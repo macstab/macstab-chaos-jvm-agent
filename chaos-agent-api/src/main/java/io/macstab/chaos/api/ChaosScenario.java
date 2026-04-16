@@ -15,8 +15,8 @@ import java.util.Objects;
  *   <li>{@link ActivationPolicy} — when and how often the effect fires
  * </ul>
  *
- * <p>Scenarios are activated via {@link ChaosControlPlane#activate(ChaosScenario)}, which returns
- * a {@link ChaosActivationHandle} for lifecycle control. Multiple scenarios may be active
+ * <p>Scenarios are activated via {@link ChaosControlPlane#activate(ChaosScenario)}, which returns a
+ * {@link ChaosActivationHandle} for lifecycle control. Multiple scenarios may be active
  * simultaneously; when more than one matches an operation, all effects compose: delays sum, and the
  * highest-{@link #precedence} terminal action (reject, suppress, exception) wins.
  *
@@ -35,9 +35,9 @@ import java.util.Objects;
  * }</pre>
  *
  * <p><b>Scope:</b> {@link ScenarioScope#JVM} scenarios intercept all matching operations in the
- * JVM. {@link ScenarioScope#SESSION} scenarios intercept only operations on threads
- * {@link ChaosSession#bind() bound} to a specific session, enabling per-test isolation in shared
- * JVM environments.
+ * JVM. {@link ScenarioScope#SESSION} scenarios intercept only operations on threads {@link
+ * ChaosSession#bind() bound} to a specific session, enabling per-test isolation in shared JVM
+ * environments.
  */
 public record ChaosScenario(
     String id,
@@ -85,13 +85,13 @@ public record ChaosScenario(
     JVM,
 
     /**
-     * The scenario is evaluated only for operations performed on threads that have been
-     * {@link ChaosSession#bind() bound} to a specific session. Use for per-test isolation when
-     * multiple tests share a JVM.
+     * The scenario is evaluated only for operations performed on threads that have been {@link
+     * ChaosSession#bind() bound} to a specific session. Use for per-test isolation when multiple
+     * tests share a JVM.
      *
      * <p>Session-scoped scenarios cannot use JVM-global selectors ({@link
-     * ChaosSelector.ThreadSelector}, {@link ChaosSelector.ShutdownSelector},
-     * {@link ChaosSelector.ClassLoadingSelector}, {@link ChaosSelector.StressSelector}).
+     * ChaosSelector.ThreadSelector}, {@link ChaosSelector.ShutdownSelector}, {@link
+     * ChaosSelector.ClassLoadingSelector}, {@link ChaosSelector.StressSelector}).
      */
     SESSION,
   }

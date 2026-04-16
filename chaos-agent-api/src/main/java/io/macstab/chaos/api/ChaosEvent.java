@@ -24,10 +24,10 @@ import java.util.Map;
  *   <tr><td>{@link Type#SKIPPED}, {@link Type#FAILED}</td><td>—</td><td>—</td></tr>
  * </table>
  *
- * @param timestamp  when the event occurred, in UTC
- * @param type       the lifecycle phase or application event
+ * @param timestamp when the event occurred, in UTC
+ * @param type the lifecycle phase or application event
  * @param scenarioId the ID of the scenario that generated this event
- * @param message    human-readable description of the event
+ * @param message human-readable description of the event
  * @param attributes context key-value pairs; see table above for type-specific keys
  */
 public record ChaosEvent(
@@ -37,9 +37,7 @@ public record ChaosEvent(
     String message,
     Map<String, String> attributes) {
 
-  /**
-   * Discriminates the kind of chaos event delivered to {@link ChaosEventListener}.
-   */
+  /** Discriminates the kind of chaos event delivered to {@link ChaosEventListener}. */
   public enum Type {
 
     /**
@@ -74,15 +72,14 @@ public record ChaosEvent(
     APPLIED,
 
     /**
-     * A potential match was evaluated but the effect was not applied, typically because
-     * {@link ActivationPolicy} constraints (probability, rate limit, maxApplications) were not
-     * satisfied.
+     * A potential match was evaluated but the effect was not applied, typically because {@link
+     * ActivationPolicy} constraints (probability, rate limit, maxApplications) were not satisfied.
      */
     SKIPPED,
 
     /**
-     * An internal error occurred during effect application. The operation proceeded normally.
-     * Check the message for diagnostic details.
+     * An internal error occurred during effect application. The operation proceeded normally. Check
+     * the message for diagnostic details.
      */
     FAILED,
   }

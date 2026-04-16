@@ -11,9 +11,9 @@ import jdk.jfr.StackTrace;
  * JFR event emitted on every chaos scenario state transition: REGISTERED, STARTED, STOPPED,
  * RELEASED.
  *
- * <p>Enabled by default — lifecycle transitions are infrequent (one per test phase boundary) so
- * the overhead is negligible. Correlate with {@link ChaosEffectAppliedEvent} via
- * {@code scenarioId} to reconstruct the full chaos timeline in a JFR recording.
+ * <p>Enabled by default — lifecycle transitions are infrequent (one per test phase boundary) so the
+ * overhead is negligible. Correlate with {@link ChaosEffectAppliedEvent} via {@code scenarioId} to
+ * reconstruct the full chaos timeline in a JFR recording.
  */
 @Name("io.macstab.chaos.ScenarioLifecycle")
 @Category({"Chaos", "Lifecycle"})

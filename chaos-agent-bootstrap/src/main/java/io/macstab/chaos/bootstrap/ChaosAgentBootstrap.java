@@ -18,21 +18,21 @@ public final class ChaosAgentBootstrap {
 
   private ChaosAgentBootstrap() {}
 
-  public static void premain(String agentArgs, Instrumentation instrumentation) {
+  public static void premain(final String agentArgs, final Instrumentation instrumentation) {
     initialize(agentArgs, instrumentation, System.getenv(), true);
   }
 
-  public static void agentmain(String agentArgs, Instrumentation instrumentation) {
+  public static void agentmain(final String agentArgs, final Instrumentation instrumentation) {
     initialize(agentArgs, instrumentation, System.getenv(), true);
   }
 
   public static ChaosControlPlane installForLocalTests() {
-    ChaosRuntime existing = RUNTIME.get();
+    final ChaosRuntime existing = RUNTIME.get();
     if (existing != null) {
       return existing;
     }
     try {
-      Instrumentation instrumentation = ByteBuddyAgent.install();
+      final Instrumentation instrumentation = ByteBuddyAgent.install();
       return initialize("", instrumentation, Map.of(), false);
     } catch (RuntimeException runtimeException) {
       throw runtimeException;
@@ -44,7 +44,7 @@ public final class ChaosAgentBootstrap {
   }
 
   public static ChaosControlPlane current() {
-    ChaosRuntime runtime = RUNTIME.get();
+    final ChaosRuntime runtime = RUNTIME.get();
     if (runtime == null) {
       throw new IllegalStateException("chaos agent is not installed");
     }
@@ -52,19 +52,19 @@ public final class ChaosAgentBootstrap {
   }
 
   static ChaosRuntime initialize(
-      String agentArgs,
-      Instrumentation instrumentation,
-      Map<String, String> environment,
-      boolean premainMode) {
-    ChaosRuntime existing = RUNTIME.get();
+      final String agentArgs,
+      final Instrumentation instrumentation,
+      final Map<String, String> environment,
+      final boolean premainMode) {
+    final ChaosRuntime existing = RUNTIME.get();
     if (existing != null) {
       return existing;
     }
-    ChaosRuntime runtime = new ChaosRuntime();
+    final ChaosRuntime runtime = new ChaosRuntime();
     JdkInstrumentationInstaller.install(instrumentation, runtime, premainMode);
     registerMBean(runtime);
     installJfrIntegration(runtime);
-    Optional<StartupConfigLoader.LoadedPlan> loadedPlan =
+    final Optional<StartupConfigLoader.LoadedPlan> loadedPlan =
         StartupConfigLoader.load(agentArgs, environment);
     loadedPlan.ifPresent(
         loaded -> {
@@ -79,18 +79,17 @@ public final class ChaosAgentBootstrap {
     return runtime;
   }
 
-  private static void installJfrIntegration(ChaosRuntime runtime) {
+  private static void installJfrIntegration(final ChaosRuntime runtime) {
     try {
       JfrIntegration.installIfAvailable(runtime);
     } catch (Throwable throwable) {
-      System.err.println(
-          "[chaos-agent] JFR integration skipped: " + throwable.getMessage());
+      System.err.println("[chaos-agent] JFR integration skipped: " + throwable.getMessage());
     }
   }
 
-  private static void registerMBean(ChaosRuntime runtime) {
+  private static void registerMBean(final ChaosRuntime runtime) {
     try {
-      ObjectName objectName = new ObjectName("io.macstab.chaos:type=ChaosDiagnostics");
+      final ObjectName objectName = new ObjectName("io.macstab.chaos:type=ChaosDiagnostics");
       if (!ManagementFactory.getPlatformMBeanServer().isRegistered(objectName)) {
         ManagementFactory.getPlatformMBeanServer()
             .registerMBean(new ChaosDiagnosticsMBean(runtime.diagnostics()), objectName);

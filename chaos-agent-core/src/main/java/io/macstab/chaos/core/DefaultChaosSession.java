@@ -17,7 +17,8 @@ final class DefaultChaosSession implements ChaosSession {
   private final List<DefaultChaosActivationHandle> handles = new CopyOnWriteArrayList<>();
   private final ScopeBinding rootBinding;
 
-  DefaultChaosSession(String displayName, ScopeContext scopeContext, ChaosRuntime runtime) {
+  DefaultChaosSession(
+      final String displayName, final ScopeContext scopeContext, final ChaosRuntime runtime) {
     this.displayName = displayName;
     this.scopeContext = scopeContext;
     this.runtime = runtime;
@@ -35,15 +36,16 @@ final class DefaultChaosSession implements ChaosSession {
   }
 
   @Override
-  public ChaosActivationHandle activate(ChaosScenario scenario) {
-    DefaultChaosActivationHandle handle = runtime.activateInSession(this, scenario);
+  public ChaosActivationHandle activate(final ChaosScenario scenario) {
+    final DefaultChaosActivationHandle handle = runtime.activateInSession(this, scenario);
     handles.add(handle);
     return handle;
   }
 
   @Override
-  public ChaosActivationHandle activate(ChaosPlan plan) {
-    List<ChaosActivationHandle> children = plan.scenarios().stream().map(this::activate).toList();
+  public ChaosActivationHandle activate(final ChaosPlan plan) {
+    final List<ChaosActivationHandle> children =
+        plan.scenarios().stream().map(this::activate).toList();
     return new CompositeActivationHandle("session-plan:" + plan.metadata().name(), children);
   }
 
@@ -53,12 +55,12 @@ final class DefaultChaosSession implements ChaosSession {
   }
 
   @Override
-  public Runnable wrap(Runnable runnable) {
+  public Runnable wrap(final Runnable runnable) {
     return scopeContext.wrap(id, runnable);
   }
 
   @Override
-  public <T> Callable<T> wrap(Callable<T> callable) {
+  public <T> Callable<T> wrap(final Callable<T> callable) {
     return scopeContext.wrap(id, callable);
   }
 

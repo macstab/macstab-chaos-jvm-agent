@@ -37,6 +37,8 @@ public interface BridgeDelegate {
 
   Thread decorateShutdownHook(Thread hook) throws Throwable;
 
+  // Non-throwing: resolveShutdownHook is called from RemoveShutdownHookAdvice which does not
+  // declare throws Throwable.
   Thread resolveShutdownHook(Thread original);
 
   void beforeExecutorShutdown(String operation, Object executor, long timeoutMillis)

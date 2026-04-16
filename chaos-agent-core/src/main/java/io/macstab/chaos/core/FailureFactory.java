@@ -9,7 +9,7 @@ import java.util.concurrent.TimeoutException;
 final class FailureFactory {
   private FailureFactory() {}
 
-  static Throwable reject(OperationType operationType, String message) {
+  static Throwable reject(final OperationType operationType, final String message) {
     return switch (operationType) {
       case CLASS_LOAD -> new ClassNotFoundException(message);
       case EXECUTOR_SUBMIT, THREAD_START, VIRTUAL_THREAD_START, SHUTDOWN_HOOK_REGISTER ->
@@ -18,7 +18,8 @@ final class FailureFactory {
     };
   }
 
-  static Throwable completionFailure(ChaosEffect.FailureKind failureKind, String message) {
+  static Throwable completionFailure(
+      final ChaosEffect.FailureKind failureKind, final String message) {
     return switch (failureKind) {
       case TIMEOUT -> new TimeoutException(message);
       case REJECTED -> new RejectedExecutionException(message);

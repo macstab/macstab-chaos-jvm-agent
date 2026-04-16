@@ -1,8 +1,9 @@
 package io.macstab.chaos.bootstrap;
 
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.assertj.core.api.Assertions.assertThat;
 
 import io.macstab.chaos.api.ActivationPolicy;
+import io.macstab.chaos.api.ChaosControlPlane;
 import io.macstab.chaos.api.ChaosEffect;
 import io.macstab.chaos.api.ChaosScenario;
 import io.macstab.chaos.api.ChaosSelector;
@@ -12,13 +13,17 @@ import java.util.Set;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+@DisplayName("ChaosPlatform local mode")
 class ChaosPlatformLocalModeTest {
+
   @Test
+  @DisplayName("session-scoped executor delay is applied when installed locally")
   void localInstallAppliesSessionScopedExecutorDelay() throws Exception {
-    var controlPlane = ChaosPlatform.installLocally();
-    try (var session = controlPlane.openSession("local-mode")) {
+    final ChaosControlPlane controlPlane = ChaosPlatform.installLocally();
+    try (final var session = controlPlane.openSession("local-mode")) {
       session.activate(
           ChaosScenario.builder("local-delay")
               .scope(ChaosScenario.ScenarioScope.SESSION)
@@ -27,13 +32,15 @@ class ChaosPlatformLocalModeTest {
               .activationPolicy(ActivationPolicy.always())
               .build());
 
-      ThreadPoolExecutor executor =
+      final ThreadPoolExecutor executor =
           new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS, new LinkedBlockingQueue<>());
       try {
-        long start = System.nanoTime();
+        final long start = System.nanoTime();
         executor.execute(() -> {});
-        long elapsed = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
-        assertTrue(elapsed >= 45, "expected execute() to be delayed by session-scoped chaos");
+        final long elapsed = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+        assertThat(elapsed)
+            .as("execute() must be delayed by session-scoped chaos")
+            .isGreaterThanOrEqualTo(45L);
       } finally {
         executor.shutdownNow();
       }

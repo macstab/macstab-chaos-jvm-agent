@@ -26,24 +26,25 @@ final class ScenarioController {
   private volatile String reason;
   private volatile Instant startedAt;
   private volatile ManagedStressor stressor;
+  private volatile ClockSkewState clockSkewState;
   private volatile long rateWindowStartMillis;
   private volatile long rateWindowPermits;
 
   ScenarioController(
-      ChaosScenario scenario,
-      String scopeKey,
-      String sessionId,
-      Clock clock,
-      ObservabilityBus observabilityBus) {
+      final ChaosScenario scenario,
+      final String scopeKey,
+      final String sessionId,
+      final Clock clock,
+      final ObservabilityBus observabilityBus) {
     this.scenario = scenario;
     this.scopeKey = scopeKey;
     this.sessionId = sessionId;
     this.clock = clock;
     this.observabilityBus = observabilityBus;
-    this.state =
-        scenario.activationPolicy().startMode() == ActivationPolicy.StartMode.AUTOMATIC
-            ? ChaosDiagnostics.ScenarioState.ACTIVE
-            : ChaosDiagnostics.ScenarioState.INACTIVE;
+    // Task 1: Always start REGISTERED regardless of start mode. The start() call
+    // transitions to ACTIVE. Setting ACTIVE here while started=false produces a
+    // diagnostic state that is observably wrong (ACTIVE but evaluating returns null).
+    this.state = ChaosDiagnostics.ScenarioState.REGISTERED;
   }
 
   String key() {
@@ -81,6 +82,10 @@ final class ScenarioController {
     state = ChaosDiagnostics.ScenarioState.ACTIVE;
     reason = "started";
     stressor = createStressorIfNeeded();
+    if (scenario.effect() instanceof ChaosEffect.ClockSkewEffect skewEffect) {
+      clockSkewState =
+          new ClockSkewState(skewEffect, System.currentTimeMillis(), System.nanoTime());
+    }
     observabilityBus.publish(
         io.macstab.chaos.api.ChaosEvent.Type.STARTED,
         scenario.id(),
@@ -94,6 +99,7 @@ final class ScenarioController {
     reason = "stopped";
     gate.release();
     closeStressor();
+    clockSkewState = null;
     observabilityBus.publish(
         io.macstab.chaos.api.ChaosEvent.Type.STOPPED,
         scenario.id(),
@@ -110,7 +116,7 @@ final class ScenarioController {
         Map.of("scope", scopeKey));
   }
 
-  ScenarioContribution evaluate(InvocationContext context) {
+  ScenarioContribution evaluate(final InvocationContext context) {
     if (!started.get()) {
       return null;
     }
@@ -120,7 +126,7 @@ final class ScenarioController {
     if (!SelectorMatcher.matches(scenario.selector(), context)) {
       return null;
     }
-    long matched = matchedCount.incrementAndGet();
+    final long matched = matchedCount.incrementAndGet();
     if (!passesActivationWindow()) {
       state = ChaosDiagnostics.ScenarioState.INACTIVE;
       reason = "expired";
@@ -135,12 +141,24 @@ final class ScenarioController {
     if (!passesProbability(matched)) {
       return null;
     }
-    long applied = appliedCount.incrementAndGet();
-    Long maxApplications = scenario.activationPolicy().maxApplications();
-    if (maxApplications != null && applied > maxApplications) {
-      state = ChaosDiagnostics.ScenarioState.INACTIVE;
-      reason = "max applications reached";
-      return null;
+    // Task 2: CAS loop to ensure appliedCount never overshoots maxApplications under
+    // concurrency. The naive incrementAndGet-then-check pattern allowed the counter to
+    // exceed the cap when multiple threads raced through this branch simultaneously.
+    final Long maxApplications = scenario.activationPolicy().maxApplications();
+    if (maxApplications != null) {
+      while (true) {
+        final long current = appliedCount.get();
+        if (current >= maxApplications) {
+          state = ChaosDiagnostics.ScenarioState.INACTIVE;
+          reason = "max applications reached";
+          return null;
+        }
+        if (appliedCount.compareAndSet(current, current + 1L)) {
+          break;
+        }
+      }
+    } else {
+      appliedCount.incrementAndGet();
     }
     Map<String, String> appliedAttrs = new LinkedHashMap<>();
     appliedAttrs.put("operation", context.operationType().name());
@@ -181,6 +199,14 @@ final class ScenarioController {
     return gate;
   }
 
+  /**
+   * Returns the active {@link ClockSkewState} for this scenario, or {@code null} if this scenario
+   * is not a clock-skew scenario or has not been started.
+   */
+  ClockSkewState clockSkewState() {
+    return clockSkewState;
+  }
+
   private ManagedStressor createStressorIfNeeded() {
     if (scenario.effect() instanceof ChaosEffect.HeapPressureEffect heapPressureEffect) {
       return new HeapPressureStressor(heapPressureEffect);
@@ -188,11 +214,36 @@ final class ScenarioController {
     if (scenario.effect() instanceof ChaosEffect.KeepAliveEffect keepAliveEffect) {
       return new KeepAliveStressor(keepAliveEffect);
     }
+    if (scenario.effect() instanceof ChaosEffect.MetaspacePressureEffect metaspacePressureEffect) {
+      return new MetaspacePressureStressor(metaspacePressureEffect);
+    }
+    if (scenario.effect()
+        instanceof ChaosEffect.DirectBufferPressureEffect directBufferPressureEffect) {
+      return new DirectBufferPressureStressor(directBufferPressureEffect);
+    }
+    if (scenario.effect() instanceof ChaosEffect.GcPressureEffect gcPressureEffect) {
+      return new GcPressureStressor(gcPressureEffect);
+    }
+    if (scenario.effect() instanceof ChaosEffect.FinalizerBacklogEffect finalizerBacklogEffect) {
+      return new FinalizerBacklogStressor(finalizerBacklogEffect);
+    }
+    if (scenario.effect() instanceof ChaosEffect.DeadlockEffect deadlockEffect) {
+      return new DeadlockStressor(deadlockEffect);
+    }
+    if (scenario.effect() instanceof ChaosEffect.ThreadLeakEffect threadLeakEffect) {
+      return new ThreadLeakStressor(threadLeakEffect);
+    }
+    if (scenario.effect() instanceof ChaosEffect.ThreadLocalLeakEffect threadLocalLeakEffect) {
+      return new ThreadLocalLeakStressor(threadLocalLeakEffect);
+    }
+    if (scenario.effect() instanceof ChaosEffect.MonitorContentionEffect monitorContentionEffect) {
+      return new MonitorContentionStressor(monitorContentionEffect);
+    }
     return null;
   }
 
   private void closeStressor() {
-    ManagedStressor current = stressor;
+    final ManagedStressor current = stressor;
     stressor = null;
     if (current != null) {
       current.close();
@@ -200,7 +251,7 @@ final class ScenarioController {
   }
 
   private boolean passesActivationWindow() {
-    Duration activeFor = scenario.activationPolicy().activeFor();
+    final Duration activeFor = scenario.activationPolicy().activeFor();
     if (activeFor == null || startedAt == null) {
       return true;
     }
@@ -208,13 +259,13 @@ final class ScenarioController {
   }
 
   private boolean passesRateLimit() {
-    ActivationPolicy.RateLimit rateLimit = scenario.activationPolicy().rateLimit();
+    final ActivationPolicy.RateLimit rateLimit = scenario.activationPolicy().rateLimit();
     if (rateLimit == null) {
       return true;
     }
     synchronized (this) {
-      long nowMillis = clock.millis();
-      long windowMillis = rateLimit.window().toMillis();
+      final long nowMillis = clock.millis();
+      final long windowMillis = rateLimit.window().toMillis();
       if (nowMillis - rateWindowStartMillis >= windowMillis) {
         rateWindowStartMillis = nowMillis;
         rateWindowPermits = 0;
@@ -227,30 +278,30 @@ final class ScenarioController {
     }
   }
 
-  private boolean passesProbability(long matched) {
-    double probability = scenario.activationPolicy().probability();
+  private boolean passesProbability(final long matched) {
+    final double probability = scenario.activationPolicy().probability();
     if (probability >= 1.0d) {
       return true;
     }
-    long seed =
+    final long seed =
         scenario.activationPolicy().randomSeed() == null
             ? 0L
             : scenario.activationPolicy().randomSeed();
-    double draw =
+    final double draw =
         new java.util.SplittableRandom(seed ^ matched ^ scenario.id().hashCode()).nextDouble();
     return draw <= probability;
   }
 
-  private long sampleDelayMillis(long matched) {
+  private long sampleDelayMillis(final long matched) {
     if (!(scenario.effect() instanceof ChaosEffect.DelayEffect delayEffect)) {
       return 0L;
     }
-    long min = delayEffect.minDelay().toMillis();
-    long max = delayEffect.maxDelay().toMillis();
+    final long min = delayEffect.minDelay().toMillis();
+    final long max = delayEffect.maxDelay().toMillis();
     if (min == max) {
       return min;
     }
-    long seed =
+    final long seed =
         scenario.activationPolicy().randomSeed() == null
             ? 0L
             : scenario.activationPolicy().randomSeed();

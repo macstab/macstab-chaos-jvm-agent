@@ -26,18 +26,20 @@ final class JfrChaosEventSink implements ChaosEventListener, AutoCloseable {
   private final ChaosDiagnostics diagnostics;
   private final Runnable periodicHook;
 
-  JfrChaosEventSink(ChaosDiagnostics diagnostics) {
+  JfrChaosEventSink(final ChaosDiagnostics diagnostics) {
     this.diagnostics = diagnostics;
     this.periodicHook = this::emitStressorSnapshot;
     FlightRecorder.addPeriodicEvent(ChaosStressorSnapshotEvent.class, periodicHook);
   }
 
   @Override
-  public void onEvent(ChaosEvent event) {
+  public void onEvent(final ChaosEvent event) {
     switch (event.type()) {
       case REGISTERED, STARTED, STOPPED, RELEASED -> emitLifecycle(event);
       case APPLIED -> emitEffectApplied(event);
-      default -> { /* SKIPPED, FAILED — not emitted as discrete JFR events */ }
+      default -> {
+        /* SKIPPED, FAILED — not emitted as discrete JFR events */
+      }
     }
   }
 
@@ -48,8 +50,8 @@ final class JfrChaosEventSink implements ChaosEventListener, AutoCloseable {
 
   // ── Private emission helpers ───────────────────────────────────────────────
 
-  private void emitLifecycle(ChaosEvent event) {
-    ChaosScenarioLifecycleEvent jfrEvent = new ChaosScenarioLifecycleEvent();
+  private void emitLifecycle(final ChaosEvent event) {
+    final ChaosScenarioLifecycleEvent jfrEvent = new ChaosScenarioLifecycleEvent();
     jfrEvent.scenarioId = event.scenarioId();
     jfrEvent.description = event.message();
     jfrEvent.eventType = event.type().name();
@@ -57,8 +59,8 @@ final class JfrChaosEventSink implements ChaosEventListener, AutoCloseable {
     jfrEvent.commit();
   }
 
-  private void emitEffectApplied(ChaosEvent event) {
-    ChaosEffectAppliedEvent jfrEvent = new ChaosEffectAppliedEvent();
+  private void emitEffectApplied(final ChaosEvent event) {
+    final ChaosEffectAppliedEvent jfrEvent = new ChaosEffectAppliedEvent();
     if (!jfrEvent.isEnabled()) {
       return;
     }
@@ -71,17 +73,17 @@ final class JfrChaosEventSink implements ChaosEventListener, AutoCloseable {
   }
 
   private void emitStressorSnapshot() {
-    ChaosStressorSnapshotEvent jfrEvent = new ChaosStressorSnapshotEvent();
+    final ChaosStressorSnapshotEvent jfrEvent = new ChaosStressorSnapshotEvent();
     if (!jfrEvent.isEnabled()) {
       return;
     }
-    ChaosDiagnostics.Snapshot snapshot = diagnostics.snapshot();
-    List<ChaosDiagnostics.ScenarioReport> scenarios = snapshot.scenarios();
+    final ChaosDiagnostics.Snapshot snapshot = diagnostics.snapshot();
+    final List<ChaosDiagnostics.ScenarioReport> scenarios = snapshot.scenarios();
 
     int activeCount = 0;
     long totalApplied = 0L;
-    StringJoiner ids = new StringJoiner(",");
-    for (ChaosDiagnostics.ScenarioReport report : scenarios) {
+    final StringJoiner ids = new StringJoiner(",");
+    for (final ChaosDiagnostics.ScenarioReport report : scenarios) {
       totalApplied += report.appliedCount();
       if (report.state() == ChaosDiagnostics.ScenarioState.ACTIVE) {
         activeCount++;
@@ -91,7 +93,7 @@ final class JfrChaosEventSink implements ChaosEventListener, AutoCloseable {
 
     jfrEvent.activeScenarioCount = activeCount;
     jfrEvent.totalAppliedCount = totalApplied;
-    String idsString = ids.toString();
+    final String idsString = ids.toString();
     jfrEvent.activeScenarioIds =
         idsString.length() > MAX_IDS_LENGTH ? idsString.substring(0, MAX_IDS_LENGTH) : idsString;
     jfrEvent.commit();

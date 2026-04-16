@@ -15,7 +15,7 @@ final class ManualGate {
     latch.countDown();
   }
 
-  void await(Duration maxBlock) throws InterruptedException {
+  void await(final Duration maxBlock) throws InterruptedException {
     if (maxBlock == null) {
       latch.await();
       return;

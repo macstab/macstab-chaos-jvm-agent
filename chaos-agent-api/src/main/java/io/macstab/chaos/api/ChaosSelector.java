@@ -52,11 +52,12 @@ public sealed interface ChaosSelector
   /**
    * Returns a selector that matches thread start operations of the given {@link ThreadKind}.
    *
-   * <p>Valid operations: {@link OperationType#THREAD_START}, {@link OperationType#VIRTUAL_THREAD_START}.
+   * <p>Valid operations: {@link OperationType#THREAD_START}, {@link
+   * OperationType#VIRTUAL_THREAD_START}.
    *
    * @param operations set of thread operations to intercept; must not be empty
-   * @param kind       {@link ThreadKind#ANY} matches all threads; use {@link ThreadKind#VIRTUAL}
-   *                   to target only virtual threads (requires JDK 21+ at runtime)
+   * @param kind {@link ThreadKind#ANY} matches all threads; use {@link ThreadKind#VIRTUAL} to
+   *     target only virtual threads (requires JDK 21+ at runtime)
    */
   static ThreadSelector thread(Set<OperationType> operations, ThreadKind kind) {
     return new ThreadSelector(operations, kind, NamePattern.any(), null);
@@ -66,8 +67,9 @@ public sealed interface ChaosSelector
    * Returns a selector that matches all executor submit and worker-run operations across any
    * executor class and task class.
    *
-   * <p>Valid operations: {@link OperationType#EXECUTOR_SUBMIT}, {@link OperationType#EXECUTOR_WORKER_RUN},
-   * {@link OperationType#EXECUTOR_SHUTDOWN}, {@link OperationType#EXECUTOR_AWAIT_TERMINATION}.
+   * <p>Valid operations: {@link OperationType#EXECUTOR_SUBMIT}, {@link
+   * OperationType#EXECUTOR_WORKER_RUN}, {@link OperationType#EXECUTOR_SHUTDOWN}, {@link
+   * OperationType#EXECUTOR_AWAIT_TERMINATION}.
    *
    * @param operations set of executor operations to intercept; must not be empty
    */
@@ -78,8 +80,8 @@ public sealed interface ChaosSelector
   /**
    * Returns a selector that matches blocking queue operations across any queue implementation.
    *
-   * <p>Valid operations: {@link OperationType#QUEUE_PUT}, {@link OperationType#QUEUE_OFFER},
-   * {@link OperationType#QUEUE_TAKE}, {@link OperationType#QUEUE_POLL}.
+   * <p>Valid operations: {@link OperationType#QUEUE_PUT}, {@link OperationType#QUEUE_OFFER}, {@link
+   * OperationType#QUEUE_TAKE}, {@link OperationType#QUEUE_POLL}.
    *
    * @param operations set of queue operations to intercept; must not be empty
    */
@@ -91,8 +93,8 @@ public sealed interface ChaosSelector
    * Returns a selector that matches {@link java.util.concurrent.CompletableFuture} completion
    * operations.
    *
-   * <p>Valid operations: {@link OperationType#ASYNC_COMPLETE},
-   * {@link OperationType#ASYNC_COMPLETE_EXCEPTIONALLY}.
+   * <p>Valid operations: {@link OperationType#ASYNC_COMPLETE}, {@link
+   * OperationType#ASYNC_COMPLETE_EXCEPTIONALLY}.
    *
    * @param operations set of async operations to intercept; must not be empty
    */
@@ -101,10 +103,11 @@ public sealed interface ChaosSelector
   }
 
   /**
-   * Returns a selector that matches scheduled task submission and tick operations across any
-   * {@link java.util.concurrent.ScheduledExecutorService}.
+   * Returns a selector that matches scheduled task submission and tick operations across any {@link
+   * java.util.concurrent.ScheduledExecutorService}.
    *
-   * <p>Valid operations: {@link OperationType#SCHEDULE_SUBMIT}, {@link OperationType#SCHEDULE_TICK}.
+   * <p>Valid operations: {@link OperationType#SCHEDULE_SUBMIT}, {@link
+   * OperationType#SCHEDULE_TICK}.
    *
    * @param operations set of scheduling operations to intercept; must not be empty
    */
@@ -115,8 +118,8 @@ public sealed interface ChaosSelector
   /**
    * Returns a selector that matches JVM shutdown operations.
    *
-   * <p>Valid operations: {@link OperationType#SHUTDOWN_HOOK_REGISTER},
-   * {@link OperationType#EXECUTOR_SHUTDOWN}, {@link OperationType#EXECUTOR_AWAIT_TERMINATION}.
+   * <p>Valid operations: {@link OperationType#SHUTDOWN_HOOK_REGISTER}, {@link
+   * OperationType#EXECUTOR_SHUTDOWN}, {@link OperationType#EXECUTOR_AWAIT_TERMINATION}.
    *
    * @param operations set of shutdown operations to intercept; must not be empty
    */
@@ -131,7 +134,7 @@ public sealed interface ChaosSelector
    * <p>Valid operations: {@link OperationType#CLASS_LOAD}, {@link OperationType#CLASS_DEFINE},
    * {@link OperationType#RESOURCE_LOAD}.
    *
-   * @param operations    set of class-loading operations to intercept; must not be empty
+   * @param operations set of class-loading operations to intercept; must not be empty
    * @param targetPattern pattern matched against the class or resource name being loaded
    */
   static ClassLoadingSelector classLoading(
@@ -143,10 +146,10 @@ public sealed interface ChaosSelector
    * Returns a selector that targets entry to or exit from methods whose declaring class and name
    * match {@code classPattern} and {@code methodNamePattern} respectively.
    *
-   * <p>This is the most powerful selector in the API. Combined with
-   * {@link ChaosEffect#injectException} and {@link OperationType#METHOD_ENTER} it can inject faults
-   * into any method in any library. Combined with {@link ChaosEffect#corruptReturnValue} and
-   * {@link OperationType#METHOD_EXIT} it corrupts return values on exit.
+   * <p>This is the most powerful selector in the API. Combined with {@link
+   * ChaosEffect#injectException} and {@link OperationType#METHOD_ENTER} it can inject faults into
+   * any method in any library. Combined with {@link ChaosEffect#corruptReturnValue} and {@link
+   * OperationType#METHOD_EXIT} it corrupts return values on exit.
    *
    * <p><b>Safety constraint:</b> at least one of {@code classPattern} or {@code methodNamePattern}
    * must be non-{@link NamePattern.MatchMode#ANY ANY} to prevent accidental JVM-wide
@@ -154,10 +157,10 @@ public sealed interface ChaosSelector
    *
    * <p>Valid operations: {@link OperationType#METHOD_ENTER}, {@link OperationType#METHOD_EXIT}.
    *
-   * @param operations        must contain only {@link OperationType#METHOD_ENTER} and/or
-   *                          {@link OperationType#METHOD_EXIT}; must not be empty
-   * @param classPattern      pattern matched against the fully-qualified class name (binary form,
-   *                          dots); must not both be ANY together with {@code methodNamePattern}
+   * @param operations must contain only {@link OperationType#METHOD_ENTER} and/or {@link
+   *     OperationType#METHOD_EXIT}; must not be empty
+   * @param classPattern pattern matched against the fully-qualified class name (binary form, dots);
+   *     must not both be ANY together with {@code methodNamePattern}
    * @param methodNamePattern pattern matched against the method name
    */
   static MethodSelector method(
@@ -180,10 +183,10 @@ public sealed interface ChaosSelector
    * Returns a selector that matches JVM runtime service calls: clock reads, GC requests, process
    * exit, reflection invocations, direct buffer allocations, and object deserialization.
    *
-   * <p>Valid operations: {@link OperationType#SYSTEM_CLOCK_MILLIS},
-   * {@link OperationType#SYSTEM_CLOCK_NANOS}, {@link OperationType#SYSTEM_GC_REQUEST},
-   * {@link OperationType#SYSTEM_EXIT_REQUEST}, {@link OperationType#REFLECTION_INVOKE},
-   * {@link OperationType#DIRECT_BUFFER_ALLOCATE}, {@link OperationType#OBJECT_DESERIALIZE}.
+   * <p>Valid operations: {@link OperationType#SYSTEM_CLOCK_MILLIS}, {@link
+   * OperationType#SYSTEM_CLOCK_NANOS}, {@link OperationType#SYSTEM_GC_REQUEST}, {@link
+   * OperationType#SYSTEM_EXIT_REQUEST}, {@link OperationType#REFLECTION_INVOKE}, {@link
+   * OperationType#DIRECT_BUFFER_ALLOCATE}, {@link OperationType#OBJECT_DESERIALIZE}.
    *
    * @param operations set of JVM runtime operations to intercept; must not be empty
    */
@@ -193,11 +196,11 @@ public sealed interface ChaosSelector
 
   /**
    * Returns a selector that activates the stressor effect identified by {@code target}. Unlike
-   * interception selectors, this does not match in-flight JVM operations — it triggers the
-   * stressor immediately on activation and runs it until the handle is closed.
+   * interception selectors, this does not match in-flight JVM operations — it triggers the stressor
+   * immediately on activation and runs it until the handle is closed.
    *
-   * <p>The {@code target} value must correspond exactly to the {@link ChaosEffect} type in the
-   * same {@link ChaosScenario}. The runtime validator enforces this binding at activation time.
+   * <p>The {@code target} value must correspond exactly to the {@link ChaosEffect} type in the same
+   * {@link ChaosScenario}. The runtime validator enforces this binding at activation time.
    *
    * @param target the stressor to activate; must not be null
    */
