@@ -19,7 +19,10 @@ package com.macstab.chaos.api;
 public class ChaosUnsupportedFeatureException extends RuntimeException {
 
   /**
-   * @param message description of the missing feature and the minimum JDK version required
+   * Constructs an exception describing a missing JVM feature.
+   *
+   * @param message description of the unsupported feature and the minimum JDK version required to
+   *     enable it; e.g., {@code "virtual thread selector requires JDK 21 or later"}
    */
   public ChaosUnsupportedFeatureException(final String message) {
     super(message);

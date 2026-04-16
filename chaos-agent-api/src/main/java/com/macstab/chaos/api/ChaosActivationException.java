@@ -19,15 +19,20 @@ package com.macstab.chaos.api;
 public class ChaosActivationException extends RuntimeException {
 
   /**
-   * @param message human-readable description of why activation failed
+   * Constructs an activation exception without an underlying cause.
+   *
+   * @param message human-readable description of why activation failed; should identify the
+   *     conflicting scenario ID and the nature of the conflict
    */
   public ChaosActivationException(final String message) {
     super(message);
   }
 
   /**
+   * Constructs an activation exception with an underlying cause.
+   *
    * @param message human-readable description of why activation failed
-   * @param cause the underlying exception, if any
+   * @param cause the root cause of the failure; may be null
    */
   public ChaosActivationException(final String message, final Throwable cause) {
     super(message, cause);

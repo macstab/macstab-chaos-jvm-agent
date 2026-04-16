@@ -16,6 +16,50 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 
+/**
+ * Per-scenario runtime controller that evaluates whether the scenario applies to a given {@link
+ * InvocationContext} and enforces all activation constraints.
+ *
+ * <h2>Lifecycle</h2>
+ *
+ * <p>A controller is created by {@link ScenarioRegistry} when a scenario is registered and moves
+ * through the following states:
+ *
+ * <ol>
+ *   <li><b>REGISTERED</b> — initial state; {@link #evaluate} always returns {@code null}.
+ *   <li><b>ACTIVE</b> — entered via {@link #start()}; {@link #evaluate} participates in chaos
+ *       decisions.
+ *   <li><b>INACTIVE</b> — entered via manual control (gate hold or explicit pause); evaluation is
+ *       suspended.
+ *   <li><b>STOPPED</b> — terminal; entered via {@link #stop()} or {@link #destroy()}; {@link
+ *       #evaluate} always returns {@code null} after this point.
+ * </ol>
+ *
+ * <h2>Evaluation pipeline</h2>
+ *
+ * <p>Each call to {@link #evaluate(InvocationContext)} runs the following checks in order,
+ * short-circuiting on the first failure:
+ *
+ * <ol>
+ *   <li>Controller is ACTIVE (started and not stopped).
+ *   <li>Session ID matches (when the scenario is session-scoped).
+ *   <li>{@link SelectorMatcher} agrees the invocation context matches the scenario's selector.
+ *   <li>Activation window: current time is within {@code activateAfter} and {@code deactivateAt}.
+ *   <li>Warm-up: {@code matchedCount} has reached {@code activateAfterMatches}.
+ *   <li>Rate limit: the sliding-window rate limit has not been exceeded (guarded by {@code
+ *       synchronized(this)}).
+ *   <li>Probability: random draw passes the configured probability.
+ *   <li>Max-applications CAS: {@code appliedCount} is below {@code maxApplications} and the CAS
+ *       increment succeeds.
+ * </ol>
+ *
+ * <h2>Thread safety</h2>
+ *
+ * <p>All public methods are thread-safe. {@code matchedCount} and {@code appliedCount} are {@link
+ * java.util.concurrent.atomic.AtomicLong}. State transitions use {@code volatile} writes. The
+ * rate-window fields ({@code rateWindowStartMillis}, {@code rateWindowPermits}) are guarded by
+ * {@code synchronized(this)}.
+ */
 final class ScenarioController {
   private final ChaosScenario scenario;
   private final String scopeKey;
@@ -54,34 +98,105 @@ final class ScenarioController {
     this.state = ChaosDiagnostics.ScenarioState.REGISTERED;
   }
 
+  /**
+   * Returns the registry key for this controller, formed by concatenating the scope key and the
+   * scenario ID ({@code "<scopeKey>::<scenarioId>"}). The key is unique within a {@link
+   * ScenarioRegistry} instance.
+   *
+   * @return the composite registry key; never {@code null}
+   */
   String key() {
     return scopeKey + "::" + scenario.id();
   }
 
+  /**
+   * Returns the scope key that was assigned when this controller was registered. For JVM-scoped
+   * scenarios the value is {@code "jvm"}; for session-scoped scenarios it is {@code
+   * "session:<sessionId>"}.
+   *
+   * @return the scope key; never {@code null}
+   */
   String scopeKey() {
     return scopeKey;
   }
 
+  /**
+   * Returns the immutable {@link ChaosScenario} descriptor that was used to create this controller.
+   * Callers must not mutate the returned object.
+   *
+   * @return the scenario descriptor; never {@code null}
+   */
   ChaosScenario scenario() {
     return scenario;
   }
 
+  /**
+   * Returns the total number of times the scenario's selector matched an invocation context since
+   * {@link #start()} was called. This count is incremented <em>before</em> the warm-up, rate-limit,
+   * probability, and max-applications checks, so it reflects all matching invocations regardless of
+   * whether chaos was ultimately applied.
+   *
+   * @return the cumulative match count; always &ge; 0
+   */
   long matchedCount() {
     return matchedCount.get();
   }
 
+  /**
+   * Returns the total number of times this scenario's effect was actually applied (i.e., the full
+   * evaluation pipeline passed and a {@link ScenarioContribution} was returned). This count is
+   * incremented only after all filters — warm-up, rate limit, probability, and max-applications —
+   * have been satisfied.
+   *
+   * @return the cumulative applied count; always &ge; 0 and &le; {@link #matchedCount()}
+   */
   long appliedCount() {
     return appliedCount.get();
   }
 
+  /**
+   * Returns the current lifecycle state of this controller.
+   *
+   * @return one of {@link ChaosDiagnostics.ScenarioState#REGISTERED}, {@link
+   *     ChaosDiagnostics.ScenarioState#ACTIVE}, {@link ChaosDiagnostics.ScenarioState#INACTIVE}, or
+   *     {@link ChaosDiagnostics.ScenarioState#STOPPED}; never {@code null}
+   */
   ChaosDiagnostics.ScenarioState state() {
     return state;
   }
 
+  /**
+   * Returns the last diagnostic reason string explaining why the most recent call to {@link
+   * #evaluate(InvocationContext)} returned {@code null}, or a lifecycle transition message such as
+   * {@code "started"} or {@code "stopped"}. Intended for observability and debugging only; the
+   * format is not part of the public API.
+   *
+   * @return the reason string; never {@code null} (returns {@code ""} if no reason has been set)
+   */
   String reason() {
     return reason == null ? "" : reason;
   }
 
+  /**
+   * Transitions this controller from {@code REGISTERED} to {@code ACTIVE} and begins chaos
+   * evaluation. Calling {@code start()} on a controller that is already {@code ACTIVE} is
+   * idempotent; the state and counters are not reset.
+   *
+   * <p>Side effects on a fresh start:
+   *
+   * <ul>
+   *   <li>Resets the {@link ManualGate} so that any threads waiting on a previous run are
+   *       unblocked.
+   *   <li>Records {@code startedAt} for activation-window calculations.
+   *   <li>Sets {@code started} to {@code true} and {@code state} to {@code ACTIVE}.
+   *   <li>Creates and starts a background {@link ManagedStressor} if the scenario's effect requires
+   *       one (e.g., heap pressure, deadlock, thread leak).
+   *   <li>Initialises {@link ClockSkewState} if the effect is a {@link
+   *       com.macstab.chaos.api.ChaosEffect.ClockSkewEffect}.
+   *   <li>Publishes a {@link com.macstab.chaos.api.ChaosEvent.Type#STARTED} event to the {@link
+   *       ObservabilityBus}.
+   * </ul>
+   */
   void start() {
     gate.reset();
     startedAt = clock.instant();
@@ -97,6 +212,26 @@ final class ScenarioController {
         ChaosEvent.Type.STARTED, scenario.id(), "scenario started", Map.of("scope", scopeKey));
   }
 
+  /**
+   * Transitions this controller to {@code STOPPED}, permanently ending chaos evaluation.
+   *
+   * <p>Side effects:
+   *
+   * <ul>
+   *   <li>Sets {@code started} to {@code false} and {@code state} to {@code STOPPED}.
+   *   <li>Releases the {@link ManualGate}, unblocking any threads that are waiting inside a
+   *       gate-effect hold.
+   *   <li>Closes and nulls out the background {@link ManagedStressor} (if any), stopping ongoing
+   *       resource stress.
+   *   <li>Clears {@link ClockSkewState} so the clock is no longer skewed.
+   *   <li>Publishes a {@link com.macstab.chaos.api.ChaosEvent.Type#STOPPED} event to the {@link
+   *       ObservabilityBus}.
+   * </ul>
+   *
+   * <p>Once stopped, calls to {@link #evaluate(InvocationContext)} always return {@code null}.
+   * Calling {@code stop()} on an already-stopped controller is safe and has no additional effect
+   * beyond re-publishing the event.
+   */
   void stop() {
     started.set(false);
     state = ChaosDiagnostics.ScenarioState.STOPPED;
@@ -108,12 +243,57 @@ final class ScenarioController {
         ChaosEvent.Type.STOPPED, scenario.id(), "scenario stopped", Map.of("scope", scopeKey));
   }
 
+  /**
+   * Releases the {@link ManualGate} for this scenario, unblocking all threads currently waiting
+   * inside a gate-effect hold without stopping the scenario. Subsequent invocations that pass the
+   * full evaluation pipeline will re-enter the gate and wait again until the next release.
+   *
+   * <p>Publishes a {@link com.macstab.chaos.api.ChaosEvent.Type#RELEASED} event to the {@link
+   * ObservabilityBus}.
+   */
   void release() {
     gate.release();
     observabilityBus.publish(
         ChaosEvent.Type.RELEASED, scenario.id(), "manual gate released", Map.of("scope", scopeKey));
   }
 
+  /**
+   * Evaluates whether this scenario should apply a chaos effect for the given invocation context.
+   * Each call runs the following checks in order, returning {@code null} on the first failure:
+   *
+   * <ol>
+   *   <li><b>Started</b>: the controller must be in the {@code ACTIVE} state ({@code started ==
+   *       true}).
+   *   <li><b>Session ID</b>: if the scenario is session-scoped, {@code context.sessionId()} must
+   *       equal the session ID this controller was registered with.
+   *   <li><b>Selector match</b>: {@link SelectorMatcher#matches} must return {@code true} for the
+   *       scenario's selector and the given context.
+   *   <li><b>Activation window</b>: if an {@code activeFor} duration is configured, the elapsed
+   *       time since {@link #start()} must not exceed it. A failure transitions the state to {@code
+   *       INACTIVE} with reason {@code "expired"}.
+   *   <li><b>Warm-up</b>: {@code matchedCount} must exceed {@code activateAfterMatches}.
+   *   <li><b>Rate limit</b>: if a rate limit is configured, the number of permits issued in the
+   *       current sliding window must not exceed the limit (guarded by {@code synchronized(this)}).
+   *   <li><b>Probability</b>: a random draw using {@link java.util.SplittableRandom} seeded with
+   *       the configured seed XOR-ed with the match count and scenario ID hash must be &le; the
+   *       configured probability.
+   *   <li><b>Max applications CAS</b>: if {@code maxApplications} is set, a compare-and-swap loop
+   *       ensures {@code appliedCount} does not exceed the cap under concurrent access. A failure
+   *       transitions the state to {@code INACTIVE} with reason {@code "max applications reached"}.
+   * </ol>
+   *
+   * <p>When all checks pass, {@code appliedCount} is incremented, a {@link
+   * com.macstab.chaos.api.ChaosEvent.Type#APPLIED} event is published, and a {@link
+   * ScenarioContribution} is returned carrying the effect, a sampled delay, and the gate timeout
+   * (if any).
+   *
+   * <p>This method does not throw checked exceptions; all internal errors are handled silently.
+   *
+   * @param context the invocation context describing the JVM operation that triggered evaluation;
+   *     must not be {@code null}
+   * @return a {@link ScenarioContribution} when chaos should be applied, or {@code null} when any
+   *     check fails
+   */
   ScenarioContribution evaluate(final InvocationContext context) {
     if (!started.get()) {
       return null;
@@ -186,17 +366,40 @@ final class ScenarioController {
         reason());
   }
 
+  /**
+   * Permanently shuts down this controller. Delegates to {@link #stop()}, which transitions the
+   * state to {@code STOPPED}, releases the gate, closes any background stressor, and clears clock
+   * skew state. Calling {@code destroy()} more than once is safe.
+   *
+   * <p>This method is the canonical teardown entry point called by {@link ScenarioRegistry} when a
+   * controller is unregistered.
+   */
   void destroy() {
     stop();
   }
 
+  /**
+   * Returns the {@link ManualGate} associated with this controller. The gate is used by {@link
+   * com.macstab.chaos.api.ChaosEffect.GateEffect} scenarios to block threads until {@link
+   * #release()} is called. The gate is never {@code null}; if the scenario does not use a gate
+   * effect, the gate simply remains in the open state and does not block callers.
+   *
+   * @return the gate; never {@code null}
+   */
   ManualGate gate() {
     return gate;
   }
 
   /**
-   * Returns the active {@link ClockSkewState} for this scenario, or {@code null} if this scenario
-   * is not a clock-skew scenario or has not been started.
+   * Returns the active {@link ClockSkewState} that was initialised when {@link #start()} was called
+   * for a {@link com.macstab.chaos.api.ChaosEffect.ClockSkewEffect} scenario. {@code
+   * ClockSkewState} holds the reference wall-clock and monotonic timestamps captured at start time,
+   * and provides the {@code applyMillis} / {@code applyNanos} methods used by {@link
+   * ChaosRuntime#applyClockSkew} to compute the skewed value.
+   *
+   * @return the clock-skew state, or {@code null} if this scenario does not have a {@link
+   *     com.macstab.chaos.api.ChaosEffect.ClockSkewEffect} or if the controller has not been
+   *     started (or has been stopped)
    */
   ClockSkewState clockSkewState() {
     return clockSkewState;

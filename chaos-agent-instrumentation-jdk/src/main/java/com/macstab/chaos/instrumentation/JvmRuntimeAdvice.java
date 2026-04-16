@@ -35,6 +35,11 @@ final class JvmRuntimeAdvice {
   /**
    * Intercepts {@code System.gc()} and {@code Runtime.gc()}. Skips the GC call when a
    * SUPPRESS-terminating scenario is active.
+   *
+   * <p>When {@code enter()} returns {@code true}, ByteBuddy's {@code skipOn =
+   * Advice.OnNonDefaultValue.class} mechanism causes the real GC call body to be skipped entirely.
+   * Because {@code gc()} is {@code void}, no exit advice is required and no return value needs to
+   * be overwritten.
    */
   static final class GcRequestAdvice {
     @Advice.OnMethodEnter(skipOn = Advice.OnNonDefaultValue.class)
@@ -129,7 +134,14 @@ final class JvmRuntimeAdvice {
 
   /**
    * Intercepts {@code Selector.select()} and {@code Selector.selectNow()} (no-argument variants).
-   * Returns {@code true} to force a spurious wakeup (advice overwrites return to 0).
+   *
+   * <p><b>Skip semantics:</b> {@code enter()} is annotated with {@code skipOn =
+   * Advice.OnNonDefaultValue.class}. When it returns {@code true} (spurious-wakeup scenario
+   * active), ByteBuddy skips the real {@code select()} body entirely. {@code exit()} is always
+   * invoked; the {@code spurious} parameter receives the boolean returned by {@code enter()}, and
+   * when it is {@code true} the writable {@code returned} field is overwritten with {@code 0},
+   * making the method appear to have returned zero ready-channel keys — a valid spurious wakeup
+   * from the caller's perspective.
    */
   static final class NioSelectNoArgAdvice {
     @Advice.OnMethodEnter(skipOn = Advice.OnNonDefaultValue.class)
@@ -147,8 +159,13 @@ final class JvmRuntimeAdvice {
   }
 
   /**
-   * Intercepts {@code Selector.select(long timeout)}. Returns {@code true} to force a spurious
-   * wakeup (advice overwrites return to 0).
+   * Intercepts {@code Selector.select(long timeout)}.
+   *
+   * <p><b>Skip semantics:</b> identical to {@link NioSelectNoArgAdvice}. When {@code enter()}
+   * returns {@code true}, the real {@code select(long)} body is skipped. The {@code spurious}
+   * parameter in {@code exit()} receives the return value of {@code enter()}, and when it is {@code
+   * true} the writable {@code returned} field is set to {@code 0} to simulate a spurious timeout
+   * wakeup with no ready channels.
    */
   static final class NioSelectTimeoutAdvice {
     @Advice.OnMethodEnter(skipOn = Advice.OnNonDefaultValue.class)
@@ -287,8 +304,14 @@ final class JvmRuntimeAdvice {
   // ── B8: CompletableFuture cancel ──────────────────────────────────────────
 
   /**
-   * Intercepts {@code CompletableFuture.cancel(boolean)}. When a SUPPRESS scenario is active, the
-   * actual cancel is skipped and the advice forces the return value to {@code true}.
+   * Intercepts {@code CompletableFuture.cancel(boolean)}.
+   *
+   * <p><b>Skip semantics:</b> when {@code enter()} returns {@code true} (SUPPRESS scenario active),
+   * ByteBuddy's {@code skipOn = Advice.OnNonDefaultValue.class} causes the real {@code cancel()}
+   * body to be skipped — the future is left in its current state. {@code exit()} always runs; when
+   * {@code suppressed} is {@code true} it overwrites the writable {@code returned} field with
+   * {@code true}, making the caller believe the cancellation succeeded even though it was silently
+   * dropped.
    */
   static final class AsyncCancelAdvice {
     @Advice.OnMethodEnter(skipOn = Advice.OnNonDefaultValue.class)
@@ -328,8 +351,14 @@ final class JvmRuntimeAdvice {
   // ── B12: ThreadLocal ──────────────────────────────────────────────────────
 
   /**
-   * Intercepts {@code ThreadLocal.get()}. When a SUPPRESS scenario matches, the actual get is
-   * skipped and the return value is set to {@code null}.
+   * Intercepts {@code ThreadLocal.get()}.
+   *
+   * <p><b>Skip semantics:</b> when {@code enter()} returns {@code true} (SUPPRESS scenario active),
+   * ByteBuddy's {@code skipOn = Advice.OnNonDefaultValue.class} skips the real {@code
+   * ThreadLocal.get()} body so the thread-local storage is never consulted. {@code exit()} always
+   * runs; when {@code suppressed} is {@code true} it sets the writable {@code returned} field to
+   * {@code null}, making the caller observe a {@code null} value as if the thread-local had never
+   * been set.
    */
   static final class ThreadLocalGetAdvice {
     @Advice.OnMethodEnter(skipOn = Advice.OnNonDefaultValue.class)
@@ -347,8 +376,14 @@ final class JvmRuntimeAdvice {
   }
 
   /**
-   * Intercepts {@code ThreadLocal.set(Object)}. When a SUPPRESS scenario matches, the actual set is
-   * skipped.
+   * Intercepts {@code ThreadLocal.set(Object)}.
+   *
+   * <p><b>Skip-without-exit pattern:</b> this advice has only an enter method annotated with {@code
+   * skipOn = Advice.OnNonDefaultValue.class} and no exit method. When {@code enter()} returns
+   * {@code true}, the real {@code ThreadLocal.set()} body is silently skipped — the value is never
+   * stored — and execution continues after the method call site as if it had returned normally. No
+   * exit advice is needed because {@code set()} is {@code void} and there is no return value to
+   * overwrite.
    */
   static final class ThreadLocalSetAdvice {
     @Advice.OnMethodEnter(skipOn = Advice.OnNonDefaultValue.class)

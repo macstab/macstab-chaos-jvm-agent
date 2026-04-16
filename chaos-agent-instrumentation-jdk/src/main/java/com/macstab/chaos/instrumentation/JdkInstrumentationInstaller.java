@@ -23,12 +23,71 @@ import net.bytebuddy.asm.Advice;
 import net.bytebuddy.matcher.ElementMatchers;
 import net.bytebuddy.utility.JavaModule;
 
+/**
+ * Static-only installer that wires ByteBuddy instrumentation for all JDK interception points.
+ *
+ * <h2>Startup sequence</h2>
+ *
+ * <ol>
+ *   <li>{@link #install} is called once by {@code ChaosAgentBootstrap} after the runtime is ready.
+ *   <li>{@link #injectBridge(java.lang.instrument.Instrumentation)} packages {@link
+ *       com.macstab.chaos.instrumentation.bridge.BootstrapDispatcher} and {@link
+ *       com.macstab.chaos.instrumentation.bridge.BootstrapDispatcher.ThrowingSupplier} into a
+ *       temporary JAR and appends it to the bootstrap classpath so that bootstrap-loaded JDK
+ *       classes can see it.
+ *   <li>{@link #installDelegate(Object)} constructs a {@link
+ *       com.macstab.chaos.instrumentation.ChaosBridge}, builds the 42-slot {@link
+ *       java.lang.invoke.MethodHandle} array via {@link #buildMethodHandles}, and calls the
+ *       bootstrap-loaded {@code BootstrapDispatcher.install()} via reflection to wire the bridge.
+ *   <li>ByteBuddy's {@code AgentBuilder} is assembled with one transformation per interception
+ *       point and installed via {@link
+ *       net.bytebuddy.agent.builder.AgentBuilder#installOn(java.lang.instrument.Instrumentation)}.
+ * </ol>
+ *
+ * <h2>Phase 1 vs Phase 2</h2>
+ *
+ * <p><b>Phase 1</b> interception points (thread pool, scheduling, queues, shutdown hooks, class
+ * loading) are always installed.
+ *
+ * <p><b>Phase 2</b> interception points (clock, GC, exit, NIO, sockets, JNDI, serialization, native
+ * libraries, JMX, ThreadLocal, etc.) are installed only in <em>premain</em> mode because they
+ * require retransformation of already-loaded JDK classes, which is possible only when the agent is
+ * attached at JVM startup via {@code -javaagent:}.
+ *
+ * <h2>Retransformation</h2>
+ *
+ * <p>All transformations use {@code disableClassFormatChanges()} combined with {@link
+ * net.bytebuddy.agent.builder.AgentBuilder.RedefinitionStrategy#RETRANSFORMATION} to allow live
+ * retransformation of already-loaded JDK classes without changing the class format.
+ *
+ * <h2>Thread safety</h2>
+ *
+ * <p>This class is stateless. {@link #install} is expected to be called exactly once at startup,
+ * from a single thread.
+ */
 public final class JdkInstrumentationInstaller {
   private static final Logger LOGGER =
       Logger.getLogger(JdkInstrumentationInstaller.class.getName());
 
   private JdkInstrumentationInstaller() {}
 
+  /**
+   * Entry point called once at agent startup to install all ByteBuddy transformations.
+   *
+   * <p>The method first injects the bootstrap bridge JAR, then wires the {@link ChaosBridge}
+   * delegate, and finally assembles and installs the {@code AgentBuilder}. Phase 1 transformations
+   * are always applied. Phase 2 transformations (JVM runtime interception points such as clock, GC,
+   * NIO, and sockets) are applied only when {@code premainMode} is {@code true} because those
+   * points require retransformation of already-loaded JDK classes.
+   *
+   * @param instrumentation the {@link Instrumentation} handle provided by the JVM at agent
+   *     attachment; used both for bootstrap classpath injection and for installing transformations
+   * @param runtime the live {@link ChaosRuntime} instance that supplies the active scenario
+   *     configuration to the bridge
+   * @param premainMode {@code true} when the agent was attached via {@code -javaagent:} at JVM
+   *     startup, enabling Phase 2 JVM-level interception; {@code false} when attached dynamically
+   *     at runtime, in which case Phase 2 is skipped
+   */
   public static void install(
       final Instrumentation instrumentation,
       final ChaosRuntime runtime,
@@ -458,6 +517,25 @@ public final class JdkInstrumentationInstaller {
     agentBuilder.installOn(instrumentation);
   }
 
+  /**
+   * Builds the fixed-size {@link MethodHandle} array that backs {@link
+   * com.macstab.chaos.instrumentation.bridge.BootstrapDispatcher}.
+   *
+   * <p>Each slot in the returned array corresponds to one of the {@code public static final int}
+   * index constants declared on {@link
+   * com.macstab.chaos.instrumentation.bridge.BootstrapDispatcher} (e.g. {@code
+   * ADJUST_CLOCK_MILLIS}, {@code BEFORE_GC_REQUEST}, etc.). The array has exactly {@link
+   * com.macstab.chaos.instrumentation.bridge.BootstrapDispatcher#HANDLE_COUNT} elements (currently
+   * 42), one per dispatch slot. All handles are resolved against the {@link BridgeDelegate}
+   * interface using a public lookup so that they are callable from the bootstrap classloader
+   * context.
+   *
+   * @return a 42-element array of {@link MethodHandle} objects indexed by the {@code HANDLE_*}
+   *     constants on {@link com.macstab.chaos.instrumentation.bridge.BootstrapDispatcher}; no
+   *     element is {@code null}
+   * @throws Exception if any required method is absent from {@link BridgeDelegate} or if the lookup
+   *     fails for any reason
+   */
   static MethodHandle[] buildMethodHandles() throws Exception {
     final MethodHandles.Lookup lookup = MethodHandles.publicLookup();
     final Class<?> cls = BridgeDelegate.class;
@@ -632,9 +710,22 @@ public final class JdkInstrumentationInstaller {
   }
 
   /**
-   * Instruments an optional JDK class (e.g. {@code javax.naming.InitialContext}) that may not be
-   * present in all environments. If the class is not loadable the type matcher simply never fires
-   * and the agent builder is returned unchanged.
+   * Conditionally instruments a JDK class that may not be present in all environments.
+   *
+   * <p>Before registering the type matcher, this method attempts to load the named class via the
+   * system classloader. If the class is not found ({@link ClassNotFoundException}), the method logs
+   * a fine-level message and returns the original {@code builder} unchanged so that a missing
+   * optional dependency never aborts agent startup. If the class is present, a standard {@code
+   * .type(...).transform(...)} entry is added to the builder.
+   *
+   * @param builder the current {@link AgentBuilder} chain to which the transformation may be
+   *     appended
+   * @param typeName fully-qualified binary name of the target class (e.g. {@code
+   *     "javax.naming.InitialContext"})
+   * @param transformer a {@link BuilderTransformer} that applies one or more {@link
+   *     net.bytebuddy.asm.Advice} visits to the ByteBuddy type builder
+   * @return the (possibly unchanged) {@link AgentBuilder} with the transformation appended when the
+   *     class is present, or the original builder when it is absent
    */
   private static AgentBuilder instrumentOptional(
       final AgentBuilder builder, final String typeName, final BuilderTransformer transformer) {
@@ -651,6 +742,23 @@ public final class JdkInstrumentationInstaller {
                 transformer.transform(b));
   }
 
+  /**
+   * Wires the {@link ChaosBridge} delegate into the bootstrap-loaded {@link
+   * com.macstab.chaos.instrumentation.bridge.BootstrapDispatcher}.
+   *
+   * <p>Because {@code BootstrapDispatcher} is loaded by the bootstrap classloader (after {@link
+   * #injectBridge} appends it) and this class is loaded by the agent classloader, the two share no
+   * common type. The method therefore resolves {@code BootstrapDispatcher} via {@link
+   * Class#forName(String, boolean, ClassLoader)} with a {@code null} classloader argument
+   * (bootstrap) and invokes its {@code install(Object, MethodHandle[])} method reflectively. The
+   * {@link MethodHandle} array is built fresh by {@link #buildMethodHandles} for each call.
+   *
+   * @param bridgeDelegate the {@link ChaosBridge} instance (cast to {@link Object} because the
+   *     bootstrap classloader cannot see the {@link ChaosBridge} type directly) that receives all
+   *     dispatched calls
+   * @throws IllegalStateException if {@link #buildMethodHandles} fails or if the reflective
+   *     invocation of {@code BootstrapDispatcher.install} cannot be completed
+   */
   private static void installDelegate(final Object bridgeDelegate) {
     try {
       final MethodHandle[] mh = buildMethodHandles();
@@ -665,6 +773,30 @@ public final class JdkInstrumentationInstaller {
     }
   }
 
+  /**
+   * Packages the bootstrap bridge classes into a temporary JAR and appends it to the bootstrap
+   * classpath.
+   *
+   * <p>The classes written are:
+   *
+   * <ul>
+   *   <li>{@code com/macstab/chaos/instrumentation/bridge/BootstrapDispatcher.class}
+   *   <li>{@code
+   *       com/macstab/chaos/instrumentation/bridge/BootstrapDispatcher$ThrowingSupplier.class}
+   * </ul>
+   *
+   * <p>Both are read from the agent classloader's resources (the same JAR that contains this class)
+   * and written verbatim into the temp JAR. The temp file is registered for deletion on JVM exit.
+   * After the JAR is written, {@link Instrumentation#appendToBootstrapClassLoaderSearch} makes its
+   * contents visible to the bootstrap classloader, allowing instrumented JDK classes — which are
+   * loaded by the bootstrap classloader — to call {@code BootstrapDispatcher} static methods.
+   *
+   * @param instrumentation the {@link Instrumentation} handle used to append to the bootstrap
+   *     classpath
+   * @throws IllegalStateException wrapping the underlying {@link java.io.IOException} if the
+   *     temporary JAR cannot be created, if a required class resource is missing from the agent
+   *     JAR, or if appending to the bootstrap classpath fails
+   */
   private static void injectBridge(final Instrumentation instrumentation) {
     try {
       final Path bridgeJar = Files.createTempFile("macstab-chaos-bootstrap-bridge", ".jar");
