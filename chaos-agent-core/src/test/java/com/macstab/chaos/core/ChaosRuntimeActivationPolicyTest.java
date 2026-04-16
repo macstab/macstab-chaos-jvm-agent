@@ -185,6 +185,132 @@ class ChaosRuntimeActivationPolicyTest {
     }
   }
 
+  @Nested
+  @DisplayName("rateLimit enforcement")
+  class RateLimitEnforcement {
+
+    @Test
+    @DisplayName("rateLimit=1/window allows only one application per window")
+    void rateLimitOnePerWindowAllowsOneApplication() {
+      ChaosRuntime runtime = new ChaosRuntime();
+      runtime.activate(
+          ChaosScenario.builder("rate-limited")
+              .scope(ChaosScenario.ScenarioScope.JVM)
+              .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+              .effect(ChaosEffect.delay(Duration.ofMillis(60)))
+              .activationPolicy(
+                  new ActivationPolicy(
+                      ActivationPolicy.StartMode.AUTOMATIC,
+                      1.0d,
+                      0,
+                      null,
+                      null,
+                      new ActivationPolicy.RateLimit(1L, Duration.ofSeconds(10)),
+                      null))
+              .build());
+
+      long first =
+          measureMillis(() -> runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {}));
+      long second =
+          measureMillis(() -> runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {}));
+
+      assertThat(first).as("first call within window should be delayed").isGreaterThanOrEqualTo(40);
+      assertThat(second).as("second call exceeds rate limit, should not be delayed").isLessThan(40);
+    }
+
+    @Test
+    @DisplayName("rateLimit=2/window fires first two then blocks until window expires")
+    void rateLimitTwoPerWindowFiresTwiceThenBlocks() {
+      ChaosRuntime runtime = new ChaosRuntime();
+      runtime.activate(
+          ChaosScenario.builder("rate-limited-2")
+              .scope(ChaosScenario.ScenarioScope.JVM)
+              .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+              .effect(ChaosEffect.delay(Duration.ofMillis(60)))
+              .activationPolicy(
+                  new ActivationPolicy(
+                      ActivationPolicy.StartMode.AUTOMATIC,
+                      1.0d,
+                      0,
+                      null,
+                      null,
+                      new ActivationPolicy.RateLimit(2L, Duration.ofSeconds(10)),
+                      null))
+              .build());
+
+      long first =
+          measureMillis(() -> runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {}));
+      long second =
+          measureMillis(() -> runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {}));
+      long third =
+          measureMillis(() -> runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {}));
+
+      assertThat(first).as("first should be delayed").isGreaterThanOrEqualTo(40);
+      assertThat(second).as("second should be delayed").isGreaterThanOrEqualTo(40);
+      assertThat(third).as("third exceeds rate limit, should not be delayed").isLessThan(40);
+    }
+  }
+
+  @Nested
+  @DisplayName("probability sampling")
+  class ProbabilitySampling {
+
+    @Test
+    @DisplayName("probability=1.0 fires on every match")
+    void probabilityOneFiresOnEveryMatch() {
+      ChaosRuntime runtime = new ChaosRuntime();
+      runtime.activate(
+          ChaosScenario.builder("prob-always")
+              .scope(ChaosScenario.ScenarioScope.JVM)
+              .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+              .effect(ChaosEffect.delay(Duration.ofMillis(60)))
+              .activationPolicy(
+                  new ActivationPolicy(
+                      ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 0, null, null, null, null))
+              .build());
+
+      for (int i = 0; i < 5; i++) {
+        long elapsed =
+            measureMillis(
+                () -> runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {}));
+        assertThat(elapsed).as("call %d should always be delayed", i).isGreaterThanOrEqualTo(40);
+      }
+    }
+
+    @Test
+    @DisplayName("probability=0.1 with fixed seed fires on some but not all matches")
+    void probabilityLowWithFixedSeedFiresSometimes() {
+      // With probability 0.1 and a large number of calls, some should fire and some should not.
+      ChaosRuntime runtime = new ChaosRuntime();
+      runtime.activate(
+          ChaosScenario.builder("prob-low")
+              .scope(ChaosScenario.ScenarioScope.JVM)
+              .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+              .effect(ChaosEffect.delay(Duration.ofMillis(60)))
+              .activationPolicy(
+                  new ActivationPolicy(
+                      ActivationPolicy.StartMode.AUTOMATIC, 0.1d, 0, null, null, null, 42L))
+              .build());
+
+      int delayed = 0;
+      int notDelayed = 0;
+      for (int i = 0; i < 20; i++) {
+        long elapsed =
+            measureMillis(
+                () -> runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {}));
+        if (elapsed >= 40) {
+          delayed++;
+        } else {
+          notDelayed++;
+        }
+      }
+      assertThat(delayed).as("some calls should be delayed with 0.1 probability").isGreaterThan(0);
+      assertThat(notDelayed)
+          .as("many calls should NOT be delayed with 0.1 probability")
+          .isGreaterThan(5);
+    }
+  }
+
   private long measureMillis(Runnable runnable) {
     long start = System.nanoTime();
     runnable.run();

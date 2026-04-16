@@ -15,6 +15,8 @@ public final class AgentProcessProbeMain {
       case "resource" -> resource();
       case "thread" -> thread();
       case "classload" -> classload();
+      case "gc" -> gc();
+      case "exit" -> exit();
       default -> throw new IllegalArgumentException("unknown mode " + args[0]);
     }
   }
@@ -57,6 +59,20 @@ public final class AgentProcessProbeMain {
       System.out.println("classload=allowed");
     } catch (final ClassNotFoundException e) {
       System.out.println("classload=rejected");
+    }
+  }
+
+  private static void gc() {
+    System.gc();
+    System.out.println("gc=returned");
+  }
+
+  private static void exit() {
+    try {
+      System.exit(42);
+      System.out.println("exit=unreachable");
+    } catch (final SecurityException e) {
+      System.out.println("exit=suppressed");
     }
   }
 }

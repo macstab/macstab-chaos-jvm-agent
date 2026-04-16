@@ -145,6 +145,54 @@ class StartupAgentIntegrationTest {
     }
   }
 
+  @Nested
+  @DisplayName("GC suppression")
+  class GcSuppression {
+
+    @Test
+    @DisplayName("startup agent suppresses System.gc()")
+    void startupAgentSuppressesSystemGc() throws Exception {
+      final ChaosPlan plan =
+          new ChaosPlan(
+              new ChaosPlan.Metadata("startup-gc", ""),
+              null,
+              List.of(
+                  ChaosScenario.builder("gc-suppress")
+                      .scope(ChaosScenario.ScenarioScope.JVM)
+                      .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.SYSTEM_GC_REQUEST)))
+                      .effect(ChaosEffect.suppress())
+                      .activationPolicy(ActivationPolicy.always())
+                      .build()));
+
+      final String output = runProbe(plan, "gc");
+      assertThat(output).contains("gc=returned");
+    }
+  }
+
+  @Nested
+  @DisplayName("Exit suppression")
+  class ExitSuppression {
+
+    @Test
+    @DisplayName("startup agent suppresses System.exit() and throws SecurityException")
+    void startupAgentSuppressesSystemExit() throws Exception {
+      final ChaosPlan plan =
+          new ChaosPlan(
+              new ChaosPlan.Metadata("startup-exit", ""),
+              null,
+              List.of(
+                  ChaosScenario.builder("exit-suppress")
+                      .scope(ChaosScenario.ScenarioScope.JVM)
+                      .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.SYSTEM_EXIT_REQUEST)))
+                      .effect(ChaosEffect.suppress())
+                      .activationPolicy(ActivationPolicy.always())
+                      .build()));
+
+      final String output = runProbe(plan, "exit");
+      assertThat(output).contains("exit=suppressed");
+    }
+  }
+
   private String runProbe(final ChaosPlan plan, final String mode) throws Exception {
     final Path configFile = tempDir.resolve(mode + "-plan.json");
     Files.writeString(configFile, ChaosPlanMapper.write(plan));

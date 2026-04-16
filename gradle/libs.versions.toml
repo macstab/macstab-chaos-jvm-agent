@@ -1,4 +1,5 @@
 [versions]
+awaitility = "4.2.2"
 byteBuddy = "1.17.8"
 googleJavaFormat = "1.33.0"
 jackson = "2.19.4"
@@ -12,6 +13,7 @@ jackson-annotations = { module = "com.fasterxml.jackson.core:jackson-annotations
 jackson-databind = { module = "com.fasterxml.jackson.core:jackson-databind", version.ref = "jackson" }
 jackson-jsr310 = { module = "com.fasterxml.jackson.datatype:jackson-datatype-jsr310", version.ref = "jackson" }
 assertj = { module = "org.assertj:assertj-core", version = "3.27.3" }
+awaitility = { module = "org.awaitility:awaitility", version.ref = "awaitility" }
 junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" }
 junit-jupiter-api = { module = "org.junit.jupiter:junit-jupiter-api" }
