@@ -8,6 +8,6 @@ dependencies {
 
 tasks.jar {
     manifest {
-        attributes["Automatic-Module-Name"] = "io.macstab.chaos.agent.api"
+        attributes["Automatic-Module-Name"] = "com.macstab.chaos.agent.api"
     }
 }

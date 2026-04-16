@@ -91,7 +91,7 @@ Important design choices:
 
 - `disableClassFormatChanges()`
 - `RedefinitionStrategy.RETRANSFORMATION`
-- ignore rules for `net.bytebuddy.*` and `io.macstab.chaos.*`
+- ignore rules for `net.bytebuddy.*` and `com.macstab.chaos.*`
 
 ## `BootstrapDispatcher`
 

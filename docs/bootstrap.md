@@ -59,7 +59,7 @@ Deployment boundary:
 - Local install: self-attach path used by tests
 - Runtime singleton: the `AtomicReference<ChaosRuntime>` held by `ChaosAgentBootstrap`
 - Loaded plan: startup config materialized into `StartupConfigLoader.LoadedPlan`
-- Diagnostics MBean: `io.macstab.chaos:type=ChaosDiagnostics`
+- Diagnostics MBean: `com.macstab.chaos:type=ChaosDiagnostics`
 
 # 4. End-to-End Behavior
 
@@ -241,7 +241,7 @@ Steady-state runtime cost is not owned by this module after initialization compl
 
 Operator-visible surfaces created by bootstrap:
 
-- MBean `io.macstab.chaos:type=ChaosDiagnostics`
+- MBean `com.macstab.chaos:type=ChaosDiagnostics`
 - optional `stderr` debug dump on startup
 
 Bootstrap does not create health checks, readiness semantics, or any external telemetry pipeline. It only exposes the core diagnostics object.
