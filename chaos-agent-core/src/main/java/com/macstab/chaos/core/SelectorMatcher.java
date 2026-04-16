@@ -3,9 +3,37 @@ package com.macstab.chaos.core;
 import com.macstab.chaos.api.ChaosSelector;
 import com.macstab.chaos.api.OperationType;
 
+/**
+ * Stateless utility that evaluates whether a {@link ChaosSelector} matches a given {@link
+ * InvocationContext}.
+ *
+ * <p>The matching logic uses an exhaustive {@code switch} expression over the sealed {@link
+ * ChaosSelector} hierarchy. Each selector variant carries its own matching predicate; this class
+ * applies it against the fields of the context. See individual cases for semantics.
+ *
+ * <h2>Thread safety</h2>
+ *
+ * <p>This class is stateless; all methods are static and may be called concurrently without
+ * synchronization.
+ */
 final class SelectorMatcher {
   private SelectorMatcher() {}
 
+  /**
+   * Returns {@code true} if {@code selector} matches the given {@code context}.
+   *
+   * <p>The switch is exhaustive over all known {@link ChaosSelector} subtypes. Matching is
+   * performed field-by-field against the context: the operation type must be in the selector's
+   * declared operation set, and any pattern fields (class name, thread name, host, etc.) must match
+   * via their respective {@code matches()} predicates. Optional fields ({@code daemon}, {@code
+   * periodicOnly}, {@code signaturePattern}) are treated as wildcards when {@code null}.
+   *
+   * @param selector the selector configuration from the registered {@link
+   *     com.macstab.chaos.api.ChaosScenario}
+   * @param context the runtime context captured at the instrumentation point
+   * @return {@code true} if this invocation falls within the selector's scope; {@code false}
+   *     otherwise
+   */
   static boolean matches(final ChaosSelector selector, final InvocationContext context) {
     return switch (selector) {
       case ChaosSelector.ThreadSelector threadSelector ->
@@ -60,6 +88,19 @@ final class SelectorMatcher {
     };
   }
 
+  /**
+   * Returns {@code true} if the thread kind constraint of {@code selector} is satisfied by {@code
+   * context}.
+   *
+   * <p>{@link ChaosSelector.ThreadKind#ANY} always matches. {@code PLATFORM} matches when {@link
+   * InvocationContext#virtualThread()} is not {@link Boolean#TRUE}; {@code VIRTUAL} matches when it
+   * is exactly {@link Boolean#TRUE}. A {@code null} virtualThread flag is treated as platform
+   * (non-virtual).
+   *
+   * @param selector the thread selector whose {@code kind} field is evaluated
+   * @param context the invocation context carrying the thread-kind flag
+   * @return {@code true} if the thread-kind constraint passes
+   */
   private static boolean matchesThreadKind(
       final ChaosSelector.ThreadSelector selector, final InvocationContext context) {
     return switch (selector.kind()) {
@@ -69,6 +110,18 @@ final class SelectorMatcher {
     };
   }
 
+  /**
+   * Returns {@code true} if the daemon-thread constraint of {@code selector} is satisfied by {@code
+   * context}.
+   *
+   * <p>When {@link ChaosSelector.ThreadSelector#daemon()} is {@code null} the constraint is treated
+   * as a wildcard and always passes. Otherwise the selector's value must equal {@link
+   * InvocationContext#daemonThread()}.
+   *
+   * @param selector the thread selector whose {@code daemon} field is evaluated
+   * @param context the invocation context carrying the daemon-thread flag
+   * @return {@code true} if the daemon constraint passes or is absent
+   */
   private static boolean matchesDaemon(
       final ChaosSelector.ThreadSelector selector, final InvocationContext context) {
     return selector.daemon() == null || selector.daemon().equals(context.daemonThread());

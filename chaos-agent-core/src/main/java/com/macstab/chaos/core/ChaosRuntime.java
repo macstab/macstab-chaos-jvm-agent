@@ -27,6 +27,45 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.RejectedExecutionException;
 
+/**
+ * Central orchestration hub that connects the instrumentation layer, the scenario registry, and the
+ * observability bus.
+ *
+ * <h2>Role in the architecture</h2>
+ *
+ * <p>{@code ChaosRuntime} is the single object that lives in the agent classloader and is
+ * accessible to all other agent components. It implements {@link ChaosControlPlane} (the public
+ * control API) and exposes the full suite of {@code before*} / {@code after*} / {@code adjust*} /
+ * {@code decorate*} dispatch methods that the instrumentation layer calls through the classloader
+ * bridge (see {@code BootstrapDispatcher}).
+ *
+ * <h2>Request flow</h2>
+ *
+ * <ol>
+ *   <li>An instrumented JDK method fires its ByteBuddy advice.
+ *   <li>The advice calls a static method on {@code BootstrapDispatcher}.
+ *   <li>{@code BootstrapDispatcher} calls through the {@code MethodHandle} bridge to the
+ *       corresponding method on this class.
+ *   <li>This class builds an {@link InvocationContext} and calls {@link
+ *       ScenarioRegistry#match(InvocationContext)} to collect active {@link ScenarioContribution}s.
+ *   <li>Contributions are merged into a {@link RuntimeDecision} (delay + gate + terminal action).
+ *   <li>The decision is executed: delay is slept, gate is awaited, and the terminal action is
+ *       dispatched (throw / return override / suppress / complete-exceptionally / corrupt-return).
+ * </ol>
+ *
+ * <h2>Thread safety</h2>
+ *
+ * <p>All methods are fully thread-safe and may be called concurrently from arbitrary threads,
+ * including JDK internal threads. Shared mutable state (the scenario registry, the shutdown-hook
+ * map, the instrumentation reference) uses appropriate concurrency primitives ({@code volatile},
+ * {@link java.util.concurrent.ConcurrentHashMap}).
+ *
+ * <h2>Lifecycle</h2>
+ *
+ * <p>Instances are created by {@code ChaosAgentBootstrap} and stored in a static {@code
+ * AtomicReference}. The runtime has no explicit shutdown step; scenario controllers are stopped
+ * individually via {@link ChaosControlPlane} API calls or session close.
+ */
 public final class ChaosRuntime implements ChaosControlPlane {
   private static final Runnable NO_OP_RUNNABLE = () -> {};
   private static final Callable<?> NO_OP_CALLABLE = () -> null;
