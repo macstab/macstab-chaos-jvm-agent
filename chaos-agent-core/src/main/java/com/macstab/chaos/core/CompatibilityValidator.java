@@ -8,9 +8,60 @@ import com.macstab.chaos.api.ChaosValidationException;
 import com.macstab.chaos.api.OperationType;
 import java.util.Set;
 
+/**
+ * Validates that a {@link ChaosScenario} is consistent with the current {@link FeatureSet} and with
+ * internal invariants of the chaos model.
+ *
+ * <p>Called by {@code ChaosRuntime} during scenario registration before any {@link
+ * ScenarioController} is created. Throws {@link com.macstab.chaos.api.ChaosValidationException} on
+ * the first constraint violation found.
+ *
+ * <p>Constraints checked include:
+ *
+ * <ul>
+ *   <li>Scope / selector compatibility (e.g. session-scoped scenarios must not use selectors that
+ *       are meaningless in a session context).
+ *   <li>Stress-effect binding (e.g. {@code HEAP_PRESSURE} effect requires sufficient available
+ *       heap).
+ *   <li>Interceptor availability (e.g. virtual-thread selectors require JDK 21+).
+ * </ul>
+ *
+ * <h2>Thread safety</h2>
+ *
+ * <p>This class is stateless; all methods are static and may be called concurrently.
+ */
 final class CompatibilityValidator {
   private CompatibilityValidator() {}
 
+  /**
+   * Validates {@code scenario} against {@code featureSet} and the internal chaos model invariants.
+   *
+   * <p>Validation is fail-fast: the method throws on the first constraint violation it encounters.
+   * The following checks are performed in order:
+   *
+   * <ol>
+   *   <li><b>Session-scope exclusions</b> — {@link ChaosScenario.ScenarioScope#SESSION} scenarios
+   *       may not use JVM-global selectors ({@code ThreadSelector}, {@code ShutdownSelector},
+   *       {@code ClassLoadingSelector}, {@code StressSelector}).
+   *   <li><b>Virtual-thread availability</b> — a {@code ThreadSelector} with {@link
+   *       ChaosSelector.ThreadKind#VIRTUAL} requires JDK 21+ at runtime.
+   *   <li><b>Stress-scope constraint</b> — stress scenarios must use {@link
+   *       ChaosScenario.ScenarioScope#JVM} scope.
+   *   <li><b>Stress-effect binding</b> — each {@link ChaosSelector.StressTarget} value must be
+   *       paired with its corresponding {@link ChaosEffect} subtype.
+   *   <li><b>Interceptor constraints</b> — effect/selector combinations must be semantically
+   *       compatible (e.g. {@code ExceptionInjectionEffect} requires {@code MethodSelector} with
+   *       {@code METHOD_ENTER} only; {@code GateEffect} is not valid with {@code StressSelector}).
+   * </ol>
+   *
+   * @param scenario the scenario to validate; must not be {@code null}
+   * @param featureSet the runtime feature flags describing the active JVM capabilities; must not be
+   *     {@code null}
+   * @throws com.macstab.chaos.api.ChaosValidationException if any structural or semantic constraint
+   *     is violated
+   * @throws com.macstab.chaos.api.ChaosUnsupportedFeatureException if the scenario requires a JVM
+   *     capability (e.g. virtual threads) that is not available at runtime
+   */
   static void validate(final ChaosScenario scenario, final FeatureSet featureSet) {
     if (scenario.scope() == ChaosScenario.ScenarioScope.SESSION) {
       if (scenario.selector() instanceof ChaosSelector.ThreadSelector
@@ -38,6 +89,18 @@ final class CompatibilityValidator {
     validateInterceptorConstraints(scenario);
   }
 
+  /**
+   * Verifies that the {@link ChaosSelector.StressTarget} is paired with its required {@link
+   * ChaosEffect} subtype.
+   *
+   * <p>Each stress target has exactly one valid effect class; any other pairing is a configuration
+   * error and is rejected immediately.
+   *
+   * @param target the stress target declared in the scenario's {@link ChaosSelector.StressSelector}
+   * @param effect the effect declared in the scenario
+   * @throws com.macstab.chaos.api.ChaosValidationException if {@code effect} is not the required
+   *     type for {@code target}
+   */
   private static void validateStressBinding(
       final ChaosSelector.StressTarget target, final ChaosEffect effect) {
     switch (target) {
@@ -123,6 +186,36 @@ final class CompatibilityValidator {
     }
   }
 
+  /**
+   * Validates that the effect/selector pairing in {@code scenario} satisfies all interceptor-level
+   * semantic constraints.
+   *
+   * <p>Checks performed:
+   *
+   * <ul>
+   *   <li>Stressor effects (heap, metaspace, GC, etc.) must use {@link
+   *       ChaosSelector.StressSelector}.
+   *   <li>{@link ChaosEffect.GateEffect} is incompatible with {@link ChaosSelector.StressSelector}
+   *       because stressors activate on lifecycle events, not per-invocation gates.
+   *   <li>{@link ChaosEffect.ExceptionalCompletionEffect} requires {@link
+   *       ChaosSelector.AsyncSelector}.
+   *   <li>{@link ChaosEffect.ExceptionInjectionEffect} requires {@link
+   *       ChaosSelector.MethodSelector} with {@code METHOD_ENTER} operations only.
+   *   <li>{@link ChaosEffect.ReturnValueCorruptionEffect} requires {@link
+   *       ChaosSelector.MethodSelector} with {@code METHOD_EXIT} operations only.
+   *   <li>{@link ChaosEffect.ClockSkewEffect} requires {@link ChaosSelector.JvmRuntimeSelector}.
+   *   <li>{@link ChaosEffect.SpuriousWakeupEffect} requires {@link ChaosSelector.NioSelector}
+   *       containing {@code NIO_SELECTOR_SELECT}.
+   *   <li>{@link ChaosSelector.NioSelector} operations must all be NIO operation types.
+   *   <li>{@link ChaosSelector.NetworkSelector} operations must all be socket operation types.
+   *   <li>{@link ChaosSelector.ThreadLocalSelector} operations must be confined to {@code
+   *       THREAD_LOCAL_GET} / {@code THREAD_LOCAL_SET}.
+   * </ul>
+   *
+   * @param scenario the scenario whose effect and selector are cross-checked
+   * @throws com.macstab.chaos.api.ChaosValidationException if any interceptor constraint is
+   *     violated
+   */
   private static void validateInterceptorConstraints(final ChaosScenario scenario) {
     final ChaosEffect effect = scenario.effect();
     final ChaosSelector selector = scenario.selector();

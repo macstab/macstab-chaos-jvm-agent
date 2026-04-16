@@ -23,7 +23,10 @@ package com.macstab.chaos.api;
 public class ChaosValidationException extends RuntimeException {
 
   /**
-   * @param message human-readable explanation of the validation failure
+   * Constructs a validation exception with a human-readable explanation.
+   *
+   * @param message explanation of the validation failure; should identify the offending scenario
+   *     field, the incompatible selector/effect pairing, or the violated API contract
    */
   public ChaosValidationException(final String message) {
     super(message);
