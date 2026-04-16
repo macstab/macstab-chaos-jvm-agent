@@ -26,6 +26,9 @@ import org.junit.jupiter.api.io.TempDir;
 @DisplayName("StartupAgent integration")
 class StartupAgentIntegrationTest {
 
+  private static final long DELAY_MS = 70L;
+  private static final long DELAY_MIN_MS = (long) (DELAY_MS * 0.8);
+
   @TempDir Path tempDir;
 
   @Nested
@@ -58,7 +61,9 @@ class StartupAgentIntegrationTest {
               output
                   .substring(output.indexOf("elapsedMillis=") + "elapsedMillis=".length())
                   .trim());
-      assertThat(elapsed).isGreaterThanOrEqualTo(50);
+      assertThat(elapsed)
+          .as("delay effect should add at least 80%% of configured %dms", DELAY_MS)
+          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
     }
   }
 

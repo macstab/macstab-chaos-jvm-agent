@@ -127,14 +127,14 @@ class ClockSkewRuntimeTest {
   }
 
   // ---------------------------------------------------------------------------
-  // End-to-end via adjustClockMillis / adjustClockNanos
-  // These methods are the exact targets called by ByteBuddy advice intercepting
-  // System.currentTimeMillis() and System.nanoTime().
+  // Runtime API tests: adjustClockMillis / adjustClockNanos
+  // These methods are the exact targets that ByteBuddy advice delegates to
+  // when intercepting System.currentTimeMillis() and System.nanoTime().
   // ---------------------------------------------------------------------------
 
   @Nested
-  @DisplayName("End-to-end via adjustClockMillis / adjustClockNanos")
-  class EndToEndSystemClock {
+  @DisplayName("Runtime API: adjustClockMillis / adjustClockNanos")
+  class AdjustClockRuntimeApiTests {
 
     @Test
     @DisplayName("FIXED skew: adjustClockMillis returns value offset by skewAmount")

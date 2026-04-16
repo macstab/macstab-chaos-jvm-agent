@@ -33,6 +33,10 @@ class ThreadLocalChaosIntegrationTest {
   private static final NamePattern TEST_TL_PATTERN =
       NamePattern.prefix("com.macstab.chaos.core.ThreadLocalChaosIntegrationTest");
 
+  private static final long DELAY_MS = 50L;
+  private static final long DELAY_MIN_MS = (long) (DELAY_MS * 0.8);
+  private static final long NO_DELAY_MAX_MS = 150L;
+
   // ---------------------------------------------------------------------------
   // GET suppression
   // ---------------------------------------------------------------------------
@@ -144,7 +148,9 @@ class ThreadLocalChaosIntegrationTest {
       final boolean result = runtime.beforeThreadLocalGet(new TestThreadLocal());
       final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
       assertThat(result).isFalse();
-      assertThat(elapsedMs).isGreaterThanOrEqualTo(30);
+      assertThat(elapsedMs)
+          .as("delay effect should add at least 80%% of configured %dms", DELAY_MS)
+          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
     }
   }
 
@@ -198,8 +204,11 @@ class ThreadLocalChaosIntegrationTest {
                   .activationPolicy(ActivationPolicy.always())
                   .build());
       final TestThreadLocal tl = new TestThreadLocal();
-      assertThat(runtime.beforeThreadLocalGet(tl)).isTrue();
-      handle.stop();
+      try {
+        assertThat(runtime.beforeThreadLocalGet(tl)).isTrue();
+      } finally {
+        handle.stop();
+      }
       assertThat(runtime.beforeThreadLocalGet(tl)).isFalse();
     }
   }
