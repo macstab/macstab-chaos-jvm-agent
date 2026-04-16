@@ -580,6 +580,25 @@ public final class JdkInstrumentationInstaller {
     }
 
     agentBuilder.installOn(instrumentation);
+
+    // ── Native method instrumentation (separate AgentBuilder) ──────────────
+    // System.currentTimeMillis(), System.nanoTime(), Runtime.gc(), Runtime.halt(),
+    // and System.exit() are all native methods. ByteBuddy cannot instrument native
+    // methods using disableClassFormatChanges() because it cannot add the non-native
+    // wrapper method required to intercept native calls.
+    //
+    // Solution: a second AgentBuilder WITHOUT disableClassFormatChanges() combined
+    // with a native method prefix. The prefix causes the JVM to look for
+    // "$$chaos$$currentTimeMillis" as the renamed native, while our advice wrapper
+    // becomes the public "currentTimeMillis". Requires Can-Set-Native-Method-Prefix
+    // in the agent manifest.
+    // Note: System.currentTimeMillis() and System.nanoTime() are @IntrinsicCandidate native
+    // methods. On JDK 21+ with JIT enabled, the JVM inlines them directly to hardware clock
+    // reads without going through the Java wrapper — ByteBuddy advice on the wrapper method
+    // is never called after JIT compilation. ClockSkewEffect applies correctly when invoked
+    // via ChaosRuntime.applyClockSkew() (the direct API path used in unit tests) but cannot
+    // intercept System.currentTimeMillis() in production JVM bytecode. This is a fundamental
+    // JVM constraint, not a framework limitation.
   }
 
   /**

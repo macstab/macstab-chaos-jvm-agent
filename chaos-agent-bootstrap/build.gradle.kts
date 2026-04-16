@@ -21,6 +21,7 @@ tasks.jar {
             "Agent-Class" to "com.macstab.chaos.bootstrap.ChaosAgentBootstrap",
             "Can-Redefine-Classes" to "true",
             "Can-Retransform-Classes" to "true",
+            "Can-Set-Native-Method-Prefix" to "true",
         )
     }
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
