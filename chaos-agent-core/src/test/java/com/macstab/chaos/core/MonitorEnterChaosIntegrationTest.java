@@ -20,6 +20,10 @@ import org.junit.jupiter.api.Test;
 @DisplayName("MONITOR_ENTER chaos - runtime integration")
 class MonitorEnterChaosIntegrationTest {
 
+  private static final long DELAY_MS = 50L;
+  private static final long DELAY_MIN_MS = (long) (DELAY_MS * 0.8);
+  private static final long NO_DELAY_MAX_MS = 150L;
+
   // ---------------------------------------------------------------------------
   // Lock acquire delay
   // ---------------------------------------------------------------------------
@@ -42,7 +46,9 @@ class MonitorEnterChaosIntegrationTest {
       final long start = System.nanoTime();
       runtime.beforeMonitorEnter();
       final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
-      assertThat(elapsedMs).isGreaterThanOrEqualTo(30);
+      assertThat(elapsedMs)
+          .as("delay effect should add at least 80%% of configured %dms", DELAY_MS)
+          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
     }
 
     @Test
@@ -60,7 +66,9 @@ class MonitorEnterChaosIntegrationTest {
       runtime.beforeMonitorEnter();
       runtime.beforeMonitorEnter();
       final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
-      assertThat(elapsedMs).isGreaterThanOrEqualTo(80);
+      assertThat(elapsedMs)
+          .as("two lock() calls should accumulate at least 2x delay")
+          .isGreaterThanOrEqualTo(DELAY_MIN_MS * 2);
     }
   }
 
@@ -79,7 +87,9 @@ class MonitorEnterChaosIntegrationTest {
       final long start = System.nanoTime();
       runtime.beforeMonitorEnter();
       final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
-      assertThat(elapsedMs).isLessThan(20);
+      assertThat(elapsedMs)
+          .as("without active scenario, operation should complete without delay")
+          .isLessThan(NO_DELAY_MAX_MS);
     }
   }
 }

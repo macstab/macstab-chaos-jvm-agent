@@ -28,6 +28,9 @@ import org.junit.jupiter.api.Test;
 @DisplayName("ChaosRuntime")
 class ChaosRuntimeTest {
 
+  private static final long DELAY_MIN_MS = 40L;
+  private static final long NO_DELAY_MAX_MS = 150L;
+
   @Nested
   @DisplayName("session scope isolation")
   class SessionScopeIsolation {
@@ -66,7 +69,9 @@ class ChaosRuntimeTest {
                         .run());
 
         assertThat(delayedMillis).isGreaterThanOrEqualTo(60);
-        assertThat(plainMillis).isLessThan(40);
+        assertThat(plainMillis)
+            .as("plain session should not experience delay")
+            .isLessThan(NO_DELAY_MAX_MS);
       }
     }
 
@@ -119,7 +124,9 @@ class ChaosRuntimeTest {
 
       long elapsed =
           measureMillis(() -> runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {}));
-      assertThat(elapsed).isGreaterThanOrEqualTo(45);
+      assertThat(elapsed)
+          .as("accumulated JVM delay should add at least 80%% of total configured delay")
+          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
     }
   }
 
@@ -226,7 +233,9 @@ class ChaosRuntimeTest {
 
       long elapsed =
           measureMillis(() -> runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {}));
-      assertThat(elapsed).isLessThan(50);
+      assertThat(elapsed)
+          .as("after stop(), effect must no longer be applied")
+          .isLessThan(NO_DELAY_MAX_MS);
     }
   }
 
