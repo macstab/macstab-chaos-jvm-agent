@@ -12,10 +12,10 @@ final class ScopeContext {
     return sessionStack.get().peek();
   }
 
-  ChaosSession.ScopeBinding bind(String sessionId) {
+  ChaosSession.ScopeBinding bind(final String sessionId) {
     sessionStack.get().push(sessionId);
     return () -> {
-      Deque<String> stack = sessionStack.get();
+      final Deque<String> stack = sessionStack.get();
       if (!stack.isEmpty()) {
         stack.pop();
       }
@@ -25,11 +25,11 @@ final class ScopeContext {
     };
   }
 
-  Runnable wrap(String sessionId, Runnable runnable) {
+  Runnable wrap(final String sessionId, final Runnable runnable) {
     return new ScopedRunnable(this, sessionId, runnable);
   }
 
-  <T> Callable<T> wrap(String sessionId, Callable<T> callable) {
+  <T> Callable<T> wrap(final String sessionId, final Callable<T> callable) {
     return new ScopedCallable<>(this, sessionId, callable);
   }
 

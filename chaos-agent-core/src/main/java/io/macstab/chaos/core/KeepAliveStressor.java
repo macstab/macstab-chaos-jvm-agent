@@ -7,7 +7,7 @@ final class KeepAliveStressor implements ManagedStressor {
   private final AtomicBoolean running = new AtomicBoolean(true);
   private final Thread thread;
 
-  KeepAliveStressor(ChaosEffect.KeepAliveEffect effect) {
+  KeepAliveStressor(final ChaosEffect.KeepAliveEffect effect) {
     this.thread =
         new Thread(
             () -> {

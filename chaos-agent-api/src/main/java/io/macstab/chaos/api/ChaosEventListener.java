@@ -21,8 +21,8 @@ package io.macstab.chaos.api;
  *
  * <ul>
  *   <li>A {@code java.util.logging} logger at {@code INFO} level (always active)
- *   <li>A JFR event bridge ({@link io.macstab.chaos.bootstrap.jfr.JfrChaosEventSink}) when
- *       {@code jdk.jfr} is available at runtime
+ *   <li>A JFR event bridge (registered automatically by the bootstrap module) when {@code jdk.jfr}
+ *       is available at runtime
  * </ul>
  */
 @FunctionalInterface
@@ -31,8 +31,8 @@ public interface ChaosEventListener {
   /**
    * Called each time a chaos event occurs.
    *
-   * @param event the immutable event; never null. Inspect {@link ChaosEvent#type()} to
-   *              discriminate lifecycle events from application events.
+   * @param event the immutable event; never null. Inspect {@link ChaosEvent#type()} to discriminate
+   *     lifecycle events from application events.
    */
   void onEvent(ChaosEvent event);
 }

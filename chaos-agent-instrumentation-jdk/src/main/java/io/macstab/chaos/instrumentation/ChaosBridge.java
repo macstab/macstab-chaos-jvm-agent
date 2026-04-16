@@ -10,89 +10,97 @@ import java.util.concurrent.ForkJoinTask;
 final class ChaosBridge implements BridgeDelegate {
   private final ChaosRuntime runtime;
 
-  ChaosBridge(ChaosRuntime runtime) {
+  ChaosBridge(final ChaosRuntime runtime) {
     this.runtime = runtime;
   }
 
   @Override
-  public Runnable decorateExecutorRunnable(String operation, Object executor, Runnable task) {
+  public Runnable decorateExecutorRunnable(
+      final String operation, final Object executor, final Runnable task) {
     return runtime.decorateExecutorRunnable(operation, executor, task);
   }
 
   @Override
   public <T> Callable<T> decorateExecutorCallable(
-      String operation, Object executor, Callable<T> task) {
+      final String operation, final Object executor, final Callable<T> task) {
     return runtime.decorateExecutorCallable(operation, executor, task);
   }
 
   @Override
-  public void beforeThreadStart(Thread thread) throws Throwable {
+  public void beforeThreadStart(final Thread thread) throws Throwable {
     runtime.beforeThreadStart(thread);
   }
 
   @Override
-  public void beforeWorkerRun(Object executor, Thread worker, Runnable task) throws Throwable {
+  public void beforeWorkerRun(final Object executor, final Thread worker, final Runnable task)
+      throws Throwable {
     runtime.beforeWorkerRun(executor, worker, task);
   }
 
   @Override
-  public void beforeForkJoinTaskRun(ForkJoinTask<?> task) throws Throwable {
+  public void beforeForkJoinTaskRun(final ForkJoinTask<?> task) throws Throwable {
     runtime.beforeForkJoinTaskRun(task);
   }
 
   @Override
   public long adjustScheduleDelay(
-      String operation, Object executor, Object task, long delay, boolean periodic)
+      final String operation,
+      final Object executor,
+      final Object task,
+      final long delay,
+      final boolean periodic)
       throws Throwable {
     return runtime.adjustScheduleDelay(operation, executor, task, delay, periodic);
   }
 
   @Override
-  public boolean beforeScheduledTick(Object executor, Object task, boolean periodic)
-      throws Throwable {
+  public boolean beforeScheduledTick(
+      final Object executor, final Object task, final boolean periodic) throws Throwable {
     return runtime.beforeScheduledTick(executor, task, periodic);
   }
 
   @Override
-  public void beforeQueueOperation(String operation, Object queue) throws Throwable {
+  public void beforeQueueOperation(final String operation, final Object queue) throws Throwable {
     runtime.beforeQueueOperation(operation, queue);
   }
 
   @Override
-  public Boolean beforeBooleanQueueOperation(String operation, Object queue) throws Throwable {
+  public Boolean beforeBooleanQueueOperation(final String operation, final Object queue)
+      throws Throwable {
     return runtime.beforeBooleanQueueOperation(operation, queue);
   }
 
   @Override
   public Boolean beforeCompletableFutureComplete(
-      String operation, CompletableFuture<?> future, Object payload) throws Throwable {
+      final String operation, final CompletableFuture<?> future, final Object payload)
+      throws Throwable {
     return runtime.beforeCompletableFutureComplete(operation, future, payload);
   }
 
   @Override
-  public void beforeClassLoad(ClassLoader loader, String className) throws Throwable {
+  public void beforeClassLoad(final ClassLoader loader, final String className) throws Throwable {
     runtime.beforeClassLoad(loader, className);
   }
 
   @Override
-  public URL afterResourceLookup(ClassLoader loader, String name, URL currentValue)
-      throws Throwable {
+  public URL afterResourceLookup(
+      final ClassLoader loader, final String name, final URL currentValue) throws Throwable {
     return runtime.afterResourceLookup(loader, name, currentValue);
   }
 
   @Override
-  public Thread decorateShutdownHook(Thread hook) throws Throwable {
+  public Thread decorateShutdownHook(final Thread hook) throws Throwable {
     return runtime.decorateShutdownHook(hook);
   }
 
   @Override
-  public Thread resolveShutdownHook(Thread original) {
+  public Thread resolveShutdownHook(final Thread original) {
     return runtime.resolveShutdownHook(original);
   }
 
   @Override
-  public void beforeExecutorShutdown(String operation, Object executor, long timeoutMillis)
-      throws Throwable {
+  public void beforeExecutorShutdown(
+      final String operation, final Object executor, final long timeoutMillis) throws Throwable {
     runtime.beforeExecutorShutdown(operation, executor, timeoutMillis);
   }
 }

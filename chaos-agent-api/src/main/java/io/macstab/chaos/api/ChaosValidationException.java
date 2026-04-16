@@ -9,8 +9,8 @@ package io.macstab.chaos.api;
  *   <li>Incompatible selector ↔ effect pairing (e.g., {@link ChaosEffect.ClockSkewEffect} with a
  *       non-{@link ChaosSelector.JvmRuntimeSelector} selector).
  *   <li>A stressor effect ({@link ChaosEffect.HeapPressureEffect}, {@link
- *       ChaosEffect.DeadlockEffect}, etc.) used with an interception selector instead of
- *       {@link ChaosSelector.StressSelector}.
+ *       ChaosEffect.DeadlockEffect}, etc.) used with an interception selector instead of {@link
+ *       ChaosSelector.StressSelector}.
  *   <li>A {@link ChaosSelector.StressSelector} whose {@link ChaosSelector.StressTarget} does not
  *       match the provided effect type.
  *   <li>A session-scoped scenario using a JVM-global selector.
@@ -25,7 +25,7 @@ public class ChaosValidationException extends RuntimeException {
   /**
    * @param message human-readable explanation of the validation failure
    */
-  public ChaosValidationException(String message) {
+  public ChaosValidationException(final String message) {
     super(message);
   }
 }

@@ -10,14 +10,14 @@ final class CompletableFutureAdvice {
   static final class CompleteAdvice {
     @Advice.OnMethodEnter
     static Boolean enter(
-        @Advice.This CompletableFuture<?> future, @Advice.Argument(0) Object payload)
+        @Advice.This final CompletableFuture<?> future, @Advice.Argument(0) final Object payload)
         throws Throwable {
       return BootstrapDispatcher.beforeCompletableFutureComplete("ASYNC_COMPLETE", future, payload);
     }
 
     @Advice.OnMethodExit(onThrowable = Throwable.class)
     static void exit(
-        @Advice.Enter Boolean decision, @Advice.Return(readOnly = false) boolean returned) {
+        @Advice.Enter final Boolean decision, @Advice.Return(readOnly = false) boolean returned) {
       if (decision != null) {
         returned = decision;
       }
@@ -27,7 +27,7 @@ final class CompletableFutureAdvice {
   static final class CompleteExceptionallyAdvice {
     @Advice.OnMethodEnter
     static Boolean enter(
-        @Advice.This CompletableFuture<?> future, @Advice.Argument(0) Throwable payload)
+        @Advice.This final CompletableFuture<?> future, @Advice.Argument(0) final Throwable payload)
         throws Throwable {
       return BootstrapDispatcher.beforeCompletableFutureComplete(
           "ASYNC_COMPLETE_EXCEPTIONALLY", future, payload);
@@ -35,7 +35,7 @@ final class CompletableFutureAdvice {
 
     @Advice.OnMethodExit(onThrowable = Throwable.class)
     static void exit(
-        @Advice.Enter Boolean decision, @Advice.Return(readOnly = false) boolean returned) {
+        @Advice.Enter final Boolean decision, @Advice.Return(readOnly = false) boolean returned) {
       if (decision != null) {
         returned = decision;
       }

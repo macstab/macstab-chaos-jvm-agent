@@ -9,7 +9,8 @@ final class ClassLoaderAdvice {
 
   static final class LoadClassAdvice {
     @Advice.OnMethodEnter
-    static void enter(@Advice.This ClassLoader loader, @Advice.Argument(0) String className)
+    static void enter(
+        @Advice.This final ClassLoader loader, @Advice.Argument(0) final String className)
         throws Throwable {
       BootstrapDispatcher.beforeClassLoad(loader, className);
     }
@@ -18,8 +19,8 @@ final class ClassLoaderAdvice {
   static final class GetResourceAdvice {
     @Advice.OnMethodExit(onThrowable = Throwable.class)
     static void exit(
-        @Advice.This ClassLoader loader,
-        @Advice.Argument(0) String name,
+        @Advice.This final ClassLoader loader,
+        @Advice.Argument(0) final String name,
         @Advice.Return(readOnly = false) URL returned)
         throws Throwable {
       returned = BootstrapDispatcher.afterResourceLookup(loader, name, returned);

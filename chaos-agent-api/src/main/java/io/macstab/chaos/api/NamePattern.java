@@ -3,6 +3,7 @@ package io.macstab.chaos.api;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 
 /**
@@ -28,8 +29,18 @@ import java.util.regex.Pattern;
  * </table>
  *
  * <p>A {@code null} candidate string never matches any pattern except {@link MatchMode#ANY}.
+ *
+ * <p>Task 7: GLOB and REGEX patterns are compiled once and cached in a JVM-wide static {@link
+ * ConcurrentHashMap} keyed by the pattern string. Repeated calls to {@link #matches} on hot paths
+ * do not pay the {@link Pattern#compile} cost.
  */
 public record NamePattern(MatchMode mode, String value) {
+
+  /** Pre-compiled regex patterns for GLOB mode, keyed by the glob expression string. */
+  private static final ConcurrentHashMap<String, Pattern> GLOB_CACHE = new ConcurrentHashMap<>();
+
+  /** Pre-compiled patterns for REGEX mode, keyed by the raw regex string. */
+  private static final ConcurrentHashMap<String, Pattern> REGEX_CACHE = new ConcurrentHashMap<>();
 
   /**
    * Canonical constructor. Normalises {@code null} mode to {@link MatchMode#ANY} and {@code null}
@@ -38,7 +49,8 @@ public record NamePattern(MatchMode mode, String value) {
    * @throws IllegalArgumentException if mode is not {@link MatchMode#ANY} and value is blank
    */
   @JsonCreator
-  public NamePattern(@JsonProperty("mode") MatchMode mode, @JsonProperty("value") String value) {
+  public NamePattern(
+      @JsonProperty("mode") final MatchMode mode, @JsonProperty("value") final String value) {
     this.mode = Objects.requireNonNullElse(mode, MatchMode.ANY);
     this.value = value == null ? "*" : value;
     if (this.mode != MatchMode.ANY && this.value.isBlank()) {
@@ -74,8 +86,8 @@ public record NamePattern(MatchMode mode, String value) {
   }
 
   /**
-   * Returns a glob pattern where {@code *} matches any sequence of characters and {@code ?}
-   * matches exactly one character.
+   * Returns a glob pattern where {@code *} matches any sequence of characters and {@code ?} matches
+   * exactly one character.
    *
    * <p>Examples: {@code "com.example.*.Repository"}, {@code "worker-thread-?"}.
    *
@@ -112,8 +124,13 @@ public record NamePattern(MatchMode mode, String value) {
     return switch (mode) {
       case EXACT -> candidate.equals(value);
       case PREFIX -> candidate.startsWith(value);
-      case GLOB -> Pattern.matches(toRegex(value), candidate);
-      case REGEX -> Pattern.matches(value, candidate);
+      case GLOB ->
+          GLOB_CACHE
+              .computeIfAbsent(value, v -> Pattern.compile(toRegex(v)))
+              .matcher(candidate)
+              .matches();
+      case REGEX ->
+          REGEX_CACHE.computeIfAbsent(value, Pattern::compile).matcher(candidate).matches();
       case ANY -> true;
     };
   }
@@ -133,9 +150,7 @@ public record NamePattern(MatchMode mode, String value) {
     return builder.append('$').toString();
   }
 
-  /**
-   * Determines the matching algorithm applied by {@link NamePattern#matches}.
-   */
+  /** Determines the matching algorithm applied by {@link NamePattern#matches}. */
   public enum MatchMode {
 
     /** Matches every candidate including {@code null}. No value required. */
@@ -149,13 +164,14 @@ public record NamePattern(MatchMode mode, String value) {
 
     /**
      * Glob match: {@code *} expands to any character sequence, {@code ?} to a single character.
-     * Special regex characters in the glob value are escaped automatically.
+     * Special regex characters in the glob value are escaped automatically. The compiled {@link
+     * Pattern} is cached in a JVM-wide static map keyed by the glob string.
      */
     GLOB,
 
     /**
-     * Full Java regex match anchored to the entire candidate string. The pattern is compiled on
-     * each invocation; cache the {@link NamePattern} instance if matching is on a hot path.
+     * Full Java regex match anchored to the entire candidate string. The pattern is compiled once
+     * and cached; subsequent calls for the same regex string pay no compile cost.
      */
     REGEX,
   }

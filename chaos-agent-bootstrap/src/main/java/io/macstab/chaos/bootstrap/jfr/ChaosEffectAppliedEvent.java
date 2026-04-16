@@ -11,8 +11,8 @@ import jdk.jfr.StackTrace;
  * JFR event emitted each time a chaos effect is applied to a matched JVM operation.
  *
  * <p>Disabled by default — this event fires on every intercepted operation and can reach high
- * frequency under load. Enable on demand via a JFR profile or {@code -XX:StartFlightRecording}
- * with an appropriate threshold, or via JMC's event settings panel during a recording session.
+ * frequency under load. Enable on demand via a JFR profile or {@code -XX:StartFlightRecording} with
+ * an appropriate threshold, or via JMC's event settings panel during a recording session.
  *
  * <p>Fields {@code operationType} and {@code effectType} allow selective filtering in JFR queries:
  *

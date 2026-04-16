@@ -8,7 +8,7 @@ final class ThreadAdvice {
 
   static final class StartAdvice {
     @Advice.OnMethodEnter
-    static void enter(@Advice.This Thread thread) throws Throwable {
+    static void enter(@Advice.This final Thread thread) throws Throwable {
       BootstrapDispatcher.beforeThreadStart(thread);
     }
   }

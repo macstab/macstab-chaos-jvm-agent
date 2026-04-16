@@ -11,7 +11,7 @@ public final class ChaosTestKit {
     return ChaosPlatform.installLocally();
   }
 
-  public static ChaosSession openSession(String displayName) {
+  public static ChaosSession openSession(final String displayName) {
     return install().openSession(displayName);
   }
 }

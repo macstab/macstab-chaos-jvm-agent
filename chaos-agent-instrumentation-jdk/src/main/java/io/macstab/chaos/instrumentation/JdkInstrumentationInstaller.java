@@ -17,15 +17,22 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ForkJoinTask;
 import java.util.jar.JarEntry;
 import java.util.jar.JarOutputStream;
+import java.util.logging.Logger;
 import net.bytebuddy.agent.builder.AgentBuilder;
 import net.bytebuddy.asm.Advice;
 import net.bytebuddy.matcher.ElementMatchers;
+import net.bytebuddy.utility.JavaModule;
 
 public final class JdkInstrumentationInstaller {
+  private static final Logger LOGGER =
+      Logger.getLogger(JdkInstrumentationInstaller.class.getName());
+
   private JdkInstrumentationInstaller() {}
 
   public static void install(
-      Instrumentation instrumentation, ChaosRuntime runtime, boolean premainMode) {
+      final Instrumentation instrumentation,
+      final ChaosRuntime runtime,
+      final boolean premainMode) {
     injectBridge(instrumentation);
     installDelegate(new ChaosBridge(runtime));
 
@@ -33,6 +40,19 @@ public final class JdkInstrumentationInstaller {
         new AgentBuilder.Default()
             .disableClassFormatChanges()
             .with(AgentBuilder.RedefinitionStrategy.RETRANSFORMATION)
+            .with(
+                new AgentBuilder.Listener.Adapter() {
+                  @Override
+                  public void onError(
+                      final String typeName,
+                      final ClassLoader classLoader,
+                      final JavaModule module,
+                      final boolean loaded,
+                      final Throwable throwable) {
+                    LOGGER.warning(
+                        "chaos instrumentation failed for " + typeName + ": " + throwable);
+                  }
+                })
             .ignore(
                 ElementMatchers.nameStartsWith("net.bytebuddy.")
                     .or(ElementMatchers.nameStartsWith("io.macstab.chaos.")));
@@ -74,8 +94,7 @@ public final class JdkInstrumentationInstaller {
                                     ElementMatchers.named("awaitTermination")
                                         .and(
                                             ElementMatchers.takesArguments(
-                                                long.class,
-                                                java.util.concurrent.TimeUnit.class)))))
+                                                long.class, java.util.concurrent.TimeUnit.class)))))
             .type(ElementMatchers.named("java.util.concurrent.ScheduledThreadPoolExecutor"))
             .transform(
                 (builder, typeDescription, classLoader, module, protectionDomain) ->
@@ -117,8 +136,7 @@ public final class JdkInstrumentationInstaller {
                                                 Runnable.class,
                                                 long.class,
                                                 long.class,
-                                                java.util.concurrent.TimeUnit.class)))))
-;
+                                                java.util.concurrent.TimeUnit.class)))));
 
     if (premainMode) {
       agentBuilder =
@@ -165,7 +183,10 @@ public final class JdkInstrumentationInstaller {
                                       ElementMatchers.named("loadClass")
                                           .and(
                                               ElementMatchers.takesArguments(
-                                                  String.class, boolean.class))))
+                                                      String.class, boolean.class)
+                                                  .or(
+                                                      ElementMatchers.takesArguments(
+                                                          String.class)))))
                           .visit(
                               Advice.to(ClassLoaderAdvice.GetResourceAdvice.class)
                                   .on(
@@ -193,87 +214,92 @@ public final class JdkInstrumentationInstaller {
                               .on(
                                   ElementMatchers.named("doExec")
                                       .and(ElementMatchers.takesArguments(0)))));
-    };
+    }
 
     agentBuilder.installOn(instrumentation);
   }
 
-  private static void installDelegate(Object bridgeDelegate) {
-    try {
-      MethodHandles.Lookup lookup = MethodHandles.publicLookup();
-      Class<?> cls = BridgeDelegate.class;
-      MethodHandle[] mh = new MethodHandle[BootstrapDispatcher.HANDLE_COUNT];
-      mh[BootstrapDispatcher.DECORATE_EXECUTOR_RUNNABLE] =
-          lookup.findVirtual(
-              cls,
-              "decorateExecutorRunnable",
-              MethodType.methodType(Runnable.class, String.class, Object.class, Runnable.class));
-      mh[BootstrapDispatcher.DECORATE_EXECUTOR_CALLABLE] =
-          lookup.findVirtual(
-              cls,
-              "decorateExecutorCallable",
-              MethodType.methodType(Callable.class, String.class, Object.class, Callable.class));
-      mh[BootstrapDispatcher.BEFORE_THREAD_START] =
-          lookup.findVirtual(cls, "beforeThreadStart", MethodType.methodType(void.class, Thread.class));
-      mh[BootstrapDispatcher.BEFORE_WORKER_RUN] =
-          lookup.findVirtual(
-              cls,
-              "beforeWorkerRun",
-              MethodType.methodType(void.class, Object.class, Thread.class, Runnable.class));
-      mh[BootstrapDispatcher.BEFORE_FORK_JOIN_TASK_RUN] =
-          lookup.findVirtual(
-              cls, "beforeForkJoinTaskRun", MethodType.methodType(void.class, ForkJoinTask.class));
-      mh[BootstrapDispatcher.ADJUST_SCHEDULE_DELAY] =
-          lookup.findVirtual(
-              cls,
-              "adjustScheduleDelay",
-              MethodType.methodType(
-                  long.class, String.class, Object.class, Object.class, long.class, boolean.class));
-      mh[BootstrapDispatcher.BEFORE_SCHEDULED_TICK] =
-          lookup.findVirtual(
-              cls,
-              "beforeScheduledTick",
-              MethodType.methodType(boolean.class, Object.class, Object.class, boolean.class));
-      mh[BootstrapDispatcher.BEFORE_QUEUE_OPERATION] =
-          lookup.findVirtual(
-              cls,
-              "beforeQueueOperation",
-              MethodType.methodType(void.class, String.class, Object.class));
-      mh[BootstrapDispatcher.BEFORE_BOOLEAN_QUEUE_OPERATION] =
-          lookup.findVirtual(
-              cls,
-              "beforeBooleanQueueOperation",
-              MethodType.methodType(Boolean.class, String.class, Object.class));
-      mh[BootstrapDispatcher.BEFORE_COMPLETABLE_FUTURE_COMPLETE] =
-          lookup.findVirtual(
-              cls,
-              "beforeCompletableFutureComplete",
-              MethodType.methodType(
-                  Boolean.class, String.class, CompletableFuture.class, Object.class));
-      mh[BootstrapDispatcher.BEFORE_CLASS_LOAD] =
-          lookup.findVirtual(
-              cls,
-              "beforeClassLoad",
-              MethodType.methodType(void.class, ClassLoader.class, String.class));
-      mh[BootstrapDispatcher.AFTER_RESOURCE_LOOKUP] =
-          lookup.findVirtual(
-              cls,
-              "afterResourceLookup",
-              MethodType.methodType(URL.class, ClassLoader.class, String.class, URL.class));
-      mh[BootstrapDispatcher.DECORATE_SHUTDOWN_HOOK] =
-          lookup.findVirtual(
-              cls, "decorateShutdownHook", MethodType.methodType(Thread.class, Thread.class));
-      mh[BootstrapDispatcher.RESOLVE_SHUTDOWN_HOOK] =
-          lookup.findVirtual(
-              cls, "resolveShutdownHook", MethodType.methodType(Thread.class, Thread.class));
-      mh[BootstrapDispatcher.BEFORE_EXECUTOR_SHUTDOWN] =
-          lookup.findVirtual(
-              cls,
-              "beforeExecutorShutdown",
-              MethodType.methodType(void.class, String.class, Object.class, long.class));
+  static MethodHandle[] buildMethodHandles() throws Exception {
+    final MethodHandles.Lookup lookup = MethodHandles.publicLookup();
+    final Class<?> cls = BridgeDelegate.class;
+    final MethodHandle[] mh = new MethodHandle[BootstrapDispatcher.HANDLE_COUNT];
+    mh[BootstrapDispatcher.DECORATE_EXECUTOR_RUNNABLE] =
+        lookup.findVirtual(
+            cls,
+            "decorateExecutorRunnable",
+            MethodType.methodType(Runnable.class, String.class, Object.class, Runnable.class));
+    mh[BootstrapDispatcher.DECORATE_EXECUTOR_CALLABLE] =
+        lookup.findVirtual(
+            cls,
+            "decorateExecutorCallable",
+            MethodType.methodType(Callable.class, String.class, Object.class, Callable.class));
+    mh[BootstrapDispatcher.BEFORE_THREAD_START] =
+        lookup.findVirtual(
+            cls, "beforeThreadStart", MethodType.methodType(void.class, Thread.class));
+    mh[BootstrapDispatcher.BEFORE_WORKER_RUN] =
+        lookup.findVirtual(
+            cls,
+            "beforeWorkerRun",
+            MethodType.methodType(void.class, Object.class, Thread.class, Runnable.class));
+    mh[BootstrapDispatcher.BEFORE_FORK_JOIN_TASK_RUN] =
+        lookup.findVirtual(
+            cls, "beforeForkJoinTaskRun", MethodType.methodType(void.class, ForkJoinTask.class));
+    mh[BootstrapDispatcher.ADJUST_SCHEDULE_DELAY] =
+        lookup.findVirtual(
+            cls,
+            "adjustScheduleDelay",
+            MethodType.methodType(
+                long.class, String.class, Object.class, Object.class, long.class, boolean.class));
+    mh[BootstrapDispatcher.BEFORE_SCHEDULED_TICK] =
+        lookup.findVirtual(
+            cls,
+            "beforeScheduledTick",
+            MethodType.methodType(boolean.class, Object.class, Object.class, boolean.class));
+    mh[BootstrapDispatcher.BEFORE_QUEUE_OPERATION] =
+        lookup.findVirtual(
+            cls,
+            "beforeQueueOperation",
+            MethodType.methodType(void.class, String.class, Object.class));
+    mh[BootstrapDispatcher.BEFORE_BOOLEAN_QUEUE_OPERATION] =
+        lookup.findVirtual(
+            cls,
+            "beforeBooleanQueueOperation",
+            MethodType.methodType(Boolean.class, String.class, Object.class));
+    mh[BootstrapDispatcher.BEFORE_COMPLETABLE_FUTURE_COMPLETE] =
+        lookup.findVirtual(
+            cls,
+            "beforeCompletableFutureComplete",
+            MethodType.methodType(
+                Boolean.class, String.class, CompletableFuture.class, Object.class));
+    mh[BootstrapDispatcher.BEFORE_CLASS_LOAD] =
+        lookup.findVirtual(
+            cls,
+            "beforeClassLoad",
+            MethodType.methodType(void.class, ClassLoader.class, String.class));
+    mh[BootstrapDispatcher.AFTER_RESOURCE_LOOKUP] =
+        lookup.findVirtual(
+            cls,
+            "afterResourceLookup",
+            MethodType.methodType(URL.class, ClassLoader.class, String.class, URL.class));
+    mh[BootstrapDispatcher.DECORATE_SHUTDOWN_HOOK] =
+        lookup.findVirtual(
+            cls, "decorateShutdownHook", MethodType.methodType(Thread.class, Thread.class));
+    mh[BootstrapDispatcher.RESOLVE_SHUTDOWN_HOOK] =
+        lookup.findVirtual(
+            cls, "resolveShutdownHook", MethodType.methodType(Thread.class, Thread.class));
+    mh[BootstrapDispatcher.BEFORE_EXECUTOR_SHUTDOWN] =
+        lookup.findVirtual(
+            cls,
+            "beforeExecutorShutdown",
+            MethodType.methodType(void.class, String.class, Object.class, long.class));
+    return mh;
+  }
 
+  private static void installDelegate(final Object bridgeDelegate) {
+    try {
+      final MethodHandle[] mh = buildMethodHandles();
       // Use reflection to call install on the bootstrap CL version of BootstrapDispatcher
-      Class<?> bootstrapDispatcher =
+      final Class<?> bootstrapDispatcher =
           Class.forName("io.macstab.chaos.instrumentation.bridge.BootstrapDispatcher", true, null);
       bootstrapDispatcher
           .getMethod("install", Object.class, MethodHandle[].class)
@@ -283,9 +309,10 @@ public final class JdkInstrumentationInstaller {
     }
   }
 
-  private static void injectBridge(Instrumentation instrumentation) {
+  private static void injectBridge(final Instrumentation instrumentation) {
     try {
-      Path bridgeJar = Files.createTempFile("macstab-chaos-bootstrap-bridge", ".jar");
+      final Path bridgeJar = Files.createTempFile("macstab-chaos-bootstrap-bridge", ".jar");
+      bridgeJar.toFile().deleteOnExit();
       try (JarOutputStream jarOutputStream =
           new JarOutputStream(Files.newOutputStream(bridgeJar))) {
         writeClass(
@@ -301,9 +328,9 @@ public final class JdkInstrumentationInstaller {
     }
   }
 
-  private static void writeClass(JarOutputStream jarOutputStream, String resourcePath)
+  private static void writeClass(final JarOutputStream jarOutputStream, final String resourcePath)
       throws IOException {
-    JarEntry jarEntry = new JarEntry(resourcePath);
+    final JarEntry jarEntry = new JarEntry(resourcePath);
     jarOutputStream.putNextEntry(jarEntry);
     try (InputStream inputStream =
         JdkInstrumentationInstaller.class.getClassLoader().getResourceAsStream(resourcePath)) {

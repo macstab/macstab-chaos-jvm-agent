@@ -74,8 +74,8 @@ public sealed interface ChaosEffect
   // ── Interceptor factory methods ────────────────────────────────────────────
 
   /**
-   * Returns a deterministic delay effect where every matched operation is paused for exactly
-   * {@code delay}.
+   * Returns a deterministic delay effect where every matched operation is paused for exactly {@code
+   * delay}.
    *
    * @param delay the fixed pause duration; must be non-negative
    */
@@ -95,8 +95,8 @@ public sealed interface ChaosEffect
   }
 
   /**
-   * Returns a gate effect that blocks the matched operation until
-   * {@link ChaosActivationHandle#release()} is called or {@code maxBlock} elapses.
+   * Returns a gate effect that blocks the matched operation until {@link
+   * ChaosActivationHandle#release()} is called or {@code maxBlock} elapses.
    *
    * @param maxBlock maximum time to block; {@code null} blocks indefinitely
    */
@@ -115,8 +115,8 @@ public sealed interface ChaosEffect
   }
 
   /**
-   * Returns a suppress effect that silently discards the matched operation. Callers receive
-   * {@code null} or {@code false} depending on operation semantics.
+   * Returns a suppress effect that silently discards the matched operation. Callers receive {@code
+   * null} or {@code false} depending on operation semantics.
    */
   static SuppressEffect suppress() {
     return new SuppressEffect();
@@ -128,7 +128,7 @@ public sealed interface ChaosEffect
    * completion path executes. Only valid with {@link ChaosSelector.AsyncSelector}.
    *
    * @param failureKind the type of exception to inject
-   * @param message     the exception message; must be non-blank
+   * @param message the exception message; must be non-blank
    */
   static ExceptionalCompletionEffect exceptionalCompletion(
       FailureKind failureKind, String message) {
@@ -136,21 +136,21 @@ public sealed interface ChaosEffect
   }
 
   /**
-   * Returns an exception injection effect that throws an instance of {@code exceptionClassName}
-   * at the entry of matched methods, before the method body executes. Only valid with
-   * {@link ChaosSelector.MethodSelector} and {@link OperationType#METHOD_ENTER}.
+   * Returns an exception injection effect that throws an instance of {@code exceptionClassName} at
+   * the entry of matched methods, before the method body executes. Only valid with {@link
+   * ChaosSelector.MethodSelector} and {@link OperationType#METHOD_ENTER}.
    *
    * <p>The exception is instantiated via reflection. Both checked exceptions and {@link Error}
    * subclasses are supported — the runtime uses {@code Unsafe.throwException} to bypass the
    * compiler's checked-exception enforcement.
    *
-   * <p>With stack trace enabled (the default here), the exception carries a full stack trace.
-   * Use {@link ExceptionInjectionEffect#ExceptionInjectionEffect(String, String, boolean)} directly
+   * <p>With stack trace enabled (the default here), the exception carries a full stack trace. Use
+   * {@link ExceptionInjectionEffect#ExceptionInjectionEffect(String, String, boolean)} directly
    * with {@code withStackTrace=false} to suppress it for lower-overhead fault injection.
    *
-   * @param exceptionClassName binary class name of the exception type (e.g.,
-   *                           {@code "java.io.IOException"}); must be a valid binary class name
-   * @param message            the exception message passed to the constructor; must be non-blank
+   * @param exceptionClassName binary class name of the exception type (e.g., {@code
+   *     "java.io.IOException"}); must be a valid binary class name
+   * @param message the exception message passed to the constructor; must be non-blank
    */
   static ExceptionInjectionEffect injectException(String exceptionClassName, String message) {
     return new ExceptionInjectionEffect(exceptionClassName, message, true);
@@ -158,8 +158,8 @@ public sealed interface ChaosEffect
 
   /**
    * Returns a return value corruption effect that replaces the actual return value of matched
-   * methods on exit. Only valid with {@link ChaosSelector.MethodSelector} and
-   * {@link OperationType#METHOD_EXIT}.
+   * methods on exit. Only valid with {@link ChaosSelector.MethodSelector} and {@link
+   * OperationType#METHOD_EXIT}.
    *
    * <p>If the strategy is inapplicable to the actual return type (e.g., {@link
    * ReturnValueStrategy#EMPTY} on a primitive), the runtime falls back to {@link
@@ -172,16 +172,16 @@ public sealed interface ChaosEffect
   }
 
   /**
-   * Returns a clock skew effect that offsets or distorts the JVM clock as observed through
-   * {@link System#currentTimeMillis()} and {@link System#nanoTime()}. Only valid with
-   * {@link ChaosSelector.JvmRuntimeSelector}.
+   * Returns a clock skew effect that offsets or distorts the JVM clock as observed through {@link
+   * System#currentTimeMillis()} and {@link System#nanoTime()}. Only valid with {@link
+   * ChaosSelector.JvmRuntimeSelector}.
    *
    * <p>The skew is applied in the instrumentation advice layer and does not affect the OS clock or
    * other processes.
    *
    * @param skewAmount the clock offset to apply; positive = future, negative = past; must not be
-   *                   zero
-   * @param mode       how the skew evolves over time
+   *     zero
+   * @param mode how the skew evolves over time
    */
   static ClockSkewEffect skewClock(Duration skewAmount, ClockSkewMode mode) {
     return new ClockSkewEffect(skewAmount, mode);
@@ -191,13 +191,13 @@ public sealed interface ChaosEffect
 
   /**
    * Returns a heap pressure stressor that allocates and retains {@code bytes} of heap memory in
-   * chunks of {@code chunkSizeBytes}. The retained memory is released when the
-   * {@link ChaosActivationHandle} is closed.
+   * chunks of {@code chunkSizeBytes}. The retained memory is released when the {@link
+   * ChaosActivationHandle} is closed.
    *
-   * <p>Use with {@link ChaosSelector.StressSelector} targeting
-   * {@link ChaosSelector.StressTarget#HEAP}.
+   * <p>Use with {@link ChaosSelector.StressSelector} targeting {@link
+   * ChaosSelector.StressTarget#HEAP}.
    *
-   * @param bytes          total bytes to allocate and retain; must be &gt; 0
+   * @param bytes total bytes to allocate and retain; must be &gt; 0
    * @param chunkSizeBytes size of each allocation chunk; must be &gt; 0
    */
   static HeapPressureEffect heapPressure(long bytes, int chunkSizeBytes) {
@@ -205,15 +205,15 @@ public sealed interface ChaosEffect
   }
 
   /**
-   * Returns a keep-alive stressor that spawns a named thread which refuses to terminate,
-   * simulating a thread that blocks JVM shutdown or holds references to resources.
+   * Returns a keep-alive stressor that spawns a named thread which refuses to terminate, simulating
+   * a thread that blocks JVM shutdown or holds references to resources.
    *
-   * <p>Use with {@link ChaosSelector.StressSelector} targeting
-   * {@link ChaosSelector.StressTarget#KEEPALIVE}.
+   * <p>Use with {@link ChaosSelector.StressSelector} targeting {@link
+   * ChaosSelector.StressTarget#KEEPALIVE}.
    *
    * @param threadName name of the kept-alive thread; must be non-blank
-   * @param daemon     {@code false} prevents JVM shutdown until the handle is closed
-   * @param heartbeat  interval between keep-alive park cycles; must be positive
+   * @param daemon {@code false} prevents JVM shutdown until the handle is closed
+   * @param heartbeat interval between keep-alive park cycles; must be positive
    */
   static KeepAliveEffect keepAlive(String threadName, boolean daemon, Duration heartbeat) {
     return new KeepAliveEffect(threadName, daemon, heartbeat);
@@ -224,12 +224,12 @@ public sealed interface ChaosEffect
    * synthetic classes with {@code fieldsPerClass} fields each, retaining strong references to
    * prevent unloading. Simulates classloader leaks common in hot-deployment frameworks.
    *
-   * <p>Use with {@link ChaosSelector.StressSelector} targeting
-   * {@link ChaosSelector.StressTarget#METASPACE}.
+   * <p>Use with {@link ChaosSelector.StressSelector} targeting {@link
+   * ChaosSelector.StressTarget#METASPACE}.
    *
    * @param generatedClassCount number of synthetic classes to generate; must be &gt; 0
-   * @param fieldsPerClass      static fields per class (controls per-class metaspace footprint);
-   *                            must be &gt;= 0
+   * @param fieldsPerClass static fields per class (controls per-class metaspace footprint); must be
+   *     &gt;= 0
    */
   static MetaspacePressureEffect metaspacePressure(int generatedClassCount, int fieldsPerClass) {
     return new MetaspacePressureEffect(generatedClassCount, fieldsPerClass, true);
@@ -241,12 +241,12 @@ public sealed interface ChaosEffect
    * simulating NIO/Netty buffer leaks. The buffers are intentionally not cleaned up until the JVM
    * exits.
    *
-   * <p>Use with {@link ChaosSelector.StressSelector} targeting
-   * {@link ChaosSelector.StressTarget#DIRECT_BUFFER}.
+   * <p>Use with {@link ChaosSelector.StressSelector} targeting {@link
+   * ChaosSelector.StressTarget#DIRECT_BUFFER}.
    *
-   * @param totalBytes     total bytes of native memory to exhaust; must be &gt; 0
-   * @param bufferSizeBytes size of each individual buffer allocation; must be &gt; 0 and
-   *                        &lt;= totalBytes
+   * @param totalBytes total bytes of native memory to exhaust; must be &gt; 0
+   * @param bufferSizeBytes size of each individual buffer allocation; must be &gt; 0 and &lt;=
+   *     totalBytes
    */
   static DirectBufferPressureEffect directBufferPressure(long totalBytes, int bufferSizeBytes) {
     return new DirectBufferPressureEffect(totalBytes, bufferSizeBytes, false);
@@ -257,11 +257,11 @@ public sealed interface ChaosEffect
    * collector. Allocated objects do not survive young-gen collections (survivorship is off by
    * default).
    *
-   * <p>Use with {@link ChaosSelector.StressSelector} targeting
-   * {@link ChaosSelector.StressTarget#GC_PRESSURE}.
+   * <p>Use with {@link ChaosSelector.StressSelector} targeting {@link
+   * ChaosSelector.StressTarget#GC_PRESSURE}.
    *
    * @param allocationRateBytesPerSecond target allocation rate; must be &gt; 0
-   * @param duration                     how long the stressor runs; must be positive
+   * @param duration how long the stressor runs; must be positive
    */
   static GcPressureEffect gcPressure(long allocationRateBytesPerSecond, Duration duration) {
     return new GcPressureEffect(allocationRateBytesPerSecond, 1024, false, duration);
@@ -272,23 +272,23 @@ public sealed interface ChaosEffect
    * finalizers sleeping for {@code finalizerDelay} each. This backs up the finalizer thread queue,
    * delaying GC reclamation and eventually causing OOM conditions.
    *
-   * <p>Use with {@link ChaosSelector.StressSelector} targeting
-   * {@link ChaosSelector.StressTarget#FINALIZER_BACKLOG}.
+   * <p>Use with {@link ChaosSelector.StressSelector} targeting {@link
+   * ChaosSelector.StressTarget#FINALIZER_BACKLOG}.
    *
-   * @param objectCount     number of objects with slow finalizers to create; must be &gt; 0
-   * @param finalizerDelay  how long each finalizer sleeps; must be &gt;= 0
+   * @param objectCount number of objects with slow finalizers to create; must be &gt; 0
+   * @param finalizerDelay how long each finalizer sleeps; must be &gt;= 0
    */
   static FinalizerBacklogEffect finalizerBacklog(int objectCount, Duration finalizerDelay) {
     return new FinalizerBacklogEffect(objectCount, finalizerDelay);
   }
 
   /**
-   * Returns a deadlock stressor that permanently deadlocks {@code participantCount} threads using
-   * a 1-second acquisition delay between lock steps. The deadlock is released when the
-   * {@link ChaosActivationHandle} is closed.
+   * Returns a deadlock stressor that permanently deadlocks {@code participantCount} threads using a
+   * 1-second acquisition delay between lock steps. The deadlock is released when the {@link
+   * ChaosActivationHandle} is closed.
    *
-   * <p>Use with {@link ChaosSelector.StressSelector} targeting
-   * {@link ChaosSelector.StressTarget#DEADLOCK}.
+   * <p>Use with {@link ChaosSelector.StressSelector} targeting {@link
+   * ChaosSelector.StressTarget#DEADLOCK}.
    *
    * @param participantCount number of threads to deadlock; must be &gt;= 2
    */
@@ -301,28 +301,28 @@ public sealed interface ChaosEffect
    * When {@code daemon=false} and the handle is not closed before JVM shutdown, the leaked threads
    * will prevent clean JVM exit.
    *
-   * <p>Use with {@link ChaosSelector.StressSelector} targeting
-   * {@link ChaosSelector.StressTarget#THREAD_LEAK}.
+   * <p>Use with {@link ChaosSelector.StressSelector} targeting {@link
+   * ChaosSelector.StressTarget#THREAD_LEAK}.
    *
    * @param threadCount number of threads to leak; must be &gt; 0
-   * @param namePrefix  prefix for thread names (e.g., {@code "leaked-worker-"}); must be non-blank
-   * @param daemon      if {@code false}, the threads block JVM exit until they terminate or the
-   *                    handle is closed
+   * @param namePrefix prefix for thread names (e.g., {@code "leaked-worker-"}); must be non-blank
+   * @param daemon if {@code false}, the threads block JVM exit until they terminate or the handle
+   *     is closed
    */
   static ThreadLeakEffect threadLeak(int threadCount, String namePrefix, boolean daemon) {
     return new ThreadLeakEffect(threadCount, namePrefix, daemon, null);
   }
 
   /**
-   * Returns a ThreadLocal leak stressor that plants {@code entriesPerThread} ThreadLocal entries
-   * of {@code valueSizeBytes} each in threads from the common pool, simulating large
-   * request-scoped objects retained across requests in a pool thread.
+   * Returns a ThreadLocal leak stressor that plants {@code entriesPerThread} ThreadLocal entries of
+   * {@code valueSizeBytes} each in threads from the common pool, simulating large request-scoped
+   * objects retained across requests in a pool thread.
    *
-   * <p>Use with {@link ChaosSelector.StressSelector} targeting
-   * {@link ChaosSelector.StressTarget#THREAD_LOCAL_LEAK}.
+   * <p>Use with {@link ChaosSelector.StressSelector} targeting {@link
+   * ChaosSelector.StressTarget#THREAD_LOCAL_LEAK}.
    *
    * @param entriesPerThread number of ThreadLocal entries per pool thread; must be &gt; 0
-   * @param valueSizeBytes   size of each entry's byte-array value; must be &gt; 0
+   * @param valueSizeBytes size of each entry's byte-array value; must be &gt; 0
    */
   static ThreadLocalLeakEffect threadLocalLeak(int entriesPerThread, int valueSizeBytes) {
     return new ThreadLocalLeakEffect(entriesPerThread, valueSizeBytes);
@@ -331,13 +331,13 @@ public sealed interface ChaosEffect
   /**
    * Returns a monitor contention stressor that spawns {@code contendingThreadCount} threads
    * competing for a single lock held for {@code lockHoldDuration} each cycle, using fair lock
-   * ordering (FIFO). For a more destructive starvation scenario, use the full
-   * {@link MonitorContentionEffect} constructor with {@code unfair=true}.
+   * ordering (FIFO). For a more destructive starvation scenario, use the full {@link
+   * MonitorContentionEffect} constructor with {@code unfair=true}.
    *
-   * <p>Use with {@link ChaosSelector.StressSelector} targeting
-   * {@link ChaosSelector.StressTarget#MONITOR_CONTENTION}.
+   * <p>Use with {@link ChaosSelector.StressSelector} targeting {@link
+   * ChaosSelector.StressTarget#MONITOR_CONTENTION}.
    *
-   * @param lockHoldDuration     how long each thread holds the lock per cycle; must be positive
+   * @param lockHoldDuration how long each thread holds the lock per cycle; must be positive
    * @param contendingThreadCount number of threads competing for the lock; must be &gt;= 2
    */
   static MonitorContentionEffect monitorContention(
