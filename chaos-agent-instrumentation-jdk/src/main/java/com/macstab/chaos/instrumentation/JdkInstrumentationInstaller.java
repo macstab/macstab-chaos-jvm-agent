@@ -1,0 +1,700 @@
+package com.macstab.chaos.instrumentation;
+
+import com.macstab.chaos.core.ChaosRuntime;
+import com.macstab.chaos.instrumentation.bridge.BootstrapDispatcher;
+import com.macstab.chaos.instrumentation.bridge.BridgeDelegate;
+import java.io.IOException;
+import java.io.InputStream;
+import java.lang.instrument.Instrumentation;
+import java.lang.invoke.MethodHandle;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.MethodType;
+import java.net.URL;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ForkJoinTask;
+import java.util.jar.JarEntry;
+import java.util.jar.JarOutputStream;
+import java.util.logging.Logger;
+import net.bytebuddy.agent.builder.AgentBuilder;
+import net.bytebuddy.asm.Advice;
+import net.bytebuddy.matcher.ElementMatchers;
+import net.bytebuddy.utility.JavaModule;
+
+public final class JdkInstrumentationInstaller {
+  private static final Logger LOGGER =
+      Logger.getLogger(JdkInstrumentationInstaller.class.getName());
+
+  private JdkInstrumentationInstaller() {}
+
+  public static void install(
+      final Instrumentation instrumentation,
+      final ChaosRuntime runtime,
+      final boolean premainMode) {
+    injectBridge(instrumentation);
+    installDelegate(new ChaosBridge(runtime));
+
+    final AgentBuilder.Listener.Adapter errorListener =
+        new AgentBuilder.Listener.Adapter() {
+          @Override
+          public void onError(
+              final String typeName,
+              final ClassLoader classLoader,
+              final JavaModule module,
+              final boolean loaded,
+              final Throwable throwable) {
+            LOGGER.warning("chaos instrumentation failed for " + typeName + ": " + throwable);
+          }
+        };
+
+    AgentBuilder agentBuilder =
+        new AgentBuilder.Default()
+            .disableClassFormatChanges()
+            .with(AgentBuilder.RedefinitionStrategy.RETRANSFORMATION)
+            .with(errorListener)
+            .ignore(
+                ElementMatchers.nameStartsWith("net.bytebuddy.")
+                    .or(ElementMatchers.nameStartsWith("com.macstab.chaos.")));
+
+    agentBuilder =
+        agentBuilder
+            .type(ElementMatchers.named("java.lang.Thread"))
+            .transform(
+                (builder, typeDescription, classLoader, module, protectionDomain) ->
+                    builder.visit(
+                        Advice.to(ThreadAdvice.StartAdvice.class)
+                            .on(
+                                ElementMatchers.named("start")
+                                    .and(ElementMatchers.takesArguments(0)))))
+            .type(ElementMatchers.named("java.util.concurrent.ThreadPoolExecutor"))
+            .transform(
+                (builder, typeDescription, classLoader, module, protectionDomain) ->
+                    builder
+                        .visit(
+                            Advice.to(ExecutorAdvice.ExecuteAdvice.class)
+                                .on(
+                                    ElementMatchers.named("execute")
+                                        .and(ElementMatchers.takesArguments(Runnable.class))))
+                        .visit(
+                            Advice.to(ExecutorAdvice.BeforeExecuteAdvice.class)
+                                .on(
+                                    ElementMatchers.named("beforeExecute")
+                                        .and(
+                                            ElementMatchers.takesArguments(
+                                                Thread.class, Runnable.class))))
+                        .visit(
+                            Advice.to(ExecutorAdvice.ShutdownAdvice.class)
+                                .on(
+                                    ElementMatchers.named("shutdown")
+                                        .and(ElementMatchers.takesArguments(0))))
+                        .visit(
+                            Advice.to(ExecutorAdvice.AwaitTerminationAdvice.class)
+                                .on(
+                                    ElementMatchers.named("awaitTermination")
+                                        .and(
+                                            ElementMatchers.takesArguments(
+                                                long.class, java.util.concurrent.TimeUnit.class)))))
+            .type(ElementMatchers.named("java.util.concurrent.ScheduledThreadPoolExecutor"))
+            .transform(
+                (builder, typeDescription, classLoader, module, protectionDomain) ->
+                    builder
+                        .visit(
+                            Advice.to(ScheduledExecutorAdvice.ScheduleRunnableAdvice.class)
+                                .on(
+                                    ElementMatchers.named("schedule")
+                                        .and(
+                                            ElementMatchers.takesArguments(
+                                                Runnable.class,
+                                                long.class,
+                                                java.util.concurrent.TimeUnit.class))))
+                        .visit(
+                            Advice.to(ScheduledExecutorAdvice.ScheduleCallableAdvice.class)
+                                .on(
+                                    ElementMatchers.named("schedule")
+                                        .and(
+                                            ElementMatchers.takesArguments(
+                                                Callable.class,
+                                                long.class,
+                                                java.util.concurrent.TimeUnit.class))))
+                        .visit(
+                            Advice.to(ScheduledExecutorAdvice.PeriodicAdvice.class)
+                                .on(
+                                    ElementMatchers.named("scheduleAtFixedRate")
+                                        .and(
+                                            ElementMatchers.takesArguments(
+                                                Runnable.class,
+                                                long.class,
+                                                long.class,
+                                                java.util.concurrent.TimeUnit.class))))
+                        .visit(
+                            Advice.to(ScheduledExecutorAdvice.PeriodicAdvice.class)
+                                .on(
+                                    ElementMatchers.named("scheduleWithFixedDelay")
+                                        .and(
+                                            ElementMatchers.takesArguments(
+                                                Runnable.class,
+                                                long.class,
+                                                long.class,
+                                                java.util.concurrent.TimeUnit.class)))));
+
+    if (premainMode) {
+      agentBuilder =
+          agentBuilder
+              .type(ElementMatchers.isSubTypeOf(java.util.concurrent.BlockingQueue.class))
+              .transform(
+                  (builder, typeDescription, classLoader, module, protectionDomain) ->
+                      builder
+                          .visit(
+                              Advice.to(QueueAdvice.PutAdvice.class)
+                                  .on(ElementMatchers.named("put")))
+                          .visit(
+                              Advice.to(QueueAdvice.TakeAdvice.class)
+                                  .on(ElementMatchers.named("take")))
+                          .visit(
+                              Advice.to(QueueAdvice.PollAdvice.class)
+                                  .on(ElementMatchers.named("poll")))
+                          .visit(
+                              Advice.to(QueueAdvice.OfferAdvice.class)
+                                  .on(
+                                      ElementMatchers.named("offer")
+                                          .and(ElementMatchers.takesArguments(1)))))
+              .type(ElementMatchers.named("java.util.concurrent.CompletableFuture"))
+              .transform(
+                  (builder, typeDescription, classLoader, module, protectionDomain) ->
+                      builder
+                          .visit(
+                              Advice.to(CompletableFutureAdvice.CompleteAdvice.class)
+                                  .on(
+                                      ElementMatchers.named("complete")
+                                          .and(ElementMatchers.takesArguments(1))))
+                          .visit(
+                              Advice.to(CompletableFutureAdvice.CompleteExceptionallyAdvice.class)
+                                  .on(
+                                      ElementMatchers.named("completeExceptionally")
+                                          .and(ElementMatchers.takesArguments(Throwable.class)))))
+              .type(ElementMatchers.named("java.lang.ClassLoader"))
+              .transform(
+                  (builder, typeDescription, classLoader, module, protectionDomain) ->
+                      builder
+                          .visit(
+                              Advice.to(ClassLoaderAdvice.LoadClassAdvice.class)
+                                  .on(
+                                      ElementMatchers.named("loadClass")
+                                          .and(
+                                              ElementMatchers.takesArguments(
+                                                      String.class, boolean.class)
+                                                  .or(
+                                                      ElementMatchers.takesArguments(
+                                                          String.class)))))
+                          .visit(
+                              Advice.to(ClassLoaderAdvice.GetResourceAdvice.class)
+                                  .on(
+                                      ElementMatchers.named("getResource")
+                                          .and(ElementMatchers.takesArguments(String.class)))))
+              .type(ElementMatchers.named("java.lang.Runtime"))
+              .transform(
+                  (builder, typeDescription, classLoader, module, protectionDomain) ->
+                      builder
+                          .visit(
+                              Advice.to(ShutdownAdvice.AddShutdownHookAdvice.class)
+                                  .on(
+                                      ElementMatchers.named("addShutdownHook")
+                                          .and(ElementMatchers.takesArguments(Thread.class))))
+                          .visit(
+                              Advice.to(ShutdownAdvice.RemoveShutdownHookAdvice.class)
+                                  .on(
+                                      ElementMatchers.named("removeShutdownHook")
+                                          .and(ElementMatchers.takesArguments(Thread.class)))))
+              .type(ElementMatchers.named("java.util.concurrent.ForkJoinTask"))
+              .transform(
+                  (builder, typeDescription, classLoader, module, protectionDomain) ->
+                      builder.visit(
+                          Advice.to(ForkJoinAdvice.DoExecAdvice.class)
+                              .on(
+                                  ElementMatchers.named("doExec")
+                                      .and(ElementMatchers.takesArguments(0)))));
+
+      // ── Phase 2: JVM runtime interception ─────────────────────────────────
+      agentBuilder =
+          agentBuilder
+              // Clock skew: System.currentTimeMillis() and System.nanoTime()
+              .type(ElementMatchers.named("java.lang.System"))
+              .transform(
+                  (builder, typeDescription, classLoader, module, protectionDomain) ->
+                      builder
+                          .visit(
+                              Advice.to(JvmRuntimeAdvice.ClockMillisAdvice.class)
+                                  .on(ElementMatchers.named("currentTimeMillis")))
+                          .visit(
+                              Advice.to(JvmRuntimeAdvice.ClockNanosAdvice.class)
+                                  .on(ElementMatchers.named("nanoTime")))
+                          .visit(
+                              Advice.to(JvmRuntimeAdvice.ExitRequestAdvice.class)
+                                  .on(
+                                      ElementMatchers.named("exit")
+                                          .and(ElementMatchers.takesArguments(int.class)))))
+              // GC and halt via Runtime
+              .type(ElementMatchers.named("java.lang.Runtime"))
+              .transform(
+                  (builder, typeDescription, classLoader, module, protectionDomain) ->
+                      builder
+                          .visit(
+                              Advice.to(JvmRuntimeAdvice.GcRequestAdvice.class)
+                                  .on(
+                                      ElementMatchers.named("gc")
+                                          .and(ElementMatchers.takesArguments(0))))
+                          .visit(
+                              Advice.to(JvmRuntimeAdvice.ExitRequestAdvice.class)
+                                  .on(
+                                      ElementMatchers.named("halt")
+                                          .and(ElementMatchers.takesArguments(int.class)))))
+              // Reflection
+              .type(ElementMatchers.named("java.lang.reflect.Method"))
+              .transform(
+                  (builder, typeDescription, classLoader, module, protectionDomain) ->
+                      builder.visit(
+                          Advice.to(JvmRuntimeAdvice.ReflectionInvokeAdvice.class)
+                              .on(
+                                  ElementMatchers.named("invoke")
+                                      .and(
+                                          ElementMatchers.takesArguments(
+                                              Object.class, Object[].class)))))
+              // Direct buffer allocation
+              .type(ElementMatchers.named("java.nio.ByteBuffer"))
+              .transform(
+                  (builder, typeDescription, classLoader, module, protectionDomain) ->
+                      builder.visit(
+                          Advice.to(JvmRuntimeAdvice.DirectBufferAllocateAdvice.class)
+                              .on(
+                                  ElementMatchers.named("allocateDirect")
+                                      .and(ElementMatchers.takesArguments(int.class)))))
+              // Object deserialization and serialization
+              .type(ElementMatchers.named("java.io.ObjectInputStream"))
+              .transform(
+                  (builder, typeDescription, classLoader, module, protectionDomain) ->
+                      builder.visit(
+                          Advice.to(JvmRuntimeAdvice.ObjectDeserializeAdvice.class)
+                              .on(
+                                  ElementMatchers.named("readObject")
+                                      .and(ElementMatchers.takesArguments(0)))))
+              .type(ElementMatchers.named("java.io.ObjectOutputStream"))
+              .transform(
+                  (builder, typeDescription, classLoader, module, protectionDomain) ->
+                      builder.visit(
+                          Advice.to(JvmRuntimeAdvice.ObjectSerializeAdvice.class)
+                              .on(
+                                  ElementMatchers.named("writeObject")
+                                      .and(ElementMatchers.takesArguments(Object.class)))))
+              // ClassLoader.defineClass
+              .type(ElementMatchers.named("java.lang.ClassLoader"))
+              .transform(
+                  (builder, typeDescription, classLoader, module, protectionDomain) ->
+                      builder.visit(
+                          Advice.to(JvmRuntimeAdvice.ClassDefineAdvice.class)
+                              .on(
+                                  ElementMatchers.named("defineClass")
+                                      .and(ElementMatchers.takesArgument(0, String.class)))))
+              // NIO Selector — target AbstractSelector subtypes (KQueueSelectorImpl etc.)
+              .type(ElementMatchers.isSubTypeOf(java.nio.channels.spi.AbstractSelector.class))
+              .transform(
+                  (builder, typeDescription, classLoader, module, protectionDomain) ->
+                      builder
+                          .visit(
+                              Advice.to(JvmRuntimeAdvice.NioSelectNoArgAdvice.class)
+                                  .on(
+                                      ElementMatchers.named("select")
+                                          .and(ElementMatchers.takesArguments(0))))
+                          .visit(
+                              Advice.to(JvmRuntimeAdvice.NioSelectTimeoutAdvice.class)
+                                  .on(
+                                      ElementMatchers.named("select")
+                                          .and(ElementMatchers.takesArguments(long.class))))
+                          .visit(
+                              Advice.to(JvmRuntimeAdvice.NioSelectNoArgAdvice.class)
+                                  .on(
+                                      ElementMatchers.named("selectNow")
+                                          .and(ElementMatchers.takesArguments(0)))))
+              // NIO SocketChannel
+              .type(ElementMatchers.named("java.nio.channels.SocketChannel"))
+              .transform(
+                  (builder, typeDescription, classLoader, module, protectionDomain) ->
+                      builder
+                          .visit(
+                              Advice.to(JvmRuntimeAdvice.NioChannelConnectAdvice.class)
+                                  .on(
+                                      ElementMatchers.named("connect")
+                                          .and(
+                                              ElementMatchers.takesArguments(
+                                                  java.net.SocketAddress.class))))
+                          .visit(
+                              Advice.to(JvmRuntimeAdvice.NioChannelReadAdvice.class)
+                                  .on(
+                                      ElementMatchers.named("read")
+                                          .and(
+                                              ElementMatchers.takesArguments(
+                                                  java.nio.ByteBuffer.class))))
+                          .visit(
+                              Advice.to(JvmRuntimeAdvice.NioChannelWriteAdvice.class)
+                                  .on(
+                                      ElementMatchers.named("write")
+                                          .and(
+                                              ElementMatchers.takesArguments(
+                                                  java.nio.ByteBuffer.class)))))
+              // NIO ServerSocketChannel
+              .type(ElementMatchers.named("java.nio.channels.ServerSocketChannel"))
+              .transform(
+                  (builder, typeDescription, classLoader, module, protectionDomain) ->
+                      builder.visit(
+                          Advice.to(JvmRuntimeAdvice.NioChannelAcceptAdvice.class)
+                              .on(
+                                  ElementMatchers.named("accept")
+                                      .and(ElementMatchers.takesArguments(0)))))
+              // Socket
+              .type(ElementMatchers.named("java.net.Socket"))
+              .transform(
+                  (builder, typeDescription, classLoader, module, protectionDomain) ->
+                      builder
+                          .visit(
+                              Advice.to(JvmRuntimeAdvice.SocketConnectAdvice.class)
+                                  .on(
+                                      ElementMatchers.named("connect")
+                                          .and(
+                                              ElementMatchers.takesArguments(
+                                                  java.net.SocketAddress.class, int.class))))
+                          .visit(
+                              Advice.to(JvmRuntimeAdvice.SocketCloseAdvice.class)
+                                  .on(
+                                      ElementMatchers.named("close")
+                                          .and(ElementMatchers.takesArguments(0)))))
+              // ServerSocket
+              .type(ElementMatchers.named("java.net.ServerSocket"))
+              .transform(
+                  (builder, typeDescription, classLoader, module, protectionDomain) ->
+                      builder.visit(
+                          Advice.to(JvmRuntimeAdvice.SocketAcceptAdvice.class)
+                              .on(
+                                  ElementMatchers.named("accept")
+                                      .and(ElementMatchers.takesArguments(0)))))
+              // SocketInputStream / SocketOutputStream (package-private)
+              .type(ElementMatchers.named("java.net.SocketInputStream"))
+              .transform(
+                  (builder, typeDescription, classLoader, module, protectionDomain) ->
+                      builder.visit(
+                          Advice.to(JvmRuntimeAdvice.SocketReadAdvice.class)
+                              .on(ElementMatchers.named("read"))))
+              .type(ElementMatchers.named("java.net.SocketOutputStream"))
+              .transform(
+                  (builder, typeDescription, classLoader, module, protectionDomain) ->
+                      builder.visit(
+                          Advice.to(JvmRuntimeAdvice.SocketWriteAdvice.class)
+                              .on(ElementMatchers.named("write"))))
+              // ZIP Inflater / Deflater
+              .type(ElementMatchers.named("java.util.zip.Inflater"))
+              .transform(
+                  (builder, typeDescription, classLoader, module, protectionDomain) ->
+                      builder.visit(
+                          Advice.to(JvmRuntimeAdvice.ZipInflateAdvice.class)
+                              .on(ElementMatchers.named("inflate"))))
+              .type(ElementMatchers.named("java.util.zip.Deflater"))
+              .transform(
+                  (builder, typeDescription, classLoader, module, protectionDomain) ->
+                      builder.visit(
+                          Advice.to(JvmRuntimeAdvice.ZipDeflateAdvice.class)
+                              .on(ElementMatchers.named("deflate"))));
+
+      // Optional instrumentation — skip gracefully if class not present
+      agentBuilder =
+          instrumentOptional(
+              agentBuilder,
+              "javax.naming.InitialContext",
+              builder ->
+                  builder.visit(
+                      Advice.to(JvmRuntimeAdvice.JndiLookupAdvice.class)
+                          .on(
+                              ElementMatchers.named("lookup")
+                                  .and(ElementMatchers.takesArguments(String.class)))));
+
+      agentBuilder =
+          instrumentOptional(
+              agentBuilder,
+              "javax.management.MBeanServer",
+              builder ->
+                  builder
+                      .visit(
+                          Advice.to(JvmRuntimeAdvice.JmxInvokeAdvice.class)
+                              .on(
+                                  ElementMatchers.named("invoke")
+                                      .and(ElementMatchers.takesArguments(4))))
+                      .visit(
+                          Advice.to(JvmRuntimeAdvice.JmxGetAttrAdvice.class)
+                              .on(
+                                  ElementMatchers.named("getAttribute")
+                                      .and(ElementMatchers.takesArguments(2)))));
+
+      agentBuilder =
+          instrumentOptional(
+              agentBuilder,
+              "java.lang.Runtime",
+              builder ->
+                  builder.visit(
+                      Advice.to(JvmRuntimeAdvice.NativeLibraryLoadAdvice.class)
+                          .on(ElementMatchers.named("loadLibrary0"))));
+
+      // CompletableFuture.cancel
+      agentBuilder =
+          agentBuilder
+              .type(ElementMatchers.named("java.util.concurrent.CompletableFuture"))
+              .transform(
+                  (builder, typeDescription, classLoader, module, protectionDomain) ->
+                      builder.visit(
+                          Advice.to(JvmRuntimeAdvice.AsyncCancelAdvice.class)
+                              .on(
+                                  ElementMatchers.named("cancel")
+                                      .and(ElementMatchers.takesArguments(boolean.class)))));
+    }
+
+    agentBuilder.installOn(instrumentation);
+  }
+
+  static MethodHandle[] buildMethodHandles() throws Exception {
+    final MethodHandles.Lookup lookup = MethodHandles.publicLookup();
+    final Class<?> cls = BridgeDelegate.class;
+    final MethodHandle[] mh = new MethodHandle[BootstrapDispatcher.HANDLE_COUNT];
+    mh[BootstrapDispatcher.DECORATE_EXECUTOR_RUNNABLE] =
+        lookup.findVirtual(
+            cls,
+            "decorateExecutorRunnable",
+            MethodType.methodType(Runnable.class, String.class, Object.class, Runnable.class));
+    mh[BootstrapDispatcher.DECORATE_EXECUTOR_CALLABLE] =
+        lookup.findVirtual(
+            cls,
+            "decorateExecutorCallable",
+            MethodType.methodType(Callable.class, String.class, Object.class, Callable.class));
+    mh[BootstrapDispatcher.BEFORE_THREAD_START] =
+        lookup.findVirtual(
+            cls, "beforeThreadStart", MethodType.methodType(void.class, Thread.class));
+    mh[BootstrapDispatcher.BEFORE_WORKER_RUN] =
+        lookup.findVirtual(
+            cls,
+            "beforeWorkerRun",
+            MethodType.methodType(void.class, Object.class, Thread.class, Runnable.class));
+    mh[BootstrapDispatcher.BEFORE_FORK_JOIN_TASK_RUN] =
+        lookup.findVirtual(
+            cls, "beforeForkJoinTaskRun", MethodType.methodType(void.class, ForkJoinTask.class));
+    mh[BootstrapDispatcher.ADJUST_SCHEDULE_DELAY] =
+        lookup.findVirtual(
+            cls,
+            "adjustScheduleDelay",
+            MethodType.methodType(
+                long.class, String.class, Object.class, Object.class, long.class, boolean.class));
+    mh[BootstrapDispatcher.BEFORE_SCHEDULED_TICK] =
+        lookup.findVirtual(
+            cls,
+            "beforeScheduledTick",
+            MethodType.methodType(boolean.class, Object.class, Object.class, boolean.class));
+    mh[BootstrapDispatcher.BEFORE_QUEUE_OPERATION] =
+        lookup.findVirtual(
+            cls,
+            "beforeQueueOperation",
+            MethodType.methodType(void.class, String.class, Object.class));
+    mh[BootstrapDispatcher.BEFORE_BOOLEAN_QUEUE_OPERATION] =
+        lookup.findVirtual(
+            cls,
+            "beforeBooleanQueueOperation",
+            MethodType.methodType(Boolean.class, String.class, Object.class));
+    mh[BootstrapDispatcher.BEFORE_COMPLETABLE_FUTURE_COMPLETE] =
+        lookup.findVirtual(
+            cls,
+            "beforeCompletableFutureComplete",
+            MethodType.methodType(
+                Boolean.class, String.class, CompletableFuture.class, Object.class));
+    mh[BootstrapDispatcher.BEFORE_CLASS_LOAD] =
+        lookup.findVirtual(
+            cls,
+            "beforeClassLoad",
+            MethodType.methodType(void.class, ClassLoader.class, String.class));
+    mh[BootstrapDispatcher.AFTER_RESOURCE_LOOKUP] =
+        lookup.findVirtual(
+            cls,
+            "afterResourceLookup",
+            MethodType.methodType(URL.class, ClassLoader.class, String.class, URL.class));
+    mh[BootstrapDispatcher.DECORATE_SHUTDOWN_HOOK] =
+        lookup.findVirtual(
+            cls, "decorateShutdownHook", MethodType.methodType(Thread.class, Thread.class));
+    mh[BootstrapDispatcher.RESOLVE_SHUTDOWN_HOOK] =
+        lookup.findVirtual(
+            cls, "resolveShutdownHook", MethodType.methodType(Thread.class, Thread.class));
+    mh[BootstrapDispatcher.BEFORE_EXECUTOR_SHUTDOWN] =
+        lookup.findVirtual(
+            cls,
+            "beforeExecutorShutdown",
+            MethodType.methodType(void.class, String.class, Object.class, long.class));
+    mh[BootstrapDispatcher.ADJUST_CLOCK_MILLIS] =
+        lookup.findVirtual(cls, "adjustClockMillis", MethodType.methodType(long.class, long.class));
+    mh[BootstrapDispatcher.ADJUST_CLOCK_NANOS] =
+        lookup.findVirtual(cls, "adjustClockNanos", MethodType.methodType(long.class, long.class));
+    mh[BootstrapDispatcher.BEFORE_GC_REQUEST] =
+        lookup.findVirtual(cls, "beforeGcRequest", MethodType.methodType(boolean.class));
+    mh[BootstrapDispatcher.BEFORE_EXIT_REQUEST] =
+        lookup.findVirtual(cls, "beforeExitRequest", MethodType.methodType(void.class, int.class));
+    mh[BootstrapDispatcher.BEFORE_REFLECTION_INVOKE] =
+        lookup.findVirtual(
+            cls,
+            "beforeReflectionInvoke",
+            MethodType.methodType(void.class, Object.class, Object.class));
+    mh[BootstrapDispatcher.BEFORE_DIRECT_BUFFER_ALLOCATE] =
+        lookup.findVirtual(
+            cls, "beforeDirectBufferAllocate", MethodType.methodType(void.class, int.class));
+    mh[BootstrapDispatcher.BEFORE_OBJECT_DESERIALIZE] =
+        lookup.findVirtual(
+            cls, "beforeObjectDeserialize", MethodType.methodType(void.class, Object.class));
+    mh[BootstrapDispatcher.BEFORE_CLASS_DEFINE] =
+        lookup.findVirtual(
+            cls,
+            "beforeClassDefine",
+            MethodType.methodType(void.class, Object.class, String.class));
+    mh[BootstrapDispatcher.BEFORE_MONITOR_ENTER] =
+        lookup.findVirtual(cls, "beforeMonitorEnter", MethodType.methodType(void.class));
+    mh[BootstrapDispatcher.BEFORE_THREAD_PARK] =
+        lookup.findVirtual(cls, "beforeThreadPark", MethodType.methodType(void.class));
+    mh[BootstrapDispatcher.BEFORE_NIO_SELECT] =
+        lookup.findVirtual(
+            cls, "beforeNioSelect", MethodType.methodType(boolean.class, Object.class, long.class));
+    mh[BootstrapDispatcher.BEFORE_NIO_CHANNEL_OP] =
+        lookup.findVirtual(
+            cls,
+            "beforeNioChannelOp",
+            MethodType.methodType(void.class, String.class, Object.class));
+    mh[BootstrapDispatcher.BEFORE_SOCKET_CONNECT] =
+        lookup.findVirtual(
+            cls,
+            "beforeSocketConnect",
+            MethodType.methodType(void.class, Object.class, Object.class, int.class));
+    mh[BootstrapDispatcher.BEFORE_SOCKET_ACCEPT] =
+        lookup.findVirtual(
+            cls, "beforeSocketAccept", MethodType.methodType(void.class, Object.class));
+    mh[BootstrapDispatcher.BEFORE_SOCKET_READ] =
+        lookup.findVirtual(
+            cls, "beforeSocketRead", MethodType.methodType(void.class, Object.class));
+    mh[BootstrapDispatcher.BEFORE_SOCKET_WRITE] =
+        lookup.findVirtual(
+            cls, "beforeSocketWrite", MethodType.methodType(void.class, Object.class, int.class));
+    mh[BootstrapDispatcher.BEFORE_SOCKET_CLOSE] =
+        lookup.findVirtual(
+            cls, "beforeSocketClose", MethodType.methodType(void.class, Object.class));
+    mh[BootstrapDispatcher.BEFORE_JNDI_LOOKUP] =
+        lookup.findVirtual(
+            cls, "beforeJndiLookup", MethodType.methodType(void.class, Object.class, String.class));
+    mh[BootstrapDispatcher.BEFORE_OBJECT_SERIALIZE] =
+        lookup.findVirtual(
+            cls,
+            "beforeObjectSerialize",
+            MethodType.methodType(void.class, Object.class, Object.class));
+    mh[BootstrapDispatcher.BEFORE_NATIVE_LIBRARY_LOAD] =
+        lookup.findVirtual(
+            cls, "beforeNativeLibraryLoad", MethodType.methodType(void.class, String.class));
+    mh[BootstrapDispatcher.BEFORE_ASYNC_CANCEL] =
+        lookup.findVirtual(
+            cls,
+            "beforeAsyncCancel",
+            MethodType.methodType(boolean.class, Object.class, boolean.class));
+    mh[BootstrapDispatcher.BEFORE_ZIP_INFLATE] =
+        lookup.findVirtual(cls, "beforeZipInflate", MethodType.methodType(void.class));
+    mh[BootstrapDispatcher.BEFORE_ZIP_DEFLATE] =
+        lookup.findVirtual(cls, "beforeZipDeflate", MethodType.methodType(void.class));
+    mh[BootstrapDispatcher.BEFORE_THREAD_LOCAL_GET] =
+        lookup.findVirtual(
+            cls, "beforeThreadLocalGet", MethodType.methodType(boolean.class, Object.class));
+    mh[BootstrapDispatcher.BEFORE_THREAD_LOCAL_SET] =
+        lookup.findVirtual(
+            cls,
+            "beforeThreadLocalSet",
+            MethodType.methodType(boolean.class, Object.class, Object.class));
+    mh[BootstrapDispatcher.BEFORE_JMX_INVOKE] =
+        lookup.findVirtual(
+            cls,
+            "beforeJmxInvoke",
+            MethodType.methodType(void.class, Object.class, Object.class, String.class));
+    mh[BootstrapDispatcher.BEFORE_JMX_GET_ATTR] =
+        lookup.findVirtual(
+            cls,
+            "beforeJmxGetAttr",
+            MethodType.methodType(void.class, Object.class, Object.class, String.class));
+    return mh;
+  }
+
+  @FunctionalInterface
+  private interface BuilderTransformer {
+    net.bytebuddy.dynamic.DynamicType.Builder<?> transform(
+        net.bytebuddy.dynamic.DynamicType.Builder<?> builder);
+  }
+
+  /**
+   * Instruments an optional JDK class (e.g. {@code javax.naming.InitialContext}) that may not be
+   * present in all environments. If the class is not loadable the type matcher simply never fires
+   * and the agent builder is returned unchanged.
+   */
+  private static AgentBuilder instrumentOptional(
+      final AgentBuilder builder, final String typeName, final BuilderTransformer transformer) {
+    try {
+      Class.forName(typeName, false, ClassLoader.getSystemClassLoader());
+    } catch (ClassNotFoundException ignored) {
+      LOGGER.fine("[chaos-agent] optional instrumentation target not present: " + typeName);
+      return builder;
+    }
+    return builder
+        .type(ElementMatchers.named(typeName))
+        .transform(
+            (b, typeDescription, classLoader, module, protectionDomain) ->
+                transformer.transform(b));
+  }
+
+  private static void installDelegate(final Object bridgeDelegate) {
+    try {
+      final MethodHandle[] mh = buildMethodHandles();
+      // Use reflection to call install on the bootstrap CL version of BootstrapDispatcher
+      final Class<?> bootstrapDispatcher =
+          Class.forName("com.macstab.chaos.instrumentation.bridge.BootstrapDispatcher", true, null);
+      bootstrapDispatcher
+          .getMethod("install", Object.class, MethodHandle[].class)
+          .invoke(null, bridgeDelegate, mh);
+    } catch (Exception exception) {
+      throw new IllegalStateException("failed to install bridge delegate", exception);
+    }
+  }
+
+  private static void injectBridge(final Instrumentation instrumentation) {
+    try {
+      final Path bridgeJar = Files.createTempFile("macstab-chaos-bootstrap-bridge", ".jar");
+      bridgeJar.toFile().deleteOnExit();
+      try (JarOutputStream jarOutputStream =
+          new JarOutputStream(Files.newOutputStream(bridgeJar))) {
+        writeClass(
+            jarOutputStream, "com/macstab/chaos/instrumentation/bridge/BootstrapDispatcher.class");
+        writeClass(
+            jarOutputStream,
+            "com/macstab/chaos/instrumentation/bridge/BootstrapDispatcher$ThrowingSupplier.class");
+      }
+      instrumentation.appendToBootstrapClassLoaderSearch(
+          new java.util.jar.JarFile(bridgeJar.toFile()));
+    } catch (IOException exception) {
+      throw new IllegalStateException("failed to inject bootstrap bridge", exception);
+    }
+  }
+
+  private static void writeClass(final JarOutputStream jarOutputStream, final String resourcePath)
+      throws IOException {
+    final JarEntry jarEntry = new JarEntry(resourcePath);
+    jarOutputStream.putNextEntry(jarEntry);
+    try (InputStream inputStream =
+        JdkInstrumentationInstaller.class.getClassLoader().getResourceAsStream(resourcePath)) {
+      if (inputStream == null) {
+        throw new IOException("missing bridge resource " + resourcePath);
+      }
+      inputStream.transferTo(jarOutputStream);
+    }
+    jarOutputStream.closeEntry();
+  }
+}

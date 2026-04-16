@@ -108,7 +108,7 @@ The system is therefore most accurate to describe as an in-process instrumentati
 1. `ChaosAgentBootstrap.premain()` or `agentmain()` calls `initialize(...)`.
 2. A `ChaosRuntime` is created unless an existing singleton is already visible.
 3. `JdkInstrumentationInstaller` injects a bootstrap bridge and installs Byte Buddy advice on selected JDK classes.
-4. The bootstrap module registers `io.macstab.chaos:type=ChaosDiagnostics` on the platform MBean server.
+4. The bootstrap module registers `com.macstab.chaos:type=ChaosDiagnostics` on the platform MBean server.
 5. `StartupConfigLoader` resolves optional config from agent args or environment.
 6. If a plan is present, the runtime activates it immediately.
 7. If startup debug dumping is enabled, the runtime prints `ChaosDiagnostics.debugDump()` to `stderr`.
@@ -360,8 +360,8 @@ Available signals:
 
 - `ChaosDiagnostics.snapshot()`
 - `ChaosDiagnostics.debugDump()`
-- JUL logs from `io.macstab.chaos`
-- MBean `io.macstab.chaos:type=ChaosDiagnostics`
+- JUL logs from `com.macstab.chaos`
+- MBean `com.macstab.chaos:type=ChaosDiagnostics`
 
 Operationally important gaps:
 
