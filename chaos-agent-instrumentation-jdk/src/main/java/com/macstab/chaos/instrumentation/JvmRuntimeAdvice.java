@@ -351,18 +351,47 @@ final class JvmRuntimeAdvice {
   // ── B12: ThreadLocal ──────────────────────────────────────────────────────
 
   /**
-   * Intercepts {@code ThreadLocal.get()}.
+   * Intercepts {@code ThreadLocal.get()} to allow null-injection or delay on ThreadLocal reads.
    *
-   * <p><b>Skip semantics:</b> when {@code enter()} returns {@code true} (SUPPRESS scenario active),
-   * ByteBuddy's {@code skipOn = Advice.OnNonDefaultValue.class} skips the real {@code
-   * ThreadLocal.get()} body so the thread-local storage is never consulted. {@code exit()} always
-   * runs; when {@code suppressed} is {@code true} it sets the writable {@code returned} field to
-   * {@code null}, making the caller observe a {@code null} value as if the thread-local had never
-   * been set.
+   * <p><b>Reentrancy guard — identity check:</b> {@code BootstrapDispatcher.DEPTH} is itself a
+   * {@code ThreadLocal<Integer>}. Without special handling, instrumenting {@code ThreadLocal.get()}
+   * would cause infinite recursion:
+   *
+   * <pre>
+   *   ThreadLocal.get() [any call]
+   *     → ThreadLocalGetAdvice.enter()
+   *       → BootstrapDispatcher.invoke()
+   *         → DEPTH.get()   ← ThreadLocal.get() again!
+   *           → ThreadLocalGetAdvice.enter()
+   *             → ... StackOverflowError
+   * </pre>
+   *
+   * <p>The fix: before delegating to the dispatcher, compare the intercepted {@code ThreadLocal}
+   * instance to {@code BootstrapDispatcher.DEPTH} by identity ({@code ==}). If they are the same
+   * object, return {@code false} immediately — no delegation, no recursion. This is safe because:
+   *
+   * <ul>
+   *   <li>{@code BootstrapDispatcher.DEPTH} is a {@code static final} singleton in the bootstrap
+   *       classloader. Identity comparison is stable and correct for the JVM lifetime.
+   *   <li>Bootstrap-classloader classes are visible from all classloaders, so the field reference
+   *       is always accessible from this advice.
+   *   <li>The check is a single reference comparison — zero allocation, nanosecond cost.
+   *   <li>All other internal {@code ThreadLocal} reads (e.g. {@code ScopeContext.sessionStack}) are
+   *       already protected by the {@code DEPTH > 0} guard inside {@code
+   *       BootstrapDispatcher.invoke()}, because they are only read during chaos evaluation which
+   *       happens after DEPTH has been incremented to 1.
+   * </ul>
    */
   static final class ThreadLocalGetAdvice {
     @Advice.OnMethodEnter(skipOn = Advice.OnNonDefaultValue.class)
     static boolean enter(@Advice.This final Object threadLocal) throws Throwable {
+      // Guard: skip interception of the dispatcher's own reentrancy-depth ThreadLocal.
+      // Without this check, DEPTH.get() inside BootstrapDispatcher.invoke() would re-trigger
+      // this advice, causing a StackOverflowError before the DEPTH guard can protect us.
+      // Identity comparison is safe: DEPTH is a static-final bootstrap-CL singleton.
+      if (threadLocal == BootstrapDispatcher.depthThreadLocal()) {
+        return false;
+      }
       return BootstrapDispatcher.beforeThreadLocalGet(threadLocal);
     }
 
@@ -390,6 +419,12 @@ final class JvmRuntimeAdvice {
     static boolean enter(
         @Advice.This final Object threadLocal, @Advice.Argument(0) final Object value)
         throws Throwable {
+      // Same reentrancy guard as ThreadLocalGetAdvice: skip the dispatcher's own DEPTH ThreadLocal.
+      // set() is not called by DEPTH (which only uses get/set via initialValue), but the guard
+      // is symmetric for correctness and defence-in-depth.
+      if (threadLocal == BootstrapDispatcher.depthThreadLocal()) {
+        return false;
+      }
       return BootstrapDispatcher.beforeThreadLocalSet(threadLocal, value);
     }
   }
