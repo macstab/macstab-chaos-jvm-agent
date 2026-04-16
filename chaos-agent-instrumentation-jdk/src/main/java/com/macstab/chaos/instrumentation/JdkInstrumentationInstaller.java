@@ -355,6 +355,48 @@ public final class JdkInstrumentationInstaller {
                               .on(
                                   ElementMatchers.named("defineClass")
                                       .and(ElementMatchers.takesArgument(0, String.class)))))
+              // LockSupport.park / parkNanos / parkUntil (THREAD_PARK)
+              // Safe to instrument globally: the chaos runtime never calls LockSupport.park()
+              // directly. Internal locks (ManualGate via ReentrantLock) do call park(), but by
+              // the time park() fires, BootstrapDispatcher.DEPTH is already > 0 (set before
+              // delegating to ChaosRuntime), so the DEPTH guard in invoke() returns the fallback
+              // immediately without entering chaos evaluation.
+              .type(ElementMatchers.named("java.util.concurrent.locks.LockSupport"))
+              .transform(
+                  (builder, typeDescription, classLoader, module, protectionDomain) ->
+                      builder
+                          .visit(
+                              Advice.to(JvmRuntimeAdvice.ThreadParkAdvice.class)
+                                  .on(
+                                      ElementMatchers.named("park")
+                                          .and(ElementMatchers.takesArguments(Object.class))))
+                          .visit(
+                              Advice.to(JvmRuntimeAdvice.ThreadParkAdvice.class)
+                                  .on(
+                                      ElementMatchers.named("parkNanos")
+                                          .and(
+                                              ElementMatchers.takesArguments(
+                                                  Object.class, long.class))))
+                          .visit(
+                              Advice.to(JvmRuntimeAdvice.ThreadParkAdvice.class)
+                                  .on(
+                                      ElementMatchers.named("parkUntil")
+                                          .and(
+                                              ElementMatchers.takesArguments(
+                                                  Object.class, long.class)))))
+              // AQS.acquire (MONITOR_ENTER proxy)
+              // Safe: ChaosRuntime uses ConcurrentHashMap (lock-free) for registry.match().
+              // The one internal AQS user is ManualGate (ReentrantLock), but ManualGate is only
+              // entered from applyGate() which runs inside DEPTH > 0 context — the DEPTH guard
+              // short-circuits before chaos evaluation begins, preventing recursion.
+              .type(ElementMatchers.named("java.util.concurrent.locks.AbstractQueuedSynchronizer"))
+              .transform(
+                  (builder, typeDescription, classLoader, module, protectionDomain) ->
+                      builder.visit(
+                          Advice.to(JvmRuntimeAdvice.MonitorEnterAdvice.class)
+                              .on(
+                                  ElementMatchers.named("acquire")
+                                      .and(ElementMatchers.takesArguments(int.class)))))
               // NIO Selector — target AbstractSelector subtypes (KQueueSelectorImpl etc.)
               .type(ElementMatchers.isSubTypeOf(java.nio.channels.spi.AbstractSelector.class))
               .transform(
@@ -462,6 +504,29 @@ public final class JdkInstrumentationInstaller {
                       builder.visit(
                           Advice.to(JvmRuntimeAdvice.ZipDeflateAdvice.class)
                               .on(ElementMatchers.named("deflate"))));
+
+      // ThreadLocal.get() / set() (THREAD_LOCAL_GET / THREAD_LOCAL_SET)
+      // Previously excluded due to reentrancy with BootstrapDispatcher.DEPTH (also a ThreadLocal).
+      // Now safe: ThreadLocalGetAdvice and ThreadLocalSetAdvice include an identity check
+      // (threadLocal == BootstrapDispatcher.DEPTH) that exits before any delegation, breaking
+      // the recursion at the only point where it could occur. See ThreadLocalGetAdvice for the
+      // full reentrancy analysis.
+      agentBuilder =
+          agentBuilder
+              .type(ElementMatchers.named("java.lang.ThreadLocal"))
+              .transform(
+                  (builder, typeDescription, classLoader, module, protectionDomain) ->
+                      builder
+                          .visit(
+                              Advice.to(JvmRuntimeAdvice.ThreadLocalGetAdvice.class)
+                                  .on(
+                                      ElementMatchers.named("get")
+                                          .and(ElementMatchers.takesArguments(0))))
+                          .visit(
+                              Advice.to(JvmRuntimeAdvice.ThreadLocalSetAdvice.class)
+                                  .on(
+                                      ElementMatchers.named("set")
+                                          .and(ElementMatchers.takesArguments(1)))));
 
       // Optional instrumentation — skip gracefully if class not present
       agentBuilder =
