@@ -505,6 +505,343 @@ class PhaseTwo_RuntimeIntegrationTest {
   }
 
   // ---------------------------------------------------------------------------
+  // Socket accept
+  // ---------------------------------------------------------------------------
+
+  @Nested
+  @DisplayName("beforeSocketAccept")
+  class SocketAcceptTests {
+
+    @Test
+    @DisplayName("delay effect adds latency")
+    void delayEffectAddsLatency() throws Throwable {
+      final ChaosRuntime runtime =
+          runtimeWith(
+              ChaosScenario.builder("socket-accept-delay")
+                  .selector(
+                      new ChaosSelector.NetworkSelector(
+                          Set.of(OperationType.SOCKET_ACCEPT), NamePattern.any()))
+                  .effect(ChaosEffect.delay(Duration.ofMillis(50)))
+                  .activationPolicy(ActivationPolicy.always())
+                  .build());
+      final long start = System.nanoTime();
+      runtime.beforeSocketAccept(null);
+      final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+      assertThat(elapsedMs).isGreaterThanOrEqualTo(30);
+    }
+
+    @Test
+    @DisplayName("RejectEffect throws on beforeSocketAccept")
+    void rejectEffectThrows() {
+      final ChaosRuntime runtime =
+          runtimeWith(
+              ChaosScenario.builder("socket-accept-reject")
+                  .selector(
+                      new ChaosSelector.NetworkSelector(
+                          Set.of(OperationType.SOCKET_ACCEPT), NamePattern.any()))
+                  .effect(ChaosEffect.reject("chaos accept rejection"))
+                  .activationPolicy(ActivationPolicy.always())
+                  .build());
+      assertThatThrownBy(() -> runtime.beforeSocketAccept(null)).isInstanceOf(Throwable.class);
+    }
+
+    @Test
+    @DisplayName("no scenario — does not throw")
+    void noScenarioDoesNotThrow() throws Throwable {
+      final ChaosRuntime runtime = new ChaosRuntime();
+      runtime.beforeSocketAccept(null);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Socket read
+  // ---------------------------------------------------------------------------
+
+  @Nested
+  @DisplayName("beforeSocketRead")
+  class SocketReadTests {
+
+    @Test
+    @DisplayName("delay effect adds latency")
+    void delayEffectAddsLatency() throws Throwable {
+      final ChaosRuntime runtime =
+          runtimeWith(
+              ChaosScenario.builder("socket-read-delay")
+                  .selector(
+                      new ChaosSelector.NetworkSelector(
+                          Set.of(OperationType.SOCKET_READ), NamePattern.any()))
+                  .effect(ChaosEffect.delay(Duration.ofMillis(50)))
+                  .activationPolicy(ActivationPolicy.always())
+                  .build());
+      final long start = System.nanoTime();
+      runtime.beforeSocketRead(null);
+      final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+      assertThat(elapsedMs).isGreaterThanOrEqualTo(30);
+    }
+
+    @Test
+    @DisplayName("RejectEffect throws SocketTimeoutException")
+    void rejectEffectThrowsSocketTimeoutException() {
+      final ChaosRuntime runtime =
+          runtimeWith(
+              ChaosScenario.builder("socket-read-reject")
+                  .selector(
+                      new ChaosSelector.NetworkSelector(
+                          Set.of(OperationType.SOCKET_READ), NamePattern.any()))
+                  .effect(ChaosEffect.reject("chaos read rejection"))
+                  .activationPolicy(ActivationPolicy.always())
+                  .build());
+      final Throwable thrown = catchThrowable(() -> runtime.beforeSocketRead(null));
+      assertThat(thrown).isInstanceOf(java.net.SocketTimeoutException.class);
+    }
+
+    @Test
+    @DisplayName("no scenario — does not throw")
+    void noScenarioDoesNotThrow() throws Throwable {
+      final ChaosRuntime runtime = new ChaosRuntime();
+      runtime.beforeSocketRead(null);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Socket write
+  // ---------------------------------------------------------------------------
+
+  @Nested
+  @DisplayName("beforeSocketWrite")
+  class SocketWriteTests {
+
+    @Test
+    @DisplayName("delay effect adds latency")
+    void delayEffectAddsLatency() throws Throwable {
+      final ChaosRuntime runtime =
+          runtimeWith(
+              ChaosScenario.builder("socket-write-delay")
+                  .selector(
+                      new ChaosSelector.NetworkSelector(
+                          Set.of(OperationType.SOCKET_WRITE), NamePattern.any()))
+                  .effect(ChaosEffect.delay(Duration.ofMillis(50)))
+                  .activationPolicy(ActivationPolicy.always())
+                  .build());
+      final long start = System.nanoTime();
+      runtime.beforeSocketWrite(null, 64);
+      final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+      assertThat(elapsedMs).isGreaterThanOrEqualTo(30);
+    }
+
+    @Test
+    @DisplayName("RejectEffect throws IOException")
+    void rejectEffectThrowsIoException() {
+      final ChaosRuntime runtime =
+          runtimeWith(
+              ChaosScenario.builder("socket-write-reject")
+                  .selector(
+                      new ChaosSelector.NetworkSelector(
+                          Set.of(OperationType.SOCKET_WRITE), NamePattern.any()))
+                  .effect(ChaosEffect.reject("chaos write rejection"))
+                  .activationPolicy(ActivationPolicy.always())
+                  .build());
+      final Throwable thrown = catchThrowable(() -> runtime.beforeSocketWrite(null, 64));
+      assertThat(thrown).isInstanceOf(java.io.IOException.class);
+    }
+
+    @Test
+    @DisplayName("no scenario — does not throw")
+    void noScenarioDoesNotThrow() throws Throwable {
+      final ChaosRuntime runtime = new ChaosRuntime();
+      runtime.beforeSocketWrite(null, 64);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Socket close
+  // ---------------------------------------------------------------------------
+
+  @Nested
+  @DisplayName("beforeSocketClose")
+  class SocketCloseTests {
+
+    @Test
+    @DisplayName("delay effect adds latency")
+    void delayEffectAddsLatency() throws Throwable {
+      final ChaosRuntime runtime =
+          runtimeWith(
+              ChaosScenario.builder("socket-close-delay")
+                  .selector(
+                      new ChaosSelector.NetworkSelector(
+                          Set.of(OperationType.SOCKET_CLOSE), NamePattern.any()))
+                  .effect(ChaosEffect.delay(Duration.ofMillis(50)))
+                  .activationPolicy(ActivationPolicy.always())
+                  .build());
+      final long start = System.nanoTime();
+      runtime.beforeSocketClose(null);
+      final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+      assertThat(elapsedMs).isGreaterThanOrEqualTo(30);
+    }
+
+    @Test
+    @DisplayName("no scenario — does not throw")
+    void noScenarioDoesNotThrow() throws Throwable {
+      final ChaosRuntime runtime = new ChaosRuntime();
+      runtime.beforeSocketClose(null);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // JNDI lookup
+  // ---------------------------------------------------------------------------
+
+  @Nested
+  @DisplayName("beforeJndiLookup")
+  class JndiLookupTests {
+
+    @Test
+    @DisplayName("RejectEffect throws NamingException (or RuntimeException if javax.naming absent)")
+    void rejectEffectThrowsNamingException() {
+      final ChaosRuntime runtime =
+          runtimeWith(
+              ChaosScenario.builder("jndi-reject")
+                  .scope(ChaosScenario.ScenarioScope.JVM)
+                  .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.JNDI_LOOKUP)))
+                  .effect(ChaosEffect.reject("chaos jndi rejection"))
+                  .activationPolicy(ActivationPolicy.always())
+                  .build());
+      assertThatThrownBy(() -> runtime.beforeJndiLookup(null, "java:comp/env/test"))
+          .isInstanceOf(Throwable.class);
+    }
+
+    @Test
+    @DisplayName("delay effect adds latency")
+    void delayEffectAddsLatency() throws Throwable {
+      final ChaosRuntime runtime =
+          runtimeWith(
+              ChaosScenario.builder("jndi-delay")
+                  .scope(ChaosScenario.ScenarioScope.JVM)
+                  .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.JNDI_LOOKUP)))
+                  .effect(ChaosEffect.delay(Duration.ofMillis(50)))
+                  .activationPolicy(ActivationPolicy.always())
+                  .build());
+      final long start = System.nanoTime();
+      runtime.beforeJndiLookup(null, "java:comp/env/test");
+      final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+      assertThat(elapsedMs).isGreaterThanOrEqualTo(30);
+    }
+
+    @Test
+    @DisplayName("no scenario — does not throw")
+    void noScenarioDoesNotThrow() throws Throwable {
+      final ChaosRuntime runtime = new ChaosRuntime();
+      runtime.beforeJndiLookup(null, "java:comp/env/test");
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // JMX MBeanServer
+  // ---------------------------------------------------------------------------
+
+  @Nested
+  @DisplayName("beforeJmxGetAttr / beforeJmxInvoke")
+  class JmxTests {
+
+    @Test
+    @DisplayName("delay effect adds latency to getAttribute path")
+    void delayEffectAddsLatencyToGetAttr() throws Throwable {
+      final ChaosRuntime runtime =
+          runtimeWith(
+              ChaosScenario.builder("jmx-get-attr-delay")
+                  .scope(ChaosScenario.ScenarioScope.JVM)
+                  .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.JMX_GET_ATTR)))
+                  .effect(ChaosEffect.delay(Duration.ofMillis(50)))
+                  .activationPolicy(ActivationPolicy.always())
+                  .build());
+      final long start = System.nanoTime();
+      runtime.beforeJmxGetAttr(null, null, "VmName");
+      final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+      assertThat(elapsedMs).isGreaterThanOrEqualTo(30);
+    }
+
+    @Test
+    @DisplayName("delay effect adds latency to invoke path")
+    void delayEffectAddsLatencyToInvoke() throws Throwable {
+      final ChaosRuntime runtime =
+          runtimeWith(
+              ChaosScenario.builder("jmx-invoke-delay")
+                  .scope(ChaosScenario.ScenarioScope.JVM)
+                  .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.JMX_INVOKE)))
+                  .effect(ChaosEffect.delay(Duration.ofMillis(50)))
+                  .activationPolicy(ActivationPolicy.always())
+                  .build());
+      final long start = System.nanoTime();
+      runtime.beforeJmxInvoke(null, null, "gc");
+      final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+      assertThat(elapsedMs).isGreaterThanOrEqualTo(30);
+    }
+
+    @Test
+    @DisplayName("no scenario — getAttribute does not throw")
+    void noScenarioDoesNotThrowGetAttr() throws Throwable {
+      final ChaosRuntime runtime = new ChaosRuntime();
+      runtime.beforeJmxGetAttr(null, null, "VmName");
+    }
+
+    @Test
+    @DisplayName("no scenario — invoke does not throw")
+    void noScenarioDoesNotThrowInvoke() throws Throwable {
+      final ChaosRuntime runtime = new ChaosRuntime();
+      runtime.beforeJmxInvoke(null, null, "gc");
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Native library load
+  // ---------------------------------------------------------------------------
+
+  @Nested
+  @DisplayName("beforeNativeLibraryLoad")
+  class NativeLibraryLoadTests {
+
+    @Test
+    @DisplayName("RejectEffect throws UnsatisfiedLinkError")
+    void rejectEffectThrowsUnsatisfiedLinkError() {
+      final ChaosRuntime runtime =
+          runtimeWith(
+              ChaosScenario.builder("native-reject")
+                  .scope(ChaosScenario.ScenarioScope.JVM)
+                  .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.NATIVE_LIBRARY_LOAD)))
+                  .effect(ChaosEffect.reject("chaos native load rejection"))
+                  .activationPolicy(ActivationPolicy.always())
+                  .build());
+      final Throwable thrown =
+          catchThrowable(() -> runtime.beforeNativeLibraryLoad("nonexistent_chaos_lib_xyz"));
+      assertThat(thrown).isInstanceOf(UnsatisfiedLinkError.class);
+    }
+
+    @Test
+    @DisplayName("delay effect adds latency")
+    void delayEffectAddsLatency() throws Throwable {
+      final ChaosRuntime runtime =
+          runtimeWith(
+              ChaosScenario.builder("native-delay")
+                  .scope(ChaosScenario.ScenarioScope.JVM)
+                  .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.NATIVE_LIBRARY_LOAD)))
+                  .effect(ChaosEffect.delay(Duration.ofMillis(50)))
+                  .activationPolicy(ActivationPolicy.always())
+                  .build());
+      final long start = System.nanoTime();
+      runtime.beforeNativeLibraryLoad("nonexistent_chaos_lib_xyz");
+      final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+      assertThat(elapsedMs).isGreaterThanOrEqualTo(30);
+    }
+
+    @Test
+    @DisplayName("no scenario — does not throw")
+    void noScenarioDoesNotThrow() throws Throwable {
+      final ChaosRuntime runtime = new ChaosRuntime();
+      runtime.beforeNativeLibraryLoad("nonexistent_chaos_lib_xyz");
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // Helpers
   // ---------------------------------------------------------------------------
 

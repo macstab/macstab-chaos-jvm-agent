@@ -3,6 +3,7 @@ package com.macstab.chaos.core;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.macstab.chaos.api.ActivationPolicy;
+import com.macstab.chaos.api.ChaosActivationHandle;
 import com.macstab.chaos.api.ChaosEffect;
 import com.macstab.chaos.api.ChaosScenario;
 import com.macstab.chaos.api.ChaosSelector;
@@ -122,6 +123,105 @@ class ClockSkewRuntimeTest {
       final ChaosRuntime runtime = new ChaosRuntime();
       final long skewed = runtime.applyClockSkew(REAL_MILLIS, OperationType.SYSTEM_CLOCK_MILLIS);
       assertThat(skewed).isEqualTo(REAL_MILLIS);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // End-to-end via adjustClockMillis / adjustClockNanos
+  // These methods are the exact targets called by ByteBuddy advice intercepting
+  // System.currentTimeMillis() and System.nanoTime().
+  // ---------------------------------------------------------------------------
+
+  @Nested
+  @DisplayName("End-to-end via adjustClockMillis / adjustClockNanos")
+  class EndToEndSystemClock {
+
+    @Test
+    @DisplayName("FIXED skew: adjustClockMillis returns value offset by skewAmount")
+    void fixedSkewAppliedToAdjustClockMillis() {
+      final ChaosRuntime runtime = new ChaosRuntime();
+      final long realMillis = System.currentTimeMillis();
+      final ChaosActivationHandle handle =
+          runtime.activate(
+              ChaosScenario.builder("clock-millis-e2e")
+                  .scope(ChaosScenario.ScenarioScope.JVM)
+                  .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.SYSTEM_CLOCK_MILLIS)))
+                  .effect(
+                      ChaosEffect.skewClock(
+                          Duration.ofSeconds(30), ChaosEffect.ClockSkewMode.FIXED))
+                  .activationPolicy(ActivationPolicy.always())
+                  .build());
+      try {
+        final long skewed = runtime.adjustClockMillis(realMillis);
+        assertThat(skewed).isGreaterThanOrEqualTo(realMillis + 25_000L);
+      } finally {
+        handle.stop();
+      }
+    }
+
+    @Test
+    @DisplayName("FIXED skew: adjustClockNanos returns value offset by skewAmount in nanos")
+    void fixedSkewAppliedToAdjustClockNanos() {
+      final ChaosRuntime runtime = new ChaosRuntime();
+      final long realNanos = System.nanoTime();
+      final ChaosActivationHandle handle =
+          runtime.activate(
+              ChaosScenario.builder("clock-nanos-e2e")
+                  .scope(ChaosScenario.ScenarioScope.JVM)
+                  .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.SYSTEM_CLOCK_NANOS)))
+                  .effect(
+                      ChaosEffect.skewClock(
+                          Duration.ofSeconds(10), ChaosEffect.ClockSkewMode.FIXED))
+                  .activationPolicy(ActivationPolicy.always())
+                  .build());
+      try {
+        final long skewed = runtime.adjustClockNanos(realNanos);
+        assertThat(skewed).isGreaterThanOrEqualTo(realNanos + 9_000_000_000L);
+      } finally {
+        handle.stop();
+      }
+    }
+
+    @Test
+    @DisplayName("FREEZE mode: repeated adjustClockMillis calls return same value")
+    void freezeModeReturnsSameValue() {
+      final ChaosRuntime runtime = new ChaosRuntime();
+      final long realMillis = System.currentTimeMillis();
+      final ChaosActivationHandle handle =
+          runtime.activate(
+              ChaosScenario.builder("clock-freeze-e2e")
+                  .scope(ChaosScenario.ScenarioScope.JVM)
+                  .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.SYSTEM_CLOCK_MILLIS)))
+                  .effect(
+                      ChaosEffect.skewClock(Duration.ofMillis(1), ChaosEffect.ClockSkewMode.FREEZE))
+                  .activationPolicy(ActivationPolicy.always())
+                  .build());
+      try {
+        final long first = runtime.adjustClockMillis(realMillis);
+        final long second = runtime.adjustClockMillis(realMillis + 100L);
+        assertThat(first).isEqualTo(second);
+      } finally {
+        handle.stop();
+      }
+    }
+
+    @Test
+    @DisplayName("after handle.stop(), adjustClockMillis returns the real value unchanged")
+    void afterStopReturnsRealValue() {
+      final ChaosRuntime runtime = new ChaosRuntime();
+      final long realMillis = System.currentTimeMillis();
+      final ChaosActivationHandle handle =
+          runtime.activate(
+              ChaosScenario.builder("clock-stop-e2e")
+                  .scope(ChaosScenario.ScenarioScope.JVM)
+                  .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.SYSTEM_CLOCK_MILLIS)))
+                  .effect(
+                      ChaosEffect.skewClock(Duration.ofHours(1), ChaosEffect.ClockSkewMode.FIXED))
+                  .activationPolicy(ActivationPolicy.always())
+                  .build());
+      handle.stop();
+      final long afterStop = runtime.adjustClockMillis(realMillis);
+      assertThat(afterStop).isEqualTo(realMillis);
     }
   }
 }
