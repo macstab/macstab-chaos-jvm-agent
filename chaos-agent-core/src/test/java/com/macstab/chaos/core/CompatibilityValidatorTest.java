@@ -419,6 +419,114 @@ class CompatibilityValidatorTest {
                       featureSet))
           .isInstanceOf(ChaosValidationException.class);
     }
+
+    @Test
+    @DisplayName("CODE_CACHE_PRESSURE target with CodeCachePressureEffect succeeds")
+    void codeCachePressureTargetWithCodeCachePressureEffectSucceeds() {
+      assertThatCode(
+              () ->
+                  CompatibilityValidator.validate(
+                      stressScenario(
+                          ChaosSelector.StressTarget.CODE_CACHE_PRESSURE,
+                          new ChaosEffect.CodeCachePressureEffect(10, 5)),
+                      featureSet))
+          .doesNotThrowAnyException();
+    }
+
+    @Test
+    @DisplayName("CODE_CACHE_PRESSURE target with wrong effect throws")
+    void codeCachePressureTargetWithWrongEffectThrows() {
+      assertThatThrownBy(
+              () ->
+                  CompatibilityValidator.validate(
+                      stressScenario(
+                          ChaosSelector.StressTarget.CODE_CACHE_PRESSURE,
+                          new ChaosEffect.HeapPressureEffect(1024L, 512)),
+                      featureSet))
+          .isInstanceOf(ChaosValidationException.class)
+          .hasMessageContaining("CODE_CACHE_PRESSURE");
+    }
+
+    @Test
+    @DisplayName("SAFEPOINT_STORM target with SafepointStormEffect succeeds")
+    void safepointStormTargetWithSafepointStormEffectSucceeds() {
+      assertThatCode(
+              () ->
+                  CompatibilityValidator.validate(
+                      stressScenario(
+                          ChaosSelector.StressTarget.SAFEPOINT_STORM,
+                          new ChaosEffect.SafepointStormEffect(Duration.ofMillis(50), 0)),
+                      featureSet))
+          .doesNotThrowAnyException();
+    }
+
+    @Test
+    @DisplayName("SAFEPOINT_STORM target with wrong effect throws")
+    void safepointStormTargetWithWrongEffectThrows() {
+      assertThatThrownBy(
+              () ->
+                  CompatibilityValidator.validate(
+                      stressScenario(
+                          ChaosSelector.StressTarget.SAFEPOINT_STORM,
+                          new ChaosEffect.HeapPressureEffect(1024L, 512)),
+                      featureSet))
+          .isInstanceOf(ChaosValidationException.class)
+          .hasMessageContaining("SAFEPOINT_STORM");
+    }
+
+    @Test
+    @DisplayName("STRING_INTERN_PRESSURE target with StringInternPressureEffect succeeds")
+    void stringInternPressureTargetWithStringInternPressureEffectSucceeds() {
+      assertThatCode(
+              () ->
+                  CompatibilityValidator.validate(
+                      stressScenario(
+                          ChaosSelector.StressTarget.STRING_INTERN_PRESSURE,
+                          new ChaosEffect.StringInternPressureEffect(1000, 32)),
+                      featureSet))
+          .doesNotThrowAnyException();
+    }
+
+    @Test
+    @DisplayName("STRING_INTERN_PRESSURE target with wrong effect throws")
+    void stringInternPressureTargetWithWrongEffectThrows() {
+      assertThatThrownBy(
+              () ->
+                  CompatibilityValidator.validate(
+                      stressScenario(
+                          ChaosSelector.StressTarget.STRING_INTERN_PRESSURE,
+                          new ChaosEffect.HeapPressureEffect(1024L, 512)),
+                      featureSet))
+          .isInstanceOf(ChaosValidationException.class)
+          .hasMessageContaining("STRING_INTERN_PRESSURE");
+    }
+
+    @Test
+    @DisplayName("REFERENCE_QUEUE_FLOOD target with ReferenceQueueFloodEffect succeeds")
+    void referenceQueueFloodTargetWithReferenceQueueFloodEffectSucceeds() {
+      assertThatCode(
+              () ->
+                  CompatibilityValidator.validate(
+                      stressScenario(
+                          ChaosSelector.StressTarget.REFERENCE_QUEUE_FLOOD,
+                          new ChaosEffect.ReferenceQueueFloodEffect(500, Duration.ofMillis(100))),
+                      featureSet))
+          .doesNotThrowAnyException();
+    }
+
+    @Test
+    @DisplayName("REFERENCE_QUEUE_FLOOD target with wrong effect throws")
+    void referenceQueueFloodTargetWithWrongEffectThrows() {
+      assertThatThrownBy(
+              () ->
+                  CompatibilityValidator.validate(
+                      stressScenario(
+                          ChaosSelector.StressTarget.REFERENCE_QUEUE_FLOOD,
+                          new ChaosEffect.HeapPressureEffect(1024L, 512)),
+                      featureSet))
+          .isInstanceOf(ChaosValidationException.class)
+          .hasMessageContaining("REFERENCE_QUEUE_FLOOD");
+    }
   }
 
   @Nested
@@ -776,6 +884,158 @@ class CompatibilityValidatorTest {
                       NamePattern.any()))
               .effect(
                   new ChaosEffect.ReturnValueCorruptionEffect(ChaosEffect.ReturnValueStrategy.ZERO))
+              .build();
+      assertThatCode(() -> CompatibilityValidator.validate(scenario, featureSet))
+          .doesNotThrowAnyException();
+    }
+  }
+
+  @Nested
+  @DisplayName("SpuriousWakeupEffect requires NioSelector with NIO_SELECTOR_SELECT")
+  class SpuriousWakeupEffectValidation {
+
+    @Test
+    @DisplayName("with non-NioSelector throws")
+    void spuriousWakeupWithNonNioSelectorThrows() {
+      ChaosScenario scenario =
+          ChaosScenario.builder("spurious-wrong")
+              .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+              .effect(new ChaosEffect.SpuriousWakeupEffect())
+              .build();
+      assertThatThrownBy(() -> CompatibilityValidator.validate(scenario, featureSet))
+          .isInstanceOf(ChaosValidationException.class)
+          .hasMessageContaining("SpuriousWakeupEffect requires NioSelector");
+    }
+
+    @Test
+    @DisplayName("with NioSelector missing NIO_SELECTOR_SELECT throws")
+    void spuriousWakeupWithNioSelectorMissingSelectThrows() {
+      ChaosScenario scenario =
+          ChaosScenario.builder("spurious-no-select")
+              .selector(
+                  new ChaosSelector.NioSelector(
+                      Set.of(OperationType.NIO_CHANNEL_READ), NamePattern.any()))
+              .effect(new ChaosEffect.SpuriousWakeupEffect())
+              .build();
+      assertThatThrownBy(() -> CompatibilityValidator.validate(scenario, featureSet))
+          .isInstanceOf(ChaosValidationException.class)
+          .hasMessageContaining("NIO_SELECTOR_SELECT");
+    }
+
+    @Test
+    @DisplayName("with NioSelector containing NIO_SELECTOR_SELECT succeeds")
+    void spuriousWakeupWithValidNioSelectorSucceeds() {
+      ChaosScenario scenario =
+          ChaosScenario.builder("spurious-ok")
+              .selector(
+                  new ChaosSelector.NioSelector(
+                      Set.of(OperationType.NIO_SELECTOR_SELECT), NamePattern.any()))
+              .effect(new ChaosEffect.SpuriousWakeupEffect())
+              .build();
+      assertThatCode(() -> CompatibilityValidator.validate(scenario, featureSet))
+          .doesNotThrowAnyException();
+    }
+  }
+
+  @Nested
+  @DisplayName("NioSelector operation constraints")
+  class NioSelectorOperationValidation {
+
+    @Test
+    @DisplayName("non-NIO operation in NioSelector throws")
+    void nioSelectorWithNonNioOperationThrows() {
+      ChaosScenario scenario =
+          ChaosScenario.builder("nio-bad-op")
+              .selector(
+                  new ChaosSelector.NioSelector(
+                      Set.of(OperationType.SOCKET_CONNECT), NamePattern.any()))
+              .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+              .build();
+      assertThatThrownBy(() -> CompatibilityValidator.validate(scenario, featureSet))
+          .isInstanceOf(ChaosValidationException.class)
+          .hasMessageContaining("NioSelector operation");
+    }
+
+    @Test
+    @DisplayName("NIO operations in NioSelector succeed")
+    void nioSelectorWithValidNioOperationsSucceeds() {
+      ChaosScenario scenario =
+          ChaosScenario.builder("nio-ok")
+              .selector(
+                  new ChaosSelector.NioSelector(
+                      Set.of(OperationType.NIO_SELECTOR_SELECT, OperationType.NIO_CHANNEL_READ),
+                      NamePattern.any()))
+              .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+              .build();
+      assertThatCode(() -> CompatibilityValidator.validate(scenario, featureSet))
+          .doesNotThrowAnyException();
+    }
+  }
+
+  @Nested
+  @DisplayName("NetworkSelector operation constraints")
+  class NetworkSelectorOperationValidation {
+
+    @Test
+    @DisplayName("non-socket operation in NetworkSelector throws")
+    void networkSelectorWithNonSocketOperationThrows() {
+      ChaosScenario scenario =
+          ChaosScenario.builder("net-bad-op")
+              .selector(
+                  new ChaosSelector.NetworkSelector(
+                      Set.of(OperationType.NIO_SELECTOR_SELECT), NamePattern.any()))
+              .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+              .build();
+      assertThatThrownBy(() -> CompatibilityValidator.validate(scenario, featureSet))
+          .isInstanceOf(ChaosValidationException.class)
+          .hasMessageContaining("NetworkSelector operation");
+    }
+
+    @Test
+    @DisplayName("socket operations in NetworkSelector succeed")
+    void networkSelectorWithValidSocketOperationsSucceeds() {
+      ChaosScenario scenario =
+          ChaosScenario.builder("net-ok")
+              .selector(
+                  new ChaosSelector.NetworkSelector(
+                      Set.of(OperationType.SOCKET_CONNECT, OperationType.SOCKET_CLOSE),
+                      NamePattern.any()))
+              .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+              .build();
+      assertThatCode(() -> CompatibilityValidator.validate(scenario, featureSet))
+          .doesNotThrowAnyException();
+    }
+  }
+
+  @Nested
+  @DisplayName("ThreadLocalSelector operation constraints")
+  class ThreadLocalSelectorOperationValidation {
+
+    @Test
+    @DisplayName("non-thread-local operation in ThreadLocalSelector throws")
+    void threadLocalSelectorWithNonThreadLocalOperationThrows() {
+      ChaosScenario scenario =
+          ChaosScenario.builder("tl-bad-op")
+              .selector(
+                  new ChaosSelector.ThreadLocalSelector(
+                      Set.of(OperationType.EXECUTOR_SUBMIT), NamePattern.any()))
+              .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+              .build();
+      assertThatThrownBy(() -> CompatibilityValidator.validate(scenario, featureSet))
+          .isInstanceOf(ChaosValidationException.class)
+          .hasMessageContaining("ThreadLocalSelector operation");
+    }
+
+    @Test
+    @DisplayName("THREAD_LOCAL_GET and THREAD_LOCAL_SET in ThreadLocalSelector succeed")
+    void threadLocalSelectorWithValidOperationsSucceeds() {
+      ChaosScenario scenario =
+          ChaosScenario.builder("tl-ok")
+              .selector(
+                  new ChaosSelector.ThreadLocalSelector(
+                      Set.of(OperationType.THREAD_LOCAL_GET, OperationType.THREAD_LOCAL_SET),
+                      NamePattern.any()))
+              .effect(ChaosEffect.delay(Duration.ofMillis(1)))
               .build();
       assertThatCode(() -> CompatibilityValidator.validate(scenario, featureSet))
           .doesNotThrowAnyException();

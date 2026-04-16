@@ -917,4 +917,209 @@ class SelectorMatcherTest {
       assertThat(SelectorMatcher.matches(selector, context)).isFalse();
     }
   }
+
+  @Nested
+  @DisplayName("NioSelector")
+  class NioSelectorTests {
+
+    @Test
+    @DisplayName("matches correct operation and channel class")
+    void matchesCorrectOperationAndChannelClass() {
+      ChaosSelector selector =
+          new ChaosSelector.NioSelector(
+              Set.of(OperationType.NIO_SELECTOR_SELECT), NamePattern.any());
+      InvocationContext context =
+          new InvocationContext(
+              OperationType.NIO_SELECTOR_SELECT,
+              "sun.nio.ch.SelectorImpl",
+              null,
+              null,
+              false,
+              null,
+              null,
+              null);
+      assertThat(SelectorMatcher.matches(selector, context)).isTrue();
+    }
+
+    @Test
+    @DisplayName("does not match wrong operation")
+    void doesNotMatchWrongOperation() {
+      ChaosSelector selector =
+          new ChaosSelector.NioSelector(
+              Set.of(OperationType.NIO_SELECTOR_SELECT), NamePattern.any());
+      InvocationContext context =
+          new InvocationContext(
+              OperationType.NIO_CHANNEL_READ,
+              "sun.nio.ch.SelectorImpl",
+              null,
+              null,
+              false,
+              null,
+              null,
+              null);
+      assertThat(SelectorMatcher.matches(selector, context)).isFalse();
+    }
+
+    @Test
+    @DisplayName("does not match when channel class pattern does not match")
+    void doesNotMatchWhenChannelClassPatternMismatch() {
+      ChaosSelector selector =
+          new ChaosSelector.NioSelector(
+              Set.of(OperationType.NIO_SELECTOR_SELECT),
+              NamePattern.exact("sun.nio.ch.SelectorImpl"));
+      InvocationContext context =
+          new InvocationContext(
+              OperationType.NIO_SELECTOR_SELECT,
+              "java.nio.channels.SocketChannel",
+              null,
+              null,
+              false,
+              null,
+              null,
+              null);
+      assertThat(SelectorMatcher.matches(selector, context)).isFalse();
+    }
+  }
+
+  @Nested
+  @DisplayName("NetworkSelector")
+  class NetworkSelectorTests {
+
+    @Test
+    @DisplayName("matches correct operation and remote host")
+    void matchesCorrectOperationAndRemoteHost() {
+      ChaosSelector selector =
+          new ChaosSelector.NetworkSelector(
+              Set.of(OperationType.SOCKET_CONNECT), NamePattern.any());
+      InvocationContext context =
+          new InvocationContext(
+              OperationType.SOCKET_CONNECT, null, null, "example.com", false, null, null, null);
+      assertThat(SelectorMatcher.matches(selector, context)).isTrue();
+    }
+
+    @Test
+    @DisplayName("does not match wrong operation")
+    void doesNotMatchWrongOperation() {
+      ChaosSelector selector =
+          new ChaosSelector.NetworkSelector(
+              Set.of(OperationType.SOCKET_CONNECT), NamePattern.any());
+      InvocationContext context =
+          new InvocationContext(
+              OperationType.SOCKET_READ, null, null, "example.com", false, null, null, null);
+      assertThat(SelectorMatcher.matches(selector, context)).isFalse();
+    }
+
+    @Test
+    @DisplayName("does not match when remote host pattern does not match")
+    void doesNotMatchWhenHostPatternMismatch() {
+      ChaosSelector selector =
+          new ChaosSelector.NetworkSelector(
+              Set.of(OperationType.SOCKET_CONNECT), NamePattern.exact("example.com"));
+      InvocationContext context =
+          new InvocationContext(
+              OperationType.SOCKET_CONNECT, null, null, "other.host", false, null, null, null);
+      assertThat(SelectorMatcher.matches(selector, context)).isFalse();
+    }
+
+    @Test
+    @DisplayName("matches multiple socket operations")
+    void matchesMultipleSocketOperations() {
+      ChaosSelector selector =
+          new ChaosSelector.NetworkSelector(
+              Set.of(
+                  OperationType.SOCKET_CONNECT,
+                  OperationType.SOCKET_WRITE,
+                  OperationType.SOCKET_READ),
+              NamePattern.any());
+      for (OperationType op :
+          new OperationType[] {
+            OperationType.SOCKET_CONNECT, OperationType.SOCKET_WRITE, OperationType.SOCKET_READ
+          }) {
+        InvocationContext context =
+            new InvocationContext(op, null, null, "db.internal", false, null, null, null);
+        assertThat(SelectorMatcher.matches(selector, context)).isTrue();
+      }
+    }
+  }
+
+  @Nested
+  @DisplayName("ThreadLocalSelector")
+  class ThreadLocalSelectorTests {
+
+    @Test
+    @DisplayName("matches THREAD_LOCAL_GET with matching class pattern")
+    void matchesGetWithMatchingClassPattern() {
+      ChaosSelector selector =
+          new ChaosSelector.ThreadLocalSelector(
+              Set.of(OperationType.THREAD_LOCAL_GET), NamePattern.any());
+      InvocationContext context =
+          new InvocationContext(
+              OperationType.THREAD_LOCAL_GET,
+              "java.lang.ThreadLocal",
+              null,
+              null,
+              false,
+              null,
+              null,
+              null);
+      assertThat(SelectorMatcher.matches(selector, context)).isTrue();
+    }
+
+    @Test
+    @DisplayName("matches THREAD_LOCAL_SET with matching class pattern")
+    void matchesSetWithMatchingClassPattern() {
+      ChaosSelector selector =
+          new ChaosSelector.ThreadLocalSelector(
+              Set.of(OperationType.THREAD_LOCAL_SET), NamePattern.any());
+      InvocationContext context =
+          new InvocationContext(
+              OperationType.THREAD_LOCAL_SET,
+              "java.lang.InheritableThreadLocal",
+              null,
+              null,
+              false,
+              null,
+              null,
+              null);
+      assertThat(SelectorMatcher.matches(selector, context)).isTrue();
+    }
+
+    @Test
+    @DisplayName("does not match wrong operation")
+    void doesNotMatchWrongOperation() {
+      ChaosSelector selector =
+          new ChaosSelector.ThreadLocalSelector(
+              Set.of(OperationType.THREAD_LOCAL_GET), NamePattern.any());
+      InvocationContext context =
+          new InvocationContext(
+              OperationType.THREAD_LOCAL_SET,
+              "java.lang.ThreadLocal",
+              null,
+              null,
+              false,
+              null,
+              null,
+              null);
+      assertThat(SelectorMatcher.matches(selector, context)).isFalse();
+    }
+
+    @Test
+    @DisplayName("does not match when thread-local class pattern does not match")
+    void doesNotMatchWhenClassPatternMismatch() {
+      ChaosSelector selector =
+          new ChaosSelector.ThreadLocalSelector(
+              Set.of(OperationType.THREAD_LOCAL_GET), NamePattern.exact("com.app.MyThreadLocal"));
+      InvocationContext context =
+          new InvocationContext(
+              OperationType.THREAD_LOCAL_GET,
+              "java.lang.ThreadLocal",
+              null,
+              null,
+              false,
+              null,
+              null,
+              null);
+      assertThat(SelectorMatcher.matches(selector, context)).isFalse();
+    }
+  }
 }
