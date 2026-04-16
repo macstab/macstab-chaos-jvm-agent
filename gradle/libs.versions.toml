@@ -11,10 +11,12 @@ byte-buddy-agent = { module = "net.bytebuddy:byte-buddy-agent", version.ref = "b
 jackson-annotations = { module = "com.fasterxml.jackson.core:jackson-annotations", version.ref = "jackson" }
 jackson-databind = { module = "com.fasterxml.jackson.core:jackson-databind", version.ref = "jackson" }
 jackson-jsr310 = { module = "com.fasterxml.jackson.datatype:jackson-datatype-jsr310", version.ref = "jackson" }
+assertj = { module = "org.assertj:assertj-core", version = "3.27.3" }
 junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" }
 junit-jupiter-api = { module = "org.junit.jupiter:junit-jupiter-api" }
 junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher" }
+lombok = { module = "org.projectlombok:lombok", version = "1.18.38" }
 
 [plugins]
 spotless = { id = "com.diffplug.spotless", version.ref = "spotless" }

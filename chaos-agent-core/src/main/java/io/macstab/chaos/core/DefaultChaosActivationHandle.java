@@ -5,9 +5,12 @@ import io.macstab.chaos.api.ChaosDiagnostics;
 
 final class DefaultChaosActivationHandle implements ChaosActivationHandle {
   private final ScenarioController controller;
+  private final ScenarioRegistry registry;
 
-  DefaultChaosActivationHandle(ScenarioController controller) {
+  DefaultChaosActivationHandle(
+      final ScenarioController controller, final ScenarioRegistry registry) {
     this.controller = controller;
+    this.registry = registry;
   }
 
   @Override
@@ -35,7 +38,16 @@ final class DefaultChaosActivationHandle implements ChaosActivationHandle {
     return controller.state();
   }
 
+  /**
+   * Stops the controller and removes it from the registry.
+   *
+   * <p>Task 4: Previously only {@link ScenarioController#destroy()} was called, which stopped the
+   * scenario but left its entry in {@link ScenarioRegistry}. Over many test cycles this caused the
+   * registry to grow unbounded. {@link ScenarioRegistry#unregister(ScenarioController)} is safe to
+   * call concurrently because {@link java.util.concurrent.ConcurrentHashMap#remove} is thread-safe.
+   */
   void destroy() {
     controller.destroy();
+    registry.unregister(controller);
   }
 }

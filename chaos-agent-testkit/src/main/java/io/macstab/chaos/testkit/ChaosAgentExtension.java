@@ -15,16 +15,16 @@ public final class ChaosAgentExtension
       ExtensionContext.Namespace.create(ChaosAgentExtension.class);
 
   @Override
-  public void beforeEach(ExtensionContext context) {
-    ChaosControlPlane controlPlane = ChaosPlatform.installLocally();
-    ChaosSession session = controlPlane.openSession(context.getDisplayName());
+  public void beforeEach(final ExtensionContext context) {
+    final ChaosControlPlane controlPlane = ChaosPlatform.installLocally();
+    final ChaosSession session = controlPlane.openSession(context.getDisplayName());
     context.getStore(NAMESPACE).put(ChaosControlPlane.class, controlPlane);
     context.getStore(NAMESPACE).put(ChaosSession.class, session);
   }
 
   @Override
-  public void afterEach(ExtensionContext context) {
-    ChaosSession session =
+  public void afterEach(final ExtensionContext context) {
+    final ChaosSession session =
         context.getStore(NAMESPACE).remove(ChaosSession.class, ChaosSession.class);
     if (session != null) {
       session.close();
@@ -33,15 +33,15 @@ public final class ChaosAgentExtension
 
   @Override
   public boolean supportsParameter(
-      ParameterContext parameterContext, ExtensionContext extensionContext) {
-    Class<?> parameterType = parameterContext.getParameter().getType();
+      final ParameterContext parameterContext, final ExtensionContext extensionContext) {
+    final Class<?> parameterType = parameterContext.getParameter().getType();
     return parameterType == ChaosSession.class || parameterType == ChaosControlPlane.class;
   }
 
   @Override
   public Object resolveParameter(
-      ParameterContext parameterContext, ExtensionContext extensionContext) {
-    Class<?> parameterType = parameterContext.getParameter().getType();
+      final ParameterContext parameterContext, final ExtensionContext extensionContext) {
+    final Class<?> parameterType = parameterContext.getParameter().getType();
     return extensionContext.getStore(NAMESPACE).get(parameterType, parameterType);
   }
 }

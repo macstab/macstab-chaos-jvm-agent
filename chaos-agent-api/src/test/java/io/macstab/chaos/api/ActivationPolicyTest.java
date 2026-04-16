@@ -1,272 +1,345 @@
 package io.macstab.chaos.api;
 
-import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.Duration;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+@DisplayName("ActivationPolicy")
 class ActivationPolicyTest {
 
-  // ── always() ─────────────────────────────────────────────────────────────
+  @Nested
+  @DisplayName("always()")
+  class Always {
 
-  @Test
-  void alwaysPolicyHasProbabilityOne() {
-    assertEquals(1.0d, ActivationPolicy.always().probability(), 0.0001);
+    @Test
+    @DisplayName("probability is 1.0")
+    void probabilityOne() {
+      assertThat(ActivationPolicy.always().probability()).isEqualTo(1.0d);
+    }
+
+    @Test
+    @DisplayName("startMode is AUTOMATIC")
+    void startModeAutomatic() {
+      assertThat(ActivationPolicy.always().startMode())
+          .isEqualTo(ActivationPolicy.StartMode.AUTOMATIC);
+    }
+
+    @Test
+    @DisplayName("activateAfterMatches is 0")
+    void activateAfterMatchesZero() {
+      assertThat(ActivationPolicy.always().activateAfterMatches()).isZero();
+    }
+
+    @Test
+    @DisplayName("maxApplications is null")
+    void maxApplicationsNull() {
+      assertThat(ActivationPolicy.always().maxApplications()).isNull();
+    }
+
+    @Test
+    @DisplayName("activeFor is null")
+    void activeForNull() {
+      assertThat(ActivationPolicy.always().activeFor()).isNull();
+    }
+
+    @Test
+    @DisplayName("rateLimit is null")
+    void rateLimitNull() {
+      assertThat(ActivationPolicy.always().rateLimit()).isNull();
+    }
   }
 
-  @Test
-  void alwaysPolicyHasAutomaticStartMode() {
-    assertEquals(ActivationPolicy.StartMode.AUTOMATIC, ActivationPolicy.always().startMode());
+  @Nested
+  @DisplayName("manual()")
+  class Manual {
+
+    @Test
+    @DisplayName("startMode is MANUAL")
+    void startModeManual() {
+      assertThat(ActivationPolicy.manual().startMode())
+          .isEqualTo(ActivationPolicy.StartMode.MANUAL);
+    }
+
+    @Test
+    @DisplayName("probability is 1.0")
+    void probabilityOne() {
+      assertThat(ActivationPolicy.manual().probability()).isEqualTo(1.0d);
+    }
+
+    @Test
+    @DisplayName("no other constraints are set")
+    void noOtherConstraints() {
+      ActivationPolicy policy = ActivationPolicy.manual();
+      assertThat(policy.activateAfterMatches()).isZero();
+      assertThat(policy.maxApplications()).isNull();
+      assertThat(policy.activeFor()).isNull();
+      assertThat(policy.rateLimit()).isNull();
+    }
   }
 
-  @Test
-  void alwaysPolicyHasNoActivateAfterMatches() {
-    assertEquals(0L, ActivationPolicy.always().activateAfterMatches());
+  @Nested
+  @DisplayName("probability 0.0 normalisation")
+  class ProbabilityNormalisation {
+
+    @Test
+    @DisplayName("probability 0.0 is normalised to 1.0")
+    void probabilityZeroNormalisedToOne() {
+      ActivationPolicy policy =
+          new ActivationPolicy(
+              ActivationPolicy.StartMode.AUTOMATIC, 0.0d, 0, null, null, null, null);
+      assertThat(policy.probability()).isEqualTo(1.0d);
+    }
   }
 
-  @Test
-  void alwaysPolicyHasNullMaxApplications() {
-    assertNull(ActivationPolicy.always().maxApplications());
+  @Nested
+  @DisplayName("probability validation")
+  class ProbabilityValidation {
+
+    @Test
+    @DisplayName("probability 1.0 is valid")
+    void probabilityOneValid() {
+      assertThatCode(
+              () ->
+                  new ActivationPolicy(
+                      ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 0, null, null, null, null))
+          .doesNotThrowAnyException();
+    }
+
+    @Test
+    @DisplayName("probability 0.5 is valid")
+    void probabilityHalfValid() {
+      assertThatCode(
+              () ->
+                  new ActivationPolicy(
+                      ActivationPolicy.StartMode.AUTOMATIC, 0.5d, 0, null, null, null, null))
+          .doesNotThrowAnyException();
+    }
+
+    @Test
+    @DisplayName("probability above 1.0 throws")
+    void probabilityAboveOneThrows() {
+      assertThatThrownBy(
+              () ->
+                  new ActivationPolicy(
+                      ActivationPolicy.StartMode.AUTOMATIC, 1.1d, 0, null, null, null, null))
+          .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @DisplayName("negative probability throws")
+    void probabilityNegativeThrows() {
+      assertThatThrownBy(
+              () ->
+                  new ActivationPolicy(
+                      ActivationPolicy.StartMode.AUTOMATIC, -0.1d, 0, null, null, null, null))
+          .isInstanceOf(IllegalArgumentException.class);
+    }
   }
 
-  @Test
-  void alwaysPolicyHasNullActiveFor() {
-    assertNull(ActivationPolicy.always().activeFor());
+  @Nested
+  @DisplayName("activateAfterMatches validation")
+  class ActivateAfterMatchesValidation {
+
+    @Test
+    @DisplayName("zero is valid")
+    void zeroValid() {
+      assertThatCode(
+              () ->
+                  new ActivationPolicy(
+                      ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 0, null, null, null, null))
+          .doesNotThrowAnyException();
+    }
+
+    @Test
+    @DisplayName("positive value is valid")
+    void positiveValid() {
+      assertThatCode(
+              () ->
+                  new ActivationPolicy(
+                      ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 10, null, null, null, null))
+          .doesNotThrowAnyException();
+    }
+
+    @Test
+    @DisplayName("negative value throws")
+    void negativeThrows() {
+      assertThatThrownBy(
+              () ->
+                  new ActivationPolicy(
+                      ActivationPolicy.StartMode.AUTOMATIC, 1.0d, -1, null, null, null, null))
+          .isInstanceOf(IllegalArgumentException.class);
+    }
   }
 
-  @Test
-  void alwaysPolicyHasNullRateLimit() {
-    assertNull(ActivationPolicy.always().rateLimit());
+  @Nested
+  @DisplayName("maxApplications validation")
+  class MaxApplicationsValidation {
+
+    @Test
+    @DisplayName("null is valid")
+    void nullValid() {
+      assertThatCode(
+              () ->
+                  new ActivationPolicy(
+                      ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 0, null, null, null, null))
+          .doesNotThrowAnyException();
+    }
+
+    @Test
+    @DisplayName("positive value is valid")
+    void positiveValid() {
+      assertThatCode(
+              () ->
+                  new ActivationPolicy(
+                      ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 0, 100L, null, null, null))
+          .doesNotThrowAnyException();
+    }
+
+    @Test
+    @DisplayName("zero throws")
+    void zeroThrows() {
+      assertThatThrownBy(
+              () ->
+                  new ActivationPolicy(
+                      ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 0, 0L, null, null, null))
+          .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @DisplayName("negative value throws")
+    void negativeThrows() {
+      assertThatThrownBy(
+              () ->
+                  new ActivationPolicy(
+                      ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 0, -5L, null, null, null))
+          .isInstanceOf(IllegalArgumentException.class);
+    }
   }
 
-  // ── manual() ─────────────────────────────────────────────────────────────
+  @Nested
+  @DisplayName("activeFor validation")
+  class ActiveForValidation {
 
-  @Test
-  void manualPolicyHasManualStartMode() {
-    assertEquals(ActivationPolicy.StartMode.MANUAL, ActivationPolicy.manual().startMode());
+    @Test
+    @DisplayName("null is valid")
+    void nullValid() {
+      assertThatCode(
+              () ->
+                  new ActivationPolicy(
+                      ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 0, null, null, null, null))
+          .doesNotThrowAnyException();
+    }
+
+    @Test
+    @DisplayName("positive duration is valid")
+    void positiveValid() {
+      assertThatCode(
+              () ->
+                  new ActivationPolicy(
+                      ActivationPolicy.StartMode.AUTOMATIC,
+                      1.0d,
+                      0,
+                      null,
+                      Duration.ofMinutes(5),
+                      null,
+                      null))
+          .doesNotThrowAnyException();
+    }
+
+    @Test
+    @DisplayName("zero duration throws")
+    void zeroThrows() {
+      assertThatThrownBy(
+              () ->
+                  new ActivationPolicy(
+                      ActivationPolicy.StartMode.AUTOMATIC,
+                      1.0d,
+                      0,
+                      null,
+                      Duration.ZERO,
+                      null,
+                      null))
+          .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @DisplayName("negative duration throws")
+    void negativeThrows() {
+      assertThatThrownBy(
+              () ->
+                  new ActivationPolicy(
+                      ActivationPolicy.StartMode.AUTOMATIC,
+                      1.0d,
+                      0,
+                      null,
+                      Duration.ofSeconds(-1),
+                      null,
+                      null))
+          .isInstanceOf(IllegalArgumentException.class);
+    }
   }
 
-  @Test
-  void manualPolicyHasProbabilityOne() {
-    assertEquals(1.0d, ActivationPolicy.manual().probability(), 0.0001);
+  @Nested
+  @DisplayName("RateLimit validation")
+  class RateLimitValidation {
+
+    @Test
+    @DisplayName("valid construction")
+    void validConstruction() {
+      assertThatCode(() -> new ActivationPolicy.RateLimit(10, Duration.ofSeconds(1)))
+          .doesNotThrowAnyException();
+    }
+
+    @Test
+    @DisplayName("zero permits throws")
+    void zeroPermitsThrows() {
+      assertThatThrownBy(() -> new ActivationPolicy.RateLimit(0, Duration.ofSeconds(1)))
+          .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @DisplayName("negative permits throws")
+    void negativePermitsThrows() {
+      assertThatThrownBy(() -> new ActivationPolicy.RateLimit(-1, Duration.ofSeconds(1)))
+          .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @DisplayName("null window throws")
+    void nullWindowThrows() {
+      assertThatThrownBy(() -> new ActivationPolicy.RateLimit(10, null))
+          .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @DisplayName("zero window throws")
+    void zeroWindowThrows() {
+      assertThatThrownBy(() -> new ActivationPolicy.RateLimit(10, Duration.ZERO))
+          .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @DisplayName("negative window throws")
+    void negativeWindowThrows() {
+      assertThatThrownBy(() -> new ActivationPolicy.RateLimit(10, Duration.ofMillis(-1)))
+          .isInstanceOf(IllegalArgumentException.class);
+    }
   }
 
-  @Test
-  void manualPolicyHasNoOtherConstraints() {
-    ActivationPolicy policy = ActivationPolicy.manual();
-    assertEquals(0L, policy.activateAfterMatches());
-    assertNull(policy.maxApplications());
-    assertNull(policy.activeFor());
-    assertNull(policy.rateLimit());
-  }
+  @Nested
+  @DisplayName("null startMode defaults to AUTOMATIC")
+  class NullStartModeDefault {
 
-  // ── probability 0.0 → 1.0 normalisation ──────────────────────────────────
-
-  @Test
-  void probabilityZeroNormalisedToOne() {
-    ActivationPolicy policy =
-        new ActivationPolicy(ActivationPolicy.StartMode.AUTOMATIC, 0.0d, 0, null, null, null, null);
-    assertEquals(1.0d, policy.probability(), 0.0001);
-  }
-
-  // ── probability validation ─────────────────────────────────────────────────
-
-  @Test
-  void probabilityOneIsValid() {
-    assertDoesNotThrow(
-        () ->
-            new ActivationPolicy(
-                ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 0, null, null, null, null));
-  }
-
-  @Test
-  void probabilityHalfIsValid() {
-    assertDoesNotThrow(
-        () ->
-            new ActivationPolicy(
-                ActivationPolicy.StartMode.AUTOMATIC, 0.5d, 0, null, null, null, null));
-  }
-
-  @Test
-  void probabilityAboveOneThrows() {
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ActivationPolicy(
-                ActivationPolicy.StartMode.AUTOMATIC, 1.1d, 0, null, null, null, null));
-  }
-
-  @Test
-  void probabilityNegativeThrows() {
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ActivationPolicy(
-                ActivationPolicy.StartMode.AUTOMATIC, -0.1d, 0, null, null, null, null));
-  }
-
-  // ── activateAfterMatches validation ───────────────────────────────────────
-
-  @Test
-  void activateAfterMatchesZeroIsValid() {
-    assertDoesNotThrow(
-        () ->
-            new ActivationPolicy(
-                ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 0, null, null, null, null));
-  }
-
-  @Test
-  void activateAfterMatchesPositiveIsValid() {
-    assertDoesNotThrow(
-        () ->
-            new ActivationPolicy(
-                ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 10, null, null, null, null));
-  }
-
-  @Test
-  void activateAfterMatchesNegativeThrows() {
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ActivationPolicy(
-                ActivationPolicy.StartMode.AUTOMATIC, 1.0d, -1, null, null, null, null));
-  }
-
-  // ── maxApplications validation ─────────────────────────────────────────────
-
-  @Test
-  void maxApplicationsNullIsValid() {
-    assertDoesNotThrow(
-        () ->
-            new ActivationPolicy(
-                ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 0, null, null, null, null));
-  }
-
-  @Test
-  void maxApplicationsPositiveIsValid() {
-    assertDoesNotThrow(
-        () ->
-            new ActivationPolicy(
-                ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 0, 100L, null, null, null));
-  }
-
-  @Test
-  void maxApplicationsZeroThrows() {
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ActivationPolicy(
-                ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 0, 0L, null, null, null));
-  }
-
-  @Test
-  void maxApplicationsNegativeThrows() {
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ActivationPolicy(
-                ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 0, -5L, null, null, null));
-  }
-
-  // ── activeFor validation ───────────────────────────────────────────────────
-
-  @Test
-  void activeForNullIsValid() {
-    assertDoesNotThrow(
-        () ->
-            new ActivationPolicy(
-                ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 0, null, null, null, null));
-  }
-
-  @Test
-  void activeForPositiveIsValid() {
-    assertDoesNotThrow(
-        () ->
-            new ActivationPolicy(
-                ActivationPolicy.StartMode.AUTOMATIC,
-                1.0d,
-                0,
-                null,
-                Duration.ofMinutes(5),
-                null,
-                null));
-  }
-
-  @Test
-  void activeForZeroThrows() {
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ActivationPolicy(
-                ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 0, null, Duration.ZERO, null, null));
-  }
-
-  @Test
-  void activeForNegativeThrows() {
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ActivationPolicy(
-                ActivationPolicy.StartMode.AUTOMATIC,
-                1.0d,
-                0,
-                null,
-                Duration.ofSeconds(-1),
-                null,
-                null));
-  }
-
-  // ── RateLimit validation ───────────────────────────────────────────────────
-
-  @Test
-  void rateLimitValidConstruction() {
-    assertDoesNotThrow(
-        () -> new ActivationPolicy.RateLimit(10, Duration.ofSeconds(1)));
-  }
-
-  @Test
-  void rateLimitZeroPermitsThrows() {
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new ActivationPolicy.RateLimit(0, Duration.ofSeconds(1)));
-  }
-
-  @Test
-  void rateLimitNegativePermitsThrows() {
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new ActivationPolicy.RateLimit(-1, Duration.ofSeconds(1)));
-  }
-
-  @Test
-  void rateLimitNullWindowThrows() {
-    assertThrows(
-        IllegalArgumentException.class, () -> new ActivationPolicy.RateLimit(10, null));
-  }
-
-  @Test
-  void rateLimitZeroWindowThrows() {
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new ActivationPolicy.RateLimit(10, Duration.ZERO));
-  }
-
-  @Test
-  void rateLimitNegativeWindowThrows() {
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new ActivationPolicy.RateLimit(10, Duration.ofMillis(-1)));
-  }
-
-  // ── null startMode defaults to AUTOMATIC ──────────────────────────────────
-
-  @Test
-  void nullStartModeDefaultsToAutomatic() {
-    ActivationPolicy policy =
-        new ActivationPolicy(null, 1.0d, 0, null, null, null, null);
-    assertEquals(ActivationPolicy.StartMode.AUTOMATIC, policy.startMode());
+    @Test
+    @DisplayName("null startMode defaults to AUTOMATIC")
+    void nullDefaultsToAutomatic() {
+      ActivationPolicy policy = new ActivationPolicy(null, 1.0d, 0, null, null, null, null);
+      assertThat(policy.startMode()).isEqualTo(ActivationPolicy.StartMode.AUTOMATIC);
+    }
   }
 }

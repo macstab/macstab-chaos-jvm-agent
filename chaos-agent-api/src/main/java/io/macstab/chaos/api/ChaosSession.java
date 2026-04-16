@@ -5,9 +5,9 @@ import java.util.concurrent.Callable;
 /**
  * A named session scope that restricts chaos effects to threads explicitly bound to it.
  *
- * <p>Sessions enable per-test isolation when multiple tests share a single JVM: each test opens
- * its own session, activates scenarios scoped to that session, and only threads bound to that
- * session observe chaos. Threads without a binding are unaffected.
+ * <p>Sessions enable per-test isolation when multiple tests share a single JVM: each test opens its
+ * own session, activates scenarios scoped to that session, and only threads bound to that session
+ * observe chaos. Threads without a binding are unaffected.
  *
  * <p><b>Basic usage:</b>
  *
@@ -54,7 +54,7 @@ public interface ChaosSession extends AutoCloseable {
    * session. Only threads bound to this session via {@link #bind()} will be affected.
    *
    * @param scenario must have {@link ChaosScenario.ScenarioScope#SESSION} scope; JVM-scoped
-   *                 scenarios cannot be activated on a session
+   *     scenarios cannot be activated on a session
    * @return a handle for per-scenario lifecycle control
    * @throws io.macstab.chaos.api.ChaosActivationException if the scenario scope is not SESSION
    */
@@ -105,7 +105,7 @@ public interface ChaosSession extends AutoCloseable {
    * thread runs it.
    *
    * @param callable the task to wrap; must not be null
-   * @param <T>      the return type of the callable
+   * @param <T> the return type of the callable
    * @return a new Callable that activates the session context before delegating to the original
    */
   <T> Callable<T> wrap(Callable<T> callable);
@@ -126,8 +126,8 @@ public interface ChaosSession extends AutoCloseable {
   interface ScopeBinding extends AutoCloseable {
 
     /**
-     * Removes the calling thread's binding to the session. After this call, the thread is
-     * invisible to all session-scoped scenarios.
+     * Removes the calling thread's binding to the session. After this call, the thread is invisible
+     * to all session-scoped scenarios.
      */
     @Override
     void close();

@@ -3,9 +3,9 @@ package io.macstab.chaos.api;
 /**
  * Primary entry point to the chaos agent runtime.
  *
- * <p>A single instance is installed per JVM when the agent attaches, accessible via
- * {@code ChaosAgentBootstrap.current()} or injected in test code via
- * {@code ChaosAgentBootstrap.installForLocalTests()}.
+ * <p>A single instance is installed per JVM when the agent attaches, accessible via {@code
+ * ChaosAgentBootstrap.current()} or injected in test code via {@code
+ * ChaosAgentBootstrap.installForLocalTests()}.
  *
  * <p>Core operations:
  *
@@ -24,18 +24,18 @@ public interface ChaosControlPlane extends AutoCloseable {
   /**
    * Activates a single chaos scenario at JVM scope.
    *
-   * <p>The scenario is validated ({@link CompatibilityValidator}) and registered immediately.
+   * <p>The scenario is validated against selector/effect compatibility and registered immediately.
    * Scenarios with {@link ActivationPolicy.StartMode#AUTOMATIC} begin intercepting operations
    * instantly. Manual-start scenarios require a subsequent {@link ChaosActivationHandle#start()}
    * call.
    *
    * @param scenario the scenario to activate; must have {@link ChaosScenario.ScenarioScope#JVM}
-   *                 scope
+   *     scope
    * @return a handle for lifecycle control; close it to stop the scenario
-   * @throws ChaosValidationException          if the selector ↔ effect combination is invalid
-   * @throws ChaosUnsupportedFeatureException  if the scenario requires a JVM feature not available
-   *                                           at runtime
-   * @throws ChaosActivationException          if a scenario with the same ID is already active
+   * @throws ChaosValidationException if the selector ↔ effect combination is invalid
+   * @throws ChaosUnsupportedFeatureException if the scenario requires a JVM feature not available
+   *     at runtime
+   * @throws ChaosActivationException if a scenario with the same ID is already active
    */
   ChaosActivationHandle activate(ChaosScenario scenario);
 
@@ -48,7 +48,7 @@ public interface ChaosControlPlane extends AutoCloseable {
    * @param plan all scenarios must have {@link ChaosScenario.ScenarioScope#JVM} scope
    * @return a composite handle that stops all plan scenarios when closed
    * @throws ChaosActivationException if any scenario in the plan is not JVM-scoped, or if any
-   *                                  scenario fails validation
+   *     scenario fails validation
    */
   ChaosActivationHandle activate(ChaosPlan plan);
 
@@ -56,8 +56,8 @@ public interface ChaosControlPlane extends AutoCloseable {
    * Opens a named session scope for per-test chaos isolation.
    *
    * <p>Scenarios activated on the returned session affect only threads explicitly bound to it via
-   * {@link ChaosSession#bind()}. Multiple sessions may be active simultaneously without
-   * interfering with each other.
+   * {@link ChaosSession#bind()}. Multiple sessions may be active simultaneously without interfering
+   * with each other.
    *
    * <p>Always close the session when the test completes to stop all session scenarios and release
    * the session scope:
@@ -78,8 +78,8 @@ public interface ChaosControlPlane extends AutoCloseable {
    * Returns the read-only diagnostics view for this control plane instance.
    *
    * <p>Use to inspect scenario states, application counters, failure records, and runtime
-   * capabilities. The same view is exposed over JMX at
-   * {@code io.macstab.chaos:type=ChaosDiagnostics}.
+   * capabilities. The same view is exposed over JMX at {@code
+   * io.macstab.chaos:type=ChaosDiagnostics}.
    */
   ChaosDiagnostics diagnostics();
 

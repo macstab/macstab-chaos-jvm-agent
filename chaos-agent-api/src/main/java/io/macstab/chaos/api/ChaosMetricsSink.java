@@ -6,9 +6,9 @@ import java.util.Map;
 /**
  * Bridge for emitting chaos activity as metrics to an external monitoring system.
  *
- * <p>Implement this interface to route chaos metrics to Micrometer, Prometheus, Dropwizard
- * Metrics, StatsD, or any other metrics backend. Pass the implementation to the
- * {@code ChaosRuntime} constructor on startup.
+ * <p>Implement this interface to route chaos metrics to Micrometer, Prometheus, Dropwizard Metrics,
+ * StatsD, or any other metrics backend. Pass the implementation to the {@code ChaosRuntime}
+ * constructor on startup.
  *
  * <p>The default implementation is {@link #NOOP}: all calls are discarded. In production
  * environments, replace it to observe chaos activity in your dashboards alongside application
@@ -21,8 +21,8 @@ import java.util.Map;
  *       {@code scenarioId}, {@code operation}.
  * </ul>
  *
- * <p><b>Implementation contract:</b> all methods must be non-blocking and must not throw.
- * They are called on the thread performing the intercepted JVM operation.
+ * <p><b>Implementation contract:</b> all methods must be non-blocking and must not throw. They are
+ * called on the thread performing the intercepted JVM operation.
  */
 public interface ChaosMetricsSink {
 
@@ -50,9 +50,9 @@ public interface ChaosMetricsSink {
   /**
    * Records a timing/duration metric sample.
    *
-   * @param name     the metric name; e.g., {@code "chaos.gate.block.duration"}
+   * @param name the metric name; e.g., {@code "chaos.gate.block.duration"}
    * @param duration the observed duration; never null
-   * @param tags     additional dimensions; never null but may be empty
+   * @param tags additional dimensions; never null but may be empty
    */
   void recordDuration(String name, Duration duration, Map<String, String> tags);
 }

@@ -18,26 +18,27 @@ final class ScenarioRegistry implements ChaosDiagnostics {
   private final Supplier<Map<String, String>> runtimeDetailsSupplier;
   private final Clock clock;
 
-  ScenarioRegistry(Clock clock, Supplier<Map<String, String>> runtimeDetailsSupplier) {
+  ScenarioRegistry(final Clock clock, final Supplier<Map<String, String>> runtimeDetailsSupplier) {
     this.clock = clock;
     this.runtimeDetailsSupplier = runtimeDetailsSupplier;
   }
 
-  void register(ScenarioController controller) {
+  void register(final ScenarioController controller) {
     if (controllers.putIfAbsent(controller.key(), controller) != null) {
       throw new IllegalStateException("scenario key already active: " + controller.key());
     }
   }
 
-  void unregister(ScenarioController controller) {
+  void unregister(final ScenarioController controller) {
     controllers.remove(controller.key(), controller);
   }
 
-  void recordFailure(String scenarioId, FailureCategory category, String message) {
+  void recordFailure(
+      final String scenarioId, final FailureCategory category, final String message) {
     failures.add(new ActivationFailure(scenarioId, category, message));
   }
 
-  List<ScenarioContribution> match(InvocationContext context) {
+  List<ScenarioContribution> match(final InvocationContext context) {
     return controllers.values().stream()
         .map(controller -> controller.evaluate(context))
         .filter(java.util.Objects::nonNull)
@@ -55,7 +56,7 @@ final class ScenarioRegistry implements ChaosDiagnostics {
 
   @Override
   public Snapshot snapshot() {
-    List<ScenarioReport> reports =
+    final List<ScenarioReport> reports =
         controllers.values().stream()
             .map(ScenarioController::snapshot)
             .sorted(
@@ -69,7 +70,7 @@ final class ScenarioRegistry implements ChaosDiagnostics {
   }
 
   @Override
-  public Optional<ScenarioReport> scenario(String scenarioId) {
+  public Optional<ScenarioReport> scenario(final String scenarioId) {
     return controllers.values().stream()
         .map(ScenarioController::snapshot)
         .filter(report -> report.id().equals(scenarioId))
@@ -78,7 +79,7 @@ final class ScenarioRegistry implements ChaosDiagnostics {
 
   @Override
   public String debugDump() {
-    Snapshot snapshot = snapshot();
+    final Snapshot snapshot = snapshot();
     StringBuilder builder = new StringBuilder();
     builder.append("macstab-chaos diagnostics").append(System.lineSeparator());
     builder.append("capturedAt=").append(snapshot.capturedAt()).append(System.lineSeparator());

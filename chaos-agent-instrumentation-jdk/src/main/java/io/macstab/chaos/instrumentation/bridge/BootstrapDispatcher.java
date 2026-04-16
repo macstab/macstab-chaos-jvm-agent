@@ -31,17 +31,17 @@ public final class BootstrapDispatcher {
 
   private BootstrapDispatcher() {}
 
-  public static void install(Object bridgeDelegate, MethodHandle[] methodHandles) {
-    delegate = bridgeDelegate;
+  public static void install(final Object bridgeDelegate, final MethodHandle[] methodHandles) {
     handles = methodHandles;
+    delegate = bridgeDelegate;
   }
 
-  public static Runnable decorateExecutorRunnable(String operation, Object executor, Runnable task)
-      throws Throwable {
+  public static Runnable decorateExecutorRunnable(
+      final String operation, final Object executor, final Runnable task) throws Throwable {
     return invoke(
         () -> {
-          MethodHandle[] h = handles;
-          Object d = delegate;
+          final MethodHandle[] h = handles;
+          final Object d = delegate;
           return (d == null || h == null)
               ? task
               : (Runnable) h[DECORATE_EXECUTOR_RUNNABLE].invoke(d, operation, executor, task);
@@ -50,11 +50,11 @@ public final class BootstrapDispatcher {
   }
 
   public static <T> Callable<T> decorateExecutorCallable(
-      String operation, Object executor, Callable<T> task) throws Throwable {
+      final String operation, final Object executor, final Callable<T> task) throws Throwable {
     return invoke(
         () -> {
-          MethodHandle[] h = handles;
-          Object d = delegate;
+          final MethodHandle[] h = handles;
+          final Object d = delegate;
           if (d == null || h == null) return task;
           @SuppressWarnings("unchecked")
           Callable<T> result =
@@ -64,11 +64,11 @@ public final class BootstrapDispatcher {
         task);
   }
 
-  public static void beforeThreadStart(Thread thread) throws Throwable {
+  public static void beforeThreadStart(final Thread thread) throws Throwable {
     invoke(
         () -> {
-          MethodHandle[] h = handles;
-          Object d = delegate;
+          final MethodHandle[] h = handles;
+          final Object d = delegate;
           if (d != null && h != null) {
             h[BEFORE_THREAD_START].invoke(d, thread);
           }
@@ -77,12 +77,12 @@ public final class BootstrapDispatcher {
         null);
   }
 
-  public static void beforeWorkerRun(Object executor, Thread worker, Runnable task)
-      throws Throwable {
+  public static void beforeWorkerRun(
+      final Object executor, final Thread worker, final Runnable task) throws Throwable {
     invoke(
         () -> {
-          MethodHandle[] h = handles;
-          Object d = delegate;
+          final MethodHandle[] h = handles;
+          final Object d = delegate;
           if (d != null && h != null) {
             h[BEFORE_WORKER_RUN].invoke(d, executor, worker, task);
           }
@@ -91,11 +91,11 @@ public final class BootstrapDispatcher {
         null);
   }
 
-  public static void beforeForkJoinTaskRun(ForkJoinTask<?> task) throws Throwable {
+  public static void beforeForkJoinTaskRun(final ForkJoinTask<?> task) throws Throwable {
     invoke(
         () -> {
-          MethodHandle[] h = handles;
-          Object d = delegate;
+          final MethodHandle[] h = handles;
+          final Object d = delegate;
           if (d != null && h != null) {
             h[BEFORE_FORK_JOIN_TASK_RUN].invoke(d, task);
           }
@@ -105,36 +105,42 @@ public final class BootstrapDispatcher {
   }
 
   public static long adjustScheduleDelay(
-      String operation, Object executor, Object task, long delay, boolean periodic)
+      final String operation,
+      final Object executor,
+      final Object task,
+      final long delay,
+      final boolean periodic)
       throws Throwable {
     return invoke(
         () -> {
-          MethodHandle[] h = handles;
-          Object d = delegate;
+          final MethodHandle[] h = handles;
+          final Object d = delegate;
           return (d == null || h == null)
               ? delay
-              : (long) h[ADJUST_SCHEDULE_DELAY].invoke(d, operation, executor, task, delay, periodic);
+              : (long)
+                  h[ADJUST_SCHEDULE_DELAY].invoke(d, operation, executor, task, delay, periodic);
         },
         delay);
   }
 
-  public static boolean beforeScheduledTick(Object executor, Object task, boolean periodic)
-      throws Throwable {
+  public static boolean beforeScheduledTick(
+      final Object executor, final Object task, final boolean periodic) throws Throwable {
     return invoke(
         () -> {
-          MethodHandle[] h = handles;
-          Object d = delegate;
+          final MethodHandle[] h = handles;
+          final Object d = delegate;
           return (d == null || h == null)
               || (boolean) h[BEFORE_SCHEDULED_TICK].invoke(d, executor, task, periodic);
         },
         true);
   }
 
-  public static void beforeQueueOperation(String operation, Object queue) throws Throwable {
+  public static void beforeQueueOperation(final String operation, final Object queue)
+      throws Throwable {
     invoke(
         () -> {
-          MethodHandle[] h = handles;
-          Object d = delegate;
+          final MethodHandle[] h = handles;
+          final Object d = delegate;
           if (d != null && h != null) {
             h[BEFORE_QUEUE_OPERATION].invoke(d, operation, queue);
           }
@@ -143,12 +149,12 @@ public final class BootstrapDispatcher {
         null);
   }
 
-  public static Boolean beforeBooleanQueueOperation(String operation, Object queue)
+  public static Boolean beforeBooleanQueueOperation(final String operation, final Object queue)
       throws Throwable {
     return invoke(
         () -> {
-          MethodHandle[] h = handles;
-          Object d = delegate;
+          final MethodHandle[] h = handles;
+          final Object d = delegate;
           return (d == null || h == null)
               ? null
               : (Boolean) h[BEFORE_BOOLEAN_QUEUE_OPERATION].invoke(d, operation, queue);
@@ -157,11 +163,12 @@ public final class BootstrapDispatcher {
   }
 
   public static Boolean beforeCompletableFutureComplete(
-      String operation, CompletableFuture<?> future, Object payload) throws Throwable {
+      final String operation, final CompletableFuture<?> future, final Object payload)
+      throws Throwable {
     return invoke(
         () -> {
-          MethodHandle[] h = handles;
-          Object d = delegate;
+          final MethodHandle[] h = handles;
+          final Object d = delegate;
           return (d == null || h == null)
               ? null
               : (Boolean)
@@ -170,11 +177,12 @@ public final class BootstrapDispatcher {
         null);
   }
 
-  public static void beforeClassLoad(ClassLoader loader, String className) throws Throwable {
+  public static void beforeClassLoad(final ClassLoader loader, final String className)
+      throws Throwable {
     invoke(
         () -> {
-          MethodHandle[] h = handles;
-          Object d = delegate;
+          final MethodHandle[] h = handles;
+          final Object d = delegate;
           if (d != null && h != null) {
             h[BEFORE_CLASS_LOAD].invoke(d, loader, className);
           }
@@ -183,12 +191,12 @@ public final class BootstrapDispatcher {
         null);
   }
 
-  public static URL afterResourceLookup(ClassLoader loader, String name, URL currentValue)
-      throws Throwable {
+  public static URL afterResourceLookup(
+      final ClassLoader loader, final String name, final URL currentValue) throws Throwable {
     return invoke(
         () -> {
-          MethodHandle[] h = handles;
-          Object d = delegate;
+          final MethodHandle[] h = handles;
+          final Object d = delegate;
           return (d == null || h == null)
               ? currentValue
               : (URL) h[AFTER_RESOURCE_LOOKUP].invoke(d, loader, name, currentValue);
@@ -196,11 +204,11 @@ public final class BootstrapDispatcher {
         currentValue);
   }
 
-  public static Thread decorateShutdownHook(Thread hook) throws Throwable {
+  public static Thread decorateShutdownHook(final Thread hook) throws Throwable {
     return invoke(
         () -> {
-          MethodHandle[] h = handles;
-          Object d = delegate;
+          final MethodHandle[] h = handles;
+          final Object d = delegate;
           return (d == null || h == null)
               ? hook
               : (Thread) h[DECORATE_SHUTDOWN_HOOK].invoke(d, hook);
@@ -208,11 +216,11 @@ public final class BootstrapDispatcher {
         hook);
   }
 
-  public static Thread resolveShutdownHook(Thread original) {
+  public static Thread resolveShutdownHook(final Thread original) {
     return invoke(
         () -> {
-          MethodHandle[] h = handles;
-          Object d = delegate;
+          final MethodHandle[] h = handles;
+          final Object d = delegate;
           return (d == null || h == null)
               ? original
               : (Thread) h[RESOLVE_SHUTDOWN_HOOK].invoke(d, original);
@@ -220,12 +228,12 @@ public final class BootstrapDispatcher {
         original);
   }
 
-  public static void beforeExecutorShutdown(String operation, Object executor, long timeoutMillis)
-      throws Throwable {
+  public static void beforeExecutorShutdown(
+      final String operation, final Object executor, final long timeoutMillis) throws Throwable {
     invoke(
         () -> {
-          MethodHandle[] h = handles;
-          Object d = delegate;
+          final MethodHandle[] h = handles;
+          final Object d = delegate;
           if (d != null && h != null) {
             h[BEFORE_EXECUTOR_SHUTDOWN].invoke(d, operation, executor, timeoutMillis);
           }
@@ -234,7 +242,7 @@ public final class BootstrapDispatcher {
         null);
   }
 
-  private static <T> T invoke(ThrowingSupplier<T> supplier, T fallback) {
+  private static <T> T invoke(final ThrowingSupplier<T> supplier, final T fallback) {
     if (DEPTH.get() > 0) {
       return fallback;
     }
@@ -245,7 +253,7 @@ public final class BootstrapDispatcher {
       sneakyThrow(throwable);
       return fallback;
     } finally {
-      int next = DEPTH.get() - 1;
+      final int next = DEPTH.get() - 1;
       if (next == 0) {
         DEPTH.remove();
       } else {
@@ -255,7 +263,7 @@ public final class BootstrapDispatcher {
   }
 
   @SuppressWarnings("unchecked")
-  private static <T extends Throwable> void sneakyThrow(Throwable throwable) throws T {
+  private static <T extends Throwable> void sneakyThrow(final Throwable throwable) throws T {
     throw (T) throwable;
   }
 

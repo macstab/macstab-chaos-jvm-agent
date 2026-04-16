@@ -7,7 +7,7 @@ final class ScheduledCallableWrapper<T> implements Callable<T> {
   private final Object executor;
   private final Callable<T> delegate;
 
-  ScheduledCallableWrapper(Object executor, Callable<T> delegate) {
+  ScheduledCallableWrapper(final Object executor, final Callable<T> delegate) {
     this.executor = executor;
     this.delegate = delegate;
   }
@@ -19,12 +19,14 @@ final class ScheduledCallableWrapper<T> implements Callable<T> {
         return null;
       }
       return delegate.call();
-    } catch (RuntimeException runtimeException) {
-      throw runtimeException;
-    } catch (Exception exception) {
-      throw exception;
     } catch (Throwable throwable) {
-      throw new IllegalStateException("scheduled callable chaos hook failed", throwable);
+      sneakyThrow(throwable);
+      return null; // unreachable
     }
+  }
+
+  @SuppressWarnings("unchecked")
+  private static <E extends Throwable> void sneakyThrow(final Throwable throwable) throws E {
+    throw (E) throwable;
   }
 }

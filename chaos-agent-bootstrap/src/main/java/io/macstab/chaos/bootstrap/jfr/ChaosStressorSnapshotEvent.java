@@ -20,8 +20,8 @@ import jdk.jfr.StackTrace;
  * }</pre>
  *
  * <p>The snapshot is driven by a {@link jdk.jfr.FlightRecorder} periodic event hook registered in
- * {@link JfrChaosEventSink}. The hook queries {@link io.macstab.chaos.api.ChaosDiagnostics} at
- * each tick and emits one event per invocation.
+ * {@link JfrChaosEventSink}. The hook queries {@link io.macstab.chaos.api.ChaosDiagnostics} at each
+ * tick and emits one event per invocation.
  */
 @Name("io.macstab.chaos.StressorSnapshot")
 @Category({"Chaos", "Stressor"})

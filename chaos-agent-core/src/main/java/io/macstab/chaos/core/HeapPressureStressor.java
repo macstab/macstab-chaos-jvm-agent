@@ -7,10 +7,10 @@ import java.util.List;
 final class HeapPressureStressor implements ManagedStressor {
   private final List<byte[]> retained = new ArrayList<>();
 
-  HeapPressureStressor(ChaosEffect.HeapPressureEffect effect) {
+  HeapPressureStressor(final ChaosEffect.HeapPressureEffect effect) {
     long remaining = effect.bytes();
     while (remaining > 0) {
-      int allocation = (int) Math.min(effect.chunkSizeBytes(), remaining);
+      final int allocation = (int) Math.min(effect.chunkSizeBytes(), remaining);
       retained.add(new byte[allocation]);
       remaining -= allocation;
     }

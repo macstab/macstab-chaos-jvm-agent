@@ -9,7 +9,7 @@ final class ForkJoinAdvice {
 
   static final class DoExecAdvice {
     @Advice.OnMethodEnter
-    static void enter(@Advice.This ForkJoinTask<?> task) throws Throwable {
+    static void enter(@Advice.This final ForkJoinTask<?> task) throws Throwable {
       BootstrapDispatcher.beforeForkJoinTaskRun(task);
     }
   }

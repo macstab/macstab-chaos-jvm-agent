@@ -25,7 +25,7 @@ public final class JfrIntegration {
    * each call will install an additional sink. Callers (e.g., {@code ChaosAgentBootstrap}) must
    * ensure it is called exactly once per runtime lifetime.
    */
-  public static void installIfAvailable(ChaosControlPlane runtime) {
+  public static void installIfAvailable(final ChaosControlPlane runtime) {
     if (!JfrAvailability.probe()) {
       return;
     }
@@ -38,8 +38,8 @@ public final class JfrIntegration {
    * lazily — this method body is never executed (and therefore never triggers JFR class loading)
    * unless the probe returned {@code true}.
    */
-  private static void installJfr(ChaosControlPlane runtime) {
-    JfrChaosEventSink sink = new JfrChaosEventSink(runtime.diagnostics());
+  private static void installJfr(final ChaosControlPlane runtime) {
+    final JfrChaosEventSink sink = new JfrChaosEventSink(runtime.diagnostics());
     runtime.addEventListener(sink);
   }
 }

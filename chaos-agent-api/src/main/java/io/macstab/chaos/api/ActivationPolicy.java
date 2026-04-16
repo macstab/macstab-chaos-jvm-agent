@@ -44,33 +44,31 @@ public record ActivationPolicy(
   /**
    * Canonical constructor with full Jackson deserialization support.
    *
-   * @param startMode       when the scenario begins accepting matches; defaults to
-   *                        {@link StartMode#AUTOMATIC}
-   * @param probability     fraction of matches that result in effect application; {@code 0.0}
-   *                        is treated as {@code 1.0} (deserialization default); must be in
-   *                        {@code (0.0, 1.0]}
+   * @param startMode when the scenario begins accepting matches; defaults to {@link
+   *     StartMode#AUTOMATIC}
+   * @param probability fraction of matches that result in effect application; {@code 0.0} is
+   *     treated as {@code 1.0} (deserialization default); must be in {@code (0.0, 1.0]}
    * @param activateAfterMatches number of initial matches to skip before the effect becomes
-   *                        eligible; {@code 0} means no warm-up
+   *     eligible; {@code 0} means no warm-up
    * @param maxApplications hard cap on total effect applications; {@code null} means unlimited
-   * @param activeFor       time window from first start during which the scenario remains active;
-   *                        {@code null} means no time bound
-   * @param rateLimit       sliding-window rate cap on applications; {@code null} means unlimited
-   * @param randomSeed      fixed PRNG seed for reproducible probability sampling; {@code null}
-   *                        uses {@code 0L}
-   * @throws IllegalArgumentException if {@code probability} is outside {@code (0.0, 1.0]}, or
-   *                                  if {@code activateAfterMatches} is negative, or if
-   *                                  {@code maxApplications} or {@code activeFor} violate their
-   *                                  constraints
+   * @param activeFor time window from first start during which the scenario remains active; {@code
+   *     null} means no time bound
+   * @param rateLimit sliding-window rate cap on applications; {@code null} means unlimited
+   * @param randomSeed fixed PRNG seed for reproducible probability sampling; {@code null} uses
+   *     {@code 0L}
+   * @throws IllegalArgumentException if {@code probability} is outside {@code (0.0, 1.0]}, or if
+   *     {@code activateAfterMatches} is negative, or if {@code maxApplications} or {@code
+   *     activeFor} violate their constraints
    */
   @JsonCreator
   public ActivationPolicy(
-      @JsonProperty("startMode") StartMode startMode,
-      @JsonProperty("probability") double probability,
-      @JsonProperty("activateAfterMatches") long activateAfterMatches,
-      @JsonProperty("maxApplications") Long maxApplications,
-      @JsonProperty("activeFor") Duration activeFor,
-      @JsonProperty("rateLimit") RateLimit rateLimit,
-      @JsonProperty("randomSeed") Long randomSeed) {
+      @JsonProperty("startMode") final StartMode startMode,
+      @JsonProperty("probability") final double probability,
+      @JsonProperty("activateAfterMatches") final long activateAfterMatches,
+      @JsonProperty("maxApplications") final Long maxApplications,
+      @JsonProperty("activeFor") final Duration activeFor,
+      @JsonProperty("rateLimit") final RateLimit rateLimit,
+      @JsonProperty("randomSeed") final Long randomSeed) {
     this.startMode = startMode == null ? StartMode.AUTOMATIC : startMode;
     this.probability = probability == 0.0d ? 1.0d : probability;
     this.activateAfterMatches = activateAfterMatches;
@@ -92,8 +90,8 @@ public record ActivationPolicy(
 
   /**
    * Returns a policy that fires on every match but starts in the {@link
-   * ChaosDiagnostics.ScenarioState#INACTIVE INACTIVE} state. The effect does not fire until
-   * {@link ChaosActivationHandle#start()} is called.
+   * ChaosDiagnostics.ScenarioState#INACTIVE INACTIVE} state. The effect does not fire until {@link
+   * ChaosActivationHandle#start()} is called.
    *
    * <p>Use for synchronised test phases where chaos must be enabled at a precise moment.
    */
@@ -123,8 +121,8 @@ public record ActivationPolicy(
   public enum StartMode {
 
     /**
-     * The scenario transitions to {@link ChaosDiagnostics.ScenarioState#ACTIVE ACTIVE}
-     * immediately upon registration. The effect fires on the first qualifying match.
+     * The scenario transitions to {@link ChaosDiagnostics.ScenarioState#ACTIVE ACTIVE} immediately
+     * upon registration. The effect fires on the first qualifying match.
      */
     AUTOMATIC,
 
@@ -149,10 +147,10 @@ public record ActivationPolicy(
 
     /**
      * @param permits maximum effect applications allowed within one {@code window}; must be {@code
-     *                > 0}
-     * @param window  rolling window duration; must be positive
+     *     > 0}
+     * @param window rolling window duration; must be positive
      * @throws IllegalArgumentException if {@code permits <= 0} or {@code window} is null, zero, or
-     *                                  negative
+     *     negative
      */
     public RateLimit {
       if (permits <= 0) {

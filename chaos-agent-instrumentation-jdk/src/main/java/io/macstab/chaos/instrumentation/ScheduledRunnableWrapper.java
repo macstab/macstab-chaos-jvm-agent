@@ -7,7 +7,7 @@ final class ScheduledRunnableWrapper implements Runnable {
   private final Runnable delegate;
   private final boolean periodic;
 
-  ScheduledRunnableWrapper(Object executor, Runnable delegate, boolean periodic) {
+  ScheduledRunnableWrapper(final Object executor, final Runnable delegate, final boolean periodic) {
     this.executor = executor;
     this.delegate = delegate;
     this.periodic = periodic;
@@ -20,7 +20,12 @@ final class ScheduledRunnableWrapper implements Runnable {
         delegate.run();
       }
     } catch (Throwable throwable) {
-      throw new IllegalStateException("scheduled runnable chaos hook failed", throwable);
+      sneakyThrow(throwable);
     }
+  }
+
+  @SuppressWarnings("unchecked")
+  private static <T extends Throwable> void sneakyThrow(final Throwable throwable) throws T {
+    throw (T) throwable;
   }
 }

@@ -8,7 +8,7 @@ final class CompositeActivationHandle implements ChaosActivationHandle {
   private final String id;
   private final List<ChaosActivationHandle> delegates;
 
-  CompositeActivationHandle(String id, List<ChaosActivationHandle> delegates) {
+  CompositeActivationHandle(final String id, final List<ChaosActivationHandle> delegates) {
     this.id = id;
     this.delegates = List.copyOf(delegates);
   }

@@ -36,7 +36,7 @@ final class FeatureSet {
     }
   }
 
-  boolean isVirtualThread(Thread thread) {
+  boolean isVirtualThread(final Thread thread) {
     if (thread == null || isVirtualMethod == null) {
       return false;
     }

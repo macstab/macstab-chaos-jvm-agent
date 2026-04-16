@@ -44,8 +44,8 @@ public enum OperationType {
   THREAD_START,
 
   /**
-   * Fires before a virtual thread (Project Loom) is started. Requires JDK 21+ at runtime; the
-   * agent probes availability at startup and rejects activation on older runtimes.
+   * Fires before a virtual thread (Project Loom) is started. Requires JDK 21+ at runtime; the agent
+   * probes availability at startup and rejects activation on older runtimes.
    *
    * <p>Use with {@link ChaosSelector.ThreadSelector} filtered to {@link
    * ChaosSelector.ThreadKind#VIRTUAL}.
@@ -55,22 +55,21 @@ public enum OperationType {
   // ── Executor operations ─────────────────────────────────────────────────────
 
   /**
-   * Fires when a task is submitted to an {@link java.util.concurrent.ExecutorService} via
-   * {@code submit()}, {@code execute()}, or {@code invokeAll()}. Chaos here can delay or reject
-   * task acceptance before the task enters the work queue.
+   * Fires when a task is submitted to an {@link java.util.concurrent.ExecutorService} via {@code
+   * submit()}, {@code execute()}, or {@code invokeAll()}. Chaos here can delay or reject task
+   * acceptance before the task enters the work queue.
    */
   EXECUTOR_SUBMIT,
 
   /**
-   * Fires just before a worker thread in an executor pool runs a submitted task. Chaos here
-   * applies latency or rejections to the execution phase, independent of submission.
+   * Fires just before a worker thread in an executor pool runs a submitted task. Chaos here applies
+   * latency or rejections to the execution phase, independent of submission.
    */
   EXECUTOR_WORKER_RUN,
 
   /**
-   * Fires when {@link java.util.concurrent.ExecutorService#shutdown()} or
-   * {@code shutdownNow()} is called. Chaos here can delay or prevent orderly shutdown of executor
-   * services.
+   * Fires when {@link java.util.concurrent.ExecutorService#shutdown()} or {@code shutdownNow()} is
+   * called. Chaos here can delay or prevent orderly shutdown of executor services.
    */
   EXECUTOR_SHUTDOWN,
 
@@ -83,9 +82,9 @@ public enum OperationType {
   // ── ForkJoin ────────────────────────────────────────────────────────────────
 
   /**
-   * Fires before a {@link java.util.concurrent.ForkJoinTask} executes within a
-   * {@link java.util.concurrent.ForkJoinPool}. Covers tasks submitted via
-   * {@code ForkJoinPool.commonPool()} as well as custom pools, including the pool backing parallel
+   * Fires before a {@link java.util.concurrent.ForkJoinTask} executes within a {@link
+   * java.util.concurrent.ForkJoinPool}. Covers tasks submitted via {@code
+   * ForkJoinPool.commonPool()} as well as custom pools, including the pool backing parallel
    * streams.
    */
   FORK_JOIN_TASK_RUN,
@@ -109,8 +108,8 @@ public enum OperationType {
   // ── Blocking queues ─────────────────────────────────────────────────────────
 
   /**
-   * Fires before a blocking {@link java.util.concurrent.BlockingQueue#put} call. Chaos here can
-   * add latency to producers, simulating a slow or backpressure-constrained queue.
+   * Fires before a blocking {@link java.util.concurrent.BlockingQueue#put} call. Chaos here can add
+   * latency to producers, simulating a slow or backpressure-constrained queue.
    */
   QUEUE_PUT,
 
@@ -138,8 +137,8 @@ public enum OperationType {
    * Fires before {@link java.util.concurrent.CompletableFuture#complete} is called. Chaos here can
    * suppress normal completion or replace it with an exceptional completion.
    *
-   * <p>Use with {@link ChaosSelector.AsyncSelector} and
-   * {@link ChaosEffect.ExceptionalCompletionEffect}.
+   * <p>Use with {@link ChaosSelector.AsyncSelector} and {@link
+   * ChaosEffect.ExceptionalCompletionEffect}.
    */
   ASYNC_COMPLETE,
 
@@ -152,9 +151,9 @@ public enum OperationType {
   // ── JVM shutdown ────────────────────────────────────────────────────────────
 
   /**
-   * Fires when a shutdown hook thread is registered via
-   * {@link Runtime#addShutdownHook(Thread)}. Chaos here can delay registration, reject hooks, or
-   * substitute a wrapped implementation to observe shutdown sequencing.
+   * Fires when a shutdown hook thread is registered via {@link Runtime#addShutdownHook(Thread)}.
+   * Chaos here can delay registration, reject hooks, or substitute a wrapped implementation to
+   * observe shutdown sequencing.
    */
   SHUTDOWN_HOOK_REGISTER,
 
@@ -184,9 +183,9 @@ public enum OperationType {
   // ── Method-level interception ───────────────────────────────────────────────
 
   /**
-   * Fires before the body of an instrumented method executes. Combined with
-   * {@link ChaosEffect.ExceptionInjectionEffect} this injects any exception into any method in any
-   * library without modifying its bytecode at the source level.
+   * Fires before the body of an instrumented method executes. Combined with {@link
+   * ChaosEffect.ExceptionInjectionEffect} this injects any exception into any method in any library
+   * without modifying its bytecode at the source level.
    *
    * <p>Used exclusively with {@link ChaosSelector.MethodSelector}.
    *
@@ -210,9 +209,9 @@ public enum OperationType {
   // ── Monitor and parking ─────────────────────────────────────────────────────
 
   /**
-   * Fires before a thread acquires a {@code synchronized} monitor or calls
-   * {@link Object#wait()}. Chaos here can inject latency before lock acquisition to simulate lock
-   * contention and convoy effects.
+   * Fires before a thread acquires a {@code synchronized} monitor or calls {@link Object#wait()}.
+   * Chaos here can inject latency before lock acquisition to simulate lock contention and convoy
+   * effects.
    *
    * <p>Used exclusively with {@link ChaosSelector.MonitorSelector}.
    */
@@ -230,8 +229,8 @@ public enum OperationType {
   // ── JVM runtime services ────────────────────────────────────────────────────
 
   /**
-   * Fires on every call to {@link System#currentTimeMillis()}. Used with
-   * {@link ChaosEffect.ClockSkewEffect} to apply fixed, drifting, or frozen clock offsets and test
+   * Fires on every call to {@link System#currentTimeMillis()}. Used with {@link
+   * ChaosEffect.ClockSkewEffect} to apply fixed, drifting, or frozen clock offsets and test
    * time-dependent logic.
    *
    * <p>Used exclusively with {@link ChaosSelector.JvmRuntimeSelector}.
@@ -239,8 +238,8 @@ public enum OperationType {
   SYSTEM_CLOCK_MILLIS,
 
   /**
-   * Fires on every call to {@link System#nanoTime()}. A backward skew intentionally violates
-   * the monotonicity contract to expose assumptions in timing loops and profiling code.
+   * Fires on every call to {@link System#nanoTime()}. A backward skew intentionally violates the
+   * monotonicity contract to expose assumptions in timing loops and profiling code.
    *
    * <p>Used exclusively with {@link ChaosSelector.JvmRuntimeSelector}.
    */
@@ -257,8 +256,8 @@ public enum OperationType {
 
   /**
    * Fires when {@link System#exit(int)} or {@link Runtime#halt(int)} is called. Chaos here can
-   * delay or suppress process exit, allowing assertions to run after code that calls
-   * {@code System.exit} in error paths.
+   * delay or suppress process exit, allowing assertions to run after code that calls {@code
+   * System.exit} in error paths.
    *
    * <p>Used exclusively with {@link ChaosSelector.JvmRuntimeSelector}.
    */
@@ -266,8 +265,8 @@ public enum OperationType {
 
   /**
    * Fires on every call to {@link java.lang.reflect.Method#invoke}. Chaos here can inject latency
-   * into reflection-heavy frameworks (Spring, Hibernate, Jackson) or simulate
-   * {@link java.lang.reflect.InvocationTargetException} wrapping.
+   * into reflection-heavy frameworks (Spring, Hibernate, Jackson) or simulate {@link
+   * java.lang.reflect.InvocationTargetException} wrapping.
    *
    * <p>Used exclusively with {@link ChaosSelector.JvmRuntimeSelector}.
    */
@@ -282,9 +281,9 @@ public enum OperationType {
   DIRECT_BUFFER_ALLOCATE,
 
   /**
-   * Fires before {@link java.io.ObjectInputStream#readObject()} deserializes an object graph.
-   * Chaos here can inject deserialization exceptions to test error handling in RPC layers and
-   * caches that rely on Java serialization.
+   * Fires before {@link java.io.ObjectInputStream#readObject()} deserializes an object graph. Chaos
+   * here can inject deserialization exceptions to test error handling in RPC layers and caches that
+   * rely on Java serialization.
    *
    * <p>Used exclusively with {@link ChaosSelector.JvmRuntimeSelector}.
    */
@@ -293,9 +292,9 @@ public enum OperationType {
   // ── Agent lifecycle ─────────────────────────────────────────────────────────
 
   /**
-   * Internal sentinel operation type used by the runtime to signal stressor lifecycle events.
-   * Not set by callers — present in {@link InvocationContext} only when evaluating
-   * {@link ChaosSelector.StressSelector} scenarios at activation time.
+   * Internal sentinel operation type used by the runtime to signal stressor lifecycle events. Not
+   * set by callers — present in the runtime invocation context only when evaluating {@link
+   * ChaosSelector.StressSelector} scenarios at activation time.
    */
   LIFECYCLE,
 }
