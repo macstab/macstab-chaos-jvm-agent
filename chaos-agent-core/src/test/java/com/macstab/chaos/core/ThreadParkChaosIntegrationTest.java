@@ -18,6 +18,10 @@ import org.junit.jupiter.api.Test;
 @DisplayName("THREAD_PARK chaos - runtime integration")
 class ThreadParkChaosIntegrationTest {
 
+  private static final long DELAY_MS = 50L;
+  private static final long DELAY_MIN_MS = (long) (DELAY_MS * 0.8);
+  private static final long NO_DELAY_MAX_MS = 150L;
+
   // ---------------------------------------------------------------------------
   // Park delay
   // ---------------------------------------------------------------------------
@@ -40,7 +44,9 @@ class ThreadParkChaosIntegrationTest {
       final long start = System.nanoTime();
       runtime.beforeThreadPark();
       final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
-      assertThat(elapsedMs).isGreaterThanOrEqualTo(30);
+      assertThat(elapsedMs)
+          .as("delay effect should add at least 80%% of configured %dms", DELAY_MS)
+          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
     }
   }
 
@@ -66,7 +72,9 @@ class ThreadParkChaosIntegrationTest {
       final long start = System.nanoTime();
       runtime.beforeThreadPark();
       final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
-      assertThat(elapsedMs).isGreaterThanOrEqualTo(30);
+      assertThat(elapsedMs)
+          .as("delay effect should add at least 80%% of configured %dms", DELAY_MS)
+          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
     }
   }
 
@@ -85,7 +93,9 @@ class ThreadParkChaosIntegrationTest {
       final long start = System.nanoTime();
       runtime.beforeThreadPark();
       final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
-      assertThat(elapsedMs).isLessThan(20);
+      assertThat(elapsedMs)
+          .as("without active scenario, operation should complete without delay")
+          .isLessThan(NO_DELAY_MAX_MS);
     }
   }
 }

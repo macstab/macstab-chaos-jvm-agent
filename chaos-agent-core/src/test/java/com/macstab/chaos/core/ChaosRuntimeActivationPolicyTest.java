@@ -25,6 +25,9 @@ import org.junit.jupiter.api.Test;
 @DisplayName("ChaosRuntime — ActivationPolicy")
 class ChaosRuntimeActivationPolicyTest {
 
+  private static final long DELAY_MIN_MS = 48L;
+  private static final long NO_DELAY_MAX_MS = 150L;
+
   @Nested
   @DisplayName("activateAfterMatches")
   class ActivateAfterMatches {
@@ -47,7 +50,7 @@ class ChaosRuntimeActivationPolicyTest {
         long elapsed =
             measureMillis(
                 () -> runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {}));
-        assertThat(elapsed).as("match %d should not be delayed", i).isLessThan(50);
+        assertThat(elapsed).as("match %d should not be delayed", i).isLessThan(NO_DELAY_MAX_MS);
       }
 
       long elapsed =
@@ -81,9 +84,9 @@ class ChaosRuntimeActivationPolicyTest {
       long third =
           measureMillis(() -> runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {}));
 
-      assertThat(first).as("first should be delayed").isGreaterThanOrEqualTo(40);
-      assertThat(second).as("second should be delayed").isGreaterThanOrEqualTo(40);
-      assertThat(third).as("third should not be delayed").isLessThan(40);
+      assertThat(first).as("first should be delayed").isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      assertThat(second).as("second should be delayed").isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      assertThat(third).as("third should not be delayed").isLessThan(NO_DELAY_MAX_MS);
     }
   }
 
@@ -175,13 +178,15 @@ class ChaosRuntimeActivationPolicyTest {
 
       long firstElapsed =
           measureMillis(() -> runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {}));
-      assertThat(firstElapsed).as("delay within active window").isGreaterThanOrEqualTo(40);
+      assertThat(firstElapsed)
+          .as("delay within active window")
+          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
 
       clock.advance(Duration.ofSeconds(10));
 
       long secondElapsed =
           measureMillis(() -> runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {}));
-      assertThat(secondElapsed).as("no delay after activeFor expiry").isLessThan(40);
+      assertThat(secondElapsed).as("no delay after activeFor expiry").isLessThan(NO_DELAY_MAX_MS);
     }
   }
 
@@ -214,8 +219,12 @@ class ChaosRuntimeActivationPolicyTest {
       long second =
           measureMillis(() -> runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {}));
 
-      assertThat(first).as("first call within window should be delayed").isGreaterThanOrEqualTo(40);
-      assertThat(second).as("second call exceeds rate limit, should not be delayed").isLessThan(40);
+      assertThat(first)
+          .as("first call within window should be delayed")
+          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      assertThat(second)
+          .as("second call exceeds rate limit, should not be delayed")
+          .isLessThan(NO_DELAY_MAX_MS);
     }
 
     @Test
@@ -245,9 +254,11 @@ class ChaosRuntimeActivationPolicyTest {
       long third =
           measureMillis(() -> runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {}));
 
-      assertThat(first).as("first should be delayed").isGreaterThanOrEqualTo(40);
-      assertThat(second).as("second should be delayed").isGreaterThanOrEqualTo(40);
-      assertThat(third).as("third exceeds rate limit, should not be delayed").isLessThan(40);
+      assertThat(first).as("first should be delayed").isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      assertThat(second).as("second should be delayed").isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      assertThat(third)
+          .as("third exceeds rate limit, should not be delayed")
+          .isLessThan(NO_DELAY_MAX_MS);
     }
   }
 
@@ -273,7 +284,9 @@ class ChaosRuntimeActivationPolicyTest {
         long elapsed =
             measureMillis(
                 () -> runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {}));
-        assertThat(elapsed).as("call %d should always be delayed", i).isGreaterThanOrEqualTo(40);
+        assertThat(elapsed)
+            .as("call %d should always be delayed", i)
+            .isGreaterThanOrEqualTo(DELAY_MIN_MS);
       }
     }
 

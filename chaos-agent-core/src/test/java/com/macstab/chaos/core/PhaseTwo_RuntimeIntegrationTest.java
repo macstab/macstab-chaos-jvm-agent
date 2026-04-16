@@ -24,6 +24,10 @@ import org.junit.jupiter.api.Test;
 @DisplayName("Phase 2 ChaosRuntime interception")
 class PhaseTwo_RuntimeIntegrationTest {
 
+  private static final long DELAY_MS = 50L;
+  private static final long DELAY_MIN_MS = (long) (DELAY_MS * 0.8);
+  private static final long NO_DELAY_MAX_MS = 150L;
+
   // ---------------------------------------------------------------------------
   // GC request
   // ---------------------------------------------------------------------------
@@ -68,7 +72,9 @@ class PhaseTwo_RuntimeIntegrationTest {
       final boolean result = runtime.beforeGcRequest();
       final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
       assertThat(result).isFalse();
-      assertThat(elapsedMs).isGreaterThanOrEqualTo(30);
+      assertThat(elapsedMs)
+          .as("delay effect should add at least 80%% of configured %dms", DELAY_MS)
+          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
     }
   }
 
@@ -148,7 +154,9 @@ class PhaseTwo_RuntimeIntegrationTest {
       final boolean result = runtime.beforeNioSelect(null, 1000L);
       final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
       assertThat(result).isFalse();
-      assertThat(elapsedMs).isGreaterThanOrEqualTo(30);
+      assertThat(elapsedMs)
+          .as("delay effect should add at least 80%% of configured %dms", DELAY_MS)
+          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
     }
   }
 
@@ -244,7 +252,9 @@ class PhaseTwo_RuntimeIntegrationTest {
       final long start = System.nanoTime();
       runtime.beforeObjectDeserialize(null);
       final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
-      assertThat(elapsedMs).isGreaterThanOrEqualTo(30);
+      assertThat(elapsedMs)
+          .as("delay effect should add at least 80%% of configured %dms", DELAY_MS)
+          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
     }
   }
 
@@ -307,7 +317,9 @@ class PhaseTwo_RuntimeIntegrationTest {
       final long start = System.nanoTime();
       runtime.beforeZipInflate();
       final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
-      assertThat(elapsedMs).isGreaterThanOrEqualTo(30);
+      assertThat(elapsedMs)
+          .as("delay effect should add at least 80%% of configured %dms", DELAY_MS)
+          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
     }
 
     @Test
@@ -339,7 +351,9 @@ class PhaseTwo_RuntimeIntegrationTest {
       final long start = System.nanoTime();
       runtime.beforeZipDeflate();
       final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
-      assertThat(elapsedMs).isGreaterThanOrEqualTo(30);
+      assertThat(elapsedMs)
+          .as("delay effect should add at least 80%% of configured %dms", DELAY_MS)
+          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
     }
 
     @Test
@@ -409,7 +423,9 @@ class PhaseTwo_RuntimeIntegrationTest {
       final long start = System.nanoTime();
       runtime.beforeReflectionInvoke(null, null);
       final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
-      assertThat(elapsedMs).isGreaterThanOrEqualTo(30);
+      assertThat(elapsedMs)
+          .as("delay effect should add at least 80%% of configured %dms", DELAY_MS)
+          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
     }
 
     @Test
@@ -466,7 +482,9 @@ class PhaseTwo_RuntimeIntegrationTest {
       final long start = System.nanoTime();
       runtime.beforeSocketConnect(null, null, 0);
       final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
-      assertThat(elapsedMs).isGreaterThanOrEqualTo(30);
+      assertThat(elapsedMs)
+          .as("delay effect should add at least 80%% of configured %dms", DELAY_MS)
+          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
     }
   }
 
@@ -527,7 +545,9 @@ class PhaseTwo_RuntimeIntegrationTest {
       final long start = System.nanoTime();
       runtime.beforeSocketAccept(null);
       final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
-      assertThat(elapsedMs).isGreaterThanOrEqualTo(30);
+      assertThat(elapsedMs)
+          .as("delay effect should add at least 80%% of configured %dms", DELAY_MS)
+          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
     }
 
     @Test
@@ -576,7 +596,9 @@ class PhaseTwo_RuntimeIntegrationTest {
       final long start = System.nanoTime();
       runtime.beforeSocketRead(null);
       final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
-      assertThat(elapsedMs).isGreaterThanOrEqualTo(30);
+      assertThat(elapsedMs)
+          .as("delay effect should add at least 80%% of configured %dms", DELAY_MS)
+          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
     }
 
     @Test
@@ -626,7 +648,9 @@ class PhaseTwo_RuntimeIntegrationTest {
       final long start = System.nanoTime();
       runtime.beforeSocketWrite(null, 64);
       final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
-      assertThat(elapsedMs).isGreaterThanOrEqualTo(30);
+      assertThat(elapsedMs)
+          .as("delay effect should add at least 80%% of configured %dms", DELAY_MS)
+          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
     }
 
     @Test
@@ -676,7 +700,9 @@ class PhaseTwo_RuntimeIntegrationTest {
       final long start = System.nanoTime();
       runtime.beforeSocketClose(null);
       final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
-      assertThat(elapsedMs).isGreaterThanOrEqualTo(30);
+      assertThat(elapsedMs)
+          .as("delay effect should add at least 80%% of configured %dms", DELAY_MS)
+          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
     }
 
     @Test
@@ -724,7 +750,9 @@ class PhaseTwo_RuntimeIntegrationTest {
       final long start = System.nanoTime();
       runtime.beforeJndiLookup(null, "java:comp/env/test");
       final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
-      assertThat(elapsedMs).isGreaterThanOrEqualTo(30);
+      assertThat(elapsedMs)
+          .as("delay effect should add at least 80%% of configured %dms", DELAY_MS)
+          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
     }
 
     @Test
@@ -757,7 +785,9 @@ class PhaseTwo_RuntimeIntegrationTest {
       final long start = System.nanoTime();
       runtime.beforeJmxGetAttr(null, null, "VmName");
       final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
-      assertThat(elapsedMs).isGreaterThanOrEqualTo(30);
+      assertThat(elapsedMs)
+          .as("delay effect should add at least 80%% of configured %dms", DELAY_MS)
+          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
     }
 
     @Test
@@ -774,7 +804,9 @@ class PhaseTwo_RuntimeIntegrationTest {
       final long start = System.nanoTime();
       runtime.beforeJmxInvoke(null, null, "gc");
       final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
-      assertThat(elapsedMs).isGreaterThanOrEqualTo(30);
+      assertThat(elapsedMs)
+          .as("delay effect should add at least 80%% of configured %dms", DELAY_MS)
+          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
     }
 
     @Test
@@ -830,7 +862,9 @@ class PhaseTwo_RuntimeIntegrationTest {
       final long start = System.nanoTime();
       runtime.beforeNativeLibraryLoad("nonexistent_chaos_lib_xyz");
       final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
-      assertThat(elapsedMs).isGreaterThanOrEqualTo(30);
+      assertThat(elapsedMs)
+          .as("delay effect should add at least 80%% of configured %dms", DELAY_MS)
+          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
     }
 
     @Test
