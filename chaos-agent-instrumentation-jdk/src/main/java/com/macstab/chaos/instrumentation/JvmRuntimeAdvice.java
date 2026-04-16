@@ -295,8 +295,12 @@ final class JvmRuntimeAdvice {
    * <p>Instrumented as a static method — no {@code @Advice.This}.
    */
   static final class NativeLibraryLoadAdvice {
+    /**
+     * {@code Runtime.loadLibrary0(Class caller, String libname)} — argument 0 is the calling {@code
+     * Class}, argument 1 is the library name string.
+     */
     @Advice.OnMethodEnter
-    static void enter(@Advice.Argument(0) final String libraryName) throws Throwable {
+    static void enter(@Advice.Argument(1) final String libraryName) throws Throwable {
       BootstrapDispatcher.beforeNativeLibraryLoad(libraryName);
     }
   }
