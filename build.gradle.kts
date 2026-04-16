@@ -18,7 +18,7 @@ plugins {
 
 apply(plugin = "com.diffplug.spotless")
 
-group = "io.macstab.chaos"
+group = "com.macstab.chaos"
 version = "0.1.0-SNAPSHOT"
 
 allprojects {

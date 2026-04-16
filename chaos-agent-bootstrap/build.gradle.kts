@@ -16,9 +16,9 @@ tasks.jar {
     inputs.files(runtimeClasspath)
     manifest {
         attributes(
-            "Automatic-Module-Name" to "io.macstab.chaos.agent.bootstrap",
-            "Premain-Class" to "io.macstab.chaos.bootstrap.ChaosAgentBootstrap",
-            "Agent-Class" to "io.macstab.chaos.bootstrap.ChaosAgentBootstrap",
+            "Automatic-Module-Name" to "com.macstab.chaos.agent.bootstrap",
+            "Premain-Class" to "com.macstab.chaos.bootstrap.ChaosAgentBootstrap",
+            "Agent-Class" to "com.macstab.chaos.bootstrap.ChaosAgentBootstrap",
             "Can-Redefine-Classes" to "true",
             "Can-Retransform-Classes" to "true",
         )
