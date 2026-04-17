@@ -7,7 +7,7 @@ This directory is organized by architectural boundary, not by package inventory.
 - Read [Bootstrap](bootstrap.md), [Core](core.md), and [Instrumentation](instrumentation.md) for the internal mechanics that make the agent behave the way it does at runtime.
 - Read [Startup Config](startup-config.md) for configuration resolution and serialization behavior.
 - Read [Testkit](testkit.md) for test-local installation and JUnit integration behavior.
-- [Startup Confi](startup-confi.md) is a compatibility alias because that spelling was explicitly requested.
+
 
 Stable external contract surface:
 
