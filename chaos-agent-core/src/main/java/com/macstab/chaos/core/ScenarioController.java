@@ -12,6 +12,7 @@ import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.SplittableRandom;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
@@ -66,7 +67,7 @@ final class ScenarioController {
   private final String sessionId;
   private final Clock clock;
   private final ObservabilityBus observabilityBus;
-  private final Supplier<Optional<Instrumentation>> instrumentationSupplier;
+  private final StressorFactory stressorFactory;
   private final ManualGate gate = new ManualGate();
   private final AtomicBoolean started = new AtomicBoolean(false);
   private final AtomicLong matchedCount = new AtomicLong();
@@ -78,6 +79,8 @@ final class ScenarioController {
   private volatile ClockSkewState clockSkewState;
   private volatile long rateWindowStartMillis;
   private volatile long rateWindowPermits;
+  /** Base seed for PRNG draws; derived once from the scenario's randomSeed (or 0). */
+  private final long baseSeed;
 
   ScenarioController(
       final ChaosScenario scenario,
@@ -91,7 +94,11 @@ final class ScenarioController {
     this.sessionId = sessionId;
     this.clock = clock;
     this.observabilityBus = observabilityBus;
-    this.instrumentationSupplier = instrumentationSupplier;
+    this.stressorFactory = new StressorFactory(instrumentationSupplier);
+    this.baseSeed =
+        scenario.activationPolicy().randomSeed() != null
+            ? scenario.activationPolicy().randomSeed()
+            : 0L;
     // Task 1: Always start REGISTERED regardless of start mode. The start() call
     // transitions to ACTIVE. Setting ACTIVE here while started=false produces a
     // diagnostic state that is observably wrong (ACTIVE but evaluating returns null).
@@ -203,7 +210,7 @@ final class ScenarioController {
     started.set(true);
     state = ChaosDiagnostics.ScenarioState.ACTIVE;
     reason = "started";
-    stressor = createStressorIfNeeded();
+    stressor = stressorFactory.createIfNeeded(scenario.effect());
     if (scenario.effect() instanceof ChaosEffect.ClockSkewEffect skewEffect) {
       clockSkewState =
           new ClockSkewState(skewEffect, System.currentTimeMillis(), System.nanoTime());
@@ -405,54 +412,6 @@ final class ScenarioController {
     return clockSkewState;
   }
 
-  private ManagedStressor createStressorIfNeeded() {
-    if (scenario.effect() instanceof ChaosEffect.HeapPressureEffect heapPressureEffect) {
-      return new HeapPressureStressor(heapPressureEffect);
-    }
-    if (scenario.effect() instanceof ChaosEffect.KeepAliveEffect keepAliveEffect) {
-      return new KeepAliveStressor(keepAliveEffect);
-    }
-    if (scenario.effect() instanceof ChaosEffect.MetaspacePressureEffect metaspacePressureEffect) {
-      return new MetaspacePressureStressor(metaspacePressureEffect);
-    }
-    if (scenario.effect()
-        instanceof ChaosEffect.DirectBufferPressureEffect directBufferPressureEffect) {
-      return new DirectBufferPressureStressor(directBufferPressureEffect);
-    }
-    if (scenario.effect() instanceof ChaosEffect.GcPressureEffect gcPressureEffect) {
-      return new GcPressureStressor(gcPressureEffect);
-    }
-    if (scenario.effect() instanceof ChaosEffect.FinalizerBacklogEffect finalizerBacklogEffect) {
-      return new FinalizerBacklogStressor(finalizerBacklogEffect);
-    }
-    if (scenario.effect() instanceof ChaosEffect.DeadlockEffect deadlockEffect) {
-      return new DeadlockStressor(deadlockEffect);
-    }
-    if (scenario.effect() instanceof ChaosEffect.ThreadLeakEffect threadLeakEffect) {
-      return new ThreadLeakStressor(threadLeakEffect);
-    }
-    if (scenario.effect() instanceof ChaosEffect.ThreadLocalLeakEffect threadLocalLeakEffect) {
-      return new ThreadLocalLeakStressor(threadLocalLeakEffect);
-    }
-    if (scenario.effect() instanceof ChaosEffect.MonitorContentionEffect monitorContentionEffect) {
-      return new MonitorContentionStressor(monitorContentionEffect);
-    }
-    if (scenario.effect() instanceof ChaosEffect.CodeCachePressureEffect codeCachePressureEffect) {
-      return new CodeCachePressureStressor(codeCachePressureEffect);
-    }
-    if (scenario.effect() instanceof ChaosEffect.SafepointStormEffect safepointStormEffect) {
-      return new SafepointStormStressor(safepointStormEffect, instrumentationSupplier.get());
-    }
-    if (scenario.effect()
-        instanceof ChaosEffect.StringInternPressureEffect stringInternPressureEffect) {
-      return new StringInternPressureStressor(stringInternPressureEffect);
-    }
-    if (scenario.effect()
-        instanceof ChaosEffect.ReferenceQueueFloodEffect referenceQueueFloodEffect) {
-      return new ReferenceQueueFloodStressor(referenceQueueFloodEffect);
-    }
-    return null;
-  }
 
   private void closeStressor() {
     final ManagedStressor current = stressor;
@@ -495,13 +454,7 @@ final class ScenarioController {
     if (probability >= 1.0d) {
       return true;
     }
-    final long seed =
-        scenario.activationPolicy().randomSeed() == null
-            ? 0L
-            : scenario.activationPolicy().randomSeed();
-    final double draw =
-        new java.util.SplittableRandom(seed ^ matched ^ scenario.id().hashCode()).nextDouble();
-    return draw <= probability;
+    return splittableRandom(matched).nextDouble() <= probability;
   }
 
   private long sampleDelayMillis(final long matched) {
@@ -513,12 +466,22 @@ final class ScenarioController {
     if (min == max) {
       return min;
     }
-    final long seed =
-        scenario.activationPolicy().randomSeed() == null
-            ? 0L
-            : scenario.activationPolicy().randomSeed();
-    return new java.util.SplittableRandom(seed ^ matched ^ scenario.id().hashCode())
-        .nextLong(min, max + 1);
+    return splittableRandom(matched).nextLong(min, max + 1);
+  }
+
+  /**
+   * Returns a {@link SplittableRandom} seeded with {@code baseSeed ^ matched ^ scenarioIdHash}.
+   *
+   * <p>A new instance is constructed per call because {@link SplittableRandom} is not thread-safe.
+   * The seed incorporates {@code matched} so that successive invocations produce different draws
+   * even when the scenario's {@link com.macstab.chaos.api.ActivationPolicy#randomSeed()} is fixed,
+   * giving reproducible-but-varied sampling across the lifetime of the scenario.
+   *
+   * @param matched the current value of {@link #matchedCount} at the time of evaluation
+   * @return a freshly seeded {@link SplittableRandom}; never {@code null}
+   */
+  private SplittableRandom splittableRandom(final long matched) {
+    return new SplittableRandom(baseSeed ^ matched ^ scenario.id().hashCode());
   }
 
   private Duration gateTimeout() {
