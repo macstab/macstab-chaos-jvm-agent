@@ -71,28 +71,83 @@ Reference: JVMTI §11.14 `SetNativeMethodPrefix` — https://docs.oracle.com/en/
 
 > *Drop-in support for every Java backend stack.*
 
-### ⬜ 2.1 Spring Boot Auto-Configuration
-**Priority: high — 4 days**
+### ⬜ 2.1 Spring Boot Test Starter
+**Priority: high — 2 days**
 
-New module: `chaos-agent-spring-boot-starter`
+New module: `chaos-agent-spring-boot-test-starter` (`testImplementation` scope)
+
+The test starter builds on `chaos-agent-testkit` and integrates into the `@SpringBootTest` lifecycle.
+Its contract is narrow and safe: the agent self-attaches once per test JVM, each test gets an isolated
+`ChaosSession`, and everything is cleaned up by the JUnit extension.
+
+Deliverables:
+- `@ChaosTest` — meta-annotation combining `@SpringBootTest` + `@ExtendWith(ChaosAgentExtension.class)`
+- `ChaosTestAutoConfiguration` — `@ConditionalOnClass` + `@TestConfiguration` exposing `ChaosControlPlane` bean
+- `ChaosSession` method parameter injection for `@SpringBootTest` test methods (via `ParameterResolver`)
+- `ChaosAgentInitializer` — `ApplicationContextInitializer` that calls `ChaosPlatform.installLocally()` before context refresh
+
+Usage:
+```java
+@ChaosTest
+class OrderServiceChaosTest {
+
+    @Test
+    void slowDatabaseRejectsOrdersGracefully(ChaosSession chaos) {
+        chaos.activate(ChaosScenario.builder()
+            .id("slow-jdbc")
+            .selector(ChaosSelector.executor(NamePattern.prefix("HikariPool")))
+            .effect(ChaosEffect.delay(Duration.ofSeconds(3)))
+            .build());
+
+        try (var binding = chaos.bind()) {
+            assertThrows(OrderTimeoutException.class,
+                () -> orderService.placeOrder(testOrder));
+        }
+    }
+}
+```
+
+---
+
+### ⬜ 2.2 Spring Boot Runtime Starter
+**Priority: medium — 3 days**
+
+New module: `chaos-agent-spring-boot-starter` (`implementation` scope)
+
+The runtime starter is for deployment-time chaos engineering: pre-production soak tests, game days,
+and controlled production experiments. It has no test APIs — only externally driven activation via
+Actuator or startup config from a config server.
+
+This is explicitly separate from the test starter. Mixing test-lifecycle APIs with runtime deployment
+creates blast-radius risk if a scenario configuration is accidentally carried into a long-lived process.
+
+Deliverables:
+- `ChaosAutoConfiguration` — `@ConditionalOnProperty("macstab.chaos.enabled")`; disabled by default
+- `ChaosProperties` — `@ConfigurationProperties("macstab.chaos")`
+- `ChaosActuatorEndpoint` — `/actuator/chaos`
+  - `GET /actuator/chaos` → full `ChaosDiagnostics.snapshot()` as JSON
+  - `POST /actuator/chaos/activate` → activate a named plan from the registered plan registry
+  - `POST /actuator/chaos/stop/{scenarioId}` → stop a running scenario by ID
+  - `POST /actuator/chaos/stop-all` → stop all JVM-scoped scenarios
+- Spring context lifecycle binding — auto-close all JVM-scoped scenarios on `ApplicationContext` close
+- `@ConditionalOnProperty` guard — all chaos beans off unless `macstab.chaos.enabled=true` is explicit
 
 ```yaml
 macstab:
   chaos:
-    enabled: true
-    config-file: classpath:chaos-plan.json
+    enabled: true                          # explicit opt-in required
+    config-file: classpath:chaos-plan.json # optional startup plan
     debug-dump-on-start: false
+    actuator:
+      enabled: true                        # Actuator endpoint, off by default
 ```
 
-Deliverables:
-- `ChaosAutoConfiguration` — `@ConditionalOnClass(ChaosControlPlane.class)`
-- `ChaosProperties` — `@ConfigurationProperties("macstab.chaos")`
-- `ChaosActuatorEndpoint` — `/actuator/chaos` (GET snapshot, POST activate/stop)
-- Spring context lifecycle binding — auto-close all JVM-scoped scenarios on `ApplicationContext` close
+**Security note**: The Actuator endpoint is protected by Spring Security if present. Operators must
+not expose `/actuator/chaos` to the public internet without authentication.
 
 ---
 
-### ⬜ 2.2 HTTP Client Selectors
+### ⬜ 2.3 HTTP Client Selectors
 **Priority: high — 5 days**
 
 New `OperationType` values: `HTTP_CLIENT_SEND`, `HTTP_CLIENT_SEND_ASYNC`
@@ -113,7 +168,7 @@ Pattern matching on URL host + path via `targetName` field of `InvocationContext
 
 ---
 
-### ⬜ 2.3 JDBC / Connection Pool Selectors
+### ⬜ 2.4 JDBC / Connection Pool Selectors
 **Priority: high — 4 days**
 
 New `OperationType` values:
@@ -211,11 +266,12 @@ Week 1  ├── ✅ 1.1  DeadlockStressor safeguard            (2h)
         ├── ⬜ 1.2  Clock skew native prefix fix           (1d)
         └── ⬜ 1.3  Missing concurrency tests              (1d)
 
-Week 2  └── ⬜ 2.1  Spring Boot starter + Actuator        (4d)
+Week 2  ├── ⬜ 2.1  Spring Boot test starter               (2d)
+        └── ⬜ 2.2  Spring Boot runtime starter            (3d)
 
-Week 3  └── ⬜ 2.2  HTTP client selectors                  (5d)
+Week 3  └── ⬜ 2.3  HTTP client selectors                  (5d)
 
-Week 4  └── ⬜ 2.3  JDBC / HikariCP selectors              (4d)
+Week 4  └── ⬜ 2.4  JDBC / HikariCP selectors              (4d)
 
 Week 5  ├── ⬜ 3.1  JMH benchmarks                        (1d)
         └── ⬜ 3.2  ChaosRuntime refactor                  (1d)
