@@ -43,7 +43,7 @@ class ChaosRuntimeActivationPolicyTest {
               .effect(ChaosEffect.delay(Duration.ofMillis(80)))
               .activationPolicy(
                   new ActivationPolicy(
-                      ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 3, null, null, null, null))
+                      ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 3, null, null, null, null, false))
               .build());
 
       for (int i = 0; i < 3; i++) {
@@ -74,7 +74,7 @@ class ChaosRuntimeActivationPolicyTest {
               .effect(ChaosEffect.delay(Duration.ofMillis(60)))
               .activationPolicy(
                   new ActivationPolicy(
-                      ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 0, 2L, null, null, null))
+                      ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 0, 2L, null, null, null, false))
               .build());
 
       long first =
@@ -173,7 +173,7 @@ class ChaosRuntimeActivationPolicyTest {
                       null,
                       Duration.ofSeconds(5),
                       null,
-                      null))
+                      null, false))
               .build());
 
       long firstElapsed =
@@ -211,7 +211,8 @@ class ChaosRuntimeActivationPolicyTest {
                       null,
                       null,
                       new ActivationPolicy.RateLimit(1L, Duration.ofSeconds(10)),
-                      null))
+                      null,
+                      false))
               .build());
 
       long first =
@@ -244,7 +245,8 @@ class ChaosRuntimeActivationPolicyTest {
                       null,
                       null,
                       new ActivationPolicy.RateLimit(2L, Duration.ofSeconds(10)),
-                      null))
+                      null,
+                      false))
               .build());
 
       long first =
@@ -277,7 +279,7 @@ class ChaosRuntimeActivationPolicyTest {
               .effect(ChaosEffect.delay(Duration.ofMillis(60)))
               .activationPolicy(
                   new ActivationPolicy(
-                      ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 0, null, null, null, null))
+                      ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 0, null, null, null, null, false))
               .build());
 
       for (int i = 0; i < 5; i++) {
@@ -302,7 +304,7 @@ class ChaosRuntimeActivationPolicyTest {
               .effect(ChaosEffect.delay(Duration.ofMillis(60)))
               .activationPolicy(
                   new ActivationPolicy(
-                      ActivationPolicy.StartMode.AUTOMATIC, 0.1d, 0, null, null, null, 42L))
+                      ActivationPolicy.StartMode.AUTOMATIC, 0.1d, 0, null, null, null, 42L, false))
               .build());
 
       int delayed = 0;

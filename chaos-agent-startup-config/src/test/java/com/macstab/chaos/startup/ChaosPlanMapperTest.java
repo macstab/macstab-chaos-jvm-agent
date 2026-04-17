@@ -93,6 +93,91 @@ class ChaosPlanMapperTest {
     }
   }
 
+  @Nested
+  @DisplayName("allowDestructiveEffects JSON deserialization")
+  class AllowDestructiveEffectsDeserialization {
+
+    @Test
+    @DisplayName("allowDestructiveEffects=true in JSON sets flag on ActivationPolicy")
+    void allowDestructiveEffectsTrueDeserializes() {
+      String json =
+          """
+          {
+            "metadata": { "name": "destructive-plan", "description": "" },
+            "scenarios": [
+              {
+                "id": "deadlock-test",
+                "scope": "JVM",
+                "selector": { "type": "stress", "target": "DEADLOCK" },
+                "effect": {
+                  "type": "deadlock",
+                  "participantCount": 2,
+                  "acquisitionDelay": "PT0.1S"
+                },
+                "activationPolicy": {
+                  "startMode": "AUTOMATIC",
+                  "probability": 1.0,
+                  "allowDestructiveEffects": true
+                }
+              }
+            ]
+          }
+          """;
+      ChaosPlan plan = ChaosPlanMapper.read(json);
+      assertThat(plan.scenarios()).hasSize(1);
+      assertThat(plan.scenarios().get(0).activationPolicy().allowDestructiveEffects()).isTrue();
+    }
+
+    @Test
+    @DisplayName("allowDestructiveEffects absent in JSON defaults to false")
+    void allowDestructiveEffectsAbsentDefaultsFalse() {
+      String json =
+          """
+          {
+            "metadata": { "name": "normal-plan", "description": "" },
+            "scenarios": [
+              {
+                "id": "delay-test",
+                "scope": "JVM",
+                "selector": {
+                  "type": "executor",
+                  "operations": ["EXECUTOR_SUBMIT"]
+                },
+                "effect": { "type": "delay", "minDelay": "PT0.1S", "maxDelay": "PT0.1S" }
+              }
+            ]
+          }
+          """;
+      ChaosPlan plan = ChaosPlanMapper.read(json);
+      assertThat(plan.scenarios().get(0).activationPolicy().allowDestructiveEffects()).isFalse();
+    }
+
+    @Test
+    @DisplayName("allowDestructiveEffects=false in JSON sets flag to false")
+    void allowDestructiveEffectsFalseDeserializes() {
+      String json =
+          """
+          {
+            "metadata": { "name": "safe-plan", "description": "" },
+            "scenarios": [
+              {
+                "id": "delay-test",
+                "scope": "JVM",
+                "selector": {
+                  "type": "executor",
+                  "operations": ["EXECUTOR_SUBMIT"]
+                },
+                "effect": { "type": "delay", "minDelay": "PT0.1S", "maxDelay": "PT0.1S" },
+                "activationPolicy": { "allowDestructiveEffects": false }
+              }
+            ]
+          }
+          """;
+      ChaosPlan plan = ChaosPlanMapper.read(json);
+      assertThat(plan.scenarios().get(0).activationPolicy().allowDestructiveEffects()).isFalse();
+    }
+  }
+
   private static ChaosPlan samplePlan(String name, long delayMillis) {
     return new ChaosPlan(
         new ChaosPlan.Metadata(name, "test plan"),

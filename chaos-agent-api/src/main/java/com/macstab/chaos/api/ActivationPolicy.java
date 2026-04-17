@@ -16,6 +16,8 @@ import java.time.Duration;
  *   <li>{@link #always()} — effect fires on every match, starts immediately
  *   <li>{@link #manual()} — effect fires on every match, but only after {@link
  *       ChaosActivationHandle#start()} is called
+ *   <li>{@link #withDestructiveEffects()} — same as {@link #always()} but with explicit opt-in
+ *       for non-recoverable effects ({@code deadlock()}, {@code threadLeak()})
  * </ul>
  *
  * <p>Fine-grained control via the canonical constructor:
@@ -29,8 +31,17 @@ import java.time.Duration;
  *     100L,           // maxApplications
  *     null,           // activeFor (no time bound)
  *     null,           // rateLimit
- *     42L);           // randomSeed
+ *     42L,            // randomSeed
+ *     false);         // allowDestructiveEffects
  * }</pre>
+ *
+ * <p><strong>Destructive effects</strong>: {@link com.macstab.chaos.api.ChaosEffect.DeadlockEffect}
+ * and {@link com.macstab.chaos.api.ChaosEffect.ThreadLeakEffect} create non-recoverable JVM state
+ * — deadlocked or permanently-parked threads that cannot be interrupted or terminated within the
+ * running JVM process. Activation of these effects requires {@code allowDestructiveEffects(true)}
+ * in the policy; any attempt without it throws {@link ChaosActivationException} at registration
+ * time, not at effect application time. Use only in short-lived test processes or controlled
+ * environments where JVM restart is acceptable.
  */
 public record ActivationPolicy(
     StartMode startMode,
@@ -39,7 +50,8 @@ public record ActivationPolicy(
     Long maxApplications,
     Duration activeFor,
     RateLimit rateLimit,
-    Long randomSeed) {
+    Long randomSeed,
+    boolean allowDestructiveEffects) {
 
   /**
    * Canonical constructor with full Jackson deserialization support.
@@ -68,7 +80,8 @@ public record ActivationPolicy(
       @JsonProperty("maxApplications") final Long maxApplications,
       @JsonProperty("activeFor") final Duration activeFor,
       @JsonProperty("rateLimit") final RateLimit rateLimit,
-      @JsonProperty("randomSeed") final Long randomSeed) {
+      @JsonProperty("randomSeed") final Long randomSeed,
+      @JsonProperty("allowDestructiveEffects") final boolean allowDestructiveEffects) {
     this.startMode = startMode == null ? StartMode.AUTOMATIC : startMode;
     this.probability = probability == 0.0d ? 1.0d : probability;
     this.activateAfterMatches = activateAfterMatches;
@@ -76,6 +89,7 @@ public record ActivationPolicy(
     this.activeFor = activeFor;
     this.rateLimit = rateLimit;
     this.randomSeed = randomSeed;
+    this.allowDestructiveEffects = allowDestructiveEffects;
     validate();
   }
 
@@ -85,7 +99,19 @@ public record ActivationPolicy(
    * <p>Equivalent to: {@code probability=1.0, startMode=AUTOMATIC, no other constraints}.
    */
   public static ActivationPolicy always() {
-    return new ActivationPolicy(StartMode.AUTOMATIC, 1.0d, 0, null, null, null, 0L);
+    return new ActivationPolicy(StartMode.AUTOMATIC, 1.0d, 0, null, null, null, 0L, false);
+  }
+
+  /**
+   * Returns a policy that fires on every match, starts immediately, and explicitly permits
+   * non-recoverable destructive effects ({@link com.macstab.chaos.api.ChaosEffect.DeadlockEffect},
+   * {@link com.macstab.chaos.api.ChaosEffect.ThreadLeakEffect}).
+   *
+   * <p><strong>Warning</strong>: activating a destructive effect creates JVM state that cannot be
+   * recovered without process restart. Use only in short-lived test processes.
+   */
+  public static ActivationPolicy withDestructiveEffects() {
+    return new ActivationPolicy(StartMode.AUTOMATIC, 1.0d, 0, null, null, null, 0L, true);
   }
 
   /**
@@ -96,7 +122,7 @@ public record ActivationPolicy(
    * <p>Use for synchronised test phases where chaos must be enabled at a precise moment.
    */
   public static ActivationPolicy manual() {
-    return new ActivationPolicy(StartMode.MANUAL, 1.0d, 0, null, null, null, 0L);
+    return new ActivationPolicy(StartMode.MANUAL, 1.0d, 0, null, null, null, 0L, false);
   }
 
   private void validate() {

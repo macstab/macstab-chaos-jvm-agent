@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.macstab.chaos.api.ActivationPolicy;
+import com.macstab.chaos.api.ChaosActivationException;
 import com.macstab.chaos.api.ChaosEffect;
 import com.macstab.chaos.api.ChaosScenario;
 import com.macstab.chaos.api.ChaosSelector;
@@ -317,12 +318,12 @@ class CompatibilityValidatorTest {
     }
 
     @Test
-    @DisplayName("THREAD_LEAK target with ThreadLeakEffect succeeds")
+    @DisplayName("THREAD_LEAK target with ThreadLeakEffect succeeds when allowDestructiveEffects=true")
     void threadLeakTargetWithThreadLeakEffectSucceeds() {
       assertThatCode(
               () ->
                   CompatibilityValidator.validate(
-                      stressScenario(
+                      destructiveStressScenario(
                           ChaosSelector.StressTarget.THREAD_LEAK,
                           new ChaosEffect.ThreadLeakEffect(2, "leak-", true, null)),
                       featureSet))
@@ -369,12 +370,12 @@ class CompatibilityValidatorTest {
     }
 
     @Test
-    @DisplayName("DEADLOCK target with DeadlockEffect succeeds")
+    @DisplayName("DEADLOCK target with DeadlockEffect succeeds when allowDestructiveEffects=true")
     void deadlockTargetWithDeadlockEffectSucceeds() {
       assertThatCode(
               () ->
                   CompatibilityValidator.validate(
-                      stressScenario(
+                      destructiveStressScenario(
                           ChaosSelector.StressTarget.DEADLOCK,
                           new ChaosEffect.DeadlockEffect(2, Duration.ofMillis(100))),
                       featureSet))
@@ -607,15 +608,17 @@ class CompatibilityValidatorTest {
     }
 
     @Test
-    @DisplayName("ThreadLeakEffect throws")
+    @DisplayName("ThreadLeakEffect without allowDestructiveEffects throws ChaosActivationException")
     void threadLeakEffectWithNonStressSelectorThrows() {
       ChaosScenario scenario =
           ChaosScenario.builder("s")
               .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
               .effect(new ChaosEffect.ThreadLeakEffect(1, "leak-", true, null))
               .build();
+      // Destructive-effect guard fires first (before stressor-requires-StressSelector check)
       assertThatThrownBy(() -> CompatibilityValidator.validate(scenario, featureSet))
-          .isInstanceOf(ChaosValidationException.class);
+          .isInstanceOf(ChaosActivationException.class)
+          .hasMessageContaining("non-recoverable");
     }
 
     @Test
@@ -631,15 +634,17 @@ class CompatibilityValidatorTest {
     }
 
     @Test
-    @DisplayName("DeadlockEffect throws")
+    @DisplayName("DeadlockEffect without allowDestructiveEffects throws ChaosActivationException")
     void deadlockEffectWithNonStressSelectorThrows() {
       ChaosScenario scenario =
           ChaosScenario.builder("s")
               .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
               .effect(new ChaosEffect.DeadlockEffect(2, Duration.ofMillis(100)))
               .build();
+      // Destructive-effect guard fires first (before stressor-requires-StressSelector check)
       assertThatThrownBy(() -> CompatibilityValidator.validate(scenario, featureSet))
-          .isInstanceOf(ChaosValidationException.class);
+          .isInstanceOf(ChaosActivationException.class)
+          .hasMessageContaining("non-recoverable");
     }
 
     @Test
@@ -1049,6 +1054,17 @@ class CompatibilityValidatorTest {
         .selector(ChaosSelector.stress(target))
         .effect(effect)
         .activationPolicy(ActivationPolicy.always())
+        .build();
+  }
+
+  /** Builds a stress scenario with explicit destructive-effect opt-in. */
+  private static ChaosScenario destructiveStressScenario(
+      ChaosSelector.StressTarget target, ChaosEffect effect) {
+    return ChaosScenario.builder("stress-test")
+        .scope(ChaosScenario.ScenarioScope.JVM)
+        .selector(ChaosSelector.stress(target))
+        .effect(effect)
+        .activationPolicy(ActivationPolicy.withDestructiveEffects())
         .build();
   }
 }

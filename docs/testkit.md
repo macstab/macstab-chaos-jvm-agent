@@ -1,218 +1,302 @@
+<!--
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Engineered by  Christian Schnapka
+                 Principal+ Embedded Systems Engineer
+                 Macstab GmbH · Hamburg, Germany
+                 https://macstab.com
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-->
+
+# chaos-agent-testkit — Test Integration Reference
+
+> Internal reference for `ChaosAgentExtension`, `ChaosTestKit`, and the agent self-attach path.
+> 
+> *Engineered by* **[Christian Schnapka](https://macstab.com)** — Principal+ Embedded Systems Engineer · [Macstab GmbH](https://macstab.com) · Hamburg, Germany
+
+---
+
 # 1. Overview
 
 ## Purpose
 
-`chaos-agent-testkit` is the test-facing convenience layer for local self-attach and session setup. It reduces boilerplate but does not change the underlying runtime model.
+`chaos-agent-testkit` provides two integration surfaces for test code:
+
+1. **`ChaosAgentExtension`** — JUnit 5 extension that manages agent installation, session lifecycle, and parameter injection automatically
+2. **`ChaosTestKit`** — static helper for tests that do not use the JUnit 5 extension and manage chaos lifecycle manually
+
+Both surfaces delegate to `ChaosPlatform.installLocally()` in `chaos-agent-bootstrap` for the actual agent installation.
 
 ## Scope
 
 In scope:
-
-- local installation helper
-- session helper
-- JUnit 5 extension for per-test session management
+- JUnit 5 `Extension` integration
+- Agent self-attach via Attach API
+- `ChaosSession` lifecycle management per test method
 
 Out of scope:
+- TestNG or JUnit 4 integration
+- Per-class or per-suite session scoping (only per-method sessions are provided by `ChaosAgentExtension`)
 
-- isolated runtime per test
-- automatic cleanup of JVM-global chaos handles
-- custom assertion DSLs
+---
 
-# 2. Architectural Context
+# 2. ChaosAgentExtension
 
-This module depends on:
-
-- `chaos-agent-api`
-- `chaos-agent-bootstrap`
-- JUnit Jupiter API for the extension
-
-It is a consumer convenience layer, not a separate runtime.
-
-# 3. Key Concepts And Terminology
-
-- Shared control plane: the singleton runtime returned by local install
-- Test session: a `ChaosSession` opened for one test case
-- Extension store: JUnit `ExtensionContext.Store` entries used to hold the control plane and session
-
-# 4. End-to-End Behavior
-
-## Helper Methods
-
-- `ChaosTestKit.install()` installs the local agent and returns the shared `ChaosControlPlane`
-- `ChaosTestKit.openSession(displayName)` installs if needed, then opens a new session
-
-## `ChaosAgentExtension`
-
-Lifecycle:
-
-1. `beforeEach(...)` installs the local agent
-2. opens a new session named after the test display name
-3. stores both objects in the JUnit extension store
-4. injects either `ChaosControlPlane` or `ChaosSession` into test methods
-5. `afterEach(...)` closes only the session
-
-Important consequence:
-
-- the extension does not close the control plane and does not uninstall instrumentation
-
-# 5. Architecture Diagrams
-
-No PlantUML diagram is included. The lifecycle is simple and the prose above is more precise for the only two classes in the module.
-
-# 6. Component Breakdown
-
-## `ChaosTestKit`
-
-Responsibility:
-
-- thin convenience wrapper around `ChaosPlatform`
-
-Why it exists:
-
-- keep test code from repeatedly writing local install boilerplate
-
-## `ChaosAgentExtension`
-
-Responsibility:
-
-- session lifecycle around each JUnit test
-- parameter injection for `ChaosControlPlane` and `ChaosSession`
-
-Why it exists:
-
-- make the common test case one annotation plus one parameter
-
-# 7. Data Model And State
-
-Stored test-scoped objects:
-
-- `ChaosControlPlane`
-- `ChaosSession`
-
-State ownership caveats:
-
-- the control plane is JVM-wide and reused
-- the session is per test
-- only the session is automatically closed
-
-This distinction is operationally important because JVM-global scenarios activated directly on the control plane can outlive the test that created them unless the test closes their handles explicitly.
-
-# 8. Concurrency And Threading Model
-
-## Single-Test Behavior
-
-The extension opens the session during `beforeEach(...)`, which means the current core implementation binds the session to whichever thread executes that callback. In the common JUnit execution model this is also the test method thread, but the module does not itself guarantee that scheduling choice.
-
-## Parallel Test Behavior
-
-If JUnit parallel execution is enabled:
-
-- multiple sessions can coexist against the same runtime
-- session-scoped scenarios remain isolated only to the extent that session binding and propagation are correct
-- JVM-global scenarios are shared across tests and can interfere with one another
-
-This module does not provide cross-test isolation stronger than the underlying runtime model.
-
-# 9. Error Handling And Failure Modes
-
-Expected failures:
-
-- local self-attach unavailable
-- dynamic agent loading disabled
-- scenario activation misuse inside tests
-
-Important misuse case:
+## Registration
 
 ```java
-ChaosActivationHandle handle =
-    controlPlane.activate(jvmGlobalScenario);
+@ExtendWith(ChaosAgentExtension.class)
+class MyServiceTest {
+    @Test
+    void testWithSession(ChaosSession session) { ... }
+
+    @Test
+    void testWithControlPlane(ChaosControlPlane controlPlane) { ... }
+}
 ```
 
-Why it is risky in tests:
+Alternatively, for auto-extension without annotation:
+```java
+// In META-INF/services/org.junit.jupiter.api.extension.Extension
+com.macstab.chaos.testkit.ChaosAgentExtension
+```
 
-- the extension will close the session after the test
-- it will not close `handle`
-- the JVM-global scenario can therefore affect later tests
+## Lifecycle
 
-Prefer session-scoped scenarios in tests unless the test explicitly owns and closes every JVM-global handle.
+```
+@BeforeAll equivalent:
+  ChaosPlatform.installLocally()
+  — self-attaches agent if not already installed
+  — idempotent; safe to call from multiple extensions
 
-# 10. Security Model
+@BeforeEach equivalent:
+  ChaosSession session = controlPlane.openSession(testDisplayName)
+  — session ID is a UUID; displayName is the test method display name
 
-Security is usually not the primary concern for a test helper, but the trust model still matters:
+@AfterEach equivalent:
+  session.close()
+  — stops all session-scoped scenarios
+  — unregisters session-scoped controllers from ScenarioRegistry
+  — does NOT affect JVM-scoped scenarios
+```
 
-- local self-attach is a privileged operation
-- tests using this module can intentionally alter JVM-global runtime behavior
+## Parameter Resolution
 
-Treat testkit usage as trusted test infrastructure, not as safe multi-tenant isolation.
+`ChaosAgentExtension` resolves the following parameter types in test methods and lifecycle callbacks:
+- `ChaosSession` — injects the current test's session
+- `ChaosControlPlane` — injects the agent's `ChaosControlPlane` (JVM-global handle)
+- `ChaosDiagnostics` — injects the diagnostics interface
 
-# 11. Performance Model
+Parameters of any other type are not resolved by this extension (JUnit delegates to other resolvers).
 
-Install cost is front-loaded when the runtime first self-attaches. After that:
+## Session Isolation Guarantee
 
-- per-test cost is mostly session creation and teardown
-- runtime hot-path cost remains whatever the core imposes for active scenarios
+Each test method gets its own `ChaosSession` with a unique ID. Session-scoped scenarios activated in test A are never visible to test B, even if tests run in parallel. This guarantee holds because:
+1. Each session has a distinct UUID as its ID
+2. `ScenarioController.evaluate()` compares `sessionId` by string equality
+3. `session.close()` in `@AfterEach` unregisters and stops all controllers for that session
 
-The module itself adds negligible overhead beyond JUnit callback and store usage.
+JVM-scoped scenarios (registered via `controlPlane.activate()`) are shared across all tests in the same JVM process. Use JVM-scoped scenarios only for intentionally shared fault injection.
 
-# 12. Observability And Operations
+---
 
-Testkit does not create new telemetry. Operational debugging still goes through:
+# 3. ChaosTestKit
 
-- `ChaosDiagnostics`
-- runtime logs
-- optional startup or manual debug dumps
+```java
+// Install agent (idempotent) and get control plane:
+ChaosControlPlane controlPlane = ChaosTestKit.install();
 
-For tests, a useful pattern is to inspect diagnostics when a scenario appears not to fire rather than assuming the extension failed.
+// Install and open a session in one call:
+ChaosSession session = ChaosTestKit.openSession("my-test");
+```
 
-# 13. Configuration Reference
+Use `ChaosTestKit` when:
+- Using TestNG or another test framework that does not support JUnit 5 extensions
+- Manually controlling chaos lifecycle in integration tests
+- Running chaos from non-test code (benchmarks, load tests)
 
-There are no independent testkit configuration keys in this repository.
+The caller is responsible for `session.close()` in all branches (preferably try-with-resources or `finally`).
 
-Prerequisites for local install are inherited from bootstrap and the JVM:
+---
 
-- self-attach must be permitted
-- dynamic agent loading must be available
+# 4. Self-Attach Requirements
 
-# 14. Extension Points And Compatibility Guarantees
+`ChaosPlatform.installLocally()` uses the JDK Attach API to self-attach the agent. Requirements:
 
-Stable caller-facing conveniences:
+- JDK (not JRE): requires `tools.jar` (JDK 8) or the `java.attach` module (JDK 9+)
+- `--add-opens java.base/jdk.internal.misc=ALL-UNNAMED` may be required on JDK 17+ for some Attach API paths
+- `-Djdk.attach.allowAttachSelf=true` must be set on JDK 9+ to allow a process to attach to itself. `ChaosAgentExtension` sets this as a system property before self-attach. Alternatively, set it in the JVM command line.
+- The agent JAR must be locatable on the classpath. `ChaosPlatform` uses a classpath scan to find the bootstrap JAR.
 
-- `ChaosTestKit.install()`
-- `ChaosTestKit.openSession(...)`
-- `ChaosAgentExtension` JUnit behavior as currently implemented
+**Gradle/Maven test configuration example**:
+```kotlin
+// build.gradle.kts
+tasks.test {
+    jvmArgs("-Djdk.attach.allowAttachSelf=true")
+}
+```
 
-Non-goals and current limits:
+---
 
-- no auto-cleanup for JVM-global handles
-- no separate runtime per test class or method
+# 5. Typical Usage Patterns
 
-# 15. Stack Walkdown
+## Session-scoped delay on executor
 
-## API Layer
+```java
+@ExtendWith(ChaosAgentExtension.class)
+class ExecutorDelayTest {
+    @Test
+    void slowExecutorShouldTriggerTimeout(ChaosSession session) throws Exception {
+        ChaosScenario scenario = ChaosScenario.builder()
+            .id("slow-executor")
+            .scope(ChaosScenario.ScenarioScope.SESSION)
+            .selector(ChaosSelector.executor())
+            .effect(ChaosEffect.delay(Duration.ofMillis(500)))
+            .build();
 
-Relevant because tests consume `ChaosControlPlane` and `ChaosSession` directly.
+        session.activate(scenario);
 
-## Application / Runtime Layer
+        try (ChaosSession.ScopeBinding scope = session.bind()) {
+            // All executor submissions on this thread see 500 ms delay
+            Future<?> f = myExecutor.submit(() -> doWork());
+            assertThrows(TimeoutException.class, () -> f.get(100, TimeUnit.MILLISECONDS));
+        }
+    }
+}
+```
 
-Highly relevant because testkit is only a thin wrapper over the real runtime.
+## JVM-scoped stressor for soak testing
 
-## JVM Layer
+```java
+@Test
+void serviceResilientUnderHeapPressure() {
+    ChaosControlPlane cp = ChaosTestKit.install();
+    ChaosActivationHandle handle = cp.activate(
+        ChaosScenario.builder()
+            .id("heap-stress")
+            .scope(ChaosScenario.ScenarioScope.JVM)
+            .selector(ChaosSelector.stress(StressTarget.HEAP))
+            .effect(ChaosEffect.heapPressure(64 * 1024 * 1024))
+            .build()
+    );
+    try {
+        runSoakTest();
+    } finally {
+        handle.close(); // stops the stressor and releases retained heap
+    }
+}
+```
 
-Relevant because local self-attach and instrumentation still happen inside the test JVM.
+## Verifying exception injection
 
-## Memory / Concurrency Layer
+```java
+@Test
+void dbCallShouldHandleNetworkFailure(ChaosSession session) {
+    session.activate(ChaosScenario.builder()
+        .id("db-socket-reject")
+        .scope(ChaosScenario.ScenarioScope.SESSION)
+        .selector(ChaosSelector.network()
+            .remoteHostPattern("db.internal.*")
+            .operations(OperationType.SOCKET_CONNECT))
+        .effect(ChaosEffect.reject("simulated connection refused"))
+        .build()
+    );
 
-Relevant for parallel test execution and session propagation.
+    try (ChaosSession.ScopeBinding scope = session.bind()) {
+        assertThrows(ConnectException.class, () -> dbService.query("SELECT 1"));
+    }
+}
+```
 
-## OS / Container Layer
+## Manual gate for synchronization testing
 
-Relevant only to the extent that local attach permissions or container hardening can block installation.
+```java
+@Test
+void gateBlocksAndReleasesCorrectly(ChaosSession session) throws Exception {
+    ChaosActivationHandle handle = session.activate(ChaosScenario.builder()
+        .id("gate-test")
+        .scope(ChaosScenario.ScenarioScope.SESSION)
+        .selector(ChaosSelector.executor())
+        .effect(ChaosEffect.gate(Duration.ofSeconds(5)))
+        .build()
+    );
 
-## Infrastructure Layer
+    CountDownLatch started = new CountDownLatch(1);
+    Thread t = new Thread(() -> {
+        started.countDown();
+        try (ChaosSession.ScopeBinding scope = session.bind()) {
+            executor.execute(() -> {}); // blocks on gate
+        }
+    });
+    t.start();
 
-Usually not materially relevant beyond the test runner and CI JVM configuration.
+    started.await();
+    // Assert: thread is blocked
+    assertTrue(t.isAlive());
 
-# 16. References
+    handle.release(); // unblocks gate
+    t.join(1000);
+    assertFalse(t.isAlive());
+}
+```
 
-- Reference: JUnit 5 User Guide
-- Reference: Java Platform SE API Specification — `java.lang.instrument`
+---
+
+# 6. Anti-Patterns and Misuse Risks
+
+| Anti-pattern | Risk | Correct approach |
+|-------------|------|-----------------|
+| Activating JVM-scoped scenario without closing the handle | Scenario leaks across tests; chaos remains active for subsequent tests in the same JVM | Always call `handle.close()` in `finally` |
+| Not binding session before submitting work to an executor | Session context not propagated; executor tasks not affected by session-scoped chaos | Use `session.bind()` before submitting, or `session.wrap(task)` to create a context-carrying wrapper |
+| Using `ChaosTestKit.install()` without `-Djdk.attach.allowAttachSelf=true` | `IllegalStateException` at runtime | Add the JVM arg to test config |
+| Checking `appliedCount` without waiting for scenarios to fire | Race condition: the scenario may not have fired yet | Use event listeners or explicit synchronization points |
+| Registering the same scenario ID twice in the same scope | `IllegalStateException("scenario key already active")` | Use unique IDs per test; let `ChaosAgentExtension` manage session lifecycle |
+
+---
+
+# 7. Diagnostics in Test Context
+
+```java
+@Test
+void debugChaos(ChaosSession session, ChaosDiagnostics diag) {
+    // ... activate scenarios ...
+
+    ChaosDiagnostics.Snapshot snap = diag.snapshot();
+    snap.scenarios().forEach(r ->
+        System.out.printf("[chaos] %s: state=%s matched=%d applied=%d reason=%s%n",
+            r.id(), r.state(), r.matchedCount(), r.appliedCount(), r.reason()));
+
+    // Or dump everything:
+    System.out.println(diag.debugDump());
+}
+```
+
+If `appliedCount == 0 && matchedCount > 0`:
+- The selector is working (matchedCount > 0 confirms this)
+- An activation policy guard is filtering: check `probability`, `rateLimit`, `activateAfterMatches`, `activeFor`, `maxApplications`
+- Check `reason` field for the last state-transition reason
+
+If `matchedCount == 0`:
+- The selector is not matching: verify the selector's `operationType`, class name patterns, and that `session.bind()` is active when the instrumented call fires
+
+---
+
+# 8. References
+
+- Reference: JUnit 5 — `Extension`, `BeforeEachCallback`, `AfterEachCallback`, `ParameterResolver` — https://junit.org/junit5/docs/current/user-guide/#extensions
+- Reference: Java SE API — `com.sun.tools.attach.VirtualMachine` (self-attach via Attach API) — https://docs.oracle.com/en/java/docs/api/jdk.attach/com/sun/tools/attach/VirtualMachine.html
+- Reference: JDK 9+ — `jdk.attach.allowAttachSelf` system property (required for self-attach) — https://openjdk.org/jeps/451
+- Reference: JSR-133 — Java Memory Model — `ThreadLocal` visibility guarantees per thread — https://jcp.org/aboutJava/communityprocess/mrel/jsr133/index.html
+
+---
+
+<div align="center">
+
+*Engineerure, implementation, and documentation crafted by*
+
+**[Christian Schnapka](https://macstab.com)**  
+Principal+ Embedded Systems Engineer  
+[Macstab GmbH](https://macstab.com) · Hamburg, Germany
+
+*Building systems that operate correctly at the edges — including the ones you deliberately break.*
+
+</div>

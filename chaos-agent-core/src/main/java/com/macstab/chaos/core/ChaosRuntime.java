@@ -31,7 +31,7 @@ import java.util.concurrent.RejectedExecutionException;
  * Central orchestration hub that connects the instrumentation layer, the scenario registry, and the
  * observability bus.
  *
- * <h2>Role in the architecture</h2>
+ * <h2>Role in the Engineerure</h2>
  *
  * <p>{@code ChaosRuntime} is the single object that lives in the agent classloader and is
  * accessible to all other agent components. It implements {@link ChaosControlPlane} (the public

@@ -91,7 +91,7 @@ class ActivationPolicyTest {
     void probabilityZeroNormalisedToOne() {
       ActivationPolicy policy =
           new ActivationPolicy(
-              ActivationPolicy.StartMode.AUTOMATIC, 0.0d, 0, null, null, null, null);
+              ActivationPolicy.StartMode.AUTOMATIC, 0.0d, 0, null, null, null, null, false);
       assertThat(policy.probability()).isEqualTo(1.0d);
     }
   }
@@ -106,7 +106,7 @@ class ActivationPolicyTest {
       assertThatCode(
               () ->
                   new ActivationPolicy(
-                      ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 0, null, null, null, null))
+                      ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 0, null, null, null, null, false))
           .doesNotThrowAnyException();
     }
 
@@ -116,7 +116,7 @@ class ActivationPolicyTest {
       assertThatCode(
               () ->
                   new ActivationPolicy(
-                      ActivationPolicy.StartMode.AUTOMATIC, 0.5d, 0, null, null, null, null))
+                      ActivationPolicy.StartMode.AUTOMATIC, 0.5d, 0, null, null, null, null, false))
           .doesNotThrowAnyException();
     }
 
@@ -126,7 +126,7 @@ class ActivationPolicyTest {
       assertThatThrownBy(
               () ->
                   new ActivationPolicy(
-                      ActivationPolicy.StartMode.AUTOMATIC, 1.1d, 0, null, null, null, null))
+                      ActivationPolicy.StartMode.AUTOMATIC, 1.1d, 0, null, null, null, null, false))
           .isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -136,7 +136,7 @@ class ActivationPolicyTest {
       assertThatThrownBy(
               () ->
                   new ActivationPolicy(
-                      ActivationPolicy.StartMode.AUTOMATIC, -0.1d, 0, null, null, null, null))
+                      ActivationPolicy.StartMode.AUTOMATIC, -0.1d, 0, null, null, null, null, false))
           .isInstanceOf(IllegalArgumentException.class);
     }
   }
@@ -151,7 +151,7 @@ class ActivationPolicyTest {
       assertThatCode(
               () ->
                   new ActivationPolicy(
-                      ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 0, null, null, null, null))
+                      ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 0, null, null, null, null, false))
           .doesNotThrowAnyException();
     }
 
@@ -161,7 +161,7 @@ class ActivationPolicyTest {
       assertThatCode(
               () ->
                   new ActivationPolicy(
-                      ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 10, null, null, null, null))
+                      ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 10, null, null, null, null, false))
           .doesNotThrowAnyException();
     }
 
@@ -171,7 +171,7 @@ class ActivationPolicyTest {
       assertThatThrownBy(
               () ->
                   new ActivationPolicy(
-                      ActivationPolicy.StartMode.AUTOMATIC, 1.0d, -1, null, null, null, null))
+                      ActivationPolicy.StartMode.AUTOMATIC, 1.0d, -1, null, null, null, null, false))
           .isInstanceOf(IllegalArgumentException.class);
     }
   }
@@ -186,7 +186,7 @@ class ActivationPolicyTest {
       assertThatCode(
               () ->
                   new ActivationPolicy(
-                      ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 0, null, null, null, null))
+                      ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 0, null, null, null, null, false))
           .doesNotThrowAnyException();
     }
 
@@ -196,7 +196,7 @@ class ActivationPolicyTest {
       assertThatCode(
               () ->
                   new ActivationPolicy(
-                      ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 0, 100L, null, null, null))
+                      ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 0, 100L, null, null, null, false))
           .doesNotThrowAnyException();
     }
 
@@ -206,7 +206,7 @@ class ActivationPolicyTest {
       assertThatThrownBy(
               () ->
                   new ActivationPolicy(
-                      ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 0, 0L, null, null, null))
+                      ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 0, 0L, null, null, null, false))
           .isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -216,7 +216,7 @@ class ActivationPolicyTest {
       assertThatThrownBy(
               () ->
                   new ActivationPolicy(
-                      ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 0, -5L, null, null, null))
+                      ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 0, -5L, null, null, null, false))
           .isInstanceOf(IllegalArgumentException.class);
     }
   }
@@ -231,7 +231,7 @@ class ActivationPolicyTest {
       assertThatCode(
               () ->
                   new ActivationPolicy(
-                      ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 0, null, null, null, null))
+                      ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 0, null, null, null, null, false))
           .doesNotThrowAnyException();
     }
 
@@ -247,7 +247,7 @@ class ActivationPolicyTest {
                       null,
                       Duration.ofMinutes(5),
                       null,
-                      null))
+                      null, false))
           .doesNotThrowAnyException();
     }
 
@@ -263,7 +263,7 @@ class ActivationPolicyTest {
                       null,
                       Duration.ZERO,
                       null,
-                      null))
+                      null, false))
           .isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -279,7 +279,7 @@ class ActivationPolicyTest {
                       null,
                       Duration.ofSeconds(-1),
                       null,
-                      null))
+                      null, false))
           .isInstanceOf(IllegalArgumentException.class);
     }
   }
@@ -338,8 +338,49 @@ class ActivationPolicyTest {
     @Test
     @DisplayName("null startMode defaults to AUTOMATIC")
     void nullDefaultsToAutomatic() {
-      ActivationPolicy policy = new ActivationPolicy(null, 1.0d, 0, null, null, null, null);
+      ActivationPolicy policy = new ActivationPolicy(null, 1.0d, 0, null, null, null, null, false);
       assertThat(policy.startMode()).isEqualTo(ActivationPolicy.StartMode.AUTOMATIC);
+    }
+  }
+
+  @Nested
+  @DisplayName("allowDestructiveEffects flag")
+  class AllowDestructiveEffectsFlag {
+
+    @Test
+    @DisplayName("always() has allowDestructiveEffects=false")
+    void alwaysFlagIsFalse() {
+      assertThat(ActivationPolicy.always().allowDestructiveEffects()).isFalse();
+    }
+
+    @Test
+    @DisplayName("manual() has allowDestructiveEffects=false")
+    void manualFlagIsFalse() {
+      assertThat(ActivationPolicy.manual().allowDestructiveEffects()).isFalse();
+    }
+
+    @Test
+    @DisplayName("withDestructiveEffects() has allowDestructiveEffects=true")
+    void withDestructiveFlagIsTrue() {
+      assertThat(ActivationPolicy.withDestructiveEffects().allowDestructiveEffects()).isTrue();
+    }
+
+    @Test
+    @DisplayName("constructor with allowDestructiveEffects=true preserves flag")
+    void constructorPreservesFlag() {
+      ActivationPolicy policy =
+          new ActivationPolicy(
+              ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 0, null, null, null, null, true);
+      assertThat(policy.allowDestructiveEffects()).isTrue();
+    }
+
+    @Test
+    @DisplayName("constructor with allowDestructiveEffects=false preserves flag")
+    void constructorPreservesFalseFlagToo() {
+      ActivationPolicy policy =
+          new ActivationPolicy(
+              ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 0, null, null, null, null, false);
+      assertThat(policy.allowDestructiveEffects()).isFalse();
     }
   }
 }

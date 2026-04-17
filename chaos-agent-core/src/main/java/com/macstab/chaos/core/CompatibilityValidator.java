@@ -1,5 +1,6 @@
 package com.macstab.chaos.core;
 
+import com.macstab.chaos.api.ChaosActivationException;
 import com.macstab.chaos.api.ChaosEffect;
 import com.macstab.chaos.api.ChaosScenario;
 import com.macstab.chaos.api.ChaosSelector;
@@ -142,6 +143,8 @@ final class CompatibilityValidator {
           throw new ChaosValidationException("StressTarget.THREAD_LEAK requires ThreadLeakEffect");
         }
       }
+      // NOTE: DEADLOCK and THREAD_LEAK destructive guards are enforced in
+      // validateInterceptorConstraints via allowDestructiveEffects flag.
       case THREAD_LOCAL_LEAK -> {
         if (!(effect instanceof ChaosEffect.ThreadLocalLeakEffect)) {
           throw new ChaosValidationException(
@@ -219,6 +222,21 @@ final class CompatibilityValidator {
   private static void validateInterceptorConstraints(final ChaosScenario scenario) {
     final ChaosEffect effect = scenario.effect();
     final ChaosSelector selector = scenario.selector();
+
+    // Destructive-effect guard: DeadlockEffect and ThreadLeakEffect create non-recoverable
+    // JVM state (deadlocked/parked threads that cannot be interrupted). Require explicit
+    // opt-in via ActivationPolicy.allowDestructiveEffects() to prevent accidental activation
+    // in long-lived processes. Fail at registration time, not at effect application time.
+    if ((effect instanceof ChaosEffect.DeadlockEffect
+            || effect instanceof ChaosEffect.ThreadLeakEffect)
+        && !scenario.activationPolicy().allowDestructiveEffects()) {
+      throw new ChaosActivationException(
+          effect.getClass().getSimpleName()
+              + " creates non-recoverable JVM state (deadlocked or permanently-parked threads "
+              + "that cannot be terminated without JVM restart). "
+              + "Activate only with ActivationPolicy.withDestructiveEffects() or "
+              + "allowDestructiveEffects=true in your JSON plan.");
+    }
 
     // Stressor effects require StressSelector — not valid with any interception selector.
     if (effect instanceof ChaosEffect.HeapPressureEffect
