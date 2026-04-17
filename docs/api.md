@@ -312,23 +312,71 @@ ChaosEffect.referenceQueueFlood(count)
 
 # 8. ActivationPolicy
 
+`ActivationPolicy` is a record — there is no builder. Use the canonical constructor directly or one of the static factory methods:
+
 ```java
-ActivationPolicy policy = ActivationPolicy.builder()
-    .startMode(ActivationPolicy.StartMode.AUTOMATIC)  // default: AUTOMATIC
-    .probability(0.5)                                  // 0.0–1.0; default: 1.0
-    .rateLimit(10, Duration.ofSeconds(1))              // N permits per window
-    .activateAfterMatches(5)                           // skip first 5 matches
-    .activeFor(Duration.ofSeconds(30))                 // auto-expire after 30s
-    .maxApplications(100L)                             // stop after 100 applications
-    .randomSeed(42L)                                   // for reproducible sampling
+// Most common: always fire, start immediately
+ActivationPolicy.always()
+
+// Opt in to non-recoverable effects (deadlock, thread leak)
+ActivationPolicy.withDestructiveEffects()
+
+// Start paused; fire only after handle.start()
+ActivationPolicy.manual()
+
+// Fine-grained: 30% probability, capped at 100 total, seeded for reproducibility
+new ActivationPolicy(
+    StartMode.AUTOMATIC,
+    0.30,           // probability
+    0,              // activateAfterMatches (no warm-up)
+    100L,           // maxApplications
+    null,           // activeFor (no time bound)
+    null,           // rateLimit
+    42L,            // randomSeed
+    false           // allowDestructiveEffects
+);
+```
+
+All guards compose as AND: a scenario fires only if every configured guard passes.
+
+### Fields
+
+| Field | Type | Default | Meaning |
+|-------|------|---------|---------|
+| `startMode` | `StartMode` | `AUTOMATIC` | `AUTOMATIC` starts on registration; `MANUAL` waits for `handle.start()` |
+| `probability` | `double` | `1.0` | Fraction of passing matches that fire; `0.0` treated as `1.0` |
+| `activateAfterMatches` | `long` | `0` | Skip this many initial matches before becoming eligible |
+| `maxApplications` | `Long` | `null` | Hard cap on total applications; `null` = unlimited |
+| `activeFor` | `Duration` | `null` | Auto-expire this long after first start; `null` = no expiry |
+| `rateLimit` | `RateLimit` | `null` | Sliding-window permit cap; `null` = unlimited |
+| `randomSeed` | `Long` | `0L` | Seed for `SplittableRandom`; XOR-ed with `scenario.id().hashCode()` for per-scenario uniqueness |
+| `allowDestructiveEffects` | `boolean` | `false` | Must be `true` to activate `DeadlockEffect` or `ThreadLeakEffect`; see below |
+
+### Destructive Effects Safeguard
+
+`DeadlockEffect` and `ThreadLeakEffect` create JVM state that cannot be recovered within a running process — deadlocked threads cannot be interrupted; leaked non-daemon threads prevent JVM exit until the process is killed.
+
+`CompatibilityValidator` rejects any scenario using these effects unless `allowDestructiveEffects == true`. The rejection is a `ChaosActivationException` thrown at registration time, not at effect application time. This is an opt-in correctness guard, not a security boundary — the calling code is trusted.
+
+```java
+// Correct: explicit opt-in
+ChaosScenario.builder()
+    .id("deadlock-test")
+    .selector(ChaosSelector.stress(StressTarget.DEADLOCK))
+    .effect(ChaosEffect.deadlock(2))
+    .activationPolicy(ActivationPolicy.withDestructiveEffects())
+    .build();
+
+// Rejected at activation: throws ChaosActivationException
+ChaosScenario.builder()
+    .id("deadlock-test")
+    .selector(ChaosSelector.stress(StressTarget.DEADLOCK))
+    .effect(ChaosEffect.deadlock(2))
+    .activationPolicy(ActivationPolicy.always())  // allowDestructiveEffects=false
     .build();
 ```
 
-All guards compose as AND: a scenario fires only if all configured guards pass.
-
-**`startMode = MANUAL`**: The scenario is registered but not started. Call `handle.start()` explicitly to begin evaluation. Useful for pre-registering scenarios and starting them at a precise point in a test.
-
-**`randomSeed`**: Determines the `SplittableRandom` base seed. With the same seed, probability sampling is deterministic across runs given the same sequence of `matchedCount` values. Different scenarios with the same seed still produce different samples because the seed is XOR-ed with `scenario.id().hashCode()`.
+**`randomSeed`**: With the same seed, probability sampling is deterministic across runs given the same sequence of `matchedCount` values. Different scenarios with the same seed still produce different samples because the seed is XOR-ed with `scenario.id().hashCode()`.
 
 ---
 
@@ -338,8 +386,8 @@ The `OperationType` enum defines all intercepted JDK operations. Full list:
 
 | Category | OperationType values |
 |----------|---------------------|
-| Executor | `EXECUTOR_SUBMIT`, `EXECUTOR_WORKER_RUN` |
-| Scheduled | `SCHEDULE_ONCE`, `SCHEDULE_FIXED_RATE`, `SCHEDULE_FIXED_DELAY`, `SCHEDULE_TICK` |
+| Executor | `EXECUTOR_SUBMIT`, `EXECUTOR_WORKER_RUN`, `EXECUTOR_SHUTDOWN`, `EXECUTOR_AWAIT_TERMINATION` |
+| Scheduled | `SCHEDULE_SUBMIT`, `SCHEDULE_TICK` |
 | ForkJoin | `FORK_JOIN_TASK_RUN` |
 | Thread | `THREAD_START`, `VIRTUAL_THREAD_START` |
 | Queue | `QUEUE_PUT`, `QUEUE_TAKE`, `QUEUE_OFFER`, `QUEUE_POLL` |
@@ -357,7 +405,7 @@ The `OperationType` enum defines all intercepted JDK operations. Full list:
 | Infrastructure | `JNDI_LOOKUP`, `JMX_INVOKE`, `JMX_GET_ATTR`, `NATIVE_LIBRARY_LOAD` |
 | Compression | `ZIP_INFLATE`, `ZIP_DEFLATE` |
 | ThreadLocal | `THREAD_LOCAL_GET`, `THREAD_LOCAL_SET` |
-| Shutdown | `SHUTDOWN_HOOK_REGISTER`, `SHUTDOWN_HOOK_REMOVE`, `EXECUTOR_SHUTDOWN` |
+| Shutdown | `SHUTDOWN_HOOK_REGISTER` |
 | Method | `METHOD_ENTER`, `METHOD_EXIT` |
 | Stressor | `LIFECYCLE` (internal; targets stressor start/stop) |
 

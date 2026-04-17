@@ -207,7 +207,7 @@ New module: `chaos-agent-micronaut-integration`
 ## Full Timeline
 
 ```
-Week 1  ├── ⬜ 1.1  DeadlockStressor safeguard            (2h)
+Week 1  ├── ✅ 1.1  DeadlockStressor safeguard            (2h)
         ├── ⬜ 1.2  Clock skew native prefix fix           (1d)
         └── ⬜ 1.3  Missing concurrency tests              (1d)
 

@@ -355,7 +355,10 @@ Key matching rules:
 
 ## CompatibilityValidator
 
-Validates selector/effect combinations before registration. Key checks:
+Validates selector/effect combinations before registration. Throws `ChaosActivationException` on violation. All checks run at activation time, not at match time.
+
+Key checks:
+
 - Virtual thread selector requires `FeatureSet.supportsVirtualThreads()` (JDK 21+)
 - Stressor effects require `StressSelector`; non-stress effects must not use `StressSelector`
 - `GateEffect` requires a stress-compatible or appropriate operation selector
@@ -363,8 +366,11 @@ Validates selector/effect combinations before registration. Key checks:
 - `ReturnValueCorruptionEffect` requires `MethodSelector` with `METHOD_EXIT` operation
 - `ExceptionInjectionEffect` requires `MethodSelector` with `METHOD_ENTER` operation
 - `ExceptionalCompletionEffect` requires `AsyncSelector`
-- `ClockSkewEffect` requires `JvmRuntimeSelector` with SYSTEM_CLOCK operations
+- `ClockSkewEffect` requires `JvmRuntimeSelector` with `SYSTEM_CLOCK_MILLIS` or `SYSTEM_CLOCK_NANOS`
 - Session-scope scenarios may not use JVM-global selectors (clock, GC, exit, class loading, native library)
+- **Destructive effects guard**: `DeadlockEffect` and `ThreadLeakEffect` require `activationPolicy.allowDestructiveEffects() == true`; activation without the flag throws `ChaosActivationException` at registration time
+
+The destructive effects guard exists because deadlocked threads and leaked non-daemon threads cannot be cleaned up within the running process. The check is intentionally fail-fast and unconditional — there is no way to bypass it short of constructing an `ActivationPolicy` with `allowDestructiveEffects=true`.
 
 ## ScopeContext
 
