@@ -150,9 +150,9 @@ This identity check fires before any delegation. When `DEPTH` reads itself, the 
 
 ---
 
-# 5. Engineerure Diagrams
+# 5. Architecture Diagrams
 
-## Bootstrap Bridge Engineerure
+## Bootstrap Bridge Architecture
 
 ```plantuml
 @startuml
@@ -499,7 +499,444 @@ See [overall-agent.md §11] for full hot-path cost breakdown.
 
 ---
 
-# 12. Known Limitations
+# 12. HTTP Client Selectors (roadmap 2.3)
+
+## 12.1 Plain-English Overview
+
+When your application fires an HTTP request through OkHttp, Apache HttpComponents, or Spring WebClient, the agent intercepts it before the bytes leave the process. You write a scenario with `ChaosSelector.httpClient(...)`, give it a URL glob like `"https://payments.internal/*"`, and every call to that endpoint goes through the chaos pipeline first — delays, suppression, or your own exception. The application never knows the agent is present unless a scenario fires.
+
+## 12.2 The Four Wired Clients
+
+The agent instruments exactly four HTTP client libraries. Each is an optional classpath presence; if the library is absent the transformation is silently skipped. The exact class and method wired for each client:
+
+| Client | Library / version in BOM | Instrumented class | Instrumented method | Dispatch type |
+|--------|--------------------------|-------------------|---------------------|---------------|
+| OkHttp synchronous | `com.squareup.okhttp3:okhttp:4.12.0` | `okhttp3.RealCall` | `execute()` (0-arg) | `BEFORE_HTTP_SEND` (sync) |
+| OkHttp asynchronous | same | `okhttp3.RealCall` | `enqueue(Callback)` (1-arg) | `BEFORE_HTTP_SEND_ASYNC` (async) |
+| Apache HC 4.x | `org.apache.httpcomponents:httpclient:4.5.14` | `org.apache.http.impl.client.CloseableHttpClient` | `execute(HttpHost, HttpRequest)` (2-arg) | `BEFORE_HTTP_SEND` (sync) |
+| Apache HC 5.x | `org.apache.httpcomponents.client5:httpclient5:5.3.1` | `org.apache.hc.client5.http.impl.classic.CloseableHttpClient` | `execute(ClassicHttpRequest, HttpClientResponseHandler)` (2-arg) | `BEFORE_HTTP_SEND` (sync) |
+| Spring WebClient / Reactor Netty | `io.projectreactor.netty:reactor-netty-http:1.1.21` | `reactor.netty.http.client.HttpClientConnect` | `connect(...)` (any-arg) | `BEFORE_HTTP_SEND_ASYNC` (async) |
+
+Spring `WebClient` dispatches all HTTP through Reactor Netty's internal `HttpClientConnect.connect(...)`. Intercepting at that internal connection initiation method means the interception is client-implementation-agnostic: `WebClient`, `RestClient` (when backed by Reactor Netty), and `HttpExchange` clients routed through WebClient all fire the same advice.
+
+The handle slots in `BootstrapDispatcher` are:
+
+- `BEFORE_HTTP_SEND = 46` — synchronous send (OkHttp `execute()`, Apache HC 4/5 `execute()`)
+- `BEFORE_HTTP_SEND_ASYNC = 47` — asynchronous / reactive send (OkHttp `enqueue()`, Reactor Netty `connect()`)
+
+Both slots carry the URL string as a single `String` argument and return `boolean` (`true` = suppress).
+
+## 12.3 `HttpUrlExtractor` — Reflective URL Extraction
+
+None of the four client libraries is a compile-time dependency of `chaos-agent-instrumentation-jdk`. They are declared `compileOnly` in the module so that the agent JAR carries no transitive class references to OkHttp, Apache HC, or Reactor Netty. At advice-weave time ByteBuddy inlines the advice bytecode into the target method; if a reference to `okhttp3.HttpUrl` appeared in the advice class descriptor the JVM would require that class to be present at transformation time. Using `Object`-typed parameters and reflective dispatch sidesteps this entirely.
+
+`HttpUrlExtractor` (package-private in `com.macstab.chaos.instrumentation`) resolves URLs through a `ConcurrentHashMap<String, Method>` keyed on `"$className#$methodName"`. On first call for a given class the method is located by walking the class hierarchy — declared methods, then interface methods, then superclass — looking for a zero-argument method with the target name. The found `Method` is stored in the cache with `setAccessible(true)` for subsequent fast-path invocations. The cache key includes the runtime class name so that distinct OkHttp `Call` subtypes or proxy wrappers each get their own cache slot.
+
+For each client:
+
+| Client | Extraction chain | Key method name |
+|--------|-----------------|-----------------|
+| `java.net.http.HttpRequest` | `request.uri().toString()` | `uri` |
+| `okhttp3.RealCall` | `call.request().url().toString()` | `request`, then `url` |
+| Apache HC 4.x | `host.toString() + requestLine.getUri().toString()` | `getRequestLine`, then `getUri` |
+| Apache HC 5.x | `request.getRequestUri().toString()` | `getRequestUri` |
+| Reactor Netty `HttpClientRequest` | `request.uri().toString()` | `uri` |
+
+When any step in the chain returns `null`, or when any reflective call throws, the extractor catches the `Throwable`, discards it, and returns `null`. A `null` URL passed to `BootstrapDispatcher.beforeHttpSend()` reaches `SelectorMatcher` as the `targetName` field of `InvocationContext`. The `SelectorMatcher` treats a `null` target name as a non-match for all non-`any()` patterns, but as a match for `NamePattern.any()`. This is intentional: a scenario with `urlPattern = any()` continues to fire even if URL extraction failed, matching the broadest intent of the selector. A scenario with a specific glob pattern silently misses, which is the safer failure mode.
+
+The reflection approach has one observable warm-up cost: the first call for each new client class incurs a full hierarchy walk. After the `Method` object is cached, subsequent calls are a single `ConcurrentHashMap.get()` plus `Method.invoke()` — cheap but not zero. At JIT saturation the JIT may inline through the `MethodHandle` and `Method.invoke` layers, though the reflective dispatch path is generally not inlined by C2.
+
+## 12.4 `ChaosHttpSuppressException` — Why Unchecked, How It Propagates
+
+`ChaosHttpSuppressException extends RuntimeException`. The unchecked choice is deliberate on two counts.
+
+First, OkHttp's `Call.execute()` declares `throws IOException`. If the advice threw a checked exception that is not `IOException`, the JVM verifier would reject the woven method — the inlined advice body must declare or catch all checked exceptions that could escape it. An unchecked exception escapes any checked-exception declaration without violating the verifier.
+
+Second, the async path (`enqueue`, `connect`) does not return a value — it dispatches onto a callback. If suppression is required, the only way to prevent the underlying I/O from being scheduled is to throw before the real method body runs. An unchecked exception thrown from `@Advice.OnMethodEnter` propagates out of the method entry, unwinding the entire call stack to wherever the caller catches exceptions. For OkHttp's `enqueue()` this means the caller never registers the `Callback` with the dispatcher; for Reactor Netty's `connect()` the reactive subscriber never sees an `onSubscribe`. The caller's existing error handling — Resilience4j circuit breakers, Spring's `ExchangeFilterFunction`, OkHttp's `Interceptor` chain — processes it as a runtime failure, which is the correct chaos semantic.
+
+`ChaosHttpSuppressException` is declared in `chaos-agent-api` (not in `chaos-agent-instrumentation-jdk`) so that downstream code can `catch (ChaosHttpSuppressException e)` in integration tests without depending on the instrumentation module.
+
+## 12.5 The `instrumentOptional` Guard
+
+`JdkInstrumentationInstaller.instrumentOptional()` is the mechanism that allows all four clients to be absent from the classpath without aborting agent startup. Before adding a type transformation to the `AgentBuilder` chain, it calls:
+
+```java
+Class.forName(typeName, false, ClassLoader.getSystemClassLoader());
+```
+
+The `false` second argument suppresses class initialization — only presence is tested. If `ClassNotFoundException` is thrown, the method logs at `FINE` level and returns the original `AgentBuilder` unchanged. The transformation for that client is never registered. No type matcher fires, no advice is woven, no exception is thrown.
+
+If the class is present, `instrumentOptional` adds a standard `.type(ElementMatchers.named(typeName)).transform(...)` entry to the builder chain.
+
+The OkHttp, Apache HC 4.x, Apache HC 5.x, and Reactor Netty transformations are all wrapped in `instrumentOptional`. An application using only OkHttp pays the advice overhead for OkHttp calls and nothing for Apache HC. An application using none of these libraries pays zero overhead on any HTTP path (because no HTTP advice is woven at all).
+
+## 12.6 The Java 11 `HttpClientImpl` Limitation
+
+The advice classes include `JavaHttpClientSendAdvice` and `JavaHttpClientSendAsyncAdvice` targeting `jdk.internal.net.http.HttpClientImpl.send(...)` and `sendAsync(...)`. These are present in the source and in `HttpClientAdvice.java`. They are deliberately **not** wired in `JdkInstrumentationInstaller`.
+
+The comment in `JdkInstrumentationInstaller` at the HTTP wiring block captures the investigation result verbatim. The concrete problem is this: `jdk.internal.net.http.HttpClientImpl` lives in the non-exported package `jdk.internal.net.http` inside the `java.net.http` module. ByteBuddy's `AgentBuilder` uses a single `AgentBuilder.Default` instance with `RETRANSFORMATION` strategy. When a transformation for `HttpClientImpl` is registered in the same `AgentBuilder` pass as the rest of Phase 2 transformations, the retransformation serialization step that ByteBuddy performs before calling `instrumentation.retransformClasses(...)` encounters the module-system restriction. ByteBuddy issues a transformation attempt for the class, which the JVM processes, but the side effect is that previously-queued retransformations for other classes in the same batch — specifically the Phase 2 JDK classes that were registered before the `HttpClientImpl` entry — have their advice silently dropped. The transformation of `Thread`, `LockSupport`, `System`, socket classes, and others fires (the `TRANSFORM` event is raised) but the instrumented bytecode is not retained by the JVM for the affected classes.
+
+The root cause is ByteBuddy's retransformation ordering: when a class in the batch lives in a non-opened module package, the JVM's retransformation serialization can interfere with the class file substitution pipeline for the entire batch. Classes that would be correctly transformed in isolation fail to hold their new bytecode when the bootstrap-adjacent `HttpClientImpl` transformation is included in the same `AgentBuilder` call.
+
+Empirical validation: an `AgentBuilder` with `enableNativeMethodPrefix("$chaos$")` plus a second standalone `AgentBuilder` installing `HttpClientImpl` was tested. The second builder issued the transformation in isolation. Woven advice fired correctly for `HttpClientImpl.send()`. The standalone builder approach with `--add-opens java.net.http/jdk.internal.net.http=ALL-UNNAMED` is the correct path to Java 11 `HttpClient` interception. This is noted in the codebase comment:
+
+```
+// Java 11+ HttpClient (jdk.internal.net.http.HttpClientImpl) is NOT registered via
+// instrumentOptional here. That class is always present on JDK 11+, but it lives in the
+// non-exported java.net.http/jdk.internal.net.http package. Attempting to transform it
+// without --add-opens java.net.http/jdk.internal.net.http=ALL-UNNAMED silently corrupts
+// subsequent AgentBuilder transformations.
+```
+
+Until a dedicated `AgentBuilder` pass is implemented with the correct `--add-opens` flag, applications using `java.net.http.HttpClient` are not intercepted by the agent's HTTP layer.
+
+## 12.7 URL Pattern Matching in `SelectorMatcher`
+
+`HttpClientSelector` carries a `NamePattern urlPattern` field. The `NamePattern` supports three modes: `ANY` (always matches), `GLOB` (file-glob syntax with `*` and `?`), and `REGEX`. In `SelectorMatcher.matches(ChaosSelector, InvocationContext)`:
+
+1. The `operationType` of the `InvocationContext` must appear in `HttpClientSelector.operations` — if the selector was registered for `HTTP_CLIENT_SEND` only, a `HTTP_CLIENT_SEND_ASYNC` call does not match.
+2. If the `urlPattern` is `ANY`, the match passes immediately.
+3. Otherwise `NamePattern.matches(context.targetName())` is evaluated. The `targetName` field of `InvocationContext` holds the URL extracted by `HttpUrlExtractor`, in `scheme://host/path` form where available.
+
+The URL is compared as-is against the glob or regex. There is no normalization: `https://api.example.com:443/users` and `https://api.example.com/users` would be treated as distinct values by the pattern `"https://api.example.com/*"`. Operators defining URL patterns should include only the portions they want to match and use `*` for the rest.
+
+The `HttpClientSelectorTest` (`agentInstalled_zeroScenarios` through `sessionIdMiss`) verifies that:
+- `NamePattern.glob("https://*.example.com/*")` matches `"https://api.example.com/users"` and rejects `"https://api.other.com/users"`
+- `any()` matches any non-null URL and also matches a `null` URL
+- An operation-type mismatch (`HTTP_CLIENT_SEND_ASYNC` context vs. `HTTP_CLIENT_SEND` selector) does not match
+
+## 12.8 Sequence Diagram — OkHttp Synchronous Path
+
+```plantuml
+@startuml
+title OkHttp RealCall.execute() → chaos pipeline → suppression or passthrough
+
+participant "Application\nThread" as App
+participant "okhttp3.RealCall\n(advice woven)" as RC
+participant "HttpClientAdvice\n.OkHttpExecuteAdvice" as Advice
+participant "BootstrapDispatcher\n.beforeHttpSend(url)" as BD
+participant "ChaosBridge\n.beforeHttpSend(url)" as CB
+participant "ChaosDispatcher\n.beforeHttpSend(url, HTTP_CLIENT_SEND)" as CD
+participant "ScenarioRegistry\n.match(context)" as SR
+participant "SelectorMatcher" as SM
+
+App -> RC : call.execute()
+activate RC
+
+note over RC : @Advice.OnMethodEnter fires\nbefore method body
+
+RC -> Advice : OkHttpExecuteAdvice.enter(this)
+activate Advice
+
+Advice -> Advice : url = HttpUrlExtractor.fromOkHttpCall(call)\n  → call.request().url().toString()
+
+Advice -> BD : beforeHttpSend(url)
+activate BD
+
+note over BD : DEPTH.get() == 0?\nyes → proceed\nDEPTH.set(1)
+
+BD -> CB : handles[46].invoke(delegate, url)
+activate CB
+
+CB -> CD : beforeHttpSend(url, HTTP_CLIENT_SEND)
+activate CD
+
+CD -> CD : build InvocationContext\n(HTTP_CLIENT_SEND, "http.client",\nnull, url, false, ...)
+
+CD -> SR : registry.match(context)
+activate SR
+
+SR -> SM : SelectorMatcher.matches(\n  HttpClientSelector, context)
+activate SM
+SM -> SM : operationType in selector.operations?\nurlPattern.matches(url)?
+SM --> SR : true / false
+deactivate SM
+
+SR --> CD : List<ScenarioContribution>
+deactivate SR
+
+alt no matching scenario
+  CD --> CB : false (no suppress)
+  CB --> BD : false
+  BD --> Advice : false
+  Advice --> RC : (no throw — passthrough)
+  RC -> RC : real OkHttp I/O executes
+  RC --> App : Response
+else SUPPRESS scenario matched
+  CD --> CB : true (suppress)
+  CB --> BD : true
+  BD --> Advice : true
+  Advice -> Advice : throw new ChaosHttpSuppressException(\n  "HTTP execute suppressed: " + url)
+  deactivate Advice
+  Advice --> App : ChaosHttpSuppressException\n(propagates as unchecked)
+  deactivate RC
+else DELAY scenario matched
+  CD -> CD : Thread.sleep(delayMillis)
+  CD --> CB : false
+  CB --> BD : false
+  BD --> Advice : false
+  Advice --> RC : (no throw — passthrough after delay)
+  RC -> RC : real OkHttp I/O executes
+  RC --> App : Response (delayed)
+end
+
+deactivate CD
+deactivate CB
+deactivate BD
+@enduml
+```
+
+---
+
+# 13. JDBC and Connection Pool Selectors (roadmap 2.4)
+
+## 13.1 Plain-English Overview
+
+The JDBC layer sits at the boundary between application code and the database driver. The agent intercepts two distinct surfaces: the connection pool (so you can make connection acquisition fail or slow down) and the JDBC statement API (so you can suppress specific SQL, slow down commits, or make rollbacks throw). A scenario targeting HikariCP's pool name `"payments-db"` with a `SuppressEffect` will make every attempt to borrow a connection from that pool throw a `ChaosJdbcSuppressException` — which Spring's `JdbcTemplate`, Hibernate, and plain JDBC code will all observe as an immediate failure, exercising the exact same failure path as a real database outage.
+
+## 13.2 The Six Instrumented Methods
+
+| Target | Class instrumented | Method | Advice class | Operation type | `targetName` |
+|--------|--------------------|--------|--------------|----------------|--------------|
+| HikariCP connection acquire | `com.zaxxer.hikari.pool.HikariPool` | `getConnection(long)` | `HikariGetConnectionAdvice` | `JDBC_CONNECTION_ACQUIRE` | Pool name from `getPoolName()` |
+| c3p0 connection checkout | `com.mchange.v2.c3p0.impl.C3P0PooledConnectionPool` | `checkoutPooledConnection()` | `C3p0CheckoutAdvice` | `JDBC_CONNECTION_ACQUIRE` | Class name fallback |
+| Statement execute | subtypes of `java.sql.Statement` | `execute(String)`, `executeQuery(String)`, `executeUpdate(String)` | `StatementExecuteAdvice` | `JDBC_STATEMENT_EXECUTE` | SQL snippet (≤ 200 chars) |
+| Connection prepare | subtypes of `java.sql.Connection` | `prepareStatement(String)` | `PrepareStatementAdvice` | `JDBC_PREPARED_STATEMENT` | SQL snippet (≤ 200 chars) |
+| Transaction commit | subtypes of `java.sql.Connection` | `commit()` | `CommitAdvice` | `JDBC_TRANSACTION_COMMIT` | `null` |
+| Transaction rollback | subtypes of `java.sql.Connection` | `rollback()` | `RollbackAdvice` | `JDBC_TRANSACTION_ROLLBACK` | `null` |
+
+HikariCP and c3p0 are wired via `instrumentOptional` — their absence from the classpath is tolerated cleanly (see §5 `instrumentOptional` description). The `java.sql.Statement` and `java.sql.Connection` instrumentation targets are always registered because `java.sql` is part of `java.sql` module, which is always present.
+
+The handle slots in `BootstrapDispatcher`:
+
+- `BEFORE_JDBC_CONNECTION_ACQUIRE = 48`
+- `BEFORE_JDBC_STATEMENT_EXECUTE = 49`
+- `BEFORE_JDBC_PREPARED_STATEMENT = 50`
+- `BEFORE_JDBC_TRANSACTION_COMMIT = 51`
+- `BEFORE_JDBC_TRANSACTION_ROLLBACK = 52`
+
+## 13.3 Interface Subtype Matching — The JVM Constraint
+
+`java.sql.Statement` and `java.sql.Connection` are interfaces. You cannot instrument an interface directly for two reasons:
+
+1. **No method body to weave**: ByteBuddy's `@Advice` model inlines bytecode into existing method bodies. An interface method prior to Java 8 default methods is abstract — no body exists. Even for default interface methods, instrumenting the interface would affect all concrete implementations, which is the correct goal, but the JVM prevents this: `retransformClasses` on an interface is legal but the injected code will never execute because no interface method has a concrete call site in the JVM dispatch chain — all real execution flows through the concrete class's virtual dispatch slot.
+
+2. **JVMS virtual dispatch**: `invokevirtual` and `invokeinterface` opcodes resolve at the concrete class level. Advice woven into the interface type descriptor would never be reached by the dispatch mechanism.
+
+The `AgentBuilder` type matcher therefore uses:
+
+```java
+ElementMatchers.isSubTypeOf(java.sql.Statement.class)
+    .and(ElementMatchers.not(ElementMatchers.isInterface()))
+```
+
+This matches every concrete class that implements `Statement` — driver classes like HikariCP's `HikariProxyStatement`, PostgreSQL's `org.postgresql.jdbc.PgStatement`, H2's `org.h2.jdbc.JdbcStatement`, and any other JDBC driver's concrete statement class that appears in the process. The same pattern applies to `Connection` subtypes: `HikariProxyConnection`, `org.postgresql.jdbc.PgConnection`, etc.
+
+The `not(isInterface())` guard is necessary because without it, the subtype matcher would also match `javax.sql.PooledConnection` and other interface subtypes of `Connection`, which would again cause the no-body problem.
+
+ByteBuddy's retransformation strategy handles the lazy loading of driver classes correctly: when a JDBC driver loads its `Statement` implementation on first use (typically when a `Connection` is first opened), the running transformation watcher fires the ByteBuddy `TRANSFORM` event for that class and the advice is woven into the newly-loaded concrete class.
+
+## 13.4 SQL Truncation — The 200-Character Limit
+
+For `JDBC_STATEMENT_EXECUTE` and `JDBC_PREPARED_STATEMENT`, the `targetName` in `InvocationContext` is set to the SQL string truncated to 200 characters. The `snippet()` helper in `ChaosDispatcher`:
+
+```java
+private static String snippet(final String sql) {
+    if (sql == null) {
+        return null;
+    }
+    return sql.length() <= 200 ? sql : sql.substring(0, 200);
+}
+```
+
+The rationale is GC pressure. An application running at high throughput may issue thousands of SQL statements per second. If the full SQL string (potentially kilobytes for complex analytic queries with large `IN` clauses or CTEs) were retained in `InvocationContext`, each invocation would allocate a non-trivial `String` object, hold a reference to the driver's original SQL buffer, and add non-negligible pressure to the minor GC. At 200 characters the string is large enough to identify the statement type and the first table name — sufficient for pattern matching — while remaining within one or two cache lines.
+
+The truncation also prevents selector abuse: a glob pattern like `"SELECT * FROM payments WHERE id IN (*"` would be matched against the first 200 chars, which is enough to distinguish statement families without requiring the pattern to account for arbitrarily long IN-list tails.
+
+`JDBC_TRANSACTION_COMMIT` and `JDBC_TRANSACTION_ROLLBACK` carry `null` as `targetName` because there is no meaningful target string. A `JdbcSelector` targeting commit operations with a non-`any()` `targetPattern` will never match, which is consistent: the pattern is matched against `null`, which is a non-match for all glob and regex patterns.
+
+## 13.5 `JdbcTargetExtractor` — Pool Name Extraction
+
+`JdbcTargetExtractor.fromHikariPool(Object pool)` extracts the HikariCP pool name by reflectively calling `getPoolName()` on the `HikariPool` instance. The same `ConcurrentHashMap<String, Method>` cache pattern used in `HttpUrlExtractor` is used here. The method hierarchy walk is superclass-only (no interface walk) because `getPoolName()` is a concrete method declared in HikariCP's `HikariDataSource`/`HikariPool` class hierarchy.
+
+If `getPoolName()` is not found (e.g., a version of HikariCP that renamed or removed the method), the extractor falls back to `pool.getClass().getName()`. This fallback guarantees that the `targetName` is always non-null when the `pool` argument is non-null. A `JdbcSelector` with `targetPattern = any()` continues to fire correctly; a pattern like `NamePattern.glob("payments-*")` simply fails to match the class name fallback, which is a safe degradation.
+
+For c3p0, the `C3p0CheckoutAdvice` does not use `JdbcTargetExtractor`. It uses `pool.getClass().getName()` directly:
+
+```java
+final String poolName = pool == null ? null : pool.getClass().getName();
+```
+
+c3p0 does not expose a named-pool API at the level that the advice can reflectively reach without version-specific knowledge. The class name is sufficient for pattern matching when the application uses a single c3p0 pool type.
+
+## 13.6 `ChaosJdbcSuppressException` — Propagation Through HikariCP
+
+`ChaosJdbcSuppressException extends RuntimeException`. When `HikariPool.getConnection(long)` advice throws it, HikariCP's calling code — `HikariDataSource.getConnection()` — does not catch `RuntimeException`. The exception propagates up through HikariCP's call stack to the application's `DataSource.getConnection()` call. Spring's `DataSourceUtils.getConnection()` wraps `RuntimeException`s that are not `DataAccessException` subtypes into a `CannotGetJdbcConnectionException`, which is what application code observes. Plain JDBC callers using `dataSource.getConnection()` directly see the `ChaosJdbcSuppressException` itself.
+
+The same propagation logic applies to all other JDBC advice methods: `Statement.execute()` advice throws before the driver's execute method runs; `Connection.commit()` advice throws before the driver flushes the transaction. Every layer above in the call stack — transaction managers, Hibernate sessions, `JdbcTemplate` — receives the exception as if the driver itself had thrown it.
+
+`ChaosJdbcSuppressException` is declared in `chaos-agent-api` for the same reason as `ChaosHttpSuppressException`: so that integration tests and application code can catch it precisely without depending on the instrumentation module.
+
+## 13.7 The `evaluateJdbc` Shared Pipeline
+
+All five JDBC dispatch methods in `ChaosDispatcher` funnel through a single private helper:
+
+```java
+private boolean evaluateJdbc(
+        final OperationType opType,
+        final String targetClassName,
+        final String targetName) throws Throwable {
+    final InvocationContext context = new InvocationContext(
+            opType, targetClassName, null, targetName, false, null, null,
+            scopeContext.currentSessionId());
+    final RuntimeDecision decision = evaluate(context);
+    applyGate(decision.gateAction());
+    if (decision.terminalAction() != null) {
+        final TerminalAction terminalAction = decision.terminalAction();
+        if (terminalAction.kind() == TerminalKind.THROW) {
+            throw terminalAction.throwable();
+        }
+        if (terminalAction.kind() == TerminalKind.SUPPRESS) {
+            sleep(decision.delayMillis());
+            return true;
+        }
+    }
+    sleep(decision.delayMillis());
+    return false;
+}
+```
+
+The five callers:
+
+```java
+public boolean beforeJdbcConnectionAcquire(String poolName) throws Throwable {
+    return evaluateJdbc(JDBC_CONNECTION_ACQUIRE, "jdbc.pool", poolName);
+}
+public boolean beforeJdbcStatementExecute(String sql) throws Throwable {
+    return evaluateJdbc(JDBC_STATEMENT_EXECUTE, "java.sql.Statement", snippet(sql));
+}
+public boolean beforeJdbcPreparedStatement(String sql) throws Throwable {
+    return evaluateJdbc(JDBC_PREPARED_STATEMENT, "java.sql.Connection", snippet(sql));
+}
+public boolean beforeJdbcTransactionCommit() throws Throwable {
+    return evaluateJdbc(JDBC_TRANSACTION_COMMIT, "java.sql.Connection", null);
+}
+public boolean beforeJdbcTransactionRollback() throws Throwable {
+    return evaluateJdbc(JDBC_TRANSACTION_ROLLBACK, "java.sql.Connection", null);
+}
+```
+
+Each caller sets the `targetClassName` to the JDBC API class that semantically owns the operation: `"jdbc.pool"` is a synthetic marker distinguishing connection-pool operations from connection-level operations. `SelectorMatcher` does not filter on `targetClassName` for `JdbcSelector` — the relevant fields are `operationType` and `targetName`. The `targetClassName` is present in `InvocationContext` for observability (event logs, metrics) rather than for selector matching.
+
+`OperationType` drives which scenarios participate in the match. A `JdbcSelector` with `operations = {JDBC_STATEMENT_EXECUTE}` will not appear in the `List<ScenarioContribution>` returned by `registry.match()` when `evaluateJdbc` is called with `JDBC_CONNECTION_ACQUIRE`. The `ScenarioRegistry.match()` method filters first by `operationType`, then by the selector's remaining predicates. This guarantees selector isolation: a scenario targeting connection acquisition never affects statement execution and vice versa.
+
+The return value contract: `evaluateJdbc` returns `true` when a `SUPPRESS` decision was reached. The advice class checks this boolean and throws `ChaosJdbcSuppressException` if `true`. `evaluateJdbc` returns `false` in all other cases: no scenario, delay only, gate only, or after an injected exception (in which case the exception was already thrown by `throw terminalAction.throwable()`). The advice does nothing further when `false` is returned, and the real JDBC method body proceeds.
+
+## 13.8 Integration Test Design — Why `ChaosPlatform.installLocally()` Was Not Used
+
+`JdbcIntegrationTest` wires the pipeline manually:
+
+```java
+@BeforeAll
+void installBridge() throws Exception {
+    runtime = new ChaosRuntime();
+    final ChaosBridge bridge = new ChaosBridge(runtime);
+    final MethodHandle[] handles = JdkInstrumentationInstaller.buildMethodHandles();
+    BootstrapDispatcher.install(bridge, handles);
+    Class.forName("org.h2.Driver");
+}
+```
+
+`ChaosPlatform.installLocally()` — the self-attach mechanism used by the Spring test starter — calls `JdkInstrumentationInstaller.install(instrumentation, runtime, premainMode=true)` which includes Phase 2 JDK instrumentation. The `chaos-agent-instrumentation-jdk` module already depends on `chaos-agent-bootstrap` for the `ChaosPlatform` type. `chaos-agent-bootstrap` in turn depends on `chaos-agent-instrumentation-jdk`. Calling `ChaosPlatform.installLocally()` from within `chaos-agent-instrumentation-jdk`'s own test scope would create a module dependency cycle: the module-under-test would need its own outputs on the classpath at test time in a way that the Gradle project structure does not support without forking a child process with `-javaagent:`.
+
+Additionally, JDBC instrumentation in `JdkInstrumentationInstaller` is gated on `premainMode=true`. A self-attach via `agentmain` sets `premainMode=false`, which means the JDBC `isSubTypeOf(Statement.class)` transformations are never installed during dynamic attach. Self-attach therefore cannot exercise the JDBC ByteBuddy wiring at all.
+
+The manual `BootstrapDispatcher.install(bridge, handles)` approach bypasses ByteBuddy entirely. The test calls the `BootstrapDispatcher` static dispatch methods (`beforeJdbcStatementExecute`, `beforeJdbcConnectionAcquire`, etc.) directly, simulating what the ByteBuddy-woven advice would call at production runtime. The real `ChaosRuntime` → `ChaosDispatcher` → `ScenarioRegistry` → `SelectorMatcher` pipeline executes in full. The real H2 in-memory database and HikariCP connection pool are used. The only missing piece is the ByteBuddy weaving — which is a concern for `JdkInstrumentationInstaller` to test, not for `JdbcIntegrationTest`. The test covers the dispatch path, the suppression signal, the exception throw, and the passthrough path; it leaves the bytecode transformation mechanics to the installer's own test scope.
+
+## 13.9 Sequence Diagram — HikariCP Connection Acquire
+
+```plantuml
+@startuml
+title HikariPool.getConnection(long) → chaos pipeline → suppress or passthrough
+
+participant "Application\nThread" as App
+participant "HikariPool\n(advice woven)" as HP
+participant "JdbcAdvice\n.HikariGetConnectionAdvice" as Advice
+participant "BootstrapDispatcher\n.beforeJdbcConnectionAcquire(poolName)" as BD
+participant "ChaosBridge\n.beforeJdbcConnectionAcquire(poolName)" as CB
+participant "ChaosDispatcher\n.beforeJdbcConnectionAcquire()" as CD
+participant "evaluateJdbc()" as EJ
+participant "ScenarioRegistry\n.match(context)" as SR
+
+App -> HP : dataSource.getConnection()\n  → HikariPool.getConnection(timeoutMs)
+activate HP
+
+note over HP : @Advice.OnMethodEnter fires\nbefore method body
+
+HP -> Advice : HikariGetConnectionAdvice.enter(this)
+activate Advice
+
+Advice -> Advice : poolName = JdbcTargetExtractor\n  .fromHikariPool(pool)\n  → reflective getPoolName()
+
+Advice -> BD : beforeJdbcConnectionAcquire(poolName)
+activate BD
+
+note over BD : DEPTH.get() == 0\nDEPTH.set(1)
+
+BD -> CB : handles[48].invoke(delegate, poolName)
+activate CB
+
+CB -> CD : beforeJdbcConnectionAcquire(poolName)
+activate CD
+
+CD -> EJ : evaluateJdbc(JDBC_CONNECTION_ACQUIRE,\n  "jdbc.pool", poolName)
+activate EJ
+
+EJ -> SR : registry.match(\n  InvocationContext(JDBC_CONNECTION_ACQUIRE,\n  "jdbc.pool", null, poolName, ...))
+activate SR
+SR --> EJ : List<ScenarioContribution>
+deactivate SR
+
+alt no matching scenario
+  EJ --> CD : false
+  CD --> CB : false
+  CB --> BD : false
+  BD --> Advice : false
+  Advice --> HP : (no throw — passthrough)
+  HP -> HP : real connection borrowed from pool
+  HP --> App : Connection
+
+else SUPPRESS scenario matched
+  EJ --> CD : true (suppress)
+  CD --> CB : true
+  CB --> BD : true
+  BD --> Advice : true
+  Advice -> Advice : throw new ChaosJdbcSuppressException(\n  "JDBC connection acquire suppressed: " + poolName)
+  deactivate Advice
+  Advice --> App : ChaosJdbcSuppressException\n(propagates unchecked through HikariCP)
+  deactivate HP
+
+else DELAY scenario matched
+  EJ -> EJ : Thread.sleep(delayMillis)
+  EJ --> CD : false
+  CD --> CB : false
+  CB --> BD : false
+  BD --> Advice : false
+  Advice --> HP : (no throw — passthrough after delay)
+  HP -> HP : real connection borrowed from pool
+  HP --> App : Connection (delayed)
+end
+
+deactivate EJ
+deactivate CD
+deactivate CB
+deactivate BD
+@enduml
+```
+
+---
+
+# 14. Known Limitations
 
 1. **`System.currentTimeMillis()` and `System.nanoTime()` cannot be intercepted** — Two
    independent JVM constraints block every known approach via a standard `-javaagent:` agent:
@@ -541,7 +978,7 @@ See [overall-agent.md §11] for full hot-path cost breakdown.
 
 ---
 
-# 13. References
+# 15. References
 
 - Reference: Byte Buddy — `AgentBuilder`, `@Advice`, `RedefinitionStrategy`, `disableClassFormatChanges()` — https://bytebuddy.net/#/tutorial
 - Reference: `java.lang.instrument.Instrumentation` — `appendToBootstrapClassLoaderSearch`, `retransformClasses`, manifest attributes — https://docs.oracle.com/en/java/docs/api/java.instrument/java/lang/instrument/Instrumentation.html
@@ -553,14 +990,14 @@ See [overall-agent.md §11] for full hot-path cost breakdown.
 - Reference: JEP 444 — Virtual Threads; virtual-thread pinning under `synchronized` vs. AQS — https://openjdk.org/jeps/444
 - Reference: JSR-133 §17.4.5 — Volatile write/read ordering and happens-before — https://jcp.org/aboutJava/communityprocess/mrel/jsr133/index.html
 - Reference: Intel® SDM Vol. 3 — `MFENCE`, `LOCK XCHG` (x86-64 volatile write fence) — https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html
-- Reference: ARM Engineerure Reference Manual — `STLR` Store-Release, `LDAR` Load-Acquire for AArch64 volatile semantics — https://developer.arm.com/documentation/ddi0487/latest
+- Reference: ARM Architecture Reference Manual — `STLR` Store-Release, `LDAR` Load-Acquire for AArch64 volatile semantics — https://developer.arm.com/documentation/ddi0487/latest
 - Reference: Linux `futex(2)` — underlying park/unpark and synchronized inflation mechanism — https://man7.org/linux/man-pages/man2/futex.2.html
 
 ---
 
 <div align="center">
 
-*Engineerure, implementation, and documentation crafted by*
+*Architecture, implementation, and documentation crafted by*
 
 **[Christian Schnapka](https://macstab.com)**  
 Embedded Principal+ Engineer  

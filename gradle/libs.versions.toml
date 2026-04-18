@@ -8,6 +8,7 @@ googleJavaFormat = "1.33.0"
 h2 = "2.3.232"
 hikariCp = "5.1.0"
 jackson = "2.19.4"
+jmh = "1.37"
 junit = "5.10.1"
 okhttp = "4.12.0"
 reactorNetty = "1.1.21"
@@ -26,6 +27,8 @@ byte-buddy-agent = { module = "net.bytebuddy:byte-buddy-agent", version.ref = "b
 jackson-annotations = { module = "com.fasterxml.jackson.core:jackson-annotations", version.ref = "jackson" }
 jackson-databind = { module = "com.fasterxml.jackson.core:jackson-databind", version.ref = "jackson" }
 jackson-jsr310 = { module = "com.fasterxml.jackson.datatype:jackson-datatype-jsr310", version.ref = "jackson" }
+jmh-core = { module = "org.openjdk.jmh:jmh-core", version.ref = "jmh" }
+jmh-generator-annprocess = { module = "org.openjdk.jmh:jmh-generator-annprocess", version.ref = "jmh" }
 assertj = { module = "org.assertj:assertj-core", version = "3.27.3" }
 awaitility = { module = "org.awaitility:awaitility", version.ref = "awaitility" }
 junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }

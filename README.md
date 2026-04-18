@@ -42,7 +42,7 @@ session.activate(ChaosScenario.builder()
 * [macstab-chaos-jvm-agent](#macstab-chaos-jvm-agent)
   * [The Short Version](#the-short-version)
   * [Floor 0 — What it does (plain English)](#floor-0--what-it-does-plain-english)
-  * [Floor -1 — Engineerure (senior engineer territory)](#floor--1--engineerure-senior-engineer-territory)
+  * [Floor -1 — Architecture (senior engineer territory)](#floor--1--engineerure-senior-engineer-territory)
   * [Floor -2 — Runtime mechanics (principal-level)](#floor--2--runtime-mechanics-principal-level)
     * [Evaluation Pipeline](#evaluation-pipeline)
     * [Classloader Bridge](#classloader-bridge)
@@ -93,7 +93,7 @@ This library lets you **turn those scenarios on and off programmatically**, scop
 
 ---
 
-## Floor -1 — Engineerure (senior engineer territory)
+## Floor -1 — Architecture (senior engineer territory)
 
 The agent loads via the standard Java Instrumentation API (`-javaagent:` or dynamic self-attach). ByteBuddy weaves `@Advice` hooks into selected JDK methods at startup. Those hooks call a static dispatcher that routes to the live scenario registry, evaluates matching scenarios against an 8-check activation pipeline, and executes the decision inline on the calling thread.
 
@@ -171,7 +171,7 @@ ByteBuddy instrumentation uses `AgentBuilder` with `RedefinitionStrategy.RETRANS
 
 - **`disableClassFormatChanges()`** constrains ByteBuddy to inline-only transformations: no new fields, no new constant pool entries that change the class format, no changes to method signatures. The transformed class must be accepted by `ClassFileTransformer.transform()` under the constraints of JVMTI's `RetransformClasses`. This is enforced by JVMTI spec §11.2.2 ("Retransformation Incapable") — specifically, that retransformable transformers may only modify method bodies, not the class schema.
 - **`@Advice.OnMethodEnter`** bytecode is copied verbatim (not called — *copied*) into the target method's bytecode at the entry point. The JVM sees one contiguous method body. After JIT compilation (`-XX:CompileThreshold` default 10,000 calls for C2 on HotSpot), the advice body is inlined by the JIT compiler as part of the compiled native frame. There is no virtual dispatch overhead after warm-up.
-- **Native method interception** (specifically `System.currentTimeMillis()`, `System.nanoTime()`): these are `@IntrinsicCandidate` native methods. HotSpot replaces them with Engineerure-specific intrinsics during JIT compilation — on x86-64, `currentTimeMillis()` becomes a direct `RDTSC` + conversion sequence; on AArch64, it uses `MRS X0, CNTVCT_EL0`. ByteBuddy advice on the Java wrapper is dead code after JIT compilation. The `ClockSkewEffect` cannot intercept production clock reads via bytecode instrumentation alone — it works only via the direct `ChaosRuntime.applyClockSkew()` API.
+- **Native method interception** (specifically `System.currentTimeMillis()`, `System.nanoTime()`): these are `@IntrinsicCandidate` native methods. HotSpot replaces them with Architecture-specific intrinsics during JIT compilation — on x86-64, `currentTimeMillis()` becomes a direct `RDTSC` + conversion sequence; on AArch64, it uses `MRS X0, CNTVCT_EL0`. ByteBuddy advice on the Java wrapper is dead code after JIT compilation. The `ClockSkewEffect` cannot intercept production clock reads via bytecode instrumentation alone — it works only via the direct `ChaosRuntime.applyClockSkew()` API.
 
 ### JMM Happens-Before in the Bootstrap Bridge
 
@@ -198,7 +198,7 @@ LOCK XADD [rsi+offset], 1   ; atomic fetch-and-add on x86-64
 LOCK CMPXCHG [rsi+offset], rax
 ```
 
-The `LOCK` prefix on x86 asserts the cache coherency protocol (MESI) for the cache line containing the field, issues a full memory barrier (both acquire and release semantics), and ensures atomicity across hyperthreads sharing an L1 cache. On AMD Zen and Intel Engineerures with MESIF, this causes a cache-line ownership transfer if another core holds the line in Modified state — the latency spike is 40–70 cycles for cross-core coherency vs. ~4 cycles for same-core hits.
+The `LOCK` prefix on x86 asserts the cache coherency protocol (MESI) for the cache line containing the field, issues a full memory barrier (both acquire and release semantics), and ensures atomicity across hyperthreads sharing an L1 cache. On AMD Zen and Intel Architectures with MESIF, this causes a cache-line ownership transfer if another core holds the line in Modified state — the latency spike is 40–70 cycles for cross-core coherency vs. ~4 cycles for same-core hits.
 
 **False sharing risk**: `ScenarioController` packs `matchedCount` and `appliedCount` as adjacent `AtomicLong` fields. Both fields fit in the same 64-byte cache line on typical JVMs. Under high-concurrency scenarios where many threads increment `matchedCount` while others CAS `appliedCount`, the cache line bounces between cores. This is a known trade-off in the current implementation — `@Contended` (JDK internal) padding could eliminate it at the cost of 128 bytes per controller.
 
@@ -562,25 +562,60 @@ For deep technical detail on all four modules — lifecycle, conditional wiring,
 
 ---
 
+## Performance
+
+The agent is designed to be invisible on any I/O-bound path. All numbers below are for the **hot path after JIT warm-up** (~10 000 invocations for C2 tier on HotSpot).
+
+### Hot-path overhead targets
+
+| Scenario | Target | What drives the cost |
+|----------|--------|----------------------|
+| Agent installed, zero active scenarios | **< 50 ns** | Null-bridge short-circuit: one null check + return |
+| One scenario active, no selector match | **< 100 ns** | Full 8-check evaluation pipeline, selector miss exits at check 3 |
+| One scenario active, match, no terminal effect | **< 300 ns** | All 8 checks pass, no effect applied |
+| Session scope miss (wrong session ID) | **< 20 ns additional** | ThreadLocal read + identity compare, exits before selector evaluation |
+| 10 active scenarios, one match | **< 1 µs** | Linear registry scan, all misses exit at selector check |
+
+For reference: HikariCP connection borrow ~5–15 µs · local TCP roundtrip ~50–200 µs · `Thread.sleep(1)` ~1 ms. The agent overhead is below the noise floor of any realistic I/O call.
+
+### What the JIT does
+
+ByteBuddy advice bytecode is **copied verbatim into the target method body** at retransformation time — not called, *inlined at the bytecode level*. After JIT warm-up, the C2 compiler inlines the `MethodHandle.invoke()` dispatch chain through `ChaosBridge` into `ChaosDispatcher`. In the zero-scenario case the entire hot path reduces to a null check and an untaken branch.
+
+The `volatile` read of `ChaosDispatcher`'s scenario registry is a single acquire load. On x86 TSO (total store order) the hardware guarantees load-load ordering without an `MFENCE` instruction — the acquire semantics cost zero additional cycles versus a plain read on Intel/AMD. On AArch64 it compiles to `LDAR` (load-acquire), which prevents speculative execution of dependent loads past the registry pointer.
+
+### Benchmarks
+
+`chaos-agent-benchmarks` contains a full JMH 1.37 suite across JDBC and HTTP client hot paths at all scenario-count variants. Run with:
+
+```bash
+./gradlew :chaos-agent-benchmarks:run
+```
+
+See [`docs/benchmarks.md`](docs/benchmarks.md) for full JIT warm-up analysis, result interpretation, and production calibration against real I/O costs.
+
+---
+
 ## Build
 
 ```bash
-./gradlew build          # compile + test all modules
-./gradlew test           # tests only
-./gradlew :chaos-agent-bootstrap:jar  # produce the agent JAR
+./gradlew build                        # compile + test all modules
+./gradlew test                         # tests only
+./gradlew :chaos-agent-bootstrap:jar   # produce the agent JAR
+./gradlew :chaos-agent-benchmarks:run  # run JMH benchmarks
 ```
 
-Requires JDK 17+. Build toolchain targets JDK 25; `--release 17` is enforced.
+Requires JDK 17+. Build toolchain targets JDK 25; `--release 21` is enforced.
 
 ---
 
 ## Detailed Documentation
 
-Internal Engineerure documentation lives in [`docs/`](docs/):
+Internal Architecture documentation lives in [`docs/`](docs/):
 
 | Document | What it covers |
 |----------|---------------|
-| [`overall-agent.md`](docs/overall-agent.md) | System Engineerure, all analysis dimensions, stack walkdown, PlantUML diagrams |
+| [`overall-agent.md`](docs/overall-agent.md) | System Architecture, all analysis dimensions, stack walkdown, PlantUML diagrams |
 | [`api.md`](docs/api.md) | Stable API contract: builders, selectors, effects, diagnostics |
 | [`core.md`](docs/core.md) | Evaluation pipeline, session scoping, stressor lifecycle, JMM analysis |
 | [`instrumentation.md`](docs/instrumentation.md) | ByteBuddy advice, bootstrap bridge, reentrancy guard, 42-handle table |
@@ -588,6 +623,7 @@ Internal Engineerure documentation lives in [`docs/`](docs/):
 | [`startup-config.md`](docs/startup-config.md) | Config source resolution, JSON schema, path safety |
 | [`testkit.md`](docs/testkit.md) | JUnit 5 extension, session lifecycle, anti-patterns |
 | [`spring-integration.md`](docs/spring-integration.md) | Spring Boot 3 and 4 starters: `@ChaosTest`, `ChaosAgentExtension`, Actuator endpoint, configuration reference |
+| [`benchmarks.md`](docs/benchmarks.md) | JMH benchmark suite: hot-path targets, JIT analysis, result interpretation, `ChaosDispatcher` vs `ChaosRuntime` profiling |
 
 ---
 
@@ -599,7 +635,7 @@ Apache License 2.0 — see [LICENSE](LICENSE).
 
 <div align="center">
 
-*Engineerure, implementation, and documentation crafted by*
+*Architecture, implementation, and documentation crafted by*
 
 **[Christian Schnapka](https://macstab.com)**
 Embedded Principal+ Engineer

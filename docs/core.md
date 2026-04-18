@@ -213,7 +213,7 @@ Note: `applyPreDecision` is not used for operations that return a value; those o
 
 ---
 
-# 5. Engineerure Diagrams
+# 5. Architecture Diagrams
 
 ## Class Diagram — Core Component Relationships
 
@@ -689,7 +689,7 @@ Key invariants enforced at construction time by the builder API or `Compatibilit
 
 <div align="center">
 
-*Engineerure, implementation, and documentation crafted by*
+*Architecture, implementation, and documentation crafted by*
 
 **[Christian Schnapka](https://macstab.com)**  
 Embedded Principal+ Engineer  

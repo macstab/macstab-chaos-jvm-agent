@@ -7,7 +7,7 @@
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 -->
 
-# macstab-chaos-jvm-agent — System Engineerure Reference
+# macstab-chaos-jvm-agent — System Architecture Reference
 
 > Authoritative internal reference for principal engineers, SREs, and production incident responders.
 > 
@@ -232,7 +232,7 @@ Consequence: a test can safely activate session-scoped chaos and submit work to 
 
 ---
 
-# 5. Engineerure Diagrams
+# 5. Architecture Diagrams
 
 ## Component Diagram — Answering: What depends on what?
 
@@ -959,8 +959,8 @@ The agent has no direct infrastructure dependencies at runtime. It does not perf
 - Reference: Java SE API — `java.util.concurrent.ConcurrentHashMap` — https://docs.oracle.com/en/java/docs/api/java.base/java/util/concurrent/ConcurrentHashMap.html
 - Reference: Java SE API — `java.util.concurrent.atomic.AtomicLong` — https://docs.oracle.com/en/java/docs/api/java.base/java/util/concurrent/atomic/AtomicLong.html
 - Reference: JDK-8029999 — `@IntrinsicCandidate`; JIT intrinsic inlining bypasses bytecode advice — https://bugs.openjdk.org/browse/JDK-8029999
-- Reference: Intel® 64 and IA-32 Engineerures SDM Vol. 3 — `LOCK CMPXCHG`, `LOCK XADD`, `MFENCE` memory ordering — https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html
-- Reference: ARM Engineerure Reference Manual — `STLR` (Store-Release), `LDAR` (Load-Acquire), `STXR` (Store-Exclusive) — https://developer.arm.com/documentation/ddi0487/latest
+- Reference: Intel® 64 and IA-32 Architectures SDM Vol. 3 — `LOCK CMPXCHG`, `LOCK XADD`, `MFENCE` memory ordering — https://www.intel.com/content/www/us/en/developer/articles/technical/intel-sdm.html
+- Reference: ARM Architecture Reference Manual — `STLR` (Store-Release), `LDAR` (Load-Acquire), `STXR` (Store-Exclusive) — https://developer.arm.com/documentation/ddi0487/latest
 - Reference: Linux `futex(2)` — `FUTEX_WAIT`, `FUTEX_WAKE`, `FUTEX_WAIT_BITSET` — https://man7.org/linux/man-pages/man2/futex.2.html
 - Reference: Linux `nanosleep(2)` — timer resolution, `CONFIG_HZ`, high-resolution timers — https://man7.org/linux/man-pages/man2/nanosleep.2.html
 - Reference: Linux `pthread_mutex_lock(3)` — futex-backed mutex implementation — https://man7.org/linux/man-pages/man3/pthread_mutex_lock.3p.html
@@ -969,7 +969,7 @@ The agent has no direct infrastructure dependencies at runtime. It does not perf
 
 <div align="center">
 
-*Engineerure, implementation, and documentation crafted by*
+*Architecture, implementation, and documentation crafted by*
 
 **[Christian Schnapka](https://macstab.com)**  
 Embedded Principal+ Engineer  

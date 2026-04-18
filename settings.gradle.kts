@@ -16,6 +16,7 @@ rootProject.name = "macstab-chaos-jvm-agent"
 
 include(
     "chaos-agent-api",
+    "chaos-agent-benchmarks",
     "chaos-agent-bootstrap",
     "chaos-agent-core",
     "chaos-agent-examples",

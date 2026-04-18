@@ -391,10 +391,11 @@ Instrumentation targets:
 
 ## Phase 3 — Performance and Quality
 
-### ⬜ 3.1 JMH Benchmark Suite
-**Priority: medium — 1 day**
+### ✅ 3.1 JMH Benchmark Suite
+**Completed — 1 day**
 
-New module: `chaos-agent-benchmarks`
+New module: `chaos-agent-benchmarks` targeting the clean `ChaosDispatcher` hot path exposed by the
+3.2 refactor.
 
 Baselines to establish and document:
 
@@ -407,21 +408,67 @@ Baselines to establish and document:
 | Session ID miss (wrong session) | < 20 ns additional |
 | 10 active scenarios, one match | < 1 µs |
 
+**What was done:**
+
+- New Gradle module `chaos-agent-benchmarks` added to `settings.gradle.kts`; applies the
+  `application` plugin with `org.openjdk.jmh.Main` as the main class. JMH version `1.37` declared
+  in `gradle/libs.versions.toml` as `jmh-core` (`implementation`) and `jmh-generator-annprocess`
+  (`annotationProcessor`). No tests live in the module — the benchmarks themselves are the
+  artefact.
+- `ChaosRuntimeBenchmark` covers the `beforeJdbcStatementExecute` hot path with six variants
+  matching the table above: `baseline_noAgent`, `agentInstalled_zeroScenarios`,
+  `agentInstalled_oneScenario_noMatch`, `agentInstalled_oneMatch_noEffect`, `sessionIdMiss`,
+  `tenScenarios_oneMatch`. Each variant uses a dedicated `@State(Scope.Benchmark)` class to
+  install scenarios via `@Setup(Level.Trial)` so activation cost is excluded from the measurement
+  window. `@Fork(1)`, `@Warmup(iterations = 3, time = 1)`, `@Measurement(iterations = 5, time =
+  1)`, `@BenchmarkMode(Mode.AverageTime)`, `@OutputTimeUnit(NANOSECONDS)`.
+- `HttpClientBenchmark` mirrors the same six-variant structure against the `beforeHttpSend` hot
+  path, feeding a representative `https://example.com/api/v1/orders` URL through the dispatcher.
+- All benchmarks call `dispatcher = runtime.dispatcher()` in `@Setup` and exercise the dispatcher
+  directly. Return values are consumed with `Blackhole.consume` to prevent dead-code elimination.
+- CI does not execute the benchmarks (too slow); `./gradlew :chaos-agent-benchmarks:compileJava`
+  is the gating build task and succeeds cleanly.
+
 ---
 
-### ⬜ 3.2 ChaosRuntime Refactor
-**Priority: low — 1 day**
+### ✅ 3.2 ChaosRuntime Refactor
+**Completed — 1 day**
 
 Split the god class:
 
 ```
-ChaosRuntime (current, ~800 LOC)
+ChaosRuntime (facade, thin delegate layer)
     ↓
-ChaosDispatcher       — hot path: before*/after*/adjust*/decorate*
+ChaosDispatcher       — hot path: before*/after*/adjust*/decorate*/beforeHttp*/beforeJdbc*
 ChaosControlPlaneImpl — control: activate(), openSession(), diagnostics(), close()
 ```
 
-No behavior change. Pure structural refactor for readability and independent profiling.
+**What was done:**
+
+- `ChaosControlPlaneImpl` (new, package-private) implements `ChaosControlPlane` and owns the
+  control-plane state: `clock`, `featureSet`, `scopeContext`, `observabilityBus`, `registry`,
+  the shutdown-hook tracking map, and the instrumentation reference. It implements `activate`,
+  `activate(ChaosPlan)`, `openSession` (via package-private helper that takes the facade
+  reference), `diagnostics`, `addEventListener`, `close`, `setInstrumentation`,
+  `activateInSession`, and `registerScenario` with its diagnostic failure-category mapping. It
+  also exposes package-private accessors so `ChaosDispatcher` can read the shared state.
+- `ChaosDispatcher` (new, public) holds every hot-path entry point — `decorate*`, `before*`,
+  `after*`, `adjust*` — including all Phase 1 and Phase 2 dispatch methods, the JDBC and HTTP
+  entry points, `applyClockSkew`, `beforeMethodEnter`/`afterMethodExit`, `currentSessionId`, and
+  the private evaluation helpers (`evaluate`, `applyPreDecision`, `applyGate`, `sleep`,
+  `propagate`, `terminalActionFor`, `rejectTerminal`, `suppressTerminal`,
+  `buildInjectedExceptionTerminal`, `evaluateJdbc`, `snippet`, `extractRemoteHost`). It is
+  constructed by `ChaosControlPlaneImpl` and receives references to the four pieces of state it
+  needs (`featureSet`, `scopeContext`, `registry`, `shutdownHooks`).
+- `ChaosRuntime` is now a thin facade that composes `ChaosControlPlaneImpl` + `ChaosDispatcher`.
+  `ChaosControlPlane` methods delegate to the control-plane impl; hot-path methods delegate to
+  the dispatcher. Package-private accessors `registry()`, `instrumentation()`,
+  `activateInSession()` are preserved for backwards compatibility with `DefaultChaosSession` and
+  tests. New public accessors `dispatcher()` and `controlPlane()` let callers (notably JMH
+  benchmarks) target the refactored halves directly.
+- All existing tests pass unchanged (`./gradlew build` succeeds). `ChaosBridge`, test
+  constructors (`new ChaosRuntime()`), and bootstrap wiring in `ChaosAgentBootstrap` continue to
+  work without modification.
 
 ---
 
@@ -475,8 +522,8 @@ Week 3  └── ✅ 2.3  HTTP client selectors                  (5d)
 
 Week 4  └── ✅ 2.4  JDBC / HikariCP selectors              (4d)
 
-Week 5  ├── ⬜ 3.1  JMH benchmarks                        (1d)
-        └── ⬜ 3.2  ChaosRuntime refactor                  (1d)
+Week 5  ├── ✅ 3.1  JMH benchmarks                        (1d)
+        └── ✅ 3.2  ChaosRuntime refactor                  (1d)
 
 Week 6  ├── ⬜ 3.3  Quarkus integration                    (2d)
         ├── ⬜ 3.4  Micronaut integration                   (2d)

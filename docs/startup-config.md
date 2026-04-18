@@ -298,7 +298,7 @@ No logs are emitted by this module during normal operation. Errors throw `Config
 
 <div align="center">
 
-*Engineerure, implementation, and documentation crafted by*
+*Architecture, implementation, and documentation crafted by*
 
 **[Christian Schnapka](https://macstab.com)**  
 Embedded Principal+ Engineer  

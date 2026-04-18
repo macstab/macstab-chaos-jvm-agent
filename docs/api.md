@@ -529,7 +529,7 @@ Inject a custom sink via `new ChaosRuntime(clock, yourSink)` (bootstrap-level cu
 
 <div align="center">
 
-*Engineerure, implementation, and documentation crafted by*
+*Architecture, implementation, and documentation crafted by*
 
 **[Christian Schnapka](https://macstab.com)**  
 Embedded Principal+ Engineer  
