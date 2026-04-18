@@ -1246,6 +1246,134 @@ public final class ChaosRuntime implements ChaosControlPlane {
     applyPreDecision(evaluate(context));
   }
 
+  /**
+   * Called before an HTTP client request is dispatched. Carries the request URL as {@code
+   * targetName} through the scenario evaluation pipeline.
+   *
+   * <p>A terminating scenario signals suppression either by throwing an injected exception or by
+   * requesting {@link TerminalKind#SUPPRESS}. In both cases the return value instructs the advice
+   * to skip the real send; advice classes are expected to throw {@link
+   * com.macstab.chaos.api.ChaosHttpSuppressException} when this method returns {@code true} so the
+   * caller observes a terminal failure.
+   *
+   * @param url the request URL in {@code scheme://host/path} form; may be {@code null}
+   * @param opType one of {@link OperationType#HTTP_CLIENT_SEND}, {@link
+   *     OperationType#HTTP_CLIENT_SEND_ASYNC}
+   * @return {@code true} when the send should be suppressed; {@code false} otherwise
+   * @throws Throwable if a matching scenario injects an exception or the delay is interrupted
+   */
+  public boolean beforeHttpSend(final String url, final OperationType opType) throws Throwable {
+    final InvocationContext context =
+        new InvocationContext(
+            opType, "http.client", null, url, false, null, null, scopeContext.currentSessionId());
+    final RuntimeDecision decision = evaluate(context);
+    applyGate(decision.gateAction());
+    if (decision.terminalAction() != null) {
+      final TerminalAction terminalAction = decision.terminalAction();
+      if (terminalAction.kind() == TerminalKind.THROW) {
+        throw terminalAction.throwable();
+      }
+      if (terminalAction.kind() == TerminalKind.SUPPRESS) {
+        sleep(decision.delayMillis());
+        return true;
+      }
+    }
+    sleep(decision.delayMillis());
+    return false;
+  }
+
+  /**
+   * Called before a JDBC connection is acquired from a pool (HikariCP or c3p0). Carries the pool
+   * identifier as {@code targetName} through the scenario evaluation pipeline.
+   *
+   * @param poolName the pool identifier; may be {@code null}
+   * @return {@code true} when the acquisition should be suppressed; {@code false} otherwise
+   * @throws Throwable if a matching scenario injects an exception or the delay is interrupted
+   */
+  public boolean beforeJdbcConnectionAcquire(final String poolName) throws Throwable {
+    return evaluateJdbc(OperationType.JDBC_CONNECTION_ACQUIRE, "jdbc.pool", poolName);
+  }
+
+  /**
+   * Called before a {@link java.sql.Statement} execute call. Carries the SQL snippet (first 200
+   * characters) as {@code targetName} through the scenario evaluation pipeline.
+   *
+   * @param sql the SQL statement being executed; may be {@code null}
+   * @return {@code true} when the statement should be suppressed; {@code false} otherwise
+   * @throws Throwable if a matching scenario injects an exception or the delay is interrupted
+   */
+  public boolean beforeJdbcStatementExecute(final String sql) throws Throwable {
+    return evaluateJdbc(OperationType.JDBC_STATEMENT_EXECUTE, "java.sql.Statement", snippet(sql));
+  }
+
+  /**
+   * Called before a {@link java.sql.Connection#prepareStatement(String)} call. Carries the SQL
+   * snippet (first 200 characters) as {@code targetName} through the scenario evaluation pipeline.
+   *
+   * @param sql the SQL statement being prepared; may be {@code null}
+   * @return {@code true} when the preparation should be suppressed; {@code false} otherwise
+   * @throws Throwable if a matching scenario injects an exception or the delay is interrupted
+   */
+  public boolean beforeJdbcPreparedStatement(final String sql) throws Throwable {
+    return evaluateJdbc(OperationType.JDBC_PREPARED_STATEMENT, "java.sql.Connection", snippet(sql));
+  }
+
+  /**
+   * Called before a {@link java.sql.Connection#commit()} call.
+   *
+   * @return {@code true} when the commit should be suppressed; {@code false} otherwise
+   * @throws Throwable if a matching scenario injects an exception or the delay is interrupted
+   */
+  public boolean beforeJdbcTransactionCommit() throws Throwable {
+    return evaluateJdbc(OperationType.JDBC_TRANSACTION_COMMIT, "java.sql.Connection", null);
+  }
+
+  /**
+   * Called before a {@link java.sql.Connection#rollback()} call.
+   *
+   * @return {@code true} when the rollback should be suppressed; {@code false} otherwise
+   * @throws Throwable if a matching scenario injects an exception or the delay is interrupted
+   */
+  public boolean beforeJdbcTransactionRollback() throws Throwable {
+    return evaluateJdbc(OperationType.JDBC_TRANSACTION_ROLLBACK, "java.sql.Connection", null);
+  }
+
+  private boolean evaluateJdbc(
+      final OperationType opType, final String targetClassName, final String targetName)
+      throws Throwable {
+    final InvocationContext context =
+        new InvocationContext(
+            opType,
+            targetClassName,
+            null,
+            targetName,
+            false,
+            null,
+            null,
+            scopeContext.currentSessionId());
+    final RuntimeDecision decision = evaluate(context);
+    applyGate(decision.gateAction());
+    if (decision.terminalAction() != null) {
+      final TerminalAction terminalAction = decision.terminalAction();
+      if (terminalAction.kind() == TerminalKind.THROW) {
+        throw terminalAction.throwable();
+      }
+      if (terminalAction.kind() == TerminalKind.SUPPRESS) {
+        sleep(decision.delayMillis());
+        return true;
+      }
+    }
+    sleep(decision.delayMillis());
+    return false;
+  }
+
+  private static String snippet(final String sql) {
+    if (sql == null) {
+      return null;
+    }
+    return sql.length() <= 200 ? sql : sql.substring(0, 200);
+  }
+
   /** Returns the {@link Instrumentation} instance if one was provided. */
   Optional<Instrumentation> instrumentation() {
     return instrumentation;

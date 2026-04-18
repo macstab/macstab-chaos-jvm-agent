@@ -1,7 +1,7 @@
 <!--
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   Engineered by  Christian Schnapka
-                 Principal+ Embedded Systems Architect
+                 Embedded Principal+ Engineer
                  Macstab GmbH · Hamburg, Germany
                  https://macstab.com
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -284,35 +284,69 @@ must not expose `/actuator/chaos` to the public internet without authentication.
 
 ---
 
-### ⬜ 2.3 HTTP Client Selectors
+### ✅ 2.3 HTTP Client Selectors
 **Priority: high — 5 days**
 
 New `OperationType` values: `HTTP_CLIENT_SEND`, `HTTP_CLIENT_SEND_ASYNC`
 
-New selector: `ChaosSelector.httpClient()`
+New selector: `ChaosSelector.httpClient(Set<OperationType>)` and
+`ChaosSelector.httpClient(Set<OperationType>, NamePattern urlPattern)`.
 
-Instrumentation targets:
+Instrumentation targets wired via `instrumentOptional` (no hard runtime dependency):
 
 | Client | Target class | Method |
 |--------|-------------|--------|
-| Java 11+ `HttpClient` | `jdk.internal.net.http.HttpClientImpl` | `send()`, `sendAsync()` |
 | OkHttp 3/4 | `okhttp3.RealCall` | `execute()`, `enqueue()` |
-| Apache HC 4.x | `org.apache.http.impl.client.CloseableHttpClient` | `execute()` |
-| Apache HC 5.x | `org.apache.hc.client5.http.impl.classic.CloseableHttpClient` | `execute()` |
+| Apache HC 4.x | `org.apache.http.impl.client.CloseableHttpClient` | `execute(HttpHost, HttpRequest)` |
+| Apache HC 5.x | `org.apache.hc.client5.http.impl.classic.CloseableHttpClient` | `execute(ClassicHttpRequest, HttpClientResponseHandler)` |
 | Spring WebClient | `reactor.netty.http.client.HttpClientConnect` | `connect()` |
 
-Pattern matching on URL host + path via `targetName` field of `InvocationContext`.
+Pattern matching on URL via `targetName` field of `InvocationContext`, populated reflectively by
+`HttpUrlExtractor` so that the agent never hard-links against the HTTP client libraries.
+
+**What was done**
+
+- `OperationType` gained `HTTP_CLIENT_SEND` and `HTTP_CLIENT_SEND_ASYNC` entries with targeted
+  JavaDoc and the `ChaosSelector.HttpClientSelector` pairing documented.
+- New sealed-interface record `ChaosSelector.HttpClientSelector(Set<OperationType> operations,
+  NamePattern urlPattern)` plus factory methods `httpClient(operations)` and
+  `httpClient(operations, urlPattern)` with Jackson polymorphic registration under `httpClient`.
+- `ChaosHttpSuppressException` (unchecked) thrown by advice classes when a scenario suppresses an
+  HTTP call.
+- `ChaosRuntime.beforeHttpSend(String url, OperationType)` feeds the request URL as `targetName`
+  through the 8-check evaluation pipeline and returns `true` on suppression.
+- Bridge slots `BEFORE_HTTP_SEND = 46` and `BEFORE_HTTP_SEND_ASYNC = 47` added to
+  `BootstrapDispatcher` (new `HANDLE_COUNT = 48`), with matching `BridgeDelegate` /
+  `ChaosBridge` methods and `MethodHandle` wiring.
+- `HttpUrlExtractor` reflectively pulls the request URL from each client type (Java HttpClient,
+  OkHttp, Apache HC 4 / 5, Reactor Netty) so the compileOnly dependencies are not required at
+  runtime.
+- `HttpClientAdvice` provides ByteBuddy `@Advice.OnMethodEnter` classes per client that call
+  the dispatcher and throw `ChaosHttpSuppressException` when suppressed.
+- `SelectorMatcher` and `CompatibilityValidator` extended for the new selector + operation types,
+  including a cross-selector guard that rejects HTTP operations used with non-HTTP selectors.
+- Build wires `compileOnly` dependencies (OkHttp 4.12.0, Apache HttpClient 4.5.14, Apache
+  HttpClient 5 3.1, Reactor Netty HTTP 1.1.21) so the agent jar itself remains free of HTTP
+  client code.
+
+**Known limitation** — `jdk.internal.net.http.HttpClientImpl` is NOT wired into the ByteBuddy
+chain. Attempting to transform it without `--add-opens
+java.net.http/jdk.internal.net.http=ALL-UNNAMED` corrupts subsequent transformations in the same
+AgentBuilder installation (observed via the `StartupAgentIntegrationTest` probe JVMs, where
+unrelated scenarios silently stopped applying). A dedicated `--add-opens` pathway is deferred to
+a follow-up; the advice class `HttpClientAdvice.JavaHttpClientSendAdvice` is retained for future
+wiring.
 
 ---
 
-### ⬜ 2.4 JDBC / Connection Pool Selectors
+### ✅ 2.4 JDBC / Connection Pool Selectors
 **Priority: high — 4 days**
 
 New `OperationType` values:
 `JDBC_CONNECTION_ACQUIRE`, `JDBC_STATEMENT_EXECUTE`, `JDBC_PREPARED_STATEMENT`,
 `JDBC_TRANSACTION_COMMIT`, `JDBC_TRANSACTION_ROLLBACK`
 
-New selector: `ChaosSelector.jdbc()`
+New selector: `ChaosSelector.jdbc()` / `ChaosSelector.jdbc(OperationType...)`
 
 Instrumentation targets:
 
@@ -320,8 +354,38 @@ Instrumentation targets:
 |--------|-------|--------|
 | HikariCP | `com.zaxxer.hikari.pool.HikariPool` | `getConnection(long)` |
 | c3p0 | `com.mchange.v2.c3p0.impl.C3P0PooledConnectionPool` | `checkoutPooledConnection()` |
-| JDBC standard | `java.sql.Statement` | `execute*()` |
-| JDBC standard | `java.sql.Connection` | `commit()`, `rollback()`, `prepareStatement()` |
+| JDBC standard | `java.sql.Statement` (concrete subtypes) | `execute(String)`, `executeQuery(String)`, `executeUpdate(String)` |
+| JDBC standard | `java.sql.Connection` (concrete subtypes) | `prepareStatement(String)`, `commit()`, `rollback()` |
+
+**What was done**
+
+- `OperationType` gained `JDBC_CONNECTION_ACQUIRE`, `JDBC_STATEMENT_EXECUTE`,
+  `JDBC_PREPARED_STATEMENT`, `JDBC_TRANSACTION_COMMIT`, and `JDBC_TRANSACTION_ROLLBACK` entries
+  with targeted JavaDoc and the `ChaosSelector.JdbcSelector` pairing documented.
+- New sealed-interface record `ChaosSelector.JdbcSelector(Set<OperationType> operations,
+  NamePattern targetPattern)` plus factory methods `jdbc()` (matches all 5 JDBC op types) and
+  `jdbc(OperationType...)` (matches the specified ops). Jackson polymorphic registration under
+  `jdbc`.
+- `ChaosJdbcSuppressException` (unchecked) thrown by advice classes when a scenario suppresses a
+  JDBC call.
+- `ChaosRuntime.beforeJdbcConnectionAcquire(String)`, `beforeJdbcStatementExecute(String)`,
+  `beforeJdbcPreparedStatement(String)`, `beforeJdbcTransactionCommit()`, and
+  `beforeJdbcTransactionRollback()` feed the pool identifier or SQL snippet (first 200
+  characters) as `targetName` through the 8-check evaluation pipeline and return `true` on
+  suppression.
+- Bridge slots 48–52 added to `BootstrapDispatcher` (new `HANDLE_COUNT = 53`), with matching
+  `BridgeDelegate` / `ChaosBridge` methods and `MethodHandle` wiring.
+- `JdbcTargetExtractor` reflectively pulls the pool name from a HikariCP `HikariPool` via
+  `getPoolName()` so the compileOnly dependency is not required at runtime.
+- `JdbcAdvice` provides ByteBuddy `@Advice.OnMethodEnter` classes per target: HikariCP,
+  c3p0, `Statement.execute*(String)`, `Connection.prepareStatement(String)`, `Connection.commit()`,
+  `Connection.rollback()`. HikariCP and c3p0 use `instrumentOptional`; the JDBC interfaces use
+  `isSubTypeOf(...).and(not(isInterface()))` so advice binds only to concrete driver classes.
+- `SelectorMatcher` and `CompatibilityValidator` extended for the new selector + operation
+  types, including a cross-selector guard that rejects JDBC operations used with non-JDBC
+  selectors. The HTTP cross-selector guard was refactored to share the new helpers.
+- Build wires `compileOnly` dependencies (HikariCP 5.1.0, c3p0 0.10.1) so the agent jar itself
+  remains free of JDBC pool code.
 
 ---
 
@@ -407,9 +471,9 @@ Week 1  ├── ✅ 1.1  DeadlockStressor safeguard            (2h)
 Week 2  ├── ✅ 2.1  Spring Boot test starter               (2d)
         └── ✅ 2.2  Spring Boot runtime starter            (3d)
 
-Week 3  └── ⬜ 2.3  HTTP client selectors                  (5d)
+Week 3  └── ✅ 2.3  HTTP client selectors                  (5d)
 
-Week 4  └── ⬜ 2.4  JDBC / HikariCP selectors              (4d)
+Week 4  └── ✅ 2.4  JDBC / HikariCP selectors              (4d)
 
 Week 5  ├── ⬜ 3.1  JMH benchmarks                        (1d)
         └── ⬜ 3.2  ChaosRuntime refactor                  (1d)
@@ -437,7 +501,7 @@ Week 7  └── ⬜ 4.1  Release process + v1.0.0 tag           (3d)
 *Architecture, implementation, and documentation crafted by*
 
 **[Christian Schnapka](https://macstab.com)**
-Principal+ Embedded Systems Architect
+Embedded Principal+ Engineer
 [Macstab GmbH](https://macstab.com) · Hamburg, Germany
 
 </div>

@@ -35,6 +35,8 @@ import java.util.Set;
   @JsonSubTypes.Type(value = ChaosSelector.NioSelector.class, name = "nio"),
   @JsonSubTypes.Type(value = ChaosSelector.NetworkSelector.class, name = "network"),
   @JsonSubTypes.Type(value = ChaosSelector.ThreadLocalSelector.class, name = "threadLocal"),
+  @JsonSubTypes.Type(value = ChaosSelector.HttpClientSelector.class, name = "httpClient"),
+  @JsonSubTypes.Type(value = ChaosSelector.JdbcSelector.class, name = "jdbc"),
   @JsonSubTypes.Type(value = ChaosSelector.StressSelector.class, name = "stress"),
 })
 public sealed interface ChaosSelector
@@ -51,6 +53,8 @@ public sealed interface ChaosSelector
         ChaosSelector.NioSelector,
         ChaosSelector.NetworkSelector,
         ChaosSelector.ThreadLocalSelector,
+        ChaosSelector.HttpClientSelector,
+        ChaosSelector.JdbcSelector,
         ChaosSelector.StressSelector {
 
   // ── Factory methods ────────────────────────────────────────────────────────
@@ -277,6 +281,66 @@ public sealed interface ChaosSelector
   static ThreadLocalSelector threadLocal(
       Set<OperationType> operations, NamePattern threadLocalClassPattern) {
     return new ThreadLocalSelector(operations, threadLocalClassPattern);
+  }
+
+  /**
+   * Returns a selector that matches HTTP client send operations across all supported clients (Java
+   * {@code HttpClient}, OkHttp, Apache HttpComponents 4/5, Spring WebClient) without URL filtering.
+   *
+   * <p>Valid operations: {@link OperationType#HTTP_CLIENT_SEND}, {@link
+   * OperationType#HTTP_CLIENT_SEND_ASYNC}.
+   *
+   * @param operations set of HTTP client operations to intercept; must not be empty
+   */
+  static HttpClientSelector httpClient(Set<OperationType> operations) {
+    return new HttpClientSelector(operations, NamePattern.any());
+  }
+
+  /**
+   * Returns a selector that matches HTTP client send operations whose request URL (in {@code
+   * scheme://host/path} form) matches {@code urlPattern}.
+   *
+   * @param operations set of HTTP client operations to intercept; must not be empty
+   * @param urlPattern pattern matched against the request URL
+   */
+  static HttpClientSelector httpClient(Set<OperationType> operations, NamePattern urlPattern) {
+    return new HttpClientSelector(operations, urlPattern);
+  }
+
+  /**
+   * Returns a selector that matches all JDBC operations across HikariCP, c3p0, and standard {@link
+   * java.sql.Statement} / {@link java.sql.Connection} implementations without operation filtering.
+   *
+   * <p>Valid operations: {@link OperationType#JDBC_CONNECTION_ACQUIRE}, {@link
+   * OperationType#JDBC_STATEMENT_EXECUTE}, {@link OperationType#JDBC_PREPARED_STATEMENT}, {@link
+   * OperationType#JDBC_TRANSACTION_COMMIT}, {@link OperationType#JDBC_TRANSACTION_ROLLBACK}.
+   */
+  static JdbcSelector jdbc() {
+    return new JdbcSelector(
+        EnumSet.of(
+            OperationType.JDBC_CONNECTION_ACQUIRE,
+            OperationType.JDBC_STATEMENT_EXECUTE,
+            OperationType.JDBC_PREPARED_STATEMENT,
+            OperationType.JDBC_TRANSACTION_COMMIT,
+            OperationType.JDBC_TRANSACTION_ROLLBACK),
+        NamePattern.any());
+  }
+
+  /**
+   * Returns a selector that matches the given JDBC operations across all supported pool and JDBC
+   * implementations without target-name filtering.
+   *
+   * @param operations the JDBC operations to intercept; must not be empty
+   */
+  static JdbcSelector jdbc(final OperationType... operations) {
+    if (operations == null || operations.length == 0) {
+      throw new IllegalArgumentException("operations must not be empty");
+    }
+    final EnumSet<OperationType> set = EnumSet.noneOf(OperationType.class);
+    for (final OperationType op : operations) {
+      set.add(op);
+    }
+    return new JdbcSelector(set, NamePattern.any());
   }
 
   /**
@@ -556,6 +620,53 @@ public sealed interface ChaosSelector
       operations = validatedOperations(operations);
       threadLocalClassPattern =
           threadLocalClassPattern == null ? NamePattern.any() : threadLocalClassPattern;
+    }
+  }
+
+  /**
+   * Matches HTTP client send operations across supported clients, optionally filtering by request
+   * URL.
+   *
+   * <p>The {@code urlPattern} is matched against the request URL in {@code scheme://host/path}
+   * form, e.g. {@code "https://api.example.com/users"}. A {@link NamePattern#any()} value matches
+   * every HTTP call irrespective of URL.
+   *
+   * <p><b>Valid operations:</b> {@link OperationType#HTTP_CLIENT_SEND}, {@link
+   * OperationType#HTTP_CLIENT_SEND_ASYNC}.
+   */
+  record HttpClientSelector(Set<OperationType> operations, NamePattern urlPattern)
+      implements ChaosSelector {
+    public HttpClientSelector {
+      operations = validatedOperations(operations);
+      urlPattern = urlPattern == null ? NamePattern.any() : urlPattern;
+    }
+  }
+
+  /**
+   * Matches JDBC connection-pool and {@link java.sql.Connection} / {@link java.sql.Statement}
+   * operations, optionally filtering by a target-name pattern (pool identifier or SQL snippet).
+   *
+   * <p>The {@code targetPattern} is matched against the {@code targetName} field of the invocation
+   * context, which is populated by the instrumentation with one of:
+   *
+   * <ul>
+   *   <li>the pool identifier (e.g. HikariCP pool name) for {@link
+   *       OperationType#JDBC_CONNECTION_ACQUIRE}
+   *   <li>a SQL snippet (first 200 characters) for {@link OperationType#JDBC_STATEMENT_EXECUTE} and
+   *       {@link OperationType#JDBC_PREPARED_STATEMENT}
+   *   <li>{@code null} for {@link OperationType#JDBC_TRANSACTION_COMMIT} and {@link
+   *       OperationType#JDBC_TRANSACTION_ROLLBACK}
+   * </ul>
+   *
+   * <p><b>Valid operations:</b> {@link OperationType#JDBC_CONNECTION_ACQUIRE}, {@link
+   * OperationType#JDBC_STATEMENT_EXECUTE}, {@link OperationType#JDBC_PREPARED_STATEMENT}, {@link
+   * OperationType#JDBC_TRANSACTION_COMMIT}, {@link OperationType#JDBC_TRANSACTION_ROLLBACK}.
+   */
+  record JdbcSelector(Set<OperationType> operations, NamePattern targetPattern)
+      implements ChaosSelector {
+    public JdbcSelector {
+      operations = validatedOperations(operations);
+      targetPattern = targetPattern == null ? NamePattern.any() : targetPattern;
     }
   }
 

@@ -1,7 +1,7 @@
 <!--
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   Engineered by  Christian Schnapka
-                 Principal+ Embedded Systems Engineer
+                 Embedded Principal+ Engineer
                  Macstab GmbH · Hamburg, Germany
                  https://macstab.com
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -11,7 +11,7 @@
 
 > Internal reference for agent initialization, singleton management, premain/agentmain dispatch, and JMX MBean registration.
 > 
-> *Engineered by* **[Christian Schnapka](https://macstab.com)** — Principal+ Embedded Systems Engineer · [Macstab GmbH](https://macstab.com) · Hamburg, Germany
+> *Engineered by* **[Christian Schnapka](https://macstab.com)** — Embedded Principal+ Engineer · [Macstab GmbH](https://macstab.com) · Hamburg, Germany
 
 ---
 
@@ -195,7 +195,7 @@ public static ChaosControlPlane current() {
 *Engineerure, implementation, and documentation crafted by*
 
 **[Christian Schnapka](https://macstab.com)**  
-Principal+ Embedded Systems Engineer  
+Embedded Principal+ Engineer  
 [Macstab GmbH](https://macstab.com) · Hamburg, Germany
 
 *Building systems that operate correctly at the edges — including the ones you deliberately break.*

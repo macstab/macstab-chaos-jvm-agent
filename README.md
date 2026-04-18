@@ -1,7 +1,7 @@
 <!--
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   Engineered by  Christian Schnapka
-                 Principal+ Embedded Systems Engineer
+                 Embedded Principal+ Engineer
                  Macstab GmbH · Hamburg, Germany
                  https://macstab.com
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -18,7 +18,7 @@
 [![ByteBuddy](https://img.shields.io/badge/ByteBuddy-instrumentation-orange.svg)](https://bytebuddy.net/)
 
 *Designed and engineered by* **[Christian Schnapka](https://macstab.com)** —
-Principal+ Embedded Systems Engineer · [Macstab GmbH](https://macstab.com) · Hamburg, Germany
+Embedded Principal+ Engineer · [Macstab GmbH](https://macstab.com) · Hamburg, Germany
 
 </div>
 
@@ -602,7 +602,7 @@ Apache License 2.0 — see [LICENSE](LICENSE).
 *Engineerure, implementation, and documentation crafted by*
 
 **[Christian Schnapka](https://macstab.com)**
-Principal+ Embedded Systems Engineer
+Embedded Principal+ Engineer
 [Macstab GmbH](https://macstab.com) · Hamburg, Germany
 
 *Building systems that operate correctly at the edges — including the ones you deliberately break.*

@@ -639,4 +639,93 @@ final class ChaosBridge implements BridgeDelegate {
       throws Throwable {
     runtime.beforeJmxGetAttr(server, objectName, attribute);
   }
+
+  /**
+   * Invoked before a synchronous HTTP client send; returns {@code true} when the runtime decides to
+   * suppress the call.
+   *
+   * @param url the request URL
+   * @return {@code true} to suppress; {@code false} for normal execution
+   * @throws Throwable if the runtime decides to abort the call
+   */
+  @Override
+  public boolean beforeHttpSend(final String url) throws Throwable {
+    return runtime.beforeHttpSend(url, com.macstab.chaos.api.OperationType.HTTP_CLIENT_SEND);
+  }
+
+  /**
+   * Invoked before an asynchronous HTTP client send; returns {@code true} when the runtime decides
+   * to suppress the call.
+   *
+   * @param url the request URL
+   * @return {@code true} to suppress; {@code false} for normal execution
+   * @throws Throwable if the runtime decides to abort the call
+   */
+  @Override
+  public boolean beforeHttpSendAsync(final String url) throws Throwable {
+    return runtime.beforeHttpSend(url, com.macstab.chaos.api.OperationType.HTTP_CLIENT_SEND_ASYNC);
+  }
+
+  /**
+   * Invoked before a JDBC connection is acquired from a pool; returns {@code true} when the runtime
+   * decides to suppress the call.
+   *
+   * @param poolName the pool identifier
+   * @return {@code true} to suppress; {@code false} for normal execution
+   * @throws Throwable if the runtime decides to abort the call
+   */
+  @Override
+  public boolean beforeJdbcConnectionAcquire(final String poolName) throws Throwable {
+    return runtime.beforeJdbcConnectionAcquire(poolName);
+  }
+
+  /**
+   * Invoked before a {@link java.sql.Statement} execute call; returns {@code true} when the runtime
+   * decides to suppress the call.
+   *
+   * @param sql the SQL statement
+   * @return {@code true} to suppress; {@code false} for normal execution
+   * @throws Throwable if the runtime decides to abort the call
+   */
+  @Override
+  public boolean beforeJdbcStatementExecute(final String sql) throws Throwable {
+    return runtime.beforeJdbcStatementExecute(sql);
+  }
+
+  /**
+   * Invoked before a {@link java.sql.Connection#prepareStatement(String)} call; returns {@code
+   * true} when the runtime decides to suppress the call.
+   *
+   * @param sql the SQL statement being prepared
+   * @return {@code true} to suppress; {@code false} for normal execution
+   * @throws Throwable if the runtime decides to abort the call
+   */
+  @Override
+  public boolean beforeJdbcPreparedStatement(final String sql) throws Throwable {
+    return runtime.beforeJdbcPreparedStatement(sql);
+  }
+
+  /**
+   * Invoked before a {@link java.sql.Connection#commit()} call; returns {@code true} when the
+   * runtime decides to suppress the commit.
+   *
+   * @return {@code true} to suppress; {@code false} for normal execution
+   * @throws Throwable if the runtime decides to abort the call
+   */
+  @Override
+  public boolean beforeJdbcTransactionCommit() throws Throwable {
+    return runtime.beforeJdbcTransactionCommit();
+  }
+
+  /**
+   * Invoked before a {@link java.sql.Connection#rollback()} call; returns {@code true} when the
+   * runtime decides to suppress the rollback.
+   *
+   * @return {@code true} to suppress; {@code false} for normal execution
+   * @throws Throwable if the runtime decides to abort the call
+   */
+  @Override
+  public boolean beforeJdbcTransactionRollback() throws Throwable {
+    return runtime.beforeJdbcTransactionRollback();
+  }
 }

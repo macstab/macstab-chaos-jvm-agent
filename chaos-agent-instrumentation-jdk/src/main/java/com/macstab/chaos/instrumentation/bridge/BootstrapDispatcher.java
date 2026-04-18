@@ -147,9 +147,16 @@ public final class BootstrapDispatcher {
   public static final int ADJUST_LOCAL_DATE_TIME_NOW = 43;
   public static final int ADJUST_ZONED_DATE_TIME_NOW = 44;
   public static final int ADJUST_DATE_NEW = 45;
+  public static final int BEFORE_HTTP_SEND = 46;
+  public static final int BEFORE_HTTP_SEND_ASYNC = 47;
+  public static final int BEFORE_JDBC_CONNECTION_ACQUIRE = 48;
+  public static final int BEFORE_JDBC_STATEMENT_EXECUTE = 49;
+  public static final int BEFORE_JDBC_PREPARED_STATEMENT = 50;
+  public static final int BEFORE_JDBC_TRANSACTION_COMMIT = 51;
+  public static final int BEFORE_JDBC_TRANSACTION_ROLLBACK = 52;
 
   /** Total number of method-handle slots; equals the highest index plus one. */
-  public static final int HANDLE_COUNT = 46;
+  public static final int HANDLE_COUNT = 53;
 
   private BootstrapDispatcher() {}
 
@@ -1206,6 +1213,146 @@ public final class BootstrapDispatcher {
           return null;
         },
         null);
+  }
+
+  /**
+   * Called before a synchronous HTTP client {@code send} (Java {@code HttpClient.send}, {@code
+   * okhttp3.RealCall.execute}, Apache HttpComponents {@code CloseableHttpClient.execute}).
+   *
+   * <p>Returning {@code true} causes the advice to skip the real send call. The advice is
+   * responsible for throwing {@link com.macstab.chaos.api.ChaosHttpSuppressException} when the call
+   * is suppressed so the caller observes a terminal failure instead of a dropped request.
+   *
+   * @param url the request URL in {@code scheme://host/path} form; may be {@code null} when the
+   *     advice cannot extract a URL
+   * @return {@code true} if the send should be suppressed; {@code false} for normal execution.
+   *     Returns {@code false} as the fallback.
+   * @throws Throwable if the delegate throws
+   */
+  public static boolean beforeHttpSend(final String url) throws Throwable {
+    return invoke(
+        () -> {
+          final MethodHandle[] h = handles;
+          final Object d = delegate;
+          return (d != null && h != null) && (boolean) h[BEFORE_HTTP_SEND].invoke(d, url);
+        },
+        false);
+  }
+
+  /**
+   * Called before an asynchronous HTTP client send (Java {@code HttpClient.sendAsync}, {@code
+   * okhttp3.RealCall.enqueue}, Spring WebClient {@code HttpClientConnect.connect}).
+   *
+   * <p>Returning {@code true} causes the advice to skip the real send call.
+   *
+   * @param url the request URL in {@code scheme://host/path} form; may be {@code null}
+   * @return {@code true} if the send should be suppressed; {@code false} for normal execution.
+   *     Returns {@code false} as the fallback.
+   * @throws Throwable if the delegate throws
+   */
+  public static boolean beforeHttpSendAsync(final String url) throws Throwable {
+    return invoke(
+        () -> {
+          final MethodHandle[] h = handles;
+          final Object d = delegate;
+          return (d != null && h != null) && (boolean) h[BEFORE_HTTP_SEND_ASYNC].invoke(d, url);
+        },
+        false);
+  }
+
+  /**
+   * Called before a JDBC connection is acquired from a pool (HikariCP, c3p0).
+   *
+   * <p>Returning {@code true} causes the advice to throw {@link
+   * com.macstab.chaos.api.ChaosJdbcSuppressException}.
+   *
+   * @param poolName the pool identifier; may be {@code null}
+   * @return {@code true} if acquisition should be suppressed; {@code false} for normal execution.
+   *     Returns {@code false} as the fallback.
+   * @throws Throwable if the delegate throws
+   */
+  public static boolean beforeJdbcConnectionAcquire(final String poolName) throws Throwable {
+    return invoke(
+        () -> {
+          final MethodHandle[] h = handles;
+          final Object d = delegate;
+          return (d != null && h != null)
+              && (boolean) h[BEFORE_JDBC_CONNECTION_ACQUIRE].invoke(d, poolName);
+        },
+        false);
+  }
+
+  /**
+   * Called before a {@link java.sql.Statement} execute call.
+   *
+   * @param sql the SQL statement; may be {@code null}
+   * @return {@code true} if the statement should be suppressed; {@code false} for normal execution.
+   *     Returns {@code false} as the fallback.
+   * @throws Throwable if the delegate throws
+   */
+  public static boolean beforeJdbcStatementExecute(final String sql) throws Throwable {
+    return invoke(
+        () -> {
+          final MethodHandle[] h = handles;
+          final Object d = delegate;
+          return (d != null && h != null)
+              && (boolean) h[BEFORE_JDBC_STATEMENT_EXECUTE].invoke(d, sql);
+        },
+        false);
+  }
+
+  /**
+   * Called before a {@link java.sql.Connection#prepareStatement(String)} call.
+   *
+   * @param sql the SQL statement being prepared; may be {@code null}
+   * @return {@code true} if preparation should be suppressed; {@code false} for normal execution.
+   *     Returns {@code false} as the fallback.
+   * @throws Throwable if the delegate throws
+   */
+  public static boolean beforeJdbcPreparedStatement(final String sql) throws Throwable {
+    return invoke(
+        () -> {
+          final MethodHandle[] h = handles;
+          final Object d = delegate;
+          return (d != null && h != null)
+              && (boolean) h[BEFORE_JDBC_PREPARED_STATEMENT].invoke(d, sql);
+        },
+        false);
+  }
+
+  /**
+   * Called before a {@link java.sql.Connection#commit()} call.
+   *
+   * @return {@code true} if the commit should be suppressed; {@code false} for normal execution.
+   *     Returns {@code false} as the fallback.
+   * @throws Throwable if the delegate throws
+   */
+  public static boolean beforeJdbcTransactionCommit() throws Throwable {
+    return invoke(
+        () -> {
+          final MethodHandle[] h = handles;
+          final Object d = delegate;
+          return (d != null && h != null) && (boolean) h[BEFORE_JDBC_TRANSACTION_COMMIT].invoke(d);
+        },
+        false);
+  }
+
+  /**
+   * Called before a {@link java.sql.Connection#rollback()} call.
+   *
+   * @return {@code true} if the rollback should be suppressed; {@code false} for normal execution.
+   *     Returns {@code false} as the fallback.
+   * @throws Throwable if the delegate throws
+   */
+  public static boolean beforeJdbcTransactionRollback() throws Throwable {
+    return invoke(
+        () -> {
+          final MethodHandle[] h = handles;
+          final Object d = delegate;
+          return (d != null && h != null)
+              && (boolean) h[BEFORE_JDBC_TRANSACTION_ROLLBACK].invoke(d);
+        },
+        false);
   }
 
   // ── Internal helpers ───────────────────────────────────────────────────────

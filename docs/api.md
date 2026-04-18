@@ -1,7 +1,7 @@
 <!--
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   Engineered by  Christian Schnapka
-                 Principal+ Embedded Systems Engineer
+                 Embedded Principal+ Engineer
                  Macstab GmbH · Hamburg, Germany
                  https://macstab.com
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -11,7 +11,7 @@
 
 > Stable external contract surface. This is the only module application and test code should depend on directly.
 > 
-> *Engineered by* **[Christian Schnapka](https://macstab.com)** — Principal+ Embedded Systems Engineer · [Macstab GmbH](https://macstab.com) · Hamburg, Germany
+> *Engineered by* **[Christian Schnapka](https://macstab.com)** — Embedded Principal+ Engineer · [Macstab GmbH](https://macstab.com) · Hamburg, Germany
 
 ---
 
@@ -532,7 +532,7 @@ Inject a custom sink via `new ChaosRuntime(clock, yourSink)` (bootstrap-level cu
 *Engineerure, implementation, and documentation crafted by*
 
 **[Christian Schnapka](https://macstab.com)**  
-Principal+ Embedded Systems Engineer  
+Embedded Principal+ Engineer  
 [Macstab GmbH](https://macstab.com) · Hamburg, Germany
 
 *Building systems that operate correctly at the edges — including the ones you deliberately break.*

@@ -1,7 +1,7 @@
 <!--
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   Engineered by  Christian Schnapka
-                 Principal+ Embedded Systems Engineer
+                 Embedded Principal+ Engineer
                  Macstab GmbH · Hamburg, Germany
                  https://macstab.com
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -11,7 +11,7 @@
 
 > Technical reference for the four Spring Boot integration modules: test starters for Boot 3 and Boot 4, runtime starters for Boot 3 and Boot 4.
 >
-> *Engineered by* **[Christian Schnapka](https://macstab.com)** — Principal+ Embedded Systems Engineer · [Macstab GmbH](https://macstab.com) · Hamburg, Germany
+> *Engineered by* **[Christian Schnapka](https://macstab.com)** — Embedded Principal+ Engineer · [Macstab GmbH](https://macstab.com) · Hamburg, Germany
 
 ---
 
@@ -693,7 +693,7 @@ All test classes use `ApplicationContextRunner` for the Spring wiring tests (lig
 *Architecture, implementation, and documentation crafted by*
 
 **[Christian Schnapka](https://macstab.com)**
-Principal+ Embedded Systems Engineer
+Embedded Principal+ Engineer
 [Macstab GmbH](https://macstab.com) · Hamburg, Germany
 
 *Building systems that operate correctly at the edges — including the ones you deliberately break.*

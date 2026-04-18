@@ -38,6 +38,11 @@ package com.macstab.chaos.api;
  *       {@link #SOCKET_READ}, {@link #SOCKET_WRITE}, {@link #SOCKET_CLOSE}
  *   <li>{@link ChaosSelector.ThreadLocalSelector} — {@link #THREAD_LOCAL_GET}, {@link
  *       #THREAD_LOCAL_SET}
+ *   <li>{@link ChaosSelector.HttpClientSelector} — {@link #HTTP_CLIENT_SEND}, {@link
+ *       #HTTP_CLIENT_SEND_ASYNC}
+ *   <li>{@link ChaosSelector.JdbcSelector} — {@link #JDBC_CONNECTION_ACQUIRE}, {@link
+ *       #JDBC_STATEMENT_EXECUTE}, {@link #JDBC_PREPARED_STATEMENT}, {@link
+ *       #JDBC_TRANSACTION_COMMIT}, {@link #JDBC_TRANSACTION_ROLLBACK}
  *   <li>{@link ChaosSelector.StressSelector} — {@link #LIFECYCLE} (internal; not set by callers)
  * </ul>
  */
@@ -512,6 +517,79 @@ public enum OperationType {
    * <p>Use with {@link ChaosSelector.ThreadLocalSelector}.
    */
   THREAD_LOCAL_SET,
+
+  // ── HTTP client operations ──────────────────────────────────────────────────
+
+  /**
+   * Fires before a synchronous HTTP client request is dispatched. Covers {@code
+   * java.net.http.HttpClient.send}, {@code okhttp3.RealCall.execute}, and Apache HttpComponents
+   * {@code CloseableHttpClient.execute}. Chaos here can inject latency, throw to simulate
+   * connection failures, or suppress the call entirely via {@link
+   * com.macstab.chaos.api.ChaosHttpSuppressException}.
+   *
+   * <p>The {@code targetName} field of the invocation context carries the request URL ({@code
+   * scheme://host/path}). Use with {@link ChaosSelector.HttpClientSelector}.
+   */
+  HTTP_CLIENT_SEND,
+
+  /**
+   * Fires before an asynchronous HTTP client request is dispatched. Covers {@code
+   * java.net.http.HttpClient.sendAsync}, {@code okhttp3.RealCall.enqueue}, and Spring WebClient's
+   * Reactor Netty client. Chaos here can inject latency, throw to simulate connection failures, or
+   * suppress the call entirely.
+   *
+   * <p>The {@code targetName} field of the invocation context carries the request URL. Use with
+   * {@link ChaosSelector.HttpClientSelector}.
+   */
+  HTTP_CLIENT_SEND_ASYNC,
+
+  // ── JDBC / connection pool operations ──────────────────────────────────────
+
+  /**
+   * Fires before a JDBC connection is acquired from a pool. Covers {@code
+   * com.zaxxer.hikari.pool.HikariPool.getConnection(long)} and {@code
+   * com.mchange.v2.c3p0.impl.C3P0PooledConnectionPool.checkoutPooledConnection()}. Chaos here can
+   * inject latency to simulate pool exhaustion or throw to simulate {@link java.sql.SQLException}.
+   *
+   * <p>The {@code targetName} field of the invocation context carries the pool identifier. Use with
+   * {@link ChaosSelector.JdbcSelector}.
+   */
+  JDBC_CONNECTION_ACQUIRE,
+
+  /**
+   * Fires before {@link java.sql.Statement#execute(String)}, {@link
+   * java.sql.Statement#executeQuery(String)}, or {@link java.sql.Statement#executeUpdate(String)}.
+   * Chaos here can inject latency to simulate slow queries or throw to simulate SQL failures.
+   *
+   * <p>The {@code targetName} field of the invocation context carries a SQL snippet (first 200
+   * characters). Use with {@link ChaosSelector.JdbcSelector}.
+   */
+  JDBC_STATEMENT_EXECUTE,
+
+  /**
+   * Fires before {@link java.sql.Connection#prepareStatement(String)}. Chaos here can inject
+   * latency during statement preparation or throw to simulate parse failures.
+   *
+   * <p>The {@code targetName} field of the invocation context carries a SQL snippet (first 200
+   * characters). Use with {@link ChaosSelector.JdbcSelector}.
+   */
+  JDBC_PREPARED_STATEMENT,
+
+  /**
+   * Fires before {@link java.sql.Connection#commit()}. Chaos here can inject latency or throw to
+   * simulate transaction commit failures.
+   *
+   * <p>Use with {@link ChaosSelector.JdbcSelector}.
+   */
+  JDBC_TRANSACTION_COMMIT,
+
+  /**
+   * Fires before {@link java.sql.Connection#rollback()}. Chaos here can inject latency or throw to
+   * simulate transaction rollback failures.
+   *
+   * <p>Use with {@link ChaosSelector.JdbcSelector}.
+   */
+  JDBC_TRANSACTION_ROLLBACK,
 
   // ── Agent lifecycle ─────────────────────────────────────────────────────────
 

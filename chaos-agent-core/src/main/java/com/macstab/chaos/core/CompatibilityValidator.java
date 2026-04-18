@@ -380,5 +380,89 @@ final class CompatibilityValidator {
         }
       }
     }
+
+    // HttpClientSelector operations must be confined to HTTP_CLIENT_SEND / HTTP_CLIENT_SEND_ASYNC.
+    if (selector instanceof ChaosSelector.HttpClientSelector httpClientSelector) {
+      final Set<OperationType> validHttpClientOps =
+          Set.of(OperationType.HTTP_CLIENT_SEND, OperationType.HTTP_CLIENT_SEND_ASYNC);
+      for (final OperationType op : httpClientSelector.operations()) {
+        if (!validHttpClientOps.contains(op)) {
+          throw new ChaosValidationException(
+              "HttpClientSelector operation "
+                  + op
+                  + " is not valid; valid ops: "
+                  + validHttpClientOps);
+        }
+      }
+    }
+
+    // HTTP_CLIENT_SEND / HTTP_CLIENT_SEND_ASYNC require HttpClientSelector.
+    if (selector instanceof ChaosSelector.HttpClientSelector) {
+      // handled above
+    } else {
+      final boolean hasHttpOp = selectorContainsAny(selector, HTTP_OPS);
+      if (hasHttpOp) {
+        throw new ChaosValidationException(
+            "HTTP_CLIENT_SEND / HTTP_CLIENT_SEND_ASYNC operations require HttpClientSelector");
+      }
+    }
+
+    // JdbcSelector operations must be confined to the JDBC operation set.
+    if (selector instanceof ChaosSelector.JdbcSelector jdbcSelector) {
+      for (final OperationType op : jdbcSelector.operations()) {
+        if (!JDBC_OPS.contains(op)) {
+          throw new ChaosValidationException(
+              "JdbcSelector operation " + op + " is not valid; valid ops: " + JDBC_OPS);
+        }
+      }
+    } else {
+      final boolean hasJdbcOp = selectorContainsAny(selector, JDBC_OPS);
+      if (hasJdbcOp) {
+        throw new ChaosValidationException("JDBC_* operations require JdbcSelector");
+      }
+    }
+  }
+
+  private static final Set<OperationType> HTTP_OPS =
+      Set.of(OperationType.HTTP_CLIENT_SEND, OperationType.HTTP_CLIENT_SEND_ASYNC);
+
+  private static final Set<OperationType> JDBC_OPS =
+      Set.of(
+          OperationType.JDBC_CONNECTION_ACQUIRE,
+          OperationType.JDBC_STATEMENT_EXECUTE,
+          OperationType.JDBC_PREPARED_STATEMENT,
+          OperationType.JDBC_TRANSACTION_COMMIT,
+          OperationType.JDBC_TRANSACTION_ROLLBACK);
+
+  private static boolean selectorContainsAny(
+      final ChaosSelector selector, final Set<OperationType> needles) {
+    return switch (selector) {
+      case ChaosSelector.ThreadSelector s -> containsAny(s.operations(), needles);
+      case ChaosSelector.ExecutorSelector s -> containsAny(s.operations(), needles);
+      case ChaosSelector.QueueSelector s -> containsAny(s.operations(), needles);
+      case ChaosSelector.AsyncSelector s -> containsAny(s.operations(), needles);
+      case ChaosSelector.SchedulingSelector s -> containsAny(s.operations(), needles);
+      case ChaosSelector.ShutdownSelector s -> containsAny(s.operations(), needles);
+      case ChaosSelector.ClassLoadingSelector s -> containsAny(s.operations(), needles);
+      case ChaosSelector.MethodSelector s -> containsAny(s.operations(), needles);
+      case ChaosSelector.MonitorSelector s -> containsAny(s.operations(), needles);
+      case ChaosSelector.JvmRuntimeSelector s -> containsAny(s.operations(), needles);
+      case ChaosSelector.NioSelector s -> containsAny(s.operations(), needles);
+      case ChaosSelector.NetworkSelector s -> containsAny(s.operations(), needles);
+      case ChaosSelector.ThreadLocalSelector s -> containsAny(s.operations(), needles);
+      case ChaosSelector.HttpClientSelector s -> containsAny(s.operations(), needles);
+      case ChaosSelector.JdbcSelector s -> containsAny(s.operations(), needles);
+      case ChaosSelector.StressSelector ignored -> false;
+    };
+  }
+
+  private static boolean containsAny(
+      final Set<OperationType> haystack, final Set<OperationType> needles) {
+    for (final OperationType op : needles) {
+      if (haystack.contains(op)) {
+        return true;
+      }
+    }
+    return false;
   }
 }

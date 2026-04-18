@@ -614,6 +614,141 @@ public final class JdkInstrumentationInstaller {
                               .on(
                                   ElementMatchers.isConstructor()
                                       .and(ElementMatchers.takesArguments(0)))));
+
+      // ── HTTP client interception (2.3) ────────────────────────────────────
+      // All targets use instrumentOptional, which checks class presence before registering. If
+      // the target is absent, no transformation is added. Advice classes only use Object-typed
+      // arguments and reflective URL extraction, so the compileOnly dependencies (OkHttp,
+      // Apache HC, Reactor Netty) are not required at runtime.
+      //
+      // Java 11+ HttpClient (jdk.internal.net.http.HttpClientImpl) is NOT registered via
+      // instrumentOptional here. That class is always present on JDK 11+, but it lives in the
+      // non-exported java.net.http/jdk.internal.net.http package. Attempting to transform it
+      // without --add-opens java.net.http/jdk.internal.net.http=ALL-UNNAMED silently corrupts
+      // subsequent AgentBuilder transformations. If interception of the Java HttpClient is
+      // required, users can target its public API or wait for a dedicated --add-opens pathway.
+      agentBuilder =
+          instrumentOptional(
+              agentBuilder,
+              "okhttp3.RealCall",
+              builder ->
+                  builder
+                      .visit(
+                          Advice.to(HttpClientAdvice.OkHttpExecuteAdvice.class)
+                              .on(
+                                  ElementMatchers.named("execute")
+                                      .and(ElementMatchers.takesArguments(0))))
+                      .visit(
+                          Advice.to(HttpClientAdvice.OkHttpEnqueueAdvice.class)
+                              .on(
+                                  ElementMatchers.named("enqueue")
+                                      .and(ElementMatchers.takesArguments(1)))));
+
+      agentBuilder =
+          instrumentOptional(
+              agentBuilder,
+              "org.apache.http.impl.client.CloseableHttpClient",
+              builder ->
+                  builder.visit(
+                      Advice.to(HttpClientAdvice.ApacheHc4ExecuteAdvice.class)
+                          .on(
+                              ElementMatchers.named("execute")
+                                  .and(ElementMatchers.takesArguments(2)))));
+
+      agentBuilder =
+          instrumentOptional(
+              agentBuilder,
+              "org.apache.hc.client5.http.impl.classic.CloseableHttpClient",
+              builder ->
+                  builder.visit(
+                      Advice.to(HttpClientAdvice.ApacheHc5ExecuteAdvice.class)
+                          .on(
+                              ElementMatchers.named("execute")
+                                  .and(ElementMatchers.takesArguments(2)))));
+
+      agentBuilder =
+          instrumentOptional(
+              agentBuilder,
+              "reactor.netty.http.client.HttpClientConnect",
+              builder ->
+                  builder.visit(
+                      Advice.to(HttpClientAdvice.ReactorNettyConnectAdvice.class)
+                          .on(ElementMatchers.named("connect"))));
+
+      // ── JDBC / connection pool interception (2.4) ──────────────────────────
+      //
+      // HikariCP and c3p0 are compileOnly dependencies and are instrumented via
+      // instrumentOptional so their absence is tolerated. java.sql.Statement and
+      // java.sql.Connection are JDK interfaces — we restrict the type matcher to
+      // concrete subtypes via isSubTypeOf + not(isInterface()) so the advice only
+      // binds to implementations (driver classes such as HikariProxyStatement,
+      // org.postgresql.jdbc.PgStatement, etc.).
+      agentBuilder =
+          instrumentOptional(
+              agentBuilder,
+              "com.zaxxer.hikari.pool.HikariPool",
+              builder ->
+                  builder.visit(
+                      Advice.to(JdbcAdvice.HikariGetConnectionAdvice.class)
+                          .on(
+                              ElementMatchers.named("getConnection")
+                                  .and(ElementMatchers.takesArguments(long.class)))));
+
+      agentBuilder =
+          instrumentOptional(
+              agentBuilder,
+              "com.mchange.v2.c3p0.impl.C3P0PooledConnectionPool",
+              builder ->
+                  builder.visit(
+                      Advice.to(JdbcAdvice.C3p0CheckoutAdvice.class)
+                          .on(
+                              ElementMatchers.named("checkoutPooledConnection")
+                                  .and(ElementMatchers.takesArguments(0)))));
+
+      agentBuilder =
+          agentBuilder
+              .type(
+                  ElementMatchers.isSubTypeOf(java.sql.Statement.class)
+                      .and(ElementMatchers.not(ElementMatchers.isInterface())))
+              .transform(
+                  (builder, typeDescription, classLoader, module, protectionDomain) ->
+                      builder
+                          .visit(
+                              Advice.to(JdbcAdvice.StatementExecuteAdvice.class)
+                                  .on(
+                                      ElementMatchers.named("execute")
+                                          .and(ElementMatchers.takesArguments(String.class))))
+                          .visit(
+                              Advice.to(JdbcAdvice.StatementExecuteAdvice.class)
+                                  .on(
+                                      ElementMatchers.named("executeQuery")
+                                          .and(ElementMatchers.takesArguments(String.class))))
+                          .visit(
+                              Advice.to(JdbcAdvice.StatementExecuteAdvice.class)
+                                  .on(
+                                      ElementMatchers.named("executeUpdate")
+                                          .and(ElementMatchers.takesArguments(String.class)))))
+              .type(
+                  ElementMatchers.isSubTypeOf(java.sql.Connection.class)
+                      .and(ElementMatchers.not(ElementMatchers.isInterface())))
+              .transform(
+                  (builder, typeDescription, classLoader, module, protectionDomain) ->
+                      builder
+                          .visit(
+                              Advice.to(JdbcAdvice.PrepareStatementAdvice.class)
+                                  .on(
+                                      ElementMatchers.named("prepareStatement")
+                                          .and(ElementMatchers.takesArguments(String.class))))
+                          .visit(
+                              Advice.to(JdbcAdvice.CommitAdvice.class)
+                                  .on(
+                                      ElementMatchers.named("commit")
+                                          .and(ElementMatchers.takesArguments(0))))
+                          .visit(
+                              Advice.to(JdbcAdvice.RollbackAdvice.class)
+                                  .on(
+                                      ElementMatchers.named("rollback")
+                                          .and(ElementMatchers.takesArguments(0)))));
     }
 
     agentBuilder.installOn(instrumentation);
@@ -855,6 +990,27 @@ public final class JdkInstrumentationInstaller {
             MethodType.methodType(java.time.ZonedDateTime.class, java.time.ZonedDateTime.class));
     mh[BootstrapDispatcher.ADJUST_DATE_NEW] =
         lookup.findVirtual(cls, "adjustDateNew", MethodType.methodType(long.class, long.class));
+    mh[BootstrapDispatcher.BEFORE_HTTP_SEND] =
+        lookup.findVirtual(
+            cls, "beforeHttpSend", MethodType.methodType(boolean.class, String.class));
+    mh[BootstrapDispatcher.BEFORE_HTTP_SEND_ASYNC] =
+        lookup.findVirtual(
+            cls, "beforeHttpSendAsync", MethodType.methodType(boolean.class, String.class));
+    mh[BootstrapDispatcher.BEFORE_JDBC_CONNECTION_ACQUIRE] =
+        lookup.findVirtual(
+            cls, "beforeJdbcConnectionAcquire", MethodType.methodType(boolean.class, String.class));
+    mh[BootstrapDispatcher.BEFORE_JDBC_STATEMENT_EXECUTE] =
+        lookup.findVirtual(
+            cls, "beforeJdbcStatementExecute", MethodType.methodType(boolean.class, String.class));
+    mh[BootstrapDispatcher.BEFORE_JDBC_PREPARED_STATEMENT] =
+        lookup.findVirtual(
+            cls, "beforeJdbcPreparedStatement", MethodType.methodType(boolean.class, String.class));
+    mh[BootstrapDispatcher.BEFORE_JDBC_TRANSACTION_COMMIT] =
+        lookup.findVirtual(
+            cls, "beforeJdbcTransactionCommit", MethodType.methodType(boolean.class));
+    mh[BootstrapDispatcher.BEFORE_JDBC_TRANSACTION_ROLLBACK] =
+        lookup.findVirtual(
+            cls, "beforeJdbcTransactionRollback", MethodType.methodType(boolean.class));
     return mh;
   }
 

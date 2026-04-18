@@ -83,6 +83,12 @@ final class SelectorMatcher {
       case ChaosSelector.ThreadLocalSelector threadLocalSelector ->
           threadLocalSelector.operations().contains(context.operationType())
               && threadLocalSelector.threadLocalClassPattern().matches(context.targetClassName());
+      case ChaosSelector.HttpClientSelector httpClientSelector ->
+          httpClientSelector.operations().contains(context.operationType())
+              && httpClientSelector.urlPattern().matches(context.targetName());
+      case ChaosSelector.JdbcSelector jdbcSelector ->
+          jdbcSelector.operations().contains(context.operationType())
+              && jdbcSelector.targetPattern().matches(context.targetName());
       case ChaosSelector.StressSelector stressSelector ->
           context.operationType() == OperationType.LIFECYCLE && stressSelector.target() != null;
     };
