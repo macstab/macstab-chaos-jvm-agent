@@ -10,7 +10,9 @@ hikariCp = "5.1.0"
 jackson = "2.19.4"
 jmh = "1.37"
 junit = "5.10.1"
+micronautBom = "4.7.6"
 okhttp = "4.12.0"
+quarkusBom = "3.21.3"
 reactorNetty = "1.1.21"
 spotless = "8.2.1"
 springBoot3 = "3.5.13"
@@ -36,7 +38,9 @@ junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" }
 junit-jupiter-api = { module = "org.junit.jupiter:junit-jupiter-api" }
 junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher" }
 lombok = { module = "org.projectlombok:lombok", version = "1.18.38" }
+micronaut-bom = { module = "io.micronaut.platform:micronaut-platform", version.ref = "micronautBom" }
 okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }
+quarkus-bom = { module = "io.quarkus:quarkus-bom", version.ref = "quarkusBom" }
 reactor-netty-http = { module = "io.projectreactor.netty:reactor-netty-http", version.ref = "reactorNetty" }
 spring-boot3-dependencies = { module = "org.springframework.boot:spring-boot-dependencies", version.ref = "springBoot3" }
 spring-boot4-dependencies = { module = "org.springframework.boot:spring-boot-dependencies", version.ref = "springBoot4" }

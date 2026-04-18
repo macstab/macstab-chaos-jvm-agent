@@ -472,24 +472,131 @@ ChaosControlPlaneImpl — control: activate(), openSession(), diagnostics(), clo
 
 ---
 
-### ⬜ 3.3 Quarkus Integration
-**Priority: low — 2 days**
+### ✅ 3.3 Quarkus Integration
+**Completed — 1 day**
 
-New module: `chaos-agent-quarkus-extension`
+New module: `chaos-agent-quarkus-extension` targeting the Quarkus 3.x extension surface
+(`quarkus-core`, `quarkus-arc`, `quarkus-junit5`, `quarkus-core-deployment`).
 
-- Quarkus build-time processor
-- Dev Services integration (auto-activate scenarios in `@QuarkusTest`)
-- `@ChaosScenario` annotation support for declarative activation
+**What was done:**
+
+- New Gradle module `chaos-agent-quarkus-extension` compiled against the
+  `io.quarkus:quarkus-bom` at version `3.21.3` (declared in `gradle/libs.versions.toml` as
+  `quarkusBom` + `quarkus-bom` library alias). Every Quarkus dependency (`quarkus-core`,
+  `quarkus-core-deployment`, `quarkus-arc`, `quarkus-junit5`) is `compileOnly` so the jar
+  remains inert until a host application supplies Quarkus on its own classpath. The jar carries
+  `Automatic-Module-Name` `com.macstab.chaos.agent.quarkus`; the package is
+  `com.macstab.chaos.quarkus`.
+- `@ChaosScenario` — declarative annotation (`TYPE`, `METHOD`) with `id`, `selector`, `effect`,
+  `scope` attributes. Selector identifiers: `executor`, `jvmRuntime`, `httpClient`, `jdbc`.
+  Effect identifiers: `delay:<iso-duration>` (ISO-8601 duration, e.g. `delay:PT0.1S`),
+  `suppress`, `freeze` (clock-skew freeze).
+- `ChaosQuarkusExtension` — JUnit 5 extension (`BeforeAllCallback`, `BeforeEachCallback`,
+  `AfterAllCallback`, `ParameterResolver`) that self-attaches the agent via
+  `ChaosPlatform.installLocally()` in `beforeAll`, opens a class-scoped `ChaosSession` stored in
+  the extension-context store, reads class-level `@ChaosScenario` annotations on `beforeAll`
+  and method-level annotations on `beforeEach`, activates each scenario on either the session
+  (session-scope) or the control plane (JVM-scope), and closes the session in `afterAll`. The
+  resolver walks parent contexts so `@Nested` classes inherit the session (matches the Spring
+  Boot class-scope behaviour).
+- `@QuarkusChaosTest` — meta-annotation combining `@QuarkusTest` and
+  `@ExtendWith(ChaosQuarkusExtension.class)` so a single annotation opts a Quarkus test into
+  chaos instrumentation.
+- `ChaosQuarkusRecorder` — Quarkus `@Recorder` that installs the chaos agent at runtime
+  initialization via a `RuntimeValue<Boolean>` marker.
+- `ChaosQuarkusBuildStep` — `@BuildStep` annotated with `@Record(ExecutionTime.RUNTIME_INIT)`
+  that produces a `FeatureBuildItem("macstab-chaos-agent")` and delegates agent installation to
+  the recorder so the feature appears in the Quarkus startup banner.
+- `ChaosArcProducer` — `@ApplicationScoped` CDI producer exposing `ChaosControlPlane` as a
+  `@DefaultBean` so user-supplied producers win (analogous to `@ConditionalOnMissingBean` in
+  Spring Boot).
+- `META-INF/quarkus-extension.yaml` — extension descriptor with the artifact coordinate, human
+  name, description, and keywords (`chaos`, `testing`, `resilience`).
+- `ChaosQuarkusExtensionTest` — plain JUnit 5 tests (no Quarkus context required, matching the
+  pattern used by `ChaosAgentExtensionTest` in the Spring Boot and Micronaut starters):
+  parameter injection of `ChaosSession` and `ChaosControlPlane`, session being open and
+  `bind()` usable, annotation parsing for `delay`/`suppress`/`freeze` effects, and method-level
+  `@ChaosScenario` activation verified through `ChaosDiagnostics.scenario(id)`. All 9 tests
+  pass via `./gradlew :chaos-agent-quarkus-extension:build`.
+
+Usage:
+```java
+@QuarkusChaosTest
+@ChaosScenario(id = "slow-jdbc", selector = "jdbc", effect = "delay:PT0.1S")
+class OrderServiceChaosTest {
+
+    @Test
+    @ChaosScenario(id = "reject-http", selector = "httpClient", effect = "suppress")
+    void placesOrderUnderChaos(ChaosSession chaos) {
+        try (var binding = chaos.bind()) {
+            assertThrows(OrderTimeoutException.class,
+                () -> orderService.placeOrder(testOrder));
+        }
+    }
+}
+```
 
 ---
 
-### ⬜ 3.4 Micronaut Integration
-**Priority: low — 2 days**
+### ✅ 3.4 Micronaut Integration
+**Completed — 1 day**
 
-New module: `chaos-agent-micronaut-integration`
+New module: `chaos-agent-micronaut-integration` targeting the Micronaut 4.x bean container and the
+`micronaut-test-junit5` surface.
 
-- `@Factory` bean for `ChaosControlPlane`
-- `@MicronautTest` lifecycle integration
+**What was done:**
+
+- New Gradle module `chaos-agent-micronaut-integration` compiled against the
+  `io.micronaut.platform:micronaut-platform` BOM at version `4.7.6` (declared in
+  `gradle/libs.versions.toml` as `micronautBom` + `micronaut-bom` library alias). Every Micronaut
+  dependency (`micronaut-inject`, `micronaut-context`, `micronaut-test-junit5`) is `compileOnly` so
+  the jar remains inert until a host application supplies Micronaut on its own classpath. The jar
+  carries `Automatic-Module-Name` `com.macstab.chaos.agent.micronaut`; the package is
+  `com.macstab.chaos.micronaut`.
+- `ChaosFactory` — `@Factory` bean factory exposing `ChaosControlPlane` as a `@Singleton` guarded
+  by `@Requires(missingBeans = ChaosControlPlane.class)`. Mirrors the
+  `@ConditionalOnMissingBean` contract of the Spring Boot starters: user-supplied beans win.
+- `ChaosMicronautExtension` — JUnit 5 extension (`BeforeAllCallback`, `AfterAllCallback`,
+  `ParameterResolver`) that self-attaches the agent via `ChaosPlatform.installLocally()` in
+  `beforeAll`, opens a class-scoped `ChaosSession` stored in the extension-context store, closes
+  it in `afterAll`, and resolves `ChaosSession` + `ChaosControlPlane` parameters. The resolver
+  walks parent contexts so `@Nested` classes inherit the session (matches the Spring Boot
+  class-scope behaviour).
+- `@MicronautChaosTest` — meta-annotation combining `@MicronautTest` and
+  `@ExtendWith(ChaosMicronautExtension.class)` so a single annotation opts a Micronaut test into
+  chaos instrumentation.
+- `ChaosContextConfigurer` — `ApplicationContextConfigurer` that invokes
+  `ChaosPlatform.installLocally()` before the Micronaut `ApplicationContext` starts. Registered
+  via `META-INF/micronaut/io.micronaut.context.ApplicationContextConfigurer` so Micronaut picks it
+  up automatically whenever the jar is on the classpath. Idempotent; safe to combine with
+  `-javaagent:` startup.
+- `ChaosMicronautExtensionTest` — plain JUnit 5 tests (no Micronaut context required, matching the
+  pattern used by `ChaosAgentExtensionTest` in the Spring Boot test starters): parameter
+  injection of `ChaosSession` and `ChaosControlPlane`, session being open and `bind()` usable,
+  session identity stable across methods in the class, and clean `@Nested` +
+  `@TestInstance(PER_CLASS)` lifecycle. All 7 tests pass via
+  `./gradlew :chaos-agent-micronaut-integration:build`.
+
+Usage:
+```java
+@MicronautChaosTest
+class OrderServiceChaosTest {
+
+    @Test
+    void slowDatabaseRejectsOrdersGracefully(ChaosSession chaos) {
+        chaos.activate(ChaosScenario.builder()
+            .id("slow-jdbc")
+            .selector(ChaosSelector.jdbc())
+            .effect(ChaosEffect.delay(Duration.ofSeconds(3)))
+            .build());
+
+        try (var binding = chaos.bind()) {
+            assertThrows(OrderTimeoutException.class,
+                () -> orderService.placeOrder(testOrder));
+        }
+    }
+}
+```
 
 ---
 
@@ -525,9 +632,9 @@ Week 4  └── ✅ 2.4  JDBC / HikariCP selectors              (4d)
 Week 5  ├── ✅ 3.1  JMH benchmarks                        (1d)
         └── ✅ 3.2  ChaosRuntime refactor                  (1d)
 
-Week 6  ├── ⬜ 3.3  Quarkus integration                    (2d)
-        ├── ⬜ 3.4  Micronaut integration                   (2d)
-        └──         Final integration testing
+Week 6  ├── ✅ 3.3  Quarkus integration                    (2d)
+        ├── ✅ 3.4  Micronaut integration                   (1d)
+        └──         Phase 3 complete — ecosystem coverage done
 
 Week 7  └── ⬜ 4.1  Release process + v1.0.0 tag           (3d)
 ```

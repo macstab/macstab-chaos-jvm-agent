@@ -21,6 +21,8 @@ include(
     "chaos-agent-core",
     "chaos-agent-examples",
     "chaos-agent-instrumentation-jdk",
+    "chaos-agent-micronaut-integration",
+    "chaos-agent-quarkus-extension",
     "chaos-agent-spring-boot3-starter",
     "chaos-agent-spring-boot3-test-starter",
     "chaos-agent-spring-boot4-starter",

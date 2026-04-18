@@ -1,0 +1,8 @@
+artifact: com.macstab.chaos:chaos-agent-quarkus-extension
+name: Macstab Chaos JVM Agent
+description: Chaos engineering extension for Quarkus applications
+metadata:
+  keywords:
+    - chaos
+    - testing
+    - resilience
