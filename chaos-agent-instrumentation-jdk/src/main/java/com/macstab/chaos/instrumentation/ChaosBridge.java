@@ -286,6 +286,59 @@ final class ChaosBridge implements BridgeDelegate {
   }
 
   /**
+   * Optionally skews the {@link java.time.Instant} returned by {@link java.time.Instant#now()}.
+   *
+   * @param realInstant the value returned by the real {@link java.time.Instant#now()}
+   * @return the (possibly skewed) instant
+   * @throws Throwable if the runtime decides to abort the call
+   */
+  @Override
+  public java.time.Instant adjustInstantNow(final java.time.Instant realInstant) throws Throwable {
+    return runtime.adjustInstantNow(realInstant);
+  }
+
+  /**
+   * Optionally skews the {@link java.time.LocalDateTime} returned by {@link
+   * java.time.LocalDateTime#now()}.
+   *
+   * @param realValue the value returned by the real {@link java.time.LocalDateTime#now()}
+   * @return the (possibly skewed) local date-time
+   * @throws Throwable if the runtime decides to abort the call
+   */
+  @Override
+  public java.time.LocalDateTime adjustLocalDateTimeNow(final java.time.LocalDateTime realValue)
+      throws Throwable {
+    return runtime.adjustLocalDateTimeNow(realValue);
+  }
+
+  /**
+   * Optionally skews the {@link java.time.ZonedDateTime} returned by {@link
+   * java.time.ZonedDateTime#now()}.
+   *
+   * @param realValue the value returned by the real {@link java.time.ZonedDateTime#now()}
+   * @return the (possibly skewed) zoned date-time
+   * @throws Throwable if the runtime decides to abort the call
+   */
+  @Override
+  public java.time.ZonedDateTime adjustZonedDateTimeNow(final java.time.ZonedDateTime realValue)
+      throws Throwable {
+    return runtime.adjustZonedDateTimeNow(realValue);
+  }
+
+  /**
+   * Optionally skews the epoch-millisecond value embedded in a freshly constructed {@link
+   * java.util.Date}.
+   *
+   * @param realMillis the value captured by the {@link java.util.Date#Date()} constructor
+   * @return the (possibly skewed) millisecond timestamp
+   * @throws Throwable if the runtime decides to abort the call
+   */
+  @Override
+  public long adjustDateNew(final long realMillis) throws Throwable {
+    return runtime.adjustDateNew(realMillis);
+  }
+
+  /**
    * Invoked before an explicit {@link System#gc()} request is executed.
    *
    * @return {@code true} to allow the GC request to proceed; {@code false} to suppress it

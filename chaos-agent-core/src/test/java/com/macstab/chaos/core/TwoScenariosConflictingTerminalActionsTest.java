@@ -66,8 +66,7 @@ class TwoScenariosConflictingTerminalActionsTest {
               .build());
 
       // The high-precedence scenario must win.
-      assertThatThrownBy(
-              () -> runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {}))
+      assertThatThrownBy(() -> runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {}))
           .isInstanceOf(java.util.concurrent.RejectedExecutionException.class)
           .hasMessageContaining("forced-rejection");
     }
@@ -96,8 +95,7 @@ class TwoScenariosConflictingTerminalActionsTest {
               .build());
 
       final long elapsed =
-          measureMillis(
-              () -> runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {}));
+          measureMillis(() -> runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {}));
 
       assertThat(elapsed)
           .as("two %dms delay scenarios must accumulate to at least %dms", DELAY_MS, 2 * DELAY_MS)
@@ -213,9 +211,7 @@ class TwoScenariosConflictingTerminalActionsTest {
       assertThat(neitherCount.get())
           .as("no invocation should produce an unexpected exception type")
           .isZero();
-      assertThat(total)
-          .as("every invocation must produce exactly one outcome")
-          .isEqualTo(expected);
+      assertThat(total).as("every invocation must produce exactly one outcome").isEqualTo(expected);
       assertThat(rejections.get())
           .as("high-precedence REJECT must always win — all %d calls must throw", expected)
           .isEqualTo(expected);

@@ -173,7 +173,8 @@ class ChaosRuntimeActivationPolicyTest {
                       null,
                       Duration.ofSeconds(5),
                       null,
-                      null, false))
+                      null,
+                      false))
               .build());
 
       long firstElapsed =

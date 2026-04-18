@@ -120,6 +120,35 @@ class BootstrapDispatcherTest {
       assertThatCode(() -> BootstrapDispatcher.beforeClassLoad(null, "com.example.Foo"))
           .doesNotThrowAnyException();
     }
+
+    @Test
+    @DisplayName("adjustInstantNow returns real instant unchanged")
+    void adjustInstantNowReturnsFallback() throws Throwable {
+      final java.time.Instant real = java.time.Instant.ofEpochSecond(1_700_000_000L);
+      assertThat(BootstrapDispatcher.adjustInstantNow(real)).isSameAs(real);
+    }
+
+    @Test
+    @DisplayName("adjustLocalDateTimeNow returns real value unchanged")
+    void adjustLocalDateTimeNowReturnsFallback() throws Throwable {
+      final java.time.LocalDateTime real = java.time.LocalDateTime.of(2026, 4, 18, 12, 0);
+      assertThat(BootstrapDispatcher.adjustLocalDateTimeNow(real)).isSameAs(real);
+    }
+
+    @Test
+    @DisplayName("adjustZonedDateTimeNow returns real value unchanged")
+    void adjustZonedDateTimeNowReturnsFallback() throws Throwable {
+      final java.time.ZonedDateTime real =
+          java.time.ZonedDateTime.of(2026, 4, 18, 12, 0, 0, 0, java.time.ZoneId.of("UTC"));
+      assertThat(BootstrapDispatcher.adjustZonedDateTimeNow(real)).isSameAs(real);
+    }
+
+    @Test
+    @DisplayName("adjustDateNew returns real millis unchanged")
+    void adjustDateNewReturnsFallback() throws Throwable {
+      assertThat(BootstrapDispatcher.adjustDateNew(1_700_000_000_000L))
+          .isEqualTo(1_700_000_000_000L);
+    }
   }
 
   @Nested

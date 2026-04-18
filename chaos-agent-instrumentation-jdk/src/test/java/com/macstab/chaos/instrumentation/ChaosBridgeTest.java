@@ -178,4 +178,39 @@ class ChaosBridgeTest {
       assertThat(bridge.resolveShutdownHook(decorated)).isNotNull();
     }
   }
+
+  @Nested
+  @DisplayName("higher-level time API adjustments")
+  class HigherLevelTimeApis {
+
+    @Test
+    @DisplayName("adjustInstantNow returns the real instant unchanged when no scenarios are active")
+    void adjustInstantNowPassthrough() throws Throwable {
+      final java.time.Instant real = java.time.Instant.ofEpochSecond(1_700_000_000L);
+      assertThat(bridge.adjustInstantNow(real)).isEqualTo(real);
+    }
+
+    @Test
+    @DisplayName(
+        "adjustLocalDateTimeNow returns the real value unchanged when no scenarios are active")
+    void adjustLocalDateTimeNowPassthrough() throws Throwable {
+      final java.time.LocalDateTime real = java.time.LocalDateTime.of(2026, 4, 18, 12, 0);
+      assertThat(bridge.adjustLocalDateTimeNow(real)).isEqualTo(real);
+    }
+
+    @Test
+    @DisplayName(
+        "adjustZonedDateTimeNow returns the real value unchanged when no scenarios are active")
+    void adjustZonedDateTimeNowPassthrough() throws Throwable {
+      final java.time.ZonedDateTime real =
+          java.time.ZonedDateTime.of(2026, 4, 18, 12, 0, 0, 0, java.time.ZoneId.of("UTC"));
+      assertThat(bridge.adjustZonedDateTimeNow(real)).isEqualTo(real);
+    }
+
+    @Test
+    @DisplayName("adjustDateNew returns the real millis unchanged when no scenarios are active")
+    void adjustDateNewPassthrough() throws Throwable {
+      assertThat(bridge.adjustDateNew(1_700_000_000_000L)).isEqualTo(1_700_000_000_000L);
+    }
+  }
 }

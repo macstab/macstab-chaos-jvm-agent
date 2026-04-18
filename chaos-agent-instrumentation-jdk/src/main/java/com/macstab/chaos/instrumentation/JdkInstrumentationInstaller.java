@@ -36,7 +36,7 @@ import net.bytebuddy.utility.JavaModule;
  *       temporary JAR and appends it to the bootstrap classpath so that bootstrap-loaded JDK
  *       classes can see it.
  *   <li>{@link #installDelegate(Object)} constructs a {@link
- *       com.macstab.chaos.instrumentation.ChaosBridge}, builds the 42-slot {@link
+ *       com.macstab.chaos.instrumentation.ChaosBridge}, builds the 46-slot {@link
  *       java.lang.invoke.MethodHandle} array via {@link #buildMethodHandles}, and calls the
  *       bootstrap-loaded {@code BootstrapDispatcher.install()} via reflection to wire the bridge.
  *   <li>ByteBuddy's {@code AgentBuilder} is assembled with one transformation per interception
@@ -572,6 +572,48 @@ public final class JdkInstrumentationInstaller {
                               .on(
                                   ElementMatchers.named("cancel")
                                       .and(ElementMatchers.takesArguments(boolean.class)))));
+
+      // ── Higher-level time APIs ────────────────────────────────────────────
+      // Direct System.currentTimeMillis() / System.nanoTime() cannot be intercepted (see note
+      // below) but java.time.Instant.now(), java.time.LocalDateTime.now(), java.time.ZonedDateTime
+      // .now(), and java.util.Date() are regular Java members that can be woven at exit.
+      agentBuilder =
+          agentBuilder
+              .type(ElementMatchers.named("java.time.Instant"))
+              .transform(
+                  (builder, typeDescription, classLoader, module, protectionDomain) ->
+                      builder.visit(
+                          Advice.to(JvmRuntimeAdvice.InstantNowAdvice.class)
+                              .on(
+                                  ElementMatchers.named("now")
+                                      .and(ElementMatchers.isStatic())
+                                      .and(ElementMatchers.takesArguments(0)))))
+              .type(ElementMatchers.named("java.time.LocalDateTime"))
+              .transform(
+                  (builder, typeDescription, classLoader, module, protectionDomain) ->
+                      builder.visit(
+                          Advice.to(JvmRuntimeAdvice.LocalDateTimeNowAdvice.class)
+                              .on(
+                                  ElementMatchers.named("now")
+                                      .and(ElementMatchers.isStatic())
+                                      .and(ElementMatchers.takesArguments(0)))))
+              .type(ElementMatchers.named("java.time.ZonedDateTime"))
+              .transform(
+                  (builder, typeDescription, classLoader, module, protectionDomain) ->
+                      builder.visit(
+                          Advice.to(JvmRuntimeAdvice.ZonedDateTimeNowAdvice.class)
+                              .on(
+                                  ElementMatchers.named("now")
+                                      .and(ElementMatchers.isStatic())
+                                      .and(ElementMatchers.takesArguments(0)))))
+              .type(ElementMatchers.named("java.util.Date"))
+              .transform(
+                  (builder, typeDescription, classLoader, module, protectionDomain) ->
+                      builder.visit(
+                          Advice.to(JvmRuntimeAdvice.DateNewAdvice.class)
+                              .on(
+                                  ElementMatchers.isConstructor()
+                                      .and(ElementMatchers.takesArguments(0)))));
     }
 
     agentBuilder.installOn(instrumentation);
@@ -590,7 +632,8 @@ public final class JdkInstrumentationInstaller {
     //   java.lang.System is loaded before premain runs, so this approach is unavailable.
     //
     // Constraint 2 — @IntrinsicCandidate JIT bypass (secondary; moot given constraint 1).
-    //   Even if a Java wrapper existed, HotSpot C2 JIT recognises java.lang.System.currentTimeMillis
+    //   Even if a Java wrapper existed, HotSpot C2 JIT recognises
+    // java.lang.System.currentTimeMillis
     //   by class+method name and replaces the call with a direct RDTSC / MRS CNTVCT_EL0 hardware
     //   read, bypassing the wrapper entirely after ~10 000 invocations.
     //
@@ -603,8 +646,10 @@ public final class JdkInstrumentationInstaller {
     // System.nanoTime() calls. Clock skew IS applied through two supported paths:
     //   1. Code explicitly calls BootstrapDispatcher.adjustClockMillis / adjustClockNanos
     //      (the hot path wired by this agent for custom instrumentation points).
-    //   2. Application code uses java.time.Instant.now() or similar higher-level APIs —
-    //      these are non-native Java methods and will be interceptable in a future release.
+    //   2. Application code uses java.time.Instant.now(), java.time.LocalDateTime.now(),
+    //      java.time.ZonedDateTime.now(), or new java.util.Date() — these are non-native Java
+    //      members that are woven above in the Phase 2 block when the agent is attached via
+    //      -javaagent: at JVM startup.
     //
     // This is a hard JVM limitation for any standard -javaagent: Java instrumentation agent.
     // Workarounds (e.g. -Xpatch:java.base, a C-level JVMTI agent) are out of scope.
@@ -619,11 +664,11 @@ public final class JdkInstrumentationInstaller {
    * com.macstab.chaos.instrumentation.bridge.BootstrapDispatcher} (e.g. {@code
    * ADJUST_CLOCK_MILLIS}, {@code BEFORE_GC_REQUEST}, etc.). The array has exactly {@link
    * com.macstab.chaos.instrumentation.bridge.BootstrapDispatcher#HANDLE_COUNT} elements (currently
-   * 42), one per dispatch slot. All handles are resolved against the {@link BridgeDelegate}
+   * 46), one per dispatch slot. All handles are resolved against the {@link BridgeDelegate}
    * interface using a public lookup so that they are callable from the bootstrap classloader
    * context.
    *
-   * @return a 42-element array of {@link MethodHandle} objects indexed by the {@code HANDLE_*}
+   * @return a 46-element array of {@link MethodHandle} objects indexed by the {@code HANDLE_*}
    *     constants on {@link com.macstab.chaos.instrumentation.bridge.BootstrapDispatcher}; no
    *     element is {@code null}
    * @throws Exception if any required method is absent from {@link BridgeDelegate} or if the lookup
@@ -793,6 +838,23 @@ public final class JdkInstrumentationInstaller {
             cls,
             "beforeJmxGetAttr",
             MethodType.methodType(void.class, Object.class, Object.class, String.class));
+    mh[BootstrapDispatcher.ADJUST_INSTANT_NOW] =
+        lookup.findVirtual(
+            cls,
+            "adjustInstantNow",
+            MethodType.methodType(java.time.Instant.class, java.time.Instant.class));
+    mh[BootstrapDispatcher.ADJUST_LOCAL_DATE_TIME_NOW] =
+        lookup.findVirtual(
+            cls,
+            "adjustLocalDateTimeNow",
+            MethodType.methodType(java.time.LocalDateTime.class, java.time.LocalDateTime.class));
+    mh[BootstrapDispatcher.ADJUST_ZONED_DATE_TIME_NOW] =
+        lookup.findVirtual(
+            cls,
+            "adjustZonedDateTimeNow",
+            MethodType.methodType(java.time.ZonedDateTime.class, java.time.ZonedDateTime.class));
+    mh[BootstrapDispatcher.ADJUST_DATE_NEW] =
+        lookup.findVirtual(cls, "adjustDateNew", MethodType.methodType(long.class, long.class));
     return mh;
   }
 

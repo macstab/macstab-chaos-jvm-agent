@@ -136,7 +136,7 @@ The agent is attached in one of two modes:
 | **Handle** | `ChaosActivationHandle` — an `AutoCloseable` returned by `activate()`; close it to stop the scenario. |
 | **Stressor** | A `ManagedStressor` that runs as a background thread or thread group for the duration of a stressor-effect scenario. |
 | **Phase 1** | Instrumentation of thread pool, scheduler, queue, classloader, and ForkJoin surfaces. Installed in both premain and agentmain. |
-| **Phase 2** | Instrumentation of clock, GC, exit, NIO, sockets, serialization, reflection, LockSupport, AQS, JMX, JNDI, native library load. Premain only. |
+| **Phase 2** | Instrumentation of clock, GC, exit, NIO, sockets, serialization, reflection, LockSupport, AQS, JMX, JNDI, native library load, and higher-level Java time APIs (`Instant.now`, `LocalDateTime.now`, `ZonedDateTime.now`, `new Date()`). Premain only. |
 
 ---
 
@@ -154,7 +154,7 @@ ChaosRuntime created (Clock.systemUTC, NOOP metrics sink)
 JdkInstrumentationInstaller.install(instrumentation, runtime, premainMode=true)
     ├── injectBridge(): package BootstrapDispatcher into temp JAR,
     │                   appendToBootstrapClassLoaderSearch
-    ├── installDelegate(): build 42-slot MethodHandle[], wire into BootstrapDispatcher.install()
+    ├── installDelegate(): build 46-slot MethodHandle[], wire into BootstrapDispatcher.install()
     └── AgentBuilder: Phase 1 + Phase 2 ByteBuddy transformations installed via retransformation
   ↓
 Optional<LoadedPlan> plan = StartupConfigLoader.load(agentArgs, System.getenv())
@@ -381,7 +381,7 @@ node "JVM Process" {
 
 ## ChaosRuntime (`chaos-agent-core`)
 
-**Responsibility**: Central dispatch hub. Implements `ChaosControlPlane`. Exposes ~40 `before*`/`after*`/`adjust*`/`decorate*` methods called by the instrumentation layer. Builds `InvocationContext`s, delegates to `ScenarioRegistry.match()`, merges `RuntimeDecision`s, and executes the decision (delay, gate, terminal action).
+**Responsibility**: Central dispatch hub. Implements `ChaosControlPlane`. Exposes ~46 `before*`/`after*`/`adjust*`/`decorate*` methods called by the instrumentation layer. Builds `InvocationContext`s, delegates to `ScenarioRegistry.match()`, merges `RuntimeDecision`s, and executes the decision (delay, gate, terminal action).
 
 **Owned concerns**:
 - `InvocationContext` construction per operation type
@@ -464,7 +464,7 @@ node "JVM Process" {
 
 **Bootstrap bridge injection**: Reads `BootstrapDispatcher.class` and `BootstrapDispatcher$ThrowingSupplier.class` from the agent JAR's resources and writes them into a temp JAR. The temp JAR is appended to the bootstrap classpath via `Instrumentation.appendToBootstrapClassLoaderSearch`. The temp file is registered for deletion on JVM exit.
 
-**MethodHandle array construction** (`buildMethodHandles`): Uses `MethodHandles.publicLookup()` against `BridgeDelegate.class` to build 42 handles. All handles are resolved against the interface, not the implementation, so the bootstrap classloader can invoke them without visibility into `ChaosBridge`. The handle array is passed to `BootstrapDispatcher.install()` via reflection (`Class.forName(..., null)` with bootstrap classloader).
+**MethodHandle array construction** (`buildMethodHandles`): Uses `MethodHandles.publicLookup()` against `BridgeDelegate.class` to build 46 handles. All handles are resolved against the interface, not the implementation, so the bootstrap classloader can invoke them without visibility into `ChaosBridge`. The handle array is passed to `BootstrapDispatcher.install()` via reflection (`Class.forName(..., null)` with bootstrap classloader).
 
 **Phase 1 vs Phase 2 distinction**:
 - Phase 1: `ThreadPoolExecutor`, `ScheduledThreadPoolExecutor`, `Thread` — can be instrumented in both premain and agentmain because these are application-level classes or JDK classes loaded after the agent
@@ -472,7 +472,7 @@ node "JVM Process" {
 
 **AQS instrumentation safety**: `ConcurrentHashMap` (used by `ScenarioRegistry`) is internally lock-free; it does not use AQS. `ManualGate` (based on `ReentrantLock`) does use AQS, but `ManualGate.await()` is only called from within `applyGate()`, which is reached only after `DEPTH` is already > 0 — so the DEPTH guard short-circuits before re-entering chaos evaluation.
 
-**Clock intrinsic caveat**: `System.currentTimeMillis()` and `System.nanoTime()` are `@IntrinsicCandidate` native methods. On JDK 21+ with JIT enabled, the JVM inlines them to hardware clock reads, bypassing the Java wrapper entirely. ByteBuddy advice on the wrapper is never reached after JIT compilation. Clock skew works correctly via the `ChaosRuntime.applyClockSkew()` API path (direct call), but cannot intercept production `System.currentTimeMillis()` calls in JIT-compiled code. This is a fundamental JVM constraint.
+**Clock intrinsic caveat**: `System.currentTimeMillis()` and `System.nanoTime()` are `@IntrinsicCandidate` native methods. On JDK 21+ with JIT enabled, the JVM inlines them to hardware clock reads, bypassing the Java wrapper entirely. ByteBuddy advice on the wrapper is never reached after JIT compilation. Clock skew works correctly for code that uses `java.time.Instant.now()`, `LocalDateTime.now()`, `ZonedDateTime.now()`, or `new java.util.Date()` — all four are non-native, non-intrinsified Java methods woven at exit by slots 42–45 of the handle array. Direct calls to `System.currentTimeMillis()` / `nanoTime()` remain beyond reach. This is a fundamental JVM constraint documented in `instrumentation.md §12`.
 
 ## Stressors (`chaos-agent-core`)
 

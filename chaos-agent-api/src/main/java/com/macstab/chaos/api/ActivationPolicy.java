@@ -16,8 +16,8 @@ import java.time.Duration;
  *   <li>{@link #always()} — effect fires on every match, starts immediately
  *   <li>{@link #manual()} — effect fires on every match, but only after {@link
  *       ChaosActivationHandle#start()} is called
- *   <li>{@link #withDestructiveEffects()} — same as {@link #always()} but with explicit opt-in
- *       for non-recoverable effects ({@code deadlock()}, {@code threadLeak()})
+ *   <li>{@link #withDestructiveEffects()} — same as {@link #always()} but with explicit opt-in for
+ *       non-recoverable effects ({@code deadlock()}, {@code threadLeak()})
  * </ul>
  *
  * <p>Fine-grained control via the canonical constructor:
@@ -36,8 +36,8 @@ import java.time.Duration;
  * }</pre>
  *
  * <p><strong>Destructive effects</strong>: {@link com.macstab.chaos.api.ChaosEffect.DeadlockEffect}
- * and {@link com.macstab.chaos.api.ChaosEffect.ThreadLeakEffect} create non-recoverable JVM state
- * — deadlocked or permanently-parked threads that cannot be interrupted or terminated within the
+ * and {@link com.macstab.chaos.api.ChaosEffect.ThreadLeakEffect} create non-recoverable JVM state —
+ * deadlocked or permanently-parked threads that cannot be interrupted or terminated within the
  * running JVM process. Activation of these effects requires {@code allowDestructiveEffects(true)}
  * in the policy; any attempt without it throws {@link ChaosActivationException} at registration
  * time, not at effect application time. Use only in short-lived test processes or controlled

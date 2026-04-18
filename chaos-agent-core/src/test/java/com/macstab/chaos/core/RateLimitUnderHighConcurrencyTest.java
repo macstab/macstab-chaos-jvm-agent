@@ -3,18 +3,16 @@ package com.macstab.chaos.core;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.macstab.chaos.api.ActivationPolicy;
+import com.macstab.chaos.api.ChaosDiagnostics;
 import com.macstab.chaos.api.ChaosEffect;
 import com.macstab.chaos.api.ChaosScenario;
 import com.macstab.chaos.api.ChaosSelector;
-import com.macstab.chaos.api.ChaosDiagnostics;
 import com.macstab.chaos.api.OperationType;
 import java.time.Duration;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -109,9 +107,7 @@ class RateLimitUnderHighConcurrencyTest {
 
     @Test
     @DisplayName(
-        "exactly PERMITS applications across "
-            + THREAD_COUNT
-            + " threads — no permit is wasted")
+        "exactly PERMITS applications across " + THREAD_COUNT + " threads — no permit is wasted")
     void exactlyPermitsApplicationsWhenMoreThreadsThanPermits() throws Exception {
       final ChaosRuntime runtime = new ChaosRuntime();
       final long permits = 10L;
@@ -174,8 +170,7 @@ class RateLimitUnderHighConcurrencyTest {
   class CombinedRateLimitAndMaxApplications {
 
     @Test
-    @DisplayName(
-        "maxApplications caps total count even when rate-limit window permits more")
+    @DisplayName("maxApplications caps total count even when rate-limit window permits more")
     void maxApplicationsCapsAbsoluteCountBelowRateLimit() throws Exception {
       final ChaosRuntime runtime = new ChaosRuntime();
       final long maxApplications = 3L;

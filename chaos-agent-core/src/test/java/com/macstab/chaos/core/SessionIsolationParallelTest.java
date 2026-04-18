@@ -32,12 +32,12 @@ import org.junit.jupiter.api.Test;
  * <h2>Invariants under test</h2>
  *
  * <ul>
- *   <li>Each session's {@code appliedCount} must equal exactly the number of in-session
- *       invocations — no more (no bleed-in from other sessions) and no fewer (no missed
- *       applications within the session).
+ *   <li>Each session's {@code appliedCount} must equal exactly the number of in-session invocations
+ *       — no more (no bleed-in from other sessions) and no fewer (no missed applications within the
+ *       session).
  *   <li>Threads with no session binding are never counted by any session-scoped scenario.
- *   <li>After a session is {@link ChaosSession#close() closed}, its effect is no longer observed
- *       by any thread.
+ *   <li>After a session is {@link ChaosSession#close() closed}, its effect is no longer observed by
+ *       any thread.
  * </ul>
  */
 @DisplayName("Session isolation under parallel access")
@@ -46,7 +46,8 @@ class SessionIsolationParallelTest {
   private static final int SESSION_COUNT = 10;
   private static final int THREADS_PER_SESSION = 10;
   private static final int ITERATIONS_PER_THREAD = 5;
-  private static final long EXPECTED_PER_SESSION = (long) THREADS_PER_SESSION * ITERATIONS_PER_THREAD;
+  private static final long EXPECTED_PER_SESSION =
+      (long) THREADS_PER_SESSION * ITERATIONS_PER_THREAD;
 
   @Nested
   @DisplayName("per-session appliedCount correctness")
@@ -236,8 +237,7 @@ class SessionIsolationParallelTest {
 
       // Pre-close: the opening thread is automatically bound (root binding in constructor).
       final long beforeClose =
-          measureMillis(
-              () -> runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {}));
+          measureMillis(() -> runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {}));
       assertThat(beforeClose)
           .as("call before close() must experience the session delay")
           .isGreaterThanOrEqualTo(60L);

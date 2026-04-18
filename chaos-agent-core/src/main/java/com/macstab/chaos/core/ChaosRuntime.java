@@ -521,30 +521,36 @@ public final class ChaosRuntime implements ChaosControlPlane {
 
   /**
    * Applies active {@link ChaosEffect.ClockSkewEffect} scenarios to a raw clock value read from
-   * {@link System#currentTimeMillis()} or {@link System#nanoTime()}.
+   * {@link System#currentTimeMillis()}, {@link System#nanoTime()}, or a higher-level time API such
+   * as {@link java.time.Instant#now()}.
    *
-   * <p>Called from ByteBuddy advice that intercepts {@link OperationType#SYSTEM_CLOCK_MILLIS} and
-   * {@link OperationType#SYSTEM_CLOCK_NANOS}. Returns the real value unchanged if no active
-   * clock-skew scenario matches.
+   * <p>Called from ByteBuddy advice that intercepts any of the time-related {@link OperationType}s:
+   * {@link OperationType#SYSTEM_CLOCK_MILLIS}, {@link OperationType#SYSTEM_CLOCK_NANOS}, {@link
+   * OperationType#INSTANT_NOW}, {@link OperationType#LOCAL_DATE_TIME_NOW}, {@link
+   * OperationType#ZONED_DATE_TIME_NOW}, and {@link OperationType#DATE_NEW}. Returns the real value
+   * unchanged if no active clock-skew scenario matches.
    *
-   * @param realValue the raw clock value as read from the OS
-   * @param clockType {@link OperationType#SYSTEM_CLOCK_MILLIS} or {@link
-   *     OperationType#SYSTEM_CLOCK_NANOS}
-   * @return the skewed (or unchanged) clock value
+   * <p>{@link OperationType#SYSTEM_CLOCK_NANOS} uses the nanosecond skew channel; every other
+   * supported operation uses the millisecond skew channel.
+   *
+   * @param realValue the raw clock value as read from the OS or the underlying time API
+   * @param clockType one of the time-related operation types listed above
+   * @return the skewed (or unchanged) clock value, in the same unit as {@code realValue}
    */
   public long applyClockSkew(final long realValue, final OperationType clockType) {
     final InvocationContext context =
         new InvocationContext(clockType, "java.lang.System", null, null, false, null, null, null);
     final List<ScenarioContribution> contributions = registry.match(context);
+    final boolean isNanos = clockType == OperationType.SYSTEM_CLOCK_NANOS;
     long result = realValue;
     for (final ScenarioContribution contribution : contributions) {
       if (contribution.effect() instanceof ChaosEffect.ClockSkewEffect skewEffect) {
         final ClockSkewState state = contribution.controller().clockSkewState();
         if (state != null) {
           result =
-              clockType == OperationType.SYSTEM_CLOCK_MILLIS
-                  ? state.applyMillis(skewEffect.mode(), result)
-                  : state.applyNanos(skewEffect.mode(), result);
+              isNanos
+                  ? state.applyNanos(skewEffect.mode(), result)
+                  : state.applyMillis(skewEffect.mode(), result);
         }
       }
     }
@@ -581,6 +587,72 @@ public final class ChaosRuntime implements ChaosControlPlane {
    */
   public long adjustClockNanos(final long realNanos) {
     return applyClockSkew(realNanos, OperationType.SYSTEM_CLOCK_NANOS);
+  }
+
+  /**
+   * Returns the (possibly skewed) {@link java.time.Instant} for {@link java.time.Instant#now()}
+   * interception.
+   *
+   * <p>Preserves the sub-millisecond nanosecond component of the real instant by applying the skew
+   * as a millisecond delta via {@link java.time.Instant#plusMillis(long)}.
+   *
+   * @param realInstant the raw instant as returned by {@link java.time.Instant#now()}; never {@code
+   *     null}
+   * @return the adjusted instant, or {@code realInstant} when no clock-skew scenario is active
+   */
+  public java.time.Instant adjustInstantNow(final java.time.Instant realInstant) {
+    final long realMillis = realInstant.toEpochMilli();
+    final long skewed = applyClockSkew(realMillis, OperationType.INSTANT_NOW);
+    final long delta = skewed - realMillis;
+    return delta == 0L ? realInstant : realInstant.plusMillis(delta);
+  }
+
+  /**
+   * Returns the (possibly skewed) {@link java.time.LocalDateTime} for {@link
+   * java.time.LocalDateTime#now()} interception.
+   *
+   * @param realValue the raw local date-time as returned by {@link java.time.LocalDateTime#now()};
+   *     never {@code null}
+   * @return the adjusted local date-time, or {@code realValue} when no clock-skew scenario is
+   *     active
+   */
+  public java.time.LocalDateTime adjustLocalDateTimeNow(final java.time.LocalDateTime realValue) {
+    final java.time.ZoneId zone = java.time.ZoneId.systemDefault();
+    final long realMillis = realValue.atZone(zone).toInstant().toEpochMilli();
+    final long skewed = applyClockSkew(realMillis, OperationType.LOCAL_DATE_TIME_NOW);
+    if (skewed == realMillis) {
+      return realValue;
+    }
+    return java.time.LocalDateTime.ofInstant(java.time.Instant.ofEpochMilli(skewed), zone);
+  }
+
+  /**
+   * Returns the (possibly skewed) {@link java.time.ZonedDateTime} for {@link
+   * java.time.ZonedDateTime#now()} interception.
+   *
+   * @param realValue the raw zoned date-time as returned by {@link java.time.ZonedDateTime#now()};
+   *     never {@code null}
+   * @return the adjusted zoned date-time, or {@code realValue} when no clock-skew scenario is
+   *     active
+   */
+  public java.time.ZonedDateTime adjustZonedDateTimeNow(final java.time.ZonedDateTime realValue) {
+    final long realMillis = realValue.toInstant().toEpochMilli();
+    final long skewed = applyClockSkew(realMillis, OperationType.ZONED_DATE_TIME_NOW);
+    if (skewed == realMillis) {
+      return realValue;
+    }
+    return java.time.Instant.ofEpochMilli(skewed).atZone(realValue.getZone());
+  }
+
+  /**
+   * Returns the (possibly skewed) epoch-millisecond value that should replace the initial time
+   * stored by a freshly-constructed {@link java.util.Date}.
+   *
+   * @param realMillis the raw millis captured by the {@link java.util.Date#Date()} constructor
+   * @return the adjusted millis, or {@code realMillis} when no clock-skew scenario is active
+   */
+  public long adjustDateNew(final long realMillis) {
+    return applyClockSkew(realMillis, OperationType.DATE_NEW);
   }
 
   /**

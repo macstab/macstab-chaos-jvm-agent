@@ -366,7 +366,7 @@ Key checks:
 - `ReturnValueCorruptionEffect` requires `MethodSelector` with `METHOD_EXIT` operation
 - `ExceptionInjectionEffect` requires `MethodSelector` with `METHOD_ENTER` operation
 - `ExceptionalCompletionEffect` requires `AsyncSelector`
-- `ClockSkewEffect` requires `JvmRuntimeSelector` with `SYSTEM_CLOCK_MILLIS` or `SYSTEM_CLOCK_NANOS`
+- `ClockSkewEffect` requires `JvmRuntimeSelector` with one of: `SYSTEM_CLOCK_MILLIS`, `SYSTEM_CLOCK_NANOS`, `INSTANT_NOW`, `LOCAL_DATE_TIME_NOW`, `ZONED_DATE_TIME_NOW`, or `DATE_NEW`
 - Session-scope scenarios may not use JVM-global selectors (clock, GC, exit, class loading, native library)
 - **Destructive effects guard**: `DeadlockEffect` and `ThreadLeakEffect` require `activationPolicy.allowDestructiveEffects() == true`; activation without the flag throws `ChaosActivationException` at registration time
 
@@ -407,6 +407,10 @@ Mode semantics:
 - **FREEZE**: always returns the reference value; time appears stopped at the moment the scenario started
 
 `ClockSkewState` is `volatile` in `ScenarioController`. On `stop()`, it is set to `null`; `applyClockSkew()` in `ChaosRuntime` checks for null before calling state methods.
+
+`applyClockSkew()` is the single generalised entry point that handles all six clock operation types: `SYSTEM_CLOCK_MILLIS`, `SYSTEM_CLOCK_NANOS`, `INSTANT_NOW`, `LOCAL_DATE_TIME_NOW`, `ZONED_DATE_TIME_NOW`, and `DATE_NEW`. Only `SYSTEM_CLOCK_NANOS` routes through the nanosecond skew channel; every other type routes through the millisecond channel. The higher-level type-specific wrappers (`adjustInstantNow`, `adjustLocalDateTimeNow`, `adjustZonedDateTimeNow`, `adjustDateNew`) each extract the underlying millisecond value, pass it to `applyClockSkew()` with the appropriate `OperationType`, then reconstruct the high-level time object — preserving zone identity for `ZonedDateTime` and nanosecond sub-millisecond precision for `Instant`.
+
+Test coverage: `ClockSkewRuntimeTest$HigherLevelTimeApis` (8 tests) covers FIXED skew on `Instant.now`, `LocalDateTime.now`, `ZonedDateTime.now`, and `Date`; FREEZE mode on `Instant.now`; isolation between `INSTANT_NOW` and `DATE_NEW` operation types; and passthrough when no scenario matches.
 
 ## ReturnValueCorruptor
 

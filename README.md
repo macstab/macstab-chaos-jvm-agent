@@ -17,7 +17,7 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-green.svg)](LICENSE)
 [![ByteBuddy](https://img.shields.io/badge/ByteBuddy-instrumentation-orange.svg)](https://bytebuddy.net/)
 
-*Designed and engineered by* **[Christian Schnapka](https://macstab.com)** —  
+*Designed and engineered by* **[Christian Schnapka](https://macstab.com)** —
 Principal+ Embedded Systems Engineer · [Macstab GmbH](https://macstab.com) · Hamburg, Germany
 
 </div>
@@ -38,7 +38,7 @@ session.activate(ChaosScenario.builder()
 
 ---
 
-å<!-- TOC -->
+<!-- TOC -->
 * [macstab-chaos-jvm-agent](#macstab-chaos-jvm-agent)
   * [The Short Version](#the-short-version)
   * [Floor 0 — What it does (plain English)](#floor-0--what-it-does-plain-english)
@@ -70,6 +70,9 @@ session.activate(ChaosScenario.builder()
   * [Startup Configuration (JSON)](#startup-configuration-json)
   * [Diagnostics](#diagnostics)
   * [Module Layout](#module-layout)
+  * [Spring Boot Integration](#spring-boot-integration)
+    * [Test Starter](#test-starter)
+    * [Runtime Starter](#runtime-starter)
   * [Build](#build)
   * [Detailed Documentation](#detailed-documentation)
   * [License](#license)
@@ -466,7 +469,96 @@ JMX MBean: `com.macstab.chaos:type=ChaosDiagnostics` — inspect from `jconsole`
 | `chaos-agent-instrumentation-jdk` | ByteBuddy advice, bootstrap bridge (42 interception handles) |
 | `chaos-agent-startup-config` | JSON/base64/file config resolution and Jackson mapping |
 | `chaos-agent-testkit` | JUnit 5 extension, `ChaosPlatform.installLocally()` for self-attach |
+| `chaos-agent-spring-boot3-test-starter` | `@ChaosTest` + `ChaosAgentExtension` for Spring Boot 3 tests |
+| `chaos-agent-spring-boot4-test-starter` | `@ChaosTest` + `ChaosAgentExtension` for Spring Boot 4 tests |
+| `chaos-agent-spring-boot3-starter` | Runtime starter with Actuator endpoint for Spring Boot 3 |
+| `chaos-agent-spring-boot4-starter` | Runtime starter with Actuator endpoint for Spring Boot 4 |
 | `chaos-agent-examples` | Runnable usage examples |
+
+---
+
+## Spring Boot Integration
+
+Two axes, four modules: test-time vs runtime, Boot 3 vs Boot 4. All four are `compileOnly` against their Spring Boot BOM — they are inert until the consuming application supplies Spring Boot on the classpath.
+
+### Test Starter
+
+The test starters give a `@SpringBootTest` class one-annotation access to chaos instrumentation. Add the dependency, put `@ChaosTest` on the class, declare a `ChaosSession` parameter on any test method.
+
+```kotlin
+// build.gradle.kts — Spring Boot 3
+testImplementation("com.macstab:chaos-agent-spring-boot3-test-starter:0.1.0-SNAPSHOT")
+
+// Spring Boot 4
+testImplementation("com.macstab:chaos-agent-spring-boot4-test-starter:0.1.0-SNAPSHOT")
+```
+
+```java
+@ChaosTest
+class OrderServiceChaosTest {
+
+    @Test
+    void slowDatabaseRejectsOrdersGracefully(ChaosSession chaos) {
+        chaos.activate(ChaosScenario.builder()
+            .id("slow-jdbc")
+            .selector(ChaosSelector.executor(NamePattern.prefix("HikariPool")))
+            .effect(ChaosEffect.delay(Duration.ofSeconds(3)))
+            .build());
+
+        try (var binding = chaos.bind()) {
+            assertThrows(OrderTimeoutException.class,
+                () -> orderService.placeOrder(testOrder));
+        }
+    }
+}
+```
+
+`@ChaosTest` composes `@SpringBootTest` and `@ExtendWith(ChaosAgentExtension.class)`. The extension self-attaches the agent (idempotent across the JVM), opens a class-scoped `ChaosSession`, injects it into test method parameters, and closes it after the last test method runs. `@Nested` classes inherit the same session. `ChaosControlPlane` can also be injected as a parameter. No `-javaagent` flag is needed for test JVMs.
+
+### Runtime Starter
+
+The runtime starters wire the chaos agent into a running Spring Boot application and optionally expose a Spring Boot Actuator endpoint for runtime activation and control.
+
+```kotlin
+// build.gradle.kts — Spring Boot 3
+implementation("com.macstab:chaos-agent-spring-boot3-starter:0.1.0-SNAPSHOT")
+
+// Spring Boot 4
+implementation("com.macstab:chaos-agent-spring-boot4-starter:0.1.0-SNAPSHOT")
+```
+
+```yaml
+# application.yml — opt-in required; all flags default to false
+macstab:
+  chaos:
+    enabled: true
+    config-file: /etc/chaos/soak-plan.json  # optional startup plan
+    debug-dump-on-start: false
+    actuator:
+      enabled: true   # exposes /actuator/chaos — protect with Spring Security
+```
+
+When `enabled: true`, the starter installs the agent and exposes `ChaosControlPlane` as a Spring bean with `destroyMethod = "close"`. If `config-file` is set, the plan is loaded and activated on `ApplicationReadyEvent`. When `actuator.enabled: true` (and `spring-boot-actuator` is on the classpath), the `/actuator/chaos` endpoint becomes available:
+
+```bash
+# Inspect active scenarios
+curl http://localhost:8080/actuator/chaos
+
+# Activate a plan inline
+curl -X POST http://localhost:8080/actuator/chaos \
+     -H 'Content-Type: application/json' \
+     -d '{"name":"latency","scenarios":[{"id":"slow-executor","scope":"JVM","selector":{"type":"executor"},"effect":{"type":"delay","minDelay":"PT0.2S","maxDelay":"PT0.5S"}}]}'
+
+# Stop a specific scenario by ID
+curl -X DELETE http://localhost:8080/actuator/chaos/slow-executor
+
+# Stop all starter-managed scenarios
+curl -X POST http://localhost:8080/actuator/chaos/stopAll
+```
+
+> The `/actuator/chaos` endpoint can activate arbitrary fault injection in the live JVM. Protect it as you would a shutdown endpoint — never expose it unauthenticated to the public internet.
+
+For deep technical detail on all four modules — lifecycle, conditional wiring, `@Nested` session propagation, `ChaosHandleRegistry` design, `ChaosAgentInitializer` timing, Boot 3 vs Boot 4 factory differences, and PlantUML sequence diagrams — see [`docs/spring-integration.md`](docs/spring-integration.md).
 
 ---
 
@@ -495,6 +587,7 @@ Internal Engineerure documentation lives in [`docs/`](docs/):
 | [`bootstrap.md`](docs/bootstrap.md) | Agent initialization, self-attach, MBean registration |
 | [`startup-config.md`](docs/startup-config.md) | Config source resolution, JSON schema, path safety |
 | [`testkit.md`](docs/testkit.md) | JUnit 5 extension, session lifecycle, anti-patterns |
+| [`spring-integration.md`](docs/spring-integration.md) | Spring Boot 3 and 4 starters: `@ChaosTest`, `ChaosAgentExtension`, Actuator endpoint, configuration reference |
 
 ---
 
@@ -508,8 +601,8 @@ Apache License 2.0 — see [LICENSE](LICENSE).
 
 *Engineerure, implementation, and documentation crafted by*
 
-**[Christian Schnapka](https://macstab.com)**  
-Principal+ Embedded Systems Engineer  
+**[Christian Schnapka](https://macstab.com)**
+Principal+ Embedded Systems Engineer
 [Macstab GmbH](https://macstab.com) · Hamburg, Germany
 
 *Building systems that operate correctly at the edges — including the ones you deliberately break.*

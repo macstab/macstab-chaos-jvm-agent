@@ -15,19 +15,20 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 /**
- * Full coverage for the destructive-effect safeguard introduced in
- * {@link ActivationPolicy#allowDestructiveEffects()}.
+ * Full coverage for the destructive-effect safeguard introduced in {@link
+ * ActivationPolicy#allowDestructiveEffects()}.
  *
  * <p>{@link ChaosEffect.DeadlockEffect} and {@link ChaosEffect.ThreadLeakEffect} create
- * non-recoverable JVM state. The safeguard requires explicit opt-in via
- * {@link ActivationPolicy#withDestructiveEffects()} or {@code allowDestructiveEffects=true}
- * in the JSON plan. Validation fires at registration time in
- * {@link CompatibilityValidator#validate}, not at effect-application time.
+ * non-recoverable JVM state. The safeguard requires explicit opt-in via {@link
+ * ActivationPolicy#withDestructiveEffects()} or {@code allowDestructiveEffects=true} in the JSON
+ * plan. Validation fires at registration time in {@link CompatibilityValidator#validate}, not at
+ * effect-application time.
  *
  * <p>Test dimensions covered:
+ *
  * <ul>
- *   <li>ActivationPolicy factory semantics — {@code always()}, {@code manual()},
- *       {@code withDestructiveEffects()} flag values
+ *   <li>ActivationPolicy factory semantics — {@code always()}, {@code manual()}, {@code
+ *       withDestructiveEffects()} flag values
  *   <li>Rejection without flag — both destructive effects, correct exception type and message
  *   <li>Acceptance with flag — both destructive effects pass validation
  *   <li>Non-destructive stressors — not blocked by the guard
@@ -164,44 +165,57 @@ class DestructiveEffectSafeguardTest {
     @Test
     @DisplayName("HeapPressureEffect passes without flag")
     void heapPressureNotBlocked() {
-      assertThatCode(() -> CompatibilityValidator.validate(
-              stressScenario(ChaosSelector.StressTarget.HEAP,
-                  new ChaosEffect.HeapPressureEffect(1024L, 512),
-                  ActivationPolicy.always()),
-              FEATURE_SET))
+      assertThatCode(
+              () ->
+                  CompatibilityValidator.validate(
+                      stressScenario(
+                          ChaosSelector.StressTarget.HEAP,
+                          new ChaosEffect.HeapPressureEffect(1024L, 512),
+                          ActivationPolicy.always()),
+                      FEATURE_SET))
           .doesNotThrowAnyException();
     }
 
     @Test
     @DisplayName("KeepAliveEffect passes without flag")
     void keepAliveNotBlocked() {
-      assertThatCode(() -> CompatibilityValidator.validate(
-              stressScenario(ChaosSelector.StressTarget.KEEPALIVE,
-                  new ChaosEffect.KeepAliveEffect("t", true, Duration.ofSeconds(1)),
-                  ActivationPolicy.always()),
-              FEATURE_SET))
+      assertThatCode(
+              () ->
+                  CompatibilityValidator.validate(
+                      stressScenario(
+                          ChaosSelector.StressTarget.KEEPALIVE,
+                          new ChaosEffect.KeepAliveEffect("t", true, Duration.ofSeconds(1)),
+                          ActivationPolicy.always()),
+                      FEATURE_SET))
           .doesNotThrowAnyException();
     }
 
     @Test
     @DisplayName("GcPressureEffect passes without flag")
     void gcPressureNotBlocked() {
-      assertThatCode(() -> CompatibilityValidator.validate(
-              stressScenario(ChaosSelector.StressTarget.GC_PRESSURE,
-                  new ChaosEffect.GcPressureEffect(1024L * 1024L, 1024, false, Duration.ofSeconds(10)),
-                  ActivationPolicy.always()),
-              FEATURE_SET))
+      assertThatCode(
+              () ->
+                  CompatibilityValidator.validate(
+                      stressScenario(
+                          ChaosSelector.StressTarget.GC_PRESSURE,
+                          new ChaosEffect.GcPressureEffect(
+                              1024L * 1024L, 1024, false, Duration.ofSeconds(10)),
+                          ActivationPolicy.always()),
+                      FEATURE_SET))
           .doesNotThrowAnyException();
     }
 
     @Test
     @DisplayName("MonitorContentionEffect passes without flag")
     void monitorContentionNotBlocked() {
-      assertThatCode(() -> CompatibilityValidator.validate(
-              stressScenario(ChaosSelector.StressTarget.MONITOR_CONTENTION,
-                  new ChaosEffect.MonitorContentionEffect(Duration.ofMillis(10), 2, false),
-                  ActivationPolicy.always()),
-              FEATURE_SET))
+      assertThatCode(
+              () ->
+                  CompatibilityValidator.validate(
+                      stressScenario(
+                          ChaosSelector.StressTarget.MONITOR_CONTENTION,
+                          new ChaosEffect.MonitorContentionEffect(Duration.ofMillis(10), 2, false),
+                          ActivationPolicy.always()),
+                      FEATURE_SET))
           .doesNotThrowAnyException();
     }
   }
@@ -248,8 +262,8 @@ class DestructiveEffectSafeguardTest {
       final ChaosRuntime runtime = new ChaosRuntime();
       // Must close the handle immediately — we do NOT want to actually deadlock the JVM.
       // Activation succeeds; we stop the scenario before the deadlock threads can acquire locks.
-      final var handle = runtime.activate(
-          deadlockScenario(ActivationPolicy.withDestructiveEffects()));
+      final var handle =
+          runtime.activate(deadlockScenario(ActivationPolicy.withDestructiveEffects()));
       handle.stop(); // stops stressor threads before deadlock manifests
       assertThat(runtime.diagnostics().snapshot().scenarios()).hasSize(1);
     }
@@ -259,12 +273,13 @@ class DestructiveEffectSafeguardTest {
     void nonDestructiveScenarioUnaffectedByFlag() {
       final ChaosRuntime runtime = new ChaosRuntime();
       // heap pressure is safe — should activate without any flag
-      final ChaosScenario scenario = ChaosScenario.builder("heap-ok")
-          .scope(ChaosScenario.ScenarioScope.JVM)
-          .selector(ChaosSelector.stress(ChaosSelector.StressTarget.HEAP))
-          .effect(new ChaosEffect.HeapPressureEffect(1024L, 16))
-          .activationPolicy(ActivationPolicy.always())
-          .build();
+      final ChaosScenario scenario =
+          ChaosScenario.builder("heap-ok")
+              .scope(ChaosScenario.ScenarioScope.JVM)
+              .selector(ChaosSelector.stress(ChaosSelector.StressTarget.HEAP))
+              .effect(new ChaosEffect.HeapPressureEffect(1024L, 16))
+              .activationPolicy(ActivationPolicy.always())
+              .build();
       assertThatCode(() -> runtime.activate(scenario).close()).doesNotThrowAnyException();
     }
   }

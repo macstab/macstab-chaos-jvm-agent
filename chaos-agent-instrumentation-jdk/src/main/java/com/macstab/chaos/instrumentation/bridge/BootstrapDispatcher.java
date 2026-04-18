@@ -114,7 +114,7 @@ public final class BootstrapDispatcher {
    * stable and must match the array built by {@code
    * JdkInstrumentationInstaller.buildMethodHandles()}.
    */
-  // ── Phase 2 handles (15-41) ───────────────────────────────────────────────
+  // ── Phase 2 handles (15-45) ───────────────────────────────────────────────
   public static final int ADJUST_CLOCK_MILLIS = 15;
 
   public static final int ADJUST_CLOCK_NANOS = 16;
@@ -143,9 +143,13 @@ public final class BootstrapDispatcher {
   public static final int BEFORE_THREAD_LOCAL_SET = 39;
   public static final int BEFORE_JMX_INVOKE = 40;
   public static final int BEFORE_JMX_GET_ATTR = 41;
+  public static final int ADJUST_INSTANT_NOW = 42;
+  public static final int ADJUST_LOCAL_DATE_TIME_NOW = 43;
+  public static final int ADJUST_ZONED_DATE_TIME_NOW = 44;
+  public static final int ADJUST_DATE_NEW = 45;
 
   /** Total number of method-handle slots; equals the highest index plus one. */
-  public static final int HANDLE_COUNT = 42;
+  public static final int HANDLE_COUNT = 46;
 
   private BootstrapDispatcher() {}
 
@@ -576,6 +580,92 @@ public final class BootstrapDispatcher {
               : (long) h[ADJUST_CLOCK_NANOS].invoke(d, realNanos);
         },
         realNanos);
+  }
+
+  /**
+   * Returns the chaos-adjusted {@link java.time.Instant} for {@code Instant.now()} interception.
+   *
+   * @param realInstant the value returned by the real {@code Instant.now()} call; never {@code
+   *     null}
+   * @return the (possibly skewed) instant; equals {@code realInstant} as the fallback
+   * @throws Throwable if the delegate throws
+   */
+  public static java.time.Instant adjustInstantNow(final java.time.Instant realInstant)
+      throws Throwable {
+    return invoke(
+        () -> {
+          final MethodHandle[] h = handles;
+          final Object d = delegate;
+          return (d == null || h == null)
+              ? realInstant
+              : (java.time.Instant) h[ADJUST_INSTANT_NOW].invoke(d, realInstant);
+        },
+        realInstant);
+  }
+
+  /**
+   * Returns the chaos-adjusted {@link java.time.LocalDateTime} for {@code LocalDateTime.now()}
+   * interception.
+   *
+   * @param realValue the value returned by the real {@code LocalDateTime.now()} call; never {@code
+   *     null}
+   * @return the (possibly skewed) local date-time; equals {@code realValue} as the fallback
+   * @throws Throwable if the delegate throws
+   */
+  public static java.time.LocalDateTime adjustLocalDateTimeNow(
+      final java.time.LocalDateTime realValue) throws Throwable {
+    return invoke(
+        () -> {
+          final MethodHandle[] h = handles;
+          final Object d = delegate;
+          return (d == null || h == null)
+              ? realValue
+              : (java.time.LocalDateTime) h[ADJUST_LOCAL_DATE_TIME_NOW].invoke(d, realValue);
+        },
+        realValue);
+  }
+
+  /**
+   * Returns the chaos-adjusted {@link java.time.ZonedDateTime} for {@code ZonedDateTime.now()}
+   * interception.
+   *
+   * @param realValue the value returned by the real {@code ZonedDateTime.now()} call; never {@code
+   *     null}
+   * @return the (possibly skewed) zoned date-time; equals {@code realValue} as the fallback
+   * @throws Throwable if the delegate throws
+   */
+  public static java.time.ZonedDateTime adjustZonedDateTimeNow(
+      final java.time.ZonedDateTime realValue) throws Throwable {
+    return invoke(
+        () -> {
+          final MethodHandle[] h = handles;
+          final Object d = delegate;
+          return (d == null || h == null)
+              ? realValue
+              : (java.time.ZonedDateTime) h[ADJUST_ZONED_DATE_TIME_NOW].invoke(d, realValue);
+        },
+        realValue);
+  }
+
+  /**
+   * Returns the chaos-adjusted epoch-millisecond value for the embedded time of a freshly
+   * constructed {@link java.util.Date}.
+   *
+   * @param realMillis the millisecond value captured by the {@code Date()} constructor via {@code
+   *     System.currentTimeMillis()}
+   * @return the (possibly skewed) millisecond timestamp; equals {@code realMillis} as the fallback
+   * @throws Throwable if the delegate throws
+   */
+  public static long adjustDateNew(final long realMillis) throws Throwable {
+    return invoke(
+        () -> {
+          final MethodHandle[] h = handles;
+          final Object d = delegate;
+          return (d == null || h == null)
+              ? realMillis
+              : (long) h[ADJUST_DATE_NEW].invoke(d, realMillis);
+        },
+        realMillis);
   }
 
   /**

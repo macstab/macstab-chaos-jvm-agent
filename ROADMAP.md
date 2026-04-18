@@ -70,8 +70,8 @@ Java instrumentation agent.** Two independent JVM constraints block every known 
 
 **Hard limitation:** workarounds require `-Xpatch:java.base` or a C-level JVMTI agent — out of scope.
 
-### ⬜ 1.4 Clock Skew — Higher-Level Java Time API Interception
-**Priority: medium — 1 day**
+### ✅ 1.4 Clock Skew — Higher-Level Java Time API Interception
+**Completed — 1 day**
 
 Partial clock skew coverage via non-native, non-intrinsified Java methods:
 
@@ -80,10 +80,31 @@ Partial clock skew coverage via non-native, non-intrinsified Java methods:
 - `java.util.Date()` constructor — calls `System.currentTimeMillis()` internally but is a
   regular constructor that ByteBuddy can wrap
 
-New `OperationType` values: `INSTANT_NOW`, `DATE_NEW`
-
 These intercept the most common modern Java time usage. Direct raw `System.currentTimeMillis()`
 calls remain outside reach (documented in 1.2).
+
+**What was done:**
+- Added `OperationType` values: `INSTANT_NOW`, `LOCAL_DATE_TIME_NOW`, `ZONED_DATE_TIME_NOW`,
+  `DATE_NEW`. Each is documented and wired into `ChaosSelector.JvmRuntimeSelector` without
+  additional selector validation (the selector already accepts arbitrary JVM-runtime ops).
+- `ChaosRuntime.applyClockSkew` now treats all four as millisecond-channel operations;
+  `SYSTEM_CLOCK_NANOS` remains the only nanosecond-channel operation. New runtime entry points
+  `adjustInstantNow`, `adjustLocalDateTimeNow`, `adjustZonedDateTimeNow`, `adjustDateNew`
+  preserve sub-millisecond precision (via `Instant.plusMillis(delta)`), zone metadata (for
+  `ZonedDateTime`), and default-zone semantics (for `LocalDateTime`).
+- Four new ByteBuddy advice classes in `JvmRuntimeAdvice` (`InstantNowAdvice`,
+  `LocalDateTimeNowAdvice`, `ZonedDateTimeNowAdvice`, `DateNewAdvice`), registered in the
+  Phase 2 block of `JdkInstrumentationInstaller`. `DateNewAdvice` uses `@Advice.This Object`
+  with an internal cast to avoid a `ClassCircularityError` on `java.util.Date` during premain
+  logging (`java.util.logging.SimpleFormatter` constructs a `Date` while scenarios activate).
+- Bootstrap bridge grew from 42 to 46 slots: `ADJUST_INSTANT_NOW`, `ADJUST_LOCAL_DATE_TIME_NOW`,
+  `ADJUST_ZONED_DATE_TIME_NOW`, `ADJUST_DATE_NEW`.
+- Tests added: `ClockSkewRuntimeTest$HigherLevelTimeApis` covers FIXED skew on `Instant.now`,
+  `LocalDateTime.now`, `ZonedDateTime.now` (zone preservation), `Date`, FREEZE mode on
+  `Instant.now`, isolation between `INSTANT_NOW` and `DATE_NEW`, and passthrough when no
+  scenario matches. `ChaosBridgeTest` and `BootstrapDispatcherTest` gained no-scenario
+  passthrough coverage for the four new entry points. `JdkInstrumentationInstallerTest`
+  continues to assert every handle slot resolves (now 46).
 
 ---
 
@@ -101,20 +122,57 @@ calls remain outside reach (documented in 1.2).
 
 > *Drop-in support for every Java backend stack.*
 
-### ⬜ 2.1 Spring Boot Test Starter
+### ✅ 2.1 Spring Boot Test Starter
 **Priority: high — 2 days**
 
-New module: `chaos-agent-spring-boot-test-starter` (`testImplementation` scope)
+Two new modules, one per Spring Boot major: `chaos-agent-spring-boot3-test-starter` and
+`chaos-agent-spring-boot4-test-starter`. Both expose the same contract, compiled against the
+corresponding Spring Boot BOM and wired to the version-specific autoconfiguration mechanism.
 
-The test starter builds on `chaos-agent-testkit` and integrates into the `@SpringBootTest` lifecycle.
-Its contract is narrow and safe: the agent self-attaches once per test JVM, each test gets an isolated
-`ChaosSession`, and everything is cleaned up by the JUnit extension.
+**What was done:**
 
-Deliverables:
-- `@ChaosTest` — meta-annotation combining `@SpringBootTest` + `@ExtendWith(ChaosAgentExtension.class)`
-- `ChaosTestAutoConfiguration` — `@ConditionalOnClass` + `@TestConfiguration` exposing `ChaosControlPlane` bean
-- `ChaosSession` method parameter injection for `@SpringBootTest` test methods (via `ParameterResolver`)
-- `ChaosAgentInitializer` — `ApplicationContextInitializer` that calls `ChaosPlatform.installLocally()` before context refresh
+Modules:
+- `chaos-agent-spring-boot3-test-starter` — compiled against `spring-boot-dependencies:3.5.13`
+  (latest stable 3.x at release time); `Automatic-Module-Name`
+  `com.macstab.chaos.agent.spring.boot3.test`; package
+  `com.macstab.chaos.spring.boot3.test`.
+- `chaos-agent-spring-boot4-test-starter` — compiled against `spring-boot-dependencies:4.0.5`
+  (latest stable 4.x at release time); `Automatic-Module-Name`
+  `com.macstab.chaos.agent.spring.boot4.test`; package
+  `com.macstab.chaos.spring.boot4.test`.
+
+Spring Boot dependencies are declared `compileOnly` so the starters are inert at production
+runtime: the user's Spring Boot application supplies Spring itself on the test classpath.
+
+Each module ships:
+- `@ChaosTest` — meta-annotation wrapping `@SpringBootTest` and
+  `@ExtendWith(ChaosAgentExtension.class)`. Forwards `properties`, `classes`, `webEnvironment`,
+  `args`, and `initializers` attributes so callers can configure `@SpringBootTest` through a
+  single annotation.
+- `ChaosAgentExtension` — JUnit 5 extension implementing `BeforeAllCallback`, `AfterAllCallback`,
+  and `ParameterResolver`. Calls `ChaosPlatform.installLocally()` (idempotent) in `beforeAll`,
+  opens a class-scoped `ChaosSession` stored in `ExtensionContext.Store`, and closes it in
+  `afterAll`. The resolver walks parent contexts so `@Nested` classes inherit the session.
+- `ChaosTestAutoConfiguration` — `@TestConfiguration(proxyBeanMethods = false)` guarded by
+  `@ConditionalOnClass(ChaosAgentExtension.class)` that exposes `ChaosControlPlane` as a bean
+  (`@ConditionalOnMissingBean`).
+- `ChaosAgentInitializer` — `ApplicationContextInitializer<ConfigurableApplicationContext>` that
+  installs the agent before context refresh and registers the live control plane as the
+  `chaosControlPlane` singleton in the bean factory.
+
+Autoconfiguration registration (different mechanism per Boot major):
+- Boot 3:
+  `META-INF/spring/org.springframework.boot.test.autoconfigure.ImportAutoConfiguration.imports`
+  for the auto-configuration; classic `META-INF/spring.factories` for the
+  `ApplicationContextInitializer`.
+- Boot 4: same `.imports` for auto-configuration; the initializer is registered via
+  `META-INF/spring/org.springframework.context.ApplicationContextInitializer.imports` (Boot 4
+  replaces `spring.factories` with `.imports` files for most factory mechanisms).
+
+Tests (per module): `ChaosAgentExtensionTest` exercises the extension directly (no Spring context
+is required to verify the extension contract itself): parameter injection of `ChaosSession` and
+`ChaosControlPlane`, session being open and `bind()` usable during tests, stable session identity
+across methods within a class, and clean `@Nested` + `@TestInstance(PER_CLASS)` lifecycle.
 
 Usage:
 ```java
@@ -139,41 +197,90 @@ class OrderServiceChaosTest {
 
 ---
 
-### ⬜ 2.2 Spring Boot Runtime Starter
+### ✅ 2.2 Spring Boot Runtime Starter
 **Priority: medium — 3 days**
 
-New module: `chaos-agent-spring-boot-starter` (`implementation` scope)
+Two new modules, one per Spring Boot major: `chaos-agent-spring-boot3-starter` and
+`chaos-agent-spring-boot4-starter`. Both compiled `compileOnly` against the corresponding Spring
+Boot BOM so the starters are inert at production runtime until the host application supplies
+Spring Boot itself.
 
-The runtime starter is for deployment-time chaos engineering: pre-production soak tests, game days,
-and controlled production experiments. It has no test APIs — only externally driven activation via
-Actuator or startup config from a config server.
+The runtime starters target deployment-time chaos engineering: pre-production soak tests, game
+days, and controlled production experiments. They expose no test APIs — only externally driven
+activation via Actuator or startup config — and are intentionally separate from the `2.1` test
+starters to prevent blast-radius risk.
 
-This is explicitly separate from the test starter. Mixing test-lifecycle APIs with runtime deployment
-creates blast-radius risk if a scenario configuration is accidentally carried into a long-lived process.
+**What was done:**
 
-Deliverables:
-- `ChaosAutoConfiguration` — `@ConditionalOnProperty("macstab.chaos.enabled")`; disabled by default
-- `ChaosProperties` — `@ConfigurationProperties("macstab.chaos")`
-- `ChaosActuatorEndpoint` — `/actuator/chaos`
-  - `GET /actuator/chaos` → full `ChaosDiagnostics.snapshot()` as JSON
-  - `POST /actuator/chaos/activate` → activate a named plan from the registered plan registry
-  - `POST /actuator/chaos/stop/{scenarioId}` → stop a running scenario by ID
-  - `POST /actuator/chaos/stop-all` → stop all JVM-scoped scenarios
-- Spring context lifecycle binding — auto-close all JVM-scoped scenarios on `ApplicationContext` close
-- `@ConditionalOnProperty` guard — all chaos beans off unless `macstab.chaos.enabled=true` is explicit
+Modules:
+- `chaos-agent-spring-boot3-starter` — compiled against `spring-boot-dependencies:3.5.13`;
+  `Automatic-Module-Name` `com.macstab.chaos.agent.spring.boot3`; package
+  `com.macstab.chaos.spring.boot3`.
+- `chaos-agent-spring-boot4-starter` — compiled against `spring-boot-dependencies:4.0.5`;
+  `Automatic-Module-Name` `com.macstab.chaos.agent.spring.boot4`; package
+  `com.macstab.chaos.spring.boot4`.
 
+Each module ships:
+- `ChaosProperties` — `@ConfigurationProperties("macstab.chaos")` with `enabled=false`,
+  `configFile=null`, `debugDumpOnStart=false`, and a nested `actuator` block with
+  `enabled=false`. All toggles default off so the starter is inert unless operators opt in.
+- `ChaosAutoConfiguration` — `@AutoConfiguration` gated by
+  `@ConditionalOnProperty("macstab.chaos.enabled", havingValue="true")`; publishes a
+  `ChaosControlPlane` bean (via `ChaosPlatform.installLocally()`) with `destroyMethod = "close"`
+  so JVM-scoped scenarios are released when the `ApplicationContext` closes, plus a
+  `ChaosHandleRegistry` and an `ApplicationListener<ApplicationReadyEvent>` that loads the
+  optional startup plan file and emits the diagnostics dump. Every bean is
+  `@ConditionalOnMissingBean` so a user-supplied implementation backs the auto-configuration
+  off.
+- `ChaosActuatorEndpoint` — `@Endpoint(id="chaos")` exposed at `/actuator/chaos` via a nested
+  `ActuatorConfiguration` gated by `@ConditionalOnClass(Endpoint.class)` and
+  `@ConditionalOnProperty("macstab.chaos.actuator.enabled", havingValue="true")`. Operations:
+  - `@ReadOperation` → `GET /actuator/chaos` returns
+    `ChaosDiagnostics.Snapshot` as JSON.
+  - `@WriteOperation` → `POST /actuator/chaos/activate` reads a JSON-encoded `ChaosPlan` from
+    the request body and activates it, registering the handle with the local
+    `ChaosHandleRegistry`.
+  - `@DeleteOperation` with `@Selector String scenarioId` → `DELETE /actuator/chaos/{scenarioId}`
+    stops a running scenario by ID.
+  - `@WriteOperation` → `POST /actuator/chaos/stopAll` stops every scenario tracked by the local
+    handle registry. Responses are typed record wrappers (`ActivationResponse`, `StopResponse`,
+    `StopAllResponse`) instead of raw strings.
+- `ChaosHandleRegistry` — thread-safe map of activation handles so the endpoint can stop
+  scenarios by ID without reaching into core-internal registries.
+
+Autoconfiguration registration (same mechanism for both Boot majors):
+`META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports`.
+
+Tests (per module):
+- `ChaosPropertiesTest` verifies the default values (`enabled=false`, `actuator.enabled=false`,
+  `configFile=null`, `debugDumpOnStart=false`).
+- `ChaosAutoConfigurationTest` uses `ApplicationContextRunner` to verify:
+  - the `ChaosControlPlane` bean is present when `macstab.chaos.enabled=true`;
+  - the `ChaosHandleRegistry` bean is present when enabled;
+  - no `ChaosControlPlane` bean exists by default or when `enabled=false`;
+  - a user-defined `ChaosControlPlane` bean backs off the auto-configuration
+    (`@ConditionalOnMissingBean`).
+- `ChaosActuatorEndpointTest` uses `ApplicationContextRunner` with a stub `ChaosControlPlane`
+  bean to verify:
+  - the endpoint bean is present when `macstab.chaos.actuator.enabled=true` and absent
+    otherwise;
+  - `snapshot()` returns a non-null diagnostics snapshot;
+  - `stop()` reports `not-found` for unknown IDs; `stopAll()` returns zero when no handles are
+    tracked.
+
+Configuration:
 ```yaml
 macstab:
   chaos:
     enabled: true                          # explicit opt-in required
-    config-file: classpath:chaos-plan.json # optional startup plan
+    config-file: /etc/chaos/plan.json      # optional startup plan
     debug-dump-on-start: false
     actuator:
       enabled: true                        # Actuator endpoint, off by default
 ```
 
-**Security note**: The Actuator endpoint is protected by Spring Security if present. Operators must
-not expose `/actuator/chaos` to the public internet without authentication.
+**Security note**: The Actuator endpoint is protected by Spring Security if present. Operators
+must not expose `/actuator/chaos` to the public internet without authentication.
 
 ---
 
@@ -295,10 +402,10 @@ New module: `chaos-agent-micronaut-integration`
 Week 1  ├── ✅ 1.1  DeadlockStressor safeguard            (2h)
         ├── ✅ 1.2  Clock skew — JVM limitation documented (1d)
         ├── ✅ 1.3  Missing concurrency tests              (1d)
-        └── ⬜ 1.4  Higher-level time API interception     (1d)
+        └── ✅ 1.4  Higher-level time API interception     (1d)
 
-Week 2  ├── ⬜ 2.1  Spring Boot test starter               (2d)
-        └── ⬜ 2.2  Spring Boot runtime starter            (3d)
+Week 2  ├── ✅ 2.1  Spring Boot test starter               (2d)
+        └── ✅ 2.2  Spring Boot runtime starter            (3d)
 
 Week 3  └── ⬜ 2.3  HTTP client selectors                  (5d)
 
@@ -329,8 +436,8 @@ Week 7  └── ⬜ 4.1  Release process + v1.0.0 tag           (3d)
 
 *Architecture, implementation, and documentation crafted by*
 
-**[Christian Schnapka](https://macstab.com)**  
-Principal+ Embedded Systems Architect  
+**[Christian Schnapka](https://macstab.com)**
+Principal+ Embedded Systems Architect
 [Macstab GmbH](https://macstab.com) · Hamburg, Germany
 
 </div>

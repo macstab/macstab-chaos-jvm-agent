@@ -191,7 +191,9 @@ public sealed interface ChaosSelector
    * native library loading, JNDI lookups, JMX operations, and ZIP compression.
    *
    * <p>Valid operations: {@link OperationType#SYSTEM_CLOCK_MILLIS}, {@link
-   * OperationType#SYSTEM_CLOCK_NANOS}, {@link OperationType#SYSTEM_GC_REQUEST}, {@link
+   * OperationType#SYSTEM_CLOCK_NANOS}, {@link OperationType#INSTANT_NOW}, {@link
+   * OperationType#LOCAL_DATE_TIME_NOW}, {@link OperationType#ZONED_DATE_TIME_NOW}, {@link
+   * OperationType#DATE_NEW}, {@link OperationType#SYSTEM_GC_REQUEST}, {@link
    * OperationType#SYSTEM_EXIT_REQUEST}, {@link OperationType#REFLECTION_INVOKE}, {@link
    * OperationType#DIRECT_BUFFER_ALLOCATE}, {@link OperationType#OBJECT_DESERIALIZE}, {@link
    * OperationType#OBJECT_SERIALIZE}, {@link OperationType#NATIVE_LIBRARY_LOAD}, {@link
@@ -486,7 +488,9 @@ public sealed interface ChaosSelector
    *
    * <ul>
    *   <li>Clock skew — intercept {@link OperationType#SYSTEM_CLOCK_MILLIS} / {@link
-   *       OperationType#SYSTEM_CLOCK_NANOS} with {@link ChaosEffect.ClockSkewEffect}
+   *       OperationType#SYSTEM_CLOCK_NANOS} / {@link OperationType#INSTANT_NOW} / {@link
+   *       OperationType#LOCAL_DATE_TIME_NOW} / {@link OperationType#ZONED_DATE_TIME_NOW} / {@link
+   *       OperationType#DATE_NEW} with {@link ChaosEffect.ClockSkewEffect}
    *   <li>GC chaos — intercept {@link OperationType#SYSTEM_GC_REQUEST}
    *   <li>Exit interception — intercept {@link OperationType#SYSTEM_EXIT_REQUEST}
    *   <li>Reflection latency — intercept {@link OperationType#REFLECTION_INVOKE}

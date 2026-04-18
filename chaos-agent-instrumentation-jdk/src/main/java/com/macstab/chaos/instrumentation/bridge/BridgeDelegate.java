@@ -247,6 +247,48 @@ public interface BridgeDelegate {
   long adjustClockNanos(long realNanos) throws Throwable;
 
   /**
+   * Returns the chaos-adjusted {@link java.time.Instant} for {@code Instant.now()} interception.
+   *
+   * @param realInstant the real value returned by {@code Instant.now()}; never {@code null}
+   * @return the (possibly skewed) instant
+   * @throws Throwable if the delegate throws
+   */
+  java.time.Instant adjustInstantNow(java.time.Instant realInstant) throws Throwable;
+
+  /**
+   * Returns the chaos-adjusted {@link java.time.LocalDateTime} for {@code LocalDateTime.now()}
+   * interception.
+   *
+   * @param realValue the real value returned by {@code LocalDateTime.now()}; never {@code null}
+   * @return the (possibly skewed) local date-time
+   * @throws Throwable if the delegate throws
+   */
+  java.time.LocalDateTime adjustLocalDateTimeNow(java.time.LocalDateTime realValue)
+      throws Throwable;
+
+  /**
+   * Returns the chaos-adjusted {@link java.time.ZonedDateTime} for {@code ZonedDateTime.now()}
+   * interception.
+   *
+   * @param realValue the real value returned by {@code ZonedDateTime.now()}; never {@code null}
+   * @return the (possibly skewed) zoned date-time
+   * @throws Throwable if the delegate throws
+   */
+  java.time.ZonedDateTime adjustZonedDateTimeNow(java.time.ZonedDateTime realValue)
+      throws Throwable;
+
+  /**
+   * Returns the chaos-adjusted epoch-millisecond value for the embedded time of a freshly
+   * constructed {@link java.util.Date}.
+   *
+   * @param realMillis the value captured by the {@code Date()} constructor via {@code
+   *     System.currentTimeMillis()}
+   * @return the (possibly skewed) millisecond timestamp
+   * @throws Throwable if the delegate throws
+   */
+  long adjustDateNew(long realMillis) throws Throwable;
+
+  /**
    * Called before {@code System.gc()} or {@code Runtime.gc()}.
    *
    * @return {@code true} if an active SUPPRESS scenario wants to block the garbage-collection

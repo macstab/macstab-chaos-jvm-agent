@@ -30,6 +30,71 @@ final class JvmRuntimeAdvice {
     }
   }
 
+  /**
+   * Rewrites the return value of {@link java.time.Instant#now()} for clock-skew injection.
+   *
+   * <p>{@code Instant.now()} is a regular Java static method that delegates to {@code
+   * Clock.systemUTC().instant()}, so unlike {@link System#currentTimeMillis()} it is neither {@code
+   * native} nor {@code @IntrinsicCandidate} and can be instrumented at exit.
+   */
+  static final class InstantNowAdvice {
+    @Advice.OnMethodExit
+    static void exit(@Advice.Return(readOnly = false) java.time.Instant returned) throws Throwable {
+      returned = BootstrapDispatcher.adjustInstantNow(returned);
+    }
+  }
+
+  /**
+   * Rewrites the return value of {@link java.time.LocalDateTime#now()} (no-argument variant) for
+   * clock-skew injection.
+   */
+  static final class LocalDateTimeNowAdvice {
+    @Advice.OnMethodExit
+    static void exit(@Advice.Return(readOnly = false) java.time.LocalDateTime returned)
+        throws Throwable {
+      returned = BootstrapDispatcher.adjustLocalDateTimeNow(returned);
+    }
+  }
+
+  /**
+   * Rewrites the return value of {@link java.time.ZonedDateTime#now()} (no-argument variant) for
+   * clock-skew injection.
+   */
+  static final class ZonedDateTimeNowAdvice {
+    @Advice.OnMethodExit
+    static void exit(@Advice.Return(readOnly = false) java.time.ZonedDateTime returned)
+        throws Throwable {
+      returned = BootstrapDispatcher.adjustZonedDateTimeNow(returned);
+    }
+  }
+
+  /**
+   * Adjusts the embedded epoch-milliseconds of a freshly-constructed {@link java.util.Date} for
+   * clock-skew injection.
+   *
+   * <p>{@link java.util.Date#Date()} calls {@link System#currentTimeMillis()} and stores it
+   * internally. Direct interception of {@code currentTimeMillis()} is impossible (see {@code
+   * JdkInstrumentationInstaller} for the JVM-level analysis), so we instead wrap the constructor
+   * and overwrite the embedded value via {@link java.util.Date#setTime(long)} on exit.
+   *
+   * <p>The {@code self} parameter is typed as {@link Object} rather than {@link java.util.Date}:
+   * {@code java.util.Date} is eagerly referenced during early JVM bootstrap by {@code
+   * java.util.logging.SimpleFormatter}, and inlining an advice that names {@code Date} in its
+   * signature can cause a {@link ClassCircularityError} if any logging happens while the
+   * retransformed constructor body is still being verified by the JVM.
+   */
+  static final class DateNewAdvice {
+    @Advice.OnMethodExit
+    static void exit(@Advice.This final Object self) throws Throwable {
+      final java.util.Date date = (java.util.Date) self;
+      final long realMillis = date.getTime();
+      final long adjusted = BootstrapDispatcher.adjustDateNew(realMillis);
+      if (adjusted != realMillis) {
+        date.setTime(adjusted);
+      }
+    }
+  }
+
   // ── A2: GC ────────────────────────────────────────────────────────────────
 
   /**

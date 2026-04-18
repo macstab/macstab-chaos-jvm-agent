@@ -54,7 +54,8 @@ class MaxApplicationsConcurrencyTest {
                     (long) MAX_APPLICATIONS,
                     null,
                     null,
-                    null, false))
+                    null,
+                    false))
             .build());
 
     final CountDownLatch startLatch = new CountDownLatch(1);

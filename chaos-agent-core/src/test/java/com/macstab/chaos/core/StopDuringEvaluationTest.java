@@ -82,8 +82,7 @@ class StopDuringEvaluationTest {
 
       // One evaluation before stop — delay is applied.
       final long before =
-          measureMillis(
-              () -> runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {}));
+          measureMillis(() -> runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {}));
       assertThat(before)
           .as("first call before stop should experience delay")
           .isGreaterThanOrEqualTo(60L);
@@ -95,9 +94,7 @@ class StopDuringEvaluationTest {
         final long after =
             measureMillis(
                 () -> runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {}));
-        assertThat(after)
-            .as("call %d after stop() must not be delayed", i + 1)
-            .isLessThan(50L);
+        assertThat(after).as("call %d after stop() must not be delayed", i + 1).isLessThan(50L);
       }
     }
   }

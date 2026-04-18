@@ -136,7 +136,14 @@ class ActivationPolicyTest {
       assertThatThrownBy(
               () ->
                   new ActivationPolicy(
-                      ActivationPolicy.StartMode.AUTOMATIC, -0.1d, 0, null, null, null, null, false))
+                      ActivationPolicy.StartMode.AUTOMATIC,
+                      -0.1d,
+                      0,
+                      null,
+                      null,
+                      null,
+                      null,
+                      false))
           .isInstanceOf(IllegalArgumentException.class);
     }
   }
@@ -161,7 +168,14 @@ class ActivationPolicyTest {
       assertThatCode(
               () ->
                   new ActivationPolicy(
-                      ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 10, null, null, null, null, false))
+                      ActivationPolicy.StartMode.AUTOMATIC,
+                      1.0d,
+                      10,
+                      null,
+                      null,
+                      null,
+                      null,
+                      false))
           .doesNotThrowAnyException();
     }
 
@@ -171,7 +185,14 @@ class ActivationPolicyTest {
       assertThatThrownBy(
               () ->
                   new ActivationPolicy(
-                      ActivationPolicy.StartMode.AUTOMATIC, 1.0d, -1, null, null, null, null, false))
+                      ActivationPolicy.StartMode.AUTOMATIC,
+                      1.0d,
+                      -1,
+                      null,
+                      null,
+                      null,
+                      null,
+                      false))
           .isInstanceOf(IllegalArgumentException.class);
     }
   }
@@ -247,7 +268,8 @@ class ActivationPolicyTest {
                       null,
                       Duration.ofMinutes(5),
                       null,
-                      null, false))
+                      null,
+                      false))
           .doesNotThrowAnyException();
     }
 
@@ -263,7 +285,8 @@ class ActivationPolicyTest {
                       null,
                       Duration.ZERO,
                       null,
-                      null, false))
+                      null,
+                      false))
           .isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -279,7 +302,8 @@ class ActivationPolicyTest {
                       null,
                       Duration.ofSeconds(-1),
                       null,
-                      null, false))
+                      null,
+                      false))
           .isInstanceOf(IllegalArgumentException.class);
     }
   }

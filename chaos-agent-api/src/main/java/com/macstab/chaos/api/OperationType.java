@@ -25,10 +25,12 @@ package com.macstab.chaos.api;
  *   <li>{@link ChaosSelector.MethodSelector} — {@link #METHOD_ENTER}, {@link #METHOD_EXIT}
  *   <li>{@link ChaosSelector.MonitorSelector} — {@link #MONITOR_ENTER}, {@link #THREAD_PARK}
  *   <li>{@link ChaosSelector.JvmRuntimeSelector} — {@link #SYSTEM_CLOCK_MILLIS}, {@link
- *       #SYSTEM_CLOCK_NANOS}, {@link #SYSTEM_GC_REQUEST}, {@link #SYSTEM_EXIT_REQUEST}, {@link
- *       #REFLECTION_INVOKE}, {@link #DIRECT_BUFFER_ALLOCATE}, {@link #OBJECT_DESERIALIZE}, {@link
- *       #OBJECT_SERIALIZE}, {@link #NATIVE_LIBRARY_LOAD}, {@link #JNDI_LOOKUP}, {@link
- *       #JMX_INVOKE}, {@link #JMX_GET_ATTR}, {@link #ZIP_INFLATE}, {@link #ZIP_DEFLATE}
+ *       #SYSTEM_CLOCK_NANOS}, {@link #INSTANT_NOW}, {@link #LOCAL_DATE_TIME_NOW}, {@link
+ *       #ZONED_DATE_TIME_NOW}, {@link #DATE_NEW}, {@link #SYSTEM_GC_REQUEST}, {@link
+ *       #SYSTEM_EXIT_REQUEST}, {@link #REFLECTION_INVOKE}, {@link #DIRECT_BUFFER_ALLOCATE}, {@link
+ *       #OBJECT_DESERIALIZE}, {@link #OBJECT_SERIALIZE}, {@link #NATIVE_LIBRARY_LOAD}, {@link
+ *       #JNDI_LOOKUP}, {@link #JMX_INVOKE}, {@link #JMX_GET_ATTR}, {@link #ZIP_INFLATE}, {@link
+ *       #ZIP_DEFLATE}
  *   <li>{@link ChaosSelector.NioSelector} — {@link #NIO_SELECTOR_SELECT}, {@link
  *       #NIO_CHANNEL_READ}, {@link #NIO_CHANNEL_WRITE}, {@link #NIO_CHANNEL_CONNECT}, {@link
  *       #NIO_CHANNEL_ACCEPT}
@@ -253,6 +255,44 @@ public enum OperationType {
    * <p>Used exclusively with {@link ChaosSelector.JvmRuntimeSelector}.
    */
   SYSTEM_CLOCK_NANOS,
+
+  /**
+   * Fires on every call to {@link java.time.Instant#now()}. Used with {@link
+   * ChaosEffect.ClockSkewEffect} to apply the same fixed, drifting, or frozen offsets as {@link
+   * #SYSTEM_CLOCK_MILLIS} but at the higher-level {@link java.time.Instant} API.
+   *
+   * <p>This operation exists because direct interception of {@link System#currentTimeMillis()} is
+   * blocked by JVM retransformation and {@code @IntrinsicCandidate} constraints; modern code that
+   * reads the wall clock via {@link java.time.Instant#now()} is instrumentable here instead.
+   *
+   * <p>Used exclusively with {@link ChaosSelector.JvmRuntimeSelector}.
+   */
+  INSTANT_NOW,
+
+  /**
+   * Fires on every call to {@link java.time.LocalDateTime#now()} (no-argument variant). Used with
+   * {@link ChaosEffect.ClockSkewEffect} to skew the returned local date-time.
+   *
+   * <p>Used exclusively with {@link ChaosSelector.JvmRuntimeSelector}.
+   */
+  LOCAL_DATE_TIME_NOW,
+
+  /**
+   * Fires on every call to {@link java.time.ZonedDateTime#now()} (no-argument variant). Used with
+   * {@link ChaosEffect.ClockSkewEffect} to skew the returned zoned date-time.
+   *
+   * <p>Used exclusively with {@link ChaosSelector.JvmRuntimeSelector}.
+   */
+  ZONED_DATE_TIME_NOW,
+
+  /**
+   * Fires on every invocation of the no-argument {@link java.util.Date#Date()} constructor. Used
+   * with {@link ChaosEffect.ClockSkewEffect} to skew the embedded wall-clock value before the
+   * constructor returns to the caller.
+   *
+   * <p>Used exclusively with {@link ChaosSelector.JvmRuntimeSelector}.
+   */
+  DATE_NEW,
 
   /**
    * Fires when {@link System#gc()} or {@link Runtime#gc()} is called. Chaos here can suppress

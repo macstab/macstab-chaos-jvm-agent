@@ -224,4 +224,174 @@ class ClockSkewRuntimeTest {
       assertThat(afterStop).isEqualTo(realMillis);
     }
   }
+
+  // ---------------------------------------------------------------------------
+  // Higher-level time API runtime tests: adjustInstantNow / adjustLocalDateTimeNow /
+  // adjustZonedDateTimeNow / adjustDateNew. These cover the exit path used by the
+  // ByteBuddy advice that intercepts java.time.Instant.now(), java.time.LocalDateTime.now(),
+  // java.time.ZonedDateTime.now(), and the java.util.Date() constructor.
+  // ---------------------------------------------------------------------------
+
+  @org.junit.jupiter.api.Nested
+  @DisplayName("Higher-level time APIs")
+  class HigherLevelTimeApis {
+
+    @Test
+    @DisplayName("adjustInstantNow shifts the returned Instant when INSTANT_NOW scenario is active")
+    void adjustInstantNowShiftsWhenActive() {
+      final ChaosRuntime runtime = new ChaosRuntime();
+      final java.time.Instant real = java.time.Instant.ofEpochSecond(1_700_000_000L, 123_456_789);
+      final ChaosActivationHandle handle =
+          runtime.activate(
+              ChaosScenario.builder("instant-skew")
+                  .scope(ChaosScenario.ScenarioScope.JVM)
+                  .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.INSTANT_NOW)))
+                  .effect(
+                      ChaosEffect.skewClock(
+                          Duration.ofSeconds(30), ChaosEffect.ClockSkewMode.FIXED))
+                  .activationPolicy(ActivationPolicy.always())
+                  .build());
+      try {
+        final java.time.Instant adjusted = runtime.adjustInstantNow(real);
+        assertThat(adjusted.toEpochMilli() - real.toEpochMilli()).isEqualTo(30_000L);
+        // Nanosecond-of-second component must be preserved by plusMillis.
+        assertThat(adjusted.getNano() % 1_000_000).isEqualTo(real.getNano() % 1_000_000);
+      } finally {
+        handle.stop();
+      }
+    }
+
+    @Test
+    @DisplayName("adjustInstantNow returns the real instant when no scenario matches")
+    void adjustInstantNowPassthroughWithoutScenario() {
+      final ChaosRuntime runtime = new ChaosRuntime();
+      final java.time.Instant real = java.time.Instant.ofEpochSecond(1_700_000_000L);
+      assertThat(runtime.adjustInstantNow(real)).isEqualTo(real);
+    }
+
+    @Test
+    @DisplayName(
+        "adjustInstantNow ignores scenarios that target other operation types (e.g. DATE_NEW)")
+    void adjustInstantNowIsolatedFromOtherClockOps() {
+      final ChaosRuntime runtime = new ChaosRuntime();
+      final java.time.Instant real = java.time.Instant.ofEpochSecond(1_700_000_000L);
+      final ChaosActivationHandle handle =
+          runtime.activate(
+              ChaosScenario.builder("date-only-skew")
+                  .scope(ChaosScenario.ScenarioScope.JVM)
+                  .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.DATE_NEW)))
+                  .effect(
+                      ChaosEffect.skewClock(Duration.ofMinutes(5), ChaosEffect.ClockSkewMode.FIXED))
+                  .activationPolicy(ActivationPolicy.always())
+                  .build());
+      try {
+        assertThat(runtime.adjustInstantNow(real)).isEqualTo(real);
+      } finally {
+        handle.stop();
+      }
+    }
+
+    @Test
+    @DisplayName("adjustDateNew shifts the embedded millis when DATE_NEW scenario is active")
+    void adjustDateNewShiftsWhenActive() {
+      final ChaosRuntime runtime = new ChaosRuntime();
+      final long real = 1_700_000_000_000L;
+      final ChaosActivationHandle handle =
+          runtime.activate(
+              ChaosScenario.builder("date-skew")
+                  .scope(ChaosScenario.ScenarioScope.JVM)
+                  .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.DATE_NEW)))
+                  .effect(
+                      ChaosEffect.skewClock(
+                          Duration.ofMinutes(-10), ChaosEffect.ClockSkewMode.FIXED))
+                  .activationPolicy(ActivationPolicy.always())
+                  .build());
+      try {
+        assertThat(runtime.adjustDateNew(real)).isEqualTo(real - 600_000L);
+      } finally {
+        handle.stop();
+      }
+    }
+
+    @Test
+    @DisplayName("adjustDateNew returns the real millis when no scenario matches")
+    void adjustDateNewPassthroughWithoutScenario() {
+      final ChaosRuntime runtime = new ChaosRuntime();
+      assertThat(runtime.adjustDateNew(1_700_000_000_000L)).isEqualTo(1_700_000_000_000L);
+    }
+
+    @Test
+    @DisplayName(
+        "adjustLocalDateTimeNow shifts the returned local date-time when scenario is active")
+    void adjustLocalDateTimeNowShiftsWhenActive() {
+      final ChaosRuntime runtime = new ChaosRuntime();
+      final java.time.LocalDateTime real = java.time.LocalDateTime.of(2026, 4, 18, 12, 0, 0);
+      final ChaosActivationHandle handle =
+          runtime.activate(
+              ChaosScenario.builder("ldt-skew")
+                  .scope(ChaosScenario.ScenarioScope.JVM)
+                  .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.LOCAL_DATE_TIME_NOW)))
+                  .effect(
+                      ChaosEffect.skewClock(Duration.ofHours(2), ChaosEffect.ClockSkewMode.FIXED))
+                  .activationPolicy(ActivationPolicy.always())
+                  .build());
+      try {
+        final java.time.LocalDateTime adjusted = runtime.adjustLocalDateTimeNow(real);
+        assertThat(adjusted).isEqualTo(real.plusHours(2));
+      } finally {
+        handle.stop();
+      }
+    }
+
+    @Test
+    @DisplayName("adjustZonedDateTimeNow shifts the instant while preserving the original zone")
+    void adjustZonedDateTimeNowShiftsAndPreservesZone() {
+      final ChaosRuntime runtime = new ChaosRuntime();
+      final java.time.ZoneId zone = java.time.ZoneId.of("America/New_York");
+      final java.time.ZonedDateTime real =
+          java.time.ZonedDateTime.of(2026, 4, 18, 12, 0, 0, 0, zone);
+      final ChaosActivationHandle handle =
+          runtime.activate(
+              ChaosScenario.builder("zdt-skew")
+                  .scope(ChaosScenario.ScenarioScope.JVM)
+                  .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.ZONED_DATE_TIME_NOW)))
+                  .effect(
+                      ChaosEffect.skewClock(
+                          Duration.ofMinutes(45), ChaosEffect.ClockSkewMode.FIXED))
+                  .activationPolicy(ActivationPolicy.always())
+                  .build());
+      try {
+        final java.time.ZonedDateTime adjusted = runtime.adjustZonedDateTimeNow(real);
+        assertThat(adjusted.toInstant()).isEqualTo(real.toInstant().plus(Duration.ofMinutes(45)));
+        assertThat(adjusted.getZone()).isEqualTo(zone);
+      } finally {
+        handle.stop();
+      }
+    }
+
+    @Test
+    @DisplayName("INSTANT_NOW FREEZE mode returns the same instant on repeated calls")
+    void instantNowFreezeReturnsSameValue() {
+      final ChaosRuntime runtime = new ChaosRuntime();
+      final java.time.Instant a = java.time.Instant.ofEpochSecond(1_700_000_000L);
+      final java.time.Instant b = java.time.Instant.ofEpochSecond(1_700_000_100L);
+      final ChaosActivationHandle handle =
+          runtime.activate(
+              ChaosScenario.builder("instant-freeze")
+                  .scope(ChaosScenario.ScenarioScope.JVM)
+                  .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.INSTANT_NOW)))
+                  .effect(
+                      ChaosEffect.skewClock(Duration.ofMillis(1), ChaosEffect.ClockSkewMode.FREEZE))
+                  .activationPolicy(ActivationPolicy.always())
+                  .build());
+      try {
+        // FREEZE pins the skewed millis at activation time. Both inputs therefore produce the
+        // same toEpochMilli(), even though the original instants are 100 s apart.
+        assertThat(runtime.adjustInstantNow(a).toEpochMilli())
+            .isEqualTo(runtime.adjustInstantNow(b).toEpochMilli());
+      } finally {
+        handle.stop();
+      }
+    }
+  }
 }

@@ -318,7 +318,8 @@ class CompatibilityValidatorTest {
     }
 
     @Test
-    @DisplayName("THREAD_LEAK target with ThreadLeakEffect succeeds when allowDestructiveEffects=true")
+    @DisplayName(
+        "THREAD_LEAK target with ThreadLeakEffect succeeds when allowDestructiveEffects=true")
     void threadLeakTargetWithThreadLeakEffectSucceeds() {
       assertThatCode(
               () ->

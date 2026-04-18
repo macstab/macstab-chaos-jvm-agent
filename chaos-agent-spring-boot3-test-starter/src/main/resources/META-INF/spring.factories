@@ -1,0 +1,2 @@
+org.springframework.context.ApplicationContextInitializer=\
+com.macstab.chaos.spring.boot3.test.ChaosAgentInitializer
