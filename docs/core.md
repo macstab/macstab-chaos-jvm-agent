@@ -511,6 +511,64 @@ Under high concurrency with many threads hitting the same rate-limited scenario,
 
 Without the CAS loop, two threads could simultaneously read `appliedCount < maxApplications`, both increment, and both apply the effect — overshooting the cap by N-1 where N is the number of concurrent threads that raced through. The CAS loop ensures the increment is atomic with the read.
 
+## RateLimit Precision under High Concurrency
+
+The `synchronized(this)` guard that protects the rate-limit window does more than prevent double-counting — it upholds the exact-permits guarantee: given `N` permits per window, _exactly_ `N` applications occur, never more and never fewer (when more threads compete than there are permits).
+
+**Invariant (test coverage in `RateLimitUnderHighConcurrencyTest`)**:
+
+| Scenario | Expected `appliedCount` | Assertion |
+|---|---|---|
+| 100 threads, 7 permits, 10 s window | `<= 7` | overshoot prevention |
+| 100 threads, 10 permits, 10 s window | `== 10` | no permit wasted |
+| 50 threads, `maxApplications=3`, `rateLimit=20` | `<= 3` | `maxApplications` wins when tighter |
+
+The last row confirms that `maxApplications` and `rateLimit` are independent guards: the tighter constraint wins. When `maxApplications < permitsPerWindow`, the CAS loop on `appliedCount` fires before the rate-limit window is exhausted.
+
+## stop() Monotonic State Transition
+
+`ScenarioController` state transitions monotonically: `REGISTERED → ACTIVE → STOPPED`. Once a controller observes the stopped flag it never reverts.
+
+**Guarantees (test coverage in `StopDuringEvaluationTest`)**:
+
+- `handle.stop()` completes a sequentially-consistent write; the calling thread reads `STOPPED` immediately after `stop()` returns.
+- Threads that began an evaluation pass _before_ observing the stopped flag may complete with an effect applied. This is the legally-in-flight window; it is bounded and resolves without exception.
+- Threads that enter `evaluate()` _after_ the stopped flag is visible receive a null contribution — no effect is applied.
+- Concurrent reader threads never observe a `STOPPED → ACTIVE` state reversal. The `stopped` flag is an `AtomicBoolean`; once `true`, `compareAndSet(false, true)` by any other writer fails.
+
+**Implementation note**: `evaluate()` reads `stopped` at the first step of the pipeline (before the selector check). This minimizes work done on stopped controllers and ensures the evaluation short-circuits cleanly without producing partial state.
+
+## Multi-Scenario Terminal Action Precedence
+
+When two or more scenarios match the same invocation and both carry terminal actions (reject, suppress, exception), the merge rule is:
+
+1. **Delays accumulate**: all matching scenarios' delay durations are summed before sleeping.
+2. **Terminal action**: the scenario with the highest `precedence()` integer wins. Equal precedence is last-write (non-deterministic) but always results in exactly one terminal action being applied — never zero, never two.
+
+**Test coverage in `TwoScenariosConflictingTerminalActionsTest`**:
+
+- Higher-precedence REJECT (`precedence=100`) beats lower-precedence SUPPRESS (`precedence=0`) regardless of registration order.
+- Delay accumulation: two 30 ms scenarios produce `>= 48 ms` observed latency (×0.8 tolerance for scheduler jitter).
+- Under 80 concurrent threads × 5 iterations (400 total calls), all calls produce REJECT when reject has higher precedence — no call escapes with suppress or no effect.
+
+**Why registration order is irrelevant**: `ChaosRuntime.evaluate()` iterates all matching controllers and builds a merged result; precedence is resolved by a final `max(precedence)` scan over contributions, not by insertion order.
+
+## Session Isolation Invariants
+
+Sessions provide hard isolation boundaries via `ScopeContext`, a thread-local stack of active session IDs.
+
+**Invariants (test coverage in `SessionIsolationParallelTest`)**:
+
+| Scenario | Invariant |
+|---|---|
+| 10 sessions × 10 threads × 5 iterations | Each session's `appliedCount == 50` — no cross-session bleed |
+| 50 unbound threads, 10 active session scenarios | All session `appliedCount == 0` — unbound threads invisible to session selectors |
+| Session closed after pre-close applications | Post-close calls on any thread are not delayed — effect stops immediately |
+
+**Why cross-session bleed is impossible**: `ScopeContext.currentSessionId()` returns the top of the calling thread's session ID stack. The `ScenarioController` for a SESSION-scoped scenario stores its session ID at registration time. The evaluation pipeline (step 3) compares `currentSessionId()` against the controller's ID with reference equality on interned session UUIDs. A thread in session A can never satisfy the guard for a controller registered to session B.
+
+**Root binding and lifecycle**: `DefaultChaosSession(...)` calls `scopeContext.bind(id)` in its constructor — the opening thread is automatically in-scope from construction. `session.close()` calls `rootBinding.close()` last, after all controllers are destroyed, ensuring no thread reads a dangling session ID.
+
 ---
 
 # 9. Error Handling and Failure Modes

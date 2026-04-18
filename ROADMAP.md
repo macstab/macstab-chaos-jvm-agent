@@ -87,13 +87,13 @@ calls remain outside reach (documented in 1.2).
 
 ---
 
-### ⬜ 1.3 Missing Concurrency Tests
-**Priority: medium — 1 day**
+### ✅ 1.3 Missing Concurrency Tests
+**Completed — 1 day**
 
-- `TwoScenariosConflictingTerminalActionsTest` — precedence merge under concurrent access
-- `StopDuringEvaluationTest` — scenario stopped while `evaluate()` is mid-pipeline
-- `RateLimitUnderHighConcurrencyTest` — 100 threads, assert permits never exceeded
-- `SessionIsolationParallelTest` — 10 sessions × 10 threads × shared executor
+- `TwoScenariosConflictingTerminalActionsTest` — precedence merge (serial + 80-thread concurrent); delays accumulate, higher-precedence terminal action always wins
+- `StopDuringEvaluationTest` — `handle.stop()` transitions state before any subsequent evaluate(); no exception when stop() races with evaluate() across 60 threads; state never reverts from STOPPED
+- `RateLimitUnderHighConcurrencyTest` — 100 threads, `appliedCount` never exceeds permit count; exactly N permits consumed when N < thread count; `maxApplications` caps below `rateLimit` when tighter
+- `SessionIsolationParallelTest` — 10 sessions × 10 threads × 5 iterations; each session's appliedCount == 50 with zero cross-session bleed; unbound threads invisible to all session scenarios; post-close effect stops immediately
 
 ---
 
@@ -294,7 +294,7 @@ New module: `chaos-agent-micronaut-integration`
 ```
 Week 1  ├── ✅ 1.1  DeadlockStressor safeguard            (2h)
         ├── ✅ 1.2  Clock skew — JVM limitation documented (1d)
-        ├── ⬜ 1.3  Missing concurrency tests              (1d)
+        ├── ✅ 1.3  Missing concurrency tests              (1d)
         └── ⬜ 1.4  Higher-level time API interception     (1d)
 
 Week 2  ├── ⬜ 2.1  Spring Boot test starter               (2d)
