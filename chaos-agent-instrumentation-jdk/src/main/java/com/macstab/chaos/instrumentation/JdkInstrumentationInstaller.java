@@ -278,22 +278,17 @@ public final class JdkInstrumentationInstaller {
       // ── Phase 2: JVM runtime interception ─────────────────────────────────
       agentBuilder =
           agentBuilder
-              // Clock skew: System.currentTimeMillis() and System.nanoTime()
+              // System.exit() — Java wrapper, safe to instrument with disableClassFormatChanges().
+              // currentTimeMillis() and nanoTime() are @IntrinsicCandidate native methods and
+              // are handled separately below via the native-method-prefix AgentBuilder.
               .type(ElementMatchers.named("java.lang.System"))
               .transform(
                   (builder, typeDescription, classLoader, module, protectionDomain) ->
-                      builder
-                          .visit(
-                              Advice.to(JvmRuntimeAdvice.ClockMillisAdvice.class)
-                                  .on(ElementMatchers.named("currentTimeMillis")))
-                          .visit(
-                              Advice.to(JvmRuntimeAdvice.ClockNanosAdvice.class)
-                                  .on(ElementMatchers.named("nanoTime")))
-                          .visit(
-                              Advice.to(JvmRuntimeAdvice.ExitRequestAdvice.class)
-                                  .on(
-                                      ElementMatchers.named("exit")
-                                          .and(ElementMatchers.takesArguments(int.class)))))
+                      builder.visit(
+                          Advice.to(JvmRuntimeAdvice.ExitRequestAdvice.class)
+                              .on(
+                                  ElementMatchers.named("exit")
+                                      .and(ElementMatchers.takesArguments(int.class)))))
               // GC and halt via Runtime
               .type(ElementMatchers.named("java.lang.Runtime"))
               .transform(
@@ -581,24 +576,38 @@ public final class JdkInstrumentationInstaller {
 
     agentBuilder.installOn(instrumentation);
 
-    // ── Native method instrumentation (separate AgentBuilder) ──────────────
-    // System.currentTimeMillis(), System.nanoTime(), Runtime.gc(), Runtime.halt(),
-    // and System.exit() are all native methods. ByteBuddy cannot instrument native
-    // methods using disableClassFormatChanges() because it cannot add the non-native
-    // wrapper method required to intercept native calls.
+    // ── Clock skew limitation: direct System.currentTimeMillis() cannot be intercepted ────────
     //
-    // Solution: a second AgentBuilder WITHOUT disableClassFormatChanges() combined
-    // with a native method prefix. The prefix causes the JVM to look for
-    // "$$chaos$$currentTimeMillis" as the renamed native, while our advice wrapper
-    // becomes the public "currentTimeMillis". Requires Can-Set-Native-Method-Prefix
-    // in the agent manifest.
-    // Note: System.currentTimeMillis() and System.nanoTime() are @IntrinsicCandidate native
-    // methods. On JDK 21+ with JIT enabled, the JVM inlines them directly to hardware clock
-    // reads without going through the Java wrapper — ByteBuddy advice on the wrapper method
-    // is never called after JIT compilation. ClockSkewEffect applies correctly when invoked
-    // via ChaosRuntime.applyClockSkew() (the direct API path used in unit tests) but cannot
-    // intercept System.currentTimeMillis() in production JVM bytecode. This is a fundamental
-    // JVM constraint, not a framework limitation.
+    // System.currentTimeMillis() and System.nanoTime() are @IntrinsicCandidate native methods
+    // in java.lang.System (java.base module). Two independent JVM constraints prevent advice
+    // from reaching them:
+    //
+    // Constraint 1 — Retransformation cannot add methods or change native modifiers.
+    //   JVMTI SetNativeMethodPrefix works by transforming a native method to a Java wrapper that
+    //   calls the renamed native ($chaos$currentTimeMillis). This requires (a) adding the renamed
+    //   native method and (b) changing currentTimeMillis() from native to non-native. Both
+    //   operations are prohibited by the JVM spec for retransformation of already-loaded classes.
+    //   java.lang.System is loaded before premain runs, so this approach is unavailable.
+    //
+    // Constraint 2 — @IntrinsicCandidate JIT bypass (secondary; moot given constraint 1).
+    //   Even if a Java wrapper existed, HotSpot C2 JIT recognises java.lang.System.currentTimeMillis
+    //   by class+method name and replaces the call with a direct RDTSC / MRS CNTVCT_EL0 hardware
+    //   read, bypassing the wrapper entirely after ~10 000 invocations.
+    //
+    // Investigation: a second AgentBuilder with enableNativeMethodPrefix("$chaos$") and
+    // RETRANSFORMATION was tested. ByteBuddy fires a TRANSFORM event for java.lang.System but
+    // the JVM silently retains the original native binding. currentTimeMillis() remains native
+    // with its original hardware-clock implementation. No error is reported.
+    //
+    // Consequence: ClockSkewEffect cannot intercept direct System.currentTimeMillis() or
+    // System.nanoTime() calls. Clock skew IS applied through two supported paths:
+    //   1. Code explicitly calls BootstrapDispatcher.adjustClockMillis / adjustClockNanos
+    //      (the hot path wired by this agent for custom instrumentation points).
+    //   2. Application code uses java.time.Instant.now() or similar higher-level APIs —
+    //      these are non-native Java methods and will be interceptable in a future release.
+    //
+    // This is a hard JVM limitation for any standard -javaagent: Java instrumentation agent.
+    // Workarounds (e.g. -Xpatch:java.base, a C-level JVMTI agent) are out of scope.
   }
 
   /**

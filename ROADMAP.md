@@ -40,20 +40,50 @@ accidental activation in long-lived processes.
 
 ---
 
-### ⬜ 1.2 Clock Skew — Native Method Prefix Fix
-**Priority: high — 1 day**
+### ✅ 1.2 Clock Skew — JVM Limitation Documented
+**Investigated and documented — 1 day**
 
-`System.currentTimeMillis()` and `System.nanoTime()` are `@IntrinsicCandidate` native methods.
-After JIT compilation on HotSpot (C2 tier, ~10k invocations), they are replaced with direct
-`RDTSC` / `MRS CNTVCT_EL0` hardware reads — ByteBuddy advice on the wrapper is dead code.
+**Finding: direct `System.currentTimeMillis()` interception is not feasible via a standard
+Java instrumentation agent.** Two independent JVM constraints block every known approach:
 
-Fix: second `AgentBuilder` without `disableClassFormatChanges()` + native method prefix
-`$$chaos$$`. JVM renames native to `$$chaos$$currentTimeMillis`, advice wrapper becomes
-the public `currentTimeMillis()`.
+1. **Retransformation cannot add methods or change native modifiers** — JVMTI `SetNativeMethodPrefix`
+   requires (a) adding a renamed native method and (b) removing the `native` modifier from the
+   original. Both are prohibited under JVM retransformation restrictions.
+   `java.lang.System` is loaded before `premain` runs, so class-load-time interception is
+   unavailable.
 
-Requires `Can-Set-Native-Method-Prefix: true` in agent manifest.
+2. **`@IntrinsicCandidate` JIT bypass** — HotSpot C2 recognises `java.lang.System.currentTimeMillis`
+   by class+method name and emits a direct `RDTSC` / `MRS CNTVCT_EL0` hardware read after
+   ~10 000 invocations, bypassing any Java-level wrapper that might exist.
 
-Reference: JVMTI §11.14 `SetNativeMethodPrefix` — https://docs.oracle.com/en/java/docs/api/java.instrument/java/lang/instrument/Instrumentation.html
+**What was done:**
+- Investigated `AgentBuilder.enableNativeMethodPrefix("$chaos$")` + `RETRANSFORMATION` empirically.
+  ByteBuddy fires a TRANSFORM event but the JVM silently retains the original native binding;
+  `currentTimeMillis()` remains native. No error is surfaced.
+- Added thorough documentation of both constraints in `JdkInstrumentationInstaller.java`.
+- `Can-Set-Native-Method-Prefix: true` remains in the manifest for future use with
+  non-bootstrap, non-pre-loaded classes.
+
+**Clock skew works via two supported paths today:**
+- Code explicitly wired through `BootstrapDispatcher.adjustClockMillis` / `adjustClockNanos`.
+- `java.time.Instant.now()` and higher-level APIs (see item 1.4 below).
+
+**Hard limitation:** workarounds require `-Xpatch:java.base` or a C-level JVMTI agent — out of scope.
+
+### ⬜ 1.4 Clock Skew — Higher-Level Java Time API Interception
+**Priority: medium — 1 day**
+
+Partial clock skew coverage via non-native, non-intrinsified Java methods:
+
+- `java.time.Instant.now()` — calls `Clock.systemUTC().instant()`; regular Java, instrumentable
+- `java.time.LocalDateTime.now()` / `ZonedDateTime.now()` — similar
+- `java.util.Date()` constructor — calls `System.currentTimeMillis()` internally but is a
+  regular constructor that ByteBuddy can wrap
+
+New `OperationType` values: `INSTANT_NOW`, `DATE_NEW`
+
+These intercept the most common modern Java time usage. Direct raw `System.currentTimeMillis()`
+calls remain outside reach (documented in 1.2).
 
 ---
 
@@ -263,8 +293,9 @@ New module: `chaos-agent-micronaut-integration`
 
 ```
 Week 1  ├── ✅ 1.1  DeadlockStressor safeguard            (2h)
-        ├── ⬜ 1.2  Clock skew native prefix fix           (1d)
-        └── ⬜ 1.3  Missing concurrency tests              (1d)
+        ├── ✅ 1.2  Clock skew — JVM limitation documented (1d)
+        ├── ⬜ 1.3  Missing concurrency tests              (1d)
+        └── ⬜ 1.4  Higher-level time API interception     (1d)
 
 Week 2  ├── ⬜ 2.1  Spring Boot test starter               (2d)
         └── ⬜ 2.2  Spring Boot runtime starter            (3d)

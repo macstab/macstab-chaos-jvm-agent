@@ -295,9 +295,9 @@ public static class ExecuteAdvice {
 
 **`suppress = Throwable.class`**: When present, exceptions thrown from the advice are caught and logged (not propagated). Used on advice methods that should never abort the instrumented method due to agent errors.
 
-**Exception-injecting advice** (e.g., `ClockMillisAdvice`): Does NOT use `suppress = Throwable.class` because it intentionally allows injected exceptions to propagate.
+**Exception-injecting advice** (e.g., `ExitRequestAdvice`): Does NOT use `suppress = Throwable.class` because it intentionally allows injected exceptions to propagate.
 
-**Return-value rewriting advice** (e.g., `ClockMillisAdvice`): Uses `@Advice.OnMethodExit` with `@Advice.Return(readOnly = false)` to overwrite the return value.
+**Return-value rewriting advice** (e.g., `ClockMillisAdvice`): Uses `@Advice.OnMethodExit` with `@Advice.Return(readOnly = false)` to overwrite the return value. `ClockMillisAdvice` and `ClockNanosAdvice` are defined but cannot be woven into `java.lang.System.currentTimeMillis()` / `nanoTime()` due to the JVM limitation documented in §12 (Limitation 1). They remain available for instrumentation of non-bootstrap native methods in future releases.
 
 **Skip-on advice** (e.g., `GcRequestAdvice`, `NioSelectNoArgAdvice`): Uses `@Advice.OnMethodEnter(skipOn = Advice.OnNonDefaultValue.class)` — if the advice method returns a non-default value (non-zero, non-null, non-false), ByteBuddy skips the actual method body. This is the mechanism for suppressing `System.gc()` and `Selector.select()`.
 
@@ -432,11 +432,39 @@ See [overall-agent.md §11] for full hot-path cost breakdown.
 
 # 12. Known Limitations
 
-1. **Clock intrinsic inlining** (documented in `JdkInstrumentationInstaller`): `System.currentTimeMillis()` and `System.nanoTime()` are `@IntrinsicCandidate` native methods. On JDK 21+ with JIT, they are inlined to direct hardware clock reads. ByteBuddy advice on the wrapper is bypassed post-JIT. Clock skew via `ClockSkewEffect` works only via the `ChaosRuntime.applyClockSkew()` API path.
+1. **`System.currentTimeMillis()` and `System.nanoTime()` cannot be intercepted** — Two
+   independent JVM constraints block every known approach via a standard `-javaagent:` agent:
+
+   *Constraint A — Retransformation cannot add methods or change native modifiers.*
+   JVMTI `SetNativeMethodPrefix` works by transforming a native method into a Java wrapper that
+   delegates to the renamed native (e.g. `$chaos$currentTimeMillis`). This requires:
+   (a) adding a new native method to the class, and
+   (b) removing the `native` modifier from the original method.
+   Both operations are prohibited by the JVM specification for retransformation of already-loaded
+   classes (`Instrumentation.retransformClasses` restrictions). `java.lang.System` is initialised
+   before `premain` runs; class-load-time interception is therefore unavailable.
+
+   *Constraint B — `@IntrinsicCandidate` JIT bypass.*
+   HotSpot C2 recognises `java.lang.System.currentTimeMillis` / `nanoTime` by class+method name
+   and replaces the callsite with a direct `RDTSC` / `MRS CNTVCT_EL0` hardware read after
+   ~10 000 invocations, bypassing any Java-level wrapper that might exist.
+
+   **Investigation result**: a second `AgentBuilder` with `enableNativeMethodPrefix("$chaos$")`
+   and `RETRANSFORMATION` was tested empirically. ByteBuddy fires a TRANSFORM event for
+   `java.lang.System` but the JVM silently retains the original native binding;
+   `currentTimeMillis()` remains native. No error is surfaced. This is a hard JVM limitation.
+   Workarounds (e.g. `-Xpatch:java.base`, a C-level JVMTI agent) are out of scope.
+
+   **Clock skew works via two supported paths today:**
+   - Code explicitly wired through `BootstrapDispatcher.adjustClockMillis` / `adjustClockNanos`.
+   - `java.time.Instant.now()` and similar higher-level Java time APIs (planned — roadmap 1.4).
 
 2. **Agentmain Phase 2 not available**: Dynamic attach (`agentmain`) cannot retransform bootstrap-loaded classes that were loaded before the agent attached. Phase 2 interception points (sockets, NIO, LockSupport, etc.) require premain attachment.
 
-3. **Native method wrapping**: A secondary `AgentBuilder` (without `disableClassFormatChanges`) with native method prefix is referenced in comments but not implemented in the current codebase. `System.currentTimeMillis()`, `System.nanoTime()`, `Runtime.gc()`, and `System.exit()` cannot be intercepted as native methods via the standard retransformation path.
+3. **Native method wrapping for other bootstrap classes**: The `disableClassFormatChanges()`
+   restriction in the primary `AgentBuilder` prevents ByteBuddy from creating native method
+   wrappers. `Runtime.gc()` is intercepted via `@OnMethodEnter` (before the native call) which
+   does not require adding methods. Return-value interception for native methods remains blocked.
 
 4. **`AbstractSelector` subtypes**: NIO `Selector.select()` is instrumented on subtypes of `AbstractSelector` (e.g., `KQueueSelectorImpl` on macOS, `EPollSelectorImpl` on Linux). These are platform-specific classes loaded lazily at first `Selector.open()` call. If `Selector.open()` is called before the agent attaches (agentmain), the platform selector class may not be instrumented.
 
