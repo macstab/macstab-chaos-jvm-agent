@@ -92,14 +92,32 @@ final class VirtualThreadCarrierPinningStressor implements ManagedStressor {
   }
 
   /**
-   * Signals all carrier-pinning threads to stop and interrupts them so that parked threads wake
-   * immediately. Returns without waiting for threads to terminate.
+   * Per-thread join deadline on {@link #close()}. Pinning threads park in small (10 µs) slices
+   * inside the synchronized block; the interrupt causes each to exit the monitor on its next
+   * iteration, so the expected wake-up time is well under a millisecond. 200 ms is a safety ceiling
+   * for OS scheduling jitter.
+   */
+  private static final long JOIN_TIMEOUT_MILLIS = 200L;
+
+  /**
+   * Signals all carrier-pinning threads to stop, interrupts them, and waits up to {@value
+   * #JOIN_TIMEOUT_MILLIS} ms per thread for termination. The class docstring promises the monitor
+   * is released on close(); without the join, close() returned while the synchronized (pinMonitor)
+   * frames were still unwinding, so a deactivate-then-recheck still observed pinned carriers.
    */
   @Override
   public void close() {
     stopped.set(true);
     for (final Thread thread : pinningThreads) {
       thread.interrupt();
+    }
+    for (final Thread thread : pinningThreads) {
+      try {
+        thread.join(JOIN_TIMEOUT_MILLIS);
+      } catch (final InterruptedException interrupted) {
+        Thread.currentThread().interrupt();
+        return;
+      }
     }
   }
 

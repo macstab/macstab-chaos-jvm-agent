@@ -81,7 +81,10 @@ final class ThreadLocalLeakStressor implements ManagedStressor {
 
   @Override
   public void close() {
-    // Remove each planted ThreadLocal from pool threads by submitting removal tasks.
+    // Submit one removal task per planted ThreadLocal back to the common pool. Work-stealing does
+    // not guarantee that a removal lands on the same worker that called set() in the constructor,
+    // so some entries may persist on threads that have since been idled or replaced — this is the
+    // best-effort contract the class-level javadoc already calls out.
     final List<ForkJoinTask<?>> cleanupTasks = new ArrayList<>(plantedLocals.size());
     for (final ThreadLocal<byte[]> local : plantedLocals) {
       cleanupTasks.add(
@@ -91,12 +94,33 @@ final class ThreadLocalLeakStressor implements ManagedStressor {
                     local.remove();
                   }));
     }
+    int failures = 0;
     for (final ForkJoinTask<?> task : cleanupTasks) {
       try {
         task.join();
-      } catch (final Exception e) {
-        LOGGER.fine(() -> "chaos thread-local-leak cleanup task failed: " + e);
+      } catch (final Exception failure) {
+        // Escalate individual failures beyond FINE: a silently swallowed cleanup task means a
+        // planted entry is permanently retained, and operators watching INFO/WARNING logs would
+        // otherwise never learn why plantedCount() reports the original size post-close. The
+        // stack trace is preserved on the per-task warning so the concrete failure (pool
+        // rejection, OOM, unchecked exception from remove()) is attributable.
+        failures++;
+        LOGGER.log(
+            java.util.logging.Level.WARNING,
+            "chaos thread-local-leak cleanup task failed",
+            failure);
       }
+    }
+    if (failures > 0) {
+      final int total = failures;
+      LOGGER.warning(
+          () ->
+              "chaos thread-local-leak cleanup completed with "
+                  + total
+                  + " failed task(s) out of "
+                  + plantedLocals.size()
+                  + "; ThreadLocal entries on affected pool threads may remain until workers"
+                  + " are recycled");
     }
   }
 

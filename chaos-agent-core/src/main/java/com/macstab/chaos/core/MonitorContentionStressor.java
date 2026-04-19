@@ -86,11 +86,30 @@ final class MonitorContentionStressor implements ManagedStressor {
     this.contentionThreads = List.copyOf(threads);
   }
 
+  /**
+   * Per-thread join deadline on {@link #close()}. Contention threads park in small (10 µs) slices
+   * and check the stop flag each iteration, so the expected wake-up time on interrupt is well under
+   * a millisecond; 200 ms is a safety ceiling for OS scheduling jitter.
+   */
+  private static final long JOIN_TIMEOUT_MILLIS = 200L;
+
   @Override
   public void close() {
     stopped.set(true);
     for (final Thread thread : contentionThreads) {
       thread.interrupt();
+    }
+    // Join after interrupt — without this, close() returns while contending threads are still
+    // draining their 10 µs park loops, and test suites asserting "no contention threads alive"
+    // immediately after deactivate observe flaky counts. Bounded join honours ManagedStressor's
+    // "wait for termination" contract.
+    for (final Thread thread : contentionThreads) {
+      try {
+        thread.join(JOIN_TIMEOUT_MILLIS);
+      } catch (final InterruptedException interrupted) {
+        Thread.currentThread().interrupt();
+        return;
+      }
     }
   }
 

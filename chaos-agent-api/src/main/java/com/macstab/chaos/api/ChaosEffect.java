@@ -834,9 +834,22 @@ public sealed interface ChaosEffect
    * behind.
    */
   record FinalizerBacklogEffect(int objectCount, Duration finalizerDelay) implements ChaosEffect {
+    /**
+     * Upper bound on {@code objectCount}. The stressor constructor allocates and retains every
+     * object simultaneously; pathological values like {@link Integer#MAX_VALUE} previously passed
+     * validation and then triggered {@link OutOfMemoryError} mid-loop, which unwinds through {@code
+     * ScenarioController.start()} and leaves the already-registered controller orphaned. Failing
+     * plan validation is far cheaper than explaining a partially-activated scenario.
+     */
+    public static final int MAX_OBJECT_COUNT = 50_000_000;
+
     public FinalizerBacklogEffect {
       if (objectCount <= 0) {
         throw new IllegalArgumentException("objectCount must be > 0");
+      }
+      if (objectCount > MAX_OBJECT_COUNT) {
+        throw new IllegalArgumentException(
+            "objectCount must be <= " + MAX_OBJECT_COUNT + " (got " + objectCount + ")");
       }
       if (finalizerDelay == null || finalizerDelay.isNegative()) {
         throw new IllegalArgumentException("finalizerDelay must be >= 0");

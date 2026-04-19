@@ -88,10 +88,33 @@ final class DeadlockStressor implements ManagedStressor {
     this.participants = List.copyOf(threads);
   }
 
+  /**
+   * Per-thread join deadline on {@link #close()}. Deadlocked threads are blocked in {@link
+   * ReentrantLock#lockInterruptibly()}; the interrupt propagates immediately, so in practice the
+   * join returns well below this ceiling. 200 ms is a soft upper bound that keeps close() bounded
+   * even if a participant has been scheduled out by the OS at the moment we interrupt.
+   */
+  private static final long JOIN_TIMEOUT_MILLIS = 200L;
+
   @Override
   public void close() {
+    // Interrupt-then-join honours ManagedStressor's "wait for termination" contract: without the
+    // join, close() returns while the lockInterruptibly() frames are still unwinding, and a
+    // deactivate-then-reactivate cycle can start a second generation of deadlock threads while
+    // the first generation still holds locks. That surfaces as overlapping thread names and a
+    // stale aliveCount() — issues that vanished once close() waits for the previous generation.
     for (final Thread thread : participants) {
       thread.interrupt();
+    }
+    for (final Thread thread : participants) {
+      try {
+        thread.join(JOIN_TIMEOUT_MILLIS);
+      } catch (final InterruptedException interrupted) {
+        // Restore the interrupt flag so callers see the signal and stop waiting on the remaining
+        // participants. Chaos teardown yielding to shutdown is the correct behaviour.
+        Thread.currentThread().interrupt();
+        return;
+      }
     }
   }
 
