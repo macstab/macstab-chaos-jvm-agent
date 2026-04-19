@@ -283,7 +283,59 @@ Add the dependency, set `macstab.chaos.enabled=true` in `application.yml`, and t
 
 This is the deployment path for pre-production soak tests, game days, and controlled production experiments. It intentionally exposes no test APIs and uses no JUnit types.
 
-### 3.2 `ChaosProperties` — Configuration Binding
+Starting with the current release, the agent is self-attached during the Spring Boot environment preparation phase — before the application context is refreshed and before any Spring beans are instantiated. This is earlier than context-refresh time, which means instrumented JDK classes (Socket, HTTP client, JDBC connections) are rewritten before any Spring bean creates them. The `ChaosControlPlane` bean in `ChaosAutoConfiguration` is still created during context refresh but is now a no-op attachment (the agent is already installed); its purpose is solely to expose the control plane as a Spring-managed bean with a `close()` destroy method.
+
+### 3.2 `ChaosAgentEnvironmentPostProcessor` — Early Attach
+
+```java
+public class ChaosAgentEnvironmentPostProcessor implements EnvironmentPostProcessor, Ordered {
+    @Override
+    public void postProcessEnvironment(
+            final ConfigurableEnvironment environment,
+            final SpringApplication application) {
+        if (!Boolean.parseBoolean(environment.getProperty("macstab.chaos.enabled", "false"))) {
+            return;
+        }
+        ChaosPlatform.installLocally();
+    }
+
+    @Override
+    public int getOrder() {
+        return Ordered.HIGHEST_PRECEDENCE;
+    }
+}
+```
+
+`EnvironmentPostProcessor` is the earliest Spring Boot extension point that has access to the resolved environment — it fires after `ConfigData` processing (so profiles, external config files, and system properties are fully resolved) but before the `ApplicationContext` is created. This is the correct place to attach the agent because:
+
+1. The environment is fully resolved, so the `macstab.chaos.enabled` check accurately reflects the operator's intent (system properties, env vars, `application.yml`, and config server values are all in scope).
+2. The `ApplicationContext` does not yet exist — no bean constructors, `@PostConstruct` callbacks, or Tomcat binding have run. When the context is subsequently created and refreshed, all instrumented JDK classes are already rewritten.
+
+`getOrder()` returns `HIGHEST_PRECEDENCE`, ensuring this processor runs before other environment post-processors (metrics, cloud config, etc.) can trigger any instrumented JDK calls.
+
+**Why the `ChaosAutoConfiguration.chaosControlPlane()` bean still exists**: `ChaosAgentEnvironmentPostProcessor` attaches the agent but does not register the `ChaosControlPlane` as a Spring bean. The bean in `ChaosAutoConfiguration` is still needed to:
+- Expose `ChaosControlPlane` as an injectable bean for application code and the Actuator endpoint.
+- Register `close()` as the Spring bean destroy method, ensuring all JVM-scoped stressor threads are stopped on `ApplicationContext.close()`.
+- Back off via `@ConditionalOnMissingBean` when user code provides its own control plane.
+
+Both registrations call `ChaosPlatform.installLocally()`, which is idempotent — whichever runs first performs the actual attach; the second returns the already-installed instance in nanoseconds.
+
+**Registration difference between Spring Boot 3 and Spring Boot 4**:
+
+In Spring Boot 3, `EnvironmentPostProcessor` lives in `org.springframework.boot.env` and is registered via `META-INF/spring/org.springframework.boot.env.EnvironmentPostProcessor.imports`:
+```
+com.macstab.chaos.spring.boot3.ChaosAgentEnvironmentPostProcessor
+```
+
+In Spring Boot 4, the interface moved to `org.springframework.boot.EnvironmentPostProcessor` (no `.env` sub-package). Spring Boot 4 loads `EnvironmentPostProcessor` instances via `SpringFactoriesLoader` reading `META-INF/spring.factories`, so registration uses the legacy factories format:
+```properties
+org.springframework.boot.EnvironmentPostProcessor=\
+  com.macstab.chaos.spring.boot4.ChaosAgentEnvironmentPostProcessor
+```
+
+This is one of the two meaningful behavioral differences between the Boot 3 and Boot 4 runtime starters (the other being the `ApplicationContextInitializer` registration in the test starters).
+
+### 3.3 `ChaosProperties` — Configuration Binding
 
 `ChaosProperties` is a `@ConfigurationProperties("macstab.chaos")` class with flat properties and one nested object:
 
@@ -303,7 +355,7 @@ public class ChaosProperties {
 
 Every field defaults to off or null. The explicit opt-in design is non-negotiable: a chaos starter that activates by default would be a deployment incident waiting to happen. The default state — all flags false, no config file, no actuator — means the starter is a completely inert presence on the classpath until an operator deliberately enables it.
 
-### 3.3 `ChaosAutoConfiguration` — Bean Wiring and Lifecycle
+### 3.4 `ChaosAutoConfiguration` — Bean Wiring and Lifecycle
 
 The top-level auto-configuration:
 
@@ -342,7 +394,7 @@ public ChaosHandleRegistry chaosHandleRegistry() {
 }
 ```
 
-`ChaosHandleRegistry` is discussed in detail in section 3.5. Its presence here as a distinct Spring bean serves two purposes: it participates in the normal Spring lifecycle and is injectable wherever needed, and it is the only coupling point between `ChaosAutoConfiguration` and `ChaosActuatorEndpoint` — the endpoint depends on both the registry and the control plane, but not on anything Spring-internal.
+`ChaosHandleRegistry` is discussed in detail in section 3.6. Its presence here as a distinct Spring bean serves two purposes: it participates in the normal Spring lifecycle and is injectable wherever needed, and it is the only coupling point between `ChaosAutoConfiguration` and `ChaosActuatorEndpoint` — the endpoint depends on both the registry and the control plane, but not on anything Spring-internal.
 
 #### `chaosStartupApplier` — `ApplicationReadyEvent` listener
 
@@ -384,7 +436,7 @@ Two independent conditions must both be true:
 
 This double-guard is the minimum safe design for an endpoint that can activate arbitrary fault injection. Classpath presence prevents `NoClassDefFoundError` on environments without Actuator; the property guard prevents accidental endpoint exposure on environments that have Actuator for other reasons (health checks, metrics) but don't intend to expose chaos operations.
 
-### 3.4 `ChaosActuatorEndpoint` — Runtime Operations via HTTP
+### 3.5 `ChaosActuatorEndpoint` — Runtime Operations via HTTP
 
 ```java
 @Endpoint(id = "chaos")
@@ -512,7 +564,7 @@ http.requestMatcher(EndpointRequest.to(ChaosActuatorEndpoint.class))
     .authorizeHttpRequests(a -> a.anyRequest().hasRole("CHAOS_OPERATOR"));
 ```
 
-### 3.5 `ChaosHandleRegistry` — Why It Exists
+### 3.6 `ChaosHandleRegistry` — Why It Exists
 
 `ChaosControlPlane` is the public API. `ScenarioRegistry` is an internal implementation class in `chaos-agent-core`. The Actuator endpoint needs to stop individual scenarios by ID — but `ScenarioRegistry` is package-private and not a dependency of the Spring starter module, nor should it be.
 
@@ -553,7 +605,7 @@ public int stopAll() {
 
 `RuntimeException` is caught and swallowed because `stopAll` is a bulk best-effort operation. If one scenario's stop call throws (e.g., the stressor thread was already terminated by a JVM shutdown hook), the remaining scenarios should still be attempted. The count reflects successful stops only.
 
-### 3.6 Sequence Diagram — POST `/actuator/chaos/activate`
+### 3.7 Sequence Diagram — POST `/actuator/chaos/activate`
 
 ```plantuml
 @startuml
@@ -597,7 +649,9 @@ end note
 
 ### What Differs
 
-The single meaningful difference between the Boot 3 and Boot 4 variants is the factory registration mechanism for `ApplicationContextInitializer` in the test starters.
+There are two meaningful differences between the Boot 3 and Boot 4 variants.
+
+**First difference — `ApplicationContextInitializer` registration in the test starters**:
 
 **Boot 3 test starter** uses `META-INF/spring.factories` (key-value format, Spring Framework legacy mechanism):
 
@@ -614,13 +668,20 @@ com.macstab.chaos.spring.boot4.test.ChaosAgentInitializer
 
 Spring Boot 4 moved from `spring.factories` to `.imports` files for most factory types. The `.imports` format is simpler (no key prefix needed, no backslash continuation), and Spring's factory scanning preferentially uses it. The `spring.factories` file is still processed by Boot 4 for backward compatibility but is considered the legacy path.
 
+**Second difference — `EnvironmentPostProcessor` interface package and registration**:
+
+**Boot 3 runtime starter**: `org.springframework.boot.env.EnvironmentPostProcessor` (the interface is in the `.env` sub-package). Registered via `META-INF/spring/org.springframework.boot.env.EnvironmentPostProcessor.imports`.
+
+**Boot 4 runtime starter**: `org.springframework.boot.EnvironmentPostProcessor` (interface moved to the top-level `org.springframework.boot` package in Boot 4). Registered via `META-INF/spring.factories` using the `org.springframework.boot.EnvironmentPostProcessor` key, because Boot 4's `EnvironmentPostProcessorsFactory.fromSpringFactories()` still uses `SpringFactoriesLoader` for this type.
+
 Both the auto-configuration registration (runtime starters) and the test auto-configuration registration (test starters) use `*.imports` files in both Boot 3 and Boot 4:
 
 | File | Boot 3 | Boot 4 |
 |------|--------|--------|
 | Runtime auto-configuration | `org.springframework.boot.autoconfigure.AutoConfiguration.imports` | Same |
 | Test auto-configuration | `org.springframework.boot.test.autoconfigure.ImportAutoConfiguration.imports` | Same |
-| `ApplicationContextInitializer` | `spring.factories` | `org.springframework.context.ApplicationContextInitializer.imports` |
+| `ApplicationContextInitializer` (test starter) | `META-INF/spring.factories` | `META-INF/spring/org.springframework.context.ApplicationContextInitializer.imports` |
+| `EnvironmentPostProcessor` (runtime starter) | `META-INF/spring/org.springframework.boot.env.EnvironmentPostProcessor.imports` | `META-INF/spring.factories` keyed on `org.springframework.boot.EnvironmentPostProcessor` |
 
 ### What is Identical
 
@@ -630,8 +691,11 @@ Everything else is source-identical between Boot 3 and Boot 4 variants. The diff
 - The `Automatic-Module-Name` in the JAR manifest
 - The Spring Boot BOM version used for compilation (`3.5.13` vs `4.0.5`)
 - The `ApplicationContextInitializer` registration file (as described above)
+- The `EnvironmentPostProcessor` interface package and registration file (as described above)
 
 All class names, method signatures, annotation usages, `@ConditionalOn*` expressions, JUnit 5 extension logic, parameter resolution, session lifecycle, and property key names are identical. The Java source of `ChaosProperties`, `ChaosAutoConfiguration`, `ChaosActuatorEndpoint`, `ChaosHandleRegistry`, `ChaosAgentExtension`, `ChaosAgentInitializer`, `ChaosTestAutoConfiguration`, and `@ChaosTest` contain no conditional logic — they compile against their respective BOMs and work identically at runtime.
+
+`ChaosAgentEnvironmentPostProcessor` carries the same logic in both Boot 3 and Boot 4. The only difference is the import: `org.springframework.boot.env.EnvironmentPostProcessor` in Boot 3 vs `org.springframework.boot.EnvironmentPostProcessor` in Boot 4, and the registration file as described above.
 
 The duplication is intentional and has a concrete justification: Spring Boot 3 and Spring Boot 4 have incompatible `@AutoConfiguration` processing semantics and compile-time annotation processor outputs. A shared module compiled against Boot 3 cannot be used in a Boot 4 application without classloader issues, and vice versa. The clean separation means each module's JAR has a single, unambiguous compile-time dependency graph.
 
@@ -690,7 +754,7 @@ All test classes use `ApplicationContextRunner` for the Spring wiring tests (lig
 
 <div align="center">
 
-*Architecture, implementation, and documentation crafted by*
+*Architecture, implementation, and documentation crafted with Love and Passion by*
 
 **[Christian Schnapka](https://macstab.com)**
 Embedded Principal+ Engineer

@@ -50,15 +50,19 @@ import net.bytebuddy.utility.JavaModule;
  * loading) are always installed.
  *
  * <p><b>Phase 2</b> interception points (clock, GC, exit, NIO, sockets, JNDI, serialization, native
- * libraries, JMX, ThreadLocal, etc.) are installed only in <em>premain</em> mode because they
- * require retransformation of already-loaded JDK classes, which is possible only when the agent is
- * attached at JVM startup via {@code -javaagent:}.
+ * libraries, JMX, ThreadLocal, etc.) are gated behind the {@code premainMode} flag. The flag is set
+ * to {@code true} both when the agent is attached at JVM startup via {@code -javaagent:} and when
+ * it is self-attached at runtime via {@code ChaosAgentBootstrap#installForLocalTests()}. In both
+ * modes the installer relies on ByteBuddy's {@code RedefinitionStrategy.RETRANSFORMATION} combined
+ * with {@code disableClassFormatChanges()} to rewrite already-loaded JDK classes such as {@code
+ * java.net.Socket}, so the same interception points fire regardless of whether the agent was on the
+ * command line or attached programmatically.
  *
  * <h2>Retransformation</h2>
  *
- * <p>All transformations use {@code disableClassFormatChanges()} combined with {@link
- * net.bytebuddy.agent.builder.AgentBuilder.RedefinitionStrategy#RETRANSFORMATION} to allow live
- * retransformation of already-loaded JDK classes without changing the class format.
+ * <p>All transformations use {@code disableClassFormatChanges()} combined with {@code
+ * RedefinitionStrategy.RETRANSFORMATION} to allow live retransformation of already-loaded JDK
+ * classes without changing the class format.
  *
  * <h2>Thread safety</h2>
  *
@@ -84,9 +88,11 @@ public final class JdkInstrumentationInstaller {
    *     attachment; used both for bootstrap classpath injection and for installing transformations
    * @param runtime the live {@link ChaosRuntime} instance that supplies the active scenario
    *     configuration to the bridge
-   * @param premainMode {@code true} when the agent was attached via {@code -javaagent:} at JVM
-   *     startup, enabling Phase 2 JVM-level interception; {@code false} when attached dynamically
-   *     at runtime, in which case Phase 2 is skipped
+   * @param premainMode {@code true} to enable Phase 2 JVM-level interception. Set by both {@code
+   *     premain}/{@code agentmain} and by self-attach test helpers so that Socket/NIO/HTTP chaos
+   *     fires in every supported attach path. Pass {@code false} only from callers that cannot rely
+   *     on retransformation (legacy attach flows that pre-date JVMTI class retransformation
+   *     support).
    */
   public static void install(
       final Instrumentation instrumentation,
@@ -749,6 +755,111 @@ public final class JdkInstrumentationInstaller {
                                   .on(
                                       ElementMatchers.named("rollback")
                                           .and(ElementMatchers.takesArguments(0)))));
+      // ── Thread.sleep interception (2.5) ───────────────────────────────────
+      agentBuilder =
+          agentBuilder
+              .type(ElementMatchers.named("java.lang.Thread"))
+              .transform(
+                  (builder, typeDescription, classLoader, module, protectionDomain) ->
+                      builder.visit(
+                          Advice.to(JvmRuntimeAdvice.ThreadSleepAdvice.class)
+                              .on(
+                                  ElementMatchers.named("sleep")
+                                      .and(ElementMatchers.isStatic())
+                                      .and(ElementMatchers.takesArguments(long.class)))));
+
+      // ── DNS resolution interception (2.6) ──────────────────────────────────
+      // InetAddress is always present; no instrumentOptional needed.
+      agentBuilder =
+          agentBuilder
+              .type(ElementMatchers.named("java.net.InetAddress"))
+              .transform(
+                  (builder, typeDescription, classLoader, module, protectionDomain) ->
+                      builder
+                          .visit(
+                              Advice.to(JvmRuntimeAdvice.DnsResolveAdvice.class)
+                                  .on(
+                                      ElementMatchers.named("getByName")
+                                          .and(ElementMatchers.isStatic())
+                                          .and(ElementMatchers.takesArguments(String.class))))
+                          .visit(
+                              Advice.to(JvmRuntimeAdvice.DnsResolveAdvice.class)
+                                  .on(
+                                      ElementMatchers.named("getAllByName")
+                                          .and(ElementMatchers.isStatic())
+                                          .and(ElementMatchers.takesArguments(String.class))))
+                          .visit(
+                              Advice.to(JvmRuntimeAdvice.DnsLocalHostAdvice.class)
+                                  .on(
+                                      ElementMatchers.named("getLocalHost")
+                                          .and(ElementMatchers.isStatic())
+                                          .and(ElementMatchers.takesArguments(0)))));
+
+      // ── SSL/TLS handshake interception (2.7) ──────────────────────────────
+      // SSLSocket and SSLEngine are abstract; concrete subclasses (SSLSocketImpl,
+      // SSLEngineImpl) override startHandshake/beginHandshake, so advice on the
+      // abstract class alone would never fire. Target all concrete subtypes instead.
+      agentBuilder =
+          agentBuilder
+              .type(
+                  ElementMatchers.isSubTypeOf(javax.net.ssl.SSLSocket.class)
+                      .and(ElementMatchers.not(ElementMatchers.isAbstract())))
+              .transform(
+                  (builder, typeDescription, classLoader, module, protectionDomain) ->
+                      builder.visit(
+                          Advice.to(JvmRuntimeAdvice.SslHandshakeAdvice.class)
+                              .on(
+                                  ElementMatchers.named("startHandshake")
+                                      .and(ElementMatchers.takesArguments(0)))));
+
+      agentBuilder =
+          agentBuilder
+              .type(
+                  ElementMatchers.isSubTypeOf(javax.net.ssl.SSLEngine.class)
+                      .and(ElementMatchers.not(ElementMatchers.isAbstract())))
+              .transform(
+                  (builder, typeDescription, classLoader, module, protectionDomain) ->
+                      builder.visit(
+                          Advice.to(JvmRuntimeAdvice.SslHandshakeAdvice.class)
+                              .on(
+                                  ElementMatchers.named("beginHandshake")
+                                      .and(ElementMatchers.takesArguments(0)))));
+
+      // ── File I/O interception (2.8) ────────────────────────────────────────
+      agentBuilder =
+          agentBuilder
+              .type(ElementMatchers.named("java.io.FileInputStream"))
+              .transform(
+                  (builder, typeDescription, classLoader, module, protectionDomain) ->
+                      builder
+                          .visit(
+                              Advice.to(JvmRuntimeAdvice.FileReadAdvice.class)
+                                  .on(
+                                      ElementMatchers.named("read")
+                                          .and(ElementMatchers.takesArguments(0))))
+                          .visit(
+                              Advice.to(JvmRuntimeAdvice.FileReadAdvice.class)
+                                  .on(
+                                      ElementMatchers.named("read")
+                                          .and(
+                                              ElementMatchers.takesArguments(
+                                                  byte[].class, int.class, int.class)))))
+              .type(ElementMatchers.named("java.io.FileOutputStream"))
+              .transform(
+                  (builder, typeDescription, classLoader, module, protectionDomain) ->
+                      builder
+                          .visit(
+                              Advice.to(JvmRuntimeAdvice.FileWriteAdvice.class)
+                                  .on(
+                                      ElementMatchers.named("write")
+                                          .and(ElementMatchers.takesArguments(int.class))))
+                          .visit(
+                              Advice.to(JvmRuntimeAdvice.FileWriteAdvice.class)
+                                  .on(
+                                      ElementMatchers.named("write")
+                                          .and(
+                                              ElementMatchers.takesArguments(
+                                                  byte[].class, int.class, int.class)))));
     }
 
     agentBuilder.installOn(instrumentation);
@@ -1011,6 +1122,18 @@ public final class JdkInstrumentationInstaller {
     mh[BootstrapDispatcher.BEFORE_JDBC_TRANSACTION_ROLLBACK] =
         lookup.findVirtual(
             cls, "beforeJdbcTransactionRollback", MethodType.methodType(boolean.class));
+    mh[BootstrapDispatcher.BEFORE_THREAD_SLEEP] =
+        lookup.findVirtual(
+            cls, "beforeThreadSleep", MethodType.methodType(boolean.class, long.class));
+    mh[BootstrapDispatcher.BEFORE_DNS_RESOLVE] =
+        lookup.findVirtual(
+            cls, "beforeDnsResolve", MethodType.methodType(void.class, String.class));
+    mh[BootstrapDispatcher.BEFORE_SSL_HANDSHAKE] =
+        lookup.findVirtual(
+            cls, "beforeSslHandshake", MethodType.methodType(void.class, Object.class));
+    mh[BootstrapDispatcher.BEFORE_FILE_IO] =
+        lookup.findVirtual(
+            cls, "beforeFileIo", MethodType.methodType(void.class, String.class, Object.class));
     return mh;
   }
 
@@ -1119,6 +1242,8 @@ public final class JdkInstrumentationInstaller {
         writeClass(
             jarOutputStream,
             "com/macstab/chaos/instrumentation/bridge/BootstrapDispatcher$ThrowingSupplier.class");
+        writeClass(
+            jarOutputStream, "com/macstab/chaos/instrumentation/ScheduledRunnableWrapper.class");
       }
       instrumentation.appendToBootstrapClassLoaderSearch(
           new java.util.jar.JarFile(bridgeJar.toFile()));

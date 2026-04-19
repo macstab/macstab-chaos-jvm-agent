@@ -25,8 +25,9 @@ import net.bytebuddy.agent.ByteBuddyAgent;
  *       full access to JDK bootstrap and platform classes. This is the mode used in production and
  *       CI test runs.
  *   <li><b>Dynamic attachment</b> ({@link #agentmain}): the agent is attached to a running JVM via
- *       the Attach API (e.g. {@code VirtualMachine.attach()}). JDK classes that have already been
- *       loaded may not be retransformable, limiting which interception points are effective.
+ *       the Attach API (e.g. {@code VirtualMachine.attach()}). Phase 2 interception points (Socket,
+ *       NIO, HTTP, ...) are rewritten via JVMTI class retransformation on already-loaded JDK
+ *       classes, so the same chaos surface is available as in static attachment.
  *   <li><b>Test helper</b> ({@link #installForLocalTests}): installs the agent into the current JVM
  *       using {@link net.bytebuddy.agent.ByteBuddyAgent#install()}, intended for use in
  *       unit/integration tests that run without {@code -javaagent:}.
@@ -64,6 +65,12 @@ public final class ChaosAgentBootstrap {
    * successfully. Written exactly once via compare-and-set; subsequent reads are non-blocking.
    */
   private static final AtomicReference<ChaosRuntime> RUNTIME = new AtomicReference<>();
+
+  /**
+   * The active config-file poller, or {@code null} when watch mode is disabled or the plan was
+   * loaded from an inline / base64 source (which has no backing file to watch).
+   */
+  static final AtomicReference<StartupConfigPoller> POLLER = new AtomicReference<>();
 
   private ChaosAgentBootstrap() {}
 
@@ -124,7 +131,7 @@ public final class ChaosAgentBootstrap {
     }
     try {
       final Instrumentation instrumentation = ByteBuddyAgent.install();
-      return initialize("", instrumentation, Map.of(), false);
+      return initialize("", instrumentation, Map.of(), true);
     } catch (RuntimeException runtimeException) {
       throw runtimeException;
     } catch (Exception exception) {
@@ -201,7 +208,19 @@ public final class ChaosAgentBootstrap {
         StartupConfigLoader.load(agentArgs, environment);
     loadedPlan.ifPresent(
         loaded -> {
-          runtime.activate(loaded.plan());
+          if (loaded.filePath() != null) {
+            final Optional<StartupConfigPoller> poller =
+                StartupConfigPoller.createIfEnabled(
+                    agentArgs, environment, loaded.filePath(), runtime);
+            if (poller.isPresent()) {
+              POLLER.set(poller.get());
+              poller.get().startWithInitialPlan(loaded.plan().scenarios());
+            } else {
+              runtime.activate(loaded.plan());
+            }
+          } else {
+            runtime.activate(loaded.plan());
+          }
           if (loaded.debugDumpOnStart()) {
             System.err.println(runtime.diagnostics().debugDump());
           }

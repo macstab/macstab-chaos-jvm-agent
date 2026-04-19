@@ -99,9 +99,9 @@ VirtualMachine.attach(pid).loadAgent("chaos-agent-bootstrap.jar", agentArgs)
   ↓
 JVM calls: ChaosAgentBootstrap.agentmain(agentArgs, instrumentation)
   ↓
-Same flow as premain EXCEPT:
-  JdkInstrumentationInstaller.install(instrumentation, runtime, premainMode=false)
-  — Phase 1 instrumentation ONLY (no Phase 2 retransformation)
+Same flow as premain, INCLUDING premainMode=true.
+Phase 1 + Phase 2 (Socket/NIO/HTTP/JDBC/...) instrumentation is installed
+via JVMTI retransformation of already-loaded JDK classes.
 ```
 
 ## Idempotency
@@ -114,26 +114,27 @@ Same flow as premain EXCEPT:
 
 # 4. ChaosPlatform — Self-Attach Path
 
-`ChaosPlatform.installLocally()` is called by `ChaosTestKit.install()` in test environments that do not use `-javaagent:`. The self-attach sequence:
+`ChaosPlatform.installLocally()` is a thin facade over `ChaosAgentBootstrap.installForLocalTests()`.
+
+Self-attach sequence:
 
 ```
-if (RUNTIME_REF.get() != null) return existing runtime
+if (RUNTIME.get() != null) return existing runtime           // idempotent guard
 
-// Locate the agent JAR (own classpath)
-URL agentJar = findAgentJar()
+Instrumentation instrumentation = ByteBuddyAgent.install()   // JVM Attach API via ByteBuddy
+initialize("", instrumentation, Map.of(), true)              // premainMode=true → Phase 1 + Phase 2
 
-// Use the Attach API to self-attach
-VirtualMachine vm = VirtualMachine.attach(ProcessHandle.current().pid().toString())
-vm.loadAgent(agentJar.getPath())
-vm.detach()
-
-// After loadAgent(), agentmain() has run → RUNTIME_REF is set
-return RUNTIME_REF.get()
+// Phase 2 retransforms already-loaded JDK classes (Socket, NIO, HTTP, JDBC, ...)
+// via Instrumentation.retransformClasses() under RETRANSFORMATION strategy
 ```
 
-**JDK requirement**: Self-attach requires `com.sun.tools.attach.VirtualMachine` and the Attach API, available in the JDK (not JRE). On JDK 9+, self-attach may be restricted by the JVM flag `-Djdk.attach.allowAttachSelf=true` (which must be set on the target JVM). `ChaosAgentExtension` sets this system property before attempting self-attach.
+**JDK requirement**: `ByteBuddyAgent.install()` uses the JVM Attach API (`com.sun.tools.attach.VirtualMachine`). On JDK 9+, self-attach requires the JVM to be started with `-Djdk.attach.allowAttachSelf=true`. `ChaosAgentExtension` (in the test starters) handles this automatically. For production dynamic attach, the host process must permit self-attachment or the attach must originate from a separate process.
 
-**Fallback**: If self-attach fails (e.g., on a JRE without tools.jar, or when the attach API is not available), `installLocally()` throws `IllegalStateException`.
+`ByteBuddyAgent.install()` uses `VirtualMachine` internally but is a higher-level wrapper that also handles the JAR creation/location concerns automatically.
+
+**Phase 2 under self-attach**: Because `premainMode=true` is passed, `JdkInstrumentationInstaller` installs all Phase 2 interception points using `AgentBuilder` configured with `RedefinitionStrategy.RETRANSFORMATION` and `disableClassFormatChanges()`. JDK classes already loaded into the JVM (including `java.net.Socket`, `java.nio.channels.SocketChannel`, `java.net.http.HttpClient`, JDBC drivers) are retransformed in-place. Future calls to their methods fire the chaos instrumentation.
+
+**Fallback**: If self-attach fails (JRE without the Attach API, security manager prohibition, or `allowAttachSelf` not set), `installForLocalTests()` throws `IllegalStateException`. In that case, run with `-javaagent:chaos-agent-bootstrap.jar` instead.
 
 ---
 
@@ -192,7 +193,7 @@ public static ChaosControlPlane current() {
 
 <div align="center">
 
-*Architecture, implementation, and documentation crafted by*
+*Architecture, implementation, and documentation crafted with Love and Passion by*
 
 **[Christian Schnapka](https://macstab.com)**  
 Embedded Principal+ Engineer  
