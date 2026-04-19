@@ -706,6 +706,18 @@ public sealed interface ChaosEffect
       if (mode == null) {
         throw new IllegalArgumentException("mode must not be null");
       }
+      // Duration.toNanos() overflows (ArithmeticException) past ~±292 years. Letting that escape
+      // at scenario-start time leaves the controller half-initialised — started=true is written
+      // before the ClockSkewState constructor runs — and the scenario remains ACTIVE with a null
+      // ClockSkewState, silently applying no skew while diagnostics claim it is live. Fail at
+      // plan-build time instead, where the caller can react.
+      try {
+        skewAmount.toNanos();
+      } catch (final ArithmeticException overflow) {
+        throw new IllegalArgumentException(
+            "skewAmount out of range (must fit in Long nanos: ~±292 years): " + skewAmount,
+            overflow);
+      }
     }
   }
 

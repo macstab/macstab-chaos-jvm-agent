@@ -73,11 +73,18 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
     } catch (final RuntimeException failure) {
       for (final ChaosActivationHandle handle : handles) {
         try {
-          if (handle instanceof DefaultChaosActivationHandle defaultHandle) {
-            defaultHandle.destroy();
-          } else {
-            handle.stop();
+          // activate(ChaosScenario) on this class returns a DefaultChaosActivationHandle, and the
+          // plan-rollback list is populated exclusively by that path (see line 70 above). Only
+          // destroy() unregisters the controller from the ScenarioRegistry; stop() alone would
+          // leave ghost STOPPED entries in diagnostics and block re-activation under the same
+          // id. Treat a non-default handle as a programmer error — it means this rollback list
+          // was populated from outside the expected path and the rollback contract has been
+          // broken.
+          if (!(handle instanceof DefaultChaosActivationHandle defaultHandle)) {
+            throw new IllegalStateException(
+                "plan rollback received unexpected handle type: " + handle.getClass().getName());
           }
+          defaultHandle.destroy();
         } catch (final RuntimeException rollbackFailure) {
           failure.addSuppressed(rollbackFailure);
         }

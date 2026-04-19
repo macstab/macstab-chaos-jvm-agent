@@ -211,31 +211,43 @@ public final class ChaosAgentBootstrap {
     if (!RUNTIME.compareAndSet(null, runtime)) {
       return RUNTIME.get();
     }
-    JdkInstrumentationInstaller.install(instrumentation, runtime, premainMode);
-    registerMBean(runtime);
-    installJfrIntegration(runtime);
-    final Optional<StartupConfigLoader.LoadedPlan> loadedPlan =
-        StartupConfigLoader.load(agentArgs, environment);
-    loadedPlan.ifPresent(
-        loaded -> {
-          if (loaded.filePath() != null) {
-            final Optional<StartupConfigPoller> poller =
-                StartupConfigPoller.createIfEnabled(
-                    agentArgs, environment, loaded.filePath(), runtime);
-            if (poller.isPresent()) {
-              POLLER.set(poller.get());
-              poller.get().startWithInitialPlan(loaded.plan().scenarios());
+    // Rollback on installation failure. Without this, an IOException from injectBridge, a
+    // reflection error from installDelegate, or an unrecoverable startup-plan failure would leave
+    // RUNTIME permanently holding a half-initialised instance with a null BootstrapDispatcher
+    // delegate. Every later call to initialize() / installForLocalTests() short-circuits on
+    // RUNTIME.get() != null, so the JVM stays in a silently-broken state for its entire lifetime.
+    // CAS'ing back to null on failure lets a subsequent attach retry cleanly; re-throwing keeps
+    // the caller aware of the failure instead of hiding it behind the short-circuit path.
+    try {
+      JdkInstrumentationInstaller.install(instrumentation, runtime, premainMode);
+      registerMBean(runtime);
+      installJfrIntegration(runtime);
+      final Optional<StartupConfigLoader.LoadedPlan> loadedPlan =
+          StartupConfigLoader.load(agentArgs, environment);
+      loadedPlan.ifPresent(
+          loaded -> {
+            if (loaded.filePath() != null) {
+              final Optional<StartupConfigPoller> poller =
+                  StartupConfigPoller.createIfEnabled(
+                      agentArgs, environment, loaded.filePath(), runtime);
+              if (poller.isPresent()) {
+                POLLER.set(poller.get());
+                poller.get().startWithInitialPlan(loaded.plan().scenarios());
+              } else {
+                runtime.activate(loaded.plan());
+              }
             } else {
               runtime.activate(loaded.plan());
             }
-          } else {
-            runtime.activate(loaded.plan());
-          }
-          if (loaded.debugDumpOnStart()) {
-            System.err.println(runtime.diagnostics().debugDump());
-          }
-        });
-    return runtime;
+            if (loaded.debugDumpOnStart()) {
+              System.err.println(runtime.diagnostics().debugDump());
+            }
+          });
+      return runtime;
+    } catch (final RuntimeException | Error installFailure) {
+      RUNTIME.compareAndSet(runtime, null);
+      throw installFailure;
+    }
   }
 
   private static void installJfrIntegration(final ChaosRuntime runtime) {

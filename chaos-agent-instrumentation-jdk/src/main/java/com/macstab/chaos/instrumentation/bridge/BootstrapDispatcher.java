@@ -189,7 +189,16 @@ public final class BootstrapDispatcher {
    *     on this class; each handle is pre-bound to {@code bridgeDelegate} so that dispatch calls
    *     need only supply the per-invocation arguments
    */
-  public static void install(final Object bridgeDelegate, final MethodHandle[] methodHandles) {
+  public static synchronized void install(
+      final Object bridgeDelegate, final MethodHandle[] methodHandles) {
+    // Serialise concurrent install() calls so the (handles, delegate) pair is never torn across
+    // two competing installers. Without this lock, thread A's handles = X followed by
+    // thread B's delegate = Y2 could leave an advice thread observing `handles` from install A
+    // bound against `delegate` from install B, producing method-handle invocations with the
+    // wrong receiver and a hard classloader mismatch. A single-writer discipline under the
+    // class monitor removes the interleaving; the fields remain volatile so advice-path readers
+    // still see the final pair without needing the lock. install(null, null) remains supported
+    // as an explicit uninstall — callers (tests, per-classloader teardown) rely on it.
     handles = methodHandles;
     delegate = bridgeDelegate;
   }

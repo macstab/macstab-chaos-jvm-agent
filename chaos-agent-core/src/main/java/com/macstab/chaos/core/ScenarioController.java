@@ -57,9 +57,17 @@ import java.util.function.Supplier;
  * <h2>Thread safety</h2>
  *
  * <p>All public methods are thread-safe. {@code matchedCount} and {@code appliedCount} are {@link
- * java.util.concurrent.atomic.AtomicLong}. State transitions use {@code volatile} writes. The
- * rate-window fields ({@code rateWindowStartMillis}, {@code rateWindowPermits}) are guarded by
- * {@code synchronized(this)}.
+ * java.util.concurrent.atomic.AtomicLong}. Lifecycle transitions — both the {@code start()} /
+ * {@code stop()} entry points and the {@code ACTIVE → INACTIVE} transitions driven from {@link
+ * #evaluate(InvocationContext)} ({@code "expired"}, {@code "max applications reached"}) — are
+ * performed inside {@code synchronized(this)} blocks. Transitions out of {@code STOPPED} are
+ * refused: once a controller is stopped, no other writer may lift it back to {@code INACTIVE} or
+ * {@code ACTIVE}. The rate-window fields ({@code rateWindowStartMillis}, {@code rateWindowPermits})
+ * are guarded by the same monitor.
+ *
+ * <p>Observability-bus publishes happen strictly <em>outside</em> the monitor: callbacks are
+ * untrusted code that may block, throw, or re-enter controller methods, so holding the lock across
+ * them would stall every concurrent {@code evaluate()} caller and risk listener-induced deadlock.
  */
 final class ScenarioController {
   private final ChaosScenario scenario;
@@ -205,28 +213,43 @@ final class ScenarioController {
    *       ObservabilityBus}.
    * </ul>
    */
-  synchronized void start() {
-    // Task R3: start() and stop() must be mutually exclusive. Without synchronisation a thread
-    // calling stop() between state=ACTIVE and the stressor assignment below could run
-    // closeStressor() before the stressor exists, then start() would finish assigning a
-    // stressor that no subsequent stop() would ever close — leaking its threads for the rest
-    // of JVM lifetime. The stressor factory call is cold-path (scenario activation), so
-    // holding the lock across it costs nothing in the hot path.
-    if (state == ChaosDiagnostics.ScenarioState.STOPPED) {
-      return;
+  void start() {
+    // start() and stop() must be mutually exclusive against each other and against the
+    // ACTIVE→INACTIVE transitions in evaluate(). Without synchronisation a stop() racing between
+    // state=ACTIVE and the stressor assignment below could run closeStressor() before the
+    // stressor exists, then start() would finish assigning a stressor that no subsequent stop()
+    // would ever close — leaking its threads for the rest of JVM lifetime.
+    //
+    // The observabilityBus.publish(...) call is deliberately OUTSIDE the synchronized block:
+    // listeners are untrusted code (user callbacks, logging I/O, re-entrant controller calls),
+    // and holding the monitor across them would stall every concurrent evaluate() caller and
+    // risk deadlock.
+    final boolean transitioned;
+    synchronized (this) {
+      if (state == ChaosDiagnostics.ScenarioState.STOPPED) {
+        return;
+      }
+      if (state == ChaosDiagnostics.ScenarioState.ACTIVE) {
+        // Idempotent: a second start() on a running controller would otherwise create a fresh
+        // stressor and clobber startedAt, leaking the previous stressor for the JVM lifetime.
+        return;
+      }
+      gate.reset();
+      startedAt = clock.instant();
+      started.set(true);
+      state = ChaosDiagnostics.ScenarioState.ACTIVE;
+      reason = "started";
+      stressor = stressorFactory.createIfNeeded(scenario.effect());
+      if (scenario.effect() instanceof ChaosEffect.ClockSkewEffect skewEffect) {
+        clockSkewState =
+            new ClockSkewState(skewEffect, System.currentTimeMillis(), System.nanoTime());
+      }
+      transitioned = true;
     }
-    gate.reset();
-    startedAt = clock.instant();
-    started.set(true);
-    state = ChaosDiagnostics.ScenarioState.ACTIVE;
-    reason = "started";
-    stressor = stressorFactory.createIfNeeded(scenario.effect());
-    if (scenario.effect() instanceof ChaosEffect.ClockSkewEffect skewEffect) {
-      clockSkewState =
-          new ClockSkewState(skewEffect, System.currentTimeMillis(), System.nanoTime());
+    if (transitioned) {
+      observabilityBus.publish(
+          ChaosEvent.Type.STARTED, scenario.id(), "scenario started", Map.of("scope", scopeKey));
     }
-    observabilityBus.publish(
-        ChaosEvent.Type.STARTED, scenario.id(), "scenario started", Map.of("scope", scopeKey));
   }
 
   /**
@@ -249,13 +272,18 @@ final class ScenarioController {
    * Calling {@code stop()} on an already-stopped controller is safe and has no additional effect
    * beyond re-publishing the event.
    */
-  synchronized void stop() {
-    started.set(false);
-    state = ChaosDiagnostics.ScenarioState.STOPPED;
-    reason = "stopped";
-    gate.release();
-    closeStressor();
-    clockSkewState = null;
+  void stop() {
+    // Mirror start(): mutate state under the monitor, publish the STOPPED event after release so
+    // listener code cannot stall concurrent evaluate() callers or deadlock by re-entering
+    // synchronized methods on this controller.
+    synchronized (this) {
+      started.set(false);
+      state = ChaosDiagnostics.ScenarioState.STOPPED;
+      reason = "stopped";
+      gate.release();
+      closeStressor();
+      clockSkewState = null;
+    }
     observabilityBus.publish(
         ChaosEvent.Type.STOPPED, scenario.id(), "scenario stopped", Map.of("scope", scopeKey));
   }
@@ -323,8 +351,7 @@ final class ScenarioController {
     }
     final long matched = matchedCount.incrementAndGet();
     if (!passesActivationWindow()) {
-      state = ChaosDiagnostics.ScenarioState.INACTIVE;
-      reason = "expired";
+      markInactive("expired");
       return null;
     }
     if (matched <= scenario.activationPolicy().activateAfterMatches()) {
@@ -353,8 +380,7 @@ final class ScenarioController {
       while (true) {
         final long current = appliedCount.get();
         if (current >= maxApplications) {
-          state = ChaosDiagnostics.ScenarioState.INACTIVE;
-          reason = "max applications reached";
+          markInactive("max applications reached");
           return null;
         }
         if (appliedCount.compareAndSet(current, current + 1L)) {
@@ -439,12 +465,42 @@ final class ScenarioController {
     }
   }
 
+  /**
+   * Downgrades {@code state} to {@code INACTIVE} with the given reason, but only when the current
+   * state is {@code ACTIVE}. Guards against:
+   *
+   * <ul>
+   *   <li>A concurrent {@code stop()} writing {@code STOPPED} being overwritten back to {@code
+   *       INACTIVE} by an in-flight {@code evaluate()} that already read the pre-stop state.
+   *   <li>Re-entering {@code INACTIVE} from an unrelated state transition.
+   * </ul>
+   *
+   * The write is performed under the same monitor that guards {@code start()} / {@code stop()} so
+   * the transition is linearisable with respect to all lifecycle edges.
+   */
+  private void markInactive(final String newReason) {
+    synchronized (this) {
+      if (state == ChaosDiagnostics.ScenarioState.ACTIVE) {
+        state = ChaosDiagnostics.ScenarioState.INACTIVE;
+        reason = newReason;
+      }
+    }
+  }
+
   private boolean passesActivationWindow() {
     final Duration activeFor = scenario.activationPolicy().activeFor();
-    if (activeFor == null || startedAt == null) {
+    if (activeFor == null) {
       return true;
     }
-    return clock.instant().isBefore(startedAt.plus(activeFor));
+    // Snapshot the volatile reference to a local so the null-check and the plus() call observe
+    // the same value. Without the snapshot a concurrent stop()→start() sequence could set
+    // startedAt=null briefly (not today's contract but cheap to defend), and two separate reads
+    // could return non-null then null. One read, one check.
+    final Instant capturedStart = startedAt;
+    if (capturedStart == null) {
+      return true;
+    }
+    return clock.instant().isBefore(capturedStart.plus(activeFor));
   }
 
   private boolean passesRateLimit() {
