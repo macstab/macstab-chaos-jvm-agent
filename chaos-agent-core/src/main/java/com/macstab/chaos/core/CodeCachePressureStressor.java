@@ -3,6 +3,8 @@ package com.macstab.chaos.core;
 import com.macstab.chaos.api.ChaosEffect;
 import java.lang.management.CompilationMXBean;
 import java.lang.management.ManagementFactory;
+import java.net.URL;
+import java.net.URLClassLoader;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.logging.Logger;
@@ -34,6 +36,7 @@ final class CodeCachePressureStressor implements ManagedStressor {
   private static final String CLASS_NAME_PREFIX = "com.macstab.chaos.synthetic.CodeCacheClass$";
 
   private volatile List<Class<?>> retainedClasses;
+  private volatile List<URLClassLoader> retainedLoaders;
 
   CodeCachePressureStressor(final ChaosEffect.CodeCachePressureEffect effect) {
     final CompilationMXBean compilationBean = ManagementFactory.getCompilationMXBean();
@@ -43,14 +46,25 @@ final class CodeCachePressureStressor implements ManagedStressor {
             : -1L;
 
     final List<Class<?>> classes = new ArrayList<>(effect.classCount());
+    final List<URLClassLoader> loaders = new ArrayList<>(effect.classCount());
     for (int i = 0; i < effect.classCount(); i++) {
-      final Class<?> cls = generateAndLoadClass(i, effect.methodsPerClass());
+      final URLClassLoader loader = new URLClassLoader(new URL[0], null);
+      final Class<?> cls = generateAndLoadClass(i, effect.methodsPerClass(), loader);
       if (cls != null) {
         triggerCompilation(cls, effect.methodsPerClass());
         classes.add(cls);
+        loaders.add(loader);
+      } else {
+        // Class generation failed — release the loader immediately rather than leaking it.
+        try {
+          loader.close();
+        } catch (java.io.IOException ignored) {
+          // Best-effort — there is no live class holding the loader, so GC will reclaim it.
+        }
       }
     }
     this.retainedClasses = List.copyOf(classes);
+    this.retainedLoaders = List.copyOf(loaders);
 
     if (compilationBean != null && compilationBean.isCompilationTimeMonitoringSupported()) {
       final long delta = compilationBean.getTotalCompilationTime() - compilationTimeBefore;
@@ -68,6 +82,18 @@ final class CodeCachePressureStressor implements ManagedStressor {
   @Override
   public void close() {
     retainedClasses = null;
+    final List<URLClassLoader> loaders = retainedLoaders;
+    retainedLoaders = null;
+    if (loaders != null) {
+      for (final URLClassLoader loader : loaders) {
+        try {
+          loader.close();
+        } catch (java.io.IOException ignored) {
+          // Best-effort: without a retained Class<?> the loader is unreachable once retainedClasses
+          // is nulled, so GC + Metaspace reclamation is the ultimate path regardless.
+        }
+      }
+    }
   }
 
   /** Returns the number of classes currently retained, or 0 after {@link #close()}. */
@@ -76,7 +102,8 @@ final class CodeCachePressureStressor implements ManagedStressor {
     return snapshot == null ? 0 : snapshot.size();
   }
 
-  private static Class<?> generateAndLoadClass(final int index, final int methodsPerClass) {
+  private static Class<?> generateAndLoadClass(
+      final int index, final int methodsPerClass, final URLClassLoader loader) {
     final String className = CLASS_NAME_PREFIX + index + "$" + Long.toHexString(System.nanoTime());
     try {
       DynamicType.Builder<?> builder = new ByteBuddy().subclass(Object.class).name(className);
@@ -92,11 +119,7 @@ final class CodeCachePressureStressor implements ManagedStressor {
                 .intercept(FixedValue.value(0L));
       }
       try (DynamicType.Unloaded<?> unloaded = builder.make()) {
-        return unloaded
-            .load(
-                new java.net.URLClassLoader(new java.net.URL[0], null),
-                ClassLoadingStrategy.Default.INJECTION)
-            .getLoaded();
+        return unloaded.load(loader, ClassLoadingStrategy.Default.INJECTION).getLoaded();
       }
     } catch (Exception exception) {
       LOGGER.fine(

@@ -600,8 +600,12 @@ public sealed interface ChaosSelector
    * <p><b>Safety constraint:</b> at least one of classPattern or methodNamePattern must be non-ANY.
    * A fully wildcard selector would instrument every method in the JVM.
    *
-   * <p>signaturePattern optionally matches the JVM method descriptor (e.g.,
-   * "(Ljava/lang/String;I)V"). Null matches any signature.
+   * <p>signaturePattern is reserved: the runtime does not currently propagate the JVM method
+   * descriptor through to the matcher, so a non-null value here would silently never match any
+   * invocation. To prevent scenarios from being silently inert, the canonical constructor rejects
+   * any non-null {@code signaturePattern} other than {@link NamePattern#any()}. Support for
+   * descriptor-based filtering is tracked as a follow-up feature — construct with {@code null} or
+   * {@link NamePattern#any()} until it ships.
    *
    * <p><b>Valid operations:</b> {@link OperationType#METHOD_ENTER}, {@link
    * OperationType#METHOD_EXIT}.
@@ -624,6 +628,15 @@ public sealed interface ChaosSelector
         throw new IllegalArgumentException(
             "MethodSelector requires at least one non-ANY pattern to prevent "
                 + "accidental global method instrumentation");
+      }
+      if (signaturePattern != null && signaturePattern.mode() != NamePattern.MatchMode.ANY) {
+        // A non-ANY signature pattern would silently never match: the InvocationContext fed to
+        // SelectorMatcher does not carry the JVM method descriptor for METHOD_ENTER/METHOD_EXIT
+        // advice, so the matcher would dereference a null subjectClassName and fail to match
+        // every call. Fail loud at plan-build time rather than ship a zero-activation scenario.
+        throw new IllegalArgumentException(
+            "MethodSelector.signaturePattern is not yet implemented in the runtime; use "
+                + "NamePattern.any() or null. Filter by classPattern/methodNamePattern for now.");
       }
     }
   }

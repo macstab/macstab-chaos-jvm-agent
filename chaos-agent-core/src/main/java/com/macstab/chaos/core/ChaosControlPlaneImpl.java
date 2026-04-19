@@ -159,25 +159,35 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
 
   private DefaultChaosActivationHandle registerScenario(
       final ChaosScenario scenario, final String scopeKey, final String sessionId) {
+    ScenarioController controller = null;
+    boolean registered = false;
     try {
       CompatibilityValidator.validate(scenario, featureSet);
-      final ScenarioController controller =
+      controller =
           new ScenarioController(
               scenario, scopeKey, sessionId, clock, observabilityBus, () -> instrumentation);
       registry.register(controller);
+      registered = true;
       final DefaultChaosActivationHandle handle =
           new DefaultChaosActivationHandle(controller, registry);
       if (scenario.activationPolicy().startMode() == ActivationPolicy.StartMode.AUTOMATIC) {
+        // handle.start() can throw mid-way through start-up (stressor constructors that allocate
+        // eagerly, ClockSkewState overflow, etc.). If that happens, the controller has already
+        // been registered and has already flipped itself to ACTIVE inside start() — if we leave
+        // it, it will match on the hot dispatch path forever with no handle to stop it. Roll the
+        // registration back before rethrowing so no orphan remains.
         handle.start();
       }
       return handle;
     } catch (final ChaosUnsupportedFeatureException unsupported) {
+      unregisterAndDestroyQuietly(controller, registered);
       registry.recordFailure(
           scenario.id(),
           ChaosDiagnostics.FailureCategory.UNSUPPORTED_RUNTIME,
           unsupported.getMessage());
       throw unsupported;
     } catch (final IllegalStateException stateException) {
+      unregisterAndDestroyQuietly(controller, registered);
       final ChaosDiagnostics.FailureCategory category =
           stateException.getMessage() != null
                   && stateException.getMessage().contains("already active")
@@ -186,11 +196,32 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
       registry.recordFailure(scenario.id(), category, stateException.getMessage());
       throw stateException;
     } catch (final RuntimeException runtimeException) {
+      unregisterAndDestroyQuietly(controller, registered);
       registry.recordFailure(
           scenario.id(),
           ChaosDiagnostics.FailureCategory.INVALID_CONFIGURATION,
           runtimeException.getMessage());
       throw runtimeException;
+    }
+  }
+
+  private void unregisterAndDestroyQuietly(
+      final ScenarioController controller, final boolean registered) {
+    if (controller == null) {
+      return;
+    }
+    if (registered) {
+      try {
+        registry.unregister(controller);
+      } catch (final RuntimeException ignored) {
+        // Best-effort rollback: a failure here must not mask the original exception reported
+        // by the caller.
+      }
+    }
+    try {
+      controller.destroy();
+    } catch (final RuntimeException ignored) {
+      // Same rationale as above — swallow so the original failure propagates intact.
     }
   }
 

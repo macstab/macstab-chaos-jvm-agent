@@ -4,11 +4,11 @@ import com.macstab.chaos.instrumentation.bridge.BootstrapDispatcher;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CancellationException;
 
-final class ScheduledCallableWrapper<T> implements Callable<T> {
+public final class ScheduledCallableWrapper<T> implements Callable<T> {
   private final Object executor;
   private final Callable<T> delegate;
 
-  ScheduledCallableWrapper(final Object executor, final Callable<T> delegate) {
+  public ScheduledCallableWrapper(final Object executor, final Callable<T> delegate) {
     this.executor = executor;
     this.delegate = delegate;
   }

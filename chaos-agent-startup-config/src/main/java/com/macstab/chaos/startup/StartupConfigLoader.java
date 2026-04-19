@@ -90,6 +90,27 @@ public final class StartupConfigLoader {
   }
 
   private static LoadedPlan loadFromFile(final String filePath, final boolean debugDumpOnStart) {
+    final ValidatedRead read = readValidatedPlanFile(filePath);
+    return new LoadedPlan(read.plan(), "file:" + filePath, debugDumpOnStart, read.path());
+  }
+
+  /**
+   * Reads and parses a chaos plan file with the same hardening applied to the JVM-agent config
+   * path: normalised resolution, symlink rejection, 1 MiB size cap, and {@code NOFOLLOW_LINKS} read
+   * to close the TOCTOU window between validation and open.
+   *
+   * <p>Intended for framework integrations (Spring starter, Quarkus extension) that accept an
+   * operator-supplied plan path and must not bypass the agent's file-read hardening.
+   *
+   * @param filePath the file path to read
+   * @return the parsed chaos plan
+   * @throws ConfigLoadException if the path is unsafe, unreadable, oversize, or the JSON is invalid
+   */
+  public static ChaosPlan loadPlanFromFile(final String filePath) {
+    return readValidatedPlanFile(filePath).plan();
+  }
+
+  private static ValidatedRead readValidatedPlanFile(final String filePath) {
     final Path path = validateAndResolvePath(filePath);
     final String json;
     // NOFOLLOW_LINKS on the read itself closes the TOCTOU window: validateAndResolvePath's
@@ -104,8 +125,10 @@ public final class StartupConfigLoader {
           "failed to read chaos plan config file: " + path, "file:" + filePath, exception);
     }
     final ChaosPlan plan = ChaosPlanMapper.read(json);
-    return new LoadedPlan(plan, "file:" + filePath, debugDumpOnStart, path);
+    return new ValidatedRead(plan, path);
   }
+
+  private record ValidatedRead(ChaosPlan plan, Path path) {}
 
   /**
    * Validates the file path against basic safety constraints.

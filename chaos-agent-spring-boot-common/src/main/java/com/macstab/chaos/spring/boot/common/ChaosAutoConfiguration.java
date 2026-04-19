@@ -4,10 +4,8 @@ import com.macstab.chaos.api.ChaosActivationHandle;
 import com.macstab.chaos.api.ChaosControlPlane;
 import com.macstab.chaos.api.ChaosPlan;
 import com.macstab.chaos.bootstrap.ChaosPlatform;
-import com.macstab.chaos.startup.ChaosPlanMapper;
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
+import com.macstab.chaos.startup.ConfigLoadException;
+import com.macstab.chaos.startup.StartupConfigLoader;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import org.springframework.boot.actuate.endpoint.annotation.Endpoint;
@@ -97,20 +95,18 @@ public class ChaosAutoConfiguration {
     final String configFile = properties.getConfigFile();
     if (configFile != null && !configFile.isBlank()) {
       try {
-        final Path path = Path.of(configFile);
-        final String json = Files.readString(path);
-        final ChaosPlan plan = ChaosPlanMapper.read(json);
+        final ChaosPlan plan = StartupConfigLoader.loadPlanFromFile(configFile);
         final ChaosActivationHandle handle = controlPlane.activate(plan);
         handleRegistry.register(handle);
         LOGGER.log(
             Level.INFO,
             "chaos-agent: activated startup plan \"{0}\" from {1}",
-            new Object[] {handle.id(), path});
-      } catch (final IOException exception) {
+            new Object[] {handle.id(), configFile});
+      } catch (final ConfigLoadException exception) {
         LOGGER.log(
             Level.SEVERE,
             exception,
-            () -> "chaos-agent: failed to read startup config file " + configFile);
+            () -> "chaos-agent: failed to load startup config file " + configFile);
       } catch (final RuntimeException exception) {
         LOGGER.log(
             Level.SEVERE,

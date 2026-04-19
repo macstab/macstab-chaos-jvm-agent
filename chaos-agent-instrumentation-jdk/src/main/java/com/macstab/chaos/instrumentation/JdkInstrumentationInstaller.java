@@ -1257,6 +1257,8 @@ public final class JdkInstrumentationInstaller {
             "com/macstab/chaos/instrumentation/bridge/BootstrapDispatcher$ThrowingSupplier.class");
         writeClass(
             jarOutputStream, "com/macstab/chaos/instrumentation/ScheduledRunnableWrapper.class");
+        writeClass(
+            jarOutputStream, "com/macstab/chaos/instrumentation/ScheduledCallableWrapper.class");
       }
       instrumentation.appendToBootstrapClassLoaderSearch(
           new java.util.jar.JarFile(bridgeJar.toFile()));

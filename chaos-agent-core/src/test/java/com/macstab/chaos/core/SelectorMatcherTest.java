@@ -1,6 +1,7 @@
 package com.macstab.chaos.core;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.macstab.chaos.api.ChaosSelector;
 import com.macstab.chaos.api.NamePattern;
@@ -747,36 +748,21 @@ class SelectorMatcherTest {
     }
 
     @Test
-    @DisplayName("signature pattern matches on descriptor")
-    void signaturePatternMatchesOnDescriptor() {
-      ChaosSelector selector =
-          new ChaosSelector.MethodSelector(
-              Set.of(OperationType.METHOD_ENTER),
-              NamePattern.exact("com.example.Dao"),
-              NamePattern.any(),
-              NamePattern.exact("(Ljava/lang/String;)V"));
-      InvocationContext matchContext =
-          new InvocationContext(
-              OperationType.METHOD_ENTER,
-              "com.example.Dao",
-              "(Ljava/lang/String;)V",
-              "save",
-              false,
-              null,
-              null,
-              null);
-      InvocationContext noMatchContext =
-          new InvocationContext(
-              OperationType.METHOD_ENTER,
-              "com.example.Dao",
-              "(I)V",
-              "save",
-              false,
-              null,
-              null,
-              null);
-      assertThat(SelectorMatcher.matches(selector, matchContext)).isTrue();
-      assertThat(SelectorMatcher.matches(selector, noMatchContext)).isFalse();
+    @DisplayName("non-ANY signature pattern is rejected until runtime wiring lands")
+    void nonAnySignaturePatternIsRejected() {
+      // The runtime does not yet propagate the JVM method descriptor through InvocationContext,
+      // so a non-null signaturePattern would silently never match. MethodSelector's canonical
+      // constructor must reject such patterns at plan-build time to prevent zero-activation
+      // scenarios (see CRIT-4 in BUGS.md).
+      assertThatThrownBy(
+              () ->
+                  new ChaosSelector.MethodSelector(
+                      Set.of(OperationType.METHOD_ENTER),
+                      NamePattern.exact("com.example.Dao"),
+                      NamePattern.any(),
+                      NamePattern.exact("(Ljava/lang/String;)V")))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("signaturePattern");
     }
 
     @Test
