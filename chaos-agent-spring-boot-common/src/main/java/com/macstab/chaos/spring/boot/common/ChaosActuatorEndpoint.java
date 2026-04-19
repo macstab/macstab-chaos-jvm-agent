@@ -112,9 +112,17 @@ public class ChaosActuatorEndpoint {
   /**
    * Stops all JVM-scoped scenarios that were activated through this starter.
    *
+   * <p>Mapped to {@code DELETE /actuator/chaos}. Previously this was a {@code @WriteOperation}
+   * (POST) alongside {@link #activate(String)}, which Spring Boot Actuator refuses to start with a
+   * {@code BeanCreationException}: two {@code @WriteOperation} methods on the same endpoint without
+   * distinguishing selectors collide on the same HTTP verb and path. DELETE pairs naturally with
+   * the no-selector bulk-stop semantics and is distinct from {@link #stop(String)}, which is a
+   * {@code DELETE /actuator/chaos/{scenarioId}} — both are DELETEs but the path segment introduced
+   * by {@code @Selector} keeps them routable.
+   *
    * @return summary of the bulk-stop outcome
    */
-  @WriteOperation
+  @DeleteOperation
   public StopAllResponse stopAll() {
     final int stoppedCount = handleRegistry.stopAll();
     return new StopAllResponse(stoppedCount);
