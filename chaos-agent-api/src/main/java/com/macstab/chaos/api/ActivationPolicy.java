@@ -68,7 +68,12 @@ public record ActivationPolicy(
    */
   public ActivationPolicy {
     if (startMode == null) startMode = StartMode.AUTOMATIC;
-    if (probability <= 0.0d || probability > 1.0d) {
+    if (Double.isNaN(probability) || probability <= 0.0d || probability > 1.0d) {
+      // Both `<= 0.0` and `> 1.0` evaluate to false for NaN, so without the explicit isNaN check
+      // a misconfigured probability (failed parse, computed from a divide-by-zero, etc.) passes
+      // the guard and the downstream `nextDouble() <= NaN` comparison in passesProbability is
+      // always false — the scenario registers as ACTIVE but silently never fires. Reject NaN
+      // at the boundary so the operator sees the misconfiguration immediately.
       throw new IllegalArgumentException(
           "probability must be in (0.0, 1.0], got "
               + probability

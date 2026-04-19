@@ -37,7 +37,14 @@ final class HeapPressureStressor implements ManagedStressor {
    *     size
    */
   HeapPressureStressor(final ChaosEffect.HeapPressureEffect effect) {
-    long remaining = effect.bytes();
+    // Cap the total allocation at half the JVM's max heap. Without a cap, a plan specifying
+    // `bytes=Long.MAX_VALUE` walks the allocation loop until `new byte[]` throws
+    // OutOfMemoryError inside the stressor constructor, killing the entire JVM rather than
+    // producing the "pressure" the operator asked for. Half the heap lets the effect produce
+    // meaningful pressure while still leaving headroom for the application and the GC.
+    final long maxHeap = Runtime.getRuntime().maxMemory();
+    final long softCap = (maxHeap == Long.MAX_VALUE) ? Long.MAX_VALUE : maxHeap / 2L;
+    long remaining = Math.min(effect.bytes(), softCap);
     while (remaining > 0) {
       final int allocation = (int) Math.min(effect.chunkSizeBytes(), remaining);
       retained.add(new byte[allocation]);

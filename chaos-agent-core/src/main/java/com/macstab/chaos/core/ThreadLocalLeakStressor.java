@@ -30,7 +30,22 @@ final class ThreadLocalLeakStressor implements ManagedStressor {
 
   ThreadLocalLeakStressor(final ChaosEffect.ThreadLocalLeakEffect effect) {
     final int parallelism = ForkJoinPool.commonPool().getParallelism();
-    final int totalLocals = parallelism * effect.entriesPerThread();
+    final int totalLocals;
+    try {
+      // Math.multiplyExact rejects overflow. Without this guard, `parallelism *
+      // effect.entriesPerThread()` wraps to a negative int for pathological entriesPerThread
+      // values and `new ArrayList<>(totalLocals)` throws NegativeArraySizeException inside the
+      // stressor factory — the controller then logs a cryptic construction failure instead of
+      // surfacing the real misconfiguration.
+      totalLocals = Math.multiplyExact(parallelism, effect.entriesPerThread());
+    } catch (final ArithmeticException overflow) {
+      throw new IllegalArgumentException(
+          "thread-local-leak total entries (parallelism * entriesPerThread) overflows int: "
+              + parallelism
+              + " * "
+              + effect.entriesPerThread(),
+          overflow);
+    }
     final List<ThreadLocal<byte[]>> locals = new ArrayList<>(totalLocals);
 
     // Create entriesPerThread ThreadLocals per pool thread. Submit one task per

@@ -70,6 +70,10 @@ final class ManualGate {
       current.await();
       return;
     }
-    current.await(maxBlock.toMillis(), TimeUnit.MILLISECONDS);
+    // Route sub-millisecond positive durations (e.g. Duration.ofNanos(500_000)) through the
+    // nanosecond-precision timed await. Using toMillis() here would truncate to 0 and return
+    // immediately without blocking, collapsing a legitimate (if very short) gate into a
+    // no-op. Nanosecond-precision CountDownLatch.await honours the full duration.
+    current.await(maxBlock.toNanos(), TimeUnit.NANOSECONDS);
   }
 }

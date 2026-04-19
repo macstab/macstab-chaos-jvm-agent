@@ -199,7 +199,18 @@ public final class ChaosDispatcher {
         return INDEFINITE_SCHEDULE_DELAY_MILLIS;
       }
     }
-    return delay + decision.delayMillis();
+    // Saturating add: a plain `delay + decision.delayMillis()` wraps to a negative long for
+    // large inputs, and ScheduledThreadPoolExecutor.schedule with a negative delay fires the
+    // task immediately — the exact opposite of the intended chaos. Mirrors the saturating add
+    // already present in the sibling adjustExecuteDelay path (see applyPreDecision).
+    final long chaosDelay = decision.delayMillis();
+    if (chaosDelay > 0L && delay > Long.MAX_VALUE - chaosDelay) {
+      return Long.MAX_VALUE;
+    }
+    if (chaosDelay < 0L && delay < Long.MIN_VALUE - chaosDelay) {
+      return Long.MIN_VALUE;
+    }
+    return delay + chaosDelay;
   }
 
   public void beforeQueueOperation(final String operation, final Object queue) throws Throwable {

@@ -184,6 +184,15 @@ public interface ChaosDiagnostics {
       Objects.requireNonNull(scopeKey, "scopeKey");
       Objects.requireNonNull(scope, "scope");
       Objects.requireNonNull(state, "state");
+      // Reject negative counters. Match/apply counts come from atomic counters that only ever
+      // increment from zero, so a negative here indicates overflow wraparound or a programming
+      // error in the caller — never a meaningful value for a diagnostics consumer.
+      if (matchedCount < 0L) {
+        throw new IllegalArgumentException("matchedCount must be >= 0, got " + matchedCount);
+      }
+      if (appliedCount < 0L) {
+        throw new IllegalArgumentException("appliedCount must be >= 0, got " + appliedCount);
+      }
     }
   }
 
@@ -198,6 +207,13 @@ public interface ChaosDiagnostics {
     public ActivationFailure {
       Objects.requireNonNull(scenarioId, "scenarioId");
       Objects.requireNonNull(category, "category");
+      // Normalise null to a stable placeholder so toString() / JMX / Actuator renderings never
+      // emit the literal string "null" as a failure reason. Exception messages propagated here
+      // (e.g. `stateException.getMessage()`) are frequently null for cause-only exceptions, so
+      // we cannot demand non-null without breaking every caller that forwards a JDK exception.
+      if (message == null) {
+        message = "(no detail)";
+      }
     }
   }
 }

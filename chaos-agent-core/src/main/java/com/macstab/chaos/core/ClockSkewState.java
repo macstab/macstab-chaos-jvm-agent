@@ -43,8 +43,13 @@ final class ClockSkewState {
       final long capturedNanos) {
     this.skewMillis = effect.skewAmount().toMillis();
     this.skewNanos = effect.skewAmount().toNanos();
-    this.frozenMillis = capturedMillis + skewMillis;
-    this.frozenNanos = capturedNanos + skewNanos;
+    // Saturate FREEZE-mode captures so a large positive skewAmount applied to a near-MAX
+    // capturedMillis does not wrap to a negative epoch timestamp, which would read as a date
+    // ~292M years in the past and break every downstream timestamp comparison (JWT exp, cache
+    // TTLs, log ordering). Same reasoning for nanos; monotonicity is already documented as
+    // intentionally violated, but wraparound is never what the operator asked for.
+    this.frozenMillis = saturatingAdd(capturedMillis, skewMillis);
+    this.frozenNanos = saturatingAdd(capturedNanos, skewNanos);
   }
 
   /**
@@ -56,8 +61,8 @@ final class ClockSkewState {
    */
   long applyMillis(final ChaosEffect.ClockSkewMode mode, final long realMillis) {
     return switch (mode) {
-      case FIXED -> realMillis + skewMillis;
-      case DRIFT -> realMillis + accumulatedDriftMillis.addAndGet(skewMillis);
+      case FIXED -> saturatingAdd(realMillis, skewMillis);
+      case DRIFT -> saturatingAdd(realMillis, addSaturating(accumulatedDriftMillis, skewMillis));
       case FREEZE -> frozenMillis;
     };
   }
@@ -71,9 +76,42 @@ final class ClockSkewState {
    */
   long applyNanos(final ChaosEffect.ClockSkewMode mode, final long realNanos) {
     return switch (mode) {
-      case FIXED -> realNanos + skewNanos;
-      case DRIFT -> realNanos + accumulatedDriftNanos.addAndGet(skewNanos);
+      case FIXED -> saturatingAdd(realNanos, skewNanos);
+      case DRIFT -> saturatingAdd(realNanos, addSaturating(accumulatedDriftNanos, skewNanos));
       case FREEZE -> frozenNanos;
     };
+  }
+
+  private static long saturatingAdd(final long a, final long b) {
+    // Plain `a + b` wraps from Long.MAX_VALUE → Long.MIN_VALUE on overflow, flipping a forward
+    // clock into the deep past. Saturation preserves the direction of the skew even at extremes.
+    try {
+      return Math.addExact(a, b);
+    } catch (final ArithmeticException overflow) {
+      return (b >= 0L) ? Long.MAX_VALUE : Long.MIN_VALUE;
+    }
+  }
+
+  private static long addSaturating(final AtomicLong accumulator, final long increment) {
+    // DRIFT mode previously used `accumulator.addAndGet(increment)` which wraps unboundedly; after
+    // roughly Long.MAX_VALUE / increment calls the counter flips sign and the observed clock
+    // jumps ~292 years into the past mid-scenario. Saturate via CAS so a forward drift stays
+    // forward even after astronomically many matches.
+    while (true) {
+      final long current = accumulator.get();
+      final long next;
+      try {
+        next = Math.addExact(current, increment);
+      } catch (final ArithmeticException overflow) {
+        final long clamped = (increment >= 0L) ? Long.MAX_VALUE : Long.MIN_VALUE;
+        if (current == clamped || accumulator.compareAndSet(current, clamped)) {
+          return clamped;
+        }
+        continue;
+      }
+      if (accumulator.compareAndSet(current, next)) {
+        return next;
+      }
+    }
   }
 }

@@ -544,7 +544,18 @@ final class ScenarioController {
     if (min == max) {
       return min;
     }
-    return splittableRandom(matched).nextLong(min, max + 1);
+    // SplittableRandom.nextLong(origin, bound) requires bound > origin. Computing `max + 1` in
+    // plain long arithmetic overflows to Long.MIN_VALUE when max is Long.MAX_VALUE, which fails
+    // the bound check inside nextLong and crashes the hot path with IllegalArgumentException.
+    // When max is already saturated, draw from [min, max] inclusive by sampling the legal range
+    // and treating the upper bound as achievable; we cannot add 1 without overflow.
+    final long upperExclusive;
+    if (max == Long.MAX_VALUE) {
+      upperExclusive = Long.MAX_VALUE;
+    } else {
+      upperExclusive = max + 1L;
+    }
+    return splittableRandom(matched).nextLong(min, upperExclusive);
   }
 
   /**
