@@ -179,6 +179,27 @@ class NamePatternTest {
     }
 
     @Test
+    @DisplayName("regex metacharacters '[' ']' '{' '}' in glob are literal, not regex syntax")
+    void globEscapesCharacterClassAndRepetitionMetacharacters() {
+      // Before the escape was added these chars were passed through verbatim to the regex
+      // compiler, so "class[0-9]*" would behave like the regex "class[0-9].*" \u2014 matching
+      // "class4", which is wrong for a literal glob containing '[' and ']'.
+      assertThat(NamePattern.glob("class[0-9]*").matches("class[0-9]foo")).isTrue();
+      assertThat(NamePattern.glob("class[0-9]*").matches("class4")).isFalse();
+      assertThat(NamePattern.glob("count{1,3}").matches("count{1,3}")).isTrue();
+      assertThat(NamePattern.glob("count{1,3}").matches("counttt")).isFalse();
+    }
+
+    @Test
+    @DisplayName("oversized glob is rejected at construction, not lazily at match time")
+    void oversizedGlobRejectedAtConstruction() {
+      final String tooLong = "a".repeat(4097);
+      assertThatThrownBy(() -> NamePattern.glob(tooLong))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("maximum length");
+    }
+
+    @Test
     @DisplayName("factory produces GLOB mode")
     void factoryProducesGlobMode() {
       assertThat(NamePattern.glob("com.example.*").mode()).isEqualTo(MatchMode.GLOB);
@@ -236,6 +257,15 @@ class NamePatternTest {
     void blankValueThrows(String value) {
       assertThatThrownBy(() -> NamePattern.regex(value))
           .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @DisplayName("oversized regex is rejected at construction, not lazily at match time")
+    void oversizedRegexRejectedAtConstruction() {
+      final String tooLong = "a".repeat(4097);
+      assertThatThrownBy(() -> NamePattern.regex(tooLong))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("maximum length");
     }
   }
 

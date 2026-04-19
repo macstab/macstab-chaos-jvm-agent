@@ -1,5 +1,6 @@
 package com.macstab.chaos.api;
 
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -58,7 +59,26 @@ public record ChaosScenario(
     selector = Objects.requireNonNull(selector, "selector");
     effect = Objects.requireNonNull(effect, "effect");
     activationPolicy = activationPolicy == null ? ActivationPolicy.always() : activationPolicy;
-    tags = tags == null ? Map.of() : Map.copyOf(new LinkedHashMap<>(tags));
+    tags = copyTagsPreservingOrder(tags);
+  }
+
+  private static Map<String, String> copyTagsPreservingOrder(final Map<String, String> tags) {
+    if (tags == null || tags.isEmpty()) {
+      return Map.of();
+    }
+    final LinkedHashMap<String, String> ordered = new LinkedHashMap<>(tags.size());
+    for (final Map.Entry<String, String> entry : tags.entrySet()) {
+      final String key = entry.getKey();
+      final String value = entry.getValue();
+      if (key == null) {
+        throw new IllegalArgumentException("tag key must not be null");
+      }
+      if (value == null) {
+        throw new IllegalArgumentException("tag value must not be null (key=" + key + ")");
+      }
+      ordered.put(key, value);
+    }
+    return Collections.unmodifiableMap(ordered);
   }
 
   /**

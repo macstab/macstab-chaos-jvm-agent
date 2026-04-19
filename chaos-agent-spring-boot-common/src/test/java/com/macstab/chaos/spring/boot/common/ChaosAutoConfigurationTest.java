@@ -28,16 +28,24 @@ class ChaosAutoConfigurationTest {
   @Test
   @DisplayName("registers ChaosControlPlane when macstab.chaos.enabled=true")
   void registersControlPlaneWhenEnabled() {
+    // Provide a stub ChaosControlPlane bean so the @ConditionalOnMissingBean on the auto-config
+    // backs off — this keeps the unit test from triggering a real JVM-wide ByteBuddy self-attach
+    // via ChaosPlatform.installLocally(), which would pollute every other test in the JVM.
     runner
         .withPropertyValues("macstab.chaos.enabled=true")
+        .withUserConfiguration(StubControlPlaneConfiguration.class)
         .run(context -> assertThat(context).hasSingleBean(ChaosControlPlane.class));
   }
 
   @Test
   @DisplayName("registers ChaosHandleRegistry when macstab.chaos.enabled=true")
   void registersHandleRegistryWhenEnabled() {
+    // Stub user bean for the same reason as registersControlPlaneWhenEnabled above — the handle
+    // registry depends on a ChaosControlPlane bean being present; the stub short-circuits the real
+    // install.
     runner
         .withPropertyValues("macstab.chaos.enabled=true")
+        .withUserConfiguration(StubControlPlaneConfiguration.class)
         .run(context -> assertThat(context).hasSingleBean(ChaosHandleRegistry.class));
   }
 
@@ -60,7 +68,7 @@ class ChaosAutoConfigurationTest {
   void userBeanBacksOffAutoConfiguration() {
     runner
         .withPropertyValues("macstab.chaos.enabled=true")
-        .withUserConfiguration(UserControlPlaneConfiguration.class)
+        .withUserConfiguration(StubControlPlaneConfiguration.class)
         .run(
             context -> {
               assertThat(context).hasSingleBean(ChaosControlPlane.class);
@@ -70,7 +78,7 @@ class ChaosAutoConfigurationTest {
   }
 
   @Configuration(proxyBeanMethods = false)
-  static class UserControlPlaneConfiguration {
+  static class StubControlPlaneConfiguration {
 
     @Bean
     ChaosControlPlane chaosControlPlane() {

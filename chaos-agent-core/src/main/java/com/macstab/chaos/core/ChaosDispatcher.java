@@ -311,7 +311,13 @@ public final class ChaosDispatcher {
   }
 
   public Thread resolveShutdownHook(final Thread original) {
-    return shutdownHooks.getOrDefault(original, original);
+    // Destructive lookup: when Runtime.removeShutdownHook is called the JVM is about to drop its
+    // own reference to the decorated thread, so we must release ours too. Leaving the mapping in
+    // place would retain both the user hook and our wrapper for the life of the process — a slow
+    // leak for long-running JVMs that churn shutdown-hook registrations (e.g. integration-test
+    // suites that stop and restart embedded servers).
+    final Thread decorated = shutdownHooks.remove(original);
+    return decorated == null ? original : decorated;
   }
 
   public void beforeExecutorShutdown(

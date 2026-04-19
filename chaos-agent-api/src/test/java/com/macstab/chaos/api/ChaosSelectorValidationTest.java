@@ -208,6 +208,90 @@ class ChaosSelectorValidationTest {
   }
 
   @Nested
+  @DisplayName("cross-selector operation rejection")
+  class CrossSelectorOperationRejection {
+
+    @Test
+    @DisplayName("MethodSelector rejects JvmRuntime operation")
+    void methodSelectorRejectsJvmRuntimeOperation() {
+      assertThatThrownBy(
+              () ->
+                  new ChaosSelector.MethodSelector(
+                      Set.of(OperationType.OBJECT_DESERIALIZE),
+                      NamePattern.exact("java.io.ObjectInputStream"),
+                      NamePattern.any(),
+                      null))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("MethodSelector")
+          .hasMessageContaining("OBJECT_DESERIALIZE");
+    }
+
+    @Test
+    @DisplayName("QueueSelector rejects THREAD_START")
+    void queueSelectorRejectsThreadStart() {
+      assertThatThrownBy(
+              () ->
+                  new ChaosSelector.QueueSelector(
+                      Set.of(OperationType.THREAD_START), NamePattern.any()))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("QueueSelector")
+          .hasMessageContaining("THREAD_START");
+    }
+
+    @Test
+    @DisplayName("JvmRuntimeSelector rejects HTTP_CLIENT_SEND")
+    void jvmRuntimeSelectorRejectsHttpClientSend() {
+      assertThatThrownBy(
+              () -> new ChaosSelector.JvmRuntimeSelector(Set.of(OperationType.HTTP_CLIENT_SEND)))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("JvmRuntimeSelector")
+          .hasMessageContaining("HTTP_CLIENT_SEND");
+    }
+
+    @Test
+    @DisplayName("NetworkSelector rejects NIO_CHANNEL_READ (belongs to NioSelector)")
+    void networkSelectorRejectsNioChannelRead() {
+      assertThatThrownBy(
+              () ->
+                  new ChaosSelector.NetworkSelector(
+                      Set.of(OperationType.NIO_CHANNEL_READ), NamePattern.any()))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("NetworkSelector");
+    }
+
+    @Test
+    @DisplayName("AsyncSelector accepts ASYNC_CANCEL")
+    void asyncSelectorAcceptsAsyncCancel() {
+      assertThatCode(() -> new ChaosSelector.AsyncSelector(Set.of(OperationType.ASYNC_CANCEL)))
+          .doesNotThrowAnyException();
+    }
+
+    @Test
+    @DisplayName("ThreadSelector accepts THREAD_SLEEP")
+    void threadSelectorAcceptsThreadSleep() {
+      assertThatCode(
+              () ->
+                  new ChaosSelector.ThreadSelector(
+                      Set.of(OperationType.THREAD_SLEEP),
+                      ChaosSelector.ThreadKind.ANY,
+                      NamePattern.any(),
+                      null))
+          .doesNotThrowAnyException();
+    }
+
+    @Test
+    @DisplayName("error message lists valid operations for diagnostics")
+    void errorMessageListsValidOperations() {
+      assertThatThrownBy(
+              () ->
+                  new ChaosSelector.DnsSelector(
+                      Set.of(OperationType.SSL_HANDSHAKE), NamePattern.any()))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("DNS_RESOLVE");
+    }
+  }
+
+  @Nested
   @DisplayName("factory methods produce the right type")
   class FactoryMethods {
 

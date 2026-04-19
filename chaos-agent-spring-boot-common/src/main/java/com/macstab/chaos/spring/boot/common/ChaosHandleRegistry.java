@@ -5,12 +5,22 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+import org.springframework.beans.factory.DisposableBean;
 
 /**
  * Tracks {@link ChaosActivationHandle} instances returned by runtime-triggered activations so that
  * the Actuator endpoint can stop them by scenario ID without exposing core-internal registry APIs.
+ *
+ * <p>Implements {@link DisposableBean} so handles registered against this bean are stopped when the
+ * enclosing Spring context closes. The underlying {@link com.macstab.chaos.api.ChaosControlPlane}
+ * is a JVM-wide singleton and is intentionally <b>not</b> closed here — only the handles owned by
+ * this context are released.
  */
-public final class ChaosHandleRegistry {
+public final class ChaosHandleRegistry implements DisposableBean {
+
+  private static final Logger LOGGER = Logger.getLogger(ChaosHandleRegistry.class.getName());
 
   private final Map<String, ChaosActivationHandle> handles = new ConcurrentHashMap<>();
 
@@ -20,10 +30,25 @@ public final class ChaosHandleRegistry {
   /**
    * Records a newly-activated handle so it can be stopped later by ID.
    *
+   * <p>If a handle with the same ID was already registered, the previous handle is stopped before
+   * being replaced. Without this, a caller who triggered two activations of the same scenario via
+   * the Actuator endpoint would silently leak the first handle and could not stop it via {@link
+   * #stop(String)} afterward.
+   *
    * @param handle the handle returned by {@code activate(...)}; must not be null
    */
   public void register(final ChaosActivationHandle handle) {
-    handles.put(handle.id(), handle);
+    final ChaosActivationHandle previous = handles.put(handle.id(), handle);
+    if (previous != null && previous != handle) {
+      try {
+        previous.stop();
+      } catch (final RuntimeException exception) {
+        LOGGER.log(
+            Level.WARNING,
+            exception,
+            () -> "chaos-agent: failed to stop previous handle for id=" + handle.id());
+      }
+    }
   }
 
   /**
@@ -67,5 +92,15 @@ public final class ChaosHandleRegistry {
       }
     }
     return count;
+  }
+
+  /**
+   * Invoked by Spring when the enclosing context closes. Delegates to {@link #stopAll()} so that
+   * handles created by this context (via the Actuator endpoint or {@code chaosStartupApplier}) do
+   * not leak into subsequent contexts.
+   */
+  @Override
+  public void destroy() {
+    stopAll();
   }
 }

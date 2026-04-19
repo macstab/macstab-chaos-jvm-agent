@@ -73,9 +73,10 @@ public final class ChaosAgentExtension
    */
   @Override
   public void beforeEach(final ExtensionContext context) {
-    final ChaosControlPlane controlPlane = ChaosPlatform.installLocally();
-    final ChaosSession session = controlPlane.openSession(context.getDisplayName());
-    context.getStore(NAMESPACE).put(ChaosControlPlane.class, controlPlane);
+    final TrackingChaosControlPlane tracker =
+        new TrackingChaosControlPlane(ChaosPlatform.installLocally());
+    final ChaosSession session = tracker.openSession(context.getDisplayName());
+    context.getStore(NAMESPACE).put(ChaosControlPlane.class, tracker);
     context.getStore(NAMESPACE).put(ChaosSession.class, session);
   }
 
@@ -93,8 +94,13 @@ public final class ChaosAgentExtension
   public void afterEach(final ExtensionContext context) {
     final ChaosSession session =
         context.getStore(NAMESPACE).remove(ChaosSession.class, ChaosSession.class);
+    final ChaosControlPlane controlPlane =
+        context.getStore(NAMESPACE).remove(ChaosControlPlane.class, ChaosControlPlane.class);
     if (session != null) {
       session.close();
+    }
+    if (controlPlane instanceof TrackingChaosControlPlane tracker) {
+      tracker.stopTracked();
     }
   }
 

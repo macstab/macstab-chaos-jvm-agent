@@ -216,11 +216,7 @@ class PhaseTwo_RuntimeIntegrationTest {
       final ChaosRuntime runtime =
           runtimeWith(
               ChaosScenario.builder("deser-reject")
-                  .selector(
-                      ChaosSelector.method(
-                          Set.of(OperationType.OBJECT_DESERIALIZE),
-                          NamePattern.exact("java.io.ObjectInputStream"),
-                          NamePattern.any()))
+                  .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.OBJECT_DESERIALIZE)))
                   .effect(ChaosEffect.reject("chaos rejection"))
                   .activationPolicy(ActivationPolicy.always())
                   .build());
@@ -241,11 +237,7 @@ class PhaseTwo_RuntimeIntegrationTest {
       final ChaosRuntime runtime =
           runtimeWith(
               ChaosScenario.builder("deser-delay")
-                  .selector(
-                      ChaosSelector.method(
-                          Set.of(OperationType.OBJECT_DESERIALIZE),
-                          NamePattern.exact("java.io.ObjectInputStream"),
-                          NamePattern.any()))
+                  .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.OBJECT_DESERIALIZE)))
                   .effect(ChaosEffect.delay(Duration.ofMillis(50)))
                   .activationPolicy(ActivationPolicy.always())
                   .build());
@@ -272,11 +264,7 @@ class PhaseTwo_RuntimeIntegrationTest {
       final ChaosRuntime runtime =
           runtimeWith(
               ChaosScenario.builder("ser-reject")
-                  .selector(
-                      ChaosSelector.method(
-                          Set.of(OperationType.OBJECT_SERIALIZE),
-                          NamePattern.exact("java.io.ObjectOutputStream"),
-                          NamePattern.any()))
+                  .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.OBJECT_SERIALIZE)))
                   .effect(ChaosEffect.reject("chaos rejection"))
                   .activationPolicy(ActivationPolicy.always())
                   .build());
@@ -306,11 +294,7 @@ class PhaseTwo_RuntimeIntegrationTest {
       final ChaosRuntime runtime =
           runtimeWith(
               ChaosScenario.builder("zip-inflate-delay")
-                  .selector(
-                      ChaosSelector.method(
-                          Set.of(OperationType.ZIP_INFLATE),
-                          NamePattern.exact("java.util.zip.Inflater"),
-                          NamePattern.any()))
+                  .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.ZIP_INFLATE)))
                   .effect(ChaosEffect.delay(Duration.ofMillis(50)))
                   .activationPolicy(ActivationPolicy.always())
                   .build());
@@ -340,11 +324,7 @@ class PhaseTwo_RuntimeIntegrationTest {
       final ChaosRuntime runtime =
           runtimeWith(
               ChaosScenario.builder("zip-deflate-delay")
-                  .selector(
-                      ChaosSelector.method(
-                          Set.of(OperationType.ZIP_DEFLATE),
-                          NamePattern.exact("java.util.zip.Deflater"),
-                          NamePattern.any()))
+                  .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.ZIP_DEFLATE)))
                   .effect(ChaosEffect.delay(Duration.ofMillis(50)))
                   .activationPolicy(ActivationPolicy.always())
                   .build());
@@ -378,11 +358,7 @@ class PhaseTwo_RuntimeIntegrationTest {
       final ChaosRuntime runtime =
           runtimeWith(
               ChaosScenario.builder("direct-buffer-reject")
-                  .selector(
-                      ChaosSelector.method(
-                          Set.of(OperationType.DIRECT_BUFFER_ALLOCATE),
-                          NamePattern.exact("java.nio.ByteBuffer"),
-                          NamePattern.any()))
+                  .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.DIRECT_BUFFER_ALLOCATE)))
                   .effect(ChaosEffect.reject("direct buffer exhausted"))
                   .activationPolicy(ActivationPolicy.always())
                   .build());
@@ -412,11 +388,7 @@ class PhaseTwo_RuntimeIntegrationTest {
       final ChaosRuntime runtime =
           runtimeWith(
               ChaosScenario.builder("reflect-delay")
-                  .selector(
-                      ChaosSelector.method(
-                          Set.of(OperationType.REFLECTION_INVOKE),
-                          NamePattern.exact("java.lang.reflect.Method"),
-                          NamePattern.any()))
+                  .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.REFLECTION_INVOKE)))
                   .effect(ChaosEffect.delay(Duration.ofMillis(50)))
                   .activationPolicy(ActivationPolicy.always())
                   .build());

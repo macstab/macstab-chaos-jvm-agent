@@ -476,8 +476,14 @@ public sealed interface ChaosSelector
   record ThreadSelector(
       Set<OperationType> operations, ThreadKind kind, NamePattern threadNamePattern, Boolean daemon)
       implements ChaosSelector {
+    static final Set<OperationType> VALID_OPS =
+        EnumSet.of(
+            OperationType.THREAD_START,
+            OperationType.VIRTUAL_THREAD_START,
+            OperationType.THREAD_SLEEP);
+
     public ThreadSelector {
-      operations = validatedOperations(operations);
+      operations = validatedOperations(operations, VALID_OPS, "ThreadSelector");
       kind = kind == null ? ThreadKind.ANY : kind;
       threadNamePattern = threadNamePattern == null ? NamePattern.any() : threadNamePattern;
     }
@@ -493,8 +499,16 @@ public sealed interface ChaosSelector
       NamePattern taskClassPattern,
       Boolean scheduledOnly)
       implements ChaosSelector {
+    static final Set<OperationType> VALID_OPS =
+        EnumSet.of(
+            OperationType.EXECUTOR_SUBMIT,
+            OperationType.EXECUTOR_WORKER_RUN,
+            OperationType.EXECUTOR_SHUTDOWN,
+            OperationType.EXECUTOR_AWAIT_TERMINATION,
+            OperationType.FORK_JOIN_TASK_RUN);
+
     public ExecutorSelector {
-      operations = validatedOperations(operations);
+      operations = validatedOperations(operations, VALID_OPS, "ExecutorSelector");
       executorClassPattern =
           executorClassPattern == null ? NamePattern.any() : executorClassPattern;
       taskClassPattern = taskClassPattern == null ? NamePattern.any() : taskClassPattern;
@@ -504,16 +518,29 @@ public sealed interface ChaosSelector
   /** Matches blocking queue operations, optionally filtering by queue implementation class. */
   record QueueSelector(Set<OperationType> operations, NamePattern queueClassPattern)
       implements ChaosSelector {
+    static final Set<OperationType> VALID_OPS =
+        EnumSet.of(
+            OperationType.QUEUE_PUT,
+            OperationType.QUEUE_OFFER,
+            OperationType.QUEUE_TAKE,
+            OperationType.QUEUE_POLL);
+
     public QueueSelector {
-      operations = validatedOperations(operations);
+      operations = validatedOperations(operations, VALID_OPS, "QueueSelector");
       queueClassPattern = queueClassPattern == null ? NamePattern.any() : queueClassPattern;
     }
   }
 
   /** Matches CompletableFuture completion operations. */
   record AsyncSelector(Set<OperationType> operations) implements ChaosSelector {
+    static final Set<OperationType> VALID_OPS =
+        EnumSet.of(
+            OperationType.ASYNC_COMPLETE,
+            OperationType.ASYNC_COMPLETE_EXCEPTIONALLY,
+            OperationType.ASYNC_CANCEL);
+
     public AsyncSelector {
-      operations = validatedOperations(operations);
+      operations = validatedOperations(operations, VALID_OPS, "AsyncSelector");
     }
   }
 
@@ -521,8 +548,11 @@ public sealed interface ChaosSelector
   record SchedulingSelector(
       Set<OperationType> operations, NamePattern executorClassPattern, Boolean periodicOnly)
       implements ChaosSelector {
+    static final Set<OperationType> VALID_OPS =
+        EnumSet.of(OperationType.SCHEDULE_SUBMIT, OperationType.SCHEDULE_TICK);
+
     public SchedulingSelector {
-      operations = validatedOperations(operations);
+      operations = validatedOperations(operations, VALID_OPS, "SchedulingSelector");
       executorClassPattern =
           executorClassPattern == null ? NamePattern.any() : executorClassPattern;
     }
@@ -531,8 +561,14 @@ public sealed interface ChaosSelector
   /** Matches JVM shutdown hook registration and executor shutdown operations. */
   record ShutdownSelector(Set<OperationType> operations, NamePattern targetClassPattern)
       implements ChaosSelector {
+    static final Set<OperationType> VALID_OPS =
+        EnumSet.of(
+            OperationType.SHUTDOWN_HOOK_REGISTER,
+            OperationType.EXECUTOR_SHUTDOWN,
+            OperationType.EXECUTOR_AWAIT_TERMINATION);
+
     public ShutdownSelector {
-      operations = validatedOperations(operations);
+      operations = validatedOperations(operations, VALID_OPS, "ShutdownSelector");
       targetClassPattern = targetClassPattern == null ? NamePattern.any() : targetClassPattern;
     }
   }
@@ -541,8 +577,12 @@ public sealed interface ChaosSelector
   record ClassLoadingSelector(
       Set<OperationType> operations, NamePattern targetNamePattern, NamePattern loaderClassPattern)
       implements ChaosSelector {
+    static final Set<OperationType> VALID_OPS =
+        EnumSet.of(
+            OperationType.CLASS_LOAD, OperationType.CLASS_DEFINE, OperationType.RESOURCE_LOAD);
+
     public ClassLoadingSelector {
-      operations = validatedOperations(operations);
+      operations = validatedOperations(operations, VALID_OPS, "ClassLoadingSelector");
       targetNamePattern = targetNamePattern == null ? NamePattern.any() : targetNamePattern;
       loaderClassPattern = loaderClassPattern == null ? NamePattern.any() : loaderClassPattern;
     }
@@ -572,8 +612,11 @@ public sealed interface ChaosSelector
       NamePattern methodNamePattern,
       NamePattern signaturePattern)
       implements ChaosSelector {
+    static final Set<OperationType> VALID_OPS =
+        EnumSet.of(OperationType.METHOD_ENTER, OperationType.METHOD_EXIT);
+
     public MethodSelector {
-      operations = validatedOperations(operations);
+      operations = validatedOperations(operations, VALID_OPS, "MethodSelector");
       classPattern = classPattern == null ? NamePattern.any() : classPattern;
       methodNamePattern = methodNamePattern == null ? NamePattern.any() : methodNamePattern;
       if (classPattern.mode() == NamePattern.MatchMode.ANY
@@ -594,8 +637,11 @@ public sealed interface ChaosSelector
    */
   record MonitorSelector(Set<OperationType> operations, NamePattern monitorClassPattern)
       implements ChaosSelector {
+    static final Set<OperationType> VALID_OPS =
+        EnumSet.of(OperationType.MONITOR_ENTER, OperationType.THREAD_PARK);
+
     public MonitorSelector {
-      operations = validatedOperations(operations);
+      operations = validatedOperations(operations, VALID_OPS, "MonitorSelector");
       monitorClassPattern = monitorClassPattern == null ? NamePattern.any() : monitorClassPattern;
     }
   }
@@ -618,8 +664,29 @@ public sealed interface ChaosSelector
    * </ul>
    */
   record JvmRuntimeSelector(Set<OperationType> operations) implements ChaosSelector {
+    static final Set<OperationType> VALID_OPS =
+        EnumSet.of(
+            OperationType.SYSTEM_CLOCK_MILLIS,
+            OperationType.SYSTEM_CLOCK_NANOS,
+            OperationType.INSTANT_NOW,
+            OperationType.LOCAL_DATE_TIME_NOW,
+            OperationType.ZONED_DATE_TIME_NOW,
+            OperationType.DATE_NEW,
+            OperationType.SYSTEM_GC_REQUEST,
+            OperationType.SYSTEM_EXIT_REQUEST,
+            OperationType.REFLECTION_INVOKE,
+            OperationType.DIRECT_BUFFER_ALLOCATE,
+            OperationType.OBJECT_DESERIALIZE,
+            OperationType.OBJECT_SERIALIZE,
+            OperationType.NATIVE_LIBRARY_LOAD,
+            OperationType.JNDI_LOOKUP,
+            OperationType.JMX_INVOKE,
+            OperationType.JMX_GET_ATTR,
+            OperationType.ZIP_INFLATE,
+            OperationType.ZIP_DEFLATE);
+
     public JvmRuntimeSelector {
-      operations = validatedOperations(operations);
+      operations = validatedOperations(operations, VALID_OPS, "JvmRuntimeSelector");
     }
   }
 
@@ -632,8 +699,16 @@ public sealed interface ChaosSelector
    */
   record NioSelector(Set<OperationType> operations, NamePattern channelClassPattern)
       implements ChaosSelector {
+    static final Set<OperationType> VALID_OPS =
+        EnumSet.of(
+            OperationType.NIO_SELECTOR_SELECT,
+            OperationType.NIO_CHANNEL_READ,
+            OperationType.NIO_CHANNEL_WRITE,
+            OperationType.NIO_CHANNEL_CONNECT,
+            OperationType.NIO_CHANNEL_ACCEPT);
+
     public NioSelector {
-      operations = validatedOperations(operations);
+      operations = validatedOperations(operations, VALID_OPS, "NioSelector");
       channelClassPattern = channelClassPattern == null ? NamePattern.any() : channelClassPattern;
     }
   }
@@ -651,8 +726,16 @@ public sealed interface ChaosSelector
    */
   record NetworkSelector(Set<OperationType> operations, NamePattern remoteHostPattern)
       implements ChaosSelector {
+    static final Set<OperationType> VALID_OPS =
+        EnumSet.of(
+            OperationType.SOCKET_CONNECT,
+            OperationType.SOCKET_ACCEPT,
+            OperationType.SOCKET_READ,
+            OperationType.SOCKET_WRITE,
+            OperationType.SOCKET_CLOSE);
+
     public NetworkSelector {
-      operations = validatedOperations(operations);
+      operations = validatedOperations(operations, VALID_OPS, "NetworkSelector");
       remoteHostPattern = remoteHostPattern == null ? NamePattern.any() : remoteHostPattern;
     }
   }
@@ -672,8 +755,11 @@ public sealed interface ChaosSelector
    */
   record ThreadLocalSelector(Set<OperationType> operations, NamePattern threadLocalClassPattern)
       implements ChaosSelector {
+    static final Set<OperationType> VALID_OPS =
+        EnumSet.of(OperationType.THREAD_LOCAL_GET, OperationType.THREAD_LOCAL_SET);
+
     public ThreadLocalSelector {
-      operations = validatedOperations(operations);
+      operations = validatedOperations(operations, VALID_OPS, "ThreadLocalSelector");
       threadLocalClassPattern =
           threadLocalClassPattern == null ? NamePattern.any() : threadLocalClassPattern;
     }
@@ -692,8 +778,11 @@ public sealed interface ChaosSelector
    */
   record HttpClientSelector(Set<OperationType> operations, NamePattern urlPattern)
       implements ChaosSelector {
+    static final Set<OperationType> VALID_OPS =
+        EnumSet.of(OperationType.HTTP_CLIENT_SEND, OperationType.HTTP_CLIENT_SEND_ASYNC);
+
     public HttpClientSelector {
-      operations = validatedOperations(operations);
+      operations = validatedOperations(operations, VALID_OPS, "HttpClientSelector");
       urlPattern = urlPattern == null ? NamePattern.any() : urlPattern;
     }
   }
@@ -720,8 +809,16 @@ public sealed interface ChaosSelector
    */
   record JdbcSelector(Set<OperationType> operations, NamePattern targetPattern)
       implements ChaosSelector {
+    static final Set<OperationType> VALID_OPS =
+        EnumSet.of(
+            OperationType.JDBC_CONNECTION_ACQUIRE,
+            OperationType.JDBC_STATEMENT_EXECUTE,
+            OperationType.JDBC_PREPARED_STATEMENT,
+            OperationType.JDBC_TRANSACTION_COMMIT,
+            OperationType.JDBC_TRANSACTION_ROLLBACK);
+
     public JdbcSelector {
-      operations = validatedOperations(operations);
+      operations = validatedOperations(operations, VALID_OPS, "JdbcSelector");
       targetPattern = targetPattern == null ? NamePattern.any() : targetPattern;
     }
   }
@@ -738,8 +835,10 @@ public sealed interface ChaosSelector
    */
   record DnsSelector(Set<OperationType> operations, NamePattern hostnamePattern)
       implements ChaosSelector {
+    static final Set<OperationType> VALID_OPS = EnumSet.of(OperationType.DNS_RESOLVE);
+
     public DnsSelector {
-      operations = validatedOperations(operations);
+      operations = validatedOperations(operations, VALID_OPS, "DnsSelector");
       hostnamePattern = hostnamePattern == null ? NamePattern.any() : hostnamePattern;
     }
   }
@@ -751,8 +850,10 @@ public sealed interface ChaosSelector
    * <p><b>Valid operations:</b> {@link OperationType#SSL_HANDSHAKE}.
    */
   record SslSelector(Set<OperationType> operations) implements ChaosSelector {
+    static final Set<OperationType> VALID_OPS = EnumSet.of(OperationType.SSL_HANDSHAKE);
+
     public SslSelector {
-      operations = validatedOperations(operations);
+      operations = validatedOperations(operations, VALID_OPS, "SslSelector");
     }
   }
 
@@ -764,8 +865,11 @@ public sealed interface ChaosSelector
    * OperationType#FILE_IO_WRITE}.
    */
   record FileIoSelector(Set<OperationType> operations) implements ChaosSelector {
+    static final Set<OperationType> VALID_OPS =
+        EnumSet.of(OperationType.FILE_IO_READ, OperationType.FILE_IO_WRITE);
+
     public FileIoSelector {
-      operations = validatedOperations(operations);
+      operations = validatedOperations(operations, VALID_OPS, "FileIoSelector");
     }
   }
 
@@ -787,9 +891,22 @@ public sealed interface ChaosSelector
 
   // ── Internal utilities ─────────────────────────────────────────────────────
 
-  private static Set<OperationType> validatedOperations(Set<OperationType> operations) {
+  private static Set<OperationType> validatedOperations(
+      final Set<OperationType> operations,
+      final Set<OperationType> validOps,
+      final String selectorName) {
     if (operations == null || operations.isEmpty()) {
       throw new IllegalArgumentException("operations must not be empty");
+    }
+    for (final OperationType op : operations) {
+      if (!validOps.contains(op)) {
+        throw new IllegalArgumentException(
+            selectorName
+                + " does not support operation "
+                + op
+                + "; valid operations are: "
+                + validOps);
+      }
     }
     return EnumSet.copyOf(operations);
   }

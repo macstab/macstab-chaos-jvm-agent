@@ -46,9 +46,16 @@ public class ChaosAutoConfiguration {
   /**
    * Exposes the installed {@link ChaosControlPlane} as a Spring-managed bean.
    *
+   * <p>The control plane is a JVM-wide singleton held by {@code ChaosAgentBootstrap.RUNTIME}; it
+   * survives context close and is safely shared across multiple application contexts in the same
+   * JVM (common in test suites). For that reason the bean intentionally does <b>not</b> declare
+   * {@code destroyMethod="close"} — tearing it down with the context would inert the runtime for
+   * every other context as well. Per-context cleanup is handled by {@link ChaosHandleRegistry}
+   * which stops only the handles it registered.
+   *
    * @return the installed control plane
    */
-  @Bean(destroyMethod = "close")
+  @Bean
   @ConditionalOnMissingBean
   public ChaosControlPlane chaosControlPlane() {
     return ChaosPlatform.installLocally();
@@ -133,6 +140,12 @@ public class ChaosAutoConfiguration {
     /**
      * Exposes the {@code /actuator/chaos} endpoint.
      *
+     * <p>Emits a {@link Level#WARNING} log entry if Spring Security is not present on the
+     * classpath: the endpoint exposes chaos activation/state over HTTP, and unauthenticated access
+     * to it can be used to inject faults into a running application. Operators running the endpoint
+     * in production without Security are responsible for protecting the endpoint via network-level
+     * controls (reverse proxy auth, private management port, etc.).
+     *
      * @param controlPlane the chaos control plane bean
      * @param handleRegistry the starter-local handle registry
      * @return the Actuator endpoint bean
@@ -141,7 +154,26 @@ public class ChaosAutoConfiguration {
     @ConditionalOnMissingBean
     public ChaosActuatorEndpoint chaosActuatorEndpoint(
         final ChaosControlPlane controlPlane, final ChaosHandleRegistry handleRegistry) {
+      if (!isSpringSecurityOnClasspath()) {
+        LOGGER.log(
+            Level.WARNING,
+            "chaos-agent: /actuator/chaos endpoint is enabled but Spring Security is not on the"
+                + " classpath. The endpoint exposes chaos activation/state; protect it with"
+                + " Security or network-level controls before using in production.");
+      }
       return new ChaosActuatorEndpoint(controlPlane, handleRegistry);
+    }
+
+    private static boolean isSpringSecurityOnClasspath() {
+      try {
+        Class.forName(
+            "org.springframework.security.config.annotation.web.builders.HttpSecurity",
+            false,
+            ActuatorConfiguration.class.getClassLoader());
+        return true;
+      } catch (final ClassNotFoundException ignored) {
+        return false;
+      }
     }
   }
 }

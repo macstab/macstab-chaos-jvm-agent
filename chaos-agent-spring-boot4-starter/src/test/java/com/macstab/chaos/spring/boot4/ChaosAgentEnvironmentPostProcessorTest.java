@@ -43,6 +43,19 @@ class ChaosAgentEnvironmentPostProcessorTest {
             .run("--spring.main.web-application-type=none", "--macstab.chaos.enabled=true");
 
     try {
+      // Marker property is set ONLY by the EnvironmentPostProcessor, so its presence proves
+      // the SPI wiring fires. Without this assertion the test would also pass if the
+      // auto-configuration bean attached the agent during context refresh instead.
+      assertThat(
+              ctx.getEnvironment()
+                  .getProperty(ChaosAgentEnvironmentPostProcessor.ATTACH_MARKER_PROPERTY))
+          .isEqualTo("spring-boot-4");
+      assertThat(
+              ctx.getEnvironment()
+                  .getPropertySources()
+                  .contains(ChaosAgentEnvironmentPostProcessor.ATTACH_MARKER_SOURCE))
+          .isTrue();
+
       final ChaosControlPlane chaos = ctx.getBean(ChaosControlPlane.class);
 
       final ChaosScenario rejectConnects =
@@ -92,6 +105,12 @@ class ChaosAgentEnvironmentPostProcessorTest {
             .run("--spring.main.web-application-type=none", "--macstab.chaos.enabled=false");
     try {
       assertThat(ctx.getBeanNamesForType(ChaosControlPlane.class)).isEmpty();
+      // Conversely, the EPP must NOT have attached the agent \u2014 its marker property
+      // must be absent when chaos is disabled.
+      assertThat(
+              ctx.getEnvironment()
+                  .getProperty(ChaosAgentEnvironmentPostProcessor.ATTACH_MARKER_PROPERTY))
+          .isNull();
     } finally {
       ctx.close();
     }

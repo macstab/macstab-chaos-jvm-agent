@@ -948,18 +948,18 @@ class CompatibilityValidatorTest {
   class NioSelectorOperationValidation {
 
     @Test
-    @DisplayName("non-NIO operation in NioSelector throws")
+    @DisplayName("non-NIO operation in NioSelector is rejected by the selector constructor")
     void nioSelectorWithNonNioOperationThrows() {
-      ChaosScenario scenario =
-          ChaosScenario.builder("nio-bad-op")
-              .selector(
+      // The NioSelector canonical constructor enforces its operation set — the invalid op never
+      // reaches CompatibilityValidator. This is strictly stronger than a runtime-validator check:
+      // invalid scenarios cannot be constructed at all.
+      assertThatThrownBy(
+              () ->
                   new ChaosSelector.NioSelector(
                       Set.of(OperationType.SOCKET_CONNECT), NamePattern.any()))
-              .effect(ChaosEffect.delay(Duration.ofMillis(1)))
-              .build();
-      assertThatThrownBy(() -> CompatibilityValidator.validate(scenario, featureSet))
-          .isInstanceOf(ChaosValidationException.class)
-          .hasMessageContaining("NioSelector operation");
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("NioSelector")
+          .hasMessageContaining("SOCKET_CONNECT");
     }
 
     @Test
@@ -983,18 +983,17 @@ class CompatibilityValidatorTest {
   class NetworkSelectorOperationValidation {
 
     @Test
-    @DisplayName("non-socket operation in NetworkSelector throws")
+    @DisplayName("non-socket operation in NetworkSelector is rejected by the selector constructor")
     void networkSelectorWithNonSocketOperationThrows() {
-      ChaosScenario scenario =
-          ChaosScenario.builder("net-bad-op")
-              .selector(
+      // See NioSelectorOperationValidation: record-level enforcement is stronger than
+      // validator-level enforcement.
+      assertThatThrownBy(
+              () ->
                   new ChaosSelector.NetworkSelector(
                       Set.of(OperationType.NIO_SELECTOR_SELECT), NamePattern.any()))
-              .effect(ChaosEffect.delay(Duration.ofMillis(1)))
-              .build();
-      assertThatThrownBy(() -> CompatibilityValidator.validate(scenario, featureSet))
-          .isInstanceOf(ChaosValidationException.class)
-          .hasMessageContaining("NetworkSelector operation");
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("NetworkSelector")
+          .hasMessageContaining("NIO_SELECTOR_SELECT");
     }
 
     @Test
@@ -1018,18 +1017,18 @@ class CompatibilityValidatorTest {
   class ThreadLocalSelectorOperationValidation {
 
     @Test
-    @DisplayName("non-thread-local operation in ThreadLocalSelector throws")
+    @DisplayName(
+        "non-thread-local operation in ThreadLocalSelector is rejected by the selector constructor")
     void threadLocalSelectorWithNonThreadLocalOperationThrows() {
-      ChaosScenario scenario =
-          ChaosScenario.builder("tl-bad-op")
-              .selector(
+      // See NioSelectorOperationValidation: record-level enforcement is stronger than
+      // validator-level enforcement.
+      assertThatThrownBy(
+              () ->
                   new ChaosSelector.ThreadLocalSelector(
                       Set.of(OperationType.EXECUTOR_SUBMIT), NamePattern.any()))
-              .effect(ChaosEffect.delay(Duration.ofMillis(1)))
-              .build();
-      assertThatThrownBy(() -> CompatibilityValidator.validate(scenario, featureSet))
-          .isInstanceOf(ChaosValidationException.class)
-          .hasMessageContaining("ThreadLocalSelector operation");
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("ThreadLocalSelector")
+          .hasMessageContaining("EXECUTOR_SUBMIT");
     }
 
     @Test

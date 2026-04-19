@@ -8,7 +8,6 @@ import com.macstab.chaos.api.ActivationPolicy;
 import com.macstab.chaos.api.ChaosEffect;
 import com.macstab.chaos.api.ChaosScenario;
 import com.macstab.chaos.api.ChaosSelector;
-import com.macstab.chaos.api.ChaosValidationException;
 import com.macstab.chaos.api.NamePattern;
 import com.macstab.chaos.api.OperationType;
 import java.time.Duration;
@@ -158,53 +157,43 @@ class JdbcSelectorTest {
     }
 
     @Test
-    @DisplayName("non-JDBC operation in JdbcSelector throws")
+    @DisplayName("non-JDBC operation in JdbcSelector is rejected by the selector constructor")
     void nonJdbcOperationThrows() {
-      ChaosScenario scenario =
-          ChaosScenario.builder("jdbc-bad-op")
-              .selector(
+      // Record-level enforcement: the invalid op cannot reach CompatibilityValidator.
+      assertThatThrownBy(
+              () ->
                   new ChaosSelector.JdbcSelector(
                       Set.of(OperationType.EXECUTOR_SUBMIT), NamePattern.any()))
-              .effect(ChaosEffect.delay(Duration.ofMillis(1)))
-              .activationPolicy(ActivationPolicy.always())
-              .build();
-      assertThatThrownBy(() -> CompatibilityValidator.validate(scenario, featureSet))
-          .isInstanceOf(ChaosValidationException.class)
-          .hasMessageContaining("JdbcSelector operation");
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("JdbcSelector")
+          .hasMessageContaining("EXECUTOR_SUBMIT");
     }
 
     @Test
-    @DisplayName("JDBC_CONNECTION_ACQUIRE in non-JDBC selector throws")
+    @DisplayName("JDBC_CONNECTION_ACQUIRE in NetworkSelector is rejected at construction")
     void jdbcOpWithWrongSelectorThrows() {
-      ChaosScenario scenario =
-          ChaosScenario.builder("jdbc-wrong-selector")
-              .selector(
+      assertThatThrownBy(
+              () ->
                   new ChaosSelector.NetworkSelector(
                       Set.of(OperationType.JDBC_CONNECTION_ACQUIRE), NamePattern.any()))
-              .effect(ChaosEffect.delay(Duration.ofMillis(1)))
-              .activationPolicy(ActivationPolicy.always())
-              .build();
-      assertThatThrownBy(() -> CompatibilityValidator.validate(scenario, featureSet))
-          .isInstanceOf(ChaosValidationException.class);
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("NetworkSelector")
+          .hasMessageContaining("JDBC_CONNECTION_ACQUIRE");
     }
 
     @Test
-    @DisplayName("JDBC_STATEMENT_EXECUTE in ExecutorSelector throws")
+    @DisplayName("JDBC_STATEMENT_EXECUTE in ExecutorSelector is rejected at construction")
     void jdbcStatementExecuteInExecutorSelectorThrows() {
-      ChaosScenario scenario =
-          ChaosScenario.builder("jdbc-wrong-selector-2")
-              .selector(
+      assertThatThrownBy(
+              () ->
                   new ChaosSelector.ExecutorSelector(
                       Set.of(OperationType.JDBC_STATEMENT_EXECUTE),
                       NamePattern.any(),
                       NamePattern.any(),
                       null))
-              .effect(ChaosEffect.delay(Duration.ofMillis(1)))
-              .activationPolicy(ActivationPolicy.always())
-              .build();
-      assertThatThrownBy(() -> CompatibilityValidator.validate(scenario, featureSet))
-          .isInstanceOf(ChaosValidationException.class)
-          .hasMessageContaining("JdbcSelector");
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("ExecutorSelector")
+          .hasMessageContaining("JDBC_STATEMENT_EXECUTE");
     }
   }
 }

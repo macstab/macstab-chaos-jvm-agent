@@ -8,7 +8,6 @@ import com.macstab.chaos.api.ActivationPolicy;
 import com.macstab.chaos.api.ChaosEffect;
 import com.macstab.chaos.api.ChaosScenario;
 import com.macstab.chaos.api.ChaosSelector;
-import com.macstab.chaos.api.ChaosValidationException;
 import com.macstab.chaos.api.NamePattern;
 import com.macstab.chaos.api.OperationType;
 import java.time.Duration;
@@ -148,34 +147,31 @@ class HttpClientSelectorTest {
     }
 
     @Test
-    @DisplayName("non-HTTP operation in HttpClientSelector throws")
+    @DisplayName("non-HTTP operation in HttpClientSelector is rejected by the selector constructor")
     void nonHttpOperationThrows() {
-      ChaosScenario scenario =
-          ChaosScenario.builder("http-bad-op")
-              .selector(
+      // The HttpClientSelector canonical constructor enforces its operation set — the invalid op
+      // cannot reach CompatibilityValidator.
+      assertThatThrownBy(
+              () ->
                   new ChaosSelector.HttpClientSelector(
                       Set.of(OperationType.EXECUTOR_SUBMIT), NamePattern.any()))
-              .effect(ChaosEffect.delay(Duration.ofMillis(1)))
-              .activationPolicy(ActivationPolicy.always())
-              .build();
-      assertThatThrownBy(() -> CompatibilityValidator.validate(scenario, featureSet))
-          .isInstanceOf(ChaosValidationException.class)
-          .hasMessageContaining("HttpClientSelector operation");
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("HttpClientSelector")
+          .hasMessageContaining("EXECUTOR_SUBMIT");
     }
 
     @Test
-    @DisplayName("HTTP_CLIENT_SEND with non-HttpClient selector throws")
+    @DisplayName("HTTP_CLIENT_SEND with non-HttpClient selector is rejected at construction")
     void httpOpWithWrongSelectorThrows() {
-      ChaosScenario scenario =
-          ChaosScenario.builder("http-wrong-selector")
-              .selector(
+      // Same rationale as above, but checked from the other direction: NetworkSelector does not
+      // accept HTTP_CLIENT_SEND at construction time.
+      assertThatThrownBy(
+              () ->
                   new ChaosSelector.NetworkSelector(
                       Set.of(OperationType.HTTP_CLIENT_SEND), NamePattern.any()))
-              .effect(ChaosEffect.delay(Duration.ofMillis(1)))
-              .activationPolicy(ActivationPolicy.always())
-              .build();
-      assertThatThrownBy(() -> CompatibilityValidator.validate(scenario, featureSet))
-          .isInstanceOf(ChaosValidationException.class);
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("NetworkSelector")
+          .hasMessageContaining("HTTP_CLIENT_SEND");
     }
   }
 

@@ -91,6 +91,12 @@ public record NamePattern(MatchMode mode, String value) {
     if (this.mode != MatchMode.ANY && this.value.isBlank()) {
       throw new IllegalArgumentException("name pattern value must be non-blank");
     }
+    // Length guard runs at construction so oversized patterns are rejected when the selector is
+    // built, not lazily on the first call to matches(). This keeps the blast radius of a hostile
+    // plan contained to the parser and prevents latent surprise during live chaos execution.
+    if (this.mode == MatchMode.GLOB || this.mode == MatchMode.REGEX) {
+      guardPatternLength(this.value);
+    }
   }
 
   /**
@@ -168,7 +174,6 @@ public record NamePattern(MatchMode mode, String value) {
   }
 
   private static Pattern compiledGlob(final String value) {
-    guardPatternLength(value);
     Pattern cached = GLOB_CACHE.get(value);
     if (cached != null) {
       return cached;
@@ -179,7 +184,6 @@ public record NamePattern(MatchMode mode, String value) {
   }
 
   private static Pattern compiledRegex(final String value) {
-    guardPatternLength(value);
     Pattern cached = REGEX_CACHE.get(value);
     if (cached != null) {
       return cached;
@@ -201,13 +205,17 @@ public record NamePattern(MatchMode mode, String value) {
   }
 
   private static String toRegex(String glob) {
+    // Escape every Java regex metacharacter so the compiled pattern only treats '*' and '?' as
+    // wildcards. Missing '[', ']', '{', '}' previously let glob inputs like "class[0-9]" expand
+    // into real character classes, causing unexpected matches.
     StringBuilder builder = new StringBuilder("^");
     for (int i = 0; i < glob.length(); i++) {
       char current = glob.charAt(i);
       switch (current) {
         case '*' -> builder.append(".*");
         case '?' -> builder.append('.');
-        case '.', '(', ')', '+', '|', '^', '$', '@', '%' -> builder.append('\\').append(current);
+        case '.', '(', ')', '+', '|', '^', '$', '@', '%', '[', ']', '{', '}' ->
+            builder.append('\\').append(current);
         case '\\' -> builder.append("\\\\");
         default -> builder.append(current);
       }
