@@ -121,6 +121,11 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
   @Override
   public void close() {
     registry.controllers().forEach(ScenarioController::destroy);
+    // Close AutoCloseable listeners (e.g. JfrChaosEventSink's FlightRecorder periodic hook).
+    // Previously those hooks were never removed, so every new ChaosRuntime accumulated a stale
+    // FlightRecorder entry pinning dead runtimes — a silent JVM-wide leak that escalated in
+    // test suites spinning up multiple runtimes.
+    observabilityBus.close();
   }
 
   void setInstrumentation(final Instrumentation inst) {

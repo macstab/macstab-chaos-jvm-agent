@@ -72,7 +72,13 @@ final class ScheduledExecutorAdvice {
       initialDelay =
           BootstrapDispatcher.adjustScheduleDelay(
               "SCHEDULE_SUBMIT", executor, taskForDelay, initialMillis, true);
-      period = periodMillis;
+      // Route period through the same adjustment pipeline so a scenario that extends (or
+      // compresses) scheduling affects every repeat, not just the initial fire. Previously the
+      // raw normalised millis was assigned unchanged — scenarios targeting scheduling chaos
+      // applied once on first tick and were silently ignored for every subsequent repeat.
+      period =
+          BootstrapDispatcher.adjustScheduleDelay(
+              "SCHEDULE_SUBMIT", executor, taskForDelay, periodMillis, true);
       unit = TimeUnit.MILLISECONDS;
     }
   }

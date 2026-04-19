@@ -231,8 +231,27 @@ public final class ChaosAgentBootstrap {
                   StartupConfigPoller.createIfEnabled(
                       agentArgs, environment, loaded.filePath(), runtime);
               if (poller.isPresent()) {
-                POLLER.set(poller.get());
-                poller.get().startWithInitialPlan(loaded.plan().scenarios());
+                final StartupConfigPoller instance = poller.get();
+                POLLER.set(instance);
+                try {
+                  instance.startWithInitialPlan(loaded.plan().scenarios());
+                } catch (final RuntimeException startFailure) {
+                  // startWithInitialPlan can throw after POLLER has been populated — e.g. an
+                  // activation failure on the initial plan, a scheduler rejection, or an I/O
+                  // hiccup reading the plan file. Without this, the poller scheduler daemon
+                  // thread is leaked for the JVM lifetime and POLLER holds a stray reference
+                  // even though startup failed. The outer try/catch at 247 will CAS the
+                  // RUNTIME back to null so the agent looks cleanly uninstalled — but the
+                  // poller thread would continue running, calling runtime.activate() on a
+                  // runtime that is no longer published. Close it before propagating.
+                  try {
+                    instance.close();
+                  } catch (final RuntimeException closeFailure) {
+                    startFailure.addSuppressed(closeFailure);
+                  }
+                  POLLER.compareAndSet(instance, null);
+                  throw startFailure;
+                }
               } else {
                 runtime.activate(loaded.plan());
               }

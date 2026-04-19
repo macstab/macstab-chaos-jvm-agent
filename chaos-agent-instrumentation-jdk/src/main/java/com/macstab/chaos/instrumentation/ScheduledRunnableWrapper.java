@@ -20,27 +20,38 @@ public final class ScheduledRunnableWrapper implements Runnable {
 
   @Override
   public void run() {
+    // Split the try scope in two: the chaos hook must not mask application exceptions.
+    //
+    // Before: a single try enclosed both beforeScheduledTick() and delegate.run(). When the
+    // task was periodic, the catch swallowed EVERY throwable — including genuine
+    // RuntimeException/Error from the application's own delegate.run(). The scheduler's
+    // self-cancellation contract (any exception from a periodic task permanently cancels all
+    // future executions) was silently defeated: broken tasks kept firing forever, operator
+    // dashboards missed the failure, and the health-check / metric worker that was supposed
+    // to page someone kept "succeeding" on schedule.
+    //
+    // After: beforeScheduledTick's exceptions (chaos-injected) are swallowed for periodic
+    // tasks to preserve cadence — the original intent. But delegate.run()'s exceptions are
+    // always propagated, restoring the JDK contract for real application failures.
+    final boolean proceed;
     try {
-      if (BootstrapDispatcher.beforeScheduledTick(executor, delegate, periodic)) {
-        delegate.run();
-      }
-    } catch (Throwable throwable) {
+      proceed = BootstrapDispatcher.beforeScheduledTick(executor, delegate, periodic);
+    } catch (final Throwable chaosFailure) {
       if (periodic) {
-        // ScheduledExecutorService contract: any exception from a periodic task's run() method
-        // permanently cancels all future executions with no notification. We refuse to let
-        // chaos-injected exceptions silently kill the application's scheduled work. A
-        // scenario that wants to kill a periodic task explicitly should use a different
-        // effect (cancel, terminate scheduler) rather than propagating an exception here.
         LOGGER.log(
             Level.WARNING,
-            "chaos: suppressing exception from periodic scheduled tick to preserve"
+            "chaos: suppressing chaos-injected exception from beforeScheduledTick to preserve"
                 + " periodicity (task="
                 + delegate.getClass().getName()
                 + ")",
-            throwable);
-      } else {
-        sneakyThrow(throwable);
+            chaosFailure);
+        return;
       }
+      sneakyThrow(chaosFailure);
+      return;
+    }
+    if (proceed) {
+      delegate.run();
     }
   }
 

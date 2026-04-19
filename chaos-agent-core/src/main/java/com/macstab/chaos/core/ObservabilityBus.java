@@ -66,6 +66,36 @@ final class ObservabilityBus {
   }
 
   /**
+   * Iterates the registered listeners and closes any that implement {@link AutoCloseable}.
+   *
+   * <p>Called from {@link ChaosControlPlaneImpl#close()} so that listeners which install JVM-wide
+   * side effects on construction (for example {@code JfrChaosEventSink}, which registers a {@link
+   * jdk.jfr.FlightRecorder#addPeriodicEvent} hook) can unwind those effects deterministically when
+   * the control plane is torn down. Previously the JFR sink's {@code close()} was never invoked, so
+   * every test-suite that spun up a new {@code ChaosRuntime} accumulated a stale periodic hook on
+   * the JFR singleton, each one pinning the dead runtime via its captured diagnostics reference.
+   * Failures are swallowed and logged — a mis-behaving listener's close() must not mask a sibling's
+   * cleanup or an application's shutdown sequence.
+   */
+  void close() {
+    for (final ChaosEventListener listener : listeners) {
+      if (listener instanceof AutoCloseable closeable) {
+        try {
+          closeable.close();
+        } catch (final Exception ex) {
+          LOGGER.warning(
+              () ->
+                  "ChaosEventListener threw during close; continuing. listener="
+                      + listener.getClass().getName()
+                      + " error="
+                      + ex);
+        }
+      }
+    }
+    listeners.clear();
+  }
+
+  /**
    * Constructs a {@link ChaosEvent} and dispatches it synchronously to every registered listener.
    *
    * <p>The event timestamp is captured as the first action of this method via {@link
@@ -133,7 +163,24 @@ final class ObservabilityBus {
    *     null}
    */
   void incrementMetric(final String name, final Map<String, String> tags) {
-    metricsSink.increment(name, tags);
+    try {
+      metricsSink.increment(name, tags);
+    } catch (final Throwable ex) {
+      // Same rationale as publish() above: this runs on application threads inside ByteBuddy
+      // advice. A custom sink (e.g. Micrometer) that loses its registry connection, is closed
+      // during JVM shutdown, or trips an internal assertion would otherwise unwind straight
+      // into user code at an opaque JDK call site like Thread.sleep or HttpClient.send. Swallow
+      // everything, log once at WARNING, and keep the application semantics clean.
+      LOGGER.warning(
+          () ->
+              "ChaosMetricsSink threw during incrementMetric; metric dropped."
+                  + " name="
+                  + name
+                  + " sink="
+                  + metricsSink.getClass().getName()
+                  + " error="
+                  + ex);
+    }
   }
 
   /**
