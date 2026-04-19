@@ -234,6 +234,11 @@ final class ScenarioController {
         // stressor and clobber startedAt, leaking the previous stressor for the JVM lifetime.
         return;
       }
+      // Release the old latch before reset(): otherwise any thread still parked in a prior
+      // ManualGate.await() — from an activation that was stopped without a matching release() —
+      // remains forever blocked on the retired latch. release() counts the old latch to zero so
+      // every waiting thread returns from await() before reset() installs the fresh one.
+      gate.release();
       gate.reset();
       startedAt = clock.instant();
       started.set(true);

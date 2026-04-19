@@ -19,6 +19,7 @@ import java.util.jar.JarEntry;
 import java.util.jar.JarOutputStream;
 import java.util.logging.Logger;
 import net.bytebuddy.agent.builder.AgentBuilder;
+import net.bytebuddy.agent.builder.ResettableClassFileTransformer;
 import net.bytebuddy.asm.Advice;
 import net.bytebuddy.matcher.ElementMatchers;
 import net.bytebuddy.utility.JavaModule;
@@ -72,6 +73,14 @@ import net.bytebuddy.utility.JavaModule;
 public final class JdkInstrumentationInstaller {
   private static final Logger LOGGER =
       Logger.getLogger(JdkInstrumentationInstaller.class.getName());
+
+  /**
+   * The transformer returned by the last successful {@link AgentBuilder#installOn} call. Retained
+   * so dynamic-attach test runners and framework teardown paths can call {@link #uninstall} to
+   * reset applied class transformations. {@code volatile} so the latest reference is visible to
+   * {@link #uninstall} on any thread.
+   */
+  private static volatile ResettableClassFileTransformer installedTransformer;
 
   private JdkInstrumentationInstaller() {}
 
@@ -907,7 +916,12 @@ public final class JdkInstrumentationInstaller {
                                                   byte[].class, int.class, int.class)))));
     }
 
-    agentBuilder.installOn(instrumentation);
+    // Retain the transformer returned by installOn so uninstall() can reset class transformations.
+    // Without this, once ByteBuddy has rewritten bootstrap-loaded JDK classes there is no handle
+    // to undo the transformation — dynamic-attach test runners that want to detach the agent
+    // between suites have no way back. Last-writer-wins is acceptable because ChaosAgentBootstrap's
+    // RUNTIME CAS serialises install() calls JVM-wide to at most one.
+    installedTransformer = agentBuilder.installOn(instrumentation);
 
     // ── Clock skew limitation: direct System.currentTimeMillis() cannot be intercepted ────────
     //
@@ -944,6 +958,30 @@ public final class JdkInstrumentationInstaller {
     //
     // This is a hard JVM limitation for any standard -javaagent: Java instrumentation agent.
     // Workarounds (e.g. -Xpatch:java.base, a C-level JVMTI agent) are out of scope.
+  }
+
+  /**
+   * Resets the installed ByteBuddy transformer, reverting class transformations applied by the most
+   * recent {@link #install} call.
+   *
+   * <p>Callable by dynamic-attach test runners between suites, or by framework teardown paths that
+   * need to detach chaos interception without restarting the JVM. Safe to call when no install has
+   * occurred — the no-transformer state is a silent no-op.
+   *
+   * @param instrumentation the same {@link Instrumentation} handle originally passed to {@link
+   *     #install}; required so the underlying JVMTI retransformation can see the previously
+   *     transformed classes
+   * @return {@code true} if a transformer was reset; {@code false} if no transformer was recorded
+   *     (i.e. {@link #install} was never called or already uninstalled)
+   */
+  public static boolean uninstall(final Instrumentation instrumentation) {
+    final ResettableClassFileTransformer current = installedTransformer;
+    if (current == null) {
+      return false;
+    }
+    installedTransformer = null;
+    current.reset(instrumentation, AgentBuilder.RedefinitionStrategy.RETRANSFORMATION);
+    return true;
   }
 
   /**

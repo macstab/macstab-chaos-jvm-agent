@@ -20,6 +20,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Control-plane half of the chaos runtime. Owns scenario lifecycle, session management,
@@ -38,6 +39,7 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
   private final ObservabilityBus observabilityBus;
   private final ScenarioRegistry registry;
   private final Map<Thread, Thread> shutdownHooks = new ConcurrentHashMap<>();
+  private final AtomicBoolean closed = new AtomicBoolean(false);
   private volatile Optional<Instrumentation> instrumentation = Optional.empty();
 
   ChaosControlPlaneImpl(final Clock clock, final ChaosMetricsSink metricsSink) {
@@ -120,7 +122,29 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
 
   @Override
   public void close() {
-    registry.controllers().forEach(ScenarioController::destroy);
+    // Idempotent close: a second call must not re-traverse the controllers and re-publish
+    // STOPPED lifecycle events. Framework integrations (Spring ApplicationContext teardown +
+    // JUnit @AfterAll, Quarkus shutdown + main-thread close, test suites asserting exact event
+    // counts) frequently call close() more than once; without this guard every controller fires
+    // a second STOPPED event via its ObservabilityBus on the repeat pass.
+    if (!closed.compareAndSet(false, true)) {
+      return;
+    }
+    // Destroy *and* unregister each controller. destroy() alone only calls stop(); it does not
+    // remove the controller from the registry. ScenarioRegistry.register() uses putIfAbsent and
+    // throws on re-registration of the same id, so a ChaosRuntime that is closed and then re-opened
+    // (Spring ContextRefreshed cycles, test-suite reinit, JVM-wide recreate) would see every
+    // previously-registered scenario id fail to reactivate. Snapshot the controllers into a list
+    // first — unregister() mutates the registry, so iterating the live view and mutating
+    // concurrently risks ConcurrentModificationException from non-ConcurrentMap backing.
+    final List<ScenarioController> toUnregister = new ArrayList<>(registry.controllers());
+    for (final ScenarioController controller : toUnregister) {
+      try {
+        controller.destroy();
+      } finally {
+        registry.unregister(controller);
+      }
+    }
     // Close AutoCloseable listeners (e.g. JfrChaosEventSink's FlightRecorder periodic hook).
     // Previously those hooks were never removed, so every new ChaosRuntime accumulated a stale
     // FlightRecorder entry pinning dead runtimes — a silent JVM-wide leak that escalated in

@@ -94,23 +94,29 @@ public final class ChaosHandleRegistry implements DisposableBean {
    */
   public int stopAll() {
     int count = 0;
-    // Use a key+value CAS remove so a concurrent register() that replaces the same id with a new
-    // handle is preserved instead of being silently dropped by a blind remove(key). Iterate over
-    // the live entrySet (not a snapshot) so a plain iterator.remove() gives us atomic per-entry
-    // semantics backed by ConcurrentHashMap.
-    final var iterator = handles.entrySet().iterator();
-    while (iterator.hasNext()) {
-      final Map.Entry<String, ChaosActivationHandle> entry = iterator.next();
-      final ChaosActivationHandle handle = entry.getValue();
-      if (!handles.remove(entry.getKey(), handle)) {
-        // A concurrent register() swapped this entry; leave the replacement alone.
-        continue;
-      }
-      try {
-        handle.stop();
-        count++;
-      } catch (final RuntimeException ignored) {
-        // best-effort stop-all
+    // Drain in passes until the map is empty. A single-pass iteration over a weakly-consistent
+    // ConcurrentHashMap entrySet() iterator is not guaranteed to observe entries inserted by a
+    // concurrent register() after the iterator was constructed — those survivors leak past
+    // context teardown and keep chaos active after close(). Re-snapshot until empty so every
+    // handle ever visible is stopped. The loop is bounded in practice because register() should
+    // not race teardown; a pathological caller that keeps registering would also be keeping the
+    // context from closing, so spinning here is the right failure mode (visible hang) rather
+    // than silent leak. Key+value CAS remove still guards against stale replacements inside a
+    // pass.
+    while (!handles.isEmpty()) {
+      final var iterator = handles.entrySet().iterator();
+      while (iterator.hasNext()) {
+        final Map.Entry<String, ChaosActivationHandle> entry = iterator.next();
+        final ChaosActivationHandle handle = entry.getValue();
+        if (!handles.remove(entry.getKey(), handle)) {
+          continue;
+        }
+        try {
+          handle.stop();
+          count++;
+        } catch (final RuntimeException ignored) {
+          // best-effort stop-all
+        }
       }
     }
     return count;
