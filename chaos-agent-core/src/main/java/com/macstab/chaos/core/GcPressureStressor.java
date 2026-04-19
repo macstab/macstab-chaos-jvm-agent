@@ -54,6 +54,14 @@ final class GcPressureStressor implements ManagedStressor {
                   int ringIndex = 0;
                   while (running.get() && System.currentTimeMillis() < deadline) {
                     for (int i = 0; i < objectsPerBatch; i++) {
+                      // Re-check running every iteration: close() sets running=false and nulls
+                      // the ring, but without this guard a batch that started before close()
+                      // would keep writing into the local `snapshot` for up to one full
+                      // BATCH_INTERVAL_MS, keeping allocated byte[] arrays strongly reachable
+                      // past the documented close() boundary.
+                      if (!running.get()) {
+                        break;
+                      }
                       final byte[] chunk = new byte[objectSizeBytes];
                       if (promote) {
                         final byte[][] snapshot = ring;
@@ -78,9 +86,19 @@ final class GcPressureStressor implements ManagedStressor {
 
   @Override
   public void close() {
+    // Set running=false BEFORE nulling the ring. The allocation thread re-checks running at the
+    // top of every inner iteration, so flipping it first guarantees that any in-flight batch
+    // observes the stop signal and skips the pending writes. Then interrupt to unblock the
+    // between-batch sleep, and join so close() only returns once the ring is guaranteed
+    // unreachable — per ManagedStressor.close() contract.
     running.set(false);
     ring = null;
     allocationThread.interrupt();
+    try {
+      allocationThread.join(500L);
+    } catch (final InterruptedException interrupted) {
+      Thread.currentThread().interrupt();
+    }
   }
 
   /** Returns {@code true} if the allocation thread is still running. */

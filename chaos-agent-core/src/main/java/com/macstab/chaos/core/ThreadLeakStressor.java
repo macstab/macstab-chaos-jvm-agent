@@ -61,9 +61,24 @@ final class ThreadLeakStressor implements ManagedStressor {
 
   @Override
   public void close() {
+    // ManagedStressor.close() javadoc mandates waiting for termination before returning. The
+    // previous implementation set the stop flag and returned — callers that immediately checked
+    // aliveCount() or observed thread liveness raced against interrupt-observation latency (up
+    // to the 50 ms parkNanos window below) and saw stale state. Interrupt every thread first so
+    // each one begins winding down in parallel, then join each with a bounded per-thread
+    // timeout. 200 ms × threadCount is still bounded overall in practice because by the time
+    // the second join runs the threads are all already observing the interrupt/stop flag.
     stopped.set(true);
     for (final Thread thread : leakedThreads) {
       thread.interrupt();
+    }
+    for (final Thread thread : leakedThreads) {
+      try {
+        thread.join(200L);
+      } catch (final InterruptedException interrupted) {
+        Thread.currentThread().interrupt();
+        break;
+      }
     }
   }
 

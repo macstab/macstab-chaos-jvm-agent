@@ -56,15 +56,23 @@ final class KeepAliveStressor implements ManagedStressor {
   }
 
   /**
-   * Signals the background thread to stop and interrupts it.
+   * Signals the background thread to stop, interrupts it, and waits briefly for termination.
    *
    * <p>Sets {@code running} to {@code false} so that the heartbeat loop exits after the current
    * sleep completes, then interrupts the thread so the loop exits immediately if it is currently
-   * sleeping inside {@link Thread#sleep}.
+   * sleeping inside {@link Thread#sleep}. Finally joins for up to 500 ms so {@link
+   * ManagedStressor#close()}'s contract — "wait for termination within a reasonable timeout" — is
+   * honoured. Non-daemon variants otherwise kept a platform thread alive past close() and prevented
+   * clean JVM exit.
    */
   @Override
   public void close() {
     running.set(false);
     thread.interrupt();
+    try {
+      thread.join(500L);
+    } catch (final InterruptedException interrupted) {
+      Thread.currentThread().interrupt();
+    }
   }
 }

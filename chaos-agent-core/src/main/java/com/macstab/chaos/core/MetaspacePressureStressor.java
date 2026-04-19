@@ -44,11 +44,31 @@ final class MetaspacePressureStressor implements ManagedStressor {
 
   MetaspacePressureStressor(final ChaosEffect.MetaspacePressureEffect effect) {
     final URLClassLoader loader = new URLClassLoader(new URL[0], null);
-    final List<Class<?>> classes = new ArrayList<>(effect.generatedClassCount());
-    for (int i = 0; i < effect.generatedClassCount(); i++) {
-      classes.add(generateClass(loader, i, effect.fieldsPerClass()));
-    }
+    // Publish the loader to the field BEFORE the ByteBuddy generation loop. If generateClass
+    // throws partway through (e.g. LinkageError from duplicate definition, IOException from
+    // unloaded.load()), the constructor exits and the activation is rolled back — but the
+    // URLClassLoader is still open. With the previous ordering (`this.isolatedLoader = loader`
+    // after the loop), close() saw a null field and skipped cleanup, permanently leaking the
+    // classloader. Under active metaspace pressure — the exact scenario this stressor targets —
+    // every failed activation compounded.
     this.isolatedLoader = loader;
+    final List<Class<?>> classes = new ArrayList<>(effect.generatedClassCount());
+    try {
+      for (int i = 0; i < effect.generatedClassCount(); i++) {
+        classes.add(generateClass(loader, i, effect.fieldsPerClass()));
+      }
+    } catch (final RuntimeException | Error generationFailure) {
+      // Best-effort close on failure: the caller's activation rollback will not invoke close()
+      // because the constructor never returned a fully-initialised instance. Drop the loader
+      // reference too so the partially-loaded classes aren't anchored by this stressor.
+      this.isolatedLoader = null;
+      try {
+        loader.close();
+      } catch (final Exception ignored) {
+        // Loader close failure during error propagation — do not mask the original failure.
+      }
+      throw generationFailure;
+    }
     this.retainedClasses = effect.retain() ? List.copyOf(classes) : List.of();
   }
 
