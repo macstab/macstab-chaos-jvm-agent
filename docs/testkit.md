@@ -146,10 +146,10 @@ tasks.test {
 class ExecutorDelayTest {
     @Test
     void slowExecutorShouldTriggerTimeout(ChaosSession session) throws Exception {
-        ChaosScenario scenario = ChaosScenario.builder()
-            .id("slow-executor")
+        ChaosScenario scenario = ChaosScenario.builder("slow-executor")
             .scope(ChaosScenario.ScenarioScope.SESSION)
-            .selector(ChaosSelector.executor())
+            .selector(ChaosSelector.executor(
+                Set.of(OperationType.EXECUTOR_SUBMIT, OperationType.EXECUTOR_WORKER_RUN)))
             .effect(ChaosEffect.delay(Duration.ofMillis(500)))
             .build();
 
@@ -171,11 +171,11 @@ class ExecutorDelayTest {
 void serviceResilientUnderHeapPressure() {
     ChaosControlPlane cp = ChaosTestKit.install();
     ChaosActivationHandle handle = cp.activate(
-        ChaosScenario.builder()
-            .id("heap-stress")
+        ChaosScenario.builder("heap-stress")
             .scope(ChaosScenario.ScenarioScope.JVM)
             .selector(ChaosSelector.stress(StressTarget.HEAP))
-            .effect(ChaosEffect.heapPressure(64 * 1024 * 1024))
+            .effect(ChaosEffect.heapPressure(64L * 1024 * 1024, 64 * 1024))
+            .activationPolicy(ActivationPolicy.always())
             .build()
     );
     try {
@@ -191,12 +191,11 @@ void serviceResilientUnderHeapPressure() {
 ```java
 @Test
 void dbCallShouldHandleNetworkFailure(ChaosSession session) {
-    session.activate(ChaosScenario.builder()
-        .id("db-socket-reject")
+    session.activate(ChaosScenario.builder("db-socket-reject")
         .scope(ChaosScenario.ScenarioScope.SESSION)
-        .selector(ChaosSelector.network()
-            .remoteHostPattern("db.internal.*")
-            .operations(OperationType.SOCKET_CONNECT))
+        .selector(ChaosSelector.network(
+            Set.of(OperationType.SOCKET_CONNECT),
+            NamePattern.regex("db\\.internal\\..*")))
         .effect(ChaosEffect.reject("simulated connection refused"))
         .build()
     );
@@ -212,10 +211,10 @@ void dbCallShouldHandleNetworkFailure(ChaosSession session) {
 ```java
 @Test
 void gateBlocksAndReleasesCorrectly(ChaosSession session) throws Exception {
-    ChaosActivationHandle handle = session.activate(ChaosScenario.builder()
-        .id("gate-test")
+    ChaosActivationHandle handle = session.activate(ChaosScenario.builder("gate-test")
         .scope(ChaosScenario.ScenarioScope.SESSION)
-        .selector(ChaosSelector.executor())
+        .selector(ChaosSelector.executor(
+            Set.of(OperationType.EXECUTOR_SUBMIT, OperationType.EXECUTOR_WORKER_RUN)))
         .effect(ChaosEffect.gate(Duration.ofSeconds(5)))
         .build()
     );

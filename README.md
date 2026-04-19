@@ -277,10 +277,9 @@ class MyServiceTest {
 
     @Test
     void shouldHandleExecutorDelays(ChaosSession session) {
-        session.activate(ChaosScenario.builder()
-            .id("slow-executor")
+        session.activate(ChaosScenario.builder("slow-executor")
             .scope(ChaosScenario.ScenarioScope.SESSION)
-            .selector(ChaosSelector.executor())
+            .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT, OperationType.EXECUTOR_WORKER_RUN)))
             .effect(ChaosEffect.delay(Duration.ofMillis(200)))
             .build());
 
@@ -317,28 +316,29 @@ java -javaagent:chaos-agent-bootstrap-0.1.0-SNAPSHOT.jar=configFile=/etc/chaos/p
 
 ## Selectors — Full Reference
 
-| Selector | Intercepts |
-|----------|-----------|
-| `executor()` | `ThreadPoolExecutor.execute()`, `submit()` |
-| `scheduledExecutor()` | `ScheduledExecutorService.schedule*()` |
-| `forkJoin()` | `ForkJoinTask.doExec()` |
-| `thread()` | `Thread.start()` — platform and virtual threads |
-| `queue()` | `BlockingQueue.put()` / `take()` / `offer()` / `poll()` |
-| `async()` | `CompletableFuture.complete()` / `completeExceptionally()` / `cancel()` |
-| `network()` | `Socket` connect / read / write / close, `ServerSocket.accept()` |
-| `nio()` | `Selector.select()` spurious wakeups, `SocketChannel` / `ServerSocketChannel` |
-| `method(class, method)` | Arbitrary method entry (`METHOD_ENTER`) and exit (`METHOD_EXIT`) |
-| `classLoader()` | `ClassLoader.defineClass()`, `loadClass()`, `getResource()` |
-| `monitor()` | `AbstractQueuedSynchronizer.acquire()` — AQS lock contention proxy |
-| `jvmRuntime()` | `currentTimeMillis()`, `nanoTime()`, `gc()`, `exit()`, `halt()` |
-| `serialization()` | `ObjectInputStream.readObject()` / `ObjectOutputStream.writeObject()` |
-| `zip()` | `Inflater.inflate()` / `Deflater.deflate()` |
-| `jndi()` | `InitialContext.lookup()` |
-| `jmx()` | `MBeanServer.invoke()` / `getAttribute()` |
-| `nativeLib()` | `System.loadLibrary()` / `System.load()` |
-| `shutdown()` | `System.exit()` / `Runtime.halt()` / shutdown hook register/remove |
-| `threadLocal()` | `ThreadLocal.get()` / `ThreadLocal.set()` |
-| `stress(target)` | Background stressor lifecycle binding |
+Every selector factory takes a `Set<OperationType>`. Pass an empty set to accept every operation the selector understands. For pattern-based filters, pass a `NamePattern` (e.g. `NamePattern.prefix(...)`, `NamePattern.regex(...)`, `NamePattern.any()`).
+
+| Factory | Intercepts |
+|---------|------------|
+| `ChaosSelector.executor(Set<OperationType>)` | `ThreadPoolExecutor.execute()` / `submit()` / `invokeAll()` |
+| `ChaosSelector.scheduling(Set<OperationType>)` | `ScheduledExecutorService.schedule*()` |
+| `ChaosSelector.thread(Set<OperationType>, ThreadKind)` | `Thread.start()` — platform and virtual threads |
+| `ChaosSelector.queue(Set<OperationType>)` | `BlockingQueue.put()` / `take()` / `offer()` / `poll()` |
+| `ChaosSelector.async(Set<OperationType>)` | `CompletableFuture.complete()` / `completeExceptionally()` / `cancel()` |
+| `ChaosSelector.network(Set<OperationType>[, NamePattern remoteHostPattern])` | `Socket` connect / read / write, `ServerSocket.accept()` |
+| `ChaosSelector.nio(Set<OperationType>[, NamePattern channelClassPattern])` | `SocketChannel`, `ServerSocketChannel`, `Selector.select()` |
+| `ChaosSelector.method(Set<OperationType>, NamePattern classPattern, NamePattern methodPattern)` | Arbitrary method entry (`METHOD_ENTER`) and exit (`METHOD_EXIT`) |
+| `ChaosSelector.classLoading(Set<OperationType>, NamePattern loaderClassPattern, NamePattern classNamePattern)` | `ClassLoader.loadClass()` / `defineClass()` / `getResource()` |
+| `ChaosSelector.monitor(Set<OperationType>)` | `synchronized` monitor enter/exit |
+| `ChaosSelector.jvmRuntime(Set<OperationType>)` | `currentTimeMillis()`, `nanoTime()`, `gc()`, `exit()`, `halt()` |
+| `ChaosSelector.threadLocal(Set<OperationType>[, NamePattern valueClassPattern])` | `ThreadLocal.get()` / `ThreadLocal.set()` |
+| `ChaosSelector.shutdown(Set<OperationType>)` | `System.exit()` / `Runtime.halt()` / shutdown hook register/remove |
+| `ChaosSelector.httpClient(Set<OperationType>[, NamePattern urlPattern])` | `HttpClient.send()` / `sendAsync()` |
+| `ChaosSelector.jdbc()` / `ChaosSelector.jdbc(OperationType...)` | JDBC `Connection`, `Statement`, `PreparedStatement`, `ResultSet` |
+| `ChaosSelector.dns(Set<OperationType>[, NamePattern hostnamePattern])` | `InetAddress.getAllByName()` |
+| `ChaosSelector.ssl(Set<OperationType>)` | `SSLEngine.wrap()` / `unwrap()` handshake |
+| `ChaosSelector.fileIo(Set<OperationType>)` | `FileInputStream` / `FileOutputStream` / `RandomAccessFile` / `Files` |
+| `ChaosSelector.stress(StressTarget)` | Background stressor lifecycle binding |
 
 ---
 
@@ -346,56 +346,69 @@ java -javaagent:chaos-agent-bootstrap-0.1.0-SNAPSHOT.jar=configFile=/etc/chaos/p
 
 ### Inline effects (execute on the calling thread)
 
-| Effect | Description |
-|--------|-------------|
-| `delay(Duration)` | Fixed pause before the operation proceeds |
-| `delay(min, max)` | Uniform random pause in `[min, max]` |
-| `gate(maxBlock)` | Block until `handle.release()` is called (or timeout elapses) |
-| `reject(message)` | Throw a semantically correct exception for the operation type |
-| `suppress()` | Silently discard; return `null` / `false` per operation contract |
-| `exceptionalCompletion(kind, msg)` | Complete a `CompletableFuture` with a failure |
-| `exceptionInjection(class, msg)` | Inject arbitrary exception at method entry via reflection |
-| `returnValueCorruption(strategy)` | Corrupt return value: `NULL`, `ZERO`, `EMPTY`, `BOUNDARY_MAX`, `BOUNDARY_MIN` |
-| `clockSkew(mode, offsetMs)` | Skew `currentTimeMillis()` / `nanoTime()`: `FIXED`, `DRIFT`, `FREEZE` |
-| `spuriousWakeup()` | Force `Selector.select()` to return 0 immediately |
+| Factory | Description |
+|---------|-------------|
+| `ChaosEffect.delay(Duration)` | Fixed pause before the operation proceeds |
+| `ChaosEffect.delay(Duration min, Duration max)` | Uniform random pause in `[min, max]` |
+| `ChaosEffect.gate(Duration maxBlock)` | Block until `handle.release()` is called (or `maxBlock` elapses) |
+| `ChaosEffect.reject(String message)` | Throw a semantically correct exception for the operation type |
+| `ChaosEffect.suppress()` | Silently discard; return `null` / `false` per operation contract |
+| `ChaosEffect.exceptionalCompletion(FailureKind, String message)` | Complete a `CompletableFuture` with a failure |
+| `ChaosEffect.injectException(String className, String message)` | Inject arbitrary exception at method entry via reflection |
+| `ChaosEffect.corruptReturnValue(ReturnValueStrategy)` | Corrupt return value: `NULL`, `ZERO`, `EMPTY`, `BOUNDARY_MAX`, `BOUNDARY_MIN` |
+| `ChaosEffect.skewClock(Duration, ClockSkewMode)` | Skew `currentTimeMillis()` / `nanoTime()`: `FIXED`, `DRIFT`, `FREEZE` |
+| `ChaosEffect.spuriousWakeup()` | Force `Selector.select()` to return 0 immediately |
 
 ### Background stressor effects
 
-| Effect | What it does | Recoverable? |
-|--------|-------------|:---:|
-| `heapPressure(bytes)` | Retain `byte[]` allocations on heap | ✅ |
-| `keepAlive(threads)` | Spawn idle non-daemon threads | ✅ |
-| `metaspacePressure(classes)` | Define synthetic classes into isolated classloader | ✅ (slow GC) |
-| `directBufferPressure(bytes)` | Allocate off-heap `ByteBuffer.allocateDirect` | ✅ (GC-dependent) |
-| `gcPressure(allocationRate)` | Continuously allocate short-lived objects | ✅ |
-| `finalizerBacklog(count)` | Flood the finalizer queue | ✅ |
-| `deadlock(participantCount)` | Create a real JVM monitor deadlock between N threads | ✅ |
-| `threadLeak(threadCount, namePrefix, daemon)` | Start permanently-parked threads that are never joined | ✅ |
-| `threadLocalLeak(entries)` | Leak `ThreadLocal` entries on a background thread | ✅ (partial) |
-| `monitorContention(threads)` | Saturate a shared lock with background contenders | ✅ |
-| `codeCachePressure(classes)` | Generate ByteBuddy classes to fill the JIT code cache | ✅ |
-| `safepointStorm(intervalMs)` | Trigger periodic GC + retransformation (STW pauses) | ✅ |
-| `stringInternPressure(count)` | Intern unique strings into the JVM string pool | ✅ (pool is GC root) |
-| `referenceQueueFlood(count)` | Flood the JVM reference queue with phantom refs | ✅ |
+| Factory | What it does | Recoverable? |
+|---------|--------------|:---:|
+| `ChaosEffect.heapPressure(long bytes, int chunkSizeBytes)` | Retain `byte[]` allocations on heap | ✅ |
+| `ChaosEffect.keepAlive(String threadName, boolean daemon, Duration heartbeat)` | Spawn an idle keep-alive thread | ✅ |
+| `ChaosEffect.metaspacePressure(int classCount, int fieldsPerClass)` | Define synthetic classes into an isolated classloader | ✅ (slow GC) |
+| `ChaosEffect.directBufferPressure(long totalBytes, int bufferSizeBytes)` | Allocate off-heap `ByteBuffer.allocateDirect` | ✅ (GC-dependent) |
+| `ChaosEffect.gcPressure(long allocationRateBytesPerSecond, Duration duration)` | Continuously allocate short-lived objects | ✅ |
+| `ChaosEffect.finalizerBacklog(int objectCount, Duration finalizerDelay)` | Flood the finalizer queue | ✅ |
+| `ChaosEffect.deadlock(int participantCount)` | Create a real JVM monitor deadlock between N threads | ✅ |
+| `ChaosEffect.threadLeak(int threadCount, String namePrefix, boolean daemon)` | Start permanently-parked threads that are never joined | ✅ |
+| `ChaosEffect.threadLocalLeak(int entriesPerThread, int valueSizeBytes)` | Leak `ThreadLocal` entries on a background thread | ✅ (partial) |
+| `ChaosEffect.monitorContention(…)` | Saturate a shared lock with background contenders | ✅ |
+| `ChaosEffect.codeCachePressure(int classCount, int methodsPerClass)` | Generate ByteBuddy classes to fill the JIT code cache | ✅ |
+| `ChaosEffect.safepointStorm(Duration gcInterval)` | Trigger periodic GC + retransformation (STW pauses) | ✅ |
+| `ChaosEffect.stringInternPressure(int internCount, int stringLengthBytes)` | Intern unique strings into the JVM string pool | ✅ (pool is GC root) |
+| `ChaosEffect.referenceQueueFlood(int referenceCount, Duration floodInterval)` | Flood the JVM reference queue with phantom refs | ✅ |
 
-> ⚠️ `deadlock()` and `threadLeak()` with `daemon=false` prevent a clean JVM exit until the activation handle is closed. Both are fully reversible: closing the handle interrupts all participating threads and releases all locks.
+> ⚠️ `deadlock()` and `threadLeak()` with `daemon=false` prevent a clean JVM exit until the activation handle is closed. Both require `ActivationPolicy.withDestructiveEffects()` at registration time. Closing the handle interrupts all participating threads and releases all locks.
 
 ---
 
 ## Activation Policy
 
+`ActivationPolicy` is a record. Use the static factories for the common cases, or construct the canonical record directly for fine-grained control. Probability must be in `(0.0, 1.0]` — pass `null` / omit the JSON field for the `1.0` default; omit the scenario entirely to disable it.
+
 ```java
-ActivationPolicy policy = ActivationPolicy.builder()
-    .probability(0.3)                        // fire 30% of the time
-    .rateLimit(10, Duration.ofSeconds(1))     // max 10 applications per second
-    .activateAfterMatches(5)                  // skip first 5 matches (warm-up)
-    .activeFor(Duration.ofSeconds(30))        // auto-expire after 30 s
-    .maxApplications(100L)                    // stop after 100 total applications
-    .randomSeed(42L)                          // reproducible sampling
-    .build();
+// Always fire (default)
+ActivationPolicy fire = ActivationPolicy.always();
+
+// Fire on every match, but start paused until handle.start() is called
+ActivationPolicy armed = ActivationPolicy.manual();
+
+// Explicit opt-in for deadlock() / threadLeak()
+ActivationPolicy destructive = ActivationPolicy.withDestructiveEffects();
+
+// Fine-grained: 30% probability, rate-limit 10/s, warm-up, auto-expire, cap, seed
+ActivationPolicy tuned = new ActivationPolicy(
+    ActivationPolicy.StartMode.AUTOMATIC,
+    0.30,                                              // probability (in (0, 1])
+    5L,                                                // activateAfterMatches (warm-up)
+    100L,                                              // maxApplications
+    Duration.ofSeconds(30),                            // activeFor
+    new ActivationPolicy.RateLimit(10, Duration.ofSeconds(1)),
+    42L,                                               // randomSeed
+    false);                                            // allowDestructiveEffects
 ```
 
-All guards compose as AND. All fields are optional. Default: fire on every match.
+All guards compose as AND. Fields may be `null` (Long / Duration / RateLimit / Long) to opt out of that axis.
 
 ---
 
@@ -457,7 +470,7 @@ MACSTAB_CHAOS_CONFIG_FILE=/etc/chaos/plan.json
 MACSTAB_CHAOS_WATCH_INTERVAL=500
 ```
 
-The diff algorithm is structural: scenarios with the same `id` **and** identical content are kept running untouched. Scenarios that are new or whose content changed are stopped and re-activated. Scenarios that were removed are stopped. Programmatically activated scenarios (via `ChaosRuntime.activate()`) are never touched by the poller.
+The diff algorithm is structural: scenarios with the same `id` **and** identical content are kept running untouched. Scenarios that are new or whose content changed are stopped and re-activated. Scenarios that were removed are stopped. Programmatically activated scenarios (via `ChaosControlPlane.activate()`) are never touched by the poller.
 
 ---
 
@@ -522,9 +535,9 @@ class OrderServiceChaosTest {
 
     @Test
     void slowDatabaseRejectsOrdersGracefully(ChaosSession chaos) {
-        chaos.activate(ChaosScenario.builder()
-            .id("slow-jdbc")
-            .selector(ChaosSelector.executor(NamePattern.prefix("HikariPool")))
+        chaos.activate(ChaosScenario.builder("slow-jdbc")
+            .scope(ChaosScenario.ScenarioScope.SESSION)
+            .selector(ChaosSelector.jdbc())
             .effect(ChaosEffect.delay(Duration.ofSeconds(3)))
             .build());
 
@@ -576,7 +589,7 @@ curl -X POST http://localhost:8080/actuator/chaos \
 curl -X DELETE http://localhost:8080/actuator/chaos/slow-executor
 
 # Stop all starter-managed scenarios
-curl -X POST http://localhost:8080/actuator/chaos/stopAll
+curl -X DELETE http://localhost:8080/actuator/chaos
 ```
 
 > The `/actuator/chaos` endpoint can activate arbitrary fault injection in the live JVM. Protect it as you would a shutdown endpoint — never expose it unauthenticated to the public internet.

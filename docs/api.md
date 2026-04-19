@@ -144,14 +144,13 @@ public interface ChaosActivationHandle extends AutoCloseable {
 # 5. ChaosScenario
 
 ```java
-ChaosScenario scenario = ChaosScenario.builder()
-    .id("unique-id")                              // required; unique within scope
+ChaosScenario scenario = ChaosScenario.builder("unique-id")  // required; unique within scope
     .description("optional label")
-    .scope(ChaosScenario.ScenarioScope.SESSION)   // JVM or SESSION
-    .precedence(0)                                // higher wins terminal action tie
-    .selector(ChaosSelector.executor())
+    .scope(ChaosScenario.ScenarioScope.SESSION)               // JVM or SESSION
+    .precedence(0)                                            // higher wins terminal action tie
+    .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
     .effect(ChaosEffect.delay(Duration.ofMillis(100)))
-    .activationPolicy(ActivationPolicy.defaults())
+    .activationPolicy(ActivationPolicy.always())
     .build();
 ```
 
@@ -163,86 +162,87 @@ ChaosScenario scenario = ChaosScenario.builder()
 
 # 6. ChaosSelector
 
-Sealed hierarchy. Every selector variant must specify a set of `OperationType` values that it targets.
+Sealed hierarchy. Each selector is an immutable record built through a static factory. Every factory (except `jdbc()`) takes a `Set<OperationType>` naming the operations the selector targets; pass an empty set to accept every operation the selector understands. Pattern-based filters take `NamePattern` values (`NamePattern.any()`, `NamePattern.prefix("...")`, `NamePattern.regex("...")`).
 
 ```java
 // Thread pool task submission and worker execution
-ChaosSelector.executor()
-ChaosSelector.executor()
-    .executorClassPattern(".*ThreadPool.*")
-    .taskClassPattern(".*HttpRequest.*")
-    .operations(OperationType.EXECUTOR_SUBMIT)
+ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT, OperationType.EXECUTOR_WORKER_RUN));
 
 // Scheduled task submission and tick execution
-ChaosSelector.scheduledExecutor()
-ChaosSelector.scheduledExecutor()
-    .executorClassPattern(".*")
-    .periodicOnly(true)
+ChaosSelector.scheduling(Set.of(OperationType.SCHEDULE_SUBMIT, OperationType.SCHEDULE_TICK));
 
-// ForkJoin tasks
-ChaosSelector.forkJoin()
-
-// Thread lifecycle
-ChaosSelector.thread()
-ChaosSelector.thread()
-    .threadNamePattern("worker-.*")
-    .kind(ChaosSelector.ThreadKind.VIRTUAL)
-    .daemon(false)
+// Thread lifecycle (platform or virtual)
+ChaosSelector.thread(Set.of(OperationType.THREAD_START), ChaosSelector.ThreadKind.VIRTUAL);
 
 // BlockingQueue operations
-ChaosSelector.queue()
-ChaosSelector.queue().queueClassPattern(".*LinkedBlockingQueue.*")
+ChaosSelector.queue(Set.of(OperationType.QUEUE_PUT, OperationType.QUEUE_TAKE));
 
 // CompletableFuture completion
-ChaosSelector.async()
-ChaosSelector.async().operations(OperationType.ASYNC_COMPLETE, OperationType.ASYNC_CANCEL)
+ChaosSelector.async(Set.of(OperationType.ASYNC_COMPLETE, OperationType.ASYNC_CANCEL));
 
-// Network sockets
-ChaosSelector.network()
-ChaosSelector.network()
-    .remoteHostPattern("db.internal.*")
-    .operations(OperationType.SOCKET_CONNECT)
+// Network sockets — optionally filter by remote host pattern
+ChaosSelector.network(Set.of(OperationType.SOCKET_CONNECT));
+ChaosSelector.network(
+    Set.of(OperationType.SOCKET_CONNECT),
+    NamePattern.prefix("db.internal"));
 
-// NIO Selector
-ChaosSelector.nio()
+// NIO channels and Selectors
+ChaosSelector.nio(Set.of(OperationType.NIO_SELECTOR_SELECT));
+ChaosSelector.nio(
+    Set.of(OperationType.NIO_SELECTOR_SELECT),
+    NamePattern.regex("sun\\.nio\\.ch\\..*"));
 
-// ClassLoader
-ChaosSelector.classLoader()
+// ClassLoader operations — filter by loader class and target class name
+ChaosSelector.classLoading(
+    Set.of(OperationType.CLASS_LOAD),
+    NamePattern.any(),                      // any loader class
+    NamePattern.prefix("com.example.plugin"));
 
 // Arbitrary method entry/exit
-ChaosSelector.method("com.example.MyService", "processOrder")
-ChaosSelector.method().classPattern("com.example.*").methodNamePattern("process.*")
+ChaosSelector.method(
+    Set.of(OperationType.METHOD_ENTER, OperationType.METHOD_EXIT),
+    NamePattern.exact("com.example.MyService"),
+    NamePattern.exact("processOrder"));
 
-// Synchronization (AQS acquire = monitor enter proxy)
-ChaosSelector.monitor()
+// Monitor enter/exit (synchronized)
+ChaosSelector.monitor(Set.of(OperationType.MONITOR_ENTER));
 
-// JVM-level operations (clock, GC, exit, JMX, JNDI, etc.)
-ChaosSelector.jvmRuntime()
-ChaosSelector.jvmRuntime().operations(OperationType.SYSTEM_CLOCK_MILLIS)
+// JVM runtime intrinsics (clock, GC, exit, …)
+ChaosSelector.jvmRuntime(Set.of(OperationType.SYSTEM_CLOCK_MILLIS));
 
-// Serialization
-ChaosSelector.serialization()
+// ThreadLocal operations — optionally filter by stored-value type
+ChaosSelector.threadLocal(Set.of(OperationType.THREAD_LOCAL_GET));
+ChaosSelector.threadLocal(
+    Set.of(OperationType.THREAD_LOCAL_GET),
+    NamePattern.prefix("com.example.tenant"));
 
-// ZIP compression/decompression
-ChaosSelector.zip()
+// Shutdown hooks and System.exit / Runtime.halt
+ChaosSelector.shutdown(Set.of(OperationType.SYSTEM_EXIT_REQUEST, OperationType.SHUTDOWN_HOOK_REGISTER));
 
-// ThreadLocal operations
-ChaosSelector.threadLocal()
+// HTTP client requests — optionally filter by URL pattern
+ChaosSelector.httpClient(Set.of(OperationType.HTTP_CLIENT_SEND));
+ChaosSelector.httpClient(
+    Set.of(OperationType.HTTP_CLIENT_SEND),
+    NamePattern.regex("https://api\\.example\\.com/.*"));
 
-// Shutdown hooks and System.exit
-ChaosSelector.shutdown()
+// JDBC (all operations, or explicit subset)
+ChaosSelector.jdbc();
+ChaosSelector.jdbc(OperationType.JDBC_STATEMENT_EXECUTE, OperationType.JDBC_PREPARED_STATEMENT);
 
-// Native library loading
-ChaosSelector.nativeLib()
+// DNS resolution — optionally filter by hostname pattern
+ChaosSelector.dns(Set.of(OperationType.DNS_RESOLVE));
+ChaosSelector.dns(
+    Set.of(OperationType.DNS_RESOLVE),
+    NamePattern.prefix("db.internal"));
 
-// JMX
-ChaosSelector.jmx()
+// SSL/TLS handshake
+ChaosSelector.ssl(Set.of(OperationType.SSL_HANDSHAKE));
 
-// JNDI
-ChaosSelector.jndi()
+// File I/O
+ChaosSelector.fileIo(Set.of(OperationType.FILE_IO_READ, OperationType.FILE_IO_WRITE));
 
-// Background stressor lifecycle
-ChaosSelector.stress(StressTarget.HEAP)
+// Background stressor lifecycle binding
+ChaosSelector.stress(StressTarget.HEAP);
 ```
 
 ---
@@ -255,55 +255,57 @@ Sealed hierarchy. Divided into interceptor effects (applied inline on the callin
 
 ```java
 // Fixed delay
-ChaosEffect.delay(Duration.ofMillis(200))
+ChaosEffect.delay(Duration.ofMillis(200));
 
 // Randomized delay: uniform in [min, max]
-ChaosEffect.delay(Duration.ofMillis(50), Duration.ofMillis(500))
+ChaosEffect.delay(Duration.ofMillis(50), Duration.ofMillis(500));
 
-// Block until handle.release() is called (or timeout elapses)
-ChaosEffect.gate(Duration.ofSeconds(30))  // maxBlock=null means block forever
+// Block until handle.release() is called (or maxBlock elapses)
+ChaosEffect.gate(Duration.ofSeconds(30));
 
 // Throw an operation-appropriate exception
-ChaosEffect.reject("connection refused")
+ChaosEffect.reject("connection refused");
 
 // Silently discard; return null/false per operation contract
-ChaosEffect.suppress()
+ChaosEffect.suppress();
 
 // Complete a CompletableFuture exceptionally
-ChaosEffect.exceptionalCompletion(ExceptionalCompletionEffect.FailureKind.TIMEOUT, "msg")
+ChaosEffect.exceptionalCompletion(
+    ChaosEffect.ExceptionalCompletionEffect.FailureKind.TIMEOUT,
+    "simulated upstream timeout");
 
-// Inject any exception at method entry
-ChaosEffect.exceptionInjection("java.io.IOException", "chaos", withStackTrace=true)
+// Inject any exception at method entry (fully qualified class name)
+ChaosEffect.injectException("java.io.IOException", "chaos");
 
 // Corrupt a method's return value
-ChaosEffect.returnValueCorruption(ReturnValueCorruptionEffect.Strategy.NULL)
+ChaosEffect.corruptReturnValue(ChaosEffect.ReturnValueStrategy.NULL);
 
 // Skew System.currentTimeMillis() / nanoTime()
-ChaosEffect.clockSkew(ClockSkewEffect.Mode.FIXED, offsetMillis=5000)
-ChaosEffect.clockSkew(ClockSkewEffect.Mode.DRIFT, offsetMillis=100)  // accumulates per call
-ChaosEffect.clockSkew(ClockSkewEffect.Mode.FREEZE, offsetMillis=0)   // freezes at start time
+ChaosEffect.skewClock(Duration.ofMillis(5000), ChaosEffect.ClockSkewMode.FIXED);
+ChaosEffect.skewClock(Duration.ofMillis(100),  ChaosEffect.ClockSkewMode.DRIFT);  // accumulates per call
+ChaosEffect.skewClock(Duration.ZERO,            ChaosEffect.ClockSkewMode.FREEZE); // freezes at start time
 
 // Inject spurious NIO Selector.select() return (returns 0 immediately)
-ChaosEffect.spuriousWakeup()
+ChaosEffect.spuriousWakeup();
 ```
 
 ## Stressor Effects
 
 ```java
-ChaosEffect.heapPressure(bytes)
-ChaosEffect.keepAlive(threads)
-ChaosEffect.metaspacePressure(classCount)
-ChaosEffect.directBufferPressure(bytes)
-ChaosEffect.gcPressure(allocationRatePerSecondBytes)
-ChaosEffect.finalizerBacklog(objectCount)
-ChaosEffect.deadlock()                    // NON-RECOVERABLE
-ChaosEffect.threadLeak(count)             // NON-RECOVERABLE
-ChaosEffect.threadLocalLeak(entryCount)
-ChaosEffect.monitorContention(threads)
-ChaosEffect.codeCachePressure(classCount)
-ChaosEffect.safepointStorm(intervalMillis)
-ChaosEffect.stringInternPressure(count)
-ChaosEffect.referenceQueueFlood(count)
+ChaosEffect.heapPressure(64L * 1024 * 1024, 64 * 1024);
+ChaosEffect.keepAlive("chaos-keepalive", false, Duration.ofSeconds(5));
+ChaosEffect.metaspacePressure(500, 16);
+ChaosEffect.directBufferPressure(128L * 1024 * 1024, 1024 * 1024);
+ChaosEffect.gcPressure(50L * 1024 * 1024, Duration.ofSeconds(30));
+ChaosEffect.finalizerBacklog(10_000, Duration.ofMillis(50));
+ChaosEffect.deadlock(2);                                  // NON-RECOVERABLE — requires withDestructiveEffects()
+ChaosEffect.threadLeak(4, "chaos-leak-", true);           // NON-RECOVERABLE — requires withDestructiveEffects()
+ChaosEffect.threadLocalLeak(100, 4096);
+ChaosEffect.monitorContention(/* implementation-specific args — see Javadoc */);
+ChaosEffect.codeCachePressure(200, 8);
+ChaosEffect.safepointStorm(Duration.ofSeconds(1));
+ChaosEffect.stringInternPressure(10_000, 64);
+ChaosEffect.referenceQueueFlood(10_000, Duration.ofMillis(50));
 ```
 
 **Warning**: `deadlock()` and `threadLeak()` are non-recoverable within the JVM process. Use only in controlled test environments. `close()` on these scenarios cannot terminate deadlocked or permanently-parked threads.
@@ -344,7 +346,7 @@ All guards compose as AND: a scenario fires only if every configured guard passe
 | Field | Type | Default | Meaning |
 |-------|------|---------|---------|
 | `startMode` | `StartMode` | `AUTOMATIC` | `AUTOMATIC` starts on registration; `MANUAL` waits for `handle.start()` |
-| `probability` | `double` | `1.0` | Fraction of passing matches that fire; `0.0` treated as `1.0` |
+| `probability` | `double` | `1.0` | Fraction of passing matches that fire; must be in `(0.0, 1.0]`. An explicit `0.0` is rejected with `IllegalArgumentException`; omit the scenario activation entirely to disable it. A `null` value in JSON defaults to `1.0`. |
 | `activateAfterMatches` | `long` | `0` | Skip this many initial matches before becoming eligible |
 | `maxApplications` | `Long` | `null` | Hard cap on total applications; `null` = unlimited |
 | `activeFor` | `Duration` | `null` | Auto-expire this long after first start; `null` = no expiry |
@@ -360,16 +362,14 @@ All guards compose as AND: a scenario fires only if every configured guard passe
 
 ```java
 // Correct: explicit opt-in
-ChaosScenario.builder()
-    .id("deadlock-test")
+ChaosScenario.builder("deadlock-test")
     .selector(ChaosSelector.stress(StressTarget.DEADLOCK))
     .effect(ChaosEffect.deadlock(2))
     .activationPolicy(ActivationPolicy.withDestructiveEffects())
     .build();
 
 // Rejected at activation: throws ChaosActivationException
-ChaosScenario.builder()
-    .id("deadlock-test")
+ChaosScenario.builder("deadlock-test")
     .selector(ChaosSelector.stress(StressTarget.DEADLOCK))
     .effect(ChaosEffect.deadlock(2))
     .activationPolicy(ActivationPolicy.always())  // allowDestructiveEffects=false
