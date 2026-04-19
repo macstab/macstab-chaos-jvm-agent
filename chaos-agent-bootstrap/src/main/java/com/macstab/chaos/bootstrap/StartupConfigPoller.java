@@ -6,7 +6,9 @@ import com.macstab.chaos.core.ChaosRuntime;
 import com.macstab.chaos.startup.AgentArgsParser;
 import com.macstab.chaos.startup.ChaosPlanMapper;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.attribute.FileTime;
 import java.util.HashMap;
@@ -162,11 +164,21 @@ public final class StartupConfigPoller implements AutoCloseable {
     if (current.equals(lastModified)) {
       return;
     }
-    lastModified = current;
     try {
-      final String json = Files.readString(configPath);
+      // NOFOLLOW_LINKS: if the config path was swapped for a symlink between stat and read
+      // (e.g. by an attacker with write access to the config directory), the open fails
+      // rather than silently following the link. Mirrors the check in StartupConfigLoader.
+      final String json;
+      try (final java.io.InputStream in =
+          Files.newInputStream(configPath, LinkOption.NOFOLLOW_LINKS)) {
+        json = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+      }
       final com.macstab.chaos.api.ChaosPlan newPlan = ChaosPlanMapper.read(json);
       applyDiff(newPlan.scenarios());
+      // Only advance lastModified AFTER a successful parse+apply. Advancing it before the
+      // parse would permanently mask the same-mtime case: a parse failure followed by the
+      // operator correcting the file in place (without touching mtime) would never reload.
+      lastModified = current;
       System.err.println(
           "[chaos-agent] config reloaded: "
               + newPlan.scenarios().size()

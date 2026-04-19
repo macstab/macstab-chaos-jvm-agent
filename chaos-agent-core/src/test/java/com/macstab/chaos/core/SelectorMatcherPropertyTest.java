@@ -132,14 +132,26 @@ class SelectorMatcherPropertyTest {
         .isFalse();
   }
 
+  @Property
+  void dnsSelectorDoesNotMatchWhenHostnameIsNull() {
+    // A DNS context may arrive with a null hostname (e.g. getByAddress path before the
+    // name is resolved). An exact-match selector must not match null — matching null would
+    // be silently permissive and inject into unintended DNS operations.
+    final ChaosSelector selector =
+        ChaosSelector.dns(Set.of(OperationType.DNS_RESOLVE), NamePattern.exact("example.com"));
+    final InvocationContext ctx =
+        new InvocationContext(
+            OperationType.DNS_RESOLVE, "InetAddress", null, null, false, null, null, null);
+    assertThat(SelectorMatcher.matches(selector, ctx))
+        .as("DnsSelector(exact) must not match a null hostname")
+        .isFalse();
+  }
+
   @Provide
   Arbitrary<OperationType> nonDnsOpType() {
-    return Arbitraries.of(
-        OperationType.FILE_IO_READ,
-        OperationType.FILE_IO_WRITE,
-        OperationType.THREAD_SLEEP,
-        OperationType.SSL_HANDSHAKE,
-        OperationType.JDBC_STATEMENT_EXECUTE);
+    // Cover every non-DNS op in OperationType — hand-curated lists become stale as new
+    // ops are added. Arbitraries.of + filter keeps coverage automatic.
+    return Arbitraries.of(OperationType.values()).filter(op -> op != OperationType.DNS_RESOLVE);
   }
 
   // ── SslSelector ────────────────────────────────────────────────────────────
@@ -168,12 +180,7 @@ class SelectorMatcherPropertyTest {
 
   @Provide
   Arbitrary<OperationType> nonSslOpType() {
-    return Arbitraries.of(
-        OperationType.DNS_RESOLVE,
-        OperationType.FILE_IO_READ,
-        OperationType.FILE_IO_WRITE,
-        OperationType.THREAD_SLEEP,
-        OperationType.JDBC_STATEMENT_EXECUTE);
+    return Arbitraries.of(OperationType.values()).filter(op -> op != OperationType.SSL_HANDSHAKE);
   }
 
   // ── ThreadSelector (THREAD_SLEEP) ──────────────────────────────────────────
@@ -206,11 +213,6 @@ class SelectorMatcherPropertyTest {
 
   @Provide
   Arbitrary<OperationType> nonSleepOpType() {
-    return Arbitraries.of(
-        OperationType.DNS_RESOLVE,
-        OperationType.FILE_IO_READ,
-        OperationType.SSL_HANDSHAKE,
-        OperationType.THREAD_START,
-        OperationType.JDBC_STATEMENT_EXECUTE);
+    return Arbitraries.of(OperationType.values()).filter(op -> op != OperationType.THREAD_SLEEP);
   }
 }

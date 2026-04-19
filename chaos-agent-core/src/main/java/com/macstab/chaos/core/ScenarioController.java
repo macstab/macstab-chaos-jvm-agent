@@ -205,7 +205,16 @@ final class ScenarioController {
    *       ObservabilityBus}.
    * </ul>
    */
-  void start() {
+  synchronized void start() {
+    // Task R3: start() and stop() must be mutually exclusive. Without synchronisation a thread
+    // calling stop() between state=ACTIVE and the stressor assignment below could run
+    // closeStressor() before the stressor exists, then start() would finish assigning a
+    // stressor that no subsequent stop() would ever close — leaking its threads for the rest
+    // of JVM lifetime. The stressor factory call is cold-path (scenario activation), so
+    // holding the lock across it costs nothing in the hot path.
+    if (state == ChaosDiagnostics.ScenarioState.STOPPED) {
+      return;
+    }
     gate.reset();
     startedAt = clock.instant();
     started.set(true);
@@ -240,7 +249,7 @@ final class ScenarioController {
    * Calling {@code stop()} on an already-stopped controller is safe and has no additional effect
    * beyond re-publishing the event.
    */
-  void stop() {
+  synchronized void stop() {
     started.set(false);
     state = ChaosDiagnostics.ScenarioState.STOPPED;
     reason = "stopped";

@@ -68,11 +68,20 @@ final class ObservabilityBus {
   /**
    * Constructs a {@link ChaosEvent} and dispatches it synchronously to every registered listener.
    *
-   * <p>The event timestamp is set to {@link java.time.Instant#now()} at the time of the call.
-   * Listeners are notified in registration order. A listener that throws is isolated: the exception
-   * is logged at WARNING level and delivery continues to the remaining listeners. This guarantee is
-   * critical in an agent context where publish runs on application threads inside ByteBuddy advice
-   * — a buggy custom listener must never propagate into application code.
+   * <p>The event timestamp is captured as the first action of this method via {@link
+   * Instant#now()}. When publish is invoked from inside the dispatcher's reentrancy guard, that
+   * {@code Instant.now()} call is already shielded from chaos clock-skew adjustment (the adjustment
+   * advice re-enters the dispatcher, which returns the real instant on reentrancy). When publish is
+   * invoked from outside a dispatch path (e.g. lifecycle STARTED / STOPPED from {@code activate()}
+   * / {@code stop()}), the adjustment would otherwise apply and event timestamps would silently
+   * reflect the app-perceived (skewed) clock — desirable for the user's code, undesirable for the
+   * operator reading chaos diagnostics. Capturing the timestamp first puts it as close as possible
+   * to the true event moment and keeps it consistent across call sites.
+   *
+   * <p>Listeners are notified in registration order. A listener that throws is isolated: the
+   * exception is logged at WARNING level and delivery continues to the remaining listeners. This
+   * guarantee is critical in an agent context where publish runs on application threads inside
+   * ByteBuddy advice — a buggy custom listener must never propagate into application code.
    *
    * @param type the event type; must not be {@code null}
    * @param scenarioId the ID of the scenario that generated this event; must not be {@code null}
@@ -85,7 +94,10 @@ final class ObservabilityBus {
       final String scenarioId,
       final String message,
       final Map<String, String> attributes) {
-    final ChaosEvent event = new ChaosEvent(Instant.now(), type, scenarioId, message, attributes);
+    // Capture the timestamp first, before any other work in this method, so that event ordering
+    // reflects publish()-arrival order as closely as possible even under listener backpressure.
+    final Instant timestamp = Instant.now();
+    final ChaosEvent event = new ChaosEvent(timestamp, type, scenarioId, message, attributes);
     for (ChaosEventListener listener : listeners) {
       try {
         listener.onEvent(event);

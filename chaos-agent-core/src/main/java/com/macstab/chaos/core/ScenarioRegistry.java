@@ -3,6 +3,8 @@ package com.macstab.chaos.core;
 import com.macstab.chaos.api.ChaosDiagnostics;
 import java.time.Clock;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -38,6 +40,11 @@ import java.util.function.Supplier;
  * java.util.concurrent.ConcurrentLinkedQueue}.
  */
 final class ScenarioRegistry implements ChaosDiagnostics {
+  private static final Comparator<ScenarioContribution> CONTRIBUTION_ORDER =
+      Comparator.comparingInt((ScenarioContribution c) -> c.scenario().precedence())
+          .reversed()
+          .thenComparing(c -> c.scenario().id());
+
   private final ConcurrentHashMap<String, ScenarioController> controllers =
       new ConcurrentHashMap<>();
   private final ConcurrentLinkedQueue<ActivationFailure> failures = new ConcurrentLinkedQueue<>();
@@ -118,15 +125,27 @@ final class ScenarioRegistry implements ChaosDiagnostics {
    *     scenario matches
    */
   List<ScenarioContribution> match(final InvocationContext context) {
-    return controllers.values().stream()
-        .map(controller -> controller.evaluate(context))
-        .filter(java.util.Objects::nonNull)
-        .sorted(
-            Comparator.comparingInt(
-                    (ScenarioContribution contribution) -> contribution.scenario().precedence())
-                .reversed()
-                .thenComparing(contribution -> contribution.scenario().id()))
-        .toList();
+    if (controllers.isEmpty()) {
+      return List.of();
+    }
+    ArrayList<ScenarioContribution> results = null;
+    for (final ScenarioController controller : controllers.values()) {
+      final ScenarioContribution contribution = controller.evaluate(context);
+      if (contribution == null) {
+        continue;
+      }
+      if (results == null) {
+        results = new ArrayList<>(4);
+      }
+      results.add(contribution);
+    }
+    if (results == null) {
+      return List.of();
+    }
+    if (results.size() > 1) {
+      results.sort(CONTRIBUTION_ORDER);
+    }
+    return Collections.unmodifiableList(results);
   }
 
   /**

@@ -88,9 +88,9 @@ class Phase4RuntimeTest {
     }
 
     @Test
-    @DisplayName("delay scenario blocks for at least 50 ms")
+    @DisplayName("delay scenario blocks for at least 100 ms")
     void delayBlocksForConfiguredDuration() throws Throwable {
-      final long delayMs = 50L;
+      final long delayMs = 100L;
       final ChaosRuntime runtime = new ChaosRuntime();
       final ChaosActivationHandle handle =
           activate(
@@ -137,9 +137,9 @@ class Phase4RuntimeTest {
   class BeforeDnsResolve {
 
     @Test
-    @DisplayName("delay scenario blocks for at least 50 ms")
+    @DisplayName("delay scenario blocks for at least 100 ms")
     void delayBlocksForConfiguredDuration() throws Throwable {
-      final long delayMs = 50L;
+      final long delayMs = 100L;
       final ChaosRuntime runtime = new ChaosRuntime();
       final ChaosActivationHandle handle =
           activate(
@@ -176,7 +176,7 @@ class Phase4RuntimeTest {
         final long elapsedMs = (System.nanoTime() - start) / 1_000_000L;
         assertThat(elapsedMs)
             .as("mismatch must not introduce delay (got %dms)", elapsedMs)
-            .isLessThan(100L);
+            .isLessThan(50L);
       } finally {
         handle.stop();
       }
@@ -222,7 +222,7 @@ class Phase4RuntimeTest {
         final long elapsedMs = (System.nanoTime() - start) / 1_000_000L;
         assertThat(elapsedMs)
             .as("DNS scenario must not delay FILE_IO_READ (got %dms)", elapsedMs)
-            .isLessThan(100L);
+            .isLessThan(50L);
       } finally {
         handle.stop();
       }
@@ -236,9 +236,9 @@ class Phase4RuntimeTest {
   class BeforeSslHandshake {
 
     @Test
-    @DisplayName("delay scenario blocks for at least 50 ms")
+    @DisplayName("delay scenario blocks for at least 100 ms")
     void delayBlocksForConfiguredDuration() throws Throwable {
-      final long delayMs = 50L;
+      final long delayMs = 100L;
       final ChaosRuntime runtime = new ChaosRuntime();
       final ChaosActivationHandle handle =
           activate(
@@ -298,7 +298,7 @@ class Phase4RuntimeTest {
       final long elapsedMs = (System.nanoTime() - start) / 1_000_000L;
       assertThat(elapsedMs)
           .as("stopped scenario must not delay (got %dms)", elapsedMs)
-          .isLessThan(100L);
+          .isLessThan(50L);
     }
   }
 
@@ -309,9 +309,9 @@ class Phase4RuntimeTest {
   class BeforeFileIo {
 
     @Test
-    @DisplayName("FILE_IO_READ delay blocks for at least 50 ms")
+    @DisplayName("FILE_IO_READ delay blocks for at least 100 ms")
     void readDelayBlocksForConfiguredDuration() throws Throwable {
-      final long delayMs = 50L;
+      final long delayMs = 100L;
       final ChaosRuntime runtime = new ChaosRuntime();
       final ChaosActivationHandle handle =
           activate(
@@ -332,9 +332,9 @@ class Phase4RuntimeTest {
     }
 
     @Test
-    @DisplayName("FILE_IO_WRITE delay blocks for at least 50 ms")
+    @DisplayName("FILE_IO_WRITE delay blocks for at least 100 ms")
     void writeDelayBlocksForConfiguredDuration() throws Throwable {
-      final long delayMs = 50L;
+      final long delayMs = 100L;
       final ChaosRuntime runtime = new ChaosRuntime();
       final ChaosActivationHandle handle =
           activate(
@@ -370,7 +370,7 @@ class Phase4RuntimeTest {
         final long elapsedMs = (System.nanoTime() - start) / 1_000_000L;
         assertThat(elapsedMs)
             .as("READ-only scenario must not delay WRITE (got %dms)", elapsedMs)
-            .isLessThan(100L);
+            .isLessThan(50L);
       } finally {
         handle.stop();
       }

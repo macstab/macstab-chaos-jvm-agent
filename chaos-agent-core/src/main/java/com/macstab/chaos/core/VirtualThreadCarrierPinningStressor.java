@@ -21,9 +21,11 @@ import java.util.logging.Logger;
  *
  * <p>This stressor simulates that condition without requiring virtual threads in the test: it
  * spawns {@code pinnedThreadCount} platform daemon threads (potential carriers), each of which
- * acquires and holds the shared {@link #PIN_MONITOR} inside a {@code synchronized} block for {@link
- * ChaosEffect.VirtualThreadCarrierPinningEffect#pinDuration()} per cycle. The loop runs until
- * {@link #close()} sets the stop flag.
+ * acquires and holds its own <em>private</em> {@code Object} monitor inside a {@code synchronized}
+ * block for {@link ChaosEffect.VirtualThreadCarrierPinningEffect#pinDuration()} per cycle. Each
+ * thread holds a distinct monitor so that the threads do not serialise on a single lock — which
+ * would reduce the stressor to simulating only one pinned carrier regardless of configured count.
+ * The loop runs until {@link #close()} sets the stop flag.
  *
  * <p>All threads start simultaneously via a {@link CountDownLatch} so that the full carrier
  * pressure is applied from the first cycle rather than staggered by OS thread-startup jitter.
@@ -34,8 +36,6 @@ import java.util.logging.Logger;
 final class VirtualThreadCarrierPinningStressor implements ManagedStressor {
 
   private static final Logger LOGGER = Logger.getLogger("com.macstab.chaos");
-
-  private static final Object PIN_MONITOR = new Object();
 
   private final List<Thread> pinningThreads;
   private final AtomicBoolean stopped = new AtomicBoolean(false);
@@ -55,6 +55,10 @@ final class VirtualThreadCarrierPinningStressor implements ManagedStressor {
 
     for (int i = 0; i < count; i++) {
       final String name = "chaos-carrier-pin-" + i;
+      // Per-thread monitor: each carrier-pinning thread must hold a DIFFERENT monitor to
+      // simulate N independent pinned carriers. Sharing one monitor serialises the threads
+      // so that only one carrier is pinned at a time.
+      final Object pinMonitor = new Object();
       final Thread thread =
           Thread.ofPlatform()
               .daemon(true)
@@ -69,7 +73,7 @@ final class VirtualThreadCarrierPinningStressor implements ManagedStressor {
                       return;
                     }
                     while (!stopped.get()) {
-                      synchronized (PIN_MONITOR) {
+                      synchronized (pinMonitor) {
                         final long deadline = System.nanoTime() + pinNanos;
                         while (System.nanoTime() < deadline && !stopped.get()) {
                           java.util.concurrent.locks.LockSupport.parkNanos(10_000L /* 10 µs */);

@@ -18,10 +18,11 @@ import java.util.logging.Logger;
  *   <li>{@code registerCleaner=false} (the default leak mode): strong references are kept in this
  *       stressor. No Cleaner is registered, so native memory is not freed until {@link #close()} is
  *       called or the JVM exits.
- *   <li>{@code registerCleaner=true}: a {@link Cleaner} action is registered against a phantom
- *       object, but the direct buffer reference is then dropped. Native memory will be freed when
- *       the GC next collects the phantom — but because no strong reference to the buffer is kept,
- *       the GC may collect it at any time, making this mode less predictable as a pressure tool.
+ *   <li>{@code registerCleaner=true}: a {@link Cleaner} action is registered whose referent is
+ *       <em>this stressor</em>, so the cleaner fires only when this stressor instance becomes
+ *       phantom-reachable (i.e., the stressor has been released by the agent). The direct buffer is
+ *       also strongly retained so that it survives until explicit {@link #close()} or GC of the
+ *       stressor itself.
  * </ul>
  *
  * <p>{@link #close()} attempts to release native memory immediately via reflection on the internal
@@ -41,13 +42,17 @@ final class DirectBufferPressureStressor implements ManagedStressor {
     while (remaining > 0) {
       final int size = (int) Math.min(effect.bufferSizeBytes(), remaining);
       final ByteBuffer buffer = ByteBuffer.allocateDirect(size);
+      // Always retain a strong reference so the buffer survives until close() or until this
+      // stressor instance becomes phantom-reachable. Without this retention, registerCleaner=true
+      // previously used a throwaway local referent that became unreachable at loop-iteration
+      // end, so GC could reclaim the buffer immediately and the stressor produced zero
+      // sustained pressure.
+      buffers.add(buffer);
       if (effect.registerCleaner()) {
-        // Register a Cleaner action but do NOT retain the buffer. Native memory will be
-        // freed when GC collects the phantom referent.
-        final Object referent = new Object();
-        CLEANER.register(referent, () -> freeDirectBuffer(buffer));
-      } else {
-        buffers.add(buffer);
+        // Referent = this stressor. The cleaner fires only when the stressor is
+        // phantom-reachable (e.g., dereferenced without explicit close()); freeDirectBuffer
+        // is safely idempotent, so close()+GC doesn't double-free in a harmful way.
+        CLEANER.register(this, () -> freeDirectBuffer(buffer));
       }
       remaining -= size;
     }

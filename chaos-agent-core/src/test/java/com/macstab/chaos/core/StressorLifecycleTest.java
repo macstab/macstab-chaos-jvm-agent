@@ -61,12 +61,17 @@ class StressorLifecycleTest {
     }
 
     @Test
-    @DisplayName("registerCleaner=true retains no strong references")
-    void cleanerModeRetainsNoStrongRefs() {
+    @DisplayName("registerCleaner=true still retains buffers so pressure is actually produced")
+    void cleanerModeAlsoRetainsBuffers() {
+      // Previously the cleaner mode used a throwaway referent that became unreachable
+      // immediately, causing the cleaner to fire before any sustained pressure could build.
+      // The stressor now retains strong references in both modes — the cleaner is attached
+      // to the stressor itself, so cleanup happens on stressor phantom-reachability rather
+      // than on per-buffer GC.
       final DirectBufferPressureStressor stressor =
           new DirectBufferPressureStressor(
               new ChaosEffect.DirectBufferPressureEffect(4096L, 1024, true));
-      assertThat(stressor.retainedBufferCount()).isZero();
+      assertThat(stressor.retainedBufferCount()).isEqualTo(4);
     }
 
     @Test

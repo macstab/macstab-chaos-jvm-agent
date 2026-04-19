@@ -60,8 +60,14 @@ public final class BootstrapDispatcher {
    * ThreadLocalGetAdvice} / {@code ThreadLocalSetAdvice} to break the instrumentation recursion
    * that would otherwise occur when {@code ThreadLocal.get()} is intercepted. See {@code
    * JvmRuntimeAdvice.ThreadLocalGetAdvice} for the full reentrancy analysis.
+   *
+   * <p>A one-element {@code int[]} is held rather than an {@link Integer} so the fast path in
+   * {@link #invoke} performs exactly one {@link ThreadLocal#get()} (per call) and mutates the
+   * counter in place — avoiding both a second {@code get()} and the Integer autoboxing that a
+   * {@code set(get()+1)} pair would incur. This matters because every intercepted JDK call hits
+   * this guard.
    */
-  private static final ThreadLocal<Integer> DEPTH = ThreadLocal.withInitial(() -> 0);
+  private static final ThreadLocal<int[]> DEPTH = ThreadLocal.withInitial(() -> new int[1]);
 
   /**
    * Returns the {@link ThreadLocal} instance used internally as the reentrancy depth counter.
@@ -79,7 +85,7 @@ public final class BootstrapDispatcher {
    *
    * @return the depth {@code ThreadLocal}; never null
    */
-  public static ThreadLocal<Integer> depthThreadLocal() {
+  public static ThreadLocal<int[]> depthThreadLocal() {
     return DEPTH;
   }
 
@@ -1469,21 +1475,22 @@ public final class BootstrapDispatcher {
    *     #sneakyThrow(Throwable)} to avoid checked-exception declaration pollution
    */
   private static <T> T invoke(final ThrowingSupplier<T> supplier, final T fallback) {
-    if (DEPTH.get() > 0) {
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
       return fallback;
     }
-    DEPTH.set(DEPTH.get() + 1);
+    depth[0] = 1;
     try {
       return supplier.get();
     } catch (Throwable throwable) {
       sneakyThrow(throwable);
       return fallback;
     } finally {
-      final int next = DEPTH.get() - 1;
-      if (next == 0) {
+      if (--depth[0] == 0) {
+        // Remove the ThreadLocal entry on unwind to avoid retaining a per-thread reference in
+        // pooled threads. A subsequent reentry allocates a fresh int[] — cheap, and bounds the
+        // footprint by actual concurrency rather than pool size × JVM lifetime.
         DEPTH.remove();
-      } else {
-        DEPTH.set(next);
       }
     }
   }

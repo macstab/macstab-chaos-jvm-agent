@@ -56,7 +56,16 @@ final class MonitorContentionStressor implements ManagedStressor {
                       return;
                     }
                     while (!stopped.get()) {
-                      lock.lock();
+                      // lockInterruptibly, not lock(): a thread blocked waiting for the lock
+                      // must unblock on close()'s interrupt(), otherwise close() returns while
+                      // the thread can still be waiting unboundedly for the lock.
+                      try {
+                        lock.lockInterruptibly();
+                      } catch (final InterruptedException e) {
+                        stopped.set(true);
+                        Thread.currentThread().interrupt();
+                        return;
+                      }
                       try {
                         final long holdDeadline = System.nanoTime() + holdNanos;
                         while (System.nanoTime() < holdDeadline && !stopped.get()) {

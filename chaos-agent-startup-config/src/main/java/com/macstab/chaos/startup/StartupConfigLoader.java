@@ -92,8 +92,13 @@ public final class StartupConfigLoader {
   private static LoadedPlan loadFromFile(final String filePath, final boolean debugDumpOnStart) {
     final Path path = validateAndResolvePath(filePath);
     final String json;
-    try {
-      json = Files.readString(path);
+    // NOFOLLOW_LINKS on the read itself closes the TOCTOU window: validateAndResolvePath's
+    // symlink rejection ran on a previous syscall, so an attacker with directory write access
+    // could swap the regular file for a symlink between validation and read. Opening the
+    // stream with NOFOLLOW_LINKS makes the read atomic with the symlink check — if the path
+    // has since become a symlink, the open fails.
+    try (final java.io.InputStream in = Files.newInputStream(path, LinkOption.NOFOLLOW_LINKS)) {
+      json = new String(in.readAllBytes(), StandardCharsets.UTF_8);
     } catch (IOException exception) {
       throw new ConfigLoadException(
           "failed to read chaos plan config file: " + path, "file:" + filePath, exception);

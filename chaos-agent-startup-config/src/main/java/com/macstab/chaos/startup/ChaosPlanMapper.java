@@ -42,13 +42,18 @@ public final class ChaosPlanMapper {
    *     contract
    */
   public static ChaosPlan read(final String json) {
-    if (json.length() > MAX_JSON_LENGTH) {
+    // String.length() counts UTF-16 chars, not bytes — a 500k-char JSON full of 4-byte
+    // codepoints is ~2 MiB encoded, silently bypassing the documented 1 MiB gate. Count the
+    // actual UTF-8 byte length with a short-circuit pass so oversized inputs are rejected
+    // without a full byte[] allocation.
+    final int utf8Bytes = utf8ByteLengthCapped(json, MAX_JSON_LENGTH + 1);
+    if (utf8Bytes > MAX_JSON_LENGTH) {
       throw new ConfigLoadException(
           "chaos plan JSON exceeds maximum size of "
               + MAX_JSON_LENGTH
-              + " bytes ("
-              + json.length()
-              + " provided)",
+              + " bytes (>"
+              + MAX_JSON_LENGTH
+              + " UTF-8 bytes provided)",
           "json-input");
     }
     try {
@@ -56,6 +61,34 @@ public final class ChaosPlanMapper {
     } catch (JsonProcessingException exception) {
       throw new ConfigLoadException("failed to parse chaos plan JSON", "json-input", exception);
     }
+  }
+
+  /**
+   * Returns the UTF-8 byte length of {@code s}, but stops counting once the result reaches or
+   * exceeds {@code cap}. The returned value is exact when below {@code cap}; otherwise it is simply
+   * {@code >= cap}.
+   */
+  static int utf8ByteLengthCapped(final CharSequence s, final int cap) {
+    int bytes = 0;
+    final int n = s.length();
+    for (int i = 0; i < n; i++) {
+      final char c = s.charAt(i);
+      if (c < 0x80) {
+        bytes += 1;
+      } else if (c < 0x800) {
+        bytes += 2;
+      } else if (Character.isHighSurrogate(c)) {
+        // Full UTF-8 encoding of a surrogate pair is 4 bytes; consume the low surrogate too.
+        bytes += 4;
+        i++;
+      } else {
+        bytes += 3;
+      }
+      if (bytes >= cap) {
+        return bytes;
+      }
+    }
+    return bytes;
   }
 
   /**

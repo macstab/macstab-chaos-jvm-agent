@@ -9,7 +9,7 @@
 
 # chaos-agent-instrumentation-jdk — Instrumentation Layer Reference
 
-> Internal reference for the bootstrap bridge, ByteBuddy advice classes, reentrancy guard, and the 46-handle interception surface.
+> Internal reference for the bootstrap bridge, ByteBuddy advice classes, reentrancy guard, and the 57-handle interception surface.
 > 
 > *Engineered by* **[Christian Schnapka](https://macstab.com)** — Embedded Principal+ Engineer · [Macstab GmbH](https://macstab.com) · Hamburg, Germany
 
@@ -22,7 +22,7 @@
 `chaos-agent-instrumentation-jdk` is the adapter between ByteBuddy's advice model and `ChaosRuntime`'s normalized dispatch API. Its responsibilities:
 
 1. Package `BootstrapDispatcher` into a temp JAR and append it to the bootstrap classpath
-2. Build a 46-slot `MethodHandle[]` array and wire it into `BootstrapDispatcher` via reflection
+2. Build a 57-slot `MethodHandle[]` array and wire it into `BootstrapDispatcher` via reflection
 3. Assemble an `AgentBuilder` covering all Phase 1 and Phase 2 interception points and install it
 
 After installation, this module has no further runtime role. All runtime execution paths go through `BootstrapDispatcher` → `ChaosBridge` → `ChaosRuntime`.
@@ -31,8 +31,8 @@ After installation, this module has no further runtime role. All runtime executi
 
 In scope:
 - `JdkInstrumentationInstaller` — entry point; orchestrates all startup steps
-- `BootstrapDispatcher` — bootstrap-classloader-resident static dispatcher (46 dispatch methods + reentrancy guard)
-- `BridgeDelegate` — interface defining the 46-method contract
+- `BootstrapDispatcher` — bootstrap-classloader-resident static dispatcher (57 dispatch methods + reentrancy guard)
+- `BridgeDelegate` — interface defining the 57-method contract
 - `ChaosBridge` — agent-classloader implementation of `BridgeDelegate`; thin delegation to `ChaosRuntime`
 - All `@Advice` classes for Phase 1 and Phase 2 interception points
 - `ScheduledCallableWrapper`, `ScheduledRunnableWrapper` — task wrappers for tick-level interception
@@ -69,8 +69,8 @@ Out of scope:
 | **Bootstrap classloader** | The JVM root classloader; loads `java.*`, `javax.*`. Has no parent. Can only see classes from `rt.jar`/`java.base` and explicitly appended JARs. |
 | **Agent classloader** | The classloader created for the agent JAR. Has the bootstrap classloader as parent (indirect). Can see all agent classes. |
 | **Advice class** | A ByteBuddy concept: a class containing `@Advice.OnMethodEnter` and/or `@Advice.OnMethodExit` static methods, whose bytecode is inlined into the instrumented method. Not a real class instantiation at runtime — the advice body is copied as bytecode. |
-| **BootstrapDispatcher** | A class that must be visible to the bootstrap classloader. Provides 46 static dispatch methods called from advice. |
-| **BridgeDelegate** | Interface in the agent classloader defining the 46-method contract. Implemented by `ChaosBridge`. |
+| **BootstrapDispatcher** | A class that must be visible to the bootstrap classloader. Provides 57 static dispatch methods called from advice. |
+| **BridgeDelegate** | Interface in the agent classloader defining the 57-method contract. Implemented by `ChaosBridge`. |
 | **MethodHandle** | A typed reference to a method, invokable across classloader boundaries. Built from the agent classloader; stored in `BootstrapDispatcher.handles[]`. |
 | **DEPTH guard** | `ThreadLocal<Integer>` in `BootstrapDispatcher`. Prevents infinite recursion when chaos code calls instrumented JDK methods. |
 | **Phase 1** | Instrumentation installed in both premain and agentmain: `ThreadPoolExecutor`, `Thread`, `ScheduledThreadPoolExecutor`. |
@@ -95,7 +95,7 @@ JdkInstrumentationInstaller.install(instrumentation, runtime, premainMode)
    → BootstrapDispatcher is now visible to bootstrap classloader
 
 2. installDelegate(new ChaosBridge(runtime))
-   — buildMethodHandles(): 46 MethodHandle[] via MethodHandles.publicLookup() against BridgeDelegate
+   — buildMethodHandles(): 57 MethodHandle[] via MethodHandles.publicLookup() against BridgeDelegate
    — Class.forName("...BootstrapDispatcher", true, null)  // null CL = bootstrap CL
    — bootstrapDispatcherClass.getMethod("install", Object.class, MethodHandle[].class)
                               .invoke(null, bridgeDelegate, mh)
@@ -240,7 +240,7 @@ rectangle "Phase 2 (premain only)" {
 
 **`injectBridge()`**: Reads class bytecode from the agent JAR's own classloader resources (the `.class` files are in the same JAR). Writes verbatim into a temp JAR. This ensures the bootstrap-injected class is byte-for-byte identical to the agent-classloader version — there is no separate bootstrap-dispatcher source; it is one class compiled once and loaded twice into different classloaders.
 
-**`buildMethodHandles()`**: Uses `MethodHandles.publicLookup()` against `BridgeDelegate.class`. Public lookup is required because the bootstrap classloader must be able to invoke the handles; a full-access lookup with the agent classloader's module system would not be reachable from the bootstrap context. Each handle is a virtual method handle; when invoked with `delegate` as the first argument, it dispatches to the `ChaosBridge` implementation. The array has exactly 46 slots (indices 0–45); see §7 for the full slot table.
+**`buildMethodHandles()`**: Uses `MethodHandles.publicLookup()` against `BridgeDelegate.class`. Public lookup is required because the bootstrap classloader must be able to invoke the handles; a full-access lookup with the agent classloader's module system would not be reachable from the bootstrap context. Each handle is a virtual method handle; when invoked with `delegate` as the first argument, it dispatches to the `ChaosBridge` implementation. The array has exactly 57 slots (indices 0–56); see §7 for the full slot table.
 
 **`installDelegate()`**: Uses `Class.forName("...BootstrapDispatcher", true, null)` — the `null` classloader argument requests loading from the bootstrap classloader, ensuring the instance obtained is the bootstrap-classloader version, not the agent-classloader version. Reflective invocation of `install()` crosses the classloader boundary without sharing type references.
 
@@ -253,7 +253,7 @@ rectangle "Phase 2 (premain only)" {
 
 ## BootstrapDispatcher
 
-46 public static dispatch methods, each:
+57 public static dispatch methods, each:
 1. Constructs a `ThrowingSupplier<T>` lambda that snapshot-reads `handles` and `delegate` into locals
 2. Calls `invoke(supplier, fallback)`
 3. Returns the result or re-throws the exception
@@ -315,7 +315,7 @@ If the bridge is not installed (`BootstrapDispatcher.handles == null`), the wrap
 
 ---
 
-# 7. The 46 Interception Handles
+# 7. The 57 Interception Handles
 
 | Index | Constant | JDK method(s) intercepted | Direction |
 |-------|----------|--------------------------|-----------|
