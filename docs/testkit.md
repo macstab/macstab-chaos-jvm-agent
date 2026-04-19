@@ -123,7 +123,7 @@ The caller is responsible for `session.close()` in all branches (preferably try-
 `ChaosPlatform.installLocally()` uses the JDK Attach API to self-attach the agent. Requirements:
 
 - JDK (not JRE): requires `tools.jar` (JDK 8) or the `java.attach` module (JDK 9+)
-- `--add-opens java.base/jdk.internal.misc=ALL-UNNAMED` may be required on JDK 17+ for some Attach API paths
+- `--add-opens java.base/jdk.internal.misc=ALL-UNNAMED` may be required on JDK 21+ for some Attach API paths
 - `-Djdk.attach.allowAttachSelf=true` must be set on JDK 9+ to allow a process to attach to itself. `ChaosAgentExtension` sets this as a system property before self-attach. Alternatively, set it in the JVM command line.
 - The agent JAR must be locatable on the classpath. `ChaosPlatform` uses a classpath scan to find the bootstrap JAR.
 

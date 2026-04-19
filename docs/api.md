@@ -494,7 +494,7 @@ record ChaosEvent(
 | Exception | When thrown |
 |-----------|-------------|
 | `ChaosActivationException` | Scenario activation fails: duplicate ID, scope mismatch, invalid configuration |
-| `ChaosUnsupportedFeatureException` | Scenario requires a JVM feature not available at runtime (e.g., virtual threads on JDK 17) |
+| `ChaosUnsupportedFeatureException` | Scenario requires a JVM feature not available on the running JVM (e.g., JFR absent on a stripped JRE) |
 | `ConfigLoadException` | Startup configuration cannot be read or parsed |
 
 All are `RuntimeException` subclasses. They propagate to the caller of `activate()` or `StartupConfigLoader.load()`.

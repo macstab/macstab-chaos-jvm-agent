@@ -13,7 +13,7 @@
 
 **In-process JVM chaos engineering — bytecode-level fault injection with zero application changes**
 
-[![Java 17+](https://img.shields.io/badge/Java-17%2B-blue.svg)](https://openjdk.org/projects/jdk/17/)
+[![Java 21+](https://img.shields.io/badge/Java-21%2B-blue.svg)](https://openjdk.org/projects/jdk/21/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-green.svg)](LICENSE)
 [![ByteBuddy](https://img.shields.io/badge/ByteBuddy-instrumentation-orange.svg)](https://bytebuddy.net/)
 
@@ -660,7 +660,7 @@ microservice modelling.
 ./gradlew :chaos-agent-benchmarks:run  # run JMH benchmarks
 ```
 
-Requires JDK 17+. Build toolchain targets JDK 25; `--release 21` is enforced.
+Requires JDK 21+ at runtime. Build toolchain targets JDK 25; `--release 21` is enforced.
 
 ---
 

@@ -5,18 +5,17 @@ import java.lang.reflect.Method;
 /**
  * Probes the running JVM at construction time to discover which optional features are available.
  *
- * <p>Some chaos behaviours (virtual-thread detection, JFR event emission) require JVM features that
- * may not be present on the minimum supported JDK version (17). This class performs the necessary
- * reflective probes once at startup and caches the results so that all other components can branch
- * on feature availability without repeated reflection.
+ * <p>The agent's declared baseline is JDK 21 ({@code release=21} in the build, enforced at the
+ * bytecode level — a class-file major version of 65 refuses to load on earlier JVMs). The probes in
+ * this class are therefore belt-and-braces against a future downgrade or against a JRE variant that
+ * omits optional modules (e.g. JFR), not a portability gate against pre-21 JVMs.
  *
  * <h2>Probes performed</h2>
  *
  * <ul>
- *   <li><b>runtimeFeatureVersion</b> — {@code Runtime.version().feature()} (always available on JDK
- *       17+).
+ *   <li><b>runtimeFeatureVersion</b> — {@code Runtime.version().feature()} (always available).
  *   <li><b>isVirtualMethod</b> — {@code Thread.isVirtual()} via reflection; present on JDK 21+. Set
- *       to {@code null} if the method is absent.
+ *       to {@code null} if the method is absent (should not happen at the declared baseline).
  *   <li><b>jfrSupported</b> — {@code Class.forName("jdk.jfr.FlightRecorder")} probe; {@code true}
  *       if JFR is available.
  * </ul>
@@ -82,7 +81,7 @@ final class FeatureSet {
    * Returns the JDK feature-release version of the running JVM (e.g. {@code 17}, {@code 21}, {@code
    * 25}).
    *
-   * <p>Sourced from {@code Runtime.version().feature()}, which is always available on JDK 17+.
+   * <p>Sourced from {@code Runtime.version().feature()}.
    *
    * @return the feature-release version number
    */
