@@ -567,11 +567,19 @@ public final class ChaosDispatcher {
     applyPreDecision(evaluate(context));
   }
 
-  public void beforeMonitorEnter() throws Throwable {
+  public void beforeMonitorEnter(final Object lock) throws Throwable {
+    // When Byte Buddy cannot bind `@Advice.This` (e.g. static synchronized blocks advised via a
+    // proxy site, or interception points where the receiver is not a stack slot), `lock` is null
+    // and we fall back to the synchronizer hierarchy as a coarse default so MonitorSelector still
+    // has *something* to filter on.
+    final String targetClassName =
+        lock == null
+            ? "java.util.concurrent.locks.AbstractQueuedSynchronizer"
+            : lock.getClass().getName();
     final InvocationContext context =
         new InvocationContext(
             OperationType.MONITOR_ENTER,
-            "java.util.concurrent.locks.AbstractQueuedSynchronizer",
+            targetClassName,
             null,
             null,
             false,
@@ -1123,6 +1131,15 @@ public final class ChaosDispatcher {
     if (effect instanceof ChaosEffect.ReturnValueCorruptionEffect corruptEffect) {
       return new TerminalAction(TerminalKind.CORRUPT_RETURN, corruptEffect, null);
     }
+    if (effect instanceof ChaosEffect.SpuriousWakeupEffect) {
+      // A spurious selector wakeup semantically means: return from select() immediately with
+      // zero ready keys instead of blocking. beforeNioSelect already implements that exact
+      // shape as its SUPPRESS terminal path (return true → advice substitutes `return 0`), so
+      // route SpuriousWakeupEffect through SUPPRESS rather than introducing a redundant kind.
+      // CompatibilityValidator restricts this effect to NioSelector + NIO_SELECTOR_SELECT, so
+      // no other dispatch path can observe this terminal here.
+      return suppressTerminal(operationType);
+    }
     return null;
   }
 
@@ -1206,6 +1223,16 @@ public final class ChaosDispatcher {
       }
       if (terminalAction.kind() == TerminalKind.SUPPRESS) {
         return;
+      }
+      if (terminalAction.kind() == TerminalKind.CORRUPT_RETURN) {
+        // CORRUPT_RETURN is only meaningful once a return value exists — it is applied by
+        // afterMethodExit, never here. Reaching this point means an effect or policy paired
+        // a corrupt-return terminal with a pre-invocation operation type; silently swallowing
+        // it would hide the misconfiguration and the scenario would appear to be a harmless
+        // no-op. Fail loud so the invariant is enforced and the bug gets attributed to the
+        // plan rather than the runtime.
+        throw new IllegalStateException(
+            "CORRUPT_RETURN terminal reached applyPreDecision — only valid from afterMethodExit");
       }
     }
     sleep(decision.delayMillis());

@@ -921,6 +921,10 @@ public sealed interface ChaosSelector
                 + validOps);
       }
     }
-    return EnumSet.copyOf(operations);
+    // Set.copyOf returns a truly unmodifiable snapshot — prevents callers (and the record's
+    // auto-generated accessor) from leaking a reference the caller can mutate behind our back.
+    // We accept the loss of EnumSet bulk-op speed on the hot path; the selector's `contains`
+    // checks remain O(1) against the compact ImmutableCollections set.
+    return Set.copyOf(operations);
   }
 }

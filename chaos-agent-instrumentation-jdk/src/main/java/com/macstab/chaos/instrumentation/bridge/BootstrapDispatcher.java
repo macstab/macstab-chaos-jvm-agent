@@ -823,13 +823,13 @@ public final class BootstrapDispatcher {
    *
    * @throws Throwable if an active scenario injects an exception
    */
-  public static void beforeMonitorEnter() throws Throwable {
+  public static void beforeMonitorEnter(final Object lock) throws Throwable {
     invoke(
         () -> {
           final MethodHandle[] h = handles;
           final Object d = delegate;
           if (d != null && h != null) {
-            h[BEFORE_MONITOR_ENTER].invoke(d);
+            h[BEFORE_MONITOR_ENTER].invoke(d, lock);
           }
           return null;
         },

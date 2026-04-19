@@ -84,6 +84,14 @@ final class FailureFactory {
           yield new RuntimeException(message);
         }
       }
+      // Operation types whose natural rejection is not IllegalStateException — mapped
+      // explicitly so reject() produces the same throwable the application would observe
+      // under a genuine failure of that kind, not a generic ISE.
+      case SYSTEM_GC_REQUEST -> new OutOfMemoryError(message);
+      case THREAD_SLEEP -> new InterruptedException(message);
+      case THREAD_PARK -> new RuntimeException(message);
+      case MONITOR_ENTER -> new IllegalMonitorStateException(message);
+      case NIO_SELECTOR_SELECT -> new java.nio.channels.ClosedSelectorException();
       default -> new IllegalStateException(message);
     };
   }

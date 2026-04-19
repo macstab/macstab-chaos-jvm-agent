@@ -3,6 +3,8 @@ package com.macstab.chaos.core;
 import com.macstab.chaos.api.ChaosEffect;
 import java.lang.ref.ReferenceQueue;
 import java.lang.ref.WeakReference;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.logging.Logger;
@@ -88,12 +90,22 @@ final class ReferenceQueueFloodStressor implements ManagedStressor {
   }
 
   private void flood(final int count) {
-    // Create byte arrays as referents — small enough to avoid OOM, large enough to be
-    // individually tracked by the GC.
+    // A WeakReference is only enqueued when its referent becomes unreachable AND the Reference
+    // itself is still reachable at GC time. A bare `new WeakReference<>(...)` has no strong
+    // root, so the Reference object is as garbage as its referent and the JVM is allowed to
+    // collect both without touching the queue — a classic silent no-op. Anchor the References
+    // in a local list that survives System.gc(), then drop the list so the referents become
+    // unreachable while the References themselves remain live for enqueueing.
+    final List<WeakReference<byte[]>> anchors = new ArrayList<>(count);
     for (int i = 0; i < count; i++) {
-      new WeakReference<>(new byte[1024], queue);
+      anchors.add(new WeakReference<>(new byte[1024], queue));
     }
-    // Suggest GC to enqueue the newly-unreachable references.
+    // Suggest GC to enqueue the newly-unreachable referents. The `anchors` list keeps each
+    // WeakReference strongly reachable during and after this call so that enqueueing can happen.
     System.gc();
+    // Reachability fence: the JVM must not hoist `anchors` unreachable before System.gc()
+    // observes the References. Without this, escape analysis + scalar replacement could
+    // resurrect the original bug.
+    java.lang.ref.Reference.reachabilityFence(anchors);
   }
 }

@@ -132,11 +132,12 @@ final class CodeCachePressureStressor implements ManagedStressor {
     try {
       for (int m = 0; m < methodsPerClass; m++) {
         final java.lang.reflect.Method method = cls.getMethod("compute" + m, long.class);
-        // Invoke enough times to exceed the JIT compilation threshold (typically 10 000 calls).
-        // A single call is sufficient to enqueue the method for compilation; repeated calls
-        // increase the likelihood that the JIT actually compiles it before close().
         final Object instance = cls.getDeclaredConstructor().newInstance();
-        for (int invocation = 0; invocation < 20; invocation++) {
+        // HotSpot's C2 compile threshold is 10 000 invocations and C1's is ~1 500; anything
+        // below that leaves the method interpreted and puts nothing into the code cache — the
+        // whole point of this stressor. 15 000 clears C2 comfortably per-method; iteration
+        // counts beyond this give diminishing returns because the method is already compiled.
+        for (int invocation = 0; invocation < 15_000; invocation++) {
           method.invoke(instance, (long) invocation);
         }
       }

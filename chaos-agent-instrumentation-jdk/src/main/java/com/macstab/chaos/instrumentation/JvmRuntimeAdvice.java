@@ -179,8 +179,11 @@ final class JvmRuntimeAdvice {
    */
   static final class MonitorEnterAdvice {
     @Advice.OnMethodEnter
-    static void enter() throws Throwable {
-      BootstrapDispatcher.beforeMonitorEnter();
+    static void enter(@Advice.This(optional = true) Object lock) throws Throwable {
+      // Pass the actual AQS (or @This-null for static-context edge cases) through so scenario
+      // matchers that filter by MonitorSelector.monitorClass see the real runtime type instead
+      // of the constant AQS string the dispatcher previously substituted.
+      BootstrapDispatcher.beforeMonitorEnter(lock);
     }
   }
 

@@ -454,7 +454,11 @@ final class ScenarioController {
     }
     synchronized (this) {
       final long nowMillis = clock.millis();
-      final long windowMillis = rateLimit.window().toMillis();
+      // Duration.toMillis() truncates sub-millisecond windows (e.g. Duration.ofNanos(500_000))
+      // to 0. With a zero window, `nowMillis - start >= 0` is always true and the permit counter
+      // resets on every call — the rate limit silently degrades to "unlimited". Clamp to a 1 ms
+      // floor; anything finer has no hope of being observed through System.currentTimeMillis.
+      final long windowMillis = Math.max(1L, rateLimit.window().toMillis());
       if (nowMillis - rateWindowStartMillis >= windowMillis) {
         rateWindowStartMillis = nowMillis;
         rateWindowPermits = 0;

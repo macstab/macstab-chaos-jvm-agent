@@ -224,8 +224,8 @@ public final class ChaosRuntime implements ChaosControlPlane {
     dispatcher.beforeClassDefine(loader, className);
   }
 
-  public void beforeMonitorEnter() throws Throwable {
-    dispatcher.beforeMonitorEnter();
+  public void beforeMonitorEnter(final Object lock) throws Throwable {
+    dispatcher.beforeMonitorEnter(lock);
   }
 
   public void beforeThreadPark() throws Throwable {

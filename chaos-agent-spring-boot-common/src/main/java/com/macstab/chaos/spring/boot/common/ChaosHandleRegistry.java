@@ -82,10 +82,20 @@ public final class ChaosHandleRegistry implements DisposableBean {
    */
   public int stopAll() {
     int count = 0;
-    for (final Map.Entry<String, ChaosActivationHandle> entry : handles.entrySet()) {
-      handles.remove(entry.getKey());
+    // Use a key+value CAS remove so a concurrent register() that replaces the same id with a new
+    // handle is preserved instead of being silently dropped by a blind remove(key). Iterate over
+    // the live entrySet (not a snapshot) so a plain iterator.remove() gives us atomic per-entry
+    // semantics backed by ConcurrentHashMap.
+    final var iterator = handles.entrySet().iterator();
+    while (iterator.hasNext()) {
+      final Map.Entry<String, ChaosActivationHandle> entry = iterator.next();
+      final ChaosActivationHandle handle = entry.getValue();
+      if (!handles.remove(entry.getKey(), handle)) {
+        // A concurrent register() swapped this entry; leave the replacement alone.
+        continue;
+      }
       try {
-        entry.getValue().stop();
+        handle.stop();
         count++;
       } catch (final RuntimeException ignored) {
         // best-effort stop-all

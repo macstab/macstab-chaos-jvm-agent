@@ -64,7 +64,7 @@ final class DefaultChaosSession implements ChaosSession {
     this.displayName = displayName;
     this.scopeContext = scopeContext;
     this.controlPlane = controlPlane;
-    this.rootBinding = scopeContext.bind(id);
+    this.rootBinding = scopeContext.bindRoot(id);
   }
 
   /**

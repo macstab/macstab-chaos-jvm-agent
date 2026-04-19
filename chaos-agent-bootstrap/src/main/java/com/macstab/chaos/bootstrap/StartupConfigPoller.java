@@ -20,7 +20,6 @@ import java.util.Optional;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
 
 /**
  * Polls a chaos configuration file at a fixed interval and applies incremental diffs to the {@link
@@ -209,8 +208,22 @@ public final class StartupConfigPoller implements AutoCloseable {
   }
 
   synchronized void applyDiff(final List<ChaosScenario> newScenarios) {
-    final Map<String, ChaosScenario> newById =
-        newScenarios.stream().collect(Collectors.toMap(ChaosScenario::id, s -> s));
+    // Detect duplicate IDs up front rather than letting Collectors.toMap throw
+    // IllegalStateException mid-diff (which would leave the runtime in a partially-torn-down
+    // state: scenarios whose content changed would already be stopped, but new/updated ones
+    // would never be re-activated). A duplicate ID means the reloaded plan is malformed, so
+    // skip the entire diff; the next successful reload will converge.
+    final Map<String, ChaosScenario> newById = new java.util.HashMap<>(newScenarios.size());
+    for (final ChaosScenario scenario : newScenarios) {
+      final ChaosScenario previous = newById.putIfAbsent(scenario.id(), scenario);
+      if (previous != null) {
+        System.err.println(
+            "[chaos-agent] config reload skipped: duplicate scenario id '"
+                + sanitiseForLog(scenario.id())
+                + "' in reloaded plan; no scenarios were changed");
+        return;
+      }
+    }
 
     // Stop scenarios that were removed or whose content changed. Use destroy() rather than
     // stop() so the registry slot is freed; otherwise every reload leaks the old scenario

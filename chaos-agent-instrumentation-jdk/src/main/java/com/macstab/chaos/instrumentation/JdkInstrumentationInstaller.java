@@ -207,7 +207,10 @@ public final class JdkInstrumentationInstaller {
     if (premainMode) {
       agentBuilder =
           agentBuilder
-              .type(ElementMatchers.isSubTypeOf(java.util.concurrent.BlockingQueue.class))
+              .type(
+                  ElementMatchers.isSubTypeOf(java.util.concurrent.BlockingQueue.class)
+                      .and(ElementMatchers.not(ElementMatchers.isInterface()))
+                      .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
               .transform(
                   (builder, typeDescription, classLoader, module, protectionDomain) ->
                       builder
@@ -425,8 +428,15 @@ public final class JdkInstrumentationInstaller {
                                   .on(
                                       ElementMatchers.named("selectNow")
                                           .and(ElementMatchers.takesArguments(0)))))
-              // NIO SocketChannel
-              .type(ElementMatchers.named("java.nio.channels.SocketChannel"))
+              // NIO SocketChannel — the public class is abstract, so name() would only match the
+              // abstract copy; instrument concrete subtypes (sun.nio.ch.SocketChannelImpl,
+              // possibly vendor variants) where the actual I/O code lives. Exclude abstract /
+              // synthetic matches to avoid `VerifyError` on bridge methods.
+              .type(
+                  ElementMatchers.isSubTypeOf(java.nio.channels.SocketChannel.class)
+                      .and(ElementMatchers.not(ElementMatchers.isAbstract()))
+                      .and(ElementMatchers.not(ElementMatchers.isInterface()))
+                      .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
               .transform(
                   (builder, typeDescription, classLoader, module, protectionDomain) ->
                       builder
@@ -451,8 +461,12 @@ public final class JdkInstrumentationInstaller {
                                           .and(
                                               ElementMatchers.takesArguments(
                                                   java.nio.ByteBuffer.class)))))
-              // NIO ServerSocketChannel
-              .type(ElementMatchers.named("java.nio.channels.ServerSocketChannel"))
+              // NIO ServerSocketChannel — same abstract-base issue as SocketChannel above.
+              .type(
+                  ElementMatchers.isSubTypeOf(java.nio.channels.ServerSocketChannel.class)
+                      .and(ElementMatchers.not(ElementMatchers.isAbstract()))
+                      .and(ElementMatchers.not(ElementMatchers.isInterface()))
+                      .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
               .transform(
                   (builder, typeDescription, classLoader, module, protectionDomain) ->
                       builder.visit(
@@ -565,6 +579,10 @@ public final class JdkInstrumentationInstaller {
                                   ElementMatchers.named("getAttribute")
                                       .and(ElementMatchers.takesArguments(2)))));
 
+      // On JDK 8-16 native library loading went through Runtime.loadLibrary0; on JDK 17+ the
+      // method was moved to jdk.internal.loader.NativeLibraries.load (private JDK internals). We
+      // weave both sites so NATIVE_LIBRARY_LOAD fires on every supported JDK; missing sites are
+      // tolerated by instrumentOptional so a mismatch is never a startup failure.
       agentBuilder =
           instrumentOptional(
               agentBuilder,
@@ -573,6 +591,14 @@ public final class JdkInstrumentationInstaller {
                   builder.visit(
                       Advice.to(JvmRuntimeAdvice.NativeLibraryLoadAdvice.class)
                           .on(ElementMatchers.named("loadLibrary0"))));
+      agentBuilder =
+          instrumentOptional(
+              agentBuilder,
+              "jdk.internal.loader.NativeLibraries",
+              builder ->
+                  builder.visit(
+                      Advice.to(JvmRuntimeAdvice.NativeLibraryLoadAdvice.class)
+                          .on(ElementMatchers.named("load"))));
 
       // CompletableFuture.cancel
       agentBuilder =
@@ -722,7 +748,8 @@ public final class JdkInstrumentationInstaller {
           agentBuilder
               .type(
                   ElementMatchers.isSubTypeOf(java.sql.Statement.class)
-                      .and(ElementMatchers.not(ElementMatchers.isInterface())))
+                      .and(ElementMatchers.not(ElementMatchers.isInterface()))
+                      .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
               .transform(
                   (builder, typeDescription, classLoader, module, protectionDomain) ->
                       builder
@@ -743,7 +770,8 @@ public final class JdkInstrumentationInstaller {
                                           .and(ElementMatchers.takesArguments(String.class)))))
               .type(
                   ElementMatchers.isSubTypeOf(java.sql.Connection.class)
-                      .and(ElementMatchers.not(ElementMatchers.isInterface())))
+                      .and(ElementMatchers.not(ElementMatchers.isInterface()))
+                      .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
               .transform(
                   (builder, typeDescription, classLoader, module, protectionDomain) ->
                       builder
@@ -1025,7 +1053,8 @@ public final class JdkInstrumentationInstaller {
             "beforeClassDefine",
             MethodType.methodType(void.class, Object.class, String.class));
     mh[BootstrapDispatcher.BEFORE_MONITOR_ENTER] =
-        lookup.findVirtual(cls, "beforeMonitorEnter", MethodType.methodType(void.class));
+        lookup.findVirtual(
+            cls, "beforeMonitorEnter", MethodType.methodType(void.class, Object.class));
     mh[BootstrapDispatcher.BEFORE_THREAD_PARK] =
         lookup.findVirtual(cls, "beforeThreadPark", MethodType.methodType(void.class));
     mh[BootstrapDispatcher.BEFORE_NIO_SELECT] =

@@ -353,9 +353,11 @@ public interface BridgeDelegate {
    *
    * <p>An active scenario may inject a delay to simulate lock contention.
    *
+   * @param lock the monitor/synchronizer instance being acquired, or {@code null} when not
+   *     available (e.g. instrumentation could not bind {@code @Advice.This})
    * @throws Throwable if an active scenario injects an exception
    */
-  void beforeMonitorEnter() throws Throwable;
+  void beforeMonitorEnter(Object lock) throws Throwable;
 
   /**
    * Called before {@code LockSupport.park(Object)}, {@code parkNanos}, or {@code parkUntil}.

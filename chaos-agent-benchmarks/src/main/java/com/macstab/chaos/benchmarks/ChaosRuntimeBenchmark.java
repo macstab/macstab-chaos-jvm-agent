@@ -103,7 +103,7 @@ public class ChaosRuntimeBenchmark {
               .effect(ChaosEffect.delay(Duration.ofMillis(0)))
               .activationPolicy(
                   new ActivationPolicy(
-                      ActivationPolicy.StartMode.AUTOMATIC, 0.0d, 0, null, null, null, 1L, false))
+                      ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 0, null, null, null, 1L, false))
               .build());
       dispatcher = runtime.dispatcher();
     }
@@ -169,7 +169,7 @@ public class ChaosRuntimeBenchmark {
               .effect(ChaosEffect.delay(Duration.ofMillis(0)))
               .activationPolicy(
                   new ActivationPolicy(
-                      ActivationPolicy.StartMode.AUTOMATIC, 0.0d, 0, null, null, null, 1L, false))
+                      ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 0, null, null, null, 1L, false))
               .build());
       dispatcher = runtime.dispatcher();
     }

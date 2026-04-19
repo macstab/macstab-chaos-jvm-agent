@@ -1,6 +1,7 @@
 package com.macstab.chaos.quarkus;
 
 import com.macstab.chaos.api.ActivationPolicy;
+import com.macstab.chaos.api.ChaosActivationHandle;
 import com.macstab.chaos.api.ChaosControlPlane;
 import com.macstab.chaos.api.ChaosEffect;
 import com.macstab.chaos.api.ChaosSelector;
@@ -9,7 +10,9 @@ import com.macstab.chaos.api.OperationType;
 import com.macstab.chaos.bootstrap.ChaosPlatform;
 import java.lang.reflect.Method;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.EnumSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import org.junit.jupiter.api.extension.AfterAllCallback;
@@ -47,6 +50,9 @@ public final class ChaosQuarkusExtension
   static final ExtensionContext.Namespace NAMESPACE =
       ExtensionContext.Namespace.create(ChaosQuarkusExtension.class);
 
+  /** Store key for the per-class list of JVM-scoped handles that must be stopped in afterAll. */
+  private static final String JVM_HANDLES_KEY = "jvmScopedHandles";
+
   /** Default constructor invoked by JUnit when the extension is registered. */
   public ChaosQuarkusExtension() {}
 
@@ -56,10 +62,17 @@ public final class ChaosQuarkusExtension
     final ChaosSession session = controlPlane.openSession(context.getDisplayName());
     context.getStore(NAMESPACE).put(ChaosControlPlane.class, controlPlane);
     context.getStore(NAMESPACE).put(ChaosSession.class, session);
+    // Class-scoped list of handles for JVM-scoped scenarios activated via @ChaosScenario.
+    // Session-scoped scenarios are torn down by session.close(); JVM-scoped ones outlive any
+    // session and previously leaked into subsequent tests — we now stop them in afterAll.
+    context.getStore(NAMESPACE).put(JVM_HANDLES_KEY, new ArrayList<ChaosActivationHandle>());
     final Class<?> testClass = context.getTestClass().orElse(null);
     if (testClass != null) {
       activateAnnotations(
-          controlPlane, session, testClass.getAnnotationsByType(ChaosScenario.class));
+          controlPlane,
+          session,
+          testClass.getAnnotationsByType(ChaosScenario.class),
+          jvmHandles(context));
     }
   }
 
@@ -75,7 +88,10 @@ public final class ChaosQuarkusExtension
       return;
     }
     activateAnnotations(
-        controlPlane, session, testMethod.getAnnotationsByType(ChaosScenario.class));
+        controlPlane,
+        session,
+        testMethod.getAnnotationsByType(ChaosScenario.class),
+        jvmHandles(context));
   }
 
   @Override
@@ -84,6 +100,21 @@ public final class ChaosQuarkusExtension
         context.getStore(NAMESPACE).remove(ChaosSession.class, ChaosSession.class);
     if (session != null) {
       session.close();
+    }
+    // Stop every JVM-scoped handle we captured during the class; otherwise JVM-scoped
+    // @ChaosScenario activations leak into every subsequent test in this JVM.
+    @SuppressWarnings("unchecked")
+    final List<ChaosActivationHandle> handles =
+        (List<ChaosActivationHandle>)
+            context.getStore(NAMESPACE).remove(JVM_HANDLES_KEY, List.class);
+    if (handles != null) {
+      for (final ChaosActivationHandle handle : handles) {
+        try {
+          handle.stop();
+        } catch (final RuntimeException ignored) {
+          // best-effort teardown — an exception here must not mask a real test failure
+        }
+      }
     }
   }
 
@@ -138,18 +169,40 @@ public final class ChaosQuarkusExtension
   private static void activateAnnotations(
       final ChaosControlPlane controlPlane,
       final ChaosSession session,
-      final ChaosScenario[] annotations) {
+      final ChaosScenario[] annotations,
+      final List<ChaosActivationHandle> jvmHandles) {
     if (annotations == null) {
       return;
     }
     for (final ChaosScenario annotation : annotations) {
       final com.macstab.chaos.api.ChaosScenario scenario = toScenario(annotation);
       if (scenario.scope() == com.macstab.chaos.api.ChaosScenario.ScenarioScope.JVM) {
-        controlPlane.activate(scenario);
+        // Capture the handle so afterAll can stop it; without this, JVM-scope scenarios leak
+        // across tests in the same JVM and the default scope ("JVM") silently pollutes the
+        // entire test suite.
+        jvmHandles.add(controlPlane.activate(scenario));
       } else {
         session.activate(scenario);
       }
     }
+  }
+
+  @SuppressWarnings("unchecked")
+  private static List<ChaosActivationHandle> jvmHandles(final ExtensionContext context) {
+    ExtensionContext current = context;
+    while (current != null) {
+      final List<ChaosActivationHandle> handles =
+          (List<ChaosActivationHandle>) current.getStore(NAMESPACE).get(JVM_HANDLES_KEY);
+      if (handles != null) {
+        return handles;
+      }
+      current = current.getParent().orElse(null);
+    }
+    // Defensive fallback — beforeAll always installs the list, but if an extension is wired
+    // via beforeEach only (without beforeAll) we still want to collect handles somewhere
+    // rather than NPE. These handles will never be stopped automatically, which is no worse
+    // than the previous behaviour.
+    return new ArrayList<>();
   }
 
   static com.macstab.chaos.api.ChaosScenario toScenario(final ChaosScenario annotation) {

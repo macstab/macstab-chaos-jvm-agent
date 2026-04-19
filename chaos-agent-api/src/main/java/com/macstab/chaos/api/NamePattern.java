@@ -87,7 +87,11 @@ public record NamePattern(MatchMode mode, String value) {
   public NamePattern(
       @JsonProperty("mode") final MatchMode mode, @JsonProperty("value") final String value) {
     this.mode = Objects.requireNonNullElse(mode, MatchMode.ANY);
-    this.value = value == null ? "*" : value;
+    // Canonicalise ANY's value to "*" so that `new NamePattern(ANY, "anything")` equals the
+    // singleton returned by `any()`. Without this, a YAML/JSON round-trip that preserves a
+    // non-"*" value field silently produces a pattern that fails to equal `ANY`, breaking the
+    // dedup pattern in selector parsing and bloating caches.
+    this.value = (this.mode == MatchMode.ANY) ? "*" : (value == null ? "*" : value);
     if (this.mode != MatchMode.ANY && this.value.isBlank()) {
       throw new IllegalArgumentException("name pattern value must be non-blank");
     }

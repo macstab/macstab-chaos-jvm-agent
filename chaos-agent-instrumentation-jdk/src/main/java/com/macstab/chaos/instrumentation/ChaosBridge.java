@@ -411,11 +411,13 @@ final class ChaosBridge implements BridgeDelegate {
    * Invoked before the current thread attempts to acquire an object monitor ({@code synchronized}
    * block entry).
    *
+   * @param lock the monitor/synchronizer instance being acquired, or {@code null} when not
+   *     available
    * @throws Throwable if the runtime decides to abort or delay monitor acquisition
    */
   @Override
-  public void beforeMonitorEnter() throws Throwable {
-    runtime.beforeMonitorEnter();
+  public void beforeMonitorEnter(final Object lock) throws Throwable {
+    runtime.beforeMonitorEnter(lock);
   }
 
   /**
