@@ -1283,6 +1283,19 @@ public final class ChaosDispatcher {
     if (throwable instanceof RuntimeException runtimeException) {
       return runtimeException;
     }
+    // Gate blocking inside applyPreDecision() can unwind as InterruptedException — for example
+    // an operator scenario that parks the caller until an external signal arrives, then a thread
+    // pool shutdown interrupts the worker. The previous implementation wrapped it as
+    // IllegalStateException and silently dropped the interrupt bit: the worker then unwound with
+    // the "chaos interception failed" exception but flag-clear, so the next blocking call
+    // (Thread.sleep, Object.wait, Condition.await, …) would sit forever instead of honouring
+    // the shutdown. Restore the interrupt flag before wrapping so subsequent blocking calls see
+    // it; we still wrap in a RuntimeException because callers advised by Byte Buddy cannot
+    // propagate a checked exception without advice-level `throws` declarations we don't want
+    // to require everywhere.
+    if (throwable instanceof InterruptedException) {
+      Thread.currentThread().interrupt();
+    }
     return new IllegalStateException("chaos interception failed", throwable);
   }
 
