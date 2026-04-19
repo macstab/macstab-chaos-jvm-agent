@@ -61,6 +61,9 @@ final class StressorFactory {
     register(
         ChaosEffect.StringInternPressureEffect.class, e -> new StringInternPressureStressor(e));
     register(ChaosEffect.ReferenceQueueFloodEffect.class, e -> new ReferenceQueueFloodStressor(e));
+    register(
+        ChaosEffect.VirtualThreadCarrierPinningEffect.class,
+        e -> new VirtualThreadCarrierPinningStressor(e));
   }
 
   @SuppressWarnings("unchecked")

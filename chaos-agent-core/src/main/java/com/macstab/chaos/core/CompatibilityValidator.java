@@ -452,6 +452,9 @@ final class CompatibilityValidator {
       case ChaosSelector.ThreadLocalSelector s -> containsAny(s.operations(), needles);
       case ChaosSelector.HttpClientSelector s -> containsAny(s.operations(), needles);
       case ChaosSelector.JdbcSelector s -> containsAny(s.operations(), needles);
+      case ChaosSelector.DnsSelector s -> containsAny(s.operations(), needles);
+      case ChaosSelector.SslSelector s -> containsAny(s.operations(), needles);
+      case ChaosSelector.FileIoSelector s -> containsAny(s.operations(), needles);
       case ChaosSelector.StressSelector ignored -> false;
     };
   }

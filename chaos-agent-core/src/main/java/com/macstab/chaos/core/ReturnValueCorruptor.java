@@ -24,6 +24,59 @@ final class ReturnValueCorruptor {
 
   private static final Logger LOGGER = Logger.getLogger("com.macstab.chaos");
 
+  private static final Map<Class<?>, Object> ZERO_VALUES =
+      Map.ofEntries(
+          Map.entry(boolean.class, Boolean.FALSE),
+          Map.entry(Boolean.class, Boolean.FALSE),
+          Map.entry(byte.class, (byte) 0),
+          Map.entry(Byte.class, (byte) 0),
+          Map.entry(short.class, (short) 0),
+          Map.entry(Short.class, (short) 0),
+          Map.entry(int.class, 0),
+          Map.entry(Integer.class, 0),
+          Map.entry(long.class, 0L),
+          Map.entry(Long.class, 0L),
+          Map.entry(float.class, 0.0f),
+          Map.entry(Float.class, 0.0f),
+          Map.entry(double.class, 0.0d),
+          Map.entry(Double.class, 0.0d),
+          Map.entry(char.class, '\0'),
+          Map.entry(Character.class, '\0'));
+
+  private static final Map<Class<?>, Object> BOUNDARY_MAX_VALUES =
+      Map.ofEntries(
+          Map.entry(byte.class, Byte.MAX_VALUE),
+          Map.entry(Byte.class, Byte.MAX_VALUE),
+          Map.entry(short.class, Short.MAX_VALUE),
+          Map.entry(Short.class, Short.MAX_VALUE),
+          Map.entry(int.class, Integer.MAX_VALUE),
+          Map.entry(Integer.class, Integer.MAX_VALUE),
+          Map.entry(long.class, Long.MAX_VALUE),
+          Map.entry(Long.class, Long.MAX_VALUE),
+          Map.entry(float.class, Float.MAX_VALUE),
+          Map.entry(Float.class, Float.MAX_VALUE),
+          Map.entry(double.class, Double.MAX_VALUE),
+          Map.entry(Double.class, Double.MAX_VALUE),
+          Map.entry(char.class, Character.MAX_VALUE),
+          Map.entry(Character.class, Character.MAX_VALUE));
+
+  private static final Map<Class<?>, Object> BOUNDARY_MIN_VALUES =
+      Map.ofEntries(
+          Map.entry(byte.class, Byte.MIN_VALUE),
+          Map.entry(Byte.class, Byte.MIN_VALUE),
+          Map.entry(short.class, Short.MIN_VALUE),
+          Map.entry(Short.class, Short.MIN_VALUE),
+          Map.entry(int.class, Integer.MIN_VALUE),
+          Map.entry(Integer.class, Integer.MIN_VALUE),
+          Map.entry(long.class, Long.MIN_VALUE),
+          Map.entry(Long.class, Long.MIN_VALUE),
+          Map.entry(float.class, -Float.MAX_VALUE),
+          Map.entry(Float.class, -Float.MAX_VALUE),
+          Map.entry(double.class, -Double.MAX_VALUE),
+          Map.entry(Double.class, -Double.MAX_VALUE),
+          Map.entry(char.class, Character.MIN_VALUE),
+          Map.entry(Character.class, Character.MIN_VALUE));
+
   private ReturnValueCorruptor() {}
 
   /**
@@ -46,8 +99,10 @@ final class ReturnValueCorruptor {
       case NULL -> corruptNull(returnType, actualValue, scenarioId);
       case ZERO -> corruptZero(returnType);
       case EMPTY -> corruptEmpty(returnType, scenarioId);
-      case BOUNDARY_MAX -> corruptBoundaryMax(returnType, scenarioId);
-      case BOUNDARY_MIN -> corruptBoundaryMin(returnType, scenarioId);
+      case BOUNDARY_MAX ->
+          corruptBoundary(BOUNDARY_MAX_VALUES, "BOUNDARY_MAX", returnType, scenarioId);
+      case BOUNDARY_MIN ->
+          corruptBoundary(BOUNDARY_MIN_VALUES, "BOUNDARY_MIN", returnType, scenarioId);
     };
   }
 
@@ -67,32 +122,8 @@ final class ReturnValueCorruptor {
   }
 
   private static Object corruptZero(final Class<?> returnType) {
-    if (returnType == boolean.class || returnType == Boolean.class) {
-      return Boolean.FALSE;
-    }
-    if (returnType == byte.class || returnType == Byte.class) {
-      return (byte) 0;
-    }
-    if (returnType == short.class || returnType == Short.class) {
-      return (short) 0;
-    }
-    if (returnType == int.class || returnType == Integer.class) {
-      return 0;
-    }
-    if (returnType == long.class || returnType == Long.class) {
-      return 0L;
-    }
-    if (returnType == float.class || returnType == Float.class) {
-      return 0.0f;
-    }
-    if (returnType == double.class || returnType == Double.class) {
-      return 0.0d;
-    }
-    if (returnType == char.class || returnType == Character.class) {
-      return '\0';
-    }
-    // Reference type: return null as the closest representation of "zero"
-    return null;
+    // Reference types not in the map return null — the closest representation of zero
+    return ZERO_VALUES.getOrDefault(returnType, null);
   }
 
   private static Object corruptEmpty(final Class<?> returnType, final String scenarioId) {
@@ -125,63 +156,20 @@ final class ReturnValueCorruptor {
     return corruptZero(returnType);
   }
 
-  private static Object corruptBoundaryMax(final Class<?> returnType, final String scenarioId) {
-    if (returnType == int.class || returnType == Integer.class) {
-      return Integer.MAX_VALUE;
-    }
-    if (returnType == long.class || returnType == Long.class) {
-      return Long.MAX_VALUE;
-    }
-    if (returnType == short.class || returnType == Short.class) {
-      return Short.MAX_VALUE;
-    }
-    if (returnType == byte.class || returnType == Byte.class) {
-      return Byte.MAX_VALUE;
-    }
-    if (returnType == float.class || returnType == Float.class) {
-      return Float.MAX_VALUE;
-    }
-    if (returnType == double.class || returnType == Double.class) {
-      return Double.MAX_VALUE;
-    }
-    if (returnType == char.class || returnType == Character.class) {
-      return Character.MAX_VALUE;
+  private static Object corruptBoundary(
+      final Map<Class<?>, Object> boundaryValues,
+      final String strategyName,
+      final Class<?> returnType,
+      final String scenarioId) {
+    final Object value = boundaryValues.get(returnType);
+    if (value != null) {
+      return value;
     }
     LOGGER.fine(
         () ->
-            "ReturnValueCorruption BOUNDARY_MAX is inapplicable to "
-                + returnType.getName()
-                + " in scenario "
-                + scenarioId
-                + "; falling back to ZERO");
-    return corruptZero(returnType);
-  }
-
-  private static Object corruptBoundaryMin(final Class<?> returnType, final String scenarioId) {
-    if (returnType == int.class || returnType == Integer.class) {
-      return Integer.MIN_VALUE;
-    }
-    if (returnType == long.class || returnType == Long.class) {
-      return Long.MIN_VALUE;
-    }
-    if (returnType == short.class || returnType == Short.class) {
-      return Short.MIN_VALUE;
-    }
-    if (returnType == byte.class || returnType == Byte.class) {
-      return Byte.MIN_VALUE;
-    }
-    if (returnType == float.class || returnType == Float.class) {
-      return -Float.MAX_VALUE;
-    }
-    if (returnType == double.class || returnType == Double.class) {
-      return -Double.MAX_VALUE;
-    }
-    if (returnType == char.class || returnType == Character.class) {
-      return Character.MIN_VALUE;
-    }
-    LOGGER.fine(
-        () ->
-            "ReturnValueCorruption BOUNDARY_MIN is inapplicable to "
+            "ReturnValueCorruption "
+                + strategyName
+                + " is inapplicable to "
                 + returnType.getName()
                 + " in scenario "
                 + scenarioId

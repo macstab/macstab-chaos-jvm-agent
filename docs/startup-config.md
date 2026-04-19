@@ -283,6 +283,69 @@ No logs are emitted by this module during normal operation. Errors throw `Config
 
 ---
 
+# 10. Live Config Reload — File Watch Mode
+
+When the config source is a **file**, the agent can poll it continuously and apply incremental diffs to the live scenario registry. This is the primary integration point for external chaos pipeline frameworks that need to change the running scenario set without restarting the JVM.
+
+## Enabling watch mode
+
+```bash
+# agent arg (milliseconds)
+-javaagent:agent.jar=configFile=/etc/chaos/plan.json,configWatchInterval=500
+
+# or via environment variables
+MACSTAB_CHAOS_CONFIG_FILE=/etc/chaos/plan.json
+MACSTAB_CHAOS_WATCH_INTERVAL=500
+```
+
+`configWatchInterval` (agent arg) takes precedence over `MACSTAB_CHAOS_WATCH_INTERVAL` (env var). A value of `0` or absent disables watching — the file is read once at startup. Watch mode is only available for file sources; inline JSON and base64 sources always use read-once mode.
+
+## Diff algorithm
+
+On every poll tick `StartupConfigPoller`:
+
+1. Stats the file (`Files.getLastModifiedTime`). If the mtime matches the last successful read, the tick is a no-op — no parse, no diff.
+2. If the mtime changed: reads and parses the new plan.
+3. Computes a structural diff against the currently active scenario set:
+
+| Case | Action |
+|---|---|
+| Same `id`, all 8 fields identical | Kept running — untouched |
+| Same `id`, any field changed | Stopped, then re-activated |
+| Present in new plan, absent from active set | Activated |
+| Present in active set, absent from new plan | Stopped |
+
+Equality is record equality across all eight `ChaosScenario` fields. A single field change — even probability — triggers a stop + re-activate cycle.
+
+## Isolation guarantee
+
+The poller only manages scenarios it activated itself (from the config file). Scenarios activated programmatically via `ChaosRuntime.activate()` or through a `ChaosSession` are invisible to the poller and are never stopped or modified by a reload.
+
+## Implementation details
+
+- Single daemon thread named `chaos-config-poller`.
+- Scheduler started by `startWithInitialPlan()` during agent initialization; stopped by `close()`.
+- `close()` stops the scheduler and calls `ChaosActivationHandle.stop()` on all managed scenarios.
+- The daemon thread does not prevent JVM shutdown.
+
+## External framework integration
+
+A chaos pipeline framework that wants to push a new scenario set into a running JVM:
+
+1. Write the updated plan to a temp file in the same directory.
+2. Atomically rename it over the watched file (`mv` / `Files.move` with `ATOMIC_MOVE`).
+3. Wait one poll interval — the agent detects the mtime change, diffs, and applies.
+
+No JVM restart required.
+
+## Configuration reference
+
+| Agent arg | Environment variable | Type | Default | Description |
+|---|---|---|---|---|
+| `configWatchInterval` | `MACSTAB_CHAOS_WATCH_INTERVAL` | long (ms) | 0 (disabled) | Poll interval; 0 = read-once |
+
+---
+
 # 9. References
 
 - Reference: ISO 8601 — Date and time format; duration strings (`PT0.1S`, `PT30S`) — https://www.iso.org/iso-8601-date-and-time-format.html
@@ -298,7 +361,7 @@ No logs are emitted by this module during normal operation. Errors throw `Config
 
 <div align="center">
 
-*Architecture, implementation, and documentation crafted by*
+*Architecture, implementation, and documentation crafted with Love and Passion by*
 
 **[Christian Schnapka](https://macstab.com)**  
 Embedded Principal+ Engineer  

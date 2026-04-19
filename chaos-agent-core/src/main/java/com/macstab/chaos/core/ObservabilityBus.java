@@ -69,8 +69,10 @@ final class ObservabilityBus {
    * Constructs a {@link ChaosEvent} and dispatches it synchronously to every registered listener.
    *
    * <p>The event timestamp is set to {@link java.time.Instant#now()} at the time of the call.
-   * Listeners are notified in registration order. Any exception thrown by a listener propagates to
-   * the caller; subsequent listeners in the list will not be notified if an earlier one throws.
+   * Listeners are notified in registration order. A listener that throws is isolated: the exception
+   * is logged at WARNING level and delivery continues to the remaining listeners. This guarantee is
+   * critical in an agent context where publish runs on application threads inside ByteBuddy advice
+   * — a buggy custom listener must never propagate into application code.
    *
    * @param type the event type; must not be {@code null}
    * @param scenarioId the ID of the scenario that generated this event; must not be {@code null}
@@ -85,7 +87,21 @@ final class ObservabilityBus {
       final Map<String, String> attributes) {
     final ChaosEvent event = new ChaosEvent(Instant.now(), type, scenarioId, message, attributes);
     for (ChaosEventListener listener : listeners) {
-      listener.onEvent(event);
+      try {
+        listener.onEvent(event);
+      } catch (Exception ex) {
+        LOGGER.warning(
+            () ->
+                "ChaosEventListener threw during publish; delivery continues."
+                    + " event="
+                    + type
+                    + " scenarioId="
+                    + scenarioId
+                    + " listener="
+                    + listener.getClass().getName()
+                    + " error="
+                    + ex);
+      }
     }
   }
 

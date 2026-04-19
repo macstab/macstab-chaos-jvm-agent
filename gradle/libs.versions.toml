@@ -9,7 +9,11 @@ h2 = "2.3.232"
 hikariCp = "5.1.0"
 jackson = "2.19.4"
 jmh = "1.37"
+jqwik = "1.9.3"
 junit = "5.10.1"
+mockito = "5.14.2"
+resilience4j = "2.2.0"
+wiremock = "3.0.1"
 micronautBom = "4.7.6"
 okhttp = "4.12.0"
 quarkusBom = "3.21.3"
@@ -31,7 +35,12 @@ jackson-databind = { module = "com.fasterxml.jackson.core:jackson-databind", ver
 jackson-jsr310 = { module = "com.fasterxml.jackson.datatype:jackson-datatype-jsr310", version.ref = "jackson" }
 jmh-core = { module = "org.openjdk.jmh:jmh-core", version.ref = "jmh" }
 jmh-generator-annprocess = { module = "org.openjdk.jmh:jmh-generator-annprocess", version.ref = "jmh" }
+jqwik = { module = "net.jqwik:jqwik", version.ref = "jqwik" }
 assertj = { module = "org.assertj:assertj-core", version = "3.27.3" }
+mockito-core = { module = "org.mockito:mockito-core", version.ref = "mockito" }
+resilience4j-spring-boot3 = { module = "io.github.resilience4j:resilience4j-spring-boot3", version.ref = "resilience4j" }
+resilience4j-retry = { module = "io.github.resilience4j:resilience4j-retry", version.ref = "resilience4j" }
+wiremock-standalone = { module = "com.github.tomakehurst:wiremock-standalone", version.ref = "wiremock" }
 awaitility = { module = "org.awaitility:awaitility", version.ref = "awaitility" }
 junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" }

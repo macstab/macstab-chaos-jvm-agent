@@ -329,6 +329,22 @@ public final class ChaosRuntime implements ChaosControlPlane {
     return dispatcher.beforeJdbcTransactionRollback();
   }
 
+  public boolean beforeThreadSleep(final long millis) throws Throwable {
+    return dispatcher.beforeThreadSleep(millis);
+  }
+
+  public void beforeDnsResolve(final String hostname) throws Throwable {
+    dispatcher.beforeDnsResolve(hostname);
+  }
+
+  public void beforeSslHandshake(final Object socket) throws Throwable {
+    dispatcher.beforeSslHandshake(socket);
+  }
+
+  public void beforeFileIo(final String operation, final Object stream) throws Throwable {
+    dispatcher.beforeFileIo(operation, stream);
+  }
+
   Optional<Instrumentation> instrumentation() {
     return controlPlane.instrumentation();
   }

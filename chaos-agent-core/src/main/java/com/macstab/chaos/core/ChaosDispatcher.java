@@ -917,6 +917,114 @@ public final class ChaosDispatcher {
     return evaluateJdbc(OperationType.JDBC_TRANSACTION_ROLLBACK, "java.sql.Connection", null);
   }
 
+  /**
+   * Called before {@link Thread#sleep(long)}.
+   *
+   * @param millis the requested sleep duration
+   * @return {@code true} if the sleep should be suppressed (caller returns immediately); {@code
+   *     false} for normal execution
+   * @throws Throwable if an active scenario throws to simulate an {@link InterruptedException}
+   */
+  public boolean beforeThreadSleep(final long millis) throws Throwable {
+    final InvocationContext context =
+        new InvocationContext(
+            OperationType.THREAD_SLEEP,
+            "java.lang.Thread",
+            null,
+            null,
+            false,
+            null,
+            null,
+            scopeContext.currentSessionId());
+    final RuntimeDecision decision = evaluate(context);
+    if (decision.terminalAction() != null) {
+      final TerminalAction terminalAction = decision.terminalAction();
+      if (terminalAction.kind() == TerminalKind.THROW) {
+        throw terminalAction.throwable();
+      }
+      if (terminalAction.kind() == TerminalKind.SUPPRESS) {
+        return true;
+      }
+    }
+    sleep(decision.delayMillis());
+    return false;
+  }
+
+  /**
+   * Called before {@link java.net.InetAddress#getByName(String)}, {@link
+   * java.net.InetAddress#getAllByName(String)}, or {@link java.net.InetAddress#getLocalHost()}.
+   *
+   * @param hostname the hostname being resolved; {@code null} for {@code getLocalHost()}
+   * @throws Throwable if an active scenario throws to simulate a DNS failure
+   */
+  public void beforeDnsResolve(final String hostname) throws Throwable {
+    final InvocationContext context =
+        new InvocationContext(
+            OperationType.DNS_RESOLVE,
+            "java.net.InetAddress",
+            null,
+            hostname,
+            false,
+            null,
+            null,
+            scopeContext.currentSessionId());
+    applyPreDecision(evaluate(context));
+  }
+
+  /**
+   * Called before {@link javax.net.ssl.SSLSocket#startHandshake()} or {@link
+   * javax.net.ssl.SSLEngine#beginHandshake()}.
+   *
+   * @param socket the {@code SSLSocket} or {@code SSLEngine} instance
+   * @throws Throwable if an active scenario throws to simulate a TLS handshake failure
+   */
+  public void beforeSslHandshake(final Object socket) throws Throwable {
+    final InvocationContext context =
+        new InvocationContext(
+            OperationType.SSL_HANDSHAKE,
+            socket == null ? "javax.net.ssl.SSLSocket" : socket.getClass().getName(),
+            null,
+            null,
+            false,
+            null,
+            null,
+            scopeContext.currentSessionId());
+    applyPreDecision(evaluate(context));
+  }
+
+  /**
+   * Called before a {@link java.io.FileInputStream#read} or {@link java.io.FileOutputStream#write}
+   * call.
+   *
+   * @param operation {@code "FILE_IO_READ"} or {@code "FILE_IO_WRITE"}
+   * @param stream the stream instance
+   * @throws Throwable if an active scenario throws to simulate an I/O failure
+   */
+  public void beforeFileIo(final String operation, final Object stream) throws Throwable {
+    final OperationType opType;
+    if ("FILE_IO_READ".equals(operation)) {
+      opType = OperationType.FILE_IO_READ;
+    } else if ("FILE_IO_WRITE".equals(operation)) {
+      opType = OperationType.FILE_IO_WRITE;
+    } else {
+      throw new IllegalArgumentException(
+          "Unknown file I/O operation tag '"
+              + operation
+              + "'; expected FILE_IO_READ or FILE_IO_WRITE");
+    }
+    final InvocationContext context =
+        new InvocationContext(
+            opType,
+            stream == null ? "java.io.FileInputStream" : stream.getClass().getName(),
+            null,
+            null,
+            false,
+            null,
+            null,
+            scopeContext.currentSessionId());
+    applyPreDecision(evaluate(context));
+  }
+
   private boolean evaluateJdbc(
       final OperationType opType, final String targetClassName, final String targetName)
       throws Throwable {

@@ -1122,4 +1122,234 @@ class SelectorMatcherTest {
       assertThat(SelectorMatcher.matches(selector, context)).isFalse();
     }
   }
+
+  @Nested
+  @DisplayName("DnsSelector")
+  class DnsSelectorTests {
+
+    @Test
+    @DisplayName("matches DNS_RESOLVE operation")
+    void matchesDnsResolveOperation() {
+      ChaosSelector selector =
+          new ChaosSelector.DnsSelector(Set.of(OperationType.DNS_RESOLVE), NamePattern.any());
+      InvocationContext context =
+          new InvocationContext(
+              OperationType.DNS_RESOLVE,
+              "java.net.InetAddress",
+              null,
+              "db.internal",
+              false,
+              null,
+              null,
+              null);
+      assertThat(SelectorMatcher.matches(selector, context)).isTrue();
+    }
+
+    @Test
+    @DisplayName("does not match wrong operation")
+    void doesNotMatchWrongOperation() {
+      ChaosSelector selector =
+          new ChaosSelector.DnsSelector(Set.of(OperationType.DNS_RESOLVE), NamePattern.any());
+      InvocationContext context =
+          new InvocationContext(
+              OperationType.SOCKET_CONNECT, null, null, "db.internal", false, null, null, null);
+      assertThat(SelectorMatcher.matches(selector, context)).isFalse();
+    }
+
+    @Test
+    @DisplayName("hostname pattern matches by prefix")
+    void hostnamePatternMatchesByPrefix() {
+      ChaosSelector selector =
+          new ChaosSelector.DnsSelector(
+              Set.of(OperationType.DNS_RESOLVE), NamePattern.prefix("db."));
+      InvocationContext matchContext =
+          new InvocationContext(
+              OperationType.DNS_RESOLVE,
+              "java.net.InetAddress",
+              null,
+              "db.internal",
+              false,
+              null,
+              null,
+              null);
+      InvocationContext noMatchContext =
+          new InvocationContext(
+              OperationType.DNS_RESOLVE,
+              "java.net.InetAddress",
+              null,
+              "api.external.com",
+              false,
+              null,
+              null,
+              null);
+      assertThat(SelectorMatcher.matches(selector, matchContext)).isTrue();
+      assertThat(SelectorMatcher.matches(selector, noMatchContext)).isFalse();
+    }
+
+    @Test
+    @DisplayName("any hostname pattern matches null hostname (getLocalHost)")
+    void anyPatternMatchesNullHostname() {
+      ChaosSelector selector =
+          new ChaosSelector.DnsSelector(Set.of(OperationType.DNS_RESOLVE), NamePattern.any());
+      InvocationContext context =
+          new InvocationContext(
+              OperationType.DNS_RESOLVE,
+              "java.net.InetAddress",
+              null,
+              null,
+              false,
+              null,
+              null,
+              null);
+      assertThat(SelectorMatcher.matches(selector, context)).isTrue();
+    }
+  }
+
+  @Nested
+  @DisplayName("SslSelector")
+  class SslSelectorTests {
+
+    @Test
+    @DisplayName("matches SSL_HANDSHAKE operation")
+    void matchesSslHandshakeOperation() {
+      ChaosSelector selector = new ChaosSelector.SslSelector(Set.of(OperationType.SSL_HANDSHAKE));
+      InvocationContext context =
+          new InvocationContext(
+              OperationType.SSL_HANDSHAKE,
+              "javax.net.ssl.SSLSocket",
+              null,
+              null,
+              false,
+              null,
+              null,
+              null);
+      assertThat(SelectorMatcher.matches(selector, context)).isTrue();
+    }
+
+    @Test
+    @DisplayName("does not match wrong operation")
+    void doesNotMatchWrongOperation() {
+      ChaosSelector selector = new ChaosSelector.SslSelector(Set.of(OperationType.SSL_HANDSHAKE));
+      InvocationContext context =
+          new InvocationContext(
+              OperationType.SOCKET_CONNECT, null, null, null, false, null, null, null);
+      assertThat(SelectorMatcher.matches(selector, context)).isFalse();
+    }
+
+    @Test
+    @DisplayName("matches SSLEngine class name")
+    void matchesSslEngineClassName() {
+      ChaosSelector selector = new ChaosSelector.SslSelector(Set.of(OperationType.SSL_HANDSHAKE));
+      InvocationContext context =
+          new InvocationContext(
+              OperationType.SSL_HANDSHAKE,
+              "javax.net.ssl.SSLEngine",
+              null,
+              null,
+              false,
+              null,
+              null,
+              null);
+      assertThat(SelectorMatcher.matches(selector, context)).isTrue();
+    }
+  }
+
+  @Nested
+  @DisplayName("FileIoSelector")
+  class FileIoSelectorTests {
+
+    @Test
+    @DisplayName("matches FILE_IO_READ operation")
+    void matchesFileIoReadOperation() {
+      ChaosSelector selector = new ChaosSelector.FileIoSelector(Set.of(OperationType.FILE_IO_READ));
+      InvocationContext context =
+          new InvocationContext(
+              OperationType.FILE_IO_READ,
+              "java.io.FileInputStream",
+              null,
+              null,
+              false,
+              null,
+              null,
+              null);
+      assertThat(SelectorMatcher.matches(selector, context)).isTrue();
+    }
+
+    @Test
+    @DisplayName("matches FILE_IO_WRITE operation")
+    void matchesFileIoWriteOperation() {
+      ChaosSelector selector =
+          new ChaosSelector.FileIoSelector(Set.of(OperationType.FILE_IO_WRITE));
+      InvocationContext context =
+          new InvocationContext(
+              OperationType.FILE_IO_WRITE,
+              "java.io.FileOutputStream",
+              null,
+              null,
+              false,
+              null,
+              null,
+              null);
+      assertThat(SelectorMatcher.matches(selector, context)).isTrue();
+    }
+
+    @Test
+    @DisplayName("matches both read and write when both are in operations set")
+    void matchesBothReadAndWrite() {
+      ChaosSelector selector =
+          new ChaosSelector.FileIoSelector(
+              Set.of(OperationType.FILE_IO_READ, OperationType.FILE_IO_WRITE));
+      InvocationContext readContext =
+          new InvocationContext(
+              OperationType.FILE_IO_READ,
+              "java.io.FileInputStream",
+              null,
+              null,
+              false,
+              null,
+              null,
+              null);
+      InvocationContext writeContext =
+          new InvocationContext(
+              OperationType.FILE_IO_WRITE,
+              "java.io.FileOutputStream",
+              null,
+              null,
+              false,
+              null,
+              null,
+              null);
+      assertThat(SelectorMatcher.matches(selector, readContext)).isTrue();
+      assertThat(SelectorMatcher.matches(selector, writeContext)).isTrue();
+    }
+
+    @Test
+    @DisplayName("READ-only selector does not match WRITE operation")
+    void readOnlySelectorDoesNotMatchWrite() {
+      ChaosSelector selector = new ChaosSelector.FileIoSelector(Set.of(OperationType.FILE_IO_READ));
+      InvocationContext context =
+          new InvocationContext(
+              OperationType.FILE_IO_WRITE,
+              "java.io.FileOutputStream",
+              null,
+              null,
+              false,
+              null,
+              null,
+              null);
+      assertThat(SelectorMatcher.matches(selector, context)).isFalse();
+    }
+
+    @Test
+    @DisplayName("does not match wrong operation")
+    void doesNotMatchWrongOperation() {
+      ChaosSelector selector =
+          new ChaosSelector.FileIoSelector(
+              Set.of(OperationType.FILE_IO_READ, OperationType.FILE_IO_WRITE));
+      InvocationContext context =
+          new InvocationContext(
+              OperationType.NIO_CHANNEL_READ, null, null, null, false, null, null, null);
+      assertThat(SelectorMatcher.matches(selector, context)).isFalse();
+    }
+  }
 }

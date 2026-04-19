@@ -64,7 +64,7 @@ public final class StartupConfigLoader {
 
     if (inlineJson != null) {
       final ChaosPlan plan = ChaosPlanMapper.read(inlineJson);
-      return Optional.of(new LoadedPlan(plan, "inline-json", debugDumpOnStart));
+      return Optional.of(new LoadedPlan(plan, "inline-json", debugDumpOnStart, null));
     }
     if (base64Json != null) {
       return Optional.of(loadFromBase64(base64Json, debugDumpOnStart));
@@ -86,7 +86,7 @@ public final class StartupConfigLoader {
     }
     final String json = new String(decoded, StandardCharsets.UTF_8);
     final ChaosPlan plan = ChaosPlanMapper.read(json);
-    return new LoadedPlan(plan, "base64", debugDumpOnStart);
+    return new LoadedPlan(plan, "base64", debugDumpOnStart, null);
   }
 
   private static LoadedPlan loadFromFile(final String filePath, final boolean debugDumpOnStart) {
@@ -99,7 +99,7 @@ public final class StartupConfigLoader {
           "failed to read chaos plan config file: " + path, "file:" + filePath, exception);
     }
     final ChaosPlan plan = ChaosPlanMapper.read(json);
-    return new LoadedPlan(plan, "file:" + filePath, debugDumpOnStart);
+    return new LoadedPlan(plan, "file:" + filePath, debugDumpOnStart, path);
   }
 
   /**
@@ -154,6 +154,15 @@ public final class StartupConfigLoader {
     return null;
   }
 
-  /** Result of successfully loading a chaos plan from a configuration source. */
-  public record LoadedPlan(ChaosPlan plan, String source, boolean debugDumpOnStart) {}
+  /**
+   * Result of successfully loading a chaos plan from a configuration source.
+   *
+   * @param plan the parsed chaos plan
+   * @param source human-readable source identifier (e.g. {@code "file:/etc/chaos/plan.json"})
+   * @param debugDumpOnStart whether to print a diagnostic dump at startup
+   * @param filePath the resolved file path when the source was a config file, {@code null}
+   *     otherwise; used by the bootstrap poller to set up file watching
+   */
+  public record LoadedPlan(
+      ChaosPlan plan, String source, boolean debugDumpOnStart, Path filePath) {}
 }

@@ -37,6 +37,9 @@ import java.util.Set;
   @JsonSubTypes.Type(value = ChaosSelector.ThreadLocalSelector.class, name = "threadLocal"),
   @JsonSubTypes.Type(value = ChaosSelector.HttpClientSelector.class, name = "httpClient"),
   @JsonSubTypes.Type(value = ChaosSelector.JdbcSelector.class, name = "jdbc"),
+  @JsonSubTypes.Type(value = ChaosSelector.DnsSelector.class, name = "dns"),
+  @JsonSubTypes.Type(value = ChaosSelector.SslSelector.class, name = "ssl"),
+  @JsonSubTypes.Type(value = ChaosSelector.FileIoSelector.class, name = "fileIo"),
   @JsonSubTypes.Type(value = ChaosSelector.StressSelector.class, name = "stress"),
 })
 public sealed interface ChaosSelector
@@ -55,6 +58,9 @@ public sealed interface ChaosSelector
         ChaosSelector.ThreadLocalSelector,
         ChaosSelector.HttpClientSelector,
         ChaosSelector.JdbcSelector,
+        ChaosSelector.DnsSelector,
+        ChaosSelector.SslSelector,
+        ChaosSelector.FileIoSelector,
         ChaosSelector.StressSelector {
 
   // ── Factory methods ────────────────────────────────────────────────────────
@@ -344,6 +350,54 @@ public sealed interface ChaosSelector
   }
 
   /**
+   * Returns a selector that matches DNS resolution calls across all hostname patterns.
+   *
+   * <p>Valid operations: {@link OperationType#DNS_RESOLVE}.
+   *
+   * @param operations set of DNS operations to intercept; must not be empty
+   */
+  static DnsSelector dns(Set<OperationType> operations) {
+    return new DnsSelector(operations, NamePattern.any());
+  }
+
+  /**
+   * Returns a selector that matches DNS resolution calls whose resolved hostname matches {@code
+   * hostnamePattern}.
+   *
+   * <p>Valid operations: {@link OperationType#DNS_RESOLVE}.
+   *
+   * @param operations set of DNS operations to intercept; must not be empty
+   * @param hostnamePattern pattern matched against the hostname being resolved; {@code null}
+   *     matches {@code InetAddress.getLocalHost()} (which has no hostname argument)
+   */
+  static DnsSelector dns(Set<OperationType> operations, NamePattern hostnamePattern) {
+    return new DnsSelector(operations, hostnamePattern);
+  }
+
+  /**
+   * Returns a selector that matches SSL/TLS handshake operations.
+   *
+   * <p>Valid operations: {@link OperationType#SSL_HANDSHAKE}.
+   *
+   * @param operations set of SSL operations to intercept; must not be empty
+   */
+  static SslSelector ssl(Set<OperationType> operations) {
+    return new SslSelector(operations);
+  }
+
+  /**
+   * Returns a selector that matches file I/O read and write operations across any {@link
+   * java.io.FileInputStream} or {@link java.io.FileOutputStream} instance.
+   *
+   * <p>Valid operations: {@link OperationType#FILE_IO_READ}, {@link OperationType#FILE_IO_WRITE}.
+   *
+   * @param operations set of file I/O operations to intercept; must not be empty
+   */
+  static FileIoSelector fileIo(Set<OperationType> operations) {
+    return new FileIoSelector(operations);
+  }
+
+  /**
    * Returns a selector that activates the stressor effect identified by {@code target}. Unlike
    * interception selectors, this does not match in-flight JVM operations — it triggers the stressor
    * immediately on activation and runs it until the handle is closed.
@@ -396,6 +450,8 @@ public sealed interface ChaosSelector
     DEADLOCK,
     /** {@link ChaosEffect.MonitorContentionEffect} */
     MONITOR_CONTENTION,
+    /** {@link ChaosEffect.VirtualThreadCarrierPinningEffect} */
+    VIRTUAL_THREAD_CARRIER_PINNING,
 
     // JIT / code cache stressors
     /** {@link ChaosEffect.CodeCachePressureEffect} */
@@ -667,6 +723,49 @@ public sealed interface ChaosSelector
     public JdbcSelector {
       operations = validatedOperations(operations);
       targetPattern = targetPattern == null ? NamePattern.any() : targetPattern;
+    }
+  }
+
+  /**
+   * Matches DNS resolution operations, optionally filtering by the hostname being resolved.
+   *
+   * <p>The {@code hostnamePattern} is matched against the hostname argument passed to {@link
+   * java.net.InetAddress#getByName(String)} or {@link java.net.InetAddress#getAllByName(String)}.
+   * For {@link java.net.InetAddress#getLocalHost()} the hostname is {@code null}; a {@link
+   * NamePattern#any()} pattern matches all DNS calls including {@code getLocalHost()}.
+   *
+   * <p><b>Valid operations:</b> {@link OperationType#DNS_RESOLVE}.
+   */
+  record DnsSelector(Set<OperationType> operations, NamePattern hostnamePattern)
+      implements ChaosSelector {
+    public DnsSelector {
+      operations = validatedOperations(operations);
+      hostnamePattern = hostnamePattern == null ? NamePattern.any() : hostnamePattern;
+    }
+  }
+
+  /**
+   * Matches SSL/TLS handshake operations on both {@link javax.net.ssl.SSLSocket} and {@link
+   * javax.net.ssl.SSLEngine}.
+   *
+   * <p><b>Valid operations:</b> {@link OperationType#SSL_HANDSHAKE}.
+   */
+  record SslSelector(Set<OperationType> operations) implements ChaosSelector {
+    public SslSelector {
+      operations = validatedOperations(operations);
+    }
+  }
+
+  /**
+   * Matches file I/O read and write operations on {@link java.io.FileInputStream} and {@link
+   * java.io.FileOutputStream}.
+   *
+   * <p><b>Valid operations:</b> {@link OperationType#FILE_IO_READ}, {@link
+   * OperationType#FILE_IO_WRITE}.
+   */
+  record FileIoSelector(Set<OperationType> operations) implements ChaosSelector {
+    public FileIoSelector {
+      operations = validatedOperations(operations);
     }
   }
 

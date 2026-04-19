@@ -9,7 +9,7 @@ import java.lang.annotation.Target;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
-import org.springframework.context.ApplicationContextInitializer;
+import org.springframework.core.annotation.AliasFor;
 
 /**
  * Meta-annotation combining {@link SpringBootTest} and the {@link ChaosAgentExtension} so that a
@@ -42,6 +42,7 @@ public @interface ChaosTest {
    *
    * @return forwarded to {@code @SpringBootTest.properties}
    */
+  @AliasFor(annotation = SpringBootTest.class, attribute = "properties")
   String[] properties() default {};
 
   /**
@@ -49,6 +50,7 @@ public @interface ChaosTest {
    *
    * @return forwarded to {@code @SpringBootTest.classes}
    */
+  @AliasFor(annotation = SpringBootTest.class, attribute = "classes")
   Class<?>[] classes() default {};
 
   /**
@@ -56,6 +58,7 @@ public @interface ChaosTest {
    *
    * @return forwarded to {@code @SpringBootTest.webEnvironment}
    */
+  @AliasFor(annotation = SpringBootTest.class, attribute = "webEnvironment")
   WebEnvironment webEnvironment() default WebEnvironment.MOCK;
 
   /**
@@ -63,12 +66,6 @@ public @interface ChaosTest {
    *
    * @return forwarded to {@code @SpringBootTest.args}
    */
+  @AliasFor(annotation = SpringBootTest.class, attribute = "args")
   String[] args() default {};
-
-  /**
-   * Application context initializers to apply before context refresh.
-   *
-   * @return forwarded to {@code @SpringBootTest.initializers}
-   */
-  Class<? extends ApplicationContextInitializer<?>>[] initializers() default {};
 }

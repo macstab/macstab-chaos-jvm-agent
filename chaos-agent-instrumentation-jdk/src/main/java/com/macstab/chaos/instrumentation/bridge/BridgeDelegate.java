@@ -610,4 +610,41 @@ public interface BridgeDelegate {
    * @throws Throwable if the delegate throws
    */
   boolean beforeJdbcTransactionRollback() throws Throwable;
+
+  /**
+   * Called before {@link Thread#sleep(long)}.
+   *
+   * @param millis the sleep duration in milliseconds
+   * @return {@code true} to suppress the sleep; {@code false} for normal execution
+   * @throws Throwable if the delegate throws
+   */
+  boolean beforeThreadSleep(long millis) throws Throwable;
+
+  /**
+   * Called before {@link java.net.InetAddress#getByName(String)}, {@link
+   * java.net.InetAddress#getAllByName(String)}, or {@link java.net.InetAddress#getLocalHost()}.
+   *
+   * @param hostname the hostname being resolved; {@code null} for {@code getLocalHost()}
+   * @throws Throwable if the delegate throws
+   */
+  void beforeDnsResolve(String hostname) throws Throwable;
+
+  /**
+   * Called before {@link javax.net.ssl.SSLSocket#startHandshake()} or {@link
+   * javax.net.ssl.SSLEngine#beginHandshake()}.
+   *
+   * @param socket the {@code SSLSocket} or {@code SSLEngine} instance
+   * @throws Throwable if the delegate throws
+   */
+  void beforeSslHandshake(Object socket) throws Throwable;
+
+  /**
+   * Called before a {@link java.io.FileInputStream#read} or {@link java.io.FileOutputStream#write}
+   * call.
+   *
+   * @param operation {@code "FILE_IO_READ"} or {@code "FILE_IO_WRITE"}
+   * @param stream the stream instance
+   * @throws Throwable if the delegate throws
+   */
+  void beforeFileIo(String operation, Object stream) throws Throwable;
 }

@@ -89,6 +89,13 @@ final class SelectorMatcher {
       case ChaosSelector.JdbcSelector jdbcSelector ->
           jdbcSelector.operations().contains(context.operationType())
               && jdbcSelector.targetPattern().matches(context.targetName());
+      case ChaosSelector.DnsSelector dnsSelector ->
+          dnsSelector.operations().contains(context.operationType())
+              && dnsSelector.hostnamePattern().matches(context.targetName());
+      case ChaosSelector.SslSelector sslSelector ->
+          sslSelector.operations().contains(context.operationType());
+      case ChaosSelector.FileIoSelector fileIoSelector ->
+          fileIoSelector.operations().contains(context.operationType());
       case ChaosSelector.StressSelector stressSelector ->
           context.operationType() == OperationType.LIFECYCLE && stressSelector.target() != null;
     };

@@ -728,4 +728,53 @@ final class ChaosBridge implements BridgeDelegate {
   public boolean beforeJdbcTransactionRollback() throws Throwable {
     return runtime.beforeJdbcTransactionRollback();
   }
+
+  /**
+   * Invoked before {@link Thread#sleep(long)}; returns {@code true} to suppress the sleep.
+   *
+   * @param millis the requested sleep duration in milliseconds
+   * @return {@code true} to suppress the sleep; {@code false} for normal execution
+   * @throws Throwable if the runtime decides to abort the sleep
+   */
+  @Override
+  public boolean beforeThreadSleep(final long millis) throws Throwable {
+    return runtime.beforeThreadSleep(millis);
+  }
+
+  /**
+   * Invoked before {@link java.net.InetAddress#getByName(String)}, {@link
+   * java.net.InetAddress#getAllByName(String)}, or {@link java.net.InetAddress#getLocalHost()}.
+   *
+   * @param hostname the hostname being resolved; {@code null} for {@code getLocalHost()}
+   * @throws Throwable if the runtime decides to abort the lookup
+   */
+  @Override
+  public void beforeDnsResolve(final String hostname) throws Throwable {
+    runtime.beforeDnsResolve(hostname);
+  }
+
+  /**
+   * Invoked before {@link javax.net.ssl.SSLSocket#startHandshake()} or {@link
+   * javax.net.ssl.SSLEngine#beginHandshake()}.
+   *
+   * @param socket the {@code SSLSocket} or {@code SSLEngine} instance
+   * @throws Throwable if the runtime decides to abort the handshake
+   */
+  @Override
+  public void beforeSslHandshake(final Object socket) throws Throwable {
+    runtime.beforeSslHandshake(socket);
+  }
+
+  /**
+   * Invoked before a {@link java.io.FileInputStream#read} or {@link java.io.FileOutputStream#write}
+   * call.
+   *
+   * @param operation {@code "FILE_IO_READ"} or {@code "FILE_IO_WRITE"}
+   * @param stream the stream instance
+   * @throws Throwable if the runtime decides to abort the I/O operation
+   */
+  @Override
+  public void beforeFileIo(final String operation, final Object stream) throws Throwable {
+    runtime.beforeFileIo(operation, stream);
+  }
 }

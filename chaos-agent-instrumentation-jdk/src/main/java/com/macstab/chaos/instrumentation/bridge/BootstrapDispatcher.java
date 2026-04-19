@@ -155,8 +155,15 @@ public final class BootstrapDispatcher {
   public static final int BEFORE_JDBC_TRANSACTION_COMMIT = 51;
   public static final int BEFORE_JDBC_TRANSACTION_ROLLBACK = 52;
 
+  // ── Phase 2 handles (53-56) ───────────────────────────────────────────────
+  public static final int BEFORE_THREAD_SLEEP = 53;
+
+  public static final int BEFORE_DNS_RESOLVE = 54;
+  public static final int BEFORE_SSL_HANDSHAKE = 55;
+  public static final int BEFORE_FILE_IO = 56;
+
   /** Total number of method-handle slots; equals the highest index plus one. */
-  public static final int HANDLE_COUNT = 53;
+  public static final int HANDLE_COUNT = 57;
 
   private BootstrapDispatcher() {}
 
@@ -1353,6 +1360,90 @@ public final class BootstrapDispatcher {
               && (boolean) h[BEFORE_JDBC_TRANSACTION_ROLLBACK].invoke(d);
         },
         false);
+  }
+
+  /**
+   * Called before {@link Thread#sleep(long)}.
+   *
+   * <p>Returns {@code true} to skip the sleep entirely (simulating a spurious wake-up or
+   * timeout-cancellation); {@code false} for normal execution. Returns {@code false} as the
+   * fallback.
+   *
+   * @param millis the sleep duration in milliseconds as passed to {@code Thread.sleep}
+   * @return {@code true} to suppress the sleep; {@code false} for normal execution
+   * @throws Throwable if the delegate throws
+   */
+  public static boolean beforeThreadSleep(final long millis) throws Throwable {
+    return invoke(
+        () -> {
+          final MethodHandle[] h = handles;
+          final Object d = delegate;
+          return (d != null && h != null) && (boolean) h[BEFORE_THREAD_SLEEP].invoke(d, millis);
+        },
+        false);
+  }
+
+  /**
+   * Called before {@link java.net.InetAddress#getByName(String)}, {@link
+   * java.net.InetAddress#getAllByName(String)}, or {@link java.net.InetAddress#getLocalHost()}.
+   *
+   * @param hostname the hostname being resolved; {@code null} for {@code getLocalHost()}
+   * @throws Throwable if an active scenario injects an exception to simulate a DNS failure
+   */
+  public static void beforeDnsResolve(final String hostname) throws Throwable {
+    invoke(
+        () -> {
+          final MethodHandle[] h = handles;
+          final Object d = delegate;
+          if (d != null && h != null) {
+            h[BEFORE_DNS_RESOLVE].invoke(d, hostname);
+          }
+          return null;
+        },
+        null);
+  }
+
+  /**
+   * Called before {@link javax.net.ssl.SSLSocket#startHandshake()} or {@link
+   * javax.net.ssl.SSLEngine#beginHandshake()}.
+   *
+   * @param socket the {@code SSLSocket} or {@code SSLEngine} instance; never {@code null}
+   * @throws Throwable if an active scenario injects an exception to simulate a TLS handshake
+   *     failure
+   */
+  public static void beforeSslHandshake(final Object socket) throws Throwable {
+    invoke(
+        () -> {
+          final MethodHandle[] h = handles;
+          final Object d = delegate;
+          if (d != null && h != null) {
+            h[BEFORE_SSL_HANDSHAKE].invoke(d, socket);
+          }
+          return null;
+        },
+        null);
+  }
+
+  /**
+   * Called before a {@link java.io.FileInputStream#read} or {@link java.io.FileOutputStream#write}
+   * call.
+   *
+   * @param operation {@code "FILE_IO_READ"} or {@code "FILE_IO_WRITE"}; never {@code null}
+   * @param stream the {@code FileInputStream} or {@code FileOutputStream} instance; never {@code
+   *     null}
+   * @throws Throwable if an active scenario injects an exception to simulate an I/O failure
+   */
+  public static void beforeFileIo(final String operation, final Object stream) throws Throwable {
+    invoke(
+        () -> {
+          final MethodHandle[] h = handles;
+          final Object d = delegate;
+          if (d != null && h != null) {
+            h[BEFORE_FILE_IO].invoke(d, operation, stream);
+          }
+          return null;
+        },
+        null);
   }
 
   // ── Internal helpers ───────────────────────────────────────────────────────

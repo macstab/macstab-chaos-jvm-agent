@@ -24,6 +24,28 @@ public record AgentArgs(Map<String, String> values) {
   }
 
   /**
+   * Returns the long value for {@code key}, or {@code defaultValue} if absent or unparseable.
+   *
+   * <p>The raw string is stripped of leading/trailing whitespace before parsing. Any non-numeric
+   * value (including blank) silently yields {@code defaultValue}.
+   *
+   * @param key the argument key to look up
+   * @param defaultValue value returned when the key is absent or its value is not a valid long
+   * @return the parsed long, or {@code defaultValue}
+   */
+  public long getLong(final String key, final long defaultValue) {
+    final String raw = values.get(key);
+    if (raw == null || raw.isBlank()) {
+      return defaultValue;
+    }
+    try {
+      return Long.parseLong(raw.strip());
+    } catch (NumberFormatException ignored) {
+      return defaultValue;
+    }
+  }
+
+  /**
    * Returns the boolean value for {@code key}.
    *
    * <p>Only the literals {@code "true"} and {@code "false"} (case-insensitive) are accepted. Any

@@ -59,6 +59,9 @@ import java.time.Duration;
   @JsonSubTypes.Type(
       value = ChaosEffect.ReferenceQueueFloodEffect.class,
       name = "referenceQueueFlood"),
+  @JsonSubTypes.Type(
+      value = ChaosEffect.VirtualThreadCarrierPinningEffect.class,
+      name = "virtualThreadCarrierPinning"),
 })
 public sealed interface ChaosEffect
     permits ChaosEffect.DelayEffect,
@@ -83,7 +86,8 @@ public sealed interface ChaosEffect
         ChaosEffect.CodeCachePressureEffect,
         ChaosEffect.SafepointStormEffect,
         ChaosEffect.StringInternPressureEffect,
-        ChaosEffect.ReferenceQueueFloodEffect {
+        ChaosEffect.ReferenceQueueFloodEffect,
+        ChaosEffect.VirtualThreadCarrierPinningEffect {
 
   // ── Interceptor factory methods ────────────────────────────────────────────
 
@@ -429,6 +433,30 @@ public sealed interface ChaosEffect
    */
   static ReferenceQueueFloodEffect referenceQueueFlood(int referenceCount, Duration floodInterval) {
     return new ReferenceQueueFloodEffect(referenceCount, floodInterval);
+  }
+
+  /**
+   * Returns a virtual-thread carrier pinning stressor that spawns {@code pinnedThreadCount}
+   * platform daemon threads, each of which sits inside a {@code synchronized} block in a loop
+   * sleeping for {@code pinDuration} per cycle.
+   *
+   * <p>When a virtual thread is mounted on a carrier platform thread and that carrier enters a
+   * {@code synchronized} block, the JVM (JDK 21) "pins" the virtual thread to its carrier: the
+   * virtual thread cannot be unmounted until the synchronized block exits, even if it calls a
+   * blocking operation. The pinned carrier is therefore unavailable to run other virtual threads.
+   * This stressor replicates that condition by deliberately holding carriers inside synchronized
+   * blocks, reducing the effective carrier-thread pool size and causing virtual-thread starvation
+   * under load.
+   *
+   * <p>Use with {@link ChaosSelector.StressSelector} targeting {@link
+   * ChaosSelector.StressTarget#VIRTUAL_THREAD_CARRIER_PINNING}.
+   *
+   * @param pinnedThreadCount number of carrier threads to pin; must be &gt; 0
+   * @param pinDuration how long each thread holds the pin per cycle; must be positive
+   */
+  static VirtualThreadCarrierPinningEffect virtualThreadCarrierPinning(
+      int pinnedThreadCount, Duration pinDuration) {
+    return new VirtualThreadCarrierPinningEffect(pinnedThreadCount, pinDuration);
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -933,6 +961,30 @@ public sealed interface ChaosEffect
       }
       if (floodInterval == null || floodInterval.isNegative() || floodInterval.isZero()) {
         throw new IllegalArgumentException("floodInterval must be positive");
+      }
+    }
+  }
+
+  /**
+   * Pins JDK 21+ virtual-thread carrier platform threads by keeping them inside {@code
+   * synchronized} blocks for {@code pinDuration} each cycle.
+   *
+   * <p>In JDK 21, a virtual thread mounted on a carrier that enters a {@code synchronized} block
+   * cannot be unmounted (pinned). This stressor simulates that condition by explicitly occupying
+   * {@code pinnedThreadCount} platform threads inside synchronized monitors, reducing the effective
+   * carrier pool available for virtual-thread scheduling and causing starvation under load.
+   *
+   * <p>Cleanup: all pinning threads are interrupted and the monitor is released when the activation
+   * handle is closed.
+   */
+  record VirtualThreadCarrierPinningEffect(int pinnedThreadCount, Duration pinDuration)
+      implements ChaosEffect {
+    public VirtualThreadCarrierPinningEffect {
+      if (pinnedThreadCount <= 0) {
+        throw new IllegalArgumentException("pinnedThreadCount must be > 0");
+      }
+      if (pinDuration == null || pinDuration.isNegative() || pinDuration.isZero()) {
+        throw new IllegalArgumentException("pinDuration must be positive");
       }
     }
   }

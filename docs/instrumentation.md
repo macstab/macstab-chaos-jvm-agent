@@ -997,7 +997,7 @@ deactivate BD
 
 <div align="center">
 
-*Architecture, implementation, and documentation crafted by*
+*Architecture, implementation, and documentation crafted with Love and Passion by*
 
 **[Christian Schnapka](https://macstab.com)**  
 Embedded Principal+ Engineer  

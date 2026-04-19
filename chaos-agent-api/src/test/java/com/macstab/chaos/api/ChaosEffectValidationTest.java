@@ -913,4 +913,79 @@ class ChaosEffectValidationTest {
           .isInstanceOf(ChaosEffect.MonitorContentionEffect.class);
     }
   }
+
+  @Nested
+  @DisplayName("VirtualThreadCarrierPinningEffect")
+  class VirtualThreadCarrierPinningEffectTests {
+
+    @Test
+    @DisplayName("valid construction")
+    void validConstruction() {
+      assertThatCode(
+              () -> new ChaosEffect.VirtualThreadCarrierPinningEffect(4, Duration.ofMillis(100)))
+          .doesNotThrowAnyException();
+    }
+
+    @Test
+    @DisplayName("one pinned thread is valid")
+    void onePinnedThreadIsValid() {
+      assertThatCode(
+              () -> new ChaosEffect.VirtualThreadCarrierPinningEffect(1, Duration.ofMillis(50)))
+          .doesNotThrowAnyException();
+    }
+
+    @Test
+    @DisplayName("zero pinnedThreadCount throws")
+    void zeroPinnedThreadCountThrows() {
+      assertThatThrownBy(
+              () -> new ChaosEffect.VirtualThreadCarrierPinningEffect(0, Duration.ofMillis(100)))
+          .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @DisplayName("negative pinnedThreadCount throws")
+    void negativePinnedThreadCountThrows() {
+      assertThatThrownBy(
+              () -> new ChaosEffect.VirtualThreadCarrierPinningEffect(-1, Duration.ofMillis(100)))
+          .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @DisplayName("null pinDuration throws")
+    void nullPinDurationThrows() {
+      assertThatThrownBy(() -> new ChaosEffect.VirtualThreadCarrierPinningEffect(2, null))
+          .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @DisplayName("zero pinDuration throws")
+    void zeroPinDurationThrows() {
+      assertThatThrownBy(() -> new ChaosEffect.VirtualThreadCarrierPinningEffect(2, Duration.ZERO))
+          .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @DisplayName("negative pinDuration throws")
+    void negativePinDurationThrows() {
+      assertThatThrownBy(
+              () -> new ChaosEffect.VirtualThreadCarrierPinningEffect(2, Duration.ofMillis(-1)))
+          .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @DisplayName("factory produces VirtualThreadCarrierPinningEffect instance")
+    void factoryProducesCorrectInstance() {
+      assertThat(ChaosEffect.virtualThreadCarrierPinning(2, Duration.ofMillis(50)))
+          .isInstanceOf(ChaosEffect.VirtualThreadCarrierPinningEffect.class);
+    }
+
+    @Test
+    @DisplayName("factory preserves field values")
+    void factoryPreservesFieldValues() {
+      final ChaosEffect.VirtualThreadCarrierPinningEffect effect =
+          ChaosEffect.virtualThreadCarrierPinning(3, Duration.ofMillis(75));
+      assertThat(effect.pinnedThreadCount()).isEqualTo(3);
+      assertThat(effect.pinDuration()).isEqualTo(Duration.ofMillis(75));
+    }
+  }
 }

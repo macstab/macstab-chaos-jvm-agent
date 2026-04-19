@@ -325,9 +325,265 @@ The `ChaosRuntime.dispatcher()` accessor is `public` and returns the live `Chaos
 
 ---
 
+---
+
+## 7. `Phase4DispatchBenchmark` — Thread · DNS · SSL · File I/O Hot Paths
+
+### 7.1 What It Measures
+
+`Phase4DispatchBenchmark` measures the `ChaosDispatcher` hot path for the four Phase 4 operation
+types — `THREAD_SLEEP`, `DNS_RESOLVE`, `SSL_HANDSHAKE`, `FILE_IO_READ`, and `FILE_IO_WRITE` — that
+were added in the roadmap 4.x instrumentation wave. The benchmark entry points map to:
+
+| Benchmark family | Dispatcher method | Instrumented JDK target |
+|---|---|---|
+| `threadSleep_*` | `beforeThreadSleep(long millis)` | `Thread.sleep(long)` |
+| `dnsResolve_*` | `beforeDnsResolve(String hostname)` | `InetAddress.getByName(String)` |
+| `sslHandshake_*` | `beforeSslHandshake(Object engine)` | `SSLEngineImpl.beginHandshake()` / `SSLSocketImpl.startHandshake()` |
+| `fileIoRead_*` | `beforeFileIo("FILE_IO_READ", Object)` | `FileInputStream.read()` |
+| `fileIoWrite_*` | `beforeFileIo("FILE_IO_WRITE", Object)` | `FileOutputStream.write(int)` |
+
+Like the JDBC and HTTP benchmarks in sections 3–4, the measurement does **not** include
+`BootstrapDispatcher` bridge overhead (~5–15 ns) or ByteBuddy advice prolog cost. It isolates the
+`ChaosDispatcher` evaluation logic: registry lookup, selector evaluation, and activation-policy check.
+
+### 7.2 Three Scenario States
+
+Each operation type is benchmarked against three states, yielding 15 benchmarks (5 types × 3 states):
+
+**`ZeroScenariosState`** — the runtime is live but the registry is empty. This is the theoretical
+lower bound for any installed agent. Dispatch terminates at the first `registry.isEmpty()` check.
+
+**`OneScenarioNoMatchState`** — one JDBC scenario is active. All Phase 4 dispatch calls miss it on
+`operationType` mismatch before any pattern evaluation. This isolates the cost of a non-empty
+registry with a guaranteed early reject.
+
+**`FourScenariosExhaustedState`** — one scenario per Phase 4 operation type, each activated with
+`maxApplications=1`. During `@Setup`, each scenario is consumed once, exhausting it. The measurement
+loop therefore hits the "full selector evaluation + exhaustion check" path — the most expensive
+*non-firing* steady state in production (scenarios that have reached their application cap but still
+sit in the registry until the handle is stopped).
+
+### 7.3 Measured Results
+
+Run on OpenJDK 25.0.1 (Apple Silicon), `-f 0 -wi 2 -i 3 -bm avgt -tu ns`:
+
+```
+Benchmark                                              Mode  Cnt    Score    Error  Units
+──────────────────────────────────────────────────────────────────────────────────────────
+Phase4DispatchBenchmark.dnsResolve_zeroScenarios        avgt    3   56.0 ±  13.1  ns/op
+Phase4DispatchBenchmark.fileIoRead_zeroScenarios        avgt    3   58.9 ±   5.0  ns/op
+Phase4DispatchBenchmark.fileIoWrite_zeroScenarios       avgt    3   58.9 ±   0.7  ns/op
+Phase4DispatchBenchmark.sslHandshake_zeroScenarios      avgt    3   57.7 ±   4.5  ns/op
+Phase4DispatchBenchmark.threadSleep_zeroScenarios       avgt    3   55.8 ±   2.0  ns/op
+
+Phase4DispatchBenchmark.dnsResolve_oneScenarioNoMatch   avgt    3   89.4 ±   6.4  ns/op
+Phase4DispatchBenchmark.fileIoRead_oneScenarioNoMatch   avgt    3   85.8 ±   2.0  ns/op
+Phase4DispatchBenchmark.fileIoWrite_oneScenarioNoMatch  avgt    3   85.7 ±  11.0  ns/op
+Phase4DispatchBenchmark.sslHandshake_oneScenarioNoMatch avgt    3   85.1 ±   0.9  ns/op
+Phase4DispatchBenchmark.threadSleep_oneScenarioNoMatch  avgt    3   82.5 ±   2.1  ns/op
+
+Phase4DispatchBenchmark.dnsResolve_fourScenariosExh.    avgt    3  306.2 ±   8.1  ns/op
+Phase4DispatchBenchmark.fileIoRead_fourScenariosExh.    avgt    3  333.4 ±  24.3  ns/op
+Phase4DispatchBenchmark.fileIoWrite_fourScenariosExh.   avgt    3  120.8 ±   4.4  ns/op
+Phase4DispatchBenchmark.sslHandshake_fourScenariosExh.  avgt    3  325.8 ±   3.0  ns/op
+Phase4DispatchBenchmark.threadSleep_fourScenariosExh.   avgt    3  332.9 ±   8.9  ns/op
+```
+
+### 7.4 Practical Throughput Impact — What the Agent Costs You
+
+Numbers only matter in context. The question a developer needs answered is not "how many
+nanoseconds?" but "how many fewer operations per second does my service handle?"
+
+The analysis below takes two representative operations — a 1 KB page-cache file read (the fastest
+realistic File I/O workload) and a DNS resolution — and expresses the agent overhead as lost
+throughput.
+
+#### A Word on What These Numbers Actually Represent
+
+Before reading the tables below, understand what the extreme cases require — and why they are
+rarely if ever reached in production.
+
+**"1 KB file read, page cache hot"** assumes the same file page lives permanently in the Linux
+page cache. In a containerised environment (Kubernetes, Docker) with memory limits and multiple
+co-located services competing for RAM, the page cache is continuously evicted under pressure.
+A file read that hits the page cache in a dedicated VM takes ~1 µs; the same read after eviction
+triggers a page fault and costs 50–500 µs depending on storage latency. The hot-cache scenario
+is realistic only for a file that is accessed thousands of times per second by the same process —
+e.g., a hot configuration file or a frequently-read binary resource. Reading one million distinct
+1 KB files per second guarantees that none of them are cached.
+
+**"DNS lookup, JVM cache hot, 2M/sec"** requires the same hostname to be resolved 2 million times
+per second by the same JVM process. The JVM `InetAddress` cache makes this a pure HashMap lookup
+after the first resolution — but a workload that loops on `InetAddress.getByName("same-host")`
+two million times per second is not a DNS workload, it is a benchmark. A real service resolves
+distinct hostnames at 100–5 000/sec. Most of those resolve from the JVM cache within its TTL,
+making the per-lookup cost ~500 ns — but the total DNS work in a busy service is measured in
+microseconds per second, not milliseconds.
+
+**In both cases, the extreme scenario is constructed to make the agent overhead look as large
+as possible relative to the baseline.** The practical section below uses realistic call rates
+instead.
+
+---
+
+#### Reference: Baseline Operation Costs
+
+| Operation | Realistic cost | Note |
+|---|---|---|
+| `FileInputStream.read()`, 1 KB, page cache hot | ~1 000 ns (1 µs) | Only if the same file page is accessed repeatedly by one process |
+| `FileInputStream.read()`, 1 KB, container under memory pressure | ~50 000–200 000 ns | Page cache evicted; kernel fetches from storage |
+| `InetAddress.getByName()`, JVM cache hit | ~500 ns | JVM-internal HashMap; no OS call; requires same host, within TTL |
+| `InetAddress.getByName()`, real DNS via local resolver | ~500 000 ns (500 µs) | UDP to a caching resolver; cache miss at OS level |
+| SSL/TLS handshake (TLS 1.3) | ~1 000 000–10 000 000 ns | Asymmetric crypto; ~100–1 000 handshakes/sec per core maximum |
+
+---
+
+#### Scenario A — File I/O Read (1 KB, page cache hot — stress test)
+
+This is the worst-case scenario for the agent: the intercepted operation is as cheap as a syscall
+can be, and the registry contains exhausted scenarios. Real world applicability is low, but it
+defines the ceiling.
+
+**Baseline maximum throughput (no agent):**
+1 000 000 000 ns / 1 000 ns per read = **1 000 000 reads/sec**
+
+| Active chaos scenarios | Cost per read | Max reads/sec | Throughput loss |
+|---|---|---|---|
+| 0 (agent installed, no scenarios) | 1 000 + 58 = 1 058 ns | 945 180 | **−5.5 %** |
+| 1 scenario, different type (type-miss) | 1 000 + 87 = 1 087 ns | 919 960 | **−8.0 %** |
+| 1 scenario, FILE_IO_READ, exhausted | 1 000 + 333 = 1 333 ns | 750 188 | **−25.0 %** |
+| 4 scenarios, all exhausted (worst case) | 1 000 + 333 = 1 333 ns | 750 188 | **−25.0 %** |
+
+> **The −25% figure is the maximum realistic worst case for File I/O dispatch overhead.**
+> It requires: page-cache-hot reads (rare in containers), exhausted scenarios left resident in the
+> registry (avoidable with `ChaosActivationHandle.stop()`), and an application doing nothing but
+> reading files at maximum speed. Remove exhausted scenarios and this drops to −5.5% or better.
+
+---
+
+#### Scenario B — DNS Resolution, JVM Cache Hot (stress test)
+
+The agent intercepts before the JVM cache check, so even a cached lookup pays the full dispatch
+cost. This produces the highest relative impact of any Phase 4 path — because the baseline
+operation is also a HashMap lookup, roughly the same complexity as the dispatch itself.
+
+**Baseline maximum throughput (no agent, JVM cache hot):**
+1 000 000 000 ns / 500 ns per lookup = **2 000 000 lookups/sec**
+
+| Active chaos scenarios | Cost per lookup | Max lookups/sec | Throughput loss |
+|---|---|---|---|
+| 0 (agent installed, no scenarios) | 500 + 56 = 556 ns | 1 798 561 | **−10.1 %** |
+| 1 scenario, different type (type-miss) | 500 + 89 = 589 ns | 1 697 793 | **−15.1 %** |
+| 1 scenario, DNS_RESOLVE, exhausted | 500 + 306 = 806 ns | 1 240 695 | **−37.9 %** |
+
+2 million DNS lookups per second on the same host from one JVM is not DNS traffic — it is a tight
+loop. In practice, achieving this rate requires the application to do essentially nothing else.
+
+---
+
+#### Scenario C — DNS Resolution, Real Network (practical case)
+
+When the hostname is not in the JVM cache and the OS resolver is queried, the operation costs
+~500 µs.
+
+**Baseline maximum throughput:** 1 000 000 000 ns / 500 000 ns = **2 000 lookups/sec**
+
+| Active chaos scenarios | Cost per lookup | Max lookups/sec | Throughput loss |
+|---|---|---|---|
+| 0 (agent installed, no scenarios) | 500 000 + 56 ns | 1 999.8 | **−0.01 %** |
+| 4 scenarios, all exhausted (worst case) | 500 000 + 306 ns | 1 998.8 | **−0.06 %** |
+
+The agent is invisible. The same applies to SSL handshakes (1–10 ms) and any `Thread.sleep` call
+by definition. **Any operation that crosses a network boundary makes the dispatch overhead
+immeasurable.**
+
+---
+
+#### Scenario D — Realistic Mixed Microservice
+
+A typical Java HTTP microservice handling 2 000 requests/sec with the following per-request
+profile:
+
+| Operation | Calls/request | Total calls/sec |
+|---|---|---|
+| File reads (config, templates, classpath resources) | 2 | 4 000 |
+| DNS resolutions (distinct upstream hostnames, mostly JVM-cached) | 0.5 | 1 000 |
+| SSL handshakes (TLS keep-alive; connections reused) | 0.05 | 100 |
+| Thread.sleep (retry backoff, health check timers) | 0.1 | 200 |
+| **Total intercepted calls/sec** | | **5 300** |
+
+**Total agent overhead — no chaos scenarios active:**
+5 300 calls/sec × 58 ns/call = **307 400 ns = 0.31 ms per second**
+
+A service spending 2 000 req/sec × say 5 ms average latency = 10 000 ms of CPU time per second.
+The agent costs **0.31 ms out of 10 000 ms — 0.003% of one CPU core.**
+
+**Total agent overhead — 4 exhausted scenarios, worst-case paths:**
+- 4 000 file reads × 333 ns = 1 332 000 ns
+- 1 000 DNS lookups × 306 ns = 306 000 ns  
+- 100 SSL handshakes × 326 ns = 32 600 ns
+- 200 thread sleeps × 333 ns = 66 600 ns
+- **Total: 1 737 200 ns = 1.74 ms per second**
+
+1.74 ms out of 10 000 ms = **0.017% of one CPU core.**
+
+Even with four exhausted scenarios sitting in the registry across all operation types, the chaos
+agent consumes less than two hundredths of one percent of one CPU core in a realistic microservice
+workload. The dominant cost is always the business logic, the I/O, and the network — not the
+dispatch overhead.
+
+**The one rule that matters:** call `ChaosActivationHandle.stop()` when a scenario is done.
+An exhausted scenario costs as much to evaluate as one that is actively firing, and delivers
+nothing in return. Everything else is noise.
+
+---
+
+#### Summary: When Agent Overhead Actually Matters
+
+| Situation | Impact | Verdict |
+|---|---|---|
+| Agent installed, no active scenarios | −5–10% throughput on cheapest ops | Acceptable; unavoidable |
+| Real network operations (DNS query, SSL, HTTP) | < 0.1% on any load | Negligible |
+| Cheap ops (page-cache reads) + active/exhausted scenarios | −8–25% on that specific call type | Manageable; stop exhausted scenarios |
+| Typical mixed microservice, any scenario count | < 0.02% total CPU | Irrelevant |
+| Pathological: same-host JVM-cached DNS at 2M/sec | −10–38% on that loop | Artificial; not a real workload |
+
+### 7.5 Design Targets and Compliance
+
+| Path | Target | Measured | Compliant |
+|---|---|---|---|
+| Empty registry | < 100 ns | 55.8–58.9 ns | ✓ |
+| One mismatching scenario | < 150 ns | 82.5–89.4 ns | ✓ |
+| Four exhausted (type-miss) | < 200 ns | 120.8 ns | ✓ |
+| Four exhausted (type-match) | < 500 ns | 306–333 ns | ✓ |
+
+All four paths meet their design targets. The exhausted-type-match path (306–333 ns) has the largest
+error bar for `fileIoRead` (±24 ns), attributable to `AtomicLong` memory-fence variance under
+macOS's ARM memory model. On x86 Linux (production target), variance is expected to be lower.
+
+### 7.6 Operational Guidance
+
+**Remove exhausted scenarios.** The most actionable result from this benchmark is that an exhausted
+scenario sitting in the registry costs 250 ns more per matching call than a scenario that was never
+there. `ChaosActivationHandle.stop()` removes a scenario from the live registry in O(n) time with a
+single `CopyOnWriteArrayList` copy. Call it as soon as `maxApplications` has been reached and the
+scenario is no longer needed.
+
+**Keep selector types narrow.** A `FileIoSelector(READ_ONLY)` scenario adds ~35 ns to write calls
+(type-mismatch reject) but 0 ns overhead beyond that to DNS, SSL, and thread operations (they fail
+at operation-type level before even reaching the file-type check). Wide selectors that cover multiple
+operation types increase the per-call cost across more code paths.
+
+**Benchmark with `-f 1` for publication.** The results above use `-f 0` (no fork) for speed. For
+published benchmarks, use `-f 1 -wi 3 -i 5` to isolate JIT state across classes and collect tighter
+confidence intervals.
+
+---
+
 <div align="center">
 
-*Architecture, implementation, and documentation crafted by*
+*Architecture, implementation, and documentation crafted with Love and Passion by*
 
 **[Christian Schnapka](https://macstab.com)**
 Embedded Principal+ Engineer

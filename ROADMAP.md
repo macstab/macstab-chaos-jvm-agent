@@ -600,17 +600,211 @@ class OrderServiceChaosTest {
 
 ---
 
-## Phase 4 — Release
+## Phase 4 — JVM Internals Interception
 
-### ⬜ 4.1 Release Process + 1.0.0
-**Priority: last — 3 days**
+Phase 4 extends the interception surface to five additional JVM-level operations that are highly
+demanded in resilience and performance-testing scenarios: `Thread.sleep()` suppression,
+DNS resolution latency/error injection, SSL/TLS handshake delay injection, File I/O
+read/write delay injection, and virtual-thread carrier-thread pinning simulation.
 
-- GitHub Actions CI matrix: JDK 17, 21, 25 + Linux/macOS
-- Maven Central publishing via Sonatype OSSRH
-- GPG signing
-- `CHANGELOG.md` ([Keep a Changelog](https://keepachangelog.com) format)
-- `io.macstab` group ID
-- Tag `v1.0.0`
+All five features follow the established agent architecture: new `OperationType` enum values,
+new `ChaosSelector` implementations with `@JsonSubTypes` support, and — where applicable —
+new `BootstrapDispatcher` dispatch handles wired through `BridgeDelegate` → `ChaosBridge` →
+`ChaosRuntime` → `ChaosDispatcher` with matching `JvmRuntimeAdvice` inner classes and
+`JdkInstrumentationInstaller` Phase 2 wiring.
+
+---
+
+### ✅ 4.1 Thread.sleep() Suppression
+**Completed — 2026-04-18**
+
+Intercepts `Thread.sleep(long)` at the JVM level and optionally skips the sleep entirely,
+simulating a spurious-wakeup or a time-skip without modifying the caller's clock perception.
+
+**New API surface:**
+
+- `OperationType.THREAD_SLEEP` — operation type representing a `Thread.sleep(long)` call.
+- `ChaosSelector.thread(Set.of(THREAD_SLEEP), ...)` — use the existing `ThreadSelector` to target
+  sleep calls by thread name or kind; or any selector that includes `THREAD_SLEEP`.
+
+**How it works:**
+
+The `ChaosEffect.SUPPRESS` outcome causes `ThreadSleepAdvice.enter()` — annotated with
+`@Advice.OnMethodEnter(skipOn = Advice.OnNonDefaultValue.class)` — to return `true`,
+which instructs ByteBuddy to skip the real `Thread.sleep()` body entirely. Any other outcome
+(DELAY, EXCEPTION) applies the standard dispatcher logic. The bootstrap dispatch handle
+index is `BootstrapDispatcher.BEFORE_THREAD_SLEEP = 53`.
+
+**Example:**
+
+```java
+// Suppress all Thread.sleep() calls on any thread — useful for speeding up
+// time-based retry loops in tests.
+chaos.activate(ChaosScenario.builder()
+    .id("suppress-sleep")
+    .selector(ChaosSelector.thread(Set.of(OperationType.THREAD_SLEEP)))
+    .effect(ChaosEffect.suppress())
+    .policy(ActivationPolicy.always())
+    .build());
+```
+
+---
+
+### ✅ 4.2 DNS Resolution Injection
+**Completed — 2026-04-18**
+
+Intercepts `InetAddress.getByName(String)`, `InetAddress.getAllByName(String)`, and
+`InetAddress.getLocalHost()` to inject latency or surface `UnknownHostException`-equivalent
+exceptions, simulating DNS outages and slow resolvers.
+
+**New API surface:**
+
+- `OperationType.DNS_RESOLVE` — operation type representing any `InetAddress` resolution call.
+- `ChaosSelector.DnsSelector(Set<OperationType> operations, NamePattern hostnamePattern)` —
+  matches resolution calls by operation type and optionally by resolved hostname prefix/regex.
+- Factory: `ChaosSelector.dns(Set<OperationType>)` and
+  `ChaosSelector.dns(Set<OperationType>, NamePattern)`.
+
+**How it works:**
+
+Three separate `@Advice` inner classes handle the three static `InetAddress` methods:
+`DnsResolveAdvice` for the two `String`-argument overloads (capturing `hostname` via
+`@Advice.Argument(0)`) and `DnsLocalHostAdvice` for the zero-argument `getLocalHost()` (passes
+`null` hostname to the dispatcher, which selectors treat as a wildcard match). The
+`InvocationContext.targetName` carries the hostname for `DnsSelector.hostnamePattern` matching.
+Bootstrap dispatch handle: `BootstrapDispatcher.BEFORE_DNS_RESOLVE = 54`.
+
+**Example:**
+
+```java
+// Inject 2 s delay on all DNS lookups for hosts matching "*.internal"
+chaos.activate(ChaosScenario.builder()
+    .id("slow-dns-internal")
+    .selector(ChaosSelector.dns(
+        Set.of(OperationType.DNS_RESOLVE),
+        NamePattern.prefix("*.internal")))
+    .effect(ChaosEffect.delay(Duration.ofSeconds(2)))
+    .policy(ActivationPolicy.always())
+    .build());
+```
+
+---
+
+### ✅ 4.3 SSL/TLS Handshake Injection
+**Completed — 2026-04-18**
+
+Intercepts `SSLSocket.startHandshake()` and `SSLEngine.beginHandshake()` to inject delays,
+simulating slow TLS negotiation or certificate chain validation timeouts.
+
+**New API surface:**
+
+- `OperationType.SSL_HANDSHAKE` — operation type representing a TLS handshake initiation.
+- `ChaosSelector.SslSelector(Set<OperationType> operations)` — matches SSL handshake calls.
+- Factory: `ChaosSelector.ssl(Set<OperationType>)`.
+
+**How it works:**
+
+`SslHandshakeAdvice` is an `@Advice.OnMethodEnter` class that captures `@Advice.This` (the
+`SSLSocket` or `SSLEngine` instance) and forwards it as `Object socket` to
+`BootstrapDispatcher.beforeSslHandshake(socket)`, which populates
+`InvocationContext.targetClassName` with `socket.getClass().getName()`. Both `SSLSocket` and
+`SSLEngine` are instrumented via `instrumentOptional(...)` so the agent degrades gracefully in
+environments where the JSSE provider is absent or the class has been shaded. Bootstrap dispatch
+handle: `BootstrapDispatcher.BEFORE_SSL_HANDSHAKE = 55`.
+
+**Example:**
+
+```java
+// Delay TLS handshakes by 500 ms to test connection-timeout handling
+chaos.activate(ChaosScenario.builder()
+    .id("slow-tls")
+    .selector(ChaosSelector.ssl(Set.of(OperationType.SSL_HANDSHAKE)))
+    .effect(ChaosEffect.delay(Duration.ofMillis(500)))
+    .policy(ActivationPolicy.always())
+    .build());
+```
+
+---
+
+### ✅ 4.4 File I/O Injection
+**Completed — 2026-04-18**
+
+Intercepts `FileInputStream.read()` / `read(byte[], int, int)` and
+`FileOutputStream.write(int)` / `write(byte[], int, int)` to inject read and write latency,
+simulating slow disks, NFS stalls, or I/O throttling.
+
+**New API surface:**
+
+- `OperationType.FILE_IO_READ` — represents a `FileInputStream.read(...)` call.
+- `OperationType.FILE_IO_WRITE` — represents a `FileOutputStream.write(...)` call.
+- `ChaosSelector.FileIoSelector(Set<OperationType> operations)` — matches file I/O by operation
+  direction; include `FILE_IO_READ`, `FILE_IO_WRITE`, or both.
+- Factory: `ChaosSelector.fileIo(Set<OperationType>)`.
+
+**How it works:**
+
+Two separate advice classes — `FileReadAdvice` and `FileWriteAdvice` — are applied to the
+corresponding `FileInputStream` and `FileOutputStream` overloads. Each captures `@Advice.This`
+and forwards the stream instance and an operation tag (`"FILE_IO_READ"` / `"FILE_IO_WRITE"`)
+to `BootstrapDispatcher.beforeFileIo(String operation, Object stream)`, which routes to
+`FILE_IO_READ` or `FILE_IO_WRITE` in the dispatcher based on the tag. Bootstrap dispatch
+handle: `BootstrapDispatcher.BEFORE_FILE_IO = 56`.
+
+**Example:**
+
+```java
+// Slow down all file reads by 100 ms — useful for testing read-timeout paths
+chaos.activate(ChaosScenario.builder()
+    .id("slow-file-read")
+    .selector(ChaosSelector.fileIo(Set.of(OperationType.FILE_IO_READ)))
+    .effect(ChaosEffect.delay(Duration.ofMillis(100)))
+    .policy(ActivationPolicy.always())
+    .build());
+```
+
+---
+
+### ✅ 4.5 Virtual Thread Carrier Pinning Simulation
+**Completed — 2026-04-18**
+
+Simulates the JDK 21+ behaviour where a virtual thread inside a `synchronized` block pins its
+carrier platform thread, preventing the carrier from being reused for other virtual threads.
+This stressor is used without a selector — it is a background stressor activated via
+`ChaosSelector.stress(StressTarget.VIRTUAL_THREAD_CARRIER_PINNING)`.
+
+**New API surface:**
+
+- `ChaosEffect.VirtualThreadCarrierPinningEffect(int pinnedThreadCount, Duration pinDuration)` —
+  creates the stressor effect.
+- `ChaosSelector.StressTarget.VIRTUAL_THREAD_CARRIER_PINNING` — stress target enum value.
+- Factory: `ChaosEffect.virtualThreadCarrierPinning(int pinnedThreadCount, Duration pinDuration)`.
+
+**How it works:**
+
+`VirtualThreadCarrierPinningStressor` spawns `pinnedThreadCount` platform-thread daemons
+(via `Thread.ofPlatform().daemon(true)`). Each thread runs a tight loop: acquire a shared
+`synchronized(PIN_MONITOR)` lock, then park in `LockSupport.parkNanos(10_000L)` chunks for
+`pinDuration` nanoseconds, then release and re-acquire. When a JVM running virtual threads
+schedules a virtual thread onto a carrier that one of these platform threads is occupying while
+holding `PIN_MONITOR`, the carrier is pinned and cannot be yielded. A `CountDownLatch ready`
+synchronises all threads before the stressor signals start; `AtomicBoolean stopped` and
+`Thread.interrupt()` in `close()` provide clean teardown.
+
+`StressorFactory` registers `VirtualThreadCarrierPinningEffect` →
+`new VirtualThreadCarrierPinningStressor(e)`.
+
+**Example:**
+
+```java
+// Pin 4 carrier threads for 100 ms at a time — stresses virtual-thread scheduler
+// and exposes code that deadlocks when all carriers are pinned
+chaos.activate(ChaosScenario.builder()
+    .id("carrier-pin")
+    .selector(ChaosSelector.stress(StressTarget.VIRTUAL_THREAD_CARRIER_PINNING))
+    .effect(ChaosEffect.virtualThreadCarrierPinning(4, Duration.ofMillis(100)))
+    .policy(ActivationPolicy.always())
+    .build());
+```
 
 ---
 
@@ -636,7 +830,12 @@ Week 6  ├── ✅ 3.3  Quarkus integration                    (2d)
         ├── ✅ 3.4  Micronaut integration                   (1d)
         └──         Phase 3 complete — ecosystem coverage done
 
-Week 7  └── ⬜ 4.1  Release process + v1.0.0 tag           (3d)
+Week 7  ├── ✅ 4.1  Thread.sleep() suppression             (0.5d)
+        ├── ✅ 4.2  DNS resolution injection               (0.5d)
+        ├── ✅ 4.3  SSL/TLS handshake injection            (0.5d)
+        ├── ✅ 4.4  File I/O injection                     (0.5d)
+        ├── ✅ 4.5  Virtual thread carrier pinning         (0.5d)
+        └──         Phase 4 complete — JVM internals coverage done
 ```
 
 ---

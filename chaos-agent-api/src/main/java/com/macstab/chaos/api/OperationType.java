@@ -43,6 +43,11 @@ package com.macstab.chaos.api;
  *   <li>{@link ChaosSelector.JdbcSelector} — {@link #JDBC_CONNECTION_ACQUIRE}, {@link
  *       #JDBC_STATEMENT_EXECUTE}, {@link #JDBC_PREPARED_STATEMENT}, {@link
  *       #JDBC_TRANSACTION_COMMIT}, {@link #JDBC_TRANSACTION_ROLLBACK}
+ *   <li>{@link ChaosSelector.ThreadSelector} — {@link #THREAD_SLEEP} (in addition to thread start
+ *       operations)
+ *   <li>{@link ChaosSelector.DnsSelector} — {@link #DNS_RESOLVE}
+ *   <li>{@link ChaosSelector.SslSelector} — {@link #SSL_HANDSHAKE}
+ *   <li>{@link ChaosSelector.FileIoSelector} — {@link #FILE_IO_READ}, {@link #FILE_IO_WRITE}
  *   <li>{@link ChaosSelector.StressSelector} — {@link #LIFECYCLE} (internal; not set by callers)
  * </ul>
  */
@@ -590,6 +595,61 @@ public enum OperationType {
    * <p>Use with {@link ChaosSelector.JdbcSelector}.
    */
   JDBC_TRANSACTION_ROLLBACK,
+
+  // ── Thread sleep ────────────────────────────────────────────────────────────
+
+  /**
+   * Fires before {@link Thread#sleep(long)} is called. Chaos here can suppress the sleep entirely
+   * (returning immediately, simulating a spurious wake-up) or inject a delay. Suppressing the sleep
+   * is particularly useful for exposing race conditions hidden by artificial pauses in test code or
+   * retry loops that back off via {@code Thread.sleep}.
+   *
+   * <p>Use with {@link ChaosSelector.ThreadSelector}.
+   */
+  THREAD_SLEEP,
+
+  // ── DNS resolution ──────────────────────────────────────────────────────────
+
+  /**
+   * Fires before {@link java.net.InetAddress#getByName(String)}, {@link
+   * java.net.InetAddress#getAllByName(String)}, or {@link java.net.InetAddress#getLocalHost()} is
+   * called. Chaos here can inject latency to simulate slow DNS, or throw {@link
+   * java.net.UnknownHostException} to simulate DNS lookup failures.
+   *
+   * <p>The {@code targetName} field of the invocation context carries the hostname being resolved
+   * ({@code null} for {@code getLocalHost()}). Use with {@link ChaosSelector.DnsSelector}.
+   */
+  DNS_RESOLVE,
+
+  // ── SSL/TLS handshake ───────────────────────────────────────────────────────
+
+  /**
+   * Fires before {@link javax.net.ssl.SSLSocket#startHandshake()} or {@link
+   * javax.net.ssl.SSLEngine#beginHandshake()} initiates a TLS handshake. Chaos here can inject
+   * latency to simulate slow TLS negotiation, or throw {@link javax.net.ssl.SSLHandshakeException}
+   * to simulate certificate validation failures and broken TLS stacks.
+   *
+   * <p>Use with {@link ChaosSelector.SslSelector}.
+   */
+  SSL_HANDSHAKE,
+
+  // ── File I/O ────────────────────────────────────────────────────────────────
+
+  /**
+   * Fires before a {@link java.io.FileInputStream#read} call. Chaos here can inject latency to
+   * simulate a slow disk, or throw {@link java.io.IOException} to simulate read failures.
+   *
+   * <p>Use with {@link ChaosSelector.FileIoSelector}.
+   */
+  FILE_IO_READ,
+
+  /**
+   * Fires before a {@link java.io.FileOutputStream#write} call. Chaos here can inject latency to
+   * simulate a slow or full disk, or throw {@link java.io.IOException} to simulate write failures.
+   *
+   * <p>Use with {@link ChaosSelector.FileIoSelector}.
+   */
+  FILE_IO_WRITE,
 
   // ── Agent lifecycle ─────────────────────────────────────────────────────────
 

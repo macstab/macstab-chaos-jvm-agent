@@ -68,12 +68,14 @@ session.activate(ChaosScenario.builder()
   * [Activation Policy](#activation-policy)
   * [Session Isolation](#session-isolation)
   * [Startup Configuration (JSON)](#startup-configuration-json)
+    * [Live config reload (file watch)](#live-config-reload-file-watch)
   * [Diagnostics](#diagnostics)
   * [Module Layout](#module-layout)
   * [Spring Boot Integration](#spring-boot-integration)
     * [Test Starter](#test-starter)
     * [Runtime Starter](#runtime-starter)
   * [Performance](#performance)
+    * [Real-world service impact](#real-world-service-impact)
     * [Hot-path overhead targets](#hot-path-overhead-targets)
     * [What the JIT does](#what-the-jit-does)
     * [Benchmarks](#benchmarks)
@@ -365,8 +367,8 @@ java -javaagent:chaos-agent-bootstrap-0.1.0-SNAPSHOT.jar=configFile=/etc/chaos/p
 | `directBufferPressure(bytes)` | Allocate off-heap `ByteBuffer.allocateDirect` | ✅ (GC-dependent) |
 | `gcPressure(allocationRate)` | Continuously allocate short-lived objects | ✅ |
 | `finalizerBacklog(count)` | Flood the finalizer queue | ✅ |
-| `deadlock()` | Create a real JVM monitor deadlock | ❌ |
-| `threadLeak(count)` | Start permanently-parked threads | ❌ |
+| `deadlock(participantCount)` | Create a real JVM monitor deadlock between N threads | ✅ |
+| `threadLeak(threadCount, namePrefix, daemon)` | Start permanently-parked threads that are never joined | ✅ |
 | `threadLocalLeak(entries)` | Leak `ThreadLocal` entries on a background thread | ✅ (partial) |
 | `monitorContention(threads)` | Saturate a shared lock with background contenders | ✅ |
 | `codeCachePressure(classes)` | Generate ByteBuddy classes to fill the JIT code cache | ✅ |
@@ -374,7 +376,7 @@ java -javaagent:chaos-agent-bootstrap-0.1.0-SNAPSHOT.jar=configFile=/etc/chaos/p
 | `stringInternPressure(count)` | Intern unique strings into the JVM string pool | ✅ (pool is GC root) |
 | `referenceQueueFlood(count)` | Flood the JVM reference queue with phantom refs | ✅ |
 
-> ⚠️ `deadlock()` and `threadLeak()` create non-recoverable JVM state. Use only in throw-away test processes.
+> ⚠️ `deadlock()` and `threadLeak()` with `daemon=false` prevent a clean JVM exit until the activation handle is closed. Both are fully reversible: closing the handle interrupts all participating threads and releases all locks.
 
 ---
 
@@ -439,6 +441,21 @@ All guards compose as AND. All fields are optional. Default: fire on every match
 ```
 
 Environment variables: `MACSTAB_CHAOS_CONFIG_FILE`, `MACSTAB_CHAOS_CONFIG_JSON`, `MACSTAB_CHAOS_CONFIG_BASE64`.
+
+### Live config reload (file watch)
+
+Point the agent at a file and enable watch mode — the agent polls the file at the configured interval, computes the diff, and updates only what changed while the JVM runs:
+
+```bash
+# poll every 500 ms
+-javaagent:agent.jar=configFile=/etc/chaos/plan.json,configWatchInterval=500
+
+# or via environment
+MACSTAB_CHAOS_CONFIG_FILE=/etc/chaos/plan.json
+MACSTAB_CHAOS_WATCH_INTERVAL=500
+```
+
+The diff algorithm is structural: scenarios with the same `id` **and** identical content are kept running untouched. Scenarios that are new or whose content changed are stopped and re-activated. Scenarios that were removed are stopped. Programmatically activated scenarios (via `ChaosRuntime.activate()`) are never touched by the poller.
 
 ---
 
@@ -570,17 +587,46 @@ For deep technical detail on all four modules — lifecycle, conditional wiring,
 
 The agent is designed to be invisible on any I/O-bound path. All numbers below are for the **hot path after JIT warm-up** (~10 000 invocations for C2 tier on HotSpot).
 
+### Real-world service impact
+
+The number that matters is not nanoseconds per call — it is the total overhead on your service
+while chaos is active. For a typical Java microservice handling **2 000 requests/sec** with a
+realistic mix of file reads, DNS lookups, SSL connections, and timed retries:
+
+| Agent state | Total dispatch overhead | % of one CPU core (2.5 GHz) |
+|---|---|---|
+| Agent installed, **no scenarios** | ~0.31 ms/sec | **0.003 %** |
+| **4 active scenarios**, all Phase 4 operation types | ~1.74 ms/sec | **0.017 %** |
+| **4 exhausted scenarios** left resident in registry | ~1.74 ms/sec | **0.017 %** |
+
+Two hundredths of one percent. That is the tax for running four simultaneous chaos scenarios
+across all instrumented operation types in a busy service.
+
+The practical implication by operation type:
+
+| Operation | Cost matters when… | Cost is negligible when… |
+|---|---|---|
+| File I/O read (page cache hot) | Exhausted scenarios left resident; >100 K reads/sec | Container under memory pressure, page cache evicted → syscall dominates |
+| DNS resolution | JVM address cache hit + exhausted scenarios | Real DNS query involved → network roundtrip (≥500 µs) dwarfs 300 ns |
+| SSL handshake | Never — TLS crypto (1–10 ms) is always 3–4 orders of magnitude larger | Always |
+| Thread.sleep | Never — the sleep duration dominates completely | Always |
+
+**One rule to remember:** call `ChaosActivationHandle.stop()` when a scenario is done.
+An exhausted scenario (one that hit `maxApplications`) costs as much to evaluate per call as one
+that is actively firing — and delivers nothing. Stopping it returns overhead to the zero-scenario
+floor immediately.
+
 ### Hot-path overhead targets
 
 | Scenario | Target | What drives the cost |
 |----------|--------|----------------------|
-| Agent installed, zero active scenarios | **< 50 ns** | Null-bridge short-circuit: one null check + return |
-| One scenario active, no selector match | **< 100 ns** | Full 8-check evaluation pipeline, selector miss exits at check 3 |
-| One scenario active, match, no terminal effect | **< 300 ns** | All 8 checks pass, no effect applied |
+| Agent installed, zero active scenarios | **< 60 ns** | Registry empty check + early return |
+| One scenario active, no selector match | **< 100 ns** | Operation-type mismatch exits before pattern evaluation |
+| One scenario active, match, no terminal effect | **< 300 ns** | Full 8-check evaluation pipeline, no effect applied |
 | Session scope miss (wrong session ID) | **< 20 ns additional** | ThreadLocal read + identity compare, exits before selector evaluation |
 | 10 active scenarios, one match | **< 1 µs** | Linear registry scan, all misses exit at selector check |
 
-For reference: HikariCP connection borrow ~5–15 µs · local TCP roundtrip ~50–200 µs · `Thread.sleep(1)` ~1 ms. The agent overhead is below the noise floor of any realistic I/O call.
+For reference: HikariCP connection borrow ~5–15 µs · local TCP roundtrip ~50–200 µs · `Thread.sleep(1)` ~1 ms.
 
 ### What the JIT does
 
@@ -590,13 +636,16 @@ The `volatile` read of `ChaosDispatcher`'s scenario registry is a single acquire
 
 ### Benchmarks
 
-`chaos-agent-benchmarks` contains a full JMH 1.37 suite across JDBC and HTTP client hot paths at all scenario-count variants. Run with:
+`chaos-agent-benchmarks` contains a full JMH 1.37 suite across JDBC, HTTP client, Thread, DNS,
+SSL, and File I/O hot paths at all scenario-count variants. Run with:
 
 ```bash
 ./gradlew :chaos-agent-benchmarks:run
 ```
 
-See [`docs/benchmarks.md`](docs/benchmarks.md) for full JIT warm-up analysis, result interpretation, and production calibration against real I/O costs.
+See [`docs/benchmarks.md`](docs/benchmarks.md) for the full analysis: JIT warm-up reasoning,
+per-operation throughput impact tables, CPU cycle breakdown at 2.5 GHz, and realistic mixed
+microservice modelling.
 
 ---
 
@@ -639,7 +688,7 @@ Apache License 2.0 — see [LICENSE](LICENSE).
 
 <div align="center">
 
-*Architecture, implementation, and documentation crafted by*
+*Architecture, implementation, and documentation crafted with Love and Passion by*
 
 **[Christian Schnapka](https://macstab.com)**
 Embedded Principal+ Engineer

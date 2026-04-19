@@ -2,12 +2,13 @@ package com.macstab.chaos.instrumentation;
 
 import com.macstab.chaos.instrumentation.bridge.BootstrapDispatcher;
 
-final class ScheduledRunnableWrapper implements Runnable {
+public final class ScheduledRunnableWrapper implements Runnable {
   private final Object executor;
   private final Runnable delegate;
   private final boolean periodic;
 
-  ScheduledRunnableWrapper(final Object executor, final Runnable delegate, final boolean periodic) {
+  public ScheduledRunnableWrapper(
+      final Object executor, final Runnable delegate, final boolean periodic) {
     this.executor = executor;
     this.delegate = delegate;
     this.periodic = periodic;

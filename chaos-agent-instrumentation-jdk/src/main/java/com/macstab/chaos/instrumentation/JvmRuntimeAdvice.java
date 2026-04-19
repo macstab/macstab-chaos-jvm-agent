@@ -527,4 +527,98 @@ final class JvmRuntimeAdvice {
       BootstrapDispatcher.beforeJmxGetAttr(server, objectName, attribute);
     }
   }
+
+  // ── B14: Thread.sleep ─────────────────────────────────────────────────────
+
+  /**
+   * Intercepts {@link Thread#sleep(long)} so that an active scenario can suppress the sleep
+   * (returning immediately) or inject an exception.
+   *
+   * <p>{@code skipOn = Advice.OnNonDefaultValue.class}: when {@code enter()} returns {@code true}
+   * the real {@code sleep()} body is skipped — the calling thread returns immediately as if the
+   * sleep completed. This exposes race conditions hidden by artificial pauses and tests retry loops
+   * that back off via {@code Thread.sleep}.
+   */
+  static final class ThreadSleepAdvice {
+    @Advice.OnMethodEnter(skipOn = Advice.OnNonDefaultValue.class)
+    static boolean enter(@Advice.Argument(0) final long millis) throws Throwable {
+      return BootstrapDispatcher.beforeThreadSleep(millis);
+    }
+  }
+
+  // ── B15: DNS resolution ───────────────────────────────────────────────────
+
+  /**
+   * Intercepts {@link java.net.InetAddress#getByName(String)} and {@link
+   * java.net.InetAddress#getAllByName(String)}.
+   *
+   * <p>These are static methods, so no {@code @Advice.This} is present. The hostname argument is
+   * forwarded to the dispatcher, which can inject latency or throw {@link
+   * java.net.UnknownHostException}.
+   */
+  static final class DnsResolveAdvice {
+    @Advice.OnMethodEnter
+    static void enter(@Advice.Argument(0) final String hostname) throws Throwable {
+      BootstrapDispatcher.beforeDnsResolve(hostname);
+    }
+  }
+
+  /**
+   * Intercepts {@link java.net.InetAddress#getLocalHost()}, which has no arguments.
+   *
+   * <p>Passes {@code null} as the hostname to signal the local-host lookup case to the dispatcher.
+   */
+  static final class DnsLocalHostAdvice {
+    @Advice.OnMethodEnter
+    static void enter() throws Throwable {
+      BootstrapDispatcher.beforeDnsResolve(null);
+    }
+  }
+
+  // ── B16: SSL/TLS handshake ────────────────────────────────────────────────
+
+  /**
+   * Intercepts {@link javax.net.ssl.SSLSocket#startHandshake()} and {@link
+   * javax.net.ssl.SSLEngine#beginHandshake()}.
+   *
+   * <p>An active scenario can inject latency to simulate slow TLS negotiation or throw {@link
+   * javax.net.ssl.SSLHandshakeException} to simulate certificate validation failures.
+   */
+  static final class SslHandshakeAdvice {
+    @Advice.OnMethodEnter
+    static void enter(@Advice.This final Object socket) throws Throwable {
+      BootstrapDispatcher.beforeSslHandshake(socket);
+    }
+  }
+
+  // ── B17: File I/O ─────────────────────────────────────────────────────────
+
+  /**
+   * Intercepts {@link java.io.FileInputStream#read(byte[], int, int)} and the single-byte {@link
+   * java.io.FileInputStream#read()} before bytes are consumed from the underlying file descriptor.
+   *
+   * <p>Passes {@code "FILE_IO_READ"} as the operation tag so the dispatcher can route to the
+   * correct {@link com.macstab.chaos.api.OperationType#FILE_IO_READ} scenario.
+   */
+  static final class FileReadAdvice {
+    @Advice.OnMethodEnter
+    static void enter(@Advice.This final Object stream) throws Throwable {
+      BootstrapDispatcher.beforeFileIo("FILE_IO_READ", stream);
+    }
+  }
+
+  /**
+   * Intercepts {@link java.io.FileOutputStream#write(byte[], int, int)} and the single-byte {@link
+   * java.io.FileOutputStream#write(int)} before bytes are written to the underlying file
+   * descriptor.
+   *
+   * <p>Passes {@code "FILE_IO_WRITE"} as the operation tag so the dispatcher can route to the
+   * correct {@link com.macstab.chaos.api.OperationType#FILE_IO_WRITE} scenario.
+   */
+  static final class FileWriteAdvice {
+    @Advice.OnMethodEnter
+    static void enter(@Advice.This final Object stream) throws Throwable {
+      BootstrapDispatcher.beforeFileIo("FILE_IO_WRITE", stream);
+    }
+  }
 }

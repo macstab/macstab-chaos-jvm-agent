@@ -54,12 +54,47 @@ public record ActivationPolicy(
     boolean allowDestructiveEffects) {
 
   /**
-   * Canonical constructor with full Jackson deserialization support.
+   * Compact canonical constructor — normalises defaults and validates all field invariants.
+   *
+   * <p>A {@code null} {@code startMode} defaults to {@link StartMode#AUTOMATIC}. A {@code
+   * probability} of exactly {@code 0.0} is treated as "not provided" and defaults to {@code 1.0}.
+   *
+   * @throws IllegalArgumentException if {@code probability} is outside {@code (0.0, 1.0]}, or if
+   *     {@code activateAfterMatches} is negative, or if {@code maxApplications} or {@code
+   *     activeFor} violate their constraints
+   */
+  public ActivationPolicy {
+    if (startMode == null) startMode = StartMode.AUTOMATIC;
+    if (probability == 0.0d) probability = 1.0d;
+    if (probability <= 0.0d || probability > 1.0d) {
+      throw new IllegalArgumentException(
+          "probability must be in (0.0, 1.0], got "
+              + probability
+              + "; to disable an effect use maxApplications=0 or omit the scenario activation");
+    }
+    if (activateAfterMatches < 0) {
+      throw new IllegalArgumentException("activateAfterMatches must be >= 0");
+    }
+    if (maxApplications != null && maxApplications <= 0) {
+      throw new IllegalArgumentException("maxApplications must be > 0 when set");
+    }
+    if (activeFor != null && (activeFor.isZero() || activeFor.isNegative())) {
+      throw new IllegalArgumentException("activeFor must be positive when set");
+    }
+  }
+
+  /**
+   * Jackson deserialization factory.
+   *
+   * <p>{@code probability} accepts a boxed {@link Double} so that an absent JSON field (which
+   * Jackson maps to {@code null}) is distinguished from an explicit {@code 0.0}. A {@code null}
+   * value defaults to {@code 1.0} (always fire). An explicit {@code 0.0} fails validation — use
+   * {@code maxApplications=0} or omit the scenario activation entirely to disable an effect.
    *
    * @param startMode when the scenario begins accepting matches; defaults to {@link
    *     StartMode#AUTOMATIC}
-   * @param probability fraction of matches that result in effect application; {@code 0.0} is
-   *     treated as {@code 1.0} (deserialization default); must be in {@code (0.0, 1.0]}
+   * @param probability fraction of matches that result in effect application; omit or pass {@code
+   *     null} to default to {@code 1.0}; must be in {@code (0.0, 1.0]} when present
    * @param activateAfterMatches number of initial matches to skip before the effect becomes
    *     eligible; {@code 0} means no warm-up
    * @param maxApplications hard cap on total effect applications; {@code null} means unlimited
@@ -68,29 +103,26 @@ public record ActivationPolicy(
    * @param rateLimit sliding-window rate cap on applications; {@code null} means unlimited
    * @param randomSeed fixed PRNG seed for reproducible probability sampling; {@code null} uses
    *     {@code 0L}
-   * @throws IllegalArgumentException if {@code probability} is outside {@code (0.0, 1.0]}, or if
-   *     {@code activateAfterMatches} is negative, or if {@code maxApplications} or {@code
-   *     activeFor} violate their constraints
    */
   @JsonCreator
-  public ActivationPolicy(
+  public static ActivationPolicy fromJson(
       @JsonProperty("startMode") final StartMode startMode,
-      @JsonProperty("probability") final double probability,
+      @JsonProperty("probability") final Double probability,
       @JsonProperty("activateAfterMatches") final long activateAfterMatches,
       @JsonProperty("maxApplications") final Long maxApplications,
       @JsonProperty("activeFor") final Duration activeFor,
       @JsonProperty("rateLimit") final RateLimit rateLimit,
       @JsonProperty("randomSeed") final Long randomSeed,
       @JsonProperty("allowDestructiveEffects") final boolean allowDestructiveEffects) {
-    this.startMode = startMode == null ? StartMode.AUTOMATIC : startMode;
-    this.probability = probability == 0.0d ? 1.0d : probability;
-    this.activateAfterMatches = activateAfterMatches;
-    this.maxApplications = maxApplications;
-    this.activeFor = activeFor;
-    this.rateLimit = rateLimit;
-    this.randomSeed = randomSeed;
-    this.allowDestructiveEffects = allowDestructiveEffects;
-    validate();
+    return new ActivationPolicy(
+        startMode,
+        probability == null ? 0.0d : probability,
+        activateAfterMatches,
+        maxApplications,
+        activeFor,
+        rateLimit,
+        randomSeed,
+        allowDestructiveEffects);
   }
 
   /**
@@ -123,21 +155,6 @@ public record ActivationPolicy(
    */
   public static ActivationPolicy manual() {
     return new ActivationPolicy(StartMode.MANUAL, 1.0d, 0, null, null, null, 0L, false);
-  }
-
-  private void validate() {
-    if (probability <= 0.0d || probability > 1.0d) {
-      throw new IllegalArgumentException("probability must be in the range (0.0, 1.0]");
-    }
-    if (activateAfterMatches < 0) {
-      throw new IllegalArgumentException("activateAfterMatches must be >= 0");
-    }
-    if (maxApplications != null && maxApplications <= 0) {
-      throw new IllegalArgumentException("maxApplications must be > 0 when set");
-    }
-    if (activeFor != null && (activeFor.isZero() || activeFor.isNegative())) {
-      throw new IllegalArgumentException("activeFor must be positive when set");
-    }
   }
 
   /**

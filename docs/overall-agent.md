@@ -969,7 +969,7 @@ The agent has no direct infrastructure dependencies at runtime. It does not perf
 
 <div align="center">
 
-*Architecture, implementation, and documentation crafted by*
+*Architecture, implementation, and documentation crafted with Love and Passion by*
 
 **[Christian Schnapka](https://macstab.com)**  
 Embedded Principal+ Engineer  
