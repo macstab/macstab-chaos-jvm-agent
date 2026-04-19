@@ -2,11 +2,11 @@ package com.macstab.chaos.api;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
+import java.util.regex.PatternSyntaxException;
 
 /**
  * A named string-matching predicate used by selectors to filter JVM operations by class name,
@@ -55,23 +55,32 @@ public record NamePattern(MatchMode mode, String value) {
   private static final int MAX_PATTERN_LENGTH = 4096;
 
   /** Pre-compiled regex patterns for GLOB mode, keyed by the glob expression string. */
-  private static final Map<String, Pattern> GLOB_CACHE = boundedLruCache();
+  private static final Map<String, Pattern> GLOB_CACHE = new ConcurrentHashMap<>();
 
   /** Pre-compiled patterns for REGEX mode, keyed by the raw regex string. */
-  private static final Map<String, Pattern> REGEX_CACHE = boundedLruCache();
+  private static final Map<String, Pattern> REGEX_CACHE = new ConcurrentHashMap<>();
 
-  private static Map<String, Pattern> boundedLruCache() {
-    // LinkedHashMap access-order LRU wrapped in synchronizedMap. Not as concurrency-friendly as
-    // ConcurrentHashMap, but Pattern.compile is expensive enough that contention on the lock is
-    // negligible and we get a hard upper bound in return. For a lock-free LRU we would need
-    // a dedicated cache library; the dependency cost outweighs the benefit here.
-    return Collections.synchronizedMap(
-        new LinkedHashMap<>(CACHE_CAPACITY, 0.75f, true) {
-          @Override
-          protected boolean removeEldestEntry(final Map.Entry<String, Pattern> eldest) {
-            return size() > CACHE_CAPACITY;
-          }
-        });
+  private static Pattern cachedCompile(
+      final Map<String, Pattern> cache, final String key, final String regex) {
+    // ConcurrentHashMap replaces the previous Collections.synchronizedMap LRU wrapper so hot-
+    // path matches() calls no longer serialise on a single global lock. Plans are validated at
+    // construction and each distinct pattern is eagerly seeded into the cache there, so the map
+    // grows only with the set of patterns the live plan actually uses. If a pathological plan
+    // pushes past the soft ceiling (e.g. generated patterns across many reloads), clear the
+    // cache entirely rather than letting it grow without bound; the subsequent compile hit is
+    // amortised by the next round of matches() calls and avoids pinning heap. Duplicate
+    // concurrent misses may both compile once — Pattern.compile is idempotent so that race is
+    // benign and cheaper than the old global lock.
+    Pattern cached = cache.get(key);
+    if (cached != null) {
+      return cached;
+    }
+    if (cache.size() >= CACHE_CAPACITY) {
+      cache.clear();
+    }
+    final Pattern compiled = Pattern.compile(regex);
+    final Pattern winner = cache.putIfAbsent(key, compiled);
+    return winner != null ? winner : compiled;
   }
 
   /** Singleton {@link MatchMode#ANY} instance — avoids allocating on every {@link #any()} call. */
@@ -100,6 +109,27 @@ public record NamePattern(MatchMode mode, String value) {
     // plan contained to the parser and prevents latent surprise during live chaos execution.
     if (this.mode == MatchMode.GLOB || this.mode == MatchMode.REGEX) {
       guardPatternLength(this.value);
+      // Eagerly compile GLOB/REGEX so malformed expressions fail plan construction instead of
+      // silently passing validation and throwing PatternSyntaxException on the first dispatch
+      // event that exercises the selector. Without this, a plan with {"mode":"REGEX","value":
+      // "(a["} loads cleanly, registers as ACTIVE, and only surfaces the syntax error at
+      // unpredictable hot-path invocation time — at which point the error may be swallowed at
+      // FINE and the operator never learns why chaos isn't firing. Seed the cache so the first
+      // runtime matches() call stays on the fast path.
+      try {
+        if (this.mode == MatchMode.GLOB) {
+          cachedCompile(GLOB_CACHE, this.value, toRegex(this.value));
+        } else {
+          cachedCompile(REGEX_CACHE, this.value, this.value);
+        }
+      } catch (final PatternSyntaxException syntaxError) {
+        throw new IllegalArgumentException(
+            "invalid "
+                + this.mode.name().toLowerCase(java.util.Locale.ROOT)
+                + " pattern: "
+                + syntaxError.getMessage(),
+            syntaxError);
+      }
     }
   }
 
@@ -178,23 +208,11 @@ public record NamePattern(MatchMode mode, String value) {
   }
 
   private static Pattern compiledGlob(final String value) {
-    Pattern cached = GLOB_CACHE.get(value);
-    if (cached != null) {
-      return cached;
-    }
-    final Pattern compiled = Pattern.compile(toRegex(value));
-    GLOB_CACHE.put(value, compiled);
-    return compiled;
+    return cachedCompile(GLOB_CACHE, value, toRegex(value));
   }
 
   private static Pattern compiledRegex(final String value) {
-    Pattern cached = REGEX_CACHE.get(value);
-    if (cached != null) {
-      return cached;
-    }
-    final Pattern compiled = Pattern.compile(value);
-    REGEX_CACHE.put(value, compiled);
-    return compiled;
+    return cachedCompile(REGEX_CACHE, value, value);
   }
 
   private static void guardPatternLength(final String value) {
@@ -212,12 +230,18 @@ public record NamePattern(MatchMode mode, String value) {
     // Escape every Java regex metacharacter so the compiled pattern only treats '*' and '?' as
     // wildcards. Missing '[', ']', '{', '}' previously let glob inputs like "class[0-9]" expand
     // into real character classes, causing unexpected matches.
+    //
+    // '?' emits a code-point-aware single-character class instead of the bare '.'. Java regex
+    // '.' matches one UTF-16 code unit, so a glob "a?b" against "a😀b" would fail because the
+    // emoji is a surrogate pair (two code units). The explicit alternation matches either a
+    // high/low surrogate pair or any non-surrogate code unit — one user-visible character in
+    // both BMP and supplementary planes.
     StringBuilder builder = new StringBuilder("^");
     for (int i = 0; i < glob.length(); i++) {
       char current = glob.charAt(i);
       switch (current) {
         case '*' -> builder.append(".*");
-        case '?' -> builder.append('.');
+        case '?' -> builder.append("(?:[\\uD800-\\uDBFF][\\uDC00-\\uDFFF]|[^\\uD800-\\uDFFF])");
         case '.', '(', ')', '+', '|', '^', '$', '@', '%', '[', ']', '{', '}' ->
             builder.append('\\').append(current);
         case '\\' -> builder.append("\\\\");
