@@ -8,6 +8,7 @@ import com.macstab.chaos.api.ChaosMetricsSink;
 import com.macstab.chaos.api.ChaosPlan;
 import com.macstab.chaos.api.ChaosScenario;
 import com.macstab.chaos.api.ChaosSession;
+import com.macstab.chaos.api.Internal;
 import com.macstab.chaos.api.OperationType;
 import java.lang.instrument.Instrumentation;
 import java.net.URL;
@@ -23,7 +24,15 @@ import java.util.concurrent.CompletableFuture;
  * tests) do not need to be updated when the control-plane and dispatch halves are profiled or
  * exercised in isolation. Delegates control-plane methods to {@link ChaosControlPlaneImpl} and
  * hot-path methods to {@link ChaosDispatcher}.
+ *
+ * <p><strong>Not part of the stable API.</strong> This class is {@code public} only because it is
+ * referenced across the chaos-agent internal multi-module split (bootstrap, instrumentation,
+ * benchmarks). The frozen public surface is {@link ChaosControlPlane} in the api module; bind
+ * against that interface instead. The {@code ChaosRuntime}-class surface may change without notice
+ * in any release. The {@link Internal @Internal} marker makes that contract explicit to API
+ * linters, IDE inspections, and {@code japicmp}-style bytecode tools.
  */
+@Internal
 public final class ChaosRuntime implements ChaosControlPlane {
   private final ChaosControlPlaneImpl controlPlane;
   private final ChaosDispatcher dispatcher;

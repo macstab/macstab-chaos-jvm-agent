@@ -2,6 +2,7 @@ package com.macstab.chaos.core;
 
 import com.macstab.chaos.api.ChaosEffect;
 import com.macstab.chaos.api.ChaosScenario;
+import com.macstab.chaos.api.Internal;
 import com.macstab.chaos.api.OperationType;
 import java.net.InetSocketAddress;
 import java.net.URL;
@@ -24,7 +25,17 @@ import java.util.concurrent.TimeUnit;
  * <h2>Thread safety</h2>
  *
  * <p>All methods are fully thread-safe.
+ *
+ * <h2>API stability</h2>
+ *
+ * <p><strong>Not part of the stable API.</strong> This class is {@code public} because it is called
+ * from the instrumentation classloader bridge and from benchmarks, not because its method surface
+ * is frozen. The stable public surface of the chaos-agent is {@code
+ * com.macstab.chaos.api.ChaosControlPlane}; bind to that interface instead. The {@link
+ * Internal @Internal} marker signals to API linters and bytecode-compat tools that this class can
+ * change without notice in any release.
  */
+@Internal
 public final class ChaosDispatcher {
   private static final Runnable NO_OP_RUNNABLE = () -> {};
   private static final Callable<?> NO_OP_CALLABLE = () -> null;
