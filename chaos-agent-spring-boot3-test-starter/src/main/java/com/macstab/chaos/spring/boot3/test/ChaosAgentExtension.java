@@ -3,6 +3,7 @@ package com.macstab.chaos.spring.boot3.test;
 import com.macstab.chaos.api.ChaosControlPlane;
 import com.macstab.chaos.api.ChaosSession;
 import com.macstab.chaos.bootstrap.ChaosPlatform;
+import com.macstab.chaos.testkit.TrackingChaosControlPlane;
 import org.junit.jupiter.api.extension.AfterAllCallback;
 import org.junit.jupiter.api.extension.BeforeAllCallback;
 import org.junit.jupiter.api.extension.ExtensionContext;
@@ -41,9 +42,14 @@ public final class ChaosAgentExtension
 
   @Override
   public void beforeAll(final ExtensionContext context) {
-    final ChaosControlPlane controlPlane = ChaosPlatform.installLocally();
-    final ChaosSession session = controlPlane.openSession(context.getDisplayName());
-    context.getStore(NAMESPACE).put(ChaosControlPlane.class, controlPlane);
+    // Wrap the JVM-wide control plane in a tracking decorator so any JVM-scoped scenarios the
+    // test class activates through the injected control-plane parameter are released in afterAll.
+    // Without tracking, a test calling controlPlane.activate(jvmScopedScenario) would leak the
+    // handle into subsequent test classes — session close() only stops session-scoped scenarios.
+    final TrackingChaosControlPlane tracker =
+        new TrackingChaosControlPlane(ChaosPlatform.installLocally());
+    final ChaosSession session = tracker.openSession(context.getDisplayName());
+    context.getStore(NAMESPACE).put(ChaosControlPlane.class, tracker);
     context.getStore(NAMESPACE).put(ChaosSession.class, session);
   }
 
@@ -51,8 +57,15 @@ public final class ChaosAgentExtension
   public void afterAll(final ExtensionContext context) {
     final ChaosSession session =
         context.getStore(NAMESPACE).remove(ChaosSession.class, ChaosSession.class);
+    final ChaosControlPlane controlPlane =
+        context.getStore(NAMESPACE).remove(ChaosControlPlane.class, ChaosControlPlane.class);
+    // Close the session first so session-scoped scenarios stop via their owning session's
+    // lifecycle, then drain any JVM-scoped handles the test class activated via the tracker.
     if (session != null) {
       session.close();
+    }
+    if (controlPlane instanceof TrackingChaosControlPlane tracker) {
+      tracker.stopTracked();
     }
   }
 

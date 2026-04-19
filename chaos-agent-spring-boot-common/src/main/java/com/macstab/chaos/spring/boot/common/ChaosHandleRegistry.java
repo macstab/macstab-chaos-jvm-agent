@@ -62,8 +62,20 @@ public final class ChaosHandleRegistry implements DisposableBean {
     if (handle == null) {
       return false;
     }
-    handle.stop();
-    return true;
+    try {
+      handle.stop();
+      return true;
+    } catch (final RuntimeException stopFailure) {
+      // handle.stop() can throw from stressor teardown (interrupted joins, SecurityException on
+      // thread-group access, IOException-wrapped errors during resource release). Without this
+      // catch, the exception propagates through the Actuator HTTP handler into Spring MVC's
+      // default error rendering, producing a 500 with internal stack frames in the response body
+      // — an information-disclosure channel. The handle has already been removed from the map,
+      // so returning false here keeps the registry consistent: the handle is no longer tracked
+      // and cannot be stopped again through this registry regardless of the stop() outcome.
+      LOGGER.log(Level.WARNING, stopFailure, () -> "chaos-agent: stop failed for handle id=" + id);
+      return false;
+    }
   }
 
   /**

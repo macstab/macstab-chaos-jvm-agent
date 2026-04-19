@@ -30,14 +30,20 @@ import java.util.logging.Logger;
  * com.macstab.chaos.bootstrap.ChaosPlatform#installLocally()} — at that point the caller owns the
  * JVM-wide state and the extension is out of the picture.
  */
-final class TrackingChaosControlPlane implements ChaosControlPlane {
+public final class TrackingChaosControlPlane implements ChaosControlPlane {
 
   private static final Logger LOGGER = Logger.getLogger(TrackingChaosControlPlane.class.getName());
 
   private final ChaosControlPlane delegate;
   private final Deque<ChaosActivationHandle> handles = new ArrayDeque<>();
 
-  TrackingChaosControlPlane(final ChaosControlPlane delegate) {
+  /**
+   * Wraps the given JVM-wide control plane so every handle issued through this instance is tracked
+   * for {@link #stopTracked() stopTracked}-driven cleanup. The delegate itself is never closed.
+   *
+   * @param delegate the JVM-wide control plane to decorate; must not be {@code null}
+   */
+  public TrackingChaosControlPlane(final ChaosControlPlane delegate) {
     this.delegate = delegate;
   }
 
@@ -87,7 +93,7 @@ final class TrackingChaosControlPlane implements ChaosControlPlane {
    * Exceptions from individual {@code stop()} calls are logged and suppressed so one bad handle
    * cannot block cleanup of the rest.
    */
-  void stopTracked() {
+  public void stopTracked() {
     final Iterator<ChaosActivationHandle> iterator;
     synchronized (handles) {
       iterator = new ArrayDeque<>(handles).descendingIterator();

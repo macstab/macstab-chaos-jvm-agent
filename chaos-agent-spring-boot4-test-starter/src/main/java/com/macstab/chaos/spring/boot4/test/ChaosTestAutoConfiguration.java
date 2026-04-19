@@ -2,9 +2,9 @@ package com.macstab.chaos.spring.boot4.test;
 
 import com.macstab.chaos.api.ChaosControlPlane;
 import com.macstab.chaos.bootstrap.ChaosPlatform;
+import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
-import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 
 /**
@@ -12,9 +12,16 @@ import org.springframework.context.annotation.Bean;
  * extension classes are on the classpath.
  *
  * <p>Registered via {@code
- * META-INF/spring/org.springframework.boot.test.autoconfigure.ImportAutoConfiguration.imports}.
+ * META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports} — the standard
+ * Spring Boot auto-configuration SPI. The earlier {@code
+ * org.springframework.boot.test.autoconfigure.ImportAutoConfiguration.imports} layout is only
+ * consulted when the test class carries {@code @ImportAutoConfiguration} (directly or via a slice
+ * annotation like {@code @DataJpaTest}/{@code @WebMvcTest}), so the bean was silently absent from
+ * plain {@code @SpringBootTest} and {@code @ChaosTest} contexts. Standard auto-config discovery
+ * runs on every {@code @SpringBootTest}-driven context regardless of slice annotations, so the bean
+ * is now reliably present for test code using {@code @Autowired ChaosControlPlane}.
  */
-@TestConfiguration(proxyBeanMethods = false)
+@AutoConfiguration
 @ConditionalOnClass(ChaosAgentExtension.class)
 public class ChaosTestAutoConfiguration {
 

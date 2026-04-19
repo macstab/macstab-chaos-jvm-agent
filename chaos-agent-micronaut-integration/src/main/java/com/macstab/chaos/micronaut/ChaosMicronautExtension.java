@@ -3,6 +3,8 @@ package com.macstab.chaos.micronaut;
 import com.macstab.chaos.api.ChaosControlPlane;
 import com.macstab.chaos.api.ChaosSession;
 import com.macstab.chaos.bootstrap.ChaosPlatform;
+import com.macstab.chaos.testkit.TrackingChaosControlPlane;
+import io.micronaut.test.extensions.junit5.annotation.MicronautTest;
 import org.junit.jupiter.api.extension.AfterAllCallback;
 import org.junit.jupiter.api.extension.BeforeAllCallback;
 import org.junit.jupiter.api.extension.ExtensionContext;
@@ -28,9 +30,20 @@ import org.junit.jupiter.api.extension.ParameterResolver;
  *
  * <h2>Parameter injection</h2>
  *
- * <p>The extension injects {@link ChaosSession} and {@link ChaosControlPlane} parameters on test
- * methods and lifecycle methods. The resolver walks parent {@link ExtensionContext} instances so
- * that {@code @Nested} test classes inherit the session opened by their outer class.
+ * <p>The extension always injects {@link ChaosSession} on test methods and lifecycle methods. The
+ * resolver walks parent {@link ExtensionContext} instances so that {@code @Nested} test classes
+ * inherit the session opened by their outer class.
+ *
+ * <p>{@link ChaosControlPlane} resolution is conditional. Micronaut's JUnit 5 extension (from
+ * {@code micronaut-test-junit5}) resolves any parameter whose type is a bean in the {@code
+ * ApplicationContext}, and {@link ChaosControlPlane} is exposed as a bean via {@code
+ * ChaosFactory.chaosControlPlane()}. If both resolvers claimed the parameter, JUnit would raise
+ * {@code ParameterResolutionException("Discovered multiple competing ParameterResolvers ...")}. To
+ * avoid the collision this extension detects the presence of {@link MicronautTest} on the test
+ * class (walking parents so nested classes inherit the decision) and yields ownership of the
+ * control-plane parameter to Micronaut in that case. When the extension is used standalone (without
+ * {@link MicronautTest}), no competing resolver exists and this extension resolves the control
+ * plane from its own store.
  */
 public final class ChaosMicronautExtension
     implements BeforeAllCallback, AfterAllCallback, ParameterResolver {
@@ -42,9 +55,15 @@ public final class ChaosMicronautExtension
 
   @Override
   public void beforeAll(final ExtensionContext context) {
-    final ChaosControlPlane controlPlane = ChaosPlatform.installLocally();
-    final ChaosSession session = controlPlane.openSession(context.getDisplayName());
-    context.getStore(NAMESPACE).put(ChaosControlPlane.class, controlPlane);
+    // Wrap the JVM-wide control plane in a tracking decorator so any JVM-scoped scenarios the
+    // test class activates through it are released in afterAll. Without tracking, an activation
+    // via controlPlane.activate(jvmScopedScenario) leaks into subsequent test classes: session
+    // close() only stops session-scoped scenarios, and the JVM-wide control-plane singleton lives
+    // for the JVM lifetime. Tracking here is the only per-class cleanup hook available.
+    final TrackingChaosControlPlane tracker =
+        new TrackingChaosControlPlane(ChaosPlatform.installLocally());
+    final ChaosSession session = tracker.openSession(context.getDisplayName());
+    context.getStore(NAMESPACE).put(ChaosControlPlane.class, tracker);
     context.getStore(NAMESPACE).put(ChaosSession.class, session);
   }
 
@@ -52,8 +71,15 @@ public final class ChaosMicronautExtension
   public void afterAll(final ExtensionContext context) {
     final ChaosSession session =
         context.getStore(NAMESPACE).remove(ChaosSession.class, ChaosSession.class);
+    final ChaosControlPlane controlPlane =
+        context.getStore(NAMESPACE).remove(ChaosControlPlane.class, ChaosControlPlane.class);
+    // Close the session first so session-scoped scenarios are stopped via their owning session's
+    // lifecycle, then drain any JVM-scoped handles the test class activated via the tracker.
     if (session != null) {
       session.close();
+    }
+    if (controlPlane instanceof TrackingChaosControlPlane tracker) {
+      tracker.stopTracked();
     }
   }
 
@@ -61,7 +87,31 @@ public final class ChaosMicronautExtension
   public boolean supportsParameter(
       final ParameterContext parameterContext, final ExtensionContext extensionContext) {
     final Class<?> parameterType = parameterContext.getParameter().getType();
-    return parameterType == ChaosSession.class || parameterType == ChaosControlPlane.class;
+    if (parameterType == ChaosSession.class) {
+      return true;
+    }
+    if (parameterType == ChaosControlPlane.class) {
+      // When the test class carries @MicronautTest, Micronaut's JUnit 5 extension is registered
+      // and already resolves any parameter whose type is a bean in the ApplicationContext (which
+      // includes ChaosControlPlane via ChaosFactory). Claiming the parameter here too would raise
+      // ParameterResolutionException("Discovered multiple competing ParameterResolvers ..."). When
+      // the test uses this extension standalone, no competing resolver exists and we must resolve
+      // the control plane ourselves — see class Javadoc.
+      return !isMicronautTest(extensionContext);
+    }
+    return false;
+  }
+
+  private static boolean isMicronautTest(final ExtensionContext context) {
+    ExtensionContext current = context;
+    while (current != null) {
+      final var testClass = current.getTestClass();
+      if (testClass.isPresent() && testClass.get().isAnnotationPresent(MicronautTest.class)) {
+        return true;
+      }
+      current = current.getParent().orElse(null);
+    }
+    return false;
   }
 
   @Override

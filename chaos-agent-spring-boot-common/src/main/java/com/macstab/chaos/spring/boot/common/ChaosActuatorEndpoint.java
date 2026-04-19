@@ -5,7 +5,10 @@ import com.macstab.chaos.api.ChaosControlPlane;
 import com.macstab.chaos.api.ChaosDiagnostics;
 import com.macstab.chaos.api.ChaosPlan;
 import com.macstab.chaos.startup.ChaosPlanMapper;
+import com.macstab.chaos.startup.ConfigLoadException;
 import java.util.Objects;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import org.springframework.boot.actuate.endpoint.annotation.DeleteOperation;
 import org.springframework.boot.actuate.endpoint.annotation.Endpoint;
 import org.springframework.boot.actuate.endpoint.annotation.ReadOperation;
@@ -21,6 +24,8 @@ import org.springframework.boot.actuate.endpoint.annotation.WriteOperation;
  */
 @Endpoint(id = "chaos")
 public class ChaosActuatorEndpoint {
+
+  private static final Logger LOGGER = Logger.getLogger(ChaosActuatorEndpoint.class.getName());
 
   private final ChaosControlPlane controlPlane;
   private final ChaosHandleRegistry handleRegistry;
@@ -58,10 +63,29 @@ public class ChaosActuatorEndpoint {
     if (planJson == null || planJson.isBlank()) {
       return new ActivationResponse("error", null, "plan JSON must not be blank");
     }
-    final ChaosPlan plan = ChaosPlanMapper.read(planJson);
-    final ChaosActivationHandle handle = controlPlane.activate(plan);
-    handleRegistry.register(handle);
-    return new ActivationResponse("activated", handle.id(), null);
+    final ChaosPlan plan;
+    try {
+      plan = ChaosPlanMapper.read(planJson);
+    } catch (final ConfigLoadException | IllegalArgumentException parseFailure) {
+      // Log the full cause chain server-side — package layout, Jackson offsets, character
+      // positions — but never leak it back in the HTTP response. An authenticated Actuator
+      // endpoint still sits behind caches and proxies that may log response bodies, so a raw
+      // Jackson error leaks internals to everyone downstream.
+      LOGGER.log(Level.WARNING, parseFailure, () -> "chaos-agent: rejecting malformed plan JSON");
+      return new ActivationResponse("error", null, "invalid plan");
+    }
+    try {
+      final ChaosActivationHandle handle = controlPlane.activate(plan);
+      handleRegistry.register(handle);
+      return new ActivationResponse("activated", handle.id(), null);
+    } catch (final IllegalStateException | IllegalArgumentException activationFailure) {
+      // Scope conflicts ("scenario key already active"), selector/effect validation mismatches,
+      // or feature-unsupported errors surface here. Same redaction rationale as the parse path:
+      // a plan-author mistake must not leak the library's internal exception hierarchy to the
+      // HTTP client.
+      LOGGER.log(Level.WARNING, activationFailure, () -> "chaos-agent: plan activation rejected");
+      return new ActivationResponse("error", null, "plan rejected");
+    }
   }
 
   /**
