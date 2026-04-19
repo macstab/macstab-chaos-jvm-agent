@@ -55,19 +55,47 @@ final class CompositeActivationHandle implements ChaosActivationHandle {
   /** Broadcasts {@link ChaosActivationHandle#start()} to all delegate handles. */
   @Override
   public void start() {
-    delegates.forEach(ChaosActivationHandle::start);
+    broadcast("start", ChaosActivationHandle::start);
   }
 
   /** Broadcasts {@link ChaosActivationHandle#stop()} to all delegate handles. */
   @Override
   public void stop() {
-    delegates.forEach(ChaosActivationHandle::stop);
+    broadcast("stop", ChaosActivationHandle::stop);
   }
 
   /** Broadcasts {@link ChaosActivationHandle#release()} to all delegate handles. */
   @Override
   public void release() {
-    delegates.forEach(ChaosActivationHandle::release);
+    broadcast("release", ChaosActivationHandle::release);
+  }
+
+  /**
+   * Applies the given action to every delegate, collecting failures rather than letting the first
+   * failure short-circuit the rest. {@code delegates.forEach(...)} stops on the first thrown
+   * exception, leaking any delegate that came after it — for {@code stop} and {@code release} that
+   * means leaked scenarios / unrestored state. Aggregate via {@code addSuppressed} so the caller
+   * sees every failure, not just the one that happened to throw first.
+   */
+  private void broadcast(
+      final String op, final java.util.function.Consumer<ChaosActivationHandle> action) {
+    RuntimeException aggregate = null;
+    for (final ChaosActivationHandle delegate : delegates) {
+      try {
+        action.accept(delegate);
+      } catch (final RuntimeException perDelegate) {
+        if (aggregate == null) {
+          aggregate =
+              new RuntimeException(
+                  "one or more delegates failed during composite " + op, perDelegate);
+        } else {
+          aggregate.addSuppressed(perDelegate);
+        }
+      }
+    }
+    if (aggregate != null) {
+      throw aggregate;
+    }
   }
 
   /**

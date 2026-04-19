@@ -33,11 +33,17 @@ class ActivationPolicyPropertyTest {
   }
 
   @Property
-  void zeroProbabilityNormalizesToOne() {
-    final ActivationPolicy policy =
-        new ActivationPolicy(
-            ActivationPolicy.StartMode.AUTOMATIC, 0.0d, 0, null, null, null, null, false);
-    assertThat(policy.probability()).isEqualTo(1.0d);
+  void zeroProbabilityIsRejected() {
+    // Silent normalisation of 0.0 → 1.0 was removed: a user who typed 0 meant "never fire"
+    // and was instead getting "always fire", which is the opposite of the stated intent.
+    // Now 0.0 is rejected explicitly and the user is pointed at maxApplications=0 for the
+    // disable-this-scenario case.
+    assertThatThrownBy(
+            () ->
+                new ActivationPolicy(
+                    ActivationPolicy.StartMode.AUTOMATIC, 0.0d, 0, null, null, null, null, false))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("probability");
   }
 
   @Property

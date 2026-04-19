@@ -616,6 +616,16 @@ public sealed interface ChaosEffect
    */
   record ExceptionInjectionEffect(String exceptionClassName, String message, boolean withStackTrace)
       implements ChaosEffect {
+    /**
+     * Package prefixes permitted for injected exception classes. Restricting to JDK and project
+     * packages removes {@code Class.forName} as a class-loading gadget: a malicious config file
+     * cannot coerce the runtime into initialising an arbitrary class under the attacker's control
+     * (e.g. one with a static initialiser performing a side effect). Extending the list is a
+     * deliberate decision — add only classes that are known to be safe to load.
+     */
+    private static final java.util.List<String> ALLOWED_PACKAGE_PREFIXES =
+        java.util.List.of("java.", "javax.", "jakarta.", "com.macstab.chaos.");
+
     public ExceptionInjectionEffect {
       if (exceptionClassName == null || exceptionClassName.isBlank()) {
         throw new IllegalArgumentException("exceptionClassName must be non-blank");
@@ -624,6 +634,11 @@ public sealed interface ChaosEffect
         throw new IllegalArgumentException(
             "exceptionClassName is not a valid binary class name: " + exceptionClassName);
       }
+      if (!isAllowedPackage(exceptionClassName)) {
+        throw new IllegalArgumentException(
+            "exceptionClassName is not in an allowed package (java., javax., jakarta., com.macstab.chaos.): "
+                + exceptionClassName);
+      }
       if (message == null || message.isBlank()) {
         throw new IllegalArgumentException("message must be non-blank");
       }
@@ -631,6 +646,15 @@ public sealed interface ChaosEffect
 
     private static boolean isValidBinaryClassName(String name) {
       return name.matches("[a-zA-Z_$][a-zA-Z0-9_$]*(\\.[a-zA-Z_$][a-zA-Z0-9_$]*)*");
+    }
+
+    private static boolean isAllowedPackage(String name) {
+      for (final String prefix : ALLOWED_PACKAGE_PREFIXES) {
+        if (name.startsWith(prefix)) {
+          return true;
+        }
+      }
+      return false;
     }
   }
 

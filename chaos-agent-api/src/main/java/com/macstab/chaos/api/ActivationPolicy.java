@@ -56,8 +56,11 @@ public record ActivationPolicy(
   /**
    * Compact canonical constructor — normalises defaults and validates all field invariants.
    *
-   * <p>A {@code null} {@code startMode} defaults to {@link StartMode#AUTOMATIC}. A {@code
-   * probability} of exactly {@code 0.0} is treated as "not provided" and defaults to {@code 1.0}.
+   * <p>A {@code null} {@code startMode} defaults to {@link StartMode#AUTOMATIC}. An explicit {@code
+   * probability} of {@code 0.0} is rejected: a user writing {@code probability: 0.0} in a config
+   * file is almost certainly trying to disable the effect, and silently rewriting it to {@code 1.0}
+   * turns an "off" switch into an "always fire" switch. The error message redirects to omitting the
+   * scenario activation entirely, which actually expresses "never fire".
    *
    * @throws IllegalArgumentException if {@code probability} is outside {@code (0.0, 1.0]}, or if
    *     {@code activateAfterMatches} is negative, or if {@code maxApplications} or {@code
@@ -65,12 +68,11 @@ public record ActivationPolicy(
    */
   public ActivationPolicy {
     if (startMode == null) startMode = StartMode.AUTOMATIC;
-    if (probability == 0.0d) probability = 1.0d;
     if (probability <= 0.0d || probability > 1.0d) {
       throw new IllegalArgumentException(
           "probability must be in (0.0, 1.0], got "
               + probability
-              + "; to disable an effect use maxApplications=0 or omit the scenario activation");
+              + "; to disable an effect omit the scenario activation entirely");
     }
     if (activateAfterMatches < 0) {
       throw new IllegalArgumentException("activateAfterMatches must be >= 0");
@@ -88,8 +90,8 @@ public record ActivationPolicy(
    *
    * <p>{@code probability} accepts a boxed {@link Double} so that an absent JSON field (which
    * Jackson maps to {@code null}) is distinguished from an explicit {@code 0.0}. A {@code null}
-   * value defaults to {@code 1.0} (always fire). An explicit {@code 0.0} fails validation — use
-   * {@code maxApplications=0} or omit the scenario activation entirely to disable an effect.
+   * value defaults to {@code 1.0} (always fire). An explicit {@code 0.0} fails validation — omit
+   * the scenario activation entirely to disable an effect.
    *
    * @param startMode when the scenario begins accepting matches; defaults to {@link
    *     StartMode#AUTOMATIC}
@@ -116,7 +118,7 @@ public record ActivationPolicy(
       @JsonProperty("allowDestructiveEffects") final boolean allowDestructiveEffects) {
     return new ActivationPolicy(
         startMode,
-        probability == null ? 0.0d : probability,
+        probability == null ? 1.0d : probability,
         activateAfterMatches,
         maxApplications,
         activeFor,

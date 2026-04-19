@@ -101,7 +101,12 @@ final class ObservabilityBus {
     for (ChaosEventListener listener : listeners) {
       try {
         listener.onEvent(event);
-      } catch (Exception ex) {
+      } catch (Throwable ex) {
+        // Catch Throwable, not Exception. This runs on application threads inside ByteBuddy
+        // advice — an Error escaping here would unwind straight into user code. StackOverflow
+        // and OOM from a pathological listener would each trigger that path, as would every
+        // ThreadDeath raised by JVM shutdown. Swallow, log, and keep going; never let a
+        // listener pollute application semantics.
         LOGGER.warning(
             () ->
                 "ChaosEventListener threw during publish; delivery continues."
@@ -156,6 +161,14 @@ final class ObservabilityBus {
     switch (event.type()) {
       case STARTED, STOPPED -> LOGGER.info(formatted);
       case APPLIED, RELEASED -> LOGGER.fine(formatted);
+      // FAILED is visibility-critical: this is how operators see that a scenario's effect
+      // application itself errored. Log at WARNING so it surfaces above normal INFO traffic.
+      case FAILED -> LOGGER.warning(formatted);
+      // REGISTERED fires once per scenario at plan load; FINE keeps it visible to debug/audit
+      // tooling without cluttering production logs. SKIPPED can be high frequency (policy rate
+      // limiting, probability misses) so push it to FINER.
+      case REGISTERED -> LOGGER.fine(formatted);
+      case SKIPPED -> LOGGER.finer(formatted);
     }
   }
 }

@@ -42,7 +42,7 @@ final class DefaultChaosSession implements ChaosSession {
   private final String id = UUID.randomUUID().toString();
   private final String displayName;
   private final ScopeContext scopeContext;
-  private final ChaosRuntime runtime;
+  private final ChaosControlPlaneImpl controlPlane;
   private final List<DefaultChaosActivationHandle> handles = new CopyOnWriteArrayList<>();
   private final ScopeBinding rootBinding;
 
@@ -52,13 +52,18 @@ final class DefaultChaosSession implements ChaosSession {
    *
    * @param displayName a human-readable label for this session, used in diagnostics
    * @param scopeContext the scope context used for thread-local session ID propagation
-   * @param runtime the chaos runtime used to activate scenarios within this session
+   * @param controlPlane the control plane used to activate scenarios within this session; held
+   *     directly rather than indirected through {@link ChaosRuntime} because {@code
+   *     activateInSession} lives on this type — removing the facade hop also lets {@link
+   *     ChaosControlPlaneImpl#openSession(String)} work standalone
    */
   DefaultChaosSession(
-      final String displayName, final ScopeContext scopeContext, final ChaosRuntime runtime) {
+      final String displayName,
+      final ScopeContext scopeContext,
+      final ChaosControlPlaneImpl controlPlane) {
     this.displayName = displayName;
     this.scopeContext = scopeContext;
-    this.runtime = runtime;
+    this.controlPlane = controlPlane;
     this.rootBinding = scopeContext.bind(id);
   }
 
@@ -93,7 +98,7 @@ final class DefaultChaosSession implements ChaosSession {
    */
   @Override
   public ChaosActivationHandle activate(final ChaosScenario scenario) {
-    final DefaultChaosActivationHandle handle = runtime.activateInSession(this, scenario);
+    final DefaultChaosActivationHandle handle = controlPlane.activateInSession(this, scenario);
     handles.add(handle);
     return handle;
   }
@@ -110,9 +115,29 @@ final class DefaultChaosSession implements ChaosSession {
    */
   @Override
   public ChaosActivationHandle activate(final ChaosPlan plan) {
-    final List<ChaosActivationHandle> children =
-        plan.scenarios().stream().map(this::activate).toList();
-    return new CompositeActivationHandle("session-plan:" + plan.metadata().name(), children);
+    // Same all-or-nothing contract as ChaosControlPlaneImpl.activate(ChaosPlan): if the 4th of
+    // 5 scenarios fails validation, the first 3 must be rolled back. Without this the plan is
+    // silently partially applied and the operator has no way to reason about state.
+    final List<ChaosActivationHandle> children = new java.util.ArrayList<>();
+    try {
+      for (final ChaosScenario scenario : plan.scenarios()) {
+        children.add(activate(scenario));
+      }
+      return new CompositeActivationHandle("session-plan:" + plan.metadata().name(), children);
+    } catch (final RuntimeException failure) {
+      for (final ChaosActivationHandle child : children) {
+        try {
+          if (child instanceof DefaultChaosActivationHandle defaultHandle) {
+            defaultHandle.destroy();
+          } else {
+            child.stop();
+          }
+        } catch (final RuntimeException rollback) {
+          failure.addSuppressed(rollback);
+        }
+      }
+      throw failure;
+    }
   }
 
   /**
@@ -165,7 +190,33 @@ final class DefaultChaosSession implements ChaosSession {
    */
   @Override
   public void close() {
-    handles.forEach(DefaultChaosActivationHandle::destroy);
-    rootBinding.close();
+    // Aggregate failures across destroy() calls and always close the root binding. Without the
+    // try/finally, the first handle that throws during destroy skips every remaining handle AND
+    // leaks the thread's scope binding — leaving session IDs stuck on the scope stack for the
+    // rest of the thread's life. Collect throwables via addSuppressed so the caller gets a
+    // complete picture instead of just the first failure.
+    RuntimeException aggregate = null;
+    for (final DefaultChaosActivationHandle handle : handles) {
+      try {
+        handle.destroy();
+      } catch (final RuntimeException perHandle) {
+        if (aggregate == null) {
+          aggregate = new RuntimeException("one or more handles failed to destroy", perHandle);
+        } else {
+          aggregate.addSuppressed(perHandle);
+        }
+      }
+    }
+    try {
+      rootBinding.close();
+    } catch (final RuntimeException bindingFailure) {
+      if (aggregate == null) {
+        throw bindingFailure;
+      }
+      aggregate.addSuppressed(bindingFailure);
+    }
+    if (aggregate != null) {
+      throw aggregate;
+    }
   }
 }

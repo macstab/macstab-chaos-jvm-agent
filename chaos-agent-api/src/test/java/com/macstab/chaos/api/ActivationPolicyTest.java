@@ -83,16 +83,21 @@ class ActivationPolicyTest {
   }
 
   @Nested
-  @DisplayName("probability 0.0 normalisation")
-  class ProbabilityNormalisation {
+  @DisplayName("probability 0.0 is rejected")
+  class ProbabilityZeroRejection {
 
     @Test
-    @DisplayName("probability 0.0 is normalised to 1.0")
-    void probabilityZeroNormalisedToOne() {
-      ActivationPolicy policy =
-          new ActivationPolicy(
-              ActivationPolicy.StartMode.AUTOMATIC, 0.0d, 0, null, null, null, null, false);
-      assertThat(policy.probability()).isEqualTo(1.0d);
+    @DisplayName("probability 0.0 throws IllegalArgumentException pointing at omit-activation")
+    void probabilityZeroRejected() {
+      // Silent normalisation of 0.0 → 1.0 was the opposite of what a user who typed 0 meant.
+      // The policy now rejects it explicitly so the ambiguity surfaces at construction time.
+      assertThatThrownBy(
+              () ->
+                  new ActivationPolicy(
+                      ActivationPolicy.StartMode.AUTOMATIC, 0.0d, 0, null, null, null, null, false))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("probability")
+          .hasMessageContaining("omit the scenario activation");
     }
   }
 

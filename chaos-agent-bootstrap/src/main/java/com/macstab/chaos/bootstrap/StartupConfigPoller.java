@@ -3,6 +3,7 @@ package com.macstab.chaos.bootstrap;
 import com.macstab.chaos.api.ChaosActivationHandle;
 import com.macstab.chaos.api.ChaosScenario;
 import com.macstab.chaos.core.ChaosRuntime;
+import com.macstab.chaos.core.DefaultChaosActivationHandle;
 import com.macstab.chaos.startup.AgentArgsParser;
 import com.macstab.chaos.startup.ChaosPlanMapper;
 import java.io.IOException;
@@ -124,7 +125,10 @@ public final class StartupConfigPoller implements AutoCloseable {
   public void startWithInitialPlan(final List<ChaosScenario> initialScenarios) {
     applyDiff(initialScenarios);
     try {
-      lastModified = Files.getLastModifiedTime(configPath);
+      // NOFOLLOW_LINKS: a symlink swap between startup validation and this stat should fail
+      // rather than silently bind the poller to the target of the symlink. Matches the read
+      // path in pollOnce and in StartupConfigLoader.
+      lastModified = Files.getLastModifiedTime(configPath, LinkOption.NOFOLLOW_LINKS);
     } catch (IOException ignored) {
       // best-effort; if the stat fails the next poll will re-read the file
     }
@@ -137,17 +141,28 @@ public final class StartupConfigPoller implements AutoCloseable {
   }
 
   /**
-   * Stops the polling scheduler and stops all scenarios currently managed by this poller.
+   * Stops the polling scheduler and fully unregisters all scenarios currently managed by this
+   * poller.
    *
-   * <p>Programmatically activated scenarios are not affected.
+   * <p>Programmatically activated scenarios are not affected. Calls {@code destroy()} rather than
+   * {@code stop()} because a stopped-but-registered scenario still occupies a slot in the registry
+   * — across many reload cycles or test runs those entries accumulate without bound.
    */
   @Override
   public void close() {
     scheduler.shutdownNow();
     synchronized (this) {
-      activeHandles.values().forEach(ChaosActivationHandle::stop);
+      activeHandles.values().forEach(StartupConfigPoller::destroyHandle);
       activeHandles.clear();
       activeScenarios.clear();
+    }
+  }
+
+  private static void destroyHandle(final ChaosActivationHandle handle) {
+    if (handle instanceof DefaultChaosActivationHandle defaultHandle) {
+      defaultHandle.destroy();
+    } else {
+      handle.stop();
     }
   }
 
@@ -156,9 +171,12 @@ public final class StartupConfigPoller implements AutoCloseable {
   void pollOnce() {
     final FileTime current;
     try {
-      current = Files.getLastModifiedTime(configPath);
+      // NOFOLLOW_LINKS on getLastModifiedTime for the same reason as on the read: detect a
+      // symlink swap at the config path instead of silently watching the target.
+      current = Files.getLastModifiedTime(configPath, LinkOption.NOFOLLOW_LINKS);
     } catch (IOException e) {
-      System.err.println("[chaos-agent] config poll failed (stat): " + e.getMessage());
+      System.err.println(
+          "[chaos-agent] config poll failed (stat): " + sanitiseForLog(e.getMessage()));
       return;
     }
     if (current.equals(lastModified)) {
@@ -183,9 +201,10 @@ public final class StartupConfigPoller implements AutoCloseable {
           "[chaos-agent] config reloaded: "
               + newPlan.scenarios().size()
               + " scenario(s) from "
-              + configPath);
+              + sanitiseForLog(configPath.toString()));
     } catch (Exception e) {
-      System.err.println("[chaos-agent] config reload failed (parse): " + e.getMessage());
+      System.err.println(
+          "[chaos-agent] config reload failed (parse): " + sanitiseForLog(e.getMessage()));
     }
   }
 
@@ -193,12 +212,14 @@ public final class StartupConfigPoller implements AutoCloseable {
     final Map<String, ChaosScenario> newById =
         newScenarios.stream().collect(Collectors.toMap(ChaosScenario::id, s -> s));
 
-    // Stop scenarios that were removed or whose content changed
+    // Stop scenarios that were removed or whose content changed. Use destroy() rather than
+    // stop() so the registry slot is freed; otherwise every reload leaks the old scenario
+    // entry into diagnostics and the registry grows without bound.
     for (final String id : new HashSet<>(activeScenarios.keySet())) {
       final ChaosScenario existing = activeScenarios.get(id);
       final ChaosScenario incoming = newById.get(id);
       if (incoming == null || !incoming.equals(existing)) {
-        activeHandles.remove(id).stop();
+        destroyHandle(activeHandles.remove(id));
         activeScenarios.remove(id);
       }
     }
@@ -211,6 +232,34 @@ public final class StartupConfigPoller implements AutoCloseable {
         activeScenarios.put(scenario.id(), scenario);
       }
     }
+  }
+
+  /**
+   * Strips control characters (including CR/LF) from strings before they hit {@code System.err}.
+   * Config file paths and parse-error messages can contain attacker-controlled bytes; without
+   * sanitisation a chaos-agent log line could be forged by embedding {@code \n[chaos-agent] ...}
+   * into a filename or JSON payload. Replaces any ASCII control character with U+FFFD and caps the
+   * rendered length so that a huge error message cannot flood the log.
+   */
+  static String sanitiseForLog(final String raw) {
+    if (raw == null) {
+      return "null";
+    }
+    final int max = 512;
+    final int end = Math.min(raw.length(), max);
+    final StringBuilder sb = new StringBuilder(end);
+    for (int i = 0; i < end; i++) {
+      final char ch = raw.charAt(i);
+      if (ch < 0x20 || ch == 0x7F) {
+        sb.append('\uFFFD');
+      } else {
+        sb.append(ch);
+      }
+    }
+    if (raw.length() > max) {
+      sb.append("...[truncated]");
+    }
+    return sb.toString();
   }
 
   static long resolveInterval(final String rawAgentArgs, final Map<String, String> environment) {

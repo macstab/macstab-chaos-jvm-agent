@@ -336,6 +336,15 @@ final class ScenarioController {
     if (!passesProbability(matched)) {
       return null;
     }
+    // Re-check the started flag before we commit to applying the effect. stop() can flip
+    // started.get() to false while we were in the rate-limit / probability / CAS branches
+    // above. Without this recheck, a stop() happening concurrently with an in-flight evaluate()
+    // will still increment appliedCount, publish an APPLIED event, and return a contribution —
+    // the user gets a chaos effect after they explicitly turned the scenario off. The recheck
+    // does not need a barrier beyond the volatile semantics of AtomicBoolean.
+    if (!started.get()) {
+      return null;
+    }
     // Task 2: CAS loop to ensure appliedCount never overshoots maxApplications under
     // concurrency. The naive incrementAndGet-then-check pattern allowed the counter to
     // exceed the cap when multiple threads raced through this branch simultaneously.

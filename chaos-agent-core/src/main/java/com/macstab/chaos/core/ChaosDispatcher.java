@@ -1113,7 +1113,20 @@ public final class ChaosDispatcher {
   private TerminalAction buildInjectedExceptionTerminal(
       final ChaosEffect.ExceptionInjectionEffect effect) {
     try {
-      final Class<?> exClass = Class.forName(effect.exceptionClassName());
+      // Class.forName(name, initialize=false, loader): deliberately skip static initialisation.
+      // Running <clinit> of an attacker-chosen class during exception construction would turn
+      // the injection path into a class-loading gadget. The package allow-list in
+      // ExceptionInjectionEffect is the primary gate; this is defence in depth.
+      final Class<?> exClass =
+          Class.forName(effect.exceptionClassName(), false, ChaosDispatcher.class.getClassLoader());
+      if (!Throwable.class.isAssignableFrom(exClass)) {
+        return new TerminalAction(
+            TerminalKind.THROW,
+            null,
+            new IllegalArgumentException(
+                "chaos-agent: configured exception class does not extend Throwable: "
+                    + effect.exceptionClassName()));
+      }
       Throwable instance;
       try {
         instance = (Throwable) exClass.getConstructor(String.class).newInstance(effect.message());
@@ -1125,14 +1138,12 @@ public final class ChaosDispatcher {
       }
       return new TerminalAction(TerminalKind.THROW, null, instance);
     } catch (final ReflectiveOperationException reflective) {
-      return new TerminalAction(
-          TerminalKind.THROW,
-          null,
+      // Preserve the cause chain so operators can see *why* instantiation failed
+      // (missing class, inaccessible ctor, ctor threw, etc.) without having to reproduce.
+      final RuntimeException wrapped =
           new RuntimeException(
-              "chaos-agent: failed to instantiate "
-                  + effect.exceptionClassName()
-                  + ": "
-                  + reflective.getMessage()));
+              "chaos-agent: failed to instantiate " + effect.exceptionClassName(), reflective);
+      return new TerminalAction(TerminalKind.THROW, null, wrapped);
     }
   }
 
@@ -1197,8 +1208,11 @@ public final class ChaosDispatcher {
     try {
       Thread.sleep(delayMillis);
     } catch (final InterruptedException interruptedException) {
+      // Restore the interrupt flag and return. Wrapping this as IllegalStateException would break
+      // the caller's interrupt contract: any subsequent blocking call they make will throw
+      // InterruptedException anyway, which is the idiomatic signal that the thread should unwind.
+      // A chaos-induced delay being cut short is not itself an error.
       Thread.currentThread().interrupt();
-      throw new IllegalStateException("chaos delay interrupted", interruptedException);
     }
   }
 

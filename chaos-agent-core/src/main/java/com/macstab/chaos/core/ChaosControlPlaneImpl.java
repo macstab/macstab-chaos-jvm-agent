@@ -55,25 +55,49 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
 
   @Override
   public ChaosActivationHandle activate(final ChaosPlan plan) {
+    // A plan is atomic: either every scenario is registered or none are. If the 4th of 5
+    // scenarios fails validation we must undo the first 3, otherwise the plan is silently
+    // partially applied and the operator has no way to tell apart "this plan is active" from
+    // "part of this plan is active". Roll back by stopping and destroying every successfully
+    // registered handle before propagating the original exception.
     final List<ChaosActivationHandle> handles = new ArrayList<>();
-    for (final ChaosScenario scenario : plan.scenarios()) {
-      if (scenario.scope() != ChaosScenario.ScenarioScope.JVM) {
-        throw new ChaosActivationException(
-            "startup/global activation cannot register session-scoped scenario " + scenario.id());
+    try {
+      for (final ChaosScenario scenario : plan.scenarios()) {
+        if (scenario.scope() != ChaosScenario.ScenarioScope.JVM) {
+          throw new ChaosActivationException(
+              "startup/global activation cannot register session-scoped scenario " + scenario.id());
+        }
+        handles.add(activate(scenario));
       }
-      handles.add(activate(scenario));
+      return new CompositeActivationHandle("plan:" + plan.metadata().name(), handles);
+    } catch (final RuntimeException failure) {
+      for (final ChaosActivationHandle handle : handles) {
+        try {
+          if (handle instanceof DefaultChaosActivationHandle defaultHandle) {
+            defaultHandle.destroy();
+          } else {
+            handle.stop();
+          }
+        } catch (final RuntimeException rollbackFailure) {
+          failure.addSuppressed(rollbackFailure);
+        }
+      }
+      throw failure;
     }
-    return new CompositeActivationHandle("plan:" + plan.metadata().name(), handles);
   }
 
   @Override
   public ChaosSession openSession(final String displayName) {
-    throw new UnsupportedOperationException(
-        "openSession is routed through the ChaosRuntime facade");
+    // A session only needs {@code activateInSession} to register session-scoped scenarios; that
+    // method lives on this control plane, so the session can hold a direct reference instead of
+    // bouncing through the ChaosRuntime facade. This removes the UnsupportedOperationException
+    // trap that used to sit here for any caller who got to the control plane without going
+    // through ChaosRuntime.
+    return new DefaultChaosSession(displayName, scopeContext, this);
   }
 
   ChaosSession openSession(final String displayName, final ChaosRuntime runtime) {
-    return new DefaultChaosSession(displayName, scopeContext, runtime);
+    return openSession(displayName);
   }
 
   @Override

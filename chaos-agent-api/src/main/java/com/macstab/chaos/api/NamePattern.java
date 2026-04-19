@@ -2,8 +2,10 @@ package com.macstab.chaos.api;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Objects;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 
 /**
@@ -30,17 +32,50 @@ import java.util.regex.Pattern;
  *
  * <p>A {@code null} candidate string never matches any pattern except {@link MatchMode#ANY}.
  *
- * <p>Task 7: GLOB and REGEX patterns are compiled once and cached in a JVM-wide static {@link
- * ConcurrentHashMap} keyed by the pattern string. Repeated calls to {@link #matches} on hot paths
- * do not pay the {@link Pattern#compile} cost.
+ * <p>GLOB and REGEX patterns are compiled once and cached in a JVM-wide bounded LRU cache keyed by
+ * the pattern string (capacity {@value #CACHE_CAPACITY}). Repeated calls to {@link #matches} on hot
+ * paths do not pay the {@link Pattern#compile} cost. The cache is bounded so that a
+ * pattern-spamming plan cannot pin arbitrary heap; rarely-used entries evict in access order.
  */
 public record NamePattern(MatchMode mode, String value) {
 
+  /**
+   * Upper bound on distinct GLOB/REGEX expressions cached per JVM. The cache is meant to amortise
+   * the compile cost for the finite set of expressions a deployed plan actually uses; a hostile or
+   * buggy plan that generates thousands of unique patterns should not be able to pin heap.
+   */
+  private static final int CACHE_CAPACITY = 1024;
+
+  /**
+   * Upper bound on the length of a single GLOB/REGEX pattern string. Java's regex engine is a
+   * backtracking NFA; pathological expressions like {@code (a+)+b} on inputs of even modest size
+   * exhibit exponential runtime. Limiting raw size is a coarse-grained defence: it bounds the worst
+   * case for any given expression and makes denial-of-service-by-regex far less practical.
+   */
+  private static final int MAX_PATTERN_LENGTH = 4096;
+
   /** Pre-compiled regex patterns for GLOB mode, keyed by the glob expression string. */
-  private static final ConcurrentHashMap<String, Pattern> GLOB_CACHE = new ConcurrentHashMap<>();
+  private static final Map<String, Pattern> GLOB_CACHE = boundedLruCache();
 
   /** Pre-compiled patterns for REGEX mode, keyed by the raw regex string. */
-  private static final ConcurrentHashMap<String, Pattern> REGEX_CACHE = new ConcurrentHashMap<>();
+  private static final Map<String, Pattern> REGEX_CACHE = boundedLruCache();
+
+  private static Map<String, Pattern> boundedLruCache() {
+    // LinkedHashMap access-order LRU wrapped in synchronizedMap. Not as concurrency-friendly as
+    // ConcurrentHashMap, but Pattern.compile is expensive enough that contention on the lock is
+    // negligible and we get a hard upper bound in return. For a lock-free LRU we would need
+    // a dedicated cache library; the dependency cost outweighs the benefit here.
+    return Collections.synchronizedMap(
+        new LinkedHashMap<>(CACHE_CAPACITY, 0.75f, true) {
+          @Override
+          protected boolean removeEldestEntry(final Map.Entry<String, Pattern> eldest) {
+            return size() > CACHE_CAPACITY;
+          }
+        });
+  }
+
+  /** Singleton {@link MatchMode#ANY} instance — avoids allocating on every {@link #any()} call. */
+  private static final NamePattern ANY = new NamePattern(MatchMode.ANY, "*");
 
   /**
    * Canonical constructor. Normalises {@code null} mode to {@link MatchMode#ANY} and {@code null}
@@ -60,10 +95,12 @@ public record NamePattern(MatchMode mode, String value) {
 
   /**
    * Returns a pattern that matches any string, including {@code null}. The standard choice when a
-   * selector field is not constrained.
+   * selector field is not constrained. Returns a shared singleton: every selector that uses {@code
+   * any()} previously allocated a fresh two-field record, which added churn to the plan parsing
+   * path.
    */
   public static NamePattern any() {
-    return new NamePattern(MatchMode.ANY, "*");
+    return ANY;
   }
 
   /**
@@ -124,15 +161,43 @@ public record NamePattern(MatchMode mode, String value) {
     return switch (mode) {
       case EXACT -> candidate.equals(value);
       case PREFIX -> candidate.startsWith(value);
-      case GLOB ->
-          GLOB_CACHE
-              .computeIfAbsent(value, v -> Pattern.compile(toRegex(v)))
-              .matcher(candidate)
-              .matches();
-      case REGEX ->
-          REGEX_CACHE.computeIfAbsent(value, Pattern::compile).matcher(candidate).matches();
+      case GLOB -> compiledGlob(value).matcher(candidate).matches();
+      case REGEX -> compiledRegex(value).matcher(candidate).matches();
       case ANY -> true;
     };
+  }
+
+  private static Pattern compiledGlob(final String value) {
+    guardPatternLength(value);
+    Pattern cached = GLOB_CACHE.get(value);
+    if (cached != null) {
+      return cached;
+    }
+    final Pattern compiled = Pattern.compile(toRegex(value));
+    GLOB_CACHE.put(value, compiled);
+    return compiled;
+  }
+
+  private static Pattern compiledRegex(final String value) {
+    guardPatternLength(value);
+    Pattern cached = REGEX_CACHE.get(value);
+    if (cached != null) {
+      return cached;
+    }
+    final Pattern compiled = Pattern.compile(value);
+    REGEX_CACHE.put(value, compiled);
+    return compiled;
+  }
+
+  private static void guardPatternLength(final String value) {
+    if (value.length() > MAX_PATTERN_LENGTH) {
+      throw new IllegalArgumentException(
+          "name pattern value exceeds maximum length of "
+              + MAX_PATTERN_LENGTH
+              + " characters (actual: "
+              + value.length()
+              + ")");
+    }
   }
 
   private static String toRegex(String glob) {

@@ -2,9 +2,11 @@ package com.macstab.chaos.core;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.awaitility.Awaitility.await;
 
 import com.macstab.chaos.api.ChaosEffect;
 import java.time.Duration;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -103,14 +105,16 @@ class StressorLifecycleTest {
 
     @Test
     @DisplayName("close() stops allocation thread")
-    void closeStopsAllocationThread() throws Exception {
+    void closeStopsAllocationThread() {
       final GcPressureStressor stressor =
           new GcPressureStressor(
               new ChaosEffect.GcPressureEffect(1_000_000L, 1024, false, Duration.ofSeconds(10)));
       stressor.close();
-      // Give the thread a moment to notice the interrupt.
-      Thread.sleep(100);
-      assertThat(stressor.isRunning()).isFalse();
+      // Poll rather than fixed sleep. An interrupt-wake round-trip varies from microseconds
+      // on an unloaded machine to hundreds of milliseconds on an over-committed CI runner, so
+      // a fixed 100 ms sleep either races or wastes time. Awaitility fails fast on condition
+      // change and has an explicit upper bound, which is what a reliable assertion needs.
+      await().atMost(2, TimeUnit.SECONDS).until(() -> !stressor.isRunning());
     }
   }
 
@@ -141,13 +145,11 @@ class StressorLifecycleTest {
 
     @Test
     @DisplayName("spawns expected number of threads")
-    void spawnsExpectedNumberOfThreads() throws Exception {
+    void spawnsExpectedNumberOfThreads() {
       final ThreadLeakStressor stressor =
           new ThreadLeakStressor(new ChaosEffect.ThreadLeakEffect(3, "leak-test-", true, null));
       try {
-        // Give threads time to start.
-        Thread.sleep(100);
-        assertThat(stressor.aliveCount()).isEqualTo(3);
+        await().atMost(2, TimeUnit.SECONDS).until(() -> stressor.aliveCount() == 3);
       } finally {
         stressor.close();
       }
@@ -155,23 +157,20 @@ class StressorLifecycleTest {
 
     @Test
     @DisplayName("close() terminates leaked threads")
-    void closeTerminatesLeakedThreads() throws Exception {
+    void closeTerminatesLeakedThreads() {
       final ThreadLeakStressor stressor =
           new ThreadLeakStressor(new ChaosEffect.ThreadLeakEffect(2, "leak-close-", true, null));
       stressor.close();
-      // Allow threads to respond to the interrupt.
-      Thread.sleep(200);
-      assertThat(stressor.aliveCount()).isZero();
+      await().atMost(3, TimeUnit.SECONDS).until(() -> stressor.aliveCount() == 0);
     }
 
     @Test
     @DisplayName("lifespan terminates threads after the configured duration")
-    void lifespanTerminatesThreadsAfterDuration() throws Exception {
+    void lifespanTerminatesThreadsAfterDuration() {
       final ThreadLeakStressor stressor =
           new ThreadLeakStressor(
               new ChaosEffect.ThreadLeakEffect(2, "lifespan-", true, Duration.ofMillis(100)));
-      Thread.sleep(400);
-      assertThat(stressor.aliveCount()).isZero();
+      await().atMost(3, TimeUnit.SECONDS).until(() -> stressor.aliveCount() == 0);
     }
   }
 
@@ -181,29 +180,25 @@ class StressorLifecycleTest {
 
     @Test
     @DisplayName("participant threads start and are alive")
-    void participantThreadsStart() throws Exception {
+    void participantThreadsStart() {
       final DeadlockStressor stressor =
           new DeadlockStressor(new ChaosEffect.DeadlockEffect(2, Duration.ofMillis(50)));
       try {
-        // Wait for threads to acquire their first locks.
-        Thread.sleep(200);
-        assertThat(stressor.aliveCount()).isEqualTo(2);
+        await().atMost(3, TimeUnit.SECONDS).until(() -> stressor.aliveCount() == 2);
       } finally {
         stressor.close();
-        Thread.sleep(200);
+        await().atMost(3, TimeUnit.SECONDS).until(() -> stressor.aliveCount() == 0);
       }
     }
 
     @Test
     @DisplayName("close() interrupts participant threads")
-    void closeInterruptsParticipants() throws Exception {
+    void closeInterruptsParticipants() {
       final DeadlockStressor stressor =
           new DeadlockStressor(new ChaosEffect.DeadlockEffect(2, Duration.ofMillis(10)));
-      // Allow deadlock to form.
-      Thread.sleep(200);
+      await().atMost(3, TimeUnit.SECONDS).until(() -> stressor.aliveCount() == 2);
       stressor.close();
-      Thread.sleep(300);
-      assertThat(stressor.aliveCount()).isZero();
+      await().atMost(3, TimeUnit.SECONDS).until(() -> stressor.aliveCount() == 0);
     }
   }
 
@@ -236,29 +231,27 @@ class StressorLifecycleTest {
 
     @Test
     @DisplayName("contending threads start and are alive")
-    void contendingThreadsStart() throws Exception {
+    void contendingThreadsStart() {
       final MonitorContentionStressor stressor =
           new MonitorContentionStressor(
               new ChaosEffect.MonitorContentionEffect(Duration.ofMillis(10), 3, false));
       try {
-        Thread.sleep(100);
-        assertThat(stressor.aliveCount()).isEqualTo(3);
+        await().atMost(3, TimeUnit.SECONDS).until(() -> stressor.aliveCount() == 3);
       } finally {
         stressor.close();
-        Thread.sleep(200);
+        await().atMost(3, TimeUnit.SECONDS).until(() -> stressor.aliveCount() == 0);
       }
     }
 
     @Test
     @DisplayName("close() stops all contending threads")
-    void closeStopsContendingThreads() throws Exception {
+    void closeStopsContendingThreads() {
       final MonitorContentionStressor stressor =
           new MonitorContentionStressor(
               new ChaosEffect.MonitorContentionEffect(Duration.ofMillis(5), 2, true));
-      Thread.sleep(100);
+      await().atMost(3, TimeUnit.SECONDS).until(() -> stressor.aliveCount() == 2);
       stressor.close();
-      Thread.sleep(300);
-      assertThat(stressor.aliveCount()).isZero();
+      await().atMost(3, TimeUnit.SECONDS).until(() -> stressor.aliveCount() == 0);
     }
   }
 }

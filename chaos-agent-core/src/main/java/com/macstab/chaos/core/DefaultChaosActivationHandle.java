@@ -4,7 +4,7 @@ import com.macstab.chaos.api.ChaosActivationHandle;
 import com.macstab.chaos.api.ChaosDiagnostics;
 
 /**
- * Default package-private implementation of {@link com.macstab.chaos.api.ChaosActivationHandle}.
+ * Default implementation of {@link com.macstab.chaos.api.ChaosActivationHandle}.
  *
  * <p>Each instance corresponds to a single registered chaos scenario. It wraps a {@link
  * ScenarioController} and provides the public lifecycle API:
@@ -18,11 +18,16 @@ import com.macstab.chaos.api.ChaosDiagnostics;
  *       decisions.
  * </ul>
  *
+ * <p>This class is public rather than package-private so that {@code StartupConfigPoller} (in the
+ * {@code bootstrap} package) can call {@link #destroy()} — an operation not exposed on the public
+ * {@link ChaosActivationHandle} API. Constructors remain package-private so only core code can
+ * instantiate handles.
+ *
  * <h2>Thread safety</h2>
  *
  * <p>All methods delegate to thread-safe internals. Instances may be used from multiple threads.
  */
-final class DefaultChaosActivationHandle implements ChaosActivationHandle {
+public final class DefaultChaosActivationHandle implements ChaosActivationHandle {
   private final ScenarioController controller;
   private final ScenarioRegistry registry;
 
@@ -85,8 +90,12 @@ final class DefaultChaosActivationHandle implements ChaosActivationHandle {
    * <p>Calling this method ensures that the scenario no longer appears in registry lookups and
    * cannot participate in future chaos decisions. The registry removal is safe to call concurrently
    * because {@link java.util.concurrent.ConcurrentHashMap#remove} is thread-safe.
+   *
+   * <p>Public rather than package-private so that {@code StartupConfigPoller} (in the {@code
+   * bootstrap} package) can fully unregister scenarios during config-diff application — calling
+   * {@code stop()} alone would leak entries into the registry indefinitely across reloads.
    */
-  void destroy() {
+  public void destroy() {
     controller.destroy();
     registry.unregister(controller);
   }

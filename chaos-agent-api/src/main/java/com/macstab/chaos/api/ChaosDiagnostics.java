@@ -3,6 +3,7 @@ package com.macstab.chaos.api;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 
 /**
@@ -138,7 +139,20 @@ public interface ChaosDiagnostics {
       Instant capturedAt,
       List<ScenarioReport> scenarios,
       List<ActivationFailure> failures,
-      Map<String, String> runtimeDetails) {}
+      Map<String, String> runtimeDetails) {
+    /**
+     * Compact constructor — rejects nulls on the required scalar and takes immutable snapshots of
+     * the list/map fields. Without the copies, a caller who kept the list returned from the
+     * registry could mutate it after publishing the snapshot, breaking the "point in time" name.
+     * {@code List.copyOf}/{@code Map.copyOf} additionally reject null elements.
+     */
+    public Snapshot {
+      Objects.requireNonNull(capturedAt, "capturedAt");
+      scenarios = scenarios == null ? List.of() : List.copyOf(scenarios);
+      failures = failures == null ? List.of() : List.copyOf(failures);
+      runtimeDetails = runtimeDetails == null ? Map.of() : Map.copyOf(runtimeDetails);
+    }
+  }
 
   /**
    * Per-scenario state and counters at snapshot time.
@@ -164,7 +178,14 @@ public interface ChaosDiagnostics {
       ScenarioState state,
       long matchedCount,
       long appliedCount,
-      String reason) {}
+      String reason) {
+    public ScenarioReport {
+      Objects.requireNonNull(id, "id");
+      Objects.requireNonNull(scopeKey, "scopeKey");
+      Objects.requireNonNull(scope, "scope");
+      Objects.requireNonNull(state, "state");
+    }
+  }
 
   /**
    * A record of a failed scenario activation attempt.
@@ -173,5 +194,10 @@ public interface ChaosDiagnostics {
    * @param category why the activation failed
    * @param message human-readable detail; suitable for logging or test failure messages
    */
-  record ActivationFailure(String scenarioId, FailureCategory category, String message) {}
+  record ActivationFailure(String scenarioId, FailureCategory category, String message) {
+    public ActivationFailure {
+      Objects.requireNonNull(scenarioId, "scenarioId");
+      Objects.requireNonNull(category, "category");
+    }
+  }
 }

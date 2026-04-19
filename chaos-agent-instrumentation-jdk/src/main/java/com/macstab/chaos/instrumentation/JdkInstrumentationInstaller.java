@@ -1233,7 +1233,13 @@ public final class JdkInstrumentationInstaller {
    */
   private static void injectBridge(final Instrumentation instrumentation) {
     try {
-      final Path bridgeJar = Files.createTempFile("macstab-chaos-bootstrap-bridge", ".jar");
+      // On POSIX filesystems create with 0600: the bridge JAR contains the code that bootstrap
+      // classloader will load, so a world-readable/writable file (the default 0644 umask-adjusted
+      // file) is a privilege-escalation hazard — any local user who can write to /tmp could swap
+      // the file before the JVM opens it and run arbitrary bootstrap-level code. On non-POSIX
+      // filesystems (e.g. Windows) fall back to the default because PosixFileAttributes are
+      // unsupported there; other platform-specific ACLs would have to be layered in separately.
+      final Path bridgeJar = createSecureTempFile();
       bridgeJar.toFile().deleteOnExit();
       try (JarOutputStream jarOutputStream =
           new JarOutputStream(Files.newOutputStream(bridgeJar))) {
@@ -1250,6 +1256,18 @@ public final class JdkInstrumentationInstaller {
     } catch (IOException exception) {
       throw new IllegalStateException("failed to inject bootstrap bridge", exception);
     }
+  }
+
+  private static Path createSecureTempFile() throws IOException {
+    final String tmpDir = System.getProperty("java.io.tmpdir");
+    final Path tmpPath = Path.of(tmpDir);
+    if (Files.getFileStore(tmpPath).supportsFileAttributeView("posix")) {
+      final java.nio.file.attribute.FileAttribute<?> ownerOnly =
+          java.nio.file.attribute.PosixFilePermissions.asFileAttribute(
+              java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"));
+      return Files.createTempFile("macstab-chaos-bootstrap-bridge", ".jar", ownerOnly);
+    }
+    return Files.createTempFile("macstab-chaos-bootstrap-bridge", ".jar");
   }
 
   private static void writeClass(final JarOutputStream jarOutputStream, final String resourcePath)

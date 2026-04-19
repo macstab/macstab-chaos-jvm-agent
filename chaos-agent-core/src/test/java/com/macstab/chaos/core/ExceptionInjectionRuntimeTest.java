@@ -90,25 +90,17 @@ class ExceptionInjectionRuntimeTest {
   }
 
   @Test
-  @DisplayName("unknown exception class falls back to RuntimeException with description")
-  void unknownExceptionClassFallsBackToRuntimeException() {
-    final ChaosRuntime runtime = new ChaosRuntime();
-    runtime.activate(
-        ChaosScenario.builder("inject-unknown")
-            .scope(ChaosScenario.ScenarioScope.JVM)
-            .selector(
-                ChaosSelector.method(
-                    Set.of(OperationType.METHOD_ENTER),
-                    NamePattern.exact("com.example.X"),
-                    NamePattern.any()))
-            .effect(
+  @DisplayName("exception class outside the allowed packages is rejected at construction")
+  void exceptionClassOutsideAllowedPackagesIsRejected() {
+    // The allowlist (java., javax., jakarta., com.macstab.chaos.) is enforced at record
+    // construction time. A class loaded later via Class.forName would be the perfect
+    // primitive for a reflective-load gadget, so we refuse to store the name at all —
+    // not at injection time, when the scenario has already been wired into the runtime.
+    assertThatThrownBy(
+            () ->
                 new ChaosEffect.ExceptionInjectionEffect(
                     "com.example.NonExistentException", "msg", true))
-            .activationPolicy(ActivationPolicy.always())
-            .build());
-
-    assertThatThrownBy(() -> runtime.beforeMethodEnter("com.example.X", "run"))
-        .isInstanceOf(RuntimeException.class)
-        .hasMessageContaining("com.example.NonExistentException");
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("allowed package");
   }
 }

@@ -131,7 +131,17 @@ public final class StartupConfigLoader {
           "config path is not a regular file: " + path, "file:" + filePath);
     }
     try {
-      final long size = Files.size(path);
+      // Files.size(path) follows symlinks; if an attacker flipped the path to a symlink between
+      // the symlink check above and this size check, we would measure the *target* file's size
+      // and then open a different file in the read step. Reading attributes with NOFOLLOW_LINKS
+      // measures the link entry itself, keeping the check aligned with the eventual
+      // NOFOLLOW_LINKS open in loadFromFile.
+      final long size =
+          Files.readAttributes(
+                  path,
+                  java.nio.file.attribute.BasicFileAttributes.class,
+                  LinkOption.NOFOLLOW_LINKS)
+              .size();
       if (size > MAX_FILE_SIZE) {
         throw new ConfigLoadException(
             "config file exceeds maximum size of "

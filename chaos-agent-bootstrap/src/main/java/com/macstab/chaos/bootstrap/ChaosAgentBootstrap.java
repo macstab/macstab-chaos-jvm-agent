@@ -200,7 +200,17 @@ public final class ChaosAgentBootstrap {
     if (existing != null) {
       return existing;
     }
+    // Claim the RUNTIME slot with a freshly constructed runtime *before* performing any
+    // side-effecting installation (instrumentation, MBean, JFR, config load). If we did the
+    // installation first and CAS'd after, a concurrent attach would run the whole install
+    // sequence twice against the same JVM — duplicate transformers, duplicate MBean
+    // registration attempts, a second StartupConfigPoller thread. Because installation is
+    // effectively unwindable once ByteBuddy has transformed bootstrap classes, we must decide
+    // who wins *first*. The loser simply discards its unused runtime object.
     final ChaosRuntime runtime = new ChaosRuntime();
+    if (!RUNTIME.compareAndSet(null, runtime)) {
+      return RUNTIME.get();
+    }
     JdkInstrumentationInstaller.install(instrumentation, runtime, premainMode);
     registerMBean(runtime);
     installJfrIntegration(runtime);
@@ -225,9 +235,6 @@ public final class ChaosAgentBootstrap {
             System.err.println(runtime.diagnostics().debugDump());
           }
         });
-    if (!RUNTIME.compareAndSet(null, runtime)) {
-      return RUNTIME.get();
-    }
     return runtime;
   }
 
