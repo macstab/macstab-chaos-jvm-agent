@@ -11,6 +11,7 @@ import java.util.Objects;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Hot-path dispatch component of the chaos runtime.
@@ -27,6 +28,16 @@ import java.util.concurrent.RejectedExecutionException;
 public final class ChaosDispatcher {
   private static final Runnable NO_OP_RUNNABLE = () -> {};
   private static final Callable<?> NO_OP_CALLABLE = () -> null;
+
+  // Safe upper bound for an "indefinite" schedule delay in milliseconds.
+  // ScheduledThreadPoolExecutor
+  // internally converts the delay to nanoseconds and adds it to System.nanoTime() in
+  // ScheduledFutureTask.triggerTime; returning Long.MAX_VALUE here overflows that multiplication
+  // and
+  // produces a negative trigger time that fires immediately — the opposite of the intent. ~100
+  // years of millis multiplied by 1_000_000 still fits in a long, so the task effectively never
+  // fires but the bookkeeping stays well-defined.
+  private static final long INDEFINITE_SCHEDULE_DELAY_MILLIS = TimeUnit.DAYS.toMillis(365L * 100L);
 
   private final FeatureSet featureSet;
   private final ScopeContext scopeContext;
@@ -174,7 +185,7 @@ public final class ChaosDispatcher {
       }
       if (terminalAction.kind() == TerminalKind.RETURN
           || terminalAction.kind() == TerminalKind.SUPPRESS) {
-        return Long.MAX_VALUE;
+        return INDEFINITE_SCHEDULE_DELAY_MILLIS;
       }
     }
     return delay + decision.delayMillis();
@@ -475,6 +486,7 @@ public final class ChaosDispatcher {
             null,
             null);
     final RuntimeDecision decision = evaluate(context);
+    applyGate(decision.gateAction());
     if (decision.terminalAction() != null) {
       final TerminalAction terminalAction = decision.terminalAction();
       if (terminalAction.kind() == TerminalKind.THROW) {
@@ -615,6 +627,7 @@ public final class ChaosDispatcher {
             null,
             scopeContext.currentSessionId());
     final RuntimeDecision decision = evaluate(context);
+    applyGate(decision.gateAction());
     if (decision.terminalAction() != null) {
       final TerminalAction terminalAction = decision.terminalAction();
       if (terminalAction.kind() == TerminalKind.THROW) {
@@ -769,6 +782,7 @@ public final class ChaosDispatcher {
             null,
             scopeContext.currentSessionId());
     final RuntimeDecision decision = evaluate(context);
+    applyGate(decision.gateAction());
     if (decision.terminalAction() != null) {
       final TerminalAction terminalAction = decision.terminalAction();
       if (terminalAction.kind() == TerminalKind.THROW) {
@@ -822,6 +836,7 @@ public final class ChaosDispatcher {
             null,
             scopeContext.currentSessionId());
     final RuntimeDecision decision = evaluate(context);
+    applyGate(decision.gateAction());
     if (decision.terminalAction() != null) {
       final TerminalAction terminalAction = decision.terminalAction();
       if (terminalAction.kind() == TerminalKind.THROW) {
@@ -848,6 +863,7 @@ public final class ChaosDispatcher {
             null,
             scopeContext.currentSessionId());
     final RuntimeDecision decision = evaluate(context);
+    applyGate(decision.gateAction());
     if (decision.terminalAction() != null) {
       final TerminalAction terminalAction = decision.terminalAction();
       if (terminalAction.kind() == TerminalKind.THROW) {
@@ -951,6 +967,7 @@ public final class ChaosDispatcher {
             null,
             scopeContext.currentSessionId());
     final RuntimeDecision decision = evaluate(context);
+    applyGate(decision.gateAction());
     if (decision.terminalAction() != null) {
       final TerminalAction terminalAction = decision.terminalAction();
       if (terminalAction.kind() == TerminalKind.THROW) {
@@ -1082,6 +1099,7 @@ public final class ChaosDispatcher {
     }
     long delayMillis = 0L;
     GateAction gateAction = null;
+    int gatePrecedence = Integer.MIN_VALUE;
     TerminalAction terminalAction = null;
     int terminalPrecedence = Integer.MIN_VALUE;
     for (final ScenarioContribution contribution : contributions) {
@@ -1096,8 +1114,10 @@ public final class ChaosDispatcher {
       } else {
         delayMillis += contributionDelay;
       }
-      if (contribution.effect() instanceof ChaosEffect.GateEffect) {
+      if (contribution.effect() instanceof ChaosEffect.GateEffect
+          && contribution.scenario().precedence() >= gatePrecedence) {
         gateAction = new GateAction(contribution.controller().gate(), contribution.gateTimeout());
+        gatePrecedence = contribution.scenario().precedence();
       }
       final TerminalAction candidate =
           terminalActionFor(

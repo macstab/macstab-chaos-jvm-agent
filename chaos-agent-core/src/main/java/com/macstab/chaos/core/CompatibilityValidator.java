@@ -86,6 +86,11 @@ final class CompatibilityValidator {
         throw new ChaosValidationException("stress scenarios must be JVM scoped");
       }
       validateStressBinding(stressSelector.target(), scenario.effect());
+      if (stressSelector.target() == ChaosSelector.StressTarget.VIRTUAL_THREAD_CARRIER_PINNING
+          && !featureSet.supportsVirtualThreads()) {
+        throw new ChaosUnsupportedFeatureException(
+            "VIRTUAL_THREAD_CARRIER_PINNING requires JDK 21+ at runtime");
+      }
     }
     validateInterceptorConstraints(scenario);
   }
@@ -184,6 +189,18 @@ final class CompatibilityValidator {
         if (!(effect instanceof ChaosEffect.ReferenceQueueFloodEffect)) {
           throw new ChaosValidationException(
               "StressTarget.REFERENCE_QUEUE_FLOOD requires ReferenceQueueFloodEffect");
+        }
+      }
+      case VIRTUAL_THREAD_CARRIER_PINNING -> {
+        // The enum-switch was previously non-exhaustive — a user-supplied pairing like
+        // (VIRTUAL_THREAD_CARRIER_PINNING, HeapPressureEffect) slipped through and failed
+        // far downstream with a ClassCastException inside the stressor factory. The JDK-21
+        // feature gate lives in validate(); this case exists to enforce the effect-type
+        // contract so every StressTarget has a binding rule.
+        if (!(effect instanceof ChaosEffect.VirtualThreadCarrierPinningEffect)) {
+          throw new ChaosValidationException(
+              "StressTarget.VIRTUAL_THREAD_CARRIER_PINNING requires"
+                  + " VirtualThreadCarrierPinningEffect");
         }
       }
     }

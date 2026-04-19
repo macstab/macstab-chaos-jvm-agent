@@ -543,6 +543,15 @@ public sealed interface ChaosEffect
    * the delay is deterministic.
    */
   record DelayEffect(Duration minDelay, Duration maxDelay) implements ChaosEffect {
+    /**
+     * Upper bound for delay values. {@code Duration.ofMillis(Long.MAX_VALUE)} breaks the hot-path
+     * sampler: {@code nextLong(min, max + 1)} wraps the upper bound to {@link Long#MIN_VALUE} and
+     * throws "bound must be greater than origin" into application threads. 30 days is a pragmatic
+     * ceiling — longer than any plausible test-suite delay yet far enough from the overflow cliff
+     * that no arithmetic downstream (sampler, `ScheduledThreadPoolExecutor.triggerTime`) wraps.
+     */
+    public static final Duration MAX_DELAY = Duration.ofDays(30L);
+
     public DelayEffect {
       if (minDelay == null || maxDelay == null) {
         throw new IllegalArgumentException("delay bounds must be non-null");
@@ -552,6 +561,10 @@ public sealed interface ChaosEffect
       }
       if (maxDelay.compareTo(minDelay) < 0) {
         throw new IllegalArgumentException("maxDelay must be >= minDelay");
+      }
+      if (maxDelay.compareTo(MAX_DELAY) > 0) {
+        throw new IllegalArgumentException(
+            "maxDelay must be <= " + MAX_DELAY + " to avoid overflow on the hot path");
       }
     }
   }

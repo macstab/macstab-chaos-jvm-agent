@@ -130,22 +130,36 @@ final class ReturnValueCorruptor {
     if (returnType == String.class) {
       return "";
     }
-    if (Optional.class.isAssignableFrom(returnType)) {
-      return Optional.empty();
-    }
-    if (List.class.isAssignableFrom(returnType)) {
+    // Assignability is intentionally inverted (returnType.isAssignableFrom(EmptySingleton)
+    // rather than Interface.isAssignableFrom(returnType)): a method declared to return a
+    // concrete subtype like ArrayList<String> cannot accept Collections.emptyList()'s
+    // ImmutableCollections$ListN because ByteBuddy emits an implicit checkcast at the
+    // @Advice.Return write site. Substituting the empty singleton only when the declared
+    // return type is a supertype of the singleton's concrete class keeps the checkcast
+    // satisfied; all other cases fall through to ZERO with a diagnostic so the operator can
+    // see why the strategy declined.
+    if (returnType.isAssignableFrom(java.util.Collections.emptyList().getClass())
+        && List.class.isAssignableFrom(returnType)) {
       return Collections.emptyList();
     }
-    if (Set.class.isAssignableFrom(returnType)) {
+    if (returnType.isAssignableFrom(java.util.Collections.emptySet().getClass())
+        && Set.class.isAssignableFrom(returnType)) {
       return Collections.emptySet();
     }
-    if (Map.class.isAssignableFrom(returnType)) {
+    if (returnType.isAssignableFrom(java.util.Collections.emptyMap().getClass())
+        && Map.class.isAssignableFrom(returnType)) {
       return Collections.emptyMap();
     }
-    if (Collection.class.isAssignableFrom(returnType)) {
+    if (returnType.isAssignableFrom(java.util.Collections.emptyList().getClass())
+        && Collection.class.isAssignableFrom(returnType)) {
       return Collections.emptyList();
     }
-    // Fallback: primitives and unrecognised reference types use ZERO
+    if (Optional.class.isAssignableFrom(returnType)) {
+      // Optional is a value type; Optional.empty() is always assignable-compatible.
+      return Optional.empty();
+    }
+    // Fallback: primitives, unrecognised reference types, and concrete subtypes we cannot
+    // safely substitute use ZERO.
     LOGGER.fine(
         () ->
             "ReturnValueCorruption EMPTY is inapplicable to "
