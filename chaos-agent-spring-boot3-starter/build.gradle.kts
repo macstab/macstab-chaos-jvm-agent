@@ -3,6 +3,7 @@ dependencies {
     implementation(project(":chaos-agent-core"))
     implementation(project(":chaos-agent-bootstrap"))
     implementation(project(":chaos-agent-startup-config"))
+    implementation(project(":chaos-agent-spring-boot-common"))
 
     compileOnly(platform(libs.spring.boot3.dependencies))
     compileOnly("org.springframework.boot:spring-boot-autoconfigure")

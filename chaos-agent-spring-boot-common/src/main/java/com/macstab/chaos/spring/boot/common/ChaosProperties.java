@@ -1,9 +1,11 @@
-package com.macstab.chaos.spring.boot4;
+package com.macstab.chaos.spring.boot.common;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
- * Configuration properties for the Spring Boot 4 runtime chaos starter.
+ * Configuration properties for the runtime chaos starter. Shared between the Spring Boot 3 and
+ * Spring Boot 4 starters — this class only uses APIs that are source- and binary-stable across both
+ * versions.
  *
  * <p>All chaos beans are gated behind {@link #isEnabled()}; the agent is inert unless an operator
  * explicitly opts in by setting {@code macstab.chaos.enabled=true} in the Spring environment.

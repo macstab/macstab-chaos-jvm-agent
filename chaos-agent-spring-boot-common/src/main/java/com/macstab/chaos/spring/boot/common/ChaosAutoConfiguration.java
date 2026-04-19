@@ -1,4 +1,4 @@
-package com.macstab.chaos.spring.boot4;
+package com.macstab.chaos.spring.boot.common;
 
 import com.macstab.chaos.api.ChaosActivationHandle;
 import com.macstab.chaos.api.ChaosControlPlane;
@@ -22,10 +22,13 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /**
- * Auto-configuration that wires the chaos agent runtime into a Spring Boot 4 application.
+ * Auto-configuration that wires the chaos agent runtime into a Spring Boot application. Shared
+ * between the Spring Boot 3 and Spring Boot 4 starters — this class only uses APIs that are stable
+ * across both versions.
  *
  * <p>Registration: {@code
- * META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports}.
+ * META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports} in each
+ * version-specific starter points at this class.
  *
  * <p>All beans are gated behind {@code macstab.chaos.enabled=true}. When disabled, no chaos
  * infrastructure is loaded into the application context.

@@ -7,6 +7,7 @@ import com.macstab.chaos.instrumentation.bridge.BootstrapDispatcher;
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
+import java.util.concurrent.CancellationException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -54,13 +55,35 @@ class ScheduledCallableWrapperTest {
   @DisplayName("when tick is suppressed")
   class WhenTickSuppressed {
 
+    // Returning null here would silently inject a null into the caller's Future.get() —
+    // any unboxing (e.g., Callable<Integer>) would then NPE downstream with no chaos
+    // signal in the stack. CancellationException is the only honest option for a
+    // Callable<T> that has been vetoed.
     @Test
-    @DisplayName("returns null when bridge returns false")
-    void returnsNullWhenTickSuppressed() throws Exception {
+    @DisplayName("throws CancellationException (not null) when bridge returns false")
+    void throwsCancellationWhenTickSuppressed() throws Exception {
       installTickBridge((e, t, p) -> false);
       final ScheduledCallableWrapper<String> wrapper =
           new ScheduledCallableWrapper<>(executor, () -> "should-not-run");
-      assertThat(wrapper.call()).isNull();
+      assertThatThrownBy(wrapper::call)
+          .isExactlyInstanceOf(CancellationException.class)
+          .hasMessageContaining("suppressed by scenario");
+    }
+
+    @Test
+    @DisplayName("does not invoke delegate when tick is suppressed")
+    void doesNotInvokeDelegateWhenSuppressed() throws Exception {
+      installTickBridge((e, t, p) -> false);
+      final boolean[] invoked = {false};
+      final ScheduledCallableWrapper<Integer> wrapper =
+          new ScheduledCallableWrapper<>(
+              executor,
+              () -> {
+                invoked[0] = true;
+                return 1;
+              });
+      assertThatThrownBy(wrapper::call).isExactlyInstanceOf(CancellationException.class);
+      assertThat(invoked[0]).isFalse();
     }
   }
 

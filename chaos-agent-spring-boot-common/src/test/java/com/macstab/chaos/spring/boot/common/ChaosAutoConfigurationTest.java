@@ -1,4 +1,4 @@
-package com.macstab.chaos.spring.boot3;
+package com.macstab.chaos.spring.boot.common;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -18,7 +18,7 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-@DisplayName("ChaosAutoConfiguration (Spring Boot 3)")
+@DisplayName("ChaosAutoConfiguration")
 class ChaosAutoConfigurationTest {
 
   private final ApplicationContextRunner runner =

@@ -26,12 +26,14 @@ Embedded Principal+ Engineer · [Macstab GmbH](https://macstab.com) · Hamburg, 
 
 ## The Short Version
 
-Most chaos tools attack from outside: kill a container, poison DNS, drop packets at the network layer. This tool goes **inside** — it rewrites JDK bytecode at startup and intercepts 42 distinct JVM operations while the process is running. No sidecars. No mocks. No application code changes. Real `Thread.sleep`, real `ConnectException`, real `OutOfMemoryError` — injected surgically into the exact call sites you choose.
+Most chaos tools attack from outside: kill a container, poison DNS, drop packets at the network layer. This tool goes **inside** — it rewrites JDK bytecode at startup and intercepts 57 distinct JVM operations while the process is running. No sidecars. No mocks. No application code changes. Real `Thread.sleep`, real `ConnectException`, real `OutOfMemoryError` — injected surgically into the exact call sites you choose.
 
 ```java
-// Three lines to make your socket layer fall apart on demand:
-session.activate(ChaosScenario.builder()
-    .selector(ChaosSelector.network().remoteHostPattern("db.internal.*"))
+// Make socket connects to a specific host start failing on demand:
+session.activate(ChaosScenario.builder("reject-db-connects")
+    .selector(ChaosSelector.network(
+        Set.of(OperationType.SOCKET_CONNECT),
+        NamePattern.prefix("db.internal.")))
     .effect(ChaosEffect.reject("chaos: connection refused"))
     .build());
 ```
@@ -113,7 +115,7 @@ Application Thread
                                 └─► RuntimeDecision: delay + gate + terminal action
 ```
 
-**42 interception handles** span: thread lifecycle, executor submission, scheduled ticks, blocking queues, `CompletableFuture`, NIO selectors, TCP sockets, clock (`currentTimeMillis`/`nanoTime`), GC, `System.exit`, reflection, `ObjectInputStream`, class loading, `LockSupport.park`, AQS acquire, JNDI, JMX, ZIP compression, `ThreadLocal`, native library loading, and arbitrary method entry/exit.
+**57 interception handles** span: thread lifecycle, executor submission, scheduled ticks, blocking queues, `CompletableFuture`, NIO selectors, TCP sockets, clock (`currentTimeMillis`/`nanoTime`), GC, `System.exit`, reflection, `ObjectInputStream`, class loading, `LockSupport.park`, AQS acquire, JNDI, JMX, ZIP compression, `ThreadLocal`, native library loading, HTTP client send, JDBC execute, DNS resolve, SSL handshake, `Thread.sleep`, file I/O, and arbitrary method entry/exit.
 
 **Session isolation**: each test gets a `ChaosSession` backed by a `ThreadLocal<String>`. Session-scoped chaos evaluates only when the session ID on the current thread matches. Executor submissions within a `session.bind()` scope carry the session ID into worker threads via task decoration — chaos propagates exactly where intended and nowhere else.
 
@@ -141,7 +143,7 @@ Every intercepted JVM operation runs through `ScenarioController.evaluate()` —
 JDK classes (`Thread`, `Socket`, `System`, etc.) are loaded by the **bootstrap classloader** — the root of the classloader hierarchy with no parent. ByteBuddy advice woven into these classes executes *in* the bootstrap classloader's namespace, which cannot see agent classes by name. The bridge:
 
 1. At startup, `BootstrapDispatcher.class` bytecode is extracted from the agent JAR, written to a temp JAR, and appended to the bootstrap classpath via `Instrumentation.appendToBootstrapClassLoaderSearch`
-2. A 42-slot `MethodHandle[]` array is built against `BridgeDelegate.class` using `MethodHandles.publicLookup()` and wired into `BootstrapDispatcher.install()` via reflection against the bootstrap-classloader version (`Class.forName("...BootstrapDispatcher", true, null)`)
+2. A 57-slot `MethodHandle[]` array is built against `BridgeDelegate.class` using `MethodHandles.publicLookup()` and wired into `BootstrapDispatcher.install()` via reflection against the bootstrap-classloader version (`Class.forName("...BootstrapDispatcher", true, null)`)
 3. `handles` is written to the `volatile` field **before** `delegate` — the Java Memory Model's happens-before rule on volatile writes guarantees any thread that observes `delegate != null` also observes the fully-initialized `handles` array
 
 ### Reentrancy Guard
@@ -487,7 +489,7 @@ JMX MBean: `com.macstab.chaos:type=ChaosDiagnostics` — inspect from `jconsole`
 | `chaos-agent-api` | **Stable public API** — the only module application code should depend on |
 | `chaos-agent-bootstrap` | Agent entry point (`premain`/`agentmain`), singleton, MBean registration |
 | `chaos-agent-core` | Scenario registry, evaluation pipeline, session scoping, stressors |
-| `chaos-agent-instrumentation-jdk` | ByteBuddy advice, bootstrap bridge (42 interception handles) |
+| `chaos-agent-instrumentation-jdk` | ByteBuddy advice, bootstrap bridge (57 interception handles) |
 | `chaos-agent-startup-config` | JSON/base64/file config resolution and Jackson mapping |
 | `chaos-agent-testkit` | JUnit 5 extension, `ChaosPlatform.installLocally()` for self-attach |
 | `chaos-agent-spring-boot3-test-starter` | `@ChaosTest` + `ChaosAgentExtension` for Spring Boot 3 tests |
@@ -671,7 +673,7 @@ Internal Architecture documentation lives in [`docs/`](docs/):
 | [`overall-agent.md`](docs/overall-agent.md) | System Architecture, all analysis dimensions, stack walkdown, PlantUML diagrams |
 | [`api.md`](docs/api.md) | Stable API contract: builders, selectors, effects, diagnostics |
 | [`core.md`](docs/core.md) | Evaluation pipeline, session scoping, stressor lifecycle, JMM analysis |
-| [`instrumentation.md`](docs/instrumentation.md) | ByteBuddy advice, bootstrap bridge, reentrancy guard, 42-handle table |
+| [`instrumentation.md`](docs/instrumentation.md) | ByteBuddy advice, bootstrap bridge, reentrancy guard, 57-handle table |
 | [`bootstrap.md`](docs/bootstrap.md) | Agent initialization, self-attach, MBean registration |
 | [`startup-config.md`](docs/startup-config.md) | Config source resolution, JSON schema, path safety |
 | [`testkit.md`](docs/testkit.md) | JUnit 5 extension, session lifecycle, anti-patterns |

@@ -11,6 +11,7 @@ import com.macstab.chaos.api.ChaosScenario;
 import com.macstab.chaos.api.ChaosScenario.ScenarioScope;
 import com.macstab.chaos.api.ChaosSelector;
 import com.macstab.chaos.api.OperationType;
+import com.macstab.chaos.spring.boot.common.ChaosAutoConfiguration;
 import java.net.ConnectException;
 import java.net.InetSocketAddress;
 import java.net.Socket;

@@ -1,11 +1,11 @@
-package com.macstab.chaos.spring.boot4;
+package com.macstab.chaos.spring.boot.common;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-@DisplayName("ChaosProperties (Spring Boot 4)")
+@DisplayName("ChaosProperties")
 class ChaosPropertiesTest {
 
   @Test

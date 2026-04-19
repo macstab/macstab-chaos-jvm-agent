@@ -1,4 +1,4 @@
-package com.macstab.chaos.spring.boot4;
+package com.macstab.chaos.spring.boot.common;
 
 import com.macstab.chaos.api.ChaosActivationHandle;
 import java.util.Collection;

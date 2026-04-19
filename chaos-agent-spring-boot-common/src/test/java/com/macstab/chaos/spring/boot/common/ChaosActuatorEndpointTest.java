@@ -1,4 +1,4 @@
-package com.macstab.chaos.spring.boot4;
+package com.macstab.chaos.spring.boot.common;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -20,7 +20,7 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-@DisplayName("ChaosActuatorEndpoint (Spring Boot 4)")
+@DisplayName("ChaosActuatorEndpoint")
 class ChaosActuatorEndpointTest {
 
   private final ApplicationContextRunner runner =
