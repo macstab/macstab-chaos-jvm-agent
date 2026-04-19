@@ -1,5 +1,6 @@
-package com.macstab.chaos.quarkus;
+package com.macstab.chaos.quarkus.deployment;
 
+import com.macstab.chaos.quarkus.ChaosQuarkusRecorder;
 import io.quarkus.deployment.annotations.BuildStep;
 import io.quarkus.deployment.annotations.ExecutionTime;
 import io.quarkus.deployment.annotations.Record;
@@ -7,6 +8,11 @@ import io.quarkus.deployment.builditem.FeatureBuildItem;
 
 /**
  * Build-time processor that registers the chaos-agent extension with the Quarkus build graph.
+ *
+ * <p>This class lives in the deployment artifact — a separate jar from the runtime artifact — so
+ * that {@code io.quarkus.deployment.*} types never leak onto the application's runtime classpath.
+ * Quarkus discovers the class via the {@code deployment-artifact:} pointer declared in the runtime
+ * module's {@code META-INF/quarkus-extension.yaml}.
  *
  * <p>The work is intentionally split across two {@link BuildStep} methods:
  *
