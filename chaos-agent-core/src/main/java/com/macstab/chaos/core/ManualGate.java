@@ -58,10 +58,18 @@ final class ManualGate {
    * @throws InterruptedException if the calling thread is interrupted while waiting
    */
   void await(final Duration maxBlock) throws InterruptedException {
-    if (maxBlock == null) {
-      latch.await();
+    // Snapshot the volatile once so a concurrent reset() cannot make us observe two different
+    // latch instances within a single call. Without this, a reset() interleaved between the
+    // zero/negative check and the timed-await could cause us to block on a newly installed
+    // latch while the original gate was never intended to be entered.
+    final CountDownLatch current = latch;
+    // Duration.ZERO and any non-positive value mean "block indefinitely" per javadoc. The
+    // CountDownLatch timed-await contract treats <= 0 as "do not wait at all", which is the
+    // exact opposite — so route both cases through the untimed await.
+    if (maxBlock == null || maxBlock.isZero() || maxBlock.isNegative()) {
+      current.await();
       return;
     }
-    latch.await(maxBlock.toMillis(), TimeUnit.MILLISECONDS);
+    current.await(maxBlock.toMillis(), TimeUnit.MILLISECONDS);
   }
 }

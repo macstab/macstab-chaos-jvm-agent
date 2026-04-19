@@ -1071,7 +1071,17 @@ public final class ChaosDispatcher {
     TerminalAction terminalAction = null;
     int terminalPrecedence = Integer.MIN_VALUE;
     for (final ScenarioContribution contribution : contributions) {
-      delayMillis += contribution.delayMillis();
+      // Saturating add: naive += with two large per-scenario delays would wrap to a negative
+      // value, and the sleep() helper treats negative as "skip sleep" — silently turning an
+      // intended multi-minute delay into no delay at all is exactly the kind of quiet bug we
+      // should not ship. Cap at Long.MAX_VALUE instead so the intent ("a very long delay") is
+      // preserved; downstream Thread.sleep still accepts it.
+      final long contributionDelay = contribution.delayMillis();
+      if (contributionDelay > 0L && delayMillis > Long.MAX_VALUE - contributionDelay) {
+        delayMillis = Long.MAX_VALUE;
+      } else {
+        delayMillis += contributionDelay;
+      }
       if (contribution.effect() instanceof ChaosEffect.GateEffect) {
         gateAction = new GateAction(contribution.controller().gate(), contribution.gateTimeout());
       }
