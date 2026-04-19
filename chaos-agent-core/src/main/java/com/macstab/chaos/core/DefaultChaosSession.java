@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Default package-private implementation of {@link com.macstab.chaos.api.ChaosSession}.
@@ -45,6 +46,7 @@ final class DefaultChaosSession implements ChaosSession {
   private final ChaosControlPlaneImpl controlPlane;
   private final List<DefaultChaosActivationHandle> handles = new CopyOnWriteArrayList<>();
   private final ScopeBinding rootBinding;
+  private final AtomicBoolean closed = new AtomicBoolean(false);
 
   /**
    * Creates a new session, assigns it a random UUID, and pushes the session ID onto the calling
@@ -190,6 +192,15 @@ final class DefaultChaosSession implements ChaosSession {
    */
   @Override
   public void close() {
+    // AutoCloseable.close() is documented as idempotent-recommended. Framework integrations
+    // often pair try-with-resources with @AfterEach cleanup, so double close() is easy. Without
+    // a guard the second call's rootBinding.close() would remove an unrelated session id from
+    // the closer's scope deque (or throw IllegalStateException from the LIFO guard) and the
+    // second destroy-loop would emit duplicate STOPPED events for every handle. Short-circuit
+    // on the first successful transition.
+    if (!closed.compareAndSet(false, true)) {
+      return;
+    }
     // Aggregate failures across destroy() calls and always close the root binding. Without the
     // try/finally, the first handle that throws during destroy skips every remaining handle AND
     // leaks the thread's scope binding — leaving session IDs stuck on the scope stack for the

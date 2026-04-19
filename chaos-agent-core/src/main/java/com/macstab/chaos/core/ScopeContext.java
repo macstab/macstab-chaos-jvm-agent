@@ -1,9 +1,9 @@
 package com.macstab.chaos.core;
 
 import com.macstab.chaos.api.ChaosSession;
-import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.concurrent.Callable;
+import java.util.concurrent.ConcurrentLinkedDeque;
 
 /**
  * Thread-local session-ID stack that propagates chaos session context across method calls and
@@ -24,11 +24,21 @@ import java.util.concurrent.Callable;
  *
  * <h2>Thread safety</h2>
  *
- * <p>The {@link ThreadLocal} itself is thread-safe by definition — each thread has its own {@link
- * java.util.Deque} instance. No cross-thread synchronization is required.
+ * <p>Each thread owns its own per-thread {@link java.util.Deque}. To let cross-thread close
+ * correctly target the opener's deque (e.g. Spring {@code @PreDestroy} on a servlet thread closing
+ * a session opened on an app-startup thread), {@link #bind(String)} and {@link #bindRoot(String)}
+ * <em>capture the opener's deque reference at bind time</em> and the returned {@link
+ * ChaosSession.ScopeBinding}'s close closes over that reference instead of re-resolving {@code
+ * sessionStack.get()} on the closing thread.
+ *
+ * <p>Because the deque may therefore be mutated concurrently — hot-path push/peek/pop on the owning
+ * thread while a foreign thread runs {@code close()} — the backing collection is {@link
+ * ConcurrentLinkedDeque}, which is wait-free and safe under concurrent access. {@link
+ * ConcurrentLinkedDeque#peek()} stays O(1) on the hot path ({@link #currentSessionId()}).
  */
 final class ScopeContext {
-  private final ThreadLocal<Deque<String>> sessionStack = ThreadLocal.withInitial(ArrayDeque::new);
+  private final ThreadLocal<Deque<String>> sessionStack =
+      ThreadLocal.withInitial(ConcurrentLinkedDeque::new);
 
   /**
    * Returns the session ID at the top of the current thread's stack, or {@code null} if no session
@@ -52,16 +62,26 @@ final class ScopeContext {
    * }
    * }</pre>
    *
-   * <p>If the stack is empty after the pop, the {@link ThreadLocal} entry is removed to avoid
-   * memory leaks in thread-pool scenarios.
+   * <p>The {@link ThreadLocal} entry is intentionally retained even when the stack empties — once
+   * captured at bind time, the deque reference is closed over by the binding's close lambda so
+   * cross-thread close targets the opener's stack. Clearing the {@link ThreadLocal} on the owner
+   * thread does not clear the captured reference, and tearing the {@link ThreadLocal} down from a
+   * foreign thread would target the foreign thread's mapping instead. The empty-deque retention
+   * cost per thread is a reference to an empty {@link ConcurrentLinkedDeque}; negligible.
    *
    * @param sessionId the session ID to push; must not be {@code null}
    * @return an {@link AutoCloseable} that pops the session ID when closed
    */
   ChaosSession.ScopeBinding bind(final String sessionId) {
-    sessionStack.get().push(sessionId);
+    // Capture the opener's deque reference at bind time. Without this the close lambda would
+    // resolve sessionStack.get() on whatever thread happens to run close(), which can be a
+    // completely foreign thread (framework teardown path, executor hand-off) — and silently pop
+    // an unrelated session off *that* thread's stack. Closing over the deque pins the
+    // pop to the right stack even when close() runs cross-thread; ConcurrentLinkedDeque keeps
+    // the concurrent push/pop/peek safe.
+    final Deque<String> stack = sessionStack.get();
+    stack.push(sessionId);
     return () -> {
-      final Deque<String> stack = sessionStack.get();
       // Verify the top matches what this binding pushed. A mismatch means either a
       // double-close or a close() invoked in the wrong order (outer binding closed while an
       // inner binding is still live). Popping anyway would silently corrupt the stack for every
@@ -81,9 +101,6 @@ final class ScopeContext {
                 + "'");
       }
       stack.pop();
-      if (stack.isEmpty()) {
-        sessionStack.remove();
-      }
     };
   }
 
@@ -109,9 +126,14 @@ final class ScopeContext {
    * @return an {@link AutoCloseable} that removes this session's root entry when closed
    */
   ChaosSession.ScopeBinding bindRoot(final String sessionId) {
-    sessionStack.get().push(sessionId);
+    // Capture the opener's deque reference at bind time so cross-thread close (Spring
+    // @PreDestroy on a servlet thread, JUnit afterAll on a different worker, etc.) targets the
+    // deque the session was actually pushed onto — not whatever random stack happens to live on
+    // the closing thread. ConcurrentLinkedDeque makes this safe under concurrent access from
+    // the owner thread's hot path (push/peek) and the closer's removeLastOccurrence.
+    final Deque<String> stack = sessionStack.get();
+    stack.push(sessionId);
     return () -> {
-      final Deque<String> stack = sessionStack.get();
       if (stack.isEmpty()) {
         throw new IllegalStateException(
             "session root binding close() called but the stack is empty (double-close?)");
@@ -125,9 +147,6 @@ final class ScopeContext {
             "session root binding close() could not find sessionId='"
                 + sessionId
                 + "' on the stack");
-      }
-      if (stack.isEmpty()) {
-        sessionStack.remove();
       }
     };
   }

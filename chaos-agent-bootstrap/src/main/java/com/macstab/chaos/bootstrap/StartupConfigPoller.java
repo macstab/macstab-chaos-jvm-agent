@@ -74,6 +74,13 @@ public final class StartupConfigPoller implements AutoCloseable {
 
   private volatile FileTime lastModified = FileTime.fromMillis(0);
 
+  // Volatile close flag observed by applyDiff so a pollOnce that wins the race against
+  // close() (e.g. blocked in Files.newInputStream and not interruptible) cannot silently
+  // re-activate scenarios into a torn-down poller, leaving zombies registered in the runtime
+  // that no one owns. Writes are under synchronized(this); reads in applyDiff are inside the
+  // same monitor so plain read is sufficient, but marking volatile keeps close() lock-free.
+  private volatile boolean closed = false;
+
   private StartupConfigPoller(
       final Path configPath, final ChaosRuntime runtime, final long intervalMs) {
     this.configPath = configPath;
@@ -149,7 +156,23 @@ public final class StartupConfigPoller implements AutoCloseable {
    */
   @Override
   public void close() {
+    // Set the closed flag BEFORE shutdownNow() so an in-flight pollOnce that reaches applyDiff
+    // after shutdownNow returns but before we enter the synchronized block below sees closed
+    // and bails out — without this, a poll blocked in Files.newInputStream (uninterruptible)
+    // would unblock, parse, and then re-activate every scenario it parsed into the soon-to-be-
+    // cleared maps of this already-closed poller, leaving zombies registered in the runtime
+    // with no owning handle.
+    closed = true;
     scheduler.shutdownNow();
+    // Best-effort: give the in-flight poll a short window to complete before we tear the maps
+    // down. If it completes, the closed check inside applyDiff short-circuits it. If it's
+    // still blocked in Files.newInputStream after the timeout we accept the window and rely on
+    // the closed flag alone — the poll thread is a daemon so it will not block JVM exit.
+    try {
+      scheduler.awaitTermination(500, TimeUnit.MILLISECONDS);
+    } catch (InterruptedException ignored) {
+      Thread.currentThread().interrupt();
+    }
     synchronized (this) {
       activeHandles.values().forEach(StartupConfigPoller::destroyHandle);
       activeHandles.clear();
@@ -201,13 +224,35 @@ public final class StartupConfigPoller implements AutoCloseable {
               + newPlan.scenarios().size()
               + " scenario(s) from "
               + sanitiseForLog(configPath.toString()));
-    } catch (Exception e) {
+    } catch (Throwable t) {
+      // Catch Throwable, not Exception: ScheduledExecutorService.scheduleAtFixedRate silently
+      // suppresses all future executions if the task throws anything, including Errors. A
+      // transient NoClassDefFoundError from the JSON mapper's classloader, an OOM from a
+      // huge plan, a StackOverflowError from a pathological config — any of those would
+      // permanently kill config reloading with no log and no way to notice. Log here and keep
+      // the scheduler alive; the next tick retries. Re-interrupt on InterruptedException to
+      // preserve the flag, and re-throw VirtualMachineError (OOM etc.) since continuing past
+      // those is not meaningful.
+      if (t instanceof InterruptedException) {
+        Thread.currentThread().interrupt();
+      }
       System.err.println(
-          "[chaos-agent] config reload failed (parse): " + sanitiseForLog(e.getMessage()));
+          "[chaos-agent] config reload failed (parse): " + sanitiseForLog(t.getMessage()));
+      if (t instanceof VirtualMachineError) {
+        throw (VirtualMachineError) t;
+      }
     }
   }
 
   synchronized void applyDiff(final List<ChaosScenario> newScenarios) {
+    // Race guard: close() sets `closed=true` before entering this monitor. An in-flight pollOnce
+    // that was blocked on file I/O may reach applyDiff after close() returned, holding a freshly
+    // parsed plan. If we let it through, each "missing from activeScenarios" branch would call
+    // runtime.activate(...) into a torn-down poller whose maps are then cleared — leaving the
+    // activated handles orphaned in the runtime registry with no owner. Bail out instead.
+    if (closed) {
+      return;
+    }
     // Detect duplicate IDs up front rather than letting Collectors.toMap throw
     // IllegalStateException mid-diff (which would leave the runtime in a partially-torn-down
     // state: scenarios whose content changed would already be stopped, but new/updated ones
