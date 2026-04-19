@@ -244,6 +244,13 @@ public final class JdkInstrumentationInstaller {
                   (builder, typeDescription, classLoader, module, protectionDomain) ->
                       builder
                           .visit(
+                              // Must match BOTH 1-arg and 2-arg overloads: BuiltinClassLoader
+                              // (the superclass of every default JDK classloader) overrides the
+                              // 2-arg variant but inherits the 1-arg from java.lang.ClassLoader,
+                              // so instrumenting only the 2-arg would miss every standard class
+                              // load via Class.forName / loader.loadClass(name). Custom
+                              // classloaders that inherit both will double-dispatch, which is a
+                              // known cost of the single-class retransformation strategy.
                               Advice.to(ClassLoaderAdvice.LoadClassAdvice.class)
                                   .on(
                                       ElementMatchers.named("loadClass")
