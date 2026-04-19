@@ -32,12 +32,23 @@ public class ChaosStartupPlan implements ApplicationListener<ApplicationReadyEve
     if (!contentionEnabled) {
       return;
     }
+    // The previous scenario used MonitorContentionEffect on its own private
+    // ReentrantLock, which never touches MetricsAggregator's monitor or any
+    // application code path — useful for stressing the contention machinery
+    // itself, useless for demonstrating carrier pinning.
+    //
+    // VirtualThreadCarrierPinningEffect pins the virtual-thread carrier threads
+    // in the ForkJoin pool for a bounded duration, exactly reproducing the
+    // symptom the demo teaches: virtual threads making progress slowly because
+    // their carriers are held up in synchronized / native code elsewhere.
     ChaosScenario scenario =
-        ChaosScenario.builder("metrics-lock-contention")
+        ChaosScenario.builder("virtual-thread-carrier-pinning")
             .description(
-                "Saturate the MetricsAggregator monitor with background contending threads")
-            .selector(ChaosSelector.stress(ChaosSelector.StressTarget.MONITOR_CONTENTION))
-            .effect(ChaosEffect.monitorContention(Duration.ofMillis(5), 8))
+                "Pin virtual-thread carriers for short bursts so concurrent POST /metrics"
+                    + " requests reveal the observability of pinning in jfr/JDK Flight Recorder.")
+            .selector(
+                ChaosSelector.stress(ChaosSelector.StressTarget.VIRTUAL_THREAD_CARRIER_PINNING))
+            .effect(ChaosEffect.virtualThreadCarrierPinning(4, Duration.ofMillis(25)))
             .activationPolicy(ActivationPolicy.always())
             .build();
     handle = controlPlane.activate(scenario);
