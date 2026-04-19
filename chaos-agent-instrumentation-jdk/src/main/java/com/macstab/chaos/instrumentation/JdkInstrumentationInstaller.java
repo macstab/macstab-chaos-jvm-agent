@@ -424,7 +424,7 @@ public final class JdkInstrumentationInstaller {
                                       ElementMatchers.named("select")
                                           .and(ElementMatchers.takesArguments(long.class))))
                           .visit(
-                              Advice.to(JvmRuntimeAdvice.NioSelectNoArgAdvice.class)
+                              Advice.to(JvmRuntimeAdvice.NioSelectNowAdvice.class)
                                   .on(
                                       ElementMatchers.named("selectNow")
                                           .and(ElementMatchers.takesArguments(0)))))
@@ -510,9 +510,19 @@ public final class JdkInstrumentationInstaller {
               .type(ElementMatchers.named("java.net.SocketOutputStream"))
               .transform(
                   (builder, typeDescription, classLoader, module, protectionDomain) ->
-                      builder.visit(
-                          Advice.to(JvmRuntimeAdvice.SocketWriteAdvice.class)
-                              .on(ElementMatchers.named("write"))))
+                      builder
+                          .visit(
+                              Advice.to(JvmRuntimeAdvice.SocketWriteSingleByteAdvice.class)
+                                  .on(
+                                      ElementMatchers.named("write")
+                                          .and(ElementMatchers.takesArguments(int.class))))
+                          .visit(
+                              Advice.to(JvmRuntimeAdvice.SocketWriteBulkAdvice.class)
+                                  .on(
+                                      ElementMatchers.named("write")
+                                          .and(
+                                              ElementMatchers.takesArguments(
+                                                  byte[].class, int.class, int.class)))))
               // ZIP Inflater / Deflater
               .type(ElementMatchers.named("java.util.zip.Inflater"))
               .transform(

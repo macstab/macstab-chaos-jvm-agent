@@ -21,9 +21,16 @@ final class QueueAdvice {
   }
 
   static final class PollAdvice {
-    @Advice.OnMethodEnter
-    static void enter(@Advice.This final Object queue) throws Throwable {
-      BootstrapDispatcher.beforeQueueOperation("QUEUE_POLL", queue);
+    // Mirrors OfferAdvice's skipOn pattern. A void @OnMethodEnter cannot signal "skip the real
+    // poll()" — the previous implementation completely dropped SUPPRESS for QUEUE_POLL. Returning
+    // Boolean here lets the suppress terminal (TerminalAction(RETURN, Boolean.FALSE, ...) for
+    // QUEUE_POLL in ChaosDispatcher.suppressTerminal) surface as a non-null value, which triggers
+    // skipOn = OnNonDefaultValue. The real poll() is skipped and the default reference return
+    // (null) is produced — matching "queue drained to nothing" semantics. No exit rewrite is
+    // needed: the skipped method's default return is already the correct null.
+    @Advice.OnMethodEnter(skipOn = Advice.OnNonDefaultValue.class)
+    static Boolean enter(@Advice.This final Object queue) throws Throwable {
+      return BootstrapDispatcher.beforeBooleanQueueOperation("QUEUE_POLL", queue);
     }
   }
 

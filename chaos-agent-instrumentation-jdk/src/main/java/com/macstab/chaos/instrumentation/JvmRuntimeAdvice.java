@@ -227,6 +227,31 @@ final class JvmRuntimeAdvice {
   }
 
   /**
+   * Intercepts {@code Selector.selectNow()} — the non-blocking poll variant.
+   *
+   * <p>Identical to {@link NioSelectNoArgAdvice} in every respect except the timeout sentinel: the
+   * dispatcher call passes {@code -1L} rather than {@code 0L} so scenario matchers can distinguish
+   * the blocking {@code select()} from the non-blocking {@code selectNow()} without heuristics.
+   * Sharing {@code NioSelectNoArgAdvice} between the two previously collapsed both calls to {@code
+   * timeoutMillis=0L}, making a {@code selectNow()}-only scenario fire on the blocking {@code
+   * select()} too (and vice versa).
+   */
+  static final class NioSelectNowAdvice {
+    @Advice.OnMethodEnter(skipOn = Advice.OnNonDefaultValue.class)
+    static boolean enter(@Advice.This final Object selector) throws Throwable {
+      return BootstrapDispatcher.beforeNioSelect(selector, -1L);
+    }
+
+    @Advice.OnMethodExit
+    static void exit(
+        @Advice.Enter final boolean spurious, @Advice.Return(readOnly = false) int returned) {
+      if (spurious) {
+        returned = 0;
+      }
+    }
+  }
+
+  /**
    * Intercepts {@code Selector.select(long timeout)}.
    *
    * <p><b>Skip semantics:</b> identical to {@link NioSelectNoArgAdvice}. When {@code enter()}
@@ -315,13 +340,26 @@ final class JvmRuntimeAdvice {
   }
 
   /**
-   * Intercepts socket {@code OutputStream.write(byte[], int, int)} and {@code
-   * OutputStream.write(int)}.
+   * Intercepts socket {@code OutputStream.write(int)} — the single-byte variant. Passes {@code 1}
+   * as the length so size-gated scenarios can distinguish per-byte writes from bulk writes.
    */
-  static final class SocketWriteAdvice {
+  static final class SocketWriteSingleByteAdvice {
     @Advice.OnMethodEnter
     static void enter(@Advice.This final Object stream) throws Throwable {
-      BootstrapDispatcher.beforeSocketWrite(stream, 0);
+      BootstrapDispatcher.beforeSocketWrite(stream, 1);
+    }
+  }
+
+  /**
+   * Intercepts socket {@code OutputStream.write(byte[], int, int)} — the bulk variant. Passes the
+   * actual {@code len} argument so {@code NetworkSelector} rules that filter on write byte count
+   * receive the real size instead of a hardcoded {@code 0}.
+   */
+  static final class SocketWriteBulkAdvice {
+    @Advice.OnMethodEnter
+    static void enter(@Advice.This final Object stream, @Advice.Argument(2) final int len)
+        throws Throwable {
+      BootstrapDispatcher.beforeSocketWrite(stream, len);
     }
   }
 

@@ -44,7 +44,10 @@ final class SelectorMatcher {
       case ChaosSelector.ExecutorSelector executorSelector ->
           executorSelector.operations().contains(context.operationType())
               && executorSelector.executorClassPattern().matches(context.targetClassName())
-              && executorSelector.taskClassPattern().matches(context.subjectClassName());
+              && executorSelector.taskClassPattern().matches(context.subjectClassName())
+              && (executorSelector.scheduledOnly() == null
+                  || !executorSelector.scheduledOnly()
+                  || context.periodic());
       case ChaosSelector.QueueSelector queueSelector ->
           queueSelector.operations().contains(context.operationType())
               && queueSelector.queueClassPattern().matches(context.targetClassName());

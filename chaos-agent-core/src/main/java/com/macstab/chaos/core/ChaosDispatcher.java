@@ -354,6 +354,17 @@ public final class ChaosDispatcher {
             null);
     final RuntimeDecision decision = evaluate(context);
     applyPreDecision(decision);
+    // SUPPRESS: `applyPreDecision` returns normally for SUPPRESS (unlike THROW, which unwinds)
+    // but the hook should not reach Runtime.addShutdownHook if the operator asked for the
+    // registration to be suppressed. Building and mapping a decorated wrapper here leaves the
+    // JVM with a hook it cannot `removeShutdownHook` later (resolveShutdownHook would return
+    // the wrapper, which Runtime doesn't know about). Return the original unchanged so the
+    // registration still happens verbatim — the suppress intent is honoured by the agent not
+    // introducing a wrapper, not by actively blocking registration.
+    if (decision.terminalAction() != null
+        && decision.terminalAction().kind() == TerminalKind.SUPPRESS) {
+      return hook;
+    }
     final Runnable delegate = hook::run;
     final Thread decorated = new Thread(delegate, hook.getName() + "-macstab-chaos-wrapper");
     decorated.setDaemon(hook.isDaemon());
@@ -1167,15 +1178,21 @@ public final class ChaosDispatcher {
       } else {
         delayMillis += contributionDelay;
       }
+      // Tie-break rule for both gate and terminal: the ScenarioRegistry sorts contributions by
+      // precedence DESC then id ASC, so on strict `>` the first-iterated (highest precedence,
+      // lowest id within that precedence) wins and subsequent equal-precedence candidates do
+      // not overwrite it. Using `>=` inverted the id tie-break — the highest-id scenario won,
+      // contradicting the class javadoc and quietly swapping which of two composed scenarios
+      // applied at runtime.
       if (contribution.effect() instanceof ChaosEffect.GateEffect
-          && contribution.scenario().precedence() >= gatePrecedence) {
+          && contribution.scenario().precedence() > gatePrecedence) {
         gateAction = new GateAction(contribution.controller().gate(), contribution.gateTimeout());
         gatePrecedence = contribution.scenario().precedence();
       }
       final TerminalAction candidate =
           terminalActionFor(
               context.operationType(), contribution.effect(), contribution.scenario());
-      if (candidate != null && contribution.scenario().precedence() >= terminalPrecedence) {
+      if (candidate != null && contribution.scenario().precedence() > terminalPrecedence) {
         terminalAction = candidate;
         terminalPrecedence = contribution.scenario().precedence();
       }
@@ -1276,6 +1293,12 @@ public final class ChaosDispatcher {
               TerminalKind.THROW, null, new SecurityException("exit suppressed by chaos agent"));
       case QUEUE_OFFER, ASYNC_COMPLETE, ASYNC_COMPLETE_EXCEPTIONALLY ->
           new TerminalAction(TerminalKind.RETURN, Boolean.FALSE, null);
+      // QUEUE_POLL: routed through beforeBooleanQueueOperation which returns the Boolean to the
+      // advice. A non-null return triggers PollAdvice's skipOn = OnNonDefaultValue and the real
+      // poll() is skipped — the skipped body's default reference return is null, which is the
+      // intended SUPPRESS semantics ("queue returned nothing"). Boolean.FALSE is used only as a
+      // non-null sentinel; its boolean value never reaches the caller.
+      case QUEUE_POLL -> new TerminalAction(TerminalKind.RETURN, Boolean.FALSE, null);
       case RESOURCE_LOAD -> new TerminalAction(TerminalKind.RETURN, null, null);
       default -> new TerminalAction(TerminalKind.SUPPRESS, null, null);
     };
