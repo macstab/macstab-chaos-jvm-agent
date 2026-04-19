@@ -92,6 +92,46 @@ final class FailureFactory {
       case THREAD_PARK -> new RuntimeException(message);
       case MONITOR_ENTER -> new IllegalMonitorStateException(message);
       case NIO_SELECTOR_SELECT -> new java.nio.channels.ClosedSelectorException();
+      // Network/file I/O: callers wrap these in try/catch for IOException; IllegalStateException
+      // fell out of those catch blocks and propagated up past the intended boundary, turning a
+      // simulated I/O failure into a request-killing unchecked exception.
+      case SOCKET_ACCEPT, SOCKET_CLOSE, FILE_IO_READ, FILE_IO_WRITE ->
+          new java.io.IOException(message);
+      // DNS: UnknownHostException is the canonical signal; ConnectException or generic IOE would
+      // route fault-tolerance logic down the wrong path.
+      case DNS_RESOLVE -> new java.net.UnknownHostException(message);
+      // TLS handshake failure — construct reflectively so this module does not fail to load if
+      // javax.net.ssl is absent from the runtime image (e.g. jlink slim images). Fall back to
+      // plain IOException so the caller still sees an I/O failure rather than an ISE.
+      case SSL_HANDSHAKE -> {
+        try {
+          yield (Throwable)
+              Class.forName("javax.net.ssl.SSLHandshakeException")
+                  .getConstructor(String.class)
+                  .newInstance(message);
+        } catch (Exception ex) {
+          yield new java.io.IOException(message);
+        }
+      }
+      // JDBC: application code universally catches SQLException. Produce it reflectively to
+      // avoid a hard dependency on java.sql at agent core load time.
+      case JDBC_CONNECTION_ACQUIRE,
+          JDBC_STATEMENT_EXECUTE,
+          JDBC_PREPARED_STATEMENT,
+          JDBC_TRANSACTION_COMMIT,
+          JDBC_TRANSACTION_ROLLBACK -> {
+        try {
+          yield (Throwable)
+              Class.forName("java.sql.SQLException")
+                  .getConstructor(String.class)
+                  .newInstance(message);
+        } catch (Exception ex) {
+          yield new RuntimeException(message);
+        }
+      }
+      // HTTP client: java.net.http.HttpClient#send declares IOException; async send completes
+      // the future exceptionally with IOException as well. Keep the expected checked type.
+      case HTTP_CLIENT_SEND, HTTP_CLIENT_SEND_ASYNC -> new java.io.IOException(message);
       default -> new IllegalStateException(message);
     };
   }

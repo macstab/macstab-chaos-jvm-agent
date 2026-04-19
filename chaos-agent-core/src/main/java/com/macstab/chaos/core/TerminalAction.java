@@ -26,5 +26,14 @@ package com.macstab.chaos.core;
  *     kinds, or {@code null} for other kinds
  * @param throwable the exception to inject for {@code THROW} and {@code COMPLETE_EXCEPTIONALLY}
  *     kinds, or {@code null} for other kinds
+ * @param scenarioId the id of the scenario that produced this terminal; surfaced in fallback and
+ *     diagnostic log messages so operators can correlate a fallback ("EMPTY → ZERO") back to a
+ *     specific scenario. {@code null} if the action was synthesised outside a scenario context.
  */
-record TerminalAction(TerminalKind kind, Object returnValue, Throwable throwable) {}
+record TerminalAction(
+    TerminalKind kind, Object returnValue, Throwable throwable, String scenarioId) {
+  /** Backwards-compatible constructor used by call sites that do not have a scenario id. */
+  TerminalAction(final TerminalKind kind, final Object returnValue, final Throwable throwable) {
+    this(kind, returnValue, throwable, null);
+  }
+}

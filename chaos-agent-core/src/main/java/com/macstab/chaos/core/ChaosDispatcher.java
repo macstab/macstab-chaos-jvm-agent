@@ -84,6 +84,16 @@ public final class ChaosDispatcher {
     final RuntimeDecision decision = evaluate(context);
     if (decision.terminalAction() != null
         && decision.terminalAction().kind() == TerminalKind.SUPPRESS) {
+      // Honour composed "gate + delay + suppress" scenarios before substituting the no-op, so
+      // the executor path matches beforeHttpSend / beforeScheduledTick / afterMethodExit which
+      // already fire the gate and delay around their terminal. Previously the early return
+      // silently dropped both, turning "pause 5 s then suppress" into instant suppression.
+      try {
+        applyGate(decision.gateAction());
+        sleep(decision.delayMillis());
+      } catch (final Throwable throwable) {
+        throw propagate(throwable);
+      }
       return NO_OP_RUNNABLE;
     }
     try {
@@ -112,6 +122,14 @@ public final class ChaosDispatcher {
     final RuntimeDecision decision = evaluate(context);
     if (decision.terminalAction() != null
         && decision.terminalAction().kind() == TerminalKind.SUPPRESS) {
+      // See decorateExecutorRunnable — apply gate + delay before returning the no-op Callable
+      // so composed scenarios preserve the pre-terminal observables.
+      try {
+        applyGate(decision.gateAction());
+        sleep(decision.delayMillis());
+      } catch (final Throwable throwable) {
+        throw propagate(throwable);
+      }
       @SuppressWarnings("unchecked")
       final Callable<T> noOp = (Callable<T>) NO_OP_CALLABLE;
       return noOp;
@@ -429,10 +447,23 @@ public final class ChaosDispatcher {
     applyGate(decision.gateAction());
     if (decision.terminalAction() != null
         && decision.terminalAction().kind() == TerminalKind.CORRUPT_RETURN) {
+      // Sleep BEFORE substituting the corrupted return. RuntimeDecision documents "delay first,
+      // then gate, then terminal action" and CORRUPT_RETURN still returns normally (unlike
+      // THROW), so a composed "delay + corrupt" scenario must deliver both effects. Previously
+      // the early return skipped sleep(), silently dropping the timing signal operators were
+      // testing for.
+      sleep(decision.delayMillis());
       final ChaosEffect.ReturnValueCorruptionEffect corruptEffect =
           (ChaosEffect.ReturnValueCorruptionEffect) decision.terminalAction().returnValue();
+      // Propagate the scenario id (stored on the TerminalAction at construction time in
+      // terminalActionFor) so that corruption fallbacks like "EMPTY → ZERO" name the scenario
+      // that fired rather than the literal string "method-exit".
+      final String scenarioId = decision.terminalAction().scenarioId();
       return ReturnValueCorruptor.corrupt(
-          corruptEffect.strategy(), returnType, actualValue, "method-exit");
+          corruptEffect.strategy(),
+          returnType,
+          actualValue,
+          scenarioId != null ? scenarioId : "method-exit");
     }
     sleep(decision.delayMillis());
     return actualValue;
@@ -1171,7 +1202,7 @@ public final class ChaosDispatcher {
       return buildInjectedExceptionTerminal(injectionEffect);
     }
     if (effect instanceof ChaosEffect.ReturnValueCorruptionEffect corruptEffect) {
-      return new TerminalAction(TerminalKind.CORRUPT_RETURN, corruptEffect, null);
+      return new TerminalAction(TerminalKind.CORRUPT_RETURN, corruptEffect, null, scenario.id());
     }
     if (effect instanceof ChaosEffect.SpuriousWakeupEffect) {
       // A spurious selector wakeup semantically means: return from select() immediately with

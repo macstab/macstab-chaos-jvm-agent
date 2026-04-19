@@ -95,6 +95,15 @@ final class ReturnValueCorruptor {
       final Class<?> returnType,
       final Object actualValue,
       final String scenarioId) {
+    // ByteBuddy cannot always statically bind a declared return class at the advice site: void
+    // methods, bridge methods, and dynamically-generated lambdas arrive here with returnType ==
+    // null. Every strategy below dereferences returnType (isPrimitive, getName, map lookup), so
+    // without this guard we NPE from inside chaos advice — indistinguishable from a bug in the
+    // instrumented method. Pass the value through unchanged: nothing to corrupt for a void
+    // return, and the caller sees "no chaos applied" rather than an inexplicable crash.
+    if (returnType == null) {
+      return actualValue;
+    }
     return switch (strategy) {
       case NULL -> corruptNull(returnType, actualValue, scenarioId);
       case ZERO -> corruptZero(returnType);
