@@ -62,27 +62,27 @@ final class VirtualThreadCarrierPinningStressor implements ManagedStressor {
       final Thread thread =
           new Thread(
               () -> {
-                    ready.countDown();
-                    try {
-                      ready.await();
-                    } catch (final InterruptedException e) {
-                      Thread.currentThread().interrupt();
-                      return;
-                    }
-                    while (!stopped.get()) {
-                      synchronized (pinMonitor) {
-                        final long deadline = System.nanoTime() + pinNanos;
-                        while (System.nanoTime() < deadline && !stopped.get()) {
-                          java.util.concurrent.locks.LockSupport.parkNanos(10_000L /* 10 µs */);
-                          if (Thread.interrupted()) {
-                            stopped.set(true);
-                            return;
-                          }
-                        }
+                ready.countDown();
+                try {
+                  ready.await();
+                } catch (final InterruptedException e) {
+                  Thread.currentThread().interrupt();
+                  return;
+                }
+                while (!stopped.get()) {
+                  synchronized (pinMonitor) {
+                    final long deadline = System.nanoTime() + pinNanos;
+                    while (System.nanoTime() < deadline && !stopped.get()) {
+                      java.util.concurrent.locks.LockSupport.parkNanos(10_000L /* 10 µs */);
+                      if (Thread.interrupted()) {
+                        stopped.set(true);
+                        return;
                       }
                     }
-                    LOGGER.fine(() -> "chaos carrier-pin thread terminated: " + name);
-                  },
+                  }
+                }
+                LOGGER.fine(() -> "chaos carrier-pin thread terminated: " + name);
+              },
               name);
       thread.setDaemon(true);
       thread.start();

@@ -45,39 +45,39 @@ final class MonitorContentionStressor implements ManagedStressor {
       final Thread thread =
           new Thread(
               () -> {
-                    ready.countDown();
-                    try {
-                      ready.await();
-                    } catch (final InterruptedException e) {
-                      Thread.currentThread().interrupt();
-                      return;
-                    }
-                    while (!stopped.get()) {
-                      // lockInterruptibly, not lock(): a thread blocked waiting for the lock
-                      // must unblock on close()'s interrupt(), otherwise close() returns while
-                      // the thread can still be waiting unboundedly for the lock.
-                      try {
-                        lock.lockInterruptibly();
-                      } catch (final InterruptedException e) {
+                ready.countDown();
+                try {
+                  ready.await();
+                } catch (final InterruptedException e) {
+                  Thread.currentThread().interrupt();
+                  return;
+                }
+                while (!stopped.get()) {
+                  // lockInterruptibly, not lock(): a thread blocked waiting for the lock
+                  // must unblock on close()'s interrupt(), otherwise close() returns while
+                  // the thread can still be waiting unboundedly for the lock.
+                  try {
+                    lock.lockInterruptibly();
+                  } catch (final InterruptedException e) {
+                    stopped.set(true);
+                    Thread.currentThread().interrupt();
+                    return;
+                  }
+                  try {
+                    final long holdDeadline = System.nanoTime() + holdNanos;
+                    while (System.nanoTime() < holdDeadline && !stopped.get()) {
+                      java.util.concurrent.locks.LockSupport.parkNanos(10_000L /* 10 µs */);
+                      if (Thread.interrupted()) {
                         stopped.set(true);
-                        Thread.currentThread().interrupt();
                         return;
                       }
-                      try {
-                        final long holdDeadline = System.nanoTime() + holdNanos;
-                        while (System.nanoTime() < holdDeadline && !stopped.get()) {
-                          java.util.concurrent.locks.LockSupport.parkNanos(10_000L /* 10 µs */);
-                          if (Thread.interrupted()) {
-                            stopped.set(true);
-                            return;
-                          }
-                        }
-                      } finally {
-                        lock.unlock();
-                      }
                     }
-                    LOGGER.fine(() -> "chaos monitor-contention thread terminated: " + name);
-                  },
+                  } finally {
+                    lock.unlock();
+                  }
+                }
+                LOGGER.fine(() -> "chaos monitor-contention thread terminated: " + name);
+              },
               name);
       thread.setDaemon(true);
       thread.start();

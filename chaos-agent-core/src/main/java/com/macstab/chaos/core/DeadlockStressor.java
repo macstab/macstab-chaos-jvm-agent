@@ -48,38 +48,38 @@ final class DeadlockStressor implements ManagedStressor {
       final Thread thread =
           new Thread(
               () -> {
-                    final ReentrantLock first = locks[index];
-                    final ReentrantLock second = locks[(index + 1) % n];
-                    try {
-                      first.lockInterruptibly();
-                      try {
-                        firstLockAcquired.countDown();
-                        // Wait until all participants hold their first lock, then attempt second.
-                        firstLockAcquired.await();
-                        if (acquisitionDelayMs > 0) {
-                          Thread.sleep(acquisitionDelayMs);
-                        }
-                        second.lockInterruptibly();
-                        try {
-                          // Deadlock should prevent reaching here. If for some reason we do
-                          // (e.g., during teardown), park until interrupted.
-                          while (!Thread.currentThread().isInterrupted()) {
-                            java.util.concurrent.locks.LockSupport.parkNanos(100_000_000L);
-                            if (Thread.interrupted()) {
-                              return;
-                            }
-                          }
-                        } finally {
-                          second.unlock();
-                        }
-                      } finally {
-                        first.unlock();
-                      }
-                    } catch (final InterruptedException e) {
-                      Thread.currentThread().interrupt();
-                      LOGGER.fine(() -> "chaos deadlock thread interrupted: " + name);
+                final ReentrantLock first = locks[index];
+                final ReentrantLock second = locks[(index + 1) % n];
+                try {
+                  first.lockInterruptibly();
+                  try {
+                    firstLockAcquired.countDown();
+                    // Wait until all participants hold their first lock, then attempt second.
+                    firstLockAcquired.await();
+                    if (acquisitionDelayMs > 0) {
+                      Thread.sleep(acquisitionDelayMs);
                     }
-                  },
+                    second.lockInterruptibly();
+                    try {
+                      // Deadlock should prevent reaching here. If for some reason we do
+                      // (e.g., during teardown), park until interrupted.
+                      while (!Thread.currentThread().isInterrupted()) {
+                        java.util.concurrent.locks.LockSupport.parkNanos(100_000_000L);
+                        if (Thread.interrupted()) {
+                          return;
+                        }
+                      }
+                    } finally {
+                      second.unlock();
+                    }
+                  } finally {
+                    first.unlock();
+                  }
+                } catch (final InterruptedException e) {
+                  Thread.currentThread().interrupt();
+                  LOGGER.fine(() -> "chaos deadlock thread interrupted: " + name);
+                }
+              },
               name);
       thread.setDaemon(true);
       thread.start();

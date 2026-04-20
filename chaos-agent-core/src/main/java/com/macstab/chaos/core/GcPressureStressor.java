@@ -47,38 +47,38 @@ final class GcPressureStressor implements ManagedStressor {
     allocationThread =
         new Thread(
             () -> {
-                  final long deadline = System.currentTimeMillis() + durationMillis;
-                  int ringIndex = 0;
-                  while (running.get() && System.currentTimeMillis() < deadline) {
-                    for (int i = 0; i < objectsPerBatch; i++) {
-                      // Re-check running every iteration: close() sets running=false and nulls
-                      // the ring, but without this guard a batch that started before close()
-                      // would keep writing into the local `snapshot` for up to one full
-                      // BATCH_INTERVAL_MS, keeping allocated byte[] arrays strongly reachable
-                      // past the documented close() boundary.
-                      if (!running.get()) {
-                        break;
-                      }
-                      final byte[] chunk = new byte[objectSizeBytes];
-                      if (promote) {
-                        final byte[][] snapshot = ring;
-                        if (snapshot != null) {
-                          snapshot[ringIndex % RING_SIZE] = chunk;
-                          ringIndex++;
-                        }
-                      }
-                      // else: short-lived — chunk is immediately unreachable
-                    }
-                    try {
-                      Thread.sleep(BATCH_INTERVAL_MS);
-                    } catch (final InterruptedException e) {
-                      Thread.currentThread().interrupt();
-                      break;
+              final long deadline = System.currentTimeMillis() + durationMillis;
+              int ringIndex = 0;
+              while (running.get() && System.currentTimeMillis() < deadline) {
+                for (int i = 0; i < objectsPerBatch; i++) {
+                  // Re-check running every iteration: close() sets running=false and nulls
+                  // the ring, but without this guard a batch that started before close()
+                  // would keep writing into the local `snapshot` for up to one full
+                  // BATCH_INTERVAL_MS, keeping allocated byte[] arrays strongly reachable
+                  // past the documented close() boundary.
+                  if (!running.get()) {
+                    break;
+                  }
+                  final byte[] chunk = new byte[objectSizeBytes];
+                  if (promote) {
+                    final byte[][] snapshot = ring;
+                    if (snapshot != null) {
+                      snapshot[ringIndex % RING_SIZE] = chunk;
+                      ringIndex++;
                     }
                   }
-                  running.set(false);
-                  LOGGER.fine(() -> "chaos-gc-pressure stressor completed");
-                },
+                  // else: short-lived — chunk is immediately unreachable
+                }
+                try {
+                  Thread.sleep(BATCH_INTERVAL_MS);
+                } catch (final InterruptedException e) {
+                  Thread.currentThread().interrupt();
+                  break;
+                }
+              }
+              running.set(false);
+              LOGGER.fine(() -> "chaos-gc-pressure stressor completed");
+            },
             "chaos-gc-pressure");
     allocationThread.setDaemon(true);
     allocationThread.start();
