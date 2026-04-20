@@ -429,7 +429,7 @@ public final class ChaosDispatcher {
         new InvocationContext(
             OperationType.METHOD_ENTER,
             className,
-            null,
+            className,
             methodName,
             false,
             null,
@@ -448,7 +448,7 @@ public final class ChaosDispatcher {
         new InvocationContext(
             OperationType.METHOD_EXIT,
             className,
-            null,
+            className,
             methodName,
             false,
             null,
@@ -1252,9 +1252,14 @@ public final class ChaosDispatcher {
       }
       Throwable instance;
       try {
-        instance = (Throwable) exClass.getConstructor(String.class).newInstance(effect.message());
+        final java.lang.reflect.Constructor<?> stringCtor =
+            exClass.getDeclaredConstructor(String.class);
+        stringCtor.setAccessible(true);
+        instance = (Throwable) stringCtor.newInstance(effect.message());
       } catch (final NoSuchMethodException noMsg) {
-        instance = (Throwable) exClass.getDeclaredConstructor().newInstance();
+        final java.lang.reflect.Constructor<?> noArgCtor = exClass.getDeclaredConstructor();
+        noArgCtor.setAccessible(true);
+        instance = (Throwable) noArgCtor.newInstance();
       }
       if (!effect.withStackTrace()) {
         instance.setStackTrace(new StackTraceElement[0]);

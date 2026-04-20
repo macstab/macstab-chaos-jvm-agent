@@ -1,8 +1,11 @@
 package com.macstab.chaos.core;
 
 import com.macstab.chaos.api.ChaosEffect;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -139,14 +142,25 @@ final class ReturnValueCorruptor {
     if (returnType == String.class) {
       return "";
     }
-    // Assignability is intentionally inverted (returnType.isAssignableFrom(EmptySingleton)
-    // rather than Interface.isAssignableFrom(returnType)): a method declared to return a
-    // concrete subtype like ArrayList<String> cannot accept Collections.emptyList()'s
-    // ImmutableCollections$ListN because ByteBuddy emits an implicit checkcast at the
-    // @Advice.Return write site. Substituting the empty singleton only when the declared
-    // return type is a supertype of the singleton's concrete class keeps the checkcast
-    // satisfied; all other cases fall through to ZERO with a diagnostic so the operator can
-    // see why the strategy declined.
+    // For concrete mutable collection types, return a fresh mutable empty instance that is
+    // assignment-compatible with the declared return type. ByteBuddy emits an implicit checkcast
+    // at the @Advice.Return write site, so returning an immutable singleton (e.g.
+    // Collections.emptyList() whose concrete type is ImmutableCollections$ListN) for a method
+    // declared to return ArrayList<T> causes a ClassCastException at the call site.
+    // Check concrete types first before falling through to interface checks.
+    if (ArrayList.class.isAssignableFrom(returnType) && List.class.isAssignableFrom(returnType)) {
+      return new ArrayList<>();
+    }
+    if (HashSet.class.isAssignableFrom(returnType) && Set.class.isAssignableFrom(returnType)) {
+      return new HashSet<>();
+    }
+    if (HashMap.class.isAssignableFrom(returnType) && Map.class.isAssignableFrom(returnType)) {
+      return new HashMap<>();
+    }
+    // For interface/abstract types, the immutable singletons are safe because the declared
+    // return type does not require a specific concrete class — only the interface compatibility.
+    // Double-check: the singleton's concrete class must be assignable to the declared return
+    // type to satisfy the checkcast at the advice write site.
     if (returnType.isAssignableFrom(java.util.Collections.emptyList().getClass())
         && List.class.isAssignableFrom(returnType)) {
       return Collections.emptyList();
