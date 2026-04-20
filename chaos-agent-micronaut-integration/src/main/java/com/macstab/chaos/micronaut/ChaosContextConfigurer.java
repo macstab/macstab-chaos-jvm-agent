@@ -10,7 +10,7 @@ import java.util.logging.Logger;
  * {@link ApplicationContextConfigurer} that ensures the chaos agent is installed before the
  * Micronaut {@link io.micronaut.context.ApplicationContext} starts.
  *
- * <p>Registered via {@code META-INF/micronaut/io.micronaut.context.ApplicationContextConfigurer} so
+ * <p>Registered via {@code META-INF/services/io.micronaut.context.ApplicationContextConfigurer} so
  * that Micronaut picks it up automatically whenever this integration jar is on the classpath. The
  * configurer fires during application bootstrap, well before any user beans are instantiated, which
  * guarantees that chaos-aware instrumentation is in place when framework and application code
