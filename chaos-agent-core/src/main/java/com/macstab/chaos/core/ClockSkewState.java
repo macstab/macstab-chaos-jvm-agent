@@ -42,7 +42,16 @@ final class ClockSkewState {
       final long capturedMillis,
       final long capturedNanos) {
     this.skewMillis = effect.skewAmount().toMillis();
-    this.skewNanos = effect.skewAmount().toNanos();
+    // Duration.toNanos() throws ArithmeticException for durations that exceed Long.MAX_VALUE
+    // nanoseconds (~292 years). Clamp to Long.MAX_VALUE / Long.MIN_VALUE so the constructor
+    // does not propagate an unchecked exception and leave the controller half-initialised.
+    long skewNanosRaw;
+    try {
+      skewNanosRaw = effect.skewAmount().toNanos();
+    } catch (final ArithmeticException overflow) {
+      skewNanosRaw = effect.skewAmount().isNegative() ? Long.MIN_VALUE : Long.MAX_VALUE;
+    }
+    this.skewNanos = skewNanosRaw;
     // Saturate FREEZE-mode captures so a large positive skewAmount applied to a near-MAX
     // capturedMillis does not wrap to a negative epoch timestamp, which would read as a date
     // ~292M years in the past and break every downstream timestamp comparison (JWT exp, cache

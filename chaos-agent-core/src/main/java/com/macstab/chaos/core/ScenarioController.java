@@ -241,14 +241,21 @@ final class ScenarioController {
       gate.release();
       gate.reset();
       startedAt = clock.instant();
+      // Construct ClockSkewState before setting started/state so that if the constructor
+      // throws (e.g. Duration.toNanos() overflow), started remains false and the controller
+      // does not enter a half-initialised ACTIVE state with a null clockSkewState.
+      final ClockSkewState newClockSkewState;
+      if (scenario.effect() instanceof ChaosEffect.ClockSkewEffect skewEffect) {
+        newClockSkewState =
+            new ClockSkewState(skewEffect, System.currentTimeMillis(), System.nanoTime());
+      } else {
+        newClockSkewState = null;
+      }
+      clockSkewState = newClockSkewState;
+      stressor = stressorFactory.createIfNeeded(scenario.effect());
       started.set(true);
       state = ChaosDiagnostics.ScenarioState.ACTIVE;
       reason = "started";
-      stressor = stressorFactory.createIfNeeded(scenario.effect());
-      if (scenario.effect() instanceof ChaosEffect.ClockSkewEffect skewEffect) {
-        clockSkewState =
-            new ClockSkewState(skewEffect, System.currentTimeMillis(), System.nanoTime());
-      }
       transitioned = true;
     }
     if (transitioned) {
