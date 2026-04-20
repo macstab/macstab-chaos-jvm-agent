@@ -46,11 +46,8 @@ final class DeadlockStressor implements ManagedStressor {
       final int index = i;
       final String name = "chaos-deadlock-" + i;
       final Thread thread =
-          Thread.ofPlatform()
-              .daemon(true)
-              .name(name)
-              .start(
-                  () -> {
+          new Thread(
+              () -> {
                     final ReentrantLock first = locks[index];
                     final ReentrantLock second = locks[(index + 1) % n];
                     try {
@@ -82,7 +79,10 @@ final class DeadlockStressor implements ManagedStressor {
                       Thread.currentThread().interrupt();
                       LOGGER.fine(() -> "chaos deadlock thread interrupted: " + name);
                     }
-                  });
+                  },
+              name);
+      thread.setDaemon(true);
+      thread.start();
       threads.add(thread);
     }
     this.participants = List.copyOf(threads);

@@ -43,11 +43,8 @@ final class MonitorContentionStressor implements ManagedStressor {
     for (int i = 0; i < count; i++) {
       final String name = "chaos-contention-" + i;
       final Thread thread =
-          Thread.ofPlatform()
-              .daemon(true)
-              .name(name)
-              .start(
-                  () -> {
+          new Thread(
+              () -> {
                     ready.countDown();
                     try {
                       ready.await();
@@ -80,7 +77,10 @@ final class MonitorContentionStressor implements ManagedStressor {
                       }
                     }
                     LOGGER.fine(() -> "chaos monitor-contention thread terminated: " + name);
-                  });
+                  },
+              name);
+      thread.setDaemon(true);
+      thread.start();
       threads.add(thread);
     }
     this.contentionThreads = List.copyOf(threads);

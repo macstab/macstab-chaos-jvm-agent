@@ -60,11 +60,8 @@ final class VirtualThreadCarrierPinningStressor implements ManagedStressor {
       // so that only one carrier is pinned at a time.
       final Object pinMonitor = new Object();
       final Thread thread =
-          Thread.ofPlatform()
-              .daemon(true)
-              .name(name)
-              .start(
-                  () -> {
+          new Thread(
+              () -> {
                     ready.countDown();
                     try {
                       ready.await();
@@ -85,7 +82,10 @@ final class VirtualThreadCarrierPinningStressor implements ManagedStressor {
                       }
                     }
                     LOGGER.fine(() -> "chaos carrier-pin thread terminated: " + name);
-                  });
+                  },
+              name);
+      thread.setDaemon(true);
+      thread.start();
       threads.add(thread);
     }
     this.pinningThreads = List.copyOf(threads);

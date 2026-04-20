@@ -40,20 +40,20 @@ final class ThreadLeakStressor implements ManagedStressor {
     for (int i = 0; i < effect.threadCount(); i++) {
       final String name = effect.namePrefix() + i;
       final Thread thread =
-          Thread.ofPlatform()
-              .daemon(effect.daemon())
-              .name(name)
-              .start(
-                  () -> {
-                    final long deadline = deadlineMillis;
-                    while (!stopped.get() && System.currentTimeMillis() < deadline) {
-                      java.util.concurrent.locks.LockSupport.parkNanos(50_000_000L /* 50 ms */);
-                      if (Thread.interrupted()) {
-                        break;
-                      }
-                    }
-                    LOGGER.fine(() -> "chaos thread-leak thread terminated: " + name);
-                  });
+          new Thread(
+              () -> {
+                final long deadline = deadlineMillis;
+                while (!stopped.get() && System.currentTimeMillis() < deadline) {
+                  java.util.concurrent.locks.LockSupport.parkNanos(50_000_000L /* 50 ms */);
+                  if (Thread.interrupted()) {
+                    break;
+                  }
+                }
+                LOGGER.fine(() -> "chaos thread-leak thread terminated: " + name);
+              },
+              name);
+      thread.setDaemon(effect.daemon());
+      thread.start();
       threads.add(thread);
     }
     this.leakedThreads = List.copyOf(threads);

@@ -45,11 +45,8 @@ final class GcPressureStressor implements ManagedStressor {
     final boolean promote = effect.promoteToOldGen();
 
     allocationThread =
-        Thread.ofPlatform()
-            .daemon(true)
-            .name("chaos-gc-pressure")
-            .start(
-                () -> {
+        new Thread(
+            () -> {
                   final long deadline = System.currentTimeMillis() + durationMillis;
                   int ringIndex = 0;
                   while (running.get() && System.currentTimeMillis() < deadline) {
@@ -81,7 +78,10 @@ final class GcPressureStressor implements ManagedStressor {
                   }
                   running.set(false);
                   LOGGER.fine(() -> "chaos-gc-pressure stressor completed");
-                });
+                },
+            "chaos-gc-pressure");
+    allocationThread.setDaemon(true);
+    allocationThread.start();
   }
 
   @Override
