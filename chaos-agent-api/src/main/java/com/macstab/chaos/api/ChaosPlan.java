@@ -1,6 +1,8 @@
 package com.macstab.chaos.api;
 
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * An ordered, named collection of chaos scenarios that activate as a unit.
@@ -39,6 +41,25 @@ public record ChaosPlan(
     observability = observability == null ? new Observability(true, true, false) : observability;
     if (scenarios == null || scenarios.isEmpty()) {
       throw new IllegalArgumentException("scenarios must not be empty");
+    }
+    // Reject null elements with an actionable message before List.copyOf throws a bare NPE.
+    // JSON plans with a literal `null` in the scenarios array reach this constructor; the raw
+    // NPE escapes ChaosPlanMapper.read's JsonProcessingException catch (only checked exceptions
+    // are caught), leaving operators with a stack trace that names no field and no plan.
+    if (scenarios.contains(null)) {
+      throw new IllegalArgumentException("scenarios must not contain null entries");
+    }
+    // Reject duplicate scenario ids up front. Without this, activate(ChaosPlan) in the control
+    // plane starts N-1 controllers, then the Nth registration fails with ScenarioRegistry's
+    // cryptic "scenario key already active" message — and the user cannot tell which id
+    // collided. Compare by id (not object identity): a plan built from a YAML/JSON list can
+    // easily include two distinct scenario objects carrying the same id.
+    final Set<String> seenIds = new HashSet<>(scenarios.size());
+    for (final ChaosScenario scenario : scenarios) {
+      if (!seenIds.add(scenario.id())) {
+        throw new IllegalArgumentException(
+            "duplicate scenario id in plan: '" + scenario.id() + "'");
+      }
     }
     scenarios = List.copyOf(scenarios);
   }

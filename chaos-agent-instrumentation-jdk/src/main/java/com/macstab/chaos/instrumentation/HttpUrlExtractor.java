@@ -17,7 +17,18 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 final class HttpUrlExtractor {
 
-  private static final ConcurrentHashMap<String, Method> METHOD_CACHE = new ConcurrentHashMap<>();
+  // ClassValue keyed on the actual Class (not just its name) so two okhttp3.RealCall
+  // classes from different classloaders each get their own per-method cache; a shared
+  // String cache keyed on class name would hand instances from one classloader a Method
+  // resolved against the other, producing IllegalArgumentException on method.invoke and
+  // silently pinning the first-seen classloader for JVM lifetime.
+  private static final ClassValue<ConcurrentHashMap<String, Method>> METHOD_CACHE =
+      new ClassValue<>() {
+        @Override
+        protected ConcurrentHashMap<String, Method> computeValue(final Class<?> type) {
+          return new ConcurrentHashMap<>();
+        }
+      };
 
   private HttpUrlExtractor() {}
 
@@ -130,13 +141,13 @@ final class HttpUrlExtractor {
 
   private static Object invoke(final Object target, final String methodName) throws Throwable {
     final Class<?> cls = target.getClass();
-    final String cacheKey = cls.getName() + "#" + methodName;
-    Method method = METHOD_CACHE.get(cacheKey);
+    final ConcurrentHashMap<String, Method> perClass = METHOD_CACHE.get(cls);
+    Method method = perClass.get(methodName);
     if (method == null) {
       method = findMethod(cls, methodName);
       if (method != null) {
         method.setAccessible(true);
-        METHOD_CACHE.put(cacheKey, method);
+        perClass.put(methodName, method);
       }
     }
     if (method == null) {

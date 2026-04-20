@@ -109,9 +109,19 @@ public final class ChaosPlanMapper {
       } else if (c < 0x800) {
         bytes += 2;
       } else if (Character.isHighSurrogate(c)) {
-        // Full UTF-8 encoding of a surrogate pair is 4 bytes; consume the low surrogate too.
-        bytes += 4;
-        i++;
+        // Only a well-formed surrogate pair encodes to 4 UTF-8 bytes. A lone high surrogate —
+        // either at the end of the string or followed by a non-low-surrogate — gets replaced
+        // with U+FFFD at encode time, which is 3 bytes, and the next char must still be counted
+        // on its own. Consuming it unconditionally (the old code did `i++` regardless) over-
+        // counted lone surrogates by one byte each and under-counted the following CJK char by
+        // three, shifting the net tally far enough off to let ~50% oversized JSON slip past the
+        // 1 MiB guard on JDK 17/21.
+        if (i + 1 < n && Character.isLowSurrogate(s.charAt(i + 1))) {
+          bytes += 4;
+          i++;
+        } else {
+          bytes += 3;
+        }
       } else {
         bytes += 3;
       }

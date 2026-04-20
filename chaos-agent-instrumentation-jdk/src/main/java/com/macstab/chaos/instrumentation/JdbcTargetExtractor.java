@@ -16,7 +16,16 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 final class JdbcTargetExtractor {
 
-  private static final ConcurrentHashMap<String, Method> METHOD_CACHE = new ConcurrentHashMap<>();
+  // ClassValue keyed on the Class object (not its name) — see HttpUrlExtractor for the
+  // shared rationale: a String cache keyed on class name collides across classloaders,
+  // hands the wrong Method back, and pins loaders for JVM lifetime.
+  private static final ClassValue<ConcurrentHashMap<String, Method>> METHOD_CACHE =
+      new ClassValue<>() {
+        @Override
+        protected ConcurrentHashMap<String, Method> computeValue(final Class<?> type) {
+          return new ConcurrentHashMap<>();
+        }
+      };
 
   private JdbcTargetExtractor() {}
 
@@ -45,13 +54,13 @@ final class JdbcTargetExtractor {
 
   private static Object invoke(final Object target, final String methodName) throws Throwable {
     final Class<?> cls = target.getClass();
-    final String cacheKey = cls.getName() + "#" + methodName;
-    Method method = METHOD_CACHE.get(cacheKey);
+    final ConcurrentHashMap<String, Method> perClass = METHOD_CACHE.get(cls);
+    Method method = perClass.get(methodName);
     if (method == null) {
       method = findMethod(cls, methodName);
       if (method != null) {
         method.setAccessible(true);
-        METHOD_CACHE.put(cacheKey, method);
+        perClass.put(methodName, method);
       }
     }
     if (method == null) {

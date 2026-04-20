@@ -1488,7 +1488,15 @@ public final class BootstrapDispatcher {
     if (depth[0] > 0) {
       return fallback;
     }
-    depth[0] = 1;
+    // Must be ++, not `= 1`. The reentrancy guard short-circuits when depth > 0 so the happy
+    // path only ever enters this branch at depth == 0, where ++ and = 1 produce the same
+    // observable counter. But if a future change relaxes the guard — or a bytebuddy advice
+    // class re-enters this path via a partially-installed delegate before the guard has been
+    // flipped — `= 1` clobbers the current depth, and the `--depth[0] == 0` unwind check then
+    // decrements past zero on outer exits. A negative depth slips past `> 0`, so the next
+    // legitimate call skips the guard, recurses into chaos dispatch, and typically stack-
+    // overflows. Keep ++ / -- paired so the counter is always a pure balance.
+    depth[0]++;
     try {
       return supplier.get();
     } catch (Throwable throwable) {

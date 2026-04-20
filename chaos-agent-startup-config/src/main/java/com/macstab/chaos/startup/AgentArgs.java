@@ -5,9 +5,10 @@ import java.util.Map;
 /**
  * Immutable view of parsed agent arguments.
  *
- * <p>All lookups are case-sensitive and return {@code null} when the key is absent. Boolean lookups
- * use strict matching: only the literal strings {@code "true"} and {@code "false"}
- * (case-insensitive) are recognised; everything else yields the supplied default.
+ * <p>Key lookups are case-sensitive and return {@code null} when the key is absent. Boolean lookups
+ * accept the canonical set {@code true|false|1|0|yes|no|on|off} (case-insensitive). Unrecognised
+ * values fall back to the supplied default after a warning to stderr, so operators notice typos
+ * instead of silently getting the default.
  *
  * @param values unmodifiable key-value map; never null
  */
@@ -48,20 +49,44 @@ public record AgentArgs(Map<String, String> values) {
   /**
    * Returns the boolean value for {@code key}.
    *
-   * <p>Only the literals {@code "true"} and {@code "false"} (case-insensitive) are accepted. Any
-   * other value — including blank, {@code "yes"}, or typos — returns {@code defaultValue}.
+   * <p>Accepts {@code true|false|1|0|yes|no|on|off} (case-insensitive) with surrounding whitespace
+   * trimmed. Any other non-blank value emits a one-line warning to {@code System.err} naming the
+   * key and the offending literal, then returns {@code defaultValue}. Blank or missing keys
+   * silently fall back.
    */
   public boolean getBoolean(final String key, final boolean defaultValue) {
     final String raw = values.get(key);
     if (raw == null) {
       return defaultValue;
     }
-    if ("true".equalsIgnoreCase(raw)) {
-      return true;
+    final String stripped = raw.strip();
+    if (stripped.isEmpty()) {
+      return defaultValue;
     }
-    if ("false".equalsIgnoreCase(raw)) {
-      return false;
+    switch (stripped.toLowerCase(java.util.Locale.ROOT)) {
+      case "true":
+      case "1":
+      case "yes":
+      case "on":
+        return true;
+      case "false":
+      case "0":
+      case "no":
+      case "off":
+        return false;
+      default:
+        // Without this warning the operator who wrote `enabled=tru` (or pasted an inline
+        // `enabled=yeah` from a config management tool) sees no indication that the flag was
+        // silently ignored and diagnostics proceed with the default value. Printing the key
+        // and the raw value lets them find and fix the typo.
+        System.err.println(
+            "[chaos-agent] agent arg '"
+                + key
+                + "' has unrecognised boolean value '"
+                + raw
+                + "'; expected true|false|1|0|yes|no|on|off. Using default: "
+                + defaultValue);
+        return defaultValue;
     }
-    return defaultValue;
   }
 }

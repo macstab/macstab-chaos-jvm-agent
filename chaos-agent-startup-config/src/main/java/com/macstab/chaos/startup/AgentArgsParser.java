@@ -77,6 +77,14 @@ public final class AgentArgsParser {
           "invalid agent arg token '" + token + "': expected key=value");
     }
     final String key = token.substring(0, separator).trim();
+    // After trimming, a key that was only whitespace (e.g. " =value") would collapse to "". The
+    // separator<=0 guard above rejects a leading '=' at index 0 but still accepts tokens whose
+    // key is all whitespace — those would be silently stored under "" and never retrievable by
+    // any named getter.
+    if (key.isEmpty()) {
+      throw new IllegalArgumentException(
+          "invalid agent arg token '" + token + "': blank key before '='");
+    }
     final String value = token.substring(separator + 1).trim();
     if (target.containsKey(key)) {
       System.err.println(

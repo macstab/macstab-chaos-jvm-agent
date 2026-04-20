@@ -269,7 +269,8 @@ final class CompatibilityValidator {
         || effect instanceof ChaosEffect.CodeCachePressureEffect
         || effect instanceof ChaosEffect.SafepointStormEffect
         || effect instanceof ChaosEffect.StringInternPressureEffect
-        || effect instanceof ChaosEffect.ReferenceQueueFloodEffect) {
+        || effect instanceof ChaosEffect.ReferenceQueueFloodEffect
+        || effect instanceof ChaosEffect.VirtualThreadCarrierPinningEffect) {
       if (!(selector instanceof ChaosSelector.StressSelector)) {
         throw new ChaosValidationException(
             effect.getClass().getSimpleName()
