@@ -50,7 +50,7 @@ public record ChaosPlan(
     // JSON plans with a literal `null` in the scenarios array reach this constructor; the raw
     // NPE escapes ChaosPlanMapper.read's JsonProcessingException catch (only checked exceptions
     // are caught), leaving operators with a stack trace that names no field and no plan.
-    if (scenarios.contains(null)) {
+    if (scenarios.stream().anyMatch(s -> s == null)) {
       throw new IllegalArgumentException("scenarios must not contain null entries");
     }
     // Reject duplicate scenario ids up front. Without this, activate(ChaosPlan) in the control
