@@ -36,6 +36,9 @@ import java.util.regex.PatternSyntaxException;
  * the pattern string (capacity {@value #CACHE_CAPACITY}). Repeated calls to {@link #matches} on hot
  * paths do not pay the {@link Pattern#compile} cost. The cache is bounded so that a
  * pattern-spamming plan cannot pin arbitrary heap; rarely-used entries evict in access order.
+ *
+ * @param mode matching algorithm to apply; {@code null} normalises to {@link MatchMode#ANY}
+ * @param value pattern string interpreted according to {@code mode}
  */
 public record NamePattern(MatchMode mode, String value) {
 

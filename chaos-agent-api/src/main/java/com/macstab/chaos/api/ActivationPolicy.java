@@ -42,6 +42,15 @@ import java.time.Duration;
  * in the policy; any attempt without it throws {@link ChaosActivationException} at registration
  * time, not at effect application time. Use only in short-lived test processes or controlled
  * environments where JVM restart is acceptable.
+ *
+ * @param startMode when the scenario begins accepting matches
+ * @param probability fraction of matches that result in effect application; in {@code (0.0, 1.0]}
+ * @param activateAfterMatches number of initial matches to skip before the effect becomes eligible
+ * @param maxApplications hard cap on total effect applications; {@code null} means unlimited
+ * @param activeFor time window during which the scenario remains active; {@code null} means none
+ * @param rateLimit sliding-window rate cap on applications; {@code null} means unlimited
+ * @param randomSeed fixed PRNG seed for reproducible probability sampling; {@code null} uses 0L
+ * @param allowDestructiveEffects whether non-recoverable effects may be activated
  */
 public record ActivationPolicy(
     StartMode startMode,
@@ -110,6 +119,8 @@ public record ActivationPolicy(
    * @param rateLimit sliding-window rate cap on applications; {@code null} means unlimited
    * @param randomSeed fixed PRNG seed for reproducible probability sampling; {@code null} uses
    *     {@code 0L}
+   * @param allowDestructiveEffects whether non-recoverable effects may be activated
+   * @return a new {@link ActivationPolicy} built from the parsed JSON values
    */
   @JsonCreator
   public static ActivationPolicy fromJson(
@@ -136,6 +147,8 @@ public record ActivationPolicy(
    * Returns a policy that fires on every match and starts immediately on activation.
    *
    * <p>Equivalent to: {@code probability=1.0, startMode=AUTOMATIC, no other constraints}.
+   *
+   * @return an always-fire activation policy
    */
   public static ActivationPolicy always() {
     return new ActivationPolicy(StartMode.AUTOMATIC, 1.0d, 0, null, null, null, 0L, false);
@@ -148,6 +161,8 @@ public record ActivationPolicy(
    *
    * <p><strong>Warning</strong>: activating a destructive effect creates JVM state that cannot be
    * recovered without process restart. Use only in short-lived test processes.
+   *
+   * @return an always-fire activation policy that permits destructive effects
    */
   public static ActivationPolicy withDestructiveEffects() {
     return new ActivationPolicy(StartMode.AUTOMATIC, 1.0d, 0, null, null, null, 0L, true);
@@ -159,6 +174,8 @@ public record ActivationPolicy(
    * ChaosActivationHandle#start()} is called.
    *
    * <p>Use for synchronised test phases where chaos must be enabled at a precise moment.
+   *
+   * @return an activation policy that fires on every match but starts in INACTIVE state
    */
   public static ActivationPolicy manual() {
     return new ActivationPolicy(StartMode.MANUAL, 1.0d, 0, null, null, null, 0L, false);
@@ -192,6 +209,9 @@ public record ActivationPolicy(
    *
    * <p>Example: {@code new RateLimit(10, Duration.ofSeconds(1))} allows at most 10 effect
    * applications per second regardless of match frequency.
+   *
+   * @param permits maximum effect applications allowed within one {@code window}; must be positive
+   * @param window rolling window duration; must be positive
    */
   public record RateLimit(long permits, Duration window) {
 

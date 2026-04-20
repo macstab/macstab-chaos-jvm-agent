@@ -39,6 +39,15 @@ import java.util.Objects;
  * JVM. {@link ScenarioScope#SESSION} scenarios intercept only operations on threads {@link
  * ChaosSession#bind() bound} to a specific session, enabling per-test isolation in shared JVM
  * environments.
+ *
+ * @param id unique identifier surfaced in diagnostics, JMX, JFR events, and logs
+ * @param description human-readable description; {@code null} normalises to {@code ""}
+ * @param scope visibility scope; {@code null} defaults to {@link ScenarioScope#JVM}
+ * @param selector selects which JVM operations are eligible for chaos
+ * @param effect the chaos effect applied when the selector matches
+ * @param activationPolicy controls when and how often the effect fires
+ * @param precedence tie-breaker for conflicting terminal actions (higher wins)
+ * @param tags free-form metadata surfaced in diagnostics and JFR events
  */
 public record ChaosScenario(
     String id,
@@ -139,6 +148,9 @@ public record ChaosScenario(
     /**
      * Human-readable description of what this scenario tests. Appears in diagnostics and debug
      * dumps.
+     *
+     * @param description free-form description text
+     * @return this builder for chaining
      */
     public Builder description(String description) {
       this.description = description;
@@ -148,6 +160,8 @@ public record ChaosScenario(
     /**
      * Sets the scope. Defaults to {@link ScenarioScope#JVM} when not called.
      *
+     * @param scope visibility scope for this scenario
+     * @return this builder for chaining
      * @see ScenarioScope
      */
     public Builder scope(ScenarioScope scope) {
@@ -158,6 +172,8 @@ public record ChaosScenario(
     /**
      * Sets the selector that determines which JVM operations are eligible for chaos. Required.
      *
+     * @param selector selector matching candidate operations
+     * @return this builder for chaining
      * @see ChaosSelector
      */
     public Builder selector(ChaosSelector selector) {
@@ -168,6 +184,8 @@ public record ChaosScenario(
     /**
      * Sets the effect applied when the selector matches. Required.
      *
+     * @param effect chaos effect to apply on a match
+     * @return this builder for chaining
      * @see ChaosEffect
      */
     public Builder effect(ChaosEffect effect) {
@@ -179,6 +197,8 @@ public record ChaosScenario(
      * Sets the activation policy controlling when and how often the effect fires. Defaults to
      * {@link ActivationPolicy#always()} when not called.
      *
+     * @param activationPolicy activation policy governing when the effect fires
+     * @return this builder for chaining
      * @see ActivationPolicy
      */
     public Builder activationPolicy(ActivationPolicy activationPolicy) {
@@ -192,6 +212,9 @@ public record ChaosScenario(
      *
      * <p>Precedence only affects terminal actions (reject, suppress, exception injection). Delay
      * effects from all matching scenarios always accumulate regardless of precedence.
+     *
+     * @param precedence conflict-resolution priority; higher values win
+     * @return this builder for chaining
      */
     public Builder precedence(int precedence) {
       this.precedence = precedence;
@@ -201,6 +224,10 @@ public record ChaosScenario(
     /**
      * Adds a free-form metadata tag. Tags are surfaced in diagnostics and JFR events. Not used for
      * selector evaluation.
+     *
+     * @param key metadata tag key
+     * @param value metadata tag value
+     * @return this builder for chaining
      */
     public Builder tag(String key, String value) {
       tags.put(key, value);

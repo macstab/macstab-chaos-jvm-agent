@@ -19,7 +19,12 @@ public record AgentArgs(Map<String, String> values) {
     values = Map.copyOf(values);
   }
 
-  /** Returns the raw value for {@code key}, or {@code null} if absent. */
+  /**
+   * Returns the raw value for {@code key}, or {@code null} if absent.
+   *
+   * @param key argument key to look up
+   * @return the raw string value, or {@code null} if the key is absent
+   */
   public String get(final String key) {
     return values.get(key);
   }
@@ -53,6 +58,10 @@ public record AgentArgs(Map<String, String> values) {
    * trimmed. Any other non-blank value emits a one-line warning to {@code System.err} naming the
    * key and the offending literal, then returns {@code defaultValue}. Blank or missing keys
    * silently fall back.
+   *
+   * @param key argument key to look up
+   * @param defaultValue value returned when the key is absent or its value is unrecognised
+   * @return the parsed boolean, or {@code defaultValue}
    */
   public boolean getBoolean(final String key, final boolean defaultValue) {
     final String raw = values.get(key);

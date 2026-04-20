@@ -96,6 +96,7 @@ public sealed interface ChaosEffect
    * delay}.
    *
    * @param delay the fixed pause duration; must be non-negative
+   * @return a deterministic delay effect
    */
   static DelayEffect delay(Duration delay) {
     return new DelayEffect(delay, delay);
@@ -541,6 +542,9 @@ public sealed interface ChaosEffect
   /**
    * Delays the matched operation by a random duration in [minDelay, maxDelay]. If min equals max
    * the delay is deterministic.
+   *
+   * @param minDelay lower bound of the injected delay; must be non-negative
+   * @param maxDelay upper bound of the injected delay; must be {@code >= minDelay}
    */
   record DelayEffect(Duration minDelay, Duration maxDelay) implements ChaosEffect {
     /**
@@ -572,6 +576,9 @@ public sealed interface ChaosEffect
   /**
    * Blocks the matched operation on a manual gate until the gate is opened or maxBlock elapses. A
    * null maxBlock blocks indefinitely.
+   *
+   * @param maxBlock maximum time the operation blocks before unblocking; {@code null} means no
+   *     timeout
    */
   record GateEffect(Duration maxBlock) implements ChaosEffect {
     public GateEffect {
@@ -584,6 +591,8 @@ public sealed interface ChaosEffect
   /**
    * Rejects the matched operation by throwing an appropriate exception. The exception type is
    * inferred from the OperationType by the runtime.
+   *
+   * @param message non-blank message carried by the thrown exception
    */
   record RejectEffect(String message) implements ChaosEffect {
     public RejectEffect {
@@ -602,6 +611,9 @@ public sealed interface ChaosEffect
   /**
    * Completes a matched CompletableFuture exceptionally before normal completion runs. Only valid
    * with {@link ChaosSelector.AsyncSelector}.
+   *
+   * @param failureKind category of failure to inject into the completion
+   * @param message non-blank message carried by the failure
    */
   record ExceptionalCompletionEffect(FailureKind failureKind, String message)
       implements ChaosEffect {
@@ -626,6 +638,10 @@ public sealed interface ChaosEffect
    *
    * <p>When withStackTrace is false the exception is constructed without a stack trace, which is
    * faster and not detectable by callers inspecting the stack trace.
+   *
+   * @param exceptionClassName binary name of the exception class to instantiate
+   * @param message non-blank message passed to the exception constructor
+   * @param withStackTrace whether to populate a stack trace on the thrown exception
    */
   record ExceptionInjectionEffect(String exceptionClassName, String message, boolean withStackTrace)
       implements ChaosEffect {
@@ -677,6 +693,8 @@ public sealed interface ChaosEffect
    *
    * <p>If the chosen strategy is inapplicable to the actual return type (e.g., EMPTY on a
    * primitive), the runtime falls back to ZERO and reports the fallback via the observability bus.
+   *
+   * @param strategy corruption strategy applied to the method's return value
    */
   record ReturnValueCorruptionEffect(ReturnValueStrategy strategy) implements ChaosEffect {
     public ReturnValueCorruptionEffect {
@@ -694,6 +712,9 @@ public sealed interface ChaosEffect
    * skewAmount moves the clock forward; negative moves it backward. A backward skew on nanoTime
    * violates its monotonicity contract — this is intentional as it simulates a defective or
    * replaced clock source.
+   *
+   * @param skewAmount amount to shift the observed clock; non-zero, positive or negative
+   * @param mode strategy used to apply the skew (jump, drift, or freeze)
    */
   record ClockSkewEffect(Duration skewAmount, ClockSkewMode mode) implements ChaosEffect {
     public ClockSkewEffect {
@@ -728,6 +749,9 @@ public sealed interface ChaosEffect
   /**
    * Allocates and retains heap memory in chunks, simulating a memory leak or spike. Released when
    * the activation handle is closed.
+   *
+   * @param bytes total heap bytes to retain; must be {@code > 0}
+   * @param chunkSizeBytes size of each individual allocation chunk; must be {@code > 0}
    */
   record HeapPressureEffect(long bytes, int chunkSizeBytes) implements ChaosEffect {
     public HeapPressureEffect {
@@ -743,6 +767,10 @@ public sealed interface ChaosEffect
   /**
    * Keeps a named thread alive to simulate a thread that refuses to terminate. Released when the
    * activation handle is closed.
+   *
+   * @param threadName non-blank name assigned to the kept-alive thread
+   * @param daemon whether the thread runs as a daemon
+   * @param heartbeat interval between heartbeat actions; must be positive
    */
   record KeepAliveEffect(String threadName, boolean daemon, Duration heartbeat)
       implements ChaosEffect {
@@ -762,6 +790,10 @@ public sealed interface ChaosEffect
    *
    * <p>When retain is true, strong references to the generated classes are kept to prevent
    * unloading during GC — the realistic scenario for a classloader leak.
+   *
+   * @param generatedClassCount number of synthetic classes to generate; must be {@code > 0}
+   * @param fieldsPerClass fields synthesised per generated class; must be {@code >= 0}
+   * @param retain whether strong references are held to prevent GC unloading
    */
   record MetaspacePressureEffect(int generatedClassCount, int fieldsPerClass, boolean retain)
       implements ChaosEffect {
@@ -782,6 +814,10 @@ public sealed interface ChaosEffect
    * <p>When registerCleaner is false the buffers are intentionally leaked — no Cleaner is
    * registered. When true a Cleaner is registered but the reference is dropped, so the buffer is
    * cleaned only when GC runs.
+   *
+   * @param totalBytes total direct memory to retain; must be {@code > 0}
+   * @param bufferSizeBytes size of each buffer; {@code <= totalBytes}
+   * @param registerCleaner whether a Cleaner is registered for each buffer
    */
   record DirectBufferPressureEffect(long totalBytes, int bufferSizeBytes, boolean registerCleaner)
       implements ChaosEffect {
@@ -805,6 +841,11 @@ public sealed interface ChaosEffect
    * <p>When promoteToOldGen is true, allocated objects are kept alive long enough to survive a
    * young-gen collection, forcing them into the old generation and triggering major or full GC
    * cycles.
+   *
+   * @param allocationRateBytesPerSecond sustained allocation rate; must be {@code > 0}
+   * @param objectSizeBytes size of each allocated object; must be {@code > 0}
+   * @param promoteToOldGen whether allocated objects are held long enough to reach the old gen
+   * @param duration total duration of the allocation workload; must be positive
    */
   record GcPressureEffect(
       long allocationRateBytesPerSecond,
@@ -832,6 +873,9 @@ public sealed interface ChaosEffect
    * <p>finalizerDelay is the duration each finalizer sleeps before completing. A long delay
    * combined with a high objectCount causes the finalizer thread to fall progressively further
    * behind.
+   *
+   * @param objectCount number of finalizable objects to allocate; must be {@code > 0}
+   * @param finalizerDelay delay each finalizer sleeps before completing; must be {@code >= 0}
    */
   record FinalizerBacklogEffect(int objectCount, Duration finalizerDelay) implements ChaosEffect {
     /**
@@ -867,6 +911,9 @@ public sealed interface ChaosEffect
    * <p>acquisitionDelay is the pause each thread takes after acquiring its first lock before
    * attempting the second. A longer delay makes the deadlock harder to detect via thread dump
    * analysis alone.
+   *
+   * @param participantCount number of threads participating in the deadlock; must be {@code >= 2}
+   * @param acquisitionDelay pause between first and second lock acquisition; must be {@code >= 0}
    */
   record DeadlockEffect(int participantCount, Duration acquisitionDelay) implements ChaosEffect {
     public DeadlockEffect {
@@ -889,6 +936,11 @@ public sealed interface ChaosEffect
    *
    * <p>lifespan sets a maximum lifetime per leaked thread. Null means threads run until JVM exit or
    * the activation handle is closed.
+   *
+   * @param threadCount number of threads to leak; must be {@code > 0}
+   * @param namePrefix non-blank prefix for the leaked thread names
+   * @param daemon whether leaked threads run as daemons
+   * @param lifespan maximum lifetime per leaked thread; {@code null} means no limit
    */
   record ThreadLeakEffect(int threadCount, String namePrefix, boolean daemon, Duration lifespan)
       implements ChaosEffect {
@@ -908,6 +960,9 @@ public sealed interface ChaosEffect
    * request-scoped objects across requests.
    *
    * <p>Planted entries are removed when the activation handle is closed.
+   *
+   * @param entriesPerThread number of ThreadLocal entries planted per pool thread; {@code > 0}
+   * @param valueSizeBytes retained size per planted value; must be {@code > 0}
    */
   record ThreadLocalLeakEffect(int entriesPerThread, int valueSizeBytes) implements ChaosEffect {
     public ThreadLocalLeakEffect {
@@ -926,6 +981,10 @@ public sealed interface ChaosEffect
    *
    * <p>When unfair is true the underlying lock does not guarantee FIFO ordering, increasing the
    * likelihood of thread starvation — the more destructive and realistic scenario.
+   *
+   * @param lockHoldDuration duration each thread holds the lock; must be positive
+   * @param contendingThreadCount number of contending threads; must be {@code >= 2}
+   * @param unfair whether the underlying lock abandons FIFO ordering
    */
   record MonitorContentionEffect(
       Duration lockHoldDuration, int contendingThreadCount, boolean unfair) implements ChaosEffect {
@@ -961,6 +1020,9 @@ public sealed interface ChaosEffect
    *
    * <p>Cleanup note: code-cache memory is only reclaimed when the JIT deoptimizes the compiled
    * methods, which may not happen immediately after the activation handle is closed.
+   *
+   * @param classCount number of synthetic classes to generate and JIT; must be {@code > 0}
+   * @param methodsPerClass methods per generated class; must be {@code > 0}
    */
   record CodeCachePressureEffect(int classCount, int methodsPerClass) implements ChaosEffect {
     public CodeCachePressureEffect {
@@ -980,6 +1042,9 @@ public sealed interface ChaosEffect
    *
    * <p>Lower {@code gcInterval} values cause more frequent STW pauses at the cost of higher CPU
    * usage on GC threads.
+   *
+   * @param gcInterval interval between forced {@link System#gc()} calls; must be positive
+   * @param retransformClassCount number of classes to retransform per cycle; must be {@code >= 0}
    */
   record SafepointStormEffect(Duration gcInterval, int retransformClassCount)
       implements ChaosEffect {
@@ -997,6 +1062,9 @@ public sealed interface ChaosEffect
    * Interns a large number of unique strings into the JVM's native string table (Metaspace),
    * creating memory pressure distinct from heap and class-loading pressure. Interned strings are
    * not eligible for GC until the classloader that owns them is collected.
+   *
+   * @param internCount number of unique strings to intern; must be {@code > 0}
+   * @param stringLengthBytes byte length of each interned string; must be {@code > 0}
    */
   record StringInternPressureEffect(int internCount, int stringLengthBytes) implements ChaosEffect {
     public StringInternPressureEffect {
@@ -1014,6 +1082,9 @@ public sealed interface ChaosEffect
    * java.lang.ref.WeakReference} objects pointing to immediately-unreachable objects, then
    * triggering GC. The ReferenceHandler must process every enqueued reference before GC can reclaim
    * the backing memory, extending STW pause durations.
+   *
+   * @param referenceCount number of WeakReferences to create per flood cycle; must be {@code > 0}
+   * @param floodInterval interval between flood cycles; must be positive
    */
   record ReferenceQueueFloodEffect(int referenceCount, Duration floodInterval)
       implements ChaosEffect {
@@ -1038,6 +1109,9 @@ public sealed interface ChaosEffect
    *
    * <p>Cleanup: all pinning threads are interrupted and the monitor is released when the activation
    * handle is closed.
+   *
+   * @param pinnedThreadCount number of carrier platform threads to pin; must be {@code > 0}
+   * @param pinDuration how long each pin is held per cycle; must be positive
    */
   record VirtualThreadCarrierPinningEffect(int pinnedThreadCount, Duration pinDuration)
       implements ChaosEffect {

@@ -830,6 +830,7 @@ public final class BootstrapDispatcher {
    *
    * <p>An active scenario may inject a delay to simulate lock contention.
    *
+   * @param lock the monitor object whose acquisition is about to occur
    * @throws Throwable if an active scenario injects an exception
    */
   public static void beforeMonitorEnter(final Object lock) throws Throwable {

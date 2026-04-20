@@ -472,7 +472,15 @@ public sealed interface ChaosSelector
 
   // ── Selector record types ──────────────────────────────────────────────────
 
-  /** Matches thread start operations filtered by thread kind and name. */
+  /**
+   * Matches thread start operations filtered by thread kind and name.
+   *
+   * @param operations operation types this selector matches
+   * @param kind thread kind filter; {@code null} defaults to {@link ThreadKind#ANY}
+   * @param threadNamePattern pattern matched against the thread name
+   * @param daemon match only daemon ({@code true}) or non-daemon ({@code false}); {@code null}
+   *     matches both
+   */
   record ThreadSelector(
       Set<OperationType> operations, ThreadKind kind, NamePattern threadNamePattern, Boolean daemon)
       implements ChaosSelector {
@@ -492,6 +500,12 @@ public sealed interface ChaosSelector
   /**
    * Matches executor submit and worker-run operations, optionally filtering by executor class and
    * submitted task class.
+   *
+   * @param operations operation types this selector matches
+   * @param executorClassPattern pattern matched against the executor's runtime class name
+   * @param taskClassPattern pattern matched against the submitted task's class name
+   * @param scheduledOnly when {@code true}, match only scheduled executor invocations; {@code null}
+   *     matches both
    */
   record ExecutorSelector(
       Set<OperationType> operations,
@@ -515,7 +529,12 @@ public sealed interface ChaosSelector
     }
   }
 
-  /** Matches blocking queue operations, optionally filtering by queue implementation class. */
+  /**
+   * Matches blocking queue operations, optionally filtering by queue implementation class.
+   *
+   * @param operations operation types this selector matches
+   * @param queueClassPattern pattern matched against the queue's runtime class name
+   */
   record QueueSelector(Set<OperationType> operations, NamePattern queueClassPattern)
       implements ChaosSelector {
     static final Set<OperationType> VALID_OPS =
@@ -531,7 +550,11 @@ public sealed interface ChaosSelector
     }
   }
 
-  /** Matches CompletableFuture completion operations. */
+  /**
+   * Matches CompletableFuture completion operations.
+   *
+   * @param operations operation types this selector matches
+   */
   record AsyncSelector(Set<OperationType> operations) implements ChaosSelector {
     static final Set<OperationType> VALID_OPS =
         EnumSet.of(
@@ -544,7 +567,13 @@ public sealed interface ChaosSelector
     }
   }
 
-  /** Matches scheduled task submission and tick operations. */
+  /**
+   * Matches scheduled task submission and tick operations.
+   *
+   * @param operations operation types this selector matches
+   * @param executorClassPattern pattern matched against the executor's runtime class name
+   * @param periodicOnly when {@code true}, match only periodic schedules; {@code null} matches both
+   */
   record SchedulingSelector(
       Set<OperationType> operations, NamePattern executorClassPattern, Boolean periodicOnly)
       implements ChaosSelector {
@@ -558,7 +587,12 @@ public sealed interface ChaosSelector
     }
   }
 
-  /** Matches JVM shutdown hook registration and executor shutdown operations. */
+  /**
+   * Matches JVM shutdown hook registration and executor shutdown operations.
+   *
+   * @param operations operation types this selector matches
+   * @param targetClassPattern pattern matched against the shutdown target's class name
+   */
   record ShutdownSelector(Set<OperationType> operations, NamePattern targetClassPattern)
       implements ChaosSelector {
     static final Set<OperationType> VALID_OPS =
@@ -573,7 +607,13 @@ public sealed interface ChaosSelector
     }
   }
 
-  /** Matches class and resource loading operations. */
+  /**
+   * Matches class and resource loading operations.
+   *
+   * @param operations operation types this selector matches
+   * @param targetNamePattern pattern matched against the class or resource name being loaded
+   * @param loaderClassPattern pattern matched against the classloader's runtime class name
+   */
   record ClassLoadingSelector(
       Set<OperationType> operations, NamePattern targetNamePattern, NamePattern loaderClassPattern)
       implements ChaosSelector {
@@ -609,6 +649,12 @@ public sealed interface ChaosSelector
    *
    * <p><b>Valid operations:</b> {@link OperationType#METHOD_ENTER}, {@link
    * OperationType#METHOD_EXIT}.
+   *
+   * @param operations operation types this selector matches
+   * @param classPattern pattern matched against the declaring class name
+   * @param methodNamePattern pattern matched against the method name
+   * @param signaturePattern reserved; must be {@code null} or {@link NamePattern#any()} until
+   *     descriptor-based filtering ships
    */
   record MethodSelector(
       Set<OperationType> operations,
@@ -647,6 +693,9 @@ public sealed interface ChaosSelector
    *
    * <p><b>Valid operations:</b> {@link OperationType#MONITOR_ENTER}, {@link
    * OperationType#THREAD_PARK}.
+   *
+   * @param operations operation types this selector matches
+   * @param monitorClassPattern pattern matched against the class of the monitor object
    */
   record MonitorSelector(Set<OperationType> operations, NamePattern monitorClassPattern)
       implements ChaosSelector {
@@ -675,6 +724,8 @@ public sealed interface ChaosSelector
    *   <li>Reflection latency — intercept {@link OperationType#REFLECTION_INVOKE}
    *   <li>Deserialization fault — intercept {@link OperationType#OBJECT_DESERIALIZE}
    * </ul>
+   *
+   * @param operations operation types this selector matches
    */
   record JvmRuntimeSelector(Set<OperationType> operations) implements ChaosSelector {
     static final Set<OperationType> VALID_OPS =
@@ -709,6 +760,9 @@ public sealed interface ChaosSelector
    * <p><b>Valid operations:</b> {@link OperationType#NIO_SELECTOR_SELECT}, {@link
    * OperationType#NIO_CHANNEL_READ}, {@link OperationType#NIO_CHANNEL_WRITE}, {@link
    * OperationType#NIO_CHANNEL_CONNECT}, {@link OperationType#NIO_CHANNEL_ACCEPT}.
+   *
+   * @param operations operation types this selector matches
+   * @param channelClassPattern pattern matched against the NIO channel's runtime class name
    */
   record NioSelector(Set<OperationType> operations, NamePattern channelClassPattern)
       implements ChaosSelector {
@@ -736,6 +790,9 @@ public sealed interface ChaosSelector
    * <p>For {@link OperationType#SOCKET_CONNECT} the {@code remoteHostPattern} is matched against
    * the {@link java.net.InetSocketAddress} host string. For other operations the pattern is matched
    * against the remote host recorded at connect time.
+   *
+   * @param operations operation types this selector matches
+   * @param remoteHostPattern pattern matched against the remote host name or IP string
    */
   record NetworkSelector(Set<OperationType> operations, NamePattern remoteHostPattern)
       implements ChaosSelector {
@@ -765,6 +822,9 @@ public sealed interface ChaosSelector
    * runtime itself. The agent reentrancy guard in {@code BootstrapDispatcher} prevents infinite
    * recursion, but activating this selector without a restrictive {@code threadLocalClassPattern}
    * will match a very high volume of calls.
+   *
+   * @param operations operation types this selector matches
+   * @param threadLocalClassPattern pattern matched against the ThreadLocal subclass name
    */
   record ThreadLocalSelector(Set<OperationType> operations, NamePattern threadLocalClassPattern)
       implements ChaosSelector {
@@ -788,6 +848,9 @@ public sealed interface ChaosSelector
    *
    * <p><b>Valid operations:</b> {@link OperationType#HTTP_CLIENT_SEND}, {@link
    * OperationType#HTTP_CLIENT_SEND_ASYNC}.
+   *
+   * @param operations operation types this selector matches
+   * @param urlPattern pattern matched against the HTTP request URL
    */
   record HttpClientSelector(Set<OperationType> operations, NamePattern urlPattern)
       implements ChaosSelector {
@@ -819,6 +882,9 @@ public sealed interface ChaosSelector
    * <p><b>Valid operations:</b> {@link OperationType#JDBC_CONNECTION_ACQUIRE}, {@link
    * OperationType#JDBC_STATEMENT_EXECUTE}, {@link OperationType#JDBC_PREPARED_STATEMENT}, {@link
    * OperationType#JDBC_TRANSACTION_COMMIT}, {@link OperationType#JDBC_TRANSACTION_ROLLBACK}.
+   *
+   * @param operations operation types this selector matches
+   * @param targetPattern pattern matched against the pool identifier or SQL snippet
    */
   record JdbcSelector(Set<OperationType> operations, NamePattern targetPattern)
       implements ChaosSelector {
@@ -845,6 +911,9 @@ public sealed interface ChaosSelector
    * NamePattern#any()} pattern matches all DNS calls including {@code getLocalHost()}.
    *
    * <p><b>Valid operations:</b> {@link OperationType#DNS_RESOLVE}.
+   *
+   * @param operations operation types this selector matches
+   * @param hostnamePattern pattern matched against the hostname being resolved
    */
   record DnsSelector(Set<OperationType> operations, NamePattern hostnamePattern)
       implements ChaosSelector {
@@ -861,6 +930,8 @@ public sealed interface ChaosSelector
    * javax.net.ssl.SSLEngine}.
    *
    * <p><b>Valid operations:</b> {@link OperationType#SSL_HANDSHAKE}.
+   *
+   * @param operations operation types this selector matches
    */
   record SslSelector(Set<OperationType> operations) implements ChaosSelector {
     static final Set<OperationType> VALID_OPS = EnumSet.of(OperationType.SSL_HANDSHAKE);
@@ -876,6 +947,8 @@ public sealed interface ChaosSelector
    *
    * <p><b>Valid operations:</b> {@link OperationType#FILE_IO_READ}, {@link
    * OperationType#FILE_IO_WRITE}.
+   *
+   * @param operations operation types this selector matches
    */
   record FileIoSelector(Set<OperationType> operations) implements ChaosSelector {
     static final Set<OperationType> VALID_OPS =
@@ -893,6 +966,8 @@ public sealed interface ChaosSelector
    *
    * <p>The StressTarget value must correspond to the ChaosEffect type provided in the same
    * ChaosScenario. This correspondence is enforced by the runtime validator at activation time.
+   *
+   * @param target stressor target whose type must match the paired {@link ChaosEffect}
    */
   record StressSelector(StressTarget target) implements ChaosSelector {
     public StressSelector {
