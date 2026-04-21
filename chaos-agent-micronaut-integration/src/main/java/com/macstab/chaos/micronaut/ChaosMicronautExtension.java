@@ -64,16 +64,17 @@ public final class ChaosMicronautExtension
     final TrackingChaosControlPlane tracker =
         new TrackingChaosControlPlane(ChaosPlatform.installLocally());
     final ChaosSession session = tracker.openSession(context.getDisplayName());
-    context.getStore(NAMESPACE).put(ChaosControlPlane.class, tracker);
-    context.getStore(NAMESPACE).put(ChaosSession.class, session);
+    final ExtensionContext.Store store = context.getStore(NAMESPACE);
+    store.put(ChaosControlPlane.class, tracker);
+    store.put(ChaosSession.class, session);
   }
 
   @Override
   public void afterAll(final ExtensionContext context) {
-    final ChaosSession session =
-        context.getStore(NAMESPACE).remove(ChaosSession.class, ChaosSession.class);
+    final ExtensionContext.Store store = context.getStore(NAMESPACE);
+    final ChaosSession session = store.remove(ChaosSession.class, ChaosSession.class);
     final ChaosControlPlane controlPlane =
-        context.getStore(NAMESPACE).remove(ChaosControlPlane.class, ChaosControlPlane.class);
+        store.remove(ChaosControlPlane.class, ChaosControlPlane.class);
     // Close the session first so session-scoped scenarios are stopped via their owning session's
     // lifecycle, then drain any JVM-scoped handles the test class activated via the tracker.
     // try/finally ensures stopTracked() runs even if session.close() throws.
