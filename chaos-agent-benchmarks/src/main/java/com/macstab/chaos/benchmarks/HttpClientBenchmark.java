@@ -34,6 +34,10 @@ import org.openjdk.jmh.infra.Blackhole;
 public class HttpClientBenchmark {
 
   private static final String URL = "https://example.com/api/v1/orders";
+  private static final Duration ZERO_DELAY = Duration.ofMillis(0);
+  private static final ActivationPolicy ONE_SHOT_POLICY =
+      new ActivationPolicy(
+          ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 0, null, null, null, 1L, false);
 
   @State(Scope.Benchmark)
   public static class ZeroScenariosState {
@@ -93,10 +97,8 @@ public class HttpClientBenchmark {
               .selector(
                   ChaosSelector.httpClient(
                       Set.of(OperationType.HTTP_CLIENT_SEND), NamePattern.any()))
-              .effect(ChaosEffect.delay(Duration.ofMillis(0)))
-              .activationPolicy(
-                  new ActivationPolicy(
-                      ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 0, null, null, null, 1L, false))
+              .effect(ChaosEffect.delay(ZERO_DELAY))
+              .activationPolicy(ONE_SHOT_POLICY)
               .build());
       dispatcher = runtime.dispatcher();
     }
@@ -115,14 +117,14 @@ public class HttpClientBenchmark {
     @Setup(Level.Trial)
     public void setup() {
       runtime = new ChaosRuntime();
-      var session = runtime.openSession("http-bench-session");
+      final var session = runtime.openSession("http-bench-session");
       session.activate(
           ChaosScenario.builder("http-session-miss")
               .scope(ChaosScenario.ScenarioScope.SESSION)
               .selector(
                   ChaosSelector.httpClient(
                       Set.of(OperationType.HTTP_CLIENT_SEND), NamePattern.any()))
-              .effect(ChaosEffect.delay(Duration.ofMillis(0)))
+              .effect(ChaosEffect.delay(ZERO_DELAY))
               .activationPolicy(ActivationPolicy.always())
               .build());
       dispatcher = runtime.dispatcher();
@@ -149,7 +151,7 @@ public class HttpClientBenchmark {
                 .selector(
                     ChaosSelector.httpClient(
                         Set.of(OperationType.HTTP_CLIENT_SEND_ASYNC), NamePattern.any()))
-                .effect(ChaosEffect.delay(Duration.ofMillis(0)))
+                .effect(ChaosEffect.delay(ZERO_DELAY))
                 .activationPolicy(ActivationPolicy.always())
                 .build());
       }
@@ -159,10 +161,8 @@ public class HttpClientBenchmark {
               .selector(
                   ChaosSelector.httpClient(
                       Set.of(OperationType.HTTP_CLIENT_SEND), NamePattern.any()))
-              .effect(ChaosEffect.delay(Duration.ofMillis(0)))
-              .activationPolicy(
-                  new ActivationPolicy(
-                      ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 0, null, null, null, 1L, false))
+              .effect(ChaosEffect.delay(ZERO_DELAY))
+              .activationPolicy(ONE_SHOT_POLICY)
               .build());
       dispatcher = runtime.dispatcher();
     }

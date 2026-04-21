@@ -36,6 +36,10 @@ public class ChaosRuntimeBenchmark {
 
   private static final Executor DUMMY_EXECUTOR = Runnable::run;
   private static final Runnable DUMMY_TASK = () -> {};
+  private static final Duration ZERO_DELAY = Duration.ofMillis(0);
+  private static final ActivationPolicy ONE_SHOT_POLICY =
+      new ActivationPolicy(
+          ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 0, null, null, null, 1L, false);
 
   @State(Scope.Benchmark)
   public static class NoAgentState {
@@ -100,10 +104,8 @@ public class ChaosRuntimeBenchmark {
               .selector(
                   new ChaosSelector.JdbcSelector(
                       Set.of(OperationType.JDBC_STATEMENT_EXECUTE), NamePattern.any()))
-              .effect(ChaosEffect.delay(Duration.ofMillis(0)))
-              .activationPolicy(
-                  new ActivationPolicy(
-                      ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 0, null, null, null, 1L, false))
+              .effect(ChaosEffect.delay(ZERO_DELAY))
+              .activationPolicy(ONE_SHOT_POLICY)
               .build());
       dispatcher = runtime.dispatcher();
     }
@@ -122,14 +124,14 @@ public class ChaosRuntimeBenchmark {
     @Setup(Level.Trial)
     public void setup() {
       runtime = new ChaosRuntime();
-      var session = runtime.openSession("bench-session");
+      final var session = runtime.openSession("bench-session");
       session.activate(
           ChaosScenario.builder("bench-session-miss")
               .scope(ChaosScenario.ScenarioScope.SESSION)
               .selector(
                   new ChaosSelector.JdbcSelector(
                       Set.of(OperationType.JDBC_STATEMENT_EXECUTE), NamePattern.any()))
-              .effect(ChaosEffect.delay(Duration.ofMillis(0)))
+              .effect(ChaosEffect.delay(ZERO_DELAY))
               .activationPolicy(ActivationPolicy.always())
               .build());
       dispatcher = runtime.dispatcher();
@@ -156,7 +158,7 @@ public class ChaosRuntimeBenchmark {
                 .selector(
                     new ChaosSelector.JdbcSelector(
                         Set.of(OperationType.JDBC_CONNECTION_ACQUIRE), NamePattern.any()))
-                .effect(ChaosEffect.delay(Duration.ofMillis(0)))
+                .effect(ChaosEffect.delay(ZERO_DELAY))
                 .activationPolicy(ActivationPolicy.always())
                 .build());
       }
@@ -166,10 +168,8 @@ public class ChaosRuntimeBenchmark {
               .selector(
                   new ChaosSelector.JdbcSelector(
                       Set.of(OperationType.JDBC_STATEMENT_EXECUTE), NamePattern.any()))
-              .effect(ChaosEffect.delay(Duration.ofMillis(0)))
-              .activationPolicy(
-                  new ActivationPolicy(
-                      ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 0, null, null, null, 1L, false))
+              .effect(ChaosEffect.delay(ZERO_DELAY))
+              .activationPolicy(ONE_SHOT_POLICY)
               .build());
       dispatcher = runtime.dispatcher();
     }

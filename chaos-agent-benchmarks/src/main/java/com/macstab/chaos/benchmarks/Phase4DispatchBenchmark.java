@@ -55,6 +55,11 @@ import org.openjdk.jmh.infra.Blackhole;
 @Fork(1)
 public class Phase4DispatchBenchmark {
 
+  private static final Duration ZERO_DELAY = Duration.ofMillis(0);
+  private static final ActivationPolicy ONE_SHOT_POLICY =
+      new ActivationPolicy(
+          ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 0, null, null, null, 1L, false);
+
   // ── states ───────────────────────────────────────────────────────────────
 
   @State(Scope.Benchmark)
@@ -115,9 +120,6 @@ public class Phase4DispatchBenchmark {
     @Setup(Level.Trial)
     public void setup() throws Throwable {
       runtime = new ChaosRuntime();
-      final ActivationPolicy oneShot =
-          new ActivationPolicy(
-              ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 0, null, null, null, 1L, false);
 
       runtime.activate(
           ChaosScenario.builder("bench-sleep")
@@ -126,31 +128,31 @@ public class Phase4DispatchBenchmark {
                   ChaosSelector.thread(
                       Set.of(OperationType.THREAD_SLEEP), ChaosSelector.ThreadKind.ANY))
               .effect(ChaosEffect.suppress())
-              .activationPolicy(oneShot)
+              .activationPolicy(ONE_SHOT_POLICY)
               .build());
 
       runtime.activate(
           ChaosScenario.builder("bench-dns")
               .scope(ChaosScenario.ScenarioScope.JVM)
               .selector(ChaosSelector.dns(Set.of(OperationType.DNS_RESOLVE), NamePattern.any()))
-              .effect(ChaosEffect.delay(Duration.ofMillis(0)))
-              .activationPolicy(oneShot)
+              .effect(ChaosEffect.delay(ZERO_DELAY))
+              .activationPolicy(ONE_SHOT_POLICY)
               .build());
 
       runtime.activate(
           ChaosScenario.builder("bench-ssl")
               .scope(ChaosScenario.ScenarioScope.JVM)
               .selector(ChaosSelector.ssl(Set.of(OperationType.SSL_HANDSHAKE)))
-              .effect(ChaosEffect.delay(Duration.ofMillis(0)))
-              .activationPolicy(oneShot)
+              .effect(ChaosEffect.delay(ZERO_DELAY))
+              .activationPolicy(ONE_SHOT_POLICY)
               .build());
 
       runtime.activate(
           ChaosScenario.builder("bench-fileread")
               .scope(ChaosScenario.ScenarioScope.JVM)
               .selector(ChaosSelector.fileIo(Set.of(OperationType.FILE_IO_READ)))
-              .effect(ChaosEffect.delay(Duration.ofMillis(0)))
-              .activationPolicy(oneShot)
+              .effect(ChaosEffect.delay(ZERO_DELAY))
+              .activationPolicy(ONE_SHOT_POLICY)
               .build());
 
       dispatcher = runtime.dispatcher();
