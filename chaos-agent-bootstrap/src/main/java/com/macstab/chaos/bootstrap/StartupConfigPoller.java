@@ -89,10 +89,10 @@ public final class StartupConfigPoller implements AutoCloseable {
     this.intervalMs = intervalMs;
     this.scheduler =
         Executors.newSingleThreadScheduledExecutor(
-            r -> {
-              final Thread t = new Thread(r, "chaos-config-poller");
-              t.setDaemon(true);
-              return t;
+            runnable -> {
+              final Thread thread = new Thread(runnable, "chaos-config-poller");
+              thread.setDaemon(true);
+              return thread;
             });
   }
 
@@ -141,7 +141,7 @@ public final class StartupConfigPoller implements AutoCloseable {
       // rather than silently bind the poller to the target of the symlink. Matches the read
       // path in pollOnce and in StartupConfigLoader.
       initialMtime = Files.getLastModifiedTime(configPath, LinkOption.NOFOLLOW_LINKS);
-    } catch (IOException ignored) {
+    } catch (final IOException ignored) {
       // best-effort; if the stat fails the next poll will re-read the file
     }
     applyDiff(initialScenarios);
@@ -183,7 +183,7 @@ public final class StartupConfigPoller implements AutoCloseable {
     // the closed flag alone — the poll thread is a daemon so it will not block JVM exit.
     try {
       scheduler.awaitTermination(500, TimeUnit.MILLISECONDS);
-    } catch (InterruptedException ignored) {
+    } catch (final InterruptedException ignored) {
       Thread.currentThread().interrupt();
     }
     synchronized (this) {
@@ -209,9 +209,9 @@ public final class StartupConfigPoller implements AutoCloseable {
       // NOFOLLOW_LINKS on getLastModifiedTime for the same reason as on the read: detect a
       // symlink swap at the config path instead of silently watching the target.
       current = Files.getLastModifiedTime(configPath, LinkOption.NOFOLLOW_LINKS);
-    } catch (IOException e) {
+    } catch (final IOException exception) {
       System.err.println(
-          "[chaos-agent] config poll failed (stat): " + sanitiseForLog(e.getMessage()));
+          "[chaos-agent] config poll failed (stat): " + sanitiseForLog(exception.getMessage()));
       return;
     }
     if (current.equals(lastModified)) {
@@ -225,9 +225,10 @@ public final class StartupConfigPoller implements AutoCloseable {
         fileSize =
             Files.readAttributes(configPath, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS)
                 .size();
-      } catch (IOException e) {
+      } catch (final IOException exception) {
         System.err.println(
-            "[chaos-agent] config poll failed (size-check): " + sanitiseForLog(e.getMessage()));
+            "[chaos-agent] config poll failed (size-check): "
+                + sanitiseForLog(exception.getMessage()));
         return;
       }
       if (fileSize > MAX_FILE_SIZE_BYTES) {
@@ -258,9 +259,10 @@ public final class StartupConfigPoller implements AutoCloseable {
       final FileTime afterRead;
       try {
         afterRead = Files.getLastModifiedTime(configPath, LinkOption.NOFOLLOW_LINKS);
-      } catch (IOException e) {
+      } catch (final IOException exception) {
         System.err.println(
-            "[chaos-agent] config poll failed (post-read stat): " + sanitiseForLog(e.getMessage()));
+            "[chaos-agent] config poll failed (post-read stat): "
+                + sanitiseForLog(exception.getMessage()));
         return;
       }
       if (!afterRead.equals(current)) {
@@ -280,7 +282,7 @@ public final class StartupConfigPoller implements AutoCloseable {
               + newPlan.scenarios().size()
               + " scenario(s) from "
               + sanitiseForLog(configPath.toString()));
-    } catch (Throwable t) {
+    } catch (final Throwable throwable) {
       // Catch Throwable, not Exception: ScheduledExecutorService.scheduleAtFixedRate silently
       // suppresses all future executions if the task throws anything, including Errors. A
       // transient NoClassDefFoundError from the JSON mapper's classloader, an OOM from a
@@ -289,13 +291,13 @@ public final class StartupConfigPoller implements AutoCloseable {
       // the scheduler alive; the next tick retries. Re-interrupt on InterruptedException to
       // preserve the flag, and re-throw VirtualMachineError (OOM etc.) since continuing past
       // those is not meaningful.
-      if (t instanceof InterruptedException) {
+      if (throwable instanceof InterruptedException) {
         Thread.currentThread().interrupt();
       }
       System.err.println(
-          "[chaos-agent] config reload failed (parse): " + sanitiseForLog(t.getMessage()));
-      if (t instanceof VirtualMachineError) {
-        throw (VirtualMachineError) t;
+          "[chaos-agent] config reload failed (parse): " + sanitiseForLog(throwable.getMessage()));
+      if (throwable instanceof VirtualMachineError) {
+        throw (VirtualMachineError) throwable;
       }
     }
   }
@@ -373,19 +375,19 @@ public final class StartupConfigPoller implements AutoCloseable {
     }
     final int max = 512;
     final int end = Math.min(raw.length(), max);
-    final StringBuilder sb = new StringBuilder(end);
+    final StringBuilder sanitised = new StringBuilder(end);
     for (int i = 0; i < end; i++) {
       final char ch = raw.charAt(i);
       if (ch < 0x20 || ch == 0x7F) {
-        sb.append('\uFFFD');
+        sanitised.append('\uFFFD');
       } else {
-        sb.append(ch);
+        sanitised.append(ch);
       }
     }
     if (raw.length() > max) {
-      sb.append("...[truncated]");
+      sanitised.append("...[truncated]");
     }
-    return sb.toString();
+    return sanitised.toString();
   }
 
   /** Maximum config file size on the hot-reload path: 1 MiB. Matches StartupConfigLoader. */

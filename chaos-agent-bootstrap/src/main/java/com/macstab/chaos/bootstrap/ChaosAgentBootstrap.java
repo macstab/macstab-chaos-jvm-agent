@@ -190,9 +190,9 @@ public final class ChaosAgentBootstrap {
       try {
         final Instrumentation instrumentation = ByteBuddyAgent.install();
         return initialize("", instrumentation, Map.of(), true);
-      } catch (RuntimeException runtimeException) {
+      } catch (final RuntimeException runtimeException) {
         throw runtimeException;
-      } catch (Exception exception) {
+      } catch (final Exception exception) {
         throw new IllegalStateException(
             "failed to self-attach JVM agent; run tests with -javaagent if dynamic attach is unavailable",
             exception);
@@ -337,7 +337,7 @@ public final class ChaosAgentBootstrap {
   private static void installJfrIntegration(final ChaosRuntime runtime) {
     try {
       JfrIntegration.installIfAvailable(runtime);
-    } catch (Throwable throwable) {
+    } catch (final Throwable throwable) {
       System.err.println("[chaos-agent] JFR integration skipped: " + throwable.getMessage());
     }
   }
@@ -347,9 +347,9 @@ public final class ChaosAgentBootstrap {
       final ObjectName objectName = new ObjectName("com.macstab.chaos:type=ChaosDiagnostics");
       ManagementFactory.getPlatformMBeanServer()
           .registerMBean(new ChaosDiagnosticsMBean(runtime.diagnostics()), objectName);
-    } catch (javax.management.InstanceAlreadyExistsException ignored) {
+    } catch (final javax.management.InstanceAlreadyExistsException ignored) {
       // a concurrent registrant beat us; the existing MBean is functionally identical
-    } catch (Exception exception) {
+    } catch (final Exception exception) {
       System.err.println("[chaos-agent] MBean registration skipped: " + exception.getMessage());
     }
   }
