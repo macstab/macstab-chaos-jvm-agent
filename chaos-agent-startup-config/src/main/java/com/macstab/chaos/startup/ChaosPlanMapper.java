@@ -44,6 +44,8 @@ public final class ChaosPlanMapper {
    */
   static final int MAX_STRING_LENGTH = MAX_JSON_LENGTH;
 
+  private static final String SOURCE_JSON_INPUT = "json-input";
+
   private static final ObjectMapper OBJECT_MAPPER = buildObjectMapper();
 
   private ChaosPlanMapper() {}
@@ -85,12 +87,13 @@ public final class ChaosPlanMapper {
               + " bytes (>"
               + MAX_JSON_LENGTH
               + " UTF-8 bytes provided)",
-          "json-input");
+          SOURCE_JSON_INPUT);
     }
     try {
       return OBJECT_MAPPER.readValue(json, ChaosPlan.class);
     } catch (JsonProcessingException exception) {
-      throw new ConfigLoadException("failed to parse chaos plan JSON", "json-input", exception);
+      throw new ConfigLoadException(
+          "failed to parse chaos plan JSON", SOURCE_JSON_INPUT, exception);
     }
   }
 

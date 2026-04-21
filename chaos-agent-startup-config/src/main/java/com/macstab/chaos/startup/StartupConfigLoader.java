@@ -48,6 +48,12 @@ public final class StartupConfigLoader {
   /** Maximum config file size: 1 MiB. Prevents OOM from oversized files. */
   private static final long MAX_FILE_SIZE = 1_048_576L;
 
+  private static final String SOURCE_FILE_PREFIX = "file:";
+  private static final String SOURCE_INLINE_JSON = "inline-json";
+  private static final String SOURCE_BASE64 = "base64";
+  private static final String TRUE_LITERAL = "true";
+  private static final String FALSE_LITERAL = "false";
+
   private StartupConfigLoader() {}
 
   /**
@@ -71,11 +77,12 @@ public final class StartupConfigLoader {
 
     final boolean debugDumpOnStart =
         agentArgs.getBoolean("debugDumpOnStart", false)
-            || "true".equalsIgnoreCase(environment.getOrDefault(ENV_DEBUG_DUMP, "false"));
+            || TRUE_LITERAL.equalsIgnoreCase(
+                environment.getOrDefault(ENV_DEBUG_DUMP, FALSE_LITERAL));
 
     if (inlineJson != null) {
       final ChaosPlan plan = ChaosPlanMapper.read(inlineJson);
-      return Optional.of(new LoadedPlan(plan, "inline-json", debugDumpOnStart, null));
+      return Optional.of(new LoadedPlan(plan, SOURCE_INLINE_JSON, debugDumpOnStart, null));
     }
     if (base64Json != null) {
       return Optional.of(loadFromBase64(base64Json, debugDumpOnStart));
@@ -93,16 +100,17 @@ public final class StartupConfigLoader {
       decoded = Base64.getMimeDecoder().decode(base64Json);
     } catch (IllegalArgumentException exception) {
       throw new ConfigLoadException(
-          "invalid base64 encoding in chaos plan configuration", "base64", exception);
+          "invalid base64 encoding in chaos plan configuration", SOURCE_BASE64, exception);
     }
     final String json = new String(decoded, StandardCharsets.UTF_8);
     final ChaosPlan plan = ChaosPlanMapper.read(json);
-    return new LoadedPlan(plan, "base64", debugDumpOnStart, null);
+    return new LoadedPlan(plan, SOURCE_BASE64, debugDumpOnStart, null);
   }
 
   private static LoadedPlan loadFromFile(final String filePath, final boolean debugDumpOnStart) {
     final ValidatedRead read = readValidatedPlanFile(filePath);
-    return new LoadedPlan(read.plan(), "file:" + filePath, debugDumpOnStart, read.path());
+    return new LoadedPlan(
+        read.plan(), SOURCE_FILE_PREFIX + filePath, debugDumpOnStart, read.path());
   }
 
   /**
@@ -133,7 +141,9 @@ public final class StartupConfigLoader {
       json = new String(in.readAllBytes(), StandardCharsets.UTF_8);
     } catch (IOException exception) {
       throw new ConfigLoadException(
-          "failed to read chaos plan config file: " + path, "file:" + filePath, exception);
+          "failed to read chaos plan config file: " + path,
+          SOURCE_FILE_PREFIX + filePath,
+          exception);
     }
     final ChaosPlan plan = ChaosPlanMapper.read(json);
     return new ValidatedRead(plan, path);
@@ -154,15 +164,17 @@ public final class StartupConfigLoader {
     final Path path = Path.of(filePath).toAbsolutePath().normalize();
 
     if (!Files.exists(path, LinkOption.NOFOLLOW_LINKS)) {
-      throw new ConfigLoadException("config file does not exist: " + path, "file:" + filePath);
+      throw new ConfigLoadException(
+          "config file does not exist: " + path, SOURCE_FILE_PREFIX + filePath);
     }
     if (Files.isSymbolicLink(path)) {
       throw new ConfigLoadException(
-          "config file is a symbolic link (rejected for safety): " + path, "file:" + filePath);
+          "config file is a symbolic link (rejected for safety): " + path,
+          SOURCE_FILE_PREFIX + filePath);
     }
     if (!Files.isRegularFile(path)) {
       throw new ConfigLoadException(
-          "config path is not a regular file: " + path, "file:" + filePath);
+          "config path is not a regular file: " + path, SOURCE_FILE_PREFIX + filePath);
     }
     try {
       // Files.size(path) follows symlinks; if an attacker flipped the path to a symlink between
@@ -184,11 +196,13 @@ public final class StartupConfigLoader {
                 + size
                 + " actual): "
                 + path,
-            "file:" + filePath);
+            SOURCE_FILE_PREFIX + filePath);
       }
     } catch (IOException exception) {
       throw new ConfigLoadException(
-          "cannot determine size of config file: " + path, "file:" + filePath, exception);
+          "cannot determine size of config file: " + path,
+          SOURCE_FILE_PREFIX + filePath,
+          exception);
     }
     rejectWorldWritable(path, filePath);
     return path;
@@ -211,7 +225,8 @@ public final class StartupConfigLoader {
           Files.getPosixFilePermissions(path, LinkOption.NOFOLLOW_LINKS);
       if (filePerms.contains(PosixFilePermission.OTHERS_WRITE)) {
         throw new ConfigLoadException(
-            "config file is world-writable (rejected for safety): " + path, "file:" + originalPath);
+            "config file is world-writable (rejected for safety): " + path,
+            SOURCE_FILE_PREFIX + originalPath);
       }
       final Path parent = path.getParent();
       if (parent != null) {
@@ -226,7 +241,7 @@ public final class StartupConfigLoader {
               "config file's parent directory is world-writable without sticky bit (rejected"
                   + " for safety): "
                   + parent,
-              "file:" + originalPath);
+              SOURCE_FILE_PREFIX + originalPath);
         }
       }
     } catch (UnsupportedOperationException | IOException exception) {
@@ -235,7 +250,7 @@ public final class StartupConfigLoader {
       // bits matter.
       throw new ConfigLoadException(
           "cannot check POSIX permissions on config file: " + path,
-          "file:" + originalPath,
+          SOURCE_FILE_PREFIX + originalPath,
           exception);
     }
   }
