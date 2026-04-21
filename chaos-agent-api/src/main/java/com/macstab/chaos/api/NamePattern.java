@@ -149,7 +149,7 @@ public record NamePattern(MatchMode mode, String value) {
    *
    * @param value the exact string to match; must be non-blank
    */
-  public static NamePattern exact(String value) {
+  public static NamePattern exact(final String value) {
     return new NamePattern(MatchMode.EXACT, value);
   }
 
@@ -159,7 +159,7 @@ public record NamePattern(MatchMode mode, String value) {
    *
    * @param value the prefix; must be non-blank
    */
-  public static NamePattern prefix(String value) {
+  public static NamePattern prefix(final String value) {
     return new NamePattern(MatchMode.PREFIX, value);
   }
 
@@ -171,7 +171,7 @@ public record NamePattern(MatchMode mode, String value) {
    *
    * @param value the glob expression; must be non-blank
    */
-  public static NamePattern glob(String value) {
+  public static NamePattern glob(final String value) {
     return new NamePattern(MatchMode.GLOB, value);
   }
 
@@ -182,7 +182,7 @@ public record NamePattern(MatchMode mode, String value) {
    * @param value a valid Java regex; must be non-blank
    * @see Pattern#matches(String, CharSequence)
    */
-  public static NamePattern regex(String value) {
+  public static NamePattern regex(final String value) {
     return new NamePattern(MatchMode.REGEX, value);
   }
 
@@ -192,7 +192,7 @@ public record NamePattern(MatchMode mode, String value) {
    * @param candidate the string to test; {@code null} matches only {@link MatchMode#ANY}
    * @return {@code true} if the candidate satisfies this pattern
    */
-  public boolean matches(String candidate) {
+  public boolean matches(final String candidate) {
     if (mode == MatchMode.ANY) {
       return true;
     }
@@ -227,7 +227,7 @@ public record NamePattern(MatchMode mode, String value) {
     }
   }
 
-  private static String toRegex(String glob) {
+  private static String toRegex(final String glob) {
     // Escape every Java regex metacharacter so the compiled pattern only treats '*' and '?' as
     // wildcards. Missing '[', ']', '{', '}' previously let glob inputs like "class[0-9]" expand
     // into real character classes, causing unexpected matches.
@@ -237,9 +237,9 @@ public record NamePattern(MatchMode mode, String value) {
     // emoji is a surrogate pair (two code units). The explicit alternation matches either a
     // high/low surrogate pair or any non-surrogate code unit — one user-visible character in
     // both BMP and supplementary planes.
-    StringBuilder builder = new StringBuilder("^");
+    final StringBuilder builder = new StringBuilder("^");
     for (int i = 0; i < glob.length(); i++) {
-      char current = glob.charAt(i);
+      final char current = glob.charAt(i);
       switch (current) {
         case '*' -> builder.append(".*");
         case '?' -> builder.append("(?:[\\uD800-\\uDBFF][\\uDC00-\\uDFFF]|[^\\uD800-\\uDFFF])");

@@ -98,7 +98,7 @@ public sealed interface ChaosEffect
    * @param delay the fixed pause duration; must be non-negative
    * @return a deterministic delay effect
    */
-  static DelayEffect delay(Duration delay) {
+  static DelayEffect delay(final Duration delay) {
     return new DelayEffect(delay, delay);
   }
 
@@ -109,7 +109,7 @@ public sealed interface ChaosEffect
    * @param minDelay lower bound (inclusive); must be non-negative
    * @param maxDelay upper bound (inclusive); must be &gt;= minDelay
    */
-  static DelayEffect delay(Duration minDelay, Duration maxDelay) {
+  static DelayEffect delay(final Duration minDelay, final Duration maxDelay) {
     return new DelayEffect(minDelay, maxDelay);
   }
 
@@ -119,7 +119,7 @@ public sealed interface ChaosEffect
    *
    * @param maxBlock maximum time to block; {@code null} blocks indefinitely
    */
-  static GateEffect gate(Duration maxBlock) {
+  static GateEffect gate(final Duration maxBlock) {
     return new GateEffect(maxBlock);
   }
 
@@ -129,7 +129,7 @@ public sealed interface ChaosEffect
    *
    * @param message the exception message; must be non-blank
    */
-  static RejectEffect reject(String message) {
+  static RejectEffect reject(final String message) {
     return new RejectEffect(message);
   }
 
@@ -150,7 +150,7 @@ public sealed interface ChaosEffect
    * @param message the exception message; must be non-blank
    */
   static ExceptionalCompletionEffect exceptionalCompletion(
-      FailureKind failureKind, String message) {
+      final FailureKind failureKind, final String message) {
     return new ExceptionalCompletionEffect(failureKind, message);
   }
 
@@ -171,7 +171,8 @@ public sealed interface ChaosEffect
    *     "java.io.IOException"}); must be a valid binary class name
    * @param message the exception message passed to the constructor; must be non-blank
    */
-  static ExceptionInjectionEffect injectException(String exceptionClassName, String message) {
+  static ExceptionInjectionEffect injectException(
+      final String exceptionClassName, final String message) {
     return new ExceptionInjectionEffect(exceptionClassName, message, true);
   }
 
@@ -186,7 +187,7 @@ public sealed interface ChaosEffect
    *
    * @param strategy the substitution strategy to apply
    */
-  static ReturnValueCorruptionEffect corruptReturnValue(ReturnValueStrategy strategy) {
+  static ReturnValueCorruptionEffect corruptReturnValue(final ReturnValueStrategy strategy) {
     return new ReturnValueCorruptionEffect(strategy);
   }
 
@@ -202,7 +203,7 @@ public sealed interface ChaosEffect
    *     zero
    * @param mode how the skew evolves over time
    */
-  static ClockSkewEffect skewClock(Duration skewAmount, ClockSkewMode mode) {
+  static ClockSkewEffect skewClock(final Duration skewAmount, final ClockSkewMode mode) {
     return new ClockSkewEffect(skewAmount, mode);
   }
 
@@ -231,7 +232,7 @@ public sealed interface ChaosEffect
    * @param bytes total bytes to allocate and retain; must be &gt; 0
    * @param chunkSizeBytes size of each allocation chunk; must be &gt; 0
    */
-  static HeapPressureEffect heapPressure(long bytes, int chunkSizeBytes) {
+  static HeapPressureEffect heapPressure(final long bytes, final int chunkSizeBytes) {
     return new HeapPressureEffect(bytes, chunkSizeBytes);
   }
 
@@ -246,7 +247,8 @@ public sealed interface ChaosEffect
    * @param daemon {@code false} prevents JVM shutdown until the handle is closed
    * @param heartbeat interval between keep-alive park cycles; must be positive
    */
-  static KeepAliveEffect keepAlive(String threadName, boolean daemon, Duration heartbeat) {
+  static KeepAliveEffect keepAlive(
+      final String threadName, final boolean daemon, final Duration heartbeat) {
     return new KeepAliveEffect(threadName, daemon, heartbeat);
   }
 
@@ -262,7 +264,8 @@ public sealed interface ChaosEffect
    * @param fieldsPerClass static fields per class (controls per-class metaspace footprint); must be
    *     &gt;= 0
    */
-  static MetaspacePressureEffect metaspacePressure(int generatedClassCount, int fieldsPerClass) {
+  static MetaspacePressureEffect metaspacePressure(
+      final int generatedClassCount, final int fieldsPerClass) {
     return new MetaspacePressureEffect(generatedClassCount, fieldsPerClass, true);
   }
 
@@ -279,7 +282,8 @@ public sealed interface ChaosEffect
    * @param bufferSizeBytes size of each individual buffer allocation; must be &gt; 0 and &lt;=
    *     totalBytes
    */
-  static DirectBufferPressureEffect directBufferPressure(long totalBytes, int bufferSizeBytes) {
+  static DirectBufferPressureEffect directBufferPressure(
+      final long totalBytes, final int bufferSizeBytes) {
     return new DirectBufferPressureEffect(totalBytes, bufferSizeBytes, false);
   }
 
@@ -294,8 +298,10 @@ public sealed interface ChaosEffect
    * @param allocationRateBytesPerSecond target allocation rate; must be &gt; 0
    * @param duration how long the stressor runs; must be positive
    */
-  static GcPressureEffect gcPressure(long allocationRateBytesPerSecond, Duration duration) {
-    return new GcPressureEffect(allocationRateBytesPerSecond, 1024, false, duration);
+  static GcPressureEffect gcPressure(
+      final long allocationRateBytesPerSecond, final Duration duration) {
+    return new GcPressureEffect(
+        allocationRateBytesPerSecond, GcPressureEffect.DEFAULT_OBJECT_SIZE_BYTES, false, duration);
   }
 
   /**
@@ -309,22 +315,23 @@ public sealed interface ChaosEffect
    * @param objectCount number of objects with slow finalizers to create; must be &gt; 0
    * @param finalizerDelay how long each finalizer sleeps; must be &gt;= 0
    */
-  static FinalizerBacklogEffect finalizerBacklog(int objectCount, Duration finalizerDelay) {
+  static FinalizerBacklogEffect finalizerBacklog(
+      final int objectCount, final Duration finalizerDelay) {
     return new FinalizerBacklogEffect(objectCount, finalizerDelay);
   }
 
   /**
-   * Returns a deadlock stressor that permanently deadlocks {@code participantCount} threads using a
-   * 1-second acquisition delay between lock steps. The deadlock is released when the {@link
-   * ChaosActivationHandle} is closed.
+   * Returns a deadlock stressor that permanently deadlocks {@code participantCount} threads using
+   * {@link DeadlockEffect#DEFAULT_ACQUISITION_DELAY} between lock steps. The deadlock is released
+   * when the {@link ChaosActivationHandle} is closed.
    *
    * <p>Use with {@link ChaosSelector.StressSelector} targeting {@link
    * ChaosSelector.StressTarget#DEADLOCK}.
    *
    * @param participantCount number of threads to deadlock; must be &gt;= 2
    */
-  static DeadlockEffect deadlock(int participantCount) {
-    return new DeadlockEffect(participantCount, Duration.ofSeconds(1));
+  static DeadlockEffect deadlock(final int participantCount) {
+    return new DeadlockEffect(participantCount, DeadlockEffect.DEFAULT_ACQUISITION_DELAY);
   }
 
   /**
@@ -340,7 +347,8 @@ public sealed interface ChaosEffect
    * @param daemon if {@code false}, the threads block JVM exit until they terminate or the handle
    *     is closed
    */
-  static ThreadLeakEffect threadLeak(int threadCount, String namePrefix, boolean daemon) {
+  static ThreadLeakEffect threadLeak(
+      final int threadCount, final String namePrefix, final boolean daemon) {
     return new ThreadLeakEffect(threadCount, namePrefix, daemon, null);
   }
 
@@ -355,7 +363,8 @@ public sealed interface ChaosEffect
    * @param entriesPerThread number of ThreadLocal entries per pool thread; must be &gt; 0
    * @param valueSizeBytes size of each entry's byte-array value; must be &gt; 0
    */
-  static ThreadLocalLeakEffect threadLocalLeak(int entriesPerThread, int valueSizeBytes) {
+  static ThreadLocalLeakEffect threadLocalLeak(
+      final int entriesPerThread, final int valueSizeBytes) {
     return new ThreadLocalLeakEffect(entriesPerThread, valueSizeBytes);
   }
 
@@ -372,7 +381,7 @@ public sealed interface ChaosEffect
    * @param contendingThreadCount number of threads competing for the lock; must be &gt;= 2
    */
   static MonitorContentionEffect monitorContention(
-      Duration lockHoldDuration, int contendingThreadCount) {
+      final Duration lockHoldDuration, final int contendingThreadCount) {
     return new MonitorContentionEffect(lockHoldDuration, contendingThreadCount, false);
   }
 
@@ -388,7 +397,8 @@ public sealed interface ChaosEffect
    * @param classCount number of synthetic classes to generate; must be &gt; 0
    * @param methodsPerClass methods per class; must be &gt; 0
    */
-  static CodeCachePressureEffect codeCachePressure(int classCount, int methodsPerClass) {
+  static CodeCachePressureEffect codeCachePressure(
+      final int classCount, final int methodsPerClass) {
     return new CodeCachePressureEffect(classCount, methodsPerClass);
   }
 
@@ -402,7 +412,7 @@ public sealed interface ChaosEffect
    *
    * @param gcInterval interval between forced GC calls; must be positive
    */
-  static SafepointStormEffect safepointStorm(Duration gcInterval) {
+  static SafepointStormEffect safepointStorm(final Duration gcInterval) {
     return new SafepointStormEffect(gcInterval, 0);
   }
 
@@ -417,7 +427,8 @@ public sealed interface ChaosEffect
    * @param internCount number of strings to intern; must be &gt; 0
    * @param stringLengthBytes length of each string in bytes; must be &gt; 0
    */
-  static StringInternPressureEffect stringInternPressure(int internCount, int stringLengthBytes) {
+  static StringInternPressureEffect stringInternPressure(
+      final int internCount, final int stringLengthBytes) {
     return new StringInternPressureEffect(internCount, stringLengthBytes);
   }
 
@@ -432,7 +443,8 @@ public sealed interface ChaosEffect
    * @param referenceCount number of references to create per flood cycle; must be &gt; 0
    * @param floodInterval interval between flood cycles; must be positive
    */
-  static ReferenceQueueFloodEffect referenceQueueFlood(int referenceCount, Duration floodInterval) {
+  static ReferenceQueueFloodEffect referenceQueueFlood(
+      final int referenceCount, final Duration floodInterval) {
     return new ReferenceQueueFloodEffect(referenceCount, floodInterval);
   }
 
@@ -456,7 +468,7 @@ public sealed interface ChaosEffect
    * @param pinDuration how long each thread holds the pin per cycle; must be positive
    */
   static VirtualThreadCarrierPinningEffect virtualThreadCarrierPinning(
-      int pinnedThreadCount, Duration pinDuration) {
+      final int pinnedThreadCount, final Duration pinDuration) {
     return new VirtualThreadCarrierPinningEffect(pinnedThreadCount, pinDuration);
   }
 
@@ -655,6 +667,14 @@ public sealed interface ChaosEffect
     private static final java.util.List<String> ALLOWED_PACKAGE_PREFIXES =
         java.util.List.of("java.", "javax.", "jakarta.", "com.macstab.chaos.");
 
+    /**
+     * Compiled binary class-name validator. Using a pre-compiled {@link java.util.regex.Pattern}
+     * avoids re-parsing the expression on every constructor call; {@link String#matches} would
+     * recompile it each time.
+     */
+    private static final java.util.regex.Pattern BINARY_CLASS_NAME_PATTERN =
+        java.util.regex.Pattern.compile("[a-zA-Z_$][a-zA-Z0-9_$]*(\\.[a-zA-Z_$][a-zA-Z0-9_$]*)*");
+
     public ExceptionInjectionEffect {
       if (exceptionClassName == null || exceptionClassName.isBlank()) {
         throw new IllegalArgumentException("exceptionClassName must be non-blank");
@@ -674,7 +694,7 @@ public sealed interface ChaosEffect
     }
 
     private static boolean isValidBinaryClassName(String name) {
-      return name.matches("[a-zA-Z_$][a-zA-Z0-9_$]*(\\.[a-zA-Z_$][a-zA-Z0-9_$]*)*");
+      return BINARY_CLASS_NAME_PATTERN.matcher(name).matches();
     }
 
     private static boolean isAllowedPackage(String name) {
@@ -876,6 +896,13 @@ public sealed interface ChaosEffect
       boolean promoteToOldGen,
       Duration duration)
       implements ChaosEffect {
+    /**
+     * Default allocated-object size used by the {@link ChaosEffect#gcPressure(long, Duration)}
+     * convenience factory. 1 KiB is small enough to pressure the young generation at realistic
+     * allocation rates without producing humongous-object edge cases in G1/ZGC.
+     */
+    public static final int DEFAULT_OBJECT_SIZE_BYTES = 1024;
+
     public GcPressureEffect {
       if (allocationRateBytesPerSecond <= 0) {
         throw new IllegalArgumentException("allocationRateBytesPerSecond must be > 0");
@@ -947,6 +974,14 @@ public sealed interface ChaosEffect
      * stressor from turning into an accidental fork-bomb when a caller types an extra digit.
      */
     public static final int MAX_PARTICIPANT_COUNT = 1_024;
+
+    /**
+     * Default pause between the first and second lock acquisition used by the {@link
+     * ChaosEffect#deadlock(int)} convenience factory. One second is long enough for competing
+     * threads to race into the conflicting order and short enough that the deadlock surfaces
+     * quickly in thread dumps.
+     */
+    public static final Duration DEFAULT_ACQUISITION_DELAY = Duration.ofSeconds(1L);
 
     public DeadlockEffect {
       if (participantCount < 2) {
@@ -1050,6 +1085,14 @@ public sealed interface ChaosEffect
    */
   record MonitorContentionEffect(
       Duration lockHoldDuration, int contendingThreadCount, boolean unfair) implements ChaosEffect {
+    /**
+     * Upper bound on {@code contendingThreadCount}. Spawning thousands of platform threads
+     * saturates the OS thread scheduler before any contention behaviour can be exercised.
+     * Consistent with {@link DeadlockEffect#MAX_PARTICIPANT_COUNT}: the same reasoning applies —
+     * keep the stressor survivable on a default-configured Linux host.
+     */
+    public static final int MAX_CONTENDING_THREAD_COUNT = 1_000;
+
     public MonitorContentionEffect {
       if (lockHoldDuration == null || lockHoldDuration.isNegative() || lockHoldDuration.isZero()) {
         throw new IllegalArgumentException("lockHoldDuration must be positive");
@@ -1057,16 +1100,19 @@ public sealed interface ChaosEffect
       if (contendingThreadCount < 2) {
         throw new IllegalArgumentException("contendingThreadCount must be >= 2");
       }
-      // Prevent OOM from operator-supplied plans with unreasonably large thread counts.
-      // Spawning thousands of platform threads saturates the thread scheduler; cap at 1000.
-      if (contendingThreadCount > 1000) {
-        throw new IllegalArgumentException("contendingThreadCount must be <= 1000");
+      if (contendingThreadCount > MAX_CONTENDING_THREAD_COUNT) {
+        throw new IllegalArgumentException(
+            "contendingThreadCount must be <= "
+                + MAX_CONTENDING_THREAD_COUNT
+                + " (got "
+                + contendingThreadCount
+                + ")");
       }
     }
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // Phase 2 interceptor effects
+  // NIO and selector interceptor effects
   // ═══════════════════════════════════════════════════════════════════════════
 
   /**
@@ -1077,7 +1123,7 @@ public sealed interface ChaosEffect
   record SpuriousWakeupEffect() implements ChaosEffect {}
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // Phase 2 stressor effects
+  // JIT, safepoint, and JVM-pressure stressor effects
   // ═══════════════════════════════════════════════════════════════════════════
 
   /**

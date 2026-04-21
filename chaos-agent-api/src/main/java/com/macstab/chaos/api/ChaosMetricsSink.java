@@ -33,10 +33,11 @@ public interface ChaosMetricsSink {
   ChaosMetricsSink NOOP =
       new ChaosMetricsSink() {
         @Override
-        public void increment(String name, Map<String, String> tags) {}
+        public void increment(final String name, final Map<String, String> tags) {}
 
         @Override
-        public void recordDuration(String name, Duration duration, Map<String, String> tags) {}
+        public void recordDuration(
+            final String name, final Duration duration, final Map<String, String> tags) {}
       };
 
   /**

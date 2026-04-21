@@ -95,7 +95,7 @@ public record ChaosScenario(
    *
    * @param id unique identifier for this scenario; used in diagnostics, JMX, JFR events, and logs
    */
-  public static Builder builder(String id) {
+  public static Builder builder(final String id) {
     return new Builder(id);
   }
 
@@ -141,7 +141,7 @@ public record ChaosScenario(
     private int precedence;
     private final Map<String, String> tags = new LinkedHashMap<>();
 
-    private Builder(String id) {
+    private Builder(final String id) {
       this.id = id;
     }
 
@@ -152,7 +152,7 @@ public record ChaosScenario(
      * @param description free-form description text
      * @return this builder for chaining
      */
-    public Builder description(String description) {
+    public Builder description(final String description) {
       this.description = description;
       return this;
     }
@@ -164,7 +164,7 @@ public record ChaosScenario(
      * @return this builder for chaining
      * @see ScenarioScope
      */
-    public Builder scope(ScenarioScope scope) {
+    public Builder scope(final ScenarioScope scope) {
       this.scope = scope;
       return this;
     }
@@ -176,7 +176,7 @@ public record ChaosScenario(
      * @return this builder for chaining
      * @see ChaosSelector
      */
-    public Builder selector(ChaosSelector selector) {
+    public Builder selector(final ChaosSelector selector) {
       this.selector = selector;
       return this;
     }
@@ -188,7 +188,7 @@ public record ChaosScenario(
      * @return this builder for chaining
      * @see ChaosEffect
      */
-    public Builder effect(ChaosEffect effect) {
+    public Builder effect(final ChaosEffect effect) {
       this.effect = effect;
       return this;
     }
@@ -201,7 +201,7 @@ public record ChaosScenario(
      * @return this builder for chaining
      * @see ActivationPolicy
      */
-    public Builder activationPolicy(ActivationPolicy activationPolicy) {
+    public Builder activationPolicy(final ActivationPolicy activationPolicy) {
       this.activationPolicy = activationPolicy;
       return this;
     }
@@ -216,7 +216,7 @@ public record ChaosScenario(
      * @param precedence conflict-resolution priority; higher values win
      * @return this builder for chaining
      */
-    public Builder precedence(int precedence) {
+    public Builder precedence(final int precedence) {
       this.precedence = precedence;
       return this;
     }
@@ -229,7 +229,7 @@ public record ChaosScenario(
      * @param value metadata tag value
      * @return this builder for chaining
      */
-    public Builder tag(String key, String value) {
+    public Builder tag(final String key, final String value) {
       if (key == null) {
         throw new IllegalArgumentException("tag key must not be null");
       }

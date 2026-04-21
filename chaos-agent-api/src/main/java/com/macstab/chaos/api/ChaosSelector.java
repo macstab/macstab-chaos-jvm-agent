@@ -75,7 +75,7 @@ public sealed interface ChaosSelector
    * @param kind {@link ThreadKind#ANY} matches all threads; use {@link ThreadKind#VIRTUAL} to
    *     target only virtual threads (requires JDK 21+ at runtime)
    */
-  static ThreadSelector thread(Set<OperationType> operations, ThreadKind kind) {
+  static ThreadSelector thread(final Set<OperationType> operations, final ThreadKind kind) {
     return new ThreadSelector(operations, kind, NamePattern.any(), null);
   }
 
@@ -89,7 +89,7 @@ public sealed interface ChaosSelector
    *
    * @param operations set of executor operations to intercept; must not be empty
    */
-  static ExecutorSelector executor(Set<OperationType> operations) {
+  static ExecutorSelector executor(final Set<OperationType> operations) {
     return new ExecutorSelector(operations, NamePattern.any(), NamePattern.any(), null);
   }
 
@@ -101,7 +101,7 @@ public sealed interface ChaosSelector
    *
    * @param operations set of queue operations to intercept; must not be empty
    */
-  static QueueSelector queue(Set<OperationType> operations) {
+  static QueueSelector queue(final Set<OperationType> operations) {
     return new QueueSelector(operations, NamePattern.any());
   }
 
@@ -114,7 +114,7 @@ public sealed interface ChaosSelector
    *
    * @param operations set of async operations to intercept; must not be empty
    */
-  static AsyncSelector async(Set<OperationType> operations) {
+  static AsyncSelector async(final Set<OperationType> operations) {
     return new AsyncSelector(operations);
   }
 
@@ -127,7 +127,7 @@ public sealed interface ChaosSelector
    *
    * @param operations set of scheduling operations to intercept; must not be empty
    */
-  static SchedulingSelector scheduling(Set<OperationType> operations) {
+  static SchedulingSelector scheduling(final Set<OperationType> operations) {
     return new SchedulingSelector(operations, NamePattern.any(), null);
   }
 
@@ -139,7 +139,7 @@ public sealed interface ChaosSelector
    *
    * @param operations set of shutdown operations to intercept; must not be empty
    */
-  static ShutdownSelector shutdown(Set<OperationType> operations) {
+  static ShutdownSelector shutdown(final Set<OperationType> operations) {
     return new ShutdownSelector(operations, NamePattern.any());
   }
 
@@ -154,7 +154,7 @@ public sealed interface ChaosSelector
    * @param targetPattern pattern matched against the class or resource name being loaded
    */
   static ClassLoadingSelector classLoading(
-      Set<OperationType> operations, NamePattern targetPattern) {
+      final Set<OperationType> operations, final NamePattern targetPattern) {
     return new ClassLoadingSelector(operations, targetPattern, NamePattern.any());
   }
 
@@ -180,7 +180,9 @@ public sealed interface ChaosSelector
    * @param methodNamePattern pattern matched against the method name
    */
   static MethodSelector method(
-      Set<OperationType> operations, NamePattern classPattern, NamePattern methodNamePattern) {
+      final Set<OperationType> operations,
+      final NamePattern classPattern,
+      final NamePattern methodNamePattern) {
     return new MethodSelector(operations, classPattern, methodNamePattern, null);
   }
 
@@ -191,7 +193,7 @@ public sealed interface ChaosSelector
    *
    * @param operations set of monitor/parking operations to intercept; must not be empty
    */
-  static MonitorSelector monitor(Set<OperationType> operations) {
+  static MonitorSelector monitor(final Set<OperationType> operations) {
     return new MonitorSelector(operations, NamePattern.any());
   }
 
@@ -213,7 +215,7 @@ public sealed interface ChaosSelector
    *
    * @param operations set of JVM runtime operations to intercept; must not be empty
    */
-  static JvmRuntimeSelector jvmRuntime(Set<OperationType> operations) {
+  static JvmRuntimeSelector jvmRuntime(final Set<OperationType> operations) {
     return new JvmRuntimeSelector(operations);
   }
 
@@ -226,7 +228,7 @@ public sealed interface ChaosSelector
    *
    * @param operations set of NIO operations to intercept; must not be empty
    */
-  static NioSelector nio(Set<OperationType> operations) {
+  static NioSelector nio(final Set<OperationType> operations) {
     return new NioSelector(operations, NamePattern.any());
   }
 
@@ -237,7 +239,8 @@ public sealed interface ChaosSelector
    * @param operations set of NIO operations to intercept; must not be empty
    * @param channelClassPattern pattern matched against the channel implementation class name
    */
-  static NioSelector nio(Set<OperationType> operations, NamePattern channelClassPattern) {
+  static NioSelector nio(
+      final Set<OperationType> operations, final NamePattern channelClassPattern) {
     return new NioSelector(operations, channelClassPattern);
   }
 
@@ -250,7 +253,7 @@ public sealed interface ChaosSelector
    *
    * @param operations set of socket operations to intercept; must not be empty
    */
-  static NetworkSelector network(Set<OperationType> operations) {
+  static NetworkSelector network(final Set<OperationType> operations) {
     return new NetworkSelector(operations, NamePattern.any());
   }
 
@@ -260,7 +263,8 @@ public sealed interface ChaosSelector
    * @param operations set of socket operations to intercept; must not be empty
    * @param remoteHostPattern pattern matched against the remote host name or IP string
    */
-  static NetworkSelector network(Set<OperationType> operations, NamePattern remoteHostPattern) {
+  static NetworkSelector network(
+      final Set<OperationType> operations, final NamePattern remoteHostPattern) {
     return new NetworkSelector(operations, remoteHostPattern);
   }
 
@@ -273,7 +277,7 @@ public sealed interface ChaosSelector
    *
    * @param operations set of ThreadLocal operations to intercept; must not be empty
    */
-  static ThreadLocalSelector threadLocal(Set<OperationType> operations) {
+  static ThreadLocalSelector threadLocal(final Set<OperationType> operations) {
     return new ThreadLocalSelector(operations, NamePattern.any());
   }
 
@@ -285,7 +289,7 @@ public sealed interface ChaosSelector
    * @param threadLocalClassPattern pattern matched against the ThreadLocal class name
    */
   static ThreadLocalSelector threadLocal(
-      Set<OperationType> operations, NamePattern threadLocalClassPattern) {
+      final Set<OperationType> operations, final NamePattern threadLocalClassPattern) {
     return new ThreadLocalSelector(operations, threadLocalClassPattern);
   }
 
@@ -298,7 +302,7 @@ public sealed interface ChaosSelector
    *
    * @param operations set of HTTP client operations to intercept; must not be empty
    */
-  static HttpClientSelector httpClient(Set<OperationType> operations) {
+  static HttpClientSelector httpClient(final Set<OperationType> operations) {
     return new HttpClientSelector(operations, NamePattern.any());
   }
 
@@ -309,7 +313,8 @@ public sealed interface ChaosSelector
    * @param operations set of HTTP client operations to intercept; must not be empty
    * @param urlPattern pattern matched against the request URL
    */
-  static HttpClientSelector httpClient(Set<OperationType> operations, NamePattern urlPattern) {
+  static HttpClientSelector httpClient(
+      final Set<OperationType> operations, final NamePattern urlPattern) {
     return new HttpClientSelector(operations, urlPattern);
   }
 
@@ -356,7 +361,7 @@ public sealed interface ChaosSelector
    *
    * @param operations set of DNS operations to intercept; must not be empty
    */
-  static DnsSelector dns(Set<OperationType> operations) {
+  static DnsSelector dns(final Set<OperationType> operations) {
     return new DnsSelector(operations, NamePattern.any());
   }
 
@@ -370,7 +375,7 @@ public sealed interface ChaosSelector
    * @param hostnamePattern pattern matched against the hostname being resolved; {@code null}
    *     matches {@code InetAddress.getLocalHost()} (which has no hostname argument)
    */
-  static DnsSelector dns(Set<OperationType> operations, NamePattern hostnamePattern) {
+  static DnsSelector dns(final Set<OperationType> operations, final NamePattern hostnamePattern) {
     return new DnsSelector(operations, hostnamePattern);
   }
 
@@ -381,7 +386,7 @@ public sealed interface ChaosSelector
    *
    * @param operations set of SSL operations to intercept; must not be empty
    */
-  static SslSelector ssl(Set<OperationType> operations) {
+  static SslSelector ssl(final Set<OperationType> operations) {
     return new SslSelector(operations);
   }
 
@@ -393,7 +398,7 @@ public sealed interface ChaosSelector
    *
    * @param operations set of file I/O operations to intercept; must not be empty
    */
-  static FileIoSelector fileIo(Set<OperationType> operations) {
+  static FileIoSelector fileIo(final Set<OperationType> operations) {
     return new FileIoSelector(operations);
   }
 
@@ -407,7 +412,7 @@ public sealed interface ChaosSelector
    *
    * @param target the stressor to activate; must not be null
    */
-  static StressSelector stress(StressTarget target) {
+  static StressSelector stress(final StressTarget target) {
     return new StressSelector(target);
   }
 

@@ -2,6 +2,7 @@ package com.macstab.chaos.api;
 
 import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 
 /**
@@ -50,7 +51,7 @@ public record ChaosPlan(
     // JSON plans with a literal `null` in the scenarios array reach this constructor; the raw
     // NPE escapes ChaosPlanMapper.read's JsonProcessingException catch (only checked exceptions
     // are caught), leaving operators with a stack trace that names no field and no plan.
-    if (scenarios.stream().anyMatch(s -> s == null)) {
+    if (scenarios.stream().anyMatch(Objects::isNull)) {
       throw new IllegalArgumentException("scenarios must not contain null entries");
     }
     // Reject duplicate scenario ids up front. Without this, activate(ChaosPlan) in the control
