@@ -76,6 +76,20 @@ public final class ChaosHandleRegistry implements DisposableBean {
             () -> "chaos-agent: failed to stop previous handle for id=" + handle.id());
       }
     }
+    // Re-check closing after the put: stopAll() may have drained the map in the window
+    // between our initial closing==false read (above) and the put. If it has, the handle we
+    // just inserted will never be drained — stopAll() has already exited. Remove it ourselves
+    // and stop it inline, matching the short-circuit path above.
+    if (closing && handles.remove(handle.id(), handle)) {
+      try {
+        handle.stop();
+      } catch (final RuntimeException exception) {
+        LOGGER.log(
+            Level.WARNING,
+            exception,
+            () -> "chaos-agent: failed to stop late-racing handle for id=" + handle.id());
+      }
+    }
   }
 
   /**
@@ -127,17 +141,15 @@ public final class ChaosHandleRegistry implements DisposableBean {
     // past the check, which themselves iterate on map entries we will observe in the pass.
     closing = true;
     int count = 0;
-    // Drain in passes until the map is empty. A single-pass iteration over a weakly-consistent
-    // ConcurrentHashMap entrySet() iterator is not guaranteed to observe entries inserted by a
-    // concurrent register() after the iterator was constructed — the closing flag now bounds
-    // this to at most one extra pass in the worst case. Key+value CAS remove guards against
-    // stale replacements inside a pass.
-    while (!handles.isEmpty()) {
-      final var iterator = handles.entrySet().iterator();
-      while (iterator.hasNext()) {
-        final Map.Entry<String, ChaosActivationHandle> entry = iterator.next();
-        final ChaosActivationHandle handle = entry.getValue();
-        if (!handles.remove(entry.getKey(), handle)) {
+    // Two-pass bounded drain. After closing=true, register() calls that already passed the
+    // closing==false check can still insert into the map — at most one batch before they
+    // observe closing=true and stop inline. Two snapshot passes are sufficient: pass 0 drains
+    // everything present at the time closing is set; pass 1 catches the bounded set of inserts
+    // that slipped through the closing guard between our volatile write and pass 0's snapshot.
+    for (int pass = 0; pass < 2; pass++) {
+      for (final String key : java.util.List.copyOf(handles.keySet())) {
+        final ChaosActivationHandle handle = handles.remove(key);
+        if (handle == null) {
           continue;
         }
         try {

@@ -81,18 +81,17 @@ final class ThreadLocalLeakStressor implements ManagedStressor {
 
   @Override
   public void close() {
-    // Submit one removal task per planted ThreadLocal back to the common pool. Work-stealing does
-    // not guarantee that a removal lands on the same worker that called set() in the constructor,
-    // so some entries may persist on threads that have since been idled or replaced — this is the
-    // best-effort contract the class-level javadoc already calls out.
-    final List<ForkJoinTask<?>> cleanupTasks = new ArrayList<>(plantedLocals.size());
+    // Submit `parallelism` removal tasks per ThreadLocal. Each planted entry was set on exactly
+    // one worker thread, but work-stealing provides no guarantee that a single removal task lands
+    // on the same worker. Submitting one task per worker per local ensures that every live pool
+    // thread will execute local.remove(), regardless of which worker holds the entry.
+    // remove() is a no-op on threads that never called set(), so the redundant calls are safe.
+    final int parallelism = ForkJoinPool.commonPool().getParallelism();
+    final List<ForkJoinTask<?>> cleanupTasks = new ArrayList<>(plantedLocals.size() * parallelism);
     for (final ThreadLocal<byte[]> local : plantedLocals) {
-      cleanupTasks.add(
-          ForkJoinPool.commonPool()
-              .submit(
-                  () -> {
-                    local.remove();
-                  }));
+      for (int t = 0; t < parallelism; t++) {
+        cleanupTasks.add(ForkJoinPool.commonPool().submit(local::remove));
+      }
     }
     int failures = 0;
     for (final ForkJoinTask<?> task : cleanupTasks) {

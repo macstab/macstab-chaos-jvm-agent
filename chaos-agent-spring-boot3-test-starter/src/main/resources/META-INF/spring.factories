@@ -1,2 +1,2 @@
-org.springframework.context.ApplicationContextInitializer=\
-com.macstab.chaos.spring.boot3.test.ChaosAgentInitializer
+# ChaosAgentInitializer is no longer registered globally here.
+# It is applied only when @ChaosTest is present, via @ContextConfiguration on that annotation.

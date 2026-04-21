@@ -394,11 +394,18 @@ public final class JdkInstrumentationInstaller {
               .transform(
                   (builder, typeDescription, classLoader, module, protectionDomain) ->
                       builder
+                          // park(Object blocker) — used by j.u.c. locks that set the blocker
                           .visit(
                               Advice.to(JvmRuntimeAdvice.ThreadParkAdvice.class)
                                   .on(
                                       ElementMatchers.named("park")
                                           .and(ElementMatchers.takesArguments(Object.class))))
+                          // park() — 0-arg variant used by direct LockSupport callers
+                          .visit(
+                              Advice.to(JvmRuntimeAdvice.ThreadParkAdvice.class)
+                                  .on(
+                                      ElementMatchers.named("park")
+                                          .and(ElementMatchers.takesArguments(0))))
                           .visit(
                               Advice.to(JvmRuntimeAdvice.ThreadParkAdvice.class)
                                   .on(
@@ -406,13 +413,25 @@ public final class JdkInstrumentationInstaller {
                                           .and(
                                               ElementMatchers.takesArguments(
                                                   Object.class, long.class))))
+                          // parkNanos(long nanos) — 1-arg variant without blocker
+                          .visit(
+                              Advice.to(JvmRuntimeAdvice.ThreadParkAdvice.class)
+                                  .on(
+                                      ElementMatchers.named("parkNanos")
+                                          .and(ElementMatchers.takesArguments(long.class))))
                           .visit(
                               Advice.to(JvmRuntimeAdvice.ThreadParkAdvice.class)
                                   .on(
                                       ElementMatchers.named("parkUntil")
                                           .and(
                                               ElementMatchers.takesArguments(
-                                                  Object.class, long.class)))))
+                                                  Object.class, long.class))))
+                          // parkUntil(long deadline) — 1-arg variant without blocker
+                          .visit(
+                              Advice.to(JvmRuntimeAdvice.ThreadParkAdvice.class)
+                                  .on(
+                                      ElementMatchers.named("parkUntil")
+                                          .and(ElementMatchers.takesArguments(long.class)))))
               // AQS.acquire (MONITOR_ENTER proxy)
               // Safe: ChaosRuntime uses ConcurrentHashMap (lock-free) for registry.match().
               // The one internal AQS user is ManualGate (ReentrantLock), but ManualGate is only
@@ -526,12 +545,20 @@ public final class JdkInstrumentationInstaller {
                                   ElementMatchers.named("accept")
                                       .and(ElementMatchers.takesArguments(0)))))
               // SocketInputStream / SocketOutputStream (package-private)
+              // Only instrument the 3-argument bulk variant of read(): the 0-arg single-byte
+              // overload delegates internally to read(byte[], int, int), causing double-fire of
+              // beforeSocketRead for each single-byte application call. Restricting to the final
+              // I/O dispatch avoids double-counting rate-limit permits and probability draws.
               .type(ElementMatchers.named("java.net.SocketInputStream"))
               .transform(
                   (builder, typeDescription, classLoader, module, protectionDomain) ->
                       builder.visit(
                           Advice.to(JvmRuntimeAdvice.SocketReadAdvice.class)
-                              .on(ElementMatchers.named("read"))))
+                              .on(
+                                  ElementMatchers.named("read")
+                                      .and(
+                                          ElementMatchers.takesArguments(
+                                              byte[].class, int.class, int.class)))))
               .type(ElementMatchers.named("java.net.SocketOutputStream"))
               .transform(
                   (builder, typeDescription, classLoader, module, protectionDomain) ->
@@ -632,7 +659,7 @@ public final class JdkInstrumentationInstaller {
               "jdk.internal.loader.NativeLibraries",
               builder ->
                   builder.visit(
-                      Advice.to(JvmRuntimeAdvice.NativeLibraryLoadAdvice.class)
+                      Advice.to(JvmRuntimeAdvice.NativeLibrariesLoadAdvice.class)
                           .on(ElementMatchers.named("load"))));
 
       // CompletableFuture.cancel
@@ -761,7 +788,12 @@ public final class JdkInstrumentationInstaller {
                       Advice.to(HttpClientAdvice.ApacheHc5ExecuteAdvice.class)
                           .on(
                               ElementMatchers.named("execute")
-                                  .and(ElementMatchers.takesArguments(2)))));
+                                  // 2-arg: execute(ClassicHttpRequest, ClassicHttpResponseHandler)
+                                  // 3-arg: execute(ClassicHttpRequest, HttpContext,
+                                  //                ClassicHttpResponseHandler)
+                                  .and(
+                                      ElementMatchers.takesArguments(2)
+                                          .or(ElementMatchers.takesArguments(3))))));
 
       agentBuilder =
           instrumentOptional(
@@ -874,12 +906,23 @@ public final class JdkInstrumentationInstaller {
               .type(ElementMatchers.named("java.lang.Thread"))
               .transform(
                   (builder, typeDescription, classLoader, module, protectionDomain) ->
-                      builder.visit(
-                          Advice.to(JvmRuntimeAdvice.ThreadSleepAdvice.class)
-                              .on(
-                                  ElementMatchers.named("sleep")
-                                      .and(ElementMatchers.isStatic())
-                                      .and(ElementMatchers.takesArguments(long.class)))));
+                      builder
+                          // sleep(long millis)
+                          .visit(
+                              Advice.to(JvmRuntimeAdvice.ThreadSleepAdvice.class)
+                                  .on(
+                                      ElementMatchers.named("sleep")
+                                          .and(ElementMatchers.isStatic())
+                                          .and(ElementMatchers.takesArguments(long.class))))
+                          // sleep(long millis, int nanos) — advice reads only arg 0 (millis)
+                          .visit(
+                              Advice.to(JvmRuntimeAdvice.ThreadSleepAdvice.class)
+                                  .on(
+                                      ElementMatchers.named("sleep")
+                                          .and(ElementMatchers.isStatic())
+                                          .and(
+                                              ElementMatchers.takesArguments(
+                                                  long.class, int.class)))));
 
       // ── DNS resolution interception (2.6) ──────────────────────────────────
       // InetAddress is always present; no instrumentOptional needed.
@@ -960,6 +1003,11 @@ public final class JdkInstrumentationInstaller {
                               Advice.to(JvmRuntimeAdvice.FileReadAdvice.class)
                                   .on(
                                       ElementMatchers.named("read")
+                                          .and(ElementMatchers.takesArguments(byte[].class))))
+                          .visit(
+                              Advice.to(JvmRuntimeAdvice.FileReadAdvice.class)
+                                  .on(
+                                      ElementMatchers.named("read")
                                           .and(
                                               ElementMatchers.takesArguments(
                                                   byte[].class, int.class, int.class)))))
@@ -972,6 +1020,11 @@ public final class JdkInstrumentationInstaller {
                                   .on(
                                       ElementMatchers.named("write")
                                           .and(ElementMatchers.takesArguments(int.class))))
+                          .visit(
+                              Advice.to(JvmRuntimeAdvice.FileWriteAdvice.class)
+                                  .on(
+                                      ElementMatchers.named("write")
+                                          .and(ElementMatchers.takesArguments(byte[].class))))
                           .visit(
                               Advice.to(JvmRuntimeAdvice.FileWriteAdvice.class)
                                   .on(
@@ -1313,7 +1366,12 @@ public final class JdkInstrumentationInstaller {
   private static AgentBuilder instrumentOptional(
       final AgentBuilder builder, final String typeName, final BuilderTransformer transformer) {
     try {
-      Class.forName(typeName, false, ClassLoader.getSystemClassLoader());
+      // Prefer the thread context classloader: OSGi containers and Spring Boot fat-JAR launchers
+      // (LaunchedURLClassLoader) load application classes under a custom CL that is invisible to
+      // the system classloader. Fall back to the system CL on startup threads where the context
+      // CL may be null or may be the bootstrap CL (before the app CL is installed).
+      final ClassLoader probe = Thread.currentThread().getContextClassLoader();
+      Class.forName(typeName, false, probe != null ? probe : ClassLoader.getSystemClassLoader());
     } catch (ClassNotFoundException ignored) {
       LOGGER.fine("[chaos-agent] optional instrumentation target not present: " + typeName);
       return builder;

@@ -33,10 +33,10 @@ final class ScheduledExecutorAdvice {
         @Advice.Argument(value = 1, readOnly = false) long delay,
         @Advice.Argument(value = 2, readOnly = false) TimeUnit unit)
         throws Throwable {
-      task = BootstrapDispatcher.decorateExecutorRunnable("SCHEDULE_SUBMIT", executor, task);
-      // Capture the decorated (but not yet wrapped) task so adjustScheduleDelay sees the
-      // original task class name in the InvocationContext, not ScheduledRunnableWrapper.
+      // Capture BEFORE decoration so adjustScheduleDelay sees the application's task class
+      // name in the InvocationContext, not the decorator or ScheduledRunnableWrapper wrapper.
       final Runnable taskForDelay = task;
+      task = BootstrapDispatcher.decorateExecutorRunnable("SCHEDULE_SUBMIT", executor, task);
       task = new ScheduledRunnableWrapper(executor, task, false);
       // Dispatcher speaks in milliseconds only; normalize the caller's unit before dispatch
       // and rewrite both arguments so the executor interprets the adjusted value as millis.
@@ -84,8 +84,8 @@ final class ScheduledExecutorAdvice {
         @Advice.Argument(value = 2, readOnly = false) long period,
         @Advice.Argument(value = 3, readOnly = false) TimeUnit unit)
         throws Throwable {
-      task = BootstrapDispatcher.decorateExecutorRunnable("SCHEDULE_SUBMIT", executor, task);
       final Runnable taskForDelay = task;
+      task = BootstrapDispatcher.decorateExecutorRunnable("SCHEDULE_SUBMIT", executor, task);
       task = new ScheduledRunnableWrapper(executor, task, true);
       // Period must be normalized alongside initialDelay because we rewrite the unit to
       // MILLISECONDS — leaving period in the original unit would multiply or divide the

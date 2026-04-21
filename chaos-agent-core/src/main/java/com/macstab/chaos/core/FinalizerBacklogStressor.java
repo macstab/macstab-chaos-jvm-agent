@@ -1,6 +1,7 @@
 package com.macstab.chaos.core;
 
 import com.macstab.chaos.api.ChaosEffect;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Logger;
 
 /**
@@ -25,6 +26,7 @@ final class FinalizerBacklogStressor implements ManagedStressor {
   private static final Logger LOGGER = Logger.getLogger("com.macstab.chaos");
 
   private final int createdCount;
+  private final AtomicBoolean stopped = new AtomicBoolean(false);
 
   @SuppressWarnings({"deprecation", "removal"})
   FinalizerBacklogStressor(final ChaosEffect.FinalizerBacklogEffect effect) {
@@ -32,7 +34,7 @@ final class FinalizerBacklogStressor implements ManagedStressor {
 
     // Create all objects without retaining references. They become GC-eligible immediately.
     for (int i = 0; i < effect.objectCount(); i++) {
-      new FinalizableObject(delayMs);
+      new FinalizableObject(delayMs, stopped);
     }
     this.createdCount = effect.objectCount();
     LOGGER.fine(
@@ -46,7 +48,8 @@ final class FinalizerBacklogStressor implements ManagedStressor {
 
   @Override
   public void close() {
-    // Objects are already GC-eligible; nothing to release.
+    // Signal all pending FinalizableObject.finalize() calls to return early without sleeping.
+    stopped.set(true);
   }
 
   /** Returns the number of finalizable objects created by this stressor instance. */
@@ -62,13 +65,18 @@ final class FinalizerBacklogStressor implements ManagedStressor {
   private static final class FinalizableObject {
 
     private final long delayMs;
+    private final AtomicBoolean stopped;
 
-    FinalizableObject(final long delayMs) {
+    FinalizableObject(final long delayMs, final AtomicBoolean stopped) {
       this.delayMs = delayMs;
+      this.stopped = stopped;
     }
 
     @Override
     protected void finalize() {
+      if (stopped.get()) {
+        return;
+      }
       if (delayMs > 0) {
         try {
           Thread.sleep(delayMs);

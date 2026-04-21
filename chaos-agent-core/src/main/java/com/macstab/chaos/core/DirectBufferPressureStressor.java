@@ -2,6 +2,7 @@ package com.macstab.chaos.core;
 
 import com.macstab.chaos.api.ChaosEffect;
 import java.lang.ref.Cleaner;
+import java.lang.reflect.Method;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
@@ -34,7 +35,40 @@ final class DirectBufferPressureStressor implements ManagedStressor {
   private static final Logger LOGGER = Logger.getLogger("com.macstab.chaos");
   private static final Cleaner CLEANER = Cleaner.create();
 
-  private final List<ByteBuffer> retainedBuffers;
+  /** Cached reflection handle for {@code sun.nio.ch.DirectBuffer.cleaner()}, or {@code null}. */
+  private static final Method DIRECT_BUFFER_CLEANER = resolveCleanerMethod();
+
+  /** Cached reflection handle for {@code sun.misc.Cleaner.clean()}, or {@code null}. */
+  private static final Method CLEANER_CLEAN = resolveCleanerCleanMethod();
+
+  private static Method resolveCleanerMethod() {
+    try {
+      final Method m = ByteBuffer.allocateDirect(1).getClass().getMethod("cleaner");
+      m.setAccessible(true);
+      return m;
+    } catch (final Exception ignored) {
+      return null;
+    }
+  }
+
+  private static Method resolveCleanerCleanMethod() {
+    if (DIRECT_BUFFER_CLEANER == null) {
+      return null;
+    }
+    try {
+      final Object cleaner = DIRECT_BUFFER_CLEANER.invoke(ByteBuffer.allocateDirect(1));
+      if (cleaner == null) {
+        return null;
+      }
+      final Method m = cleaner.getClass().getMethod("clean");
+      m.setAccessible(true);
+      return m;
+    } catch (final Exception ignored) {
+      return null;
+    }
+  }
+
+  private volatile List<ByteBuffer> retainedBuffers;
 
   DirectBufferPressureStressor(final ChaosEffect.DirectBufferPressureEffect effect) {
     final List<ByteBuffer> buffers = new ArrayList<>();
@@ -61,27 +95,29 @@ final class DirectBufferPressureStressor implements ManagedStressor {
 
   @Override
   public void close() {
-    for (final ByteBuffer buffer : retainedBuffers) {
-      freeDirectBuffer(buffer);
+    final List<ByteBuffer> buffers = retainedBuffers;
+    retainedBuffers = List.of();
+    if (buffers != null) {
+      for (final ByteBuffer buffer : buffers) {
+        freeDirectBuffer(buffer);
+      }
     }
   }
 
   /** Returns the number of directly-retained buffers (registerCleaner=false only). */
   int retainedBufferCount() {
-    return retainedBuffers.size();
+    final List<ByteBuffer> snapshot = retainedBuffers;
+    return snapshot == null ? 0 : snapshot.size();
   }
 
   private static void freeDirectBuffer(final ByteBuffer buffer) {
-    if (buffer == null || !buffer.isDirect()) {
+    if (buffer == null || !buffer.isDirect() || DIRECT_BUFFER_CLEANER == null) {
       return;
     }
     try {
-      // Access the internal sun.nio.ch.DirectBuffer cleaner via reflection.
-      // On JDK 9+ with --add-opens this is accessible; on sealed builds the fallback
-      // is to let GC handle it.
-      final Object cleaner = buffer.getClass().getMethod("cleaner").invoke(buffer);
-      if (cleaner != null) {
-        cleaner.getClass().getMethod("clean").invoke(cleaner);
+      final Object cleaner = DIRECT_BUFFER_CLEANER.invoke(buffer);
+      if (cleaner != null && CLEANER_CLEAN != null) {
+        CLEANER_CLEAN.invoke(cleaner);
       }
     } catch (final Exception e) {
       LOGGER.fine(() -> "DirectBufferPressureStressor: could not eagerly free direct buffer: " + e);

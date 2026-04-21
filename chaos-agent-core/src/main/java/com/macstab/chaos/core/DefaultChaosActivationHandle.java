@@ -30,6 +30,8 @@ import com.macstab.chaos.api.ChaosDiagnostics;
 public final class DefaultChaosActivationHandle implements ChaosActivationHandle {
   private final ScenarioController controller;
   private final ScenarioRegistry registry;
+  private final java.util.concurrent.atomic.AtomicBoolean destroyed =
+      new java.util.concurrent.atomic.AtomicBoolean(false);
 
   /**
    * Creates a handle that wraps the given controller and registry.
@@ -96,6 +98,9 @@ public final class DefaultChaosActivationHandle implements ChaosActivationHandle
    * {@code stop()} alone would leak entries into the registry indefinitely across reloads.
    */
   public void destroy() {
+    if (!destroyed.compareAndSet(false, true)) {
+      return;
+    }
     controller.destroy();
     registry.unregister(controller);
   }

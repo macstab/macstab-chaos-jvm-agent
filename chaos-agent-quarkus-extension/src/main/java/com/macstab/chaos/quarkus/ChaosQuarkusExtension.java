@@ -21,6 +21,7 @@ import org.junit.jupiter.api.extension.BeforeAllCallback;
 import org.junit.jupiter.api.extension.BeforeEachCallback;
 import org.junit.jupiter.api.extension.ExtensionContext;
 import org.junit.jupiter.api.extension.ParameterContext;
+import org.junit.jupiter.api.extension.ParameterResolutionException;
 import org.junit.jupiter.api.extension.ParameterResolver;
 
 /**
@@ -147,21 +148,25 @@ public final class ChaosQuarkusExtension
   public void afterAll(final ExtensionContext context) {
     final ChaosSession session =
         context.getStore(NAMESPACE).remove(ChaosSession.class, ChaosSession.class);
-    if (session != null) {
-      session.close();
-    }
-    // Stop every JVM-scoped handle we captured during the class; otherwise JVM-scoped
-    // @ChaosScenario activations leak into every subsequent test in this JVM.
-    @SuppressWarnings("unchecked")
-    final List<ChaosActivationHandle> handles =
-        (List<ChaosActivationHandle>)
-            context.getStore(NAMESPACE).remove(JVM_HANDLES_KEY, List.class);
-    if (handles != null) {
-      for (final ChaosActivationHandle handle : handles) {
-        try {
-          handle.stop();
-        } catch (final RuntimeException ignored) {
-          // best-effort teardown — an exception here must not mask a real test failure
+    // try/finally ensures JVM-scoped handles are always stopped even if session.close() throws.
+    try {
+      if (session != null) {
+        session.close();
+      }
+    } finally {
+      // Stop every JVM-scoped handle we captured during the class; otherwise JVM-scoped
+      // @ChaosScenario activations leak into every subsequent test in this JVM.
+      @SuppressWarnings("unchecked")
+      final List<ChaosActivationHandle> handles =
+          (List<ChaosActivationHandle>)
+              context.getStore(NAMESPACE).remove(JVM_HANDLES_KEY, List.class);
+      if (handles != null) {
+        for (final ChaosActivationHandle handle : handles) {
+          try {
+            handle.stop();
+          } catch (final RuntimeException ignored) {
+            // best-effort teardown — an exception here must not mask a real test failure
+          }
         }
       }
     }
@@ -186,7 +191,11 @@ public final class ChaosQuarkusExtension
       }
       current = current.getParent().orElse(null);
     }
-    return null;
+    throw new ParameterResolutionException(
+        "ChaosQuarkusExtension: no "
+            + parameterType.getSimpleName()
+            + " available — ensure the test class is annotated with @QuarkusChaosTest"
+            + " and beforeAll() has run before parameter injection");
   }
 
   private static ChaosSession lookupSession(final ExtensionContext context) {
@@ -247,11 +256,12 @@ public final class ChaosQuarkusExtension
       }
       current = current.getParent().orElse(null);
     }
-    // Defensive fallback — beforeAll always installs the list, but if an extension is wired
-    // via beforeEach only (without beforeAll) we still want to collect handles somewhere
-    // rather than NPE. These handles will never be stopped automatically, which is no worse
-    // than the previous behaviour.
-    return new ArrayList<>();
+    // Defensive fallback — beforeAll always installs the list. If somehow reached without
+    // beforeAll (e.g. extension registered without @QuarkusChaosTest), create and store a
+    // new list in the nearest writable context so afterAll can find and stop these handles.
+    final List<ChaosActivationHandle> fallback = new ArrayList<>();
+    context.getStore(NAMESPACE).put(JVM_HANDLES_KEY, fallback);
+    return fallback;
   }
 
   static com.macstab.chaos.api.ChaosScenario toScenario(final ChaosScenario annotation) {
@@ -299,8 +309,15 @@ public final class ChaosQuarkusExtension
     final String normalized = effect.trim();
     if (normalized.startsWith("delay:")) {
       final String durationText = normalized.substring("delay:".length());
-      final Duration delay = Duration.parse(durationText);
-      return ChaosEffect.delay(delay);
+      try {
+        return ChaosEffect.delay(Duration.parse(durationText));
+      } catch (final java.time.format.DateTimeParseException ex) {
+        throw new IllegalArgumentException(
+            "unsupported effect duration in '"
+                + effect
+                + "': expected ISO-8601 format, e.g. PT0.1S",
+            ex);
+      }
     }
     switch (normalized) {
       case "suppress":

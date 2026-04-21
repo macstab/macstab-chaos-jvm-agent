@@ -166,6 +166,17 @@ final class HttpUrlExtractor {
     if (request == null) {
       return null;
     }
+    // HC5 ClassicHttpRequest exposes getUri() returning a full java.net.URI (scheme+host+path).
+    // Prefer it over getRequestUri() which returns only the request-target path string
+    // (e.g. "/api/v1/resource"), making host-pattern matching against "https://host/*" fail.
+    try {
+      final Object uri = invoke(request, "getUri");
+      if (uri != null) {
+        return uri.toString();
+      }
+    } catch (final Throwable ignored) {
+      // fall through to path-only fallback
+    }
     try {
       final Object uri = invoke(request, "getRequestUri");
       return uri == null ? null : uri.toString();
@@ -216,13 +227,19 @@ final class HttpUrlExtractor {
           // leave method un-accessible; invoke() may still succeed for public methods in
           // exported packages.
         }
-        perClass.put(methodName, method);
+        // putIfAbsent: if two threads both miss the cache and call findMethod concurrently, the
+        // first accessible Method wins. If the loser's setAccessible threw, the winner's
+        // accessible copy is already in place; the loser's un-accessible copy is discarded.
+        final Method existing = perClass.putIfAbsent(methodName, method);
+        if (existing != null) {
+          method = existing;
+        }
       } else {
         // Cache the *absence* of a matching method so that subsequent calls on the same class
         // skip the full superclass + interface walk. Without this, every intercepted HTTP call
         // against a class that happens not to expose the expected accessor re-runs findMethod —
         // a reflective traversal of the entire type hierarchy on every request.
-        perClass.put(methodName, NEGATIVE_CACHE_MARKER);
+        perClass.putIfAbsent(methodName, NEGATIVE_CACHE_MARKER);
       }
     }
     if (method == null || method == NEGATIVE_CACHE_MARKER) {

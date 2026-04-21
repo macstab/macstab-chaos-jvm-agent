@@ -51,7 +51,6 @@ final class CodeCachePressureStressor implements ManagedStressor {
       final URLClassLoader loader = new URLClassLoader(new URL[0], null);
       final Class<?> cls = generateAndLoadClass(i, effect.methodsPerClass(), loader);
       if (cls != null) {
-        triggerCompilation(cls, effect.methodsPerClass());
         classes.add(cls);
         loaders.add(loader);
       } else {
@@ -65,6 +64,26 @@ final class CodeCachePressureStressor implements ManagedStressor {
     }
     this.retainedClasses = List.copyOf(classes);
     this.retainedLoaders = List.copyOf(loaders);
+
+    // Trigger JIT compilation on a background daemon thread so the activation path is not
+    // blocked for the duration of the 15,000-invocations-per-method compilation loop.
+    if (!classes.isEmpty()) {
+      final List<Class<?>> snapshot = List.copyOf(classes);
+      final int methodsPerClass = effect.methodsPerClass();
+      final Thread compiler =
+          new Thread(
+              () -> {
+                for (final Class<?> cls2 : snapshot) {
+                  if (retainedClasses == null) {
+                    return;
+                  }
+                  triggerCompilation(cls2, methodsPerClass);
+                }
+              },
+              "chaos-code-cache-compiler");
+      compiler.setDaemon(true);
+      compiler.start();
+    }
 
     if (compilationBean != null && compilationBean.isCompilationTimeMonitoringSupported()) {
       final long delta = compilationBean.getTotalCompilationTime() - compilationTimeBefore;
@@ -81,7 +100,6 @@ final class CodeCachePressureStressor implements ManagedStressor {
 
   @Override
   public void close() {
-    retainedClasses = null;
     final List<URLClassLoader> loaders = retainedLoaders;
     retainedLoaders = null;
     if (loaders != null) {
@@ -89,11 +107,13 @@ final class CodeCachePressureStressor implements ManagedStressor {
         try {
           loader.close();
         } catch (java.io.IOException ignored) {
-          // Best-effort: without a retained Class<?> the loader is unreachable once retainedClasses
-          // is nulled, so GC + Metaspace reclamation is the ultimate path regardless.
+          // Best-effort: GC + Metaspace reclamation is the ultimate path regardless.
         }
       }
     }
+    // Null classes last: retainedClassCount() == 0 signals Metaspace is fully released,
+    // but Metaspace is anchored by the loaders above — null only after all loaders are closed.
+    retainedClasses = null;
   }
 
   /** Returns the number of classes currently retained, or 0 after {@link #close()}. */

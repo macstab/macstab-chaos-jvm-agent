@@ -8,6 +8,7 @@ import org.junit.jupiter.api.extension.AfterAllCallback;
 import org.junit.jupiter.api.extension.BeforeAllCallback;
 import org.junit.jupiter.api.extension.ExtensionContext;
 import org.junit.jupiter.api.extension.ParameterContext;
+import org.junit.jupiter.api.extension.ParameterResolutionException;
 import org.junit.jupiter.api.extension.ParameterResolver;
 
 /**
@@ -61,11 +62,15 @@ public final class ChaosAgentExtension
         context.getStore(NAMESPACE).remove(ChaosControlPlane.class, ChaosControlPlane.class);
     // Close the session first so session-scoped scenarios stop via their owning session's
     // lifecycle, then drain any JVM-scoped handles the test class activated via the tracker.
-    if (session != null) {
-      session.close();
-    }
-    if (controlPlane instanceof TrackingChaosControlPlane tracker) {
-      tracker.stopTracked();
+    // try/finally ensures stopTracked() runs even if session.close() throws.
+    try {
+      if (session != null) {
+        session.close();
+      }
+    } finally {
+      if (controlPlane instanceof TrackingChaosControlPlane tracker) {
+        tracker.stopTracked();
+      }
     }
   }
 
@@ -88,6 +93,10 @@ public final class ChaosAgentExtension
       }
       current = current.getParent().orElse(null);
     }
-    return null;
+    throw new ParameterResolutionException(
+        "ChaosAgentExtension: no "
+            + parameterType.getSimpleName()
+            + " available — ensure the test class is annotated with @ChaosTest"
+            + " and beforeAll() has run before parameter injection");
   }
 }

@@ -94,20 +94,31 @@ public final class TrackingChaosControlPlane implements ChaosControlPlane {
    * cannot block cleanup of the rest.
    */
   public void stopTracked() {
-    final Iterator<ChaosActivationHandle> iterator;
-    synchronized (handles) {
-      iterator = new ArrayDeque<>(handles).descendingIterator();
-      handles.clear();
-    }
-    while (iterator.hasNext()) {
-      final ChaosActivationHandle handle = iterator.next();
-      try {
-        handle.stop();
-      } catch (final RuntimeException exception) {
-        LOGGER.log(
-            Level.WARNING,
-            exception,
-            () -> "chaos-agent: failed to stop JVM-scoped handle during test teardown");
+    // Drain in a loop rather than taking one snapshot. A concurrent activate() call between
+    // the snapshot and handles.clear() would add a handle that is already in 'handles' but not
+    // in the snapshot's iterator — that handle would be silently orphaned for the rest of the
+    // JVM lifetime. Looping until the deque stays empty after clear() guarantees every handle
+    // registered before the deque is lastly observed empty is stopped.
+    while (true) {
+      final ArrayDeque<ChaosActivationHandle> snapshot;
+      synchronized (handles) {
+        if (handles.isEmpty()) {
+          return;
+        }
+        snapshot = new ArrayDeque<>(handles);
+        handles.clear();
+      }
+      final Iterator<ChaosActivationHandle> iterator = snapshot.descendingIterator();
+      while (iterator.hasNext()) {
+        final ChaosActivationHandle handle = iterator.next();
+        try {
+          handle.stop();
+        } catch (final RuntimeException exception) {
+          LOGGER.log(
+              Level.WARNING,
+              exception,
+              () -> "chaos-agent: failed to stop JVM-scoped handle during test teardown");
+        }
       }
     }
   }

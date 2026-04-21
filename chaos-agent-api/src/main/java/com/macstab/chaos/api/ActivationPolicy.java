@@ -49,7 +49,10 @@ import java.time.Duration;
  * @param maxApplications hard cap on total effect applications; {@code null} means unlimited
  * @param activeFor time window during which the scenario remains active; {@code null} means none
  * @param rateLimit sliding-window rate cap on applications; {@code null} means unlimited
- * @param randomSeed fixed PRNG seed for reproducible probability sampling; {@code null} uses 0L
+ * @param randomSeed fixed PRNG seed for reproducible probability sampling; {@code null} draws a
+ *     random seed from {@link java.util.concurrent.ThreadLocalRandom} on first activation —
+ *     sampling is non-deterministic across JVM restarts; set an explicit value for reproducible
+ *     sequences
  * @param allowDestructiveEffects whether non-recoverable effects may be activated
  */
 public record ActivationPolicy(
@@ -117,8 +120,9 @@ public record ActivationPolicy(
    * @param activeFor time window from first start during which the scenario remains active; {@code
    *     null} means no time bound
    * @param rateLimit sliding-window rate cap on applications; {@code null} means unlimited
-   * @param randomSeed fixed PRNG seed for reproducible probability sampling; {@code null} uses
-   *     {@code 0L}
+   * @param randomSeed fixed PRNG seed for reproducible probability sampling; {@code null} draws a
+   *     random seed from {@link java.util.concurrent.ThreadLocalRandom} — non-deterministic across
+   *     JVM restarts
    * @param allowDestructiveEffects whether non-recoverable effects may be activated
    * @return a new {@link ActivationPolicy} built from the parsed JSON values
    */

@@ -10,6 +10,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
 import org.springframework.core.annotation.AliasFor;
+import org.springframework.test.context.ContextConfiguration;
 
 /**
  * Meta-annotation combining {@link SpringBootTest} and the {@link ChaosAgentExtension} so that a
@@ -35,6 +36,7 @@ import org.springframework.core.annotation.AliasFor;
 @Inherited
 @SpringBootTest
 @ExtendWith(ChaosAgentExtension.class)
+@ContextConfiguration(initializers = ChaosAgentInitializer.class)
 public @interface ChaosTest {
 
   /**

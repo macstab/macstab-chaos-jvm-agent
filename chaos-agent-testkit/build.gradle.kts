@@ -1,8 +1,8 @@
 dependencies {
     api(project(":chaos-agent-api"))
     implementation(project(":chaos-agent-bootstrap"))
-    implementation(platform(libs.junit.bom))
-    implementation(libs.junit.jupiter.api)
+    api(platform(libs.junit.bom))
+    api(libs.junit.jupiter.api)
 
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)

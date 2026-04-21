@@ -106,15 +106,19 @@ final class DeadlockStressor implements ManagedStressor {
     for (final Thread thread : participants) {
       thread.interrupt();
     }
+    boolean selfInterrupted = false;
     for (final Thread thread : participants) {
-      try {
-        thread.join(JOIN_TIMEOUT_MILLIS);
-      } catch (final InterruptedException interrupted) {
-        // Restore the interrupt flag so callers see the signal and stop waiting on the remaining
-        // participants. Chaos teardown yielding to shutdown is the correct behaviour.
-        Thread.currentThread().interrupt();
-        return;
+      while (true) {
+        try {
+          thread.join(JOIN_TIMEOUT_MILLIS);
+          break;
+        } catch (final InterruptedException interrupted) {
+          selfInterrupted = true;
+        }
       }
+    }
+    if (selfInterrupted) {
+      Thread.currentThread().interrupt();
     }
   }
 

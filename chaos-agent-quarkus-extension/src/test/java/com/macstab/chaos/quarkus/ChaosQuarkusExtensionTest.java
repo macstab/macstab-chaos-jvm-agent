@@ -123,7 +123,6 @@ class ChaosQuarkusExtensionTest {
 
   @Nested
   @DisplayName("method-level @ChaosScenario activation")
-  @ExtendWith(ChaosQuarkusExtension.class)
   class MethodLevelActivation {
 
     @Test

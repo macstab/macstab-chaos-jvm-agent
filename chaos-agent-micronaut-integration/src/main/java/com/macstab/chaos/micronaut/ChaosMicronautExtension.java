@@ -9,6 +9,7 @@ import org.junit.jupiter.api.extension.AfterAllCallback;
 import org.junit.jupiter.api.extension.BeforeAllCallback;
 import org.junit.jupiter.api.extension.ExtensionContext;
 import org.junit.jupiter.api.extension.ParameterContext;
+import org.junit.jupiter.api.extension.ParameterResolutionException;
 import org.junit.jupiter.api.extension.ParameterResolver;
 
 /**
@@ -75,11 +76,15 @@ public final class ChaosMicronautExtension
         context.getStore(NAMESPACE).remove(ChaosControlPlane.class, ChaosControlPlane.class);
     // Close the session first so session-scoped scenarios are stopped via their owning session's
     // lifecycle, then drain any JVM-scoped handles the test class activated via the tracker.
-    if (session != null) {
-      session.close();
-    }
-    if (controlPlane instanceof TrackingChaosControlPlane tracker) {
-      tracker.stopTracked();
+    // try/finally ensures stopTracked() runs even if session.close() throws.
+    try {
+      if (session != null) {
+        session.close();
+      }
+    } finally {
+      if (controlPlane instanceof TrackingChaosControlPlane tracker) {
+        tracker.stopTracked();
+      }
     }
   }
 
@@ -126,6 +131,14 @@ public final class ChaosMicronautExtension
       }
       current = current.getParent().orElse(null);
     }
-    return null;
+    // JUnit 5 contract: once supportsParameter() returns true, resolveParameter() must return
+    // non-null or throw. Returning null silently injects null into the test parameter, causing
+    // an NPE inside the test body with a misleading stack trace pointing at the test rather
+    // than the missing setup (missing @MicronautChaosTest, beforeAll not yet run, etc.).
+    throw new ParameterResolutionException(
+        "ChaosMicronautExtension: no "
+            + parameterType.getSimpleName()
+            + " available — ensure the test class is annotated with @MicronautChaosTest"
+            + " and beforeAll() has run before parameter injection");
   }
 }

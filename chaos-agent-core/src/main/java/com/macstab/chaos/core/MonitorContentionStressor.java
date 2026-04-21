@@ -66,9 +66,14 @@ final class MonitorContentionStressor implements ManagedStressor {
                   try {
                     final long holdDeadline = System.nanoTime() + holdNanos;
                     while (System.nanoTime() < holdDeadline && !stopped.get()) {
-                      java.util.concurrent.locks.LockSupport.parkNanos(10_000L /* 10 µs */);
-                      if (Thread.interrupted()) {
+                      // Thread.sleep(0, nanos) holds the lock (unlike wait()) and is not
+                      // instrumented by the chaos agent (LockSupport.park* is), preventing
+                      // a chaos delay scenario from recursively targeting this stressor.
+                      try {
+                        Thread.sleep(0, 10_000 /* 10 µs */);
+                      } catch (final InterruptedException ie) {
                         stopped.set(true);
+                        Thread.currentThread().interrupt();
                         return;
                       }
                     }
@@ -103,13 +108,16 @@ final class MonitorContentionStressor implements ManagedStressor {
     // draining their 10 µs park loops, and test suites asserting "no contention threads alive"
     // immediately after deactivate observe flaky counts. Bounded join honours ManagedStressor's
     // "wait for termination" contract.
+    boolean selfInterrupted = false;
     for (final Thread thread : contentionThreads) {
       try {
         thread.join(JOIN_TIMEOUT_MILLIS);
       } catch (final InterruptedException interrupted) {
-        Thread.currentThread().interrupt();
-        return;
+        selfInterrupted = true;
       }
+    }
+    if (selfInterrupted) {
+      Thread.currentThread().interrupt();
     }
   }
 

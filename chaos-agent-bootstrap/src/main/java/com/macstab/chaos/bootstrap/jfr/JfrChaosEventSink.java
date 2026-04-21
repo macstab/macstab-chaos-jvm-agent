@@ -52,6 +52,9 @@ final class JfrChaosEventSink implements ChaosEventListener, AutoCloseable {
 
   private void emitLifecycle(final ChaosEvent event) {
     final ChaosScenarioLifecycleEvent jfrEvent = new ChaosScenarioLifecycleEvent();
+    if (!jfrEvent.isEnabled()) {
+      return;
+    }
     jfrEvent.scenarioId = event.scenarioId();
     jfrEvent.description = event.message();
     jfrEvent.eventType = event.type().name();

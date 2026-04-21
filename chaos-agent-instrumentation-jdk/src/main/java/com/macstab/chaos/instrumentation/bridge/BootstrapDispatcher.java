@@ -642,15 +642,29 @@ public final class BootstrapDispatcher {
    *     delegate is not installed
    */
   public static Thread resolveShutdownHook(final Thread original) {
-    return invoke(
-        () -> {
-          final MethodHandle[] h = handles;
-          final Object d = delegate;
-          return (d == null || h == null)
-              ? original
-              : (Thread) h[RESOLVE_SHUTDOWN_HOOK].invoke(d, original);
-        },
-        original);
+    // Use a safe (non-sneaky-throwing) fallback path: any chaos exception here would propagate
+    // out of Runtime.removeShutdownHook() to the application, which never expects it. Return
+    // the original hook unmodified on any error so the JVM shutdown sequencing is unaffected.
+    try {
+      final int[] depth = DEPTH.get();
+      if (depth[0] > 0) {
+        return original;
+      }
+      depth[0]++;
+      try {
+        final MethodHandle[] h = handles;
+        final Object d = delegate;
+        return (d == null || h == null)
+            ? original
+            : (Thread) h[RESOLVE_SHUTDOWN_HOOK].invoke(d, original);
+      } finally {
+        if (--depth[0] == 0) {
+          DEPTH.remove();
+        }
+      }
+    } catch (final Throwable ignored) {
+      return original;
+    }
   }
 
   /**

@@ -4,6 +4,8 @@ import com.macstab.chaos.api.ChaosSession;
 import java.util.Deque;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentLinkedDeque;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * Thread-local session-ID stack that propagates chaos session context across method calls and
@@ -37,6 +39,8 @@ import java.util.concurrent.ConcurrentLinkedDeque;
  * ConcurrentLinkedDeque#peek()} stays O(1) on the hot path ({@link #currentSessionId()}).
  */
 final class ScopeContext {
+  private static final Logger LOGGER = Logger.getLogger("com.macstab.chaos");
+
   private final ThreadLocal<Deque<String>> sessionStack =
       ThreadLocal.withInitial(ConcurrentLinkedDeque::new);
 
@@ -87,20 +91,17 @@ final class ScopeContext {
       // inner binding is still live). Popping anyway would silently corrupt the stack for every
       // subsequent request served by this pooled thread — a subtle, hard-to-diagnose leak of
       // scope between unrelated requests. Fail loud at the call site instead.
-      if (stack.isEmpty()) {
+      // removeFirstOccurrence atomically finds and removes the entry in a single pass,
+      // closing the TOCTOU window between a separate peek() and pop() where a concurrent
+      // push() from another thread (cross-thread close is allowed by the class contract)
+      // could insert a new head between the peek and pop, causing pop() to remove the wrong
+      // entry and leave this binding's sessionId permanently stranded on the stack.
+      if (!stack.removeFirstOccurrence(sessionId)) {
         throw new IllegalStateException(
-            "ScopeBinding close() called but the session stack is empty (double-close?)");
-      }
-      final String top = stack.peek();
-      if (!java.util.Objects.equals(top, sessionId)) {
-        throw new IllegalStateException(
-            "ScopeBinding closed in wrong order: expected sessionId='"
+            "ScopeBinding close() could not find sessionId='"
                 + sessionId
-                + "' at stack top but found '"
-                + top
-                + "'");
+                + "' on the stack (double-close or wrong-order close?)");
       }
-      stack.pop();
     };
   }
 
@@ -188,8 +189,21 @@ final class ScopeContext {
       implements Runnable {
     @Override
     public void run() {
-      try (ChaosSession.ScopeBinding ignored = scopeContext.bind(sessionId)) {
+      final ChaosSession.ScopeBinding binding = scopeContext.bind(sessionId);
+      try {
         delegate.run();
+      } finally {
+        try {
+          binding.close();
+        } catch (final RuntimeException scopeCloseFailure) {
+          // Do not let scope cleanup failure propagate as the task's primary exception.
+          // A stale or double-closed binding (e.g. from a leaked inner binding on the same
+          // thread) must not mask the actual result of the task or corrupt the executor.
+          LOGGER.log(
+              Level.FINE,
+              "chaos scope binding close failed; session stack may be inconsistent",
+              scopeCloseFailure);
+        }
       }
     }
   }
@@ -198,8 +212,18 @@ final class ScopeContext {
       ScopeContext scopeContext, String sessionId, Callable<T> delegate) implements Callable<T> {
     @Override
     public T call() throws Exception {
-      try (ChaosSession.ScopeBinding ignored = scopeContext.bind(sessionId)) {
+      final ChaosSession.ScopeBinding binding = scopeContext.bind(sessionId);
+      try {
         return delegate.call();
+      } finally {
+        try {
+          binding.close();
+        } catch (final RuntimeException scopeCloseFailure) {
+          LOGGER.log(
+              Level.FINE,
+              "chaos scope binding close failed; session stack may be inconsistent",
+              scopeCloseFailure);
+        }
       }
     }
   }

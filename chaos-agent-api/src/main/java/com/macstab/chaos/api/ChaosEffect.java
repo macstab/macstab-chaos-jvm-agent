@@ -1057,6 +1057,11 @@ public sealed interface ChaosEffect
       if (contendingThreadCount < 2) {
         throw new IllegalArgumentException("contendingThreadCount must be >= 2");
       }
+      // Prevent OOM from operator-supplied plans with unreasonably large thread counts.
+      // Spawning thousands of platform threads saturates the thread scheduler; cap at 1000.
+      if (contendingThreadCount > 1000) {
+        throw new IllegalArgumentException("contendingThreadCount must be <= 1000");
+      }
     }
   }
 

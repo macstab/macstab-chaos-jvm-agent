@@ -47,6 +47,13 @@ public final class ScheduledRunnableWrapper implements Runnable {
           executor == null || BootstrapDispatcher.beforeScheduledTick(executor, delegate, periodic);
     } catch (final Throwable chaosFailure) {
       if (periodic) {
+        // Restore the interrupt flag before swallowing: an InterruptedException from the chaos
+        // hook clears the thread's interrupt bit. If we return without restoring it, the worker
+        // thread's interrupt status is silently cleared and cooperative-cancellation signals
+        // that fired during the chaos hook are lost for the rest of the task's lifetime.
+        if (chaosFailure instanceof InterruptedException) {
+          Thread.currentThread().interrupt();
+        }
         LOGGER.log(
             Level.WARNING,
             "chaos: suppressing chaos-injected exception from beforeScheduledTick to preserve"

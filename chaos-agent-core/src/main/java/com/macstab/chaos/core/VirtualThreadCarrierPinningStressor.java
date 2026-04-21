@@ -73,9 +73,14 @@ final class VirtualThreadCarrierPinningStressor implements ManagedStressor {
                   synchronized (pinMonitor) {
                     final long deadline = System.nanoTime() + pinNanos;
                     while (System.nanoTime() < deadline && !stopped.get()) {
-                      java.util.concurrent.locks.LockSupport.parkNanos(10_000L /* 10 µs */);
-                      if (Thread.interrupted()) {
+                      // Thread.sleep(0, nanos) holds the synchronized monitor (unlike wait())
+                      // and is not instrumented by the chaos agent (LockSupport.park* is), so
+                      // an active chaos delay scenario cannot recursively target this stressor.
+                      try {
+                        Thread.sleep(0, 10_000 /* 10 µs */);
+                      } catch (final InterruptedException ie) {
                         stopped.set(true);
+                        Thread.currentThread().interrupt();
                         return;
                       }
                     }
@@ -111,13 +116,20 @@ final class VirtualThreadCarrierPinningStressor implements ManagedStressor {
     for (final Thread thread : pinningThreads) {
       thread.interrupt();
     }
+    // Join all threads even when interrupted mid-loop. Returning early on the first
+    // InterruptedException leaves un-joined threads running — violating close()'s contract
+    // that carrier-pinning has stopped before the method returns. Collect the interrupt and
+    // restore it after the full join sweep.
+    boolean selfInterrupted = false;
     for (final Thread thread : pinningThreads) {
       try {
         thread.join(JOIN_TIMEOUT_MILLIS);
       } catch (final InterruptedException interrupted) {
-        Thread.currentThread().interrupt();
-        return;
+        selfInterrupted = true;
       }
+    }
+    if (selfInterrupted) {
+      Thread.currentThread().interrupt();
     }
   }
 

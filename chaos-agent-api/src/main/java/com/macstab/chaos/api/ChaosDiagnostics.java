@@ -193,6 +193,10 @@ public interface ChaosDiagnostics {
       if (appliedCount < 0L) {
         throw new IllegalArgumentException("appliedCount must be >= 0, got " + appliedCount);
       }
+      if (appliedCount > matchedCount) {
+        throw new IllegalArgumentException(
+            "appliedCount (" + appliedCount + ") must be <= matchedCount (" + matchedCount + ")");
+      }
     }
   }
 

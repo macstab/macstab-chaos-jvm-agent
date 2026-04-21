@@ -11,6 +11,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.FileTime;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -129,15 +130,22 @@ public final class StartupConfigPoller implements AutoCloseable {
    * @param initialScenarios scenarios from the first file read, already parsed by the caller
    */
   public void startWithInitialPlan(final List<ChaosScenario> initialScenarios) {
-    applyDiff(initialScenarios);
+    // Capture the file's mtime BEFORE applying the initial plan. If the file is atomically
+    // renamed between applyDiff and the stat, lastModified reflects the new file's mtime and
+    // the first pollOnce would silently skip the new content. Capturing mtime first ensures the
+    // poller's baseline is anchored to the file the caller already read and passed as
+    // initialScenarios; a subsequent file change will then produce a visible mtime difference.
+    FileTime initialMtime = FileTime.fromMillis(0);
     try {
       // NOFOLLOW_LINKS: a symlink swap between startup validation and this stat should fail
       // rather than silently bind the poller to the target of the symlink. Matches the read
       // path in pollOnce and in StartupConfigLoader.
-      lastModified = Files.getLastModifiedTime(configPath, LinkOption.NOFOLLOW_LINKS);
+      initialMtime = Files.getLastModifiedTime(configPath, LinkOption.NOFOLLOW_LINKS);
     } catch (IOException ignored) {
       // best-effort; if the stat fails the next poll will re-read the file
     }
+    applyDiff(initialScenarios);
+    lastModified = initialMtime;
     scheduler.scheduleAtFixedRate(this::pollOnce, intervalMs, intervalMs, TimeUnit.MILLISECONDS);
   }
 
@@ -210,6 +218,26 @@ public final class StartupConfigPoller implements AutoCloseable {
       return;
     }
     try {
+      // Guard against OOM from arbitrarily large files replacing the config between the
+      // mtime stat and the read. Mirrors the 1 MiB size cap in StartupConfigLoader.
+      final long fileSize;
+      try {
+        fileSize =
+            Files.readAttributes(configPath, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS)
+                .size();
+      } catch (IOException e) {
+        System.err.println(
+            "[chaos-agent] config poll failed (size-check): " + sanitiseForLog(e.getMessage()));
+        return;
+      }
+      if (fileSize > MAX_FILE_SIZE_BYTES) {
+        System.err.println(
+            "[chaos-agent] config reload skipped: file size "
+                + fileSize
+                + " exceeds limit "
+                + MAX_FILE_SIZE_BYTES);
+        return;
+      }
       // NOFOLLOW_LINKS: if the config path was swapped for a symlink between stat and read
       // (e.g. by an attacker with write access to the config directory), the open fails
       // rather than silently following the link. Mirrors the check in StartupConfigLoader.
@@ -310,12 +338,24 @@ public final class StartupConfigPoller implements AutoCloseable {
       }
     }
 
-    // Activate scenarios that are new or were just stopped due to content change
+    // Activate scenarios that are new or were just stopped due to content change.
+    // Each activation is attempted independently: a validation failure on one scenario must not
+    // leave all subsequent scenarios unactivated, which would make the runtime inconsistent with
+    // every reload after the first partial failure. Log and continue so the successfully
+    // activatable subset is always applied.
     for (final ChaosScenario scenario : newScenarios) {
       if (!activeScenarios.containsKey(scenario.id())) {
-        final ChaosActivationHandle handle = runtime.activate(scenario);
-        activeHandles.put(scenario.id(), handle);
-        activeScenarios.put(scenario.id(), scenario);
+        try {
+          final ChaosActivationHandle handle = runtime.activate(scenario);
+          activeHandles.put(scenario.id(), handle);
+          activeScenarios.put(scenario.id(), scenario);
+        } catch (final RuntimeException activationFailure) {
+          System.err.println(
+              "[chaos-agent] config reload: failed to activate scenario '"
+                  + sanitiseForLog(scenario.id())
+                  + "': "
+                  + sanitiseForLog(activationFailure.getMessage()));
+        }
       }
     }
   }
@@ -347,6 +387,9 @@ public final class StartupConfigPoller implements AutoCloseable {
     }
     return sb.toString();
   }
+
+  /** Maximum config file size on the hot-reload path: 1 MiB. Matches StartupConfigLoader. */
+  static final long MAX_FILE_SIZE_BYTES = 1_048_576L;
 
   /**
    * Lower bound on the poll interval. Values below this are clamped up to protect against a

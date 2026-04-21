@@ -51,6 +51,21 @@ final class ManualGate {
   }
 
   /**
+   * Atomically releases any threads waiting on the current latch and installs a fresh closed latch.
+   *
+   * <p>Callers that enter {@link #await(java.time.Duration)} between a separate {@link #release()}
+   * and {@link #reset()} would observe the already-released old latch and pass through without
+   * blocking. This method eliminates that window by performing both operations under the same
+   * monitor: {@code await()} snapshots the latch reference before this method acquires the monitor,
+   * so any thread that read the old latch will still be released by {@code countDown()}; any thread
+   * that reads the latch after this method returns will see the fresh closed latch.
+   */
+  synchronized void releaseAndReset() {
+    latch.countDown();
+    latch = new CountDownLatch(1);
+  }
+
+  /**
    * Blocks the calling thread until the gate is released or the timeout elapses.
    *
    * @param maxBlock the maximum time to wait; a value of {@link java.time.Duration#ZERO} or a

@@ -65,23 +65,21 @@ public record NamePattern(MatchMode mode, String value) {
 
   private static Pattern cachedCompile(
       final Map<String, Pattern> cache, final String key, final String regex) {
-    // ConcurrentHashMap replaces the previous Collections.synchronizedMap LRU wrapper so hot-
-    // path matches() calls no longer serialise on a single global lock. Plans are validated at
-    // construction and each distinct pattern is eagerly seeded into the cache there, so the map
-    // grows only with the set of patterns the live plan actually uses. If a pathological plan
-    // pushes past the soft ceiling (e.g. generated patterns across many reloads), clear the
-    // cache entirely rather than letting it grow without bound; the subsequent compile hit is
-    // amortised by the next round of matches() calls and avoids pinning heap. Duplicate
-    // concurrent misses may both compile once — Pattern.compile is idempotent so that race is
-    // benign and cheaper than the old global lock.
+    // ConcurrentHashMap for lock-free hot-path reads. Plans seed the cache eagerly at
+    // construction, so at runtime the map only grows with distinct live-plan patterns.
+    // At capacity: compile and return without inserting rather than calling cache.clear()
+    // (which was non-atomic — concurrent threads could each observe size >= CACHE_CAPACITY
+    // and race to clear, wiping each other's freshly inserted entries and turning the cache
+    // into a source of repeated Pattern.compile calls under load). Returning without inserting
+    // is safe: the pattern is correct and the capacity guard still bounds heap.
     Pattern cached = cache.get(key);
     if (cached != null) {
       return cached;
     }
-    if (cache.size() >= CACHE_CAPACITY) {
-      cache.clear();
-    }
     final Pattern compiled = Pattern.compile(regex);
+    if (cache.size() >= CACHE_CAPACITY) {
+      return compiled;
+    }
     final Pattern winner = cache.putIfAbsent(key, compiled);
     return winner != null ? winner : compiled;
   }

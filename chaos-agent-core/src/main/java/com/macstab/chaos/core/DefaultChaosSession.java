@@ -100,8 +100,18 @@ final class DefaultChaosSession implements ChaosSession {
    */
   @Override
   public ChaosActivationHandle activate(final ChaosScenario scenario) {
+    if (closed.get()) {
+      throw new IllegalStateException("cannot activate scenario on a closed session");
+    }
     final DefaultChaosActivationHandle handle = controlPlane.activateInSession(this, scenario);
     handles.add(handle);
+    // Guard against the race where close() iterated handles before add() above completed.
+    // If the session was closed concurrently, destroy the handle immediately rather than leaking.
+    if (closed.get()) {
+      handles.remove(handle);
+      handle.destroy();
+      throw new IllegalStateException("session was closed during activation");
+    }
     return handle;
   }
 

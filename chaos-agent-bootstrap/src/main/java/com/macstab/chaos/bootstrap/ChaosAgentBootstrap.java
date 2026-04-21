@@ -322,9 +322,15 @@ public final class ChaosAgentBootstrap {
             }
           });
       return runtime;
-    } catch (final RuntimeException | Error installFailure) {
+    } catch (final Throwable installFailure) {
       RUNTIME.compareAndSet(runtime, null);
-      throw installFailure;
+      if (installFailure instanceof RuntimeException re) {
+        throw re;
+      }
+      if (installFailure instanceof Error e) {
+        throw e;
+      }
+      throw new IllegalStateException("agent initialization failed", installFailure);
     }
   }
 
@@ -339,10 +345,10 @@ public final class ChaosAgentBootstrap {
   private static void registerMBean(final ChaosRuntime runtime) {
     try {
       final ObjectName objectName = new ObjectName("com.macstab.chaos:type=ChaosDiagnostics");
-      if (!ManagementFactory.getPlatformMBeanServer().isRegistered(objectName)) {
-        ManagementFactory.getPlatformMBeanServer()
-            .registerMBean(new ChaosDiagnosticsMBean(runtime.diagnostics()), objectName);
-      }
+      ManagementFactory.getPlatformMBeanServer()
+          .registerMBean(new ChaosDiagnosticsMBean(runtime.diagnostics()), objectName);
+    } catch (javax.management.InstanceAlreadyExistsException ignored) {
+      // a concurrent registrant beat us; the existing MBean is functionally identical
     } catch (Exception exception) {
       System.err.println("[chaos-agent] MBean registration skipped: " + exception.getMessage());
     }

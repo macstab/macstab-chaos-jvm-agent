@@ -91,12 +91,26 @@ public class ChaosActuatorEndpoint {
   /**
    * Stops a specific scenario by its scenario ID.
    *
+   * <p><b>Note on TOCTOU</b>: the "not-found" vs "unmanaged" distinction involves a non-atomic
+   * check between {@link ChaosHandleRegistry#stop} and {@link
+   * com.macstab.chaos.api.ChaosDiagnostics#scenario}. A concurrent stop on another thread (or via a
+   * different handle) can race the diagnostics lookup, producing a transient "not-found" response
+   * for a scenario that was stopped between the two calls. This is accepted as a documentation-only
+   * race: locking both registries together would require cross-module coupling that is not
+   * warranted for an informational status response.
+   *
    * @param scenarioId scenario identifier
    * @return summary of the stop outcome
    */
   @DeleteOperation
   public StopResponse stop(@Selector final String scenarioId) {
-    final boolean stopped = handleRegistry.stop(scenarioId);
+    // Handles are stored under the composite key "<scopeKey>::<scenarioId>" (e.g. "jvm::my-id").
+    // Try the composite JVM-scope key first, then the plain id as a fallback for handles activated
+    // with a different scope prefix (session-scoped, custom).
+    boolean stopped = handleRegistry.stop("jvm::" + scenarioId);
+    if (!stopped) {
+      stopped = handleRegistry.stop(scenarioId);
+    }
     if (stopped) {
       return new StopResponse("stopped", scenarioId, null);
     }

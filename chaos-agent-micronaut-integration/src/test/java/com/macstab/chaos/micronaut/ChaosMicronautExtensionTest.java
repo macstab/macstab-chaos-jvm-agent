@@ -61,7 +61,7 @@ class ChaosMicronautExtensionTest {
       assertThat(session).isSameAs(SessionLifecycle.capturedSession(session));
     }
 
-    private static ChaosSession captured;
+    private static volatile ChaosSession captured;
 
     private static ChaosSession capturedSession(final ChaosSession candidate) {
       if (captured == null) {

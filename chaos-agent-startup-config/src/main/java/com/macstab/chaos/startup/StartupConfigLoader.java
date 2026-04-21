@@ -90,7 +90,7 @@ public final class StartupConfigLoader {
       final String base64Json, final boolean debugDumpOnStart) {
     final byte[] decoded;
     try {
-      decoded = Base64.getDecoder().decode(base64Json);
+      decoded = Base64.getMimeDecoder().decode(base64Json);
     } catch (IllegalArgumentException exception) {
       throw new ConfigLoadException(
           "invalid base64 encoding in chaos plan configuration", "base64", exception);

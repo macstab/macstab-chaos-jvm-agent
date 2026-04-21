@@ -232,35 +232,63 @@ final class ScenarioController {
     // listeners are untrusted code (user callbacks, logging I/O, re-entrant controller calls),
     // and holding the monitor across them would stall every concurrent evaluate() caller and
     // risk deadlock.
+    // Construct the stressor BEFORE entering the synchronized block: stressor constructors
+    // may spawn threads or allocate large arrays (DeadlockStressor, HeapPressureStressor).
+    // Holding the monitor across this work blocks every concurrent evaluate(), stop(), and
+    // JFR snapshot that needs synchronized(this) for the entire startup duration.
+    // If state has changed (STOPPED raced us) we close the freshly-constructed stressor below.
+    final ManagedStressor newStressor = stressorFactory.createIfNeeded(scenario.effect());
     final boolean transitioned;
     synchronized (this) {
       if (state == ChaosDiagnostics.ScenarioState.STOPPED) {
+        if (newStressor != null) {
+          newStressor.close();
+        }
         return;
       }
       if (state == ChaosDiagnostics.ScenarioState.ACTIVE) {
         // Idempotent: a second start() on a running controller would otherwise create a fresh
         // stressor and clobber startedAt, leaking the previous stressor for the JVM lifetime.
+        if (newStressor != null) {
+          newStressor.close();
+        }
         return;
       }
-      // Release the old latch before reset(): otherwise any thread still parked in a prior
-      // ManualGate.await() — from an activation that was stopped without a matching release() —
-      // remains forever blocked on the retired latch. release() counts the old latch to zero so
-      // every waiting thread returns from await() before reset() installs the fresh one.
-      gate.release();
-      gate.reset();
-      startedAt = clock.instant();
+      // releaseAndReset() atomically unblocks any threads parked on the previous latch and
+      // installs a fresh closed latch. Separate release()+reset() calls leave a window where
+      // a thread entering await() after release() but before reset() observes the already-
+      // counted-down latch and passes through without blocking.
+      gate.releaseAndReset();
+      // Guard these clock reads against an active ClockSkewEffect: start() is called at
+      // DEPTH=0 (outside any dispatcher path), so clock intercepts would skew startedAt and
+      // the ClockSkewState reference timestamps. A +1h skew on startedAt would silently turn
+      // a 5-minute activeFor window into 65 minutes; a -1h skew would make it expire instantly.
+      ChaosDispatcher.incrementDispatchDepth();
+      try {
+        startedAt = clock.instant();
+      } finally {
+        ChaosDispatcher.decrementDispatchDepth();
+      }
       // Construct ClockSkewState before setting started/state so that if the constructor
       // throws (e.g. Duration.toNanos() overflow), started remains false and the controller
       // does not enter a half-initialised ACTIVE state with a null clockSkewState.
       final ClockSkewState newClockSkewState;
       if (scenario.effect() instanceof ChaosEffect.ClockSkewEffect skewEffect) {
-        newClockSkewState =
-            new ClockSkewState(skewEffect, System.currentTimeMillis(), System.nanoTime());
+        ChaosDispatcher.incrementDispatchDepth();
+        final long wallMillis;
+        final long nanoRef;
+        try {
+          wallMillis = System.currentTimeMillis();
+          nanoRef = System.nanoTime();
+        } finally {
+          ChaosDispatcher.decrementDispatchDepth();
+        }
+        newClockSkewState = new ClockSkewState(skewEffect, wallMillis, nanoRef);
       } else {
         newClockSkewState = null;
       }
       clockSkewState = newClockSkewState;
-      stressor = stressorFactory.createIfNeeded(scenario.effect());
+      stressor = newStressor;
       started.set(true);
       state = ChaosDiagnostics.ScenarioState.ACTIVE;
       reason = "started";
@@ -369,18 +397,22 @@ final class ScenarioController {
     if (!SelectorMatcher.matches(scenario.selector(), context)) {
       return null;
     }
-    final long matched = matchedCount.incrementAndGet();
     if (!passesActivationWindow()) {
       markInactive("expired");
       return null;
     }
+    final long matched = matchedCount.incrementAndGet();
     if (matched <= scenario.activationPolicy().activateAfterMatches()) {
       return null;
     }
-    if (!passesRateLimit()) {
+    // Probability is checked before rate-limit so that rate-limit permits are only consumed when
+    // the effect will actually be applied. Checking rate-limit first would burn permits on
+    // invocations that probability then rejects, making the effective throughput
+    // `rate_limit * probability` instead of the operator-configured `rate_limit`.
+    if (!passesProbability(matched)) {
       return null;
     }
-    if (!passesProbability(matched)) {
+    if (!passesRateLimit()) {
       return null;
     }
     // Re-check the started flag before we commit to applying the effect. stop() can flip
@@ -502,6 +534,7 @@ final class ScenarioController {
     synchronized (this) {
       if (state == ChaosDiagnostics.ScenarioState.ACTIVE) {
         state = ChaosDiagnostics.ScenarioState.INACTIVE;
+        started.set(false);
         reason = newReason;
       }
     }
@@ -548,7 +581,12 @@ final class ScenarioController {
       // floor; anything finer has no hope of being observed through System.currentTimeMillis.
       final long windowMillis = Math.max(1L, rateLimit.window().toMillis());
       if (nowMillis - rateWindowStartMillis >= windowMillis) {
-        rateWindowStartMillis = nowMillis;
+        // Advance by whole window multiples rather than snapping to nowMillis, so the window
+        // boundary stays aligned to the original start time. Resetting to nowMillis on every
+        // expiry causes the effective window to drift: a burst that hits exactly at the boundary
+        // extends the window by the inter-call gap, granting more permits than configured.
+        final long elapsed = nowMillis - rateWindowStartMillis;
+        rateWindowStartMillis += (elapsed / windowMillis) * windowMillis;
         rateWindowPermits = 0;
       }
       if (rateWindowPermits >= rateLimit.permits()) {
@@ -564,7 +602,10 @@ final class ScenarioController {
     if (probability >= 1.0d) {
       return true;
     }
-    return splittableRandom(matched).nextDouble() <= probability;
+    if (probability <= 0.0d) {
+      return false;
+    }
+    return splittableRandom(matched).nextDouble() < probability;
   }
 
   private long sampleDelayMillis(final long matched) {
@@ -602,7 +643,11 @@ final class ScenarioController {
    * @return a freshly seeded {@link SplittableRandom}; never {@code null}
    */
   private SplittableRandom splittableRandom(final long matched) {
-    return new SplittableRandom(baseSeed ^ matched ^ scenario.id().hashCode());
+    // String.hashCode() is 32-bit; sign-extension into long means all scenario IDs with the same
+    // lower-32-bit hash produce identical seeds. Use a 64-bit Fibonacci hash mix to spread the
+    // id's contribution across the full 64-bit seed space.
+    final long idMix = (long) scenario.id().hashCode() * 0x9e3779b97f4a7c15L;
+    return new SplittableRandom(baseSeed ^ Long.rotateLeft(matched, 32) ^ idMix);
   }
 
   private Duration gateTimeout() {

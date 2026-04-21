@@ -230,6 +230,12 @@ public record ChaosScenario(
      * @return this builder for chaining
      */
     public Builder tag(String key, String value) {
+      if (key == null) {
+        throw new IllegalArgumentException("tag key must not be null");
+      }
+      if (value == null) {
+        throw new IllegalArgumentException("tag value must not be null (key=" + key + ")");
+      }
       tags.put(key, value);
       return this;
     }

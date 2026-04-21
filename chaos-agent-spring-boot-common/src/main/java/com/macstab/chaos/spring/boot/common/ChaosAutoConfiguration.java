@@ -109,14 +109,18 @@ public class ChaosAutoConfiguration {
             "chaos-agent: activated startup plan \"{0}\" from {1}",
             new Object[] {handle.id(), safeConfigFile});
       } catch (final ConfigLoadException exception) {
-        // Do not include the Jackson cause chain: its messages can echo raw excerpts of the
-        // file contents, which for attacker-influenced paths (/run/secrets/*, service-account
-        // tokens mounted at attacker-writable paths) leaks credential bytes into stdout. Log
-        // the sanitised path and a stable category instead; the stack trace is retained.
+        // Do not include the Jackson cause chain message: it can echo raw excerpts of the
+        // file contents, which for attacker-influenced paths leaks credential bytes into stdout.
+        // Log the stack trace (safe) via the Throwable overload; the message is sanitised.
         LOGGER.log(
             Level.SEVERE,
-            "chaos-agent: failed to load startup config file {0} (reason: {1})",
-            new Object[] {safeConfigFile, exception.getMessage()});
+            exception,
+            () ->
+                "chaos-agent: failed to load startup config file "
+                    + safeConfigFile
+                    + " (reason: "
+                    + exception.getMessage()
+                    + ")");
       } catch (final RuntimeException exception) {
         LOGGER.log(
             Level.SEVERE,

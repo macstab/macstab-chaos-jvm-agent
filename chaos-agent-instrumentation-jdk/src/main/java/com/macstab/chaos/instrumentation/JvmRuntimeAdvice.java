@@ -411,6 +411,20 @@ final class JvmRuntimeAdvice {
     }
   }
 
+  static final class NativeLibrariesLoadAdvice {
+    /**
+     * {@code jdk.internal.loader.NativeLibraries.load(NativeLibraryImpl impl, String name, boolean
+     * isBuiltin, boolean isJNI)} — argument 0 is the {@code NativeLibraryImpl} instance, argument 1
+     * is the library name string. Kept as a separate class from {@link NativeLibraryLoadAdvice} so
+     * that if the JDK signature changes the wrong index is caught at instrumentation time rather
+     * than silently reading a non-name argument.
+     */
+    @Advice.OnMethodEnter
+    static void enter(@Advice.Argument(1) final String libraryName) throws Throwable {
+      BootstrapDispatcher.beforeNativeLibraryLoad(libraryName);
+    }
+  }
+
   // ── B8: CompletableFuture cancel ──────────────────────────────────────────
 
   /**

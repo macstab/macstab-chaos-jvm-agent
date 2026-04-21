@@ -23,6 +23,7 @@ public final class ChaosAgentInitializer
     // Install the JVM-wide agent before context refresh; see ChaosAgentInitializer in the
     // Boot 3 starter for the reasoning behind delegating bean exposure to the auto-config
     // rather than calling beanFactory.registerSingleton(...) here.
+    System.setProperty("macstab.chaos.test.enabled", "true");
     ChaosPlatform.installLocally();
   }
 }

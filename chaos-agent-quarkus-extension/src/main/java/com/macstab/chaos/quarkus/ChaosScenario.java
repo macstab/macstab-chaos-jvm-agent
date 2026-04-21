@@ -1,6 +1,7 @@
 package com.macstab.chaos.quarkus;
 
 import java.lang.annotation.ElementType;
+import java.lang.annotation.Inherited;
 import java.lang.annotation.Repeatable;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
@@ -35,6 +36,7 @@ import java.lang.annotation.Target;
  */
 @Target({ElementType.TYPE, ElementType.METHOD})
 @Retention(RetentionPolicy.RUNTIME)
+@Inherited
 @Repeatable(ChaosScenarios.class)
 public @interface ChaosScenario {
 
@@ -73,9 +75,11 @@ public @interface ChaosScenario {
 
   /**
    * Scope of the scenario, matching {@link com.macstab.chaos.api.ChaosScenario.ScenarioScope}.
-   * Defaults to {@code "JVM"} to match the task specification; the extension automatically falls
-   * back to {@code SESSION} when the declared scope is {@code JVM} so the scenario can be activated
-   * on the test's class-scoped session without scope conflicts.
+   * Defaults to {@code "JVM"}. JVM-scoped scenarios are activated at JVM scope via {@link
+   * com.macstab.chaos.api.ChaosControlPlane#activate} and are tracked per-class or per-method for
+   * teardown in {@code afterAll}/{@code afterEach}. SESSION-scoped scenarios are activated on the
+   * class-scoped {@link com.macstab.chaos.api.ChaosSession} and are torn down by {@code
+   * session.close()} in {@code afterAll}.
    *
    * @return the scenario scope name
    */

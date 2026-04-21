@@ -5,6 +5,7 @@ import com.macstab.chaos.bootstrap.ChaosPlatform;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 
 /**
@@ -35,7 +36,10 @@ public class ChaosTestAutoConfiguration {
    */
   @Bean
   @ConditionalOnMissingBean(ChaosControlPlane.class)
+  @ConditionalOnProperty(name = "macstab.chaos.test.enabled", havingValue = "true")
   public ChaosControlPlane chaosControlPlane() {
+    // ChaosAgentInitializer.initialize() has already called installLocally() and set
+    // the guard property; current() returns the same singleton without a second attach.
     return ChaosPlatform.installLocally();
   }
 }

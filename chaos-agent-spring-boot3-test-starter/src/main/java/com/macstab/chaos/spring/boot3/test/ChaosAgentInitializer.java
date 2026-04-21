@@ -31,6 +31,11 @@ public final class ChaosAgentInitializer
     // or @TestConfiguration-time bean-name collisions — sees a pre-registered singleton it
     // cannot replace the normal way. Letting the auto-config produce the bean keeps the
     // lifecycle consistent and leaves the override paths open.
+    // Signal to ChaosTestAutoConfiguration that the agent was explicitly requested so the
+    // auto-config bean is only created in contexts where chaos is actually opted in. Without
+    // this flag the auto-config's chaosControlPlane() would call installLocally() for every
+    // @SpringBootTest context regardless of @ChaosTest, self-attaching the agent globally.
+    System.setProperty("macstab.chaos.test.enabled", "true");
     ChaosPlatform.installLocally();
   }
 }

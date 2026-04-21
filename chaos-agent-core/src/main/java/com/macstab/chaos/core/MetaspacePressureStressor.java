@@ -22,14 +22,14 @@ import net.bytebuddy.dynamic.loading.ClassLoadingStrategy;
  * classloader leak scenario: the classloader is not GC-able because live references prevent
  * collection, and therefore Metaspace is not reclaimed.
  *
- * <p>When {@code retain=false} the stressor drops all references immediately after loading. The
- * classes may or may not be GC-collected depending on JVM GC behaviour — this models a partial or
- * delayed leak.
+ * <p>When {@code retain=false} the stressor drops strong {@link Class} references immediately after
+ * loading, reducing Java-heap pressure. However, Metaspace entries remain occupied until {@link
+ * #close()} closes the isolated classloader and GC collects it — the Metaspace pressure between
+ * {@code retain=false} and {@code close()} is identical to {@code retain=true}.
  *
- * <p>{@link #close()} nulls the retained class list, making the classes eligible for collection if
- * no other references exist. Note: Metaspace reclamation only occurs when the classloader that
- * defined the class is itself collected, which may not happen immediately or at all if the
- * classloader is still reachable.
+ * <p>{@link #close()} closes and nulls the isolated classloader, making its classes eligible for
+ * Metaspace reclamation. Note: actual Metaspace reclamation occurs only when GC collects the
+ * loader, which may not be immediate.
  */
 final class MetaspacePressureStressor implements ManagedStressor {
 
@@ -74,7 +74,6 @@ final class MetaspacePressureStressor implements ManagedStressor {
 
   @Override
   public void close() {
-    retainedClasses = null;
     final URLClassLoader loader = isolatedLoader;
     isolatedLoader = null;
     if (loader != null) {
@@ -84,6 +83,9 @@ final class MetaspacePressureStressor implements ManagedStressor {
         LOGGER.fine(() -> "MetaspacePressureStressor: isolated loader close failed: " + e);
       }
     }
+    // Null classes after the loader is closed: retainedClassCount() == 0 is used as a signal
+    // that Metaspace pressure has been released, but Metaspace is anchored by the loader above.
+    retainedClasses = null;
   }
 
   /**

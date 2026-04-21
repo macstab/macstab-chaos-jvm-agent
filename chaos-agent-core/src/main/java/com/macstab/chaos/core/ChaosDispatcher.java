@@ -40,6 +40,73 @@ public final class ChaosDispatcher {
   private static final Runnable NO_OP_RUNNABLE = () -> {};
   private static final Callable<?> NO_OP_CALLABLE = () -> null;
 
+  /**
+   * Resolved lazily on first use; {@code null} until resolution succeeds.
+   *
+   * <p>Accessed from {@link #incrementDispatchDepth()} / {@link #decrementDispatchDepth()} which
+   * are called by {@link ScenarioController#start()} to suppress clock-skew interception during
+   * startup clock reads. BootstrapDispatcher lives in the bootstrap classpath (not a compile-time
+   * dependency of this module), so reflection is the only way to reach it.
+   */
+  @SuppressWarnings("unchecked")
+  private static volatile java.util.concurrent.atomic.AtomicReference<ThreadLocal<int[]>>
+      bootstrapDepthRef = null;
+
+  private static ThreadLocal<int[]> resolveBootstrapDepth() {
+    if (bootstrapDepthRef != null) {
+      return bootstrapDepthRef.get();
+    }
+    synchronized (ChaosDispatcher.class) {
+      if (bootstrapDepthRef != null) {
+        return bootstrapDepthRef.get();
+      }
+      try {
+        final Class<?> cls =
+            Class.forName(
+                "com.macstab.chaos.instrumentation.bridge.BootstrapDispatcher",
+                false,
+                ClassLoader.getPlatformClassLoader());
+        @SuppressWarnings("unchecked")
+        final ThreadLocal<int[]> tl =
+            (ThreadLocal<int[]>) cls.getMethod("depthThreadLocal").invoke(null);
+        bootstrapDepthRef = new java.util.concurrent.atomic.AtomicReference<>(tl);
+        return tl;
+      } catch (final Throwable ignored) {
+        // Bootstrap dispatcher not yet installed (unit-test mode without agent).
+        // Store null reference so subsequent callers skip the guard rather than
+        // retrying reflection on every call.
+        bootstrapDepthRef = new java.util.concurrent.atomic.AtomicReference<>(null);
+        return null;
+      }
+    }
+  }
+
+  /**
+   * Increments the bootstrap dispatcher's DEPTH counter on the current thread, suppressing any
+   * active chaos interception on subsequent JVM calls (clock reads, park, sleep, …) until the
+   * matching {@link #decrementDispatchDepth()} is called.
+   *
+   * <p>Designed to be called from {@code ScenarioController.start()} so that {@code
+   * clock.instant()}, {@code System.currentTimeMillis()}, and {@code System.nanoTime()} during
+   * scenario startup are not skewed by a concurrently active {@code ClockSkewEffect} scenario —
+   * which would silently shift the {@code startedAt} anchor and corrupt the {@code activeFor}
+   * window calculation.
+   */
+  static void incrementDispatchDepth() {
+    final ThreadLocal<int[]> depth = resolveBootstrapDepth();
+    if (depth != null) {
+      depth.get()[0]++;
+    }
+  }
+
+  /** Paired decrement for {@link #incrementDispatchDepth()}. Always call in a {@code finally}. */
+  static void decrementDispatchDepth() {
+    final ThreadLocal<int[]> depth = resolveBootstrapDepth();
+    if (depth != null) {
+      depth.get()[0]--;
+    }
+  }
+
   // Safe upper bound for an "indefinite" schedule delay in milliseconds.
   // ScheduledThreadPoolExecutor
   // internally converts the delay to nanoseconds and adds it to System.nanoTime() in
@@ -54,6 +121,8 @@ public final class ChaosDispatcher {
   private final ScopeContext scopeContext;
   private final ScenarioRegistry registry;
   private final Map<Thread, Thread> shutdownHooks;
+  private final Map<Thread, java.util.concurrent.atomic.AtomicReference<Thread>> hookDelegateRefs =
+      new java.util.concurrent.ConcurrentHashMap<>();
 
   ChaosDispatcher(final ChaosControlPlaneImpl controlPlane) {
     this.featureSet = controlPlane.featureSet();
@@ -75,7 +144,7 @@ public final class ChaosDispatcher {
         new InvocationContext(
             OperationType.valueOf(operation),
             executor == null ? "unknown" : executor.getClass().getName(),
-            task.getClass().getName(),
+            taskClassName(task),
             null,
             false,
             null,
@@ -113,7 +182,7 @@ public final class ChaosDispatcher {
         new InvocationContext(
             OperationType.valueOf(operation),
             executor == null ? "unknown" : executor.getClass().getName(),
-            task.getClass().getName(),
+            taskClassName(task),
             null,
             false,
             null,
@@ -164,7 +233,7 @@ public final class ChaosDispatcher {
         new InvocationContext(
             OperationType.EXECUTOR_WORKER_RUN,
             executor.getClass().getName(),
-            task == null ? null : task.getClass().getName(),
+            taskClassName(task),
             worker == null ? null : worker.getName(),
             false,
             worker == null ? null : worker.isDaemon(),
@@ -179,7 +248,7 @@ public final class ChaosDispatcher {
         new InvocationContext(
             OperationType.FORK_JOIN_TASK_RUN,
             "java.util.concurrent.ForkJoinPool",
-            task == null ? null : task.getClass().getName(),
+            taskClassName(task),
             null,
             false,
             null,
@@ -199,7 +268,7 @@ public final class ChaosDispatcher {
         new InvocationContext(
             OperationType.valueOf(operation),
             executor == null ? "unknown" : executor.getClass().getName(),
-            task == null ? null : task.getClass().getName(),
+            taskClassName(task),
             null,
             periodic,
             null,
@@ -365,10 +434,20 @@ public final class ChaosDispatcher {
         && decision.terminalAction().kind() == TerminalKind.SUPPRESS) {
       return hook;
     }
-    final Runnable delegate = hook::run;
-    final Thread decorated = new Thread(delegate, hook.getName() + "-macstab-chaos-wrapper");
+    final java.util.concurrent.atomic.AtomicReference<Thread> hookRef =
+        new java.util.concurrent.atomic.AtomicReference<>(hook);
+    final Thread decorated =
+        new Thread(
+            () -> {
+              final Thread h = hookRef.getAndSet(null);
+              if (h != null) {
+                h.run();
+              }
+            },
+            hook.getName() + "-macstab-chaos-wrapper");
     decorated.setDaemon(hook.isDaemon());
     shutdownHooks.put(hook, decorated);
+    hookDelegateRefs.put(hook, hookRef);
     return decorated;
   }
 
@@ -379,6 +458,11 @@ public final class ChaosDispatcher {
     // leak for long-running JVMs that churn shutdown-hook registrations (e.g. integration-test
     // suites that stop and restart embedded servers).
     final Thread decorated = shutdownHooks.remove(original);
+    final java.util.concurrent.atomic.AtomicReference<Thread> hookRef =
+        hookDelegateRefs.remove(original);
+    if (hookRef != null) {
+      hookRef.set(null);
+    }
     return decorated == null ? original : decorated;
   }
 
@@ -403,7 +487,7 @@ public final class ChaosDispatcher {
         new InvocationContext(
             OperationType.SCHEDULE_TICK,
             executor == null ? "unknown" : executor.getClass().getName(),
-            task == null ? null : task.getClass().getName(),
+            taskClassName(task),
             null,
             periodic,
             null,
@@ -481,21 +565,31 @@ public final class ChaosDispatcher {
   }
 
   public long applyClockSkew(final long realValue, final OperationType clockType) {
+    // Clock-skew reads must NOT go through registry.match() → ScenarioController.evaluate().
+    // evaluate() increments matchedCount, consumes rate-limit permits, rolls the probability
+    // die, and decrements maxApplications — all designed for application-controlled events
+    // (sleeps, network reads, lock acquires), not for JVM-internal clock calls that fire
+    // thousands of times per second. Routing through evaluate() would exhaust any activation
+    // policy budget within milliseconds. Instead, iterate controllers directly: check started
+    // + selector + ClockSkewEffect without touching policy accounting.
     final InvocationContext context =
         new InvocationContext(clockType, "java.lang.System", null, null, false, null, null, null);
-    final List<ScenarioContribution> contributions = registry.match(context);
     final boolean isNanos = clockType == OperationType.SYSTEM_CLOCK_NANOS;
     long result = realValue;
-    for (final ScenarioContribution contribution : contributions) {
-      if (contribution.effect() instanceof ChaosEffect.ClockSkewEffect skewEffect) {
-        final ClockSkewState state = contribution.controller().clockSkewState();
-        if (state != null) {
-          result =
-              isNanos
-                  ? state.applyNanos(skewEffect.mode(), result)
-                  : state.applyMillis(skewEffect.mode(), result);
-        }
+    for (final ScenarioController controller : registry.controllers()) {
+      final ClockSkewState state = controller.clockSkewState();
+      if (state == null) {
+        continue;
       }
+      if (!SelectorMatcher.matches(controller.scenario().selector(), context)) {
+        continue;
+      }
+      final ChaosEffect.ClockSkewEffect skewEffect =
+          (ChaosEffect.ClockSkewEffect) controller.scenario().effect();
+      result =
+          isNanos
+              ? state.applyNanos(skewEffect.mode(), result)
+              : state.applyMillis(skewEffect.mode(), result);
     }
     return result;
   }
@@ -584,9 +678,12 @@ public final class ChaosDispatcher {
     if (method instanceof java.lang.reflect.Method reflectMethod) {
       methodName = reflectMethod.getName();
       declaringClass = reflectMethod.getDeclaringClass().getName();
+    } else if (method instanceof java.lang.reflect.Constructor<?> ctor) {
+      methodName = "<init>";
+      declaringClass = ctor.getDeclaringClass().getName();
     } else {
       methodName = null;
-      declaringClass = "java.lang.reflect.Method";
+      declaringClass = method == null ? "java.lang.reflect.Method" : method.getClass().getName();
     }
     final InvocationContext context =
         new InvocationContext(
@@ -1348,6 +1445,7 @@ public final class ChaosDispatcher {
         return;
       }
       if (terminalAction.kind() == TerminalKind.SUPPRESS) {
+        sleep(decision.delayMillis());
         return;
       }
       if (terminalAction.kind() == TerminalKind.CORRUPT_RETURN) {
@@ -1403,6 +1501,21 @@ public final class ChaosDispatcher {
       Thread.currentThread().interrupt();
     }
     return new IllegalStateException("chaos interception failed", throwable);
+  }
+
+  /**
+   * Strips the JVM-generated synthetic lambda suffix ({@code $$Lambda$N/0x...}) from a class name
+   * so that {@code EXACT} and {@code GLOB} task-class patterns work transparently for lambda tasks.
+   * Without stripping, a task defined as a lambda in {@code com.example.MyService} has the name
+   * {@code com.example.MyService$$Lambda$14/0x00000007004a1c40}, which defeats exact patterns.
+   */
+  static String taskClassName(final Object task) {
+    if (task == null) {
+      return null;
+    }
+    final String name = task.getClass().getName();
+    final int syntheticIdx = name.indexOf("$$Lambda$");
+    return syntheticIdx == -1 ? name : name.substring(0, syntheticIdx);
   }
 
   private static String extractRemoteHost(final Object socketAddress) {

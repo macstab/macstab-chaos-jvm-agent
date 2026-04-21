@@ -202,18 +202,19 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
       controller =
           new ScenarioController(
               scenario, scopeKey, sessionId, clock, observabilityBus, () -> instrumentation);
-      registry.register(controller);
-      registered = true;
       final DefaultChaosActivationHandle handle =
           new DefaultChaosActivationHandle(controller, registry);
       if (scenario.activationPolicy().startMode() == ActivationPolicy.StartMode.AUTOMATIC) {
-        // handle.start() can throw mid-way through start-up (stressor constructors that allocate
-        // eagerly, ClockSkewState overflow, etc.). If that happens, the controller has already
-        // been registered and has already flipped itself to ACTIVE inside start() — if we leave
-        // it, it will match on the hot dispatch path forever with no handle to stop it. Roll the
-        // registration back before rethrowing so no orphan remains.
+        // Start before registering: the controller is not yet visible to evaluate() on the hot
+        // dispatch path. If start() throws (stressor OOM, ClockSkewState overflow, listener
+        // exception), the controller never enters the registry and the rollback catch below skips
+        // the unregister call (registered=false). The only downside is a brief gap between start
+        // and registration — in that window STARTED lifecycle events fire but diagnostics does not
+        // yet show the scenario. This is a tolerable ordering artefact.
         handle.start();
       }
+      registry.register(controller);
+      registered = true;
       return handle;
     } catch (final ChaosUnsupportedFeatureException unsupported) {
       unregisterAndDestroyQuietly(controller, registered);

@@ -107,6 +107,10 @@ final class GcPressureStressor implements ManagedStressor {
     ring = null;
     allocationThread.interrupt();
     try {
+      // 500 ms bounded join: the allocation thread may be mid-batch and descheduled on a busy
+      // JVM. If the join times out, close() returns while the thread's stack still holds a
+      // local reference to the ring snapshot — heap pressure is not immediately released.
+      // This is a best-effort stop; full release occurs once the thread exits naturally.
       allocationThread.join(500L);
     } catch (final InterruptedException interrupted) {
       Thread.currentThread().interrupt();
