@@ -1626,7 +1626,7 @@ public final class BootstrapDispatcher {
     depth[0]++;
     try {
       return supplier.get();
-    } catch (Throwable throwable) {
+    } catch (final Throwable throwable) {
       sneakyThrow(throwable);
       return fallback;
     } finally {

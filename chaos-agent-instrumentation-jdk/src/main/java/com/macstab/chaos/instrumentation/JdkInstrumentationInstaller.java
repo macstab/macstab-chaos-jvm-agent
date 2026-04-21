@@ -74,6 +74,9 @@ public final class JdkInstrumentationInstaller {
   private static final Logger LOGGER =
       Logger.getLogger(JdkInstrumentationInstaller.class.getName());
 
+  private static final String BRIDGE_JAR_PREFIX = "macstab-chaos-bootstrap-bridge";
+  private static final String BRIDGE_JAR_SUFFIX = ".jar";
+
   /**
    * The transformer returned by the last successful {@link AgentBuilder#installOn} call. Retained
    * so dynamic-attach test runners and framework teardown paths can call {@link #uninstall} to
@@ -1372,7 +1375,7 @@ public final class JdkInstrumentationInstaller {
       // CL may be null or may be the bootstrap CL (before the app CL is installed).
       final ClassLoader probe = Thread.currentThread().getContextClassLoader();
       Class.forName(typeName, false, probe != null ? probe : ClassLoader.getSystemClassLoader());
-    } catch (ClassNotFoundException ignored) {
+    } catch (final ClassNotFoundException ignored) {
       LOGGER.fine("[chaos-agent] optional instrumentation target not present: " + typeName);
       return builder;
     }
@@ -1409,7 +1412,7 @@ public final class JdkInstrumentationInstaller {
       bootstrapDispatcher
           .getMethod("install", Object.class, MethodHandle[].class)
           .invoke(null, bridgeDelegate, mh);
-    } catch (Exception exception) {
+    } catch (final Exception exception) {
       throw new IllegalStateException("failed to install bridge delegate", exception);
     }
   }
@@ -1488,7 +1491,7 @@ public final class JdkInstrumentationInstaller {
       final java.util.jar.JarFile jarFile = new java.util.jar.JarFile(bridgeJar.toFile());
       BRIDGE_JARS.add(jarFile);
       instrumentation.appendToBootstrapClassLoaderSearch(jarFile);
-    } catch (IOException exception) {
+    } catch (final IOException exception) {
       // Failure path: clear the injected flag so a subsequent install() can retry rather
       // than silently returning success when the bridge was never actually in place.
       BRIDGE_INJECTED.set(false);
@@ -1518,9 +1521,9 @@ public final class JdkInstrumentationInstaller {
       final java.nio.file.attribute.FileAttribute<?> ownerOnly =
           java.nio.file.attribute.PosixFilePermissions.asFileAttribute(
               java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"));
-      return Files.createTempFile("macstab-chaos-bootstrap-bridge", ".jar", ownerOnly);
+      return Files.createTempFile(BRIDGE_JAR_PREFIX, BRIDGE_JAR_SUFFIX, ownerOnly);
     }
-    return Files.createTempFile("macstab-chaos-bootstrap-bridge", ".jar");
+    return Files.createTempFile(BRIDGE_JAR_PREFIX, BRIDGE_JAR_SUFFIX);
   }
 
   private static void writeClass(final JarOutputStream jarOutputStream, final String resourcePath)

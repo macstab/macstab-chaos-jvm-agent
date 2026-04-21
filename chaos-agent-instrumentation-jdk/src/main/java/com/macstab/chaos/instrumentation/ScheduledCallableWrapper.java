@@ -41,7 +41,7 @@ public final class ScheduledCallableWrapper<T> implements Callable<T> {
                 + ")");
       }
       return delegate.call();
-    } catch (Throwable throwable) {
+    } catch (final Throwable throwable) {
       // Restore the interrupt flag before re-throwing. Without this, an InterruptedException
       // thrown by delegate.call() (or by the chaos hook itself) would clear the worker
       // thread's interrupt bit, defeating cooperative cancellation in the enclosing
