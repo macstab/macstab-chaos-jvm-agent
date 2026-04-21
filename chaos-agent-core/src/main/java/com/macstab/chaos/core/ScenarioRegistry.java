@@ -227,7 +227,7 @@ final class ScenarioRegistry implements ChaosDiagnostics {
   @Override
   public String debugDump() {
     final Snapshot snapshot = snapshot();
-    StringBuilder builder = new StringBuilder();
+    final StringBuilder builder = new StringBuilder();
     builder.append("macstab-chaos diagnostics").append(System.lineSeparator());
     builder.append("capturedAt=").append(snapshot.capturedAt()).append(System.lineSeparator());
     snapshot
@@ -235,7 +235,7 @@ final class ScenarioRegistry implements ChaosDiagnostics {
         .forEach(
             (key, value) ->
                 builder.append(key).append('=').append(value).append(System.lineSeparator()));
-    for (ScenarioReport report : snapshot.scenarios()) {
+    for (final ScenarioReport report : snapshot.scenarios()) {
       builder
           .append(report.id())
           .append(" state=")

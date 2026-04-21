@@ -57,7 +57,7 @@ final class CodeCachePressureStressor implements ManagedStressor {
         // Class generation failed — release the loader immediately rather than leaking it.
         try {
           loader.close();
-        } catch (java.io.IOException ignored) {
+        } catch (final java.io.IOException ignored) {
           // Best-effort — there is no live class holding the loader, so GC will reclaim it.
         }
       }
@@ -106,7 +106,7 @@ final class CodeCachePressureStressor implements ManagedStressor {
       for (final URLClassLoader loader : loaders) {
         try {
           loader.close();
-        } catch (java.io.IOException ignored) {
+        } catch (final java.io.IOException ignored) {
           // Best-effort: GC + Metaspace reclamation is the ultimate path regardless.
         }
       }
@@ -141,7 +141,7 @@ final class CodeCachePressureStressor implements ManagedStressor {
       try (DynamicType.Unloaded<?> unloaded = builder.make()) {
         return unloaded.load(loader, ClassLoadingStrategy.Default.INJECTION).getLoaded();
       }
-    } catch (Exception exception) {
+    } catch (final Exception exception) {
       LOGGER.fine(
           "CodeCachePressureStressor: failed to generate class " + index + ": " + exception);
       return null;
@@ -161,7 +161,7 @@ final class CodeCachePressureStressor implements ManagedStressor {
           method.invoke(instance, (long) invocation);
         }
       }
-    } catch (Exception exception) {
+    } catch (final Exception exception) {
       LOGGER.fine("CodeCachePressureStressor: failed to invoke methods: " + exception);
     }
   }

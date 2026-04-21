@@ -128,10 +128,10 @@ final class ObservabilityBus {
     // reflects publish()-arrival order as closely as possible even under listener backpressure.
     final Instant timestamp = Instant.now();
     final ChaosEvent event = new ChaosEvent(timestamp, type, scenarioId, message, attributes);
-    for (ChaosEventListener listener : listeners) {
+    for (final ChaosEventListener listener : listeners) {
       try {
         listener.onEvent(event);
-      } catch (Throwable ex) {
+      } catch (final Throwable ex) {
         // Catch Throwable, not Exception. This runs on application threads inside ByteBuddy
         // advice — an Error escaping here would unwind straight into user code. StackOverflow
         // and OOM from a pathological listener would each trigger that path, as would every

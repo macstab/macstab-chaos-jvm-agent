@@ -70,7 +70,7 @@ final class FailureFactory {
               Class.forName("javax.naming.NamingException")
                   .getConstructor(String.class)
                   .newInstance(message);
-        } catch (Exception ex) {
+        } catch (final Exception ex) {
           yield new RuntimeException(message);
         }
       }
@@ -80,7 +80,7 @@ final class FailureFactory {
               Class.forName("javax.management.MBeanException")
                   .getConstructor(Exception.class, String.class)
                   .newInstance(new RuntimeException(message), message);
-        } catch (Exception ex) {
+        } catch (final Exception ex) {
           yield new RuntimeException(message);
         }
       }
@@ -109,7 +109,7 @@ final class FailureFactory {
               Class.forName("javax.net.ssl.SSLHandshakeException")
                   .getConstructor(String.class)
                   .newInstance(message);
-        } catch (Exception ex) {
+        } catch (final Exception ex) {
           yield new java.io.IOException(message);
         }
       }
@@ -125,7 +125,7 @@ final class FailureFactory {
               Class.forName("java.sql.SQLException")
                   .getConstructor(String.class)
                   .newInstance(message);
-        } catch (Exception ex) {
+        } catch (final Exception ex) {
           yield new RuntimeException(message);
         }
       }

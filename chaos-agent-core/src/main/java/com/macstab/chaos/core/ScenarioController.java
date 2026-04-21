@@ -442,7 +442,7 @@ final class ScenarioController {
     } else {
       appliedCount.incrementAndGet();
     }
-    Map<String, String> appliedAttrs = new LinkedHashMap<>();
+    final Map<String, String> appliedAttrs = new LinkedHashMap<>();
     appliedAttrs.put("operation", context.operationType().name());
     appliedAttrs.put("scope", scopeKey);
     appliedAttrs.put("effectType", scenario.effect().getClass().getSimpleName());

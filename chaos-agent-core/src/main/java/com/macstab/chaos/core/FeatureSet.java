@@ -35,7 +35,7 @@ final class FeatureSet {
     Method method;
     try {
       method = Thread.class.getMethod("isVirtual");
-    } catch (NoSuchMethodException ignored) {
+    } catch (final NoSuchMethodException ignored) {
       method = null;
     }
     this.isVirtualMethod = method;
@@ -72,7 +72,7 @@ final class FeatureSet {
     try {
       Class.forName("jdk.jfr.FlightRecorder", false, FeatureSet.class.getClassLoader());
       return true;
-    } catch (ClassNotFoundException ignored) {
+    } catch (final ClassNotFoundException ignored) {
       return false;
     }
   }
@@ -111,7 +111,7 @@ final class FeatureSet {
     }
     try {
       return (boolean) isVirtualMethod.invoke(thread);
-    } catch (ReflectiveOperationException ignored) {
+    } catch (final ReflectiveOperationException ignored) {
       return false;
     }
   }

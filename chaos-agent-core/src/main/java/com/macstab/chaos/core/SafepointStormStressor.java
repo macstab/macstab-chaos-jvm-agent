@@ -51,7 +51,7 @@ final class SafepointStormStressor implements ManagedStressor {
                 }
                 try {
                   Thread.sleep(intervalMillis);
-                } catch (InterruptedException interruptedException) {
+                } catch (final InterruptedException interruptedException) {
                   Thread.currentThread().interrupt();
                   break;
                 }
@@ -73,7 +73,7 @@ final class SafepointStormStressor implements ManagedStressor {
     stormThread.interrupt();
     try {
       stormThread.join(5_000L);
-    } catch (InterruptedException interruptedException) {
+    } catch (final InterruptedException interruptedException) {
       Thread.currentThread().interrupt();
     }
     LOGGER.fine("SafepointStormStressor stopped after " + gcCycleCount.get() + " GC cycles");
@@ -117,7 +117,7 @@ final class SafepointStormStressor implements ManagedStressor {
       try {
         inst.retransformClasses(cls);
         retransformed++;
-      } catch (Exception exception) {
+      } catch (final Exception exception) {
         // Some system classes cannot be retransformed; skip silently.
       }
     }

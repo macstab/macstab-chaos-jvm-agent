@@ -263,7 +263,7 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
   }
 
   private Map<String, String> runtimeDetails() {
-    Map<String, String> details = new LinkedHashMap<>();
+    final Map<String, String> details = new LinkedHashMap<>();
     details.put("jdkFeatureVersion", Integer.toString(featureSet.runtimeFeatureVersion()));
     details.put("virtualThreadsSupported", Boolean.toString(featureSet.supportsVirtualThreads()));
     details.put("jfrSupported", Boolean.toString(featureSet.jfrSupported()));

@@ -50,7 +50,7 @@ final class ReferenceQueueFloodStressor implements ManagedStressor {
                 }
                 try {
                   Thread.sleep(intervalMillis);
-                } catch (InterruptedException interruptedException) {
+                } catch (final InterruptedException interruptedException) {
                   Thread.currentThread().interrupt();
                   break;
                 }
@@ -73,7 +73,7 @@ final class ReferenceQueueFloodStressor implements ManagedStressor {
     floodThread.interrupt();
     try {
       floodThread.join(5_000L);
-    } catch (InterruptedException interruptedException) {
+    } catch (final InterruptedException interruptedException) {
       Thread.currentThread().interrupt();
     }
     // Drain the queue so we do not leave the ReferenceHandler with a large backlog.
