@@ -10,7 +10,7 @@ public class MetricsAggregator {
   private final Map<String, Long> counts = new HashMap<>();
   private final Object lock = new Object();
 
-  public void record(String metric) {
+  public void record(final String metric) {
     synchronized (lock) {
       counts.merge(metric, 1L, Long::sum);
       Thread.yield();

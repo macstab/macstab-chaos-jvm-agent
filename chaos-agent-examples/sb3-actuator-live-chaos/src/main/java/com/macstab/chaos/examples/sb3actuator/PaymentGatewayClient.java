@@ -13,13 +13,13 @@ public class PaymentGatewayClient {
   private final String gatewayUrl;
 
   public PaymentGatewayClient(
-      RestTemplate restTemplate, @Value("${payment.gateway.url}") String gatewayUrl) {
+      final RestTemplate restTemplate, @Value("${payment.gateway.url}") final String gatewayUrl) {
     this.restTemplate = restTemplate;
     this.gatewayUrl = gatewayUrl;
   }
 
   @CircuitBreaker(name = "payment-gateway", fallbackMethod = "chargeFallback")
-  public String charge(String orderId) {
+  public String charge(final String orderId) {
     return restTemplate.postForObject(gatewayUrl + "/charge", orderId, String.class);
   }
 
@@ -28,7 +28,7 @@ public class PaymentGatewayClient {
   // cases must be distinguishable so tests can assert on actual open-circuit
   // behaviour instead of the noisier "any exception" path.
   @SuppressWarnings("unused")
-  public String chargeFallback(String orderId, Throwable t) {
+  public String chargeFallback(final String orderId, final Throwable t) {
     if (t instanceof CallNotPermittedException) {
       return "fallback:circuit-open";
     }

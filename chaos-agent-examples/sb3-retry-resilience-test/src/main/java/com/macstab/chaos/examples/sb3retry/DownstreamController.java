@@ -9,7 +9,7 @@ public class DownstreamController {
 
   private final DownstreamClient downstreamClient;
 
-  public DownstreamController(DownstreamClient downstreamClient) {
+  public DownstreamController(final DownstreamClient downstreamClient) {
     this.downstreamClient = downstreamClient;
   }
 

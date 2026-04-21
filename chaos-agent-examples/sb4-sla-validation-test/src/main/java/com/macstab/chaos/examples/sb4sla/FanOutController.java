@@ -9,7 +9,7 @@ public class FanOutController {
 
   private final FanOutService fanOutService;
 
-  public FanOutController(FanOutService fanOutService) {
+  public FanOutController(final FanOutService fanOutService) {
     this.fanOutService = fanOutService;
   }
 

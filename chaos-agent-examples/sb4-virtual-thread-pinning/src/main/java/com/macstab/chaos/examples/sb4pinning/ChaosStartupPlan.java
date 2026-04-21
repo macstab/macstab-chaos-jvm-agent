@@ -21,14 +21,14 @@ public class ChaosStartupPlan implements ApplicationListener<ApplicationReadyEve
   private volatile ChaosActivationHandle handle;
 
   public ChaosStartupPlan(
-      ChaosControlPlane controlPlane,
-      @Value("${macstab.chaos.contention.enabled:false}") boolean contentionEnabled) {
+      final ChaosControlPlane controlPlane,
+      @Value("${macstab.chaos.contention.enabled:false}") final boolean contentionEnabled) {
     this.controlPlane = controlPlane;
     this.contentionEnabled = contentionEnabled;
   }
 
   @Override
-  public void onApplicationEvent(ApplicationReadyEvent event) {
+  public void onApplicationEvent(final ApplicationReadyEvent event) {
     if (!contentionEnabled) {
       return;
     }
@@ -41,7 +41,7 @@ public class ChaosStartupPlan implements ApplicationListener<ApplicationReadyEve
     // in the ForkJoin pool for a bounded duration, exactly reproducing the
     // symptom the demo teaches: virtual threads making progress slowly because
     // their carriers are held up in synchronized / native code elsewhere.
-    ChaosScenario scenario =
+    final ChaosScenario scenario =
         ChaosScenario.builder("virtual-thread-carrier-pinning")
             .description(
                 "Pin virtual-thread carriers for short bursts so concurrent POST /metrics"
@@ -56,7 +56,7 @@ public class ChaosStartupPlan implements ApplicationListener<ApplicationReadyEve
 
   @PreDestroy
   public void shutdown() {
-    ChaosActivationHandle h = handle;
+    final ChaosActivationHandle h = handle;
     if (h != null) {
       h.stop();
     }

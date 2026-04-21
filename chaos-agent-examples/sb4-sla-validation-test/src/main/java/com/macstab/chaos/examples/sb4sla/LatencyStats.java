@@ -11,7 +11,7 @@ public final class LatencyStats {
    * @param pct percentile in the range [0.0, 100.0]
    * @return interpolated percentile value in nanoseconds
    */
-  public static long percentile(long[] sortedNanos, double pct) {
+  public static long percentile(final long[] sortedNanos, final double pct) {
     if (sortedNanos == null || sortedNanos.length == 0) {
       throw new IllegalArgumentException("sortedNanos must be non-empty");
     }
@@ -21,13 +21,13 @@ public final class LatencyStats {
     if (sortedNanos.length == 1) {
       return sortedNanos[0];
     }
-    double rank = (pct / 100.0) * (sortedNanos.length - 1);
-    int lower = (int) Math.floor(rank);
-    int upper = (int) Math.ceil(rank);
+    final double rank = (pct / 100.0) * (sortedNanos.length - 1);
+    final int lower = (int) Math.floor(rank);
+    final int upper = (int) Math.ceil(rank);
     if (lower == upper) {
       return sortedNanos[lower];
     }
-    double fraction = rank - lower;
+    final double fraction = rank - lower;
     return Math.round(sortedNanos[lower] + fraction * (sortedNanos[upper] - sortedNanos[lower]));
   }
 }

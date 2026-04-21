@@ -12,13 +12,13 @@ public class PaymentController {
 
   private final PaymentGatewayClient client;
 
-  public PaymentController(PaymentGatewayClient client) {
+  public PaymentController(final PaymentGatewayClient client) {
     this.client = client;
   }
 
   @PostMapping("/{orderId}")
-  public ResponseEntity<String> charge(@PathVariable String orderId) {
-    String result = client.charge(orderId);
+  public ResponseEntity<String> charge(@PathVariable final String orderId) {
+    final String result = client.charge(orderId);
     return ResponseEntity.ok(result);
   }
 }

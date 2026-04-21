@@ -16,10 +16,10 @@ public class FanOutService {
   private final String urlC;
 
   public FanOutService(
-      RestTemplate restTemplate,
-      @Value("${downstream.a.url}") String urlA,
-      @Value("${downstream.b.url}") String urlB,
-      @Value("${downstream.c.url}") String urlC) {
+      final RestTemplate restTemplate,
+      @Value("${downstream.a.url}") final String urlA,
+      @Value("${downstream.b.url}") final String urlB,
+      @Value("${downstream.c.url}") final String urlC) {
     this.restTemplate = restTemplate;
     this.urlA = urlA;
     this.urlB = urlB;
@@ -27,14 +27,14 @@ public class FanOutService {
   }
 
   public FanOutResult call() {
-    try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
-      CompletableFuture<String> futureA =
+    try (final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
+      final CompletableFuture<String> futureA =
           CompletableFuture.supplyAsync(
               () -> restTemplate.getForObject(urlA, String.class), executor);
-      CompletableFuture<String> futureB =
+      final CompletableFuture<String> futureB =
           CompletableFuture.supplyAsync(
               () -> restTemplate.getForObject(urlB, String.class), executor);
-      CompletableFuture<String> futureC =
+      final CompletableFuture<String> futureC =
           CompletableFuture.supplyAsync(
               () -> restTemplate.getForObject(urlC, String.class), executor);
 

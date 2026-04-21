@@ -14,12 +14,12 @@ public class MetricsController {
 
   private final MetricsAggregator aggregator;
 
-  public MetricsController(MetricsAggregator aggregator) {
+  public MetricsController(final MetricsAggregator aggregator) {
     this.aggregator = aggregator;
   }
 
   @PostMapping
-  public ResponseEntity<Void> record(@RequestParam String name) {
+  public ResponseEntity<Void> record(@RequestParam final String name) {
     aggregator.record(name);
     return ResponseEntity.noContent().build();
   }

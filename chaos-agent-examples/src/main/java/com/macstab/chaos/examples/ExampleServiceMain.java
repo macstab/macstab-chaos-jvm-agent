@@ -14,22 +14,22 @@ import java.util.concurrent.TimeUnit;
 public final class ExampleServiceMain {
   private ExampleServiceMain() {}
 
-  public static void main(String[] args) throws Exception {
+  public static void main(final String[] args) throws Exception {
     if (Boolean.getBoolean("macstab.chaos.install.local")) {
       ChaosPlatform.installLocally();
     }
-    BlockingQueue<String> queue = new LinkedBlockingQueue<>(16);
-    ThreadPoolExecutor executor =
+    final BlockingQueue<String> queue = new LinkedBlockingQueue<>(16);
+    final ThreadPoolExecutor executor =
         new ThreadPoolExecutor(2, 2, 0L, TimeUnit.MILLISECONDS, new LinkedBlockingQueue<>());
-    ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
+    final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
     queue.put("payload");
-    CompletableFuture<String> future = new CompletableFuture<>();
+    final CompletableFuture<String> future = new CompletableFuture<>();
     executor.submit(
         () -> {
           try {
-            String item = queue.take();
+            final String item = queue.take();
             future.complete(item + ":" + loadResource());
-          } catch (Exception exception) {
+          } catch (final Exception exception) {
             future.completeExceptionally(exception);
           }
         });
@@ -41,7 +41,7 @@ public final class ExampleServiceMain {
   }
 
   private static String loadResource() throws Exception {
-    try (InputStream inputStream =
+    try (final InputStream inputStream =
         ExampleServiceMain.class.getClassLoader().getResourceAsStream("example-resource.txt")) {
       if (inputStream == null) {
         return "missing";

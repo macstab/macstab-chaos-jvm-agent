@@ -12,7 +12,7 @@ public class DownstreamClient {
   private final String downstreamUrl;
 
   public DownstreamClient(
-      RestTemplate restTemplate, @Value("${downstream.url}") String downstreamUrl) {
+      final RestTemplate restTemplate, @Value("${downstream.url}") final String downstreamUrl) {
     this.restTemplate = restTemplate;
     this.downstreamUrl = downstreamUrl;
   }
