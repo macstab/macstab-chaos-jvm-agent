@@ -141,7 +141,12 @@ public final class StartupConfigPoller implements AutoCloseable {
     scheduler.scheduleAtFixedRate(this::pollOnce, intervalMs, intervalMs, TimeUnit.MILLISECONDS);
   }
 
-  /** Returns the configured poll interval in milliseconds. */
+  /**
+   * Returns the configured poll interval in milliseconds.
+   *
+   * @return poll interval in milliseconds; always {@code >= MIN_WATCH_INTERVAL_MS} when watching is
+   *     enabled
+   */
   public long intervalMs() {
     return intervalMs;
   }
@@ -212,6 +217,29 @@ public final class StartupConfigPoller implements AutoCloseable {
       try (final java.io.InputStream in =
           Files.newInputStream(configPath, LinkOption.NOFOLLOW_LINKS)) {
         json = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+      }
+      // Re-stat after the read: if the mtime moved between the initial stat and end-of-read,
+      // the writer was still producing the file while we were consuming it, so the bytes we
+      // have are potentially truncated or mid-rewrite. Advancing lastModified with the stale
+      // stat would permanently mask the final (complete) mtime once the writer finishes,
+      // leaving the poller stuck on the torn read forever. Skip the parse and wait for the
+      // next tick, which will see the settled mtime and a clean read. Editors that perform
+      // atomic rename-into-place produce exactly one mtime change and are unaffected; editors
+      // that truncate-and-write (vim default, `echo > file`) produce two — only the second
+      // will parse.
+      final FileTime afterRead;
+      try {
+        afterRead = Files.getLastModifiedTime(configPath, LinkOption.NOFOLLOW_LINKS);
+      } catch (IOException e) {
+        System.err.println(
+            "[chaos-agent] config poll failed (post-read stat): " + sanitiseForLog(e.getMessage()));
+        return;
+      }
+      if (!afterRead.equals(current)) {
+        // Don't advance lastModified: the next tick should see afterRead (or a later value)
+        // as a fresh change and retry. Logging at FINE would flood for active writers; stay
+        // silent.
+        return;
       }
       final com.macstab.chaos.api.ChaosPlan newPlan = ChaosPlanMapper.read(json);
       applyDiff(newPlan.scenarios());
@@ -320,7 +348,25 @@ public final class StartupConfigPoller implements AutoCloseable {
     return sb.toString();
   }
 
+  /**
+   * Lower bound on the poll interval. Values below this are clamped up to protect against a
+   * stat-storm against network filesystems (ConfigMap mounts, NFS). A misconfigured {@code
+   * configWatchInterval=1} would otherwise schedule one {@code getLastModifiedTime} per millisecond
+   * — enough to saturate a kubelet's ConfigMap volume plugin on a single process. 50 ms is
+   * aggressive for test iteration but well below any operational-impact threshold.
+   */
+  static final long MIN_WATCH_INTERVAL_MS = 50L;
+
   static long resolveInterval(final String rawAgentArgs, final Map<String, String> environment) {
+    final long raw = resolveRawInterval(rawAgentArgs, environment);
+    if (raw <= 0) {
+      return 0L;
+    }
+    return Math.max(raw, MIN_WATCH_INTERVAL_MS);
+  }
+
+  private static long resolveRawInterval(
+      final String rawAgentArgs, final Map<String, String> environment) {
     final long fromArg = AgentArgsParser.parse(rawAgentArgs).getLong(ARG_WATCH_INTERVAL, 0L);
     if (fromArg > 0) {
       return fromArg;

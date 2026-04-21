@@ -74,6 +74,18 @@ final class ManualGate {
     // nanosecond-precision timed await. Using toMillis() here would truncate to 0 and return
     // immediately without blocking, collapsing a legitimate (if very short) gate into a
     // no-op. Nanosecond-precision CountDownLatch.await honours the full duration.
-    current.await(maxBlock.toNanos(), TimeUnit.NANOSECONDS);
+    //
+    // Duration.toNanos() overflows to ArithmeticException at ~±292 years; a caller passing
+    // Duration.ofDays(Long.MAX_VALUE) or similar would otherwise crash the advice thread.
+    // A duration larger than the nanosecond-representable range is effectively indefinite, so
+    // fall back to the untimed await in that case.
+    final long nanos;
+    try {
+      nanos = maxBlock.toNanos();
+    } catch (final ArithmeticException overflow) {
+      current.await();
+      return;
+    }
+    current.await(nanos, TimeUnit.NANOSECONDS);
   }
 }

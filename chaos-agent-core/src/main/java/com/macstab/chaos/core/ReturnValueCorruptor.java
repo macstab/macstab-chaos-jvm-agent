@@ -1,15 +1,31 @@
 package com.macstab.chaos.core;
 
 import com.macstab.chaos.api.ChaosEffect;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.NavigableMap;
+import java.util.NavigableSet;
 import java.util.Optional;
+import java.util.Queue;
 import java.util.Set;
+import java.util.SortedMap;
+import java.util.SortedSet;
+import java.util.TreeMap;
+import java.util.TreeSet;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.ConcurrentSkipListMap;
+import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.logging.Logger;
 
 /**
@@ -147,15 +163,48 @@ final class ReturnValueCorruptor {
     // at the @Advice.Return write site, so returning an immutable singleton (e.g.
     // Collections.emptyList() whose concrete type is ImmutableCollections$ListN) for a method
     // declared to return ArrayList<T> causes a ClassCastException at the call site.
-    // Check concrete types first before falling through to interface checks.
-    if (ArrayList.class.isAssignableFrom(returnType) && List.class.isAssignableFrom(returnType)) {
+    // Check concrete types first (most specific to least specific) before interface checks.
+    //
+    // Order matters: LinkedHashMap extends HashMap, so the LinkedHashMap check must come before
+    // HashMap. Similarly LinkedHashSet extends HashSet. ConcurrentSkipList* implement the
+    // sorted/navigable interfaces so they get caught by the interface checks below if they
+    // themselves are the declared type; we add dedicated checks because the declared-return-type
+    // contract can name them concretely in the method signature.
+    if (ArrayList.class.isAssignableFrom(returnType)) {
       return new ArrayList<>();
     }
-    if (HashSet.class.isAssignableFrom(returnType) && Set.class.isAssignableFrom(returnType)) {
+    if (LinkedList.class.isAssignableFrom(returnType)) {
+      return new LinkedList<>();
+    }
+    if (ArrayDeque.class.isAssignableFrom(returnType)) {
+      return new ArrayDeque<>();
+    }
+    if (LinkedHashSet.class.isAssignableFrom(returnType)) {
+      return new LinkedHashSet<>();
+    }
+    if (HashSet.class.isAssignableFrom(returnType)) {
       return new HashSet<>();
     }
-    if (HashMap.class.isAssignableFrom(returnType) && Map.class.isAssignableFrom(returnType)) {
+    if (TreeSet.class.isAssignableFrom(returnType)) {
+      return new TreeSet<>();
+    }
+    if (ConcurrentSkipListSet.class.isAssignableFrom(returnType)) {
+      return new ConcurrentSkipListSet<>();
+    }
+    if (LinkedHashMap.class.isAssignableFrom(returnType)) {
+      return new LinkedHashMap<>();
+    }
+    if (HashMap.class.isAssignableFrom(returnType)) {
       return new HashMap<>();
+    }
+    if (TreeMap.class.isAssignableFrom(returnType)) {
+      return new TreeMap<>();
+    }
+    if (ConcurrentSkipListMap.class.isAssignableFrom(returnType)) {
+      return new ConcurrentSkipListMap<>();
+    }
+    if (ConcurrentHashMap.class.isAssignableFrom(returnType)) {
+      return new ConcurrentHashMap<>();
     }
     // For interface/abstract types, the immutable singletons are safe because the declared
     // return type does not require a specific concrete class — only the interface compatibility.
@@ -173,8 +222,35 @@ final class ReturnValueCorruptor {
         && Map.class.isAssignableFrom(returnType)) {
       return Collections.emptyMap();
     }
+    // Queue and Deque interfaces are not backed by a Collections.empty* singleton, so fall
+    // back to mutable-but-empty concrete implementations. Deque is a sub-interface of Queue,
+    // so check it first.
+    if (Deque.class.isAssignableFrom(returnType)) {
+      return new ArrayDeque<>();
+    }
+    if (Queue.class.isAssignableFrom(returnType)) {
+      return new LinkedList<>();
+    }
+    // SortedMap / NavigableMap / SortedSet / NavigableSet have no Collections.empty* singleton
+    // that satisfies the interface. Collections.emptySortedMap() etc. do exist but returning a
+    // mutable instance is safer because callers may mutate the result.
+    if (NavigableMap.class.isAssignableFrom(returnType)
+        || SortedMap.class.isAssignableFrom(returnType)) {
+      return new TreeMap<>();
+    }
+    if (NavigableSet.class.isAssignableFrom(returnType)
+        || SortedSet.class.isAssignableFrom(returnType)) {
+      return new TreeSet<>();
+    }
+    if (ConcurrentMap.class.isAssignableFrom(returnType)) {
+      return new ConcurrentHashMap<>();
+    }
     if (returnType.isAssignableFrom(java.util.Collections.emptyList().getClass())
         && Collection.class.isAssignableFrom(returnType)) {
+      return Collections.emptyList();
+    }
+    if (Iterable.class.isAssignableFrom(returnType)
+        && returnType.isAssignableFrom(java.util.Collections.emptyList().getClass())) {
       return Collections.emptyList();
     }
     if (Optional.class.isAssignableFrom(returnType)) {

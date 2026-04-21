@@ -72,6 +72,26 @@ public final class ChaosAgentBootstrap {
    */
   static final AtomicReference<StartupConfigPoller> POLLER = new AtomicReference<>();
 
+  /** Serialises concurrent {@link #installForLocalTests} calls; see that method for rationale. */
+  private static final Object INSTALL_LOCK = new Object();
+
+  /**
+   * System property / env-var name that opts in to installing the agent via {@link #agentmain}
+   * (dynamic attach). Without this opt-in, {@code agentmain} is a no-op: an attacker who has
+   * already achieved code execution sufficient to call the Attach API on a live JVM (HotSpotAttach
+   * / JcmdAttach) would otherwise be able to turn the chaos agent into an instrumentation RCE
+   * primitive — the agent has permission to rewrite bootstrap JDK classes, which is strictly more
+   * than arbitrary process-level code exec.
+   */
+  static final String ALLOW_DYNAMIC_ATTACH_PROPERTY = "macstab.chaos.allow-dynamic-attach";
+
+  /**
+   * Env-var equivalent of {@link #ALLOW_DYNAMIC_ATTACH_PROPERTY}. Both forms are checked so
+   * operators running under container orchestrators that only expose env vars can opt in without
+   * having to juggle {@code -D} flags on a command line they do not control.
+   */
+  static final String ALLOW_DYNAMIC_ATTACH_ENV = "MACSTAB_CHAOS_ALLOW_DYNAMIC_ATTACH";
+
   private ChaosAgentBootstrap() {}
 
   /**
@@ -100,11 +120,38 @@ public final class ChaosAgentBootstrap {
    * whether the class-file transformer requests it. Interception points that require transforming
    * bootstrap-loaded JDK classes may be ineffective if those classes were loaded before attachment.
    *
+   * <p><b>Security gate</b>: dynamic attach requires an explicit opt-in via the {@link
+   * #ALLOW_DYNAMIC_ATTACH_PROPERTY} system property or {@link #ALLOW_DYNAMIC_ATTACH_ENV}
+   * environment variable. Without the opt-in, {@code agentmain} is a no-op and returns silently.
+   * Rationale: an attacker who can call the Attach API on a running JVM already has process-level
+   * code execution, but installing a chaos agent gives them the ability to rewrite bootstrap JDK
+   * classes, which is a strictly stronger primitive. Requiring an explicit opt-in prevents a chaos
+   * jar that happens to be on the classpath from being trivially weaponised by a lower-privilege
+   * attacker via {@code VirtualMachine.attach}.
+   *
    * @param agentArgs the raw argument string passed to the attach call; may be {@code null}
    * @param instrumentation the {@link Instrumentation} instance provided by the JVM
    */
   public static void agentmain(final String agentArgs, final Instrumentation instrumentation) {
-    initialize(agentArgs, instrumentation, System.getenv(), true);
+    if (!dynamicAttachAllowed(System.getProperties(), System.getenv())) {
+      System.err.println(
+          "[chaos-agent] ignoring dynamic attach: set -D"
+              + ALLOW_DYNAMIC_ATTACH_PROPERTY
+              + "=true or "
+              + ALLOW_DYNAMIC_ATTACH_ENV
+              + "=true to opt in");
+      return;
+    }
+    initialize(agentArgs, instrumentation, System.getenv(), false);
+  }
+
+  private static boolean dynamicAttachAllowed(
+      final java.util.Properties systemProperties, final Map<String, String> environment) {
+    if (Boolean.parseBoolean(systemProperties.getProperty(ALLOW_DYNAMIC_ATTACH_PROPERTY))) {
+      return true;
+    }
+    final String envValue = environment.get(ALLOW_DYNAMIC_ATTACH_ENV);
+    return envValue != null && Boolean.parseBoolean(envValue);
   }
 
   /**
@@ -129,15 +176,27 @@ public final class ChaosAgentBootstrap {
     if (existing != null) {
       return existing;
     }
-    try {
-      final Instrumentation instrumentation = ByteBuddyAgent.install();
-      return initialize("", instrumentation, Map.of(), true);
-    } catch (RuntimeException runtimeException) {
-      throw runtimeException;
-    } catch (Exception exception) {
-      throw new IllegalStateException(
-          "failed to self-attach JVM agent; run tests with -javaagent if dynamic attach is unavailable",
-          exception);
+    // Double-checked under INSTALL_LOCK so two test threads racing their first call do not
+    // both perform the expensive self-attach. ByteBuddyAgent.install() caches internally, but
+    // initialize() below has non-trivial side effects (bridge JAR materialisation, MBean
+    // registration attempts, JFR probe). The inner initialize() performs a CAS on RUNTIME so
+    // correctness doesn't depend on this lock, but serialising here avoids doing the attach
+    // work twice when the outcome is identical.
+    synchronized (INSTALL_LOCK) {
+      final ChaosRuntime existingAfterLock = RUNTIME.get();
+      if (existingAfterLock != null) {
+        return existingAfterLock;
+      }
+      try {
+        final Instrumentation instrumentation = ByteBuddyAgent.install();
+        return initialize("", instrumentation, Map.of(), true);
+      } catch (RuntimeException runtimeException) {
+        throw runtimeException;
+      } catch (Exception exception) {
+        throw new IllegalStateException(
+            "failed to self-attach JVM agent; run tests with -javaagent if dynamic attach is unavailable",
+            exception);
+      }
     }
   }
 

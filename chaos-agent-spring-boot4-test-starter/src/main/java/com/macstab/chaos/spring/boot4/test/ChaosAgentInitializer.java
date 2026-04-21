@@ -1,6 +1,5 @@
 package com.macstab.chaos.spring.boot4.test;
 
-import com.macstab.chaos.api.ChaosControlPlane;
 import com.macstab.chaos.bootstrap.ChaosPlatform;
 import org.springframework.context.ApplicationContextInitializer;
 import org.springframework.context.ConfigurableApplicationContext;
@@ -21,7 +20,9 @@ public final class ChaosAgentInitializer
 
   @Override
   public void initialize(final ConfigurableApplicationContext applicationContext) {
-    final ChaosControlPlane controlPlane = ChaosPlatform.installLocally();
-    applicationContext.getBeanFactory().registerSingleton("chaosControlPlane", controlPlane);
+    // Install the JVM-wide agent before context refresh; see ChaosAgentInitializer in the
+    // Boot 3 starter for the reasoning behind delegating bean exposure to the auto-config
+    // rather than calling beanFactory.registerSingleton(...) here.
+    ChaosPlatform.installLocally();
   }
 }

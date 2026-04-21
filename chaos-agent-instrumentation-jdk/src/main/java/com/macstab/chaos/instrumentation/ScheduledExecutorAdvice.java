@@ -8,6 +8,23 @@ import net.bytebuddy.asm.Advice;
 final class ScheduledExecutorAdvice {
   private ScheduledExecutorAdvice() {}
 
+  // NOTE ON SUB-MILLISECOND CLAMPING: Every enter() advice below computes
+  //   long millis = unit.toMillis(delay);
+  //   if (delay > 0 && millis <= 0) millis = 1;
+  // rather than delegating to a private helper method on this class. ByteBuddy inlines the
+  // advice method body into the target bytecode, but a call to a static method on
+  // ScheduledExecutorAdvice stays in the bytecode as an INVOKESTATIC whose owner class must
+  // resolve through the instrumented class's classloader — the bootstrap loader for
+  // ScheduledThreadPoolExecutor. Only BootstrapDispatcher and the two wrappers are in the
+  // injected bridge JAR; the advice class itself is not, so any helper call produces a
+  // NoClassDefFoundError at runtime. Keep the clamp inline in each advice.
+  //
+  // The clamp is necessary because unit.toMillis() truncates: schedule(task, 500, NANOSECONDS)
+  // normalises to 0 ms, which the scheduler would then treat as "fire immediately", silently
+  // converting a deferred schedule into an immediate one. 1 ms is the coarsest non-zero value
+  // we can still represent after the unit rewrite, and it preserves the "caller asked for a
+  // delay" semantic.
+
   static final class ScheduleRunnableAdvice {
     @Advice.OnMethodEnter
     static void enter(
@@ -25,7 +42,10 @@ final class ScheduledExecutorAdvice {
       // and rewrite both arguments so the executor interprets the adjusted value as millis.
       // Without this, schedule(r, 5, SECONDS) would hand 5 to the dispatcher (treated as 5ms),
       // then the returned millis would be written back but interpreted as 5 seconds upstream.
-      final long delayMillis = unit.toMillis(delay);
+      long delayMillis = unit.toMillis(delay);
+      if (delay > 0L && delayMillis <= 0L) {
+        delayMillis = 1L;
+      }
       delay =
           BootstrapDispatcher.adjustScheduleDelay(
               "SCHEDULE_SUBMIT", executor, taskForDelay, delayMillis, false);
@@ -44,7 +64,10 @@ final class ScheduledExecutorAdvice {
       task = BootstrapDispatcher.decorateExecutorCallable("SCHEDULE_SUBMIT", executor, task);
       final Callable<?> taskForDelay = task;
       task = new ScheduledCallableWrapper<>(executor, task);
-      final long delayMillis = unit.toMillis(delay);
+      long delayMillis = unit.toMillis(delay);
+      if (delay > 0L && delayMillis <= 0L) {
+        delayMillis = 1L;
+      }
       delay =
           BootstrapDispatcher.adjustScheduleDelay(
               "SCHEDULE_SUBMIT", executor, taskForDelay, delayMillis, false);
@@ -66,19 +89,29 @@ final class ScheduledExecutorAdvice {
       task = new ScheduledRunnableWrapper(executor, task, true);
       // Period must be normalized alongside initialDelay because we rewrite the unit to
       // MILLISECONDS — leaving period in the original unit would multiply or divide the
-      // repeat interval by a factor of 10^3/10^6/10^9 depending on the caller's unit.
-      final long initialMillis = unit.toMillis(initialDelay);
-      final long periodMillis = unit.toMillis(period);
+      // repeat interval by a factor of 10^3/10^6/10^9 depending on the caller's unit. Clamp
+      // sub-millisecond period values to 1 ms as well: a period of 0 would cause the STPE
+      // to busy-loop on the same tick with no back-pressure.
+      long initialMillis = unit.toMillis(initialDelay);
+      if (initialDelay > 0L && initialMillis <= 0L) {
+        initialMillis = 1L;
+      }
+      long periodMillis = unit.toMillis(period);
+      if (period > 0L && periodMillis <= 0L) {
+        periodMillis = 1L;
+      }
       initialDelay =
           BootstrapDispatcher.adjustScheduleDelay(
               "SCHEDULE_SUBMIT", executor, taskForDelay, initialMillis, true);
-      // Route period through the same adjustment pipeline so a scenario that extends (or
-      // compresses) scheduling affects every repeat, not just the initial fire. Previously the
-      // raw normalised millis was assigned unchanged — scenarios targeting scheduling chaos
-      // applied once on first tick and were silently ignored for every subsequent repeat.
-      period =
-          BootstrapDispatcher.adjustScheduleDelay(
-              "SCHEDULE_SUBMIT", executor, taskForDelay, periodMillis, true);
+      // Only adjust initialDelay. adjustScheduleDelay routes through a stateful evaluate():
+      // matchedCount/appliedCount increment, rate-limit/probability sampling, APPLIED event
+      // emission, and maxApplications CAS all fire on each call. A second invocation for
+      // `period` within the same schedule(...) makes one caller-visible scheduling decision
+      // count as two scenario ticks — capped scenarios run out twice as fast, probability rolls
+      // disagree between initial and period, and observability double-emits. Period passes
+      // through as normalised millis; per-repeat chaos belongs on the task's run() path, not
+      // on re-invoking the schedule-time decision per tick.
+      period = periodMillis;
       unit = TimeUnit.MILLISECONDS;
     }
   }

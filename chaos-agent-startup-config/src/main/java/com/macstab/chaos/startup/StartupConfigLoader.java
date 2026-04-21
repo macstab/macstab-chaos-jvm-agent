@@ -3,12 +3,15 @@ package com.macstab.chaos.startup;
 import com.macstab.chaos.api.ChaosPlan;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermission;
 import java.util.Base64;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Resolves and loads a {@link ChaosPlan} during JVM agent startup.
@@ -187,7 +190,70 @@ public final class StartupConfigLoader {
       throw new ConfigLoadException(
           "cannot determine size of config file: " + path, "file:" + filePath, exception);
     }
+    rejectWorldWritable(path, filePath);
     return path;
+  }
+
+  /**
+   * Rejects config files that are world-writable (POSIX {@code o+w}) or whose enclosing directory
+   * is world-writable. Either condition lets any local user on the host swap the plan contents for
+   * an attacker-chosen payload between deploys — activating chaos with scenarios the operator never
+   * authorised. On non-POSIX filesystems the check is skipped: NTFS / ReFS express the same intent
+   * through ACLs rather than mode bits, and we'd rather keep the agent usable on Windows test hosts
+   * than fail-closed on a platform where the check is meaningless.
+   */
+  private static void rejectWorldWritable(final Path path, final String originalPath) {
+    if (!FileSystems.getDefault().supportedFileAttributeViews().contains("posix")) {
+      return;
+    }
+    try {
+      final Set<PosixFilePermission> filePerms =
+          Files.getPosixFilePermissions(path, LinkOption.NOFOLLOW_LINKS);
+      if (filePerms.contains(PosixFilePermission.OTHERS_WRITE)) {
+        throw new ConfigLoadException(
+            "config file is world-writable (rejected for safety): " + path, "file:" + originalPath);
+      }
+      final Path parent = path.getParent();
+      if (parent != null) {
+        final Set<PosixFilePermission> dirPerms =
+            Files.getPosixFilePermissions(parent, LinkOption.NOFOLLOW_LINKS);
+        // A world-writable parent without the sticky bit (t) lets any local user replace the
+        // target file via unlink+create, even if the file itself is mode 0644. Sticky dirs
+        // (typical for /tmp) restrict unlink to the file's owner so the replacement attack is
+        // closed; accept those and reject the rest.
+        if (dirPerms.contains(PosixFilePermission.OTHERS_WRITE) && !isStickyBitSet(parent)) {
+          throw new ConfigLoadException(
+              "config file's parent directory is world-writable without sticky bit (rejected"
+                  + " for safety): "
+                  + parent,
+              "file:" + originalPath);
+        }
+      }
+    } catch (UnsupportedOperationException | IOException exception) {
+      // Treat an unreadable POSIX view on a filesystem that claimed to support POSIX as an
+      // I/O failure rather than silent success: the check exists precisely because the mode
+      // bits matter.
+      throw new ConfigLoadException(
+          "cannot check POSIX permissions on config file: " + path,
+          "file:" + originalPath,
+          exception);
+    }
+  }
+
+  private static boolean isStickyBitSet(final Path directory) {
+    // POSIX sticky bit is not exposed by Files.getPosixFilePermissions (only the nine rwxrwxrwx
+    // mode bits are). Use the Unix-specific "unix:mode" attribute view where available, which
+    // returns the full 16-bit mode including setuid/setgid/sticky in the high bits. On
+    // filesystems that don't expose it, assume sticky is NOT set — fail-closed.
+    try {
+      final Object mode = Files.getAttribute(directory, "unix:mode", LinkOption.NOFOLLOW_LINKS);
+      if (mode instanceof Integer modeValue) {
+        return (modeValue & 01000) != 0;
+      }
+    } catch (UnsupportedOperationException | IllegalArgumentException | IOException ignored) {
+      // Fall through to fail-closed.
+    }
+    return false;
   }
 
   private static String firstNonBlank(final String left, final String right) {

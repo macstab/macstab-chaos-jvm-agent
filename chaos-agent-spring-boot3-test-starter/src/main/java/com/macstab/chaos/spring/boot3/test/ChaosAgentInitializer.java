@@ -1,6 +1,5 @@
 package com.macstab.chaos.spring.boot3.test;
 
-import com.macstab.chaos.api.ChaosControlPlane;
 import com.macstab.chaos.bootstrap.ChaosPlatform;
 import org.springframework.context.ApplicationContextInitializer;
 import org.springframework.context.ConfigurableApplicationContext;
@@ -21,7 +20,17 @@ public final class ChaosAgentInitializer
 
   @Override
   public void initialize(final ConfigurableApplicationContext applicationContext) {
-    final ChaosControlPlane controlPlane = ChaosPlatform.installLocally();
-    applicationContext.getBeanFactory().registerSingleton("chaosControlPlane", controlPlane);
+    // Install the JVM-wide agent before context refresh so instrumentation is in place when
+    // beans are instantiated. The resulting control plane is exposed as a Spring bean by
+    // ChaosTestAutoConfiguration — previously this initializer also called
+    // beanFactory.registerSingleton("chaosControlPlane", ...). That early singleton lands in
+    // the bean factory before @ConditionalOnMissingBean is evaluated, silently suppressing
+    // the auto-config bean method and bypassing @Bean lifecycle processing (lifecycle
+    // callbacks, dependency injection checks, BeanPostProcessor hooks). Worse, test code that
+    // relies on repeatable bean definitions — e.g. @MockBean replacement, @Primary overrides,
+    // or @TestConfiguration-time bean-name collisions — sees a pre-registered singleton it
+    // cannot replace the normal way. Letting the auto-config produce the bean keeps the
+    // lifecycle consistent and leaves the override paths open.
+    ChaosPlatform.installLocally();
   }
 }

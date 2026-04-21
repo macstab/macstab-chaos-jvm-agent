@@ -22,15 +22,25 @@ import jdk.jfr.StackTrace;
 @Enabled(true)
 public final class ChaosScenarioLifecycleEvent extends Event {
 
+  /** No-arg constructor required by the JFR runtime to instantiate event objects reflectively. */
+  public ChaosScenarioLifecycleEvent() {}
+
+  /** Unique identifier of the scenario that transitioned state. */
   @Label("Scenario ID")
   public String scenarioId;
 
+  /** Human-readable description of the scenario. */
   @Label("Description")
   public String description;
 
+  /**
+   * Lifecycle transition: one of {@code REGISTERED}, {@code STARTED}, {@code STOPPED}, {@code
+   * RELEASED}.
+   */
   @Label("Event Type")
   public String eventType;
 
+  /** Scope key that was active when the transition occurred; {@code null} for global scope. */
   @Label("Scope Key")
   public String scopeKey;
 }

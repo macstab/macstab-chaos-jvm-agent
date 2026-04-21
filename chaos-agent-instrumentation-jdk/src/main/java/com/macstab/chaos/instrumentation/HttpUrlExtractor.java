@@ -1,6 +1,10 @@
 package com.macstab.chaos.instrumentation;
 
 import java.lang.reflect.Method;
+import java.util.ArrayDeque;
+import java.util.Deque;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -29,6 +33,24 @@ final class HttpUrlExtractor {
           return new ConcurrentHashMap<>();
         }
       };
+
+  /**
+   * Sentinel Method entry stored in the cache when {@link #findMethod} returns {@code null}, so
+   * repeated calls against a class that doesn't define the target method skip the full superclass +
+   * interface walk. ConcurrentHashMap disallows null values, so without a sentinel we'd re-run the
+   * reflective search on every intercepted HTTP call — a per-request cost on a hot path.
+   * NEGATIVE_CACHE_MARKER is an arbitrary Method object whose identity is used as the "negative
+   * result" tag; it is never actually invoked.
+   */
+  private static final Method NEGATIVE_CACHE_MARKER;
+
+  static {
+    try {
+      NEGATIVE_CACHE_MARKER = Object.class.getDeclaredMethod("hashCode");
+    } catch (final NoSuchMethodException unreachable) {
+      throw new ExceptionInInitializerError(unreachable);
+    }
+  }
 
   private HttpUrlExtractor() {}
 
@@ -100,6 +122,39 @@ final class HttpUrlExtractor {
   }
 
   /**
+   * Extracts the URI from an Apache HttpComponents 4.x {@code HttpUriRequest} via {@code getURI()}.
+   * Falls back to {@code getRequestLine().getUri()} if {@code getURI()} is absent (e.g., a plain
+   * {@code HttpRequest} passed through the HttpUriRequest-first matcher by a driver subclass).
+   *
+   * @param request an {@code org.apache.http.client.methods.HttpUriRequest} (or superclass); may be
+   *     {@code null}
+   * @return the URL string, or {@code null} if extraction fails
+   */
+  static String fromApacheHc4UriRequest(final Object request) {
+    if (request == null) {
+      return null;
+    }
+    try {
+      final Object uri = invoke(request, "getURI");
+      if (uri != null) {
+        return uri.toString();
+      }
+    } catch (final Throwable ignored) {
+      // fall through to request-line path
+    }
+    try {
+      final Object requestLine = invoke(request, "getRequestLine");
+      if (requestLine != null) {
+        final Object uri = invoke(requestLine, "getUri");
+        return uri == null ? null : uri.toString();
+      }
+    } catch (final Throwable ignored) {
+      return null;
+    }
+    return null;
+  }
+
+  /**
    * Extracts the URI from an Apache HttpComponents 5.x {@code ClassicHttpRequest} via {@code
    * getRequestUri}.
    *
@@ -146,17 +201,39 @@ final class HttpUrlExtractor {
     if (method == null) {
       method = findMethod(cls, methodName);
       if (method != null) {
-        method.setAccessible(true);
+        // setAccessible(true) can throw InaccessibleObjectException on JDK 17+ when the target
+        // module has not opened the defining package for reflective access. Without catching
+        // it specifically, the outer catch(Throwable) in every public entry point would hide
+        // the concrete reason (module encapsulation) behind a silent null, leaking the real
+        // diagnostic. Swallow InaccessibleObjectException here because several of the HTTP
+        // client types (HttpRequest in java.net.http) ARE reachable without setAccessible
+        // when called from a module that reads java.net.http — we still cache the Method so
+        // invoke() can try it as-is. If the eventual invoke fails, the outer catch returns
+        // null and the extractor falls back to "no URL filter".
+        try {
+          method.setAccessible(true);
+        } catch (final java.lang.reflect.InaccessibleObjectException encapsulated) {
+          // leave method un-accessible; invoke() may still succeed for public methods in
+          // exported packages.
+        }
         perClass.put(methodName, method);
+      } else {
+        // Cache the *absence* of a matching method so that subsequent calls on the same class
+        // skip the full superclass + interface walk. Without this, every intercepted HTTP call
+        // against a class that happens not to expose the expected accessor re-runs findMethod —
+        // a reflective traversal of the entire type hierarchy on every request.
+        perClass.put(methodName, NEGATIVE_CACHE_MARKER);
       }
     }
-    if (method == null) {
+    if (method == null || method == NEGATIVE_CACHE_MARKER) {
       return null;
     }
     return method.invoke(target);
   }
 
   private static Method findMethod(final Class<?> start, final String methodName) {
+    final Set<Class<?>> visitedInterfaces = new HashSet<>();
+    final Deque<Class<?>> interfaceQueue = new ArrayDeque<>();
     Class<?> current = start;
     while (current != null) {
       for (final Method candidate : current.getDeclaredMethods()) {
@@ -164,14 +241,30 @@ final class HttpUrlExtractor {
           return candidate;
         }
       }
+      // Walk the interface hierarchy transitively. Reactor Netty HttpClientRequest.uri(), for
+      // instance, is declared on an interface that the concrete class inherits through several
+      // levels of super-interface; only scanning current.getInterfaces() misses methods
+      // declared on a super-super-interface and produces a spurious cache miss that falls back
+      // to "no URL filter" for every request through that client.
       for (final Class<?> iface : current.getInterfaces()) {
-        for (final Method candidate : iface.getDeclaredMethods()) {
-          if (candidate.getName().equals(methodName) && candidate.getParameterCount() == 0) {
-            return candidate;
-          }
+        if (visitedInterfaces.add(iface)) {
+          interfaceQueue.add(iface);
         }
       }
       current = current.getSuperclass();
+    }
+    Class<?> iface;
+    while ((iface = interfaceQueue.poll()) != null) {
+      for (final Method candidate : iface.getDeclaredMethods()) {
+        if (candidate.getName().equals(methodName) && candidate.getParameterCount() == 0) {
+          return candidate;
+        }
+      }
+      for (final Class<?> superInterface : iface.getInterfaces()) {
+        if (visitedInterfaces.add(superInterface)) {
+          interfaceQueue.add(superInterface);
+        }
+      }
     }
     return null;
   }

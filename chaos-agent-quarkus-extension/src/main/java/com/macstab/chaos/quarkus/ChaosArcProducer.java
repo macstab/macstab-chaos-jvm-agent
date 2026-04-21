@@ -17,12 +17,14 @@ import jakarta.enterprise.inject.Produces;
  *
  * <h2>Build-time gate</h2>
  *
- * <p>The producer is gated by the {@code macstab.chaos.enabled} build-time property. When the
- * property is missing it defaults to {@code true}, so an application that does not opt out keeps
- * the existing behaviour. Setting {@code macstab.chaos.enabled=false} at build time removes the
- * producer from the CDI container entirely — production deployments that bundle the extension for
- * non-prod profiles but must never install the chaos plane at runtime can rely on this gate rather
- * than having to guarantee {@code ChaosPlatform.installLocally()} is never called from user code.
+ * <p>The producer is gated by the {@code macstab.chaos.enabled} build-time property and is
+ * <b>opt-in</b>: when the property is absent the producer is <i>not</i> registered and {@link
+ * ChaosPlatform#installLocally()} is never invoked. Dropping the extension jar onto a production
+ * classpath therefore does not silently self-attach a JVM-wide chaos plane; an operator must
+ * explicitly set {@code macstab.chaos.enabled=true} at build time. This matches the default chosen
+ * by the recorder side of the extension and the Spring Boot starter, so the behaviour across
+ * frameworks is consistent: chaos is never active-by-default, only by affirmative build-time
+ * opt-in.
  *
  * <h2>Usage</h2>
  *
@@ -50,11 +52,11 @@ public class ChaosArcProducer {
   /**
    * Produces the singleton {@link ChaosControlPlane}.
    *
-   * <p>Only registered when {@code macstab.chaos.enabled} is unset or {@code true}. When the
-   * property is {@code false} at build time, the producer is excluded and injection of {@link
-   * ChaosControlPlane} will fail with a CDI unsatisfied-dependency error unless the application
-   * provides its own producer — exactly the behaviour we want for an operator who built the app
-   * with chaos explicitly disabled.
+   * <p>Only registered when {@code macstab.chaos.enabled=true} is set at build time. When the
+   * property is unset or {@code false}, the producer is excluded from the CDI container and
+   * injection of {@link ChaosControlPlane} will fail with an unsatisfied-dependency error unless
+   * the application provides its own producer — exactly the behaviour we want so that merely
+   * shipping the extension on the classpath does not self-attach chaos in production.
    *
    * @return the active {@link ChaosControlPlane}, installed on demand if the agent has not yet
    *     attached
@@ -62,7 +64,7 @@ public class ChaosArcProducer {
   @Produces
   @ApplicationScoped
   @DefaultBean
-  @IfBuildProperty(name = "macstab.chaos.enabled", stringValue = "true", enableIfMissing = true)
+  @IfBuildProperty(name = "macstab.chaos.enabled", stringValue = "true", enableIfMissing = false)
   public ChaosControlPlane chaosControlPlane() {
     return ChaosPlatform.installLocally();
   }

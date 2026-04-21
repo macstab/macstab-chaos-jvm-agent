@@ -14,9 +14,10 @@ import java.util.List;
  * <h2>State computation</h2>
  *
  * <p>{@link #state()} returns {@link com.macstab.chaos.api.ChaosDiagnostics.ScenarioState#ACTIVE}
- * if at least one delegate is {@code ACTIVE}; otherwise it returns {@link
- * com.macstab.chaos.api.ChaosDiagnostics.ScenarioState#INACTIVE}. This means the composite is
- * considered active as long as any one of its members is active.
+ * if at least one delegate is {@code ACTIVE}; {@link
+ * com.macstab.chaos.api.ChaosDiagnostics.ScenarioState#STOPPED} if every delegate has reached the
+ * terminal {@code STOPPED} state; otherwise {@link
+ * com.macstab.chaos.api.ChaosDiagnostics.ScenarioState#INACTIVE}.
  *
  * <h2>Thread safety</h2>
  *
@@ -99,17 +100,34 @@ final class CompositeActivationHandle implements ChaosActivationHandle {
   }
 
   /**
-   * Returns {@link com.macstab.chaos.api.ChaosDiagnostics.ScenarioState#ACTIVE} if at least one
-   * delegate reports {@code ACTIVE}; otherwise returns {@link
-   * com.macstab.chaos.api.ChaosDiagnostics.ScenarioState#INACTIVE}.
+   * Returns the aggregated state across all delegates.
+   *
+   * <p>{@code ACTIVE} if any delegate is active, {@code STOPPED} if every delegate has reached the
+   * terminal {@code STOPPED} state, otherwise {@code INACTIVE}. Collapsing post-teardown state to
+   * {@code INACTIVE} would violate the {@link ChaosActivationHandle} contract: callers asserting
+   * {@code handle.state() == STOPPED} after {@code destroy()} would never see the transition.
    *
    * @return the aggregated state across all delegates
    */
   @Override
   public ChaosDiagnostics.ScenarioState state() {
-    return delegates.stream()
-            .anyMatch(handle -> handle.state() == ChaosDiagnostics.ScenarioState.ACTIVE)
-        ? ChaosDiagnostics.ScenarioState.ACTIVE
-        : ChaosDiagnostics.ScenarioState.INACTIVE;
+    boolean anyActive = false;
+    boolean allStopped = !delegates.isEmpty();
+    for (final ChaosActivationHandle handle : delegates) {
+      final ChaosDiagnostics.ScenarioState delegateState = handle.state();
+      if (delegateState == ChaosDiagnostics.ScenarioState.ACTIVE) {
+        anyActive = true;
+      }
+      if (delegateState != ChaosDiagnostics.ScenarioState.STOPPED) {
+        allStopped = false;
+      }
+    }
+    if (anyActive) {
+      return ChaosDiagnostics.ScenarioState.ACTIVE;
+    }
+    if (allStopped) {
+      return ChaosDiagnostics.ScenarioState.STOPPED;
+    }
+    return ChaosDiagnostics.ScenarioState.INACTIVE;
   }
 }

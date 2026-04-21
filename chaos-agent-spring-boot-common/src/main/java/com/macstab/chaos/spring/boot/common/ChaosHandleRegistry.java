@@ -24,6 +24,17 @@ public final class ChaosHandleRegistry implements DisposableBean {
 
   private final Map<String, ChaosActivationHandle> handles = new ConcurrentHashMap<>();
 
+  // Set to true by stopAll() / destroy() so that register() calls racing the shutdown are
+  // short-circuited. Without the flag, a register() that happens just after stopAll() has
+  // drained the map inserts a new entry that stopAll() has already moved past, and the
+  // handle leaks past context close. Worse, stopAll()'s "drain until empty" loop is not
+  // formally bounded: a misbehaving caller (e.g., a test fixture holding the Actuator
+  // endpoint open and re-triggering activations in response to events) can livelock the
+  // shutdown. The flag converts the race into a deterministic "stop the newly-registered
+  // handle immediately and do not track it", making teardown bounded by the size of the
+  // map at the moment closing was observed.
+  private volatile boolean closing = false;
+
   /** Default constructor invoked by Spring when the bean is created. */
   public ChaosHandleRegistry() {}
 
@@ -35,9 +46,25 @@ public final class ChaosHandleRegistry implements DisposableBean {
    * the Actuator endpoint would silently leak the first handle and could not stop it via {@link
    * #stop(String)} afterward.
    *
+   * <p>If the registry is already closing (i.e. {@link #destroy()} / {@link #stopAll()} has begun),
+   * the newly registered handle is stopped immediately instead of being tracked, so it cannot leak
+   * past the context teardown window.
+   *
    * @param handle the handle returned by {@code activate(...)}; must not be null
    */
   public void register(final ChaosActivationHandle handle) {
+    if (closing) {
+      // Context is tearing down — track would leak the handle past stopAll()'s drain.
+      try {
+        handle.stop();
+      } catch (final RuntimeException exception) {
+        LOGGER.log(
+            Level.WARNING,
+            exception,
+            () -> "chaos-agent: failed to stop handle registered during shutdown: " + handle.id());
+      }
+      return;
+    }
     final ChaosActivationHandle previous = handles.put(handle.id(), handle);
     if (previous != null && previous != handle) {
       try {
@@ -93,16 +120,18 @@ public final class ChaosHandleRegistry implements DisposableBean {
    * @return the number of handles that were stopped successfully
    */
   public int stopAll() {
+    // Flip the closing flag FIRST so any concurrent register() calls short-circuit and stop
+    // their handles inline instead of racing our drain. Writes to the map after this point
+    // come only from threads that observed closing=false before this write — those are
+    // bounded by the current map contents plus the in-flight register() calls already
+    // past the check, which themselves iterate on map entries we will observe in the pass.
+    closing = true;
     int count = 0;
     // Drain in passes until the map is empty. A single-pass iteration over a weakly-consistent
     // ConcurrentHashMap entrySet() iterator is not guaranteed to observe entries inserted by a
-    // concurrent register() after the iterator was constructed — those survivors leak past
-    // context teardown and keep chaos active after close(). Re-snapshot until empty so every
-    // handle ever visible is stopped. The loop is bounded in practice because register() should
-    // not race teardown; a pathological caller that keeps registering would also be keeping the
-    // context from closing, so spinning here is the right failure mode (visible hang) rather
-    // than silent leak. Key+value CAS remove still guards against stale replacements inside a
-    // pass.
+    // concurrent register() after the iterator was constructed — the closing flag now bounds
+    // this to at most one extra pass in the worst case. Key+value CAS remove guards against
+    // stale replacements inside a pass.
     while (!handles.isEmpty()) {
       final var iterator = handles.entrySet().iterator();
       while (iterator.hasNext()) {

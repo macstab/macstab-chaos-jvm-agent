@@ -13,6 +13,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.SplittableRandom;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
@@ -104,10 +105,17 @@ final class ScenarioController {
     this.clock = clock;
     this.observabilityBus = observabilityBus;
     this.stressorFactory = new StressorFactory(instrumentationSupplier);
+    // randomSeed==null must mean "non-deterministic sampling", not "seed 0". Seeding with 0 made
+    // splittableRandom(matched) collapse to baseSeed ^ matched ^ scenario.id().hashCode() — a
+    // function of scenario ID and match count only, so every JVM run reproduced the exact same
+    // fire/no-fire sequence. Operators with probability<1.0 expecting stochastic sampling across
+    // CI runs instead got a fixed schedule. Draw the fallback seed from ThreadLocalRandom so
+    // successive JVMs get distinct sequences; users who want reproducibility set randomSeed
+    // explicitly.
     this.baseSeed =
         scenario.activationPolicy().randomSeed() != null
             ? scenario.activationPolicy().randomSeed()
-            : 0L;
+            : ThreadLocalRandom.current().nextLong();
     // Task 1: Always start REGISTERED regardless of start mode. The start() call
     // transitions to ACTIVE. Setting ACTIVE here while started=false produces a
     // diagnostic state that is observably wrong (ACTIVE but evaluating returns null).
@@ -512,7 +520,19 @@ final class ScenarioController {
     if (capturedStart == null) {
       return true;
     }
-    return clock.instant().isBefore(capturedStart.plus(activeFor));
+    // Instant.plus throws DateTimeException when activeFor would push the deadline past
+    // Instant.MAX, and ArithmeticException for nanos overflow. ActivationPolicy does not bound
+    // activeFor, so a misconfigured plan with e.g. Duration.ofDays(Long.MAX_VALUE) would leak a
+    // runtime exception into the instrumented application thread instead of expiring cleanly.
+    // Treat an un-representable deadline as "effectively never expires" — the common intent
+    // when someone writes a preposterously large duration.
+    final Instant deadline;
+    try {
+      deadline = capturedStart.plus(activeFor);
+    } catch (final java.time.DateTimeException | ArithmeticException overflow) {
+      return true;
+    }
+    return clock.instant().isBefore(deadline);
   }
 
   private boolean passesRateLimit() {

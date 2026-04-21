@@ -76,14 +76,35 @@ final class HttpClientAdvice {
   }
 
   /**
-   * Intercepts Apache HttpComponents 4.x {@code CloseableHttpClient.execute(HttpHost,
-   * HttpRequest)}.
+   * Intercepts Apache HttpComponents 4.x {@code CloseableHttpClient.execute(HttpHost, HttpRequest,
+   * ...)} overloads — the HttpHost-first variants. Apache HC 4.x defines four such overloads
+   * (with/without {@code HttpContext}, with/without {@code ResponseHandler}); the installer
+   * restricts the matcher by first-argument type so this advice only binds to those, leaving the
+   * HttpUriRequest-first overloads to {@link ApacheHc4UriExecuteAdvice}.
    */
   static final class ApacheHc4ExecuteAdvice {
     @Advice.OnMethodEnter
     static void enter(@Advice.Argument(0) final Object host, @Advice.Argument(1) final Object req)
         throws Throwable {
       final String url = HttpUrlExtractor.fromApacheHc4Request(host, req);
+      if (BootstrapDispatcher.beforeHttpSend(url)) {
+        throw new ChaosHttpSuppressException("HTTP execute suppressed by chaos agent: " + url);
+      }
+    }
+  }
+
+  /**
+   * Intercepts Apache HttpComponents 4.x {@code CloseableHttpClient.execute(HttpUriRequest, ...)}
+   * overloads — the variants where the request is the first argument with no separate host. The
+   * previous single {@code takesArguments(2)} matcher bound the HttpHost-first advice to {@code
+   * execute(HttpUriRequest, HttpContext)} and {@code execute(HttpUriRequest, ResponseHandler)} as
+   * well, handing the advice an {@code HttpUriRequest} where it expected an {@code HttpHost} and
+   * producing malformed URL strings (or none at all).
+   */
+  static final class ApacheHc4UriExecuteAdvice {
+    @Advice.OnMethodEnter
+    static void enter(@Advice.Argument(0) final Object request) throws Throwable {
+      final String url = HttpUrlExtractor.fromApacheHc4UriRequest(request);
       if (BootstrapDispatcher.beforeHttpSend(url)) {
         throw new ChaosHttpSuppressException("HTTP execute suppressed by chaos agent: " + url);
       }

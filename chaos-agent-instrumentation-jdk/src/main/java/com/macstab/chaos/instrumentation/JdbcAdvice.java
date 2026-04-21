@@ -13,10 +13,10 @@ import net.bytebuddy.asm.Advice;
  *   <li>HikariCP ({@code com.zaxxer.hikari.pool.HikariPool}) — {@code getConnection(long)}
  *   <li>c3p0 ({@code com.mchange.v2.c3p0.impl.C3P0PooledConnectionPool}) — {@code
  *       checkoutPooledConnection()}
- *   <li>{@link java.sql.Statement} — {@code execute(String)}, {@code executeQuery(String)}, {@code
- *       executeUpdate(String)}
- *   <li>{@link java.sql.Connection} — {@code prepareStatement(String)}, {@code commit()}, {@code
- *       rollback()}
+ *   <li>{@link java.sql.Statement} — {@code execute}, {@code executeQuery}, {@code executeUpdate},
+ *       and {@code executeLargeUpdate} (every overload whose first argument is the SQL string)
+ *   <li>{@link java.sql.Connection} — {@code prepareStatement} and {@code prepareCall} (every
+ *       overload whose first argument is the SQL string), {@code commit()}, {@code rollback()}
  * </ul>
  *
  * <p>All advice classes route through {@link BootstrapDispatcher} so they require no compile-time
@@ -58,8 +58,10 @@ final class JdbcAdvice {
   }
 
   /**
-   * Intercepts {@code java.sql.Statement.execute(String)}, {@code
-   * java.sql.Statement.executeQuery(String)}, and {@code java.sql.Statement.executeUpdate(String)}.
+   * Intercepts every {@code java.sql.Statement} execute variant whose first argument is the SQL
+   * string: {@code execute}, {@code executeQuery}, {@code executeUpdate}, {@code
+   * executeLargeUpdate} — including the generated-keys overloads {@code execute(String, int)},
+   * {@code execute(String, int[])}, {@code execute(String, String[])} and their update equivalents.
    */
   static final class StatementExecuteAdvice {
     @Advice.OnMethodEnter
@@ -71,7 +73,13 @@ final class JdbcAdvice {
     }
   }
 
-  /** Intercepts {@code java.sql.Connection.prepareStatement(String)}. */
+  /**
+   * Intercepts every {@code java.sql.Connection.prepareStatement} / {@code prepareCall} overload
+   * whose first argument is the SQL string, including the generated-keys and column-index/name
+   * variants such as {@code prepareStatement(String, int)}, {@code prepareStatement(String,
+   * int[])}, {@code prepareStatement(String, String[])}, and {@code prepareStatement(String, int,
+   * int)}.
+   */
   static final class PrepareStatementAdvice {
     @Advice.OnMethodEnter
     static void enter(@Advice.Argument(0) final String sql) throws Throwable {

@@ -31,9 +31,14 @@ import jdk.jfr.StackTrace;
 @StackTrace(false)
 public final class ChaosStressorSnapshotEvent extends Event {
 
+  /** No-arg constructor required by the JFR runtime to instantiate event objects reflectively. */
+  public ChaosStressorSnapshotEvent() {}
+
+  /** Number of chaos scenarios currently in the STARTED state at snapshot time. */
   @Label("Active Scenario Count")
   public int activeScenarioCount;
 
+  /** Cumulative number of chaos effects applied across all scenarios since agent start. */
   @Label("Total Applied Count")
   public long totalAppliedCount;
 

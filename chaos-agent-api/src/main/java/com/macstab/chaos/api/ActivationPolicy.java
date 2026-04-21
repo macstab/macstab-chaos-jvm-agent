@@ -229,6 +229,18 @@ public record ActivationPolicy(
       if (window == null || window.isZero() || window.isNegative()) {
         throw new IllegalArgumentException("window must be positive");
       }
+      // Probe toNanos() eagerly: the rate-limiter arithmetic downstream multiplies window
+      // nanos by fractional permits (long math). A Duration constructed from Duration.ofDays(
+      // Long.MAX_VALUE / 86_400) silently overflows on toNanos() with ArithmeticException,
+      // which would otherwise surface deep inside the scenario hot path on the first match —
+      // turning an operator configuration mistake into a runtime exception far from the
+      // source. Catching it here points the error at the plan parser / YAML author.
+      try {
+        window.toNanos();
+      } catch (final ArithmeticException overflow) {
+        throw new IllegalArgumentException(
+            "window is too large to represent in nanoseconds: " + window, overflow);
+      }
     }
   }
 }

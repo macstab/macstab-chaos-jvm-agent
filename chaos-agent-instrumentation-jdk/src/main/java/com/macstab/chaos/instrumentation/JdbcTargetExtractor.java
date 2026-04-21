@@ -59,7 +59,16 @@ final class JdbcTargetExtractor {
     if (method == null) {
       method = findMethod(cls, methodName);
       if (method != null) {
-        method.setAccessible(true);
+        // See HttpUrlExtractor for the full rationale: setAccessible can throw
+        // InaccessibleObjectException on JDK 17+ when the target module has not opened
+        // its package. Swallow only that specific exception so the Method still gets
+        // cached — invoke() below may still succeed for public methods in exported
+        // packages (HikariPool.getPoolName is public, so the common path works).
+        try {
+          method.setAccessible(true);
+        } catch (final java.lang.reflect.InaccessibleObjectException encapsulated) {
+          // leave method un-accessible; invoke() may still succeed.
+        }
         perClass.put(methodName, method);
       }
     }

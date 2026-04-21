@@ -37,8 +37,14 @@ final class GcPressureStressor implements ManagedStressor {
       ring = new byte[RING_SIZE][];
     }
 
-    final long batchSizeBytes =
-        Math.max(1L, effect.allocationRateBytesPerSecond() * BATCH_INTERVAL_MS / 1000L);
+    // Saturate the rate before the multiply. Without the clamp, a user-supplied
+    // allocationRateBytesPerSecond above Long.MAX_VALUE / BATCH_INTERVAL_MS wraps the product to
+    // a negative long; the outer Math.max(1L, …) then silently collapses to 1 byte/batch, leaving
+    // the stressor nominally ACTIVE while producing no GC pressure. Clamping instead behaves as
+    // if the caller had set the maximum representable rate.
+    final long rate = effect.allocationRateBytesPerSecond();
+    final long saturatedRate = Math.min(rate, Long.MAX_VALUE / BATCH_INTERVAL_MS);
+    final long batchSizeBytes = Math.max(1L, saturatedRate * BATCH_INTERVAL_MS / 1000L);
     final int objectSizeBytes = effect.objectSizeBytes();
     final int objectsPerBatch = (int) Math.max(1L, batchSizeBytes / objectSizeBytes);
     final long durationMillis = effect.duration().toMillis();
@@ -48,7 +54,13 @@ final class GcPressureStressor implements ManagedStressor {
         new Thread(
             () -> {
               final long deadline = System.currentTimeMillis() + durationMillis;
-              int ringIndex = 0;
+              // long — not int — because a stressor running at 1M allocations/sec
+              // (e.g. 1 GB/s at 1 KB objects, a plausible high-pressure scenario) overflows
+              // int in ~35 minutes. Past overflow, `Integer.MIN_VALUE % RING_SIZE` returns a
+              // negative index and the daemon thread dies on AIOOBE, silently dropping the
+              // old-gen promotion that scenarios depend on for the rest of their duration.
+              // Math.floorMod guards against any future signed-math slip too.
+              long ringIndex = 0L;
               while (running.get() && System.currentTimeMillis() < deadline) {
                 for (int i = 0; i < objectsPerBatch; i++) {
                   // Re-check running every iteration: close() sets running=false and nulls
@@ -63,7 +75,7 @@ final class GcPressureStressor implements ManagedStressor {
                   if (promote) {
                     final byte[][] snapshot = ring;
                     if (snapshot != null) {
-                      snapshot[ringIndex % RING_SIZE] = chunk;
+                      snapshot[(int) Math.floorMod(ringIndex, (long) RING_SIZE)] = chunk;
                       ringIndex++;
                     }
                   }

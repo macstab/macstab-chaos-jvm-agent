@@ -163,6 +163,15 @@ public final class JdkInstrumentationInstaller {
                                 .on(
                                     ElementMatchers.named("shutdown")
                                         .and(ElementMatchers.takesArguments(0))))
+                        // shutdownNow() intercepts the forced-shutdown variant that interrupts
+                        // in-flight tasks and returns the undrained queue. Omitting it left any
+                        // selector targeting EXECUTOR_SHUTDOWN silently missing shutdown paths
+                        // that went through shutdownNow instead of shutdown.
+                        .visit(
+                            Advice.to(ExecutorAdvice.ShutdownNowAdvice.class)
+                                .on(
+                                    ElementMatchers.named("shutdownNow")
+                                        .and(ElementMatchers.takesArguments(0))))
                         .visit(
                             Advice.to(ExecutorAdvice.AwaitTerminationAdvice.class)
                                 .on(
@@ -417,8 +426,15 @@ public final class JdkInstrumentationInstaller {
                               .on(
                                   ElementMatchers.named("acquire")
                                       .and(ElementMatchers.takesArguments(int.class)))))
-              // NIO Selector — target AbstractSelector subtypes (KQueueSelectorImpl etc.)
-              .type(ElementMatchers.isSubTypeOf(java.nio.channels.spi.AbstractSelector.class))
+              // NIO Selector — target AbstractSelector subtypes (KQueueSelectorImpl etc.).
+              // Exclude abstract / interface / synthetic matches for the same VerifyError reason
+              // as SocketChannel below: bytecode generated for bridge / synthetic methods on
+              // abstract bases cannot satisfy the advice's stack-map expectations.
+              .type(
+                  ElementMatchers.isSubTypeOf(java.nio.channels.spi.AbstractSelector.class)
+                      .and(ElementMatchers.not(ElementMatchers.isAbstract()))
+                      .and(ElementMatchers.not(ElementMatchers.isInterface()))
+                      .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
               .transform(
                   (builder, typeDescription, classLoader, module, protectionDomain) ->
                       builder
@@ -702,16 +718,39 @@ public final class JdkInstrumentationInstaller {
                                   ElementMatchers.named("enqueue")
                                       .and(ElementMatchers.takesArguments(1)))));
 
+      // Apache HC 4.x exposes eight execute() overloads split across two shapes:
+      //   execute(HttpHost, HttpRequest [, HttpContext] [, ResponseHandler])  — HttpHost first
+      //   execute(HttpUriRequest [, HttpContext] [, ResponseHandler])         — request first
+      //
+      // A flat takesArguments(2) matcher (the previous wiring) bound
+      // ApacheHc4ExecuteAdvice indiscriminately to all three 2-arg overloads,
+      // handing the advice an HttpUriRequest where it expected an HttpHost and
+      // leaving single-arg + 3-arg + 4-arg variants completely uncovered. The
+      // refined matchers below disambiguate by first-argument type so every
+      // overload routes to the advice that understands its signature.
       agentBuilder =
           instrumentOptional(
               agentBuilder,
               "org.apache.http.impl.client.CloseableHttpClient",
               builder ->
-                  builder.visit(
-                      Advice.to(HttpClientAdvice.ApacheHc4ExecuteAdvice.class)
-                          .on(
-                              ElementMatchers.named("execute")
-                                  .and(ElementMatchers.takesArguments(2)))));
+                  builder
+                      .visit(
+                          Advice.to(HttpClientAdvice.ApacheHc4ExecuteAdvice.class)
+                              .on(
+                                  ElementMatchers.named("execute")
+                                      .and(
+                                          ElementMatchers.takesArgument(
+                                              0,
+                                              ElementMatchers.named("org.apache.http.HttpHost")))))
+                      .visit(
+                          Advice.to(HttpClientAdvice.ApacheHc4UriExecuteAdvice.class)
+                              .on(
+                                  ElementMatchers.named("execute")
+                                      .and(
+                                          ElementMatchers.takesArgument(
+                                              0,
+                                              ElementMatchers.named(
+                                                  "org.apache.http.client.methods.HttpUriRequest"))))));
 
       agentBuilder =
           instrumentOptional(
@@ -763,6 +802,16 @@ public final class JdkInstrumentationInstaller {
                               ElementMatchers.named("checkoutPooledConnection")
                                   .and(ElementMatchers.takesArguments(0)))));
 
+      // Match every Statement.execute*/Connection.prepareStatement overload whose first
+      // argument is the SQL String. The JDBC API defines generated-keys variants
+      // (execute(String, int), execute(String, int[]), execute(String, String[]),
+      // executeUpdate(String, int), ..., prepareStatement(String, int),
+      // prepareStatement(String, int[]), prepareStatement(String, int, int),
+      // prepareStatement(String, int, int, int), prepareStatement(String, String[]))
+      // that restricting to takesArguments(String.class) silently skipped — any JDBC
+      // caller using Statement.RETURN_GENERATED_KEYS or column-name arrays bypassed
+      // every chaos selector targeting JDBC. The advice only reads @Argument(0), so
+      // takesArgument(0, String.class) is sufficient and binds to all overloads.
       agentBuilder =
           agentBuilder
               .type(
@@ -776,17 +825,22 @@ public final class JdkInstrumentationInstaller {
                               Advice.to(JdbcAdvice.StatementExecuteAdvice.class)
                                   .on(
                                       ElementMatchers.named("execute")
-                                          .and(ElementMatchers.takesArguments(String.class))))
+                                          .and(ElementMatchers.takesArgument(0, String.class))))
                           .visit(
                               Advice.to(JdbcAdvice.StatementExecuteAdvice.class)
                                   .on(
                                       ElementMatchers.named("executeQuery")
-                                          .and(ElementMatchers.takesArguments(String.class))))
+                                          .and(ElementMatchers.takesArgument(0, String.class))))
                           .visit(
                               Advice.to(JdbcAdvice.StatementExecuteAdvice.class)
                                   .on(
                                       ElementMatchers.named("executeUpdate")
-                                          .and(ElementMatchers.takesArguments(String.class)))))
+                                          .and(ElementMatchers.takesArgument(0, String.class))))
+                          .visit(
+                              Advice.to(JdbcAdvice.StatementExecuteAdvice.class)
+                                  .on(
+                                      ElementMatchers.named("executeLargeUpdate")
+                                          .and(ElementMatchers.takesArgument(0, String.class)))))
               .type(
                   ElementMatchers.isSubTypeOf(java.sql.Connection.class)
                       .and(ElementMatchers.not(ElementMatchers.isInterface()))
@@ -798,7 +852,12 @@ public final class JdkInstrumentationInstaller {
                               Advice.to(JdbcAdvice.PrepareStatementAdvice.class)
                                   .on(
                                       ElementMatchers.named("prepareStatement")
-                                          .and(ElementMatchers.takesArguments(String.class))))
+                                          .and(ElementMatchers.takesArgument(0, String.class))))
+                          .visit(
+                              Advice.to(JdbcAdvice.PrepareStatementAdvice.class)
+                                  .on(
+                                      ElementMatchers.named("prepareCall")
+                                          .and(ElementMatchers.takesArgument(0, String.class))))
                           .visit(
                               Advice.to(JdbcAdvice.CommitAdvice.class)
                                   .on(
@@ -853,11 +912,15 @@ public final class JdkInstrumentationInstaller {
       // SSLSocket and SSLEngine are abstract; concrete subclasses (SSLSocketImpl,
       // SSLEngineImpl) override startHandshake/beginHandshake, so advice on the
       // abstract class alone would never fire. Target all concrete subtypes instead.
+      // Interface / synthetic filters exclude Mockito/CGLIB generated proxies that would
+      // otherwise trip VerifyError during class transformation.
       agentBuilder =
           agentBuilder
               .type(
                   ElementMatchers.isSubTypeOf(javax.net.ssl.SSLSocket.class)
-                      .and(ElementMatchers.not(ElementMatchers.isAbstract())))
+                      .and(ElementMatchers.not(ElementMatchers.isAbstract()))
+                      .and(ElementMatchers.not(ElementMatchers.isInterface()))
+                      .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
               .transform(
                   (builder, typeDescription, classLoader, module, protectionDomain) ->
                       builder.visit(
@@ -870,7 +933,9 @@ public final class JdkInstrumentationInstaller {
           agentBuilder
               .type(
                   ElementMatchers.isSubTypeOf(javax.net.ssl.SSLEngine.class)
-                      .and(ElementMatchers.not(ElementMatchers.isAbstract())))
+                      .and(ElementMatchers.not(ElementMatchers.isAbstract()))
+                      .and(ElementMatchers.not(ElementMatchers.isInterface()))
+                      .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
               .transform(
                   (builder, typeDescription, classLoader, module, protectionDomain) ->
                       builder.visit(
@@ -1316,6 +1381,19 @@ public final class JdkInstrumentationInstaller {
    *     JAR, or if appending to the bootstrap classpath fails
    */
   private static void injectBridge(final Instrumentation instrumentation) {
+    // Idempotency: appendToBootstrapClassLoaderSearch has no unwind operation — once a JAR
+    // is appended, its entries stay visible to the bootstrap classloader for the JVM's
+    // lifetime, and the bootstrap classloader caches the classes it has loaded. A second
+    // install() call (dynamic-attach test runners that cycle install→uninstall→install)
+    // that rebuilds and re-appends a fresh temp JAR would:
+    //   (1) leak file descriptors in BRIDGE_JARS on every cycle,
+    //   (2) shadow the already-loaded BootstrapDispatcher with a new Class object on a
+    //       newer classpath entry for any class still resolvable lazily (inner classes),
+    // neither of which is desirable. The bridge classes are fixed bytecode — once injected,
+    // they never change — so skipping subsequent calls is both safe and correct.
+    if (!BRIDGE_INJECTED.compareAndSet(false, true)) {
+      return;
+    }
     try {
       // On POSIX filesystems create with 0600: the bridge JAR contains the code that bootstrap
       // classloader will load, so a world-readable/writable file (the default 0644 umask-adjusted
@@ -1337,12 +1415,43 @@ public final class JdkInstrumentationInstaller {
         writeClass(
             jarOutputStream, "com/macstab/chaos/instrumentation/ScheduledCallableWrapper.class");
       }
-      instrumentation.appendToBootstrapClassLoaderSearch(
-          new java.util.jar.JarFile(bridgeJar.toFile()));
+      // Retain the JarFile in a static field. appendToBootstrapClassLoaderSearch does not
+      // document whether the JVM keeps a strong reference to the Java-side JarFile; on
+      // HotSpot the underlying native classpath entry is kept open, but the Java wrapper
+      // becomes unreachable as soon as this method returns. If the JarFile is finalized and
+      // its ZipFile closed, later bootstrap loads of ScheduledRunnableWrapper /
+      // ScheduledCallableWrapper / BootstrapDispatcher classes can fail with
+      // ZipException("ZipFile closed") at the first intercepted schedule() call — hours or
+      // days into an otherwise-healthy run. Holding the reference is cheap (one file handle
+      // per JVM) and eliminates the finalizer race. Note that BRIDGE_JARS is NEVER cleared
+      // on uninstall — the bootstrap classloader has already loaded classes from the JAR and
+      // releasing the JarFile would let its ZipFile finalize, breaking every future class
+      // load that resolves lazily through the bootstrap classpath entry.
+      final java.util.jar.JarFile jarFile = new java.util.jar.JarFile(bridgeJar.toFile());
+      BRIDGE_JARS.add(jarFile);
+      instrumentation.appendToBootstrapClassLoaderSearch(jarFile);
     } catch (IOException exception) {
+      // Failure path: clear the injected flag so a subsequent install() can retry rather
+      // than silently returning success when the bridge was never actually in place.
+      BRIDGE_INJECTED.set(false);
       throw new IllegalStateException("failed to inject bootstrap bridge", exception);
     }
   }
+
+  /**
+   * Tracks whether {@link #injectBridge} has successfully installed the bootstrap bridge JAR.
+   * JVM-wide single-shot because {@code Instrumentation.appendToBootstrapClassLoaderSearch} has no
+   * reverse operation.
+   */
+  private static final java.util.concurrent.atomic.AtomicBoolean BRIDGE_INJECTED =
+      new java.util.concurrent.atomic.AtomicBoolean(false);
+
+  /**
+   * Strong-reference holder for the injected bridge {@link java.util.jar.JarFile}. See the call
+   * site above for the rationale.
+   */
+  private static final java.util.List<java.util.jar.JarFile> BRIDGE_JARS =
+      java.util.Collections.synchronizedList(new java.util.ArrayList<>());
 
   private static Path createSecureTempFile() throws IOException {
     final String tmpDir = System.getProperty("java.io.tmpdir");

@@ -72,8 +72,17 @@ final class FinalizerBacklogStressor implements ManagedStressor {
       if (delayMs > 0) {
         try {
           Thread.sleep(delayMs);
-        } catch (final InterruptedException e) {
-          Thread.currentThread().interrupt();
+        } catch (final InterruptedException ignored) {
+          // Do NOT restore the interrupt flag: finalize() runs on the shared JVM finalizer
+          // thread, and setting its interrupt bit leaks our chaos signal into every subsequent
+          // finalizer on the queue. A legitimate finalize() with its own Thread.sleep or
+          // IO call would observe an unexpected interrupt that did not originate from its
+          // own bookkeeping — producing sporadic failures in unrelated user-domain objects
+          // (JDBC, NIO channels, resource closers) whose root cause would be impossible to
+          // trace back to chaos-agent. Swallow silently and let the finalizer complete; the
+          // stressor's backlog effect is only observable through delay accumulation, not
+          // through individual-object completion. The interrupt was delivered by close() or
+          // JVM shutdown and the thread is already being torn down.
         }
       }
     }

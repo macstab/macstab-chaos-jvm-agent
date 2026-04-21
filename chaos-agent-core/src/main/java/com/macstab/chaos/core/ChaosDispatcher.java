@@ -855,6 +855,17 @@ public final class ChaosDispatcher {
       if (terminalAction.kind() == TerminalKind.SUPPRESS) {
         return true;
       }
+      // COMPLETE_EXCEPTIONALLY is documented as "complete a CompletableFuture exceptionally with
+      // the enclosed throwable" — the ASYNC_CANCEL site is the canonical call site for that
+      // semantic. Without this branch the scenario's terminal action would be silently dropped
+      // and the cancel() would proceed normally, contradicting the plan.
+      if (terminalAction.kind() == TerminalKind.COMPLETE_EXCEPTIONALLY
+          && future instanceof CompletableFuture<?> completable) {
+        completable.completeExceptionally(terminalAction.throwable());
+        // Report "cancel succeeded" so the call site short-circuits and does not invoke the
+        // real cancel (which would race against our completeExceptionally).
+        return true;
+      }
     }
     sleep(decision.delayMillis());
     return false;
@@ -1257,9 +1268,23 @@ public final class ChaosDispatcher {
         stringCtor.setAccessible(true);
         instance = (Throwable) stringCtor.newInstance(effect.message());
       } catch (final NoSuchMethodException noMsg) {
+        // Fallback: class has no (String) constructor. Silently dropping effect.message() here
+        // made injected exceptions opaque in logs — operators could not tell which scenario
+        // fired. If a message was configured, thread it through initCause so the message text
+        // survives (visible via getCause().getMessage() in stack traces). With no message the
+        // cause stays null and the exception behaves as before.
         final java.lang.reflect.Constructor<?> noArgCtor = exClass.getDeclaredConstructor();
         noArgCtor.setAccessible(true);
         instance = (Throwable) noArgCtor.newInstance();
+        final String msg = effect.message();
+        if (msg != null && !msg.isEmpty()) {
+          try {
+            instance.initCause(new RuntimeException(msg));
+          } catch (final IllegalStateException alreadyInitialised) {
+            // Some Throwable subclasses pre-initialise cause in their no-arg ctor; respect
+            // that rather than overwriting. Opacity remains in that case, but we did our best.
+          }
+        }
       }
       if (!effect.withStackTrace()) {
         instance.setStackTrace(new StackTraceElement[0]);

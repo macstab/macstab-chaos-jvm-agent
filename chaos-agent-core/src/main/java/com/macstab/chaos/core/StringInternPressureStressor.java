@@ -27,20 +27,47 @@ final class StringInternPressureStressor implements ManagedStressor {
   private static final Logger LOGGER =
       Logger.getLogger(StringInternPressureStressor.class.getName());
 
+  /**
+   * Upper bound on {@code stringLengthBytes}. Guards the {@code new StringBuilder(lengthBytes)}
+   * allocation in {@link #buildAndIntern} against OOM / {@code NegativeArraySizeException} if the
+   * effect is constructed with a pathological value. 1 MiB is well above any realistic
+   * interned-string fixture and still fits in a single char[] allocation.
+   */
+  private static final int MAX_STRING_LENGTH_BYTES = 1 << 20;
+
+  /**
+   * Upper bound on {@code internCount}. An unbounded value multiplied by a large length can exhaust
+   * Metaspace before any operator telemetry fires. 1M interned strings is an order of magnitude
+   * above typical stress runs.
+   */
+  private static final int MAX_INTERN_COUNT = 1_000_000;
+
   private volatile List<String> internedStrings;
 
   StringInternPressureStressor(final ChaosEffect.StringInternPressureEffect effect) {
-    final List<String> strings = new ArrayList<>(effect.internCount());
-    for (int i = 0; i < effect.internCount(); i++) {
-      strings.add(buildAndIntern(i, effect.stringLengthBytes()));
+    final int lengthBytes = clamp(effect.stringLengthBytes(), 1, MAX_STRING_LENGTH_BYTES);
+    final int internCount = clamp(effect.internCount(), 0, MAX_INTERN_COUNT);
+    final List<String> strings = new ArrayList<>(internCount);
+    for (int i = 0; i < internCount; i++) {
+      strings.add(buildAndIntern(i, lengthBytes));
     }
     this.internedStrings = List.copyOf(strings);
     LOGGER.fine(
         "StringInternPressureStressor interned "
             + strings.size()
             + " strings of "
-            + effect.stringLengthBytes()
+            + lengthBytes
             + " bytes each");
+  }
+
+  private static int clamp(final int value, final int min, final int max) {
+    if (value < min) {
+      return min;
+    }
+    if (value > max) {
+      return max;
+    }
+    return value;
   }
 
   @Override

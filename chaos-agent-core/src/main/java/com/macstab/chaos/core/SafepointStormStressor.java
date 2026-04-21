@@ -111,14 +111,36 @@ final class SafepointStormStressor implements ManagedStressor {
     int retransformed = 0;
     for (int i = 0; i < allClasses.length && retransformed < count; i += step) {
       final Class<?> cls = allClasses[i];
-      if (inst.isModifiableClass(cls)) {
-        try {
-          inst.retransformClasses(cls);
-          retransformed++;
-        } catch (Exception exception) {
-          // Some system classes cannot be retransformed; skip silently.
-        }
+      if (!isSafeToRetransform(cls) || !inst.isModifiableClass(cls)) {
+        continue;
+      }
+      try {
+        inst.retransformClasses(cls);
+        retransformed++;
+      } catch (Exception exception) {
+        // Some system classes cannot be retransformed; skip silently.
       }
     }
+  }
+
+  /**
+   * Rejects classes we must never retransform. Retransforming the agent's own classes — in
+   * particular anything under {@code com.macstab.chaos} — risks re-applying advice visitors whose
+   * bytecode state assumes the unwoven form, which would NoClassDefFoundError the live scenario out
+   * from under itself. Similarly, ByteBuddy's own classes sit in the transformation pipeline and
+   * reentering them during a retransform can deadlock AgentBuilder's internal locks. Array and
+   * hidden classes are not legal retransformation targets and would waste the sample slot.
+   */
+  private static boolean isSafeToRetransform(final Class<?> cls) {
+    if (cls.isArray() || cls.isHidden() || cls.isPrimitive()) {
+      return false;
+    }
+    final String name = cls.getName();
+    if (name.startsWith("com.macstab.chaos.")
+        || name.startsWith("net.bytebuddy.")
+        || name.startsWith("jdk.internal.")) {
+      return false;
+    }
+    return true;
   }
 }

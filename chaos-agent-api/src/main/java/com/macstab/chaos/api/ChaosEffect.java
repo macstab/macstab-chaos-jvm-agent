@@ -754,12 +754,35 @@ public sealed interface ChaosEffect
    * @param chunkSizeBytes size of each individual allocation chunk; must be {@code > 0}
    */
   record HeapPressureEffect(long bytes, int chunkSizeBytes) implements ChaosEffect {
+    /**
+     * Upper bound on {@code bytes}. Sized well above any reasonable chaos fixture (64 GiB) yet low
+     * enough that a caller passing {@link Long#MAX_VALUE} — a common test-harness oversight — fails
+     * at plan-build time instead of triggering an {@code OutOfMemoryError} mid-start that leaves
+     * the stressor half-registered.
+     */
+    public static final long MAX_BYTES = 64L * 1024L * 1024L * 1024L;
+
+    /**
+     * Upper bound on {@code chunkSizeBytes}. 256 MiB per chunk is already enormous for any
+     * realistic heap-fragmentation test; larger values explode the array header allocation path and
+     * produce less interesting chaos behaviour than the failure mode being simulated.
+     */
+    public static final int MAX_CHUNK_SIZE_BYTES = 256 * 1024 * 1024;
+
     public HeapPressureEffect {
       if (bytes <= 0) {
         throw new IllegalArgumentException("bytes must be > 0");
       }
+      if (bytes > MAX_BYTES) {
+        throw new IllegalArgumentException(
+            "bytes must be <= " + MAX_BYTES + " (got " + bytes + ")");
+      }
       if (chunkSizeBytes <= 0) {
         throw new IllegalArgumentException("chunkSizeBytes must be > 0");
+      }
+      if (chunkSizeBytes > MAX_CHUNK_SIZE_BYTES) {
+        throw new IllegalArgumentException(
+            "chunkSizeBytes must be <= " + MAX_CHUNK_SIZE_BYTES + " (got " + chunkSizeBytes + ")");
       }
     }
   }
@@ -916,10 +939,27 @@ public sealed interface ChaosEffect
    * @param acquisitionDelay pause between first and second lock acquisition; must be {@code >= 0}
    */
   record DeadlockEffect(int participantCount, Duration acquisitionDelay) implements ChaosEffect {
+    /**
+     * Upper bound on {@code participantCount}. Each participant is a live kernel thread held in
+     * {@code LockSupport.park}; values above a few thousand exhaust {@code
+     * /proc/sys/kernel/threads-max} on typical Linux hosts well before any deadlock-detection
+     * behaviour can be exercised. 1,024 is comfortably beyond realistic scenarios and keeps the
+     * stressor from turning into an accidental fork-bomb when a caller types an extra digit.
+     */
+    public static final int MAX_PARTICIPANT_COUNT = 1_024;
+
     public DeadlockEffect {
       if (participantCount < 2) {
         throw new IllegalArgumentException(
             "participantCount must be >= 2 — a deadlock requires at least two participants");
+      }
+      if (participantCount > MAX_PARTICIPANT_COUNT) {
+        throw new IllegalArgumentException(
+            "participantCount must be <= "
+                + MAX_PARTICIPANT_COUNT
+                + " (got "
+                + participantCount
+                + ")");
       }
       if (acquisitionDelay == null || acquisitionDelay.isNegative()) {
         throw new IllegalArgumentException("acquisitionDelay must be >= 0");
@@ -944,12 +984,34 @@ public sealed interface ChaosEffect
    */
   record ThreadLeakEffect(int threadCount, String namePrefix, boolean daemon, Duration lifespan)
       implements ChaosEffect {
+    /**
+     * Upper bound on {@code threadCount}. Each leaked thread consumes ~1 MiB of native stack plus a
+     * kernel task struct; a pathological value like {@link Integer#MAX_VALUE} exhausts user-task
+     * limits and host memory before the test can observe the intended behaviour. 10,000 comfortably
+     * exceeds the thread-count ceilings of every JVM pool we target while remaining survivable on a
+     * default-configured Linux host.
+     */
+    public static final int MAX_THREAD_COUNT = 10_000;
+
     public ThreadLeakEffect {
       if (threadCount <= 0) {
         throw new IllegalArgumentException("threadCount must be > 0");
       }
+      if (threadCount > MAX_THREAD_COUNT) {
+        throw new IllegalArgumentException(
+            "threadCount must be <= " + MAX_THREAD_COUNT + " (got " + threadCount + ")");
+      }
       if (namePrefix == null || namePrefix.isBlank()) {
         throw new IllegalArgumentException("namePrefix must be non-blank");
+      }
+      // Sibling effects reject zero/negative Durations at construction (DeadlockEffect's
+      // acquisitionDelay, MonitorContentionEffect's lockHoldDuration, ActivationPolicy's
+      // activeFor). Without this guard a caller passing Duration.ZERO or a negative lifespan
+      // reaches the stressor, which interprets a non-positive value as "fire immediately" —
+      // leaked threads are spawned and then joined on the same tick, producing no observable
+      // leak and silently defeating the scenario. Absent (null) still means "no limit".
+      if (lifespan != null && (lifespan.isZero() || lifespan.isNegative())) {
+        throw new IllegalArgumentException("lifespan must be positive when set");
       }
     }
   }

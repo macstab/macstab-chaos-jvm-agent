@@ -96,11 +96,18 @@ public final class ChaosAgentExtension
         context.getStore(NAMESPACE).remove(ChaosSession.class, ChaosSession.class);
     final ChaosControlPlane controlPlane =
         context.getStore(NAMESPACE).remove(ChaosControlPlane.class, ChaosControlPlane.class);
-    if (session != null) {
-      session.close();
-    }
-    if (controlPlane instanceof TrackingChaosControlPlane tracker) {
-      tracker.stopTracked();
+    // stopTracked() MUST run even if session.close() throws, otherwise any JVM-scoped handles
+    // activated via controlPlane.activate(...) during the test survive into the next test —
+    // TrackingChaosControlPlane documents this as the dominant source of test-suite flakiness.
+    // Rare but the cost of getting wrong is cross-test contamination of JVM-wide instrumentation.
+    try {
+      if (session != null) {
+        session.close();
+      }
+    } finally {
+      if (controlPlane instanceof TrackingChaosControlPlane tracker) {
+        tracker.stopTracked();
+      }
     }
   }
 

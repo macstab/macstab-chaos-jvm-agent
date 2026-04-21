@@ -94,6 +94,12 @@ public class ChaosAutoConfiguration {
       final ChaosHandleRegistry handleRegistry) {
     final String configFile = properties.getConfigFile();
     if (configFile != null && !configFile.isBlank()) {
+      // Strip CR/LF/NUL from the operator-supplied path before it enters any log record.
+      // Without this, a property value like "/etc/plan.json\n2026-04-20 FORGED: chaos
+      // deactivated" forges a second log line downstream in structured-log pipelines (CRLF
+      // injection / log-entry splitting). Audit integrity depends on every emitted line
+      // being attributable to a single log call.
+      final String safeConfigFile = sanitizeForLog(configFile);
       try {
         final ChaosPlan plan = StartupConfigLoader.loadPlanFromFile(configFile);
         final ChaosActivationHandle handle = controlPlane.activate(plan);
@@ -101,17 +107,21 @@ public class ChaosAutoConfiguration {
         LOGGER.log(
             Level.INFO,
             "chaos-agent: activated startup plan \"{0}\" from {1}",
-            new Object[] {handle.id(), configFile});
+            new Object[] {handle.id(), safeConfigFile});
       } catch (final ConfigLoadException exception) {
+        // Do not include the Jackson cause chain: its messages can echo raw excerpts of the
+        // file contents, which for attacker-influenced paths (/run/secrets/*, service-account
+        // tokens mounted at attacker-writable paths) leaks credential bytes into stdout. Log
+        // the sanitised path and a stable category instead; the stack trace is retained.
         LOGGER.log(
             Level.SEVERE,
-            exception,
-            () -> "chaos-agent: failed to load startup config file " + configFile);
+            "chaos-agent: failed to load startup config file {0} (reason: {1})",
+            new Object[] {safeConfigFile, exception.getMessage()});
       } catch (final RuntimeException exception) {
         LOGGER.log(
             Level.SEVERE,
             exception,
-            () -> "chaos-agent: failed to activate startup plan from " + configFile);
+            () -> "chaos-agent: failed to activate startup plan from " + safeConfigFile);
       }
     }
     if (properties.isDebugDumpOnStart()) {
@@ -119,6 +129,30 @@ public class ChaosAutoConfiguration {
           Level.INFO,
           () -> "chaos-agent: startup diagnostics\n" + controlPlane.diagnostics().debugDump());
     }
+  }
+
+  /**
+   * Strips control characters (CR, LF, NUL, and other C0 control codes) from operator-supplied
+   * strings before they enter log records. Callers should pass values whose provenance is untrusted
+   * — config paths, user-supplied IDs. Values are truncated at 1 KiB to bound the expense of
+   * pathological inputs on hot paths.
+   */
+  static String sanitizeForLog(final String value) {
+    if (value == null) {
+      return "";
+    }
+    final int maxLen = 1024;
+    final String truncated = value.length() > maxLen ? value.substring(0, maxLen) : value;
+    final StringBuilder sb = new StringBuilder(truncated.length());
+    for (int i = 0; i < truncated.length(); i++) {
+      final char c = truncated.charAt(i);
+      if (c == '\r' || c == '\n' || c == '\u0000' || (c < 0x20 && c != '\t')) {
+        sb.append('_');
+      } else {
+        sb.append(c);
+      }
+    }
+    return sb.toString();
   }
 
   /**
