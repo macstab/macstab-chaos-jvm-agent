@@ -79,12 +79,13 @@ public final class ChaosQuarkusExtension
   public void beforeAll(final ExtensionContext context) {
     final ChaosControlPlane controlPlane = ChaosPlatform.installLocally();
     final ChaosSession session = controlPlane.openSession(context.getDisplayName());
-    context.getStore(NAMESPACE).put(ChaosControlPlane.class, controlPlane);
-    context.getStore(NAMESPACE).put(ChaosSession.class, session);
+    final ExtensionContext.Store store = context.getStore(NAMESPACE);
+    store.put(ChaosControlPlane.class, controlPlane);
+    store.put(ChaosSession.class, session);
     // Class-scoped list of handles for JVM-scoped scenarios activated via @ChaosScenario.
     // Session-scoped scenarios are torn down by session.close(); JVM-scoped ones outlive any
     // session and previously leaked into subsequent tests — we now stop them in afterAll.
-    context.getStore(NAMESPACE).put(JVM_HANDLES_KEY, new ArrayList<ChaosActivationHandle>());
+    store.put(JVM_HANDLES_KEY, new ArrayList<ChaosActivationHandle>());
     final Class<?> testClass = context.getTestClass().orElse(null);
     if (testClass != null) {
       activateAnnotations(
@@ -146,8 +147,8 @@ public final class ChaosQuarkusExtension
 
   @Override
   public void afterAll(final ExtensionContext context) {
-    final ChaosSession session =
-        context.getStore(NAMESPACE).remove(ChaosSession.class, ChaosSession.class);
+    final ExtensionContext.Store store = context.getStore(NAMESPACE);
+    final ChaosSession session = store.remove(ChaosSession.class, ChaosSession.class);
     // try/finally ensures JVM-scoped handles are always stopped even if session.close() throws.
     try {
       if (session != null) {
@@ -158,8 +159,7 @@ public final class ChaosQuarkusExtension
       // @ChaosScenario activations leak into every subsequent test in this JVM.
       @SuppressWarnings("unchecked")
       final List<ChaosActivationHandle> handles =
-          (List<ChaosActivationHandle>)
-              context.getStore(NAMESPACE).remove(JVM_HANDLES_KEY, List.class);
+          (List<ChaosActivationHandle>) store.remove(JVM_HANDLES_KEY, List.class);
       if (handles != null) {
         for (final ChaosActivationHandle handle : handles) {
           try {
