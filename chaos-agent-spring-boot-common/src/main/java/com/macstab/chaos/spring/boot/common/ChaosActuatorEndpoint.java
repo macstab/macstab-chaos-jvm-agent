@@ -27,6 +27,9 @@ public class ChaosActuatorEndpoint {
 
   private static final Logger LOGGER = Logger.getLogger(ChaosActuatorEndpoint.class.getName());
 
+  /** Key prefix used by the core runtime for JVM-scoped scenario handles. */
+  private static final String JVM_SCOPE_KEY_PREFIX = "jvm::";
+
   private final ChaosControlPlane controlPlane;
   private final ChaosHandleRegistry handleRegistry;
 
@@ -107,7 +110,7 @@ public class ChaosActuatorEndpoint {
     // Handles are stored under the composite key "<scopeKey>::<scenarioId>" (e.g. "jvm::my-id").
     // Try the composite JVM-scope key first, then the plain id as a fallback for handles activated
     // with a different scope prefix (session-scoped, custom).
-    boolean stopped = handleRegistry.stop("jvm::" + scenarioId);
+    boolean stopped = handleRegistry.stop(JVM_SCOPE_KEY_PREFIX + scenarioId);
     if (!stopped) {
       stopped = handleRegistry.stop(scenarioId);
     }

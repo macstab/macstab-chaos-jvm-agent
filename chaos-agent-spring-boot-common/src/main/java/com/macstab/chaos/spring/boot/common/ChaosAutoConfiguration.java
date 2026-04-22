@@ -141,22 +141,33 @@ public class ChaosAutoConfiguration {
    * — config paths, user-supplied IDs. Values are truncated at 1 KiB to bound the expense of
    * pathological inputs on hot paths.
    */
+  private static final int LOG_SANITIZE_MAX_LENGTH = 1024;
+
   static String sanitizeForLog(final String value) {
     if (value == null) {
       return "";
     }
-    final int maxLen = 1024;
-    final String truncated = value.length() > maxLen ? value.substring(0, maxLen) : value;
-    final StringBuilder sb = new StringBuilder(truncated.length());
+    final String truncated =
+        value.length() > LOG_SANITIZE_MAX_LENGTH
+            ? value.substring(0, LOG_SANITIZE_MAX_LENGTH)
+            : value;
+    final StringBuilder sanitized = new StringBuilder(truncated.length());
     for (int i = 0; i < truncated.length(); i++) {
-      final char c = truncated.charAt(i);
-      if (c == '\r' || c == '\n' || c == '\u0000' || (c < 0x20 && c != '\t')) {
-        sb.append('_');
+      final char character = truncated.charAt(i);
+      if (isControlCharacter(character)) {
+        sanitized.append('_');
       } else {
-        sb.append(c);
+        sanitized.append(character);
       }
     }
-    return sb.toString();
+    return sanitized.toString();
+  }
+
+  private static boolean isControlCharacter(final char character) {
+    return character == '\r'
+        || character == '\n'
+        || character == '\u0000'
+        || (character < 0x20 && character != '\t');
   }
 
   /**
