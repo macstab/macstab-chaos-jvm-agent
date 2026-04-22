@@ -52,48 +52,60 @@ final class GcPressureStressor implements ManagedStressor {
 
     allocationThread =
         new Thread(
-            () -> {
-              final long deadline = System.currentTimeMillis() + durationMillis;
-              // long — not int — because a stressor running at 1M allocations/sec
-              // (e.g. 1 GB/s at 1 KB objects, a plausible high-pressure scenario) overflows
-              // int in ~35 minutes. Past overflow, `Integer.MIN_VALUE % RING_SIZE` returns a
-              // negative index and the daemon thread dies on AIOOBE, silently dropping the
-              // old-gen promotion that scenarios depend on for the rest of their duration.
-              // Math.floorMod guards against any future signed-math slip too.
-              long ringIndex = 0L;
-              while (running.get() && System.currentTimeMillis() < deadline) {
-                for (int i = 0; i < objectsPerBatch; i++) {
-                  // Re-check running every iteration: close() sets running=false and nulls
-                  // the ring, but without this guard a batch that started before close()
-                  // would keep writing into the local `snapshot` for up to one full
-                  // BATCH_INTERVAL_MS, keeping allocated byte[] arrays strongly reachable
-                  // past the documented close() boundary.
-                  if (!running.get()) {
-                    break;
-                  }
-                  final byte[] chunk = new byte[objectSizeBytes];
-                  if (promote) {
-                    final byte[][] snapshot = ring;
-                    if (snapshot != null) {
-                      snapshot[(int) Math.floorMod(ringIndex, (long) RING_SIZE)] = chunk;
-                      ringIndex++;
-                    }
-                  }
-                  // else: short-lived — chunk is immediately unreachable
-                }
-                try {
-                  Thread.sleep(BATCH_INTERVAL_MS);
-                } catch (final InterruptedException e) {
-                  Thread.currentThread().interrupt();
-                  break;
-                }
-              }
-              running.set(false);
-              LOGGER.fine(() -> "chaos-gc-pressure stressor completed");
-            },
+            allocationLoop(objectsPerBatch, objectSizeBytes, promote, durationMillis),
             "chaos-gc-pressure");
     allocationThread.setDaemon(true);
     allocationThread.start();
+  }
+
+  /**
+   * Body of the allocation daemon thread: sustains the configured allocation rate until the
+   * duration elapses or {@link #close()} sets {@code running=false}.
+   */
+  private Runnable allocationLoop(
+      final int objectsPerBatch,
+      final int objectSizeBytes,
+      final boolean promote,
+      final long durationMillis) {
+    return () -> {
+      final long deadline = System.currentTimeMillis() + durationMillis;
+      // long — not int — because a stressor running at 1M allocations/sec
+      // (e.g. 1 GB/s at 1 KB objects, a plausible high-pressure scenario) overflows
+      // int in ~35 minutes. Past overflow, `Integer.MIN_VALUE % RING_SIZE` returns a
+      // negative index and the daemon thread dies on AIOOBE, silently dropping the
+      // old-gen promotion that scenarios depend on for the rest of their duration.
+      // Math.floorMod guards against any future signed-math slip too.
+      long ringIndex = 0L;
+      while (running.get() && System.currentTimeMillis() < deadline) {
+        for (int i = 0; i < objectsPerBatch; i++) {
+          // Re-check running every iteration: close() sets running=false and nulls
+          // the ring, but without this guard a batch that started before close()
+          // would keep writing into the local `snapshot` for up to one full
+          // BATCH_INTERVAL_MS, keeping allocated byte[] arrays strongly reachable
+          // past the documented close() boundary.
+          if (!running.get()) {
+            break;
+          }
+          final byte[] chunk = new byte[objectSizeBytes];
+          if (promote) {
+            final byte[][] snapshot = ring;
+            if (snapshot != null) {
+              snapshot[(int) Math.floorMod(ringIndex, (long) RING_SIZE)] = chunk;
+              ringIndex++;
+            }
+          }
+          // else: short-lived — chunk is immediately unreachable
+        }
+        try {
+          Thread.sleep(BATCH_INTERVAL_MS);
+        } catch (final InterruptedException e) {
+          Thread.currentThread().interrupt();
+          break;
+        }
+      }
+      running.set(false);
+      LOGGER.fine(() -> "chaos-gc-pressure stressor completed");
+    };
   }
 
   @Override
