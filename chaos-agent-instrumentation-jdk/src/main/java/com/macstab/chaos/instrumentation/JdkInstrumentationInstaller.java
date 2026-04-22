@@ -113,928 +113,14 @@ public final class JdkInstrumentationInstaller {
     injectBridge(instrumentation);
     installDelegate(new ChaosBridge(runtime));
 
-    final AgentBuilder.Listener.Adapter errorListener =
-        new AgentBuilder.Listener.Adapter() {
-          @Override
-          public void onError(
-              final String typeName,
-              final ClassLoader classLoader,
-              final JavaModule module,
-              final boolean loaded,
-              final Throwable throwable) {
-            LOGGER.warning("chaos instrumentation failed for " + typeName + ": " + throwable);
-          }
-        };
-
-    AgentBuilder agentBuilder =
-        new AgentBuilder.Default()
-            .disableClassFormatChanges()
-            .with(AgentBuilder.RedefinitionStrategy.RETRANSFORMATION)
-            .with(errorListener)
-            .ignore(
-                ElementMatchers.nameStartsWith("net.bytebuddy.")
-                    .or(ElementMatchers.nameStartsWith("com.macstab.chaos.")));
-
-    agentBuilder =
-        agentBuilder
-            .type(ElementMatchers.named("java.lang.Thread"))
-            .transform(
-                (builder, typeDescription, classLoader, module, protectionDomain) ->
-                    builder.visit(
-                        Advice.to(ThreadAdvice.StartAdvice.class)
-                            .on(
-                                ElementMatchers.named("start")
-                                    .and(ElementMatchers.takesArguments(0)))))
-            .type(ElementMatchers.named("java.util.concurrent.ThreadPoolExecutor"))
-            .transform(
-                (builder, typeDescription, classLoader, module, protectionDomain) ->
-                    builder
-                        .visit(
-                            Advice.to(ExecutorAdvice.ExecuteAdvice.class)
-                                .on(
-                                    ElementMatchers.named("execute")
-                                        .and(ElementMatchers.takesArguments(Runnable.class))))
-                        .visit(
-                            Advice.to(ExecutorAdvice.BeforeExecuteAdvice.class)
-                                .on(
-                                    ElementMatchers.named("beforeExecute")
-                                        .and(
-                                            ElementMatchers.takesArguments(
-                                                Thread.class, Runnable.class))))
-                        .visit(
-                            Advice.to(ExecutorAdvice.ShutdownAdvice.class)
-                                .on(
-                                    ElementMatchers.named("shutdown")
-                                        .and(ElementMatchers.takesArguments(0))))
-                        // shutdownNow() intercepts the forced-shutdown variant that interrupts
-                        // in-flight tasks and returns the undrained queue. Omitting it left any
-                        // selector targeting EXECUTOR_SHUTDOWN silently missing shutdown paths
-                        // that went through shutdownNow instead of shutdown.
-                        .visit(
-                            Advice.to(ExecutorAdvice.ShutdownNowAdvice.class)
-                                .on(
-                                    ElementMatchers.named("shutdownNow")
-                                        .and(ElementMatchers.takesArguments(0))))
-                        .visit(
-                            Advice.to(ExecutorAdvice.AwaitTerminationAdvice.class)
-                                .on(
-                                    ElementMatchers.named("awaitTermination")
-                                        .and(
-                                            ElementMatchers.takesArguments(
-                                                long.class, java.util.concurrent.TimeUnit.class)))))
-            .type(ElementMatchers.named("java.util.concurrent.ScheduledThreadPoolExecutor"))
-            .transform(
-                (builder, typeDescription, classLoader, module, protectionDomain) ->
-                    builder
-                        .visit(
-                            Advice.to(ScheduledExecutorAdvice.ScheduleRunnableAdvice.class)
-                                .on(
-                                    ElementMatchers.named("schedule")
-                                        .and(
-                                            ElementMatchers.takesArguments(
-                                                Runnable.class,
-                                                long.class,
-                                                java.util.concurrent.TimeUnit.class))))
-                        .visit(
-                            Advice.to(ScheduledExecutorAdvice.ScheduleCallableAdvice.class)
-                                .on(
-                                    ElementMatchers.named("schedule")
-                                        .and(
-                                            ElementMatchers.takesArguments(
-                                                Callable.class,
-                                                long.class,
-                                                java.util.concurrent.TimeUnit.class))))
-                        .visit(
-                            Advice.to(ScheduledExecutorAdvice.PeriodicAdvice.class)
-                                .on(
-                                    ElementMatchers.named("scheduleAtFixedRate")
-                                        .and(
-                                            ElementMatchers.takesArguments(
-                                                Runnable.class,
-                                                long.class,
-                                                long.class,
-                                                java.util.concurrent.TimeUnit.class))))
-                        .visit(
-                            Advice.to(ScheduledExecutorAdvice.PeriodicAdvice.class)
-                                .on(
-                                    ElementMatchers.named("scheduleWithFixedDelay")
-                                        .and(
-                                            ElementMatchers.takesArguments(
-                                                Runnable.class,
-                                                long.class,
-                                                long.class,
-                                                java.util.concurrent.TimeUnit.class)))));
+    AgentBuilder agentBuilder = buildBaseAgentBuilder();
+    agentBuilder = applyPhase1ThreadAndExecutorTransformations(agentBuilder);
 
     if (premainMode) {
-      agentBuilder =
-          agentBuilder
-              .type(
-                  ElementMatchers.isSubTypeOf(java.util.concurrent.BlockingQueue.class)
-                      .and(ElementMatchers.not(ElementMatchers.isInterface()))
-                      .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
-              .transform(
-                  (builder, typeDescription, classLoader, module, protectionDomain) ->
-                      builder
-                          .visit(
-                              Advice.to(QueueAdvice.PutAdvice.class)
-                                  .on(ElementMatchers.named("put")))
-                          .visit(
-                              Advice.to(QueueAdvice.TakeAdvice.class)
-                                  .on(ElementMatchers.named("take")))
-                          .visit(
-                              Advice.to(QueueAdvice.PollAdvice.class)
-                                  .on(ElementMatchers.named("poll")))
-                          .visit(
-                              Advice.to(QueueAdvice.OfferAdvice.class)
-                                  .on(
-                                      ElementMatchers.named("offer")
-                                          .and(ElementMatchers.takesArguments(1)))))
-              .type(ElementMatchers.named("java.util.concurrent.CompletableFuture"))
-              .transform(
-                  (builder, typeDescription, classLoader, module, protectionDomain) ->
-                      builder
-                          .visit(
-                              Advice.to(CompletableFutureAdvice.CompleteAdvice.class)
-                                  .on(
-                                      ElementMatchers.named("complete")
-                                          .and(ElementMatchers.takesArguments(1))))
-                          .visit(
-                              Advice.to(CompletableFutureAdvice.CompleteExceptionallyAdvice.class)
-                                  .on(
-                                      ElementMatchers.named("completeExceptionally")
-                                          .and(ElementMatchers.takesArguments(Throwable.class)))))
-              .type(ElementMatchers.named("java.lang.ClassLoader"))
-              .transform(
-                  (builder, typeDescription, classLoader, module, protectionDomain) ->
-                      builder
-                          .visit(
-                              // Must match BOTH 1-arg and 2-arg overloads: BuiltinClassLoader
-                              // (the superclass of every default JDK classloader) overrides the
-                              // 2-arg variant but inherits the 1-arg from java.lang.ClassLoader,
-                              // so instrumenting only the 2-arg would miss every standard class
-                              // load via Class.forName / loader.loadClass(name). Custom
-                              // classloaders that inherit both will double-dispatch, which is a
-                              // known cost of the single-class retransformation strategy.
-                              Advice.to(ClassLoaderAdvice.LoadClassAdvice.class)
-                                  .on(
-                                      ElementMatchers.named("loadClass")
-                                          .and(
-                                              ElementMatchers.takesArguments(
-                                                      String.class, boolean.class)
-                                                  .or(
-                                                      ElementMatchers.takesArguments(
-                                                          String.class)))))
-                          .visit(
-                              Advice.to(ClassLoaderAdvice.GetResourceAdvice.class)
-                                  .on(
-                                      ElementMatchers.named("getResource")
-                                          .and(ElementMatchers.takesArguments(String.class)))))
-              .type(ElementMatchers.named("java.lang.Runtime"))
-              .transform(
-                  (builder, typeDescription, classLoader, module, protectionDomain) ->
-                      builder
-                          .visit(
-                              Advice.to(ShutdownAdvice.AddShutdownHookAdvice.class)
-                                  .on(
-                                      ElementMatchers.named("addShutdownHook")
-                                          .and(ElementMatchers.takesArguments(Thread.class))))
-                          .visit(
-                              Advice.to(ShutdownAdvice.RemoveShutdownHookAdvice.class)
-                                  .on(
-                                      ElementMatchers.named("removeShutdownHook")
-                                          .and(ElementMatchers.takesArguments(Thread.class)))))
-              .type(ElementMatchers.named("java.util.concurrent.ForkJoinTask"))
-              .transform(
-                  (builder, typeDescription, classLoader, module, protectionDomain) ->
-                      builder.visit(
-                          Advice.to(ForkJoinAdvice.DoExecAdvice.class)
-                              .on(
-                                  ElementMatchers.named("doExec")
-                                      .and(ElementMatchers.takesArguments(0)))));
-
-      // ── Phase 2: JVM runtime interception ─────────────────────────────────
-      agentBuilder =
-          agentBuilder
-              // System.exit() — Java wrapper, safe to instrument with disableClassFormatChanges().
-              // currentTimeMillis() and nanoTime() are @IntrinsicCandidate native methods and
-              // are handled separately below via the native-method-prefix AgentBuilder.
-              .type(ElementMatchers.named("java.lang.System"))
-              .transform(
-                  (builder, typeDescription, classLoader, module, protectionDomain) ->
-                      builder.visit(
-                          Advice.to(JvmRuntimeAdvice.ExitRequestAdvice.class)
-                              .on(
-                                  ElementMatchers.named("exit")
-                                      .and(ElementMatchers.takesArguments(int.class)))))
-              // GC and halt via Runtime
-              .type(ElementMatchers.named("java.lang.Runtime"))
-              .transform(
-                  (builder, typeDescription, classLoader, module, protectionDomain) ->
-                      builder
-                          .visit(
-                              Advice.to(JvmRuntimeAdvice.GcRequestAdvice.class)
-                                  .on(
-                                      ElementMatchers.named("gc")
-                                          .and(ElementMatchers.takesArguments(0))))
-                          .visit(
-                              Advice.to(JvmRuntimeAdvice.ExitRequestAdvice.class)
-                                  .on(
-                                      ElementMatchers.named("halt")
-                                          .and(ElementMatchers.takesArguments(int.class)))))
-              // Reflection
-              .type(ElementMatchers.named("java.lang.reflect.Method"))
-              .transform(
-                  (builder, typeDescription, classLoader, module, protectionDomain) ->
-                      builder.visit(
-                          Advice.to(JvmRuntimeAdvice.ReflectionInvokeAdvice.class)
-                              .on(
-                                  ElementMatchers.named("invoke")
-                                      .and(
-                                          ElementMatchers.takesArguments(
-                                              Object.class, Object[].class)))))
-              // Direct buffer allocation
-              .type(ElementMatchers.named("java.nio.ByteBuffer"))
-              .transform(
-                  (builder, typeDescription, classLoader, module, protectionDomain) ->
-                      builder.visit(
-                          Advice.to(JvmRuntimeAdvice.DirectBufferAllocateAdvice.class)
-                              .on(
-                                  ElementMatchers.named("allocateDirect")
-                                      .and(ElementMatchers.takesArguments(int.class)))))
-              // Object deserialization and serialization
-              .type(ElementMatchers.named("java.io.ObjectInputStream"))
-              .transform(
-                  (builder, typeDescription, classLoader, module, protectionDomain) ->
-                      builder.visit(
-                          Advice.to(JvmRuntimeAdvice.ObjectDeserializeAdvice.class)
-                              .on(
-                                  ElementMatchers.named("readObject")
-                                      .and(ElementMatchers.takesArguments(0)))))
-              .type(ElementMatchers.named("java.io.ObjectOutputStream"))
-              .transform(
-                  (builder, typeDescription, classLoader, module, protectionDomain) ->
-                      builder.visit(
-                          Advice.to(JvmRuntimeAdvice.ObjectSerializeAdvice.class)
-                              .on(
-                                  ElementMatchers.named("writeObject")
-                                      .and(ElementMatchers.takesArguments(Object.class)))))
-              // ClassLoader.defineClass
-              .type(ElementMatchers.named("java.lang.ClassLoader"))
-              .transform(
-                  (builder, typeDescription, classLoader, module, protectionDomain) ->
-                      builder.visit(
-                          Advice.to(JvmRuntimeAdvice.ClassDefineAdvice.class)
-                              .on(
-                                  ElementMatchers.named("defineClass")
-                                      .and(ElementMatchers.takesArgument(0, String.class)))))
-              // LockSupport.park / parkNanos / parkUntil (THREAD_PARK)
-              // Safe to instrument globally: the chaos runtime never calls LockSupport.park()
-              // directly. Internal locks (ManualGate via ReentrantLock) do call park(), but by
-              // the time park() fires, BootstrapDispatcher.DEPTH is already > 0 (set before
-              // delegating to ChaosRuntime), so the DEPTH guard in invoke() returns the fallback
-              // immediately without entering chaos evaluation.
-              .type(ElementMatchers.named("java.util.concurrent.locks.LockSupport"))
-              .transform(
-                  (builder, typeDescription, classLoader, module, protectionDomain) ->
-                      builder
-                          // park(Object blocker) — used by j.u.c. locks that set the blocker
-                          .visit(
-                              Advice.to(JvmRuntimeAdvice.ThreadParkAdvice.class)
-                                  .on(
-                                      ElementMatchers.named("park")
-                                          .and(ElementMatchers.takesArguments(Object.class))))
-                          // park() — 0-arg variant used by direct LockSupport callers
-                          .visit(
-                              Advice.to(JvmRuntimeAdvice.ThreadParkAdvice.class)
-                                  .on(
-                                      ElementMatchers.named("park")
-                                          .and(ElementMatchers.takesArguments(0))))
-                          .visit(
-                              Advice.to(JvmRuntimeAdvice.ThreadParkAdvice.class)
-                                  .on(
-                                      ElementMatchers.named("parkNanos")
-                                          .and(
-                                              ElementMatchers.takesArguments(
-                                                  Object.class, long.class))))
-                          // parkNanos(long nanos) — 1-arg variant without blocker
-                          .visit(
-                              Advice.to(JvmRuntimeAdvice.ThreadParkAdvice.class)
-                                  .on(
-                                      ElementMatchers.named("parkNanos")
-                                          .and(ElementMatchers.takesArguments(long.class))))
-                          .visit(
-                              Advice.to(JvmRuntimeAdvice.ThreadParkAdvice.class)
-                                  .on(
-                                      ElementMatchers.named("parkUntil")
-                                          .and(
-                                              ElementMatchers.takesArguments(
-                                                  Object.class, long.class))))
-                          // parkUntil(long deadline) — 1-arg variant without blocker
-                          .visit(
-                              Advice.to(JvmRuntimeAdvice.ThreadParkAdvice.class)
-                                  .on(
-                                      ElementMatchers.named("parkUntil")
-                                          .and(ElementMatchers.takesArguments(long.class)))))
-              // AQS.acquire (MONITOR_ENTER proxy)
-              // Safe: ChaosRuntime uses ConcurrentHashMap (lock-free) for registry.match().
-              // The one internal AQS user is ManualGate (ReentrantLock), but ManualGate is only
-              // entered from applyGate() which runs inside DEPTH > 0 context — the DEPTH guard
-              // short-circuits before chaos evaluation begins, preventing recursion.
-              .type(ElementMatchers.named("java.util.concurrent.locks.AbstractQueuedSynchronizer"))
-              .transform(
-                  (builder, typeDescription, classLoader, module, protectionDomain) ->
-                      builder.visit(
-                          Advice.to(JvmRuntimeAdvice.MonitorEnterAdvice.class)
-                              .on(
-                                  ElementMatchers.named("acquire")
-                                      .and(ElementMatchers.takesArguments(int.class)))))
-              // NIO Selector — target AbstractSelector subtypes (KQueueSelectorImpl etc.).
-              // Exclude abstract / interface / synthetic matches for the same VerifyError reason
-              // as SocketChannel below: bytecode generated for bridge / synthetic methods on
-              // abstract bases cannot satisfy the advice's stack-map expectations.
-              .type(
-                  ElementMatchers.isSubTypeOf(java.nio.channels.spi.AbstractSelector.class)
-                      .and(ElementMatchers.not(ElementMatchers.isAbstract()))
-                      .and(ElementMatchers.not(ElementMatchers.isInterface()))
-                      .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
-              .transform(
-                  (builder, typeDescription, classLoader, module, protectionDomain) ->
-                      builder
-                          .visit(
-                              Advice.to(JvmRuntimeAdvice.NioSelectNoArgAdvice.class)
-                                  .on(
-                                      ElementMatchers.named("select")
-                                          .and(ElementMatchers.takesArguments(0))))
-                          .visit(
-                              Advice.to(JvmRuntimeAdvice.NioSelectTimeoutAdvice.class)
-                                  .on(
-                                      ElementMatchers.named("select")
-                                          .and(ElementMatchers.takesArguments(long.class))))
-                          .visit(
-                              Advice.to(JvmRuntimeAdvice.NioSelectNowAdvice.class)
-                                  .on(
-                                      ElementMatchers.named("selectNow")
-                                          .and(ElementMatchers.takesArguments(0)))))
-              // NIO SocketChannel — the public class is abstract, so name() would only match the
-              // abstract copy; instrument concrete subtypes (sun.nio.ch.SocketChannelImpl,
-              // possibly vendor variants) where the actual I/O code lives. Exclude abstract /
-              // synthetic matches to avoid `VerifyError` on bridge methods.
-              .type(
-                  ElementMatchers.isSubTypeOf(java.nio.channels.SocketChannel.class)
-                      .and(ElementMatchers.not(ElementMatchers.isAbstract()))
-                      .and(ElementMatchers.not(ElementMatchers.isInterface()))
-                      .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
-              .transform(
-                  (builder, typeDescription, classLoader, module, protectionDomain) ->
-                      builder
-                          .visit(
-                              Advice.to(JvmRuntimeAdvice.NioChannelConnectAdvice.class)
-                                  .on(
-                                      ElementMatchers.named("connect")
-                                          .and(
-                                              ElementMatchers.takesArguments(
-                                                  java.net.SocketAddress.class))))
-                          .visit(
-                              Advice.to(JvmRuntimeAdvice.NioChannelReadAdvice.class)
-                                  .on(
-                                      ElementMatchers.named("read")
-                                          .and(
-                                              ElementMatchers.takesArguments(
-                                                  java.nio.ByteBuffer.class))))
-                          .visit(
-                              Advice.to(JvmRuntimeAdvice.NioChannelWriteAdvice.class)
-                                  .on(
-                                      ElementMatchers.named("write")
-                                          .and(
-                                              ElementMatchers.takesArguments(
-                                                  java.nio.ByteBuffer.class)))))
-              // NIO ServerSocketChannel — same abstract-base issue as SocketChannel above.
-              .type(
-                  ElementMatchers.isSubTypeOf(java.nio.channels.ServerSocketChannel.class)
-                      .and(ElementMatchers.not(ElementMatchers.isAbstract()))
-                      .and(ElementMatchers.not(ElementMatchers.isInterface()))
-                      .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
-              .transform(
-                  (builder, typeDescription, classLoader, module, protectionDomain) ->
-                      builder.visit(
-                          Advice.to(JvmRuntimeAdvice.NioChannelAcceptAdvice.class)
-                              .on(
-                                  ElementMatchers.named("accept")
-                                      .and(ElementMatchers.takesArguments(0)))))
-              // Socket
-              .type(ElementMatchers.named("java.net.Socket"))
-              .transform(
-                  (builder, typeDescription, classLoader, module, protectionDomain) ->
-                      builder
-                          .visit(
-                              Advice.to(JvmRuntimeAdvice.SocketConnectAdvice.class)
-                                  .on(
-                                      ElementMatchers.named("connect")
-                                          .and(
-                                              ElementMatchers.takesArguments(
-                                                  java.net.SocketAddress.class, int.class))))
-                          .visit(
-                              Advice.to(JvmRuntimeAdvice.SocketCloseAdvice.class)
-                                  .on(
-                                      ElementMatchers.named("close")
-                                          .and(ElementMatchers.takesArguments(0)))))
-              // ServerSocket
-              .type(ElementMatchers.named("java.net.ServerSocket"))
-              .transform(
-                  (builder, typeDescription, classLoader, module, protectionDomain) ->
-                      builder.visit(
-                          Advice.to(JvmRuntimeAdvice.SocketAcceptAdvice.class)
-                              .on(
-                                  ElementMatchers.named("accept")
-                                      .and(ElementMatchers.takesArguments(0)))))
-              // SocketInputStream / SocketOutputStream (package-private)
-              // Only instrument the 3-argument bulk variant of read(): the 0-arg single-byte
-              // overload delegates internally to read(byte[], int, int), causing double-fire of
-              // beforeSocketRead for each single-byte application call. Restricting to the final
-              // I/O dispatch avoids double-counting rate-limit permits and probability draws.
-              .type(ElementMatchers.named("java.net.SocketInputStream"))
-              .transform(
-                  (builder, typeDescription, classLoader, module, protectionDomain) ->
-                      builder.visit(
-                          Advice.to(JvmRuntimeAdvice.SocketReadAdvice.class)
-                              .on(
-                                  ElementMatchers.named("read")
-                                      .and(
-                                          ElementMatchers.takesArguments(
-                                              byte[].class, int.class, int.class)))))
-              .type(ElementMatchers.named("java.net.SocketOutputStream"))
-              .transform(
-                  (builder, typeDescription, classLoader, module, protectionDomain) ->
-                      builder
-                          .visit(
-                              Advice.to(JvmRuntimeAdvice.SocketWriteSingleByteAdvice.class)
-                                  .on(
-                                      ElementMatchers.named("write")
-                                          .and(ElementMatchers.takesArguments(int.class))))
-                          .visit(
-                              Advice.to(JvmRuntimeAdvice.SocketWriteBulkAdvice.class)
-                                  .on(
-                                      ElementMatchers.named("write")
-                                          .and(
-                                              ElementMatchers.takesArguments(
-                                                  byte[].class, int.class, int.class)))))
-              // ZIP Inflater / Deflater
-              .type(ElementMatchers.named("java.util.zip.Inflater"))
-              .transform(
-                  (builder, typeDescription, classLoader, module, protectionDomain) ->
-                      builder.visit(
-                          Advice.to(JvmRuntimeAdvice.ZipInflateAdvice.class)
-                              .on(ElementMatchers.named("inflate"))))
-              .type(ElementMatchers.named("java.util.zip.Deflater"))
-              .transform(
-                  (builder, typeDescription, classLoader, module, protectionDomain) ->
-                      builder.visit(
-                          Advice.to(JvmRuntimeAdvice.ZipDeflateAdvice.class)
-                              .on(ElementMatchers.named("deflate"))));
-
-      // ThreadLocal.get() / set() (THREAD_LOCAL_GET / THREAD_LOCAL_SET)
-      // Previously excluded due to reentrancy with BootstrapDispatcher.DEPTH (also a ThreadLocal).
-      // Now safe: ThreadLocalGetAdvice and ThreadLocalSetAdvice include an identity check
-      // (threadLocal == BootstrapDispatcher.DEPTH) that exits before any delegation, breaking
-      // the recursion at the only point where it could occur. See ThreadLocalGetAdvice for the
-      // full reentrancy analysis.
-      agentBuilder =
-          agentBuilder
-              .type(ElementMatchers.named("java.lang.ThreadLocal"))
-              .transform(
-                  (builder, typeDescription, classLoader, module, protectionDomain) ->
-                      builder
-                          .visit(
-                              Advice.to(JvmRuntimeAdvice.ThreadLocalGetAdvice.class)
-                                  .on(
-                                      ElementMatchers.named("get")
-                                          .and(ElementMatchers.takesArguments(0))))
-                          .visit(
-                              Advice.to(JvmRuntimeAdvice.ThreadLocalSetAdvice.class)
-                                  .on(
-                                      ElementMatchers.named("set")
-                                          .and(ElementMatchers.takesArguments(1)))));
-
-      // Optional instrumentation — skip gracefully if class not present
-      agentBuilder =
-          instrumentOptional(
-              agentBuilder,
-              "javax.naming.InitialContext",
-              builder ->
-                  builder.visit(
-                      Advice.to(JvmRuntimeAdvice.JndiLookupAdvice.class)
-                          .on(
-                              ElementMatchers.named("lookup")
-                                  .and(ElementMatchers.takesArguments(String.class)))));
-
-      agentBuilder =
-          instrumentOptional(
-              agentBuilder,
-              "javax.management.MBeanServer",
-              builder ->
-                  builder
-                      .visit(
-                          Advice.to(JvmRuntimeAdvice.JmxInvokeAdvice.class)
-                              .on(
-                                  ElementMatchers.named("invoke")
-                                      .and(ElementMatchers.takesArguments(4))))
-                      .visit(
-                          Advice.to(JvmRuntimeAdvice.JmxGetAttrAdvice.class)
-                              .on(
-                                  ElementMatchers.named("getAttribute")
-                                      .and(ElementMatchers.takesArguments(2)))));
-
-      // On JDK 8-16 native library loading went through Runtime.loadLibrary0; on JDK 17+ the
-      // method was moved to jdk.internal.loader.NativeLibraries.load (private JDK internals). We
-      // weave both sites so NATIVE_LIBRARY_LOAD fires on every supported JDK; missing sites are
-      // tolerated by instrumentOptional so a mismatch is never a startup failure.
-      agentBuilder =
-          instrumentOptional(
-              agentBuilder,
-              "java.lang.Runtime",
-              builder ->
-                  builder.visit(
-                      Advice.to(JvmRuntimeAdvice.NativeLibraryLoadAdvice.class)
-                          .on(ElementMatchers.named("loadLibrary0"))));
-      agentBuilder =
-          instrumentOptional(
-              agentBuilder,
-              "jdk.internal.loader.NativeLibraries",
-              builder ->
-                  builder.visit(
-                      Advice.to(JvmRuntimeAdvice.NativeLibrariesLoadAdvice.class)
-                          .on(ElementMatchers.named("load"))));
-
-      // CompletableFuture.cancel
-      agentBuilder =
-          agentBuilder
-              .type(ElementMatchers.named("java.util.concurrent.CompletableFuture"))
-              .transform(
-                  (builder, typeDescription, classLoader, module, protectionDomain) ->
-                      builder.visit(
-                          Advice.to(JvmRuntimeAdvice.AsyncCancelAdvice.class)
-                              .on(
-                                  ElementMatchers.named("cancel")
-                                      .and(ElementMatchers.takesArguments(boolean.class)))));
-
-      // ── Higher-level time APIs ────────────────────────────────────────────
-      // Direct System.currentTimeMillis() / System.nanoTime() cannot be intercepted (see note
-      // below) but java.time.Instant.now(), java.time.LocalDateTime.now(), java.time.ZonedDateTime
-      // .now(), and java.util.Date() are regular Java members that can be woven at exit.
-      agentBuilder =
-          agentBuilder
-              .type(ElementMatchers.named("java.time.Instant"))
-              .transform(
-                  (builder, typeDescription, classLoader, module, protectionDomain) ->
-                      builder.visit(
-                          Advice.to(JvmRuntimeAdvice.InstantNowAdvice.class)
-                              .on(
-                                  ElementMatchers.named("now")
-                                      .and(ElementMatchers.isStatic())
-                                      .and(ElementMatchers.takesArguments(0)))))
-              .type(ElementMatchers.named("java.time.LocalDateTime"))
-              .transform(
-                  (builder, typeDescription, classLoader, module, protectionDomain) ->
-                      builder.visit(
-                          Advice.to(JvmRuntimeAdvice.LocalDateTimeNowAdvice.class)
-                              .on(
-                                  ElementMatchers.named("now")
-                                      .and(ElementMatchers.isStatic())
-                                      .and(ElementMatchers.takesArguments(0)))))
-              .type(ElementMatchers.named("java.time.ZonedDateTime"))
-              .transform(
-                  (builder, typeDescription, classLoader, module, protectionDomain) ->
-                      builder.visit(
-                          Advice.to(JvmRuntimeAdvice.ZonedDateTimeNowAdvice.class)
-                              .on(
-                                  ElementMatchers.named("now")
-                                      .and(ElementMatchers.isStatic())
-                                      .and(ElementMatchers.takesArguments(0)))))
-              .type(ElementMatchers.named("java.util.Date"))
-              .transform(
-                  (builder, typeDescription, classLoader, module, protectionDomain) ->
-                      builder.visit(
-                          Advice.to(JvmRuntimeAdvice.DateNewAdvice.class)
-                              .on(
-                                  ElementMatchers.isConstructor()
-                                      .and(ElementMatchers.takesArguments(0)))));
-
-      // ── HTTP client interception (2.3) ────────────────────────────────────
-      // All targets use instrumentOptional, which checks class presence before registering. If
-      // the target is absent, no transformation is added. Advice classes only use Object-typed
-      // arguments and reflective URL extraction, so the compileOnly dependencies (OkHttp,
-      // Apache HC, Reactor Netty) are not required at runtime.
-      //
-      // Java 11+ HttpClient (jdk.internal.net.http.HttpClientImpl) is NOT registered via
-      // instrumentOptional here. That class is always present on JDK 11+, but it lives in the
-      // non-exported java.net.http/jdk.internal.net.http package. Attempting to transform it
-      // without --add-opens java.net.http/jdk.internal.net.http=ALL-UNNAMED silently corrupts
-      // subsequent AgentBuilder transformations. If interception of the Java HttpClient is
-      // required, users can target its public API or wait for a dedicated --add-opens pathway.
-      agentBuilder =
-          instrumentOptional(
-              agentBuilder,
-              "okhttp3.RealCall",
-              builder ->
-                  builder
-                      .visit(
-                          Advice.to(HttpClientAdvice.OkHttpExecuteAdvice.class)
-                              .on(
-                                  ElementMatchers.named("execute")
-                                      .and(ElementMatchers.takesArguments(0))))
-                      .visit(
-                          Advice.to(HttpClientAdvice.OkHttpEnqueueAdvice.class)
-                              .on(
-                                  ElementMatchers.named("enqueue")
-                                      .and(ElementMatchers.takesArguments(1)))));
-
-      // Apache HC 4.x exposes eight execute() overloads split across two shapes:
-      //   execute(HttpHost, HttpRequest [, HttpContext] [, ResponseHandler])  — HttpHost first
-      //   execute(HttpUriRequest [, HttpContext] [, ResponseHandler])         — request first
-      //
-      // A flat takesArguments(2) matcher (the previous wiring) bound
-      // ApacheHc4ExecuteAdvice indiscriminately to all three 2-arg overloads,
-      // handing the advice an HttpUriRequest where it expected an HttpHost and
-      // leaving single-arg + 3-arg + 4-arg variants completely uncovered. The
-      // refined matchers below disambiguate by first-argument type so every
-      // overload routes to the advice that understands its signature.
-      agentBuilder =
-          instrumentOptional(
-              agentBuilder,
-              "org.apache.http.impl.client.CloseableHttpClient",
-              builder ->
-                  builder
-                      .visit(
-                          Advice.to(HttpClientAdvice.ApacheHc4ExecuteAdvice.class)
-                              .on(
-                                  ElementMatchers.named("execute")
-                                      .and(
-                                          ElementMatchers.takesArgument(
-                                              0,
-                                              ElementMatchers.named("org.apache.http.HttpHost")))))
-                      .visit(
-                          Advice.to(HttpClientAdvice.ApacheHc4UriExecuteAdvice.class)
-                              .on(
-                                  ElementMatchers.named("execute")
-                                      .and(
-                                          ElementMatchers.takesArgument(
-                                              0,
-                                              ElementMatchers.named(
-                                                  "org.apache.http.client.methods.HttpUriRequest"))))));
-
-      agentBuilder =
-          instrumentOptional(
-              agentBuilder,
-              "org.apache.hc.client5.http.impl.classic.CloseableHttpClient",
-              builder ->
-                  builder.visit(
-                      Advice.to(HttpClientAdvice.ApacheHc5ExecuteAdvice.class)
-                          .on(
-                              ElementMatchers.named("execute")
-                                  // 2-arg: execute(ClassicHttpRequest, ClassicHttpResponseHandler)
-                                  // 3-arg: execute(ClassicHttpRequest, HttpContext,
-                                  //                ClassicHttpResponseHandler)
-                                  .and(
-                                      ElementMatchers.takesArguments(2)
-                                          .or(ElementMatchers.takesArguments(3))))));
-
-      agentBuilder =
-          instrumentOptional(
-              agentBuilder,
-              "reactor.netty.http.client.HttpClientConnect",
-              builder ->
-                  builder.visit(
-                      Advice.to(HttpClientAdvice.ReactorNettyConnectAdvice.class)
-                          .on(ElementMatchers.named("connect"))));
-
-      // ── JDBC / connection pool interception (2.4) ──────────────────────────
-      //
-      // HikariCP and c3p0 are compileOnly dependencies and are instrumented via
-      // instrumentOptional so their absence is tolerated. java.sql.Statement and
-      // java.sql.Connection are JDK interfaces — we restrict the type matcher to
-      // concrete subtypes via isSubTypeOf + not(isInterface()) so the advice only
-      // binds to implementations (driver classes such as HikariProxyStatement,
-      // org.postgresql.jdbc.PgStatement, etc.).
-      agentBuilder =
-          instrumentOptional(
-              agentBuilder,
-              "com.zaxxer.hikari.pool.HikariPool",
-              builder ->
-                  builder.visit(
-                      Advice.to(JdbcAdvice.HikariGetConnectionAdvice.class)
-                          .on(
-                              ElementMatchers.named("getConnection")
-                                  .and(ElementMatchers.takesArguments(long.class)))));
-
-      agentBuilder =
-          instrumentOptional(
-              agentBuilder,
-              "com.mchange.v2.c3p0.impl.C3P0PooledConnectionPool",
-              builder ->
-                  builder.visit(
-                      Advice.to(JdbcAdvice.C3p0CheckoutAdvice.class)
-                          .on(
-                              ElementMatchers.named("checkoutPooledConnection")
-                                  .and(ElementMatchers.takesArguments(0)))));
-
-      // Match every Statement.execute*/Connection.prepareStatement overload whose first
-      // argument is the SQL String. The JDBC API defines generated-keys variants
-      // (execute(String, int), execute(String, int[]), execute(String, String[]),
-      // executeUpdate(String, int), ..., prepareStatement(String, int),
-      // prepareStatement(String, int[]), prepareStatement(String, int, int),
-      // prepareStatement(String, int, int, int), prepareStatement(String, String[]))
-      // that restricting to takesArguments(String.class) silently skipped — any JDBC
-      // caller using Statement.RETURN_GENERATED_KEYS or column-name arrays bypassed
-      // every chaos selector targeting JDBC. The advice only reads @Argument(0), so
-      // takesArgument(0, String.class) is sufficient and binds to all overloads.
-      agentBuilder =
-          agentBuilder
-              .type(
-                  ElementMatchers.isSubTypeOf(java.sql.Statement.class)
-                      .and(ElementMatchers.not(ElementMatchers.isInterface()))
-                      .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
-              .transform(
-                  (builder, typeDescription, classLoader, module, protectionDomain) ->
-                      builder
-                          .visit(
-                              Advice.to(JdbcAdvice.StatementExecuteAdvice.class)
-                                  .on(
-                                      ElementMatchers.named("execute")
-                                          .and(ElementMatchers.takesArgument(0, String.class))))
-                          .visit(
-                              Advice.to(JdbcAdvice.StatementExecuteAdvice.class)
-                                  .on(
-                                      ElementMatchers.named("executeQuery")
-                                          .and(ElementMatchers.takesArgument(0, String.class))))
-                          .visit(
-                              Advice.to(JdbcAdvice.StatementExecuteAdvice.class)
-                                  .on(
-                                      ElementMatchers.named("executeUpdate")
-                                          .and(ElementMatchers.takesArgument(0, String.class))))
-                          .visit(
-                              Advice.to(JdbcAdvice.StatementExecuteAdvice.class)
-                                  .on(
-                                      ElementMatchers.named("executeLargeUpdate")
-                                          .and(ElementMatchers.takesArgument(0, String.class)))))
-              .type(
-                  ElementMatchers.isSubTypeOf(java.sql.Connection.class)
-                      .and(ElementMatchers.not(ElementMatchers.isInterface()))
-                      .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
-              .transform(
-                  (builder, typeDescription, classLoader, module, protectionDomain) ->
-                      builder
-                          .visit(
-                              Advice.to(JdbcAdvice.PrepareStatementAdvice.class)
-                                  .on(
-                                      ElementMatchers.named("prepareStatement")
-                                          .and(ElementMatchers.takesArgument(0, String.class))))
-                          .visit(
-                              Advice.to(JdbcAdvice.PrepareStatementAdvice.class)
-                                  .on(
-                                      ElementMatchers.named("prepareCall")
-                                          .and(ElementMatchers.takesArgument(0, String.class))))
-                          .visit(
-                              Advice.to(JdbcAdvice.CommitAdvice.class)
-                                  .on(
-                                      ElementMatchers.named("commit")
-                                          .and(ElementMatchers.takesArguments(0))))
-                          .visit(
-                              Advice.to(JdbcAdvice.RollbackAdvice.class)
-                                  .on(
-                                      ElementMatchers.named("rollback")
-                                          .and(ElementMatchers.takesArguments(0)))));
-      // ── Thread.sleep interception (2.5) ───────────────────────────────────
-      agentBuilder =
-          agentBuilder
-              .type(ElementMatchers.named("java.lang.Thread"))
-              .transform(
-                  (builder, typeDescription, classLoader, module, protectionDomain) ->
-                      builder
-                          // sleep(long millis)
-                          .visit(
-                              Advice.to(JvmRuntimeAdvice.ThreadSleepAdvice.class)
-                                  .on(
-                                      ElementMatchers.named("sleep")
-                                          .and(ElementMatchers.isStatic())
-                                          .and(ElementMatchers.takesArguments(long.class))))
-                          // sleep(long millis, int nanos) — advice reads only arg 0 (millis)
-                          .visit(
-                              Advice.to(JvmRuntimeAdvice.ThreadSleepAdvice.class)
-                                  .on(
-                                      ElementMatchers.named("sleep")
-                                          .and(ElementMatchers.isStatic())
-                                          .and(
-                                              ElementMatchers.takesArguments(
-                                                  long.class, int.class)))));
-
-      // ── DNS resolution interception (2.6) ──────────────────────────────────
-      // InetAddress is always present; no instrumentOptional needed.
-      agentBuilder =
-          agentBuilder
-              .type(ElementMatchers.named("java.net.InetAddress"))
-              .transform(
-                  (builder, typeDescription, classLoader, module, protectionDomain) ->
-                      builder
-                          .visit(
-                              Advice.to(JvmRuntimeAdvice.DnsResolveAdvice.class)
-                                  .on(
-                                      ElementMatchers.named("getByName")
-                                          .and(ElementMatchers.isStatic())
-                                          .and(ElementMatchers.takesArguments(String.class))))
-                          .visit(
-                              Advice.to(JvmRuntimeAdvice.DnsResolveAdvice.class)
-                                  .on(
-                                      ElementMatchers.named("getAllByName")
-                                          .and(ElementMatchers.isStatic())
-                                          .and(ElementMatchers.takesArguments(String.class))))
-                          .visit(
-                              Advice.to(JvmRuntimeAdvice.DnsLocalHostAdvice.class)
-                                  .on(
-                                      ElementMatchers.named("getLocalHost")
-                                          .and(ElementMatchers.isStatic())
-                                          .and(ElementMatchers.takesArguments(0)))));
-
-      // ── SSL/TLS handshake interception (2.7) ──────────────────────────────
-      // SSLSocket and SSLEngine are abstract; concrete subclasses (SSLSocketImpl,
-      // SSLEngineImpl) override startHandshake/beginHandshake, so advice on the
-      // abstract class alone would never fire. Target all concrete subtypes instead.
-      // Interface / synthetic filters exclude Mockito/CGLIB generated proxies that would
-      // otherwise trip VerifyError during class transformation.
-      agentBuilder =
-          agentBuilder
-              .type(
-                  ElementMatchers.isSubTypeOf(javax.net.ssl.SSLSocket.class)
-                      .and(ElementMatchers.not(ElementMatchers.isAbstract()))
-                      .and(ElementMatchers.not(ElementMatchers.isInterface()))
-                      .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
-              .transform(
-                  (builder, typeDescription, classLoader, module, protectionDomain) ->
-                      builder.visit(
-                          Advice.to(JvmRuntimeAdvice.SslHandshakeAdvice.class)
-                              .on(
-                                  ElementMatchers.named("startHandshake")
-                                      .and(ElementMatchers.takesArguments(0)))));
-
-      agentBuilder =
-          agentBuilder
-              .type(
-                  ElementMatchers.isSubTypeOf(javax.net.ssl.SSLEngine.class)
-                      .and(ElementMatchers.not(ElementMatchers.isAbstract()))
-                      .and(ElementMatchers.not(ElementMatchers.isInterface()))
-                      .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
-              .transform(
-                  (builder, typeDescription, classLoader, module, protectionDomain) ->
-                      builder.visit(
-                          Advice.to(JvmRuntimeAdvice.SslHandshakeAdvice.class)
-                              .on(
-                                  ElementMatchers.named("beginHandshake")
-                                      .and(ElementMatchers.takesArguments(0)))));
-
-      // ── File I/O interception (2.8) ────────────────────────────────────────
-      agentBuilder =
-          agentBuilder
-              .type(ElementMatchers.named("java.io.FileInputStream"))
-              .transform(
-                  (builder, typeDescription, classLoader, module, protectionDomain) ->
-                      builder
-                          .visit(
-                              Advice.to(JvmRuntimeAdvice.FileReadAdvice.class)
-                                  .on(
-                                      ElementMatchers.named("read")
-                                          .and(ElementMatchers.takesArguments(0))))
-                          .visit(
-                              Advice.to(JvmRuntimeAdvice.FileReadAdvice.class)
-                                  .on(
-                                      ElementMatchers.named("read")
-                                          .and(ElementMatchers.takesArguments(byte[].class))))
-                          .visit(
-                              Advice.to(JvmRuntimeAdvice.FileReadAdvice.class)
-                                  .on(
-                                      ElementMatchers.named("read")
-                                          .and(
-                                              ElementMatchers.takesArguments(
-                                                  byte[].class, int.class, int.class)))))
-              .type(ElementMatchers.named("java.io.FileOutputStream"))
-              .transform(
-                  (builder, typeDescription, classLoader, module, protectionDomain) ->
-                      builder
-                          .visit(
-                              Advice.to(JvmRuntimeAdvice.FileWriteAdvice.class)
-                                  .on(
-                                      ElementMatchers.named("write")
-                                          .and(ElementMatchers.takesArguments(int.class))))
-                          .visit(
-                              Advice.to(JvmRuntimeAdvice.FileWriteAdvice.class)
-                                  .on(
-                                      ElementMatchers.named("write")
-                                          .and(ElementMatchers.takesArguments(byte[].class))))
-                          .visit(
-                              Advice.to(JvmRuntimeAdvice.FileWriteAdvice.class)
-                                  .on(
-                                      ElementMatchers.named("write")
-                                          .and(
-                                              ElementMatchers.takesArguments(
-                                                  byte[].class, int.class, int.class)))));
+      agentBuilder = applyPhase1ConcurrencyTransformations(agentBuilder);
+      agentBuilder = applyPhase2CoreJvmTransformations(agentBuilder);
+      agentBuilder = applyPhase2NetworkTransformations(agentBuilder);
+      agentBuilder = applyPhase2OptionalTransformations(agentBuilder);
     }
 
     // Retain the transformer returned by installOn so uninstall() can reset class transformations.
@@ -1126,220 +212,282 @@ public final class JdkInstrumentationInstaller {
    */
   static MethodHandle[] buildMethodHandles() throws Exception {
     final MethodHandles.Lookup lookup = MethodHandles.publicLookup();
-    final Class<?> cls = BridgeDelegate.class;
-    final MethodHandle[] mh = new MethodHandle[BootstrapDispatcher.HANDLE_COUNT];
-    mh[BootstrapDispatcher.DECORATE_EXECUTOR_RUNNABLE] =
+    final Class<?> delegateInterface = BridgeDelegate.class;
+    final MethodHandle[] methodHandles = new MethodHandle[BootstrapDispatcher.HANDLE_COUNT];
+    methodHandles[BootstrapDispatcher.DECORATE_EXECUTOR_RUNNABLE] =
         lookup.findVirtual(
-            cls,
+            delegateInterface,
             "decorateExecutorRunnable",
             MethodType.methodType(Runnable.class, String.class, Object.class, Runnable.class));
-    mh[BootstrapDispatcher.DECORATE_EXECUTOR_CALLABLE] =
+    methodHandles[BootstrapDispatcher.DECORATE_EXECUTOR_CALLABLE] =
         lookup.findVirtual(
-            cls,
+            delegateInterface,
             "decorateExecutorCallable",
             MethodType.methodType(Callable.class, String.class, Object.class, Callable.class));
-    mh[BootstrapDispatcher.BEFORE_THREAD_START] =
+    methodHandles[BootstrapDispatcher.BEFORE_THREAD_START] =
         lookup.findVirtual(
-            cls, "beforeThreadStart", MethodType.methodType(void.class, Thread.class));
-    mh[BootstrapDispatcher.BEFORE_WORKER_RUN] =
+            delegateInterface,
+            "beforeThreadStart",
+            MethodType.methodType(void.class, Thread.class));
+    methodHandles[BootstrapDispatcher.BEFORE_WORKER_RUN] =
         lookup.findVirtual(
-            cls,
+            delegateInterface,
             "beforeWorkerRun",
             MethodType.methodType(void.class, Object.class, Thread.class, Runnable.class));
-    mh[BootstrapDispatcher.BEFORE_FORK_JOIN_TASK_RUN] =
+    methodHandles[BootstrapDispatcher.BEFORE_FORK_JOIN_TASK_RUN] =
         lookup.findVirtual(
-            cls, "beforeForkJoinTaskRun", MethodType.methodType(void.class, ForkJoinTask.class));
-    mh[BootstrapDispatcher.ADJUST_SCHEDULE_DELAY] =
+            delegateInterface,
+            "beforeForkJoinTaskRun",
+            MethodType.methodType(void.class, ForkJoinTask.class));
+    methodHandles[BootstrapDispatcher.ADJUST_SCHEDULE_DELAY] =
         lookup.findVirtual(
-            cls,
+            delegateInterface,
             "adjustScheduleDelay",
             MethodType.methodType(
                 long.class, String.class, Object.class, Object.class, long.class, boolean.class));
-    mh[BootstrapDispatcher.BEFORE_SCHEDULED_TICK] =
+    methodHandles[BootstrapDispatcher.BEFORE_SCHEDULED_TICK] =
         lookup.findVirtual(
-            cls,
+            delegateInterface,
             "beforeScheduledTick",
             MethodType.methodType(boolean.class, Object.class, Object.class, boolean.class));
-    mh[BootstrapDispatcher.BEFORE_QUEUE_OPERATION] =
+    methodHandles[BootstrapDispatcher.BEFORE_QUEUE_OPERATION] =
         lookup.findVirtual(
-            cls,
+            delegateInterface,
             "beforeQueueOperation",
             MethodType.methodType(void.class, String.class, Object.class));
-    mh[BootstrapDispatcher.BEFORE_BOOLEAN_QUEUE_OPERATION] =
+    methodHandles[BootstrapDispatcher.BEFORE_BOOLEAN_QUEUE_OPERATION] =
         lookup.findVirtual(
-            cls,
+            delegateInterface,
             "beforeBooleanQueueOperation",
             MethodType.methodType(Boolean.class, String.class, Object.class));
-    mh[BootstrapDispatcher.BEFORE_COMPLETABLE_FUTURE_COMPLETE] =
+    methodHandles[BootstrapDispatcher.BEFORE_COMPLETABLE_FUTURE_COMPLETE] =
         lookup.findVirtual(
-            cls,
+            delegateInterface,
             "beforeCompletableFutureComplete",
             MethodType.methodType(
                 Boolean.class, String.class, CompletableFuture.class, Object.class));
-    mh[BootstrapDispatcher.BEFORE_CLASS_LOAD] =
+    methodHandles[BootstrapDispatcher.BEFORE_CLASS_LOAD] =
         lookup.findVirtual(
-            cls,
+            delegateInterface,
             "beforeClassLoad",
             MethodType.methodType(void.class, ClassLoader.class, String.class));
-    mh[BootstrapDispatcher.AFTER_RESOURCE_LOOKUP] =
+    methodHandles[BootstrapDispatcher.AFTER_RESOURCE_LOOKUP] =
         lookup.findVirtual(
-            cls,
+            delegateInterface,
             "afterResourceLookup",
             MethodType.methodType(URL.class, ClassLoader.class, String.class, URL.class));
-    mh[BootstrapDispatcher.DECORATE_SHUTDOWN_HOOK] =
+    methodHandles[BootstrapDispatcher.DECORATE_SHUTDOWN_HOOK] =
         lookup.findVirtual(
-            cls, "decorateShutdownHook", MethodType.methodType(Thread.class, Thread.class));
-    mh[BootstrapDispatcher.RESOLVE_SHUTDOWN_HOOK] =
+            delegateInterface,
+            "decorateShutdownHook",
+            MethodType.methodType(Thread.class, Thread.class));
+    methodHandles[BootstrapDispatcher.RESOLVE_SHUTDOWN_HOOK] =
         lookup.findVirtual(
-            cls, "resolveShutdownHook", MethodType.methodType(Thread.class, Thread.class));
-    mh[BootstrapDispatcher.BEFORE_EXECUTOR_SHUTDOWN] =
+            delegateInterface,
+            "resolveShutdownHook",
+            MethodType.methodType(Thread.class, Thread.class));
+    methodHandles[BootstrapDispatcher.BEFORE_EXECUTOR_SHUTDOWN] =
         lookup.findVirtual(
-            cls,
+            delegateInterface,
             "beforeExecutorShutdown",
             MethodType.methodType(void.class, String.class, Object.class, long.class));
-    mh[BootstrapDispatcher.ADJUST_CLOCK_MILLIS] =
-        lookup.findVirtual(cls, "adjustClockMillis", MethodType.methodType(long.class, long.class));
-    mh[BootstrapDispatcher.ADJUST_CLOCK_NANOS] =
-        lookup.findVirtual(cls, "adjustClockNanos", MethodType.methodType(long.class, long.class));
-    mh[BootstrapDispatcher.BEFORE_GC_REQUEST] =
-        lookup.findVirtual(cls, "beforeGcRequest", MethodType.methodType(boolean.class));
-    mh[BootstrapDispatcher.BEFORE_EXIT_REQUEST] =
-        lookup.findVirtual(cls, "beforeExitRequest", MethodType.methodType(void.class, int.class));
-    mh[BootstrapDispatcher.BEFORE_REFLECTION_INVOKE] =
+    methodHandles[BootstrapDispatcher.ADJUST_CLOCK_MILLIS] =
         lookup.findVirtual(
-            cls,
+            delegateInterface, "adjustClockMillis", MethodType.methodType(long.class, long.class));
+    methodHandles[BootstrapDispatcher.ADJUST_CLOCK_NANOS] =
+        lookup.findVirtual(
+            delegateInterface, "adjustClockNanos", MethodType.methodType(long.class, long.class));
+    methodHandles[BootstrapDispatcher.BEFORE_GC_REQUEST] =
+        lookup.findVirtual(
+            delegateInterface, "beforeGcRequest", MethodType.methodType(boolean.class));
+    methodHandles[BootstrapDispatcher.BEFORE_EXIT_REQUEST] =
+        lookup.findVirtual(
+            delegateInterface,
+            "beforeExitRequest",
+            MethodType.methodType(void.class, int.class));
+    methodHandles[BootstrapDispatcher.BEFORE_REFLECTION_INVOKE] =
+        lookup.findVirtual(
+            delegateInterface,
             "beforeReflectionInvoke",
             MethodType.methodType(void.class, Object.class, Object.class));
-    mh[BootstrapDispatcher.BEFORE_DIRECT_BUFFER_ALLOCATE] =
+    methodHandles[BootstrapDispatcher.BEFORE_DIRECT_BUFFER_ALLOCATE] =
         lookup.findVirtual(
-            cls, "beforeDirectBufferAllocate", MethodType.methodType(void.class, int.class));
-    mh[BootstrapDispatcher.BEFORE_OBJECT_DESERIALIZE] =
+            delegateInterface,
+            "beforeDirectBufferAllocate",
+            MethodType.methodType(void.class, int.class));
+    methodHandles[BootstrapDispatcher.BEFORE_OBJECT_DESERIALIZE] =
         lookup.findVirtual(
-            cls, "beforeObjectDeserialize", MethodType.methodType(void.class, Object.class));
-    mh[BootstrapDispatcher.BEFORE_CLASS_DEFINE] =
+            delegateInterface,
+            "beforeObjectDeserialize",
+            MethodType.methodType(void.class, Object.class));
+    methodHandles[BootstrapDispatcher.BEFORE_CLASS_DEFINE] =
         lookup.findVirtual(
-            cls,
+            delegateInterface,
             "beforeClassDefine",
             MethodType.methodType(void.class, Object.class, String.class));
-    mh[BootstrapDispatcher.BEFORE_MONITOR_ENTER] =
+    methodHandles[BootstrapDispatcher.BEFORE_MONITOR_ENTER] =
         lookup.findVirtual(
-            cls, "beforeMonitorEnter", MethodType.methodType(void.class, Object.class));
-    mh[BootstrapDispatcher.BEFORE_THREAD_PARK] =
-        lookup.findVirtual(cls, "beforeThreadPark", MethodType.methodType(void.class));
-    mh[BootstrapDispatcher.BEFORE_NIO_SELECT] =
+            delegateInterface,
+            "beforeMonitorEnter",
+            MethodType.methodType(void.class, Object.class));
+    methodHandles[BootstrapDispatcher.BEFORE_THREAD_PARK] =
         lookup.findVirtual(
-            cls, "beforeNioSelect", MethodType.methodType(boolean.class, Object.class, long.class));
-    mh[BootstrapDispatcher.BEFORE_NIO_CHANNEL_OP] =
+            delegateInterface, "beforeThreadPark", MethodType.methodType(void.class));
+    methodHandles[BootstrapDispatcher.BEFORE_NIO_SELECT] =
         lookup.findVirtual(
-            cls,
+            delegateInterface,
+            "beforeNioSelect",
+            MethodType.methodType(boolean.class, Object.class, long.class));
+    methodHandles[BootstrapDispatcher.BEFORE_NIO_CHANNEL_OP] =
+        lookup.findVirtual(
+            delegateInterface,
             "beforeNioChannelOp",
             MethodType.methodType(void.class, String.class, Object.class));
-    mh[BootstrapDispatcher.BEFORE_SOCKET_CONNECT] =
+    methodHandles[BootstrapDispatcher.BEFORE_SOCKET_CONNECT] =
         lookup.findVirtual(
-            cls,
+            delegateInterface,
             "beforeSocketConnect",
             MethodType.methodType(void.class, Object.class, Object.class, int.class));
-    mh[BootstrapDispatcher.BEFORE_SOCKET_ACCEPT] =
+    methodHandles[BootstrapDispatcher.BEFORE_SOCKET_ACCEPT] =
         lookup.findVirtual(
-            cls, "beforeSocketAccept", MethodType.methodType(void.class, Object.class));
-    mh[BootstrapDispatcher.BEFORE_SOCKET_READ] =
+            delegateInterface,
+            "beforeSocketAccept",
+            MethodType.methodType(void.class, Object.class));
+    methodHandles[BootstrapDispatcher.BEFORE_SOCKET_READ] =
         lookup.findVirtual(
-            cls, "beforeSocketRead", MethodType.methodType(void.class, Object.class));
-    mh[BootstrapDispatcher.BEFORE_SOCKET_WRITE] =
+            delegateInterface,
+            "beforeSocketRead",
+            MethodType.methodType(void.class, Object.class));
+    methodHandles[BootstrapDispatcher.BEFORE_SOCKET_WRITE] =
         lookup.findVirtual(
-            cls, "beforeSocketWrite", MethodType.methodType(void.class, Object.class, int.class));
-    mh[BootstrapDispatcher.BEFORE_SOCKET_CLOSE] =
+            delegateInterface,
+            "beforeSocketWrite",
+            MethodType.methodType(void.class, Object.class, int.class));
+    methodHandles[BootstrapDispatcher.BEFORE_SOCKET_CLOSE] =
         lookup.findVirtual(
-            cls, "beforeSocketClose", MethodType.methodType(void.class, Object.class));
-    mh[BootstrapDispatcher.BEFORE_JNDI_LOOKUP] =
+            delegateInterface,
+            "beforeSocketClose",
+            MethodType.methodType(void.class, Object.class));
+    methodHandles[BootstrapDispatcher.BEFORE_JNDI_LOOKUP] =
         lookup.findVirtual(
-            cls, "beforeJndiLookup", MethodType.methodType(void.class, Object.class, String.class));
-    mh[BootstrapDispatcher.BEFORE_OBJECT_SERIALIZE] =
+            delegateInterface,
+            "beforeJndiLookup",
+            MethodType.methodType(void.class, Object.class, String.class));
+    methodHandles[BootstrapDispatcher.BEFORE_OBJECT_SERIALIZE] =
         lookup.findVirtual(
-            cls,
+            delegateInterface,
             "beforeObjectSerialize",
             MethodType.methodType(void.class, Object.class, Object.class));
-    mh[BootstrapDispatcher.BEFORE_NATIVE_LIBRARY_LOAD] =
+    methodHandles[BootstrapDispatcher.BEFORE_NATIVE_LIBRARY_LOAD] =
         lookup.findVirtual(
-            cls, "beforeNativeLibraryLoad", MethodType.methodType(void.class, String.class));
-    mh[BootstrapDispatcher.BEFORE_ASYNC_CANCEL] =
+            delegateInterface,
+            "beforeNativeLibraryLoad",
+            MethodType.methodType(void.class, String.class));
+    methodHandles[BootstrapDispatcher.BEFORE_ASYNC_CANCEL] =
         lookup.findVirtual(
-            cls,
+            delegateInterface,
             "beforeAsyncCancel",
             MethodType.methodType(boolean.class, Object.class, boolean.class));
-    mh[BootstrapDispatcher.BEFORE_ZIP_INFLATE] =
-        lookup.findVirtual(cls, "beforeZipInflate", MethodType.methodType(void.class));
-    mh[BootstrapDispatcher.BEFORE_ZIP_DEFLATE] =
-        lookup.findVirtual(cls, "beforeZipDeflate", MethodType.methodType(void.class));
-    mh[BootstrapDispatcher.BEFORE_THREAD_LOCAL_GET] =
+    methodHandles[BootstrapDispatcher.BEFORE_ZIP_INFLATE] =
         lookup.findVirtual(
-            cls, "beforeThreadLocalGet", MethodType.methodType(boolean.class, Object.class));
-    mh[BootstrapDispatcher.BEFORE_THREAD_LOCAL_SET] =
+            delegateInterface, "beforeZipInflate", MethodType.methodType(void.class));
+    methodHandles[BootstrapDispatcher.BEFORE_ZIP_DEFLATE] =
         lookup.findVirtual(
-            cls,
+            delegateInterface, "beforeZipDeflate", MethodType.methodType(void.class));
+    methodHandles[BootstrapDispatcher.BEFORE_THREAD_LOCAL_GET] =
+        lookup.findVirtual(
+            delegateInterface,
+            "beforeThreadLocalGet",
+            MethodType.methodType(boolean.class, Object.class));
+    methodHandles[BootstrapDispatcher.BEFORE_THREAD_LOCAL_SET] =
+        lookup.findVirtual(
+            delegateInterface,
             "beforeThreadLocalSet",
             MethodType.methodType(boolean.class, Object.class, Object.class));
-    mh[BootstrapDispatcher.BEFORE_JMX_INVOKE] =
+    methodHandles[BootstrapDispatcher.BEFORE_JMX_INVOKE] =
         lookup.findVirtual(
-            cls,
+            delegateInterface,
             "beforeJmxInvoke",
             MethodType.methodType(void.class, Object.class, Object.class, String.class));
-    mh[BootstrapDispatcher.BEFORE_JMX_GET_ATTR] =
+    methodHandles[BootstrapDispatcher.BEFORE_JMX_GET_ATTR] =
         lookup.findVirtual(
-            cls,
+            delegateInterface,
             "beforeJmxGetAttr",
             MethodType.methodType(void.class, Object.class, Object.class, String.class));
-    mh[BootstrapDispatcher.ADJUST_INSTANT_NOW] =
+    methodHandles[BootstrapDispatcher.ADJUST_INSTANT_NOW] =
         lookup.findVirtual(
-            cls,
+            delegateInterface,
             "adjustInstantNow",
             MethodType.methodType(java.time.Instant.class, java.time.Instant.class));
-    mh[BootstrapDispatcher.ADJUST_LOCAL_DATE_TIME_NOW] =
+    methodHandles[BootstrapDispatcher.ADJUST_LOCAL_DATE_TIME_NOW] =
         lookup.findVirtual(
-            cls,
+            delegateInterface,
             "adjustLocalDateTimeNow",
             MethodType.methodType(java.time.LocalDateTime.class, java.time.LocalDateTime.class));
-    mh[BootstrapDispatcher.ADJUST_ZONED_DATE_TIME_NOW] =
+    methodHandles[BootstrapDispatcher.ADJUST_ZONED_DATE_TIME_NOW] =
         lookup.findVirtual(
-            cls,
+            delegateInterface,
             "adjustZonedDateTimeNow",
             MethodType.methodType(java.time.ZonedDateTime.class, java.time.ZonedDateTime.class));
-    mh[BootstrapDispatcher.ADJUST_DATE_NEW] =
-        lookup.findVirtual(cls, "adjustDateNew", MethodType.methodType(long.class, long.class));
-    mh[BootstrapDispatcher.BEFORE_HTTP_SEND] =
+    methodHandles[BootstrapDispatcher.ADJUST_DATE_NEW] =
         lookup.findVirtual(
-            cls, "beforeHttpSend", MethodType.methodType(boolean.class, String.class));
-    mh[BootstrapDispatcher.BEFORE_HTTP_SEND_ASYNC] =
+            delegateInterface, "adjustDateNew", MethodType.methodType(long.class, long.class));
+    methodHandles[BootstrapDispatcher.BEFORE_HTTP_SEND] =
         lookup.findVirtual(
-            cls, "beforeHttpSendAsync", MethodType.methodType(boolean.class, String.class));
-    mh[BootstrapDispatcher.BEFORE_JDBC_CONNECTION_ACQUIRE] =
+            delegateInterface,
+            "beforeHttpSend",
+            MethodType.methodType(boolean.class, String.class));
+    methodHandles[BootstrapDispatcher.BEFORE_HTTP_SEND_ASYNC] =
         lookup.findVirtual(
-            cls, "beforeJdbcConnectionAcquire", MethodType.methodType(boolean.class, String.class));
-    mh[BootstrapDispatcher.BEFORE_JDBC_STATEMENT_EXECUTE] =
+            delegateInterface,
+            "beforeHttpSendAsync",
+            MethodType.methodType(boolean.class, String.class));
+    methodHandles[BootstrapDispatcher.BEFORE_JDBC_CONNECTION_ACQUIRE] =
         lookup.findVirtual(
-            cls, "beforeJdbcStatementExecute", MethodType.methodType(boolean.class, String.class));
-    mh[BootstrapDispatcher.BEFORE_JDBC_PREPARED_STATEMENT] =
+            delegateInterface,
+            "beforeJdbcConnectionAcquire",
+            MethodType.methodType(boolean.class, String.class));
+    methodHandles[BootstrapDispatcher.BEFORE_JDBC_STATEMENT_EXECUTE] =
         lookup.findVirtual(
-            cls, "beforeJdbcPreparedStatement", MethodType.methodType(boolean.class, String.class));
-    mh[BootstrapDispatcher.BEFORE_JDBC_TRANSACTION_COMMIT] =
+            delegateInterface,
+            "beforeJdbcStatementExecute",
+            MethodType.methodType(boolean.class, String.class));
+    methodHandles[BootstrapDispatcher.BEFORE_JDBC_PREPARED_STATEMENT] =
         lookup.findVirtual(
-            cls, "beforeJdbcTransactionCommit", MethodType.methodType(boolean.class));
-    mh[BootstrapDispatcher.BEFORE_JDBC_TRANSACTION_ROLLBACK] =
+            delegateInterface,
+            "beforeJdbcPreparedStatement",
+            MethodType.methodType(boolean.class, String.class));
+    methodHandles[BootstrapDispatcher.BEFORE_JDBC_TRANSACTION_COMMIT] =
         lookup.findVirtual(
-            cls, "beforeJdbcTransactionRollback", MethodType.methodType(boolean.class));
-    mh[BootstrapDispatcher.BEFORE_THREAD_SLEEP] =
+            delegateInterface,
+            "beforeJdbcTransactionCommit",
+            MethodType.methodType(boolean.class));
+    methodHandles[BootstrapDispatcher.BEFORE_JDBC_TRANSACTION_ROLLBACK] =
         lookup.findVirtual(
-            cls, "beforeThreadSleep", MethodType.methodType(boolean.class, long.class));
-    mh[BootstrapDispatcher.BEFORE_DNS_RESOLVE] =
+            delegateInterface,
+            "beforeJdbcTransactionRollback",
+            MethodType.methodType(boolean.class));
+    methodHandles[BootstrapDispatcher.BEFORE_THREAD_SLEEP] =
         lookup.findVirtual(
-            cls, "beforeDnsResolve", MethodType.methodType(void.class, String.class));
-    mh[BootstrapDispatcher.BEFORE_SSL_HANDSHAKE] =
+            delegateInterface,
+            "beforeThreadSleep",
+            MethodType.methodType(boolean.class, long.class));
+    methodHandles[BootstrapDispatcher.BEFORE_DNS_RESOLVE] =
         lookup.findVirtual(
-            cls, "beforeSslHandshake", MethodType.methodType(void.class, Object.class));
-    mh[BootstrapDispatcher.BEFORE_FILE_IO] =
+            delegateInterface,
+            "beforeDnsResolve",
+            MethodType.methodType(void.class, String.class));
+    methodHandles[BootstrapDispatcher.BEFORE_SSL_HANDSHAKE] =
         lookup.findVirtual(
-            cls, "beforeFileIo", MethodType.methodType(void.class, String.class, Object.class));
-    return mh;
+            delegateInterface,
+            "beforeSslHandshake",
+            MethodType.methodType(void.class, Object.class));
+    methodHandles[BootstrapDispatcher.BEFORE_FILE_IO] =
+        lookup.findVirtual(
+            delegateInterface,
+            "beforeFileIo",
+            MethodType.methodType(void.class, String.class, Object.class));
+    return methodHandles;
   }
 
   @FunctionalInterface
@@ -1382,8 +530,8 @@ public final class JdkInstrumentationInstaller {
     return builder
         .type(ElementMatchers.named(typeName))
         .transform(
-            (b, typeDescription, classLoader, module, protectionDomain) ->
-                transformer.transform(b));
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                transformer.transform(typeBuilder));
   }
 
   /**
@@ -1405,13 +553,13 @@ public final class JdkInstrumentationInstaller {
    */
   private static void installDelegate(final Object bridgeDelegate) {
     try {
-      final MethodHandle[] mh = buildMethodHandles();
+      final MethodHandle[] methodHandles = buildMethodHandles();
       // Use reflection to call install on the bootstrap CL version of BootstrapDispatcher
       final Class<?> bootstrapDispatcher =
           Class.forName("com.macstab.chaos.instrumentation.bridge.BootstrapDispatcher", true, null);
       bootstrapDispatcher
           .getMethod("install", Object.class, MethodHandle[].class)
-          .invoke(null, bridgeDelegate, mh);
+          .invoke(null, bridgeDelegate, methodHandles);
     } catch (final Exception exception) {
       throw new IllegalStateException("failed to install bridge delegate", exception);
     }
@@ -1513,6 +661,965 @@ public final class JdkInstrumentationInstaller {
    */
   private static final java.util.List<java.util.jar.JarFile> BRIDGE_JARS =
       java.util.Collections.synchronizedList(new java.util.ArrayList<>());
+
+  /**
+   * Builds the base {@link AgentBuilder} with retransformation strategy, error logging, and ignore
+   * rules for ByteBuddy and chaos-agent internal packages.
+   */
+  private static AgentBuilder buildBaseAgentBuilder() {
+    final AgentBuilder.Listener.Adapter errorListener =
+        new AgentBuilder.Listener.Adapter() {
+          @Override
+          public void onError(
+              final String typeName,
+              final ClassLoader classLoader,
+              final JavaModule module,
+              final boolean loaded,
+              final Throwable throwable) {
+            LOGGER.warning("chaos instrumentation failed for " + typeName + ": " + throwable);
+          }
+        };
+    return new AgentBuilder.Default()
+        .disableClassFormatChanges()
+        .with(AgentBuilder.RedefinitionStrategy.RETRANSFORMATION)
+        .with(errorListener)
+        .ignore(
+            ElementMatchers.nameStartsWith("net.bytebuddy.")
+                .or(ElementMatchers.nameStartsWith("com.macstab.chaos.")));
+  }
+
+  /**
+   * Applies Phase 1 thread, executor, and scheduler transformations that are always installed
+   * regardless of the {@code premainMode} flag.
+   */
+  private static AgentBuilder applyPhase1ThreadAndExecutorTransformations(
+      final AgentBuilder builder) {
+    return builder
+        .type(ElementMatchers.named("java.lang.Thread"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(ThreadAdvice.StartAdvice.class)
+                        .on(
+                            ElementMatchers.named("start")
+                                .and(ElementMatchers.takesArguments(0)))))
+        .type(ElementMatchers.named("java.util.concurrent.ThreadPoolExecutor"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder
+                    .visit(
+                        Advice.to(ExecutorAdvice.ExecuteAdvice.class)
+                            .on(
+                                ElementMatchers.named("execute")
+                                    .and(ElementMatchers.takesArguments(Runnable.class))))
+                    .visit(
+                        Advice.to(ExecutorAdvice.BeforeExecuteAdvice.class)
+                            .on(
+                                ElementMatchers.named("beforeExecute")
+                                    .and(
+                                        ElementMatchers.takesArguments(
+                                            Thread.class, Runnable.class))))
+                    .visit(
+                        Advice.to(ExecutorAdvice.ShutdownAdvice.class)
+                            .on(
+                                ElementMatchers.named("shutdown")
+                                    .and(ElementMatchers.takesArguments(0))))
+                    // shutdownNow() intercepts the forced-shutdown variant that interrupts
+                    // in-flight tasks and returns the undrained queue. Omitting it left any
+                    // selector targeting EXECUTOR_SHUTDOWN silently missing shutdown paths
+                    // that went through shutdownNow instead of shutdown.
+                    .visit(
+                        Advice.to(ExecutorAdvice.ShutdownNowAdvice.class)
+                            .on(
+                                ElementMatchers.named("shutdownNow")
+                                    .and(ElementMatchers.takesArguments(0))))
+                    .visit(
+                        Advice.to(ExecutorAdvice.AwaitTerminationAdvice.class)
+                            .on(
+                                ElementMatchers.named("awaitTermination")
+                                    .and(
+                                        ElementMatchers.takesArguments(
+                                            long.class, java.util.concurrent.TimeUnit.class)))))
+        .type(ElementMatchers.named("java.util.concurrent.ScheduledThreadPoolExecutor"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder
+                    .visit(
+                        Advice.to(ScheduledExecutorAdvice.ScheduleRunnableAdvice.class)
+                            .on(
+                                ElementMatchers.named("schedule")
+                                    .and(
+                                        ElementMatchers.takesArguments(
+                                            Runnable.class,
+                                            long.class,
+                                            java.util.concurrent.TimeUnit.class))))
+                    .visit(
+                        Advice.to(ScheduledExecutorAdvice.ScheduleCallableAdvice.class)
+                            .on(
+                                ElementMatchers.named("schedule")
+                                    .and(
+                                        ElementMatchers.takesArguments(
+                                            Callable.class,
+                                            long.class,
+                                            java.util.concurrent.TimeUnit.class))))
+                    .visit(
+                        Advice.to(ScheduledExecutorAdvice.PeriodicAdvice.class)
+                            .on(
+                                ElementMatchers.named("scheduleAtFixedRate")
+                                    .and(
+                                        ElementMatchers.takesArguments(
+                                            Runnable.class,
+                                            long.class,
+                                            long.class,
+                                            java.util.concurrent.TimeUnit.class))))
+                    .visit(
+                        Advice.to(ScheduledExecutorAdvice.PeriodicAdvice.class)
+                            .on(
+                                ElementMatchers.named("scheduleWithFixedDelay")
+                                    .and(
+                                        ElementMatchers.takesArguments(
+                                            Runnable.class,
+                                            long.class,
+                                            long.class,
+                                            java.util.concurrent.TimeUnit.class)))));
+  }
+
+  /**
+   * Applies Phase 1 concurrency transformations (queues, CompletableFuture, ClassLoader, shutdown
+   * hooks, ForkJoin). Gated behind {@code premainMode}.
+   */
+  private static AgentBuilder applyPhase1ConcurrencyTransformations(final AgentBuilder builder) {
+    return builder
+        .type(
+            ElementMatchers.isSubTypeOf(java.util.concurrent.BlockingQueue.class)
+                .and(ElementMatchers.not(ElementMatchers.isInterface()))
+                .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder
+                    .visit(
+                        Advice.to(QueueAdvice.PutAdvice.class)
+                            .on(ElementMatchers.named("put")))
+                    .visit(
+                        Advice.to(QueueAdvice.TakeAdvice.class)
+                            .on(ElementMatchers.named("take")))
+                    .visit(
+                        Advice.to(QueueAdvice.PollAdvice.class)
+                            .on(ElementMatchers.named("poll")))
+                    .visit(
+                        Advice.to(QueueAdvice.OfferAdvice.class)
+                            .on(
+                                ElementMatchers.named("offer")
+                                    .and(ElementMatchers.takesArguments(1)))))
+        .type(ElementMatchers.named("java.util.concurrent.CompletableFuture"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder
+                    .visit(
+                        Advice.to(CompletableFutureAdvice.CompleteAdvice.class)
+                            .on(
+                                ElementMatchers.named("complete")
+                                    .and(ElementMatchers.takesArguments(1))))
+                    .visit(
+                        Advice.to(CompletableFutureAdvice.CompleteExceptionallyAdvice.class)
+                            .on(
+                                ElementMatchers.named("completeExceptionally")
+                                    .and(ElementMatchers.takesArguments(Throwable.class)))))
+        .type(ElementMatchers.named("java.lang.ClassLoader"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder
+                    .visit(
+                        // Must match BOTH 1-arg and 2-arg overloads: BuiltinClassLoader
+                        // (the superclass of every default JDK classloader) overrides the
+                        // 2-arg variant but inherits the 1-arg from java.lang.ClassLoader,
+                        // so instrumenting only the 2-arg would miss every standard class
+                        // load via Class.forName / loader.loadClass(name). Custom
+                        // classloaders that inherit both will double-dispatch, which is a
+                        // known cost of the single-class retransformation strategy.
+                        Advice.to(ClassLoaderAdvice.LoadClassAdvice.class)
+                            .on(
+                                ElementMatchers.named("loadClass")
+                                    .and(
+                                        ElementMatchers.takesArguments(
+                                                String.class, boolean.class)
+                                            .or(
+                                                ElementMatchers.takesArguments(
+                                                    String.class)))))
+                    .visit(
+                        Advice.to(ClassLoaderAdvice.GetResourceAdvice.class)
+                            .on(
+                                ElementMatchers.named("getResource")
+                                    .and(ElementMatchers.takesArguments(String.class)))))
+        .type(ElementMatchers.named("java.lang.Runtime"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder
+                    .visit(
+                        Advice.to(ShutdownAdvice.AddShutdownHookAdvice.class)
+                            .on(
+                                ElementMatchers.named("addShutdownHook")
+                                    .and(ElementMatchers.takesArguments(Thread.class))))
+                    .visit(
+                        Advice.to(ShutdownAdvice.RemoveShutdownHookAdvice.class)
+                            .on(
+                                ElementMatchers.named("removeShutdownHook")
+                                    .and(ElementMatchers.takesArguments(Thread.class)))))
+        .type(ElementMatchers.named("java.util.concurrent.ForkJoinTask"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(ForkJoinAdvice.DoExecAdvice.class)
+                        .on(
+                            ElementMatchers.named("doExec")
+                                .and(ElementMatchers.takesArguments(0)))));
+  }
+
+  /**
+   * Applies Phase 2 core JVM transformations: System.exit, Runtime gc/halt, reflection, NIO
+   * buffers, serialization, ClassLoader.defineClass, LockSupport, AQS, NIO channels, and sockets.
+   * Gated behind {@code premainMode}.
+   */
+  private static AgentBuilder applyPhase2CoreJvmTransformations(final AgentBuilder builder) {
+    return builder
+        // System.exit()
+        .type(ElementMatchers.named("java.lang.System"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(JvmRuntimeAdvice.ExitRequestAdvice.class)
+                        .on(
+                            ElementMatchers.named("exit")
+                                .and(ElementMatchers.takesArguments(int.class)))))
+        // GC and halt via Runtime
+        .type(ElementMatchers.named("java.lang.Runtime"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.GcRequestAdvice.class)
+                            .on(
+                                ElementMatchers.named("gc")
+                                    .and(ElementMatchers.takesArguments(0))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.ExitRequestAdvice.class)
+                            .on(
+                                ElementMatchers.named("halt")
+                                    .and(ElementMatchers.takesArguments(int.class)))))
+        // Reflection
+        .type(ElementMatchers.named("java.lang.reflect.Method"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(JvmRuntimeAdvice.ReflectionInvokeAdvice.class)
+                        .on(
+                            ElementMatchers.named("invoke")
+                                .and(
+                                    ElementMatchers.takesArguments(
+                                        Object.class, Object[].class)))))
+        // Direct buffer allocation
+        .type(ElementMatchers.named("java.nio.ByteBuffer"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(JvmRuntimeAdvice.DirectBufferAllocateAdvice.class)
+                        .on(
+                            ElementMatchers.named("allocateDirect")
+                                .and(ElementMatchers.takesArguments(int.class)))))
+        // Object deserialization and serialization
+        .type(ElementMatchers.named("java.io.ObjectInputStream"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(JvmRuntimeAdvice.ObjectDeserializeAdvice.class)
+                        .on(
+                            ElementMatchers.named("readObject")
+                                .and(ElementMatchers.takesArguments(0)))))
+        .type(ElementMatchers.named("java.io.ObjectOutputStream"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(JvmRuntimeAdvice.ObjectSerializeAdvice.class)
+                        .on(
+                            ElementMatchers.named("writeObject")
+                                .and(ElementMatchers.takesArguments(Object.class)))))
+        // ClassLoader.defineClass
+        .type(ElementMatchers.named("java.lang.ClassLoader"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(JvmRuntimeAdvice.ClassDefineAdvice.class)
+                        .on(
+                            ElementMatchers.named("defineClass")
+                                .and(ElementMatchers.takesArgument(0, String.class)))))
+        // LockSupport.park / parkNanos / parkUntil (THREAD_PARK)
+        // Safe to instrument globally: the chaos runtime never calls LockSupport.park()
+        // directly. Internal locks (ManualGate via ReentrantLock) do call park(), but by
+        // the time park() fires, BootstrapDispatcher.DEPTH is already > 0 (set before
+        // delegating to ChaosRuntime), so the DEPTH guard in invoke() returns the fallback
+        // immediately without entering chaos evaluation.
+        .type(ElementMatchers.named("java.util.concurrent.locks.LockSupport"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder
+                    // park(Object blocker) — used by j.u.c. locks that set the blocker
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.ThreadParkAdvice.class)
+                            .on(
+                                ElementMatchers.named("park")
+                                    .and(ElementMatchers.takesArguments(Object.class))))
+                    // park() — 0-arg variant used by direct LockSupport callers
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.ThreadParkAdvice.class)
+                            .on(
+                                ElementMatchers.named("park")
+                                    .and(ElementMatchers.takesArguments(0))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.ThreadParkAdvice.class)
+                            .on(
+                                ElementMatchers.named("parkNanos")
+                                    .and(
+                                        ElementMatchers.takesArguments(
+                                            Object.class, long.class))))
+                    // parkNanos(long nanos) — 1-arg variant without blocker
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.ThreadParkAdvice.class)
+                            .on(
+                                ElementMatchers.named("parkNanos")
+                                    .and(ElementMatchers.takesArguments(long.class))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.ThreadParkAdvice.class)
+                            .on(
+                                ElementMatchers.named("parkUntil")
+                                    .and(
+                                        ElementMatchers.takesArguments(
+                                            Object.class, long.class))))
+                    // parkUntil(long deadline) — 1-arg variant without blocker
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.ThreadParkAdvice.class)
+                            .on(
+                                ElementMatchers.named("parkUntil")
+                                    .and(ElementMatchers.takesArguments(long.class)))))
+        // AQS.acquire (MONITOR_ENTER proxy)
+        // Safe: ChaosRuntime uses ConcurrentHashMap (lock-free) for registry.match().
+        // The one internal AQS user is ManualGate (ReentrantLock), but ManualGate is only
+        // entered from applyGate() which runs inside DEPTH > 0 context — the DEPTH guard
+        // short-circuits before chaos evaluation begins, preventing recursion.
+        .type(ElementMatchers.named("java.util.concurrent.locks.AbstractQueuedSynchronizer"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(JvmRuntimeAdvice.MonitorEnterAdvice.class)
+                        .on(
+                            ElementMatchers.named("acquire")
+                                .and(ElementMatchers.takesArguments(int.class)))))
+        // NIO Selector — target AbstractSelector subtypes (KQueueSelectorImpl etc.).
+        // Exclude abstract / interface / synthetic matches for the same VerifyError reason
+        // as SocketChannel below: bytecode generated for bridge / synthetic methods on
+        // abstract bases cannot satisfy the advice's stack-map expectations.
+        .type(
+            ElementMatchers.isSubTypeOf(java.nio.channels.spi.AbstractSelector.class)
+                .and(ElementMatchers.not(ElementMatchers.isAbstract()))
+                .and(ElementMatchers.not(ElementMatchers.isInterface()))
+                .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.NioSelectNoArgAdvice.class)
+                            .on(
+                                ElementMatchers.named("select")
+                                    .and(ElementMatchers.takesArguments(0))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.NioSelectTimeoutAdvice.class)
+                            .on(
+                                ElementMatchers.named("select")
+                                    .and(ElementMatchers.takesArguments(long.class))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.NioSelectNowAdvice.class)
+                            .on(
+                                ElementMatchers.named("selectNow")
+                                    .and(ElementMatchers.takesArguments(0)))))
+        // NIO SocketChannel — the public class is abstract, so name() would only match the
+        // abstract copy; instrument concrete subtypes (sun.nio.ch.SocketChannelImpl,
+        // possibly vendor variants) where the actual I/O code lives. Exclude abstract /
+        // synthetic matches to avoid VerifyError on bridge methods.
+        .type(
+            ElementMatchers.isSubTypeOf(java.nio.channels.SocketChannel.class)
+                .and(ElementMatchers.not(ElementMatchers.isAbstract()))
+                .and(ElementMatchers.not(ElementMatchers.isInterface()))
+                .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.NioChannelConnectAdvice.class)
+                            .on(
+                                ElementMatchers.named("connect")
+                                    .and(
+                                        ElementMatchers.takesArguments(
+                                            java.net.SocketAddress.class))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.NioChannelReadAdvice.class)
+                            .on(
+                                ElementMatchers.named("read")
+                                    .and(
+                                        ElementMatchers.takesArguments(
+                                            java.nio.ByteBuffer.class))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.NioChannelWriteAdvice.class)
+                            .on(
+                                ElementMatchers.named("write")
+                                    .and(
+                                        ElementMatchers.takesArguments(
+                                            java.nio.ByteBuffer.class)))))
+        // NIO ServerSocketChannel — same abstract-base issue as SocketChannel above.
+        .type(
+            ElementMatchers.isSubTypeOf(java.nio.channels.ServerSocketChannel.class)
+                .and(ElementMatchers.not(ElementMatchers.isAbstract()))
+                .and(ElementMatchers.not(ElementMatchers.isInterface()))
+                .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(JvmRuntimeAdvice.NioChannelAcceptAdvice.class)
+                        .on(
+                            ElementMatchers.named("accept")
+                                .and(ElementMatchers.takesArguments(0)))))
+        // Socket
+        .type(ElementMatchers.named("java.net.Socket"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.SocketConnectAdvice.class)
+                            .on(
+                                ElementMatchers.named("connect")
+                                    .and(
+                                        ElementMatchers.takesArguments(
+                                            java.net.SocketAddress.class, int.class))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.SocketCloseAdvice.class)
+                            .on(
+                                ElementMatchers.named("close")
+                                    .and(ElementMatchers.takesArguments(0)))))
+        // ServerSocket
+        .type(ElementMatchers.named("java.net.ServerSocket"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(JvmRuntimeAdvice.SocketAcceptAdvice.class)
+                        .on(
+                            ElementMatchers.named("accept")
+                                .and(ElementMatchers.takesArguments(0)))))
+        // SocketInputStream / SocketOutputStream (package-private)
+        // Only instrument the 3-argument bulk variant of read(): the 0-arg single-byte
+        // overload delegates internally to read(byte[], int, int), causing double-fire of
+        // beforeSocketRead for each single-byte application call. Restricting to the final
+        // I/O dispatch avoids double-counting rate-limit permits and probability draws.
+        .type(ElementMatchers.named("java.net.SocketInputStream"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(JvmRuntimeAdvice.SocketReadAdvice.class)
+                        .on(
+                            ElementMatchers.named("read")
+                                .and(
+                                    ElementMatchers.takesArguments(
+                                        byte[].class, int.class, int.class)))))
+        .type(ElementMatchers.named("java.net.SocketOutputStream"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.SocketWriteSingleByteAdvice.class)
+                            .on(
+                                ElementMatchers.named("write")
+                                    .and(ElementMatchers.takesArguments(int.class))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.SocketWriteBulkAdvice.class)
+                            .on(
+                                ElementMatchers.named("write")
+                                    .and(
+                                        ElementMatchers.takesArguments(
+                                            byte[].class, int.class, int.class)))))
+        // ZIP Inflater / Deflater
+        .type(ElementMatchers.named("java.util.zip.Inflater"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(JvmRuntimeAdvice.ZipInflateAdvice.class)
+                        .on(ElementMatchers.named("inflate"))))
+        .type(ElementMatchers.named("java.util.zip.Deflater"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(JvmRuntimeAdvice.ZipDeflateAdvice.class)
+                        .on(ElementMatchers.named("deflate"))));
+  }
+
+  /**
+   * Applies Phase 2 network-adjacent transformations: ThreadLocal, clock APIs, CompletableFuture
+   * cancel, and SSL/TLS handshake. Gated behind {@code premainMode}.
+   */
+  private static AgentBuilder applyPhase2NetworkTransformations(final AgentBuilder builder) {
+    // ThreadLocal.get() / set() (THREAD_LOCAL_GET / THREAD_LOCAL_SET)
+    // Previously excluded due to reentrancy with BootstrapDispatcher.DEPTH (also a ThreadLocal).
+    // Now safe: ThreadLocalGetAdvice and ThreadLocalSetAdvice include an identity check
+    // (threadLocal == BootstrapDispatcher.DEPTH) that exits before any delegation, breaking
+    // the recursion at the only point where it could occur. See ThreadLocalGetAdvice for the
+    // full reentrancy analysis.
+    AgentBuilder agentBuilder =
+        builder
+            .type(ElementMatchers.named("java.lang.ThreadLocal"))
+            .transform(
+                (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                    typeBuilder
+                        .visit(
+                            Advice.to(JvmRuntimeAdvice.ThreadLocalGetAdvice.class)
+                                .on(
+                                    ElementMatchers.named("get")
+                                        .and(ElementMatchers.takesArguments(0))))
+                        .visit(
+                            Advice.to(JvmRuntimeAdvice.ThreadLocalSetAdvice.class)
+                                .on(
+                                    ElementMatchers.named("set")
+                                        .and(ElementMatchers.takesArguments(1)))));
+
+    // ── Higher-level time APIs ────────────────────────────────────────────
+    // Direct System.currentTimeMillis() / System.nanoTime() cannot be intercepted (see note
+    // in install()) but java.time.Instant.now(), java.time.LocalDateTime.now(),
+    // java.time.ZonedDateTime.now(), and java.util.Date() are regular Java members that can
+    // be woven at exit.
+    agentBuilder =
+        agentBuilder
+            .type(ElementMatchers.named("java.time.Instant"))
+            .transform(
+                (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                    typeBuilder.visit(
+                        Advice.to(JvmRuntimeAdvice.InstantNowAdvice.class)
+                            .on(
+                                ElementMatchers.named("now")
+                                    .and(ElementMatchers.isStatic())
+                                    .and(ElementMatchers.takesArguments(0)))))
+            .type(ElementMatchers.named("java.time.LocalDateTime"))
+            .transform(
+                (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                    typeBuilder.visit(
+                        Advice.to(JvmRuntimeAdvice.LocalDateTimeNowAdvice.class)
+                            .on(
+                                ElementMatchers.named("now")
+                                    .and(ElementMatchers.isStatic())
+                                    .and(ElementMatchers.takesArguments(0)))))
+            .type(ElementMatchers.named("java.time.ZonedDateTime"))
+            .transform(
+                (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                    typeBuilder.visit(
+                        Advice.to(JvmRuntimeAdvice.ZonedDateTimeNowAdvice.class)
+                            .on(
+                                ElementMatchers.named("now")
+                                    .and(ElementMatchers.isStatic())
+                                    .and(ElementMatchers.takesArguments(0)))))
+            .type(ElementMatchers.named("java.util.Date"))
+            .transform(
+                (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                    typeBuilder.visit(
+                        Advice.to(JvmRuntimeAdvice.DateNewAdvice.class)
+                            .on(
+                                ElementMatchers.isConstructor()
+                                    .and(ElementMatchers.takesArguments(0)))));
+
+    // CompletableFuture.cancel
+    agentBuilder =
+        agentBuilder
+            .type(ElementMatchers.named("java.util.concurrent.CompletableFuture"))
+            .transform(
+                (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                    typeBuilder.visit(
+                        Advice.to(JvmRuntimeAdvice.AsyncCancelAdvice.class)
+                            .on(
+                                ElementMatchers.named("cancel")
+                                    .and(ElementMatchers.takesArguments(boolean.class)))));
+
+    // ── SSL/TLS handshake interception ────────────────────────────────────
+    // SSLSocket and SSLEngine are abstract; concrete subclasses (SSLSocketImpl,
+    // SSLEngineImpl) override startHandshake/beginHandshake, so advice on the
+    // abstract class alone would never fire. Target all concrete subtypes instead.
+    // Interface / synthetic filters exclude Mockito/CGLIB generated proxies that would
+    // otherwise trip VerifyError during class transformation.
+    agentBuilder =
+        agentBuilder
+            .type(
+                ElementMatchers.isSubTypeOf(javax.net.ssl.SSLSocket.class)
+                    .and(ElementMatchers.not(ElementMatchers.isAbstract()))
+                    .and(ElementMatchers.not(ElementMatchers.isInterface()))
+                    .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
+            .transform(
+                (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                    typeBuilder.visit(
+                        Advice.to(JvmRuntimeAdvice.SslHandshakeAdvice.class)
+                            .on(
+                                ElementMatchers.named("startHandshake")
+                                    .and(ElementMatchers.takesArguments(0)))));
+
+    agentBuilder =
+        agentBuilder
+            .type(
+                ElementMatchers.isSubTypeOf(javax.net.ssl.SSLEngine.class)
+                    .and(ElementMatchers.not(ElementMatchers.isAbstract()))
+                    .and(ElementMatchers.not(ElementMatchers.isInterface()))
+                    .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
+            .transform(
+                (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                    typeBuilder.visit(
+                        Advice.to(JvmRuntimeAdvice.SslHandshakeAdvice.class)
+                            .on(
+                                ElementMatchers.named("beginHandshake")
+                                    .and(ElementMatchers.takesArguments(0)))));
+
+    return agentBuilder;
+  }
+
+  /**
+   * Applies Phase 2 optional transformations (HTTP clients, JDBC, Thread.sleep, DNS, file I/O).
+   * Each optional target is guarded by a class-presence check so missing dependencies are silently
+   * skipped. Gated behind {@code premainMode}.
+   */
+  private static AgentBuilder applyPhase2OptionalTransformations(AgentBuilder agentBuilder) {
+    // ── HTTP client interception ─────────────────────────────────────────
+    // All targets use instrumentOptional, which checks class presence before registering. If
+    // the target is absent, no transformation is added. Advice classes only use Object-typed
+    // arguments and reflective URL extraction, so the compileOnly dependencies (OkHttp,
+    // Apache HC, Reactor Netty) are not required at runtime.
+    //
+    // Java 11+ HttpClient (jdk.internal.net.http.HttpClientImpl) is NOT registered via
+    // instrumentOptional here. That class is always present on JDK 11+, but it lives in the
+    // non-exported java.net.http/jdk.internal.net.http package. Attempting to transform it
+    // without --add-opens java.net.http/jdk.internal.net.http=ALL-UNNAMED silently corrupts
+    // subsequent AgentBuilder transformations. If interception of the Java HttpClient is
+    // required, users can target its public API or wait for a dedicated --add-opens pathway.
+    agentBuilder =
+        instrumentOptional(
+            agentBuilder,
+            "okhttp3.RealCall",
+            typeBuilder ->
+                typeBuilder
+                    .visit(
+                        Advice.to(HttpClientAdvice.OkHttpExecuteAdvice.class)
+                            .on(
+                                ElementMatchers.named("execute")
+                                    .and(ElementMatchers.takesArguments(0))))
+                    .visit(
+                        Advice.to(HttpClientAdvice.OkHttpEnqueueAdvice.class)
+                            .on(
+                                ElementMatchers.named("enqueue")
+                                    .and(ElementMatchers.takesArguments(1)))));
+
+    // Apache HC 4.x exposes eight execute() overloads split across two shapes:
+    //   execute(HttpHost, HttpRequest [, HttpContext] [, ResponseHandler])  — HttpHost first
+    //   execute(HttpUriRequest [, HttpContext] [, ResponseHandler])         — request first
+    //
+    // A flat takesArguments(2) matcher (the previous wiring) bound
+    // ApacheHc4ExecuteAdvice indiscriminately to all three 2-arg overloads,
+    // handing the advice an HttpUriRequest where it expected an HttpHost and
+    // leaving single-arg + 3-arg + 4-arg variants completely uncovered. The
+    // refined matchers below disambiguate by first-argument type so every
+    // overload routes to the advice that understands its signature.
+    agentBuilder =
+        instrumentOptional(
+            agentBuilder,
+            "org.apache.http.impl.client.CloseableHttpClient",
+            typeBuilder ->
+                typeBuilder
+                    .visit(
+                        Advice.to(HttpClientAdvice.ApacheHc4ExecuteAdvice.class)
+                            .on(
+                                ElementMatchers.named("execute")
+                                    .and(
+                                        ElementMatchers.takesArgument(
+                                            0,
+                                            ElementMatchers.named("org.apache.http.HttpHost")))))
+                    .visit(
+                        Advice.to(HttpClientAdvice.ApacheHc4UriExecuteAdvice.class)
+                            .on(
+                                ElementMatchers.named("execute")
+                                    .and(
+                                        ElementMatchers.takesArgument(
+                                            0,
+                                            ElementMatchers.named(
+                                                "org.apache.http.client.methods.HttpUriRequest"))))));
+
+    agentBuilder =
+        instrumentOptional(
+            agentBuilder,
+            "org.apache.hc.client5.http.impl.classic.CloseableHttpClient",
+            typeBuilder ->
+                typeBuilder.visit(
+                    Advice.to(HttpClientAdvice.ApacheHc5ExecuteAdvice.class)
+                        .on(
+                            ElementMatchers.named("execute")
+                                // 2-arg: execute(ClassicHttpRequest, ClassicHttpResponseHandler)
+                                // 3-arg: execute(ClassicHttpRequest, HttpContext,
+                                //                ClassicHttpResponseHandler)
+                                .and(
+                                    ElementMatchers.takesArguments(2)
+                                        .or(ElementMatchers.takesArguments(3))))));
+
+    agentBuilder =
+        instrumentOptional(
+            agentBuilder,
+            "reactor.netty.http.client.HttpClientConnect",
+            typeBuilder ->
+                typeBuilder.visit(
+                    Advice.to(HttpClientAdvice.ReactorNettyConnectAdvice.class)
+                        .on(ElementMatchers.named("connect"))));
+
+    // ── JDBC / connection pool interception ──────────────────────────────
+    //
+    // HikariCP and c3p0 are compileOnly dependencies and are instrumented via
+    // instrumentOptional so their absence is tolerated. java.sql.Statement and
+    // java.sql.Connection are JDK interfaces — we restrict the type matcher to
+    // concrete subtypes via isSubTypeOf + not(isInterface()) so the advice only
+    // binds to implementations (driver classes such as HikariProxyStatement,
+    // org.postgresql.jdbc.PgStatement, etc.).
+    agentBuilder =
+        instrumentOptional(
+            agentBuilder,
+            "com.zaxxer.hikari.pool.HikariPool",
+            typeBuilder ->
+                typeBuilder.visit(
+                    Advice.to(JdbcAdvice.HikariGetConnectionAdvice.class)
+                        .on(
+                            ElementMatchers.named("getConnection")
+                                .and(ElementMatchers.takesArguments(long.class)))));
+
+    agentBuilder =
+        instrumentOptional(
+            agentBuilder,
+            "com.mchange.v2.c3p0.impl.C3P0PooledConnectionPool",
+            typeBuilder ->
+                typeBuilder.visit(
+                    Advice.to(JdbcAdvice.C3p0CheckoutAdvice.class)
+                        .on(
+                            ElementMatchers.named("checkoutPooledConnection")
+                                .and(ElementMatchers.takesArguments(0)))));
+
+    // Match every Statement.execute*/Connection.prepareStatement overload whose first
+    // argument is the SQL String. The JDBC API defines generated-keys variants
+    // (execute(String, int), execute(String, int[]), execute(String, String[]),
+    // executeUpdate(String, int), ..., prepareStatement(String, int),
+    // prepareStatement(String, int[]), prepareStatement(String, int, int),
+    // prepareStatement(String, int, int, int), prepareStatement(String, String[]))
+    // that restricting to takesArguments(String.class) silently skipped — any JDBC
+    // caller using Statement.RETURN_GENERATED_KEYS or column-name arrays bypassed
+    // every chaos selector targeting JDBC. The advice only reads @Argument(0), so
+    // takesArgument(0, String.class) is sufficient and binds to all overloads.
+    agentBuilder =
+        agentBuilder
+            .type(
+                ElementMatchers.isSubTypeOf(java.sql.Statement.class)
+                    .and(ElementMatchers.not(ElementMatchers.isInterface()))
+                    .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
+            .transform(
+                (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                    typeBuilder
+                        .visit(
+                            Advice.to(JdbcAdvice.StatementExecuteAdvice.class)
+                                .on(
+                                    ElementMatchers.named("execute")
+                                        .and(ElementMatchers.takesArgument(0, String.class))))
+                        .visit(
+                            Advice.to(JdbcAdvice.StatementExecuteAdvice.class)
+                                .on(
+                                    ElementMatchers.named("executeQuery")
+                                        .and(ElementMatchers.takesArgument(0, String.class))))
+                        .visit(
+                            Advice.to(JdbcAdvice.StatementExecuteAdvice.class)
+                                .on(
+                                    ElementMatchers.named("executeUpdate")
+                                        .and(ElementMatchers.takesArgument(0, String.class))))
+                        .visit(
+                            Advice.to(JdbcAdvice.StatementExecuteAdvice.class)
+                                .on(
+                                    ElementMatchers.named("executeLargeUpdate")
+                                        .and(ElementMatchers.takesArgument(0, String.class)))))
+            .type(
+                ElementMatchers.isSubTypeOf(java.sql.Connection.class)
+                    .and(ElementMatchers.not(ElementMatchers.isInterface()))
+                    .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
+            .transform(
+                (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                    typeBuilder
+                        .visit(
+                            Advice.to(JdbcAdvice.PrepareStatementAdvice.class)
+                                .on(
+                                    ElementMatchers.named("prepareStatement")
+                                        .and(ElementMatchers.takesArgument(0, String.class))))
+                        .visit(
+                            Advice.to(JdbcAdvice.PrepareStatementAdvice.class)
+                                .on(
+                                    ElementMatchers.named("prepareCall")
+                                        .and(ElementMatchers.takesArgument(0, String.class))))
+                        .visit(
+                            Advice.to(JdbcAdvice.CommitAdvice.class)
+                                .on(
+                                    ElementMatchers.named("commit")
+                                        .and(ElementMatchers.takesArguments(0))))
+                        .visit(
+                            Advice.to(JdbcAdvice.RollbackAdvice.class)
+                                .on(
+                                    ElementMatchers.named("rollback")
+                                        .and(ElementMatchers.takesArguments(0)))));
+
+    // ── JNDI and JMX ─────────────────────────────────────────────────────
+    agentBuilder =
+        instrumentOptional(
+            agentBuilder,
+            "javax.naming.InitialContext",
+            typeBuilder ->
+                typeBuilder.visit(
+                    Advice.to(JvmRuntimeAdvice.JndiLookupAdvice.class)
+                        .on(
+                            ElementMatchers.named("lookup")
+                                .and(ElementMatchers.takesArguments(String.class)))));
+
+    agentBuilder =
+        instrumentOptional(
+            agentBuilder,
+            "javax.management.MBeanServer",
+            typeBuilder ->
+                typeBuilder
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.JmxInvokeAdvice.class)
+                            .on(
+                                ElementMatchers.named("invoke")
+                                    .and(ElementMatchers.takesArguments(4))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.JmxGetAttrAdvice.class)
+                            .on(
+                                ElementMatchers.named("getAttribute")
+                                    .and(ElementMatchers.takesArguments(2)))));
+
+    // On JDK 8-16 native library loading went through Runtime.loadLibrary0; on JDK 17+ the
+    // method was moved to jdk.internal.loader.NativeLibraries.load (private JDK internals). We
+    // weave both sites so NATIVE_LIBRARY_LOAD fires on every supported JDK; missing sites are
+    // tolerated by instrumentOptional so a mismatch is never a startup failure.
+    agentBuilder =
+        instrumentOptional(
+            agentBuilder,
+            "java.lang.Runtime",
+            typeBuilder ->
+                typeBuilder.visit(
+                    Advice.to(JvmRuntimeAdvice.NativeLibraryLoadAdvice.class)
+                        .on(ElementMatchers.named("loadLibrary0"))));
+    agentBuilder =
+        instrumentOptional(
+            agentBuilder,
+            "jdk.internal.loader.NativeLibraries",
+            typeBuilder ->
+                typeBuilder.visit(
+                    Advice.to(JvmRuntimeAdvice.NativeLibrariesLoadAdvice.class)
+                        .on(ElementMatchers.named("load"))));
+
+    // ── Thread.sleep interception ─────────────────────────────────────────
+    agentBuilder =
+        agentBuilder
+            .type(ElementMatchers.named("java.lang.Thread"))
+            .transform(
+                (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                    typeBuilder
+                        // sleep(long millis)
+                        .visit(
+                            Advice.to(JvmRuntimeAdvice.ThreadSleepAdvice.class)
+                                .on(
+                                    ElementMatchers.named("sleep")
+                                        .and(ElementMatchers.isStatic())
+                                        .and(ElementMatchers.takesArguments(long.class))))
+                        // sleep(long millis, int nanos) — advice reads only arg 0 (millis)
+                        .visit(
+                            Advice.to(JvmRuntimeAdvice.ThreadSleepAdvice.class)
+                                .on(
+                                    ElementMatchers.named("sleep")
+                                        .and(ElementMatchers.isStatic())
+                                        .and(
+                                            ElementMatchers.takesArguments(
+                                                long.class, int.class)))));
+
+    // ── DNS resolution interception ───────────────────────────────────────
+    // InetAddress is always present; no instrumentOptional needed.
+    agentBuilder =
+        agentBuilder
+            .type(ElementMatchers.named("java.net.InetAddress"))
+            .transform(
+                (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                    typeBuilder
+                        .visit(
+                            Advice.to(JvmRuntimeAdvice.DnsResolveAdvice.class)
+                                .on(
+                                    ElementMatchers.named("getByName")
+                                        .and(ElementMatchers.isStatic())
+                                        .and(ElementMatchers.takesArguments(String.class))))
+                        .visit(
+                            Advice.to(JvmRuntimeAdvice.DnsResolveAdvice.class)
+                                .on(
+                                    ElementMatchers.named("getAllByName")
+                                        .and(ElementMatchers.isStatic())
+                                        .and(ElementMatchers.takesArguments(String.class))))
+                        .visit(
+                            Advice.to(JvmRuntimeAdvice.DnsLocalHostAdvice.class)
+                                .on(
+                                    ElementMatchers.named("getLocalHost")
+                                        .and(ElementMatchers.isStatic())
+                                        .and(ElementMatchers.takesArguments(0)))));
+
+    // ── File I/O interception ─────────────────────────────────────────────
+    agentBuilder =
+        agentBuilder
+            .type(ElementMatchers.named("java.io.FileInputStream"))
+            .transform(
+                (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                    typeBuilder
+                        .visit(
+                            Advice.to(JvmRuntimeAdvice.FileReadAdvice.class)
+                                .on(
+                                    ElementMatchers.named("read")
+                                        .and(ElementMatchers.takesArguments(0))))
+                        .visit(
+                            Advice.to(JvmRuntimeAdvice.FileReadAdvice.class)
+                                .on(
+                                    ElementMatchers.named("read")
+                                        .and(ElementMatchers.takesArguments(byte[].class))))
+                        .visit(
+                            Advice.to(JvmRuntimeAdvice.FileReadAdvice.class)
+                                .on(
+                                    ElementMatchers.named("read")
+                                        .and(
+                                            ElementMatchers.takesArguments(
+                                                byte[].class, int.class, int.class)))))
+            .type(ElementMatchers.named("java.io.FileOutputStream"))
+            .transform(
+                (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                    typeBuilder
+                        .visit(
+                            Advice.to(JvmRuntimeAdvice.FileWriteAdvice.class)
+                                .on(
+                                    ElementMatchers.named("write")
+                                        .and(ElementMatchers.takesArguments(int.class))))
+                        .visit(
+                            Advice.to(JvmRuntimeAdvice.FileWriteAdvice.class)
+                                .on(
+                                    ElementMatchers.named("write")
+                                        .and(ElementMatchers.takesArguments(byte[].class))))
+                        .visit(
+                            Advice.to(JvmRuntimeAdvice.FileWriteAdvice.class)
+                                .on(
+                                    ElementMatchers.named("write")
+                                        .and(
+                                            ElementMatchers.takesArguments(
+                                                byte[].class, int.class, int.class)))));
+
+    return agentBuilder;
+  }
 
   private static Path createSecureTempFile() throws IOException {
     final String tmpDir = System.getProperty("java.io.tmpdir");

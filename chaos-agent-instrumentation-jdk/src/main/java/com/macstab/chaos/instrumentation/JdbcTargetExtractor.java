@@ -53,11 +53,11 @@ final class JdbcTargetExtractor {
   }
 
   private static Object invoke(final Object target, final String methodName) throws Throwable {
-    final Class<?> cls = target.getClass();
-    final ConcurrentHashMap<String, Method> perClass = METHOD_CACHE.get(cls);
+    final Class<?> targetClass = target.getClass();
+    final ConcurrentHashMap<String, Method> perClass = METHOD_CACHE.get(targetClass);
     Method method = perClass.get(methodName);
     if (method == null) {
-      method = findMethod(cls, methodName);
+      method = findMethod(targetClass, methodName);
       if (method != null) {
         // See HttpUrlExtractor for the full rationale: setAccessible can throw
         // InaccessibleObjectException on JDK 17+ when the target module has not opened
@@ -79,14 +79,14 @@ final class JdbcTargetExtractor {
   }
 
   private static Method findMethod(final Class<?> start, final String methodName) {
-    Class<?> current = start;
-    while (current != null) {
-      for (final Method candidate : current.getDeclaredMethods()) {
+    Class<?> searchClass = start;
+    while (searchClass != null) {
+      for (final Method candidate : searchClass.getDeclaredMethods()) {
         if (candidate.getName().equals(methodName) && candidate.getParameterCount() == 0) {
           return candidate;
         }
       }
-      current = current.getSuperclass();
+      searchClass = searchClass.getSuperclass();
     }
     return null;
   }

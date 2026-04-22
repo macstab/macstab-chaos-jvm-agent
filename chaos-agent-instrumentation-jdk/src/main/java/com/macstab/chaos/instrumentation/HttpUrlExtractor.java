@@ -106,19 +106,24 @@ final class HttpUrlExtractor {
   static String fromApacheHc4Request(final Object host, final Object request) {
     try {
       final String hostPart = host == null ? "" : host.toString();
-      String path = "";
-      if (request != null) {
-        final Object requestLine = invoke(request, "getRequestLine");
-        if (requestLine != null) {
-          final Object uri = invoke(requestLine, "getUri");
-          path = uri == null ? "" : uri.toString();
-        }
-      }
-      final String combined = hostPart + path;
+      final String requestPath = extractApacheHc4RequestPath(request);
+      final String combined = hostPart + requestPath;
       return combined.isEmpty() ? null : combined;
     } catch (final Throwable ignored) {
       return null;
     }
+  }
+
+  private static String extractApacheHc4RequestPath(final Object request) throws Throwable {
+    if (request == null) {
+      return "";
+    }
+    final Object requestLine = invoke(request, "getRequestLine");
+    if (requestLine == null) {
+      return "";
+    }
+    final Object uri = invoke(requestLine, "getUri");
+    return uri == null ? "" : uri.toString();
   }
 
   /**
@@ -206,11 +211,11 @@ final class HttpUrlExtractor {
   }
 
   private static Object invoke(final Object target, final String methodName) throws Throwable {
-    final Class<?> cls = target.getClass();
-    final ConcurrentHashMap<String, Method> perClass = METHOD_CACHE.get(cls);
+    final Class<?> targetClass = target.getClass();
+    final ConcurrentHashMap<String, Method> perClass = METHOD_CACHE.get(targetClass);
     Method method = perClass.get(methodName);
     if (method == null) {
-      method = findMethod(cls, methodName);
+      method = findMethod(targetClass, methodName);
       if (method != null) {
         // setAccessible(true) can throw InaccessibleObjectException on JDK 17+ when the target
         // module has not opened the defining package for reflective access. Without catching
@@ -270,14 +275,14 @@ final class HttpUrlExtractor {
       }
       current = current.getSuperclass();
     }
-    Class<?> iface;
-    while ((iface = interfaceQueue.poll()) != null) {
-      for (final Method candidate : iface.getDeclaredMethods()) {
+    Class<?> currentInterface;
+    while ((currentInterface = interfaceQueue.poll()) != null) {
+      for (final Method candidate : currentInterface.getDeclaredMethods()) {
         if (candidate.getName().equals(methodName) && candidate.getParameterCount() == 0) {
           return candidate;
         }
       }
-      for (final Class<?> superInterface : iface.getInterfaces()) {
+      for (final Class<?> superInterface : currentInterface.getInterfaces()) {
         if (visitedInterfaces.add(superInterface)) {
           interfaceQueue.add(superInterface);
         }
