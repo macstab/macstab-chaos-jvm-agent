@@ -784,6 +784,15 @@ public final class JdkInstrumentationInstaller {
    */
   private static AgentBuilder applyPhase1ThreadAndExecutorTransformations(
       final AgentBuilder builder) {
+    AgentBuilder b = builder;
+    b = applyThreadStartTransformations(b);
+    b = applyThreadPoolExecutorTransformations(b);
+    b = applyScheduledExecutorTransformations(b);
+    return b;
+  }
+
+  /** Thread.start instrumentation. */
+  private static AgentBuilder applyThreadStartTransformations(final AgentBuilder builder) {
     return builder
         .type(ElementMatchers.named("java.lang.Thread"))
         .transform(
@@ -792,7 +801,12 @@ public final class JdkInstrumentationInstaller {
                     Advice.to(ThreadAdvice.StartAdvice.class)
                         .on(
                             ElementMatchers.named("start")
-                                .and(ElementMatchers.takesArguments(0)))))
+                                .and(ElementMatchers.takesArguments(0)))));
+  }
+
+  /** ThreadPoolExecutor execute/beforeExecute/shutdown/shutdownNow/awaitTermination. */
+  private static AgentBuilder applyThreadPoolExecutorTransformations(final AgentBuilder builder) {
+    return builder
         .type(ElementMatchers.named("java.util.concurrent.ThreadPoolExecutor"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
@@ -829,7 +843,12 @@ public final class JdkInstrumentationInstaller {
                                 ElementMatchers.named("awaitTermination")
                                     .and(
                                         ElementMatchers.takesArguments(
-                                            long.class, java.util.concurrent.TimeUnit.class)))))
+                                            long.class, java.util.concurrent.TimeUnit.class)))));
+  }
+
+  /** ScheduledThreadPoolExecutor schedule / scheduleAtFixedRate / scheduleWithFixedDelay. */
+  private static AgentBuilder applyScheduledExecutorTransformations(final AgentBuilder builder) {
+    return builder
         .type(ElementMatchers.named("java.util.concurrent.ScheduledThreadPoolExecutor"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
