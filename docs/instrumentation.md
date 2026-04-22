@@ -365,6 +365,17 @@ If the bridge is not installed (`BootstrapDispatcher.handles == null`), the wrap
 | 43 | `ADJUST_LOCAL_DATE_TIME_NOW` | `LocalDateTime.now()` (no-arg static) | exit (`LocalDateTime` rewrite) |
 | 44 | `ADJUST_ZONED_DATE_TIME_NOW` | `ZonedDateTime.now()` (no-arg static) | exit (`ZonedDateTime` rewrite) |
 | 45 | `ADJUST_DATE_NEW` | `Date()` (no-arg constructor) | exit (embedded millis rewrite via `setTime`) |
+| 46 | `BEFORE_HTTP_SEND` | `RealCall.execute()`, `CloseableHttpClient.execute(...)` (OkHttp sync, Apache HC 4/5) | enter (boolean suppress) |
+| 47 | `BEFORE_HTTP_SEND_ASYNC` | `RealCall.enqueue(Callback)`, `HttpClientConnect.connect(...)` (OkHttp async, Reactor Netty) | enter (boolean suppress) |
+| 48 | `BEFORE_JDBC_CONNECTION_ACQUIRE` | `DataSource.getConnection()` | enter (boolean suppress) |
+| 49 | `BEFORE_JDBC_STATEMENT_EXECUTE` | `Statement.execute(String)` | enter (boolean suppress) |
+| 50 | `BEFORE_JDBC_PREPARED_STATEMENT` | `Connection.prepareStatement(String)` | enter (boolean suppress) |
+| 51 | `BEFORE_JDBC_TRANSACTION_COMMIT` | `Connection.commit()` | enter (boolean suppress) |
+| 52 | `BEFORE_JDBC_TRANSACTION_ROLLBACK` | `Connection.rollback()` | enter (boolean suppress) |
+| 53 | `BEFORE_THREAD_SLEEP` | `Thread.sleep(long)` | enter (boolean suppress) |
+| 54 | `BEFORE_DNS_RESOLVE` | `InetAddress.getAllByName(String)` | enter |
+| 55 | `BEFORE_SSL_HANDSHAKE` | `SSLSocket` handshake initiation | enter |
+| 56 | `BEFORE_FILE_IO` | `FileInputStream`/`FileOutputStream` operations | enter |
 
 ---
 

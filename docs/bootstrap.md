@@ -97,12 +97,24 @@ RUNTIME_REF.set(runtime)   // AtomicReference; last write; visible to all thread
 ```
 VirtualMachine.attach(pid).loadAgent("chaos-agent-bootstrap.jar", agentArgs)
   ↓
+Opt-in check: System.getProperty("macstab.chaos.agentmain.enable") /
+              MACSTAB_CHAOS_AGENTMAIN_ENABLE env var must be "true".
+Without the opt-in, agentmain is a no-op (security: prevents drive-by injection
+from any process with jcmd/attach permission).
+  ↓
 JVM calls: ChaosAgentBootstrap.agentmain(agentArgs, instrumentation)
   ↓
-Same flow as premain, INCLUDING premainMode=true.
-Phase 1 + Phase 2 (Socket/NIO/HTTP/JDBC/...) instrumentation is installed
-via JVMTI retransformation of already-loaded JDK classes.
+initialize(agentArgs, instrumentation, env, premainMode=false)
+  ↓
+Phase 1 only: ThreadPoolExecutor, Thread, ScheduledThreadPoolExecutor,
+              BlockingQueue, CompletableFuture, ForkJoin, ClassLoader, ShutdownHook.
+Phase 2 (Socket/NIO/HTTP/JDBC/TLS/DNS/clock/GC/JNDI/JMX/Serialization/...) is
+NOT installed via agentmain. Those JDK classes are already loaded and would
+require retransformation; agentmain intentionally skips them so that runtime
+attach to a live production JVM cannot silently rewrite low-level networking.
 ```
+
+**To get Phase 2 via dynamic attach**, use `ChaosPlatform.installLocally()` (below) — that path goes through `installForLocalTests()` and passes `premainMode=true`. It is intended for test-JVM self-attach, not for attaching to an unknown production process.
 
 ## Idempotency
 

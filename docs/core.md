@@ -24,7 +24,9 @@
 ## Scope
 
 In scope:
-- `ChaosRuntime` — central hub; implements `ChaosControlPlane`
+- `ChaosRuntime` — thin facade that composes the control-plane and dispatch halves. Implements `ChaosControlPlane` by delegation. Exists as a single entry point so downstream modules (`chaos-agent-bootstrap`, `chaos-agent-instrumentation-jdk`, testkit, benchmarks) bind to one type.
+- `ChaosControlPlaneImpl` (package-private) — actual control-plane implementation. Owns scenario registration, session lifecycle, diagnostics, event listeners, instrumentation handle, shutdown-hook tracking.
+- `ChaosDispatcher` (package-private) — hot-path half. Owns the `before*` / `after*` / `adjust*` / `decorate*` interception methods invoked from `BootstrapDispatcher`.
 - `ScenarioController` — per-scenario runtime guard with 8-check evaluation pipeline
 - `ScenarioRegistry` — thread-safe store of controllers; implements `ChaosDiagnostics`
 - `SelectorMatcher` — stateless invocation-context matcher
@@ -118,6 +120,11 @@ new DefaultChaosActivationHandle(controller, registry)
         observabilityBus.publish(STARTED, ...)
   ↓
 return DefaultChaosActivationHandle
+
+// Plan activations (activate(ChaosPlan)) follow the same path for each scenario in the plan,
+// then wrap all resulting handles in CompositeActivationHandle, which delegates start/stop/release
+// to each member handle. The composite ID is a generated plan-level UUID, distinct from any
+// individual scenario ID.
 ```
 
 ## Per-Invocation Evaluation

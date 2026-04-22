@@ -60,7 +60,8 @@ public interface ChaosControlPlane {
     // Inspect current agent state
     ChaosDiagnostics diagnostics();
 
-    // Register event listener (called on APPLIED, STARTED, STOPPED, RELEASED events)
+    // Register event listener. Invoked synchronously on every ChaosEvent.Type:
+    //   REGISTERED, STARTED, STOPPED, RELEASED, APPLIED, SKIPPED, FAILED
     void addEventListener(ChaosEventListener listener);
 
     // Stop all active scenarios (does not uninstall instrumentation)
@@ -121,7 +122,10 @@ For tasks submitted to executors outside a `bind()` block, use `session.wrap(tas
 
 ```java
 public interface ChaosActivationHandle extends AutoCloseable {
-    // Start the scenario (if startMode == MANUAL)
+    // Unique ID of the activated scenario (plan handles return the composite plan ID)
+    String id();
+
+    // Start the scenario (if startMode == MANUAL; no-op for AUTOMATIC)
     void start();
 
     // Stop the scenario (permanent; cannot be restarted)
@@ -130,14 +134,21 @@ public interface ChaosActivationHandle extends AutoCloseable {
     // Release a gate-effect hold, unblocking all waiting threads
     void release();
 
+    // Current lifecycle state (snapshot; may change concurrently)
+    ChaosDiagnostics.ScenarioState state();
+
     // Equivalent to stop()
-    void close();
+    @Override default void close() { stop(); }
 }
 ```
 
 **`release()`**: Applicable only to gate-effect scenarios. Unblocks all threads currently waiting in `ManualGate.await()`. Does not stop the scenario — subsequent matching invocations will re-enter the gate.
 
+**`state()`**: Returns one of `REGISTERED`, `ACTIVE`, `INACTIVE`, `STOPPED`. Useful for assertions in tests (`assertThat(handle.state()).isEqualTo(ACTIVE)`).
+
 **Idempotency**: `stop()` and `close()` are idempotent; calling them multiple times is safe.
+
+**Plan activations**: `controlPlane.activate(ChaosPlan)` returns a composite handle whose `stop()` stops every scenario in the plan and whose `id()` reports the plan ID.
 
 ---
 
@@ -219,10 +230,11 @@ ChaosSelector.threadLocal(
 // Shutdown hooks and System.exit / Runtime.halt
 ChaosSelector.shutdown(Set.of(OperationType.SYSTEM_EXIT_REQUEST, OperationType.SHUTDOWN_HOOK_REGISTER));
 
-// HTTP client requests — optionally filter by URL pattern
-ChaosSelector.httpClient(Set.of(OperationType.HTTP_CLIENT_SEND));
+// HTTP client requests — sync and async. Matches both HttpClient#send and #sendAsync.
 ChaosSelector.httpClient(
-    Set.of(OperationType.HTTP_CLIENT_SEND),
+    Set.of(OperationType.HTTP_CLIENT_SEND, OperationType.HTTP_CLIENT_SEND_ASYNC));
+ChaosSelector.httpClient(
+    Set.of(OperationType.HTTP_CLIENT_SEND, OperationType.HTTP_CLIENT_SEND_ASYNC),
     NamePattern.regex("https://api\\.example\\.com/.*"));
 
 // JDBC (all operations, or explicit subset)
@@ -481,21 +493,31 @@ record ChaosEvent(
     Map<String, String> attributes,
     Instant timestamp
 ) {
-    enum Type { STARTED, STOPPED, RELEASED, APPLIED }
+    enum Type {
+        REGISTERED,  // scenario was registered with the control plane
+        STARTED,     // scenario transitioned INACTIVE → ACTIVE
+        APPLIED,     // effect was applied to a matched operation
+        SKIPPED,     // selector matched but activation policy vetoed (probability / rate limit)
+        FAILED,      // effect evaluation threw unexpectedly (listener / reflective failure)
+        RELEASED,    // gate-effect release() unblocked waiters
+        STOPPED      // scenario transitioned to STOPPED
+    }
 }
 ```
 
 **Contract**: Listeners are called synchronously on the application thread that triggered the event. Must not block, perform I/O, or throw checked exceptions. Listener exceptions are caught and logged; they do not abort the chaos operation.
 
+**Observability use**: Subscribe a listener to count `APPLIED` vs `SKIPPED` per scenario ID — this is the ground truth for "how many times did my chaos actually fire during this test?".
+
 ---
 
 # 12. Exception Types
 
-| Exception | When thrown |
-|-----------|-------------|
-| `ChaosActivationException` | Scenario activation fails: duplicate ID, scope mismatch, invalid configuration |
-| `ChaosUnsupportedFeatureException` | Scenario requires a JVM feature not available on the running JVM (e.g., JFR absent on a stripped JRE) |
-| `ConfigLoadException` | Startup configuration cannot be read or parsed |
+| Exception | Module | When thrown |
+|-----------|--------|-------------|
+| `ChaosActivationException` | `chaos-agent-api` | Scenario activation fails: duplicate ID, scope mismatch, invalid configuration |
+| `ChaosUnsupportedFeatureException` | `chaos-agent-api` | Scenario requires a JVM feature not available on the running JVM (e.g., JFR absent on a stripped JRE) |
+| `ConfigLoadException` | `chaos-agent-startup-config` | Startup configuration cannot be read or parsed. Not part of the core API surface — only thrown from `StartupConfigLoader.load()` and only visible to code that imports the startup-config module. |
 
 All are `RuntimeException` subclasses. They propagate to the caller of `activate()` or `StartupConfigLoader.load()`.
 

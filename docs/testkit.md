@@ -63,30 +63,37 @@ com.macstab.chaos.testkit.ChaosAgentExtension
 ## Lifecycle
 
 ```
-@BeforeAll equivalent:
-  ChaosPlatform.installLocally()
-  — self-attaches agent if not already installed
-  — idempotent; safe to call from multiple extensions
-
-@BeforeEach equivalent:
-  ChaosSession session = controlPlane.openSession(testDisplayName)
+@BeforeEach:
+  TrackingChaosControlPlane tracker = new TrackingChaosControlPlane(ChaosPlatform.installLocally())
+  — ChaosPlatform.installLocally() is idempotent; returns the same ChaosRuntime across tests
+  — TrackingChaosControlPlane wraps the real control plane to record JVM-scoped handle activations
+  ChaosSession session = tracker.openSession(testDisplayName)
   — session ID is a UUID; displayName is the test method display name
 
-@AfterEach equivalent:
+@AfterEach:
   session.close()
   — stops all session-scoped scenarios
   — unregisters session-scoped controllers from ScenarioRegistry
-  — does NOT affect JVM-scoped scenarios
+  tracker.stopTracked()
+  — stops any JVM-scoped handles activated via controlPlane.activate() during the test
+  — runs in finally block: executes even if session.close() throws
+  — prevents JVM-scoped scenario leakage into subsequent tests
 ```
 
 ## Parameter Resolution
 
 `ChaosAgentExtension` resolves the following parameter types in test methods and lifecycle callbacks:
 - `ChaosSession` — injects the current test's session
-- `ChaosControlPlane` — injects the agent's `ChaosControlPlane` (JVM-global handle)
-- `ChaosDiagnostics` — injects the diagnostics interface
+- `ChaosControlPlane` — injects the `TrackingChaosControlPlane` wrapping the JVM-wide control plane
 
 Parameters of any other type are not resolved by this extension (JUnit delegates to other resolvers).
+
+**`ChaosDiagnostics` is not injectable.** Obtain it via `controlPlane.diagnostics()`:
+```java
+void myTest(ChaosControlPlane controlPlane) {
+    ChaosDiagnostics diagnostics = controlPlane.diagnostics();
+}
+```
 
 ## Session Isolation Guarantee
 

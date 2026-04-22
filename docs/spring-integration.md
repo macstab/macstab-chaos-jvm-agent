@@ -79,18 +79,21 @@ ParameterResolver
 
 ```java
 public void beforeAll(final ExtensionContext context) {
-    final ChaosControlPlane controlPlane = ChaosPlatform.installLocally();
-    final ChaosSession session = controlPlane.openSession(context.getDisplayName());
-    context.getStore(NAMESPACE).put(ChaosControlPlane.class, controlPlane);
+    final TrackingChaosControlPlane tracker =
+        new TrackingChaosControlPlane(ChaosPlatform.installLocally());
+    final ChaosSession session = tracker.openSession(context.getDisplayName());
+    context.getStore(NAMESPACE).put(ChaosControlPlane.class, tracker);
     context.getStore(NAMESPACE).put(ChaosSession.class, session);
 }
 ```
 
 `ChaosPlatform.installLocally()` is idempotent — it uses a JVM-wide lock and returns the same `ChaosControlPlane` instance on every call within the same JVM process. The first call triggers dynamic self-attach of the chaos agent via the JVM Attach API. Subsequent calls, from subsequent `@ChaosTest` classes or nested tests in the same forked JVM, return the already-installed instance without attempting re-attachment.
 
-`controlPlane.openSession(context.getDisplayName())` creates a new `ChaosSession` scoped to this test class's execution. The display name (the class name or whatever `@DisplayName` provides) is stored as the session's human-readable identifier, which appears in diagnostics snapshots.
+The raw control plane is wrapped in a `TrackingChaosControlPlane` before being stored. This wrapper records every `ChaosActivationHandle` returned from `controlPlane.activate()` during the test class's lifecycle. `afterAll` calls `tracker.stopTracked()` to stop any JVM-scoped handles the test activated — preventing JVM-scoped scenario leakage into subsequent test classes in the same JVM.
 
-Both the control plane and the session are stored in the extension's `ExtensionContext.Store` under the type-keyed namespace:
+`tracker.openSession(context.getDisplayName())` creates a new `ChaosSession` scoped to this test class's execution. The display name (the class name or whatever `@DisplayName` provides) is stored as the session's human-readable identifier, which appears in diagnostics snapshots.
+
+Both the tracking control plane and the session are stored in the extension's `ExtensionContext.Store` under the type-keyed namespace:
 
 ```java
 static final ExtensionContext.Namespace NAMESPACE =
@@ -99,19 +102,27 @@ static final ExtensionContext.Namespace NAMESPACE =
 
 This is a deliberate design choice. JUnit's `ExtensionContext.Namespace` creates a logically isolated keyspace per extension class. Storing by type (`ChaosControlPlane.class`, `ChaosSession.class`) rather than by string avoids collision with other extensions that might store values in the same context.
 
-#### `afterAll` — session close
+#### `afterAll` — session close and JVM-scoped handle cleanup
 
 ```java
 public void afterAll(final ExtensionContext context) {
     final ChaosSession session =
         context.getStore(NAMESPACE).remove(ChaosSession.class, ChaosSession.class);
-    if (session != null) {
-        session.close();
+    final ChaosControlPlane controlPlane =
+        context.getStore(NAMESPACE).remove(ChaosControlPlane.class, ChaosControlPlane.class);
+    try {
+        if (session != null) {
+            session.close();
+        }
+    } finally {
+        if (controlPlane instanceof TrackingChaosControlPlane tracker) {
+            tracker.stopTracked();
+        }
     }
 }
 ```
 
-`remove()` is atomic with respect to the store — it retrieves and removes in one operation, preventing double-close races. `session.close()` stops every session-scoped `ScenarioController` registered under this session and unregisters them from `ScenarioRegistry`. JVM-scoped scenarios are unaffected — they outlive individual test sessions by design.
+`remove()` is atomic with respect to the store — it retrieves and removes in one operation, preventing double-close races. `session.close()` stops every session-scoped `ScenarioController` and unregisters them from `ScenarioRegistry`. `tracker.stopTracked()` runs in the `finally` block to ensure it executes even if `session.close()` throws — stopping any JVM-scoped handles the test class activated via `controlPlane.activate()`. JVM-scoped scenarios not created through the injected control plane are unaffected.
 
 #### `ParameterResolver` — `ChaosSession` and `ChaosControlPlane` injection
 

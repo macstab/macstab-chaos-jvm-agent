@@ -33,7 +33,7 @@ Key properties:
 - **Per-session isolation** — concurrent tests share a JVM; chaos is thread-local unless explicitly JVM-scoped
 - **Runtime control** — scenarios start, stop, fire, and expire without JVM restart
 - **Activation policy composition** — probability, rate limit, warm-up, time window, max-applications, random seed
-- **42 interception handles** covering the full JDK surface relevant to enterprise backend workloads
+- **57 interception handles** covering the full JDK surface relevant to enterprise backend workloads
 
 ## Scope
 
@@ -76,7 +76,7 @@ Out of scope:
 chaos-agent-api           — stable public contract; the only module application code directly depends on
 chaos-agent-bootstrap     — agent entry point (premain/agentmain), singleton init, JMX MBean
 chaos-agent-core          — matching engine, scenario controllers, activation policies, session scoping, stressors
-chaos-agent-instrumentation-jdk — ByteBuddy advice, bootstrap bridge, 42 interception handles
+chaos-agent-instrumentation-jdk — ByteBuddy advice, bootstrap bridge, 57 interception handles
 chaos-agent-startup-config — config resolution: JSON/base64/file; Jackson mapping
 chaos-agent-testkit       — JUnit 5 extension, ChaosPlatform.installLocally() for self-attach
 chaos-agent-examples      — runnable examples
