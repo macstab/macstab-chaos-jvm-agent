@@ -161,7 +161,7 @@ Optional<LoadedPlan> plan = StartupConfigLoader.load(agentArgs, System.getenv())
   if plan present:
     controlPlane.activate(plan)  ← registers scenarios with AUTOMATIC start mode
   ↓
-MBeanServer registration: com.macstab.chaos:type=ChaosDiagnostics
+MBeanServer registration: com.macstab.chaos.jvm:type=ChaosDiagnostics
   ↓
 ChaosRuntime.setInstrumentation(instrumentation)
 ```
@@ -787,7 +787,7 @@ String dump = diag.debugDump();  // multi-line text, suitable for logs
 
 ## JMX
 
-MBean registered at: `com.macstab.chaos:type=ChaosDiagnostics`
+MBean registered at: `com.macstab.chaos.jvm:type=ChaosDiagnostics`
 
 Exposes `debugDump()` as a JMX operation. Allows operators to inspect agent state from `jconsole` or `jmxterm` without application code changes.
 

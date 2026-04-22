@@ -134,12 +134,12 @@ corresponding Spring Boot BOM and wired to the version-specific autoconfiguratio
 Modules:
 - `chaos-agent-spring-boot3-test-starter` — compiled against `spring-boot-dependencies:3.5.13`
   (latest stable 3.x at release time); `Automatic-Module-Name`
-  `com.macstab.chaos.agent.spring.boot3.test`; package
-  `com.macstab.chaos.spring.boot3.test`.
+  `com.macstab.chaos.jvm.agent.spring.boot3.test`; package
+  `com.macstab.chaos.jvm.spring.boot3.test`.
 - `chaos-agent-spring-boot4-test-starter` — compiled against `spring-boot-dependencies:4.0.5`
   (latest stable 4.x at release time); `Automatic-Module-Name`
-  `com.macstab.chaos.agent.spring.boot4.test`; package
-  `com.macstab.chaos.spring.boot4.test`.
+  `com.macstab.chaos.jvm.agent.spring.boot4.test`; package
+  `com.macstab.chaos.jvm.spring.boot4.test`.
 
 Spring Boot dependencies are declared `compileOnly` so the starters are inert at production
 runtime: the user's Spring Boot application supplies Spring itself on the test classpath.
@@ -214,11 +214,11 @@ starters to prevent blast-radius risk.
 
 Modules:
 - `chaos-agent-spring-boot3-starter` — compiled against `spring-boot-dependencies:3.5.13`;
-  `Automatic-Module-Name` `com.macstab.chaos.agent.spring.boot3`; package
-  `com.macstab.chaos.spring.boot3`.
+  `Automatic-Module-Name` `com.macstab.chaos.jvm.agent.spring.boot3`; package
+  `com.macstab.chaos.jvm.spring.boot3`.
 - `chaos-agent-spring-boot4-starter` — compiled against `spring-boot-dependencies:4.0.5`;
-  `Automatic-Module-Name` `com.macstab.chaos.agent.spring.boot4`; package
-  `com.macstab.chaos.spring.boot4`.
+  `Automatic-Module-Name` `com.macstab.chaos.jvm.agent.spring.boot4`; package
+  `com.macstab.chaos.jvm.spring.boot4`.
 
 Each module ships:
 - `ChaosProperties` — `@ConfigurationProperties("macstab.chaos")` with `enabled=false`,
@@ -485,8 +485,8 @@ New module: `chaos-agent-quarkus-extension` targeting the Quarkus 3.x extension 
   `quarkusBom` + `quarkus-bom` library alias). Every Quarkus dependency (`quarkus-core`,
   `quarkus-core-deployment`, `quarkus-arc`, `quarkus-junit5`) is `compileOnly` so the jar
   remains inert until a host application supplies Quarkus on its own classpath. The jar carries
-  `Automatic-Module-Name` `com.macstab.chaos.agent.quarkus`; the package is
-  `com.macstab.chaos.quarkus`.
+  `Automatic-Module-Name` `com.macstab.chaos.jvm.agent.quarkus`; the package is
+  `com.macstab.chaos.jvm.quarkus`.
 - `@ChaosScenario` — declarative annotation (`TYPE`, `METHOD`) with `id`, `selector`, `effect`,
   `scope` attributes. Selector identifiers: `executor`, `jvmRuntime`, `httpClient`, `jdbc`.
   Effect identifiers: `delay:<iso-duration>` (ISO-8601 duration, e.g. `delay:PT0.1S`),
@@ -551,8 +551,8 @@ New module: `chaos-agent-micronaut-integration` targeting the Micronaut 4.x bean
   `gradle/libs.versions.toml` as `micronautBom` + `micronaut-bom` library alias). Every Micronaut
   dependency (`micronaut-inject`, `micronaut-context`, `micronaut-test-junit5`) is `compileOnly` so
   the jar remains inert until a host application supplies Micronaut on its own classpath. The jar
-  carries `Automatic-Module-Name` `com.macstab.chaos.agent.micronaut`; the package is
-  `com.macstab.chaos.micronaut`.
+  carries `Automatic-Module-Name` `com.macstab.chaos.jvm.agent.micronaut`; the package is
+  `com.macstab.chaos.jvm.micronaut`.
 - `ChaosFactory` — `@Factory` bean factory exposing `ChaosControlPlane` as a `@Singleton` guarded
   by `@Requires(missingBeans = ChaosControlPlane.class)`. Mirrors the
   `@ConditionalOnMissingBean` contract of the Spring Boot starters: user-supplied beans win.

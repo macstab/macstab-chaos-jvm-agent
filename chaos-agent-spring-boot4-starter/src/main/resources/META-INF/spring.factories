@@ -1,2 +1,2 @@
 org.springframework.boot.EnvironmentPostProcessor=\
-com.macstab.chaos.spring.boot4.ChaosAgentEnvironmentPostProcessor
+com.macstab.chaos.jvm.spring.boot4.ChaosAgentEnvironmentPostProcessor

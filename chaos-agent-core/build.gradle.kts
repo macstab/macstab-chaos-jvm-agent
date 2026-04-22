@@ -11,6 +11,6 @@ dependencies {
 
 tasks.jar {
     manifest {
-        attributes["Automatic-Module-Name"] = "com.macstab.chaos.agent.core"
+        attributes["Automatic-Module-Name"] = "com.macstab.chaos.jvm.agent.core"
     }
 }

@@ -11,6 +11,6 @@ dependencies {
 
 tasks.jar {
     manifest {
-        attributes["Automatic-Module-Name"] = "com.macstab.chaos.agent.testkit"
+        attributes["Automatic-Module-Name"] = "com.macstab.chaos.jvm.agent.testkit"
     }
 }

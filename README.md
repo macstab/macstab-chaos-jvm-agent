@@ -681,7 +681,7 @@ snap.scenarios().forEach(r ->
 System.out.println(diag.debugDump()); // full text dump
 ```
 
-JMX MBean: `com.macstab.chaos:type=ChaosDiagnostics` — inspect from `jconsole` without code changes.
+JMX MBean: `com.macstab.chaos.jvm:type=ChaosDiagnostics` — inspect from `jconsole` without code changes.
 
 **Diagnosing zero applications**:
 - `matchedCount > 0 && appliedCount == 0` → selector works; activation policy is filtering

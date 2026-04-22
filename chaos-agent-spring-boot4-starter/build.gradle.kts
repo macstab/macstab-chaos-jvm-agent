@@ -26,6 +26,6 @@ dependencies {
 
 tasks.jar {
     manifest {
-        attributes["Automatic-Module-Name"] = "com.macstab.chaos.agent.spring.boot4"
+        attributes["Automatic-Module-Name"] = "com.macstab.chaos.jvm.agent.spring.boot4"
     }
 }

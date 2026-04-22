@@ -1,4 +1,4 @@
-artifact: com.macstab.chaos:chaos-agent-quarkus-extension
+artifact: com.macstab.chaos.jvm:chaos-agent-quarkus-extension
 name: Macstab Chaos JVM Agent
 description: Chaos engineering extension for Quarkus applications
 # The deployment-artifact pointer is mandatory for Quarkus extensions: the
@@ -6,7 +6,7 @@ description: Chaos engineering extension for Quarkus applications
 # deployment jar. Without this line Quarkus silently ignores the extension's
 # build steps, so the feature never registers and the runtime-init recorder
 # bytecode is never emitted.
-deployment-artifact: com.macstab.chaos:chaos-agent-quarkus-extension-deployment
+deployment-artifact: com.macstab.chaos.jvm:chaos-agent-quarkus-extension-deployment
 metadata:
   keywords:
     - chaos

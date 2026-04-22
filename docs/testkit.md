@@ -57,7 +57,7 @@ class MyServiceTest {
 Alternatively, for auto-extension without annotation:
 ```java
 // In META-INF/services/org.junit.jupiter.api.extension.Extension
-com.macstab.chaos.testkit.ChaosAgentExtension
+com.macstab.chaos.jvm.testkit.ChaosAgentExtension
 ```
 
 ## Lifecycle

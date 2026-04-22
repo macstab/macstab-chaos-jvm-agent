@@ -53,17 +53,17 @@ The most novel capability is **CI/CD pipeline integration**: chaos scenarios run
 ```kotlin
 dependencies {
     // Required for all usage — the API types and agent bootstrap
-    testImplementation("com.macstab.chaos:chaos-agent-testkit:0.1.0-SNAPSHOT")
+    testImplementation("com.macstab.chaos.jvm:chaos-agent-testkit:0.1.0-SNAPSHOT")
 
     // Spring Boot 3 test integration (choose one)
-    testImplementation("com.macstab.chaos:chaos-agent-spring-boot3-test-starter:0.1.0-SNAPSHOT")
+    testImplementation("com.macstab.chaos.jvm:chaos-agent-spring-boot3-test-starter:0.1.0-SNAPSHOT")
     // or Spring Boot 4:
-    testImplementation("com.macstab.chaos:chaos-agent-spring-boot4-test-starter:0.1.0-SNAPSHOT")
+    testImplementation("com.macstab.chaos.jvm:chaos-agent-spring-boot4-test-starter:0.1.0-SNAPSHOT")
 
     // Spring Boot 3 runtime starter (Actuator endpoint, live reload)
-    implementation("com.macstab.chaos:chaos-agent-spring-boot3-starter:0.1.0-SNAPSHOT")
+    implementation("com.macstab.chaos.jvm:chaos-agent-spring-boot3-starter:0.1.0-SNAPSHOT")
     // or Spring Boot 4:
-    implementation("com.macstab.chaos:chaos-agent-spring-boot4-starter:0.1.0-SNAPSHOT")
+    implementation("com.macstab.chaos.jvm:chaos-agent-spring-boot4-starter:0.1.0-SNAPSHOT")
 }
 ```
 
@@ -73,14 +73,14 @@ The agent self-attaches at test time via the JDK Attach API — no `-javaagent:`
 
 ```xml
 <dependency>
-    <groupId>com.macstab.chaos</groupId>
+    <groupId>com.macstab.chaos.jvm</groupId>
     <artifactId>chaos-agent-testkit</artifactId>
     <version>0.1.0-SNAPSHOT</version>
     <scope>test</scope>
 </dependency>
 <!-- Or Spring Boot 3 test starter: -->
 <dependency>
-    <groupId>com.macstab.chaos</groupId>
+    <groupId>com.macstab.chaos.jvm</groupId>
     <artifactId>chaos-agent-spring-boot3-test-starter</artifactId>
     <version>0.1.0-SNAPSHOT</version>
     <scope>test</scope>
@@ -501,7 +501,7 @@ For load-soak testing with chaos, run a dedicated container that attaches via dy
 # Attach from a separate container sharing the target's PID namespace
 kubectl exec -n chaos-lab <chaos-runner-pod> -- \
   java -cp chaos-agent-bootstrap.jar \
-    com.macstab.chaos.bootstrap.ChaosAgentAttachCli \
+    com.macstab.chaos.jvm.bootstrap.ChaosAgentAttachCli \
     --pid <target-pid> \
     --config /plans/soak-plan.json
 ```
@@ -563,12 +563,12 @@ Add `debugDump=true` to the agent args to print the full plan on startup:
 
 ### 7.4 JMX MBean
 
-The agent registers a `ChaosDiagnostics` MBean at `com.macstab.chaos:type=ChaosDiagnostics`. Connect with `jconsole`, `jvisualvm`, or any JMX client:
+The agent registers a `ChaosDiagnostics` MBean at `com.macstab.chaos.jvm:type=ChaosDiagnostics`. Connect with `jconsole`, `jvisualvm`, or any JMX client:
 
 ```
 # Via jconsole
 Connect to: service:jmx:rmi:///jndi/rmi://localhost:9999/jmxrmi
-MBean: com.macstab.chaos:type=ChaosDiagnostics
+MBean: com.macstab.chaos.jvm:type=ChaosDiagnostics
   → debugDump()   — full human-readable diagnostic text
   → snapshot()    — structured Snapshot composite data
 ```
@@ -580,7 +580,7 @@ The MBean is read-only: it provides diagnostics but does not accept scenario act
 Add the runtime starter to expose a `/chaos` Actuator endpoint:
 
 ```kotlin
-implementation("com.macstab.chaos:chaos-agent-spring-boot3-starter:0.1.0-SNAPSHOT")
+implementation("com.macstab.chaos.jvm:chaos-agent-spring-boot3-starter:0.1.0-SNAPSHOT")
 ```
 
 ```yaml
@@ -863,7 +863,7 @@ The HANDLE_COUNT is checked at startup via `buildMethodHandles()`: a mismatch be
 ### Running a Single Test Class
 
 ```bash
-./gradlew :chaos-agent-core:test --tests "com.macstab.chaos.core.ScenarioControllerTest"
+./gradlew :chaos-agent-core:test --tests "com.macstab.chaos.jvm.core.ScenarioControllerTest"
 ```
 
 ### Spotless and Google Java Format Version

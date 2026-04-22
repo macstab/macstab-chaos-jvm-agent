@@ -152,7 +152,7 @@ initialize("", instrumentation, Map.of(), true)              // premainMode=true
 
 # 5. JMX MBean
 
-The MBean is registered at `com.macstab.chaos:type=ChaosDiagnostics`.
+The MBean is registered at `com.macstab.chaos.jvm:type=ChaosDiagnostics`.
 
 **Interface**: The MBean exposes `ChaosDiagnostics`:
 - `snapshot()` → `Snapshot` (serialized as JMX composite data)

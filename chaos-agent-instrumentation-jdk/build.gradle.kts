@@ -19,6 +19,6 @@ dependencies {
 
 tasks.jar {
     manifest {
-        attributes["Automatic-Module-Name"] = "com.macstab.chaos.agent.instrumentation.jdk"
+        attributes["Automatic-Module-Name"] = "com.macstab.chaos.jvm.agent.instrumentation.jdk"
     }
 }

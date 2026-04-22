@@ -54,7 +54,7 @@ This document is the authoritative technical reference for configuring chaos sce
 ## Scope
 
 In scope:
-- `com.macstab.chaos.api.*` public API types: `ChaosSelector`, `ChaosEffect`, `OperationType`, `ActivationPolicy`, `NamePattern`, `ChaosScenario`, `ChaosPlan`, `ChaosControlPlane`, `ChaosSession`, `ChaosActivationHandle`
+- `com.macstab.chaos.jvm.api.*` public API types: `ChaosSelector`, `ChaosEffect`, `OperationType`, `ActivationPolicy`, `NamePattern`, `ChaosScenario`, `ChaosPlan`, `ChaosControlPlane`, `ChaosSession`, `ChaosActivationHandle`
 - Startup configuration resolution: `StartupConfigLoader`, `AgentArgsParser`, configuration source priority
 - JSON plan format as deserialized by `ChaosPlanMapper` (Jackson)
 - Selector ↔ effect ↔ operation compatibility matrix
@@ -71,7 +71,7 @@ Out of scope:
 - JDK 21+ is the minimum supported runtime
 - `VIRTUAL_THREAD_START` and `VirtualThreadCarrierPinningEffect` require Project Loom (JDK 21+); the agent probes availability at startup and rejects activation on older runtimes
 - JSON deserialization uses Jackson with `@JsonSubTypes` polymorphic dispatch; the `type` discriminator field is mandatory in JSON for all selector and effect types
-- All API types in `com.macstab.chaos.api` are stable public contracts; all implementation types in `com.macstab.chaos.core` are internal
+- All API types in `com.macstab.chaos.jvm.api` are stable public contracts; all implementation types in `com.macstab.chaos.jvm.core` are internal
 
 ## Non-Goals
 
@@ -132,7 +132,7 @@ If no source is present, the agent starts with no active scenarios. Programmatic
 - **Agent arguments** are set by the process launcher (CI scripts, test harness, Docker entrypoint). They are fully trusted; no further validation of their origin is performed.
 - **Environment variables** are subject to the same trust as the OS process environment. In containerized deployments, they originate from the Kubernetes secret/configmap injection path.
 - **Config files** are validated for path safety (no symlink traversal, no path outside a configured root) by `StartupConfigLoader` before reading.
-- **Exception class names** in `ExceptionInjectionEffect` are restricted to `java.`, `javax.`, `jakarta.`, and `com.macstab.chaos.` packages to prevent `Class.forName` from loading arbitrary attacker-controlled classes from a hostile config file.
+- **Exception class names** in `ExceptionInjectionEffect` are restricted to `java.`, `javax.`, `jakarta.`, and `com.macstab.chaos.jvm.` packages to prevent `Class.forName` from loading arbitrary attacker-controlled classes from a hostile config file.
 
 ---
 
@@ -578,7 +578,7 @@ The chaos runtime is designed to be non-fatal to the application. If an effect t
 java.*
 javax.*
 jakarta.*
-com.macstab.chaos.*
+com.macstab.chaos.jvm.*
 ```
 
 This prevents `Class.forName` from loading an arbitrary class with a malicious static initializer from a hostile config file. Extending the allowlist requires a code change — it is intentional.
@@ -589,7 +589,7 @@ A `StressSelector` / stressor effect combination applies JVM-wide chaos (heap ex
 
 ## 10.4 Observability of Chaos Activity
 
-All chaos events are emitted to registered `ChaosEventListener`s and to JMX (`com.macstab.chaos:type=ChaosDiagnostics`). Chaos activity is therefore visible to any JMX-capable monitoring tool attached to the JVM. In security-sensitive environments where the fact of chaos testing must not be visible to external observers, disable JMX via `ChaosPlan.Observability.jmxEnabled = false`.
+All chaos events are emitted to registered `ChaosEventListener`s and to JMX (`com.macstab.chaos.jvm:type=ChaosDiagnostics`). Chaos activity is therefore visible to any JMX-capable monitoring tool attached to the JVM. In security-sensitive environments where the fact of chaos testing must not be visible to external observers, disable JMX via `ChaosPlan.Observability.jmxEnabled = false`.
 
 ---
 
@@ -636,7 +636,7 @@ GLOB and REGEX patterns are compiled once per unique expression string and cache
 
 ## 12.1 JMX
 
-All active scenarios are published to `com.macstab.chaos:type=ChaosDiagnostics`. Attributes include:
+All active scenarios are published to `com.macstab.chaos.jvm:type=ChaosDiagnostics`. Attributes include:
 - Scenario state (INACTIVE / ACTIVE / EXHAUSTED / RELEASED)
 - Application count per scenario
 - Skip count per scenario
@@ -1312,7 +1312,7 @@ ChaosEffect.delay(Duration.ofSeconds(2))  // deterministic
 | `message` | String | non-blank | Exception message |
 | `withStackTrace` | boolean | default `true` | `false` = no stack trace; lower overhead, less detectable |
 
-**Allowed package prefixes:** `java.`, `javax.`, `jakarta.`, `com.macstab.chaos.`
+**Allowed package prefixes:** `java.`, `javax.`, `jakarta.`, `com.macstab.chaos.jvm.`
 
 **JSON example:**
 ```json
@@ -1800,7 +1800,7 @@ System.out.println(diag.applicationCount("my-scenario")); // 42
 
 # 14. Extension Points and Compatibility
 
-## 14.1 Stable Public API (`com.macstab.chaos.api`)
+## 14.1 Stable Public API (`com.macstab.chaos.jvm.api`)
 
 All types in the `chaos-agent-api` module are stable public API:
 - `ChaosSelector` and all record subtypes
@@ -1816,9 +1816,9 @@ All types in the `chaos-agent-api` module are stable public API:
 ## 14.2 Internal Implementation (not API)
 
 Do not depend on:
-- `com.macstab.chaos.core.*` (internal implementation of ChaosControlPlane, ScenarioRegistry, ChaosDispatcher, stressor implementations)
-- `com.macstab.chaos.bootstrap.*` (BootstrapDispatcher internals)
-- `com.macstab.chaos.instrumentation.*` (ByteBuddy advice classes)
+- `com.macstab.chaos.jvm.core.*` (internal implementation of ChaosControlPlane, ScenarioRegistry, ChaosDispatcher, stressor implementations)
+- `com.macstab.chaos.jvm.bootstrap.*` (BootstrapDispatcher internals)
+- `com.macstab.chaos.jvm.instrumentation.*` (ByteBuddy advice classes)
 
 ## 14.3 Custom Event Listeners
 
@@ -1850,7 +1850,7 @@ Constraints: listeners are called synchronously on the intercepting thread. Must
 
 ## 15.1 API / Framework Layer
 
-The entry point for all chaos configuration is the `com.macstab.chaos.api` package. This layer is:
+The entry point for all chaos configuration is the `com.macstab.chaos.jvm.api` package. This layer is:
 - Serialization-aware: all types annotated with Jackson `@JsonTypeInfo`/`@JsonSubTypes` for polymorphic JSON round-tripping
 - Validation-complete: all invariants are enforced in record canonical constructors (fail-fast at plan-build time, not at dispatch time)
 - Immutable: all record types; `ChaosScenario.tags` is an unmodifiable `LinkedHashMap` copy; `ChaosPlan.scenarios` is `List.copyOf`

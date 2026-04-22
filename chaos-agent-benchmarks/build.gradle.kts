@@ -15,6 +15,6 @@ application {
 
 tasks.jar {
     manifest {
-        attributes["Automatic-Module-Name"] = "com.macstab.chaos.agent.benchmarks"
+        attributes["Automatic-Module-Name"] = "com.macstab.chaos.jvm.agent.benchmarks"
     }
 }

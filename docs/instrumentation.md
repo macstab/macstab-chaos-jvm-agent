@@ -249,7 +249,7 @@ rectangle "Phase 2 (premain only)" {
 **`AgentBuilder` configuration**:
 - `disableClassFormatChanges()`: prevents ByteBuddy from adding fields or changing the constant pool structure — required for retransformation
 - `RedefinitionStrategy.RETRANSFORMATION`: allows transforming already-loaded classes; required for Phase 2 JDK classes that are loaded before the agent
-- `ignore(nameStartsWith("net.bytebuddy.") or nameStartsWith("com.macstab.chaos."))`: prevents self-instrumentation of the agent and ByteBuddy itself
+- `ignore(nameStartsWith("net.bytebuddy.") or nameStartsWith("com.macstab.chaos.jvm."))`: prevents self-instrumentation of the agent and ByteBuddy itself
 
 ## BootstrapDispatcher
 
@@ -541,7 +541,7 @@ Both slots carry the URL string as a single `String` argument and return `boolea
 
 None of the four client libraries is a compile-time dependency of `chaos-agent-instrumentation-jdk`. They are declared `compileOnly` in the module so that the agent JAR carries no transitive class references to OkHttp, Apache HC, or Reactor Netty. At advice-weave time ByteBuddy inlines the advice bytecode into the target method; if a reference to `okhttp3.HttpUrl` appeared in the advice class descriptor the JVM would require that class to be present at transformation time. Using `Object`-typed parameters and reflective dispatch sidesteps this entirely.
 
-`HttpUrlExtractor` (package-private in `com.macstab.chaos.instrumentation`) resolves URLs through a `ConcurrentHashMap<String, Method>` keyed on `"$className#$methodName"`. On first call for a given class the method is located by walking the class hierarchy — declared methods, then interface methods, then superclass — looking for a zero-argument method with the target name. The found `Method` is stored in the cache with `setAccessible(true)` for subsequent fast-path invocations. The cache key includes the runtime class name so that distinct OkHttp `Call` subtypes or proxy wrappers each get their own cache slot.
+`HttpUrlExtractor` (package-private in `com.macstab.chaos.jvm.instrumentation`) resolves URLs through a `ConcurrentHashMap<String, Method>` keyed on `"$className#$methodName"`. On first call for a given class the method is located by walking the class hierarchy — declared methods, then interface methods, then superclass — looking for a zero-argument method with the target name. The found `Method` is stored in the cache with `setAccessible(true)` for subsequent fast-path invocations. The cache key includes the runtime class name so that distinct OkHttp `Call` subtypes or proxy wrappers each get their own cache slot.
 
 For each client:
 
