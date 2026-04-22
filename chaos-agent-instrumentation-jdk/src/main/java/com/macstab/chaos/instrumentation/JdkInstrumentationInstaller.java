@@ -879,6 +879,17 @@ public final class JdkInstrumentationInstaller {
    * hooks, ForkJoin). Gated behind {@code premainMode}.
    */
   private static AgentBuilder applyPhase1ConcurrencyTransformations(final AgentBuilder builder) {
+    AgentBuilder b = builder;
+    b = applyBlockingQueueTransformations(b);
+    b = applyCompletableFutureTransformations(b);
+    b = applyClassLoaderTransformations(b);
+    b = applyShutdownHookTransformations(b);
+    b = applyForkJoinTransformations(b);
+    return b;
+  }
+
+  /** BlockingQueue put/take/poll/offer instrumentation. */
+  private static AgentBuilder applyBlockingQueueTransformations(final AgentBuilder builder) {
     return builder
         .type(
             ElementMatchers.isSubTypeOf(java.util.concurrent.BlockingQueue.class)
@@ -900,7 +911,12 @@ public final class JdkInstrumentationInstaller {
                         Advice.to(QueueAdvice.OfferAdvice.class)
                             .on(
                                 ElementMatchers.named("offer")
-                                    .and(ElementMatchers.takesArguments(1)))))
+                                    .and(ElementMatchers.takesArguments(1)))));
+  }
+
+  /** CompletableFuture complete / completeExceptionally instrumentation. */
+  private static AgentBuilder applyCompletableFutureTransformations(final AgentBuilder builder) {
+    return builder
         .type(ElementMatchers.named("java.util.concurrent.CompletableFuture"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
@@ -914,7 +930,12 @@ public final class JdkInstrumentationInstaller {
                         Advice.to(CompletableFutureAdvice.CompleteExceptionallyAdvice.class)
                             .on(
                                 ElementMatchers.named("completeExceptionally")
-                                    .and(ElementMatchers.takesArguments(Throwable.class)))))
+                                    .and(ElementMatchers.takesArguments(Throwable.class)))));
+  }
+
+  /** ClassLoader loadClass / getResource instrumentation. */
+  private static AgentBuilder applyClassLoaderTransformations(final AgentBuilder builder) {
+    return builder
         .type(ElementMatchers.named("java.lang.ClassLoader"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
@@ -940,7 +961,12 @@ public final class JdkInstrumentationInstaller {
                         Advice.to(ClassLoaderAdvice.GetResourceAdvice.class)
                             .on(
                                 ElementMatchers.named("getResource")
-                                    .and(ElementMatchers.takesArguments(String.class)))))
+                                    .and(ElementMatchers.takesArguments(String.class)))));
+  }
+
+  /** Runtime addShutdownHook / removeShutdownHook instrumentation. */
+  private static AgentBuilder applyShutdownHookTransformations(final AgentBuilder builder) {
+    return builder
         .type(ElementMatchers.named("java.lang.Runtime"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
@@ -954,7 +980,12 @@ public final class JdkInstrumentationInstaller {
                         Advice.to(ShutdownAdvice.RemoveShutdownHookAdvice.class)
                             .on(
                                 ElementMatchers.named("removeShutdownHook")
-                                    .and(ElementMatchers.takesArguments(Thread.class)))))
+                                    .and(ElementMatchers.takesArguments(Thread.class)))));
+  }
+
+  /** ForkJoinTask.doExec instrumentation. */
+  private static AgentBuilder applyForkJoinTransformations(final AgentBuilder builder) {
+    return builder
         .type(ElementMatchers.named("java.util.concurrent.ForkJoinTask"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
