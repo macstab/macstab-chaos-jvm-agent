@@ -1295,92 +1295,108 @@ public final class JdkInstrumentationInstaller {
    * cancel, and SSL/TLS handshake. Gated behind {@code premainMode}.
    */
   private static AgentBuilder applyPhase2NetworkTransformations(final AgentBuilder builder) {
-    // ThreadLocal.get() / set() (THREAD_LOCAL_GET / THREAD_LOCAL_SET)
-    // Previously excluded due to reentrancy with BootstrapDispatcher.DEPTH (also a ThreadLocal).
-    // Now safe: ThreadLocalGetAdvice and ThreadLocalSetAdvice include an identity check
-    // (threadLocal == BootstrapDispatcher.DEPTH) that exits before any delegation, breaking
-    // the recursion at the only point where it could occur. See ThreadLocalGetAdvice for the
-    // full reentrancy analysis.
+    AgentBuilder agentBuilder = builder;
+    agentBuilder = applyThreadLocalTransformations(agentBuilder);
+    agentBuilder = applyTimeApiTransformations(agentBuilder);
+    agentBuilder = applyCompletableFutureCancelTransformations(agentBuilder);
+    agentBuilder = applySslHandshakeTransformations(agentBuilder);
+    return agentBuilder;
+  }
+
+  /**
+   * ThreadLocal.get() / set() (THREAD_LOCAL_GET / THREAD_LOCAL_SET). Previously excluded due to
+   * reentrancy with BootstrapDispatcher.DEPTH (also a ThreadLocal). Now safe: ThreadLocalGetAdvice
+   * and ThreadLocalSetAdvice include an identity check (threadLocal == BootstrapDispatcher.DEPTH)
+   * that exits before any delegation, breaking the recursion at the only point where it could
+   * occur. See ThreadLocalGetAdvice for the full reentrancy analysis.
+   */
+  private static AgentBuilder applyThreadLocalTransformations(final AgentBuilder builder) {
+    return builder
+        .type(ElementMatchers.named("java.lang.ThreadLocal"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.ThreadLocalGetAdvice.class)
+                            .on(
+                                ElementMatchers.named("get")
+                                    .and(ElementMatchers.takesArguments(0))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.ThreadLocalSetAdvice.class)
+                            .on(
+                                ElementMatchers.named("set")
+                                    .and(ElementMatchers.takesArguments(1)))));
+  }
+
+  /**
+   * Higher-level time APIs. Direct System.currentTimeMillis() / System.nanoTime() cannot be
+   * intercepted (see note in install()) but java.time.Instant.now(), java.time.LocalDateTime.now(),
+   * java.time.ZonedDateTime.now(), and java.util.Date() are regular Java members that can be woven
+   * at exit.
+   */
+  private static AgentBuilder applyTimeApiTransformations(final AgentBuilder builder) {
+    return builder
+        .type(ElementMatchers.named("java.time.Instant"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(JvmRuntimeAdvice.InstantNowAdvice.class)
+                        .on(
+                            ElementMatchers.named("now")
+                                .and(ElementMatchers.isStatic())
+                                .and(ElementMatchers.takesArguments(0)))))
+        .type(ElementMatchers.named("java.time.LocalDateTime"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(JvmRuntimeAdvice.LocalDateTimeNowAdvice.class)
+                        .on(
+                            ElementMatchers.named("now")
+                                .and(ElementMatchers.isStatic())
+                                .and(ElementMatchers.takesArguments(0)))))
+        .type(ElementMatchers.named("java.time.ZonedDateTime"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(JvmRuntimeAdvice.ZonedDateTimeNowAdvice.class)
+                        .on(
+                            ElementMatchers.named("now")
+                                .and(ElementMatchers.isStatic())
+                                .and(ElementMatchers.takesArguments(0)))))
+        .type(ElementMatchers.named("java.util.Date"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(JvmRuntimeAdvice.DateNewAdvice.class)
+                        .on(
+                            ElementMatchers.isConstructor()
+                                .and(ElementMatchers.takesArguments(0)))));
+  }
+
+  /** CompletableFuture.cancel instrumentation. */
+  private static AgentBuilder applyCompletableFutureCancelTransformations(
+      final AgentBuilder builder) {
+    return builder
+        .type(ElementMatchers.named("java.util.concurrent.CompletableFuture"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(JvmRuntimeAdvice.AsyncCancelAdvice.class)
+                        .on(
+                            ElementMatchers.named("cancel")
+                                .and(ElementMatchers.takesArguments(boolean.class)))));
+  }
+
+  /**
+   * SSL/TLS handshake interception on concrete SSLSocket / SSLEngine subtypes. SSLSocket and
+   * SSLEngine themselves are abstract; concrete subclasses (SSLSocketImpl, SSLEngineImpl) override
+   * startHandshake / beginHandshake, so advice on the abstract class alone would never fire.
+   * Interface / synthetic filters exclude Mockito/CGLIB generated proxies that would otherwise trip
+   * VerifyError during class transformation.
+   */
+  private static AgentBuilder applySslHandshakeTransformations(final AgentBuilder builder) {
     AgentBuilder agentBuilder =
         builder
-            .type(ElementMatchers.named("java.lang.ThreadLocal"))
-            .transform(
-                (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
-                    typeBuilder
-                        .visit(
-                            Advice.to(JvmRuntimeAdvice.ThreadLocalGetAdvice.class)
-                                .on(
-                                    ElementMatchers.named("get")
-                                        .and(ElementMatchers.takesArguments(0))))
-                        .visit(
-                            Advice.to(JvmRuntimeAdvice.ThreadLocalSetAdvice.class)
-                                .on(
-                                    ElementMatchers.named("set")
-                                        .and(ElementMatchers.takesArguments(1)))));
-
-    // ── Higher-level time APIs ────────────────────────────────────────────
-    // Direct System.currentTimeMillis() / System.nanoTime() cannot be intercepted (see note
-    // in install()) but java.time.Instant.now(), java.time.LocalDateTime.now(),
-    // java.time.ZonedDateTime.now(), and java.util.Date() are regular Java members that can
-    // be woven at exit.
-    agentBuilder =
-        agentBuilder
-            .type(ElementMatchers.named("java.time.Instant"))
-            .transform(
-                (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
-                    typeBuilder.visit(
-                        Advice.to(JvmRuntimeAdvice.InstantNowAdvice.class)
-                            .on(
-                                ElementMatchers.named("now")
-                                    .and(ElementMatchers.isStatic())
-                                    .and(ElementMatchers.takesArguments(0)))))
-            .type(ElementMatchers.named("java.time.LocalDateTime"))
-            .transform(
-                (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
-                    typeBuilder.visit(
-                        Advice.to(JvmRuntimeAdvice.LocalDateTimeNowAdvice.class)
-                            .on(
-                                ElementMatchers.named("now")
-                                    .and(ElementMatchers.isStatic())
-                                    .and(ElementMatchers.takesArguments(0)))))
-            .type(ElementMatchers.named("java.time.ZonedDateTime"))
-            .transform(
-                (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
-                    typeBuilder.visit(
-                        Advice.to(JvmRuntimeAdvice.ZonedDateTimeNowAdvice.class)
-                            .on(
-                                ElementMatchers.named("now")
-                                    .and(ElementMatchers.isStatic())
-                                    .and(ElementMatchers.takesArguments(0)))))
-            .type(ElementMatchers.named("java.util.Date"))
-            .transform(
-                (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
-                    typeBuilder.visit(
-                        Advice.to(JvmRuntimeAdvice.DateNewAdvice.class)
-                            .on(
-                                ElementMatchers.isConstructor()
-                                    .and(ElementMatchers.takesArguments(0)))));
-
-    // CompletableFuture.cancel
-    agentBuilder =
-        agentBuilder
-            .type(ElementMatchers.named("java.util.concurrent.CompletableFuture"))
-            .transform(
-                (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
-                    typeBuilder.visit(
-                        Advice.to(JvmRuntimeAdvice.AsyncCancelAdvice.class)
-                            .on(
-                                ElementMatchers.named("cancel")
-                                    .and(ElementMatchers.takesArguments(boolean.class)))));
-
-    // ── SSL/TLS handshake interception ────────────────────────────────────
-    // SSLSocket and SSLEngine are abstract; concrete subclasses (SSLSocketImpl,
-    // SSLEngineImpl) override startHandshake/beginHandshake, so advice on the
-    // abstract class alone would never fire. Target all concrete subtypes instead.
-    // Interface / synthetic filters exclude Mockito/CGLIB generated proxies that would
-    // otherwise trip VerifyError during class transformation.
-    agentBuilder =
-        agentBuilder
             .type(
                 ElementMatchers.isSubTypeOf(javax.net.ssl.SSLSocket.class)
                     .and(ElementMatchers.not(ElementMatchers.isAbstract()))
