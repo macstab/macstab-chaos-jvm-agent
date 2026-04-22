@@ -33,17 +33,20 @@ import io.quarkus.deployment.builditem.FeatureBuildItem;
  */
 public final class ChaosQuarkusBuildStep {
 
+  /** Feature name reported in the Quarkus startup banner. */
+  private static final String FEATURE_NAME = "macstab-chaos-agent";
+
   /** Default constructor; Quarkus instantiates build-step classes reflectively. */
   public ChaosQuarkusBuildStep() {}
 
   /**
    * Produces the feature marker for the Quarkus startup banner.
    *
-   * @return a {@link FeatureBuildItem} whose name is {@code "macstab-chaos-agent"}
+   * @return a {@link FeatureBuildItem} whose name is {@link #FEATURE_NAME}
    */
   @BuildStep
   public FeatureBuildItem feature() {
-    return new FeatureBuildItem("macstab-chaos-agent");
+    return new FeatureBuildItem(FEATURE_NAME);
   }
 
   /**
