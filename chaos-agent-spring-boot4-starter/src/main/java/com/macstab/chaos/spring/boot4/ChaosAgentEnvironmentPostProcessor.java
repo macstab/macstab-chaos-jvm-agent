@@ -37,6 +37,12 @@ public class ChaosAgentEnvironmentPostProcessor implements EnvironmentPostProces
   /** Key whose presence proves this EPP ran and attached the agent. */
   public static final String ATTACH_MARKER_PROPERTY = "macstab.chaos.agent.attach-phase";
 
+  /** Value written to {@link #ATTACH_MARKER_PROPERTY} to identify this starter variant. */
+  private static final String ATTACH_PHASE_VALUE = "spring-boot-4";
+
+  /** Property key consulted to decide whether chaos instrumentation should be installed. */
+  private static final String CHAOS_ENABLED_PROPERTY = "macstab.chaos.enabled";
+
   private static final Logger LOGGER =
       Logger.getLogger(ChaosAgentEnvironmentPostProcessor.class.getName());
 
@@ -63,6 +69,13 @@ public class ChaosAgentEnvironmentPostProcessor implements EnvironmentPostProces
   /** System property / env-var name that opts in to honouring remote property sources. */
   private static final String ALLOW_REMOTE_ENABLE_PROPERTY = "macstab.chaos.allow-remote-enable";
 
+  /**
+   * Name of the synthetic aggregator property source that Spring Boot prepends before EPPs fire.
+   * It delegates containsProperty() to every real backing source, so it must be skipped to avoid
+   * false-positive trust evaluations.
+   */
+  private static final String CONFIGURATION_PROPERTIES_AGGREGATOR_SOURCE = "configurationProperties";
+
   /** Default constructor invoked by Spring Boot via SPI. */
   public ChaosAgentEnvironmentPostProcessor() {}
 
@@ -74,18 +87,18 @@ public class ChaosAgentEnvironmentPostProcessor implements EnvironmentPostProces
     }
     try {
       ChaosPlatform.installLocally();
-      environment
-          .getPropertySources()
-          .addFirst(
-              new MapPropertySource(
-                  ATTACH_MARKER_SOURCE,
-                  Collections.singletonMap(ATTACH_MARKER_PROPERTY, "spring-boot-4")));
+      environment.getPropertySources().addFirst(buildAttachMarkerPropertySource());
     } catch (final RuntimeException exception) {
       LOGGER.log(
           Level.WARNING,
           exception,
           () -> "chaos-agent: failed to self-attach during Spring Boot startup");
     }
+  }
+
+  private static MapPropertySource buildAttachMarkerPropertySource() {
+    return new MapPropertySource(
+        ATTACH_MARKER_SOURCE, Collections.singletonMap(ATTACH_MARKER_PROPERTY, ATTACH_PHASE_VALUE));
   }
 
   /**
@@ -97,11 +110,11 @@ public class ChaosAgentEnvironmentPostProcessor implements EnvironmentPostProces
    * a runtime one.
    */
   private static boolean enabledByTrustedSource(final ConfigurableEnvironment environment) {
-    final String resolved = environment.getProperty("macstab.chaos.enabled");
+    final String resolved = environment.getProperty(CHAOS_ENABLED_PROPERTY);
     if (!Boolean.parseBoolean(resolved)) {
       return false;
     }
-    if (valueComesFromTrustedSource(environment, "macstab.chaos.enabled")) {
+    if (valueComesFromTrustedSource(environment, CHAOS_ENABLED_PROPERTY)) {
       return true;
     }
     if (Boolean.parseBoolean(environment.getProperty(ALLOW_REMOTE_ENABLE_PROPERTY))
@@ -126,7 +139,7 @@ public class ChaosAgentEnvironmentPostProcessor implements EnvironmentPostProces
       // any key that any underlying source owns. Evaluating trust against this wrapper's name
       // would always yield false (it is not a real source). Skip it so the real backing sources
       // are evaluated in precedence order instead.
-      if ("configurationProperties".equals(source.getName())) {
+      if (CONFIGURATION_PROPERTIES_AGGREGATOR_SOURCE.equals(source.getName())) {
         continue;
       }
       if (!source.containsProperty(propertyName)) {
