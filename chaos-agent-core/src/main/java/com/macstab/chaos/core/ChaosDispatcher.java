@@ -1204,20 +1204,10 @@ public final class ChaosDispatcher {
    * @throws Throwable if an active scenario throws to simulate an I/O failure
    */
   public void beforeFileIo(final String operation, final Object stream) throws Throwable {
-    final OperationType opType;
-    if ("FILE_IO_READ".equals(operation)) {
-      opType = OperationType.FILE_IO_READ;
-    } else if ("FILE_IO_WRITE".equals(operation)) {
-      opType = OperationType.FILE_IO_WRITE;
-    } else {
-      throw new IllegalArgumentException(
-          "Unknown file I/O operation tag '"
-              + operation
-              + "'; expected FILE_IO_READ or FILE_IO_WRITE");
-    }
+    final OperationType fileIoOpType = resolveFileIoOperationType(operation);
     final InvocationContext context =
         new InvocationContext(
-            opType,
+            fileIoOpType,
             stream == null ? "java.io.FileInputStream" : stream.getClass().getName(),
             null,
             null,
@@ -1226,6 +1216,19 @@ public final class ChaosDispatcher {
             null,
             scopeContext.currentSessionId());
     applyPreDecision(evaluate(context));
+  }
+
+  private static OperationType resolveFileIoOperationType(final String operationTag) {
+    if ("FILE_IO_READ".equals(operationTag)) {
+      return OperationType.FILE_IO_READ;
+    }
+    if ("FILE_IO_WRITE".equals(operationTag)) {
+      return OperationType.FILE_IO_WRITE;
+    }
+    throw new IllegalArgumentException(
+        "Unknown file I/O operation tag '"
+            + operationTag
+            + "'; expected FILE_IO_READ or FILE_IO_WRITE");
   }
 
   private boolean evaluateJdbc(
@@ -1513,9 +1516,9 @@ public final class ChaosDispatcher {
     if (task == null) {
       return null;
     }
-    final String name = task.getClass().getName();
-    final int syntheticIdx = name.indexOf("$$Lambda$");
-    return syntheticIdx == -1 ? name : name.substring(0, syntheticIdx);
+    final String fullName = task.getClass().getName();
+    final int lambdaSuffixIndex = fullName.indexOf("$$Lambda$");
+    return lambdaSuffixIndex == -1 ? fullName : fullName.substring(0, lambdaSuffixIndex);
   }
 
   private static String extractRemoteHost(final Object socketAddress) {

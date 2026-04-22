@@ -401,15 +401,15 @@ final class ScenarioController {
       markInactive("expired");
       return null;
     }
-    final long matched = matchedCount.incrementAndGet();
-    if (matched <= scenario.activationPolicy().activateAfterMatches()) {
+    final long matchCount = matchedCount.incrementAndGet();
+    if (matchCount <= scenario.activationPolicy().activateAfterMatches()) {
       return null;
     }
     // Probability is checked before rate-limit so that rate-limit permits are only consumed when
     // the effect will actually be applied. Checking rate-limit first would burn permits on
     // invocations that probability then rejects, making the effective throughput
     // `rate_limit * probability` instead of the operator-configured `rate_limit`.
-    if (!passesProbability(matched)) {
+    if (!passesProbability(matchCount)) {
       return null;
     }
     if (!passesRateLimit()) {
@@ -424,38 +424,53 @@ final class ScenarioController {
     if (!started.get()) {
       return null;
     }
-    // Task 2: CAS loop to ensure appliedCount never overshoots maxApplications under
-    // concurrency. The naive incrementAndGet-then-check pattern allowed the counter to
-    // exceed the cap when multiple threads raced through this branch simultaneously.
-    final Long maxApplications = scenario.activationPolicy().maxApplications();
-    if (maxApplications != null) {
-      while (true) {
-        final long current = appliedCount.get();
-        if (current >= maxApplications) {
-          markInactive("max applications reached");
-          return null;
-        }
-        if (appliedCount.compareAndSet(current, current + 1L)) {
-          break;
-        }
-      }
-    } else {
-      appliedCount.incrementAndGet();
+    if (!incrementAppliedCountWithinCap()) {
+      return null;
     }
-    final Map<String, String> appliedAttrs = new LinkedHashMap<>();
-    appliedAttrs.put("operation", context.operationType().name());
-    appliedAttrs.put("scope", scopeKey);
-    appliedAttrs.put("effectType", scenario.effect().getClass().getSimpleName());
+    publishAppliedEvent(context);
+    return new ScenarioContribution(
+        this, scenario, scenario.effect(), sampleDelayMillis(matchCount), gateTimeout());
+  }
+
+  /**
+   * Increments {@code appliedCount} respecting the {@code maxApplications} cap via a CAS loop.
+   * Returns {@code true} if the count was successfully incremented, {@code false} if the cap was
+   * reached and the scenario should transition to {@code INACTIVE}.
+   */
+  private boolean incrementAppliedCountWithinCap() {
+    final Long maxApplications = scenario.activationPolicy().maxApplications();
+    if (maxApplications == null) {
+      appliedCount.incrementAndGet();
+      return true;
+    }
+    // CAS loop to ensure appliedCount never overshoots maxApplications under concurrency.
+    // The naive incrementAndGet-then-check pattern allowed the counter to exceed the cap
+    // when multiple threads raced through this branch simultaneously.
+    while (true) {
+      final long currentCount = appliedCount.get();
+      if (currentCount >= maxApplications) {
+        markInactive("max applications reached");
+        return false;
+      }
+      if (appliedCount.compareAndSet(currentCount, currentCount + 1L)) {
+        return true;
+      }
+    }
+  }
+
+  private void publishAppliedEvent(final InvocationContext context) {
+    final Map<String, String> eventAttributes = new LinkedHashMap<>();
+    eventAttributes.put("operation", context.operationType().name());
+    eventAttributes.put("scope", scopeKey);
+    eventAttributes.put("effectType", scenario.effect().getClass().getSimpleName());
     if (sessionId != null) {
-      appliedAttrs.put("sessionId", sessionId);
+      eventAttributes.put("sessionId", sessionId);
     }
     observabilityBus.publish(
-        ChaosEvent.Type.APPLIED, scenario.id(), "scenario effect applied", appliedAttrs);
+        ChaosEvent.Type.APPLIED, scenario.id(), "scenario effect applied", eventAttributes);
     observabilityBus.incrementMetric(
         "chaos.effect.applied",
         Map.of("scenarioId", scenario.id(), "operation", context.operationType().name()));
-    return new ScenarioContribution(
-        this, scenario, scenario.effect(), sampleDelayMillis(matched), gateTimeout());
   }
 
   ChaosDiagnostics.ScenarioReport snapshot() {

@@ -93,29 +93,27 @@ final class ThreadLocalLeakStressor implements ManagedStressor {
         cleanupTasks.add(ForkJoinPool.commonPool().submit(local::remove));
       }
     }
-    int failures = 0;
+    int failedTaskCount = 0;
     for (final ForkJoinTask<?> task : cleanupTasks) {
       try {
         task.join();
-      } catch (final Exception failure) {
+      } catch (final Exception taskFailure) {
         // Escalate individual failures beyond FINE: a silently swallowed cleanup task means a
         // planted entry is permanently retained, and operators watching INFO/WARNING logs would
         // otherwise never learn why plantedCount() reports the original size post-close. The
         // stack trace is preserved on the per-task warning so the concrete failure (pool
         // rejection, OOM, unchecked exception from remove()) is attributable.
-        failures++;
+        failedTaskCount++;
         LOGGER.log(
-            java.util.logging.Level.WARNING,
-            "chaos thread-local-leak cleanup task failed",
-            failure);
+            java.util.logging.Level.WARNING, "chaos thread-local-leak cleanup task failed", taskFailure);
       }
     }
-    if (failures > 0) {
-      final int total = failures;
+    if (failedTaskCount > 0) {
+      final int capturedFailureCount = failedTaskCount;
       LOGGER.warning(
           () ->
               "chaos thread-local-leak cleanup completed with "
-                  + total
+                  + capturedFailureCount
                   + " failed task(s) out of "
                   + plantedLocals.size()
                   + "; ThreadLocal entries on affected pool threads may remain until workers"

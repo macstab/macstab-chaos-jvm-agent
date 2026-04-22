@@ -73,11 +73,11 @@ final class CodeCachePressureStressor implements ManagedStressor {
       final Thread compiler =
           new Thread(
               () -> {
-                for (final Class<?> cls2 : snapshot) {
+                for (final Class<?> loadedClass : snapshot) {
                   if (retainedClasses == null) {
                     return;
                   }
-                  triggerCompilation(cls2, methodsPerClass);
+                  triggerCompilation(loadedClass, methodsPerClass);
                 }
               },
               "chaos-code-cache-compiler");

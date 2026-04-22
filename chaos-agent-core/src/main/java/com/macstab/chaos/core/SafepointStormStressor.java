@@ -135,12 +135,9 @@ final class SafepointStormStressor implements ManagedStressor {
     if (cls.isArray() || cls.isHidden() || cls.isPrimitive()) {
       return false;
     }
-    final String name = cls.getName();
-    if (name.startsWith("com.macstab.chaos.")
-        || name.startsWith("net.bytebuddy.")
-        || name.startsWith("jdk.internal.")) {
-      return false;
-    }
-    return true;
+    final String className = cls.getName();
+    return !className.startsWith("com.macstab.chaos.")
+        && !className.startsWith("net.bytebuddy.")
+        && !className.startsWith("jdk.internal.");
   }
 }

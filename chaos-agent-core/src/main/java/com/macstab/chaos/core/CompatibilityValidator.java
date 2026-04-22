@@ -240,10 +240,21 @@ final class CompatibilityValidator {
     final ChaosEffect effect = scenario.effect();
     final ChaosSelector selector = scenario.selector();
 
-    // Destructive-effect guard: DeadlockEffect and ThreadLeakEffect create non-recoverable
-    // JVM state (deadlocked/parked threads that cannot be interrupted). Require explicit
-    // opt-in via ActivationPolicy.allowDestructiveEffects() to prevent accidental activation
-    // in long-lived processes. Fail at registration time, not at effect application time.
+    validateDestructiveEffectGuard(effect, scenario);
+    validateStressorEffectRequiresStressSelector(effect, selector);
+    validateGateEffectNotWithStressSelector(effect, selector);
+    validateEffectSelectorAffinity(effect, selector);
+    validateSelectorOperationSets(selector);
+    validateOperationTypeSelectorAffinity(selector);
+  }
+
+  /**
+   * Rejects {@link ChaosEffect.DeadlockEffect} and {@link ChaosEffect.ThreadLeakEffect} unless the
+   * scenario explicitly opts in via {@link
+   * com.macstab.chaos.api.ActivationPolicy#allowDestructiveEffects()}.
+   */
+  private static void validateDestructiveEffectGuard(
+      final ChaosEffect effect, final ChaosScenario scenario) {
     if ((effect instanceof ChaosEffect.DeadlockEffect
             || effect instanceof ChaosEffect.ThreadLeakEffect)
         && !scenario.activationPolicy().allowDestructiveEffects()) {
@@ -254,9 +265,22 @@ final class CompatibilityValidator {
               + "Activate only with ActivationPolicy.withDestructiveEffects() or "
               + "allowDestructiveEffects=true in your JSON plan.");
     }
+  }
 
-    // Stressor effects require StressSelector — not valid with any interception selector.
-    if (effect instanceof ChaosEffect.HeapPressureEffect
+  /**
+   * Rejects stressor effects (heap, metaspace, GC, etc.) when paired with any selector other than
+   * {@link ChaosSelector.StressSelector}.
+   */
+  private static void validateStressorEffectRequiresStressSelector(
+      final ChaosEffect effect, final ChaosSelector selector) {
+    if (isStressorEffect(effect) && !(selector instanceof ChaosSelector.StressSelector)) {
+      throw new ChaosValidationException(
+          effect.getClass().getSimpleName() + " is a stressor effect and requires StressSelector");
+    }
+  }
+
+  private static boolean isStressorEffect(final ChaosEffect effect) {
+    return effect instanceof ChaosEffect.HeapPressureEffect
         || effect instanceof ChaosEffect.MetaspacePressureEffect
         || effect instanceof ChaosEffect.DirectBufferPressureEffect
         || effect instanceof ChaosEffect.GcPressureEffect
@@ -270,174 +294,153 @@ final class CompatibilityValidator {
         || effect instanceof ChaosEffect.SafepointStormEffect
         || effect instanceof ChaosEffect.StringInternPressureEffect
         || effect instanceof ChaosEffect.ReferenceQueueFloodEffect
-        || effect instanceof ChaosEffect.VirtualThreadCarrierPinningEffect) {
-      if (!(selector instanceof ChaosSelector.StressSelector)) {
-        throw new ChaosValidationException(
-            effect.getClass().getSimpleName()
-                + " is a stressor effect and requires StressSelector");
-      }
-    }
+        || effect instanceof ChaosEffect.VirtualThreadCarrierPinningEffect;
+  }
 
-    // Task 8: GateEffect is not meaningful with StressSelector — stressors activate
-    // immediately on start() and are not gated on a per-invocation basis.
+  /**
+   * Rejects {@link ChaosEffect.GateEffect} paired with {@link ChaosSelector.StressSelector} because
+   * stressors activate on lifecycle events, not per-invocation gates.
+   */
+  private static void validateGateEffectNotWithStressSelector(
+      final ChaosEffect effect, final ChaosSelector selector) {
     if (effect instanceof ChaosEffect.GateEffect
         && selector instanceof ChaosSelector.StressSelector) {
       throw new ChaosValidationException(
           "GateEffect is not valid with StressSelector — stressors activate independently of the"
               + " gate mechanism");
     }
+  }
 
-    // ExceptionalCompletionEffect is CompletableFuture-specific.
+  /**
+   * Validates effect-to-selector affinity rules: each effect type that requires a specific selector
+   * kind is checked here, including operation-set sub-constraints for method and NIO effects.
+   */
+  private static void validateEffectSelectorAffinity(
+      final ChaosEffect effect, final ChaosSelector selector) {
     if (effect instanceof ChaosEffect.ExceptionalCompletionEffect
         && !(selector instanceof ChaosSelector.AsyncSelector)) {
       throw new ChaosValidationException(
           "ExceptionalCompletionEffect is only valid with AsyncSelector");
     }
-
-    // ExceptionInjectionEffect instruments method entry — requires MethodSelector.
-    if (effect instanceof ChaosEffect.ExceptionInjectionEffect
-        && !(selector instanceof ChaosSelector.MethodSelector)) {
-      throw new ChaosValidationException("ExceptionInjectionEffect requires MethodSelector");
-    }
-
-    // Task 9: ExceptionInjectionEffect fires at method entry; METHOD_EXIT is semantically
-    // wrong (the method body has already run) and would never be evaluated.
-    if (effect instanceof ChaosEffect.ExceptionInjectionEffect
-        && selector instanceof ChaosSelector.MethodSelector methodSelector) {
-      if (methodSelector.operations().contains(OperationType.METHOD_EXIT)) {
-        throw new ChaosValidationException(
-            "ExceptionInjectionEffect requires METHOD_ENTER operations only;"
-                + " found METHOD_EXIT in the selector");
-      }
-    }
-
-    // ReturnValueCorruptionEffect instruments method exit — requires MethodSelector.
-    if (effect instanceof ChaosEffect.ReturnValueCorruptionEffect
-        && !(selector instanceof ChaosSelector.MethodSelector)) {
-      throw new ChaosValidationException("ReturnValueCorruptionEffect requires MethodSelector");
-    }
-
-    // Task 9: ReturnValueCorruptionEffect fires at method exit; METHOD_ENTER is wrong
-    // because the return value does not yet exist at entry.
-    if (effect instanceof ChaosEffect.ReturnValueCorruptionEffect
-        && selector instanceof ChaosSelector.MethodSelector methodSelector) {
-      if (methodSelector.operations().contains(OperationType.METHOD_ENTER)) {
-        throw new ChaosValidationException(
-            "ReturnValueCorruptionEffect requires METHOD_EXIT operations only;"
-                + " found METHOD_ENTER in the selector");
-      }
-    }
-
-    // ClockSkewEffect intercepts JVM clock calls — requires JvmRuntimeSelector.
+    validateExceptionInjectionSelector(effect, selector);
+    validateReturnValueCorruptionSelector(effect, selector);
     if (effect instanceof ChaosEffect.ClockSkewEffect
         && !(selector instanceof ChaosSelector.JvmRuntimeSelector)) {
       throw new ChaosValidationException("ClockSkewEffect requires JvmRuntimeSelector");
     }
+    validateSpuriousWakeupSelector(effect, selector);
+  }
 
-    // SpuriousWakeupEffect simulates a Selector.select() returning 0 — requires NioSelector
-    // with at least NIO_SELECTOR_SELECT in the operation set.
-    if (effect instanceof ChaosEffect.SpuriousWakeupEffect) {
-      if (!(selector instanceof ChaosSelector.NioSelector)) {
-        throw new ChaosValidationException("SpuriousWakeupEffect requires NioSelector");
-      }
-      if (selector instanceof ChaosSelector.NioSelector nioSelector
-          && !nioSelector.operations().contains(OperationType.NIO_SELECTOR_SELECT)) {
-        throw new ChaosValidationException(
-            "SpuriousWakeupEffect requires NioSelector with NIO_SELECTOR_SELECT operation");
-      }
+  private static void validateExceptionInjectionSelector(
+      final ChaosEffect effect, final ChaosSelector selector) {
+    if (!(effect instanceof ChaosEffect.ExceptionInjectionEffect)) {
+      return;
     }
+    if (!(selector instanceof ChaosSelector.MethodSelector)) {
+      throw new ChaosValidationException("ExceptionInjectionEffect requires MethodSelector");
+    }
+    // METHOD_EXIT is semantically wrong for injection: the method body has already run.
+    if (selector instanceof ChaosSelector.MethodSelector methodSelector
+        && methodSelector.operations().contains(OperationType.METHOD_EXIT)) {
+      throw new ChaosValidationException(
+          "ExceptionInjectionEffect requires METHOD_ENTER operations only;"
+              + " found METHOD_EXIT in the selector");
+    }
+  }
 
-    // NioSelector operations must be confined to NIO operation types.
+  private static void validateReturnValueCorruptionSelector(
+      final ChaosEffect effect, final ChaosSelector selector) {
+    if (!(effect instanceof ChaosEffect.ReturnValueCorruptionEffect)) {
+      return;
+    }
+    if (!(selector instanceof ChaosSelector.MethodSelector)) {
+      throw new ChaosValidationException("ReturnValueCorruptionEffect requires MethodSelector");
+    }
+    // METHOD_ENTER is wrong: the return value does not exist yet at entry.
+    if (selector instanceof ChaosSelector.MethodSelector methodSelector
+        && methodSelector.operations().contains(OperationType.METHOD_ENTER)) {
+      throw new ChaosValidationException(
+          "ReturnValueCorruptionEffect requires METHOD_EXIT operations only;"
+              + " found METHOD_ENTER in the selector");
+    }
+  }
+
+  private static void validateSpuriousWakeupSelector(
+      final ChaosEffect effect, final ChaosSelector selector) {
+    if (!(effect instanceof ChaosEffect.SpuriousWakeupEffect)) {
+      return;
+    }
+    if (!(selector instanceof ChaosSelector.NioSelector)) {
+      throw new ChaosValidationException("SpuriousWakeupEffect requires NioSelector");
+    }
+    if (selector instanceof ChaosSelector.NioSelector nioSelector
+        && !nioSelector.operations().contains(OperationType.NIO_SELECTOR_SELECT)) {
+      throw new ChaosValidationException(
+          "SpuriousWakeupEffect requires NioSelector with NIO_SELECTOR_SELECT operation");
+    }
+  }
+
+  /**
+   * Validates that each selector's declared operations are confined to the operation types that are
+   * legal for that selector kind.
+   */
+  private static void validateSelectorOperationSets(final ChaosSelector selector) {
     if (selector instanceof ChaosSelector.NioSelector nioSelector) {
-      final Set<OperationType> validNioOps =
-          Set.of(
-              OperationType.NIO_SELECTOR_SELECT,
-              OperationType.NIO_CHANNEL_READ,
-              OperationType.NIO_CHANNEL_WRITE,
-              OperationType.NIO_CHANNEL_CONNECT,
-              OperationType.NIO_CHANNEL_ACCEPT);
-      for (final OperationType op : nioSelector.operations()) {
-        if (!validNioOps.contains(op)) {
-          throw new ChaosValidationException(
-              "NioSelector operation " + op + " is not a NIO operation; valid ops: " + validNioOps);
-        }
-      }
+      validateOperationSet(nioSelector.operations(), NIO_OPS, "NioSelector", "NIO operation");
     }
-
-    // NetworkSelector operations must be confined to socket operation types.
     if (selector instanceof ChaosSelector.NetworkSelector networkSelector) {
-      final Set<OperationType> validNetworkOps =
-          Set.of(
-              OperationType.SOCKET_CONNECT,
-              OperationType.SOCKET_ACCEPT,
-              OperationType.SOCKET_READ,
-              OperationType.SOCKET_WRITE,
-              OperationType.SOCKET_CLOSE);
-      for (final OperationType op : networkSelector.operations()) {
-        if (!validNetworkOps.contains(op)) {
-          throw new ChaosValidationException(
-              "NetworkSelector operation "
-                  + op
-                  + " is not a socket operation; valid ops: "
-                  + validNetworkOps);
-        }
-      }
+      validateOperationSet(
+          networkSelector.operations(), NETWORK_OPS, "NetworkSelector", "socket operation");
     }
-
-    // ThreadLocalSelector operations must be confined to THREAD_LOCAL_GET / THREAD_LOCAL_SET.
     if (selector instanceof ChaosSelector.ThreadLocalSelector threadLocalSelector) {
-      final Set<OperationType> validThreadLocalOps =
-          Set.of(OperationType.THREAD_LOCAL_GET, OperationType.THREAD_LOCAL_SET);
-      for (final OperationType op : threadLocalSelector.operations()) {
-        if (!validThreadLocalOps.contains(op)) {
-          throw new ChaosValidationException(
-              "ThreadLocalSelector operation "
-                  + op
-                  + " is not valid; valid ops: "
-                  + validThreadLocalOps);
-        }
-      }
+      validateOperationSet(
+          threadLocalSelector.operations(),
+          THREAD_LOCAL_OPS,
+          "ThreadLocalSelector",
+          "valid");
     }
-
-    // HttpClientSelector operations must be confined to HTTP_CLIENT_SEND / HTTP_CLIENT_SEND_ASYNC.
     if (selector instanceof ChaosSelector.HttpClientSelector httpClientSelector) {
-      final Set<OperationType> validHttpClientOps =
-          Set.of(OperationType.HTTP_CLIENT_SEND, OperationType.HTTP_CLIENT_SEND_ASYNC);
-      for (final OperationType op : httpClientSelector.operations()) {
-        if (!validHttpClientOps.contains(op)) {
-          throw new ChaosValidationException(
-              "HttpClientSelector operation "
-                  + op
-                  + " is not valid; valid ops: "
-                  + validHttpClientOps);
-        }
-      }
+      validateOperationSet(
+          httpClientSelector.operations(), HTTP_OPS, "HttpClientSelector", "valid");
     }
-
-    // HTTP_CLIENT_SEND / HTTP_CLIENT_SEND_ASYNC require HttpClientSelector.
-    if (selector instanceof ChaosSelector.HttpClientSelector) {
-      // handled above
-    } else {
-      final boolean hasHttpOp = selectorContainsAny(selector, HTTP_OPS);
-      if (hasHttpOp) {
-        throw new ChaosValidationException(
-            "HTTP_CLIENT_SEND / HTTP_CLIENT_SEND_ASYNC operations require HttpClientSelector");
-      }
-    }
-
-    // JdbcSelector operations must be confined to the JDBC operation set.
     if (selector instanceof ChaosSelector.JdbcSelector jdbcSelector) {
-      for (final OperationType op : jdbcSelector.operations()) {
-        if (!JDBC_OPS.contains(op)) {
-          throw new ChaosValidationException(
-              "JdbcSelector operation " + op + " is not valid; valid ops: " + JDBC_OPS);
-        }
+      validateOperationSet(jdbcSelector.operations(), JDBC_OPS, "JdbcSelector", "valid");
+    }
+  }
+
+  private static void validateOperationSet(
+      final Set<OperationType> operations,
+      final Set<OperationType> allowedOps,
+      final String selectorName,
+      final String validDescription) {
+    for (final OperationType operation : operations) {
+      if (!allowedOps.contains(operation)) {
+        throw new ChaosValidationException(
+            selectorName
+                + " operation "
+                + operation
+                + " is not "
+                + validDescription
+                + "; valid ops: "
+                + allowedOps);
       }
-    } else {
-      final boolean hasJdbcOp = selectorContainsAny(selector, JDBC_OPS);
-      if (hasJdbcOp) {
-        throw new ChaosValidationException("JDBC_* operations require JdbcSelector");
-      }
+    }
+  }
+
+  /**
+   * Validates that operation types requiring a specific selector kind are not used with the wrong
+   * selector (e.g. HTTP operations outside {@link ChaosSelector.HttpClientSelector}, JDBC operations
+   * outside {@link ChaosSelector.JdbcSelector}).
+   */
+  private static void validateOperationTypeSelectorAffinity(final ChaosSelector selector) {
+    if (!(selector instanceof ChaosSelector.HttpClientSelector)
+        && selectorContainsAny(selector, HTTP_OPS)) {
+      throw new ChaosValidationException(
+          "HTTP_CLIENT_SEND / HTTP_CLIENT_SEND_ASYNC operations require HttpClientSelector");
+    }
+    if (!(selector instanceof ChaosSelector.JdbcSelector)
+        && selectorContainsAny(selector, JDBC_OPS)) {
+      throw new ChaosValidationException("JDBC_* operations require JdbcSelector");
     }
   }
 
@@ -452,27 +455,55 @@ final class CompatibilityValidator {
           OperationType.JDBC_TRANSACTION_COMMIT,
           OperationType.JDBC_TRANSACTION_ROLLBACK);
 
+  private static final Set<OperationType> NIO_OPS =
+      Set.of(
+          OperationType.NIO_SELECTOR_SELECT,
+          OperationType.NIO_CHANNEL_READ,
+          OperationType.NIO_CHANNEL_WRITE,
+          OperationType.NIO_CHANNEL_CONNECT,
+          OperationType.NIO_CHANNEL_ACCEPT);
+
+  private static final Set<OperationType> NETWORK_OPS =
+      Set.of(
+          OperationType.SOCKET_CONNECT,
+          OperationType.SOCKET_ACCEPT,
+          OperationType.SOCKET_READ,
+          OperationType.SOCKET_WRITE,
+          OperationType.SOCKET_CLOSE);
+
+  private static final Set<OperationType> THREAD_LOCAL_OPS =
+      Set.of(OperationType.THREAD_LOCAL_GET, OperationType.THREAD_LOCAL_SET);
+
   private static boolean selectorContainsAny(
       final ChaosSelector selector, final Set<OperationType> needles) {
     return switch (selector) {
-      case ChaosSelector.ThreadSelector s -> containsAny(s.operations(), needles);
-      case ChaosSelector.ExecutorSelector s -> containsAny(s.operations(), needles);
-      case ChaosSelector.QueueSelector s -> containsAny(s.operations(), needles);
-      case ChaosSelector.AsyncSelector s -> containsAny(s.operations(), needles);
-      case ChaosSelector.SchedulingSelector s -> containsAny(s.operations(), needles);
-      case ChaosSelector.ShutdownSelector s -> containsAny(s.operations(), needles);
-      case ChaosSelector.ClassLoadingSelector s -> containsAny(s.operations(), needles);
-      case ChaosSelector.MethodSelector s -> containsAny(s.operations(), needles);
-      case ChaosSelector.MonitorSelector s -> containsAny(s.operations(), needles);
-      case ChaosSelector.JvmRuntimeSelector s -> containsAny(s.operations(), needles);
-      case ChaosSelector.NioSelector s -> containsAny(s.operations(), needles);
-      case ChaosSelector.NetworkSelector s -> containsAny(s.operations(), needles);
-      case ChaosSelector.ThreadLocalSelector s -> containsAny(s.operations(), needles);
-      case ChaosSelector.HttpClientSelector s -> containsAny(s.operations(), needles);
-      case ChaosSelector.JdbcSelector s -> containsAny(s.operations(), needles);
-      case ChaosSelector.DnsSelector s -> containsAny(s.operations(), needles);
-      case ChaosSelector.SslSelector s -> containsAny(s.operations(), needles);
-      case ChaosSelector.FileIoSelector s -> containsAny(s.operations(), needles);
+      case ChaosSelector.ThreadSelector threadSel -> containsAny(threadSel.operations(), needles);
+      case ChaosSelector.ExecutorSelector executorSel ->
+          containsAny(executorSel.operations(), needles);
+      case ChaosSelector.QueueSelector queueSel -> containsAny(queueSel.operations(), needles);
+      case ChaosSelector.AsyncSelector asyncSel -> containsAny(asyncSel.operations(), needles);
+      case ChaosSelector.SchedulingSelector schedulingSel ->
+          containsAny(schedulingSel.operations(), needles);
+      case ChaosSelector.ShutdownSelector shutdownSel ->
+          containsAny(shutdownSel.operations(), needles);
+      case ChaosSelector.ClassLoadingSelector classLoadingSel ->
+          containsAny(classLoadingSel.operations(), needles);
+      case ChaosSelector.MethodSelector methodSel -> containsAny(methodSel.operations(), needles);
+      case ChaosSelector.MonitorSelector monitorSel ->
+          containsAny(monitorSel.operations(), needles);
+      case ChaosSelector.JvmRuntimeSelector jvmRuntimeSel ->
+          containsAny(jvmRuntimeSel.operations(), needles);
+      case ChaosSelector.NioSelector nioSel -> containsAny(nioSel.operations(), needles);
+      case ChaosSelector.NetworkSelector networkSel ->
+          containsAny(networkSel.operations(), needles);
+      case ChaosSelector.ThreadLocalSelector threadLocalSel ->
+          containsAny(threadLocalSel.operations(), needles);
+      case ChaosSelector.HttpClientSelector httpClientSel ->
+          containsAny(httpClientSel.operations(), needles);
+      case ChaosSelector.JdbcSelector jdbcSel -> containsAny(jdbcSel.operations(), needles);
+      case ChaosSelector.DnsSelector dnsSel -> containsAny(dnsSel.operations(), needles);
+      case ChaosSelector.SslSelector sslSel -> containsAny(sslSel.operations(), needles);
+      case ChaosSelector.FileIoSelector fileIoSel -> containsAny(fileIoSel.operations(), needles);
       case ChaosSelector.StressSelector ignored -> false;
     };
   }

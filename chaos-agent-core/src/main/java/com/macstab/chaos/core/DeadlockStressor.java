@@ -29,27 +29,27 @@ final class DeadlockStressor implements ManagedStressor {
   private final List<Thread> participants;
 
   DeadlockStressor(final ChaosEffect.DeadlockEffect effect) {
-    final int n = effect.participantCount();
+    final int participantCount = effect.participantCount();
     final long acquisitionDelayMs = effect.acquisitionDelay().toMillis();
 
-    // Create N independent locks — one per participant.
-    final ReentrantLock[] locks = new ReentrantLock[n];
-    for (int i = 0; i < n; i++) {
-      locks[i] = new ReentrantLock();
+    // Create one independent lock per participant.
+    final ReentrantLock[] locks = new ReentrantLock[participantCount];
+    for (int lockIndex = 0; lockIndex < participantCount; lockIndex++) {
+      locks[lockIndex] = new ReentrantLock();
     }
 
     // Latch: all threads acquire their first lock before any tries the second.
-    final CountDownLatch firstLockAcquired = new CountDownLatch(n);
-    final List<Thread> threads = new ArrayList<>(n);
+    final CountDownLatch firstLockAcquired = new CountDownLatch(participantCount);
+    final List<Thread> threads = new ArrayList<>(participantCount);
 
-    for (int i = 0; i < n; i++) {
-      final int index = i;
-      final String name = "chaos-deadlock-" + i;
+    for (int participantIndex = 0; participantIndex < participantCount; participantIndex++) {
+      final int index = participantIndex;
+      final String name = "chaos-deadlock-" + participantIndex;
       final Thread thread =
           new Thread(
               () -> {
                 final ReentrantLock first = locks[index];
-                final ReentrantLock second = locks[(index + 1) % n];
+                final ReentrantLock second = locks[(index + 1) % participantCount];
                 try {
                   first.lockInterruptibly();
                   try {
