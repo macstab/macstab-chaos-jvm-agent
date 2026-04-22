@@ -208,15 +208,14 @@ final class ReturnValueCorruptor {
    * assignment-compatible with the declared return type. ByteBuddy emits an implicit checkcast at
    * the {@code @Advice.Return} write site, so returning an immutable singleton (e.g. {@code
    * Collections.emptyList()} whose concrete type is {@code ImmutableCollections$ListN}) for a
-   * method declared to return {@code ArrayList<T>} causes a {@code ClassCastException} at the
-   * call site. Check concrete types first (most specific to least specific) before interface
-   * checks.
+   * method declared to return {@code ArrayList<T>} causes a {@code ClassCastException} at the call
+   * site. Check concrete types first (most specific to least specific) before interface checks.
    *
    * <p>Order matters: {@code LinkedHashSet} extends {@code HashSet}, so the LinkedHashSet check
    * must come first. ConcurrentSkipList* implement the sorted/navigable interfaces so they get
-   * caught by the interface checks below if they themselves are the declared type; we add
-   * dedicated checks because the declared-return-type contract can name them concretely in the
-   * method signature.
+   * caught by the interface checks below if they themselves are the declared type; we add dedicated
+   * checks because the declared-return-type contract can name them concretely in the method
+   * signature.
    */
   private static Object tryEmptyConcreteCollection(final Class<?> returnType) {
     if (ArrayList.class.isAssignableFrom(returnType)) {
@@ -245,8 +244,8 @@ final class ReturnValueCorruptor {
 
   /**
    * Concrete Map types. Order matters: {@code LinkedHashMap} extends {@code HashMap}, so the
-   * LinkedHashMap check must come first. See {@link #tryEmptyConcreteCollection} for the
-   * checkcast rationale.
+   * LinkedHashMap check must come first. See {@link #tryEmptyConcreteCollection} for the checkcast
+   * rationale.
    */
   private static Object tryEmptyConcreteMap(final Class<?> returnType) {
     if (LinkedHashMap.class.isAssignableFrom(returnType)) {
@@ -291,8 +290,8 @@ final class ReturnValueCorruptor {
 
   /**
    * Queue and Deque interfaces are not backed by a {@code Collections.empty*} singleton, so fall
-   * back to mutable-but-empty concrete implementations. Deque is a sub-interface of Queue, so
-   * check it first.
+   * back to mutable-but-empty concrete implementations. Deque is a sub-interface of Queue, so check
+   * it first.
    */
   private static Object tryEmptyQueueOrDeque(final Class<?> returnType) {
     if (Deque.class.isAssignableFrom(returnType)) {

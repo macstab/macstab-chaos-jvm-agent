@@ -345,9 +345,7 @@ public final class JdkInstrumentationInstaller {
             delegateInterface, "beforeGcRequest", MethodType.methodType(boolean.class));
     methodHandles[BootstrapDispatcher.BEFORE_EXIT_REQUEST] =
         lookup.findVirtual(
-            delegateInterface,
-            "beforeExitRequest",
-            MethodType.methodType(void.class, int.class));
+            delegateInterface, "beforeExitRequest", MethodType.methodType(void.class, int.class));
   }
 
   /** Wires handles for reflection, direct buffers, class redefinition, monitors, and parking. */
@@ -414,9 +412,7 @@ public final class JdkInstrumentationInstaller {
             MethodType.methodType(void.class, Object.class));
     methodHandles[BootstrapDispatcher.BEFORE_SOCKET_READ] =
         lookup.findVirtual(
-            delegateInterface,
-            "beforeSocketRead",
-            MethodType.methodType(void.class, Object.class));
+            delegateInterface, "beforeSocketRead", MethodType.methodType(void.class, Object.class));
     methodHandles[BootstrapDispatcher.BEFORE_SOCKET_WRITE] =
         lookup.findVirtual(
             delegateInterface,
@@ -542,9 +538,7 @@ public final class JdkInstrumentationInstaller {
             MethodType.methodType(boolean.class, String.class));
     methodHandles[BootstrapDispatcher.BEFORE_JDBC_TRANSACTION_COMMIT] =
         lookup.findVirtual(
-            delegateInterface,
-            "beforeJdbcTransactionCommit",
-            MethodType.methodType(boolean.class));
+            delegateInterface, "beforeJdbcTransactionCommit", MethodType.methodType(boolean.class));
     methodHandles[BootstrapDispatcher.BEFORE_JDBC_TRANSACTION_ROLLBACK] =
         lookup.findVirtual(
             delegateInterface,
@@ -565,9 +559,7 @@ public final class JdkInstrumentationInstaller {
             MethodType.methodType(boolean.class, long.class));
     methodHandles[BootstrapDispatcher.BEFORE_DNS_RESOLVE] =
         lookup.findVirtual(
-            delegateInterface,
-            "beforeDnsResolve",
-            MethodType.methodType(void.class, String.class));
+            delegateInterface, "beforeDnsResolve", MethodType.methodType(void.class, String.class));
     methodHandles[BootstrapDispatcher.BEFORE_SSL_HANDSHAKE] =
         lookup.findVirtual(
             delegateInterface,
@@ -917,15 +909,11 @@ public final class JdkInstrumentationInstaller {
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder
+                    .visit(Advice.to(QueueAdvice.PutAdvice.class).on(ElementMatchers.named("put")))
                     .visit(
-                        Advice.to(QueueAdvice.PutAdvice.class)
-                            .on(ElementMatchers.named("put")))
+                        Advice.to(QueueAdvice.TakeAdvice.class).on(ElementMatchers.named("take")))
                     .visit(
-                        Advice.to(QueueAdvice.TakeAdvice.class)
-                            .on(ElementMatchers.named("take")))
-                    .visit(
-                        Advice.to(QueueAdvice.PollAdvice.class)
-                            .on(ElementMatchers.named("poll")))
+                        Advice.to(QueueAdvice.PollAdvice.class).on(ElementMatchers.named("poll")))
                     .visit(
                         Advice.to(QueueAdvice.OfferAdvice.class)
                             .on(
@@ -971,11 +959,8 @@ public final class JdkInstrumentationInstaller {
                             .on(
                                 ElementMatchers.named("loadClass")
                                     .and(
-                                        ElementMatchers.takesArguments(
-                                                String.class, boolean.class)
-                                            .or(
-                                                ElementMatchers.takesArguments(
-                                                    String.class)))))
+                                        ElementMatchers.takesArguments(String.class, boolean.class)
+                                            .or(ElementMatchers.takesArguments(String.class)))))
                     .visit(
                         Advice.to(ClassLoaderAdvice.GetResourceAdvice.class)
                             .on(
@@ -1049,9 +1034,7 @@ public final class JdkInstrumentationInstaller {
                 typeBuilder
                     .visit(
                         Advice.to(JvmRuntimeAdvice.GcRequestAdvice.class)
-                            .on(
-                                ElementMatchers.named("gc")
-                                    .and(ElementMatchers.takesArguments(0))))
+                            .on(ElementMatchers.named("gc").and(ElementMatchers.takesArguments(0))))
                     .visit(
                         Advice.to(JvmRuntimeAdvice.ExitRequestAdvice.class)
                             .on(
@@ -1074,8 +1057,7 @@ public final class JdkInstrumentationInstaller {
                         .on(
                             ElementMatchers.named("invoke")
                                 .and(
-                                    ElementMatchers.takesArguments(
-                                        Object.class, Object[].class)))))
+                                    ElementMatchers.takesArguments(Object.class, Object[].class)))))
         .type(ElementMatchers.named("java.nio.ByteBuffer"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
@@ -1139,9 +1121,7 @@ public final class JdkInstrumentationInstaller {
                         Advice.to(JvmRuntimeAdvice.ThreadParkAdvice.class)
                             .on(
                                 ElementMatchers.named("parkNanos")
-                                    .and(
-                                        ElementMatchers.takesArguments(
-                                            Object.class, long.class))))
+                                    .and(ElementMatchers.takesArguments(Object.class, long.class))))
                     // parkNanos(long nanos) — 1-arg variant without blocker
                     .visit(
                         Advice.to(JvmRuntimeAdvice.ThreadParkAdvice.class)
@@ -1152,9 +1132,7 @@ public final class JdkInstrumentationInstaller {
                         Advice.to(JvmRuntimeAdvice.ThreadParkAdvice.class)
                             .on(
                                 ElementMatchers.named("parkUntil")
-                                    .and(
-                                        ElementMatchers.takesArguments(
-                                            Object.class, long.class))))
+                                    .and(ElementMatchers.takesArguments(Object.class, long.class))))
                     // parkUntil(long deadline) — 1-arg variant without blocker
                     .visit(
                         Advice.to(JvmRuntimeAdvice.ThreadParkAdvice.class)
@@ -1238,8 +1216,7 @@ public final class JdkInstrumentationInstaller {
                             .on(
                                 ElementMatchers.named("read")
                                     .and(
-                                        ElementMatchers.takesArguments(
-                                            java.nio.ByteBuffer.class))))
+                                        ElementMatchers.takesArguments(java.nio.ByteBuffer.class))))
                     .visit(
                         Advice.to(JvmRuntimeAdvice.NioChannelWriteAdvice.class)
                             .on(
@@ -1503,11 +1480,11 @@ public final class JdkInstrumentationInstaller {
    * Reactor Netty) are not required at runtime.
    *
    * <p>Java 11+ HttpClient ({@code jdk.internal.net.http.HttpClientImpl}) is NOT registered here.
-   * That class is always present on JDK 11+, but it lives in the non-exported
-   * {@code java.net.http/jdk.internal.net.http} package. Attempting to transform it without
-   * {@code --add-opens java.net.http/jdk.internal.net.http=ALL-UNNAMED} silently corrupts
-   * subsequent AgentBuilder transformations. If interception of the Java HttpClient is required,
-   * users can target its public API or wait for a dedicated {@code --add-opens} pathway.
+   * That class is always present on JDK 11+, but it lives in the non-exported {@code
+   * java.net.http/jdk.internal.net.http} package. Attempting to transform it without {@code
+   * --add-opens java.net.http/jdk.internal.net.http=ALL-UNNAMED} silently corrupts subsequent
+   * AgentBuilder transformations. If interception of the Java HttpClient is required, users can
+   * target its public API or wait for a dedicated {@code --add-opens} pathway.
    */
   private static AgentBuilder applyPhase2HttpClientInterception(AgentBuilder agentBuilder) {
     agentBuilder =
@@ -1549,8 +1526,7 @@ public final class JdkInstrumentationInstaller {
                                 ElementMatchers.named("execute")
                                     .and(
                                         ElementMatchers.takesArgument(
-                                            0,
-                                            ElementMatchers.named("org.apache.http.HttpHost")))))
+                                            0, ElementMatchers.named("org.apache.http.HttpHost")))))
                     .visit(
                         Advice.to(HttpClientAdvice.ApacheHc4UriExecuteAdvice.class)
                             .on(
@@ -1587,15 +1563,15 @@ public final class JdkInstrumentationInstaller {
   }
 
   /**
-   * Registers JDBC and connection-pool interception: HikariCP, c3p0, and concrete
-   * {@link java.sql.Statement} / {@link java.sql.Connection} subtypes.
+   * Registers JDBC and connection-pool interception: HikariCP, c3p0, and concrete {@link
+   * java.sql.Statement} / {@link java.sql.Connection} subtypes.
    *
-   * <p>HikariCP and c3p0 are compileOnly dependencies and are instrumented via
-   * {@link #instrumentOptional} so their absence is tolerated. {@code java.sql.Statement} and
-   * {@code java.sql.Connection} are JDK interfaces — the type matcher is restricted to concrete
-   * subtypes via {@code isSubTypeOf + not(isInterface())} so the advice only binds to
-   * implementations (driver classes such as {@code HikariProxyStatement},
-   * {@code org.postgresql.jdbc.PgStatement}, etc.).
+   * <p>HikariCP and c3p0 are compileOnly dependencies and are instrumented via {@link
+   * #instrumentOptional} so their absence is tolerated. {@code java.sql.Statement} and {@code
+   * java.sql.Connection} are JDK interfaces — the type matcher is restricted to concrete subtypes
+   * via {@code isSubTypeOf + not(isInterface())} so the advice only binds to implementations
+   * (driver classes such as {@code HikariProxyStatement}, {@code org.postgresql.jdbc.PgStatement},
+   * etc.).
    */
   private static AgentBuilder applyPhase2JdbcInterception(AgentBuilder agentBuilder) {
     agentBuilder =
@@ -1687,7 +1663,10 @@ public final class JdkInstrumentationInstaller {
                                     .and(ElementMatchers.takesArguments(0)))));
   }
 
-  /** Registers JNDI ({@code javax.naming.InitialContext}) and JMX ({@code javax.management.MBeanServer}) interception. */
+  /**
+   * Registers JNDI ({@code javax.naming.InitialContext}) and JMX ({@code
+   * javax.management.MBeanServer}) interception.
+   */
   private static AgentBuilder applyPhase2JndiAndJmxInterception(AgentBuilder agentBuilder) {
     agentBuilder =
         instrumentOptional(
@@ -1707,9 +1686,7 @@ public final class JdkInstrumentationInstaller {
             typeBuilder
                 .visit(
                     Advice.to(JvmRuntimeAdvice.JmxInvokeAdvice.class)
-                        .on(
-                            ElementMatchers.named("invoke")
-                                .and(ElementMatchers.takesArguments(4))))
+                        .on(ElementMatchers.named("invoke").and(ElementMatchers.takesArguments(4))))
                 .visit(
                     Advice.to(JvmRuntimeAdvice.JmxGetAttrAdvice.class)
                         .on(
@@ -1767,12 +1744,13 @@ public final class JdkInstrumentationInstaller {
   }
 
   /**
-   * Registers DNS resolution interception ({@link java.net.InetAddress#getByName(String)},
-   * {@link java.net.InetAddress#getAllByName(String)}, {@link java.net.InetAddress#getLocalHost()}).
+   * Registers DNS resolution interception ({@link java.net.InetAddress#getByName(String)}, {@link
+   * java.net.InetAddress#getAllByName(String)}, {@link java.net.InetAddress#getLocalHost()}).
    *
    * <p>InetAddress is always present; no {@link #instrumentOptional} needed.
    */
-  private static AgentBuilder applyPhase2DnsResolutionInterception(final AgentBuilder agentBuilder) {
+  private static AgentBuilder applyPhase2DnsResolutionInterception(
+      final AgentBuilder agentBuilder) {
     return agentBuilder
         .type(ElementMatchers.named("java.net.InetAddress"))
         .transform(
@@ -1799,8 +1777,8 @@ public final class JdkInstrumentationInstaller {
   }
 
   /**
-   * Registers file I/O interception ({@link java.io.FileInputStream#read()} overloads and
-   * {@link java.io.FileOutputStream#write(int)} overloads).
+   * Registers file I/O interception ({@link java.io.FileInputStream#read()} overloads and {@link
+   * java.io.FileOutputStream#write(int)} overloads).
    */
   private static AgentBuilder applyPhase2FileIoInterception(final AgentBuilder agentBuilder) {
     return agentBuilder

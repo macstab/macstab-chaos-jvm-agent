@@ -88,10 +88,10 @@ final class FailureFactory {
       // JDBC: application code universally catches SQLException. Produce it reflectively to
       // avoid a hard dependency on java.sql at agent core load time.
       case JDBC_CONNECTION_ACQUIRE,
-              JDBC_STATEMENT_EXECUTE,
-              JDBC_PREPARED_STATEMENT,
-              JDBC_TRANSACTION_COMMIT,
-              JDBC_TRANSACTION_ROLLBACK ->
+          JDBC_STATEMENT_EXECUTE,
+          JDBC_PREPARED_STATEMENT,
+          JDBC_TRANSACTION_COMMIT,
+          JDBC_TRANSACTION_ROLLBACK ->
           createJdbcSqlException(message);
       // HTTP client: java.net.http.HttpClient#send declares IOException; async send completes
       // the future exceptionally with IOException as well. Keep the expected checked type.
@@ -137,8 +137,7 @@ final class FailureFactory {
   private static Throwable createJndiNamingException(final String message) {
     try {
       final Class<?> namingExceptionClass = Class.forName("javax.naming.NamingException");
-      return (Throwable)
-          namingExceptionClass.getConstructor(String.class).newInstance(message);
+      return (Throwable) namingExceptionClass.getConstructor(String.class).newInstance(message);
     } catch (final Exception ignored) {
       return new RuntimeException(message);
     }

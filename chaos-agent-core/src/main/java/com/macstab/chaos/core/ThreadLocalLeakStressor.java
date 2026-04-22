@@ -105,7 +105,9 @@ final class ThreadLocalLeakStressor implements ManagedStressor {
         // rejection, OOM, unchecked exception from remove()) is attributable.
         failedTaskCount++;
         LOGGER.log(
-            java.util.logging.Level.WARNING, "chaos thread-local-leak cleanup task failed", taskFailure);
+            java.util.logging.Level.WARNING,
+            "chaos thread-local-leak cleanup task failed",
+            taskFailure);
       }
     }
     if (failedTaskCount > 0) {

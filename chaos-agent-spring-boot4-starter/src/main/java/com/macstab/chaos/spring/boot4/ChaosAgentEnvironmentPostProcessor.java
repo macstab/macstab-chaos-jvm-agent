@@ -63,18 +63,21 @@ public class ChaosAgentEnvironmentPostProcessor implements EnvironmentPostProces
           "systemProperties",
           "systemEnvironment",
           "commandLineArgs",
-          CLASSPATH_CONFIG_SOURCE_PREFIX + " [application.properties]' via location 'optional:classpath:/'",
-          CLASSPATH_CONFIG_SOURCE_PREFIX + " [application.yml]' via location 'optional:classpath:/'");
+          CLASSPATH_CONFIG_SOURCE_PREFIX
+              + " [application.properties]' via location 'optional:classpath:/'",
+          CLASSPATH_CONFIG_SOURCE_PREFIX
+              + " [application.yml]' via location 'optional:classpath:/'");
 
   /** System property / env-var name that opts in to honouring remote property sources. */
   private static final String ALLOW_REMOTE_ENABLE_PROPERTY = "macstab.chaos.allow-remote-enable";
 
   /**
-   * Name of the synthetic aggregator property source that Spring Boot prepends before EPPs fire.
-   * It delegates containsProperty() to every real backing source, so it must be skipped to avoid
+   * Name of the synthetic aggregator property source that Spring Boot prepends before EPPs fire. It
+   * delegates containsProperty() to every real backing source, so it must be skipped to avoid
    * false-positive trust evaluations.
    */
-  private static final String CONFIGURATION_PROPERTIES_AGGREGATOR_SOURCE = "configurationProperties";
+  private static final String CONFIGURATION_PROPERTIES_AGGREGATOR_SOURCE =
+      "configurationProperties";
 
   /** Default constructor invoked by Spring Boot via SPI. */
   public ChaosAgentEnvironmentPostProcessor() {}

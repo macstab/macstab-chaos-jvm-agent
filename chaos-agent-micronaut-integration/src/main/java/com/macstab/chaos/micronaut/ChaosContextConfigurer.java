@@ -37,8 +37,7 @@ public class ChaosContextConfigurer implements ApplicationContextConfigurer {
    */
   public static final String ENABLED_PROPERTY = "macstab.chaos.enabled";
 
-  private static final String ENABLED_ENV_VAR =
-      ENABLED_PROPERTY.replace('.', '_').toUpperCase();
+  private static final String ENABLED_ENV_VAR = ENABLED_PROPERTY.replace('.', '_').toUpperCase();
 
   private static final Logger LOGGER = Logger.getLogger(ChaosContextConfigurer.class.getName());
 

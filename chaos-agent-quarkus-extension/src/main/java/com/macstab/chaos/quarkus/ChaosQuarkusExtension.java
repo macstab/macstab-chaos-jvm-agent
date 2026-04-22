@@ -159,8 +159,8 @@ public final class ChaosQuarkusExtension
 
   /**
    * Stops each handle in the list in a best-effort manner. A {@link RuntimeException} from any
-   * individual {@link ChaosActivationHandle#stop()} is swallowed so that it cannot mask a real
-   * test failure and so that sibling handles are always released.
+   * individual {@link ChaosActivationHandle#stop()} is swallowed so that it cannot mask a real test
+   * failure and so that sibling handles are always released.
    */
   private static void stopHandlesSafely(final List<ChaosActivationHandle> handles) {
     if (handles == null) {

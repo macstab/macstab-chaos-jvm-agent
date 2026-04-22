@@ -394,10 +394,7 @@ final class CompatibilityValidator {
     }
     if (selector instanceof ChaosSelector.ThreadLocalSelector threadLocalSelector) {
       validateOperationSet(
-          threadLocalSelector.operations(),
-          THREAD_LOCAL_OPS,
-          "ThreadLocalSelector",
-          "valid");
+          threadLocalSelector.operations(), THREAD_LOCAL_OPS, "ThreadLocalSelector", "valid");
     }
     if (selector instanceof ChaosSelector.HttpClientSelector httpClientSelector) {
       validateOperationSet(
@@ -429,8 +426,8 @@ final class CompatibilityValidator {
 
   /**
    * Validates that operation types requiring a specific selector kind are not used with the wrong
-   * selector (e.g. HTTP operations outside {@link ChaosSelector.HttpClientSelector}, JDBC operations
-   * outside {@link ChaosSelector.JdbcSelector}).
+   * selector (e.g. HTTP operations outside {@link ChaosSelector.HttpClientSelector}, JDBC
+   * operations outside {@link ChaosSelector.JdbcSelector}).
    */
   private static void validateOperationTypeSelectorAffinity(final ChaosSelector selector) {
     if (!(selector instanceof ChaosSelector.HttpClientSelector)

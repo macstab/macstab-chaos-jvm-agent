@@ -49,8 +49,8 @@ public class ChaosAgentEnvironmentPostProcessor implements EnvironmentPostProces
    * self-attaching a JVM agent based on a value flipped by a compromised Config Server turns any
    * config-server RCE into an instrumentation RCE. Operators who genuinely need to enable chaos
    * remotely can set {@code macstab.chaos.allow-remote-enable=true} (checked via {@link
-   * #remoteEnableIsAllowedViaTrustedSource}) through a trusted local source first, which is itself subject
-   * to this trust filter.
+   * #remoteEnableIsAllowedViaTrustedSource}) through a trusted local source first, which is itself
+   * subject to this trust filter.
    */
   private static final String CLASSPATH_CONFIG_SOURCE_PREFIX =
       "Config resource 'class path resource";
@@ -60,8 +60,10 @@ public class ChaosAgentEnvironmentPostProcessor implements EnvironmentPostProces
           "systemProperties",
           "systemEnvironment",
           "commandLineArgs",
-          CLASSPATH_CONFIG_SOURCE_PREFIX + " [application.properties]' via location 'optional:classpath:/'",
-          CLASSPATH_CONFIG_SOURCE_PREFIX + " [application.yml]' via location 'optional:classpath:/'");
+          CLASSPATH_CONFIG_SOURCE_PREFIX
+              + " [application.properties]' via location 'optional:classpath:/'",
+          CLASSPATH_CONFIG_SOURCE_PREFIX
+              + " [application.yml]' via location 'optional:classpath:/'");
 
   /** System property / env-var name that opts in to honouring remote property sources. */
   private static final String ALLOW_REMOTE_ENABLE_PROPERTY = "macstab.chaos.allow-remote-enable";
@@ -87,8 +89,7 @@ public class ChaosAgentEnvironmentPostProcessor implements EnvironmentPostProces
 
   private static MapPropertySource buildAttachMarkerSource() {
     return new MapPropertySource(
-        ATTACH_MARKER_SOURCE,
-        Collections.singletonMap(ATTACH_MARKER_PROPERTY, "spring-boot-3"));
+        ATTACH_MARKER_SOURCE, Collections.singletonMap(ATTACH_MARKER_PROPERTY, "spring-boot-3"));
   }
 
   /**
