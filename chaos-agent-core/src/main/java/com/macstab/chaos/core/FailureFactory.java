@@ -63,27 +63,8 @@ final class FailureFactory {
       case OBJECT_SERIALIZE -> new java.io.NotSerializableException(message);
       case DIRECT_BUFFER_ALLOCATE -> new OutOfMemoryError(message);
       case NATIVE_LIBRARY_LOAD -> new UnsatisfiedLinkError(message);
-      case JNDI_LOOKUP -> {
-        try {
-          // javax.naming.NamingException has a (String) constructor
-          yield (Throwable)
-              Class.forName("javax.naming.NamingException")
-                  .getConstructor(String.class)
-                  .newInstance(message);
-        } catch (final Exception ex) {
-          yield new RuntimeException(message);
-        }
-      }
-      case JMX_INVOKE, JMX_GET_ATTR -> {
-        try {
-          yield (Throwable)
-              Class.forName("javax.management.MBeanException")
-                  .getConstructor(Exception.class, String.class)
-                  .newInstance(new RuntimeException(message), message);
-        } catch (final Exception ex) {
-          yield new RuntimeException(message);
-        }
-      }
+      case JNDI_LOOKUP -> createJndiNamingException(message);
+      case JMX_INVOKE, JMX_GET_ATTR -> createJmxMBeanException(message);
       // Operation types whose natural rejection is not IllegalStateException — mapped
       // explicitly so reject() produces the same throwable the application would observe
       // under a genuine failure of that kind, not a generic ISE.
@@ -103,32 +84,15 @@ final class FailureFactory {
       // TLS handshake failure — construct reflectively so this module does not fail to load if
       // javax.net.ssl is absent from the runtime image (e.g. jlink slim images). Fall back to
       // plain IOException so the caller still sees an I/O failure rather than an ISE.
-      case SSL_HANDSHAKE -> {
-        try {
-          yield (Throwable)
-              Class.forName("javax.net.ssl.SSLHandshakeException")
-                  .getConstructor(String.class)
-                  .newInstance(message);
-        } catch (final Exception ex) {
-          yield new java.io.IOException(message);
-        }
-      }
+      case SSL_HANDSHAKE -> createSslHandshakeException(message);
       // JDBC: application code universally catches SQLException. Produce it reflectively to
       // avoid a hard dependency on java.sql at agent core load time.
       case JDBC_CONNECTION_ACQUIRE,
-          JDBC_STATEMENT_EXECUTE,
-          JDBC_PREPARED_STATEMENT,
-          JDBC_TRANSACTION_COMMIT,
-          JDBC_TRANSACTION_ROLLBACK -> {
-        try {
-          yield (Throwable)
-              Class.forName("java.sql.SQLException")
-                  .getConstructor(String.class)
-                  .newInstance(message);
-        } catch (final Exception ex) {
-          yield new RuntimeException(message);
-        }
-      }
+              JDBC_STATEMENT_EXECUTE,
+              JDBC_PREPARED_STATEMENT,
+              JDBC_TRANSACTION_COMMIT,
+              JDBC_TRANSACTION_ROLLBACK ->
+          createJdbcSqlException(message);
       // HTTP client: java.net.http.HttpClient#send declares IOException; async send completes
       // the future exceptionally with IOException as well. Keep the expected checked type.
       case HTTP_CLIENT_SEND, HTTP_CLIENT_SEND_ASYNC -> new java.io.IOException(message);
@@ -168,5 +132,47 @@ final class FailureFactory {
       case RUNTIME -> new RuntimeException(message);
       case SECURITY -> new SecurityException(message);
     };
+  }
+
+  private static Throwable createJndiNamingException(final String message) {
+    try {
+      final Class<?> namingExceptionClass = Class.forName("javax.naming.NamingException");
+      return (Throwable)
+          namingExceptionClass.getConstructor(String.class).newInstance(message);
+    } catch (final Exception ignored) {
+      return new RuntimeException(message);
+    }
+  }
+
+  private static Throwable createJmxMBeanException(final String message) {
+    try {
+      final Class<?> mbeanExceptionClass = Class.forName("javax.management.MBeanException");
+      return (Throwable)
+          mbeanExceptionClass
+              .getConstructor(Exception.class, String.class)
+              .newInstance(new RuntimeException(message), message);
+    } catch (final Exception ignored) {
+      return new RuntimeException(message);
+    }
+  }
+
+  private static Throwable createSslHandshakeException(final String message) {
+    try {
+      final Class<?> sslHandshakeExceptionClass =
+          Class.forName("javax.net.ssl.SSLHandshakeException");
+      return (Throwable)
+          sslHandshakeExceptionClass.getConstructor(String.class).newInstance(message);
+    } catch (final Exception ignored) {
+      return new java.io.IOException(message);
+    }
+  }
+
+  private static Throwable createJdbcSqlException(final String message) {
+    try {
+      final Class<?> sqlExceptionClass = Class.forName("java.sql.SQLException");
+      return (Throwable) sqlExceptionClass.getConstructor(String.class).newInstance(message);
+    } catch (final Exception ignored) {
+      return new RuntimeException(message);
+    }
   }
 }
