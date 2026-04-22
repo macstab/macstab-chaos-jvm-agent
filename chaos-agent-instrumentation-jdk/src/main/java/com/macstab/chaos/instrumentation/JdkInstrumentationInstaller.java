@@ -214,6 +214,25 @@ public final class JdkInstrumentationInstaller {
     final MethodHandles.Lookup lookup = MethodHandles.publicLookup();
     final Class<?> delegateInterface = BridgeDelegate.class;
     final MethodHandle[] methodHandles = new MethodHandle[BootstrapDispatcher.HANDLE_COUNT];
+    wireExecutorHandles(lookup, delegateInterface, methodHandles);
+    wireSchedulingHandles(lookup, delegateInterface, methodHandles);
+    wireClassLoadingAndShutdownHandles(lookup, delegateInterface, methodHandles);
+    wireClockGcAndExitHandles(lookup, delegateInterface, methodHandles);
+    wireReflectionAndMemoryHandles(lookup, delegateInterface, methodHandles);
+    wireNetworkHandles(lookup, delegateInterface, methodHandles);
+    wireMiscRuntimeHandles(lookup, delegateInterface, methodHandles);
+    wireTimeApiHandles(lookup, delegateInterface, methodHandles);
+    wireHttpAndJdbcHandles(lookup, delegateInterface, methodHandles);
+    wireMiscIoHandles(lookup, delegateInterface, methodHandles);
+    return methodHandles;
+  }
+
+  /** Wires handles for executor and raw thread lifecycle instrumentation. */
+  private static void wireExecutorHandles(
+      final MethodHandles.Lookup lookup,
+      final Class<?> delegateInterface,
+      final MethodHandle[] methodHandles)
+      throws ReflectiveOperationException {
     methodHandles[BootstrapDispatcher.DECORATE_EXECUTOR_RUNNABLE] =
         lookup.findVirtual(
             delegateInterface,
@@ -239,6 +258,14 @@ public final class JdkInstrumentationInstaller {
             delegateInterface,
             "beforeForkJoinTaskRun",
             MethodType.methodType(void.class, ForkJoinTask.class));
+  }
+
+  /** Wires handles for scheduling, queue, and CompletableFuture instrumentation. */
+  private static void wireSchedulingHandles(
+      final MethodHandles.Lookup lookup,
+      final Class<?> delegateInterface,
+      final MethodHandle[] methodHandles)
+      throws ReflectiveOperationException {
     methodHandles[BootstrapDispatcher.ADJUST_SCHEDULE_DELAY] =
         lookup.findVirtual(
             delegateInterface,
@@ -266,6 +293,14 @@ public final class JdkInstrumentationInstaller {
             "beforeCompletableFutureComplete",
             MethodType.methodType(
                 Boolean.class, String.class, CompletableFuture.class, Object.class));
+  }
+
+  /** Wires handles for class loading, resource lookup, and shutdown hook instrumentation. */
+  private static void wireClassLoadingAndShutdownHandles(
+      final MethodHandles.Lookup lookup,
+      final Class<?> delegateInterface,
+      final MethodHandle[] methodHandles)
+      throws ReflectiveOperationException {
     methodHandles[BootstrapDispatcher.BEFORE_CLASS_LOAD] =
         lookup.findVirtual(
             delegateInterface,
@@ -291,6 +326,14 @@ public final class JdkInstrumentationInstaller {
             delegateInterface,
             "beforeExecutorShutdown",
             MethodType.methodType(void.class, String.class, Object.class, long.class));
+  }
+
+  /** Wires handles for clock adjustment, GC requests, and VM exit interception. */
+  private static void wireClockGcAndExitHandles(
+      final MethodHandles.Lookup lookup,
+      final Class<?> delegateInterface,
+      final MethodHandle[] methodHandles)
+      throws ReflectiveOperationException {
     methodHandles[BootstrapDispatcher.ADJUST_CLOCK_MILLIS] =
         lookup.findVirtual(
             delegateInterface, "adjustClockMillis", MethodType.methodType(long.class, long.class));
@@ -305,6 +348,14 @@ public final class JdkInstrumentationInstaller {
             delegateInterface,
             "beforeExitRequest",
             MethodType.methodType(void.class, int.class));
+  }
+
+  /** Wires handles for reflection, direct buffers, class redefinition, monitors, and parking. */
+  private static void wireReflectionAndMemoryHandles(
+      final MethodHandles.Lookup lookup,
+      final Class<?> delegateInterface,
+      final MethodHandle[] methodHandles)
+      throws ReflectiveOperationException {
     methodHandles[BootstrapDispatcher.BEFORE_REFLECTION_INVOKE] =
         lookup.findVirtual(
             delegateInterface,
@@ -333,6 +384,14 @@ public final class JdkInstrumentationInstaller {
     methodHandles[BootstrapDispatcher.BEFORE_THREAD_PARK] =
         lookup.findVirtual(
             delegateInterface, "beforeThreadPark", MethodType.methodType(void.class));
+  }
+
+  /** Wires handles for NIO and socket I/O instrumentation. */
+  private static void wireNetworkHandles(
+      final MethodHandles.Lookup lookup,
+      final Class<?> delegateInterface,
+      final MethodHandle[] methodHandles)
+      throws ReflectiveOperationException {
     methodHandles[BootstrapDispatcher.BEFORE_NIO_SELECT] =
         lookup.findVirtual(
             delegateInterface,
@@ -368,6 +427,14 @@ public final class JdkInstrumentationInstaller {
             delegateInterface,
             "beforeSocketClose",
             MethodType.methodType(void.class, Object.class));
+  }
+
+  /** Wires handles for JNDI, serialization, native libs, async cancel, zip, thread-locals, JMX. */
+  private static void wireMiscRuntimeHandles(
+      final MethodHandles.Lookup lookup,
+      final Class<?> delegateInterface,
+      final MethodHandle[] methodHandles)
+      throws ReflectiveOperationException {
     methodHandles[BootstrapDispatcher.BEFORE_JNDI_LOOKUP] =
         lookup.findVirtual(
             delegateInterface,
@@ -414,6 +481,14 @@ public final class JdkInstrumentationInstaller {
             delegateInterface,
             "beforeJmxGetAttr",
             MethodType.methodType(void.class, Object.class, Object.class, String.class));
+  }
+
+  /** Wires handles for java.time API now() adjustments and java.util.Date construction. */
+  private static void wireTimeApiHandles(
+      final MethodHandles.Lookup lookup,
+      final Class<?> delegateInterface,
+      final MethodHandle[] methodHandles)
+      throws ReflectiveOperationException {
     methodHandles[BootstrapDispatcher.ADJUST_INSTANT_NOW] =
         lookup.findVirtual(
             delegateInterface,
@@ -432,6 +507,14 @@ public final class JdkInstrumentationInstaller {
     methodHandles[BootstrapDispatcher.ADJUST_DATE_NEW] =
         lookup.findVirtual(
             delegateInterface, "adjustDateNew", MethodType.methodType(long.class, long.class));
+  }
+
+  /** Wires handles for HTTP client and JDBC instrumentation. */
+  private static void wireHttpAndJdbcHandles(
+      final MethodHandles.Lookup lookup,
+      final Class<?> delegateInterface,
+      final MethodHandle[] methodHandles)
+      throws ReflectiveOperationException {
     methodHandles[BootstrapDispatcher.BEFORE_HTTP_SEND] =
         lookup.findVirtual(
             delegateInterface,
@@ -467,6 +550,14 @@ public final class JdkInstrumentationInstaller {
             delegateInterface,
             "beforeJdbcTransactionRollback",
             MethodType.methodType(boolean.class));
+  }
+
+  /** Wires handles for thread sleep, DNS, SSL handshake, and file I/O instrumentation. */
+  private static void wireMiscIoHandles(
+      final MethodHandles.Lookup lookup,
+      final Class<?> delegateInterface,
+      final MethodHandle[] methodHandles)
+      throws ReflectiveOperationException {
     methodHandles[BootstrapDispatcher.BEFORE_THREAD_SLEEP] =
         lookup.findVirtual(
             delegateInterface,
@@ -487,7 +578,6 @@ public final class JdkInstrumentationInstaller {
             delegateInterface,
             "beforeFileIo",
             MethodType.methodType(void.class, String.class, Object.class));
-    return methodHandles;
   }
 
   @FunctionalInterface
