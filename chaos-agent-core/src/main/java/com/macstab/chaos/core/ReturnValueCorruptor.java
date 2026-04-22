@@ -155,21 +155,70 @@ final class ReturnValueCorruptor {
   }
 
   private static Object corruptEmpty(final Class<?> returnType, final String scenarioId) {
+    Object result;
+    if ((result = tryEmptyString(returnType)) != null) {
+      return result;
+    }
+    if ((result = tryEmptyConcreteCollection(returnType)) != null) {
+      return result;
+    }
+    if ((result = tryEmptyConcreteMap(returnType)) != null) {
+      return result;
+    }
+    if ((result = tryEmptyCollectionSingleton(returnType)) != null) {
+      return result;
+    }
+    if ((result = tryEmptyQueueOrDeque(returnType)) != null) {
+      return result;
+    }
+    if ((result = tryEmptySortedInterface(returnType)) != null) {
+      return result;
+    }
+    if ((result = tryEmptyConcurrentMap(returnType)) != null) {
+      return result;
+    }
+    if ((result = tryEmptyCollectionOrIterable(returnType)) != null) {
+      return result;
+    }
+    if ((result = tryEmptyOptional(returnType)) != null) {
+      return result;
+    }
+    // Fallback: primitives, unrecognised reference types, and concrete subtypes we cannot
+    // safely substitute use ZERO.
+    LOGGER.fine(
+        () ->
+            "ReturnValueCorruption EMPTY is inapplicable to "
+                + returnType.getName()
+                + " in scenario "
+                + scenarioId
+                + "; falling back to ZERO");
+    return corruptZero(returnType);
+  }
+
+  /** Empty String fallback. Returns {@code ""} for {@code String.class}, else {@code null}. */
+  private static Object tryEmptyString(final Class<?> returnType) {
     if (returnType == String.class) {
       return "";
     }
-    // For concrete mutable collection types, return a fresh mutable empty instance that is
-    // assignment-compatible with the declared return type. ByteBuddy emits an implicit checkcast
-    // at the @Advice.Return write site, so returning an immutable singleton (e.g.
-    // Collections.emptyList() whose concrete type is ImmutableCollections$ListN) for a method
-    // declared to return ArrayList<T> causes a ClassCastException at the call site.
-    // Check concrete types first (most specific to least specific) before interface checks.
-    //
-    // Order matters: LinkedHashMap extends HashMap, so the LinkedHashMap check must come before
-    // HashMap. Similarly LinkedHashSet extends HashSet. ConcurrentSkipList* implement the
-    // sorted/navigable interfaces so they get caught by the interface checks below if they
-    // themselves are the declared type; we add dedicated checks because the declared-return-type
-    // contract can name them concretely in the method signature.
+    return null;
+  }
+
+  /**
+   * For concrete mutable collection types, returns a fresh mutable empty instance that is
+   * assignment-compatible with the declared return type. ByteBuddy emits an implicit checkcast at
+   * the {@code @Advice.Return} write site, so returning an immutable singleton (e.g. {@code
+   * Collections.emptyList()} whose concrete type is {@code ImmutableCollections$ListN}) for a
+   * method declared to return {@code ArrayList<T>} causes a {@code ClassCastException} at the
+   * call site. Check concrete types first (most specific to least specific) before interface
+   * checks.
+   *
+   * <p>Order matters: {@code LinkedHashSet} extends {@code HashSet}, so the LinkedHashSet check
+   * must come first. ConcurrentSkipList* implement the sorted/navigable interfaces so they get
+   * caught by the interface checks below if they themselves are the declared type; we add
+   * dedicated checks because the declared-return-type contract can name them concretely in the
+   * method signature.
+   */
+  private static Object tryEmptyConcreteCollection(final Class<?> returnType) {
     if (ArrayList.class.isAssignableFrom(returnType)) {
       return new ArrayList<>();
     }
@@ -191,6 +240,15 @@ final class ReturnValueCorruptor {
     if (ConcurrentSkipListSet.class.isAssignableFrom(returnType)) {
       return new ConcurrentSkipListSet<>();
     }
+    return null;
+  }
+
+  /**
+   * Concrete Map types. Order matters: {@code LinkedHashMap} extends {@code HashMap}, so the
+   * LinkedHashMap check must come first. See {@link #tryEmptyConcreteCollection} for the
+   * checkcast rationale.
+   */
+  private static Object tryEmptyConcreteMap(final Class<?> returnType) {
     if (LinkedHashMap.class.isAssignableFrom(returnType)) {
       return new LinkedHashMap<>();
     }
@@ -206,10 +264,16 @@ final class ReturnValueCorruptor {
     if (ConcurrentHashMap.class.isAssignableFrom(returnType)) {
       return new ConcurrentHashMap<>();
     }
-    // For interface/abstract types, the immutable singletons are safe because the declared
-    // return type does not require a specific concrete class — only the interface compatibility.
-    // Double-check: the singleton's concrete class must be assignable to the declared return
-    // type to satisfy the checkcast at the advice write site.
+    return null;
+  }
+
+  /**
+   * For interface / abstract types, the immutable singletons are safe because the declared return
+   * type does not require a specific concrete class — only the interface compatibility.
+   * Double-check: the singleton's concrete class must be assignable to the declared return type to
+   * satisfy the checkcast at the advice write site.
+   */
+  private static Object tryEmptyCollectionSingleton(final Class<?> returnType) {
     if (returnType.isAssignableFrom(java.util.Collections.emptyList().getClass())
         && List.class.isAssignableFrom(returnType)) {
       return Collections.emptyList();
@@ -222,18 +286,30 @@ final class ReturnValueCorruptor {
         && Map.class.isAssignableFrom(returnType)) {
       return Collections.emptyMap();
     }
-    // Queue and Deque interfaces are not backed by a Collections.empty* singleton, so fall
-    // back to mutable-but-empty concrete implementations. Deque is a sub-interface of Queue,
-    // so check it first.
+    return null;
+  }
+
+  /**
+   * Queue and Deque interfaces are not backed by a {@code Collections.empty*} singleton, so fall
+   * back to mutable-but-empty concrete implementations. Deque is a sub-interface of Queue, so
+   * check it first.
+   */
+  private static Object tryEmptyQueueOrDeque(final Class<?> returnType) {
     if (Deque.class.isAssignableFrom(returnType)) {
       return new ArrayDeque<>();
     }
     if (Queue.class.isAssignableFrom(returnType)) {
       return new LinkedList<>();
     }
-    // SortedMap / NavigableMap / SortedSet / NavigableSet have no Collections.empty* singleton
-    // that satisfies the interface. Collections.emptySortedMap() etc. do exist but returning a
-    // mutable instance is safer because callers may mutate the result.
+    return null;
+  }
+
+  /**
+   * SortedMap / NavigableMap / SortedSet / NavigableSet have no {@code Collections.empty*}
+   * singleton that satisfies the interface. {@code Collections.emptySortedMap()} etc. do exist but
+   * returning a mutable instance is safer because callers may mutate the result.
+   */
+  private static Object tryEmptySortedInterface(final Class<?> returnType) {
     if (NavigableMap.class.isAssignableFrom(returnType)
         || SortedMap.class.isAssignableFrom(returnType)) {
       return new TreeMap<>();
@@ -242,9 +318,19 @@ final class ReturnValueCorruptor {
         || SortedSet.class.isAssignableFrom(returnType)) {
       return new TreeSet<>();
     }
+    return null;
+  }
+
+  /** ConcurrentMap interface fallback. */
+  private static Object tryEmptyConcurrentMap(final Class<?> returnType) {
     if (ConcurrentMap.class.isAssignableFrom(returnType)) {
       return new ConcurrentHashMap<>();
     }
+    return null;
+  }
+
+  /** Collection / Iterable fallback to {@link Collections#emptyList()}. */
+  private static Object tryEmptyCollectionOrIterable(final Class<?> returnType) {
     if (returnType.isAssignableFrom(java.util.Collections.emptyList().getClass())
         && Collection.class.isAssignableFrom(returnType)) {
       return Collections.emptyList();
@@ -253,20 +339,15 @@ final class ReturnValueCorruptor {
         && returnType.isAssignableFrom(java.util.Collections.emptyList().getClass())) {
       return Collections.emptyList();
     }
+    return null;
+  }
+
+  /** Optional is a value type; {@link Optional#empty()} is always assignable-compatible. */
+  private static Object tryEmptyOptional(final Class<?> returnType) {
     if (Optional.class.isAssignableFrom(returnType)) {
-      // Optional is a value type; Optional.empty() is always assignable-compatible.
       return Optional.empty();
     }
-    // Fallback: primitives, unrecognised reference types, and concrete subtypes we cannot
-    // safely substitute use ZERO.
-    LOGGER.fine(
-        () ->
-            "ReturnValueCorruption EMPTY is inapplicable to "
-                + returnType.getName()
-                + " in scenario "
-                + scenarioId
-                + "; falling back to ZERO");
-    return corruptZero(returnType);
+    return null;
   }
 
   private static Object corruptBoundary(
