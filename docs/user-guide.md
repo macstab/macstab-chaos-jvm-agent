@@ -30,6 +30,8 @@
 11. [Limitations and Known Constraints](#11-limitations-and-known-constraints)
 12. [Contributing](#12-contributing)
 
+> **Complete configuration reference:** For exhaustive documentation of every selector, effect, operation type, activation policy field, stressor, and JSON plan schema, see [configuration-reference.md](configuration-reference.md).
+
 ---
 
 ## 1. What This Is (and Is Not)
