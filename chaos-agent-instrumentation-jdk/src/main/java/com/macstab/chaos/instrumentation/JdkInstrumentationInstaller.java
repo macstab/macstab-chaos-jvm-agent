@@ -37,9 +37,11 @@ import net.bytebuddy.utility.JavaModule;
  *       temporary JAR and appends it to the bootstrap classpath so that bootstrap-loaded JDK
  *       classes can see it.
  *   <li>{@link #installDelegate(Object)} constructs a {@link
- *       com.macstab.chaos.instrumentation.ChaosBridge}, builds the 46-slot {@link
- *       java.lang.invoke.MethodHandle} array via {@link #buildMethodHandles}, and calls the
- *       bootstrap-loaded {@code BootstrapDispatcher.install()} via reflection to wire the bridge.
+ *       com.macstab.chaos.instrumentation.ChaosBridge}, builds the {@link
+ *       com.macstab.chaos.instrumentation.bridge.BootstrapDispatcher#HANDLE_COUNT
+ *       HANDLE_COUNT}-slot {@link java.lang.invoke.MethodHandle} array via {@link
+ *       #buildMethodHandles}, and calls the bootstrap-loaded {@code BootstrapDispatcher.install()}
+ *       via reflection to wire the bridge.
  *   <li>ByteBuddy's {@code AgentBuilder} is assembled with one transformation per interception
  *       point and installed via {@link
  *       net.bytebuddy.agent.builder.AgentBuilder#installOn(java.lang.instrument.Instrumentation)}.
@@ -199,14 +201,15 @@ public final class JdkInstrumentationInstaller {
    * index constants declared on {@link
    * com.macstab.chaos.instrumentation.bridge.BootstrapDispatcher} (e.g. {@code
    * ADJUST_CLOCK_MILLIS}, {@code BEFORE_GC_REQUEST}, etc.). The array has exactly {@link
-   * com.macstab.chaos.instrumentation.bridge.BootstrapDispatcher#HANDLE_COUNT} elements (currently
-   * 46), one per dispatch slot. All handles are resolved against the {@link BridgeDelegate}
-   * interface using a public lookup so that they are callable from the bootstrap classloader
-   * context.
+   * com.macstab.chaos.instrumentation.bridge.BootstrapDispatcher#HANDLE_COUNT} elements, one per
+   * dispatch slot. All handles are unbound virtual handles resolved against the {@link
+   * BridgeDelegate} interface via a public lookup; each dispatch call passes the delegate instance
+   * as the first argument so handles remain callable from the bootstrap classloader context.
    *
-   * @return a 46-element array of {@link MethodHandle} objects indexed by the {@code HANDLE_*}
-   *     constants on {@link com.macstab.chaos.instrumentation.bridge.BootstrapDispatcher}; no
-   *     element is {@code null}
+   * @return an array of {@link MethodHandle} objects sized to {@link
+   *     com.macstab.chaos.instrumentation.bridge.BootstrapDispatcher#HANDLE_COUNT} and indexed by
+   *     the {@code HANDLE_*} constants on {@link
+   *     com.macstab.chaos.instrumentation.bridge.BootstrapDispatcher}; no element is {@code null}
    * @throws Exception if any required method is absent from {@link BridgeDelegate} or if the lookup
    *     fails for any reason
    */

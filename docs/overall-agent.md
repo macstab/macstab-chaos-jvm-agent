@@ -154,7 +154,7 @@ ChaosRuntime created (Clock.systemUTC, NOOP metrics sink)
 JdkInstrumentationInstaller.install(instrumentation, runtime, premainMode=true)
     ├── injectBridge(): package BootstrapDispatcher into temp JAR,
     │                   appendToBootstrapClassLoaderSearch
-    ├── installDelegate(): build 46-slot MethodHandle[], wire into BootstrapDispatcher.install()
+    ├── installDelegate(): build 57-slot MethodHandle[], wire into BootstrapDispatcher.install()
     └── AgentBuilder: Phase 1 + Phase 2 ByteBuddy transformations installed via retransformation
   ↓
 Optional<LoadedPlan> plan = StartupConfigLoader.load(agentArgs, System.getenv())
@@ -452,7 +452,7 @@ node "JVM Process" {
 
 **Two-field volatile publication**: `handles` is written before `delegate` so that any thread that snapshot-reads a non-null `delegate` is guaranteed to also see a non-null `handles` array. Both fields are `volatile`. This is the minimal safe publication protocol for a two-field pair without synchronization.
 
-**Reentrancy guard**: `ThreadLocal<Integer> DEPTH`. Incremented at the start of every `invoke()`, decremented in `finally`. When `DEPTH > 0`, any nested dispatch (e.g., chaos code calling `Thread.sleep()`, which is instrumented for `THREAD_PARK`) returns the fallback immediately. The `ThreadLocal` is `.remove()`d when DEPTH returns to zero to prevent memory leaks in pooled threads.
+**Reentrancy guard**: `ThreadLocal<int[]> DEPTH` (a one-element `int[]` is held instead of `Integer` so the counter is read once per call and mutated in place, avoiding a second `ThreadLocal.get()` and autoboxing on every intercepted JDK call). Incremented at the start of every `invoke()`, decremented in `finally`. When `DEPTH > 0`, any nested dispatch (e.g., chaos code calling `Thread.sleep()`, which is instrumented for `THREAD_PARK`) returns the fallback immediately. The `ThreadLocal` is `.remove()`d when DEPTH returns to zero to prevent memory leaks in pooled threads.
 
 **Special case — ThreadLocal advice**: `ThreadLocalGetAdvice` and `ThreadLocalSetAdvice` include an identity check: `if (threadLocal == BootstrapDispatcher.depthThreadLocal()) return false`. Without this check, the advice on `ThreadLocal.get()` would fire when `DEPTH.get()` is called inside `invoke()`, creating an infinite recursion that the DEPTH guard cannot prevent (the DEPTH read is itself a `ThreadLocal.get()`).
 
@@ -464,7 +464,7 @@ node "JVM Process" {
 
 **Bootstrap bridge injection**: Reads `BootstrapDispatcher.class` and `BootstrapDispatcher$ThrowingSupplier.class` from the agent JAR's resources and writes them into a temp JAR. The temp JAR is appended to the bootstrap classpath via `Instrumentation.appendToBootstrapClassLoaderSearch`. The temp file is registered for deletion on JVM exit.
 
-**MethodHandle array construction** (`buildMethodHandles`): Uses `MethodHandles.publicLookup()` against `BridgeDelegate.class` to build 46 handles. All handles are resolved against the interface, not the implementation, so the bootstrap classloader can invoke them without visibility into `ChaosBridge`. The handle array is passed to `BootstrapDispatcher.install()` via reflection (`Class.forName(..., null)` with bootstrap classloader).
+**MethodHandle array construction** (`buildMethodHandles`): Uses `MethodHandles.publicLookup()` against `BridgeDelegate.class` to build `BootstrapDispatcher.HANDLE_COUNT` handles (currently 57). All handles are unbound virtual handles resolved against the interface, not the implementation, so the bootstrap classloader can invoke them without visibility into `ChaosBridge`; each dispatch call supplies the delegate instance as the first argument. The handle array is passed to `BootstrapDispatcher.install()` via reflection (`Class.forName(..., null)` with bootstrap classloader).
 
 **Phase 1 vs Phase 2 distinction**:
 - Phase 1: `ThreadPoolExecutor`, `ScheduledThreadPoolExecutor`, `Thread` — can be instrumented in both premain and agentmain because these are application-level classes or JDK classes loaded after the agent
@@ -596,7 +596,7 @@ The agent is strictly reactive — it does not introduce background threads unle
 | `ChaosRuntime.shutdownHooks` | Runtime | `ConcurrentHashMap` |
 | `ScopeContext.currentSessionId()` | Per-thread | `ThreadLocal` |
 | `BootstrapDispatcher.handles` / `delegate` | Static, JVM-wide | `volatile` (two-field safe publication protocol) |
-| `BootstrapDispatcher.DEPTH` | Per-thread | `ThreadLocal<Integer>` |
+| `BootstrapDispatcher.DEPTH` | Per-thread | `ThreadLocal<int[]>` |
 
 ## Visibility and Publication Guarantees
 

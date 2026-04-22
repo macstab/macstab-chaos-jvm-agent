@@ -72,7 +72,7 @@ Out of scope:
 | **BootstrapDispatcher** | A class that must be visible to the bootstrap classloader. Provides 57 static dispatch methods called from advice. |
 | **BridgeDelegate** | Interface in the agent classloader defining the 57-method contract. Implemented by `ChaosBridge`. |
 | **MethodHandle** | A typed reference to a method, invokable across classloader boundaries. Built from the agent classloader; stored in `BootstrapDispatcher.handles[]`. |
-| **DEPTH guard** | `ThreadLocal<Integer>` in `BootstrapDispatcher`. Prevents infinite recursion when chaos code calls instrumented JDK methods. |
+| **DEPTH guard** | `ThreadLocal<int[]>` in `BootstrapDispatcher`. Prevents infinite recursion when chaos code calls instrumented JDK methods. |
 | **Phase 1** | Instrumentation installed in both premain and agentmain: `ThreadPoolExecutor`, `Thread`, `ScheduledThreadPoolExecutor`. |
 | **Phase 2** | Instrumentation installed in premain only: all bootstrap-loaded JDK classes requiring retransformation. |
 | **Retransformation** | Replacing the bytecode of an already-loaded class. Requires `Can-Retransform-Classes: true` in the agent manifest and premain-mode attachment. |
@@ -158,7 +158,7 @@ This identity check fires before any delegation. When `DEPTH` reads itself, the 
 @startuml
 node "Bootstrap ClassLoader" {
   rectangle "JDK classes\n(java.lang.Thread,\njava.net.Socket, etc.)" as JDK
-  rectangle "BootstrapDispatcher\n(injected via temp JAR)\n\nvolatile Object delegate\nvolatile MethodHandle[] handles\nThreadLocal<Integer> DEPTH" as BD
+  rectangle "BootstrapDispatcher\n(injected via temp JAR)\n\nvolatile Object delegate\nvolatile MethodHandle[] handles\nThreadLocal<int[]> DEPTH" as BD
 }
 
 node "Agent ClassLoader" {

@@ -28,9 +28,10 @@ import java.util.concurrent.ForkJoinTask;
  * unreachable by name from bootstrap code. The bridge is established at startup via {@link
  * #install}: the agent classloader passes in a {@code BridgeDelegate} instance (as {@code Object}
  * to avoid class-not-found errors in bootstrap code) and a pre-built {@code MethodHandle[]} of size
- * {@link #HANDLE_COUNT}. Each element is a handle bound to the corresponding method on the
- * delegate. Integer constants ({@link #DECORATE_EXECUTOR_RUNNABLE} … {@link #BEFORE_JMX_GET_ATTR})
- * serve as stable indices into this array.
+ * {@link #HANDLE_COUNT}. Each element is an unbound virtual {@link MethodHandle} resolved against
+ * the {@link BridgeDelegate} interface; every dispatch call supplies the delegate instance as the
+ * first argument at invocation time. Integer constants ({@link #DECORATE_EXECUTOR_RUNNABLE} …
+ * {@link #BEFORE_JMX_GET_ATTR}) serve as stable indices into this array.
  *
  * <h2>Reentrancy guard</h2>
  *
@@ -97,9 +98,11 @@ public final class BootstrapDispatcher {
   private static volatile Object delegate;
 
   /**
-   * Pre-built {@link MethodHandle} array of size {@link #HANDLE_COUNT}, each element bound to
-   * {@link #delegate}. Written before {@code delegate} by {@link #install} so a reader observing a
-   * non-null {@code delegate} is guaranteed to also see a complete handles array.
+   * Pre-built {@link MethodHandle} array of size {@link #HANDLE_COUNT}. Each element is an unbound
+   * virtual handle resolved against the {@link BridgeDelegate} interface; dispatch methods pass
+   * {@link #delegate} as the first invocation argument. Written before {@code delegate} by {@link
+   * #install} so a reader observing a non-null {@code delegate} is guaranteed to also see a
+   * complete handles array.
    */
   private static volatile MethodHandle[] handles;
 
@@ -298,8 +301,9 @@ public final class BootstrapDispatcher {
    *     ClassNotFoundException} in bootstrap code
    * @param methodHandles array of exactly {@link #HANDLE_COUNT} {@link
    *     java.lang.invoke.MethodHandle} instances, indexed by the public integer constants defined
-   *     on this class; each handle is pre-bound to {@code bridgeDelegate} so that dispatch calls
-   *     need only supply the per-invocation arguments
+   *     on this class; each handle is an unbound virtual handle resolved against {@link
+   *     BridgeDelegate}, and dispatch calls pass {@code bridgeDelegate} as the first argument on
+   *     every invocation
    */
   public static synchronized void install(
       final Object bridgeDelegate, final MethodHandle[] methodHandles) {

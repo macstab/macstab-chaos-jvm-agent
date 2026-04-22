@@ -151,7 +151,7 @@ JDK classes (`Thread`, `Socket`, `System`, etc.) are loaded by the **bootstrap c
 Chaos code itself calls instrumented JDK methods (`Thread.sleep`, `LockSupport.park`, `ConcurrentHashMap` internals). Without protection, each chaos dispatch would trigger another chaos dispatch, recursing until stack overflow. The guard:
 
 ```
-DEPTH : ThreadLocal<Integer>  (bootstrap-classloader resident)
+DEPTH : ThreadLocal<int[]>  (bootstrap-classloader resident)
 invoke():
   if DEPTH.get() > 0 → return fallback immediately
   DEPTH.set(DEPTH.get() + 1)

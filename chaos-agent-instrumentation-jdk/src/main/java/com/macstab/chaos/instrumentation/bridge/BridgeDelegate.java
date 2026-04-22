@@ -18,10 +18,11 @@ import java.util.concurrent.ForkJoinTask;
  * <p>The bridge is crossed at runtime via a {@link java.lang.invoke.MethodHandle} array: at agent
  * startup, an implementation of this interface ({@link
  * com.macstab.chaos.instrumentation.ChaosBridge}) is constructed in the agent classloader and its
- * methods are pre-bound into handles. Those handles — plus the delegate instance itself, typed as
- * {@code Object} — are handed to {@link BootstrapDispatcher#install(Object,
- * java.lang.invoke.MethodHandle[])} so that the bootstrap dispatcher can call through to agent code
- * without any classloader visibility requirement.
+ * methods are resolved into unbound virtual handles against this interface. Those handles — plus
+ * the delegate instance itself, typed as {@code Object} — are handed to {@link
+ * BootstrapDispatcher#install(Object, java.lang.invoke.MethodHandle[])}, and each dispatch call
+ * supplies the delegate as the first argument so the bootstrap dispatcher can call through to agent
+ * code without any classloader visibility requirement.
  *
  * <h2>Method mapping</h2>
  *

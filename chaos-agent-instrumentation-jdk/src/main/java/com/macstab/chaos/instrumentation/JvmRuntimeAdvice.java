@@ -478,7 +478,7 @@ final class JvmRuntimeAdvice {
    * Intercepts {@code ThreadLocal.get()} to allow null-injection or delay on ThreadLocal reads.
    *
    * <p><b>Reentrancy guard — identity check:</b> {@code BootstrapDispatcher.DEPTH} is itself a
-   * {@code ThreadLocal<Integer>}. Without special handling, instrumenting {@code ThreadLocal.get()}
+   * {@code ThreadLocal<int[]>}. Without special handling, instrumenting {@code ThreadLocal.get()}
    * would cause infinite recursion:
    *
    * <pre>
