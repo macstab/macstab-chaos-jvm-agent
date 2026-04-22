@@ -37,6 +37,9 @@ public class ChaosContextConfigurer implements ApplicationContextConfigurer {
    */
   public static final String ENABLED_PROPERTY = "macstab.chaos.enabled";
 
+  private static final String ENABLED_ENV_VAR =
+      ENABLED_PROPERTY.replace('.', '_').toUpperCase();
+
   private static final Logger LOGGER = Logger.getLogger(ChaosContextConfigurer.class.getName());
 
   /** Default constructor invoked by Micronaut when the configurer is discovered. */
@@ -67,7 +70,7 @@ public class ChaosContextConfigurer implements ApplicationContextConfigurer {
     if (sysProp != null) {
       return Boolean.parseBoolean(sysProp);
     }
-    final String envVar = System.getenv(ENABLED_PROPERTY.replace('.', '_').toUpperCase());
+    final String envVar = System.getenv(ENABLED_ENV_VAR);
     return Boolean.parseBoolean(envVar);
   }
 }

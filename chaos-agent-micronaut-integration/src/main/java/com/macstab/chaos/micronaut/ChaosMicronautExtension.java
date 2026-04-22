@@ -5,6 +5,7 @@ import com.macstab.chaos.api.ChaosSession;
 import com.macstab.chaos.bootstrap.ChaosPlatform;
 import com.macstab.chaos.testkit.TrackingChaosControlPlane;
 import io.micronaut.test.extensions.junit5.annotation.MicronautTest;
+import java.util.Optional;
 import org.junit.jupiter.api.extension.AfterAllCallback;
 import org.junit.jupiter.api.extension.BeforeAllCallback;
 import org.junit.jupiter.api.extension.ExtensionContext;
@@ -111,7 +112,7 @@ public final class ChaosMicronautExtension
   private static boolean isMicronautTest(final ExtensionContext context) {
     ExtensionContext current = context;
     while (current != null) {
-      final var testClass = current.getTestClass();
+      final Optional<Class<?>> testClass = current.getTestClass();
       if (testClass.isPresent() && testClass.get().isAnnotationPresent(MicronautTest.class)) {
         return true;
       }
@@ -124,13 +125,9 @@ public final class ChaosMicronautExtension
   public Object resolveParameter(
       final ParameterContext parameterContext, final ExtensionContext extensionContext) {
     final Class<?> parameterType = parameterContext.getParameter().getType();
-    ExtensionContext current = extensionContext;
-    while (current != null) {
-      final Object value = current.getStore(NAMESPACE).get(parameterType, parameterType);
-      if (value != null) {
-        return value;
-      }
-      current = current.getParent().orElse(null);
+    final Object stored = findInStoreHierarchy(extensionContext, parameterType);
+    if (stored != null) {
+      return stored;
     }
     // JUnit 5 contract: once supportsParameter() returns true, resolveParameter() must return
     // non-null or throw. Returning null silently injects null into the test parameter, causing
@@ -141,5 +138,18 @@ public final class ChaosMicronautExtension
             + parameterType.getSimpleName()
             + " available — ensure the test class is annotated with @MicronautChaosTest"
             + " and beforeAll() has run before parameter injection");
+  }
+
+  private static Object findInStoreHierarchy(
+      final ExtensionContext startContext, final Class<?> type) {
+    ExtensionContext current = startContext;
+    while (current != null) {
+      final Object value = current.getStore(NAMESPACE).get(type, type);
+      if (value != null) {
+        return value;
+      }
+      current = current.getParent().orElse(null);
+    }
+    return null;
   }
 }
