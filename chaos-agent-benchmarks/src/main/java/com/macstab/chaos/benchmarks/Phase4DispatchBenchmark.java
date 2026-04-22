@@ -60,6 +60,12 @@ public class Phase4DispatchBenchmark {
       new ActivationPolicy(
           ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 0, null, null, null, 1L, false);
 
+  private static final long SLEEP_DURATION_MILLIS = 1L;
+  private static final String DNS_HOSTNAME = "api.example.com";
+  private static final String SETUP_DNS_HOSTNAME = "bench.internal";
+  private static final String FILE_IO_READ_OPERATION = "FILE_IO_READ";
+  private static final String FILE_IO_WRITE_OPERATION = "FILE_IO_WRITE";
+
   // ── states ───────────────────────────────────────────────────────────────
 
   @State(Scope.Benchmark)
@@ -158,10 +164,10 @@ public class Phase4DispatchBenchmark {
       dispatcher = runtime.dispatcher();
 
       // Consume each scenario once so they are exhausted for the measurement loop.
-      dispatcher.beforeThreadSleep(1L);
-      dispatcher.beforeDnsResolve("bench.internal");
+      dispatcher.beforeThreadSleep(SLEEP_DURATION_MILLIS);
+      dispatcher.beforeDnsResolve(SETUP_DNS_HOSTNAME);
       dispatcher.beforeSslHandshake(null);
-      dispatcher.beforeFileIo("FILE_IO_READ", null);
+      dispatcher.beforeFileIo(FILE_IO_READ_OPERATION, null);
     }
 
     @TearDown(Level.Trial)
@@ -173,106 +179,106 @@ public class Phase4DispatchBenchmark {
   // ── Thread.sleep ─────────────────────────────────────────────────────────
 
   @Benchmark
-  public boolean threadSleep_zeroScenarios(ZeroScenariosState s) throws Throwable {
-    return s.dispatcher.beforeThreadSleep(1L);
+  public boolean threadSleep_zeroScenarios(ZeroScenariosState state) throws Throwable {
+    return state.dispatcher.beforeThreadSleep(SLEEP_DURATION_MILLIS);
   }
 
   @Benchmark
-  public boolean threadSleep_oneScenarioNoMatch(OneScenarioNoMatchState s) throws Throwable {
-    return s.dispatcher.beforeThreadSleep(1L);
+  public boolean threadSleep_oneScenarioNoMatch(OneScenarioNoMatchState state) throws Throwable {
+    return state.dispatcher.beforeThreadSleep(SLEEP_DURATION_MILLIS);
   }
 
   @Benchmark
-  public boolean threadSleep_fourScenariosExhausted(FourScenariosExhaustedState s)
+  public boolean threadSleep_fourScenariosExhausted(FourScenariosExhaustedState state)
       throws Throwable {
-    return s.dispatcher.beforeThreadSleep(1L);
+    return state.dispatcher.beforeThreadSleep(SLEEP_DURATION_MILLIS);
   }
 
   // ── DNS resolve ──────────────────────────────────────────────────────────
 
   @Benchmark
-  public void dnsResolve_zeroScenarios(ZeroScenariosState s, Blackhole bh) throws Throwable {
-    s.dispatcher.beforeDnsResolve("api.example.com");
-    bh.consume(s);
+  public void dnsResolve_zeroScenarios(ZeroScenariosState state, Blackhole bh) throws Throwable {
+    state.dispatcher.beforeDnsResolve(DNS_HOSTNAME);
+    bh.consume(state);
   }
 
   @Benchmark
-  public void dnsResolve_oneScenarioNoMatch(OneScenarioNoMatchState s, Blackhole bh)
+  public void dnsResolve_oneScenarioNoMatch(OneScenarioNoMatchState state, Blackhole bh)
       throws Throwable {
-    s.dispatcher.beforeDnsResolve("api.example.com");
-    bh.consume(s);
+    state.dispatcher.beforeDnsResolve(DNS_HOSTNAME);
+    bh.consume(state);
   }
 
   @Benchmark
-  public void dnsResolve_fourScenariosExhausted(FourScenariosExhaustedState s, Blackhole bh)
+  public void dnsResolve_fourScenariosExhausted(FourScenariosExhaustedState state, Blackhole bh)
       throws Throwable {
-    s.dispatcher.beforeDnsResolve("api.example.com");
-    bh.consume(s);
+    state.dispatcher.beforeDnsResolve(DNS_HOSTNAME);
+    bh.consume(state);
   }
 
   // ── SSL/TLS handshake ────────────────────────────────────────────────────
 
   @Benchmark
-  public void sslHandshake_zeroScenarios(ZeroScenariosState s, Blackhole bh) throws Throwable {
-    s.dispatcher.beforeSslHandshake(null);
-    bh.consume(s);
+  public void sslHandshake_zeroScenarios(ZeroScenariosState state, Blackhole bh) throws Throwable {
+    state.dispatcher.beforeSslHandshake(null);
+    bh.consume(state);
   }
 
   @Benchmark
-  public void sslHandshake_oneScenarioNoMatch(OneScenarioNoMatchState s, Blackhole bh)
+  public void sslHandshake_oneScenarioNoMatch(OneScenarioNoMatchState state, Blackhole bh)
       throws Throwable {
-    s.dispatcher.beforeSslHandshake(null);
-    bh.consume(s);
+    state.dispatcher.beforeSslHandshake(null);
+    bh.consume(state);
   }
 
   @Benchmark
-  public void sslHandshake_fourScenariosExhausted(FourScenariosExhaustedState s, Blackhole bh)
+  public void sslHandshake_fourScenariosExhausted(FourScenariosExhaustedState state, Blackhole bh)
       throws Throwable {
-    s.dispatcher.beforeSslHandshake(null);
-    bh.consume(s);
+    state.dispatcher.beforeSslHandshake(null);
+    bh.consume(state);
   }
 
   // ── File I/O read ─────────────────────────────────────────────────────────
 
   @Benchmark
-  public void fileIoRead_zeroScenarios(ZeroScenariosState s, Blackhole bh) throws Throwable {
-    s.dispatcher.beforeFileIo("FILE_IO_READ", null);
-    bh.consume(s);
+  public void fileIoRead_zeroScenarios(ZeroScenariosState state, Blackhole bh) throws Throwable {
+    state.dispatcher.beforeFileIo(FILE_IO_READ_OPERATION, null);
+    bh.consume(state);
   }
 
   @Benchmark
-  public void fileIoRead_oneScenarioNoMatch(OneScenarioNoMatchState s, Blackhole bh)
+  public void fileIoRead_oneScenarioNoMatch(OneScenarioNoMatchState state, Blackhole bh)
       throws Throwable {
-    s.dispatcher.beforeFileIo("FILE_IO_READ", null);
-    bh.consume(s);
+    state.dispatcher.beforeFileIo(FILE_IO_READ_OPERATION, null);
+    bh.consume(state);
   }
 
   @Benchmark
-  public void fileIoRead_fourScenariosExhausted(FourScenariosExhaustedState s, Blackhole bh)
+  public void fileIoRead_fourScenariosExhausted(FourScenariosExhaustedState state, Blackhole bh)
       throws Throwable {
-    s.dispatcher.beforeFileIo("FILE_IO_READ", null);
-    bh.consume(s);
+    state.dispatcher.beforeFileIo(FILE_IO_READ_OPERATION, null);
+    bh.consume(state);
   }
 
   // ── File I/O write ────────────────────────────────────────────────────────
 
   @Benchmark
-  public void fileIoWrite_zeroScenarios(ZeroScenariosState s, Blackhole bh) throws Throwable {
-    s.dispatcher.beforeFileIo("FILE_IO_WRITE", null);
-    bh.consume(s);
+  public void fileIoWrite_zeroScenarios(ZeroScenariosState state, Blackhole bh) throws Throwable {
+    state.dispatcher.beforeFileIo(FILE_IO_WRITE_OPERATION, null);
+    bh.consume(state);
   }
 
   @Benchmark
-  public void fileIoWrite_oneScenarioNoMatch(OneScenarioNoMatchState s, Blackhole bh)
+  public void fileIoWrite_oneScenarioNoMatch(OneScenarioNoMatchState state, Blackhole bh)
       throws Throwable {
-    s.dispatcher.beforeFileIo("FILE_IO_WRITE", null);
-    bh.consume(s);
+    state.dispatcher.beforeFileIo(FILE_IO_WRITE_OPERATION, null);
+    bh.consume(state);
   }
 
   @Benchmark
-  public void fileIoWrite_fourScenariosExhausted(FourScenariosExhaustedState s, Blackhole bh)
+  public void fileIoWrite_fourScenariosExhausted(FourScenariosExhaustedState state, Blackhole bh)
       throws Throwable {
-    s.dispatcher.beforeFileIo("FILE_IO_WRITE", null);
-    bh.consume(s);
+    state.dispatcher.beforeFileIo(FILE_IO_WRITE_OPERATION, null);
+    bh.consume(state);
   }
 }

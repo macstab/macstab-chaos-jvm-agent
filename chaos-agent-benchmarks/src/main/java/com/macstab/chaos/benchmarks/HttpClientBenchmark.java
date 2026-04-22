@@ -33,11 +33,13 @@ import org.openjdk.jmh.infra.Blackhole;
 @Fork(1)
 public class HttpClientBenchmark {
 
-  private static final String URL = "https://example.com/api/v1/orders";
+  private static final String BENCHMARK_URL = "https://example.com/api/v1/orders";
+  private static final String NO_MATCH_URL_PATTERN = "https://other\\.example\\.net/.*";
   private static final Duration ZERO_DELAY = Duration.ofMillis(0);
   private static final ActivationPolicy ONE_SHOT_POLICY =
       new ActivationPolicy(
           ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 0, null, null, null, 1L, false);
+  private static final int NON_MATCHING_SCENARIO_COUNT = 9;
 
   @State(Scope.Benchmark)
   public static class ZeroScenariosState {
@@ -70,7 +72,7 @@ public class HttpClientBenchmark {
               .selector(
                   ChaosSelector.httpClient(
                       Set.of(OperationType.HTTP_CLIENT_SEND),
-                      NamePattern.regex("https://other\\.example\\.net/.*")))
+                      NamePattern.regex(NO_MATCH_URL_PATTERN)))
               .effect(ChaosEffect.delay(Duration.ofMillis(1)))
               .activationPolicy(ActivationPolicy.always())
               .build());
@@ -144,7 +146,7 @@ public class HttpClientBenchmark {
     @Setup(Level.Trial)
     public void setup() {
       runtime = new ChaosRuntime();
-      for (int i = 0; i < 9; i++) {
+      for (int i = 0; i < NON_MATCHING_SCENARIO_COUNT; i++) {
         runtime.activate(
             ChaosScenario.builder("http-no-match-" + i)
                 .scope(ChaosScenario.ScenarioScope.JVM)
@@ -175,34 +177,34 @@ public class HttpClientBenchmark {
 
   @Benchmark
   public void baseline_noAgent(Blackhole bh) {
-    bh.consume(URL.length());
+    bh.consume(BENCHMARK_URL.length());
   }
 
   @Benchmark
   public void agentInstalled_zeroScenarios(ZeroScenariosState state, Blackhole bh)
       throws Throwable {
-    bh.consume(state.dispatcher.beforeHttpSend(URL, OperationType.HTTP_CLIENT_SEND));
+    bh.consume(state.dispatcher.beforeHttpSend(BENCHMARK_URL, OperationType.HTTP_CLIENT_SEND));
   }
 
   @Benchmark
   public void agentInstalled_oneScenario_noMatch(OneScenarioNoMatchState state, Blackhole bh)
       throws Throwable {
-    bh.consume(state.dispatcher.beforeHttpSend(URL, OperationType.HTTP_CLIENT_SEND));
+    bh.consume(state.dispatcher.beforeHttpSend(BENCHMARK_URL, OperationType.HTTP_CLIENT_SEND));
   }
 
   @Benchmark
   public void agentInstalled_oneMatch_noEffect(OneMatchNoEffectState state, Blackhole bh)
       throws Throwable {
-    bh.consume(state.dispatcher.beforeHttpSend(URL, OperationType.HTTP_CLIENT_SEND));
+    bh.consume(state.dispatcher.beforeHttpSend(BENCHMARK_URL, OperationType.HTTP_CLIENT_SEND));
   }
 
   @Benchmark
   public void sessionIdMiss(SessionMissState state, Blackhole bh) throws Throwable {
-    bh.consume(state.dispatcher.beforeHttpSend(URL, OperationType.HTTP_CLIENT_SEND));
+    bh.consume(state.dispatcher.beforeHttpSend(BENCHMARK_URL, OperationType.HTTP_CLIENT_SEND));
   }
 
   @Benchmark
   public void tenScenarios_oneMatch(TenScenariosState state, Blackhole bh) throws Throwable {
-    bh.consume(state.dispatcher.beforeHttpSend(URL, OperationType.HTTP_CLIENT_SEND));
+    bh.consume(state.dispatcher.beforeHttpSend(BENCHMARK_URL, OperationType.HTTP_CLIENT_SEND));
   }
 }

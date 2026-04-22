@@ -40,6 +40,8 @@ public class ChaosRuntimeBenchmark {
   private static final ActivationPolicy ONE_SHOT_POLICY =
       new ActivationPolicy(
           ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 0, null, null, null, 1L, false);
+  private static final String BENCHMARK_SQL = "SELECT 1";
+  private static final int NON_MATCHING_SCENARIO_COUNT = 9;
 
   @State(Scope.Benchmark)
   public static class NoAgentState {
@@ -151,7 +153,7 @@ public class ChaosRuntimeBenchmark {
     @Setup(Level.Trial)
     public void setup() {
       runtime = new ChaosRuntime();
-      for (int i = 0; i < 9; i++) {
+      for (int i = 0; i < NON_MATCHING_SCENARIO_COUNT; i++) {
         runtime.activate(
             ChaosScenario.builder("bench-no-match-" + i)
                 .scope(ChaosScenario.ScenarioScope.JVM)
@@ -189,28 +191,28 @@ public class ChaosRuntimeBenchmark {
   @Benchmark
   public void agentInstalled_zeroScenarios(ZeroScenariosState state, Blackhole bh)
       throws Throwable {
-    bh.consume(state.dispatcher.beforeJdbcStatementExecute("SELECT 1"));
+    bh.consume(state.dispatcher.beforeJdbcStatementExecute(BENCHMARK_SQL));
   }
 
   @Benchmark
   public void agentInstalled_oneScenario_noMatch(OneScenarioNoMatchState state, Blackhole bh)
       throws Throwable {
-    bh.consume(state.dispatcher.beforeJdbcStatementExecute("SELECT 1"));
+    bh.consume(state.dispatcher.beforeJdbcStatementExecute(BENCHMARK_SQL));
   }
 
   @Benchmark
   public void agentInstalled_oneMatch_noEffect(OneMatchNoEffectState state, Blackhole bh)
       throws Throwable {
-    bh.consume(state.dispatcher.beforeJdbcStatementExecute("SELECT 1"));
+    bh.consume(state.dispatcher.beforeJdbcStatementExecute(BENCHMARK_SQL));
   }
 
   @Benchmark
   public void sessionIdMiss(SessionMissState state, Blackhole bh) throws Throwable {
-    bh.consume(state.dispatcher.beforeJdbcStatementExecute("SELECT 1"));
+    bh.consume(state.dispatcher.beforeJdbcStatementExecute(BENCHMARK_SQL));
   }
 
   @Benchmark
   public void tenScenarios_oneMatch(TenScenariosState state, Blackhole bh) throws Throwable {
-    bh.consume(state.dispatcher.beforeJdbcStatementExecute("SELECT 1"));
+    bh.consume(state.dispatcher.beforeJdbcStatementExecute(BENCHMARK_SQL));
   }
 }
