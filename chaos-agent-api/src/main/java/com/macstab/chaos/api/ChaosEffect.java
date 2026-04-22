@@ -693,11 +693,11 @@ public sealed interface ChaosEffect
       }
     }
 
-    private static boolean isValidBinaryClassName(String name) {
+    private static boolean isValidBinaryClassName(final String name) {
       return BINARY_CLASS_NAME_PATTERN.matcher(name).matches();
     }
 
-    private static boolean isAllowedPackage(String name) {
+    private static boolean isAllowedPackage(final String name) {
       for (final String prefix : ALLOWED_PACKAGE_PREFIXES) {
         if (name.startsWith(prefix)) {
           return true;

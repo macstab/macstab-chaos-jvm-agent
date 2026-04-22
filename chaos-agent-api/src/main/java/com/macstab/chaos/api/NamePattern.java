@@ -72,7 +72,7 @@ public record NamePattern(MatchMode mode, String value) {
     // and race to clear, wiping each other's freshly inserted entries and turning the cache
     // into a source of repeated Pattern.compile calls under load). Returning without inserting
     // is safe: the pattern is correct and the capacity guard still bounds heap.
-    Pattern cached = cache.get(key);
+    final Pattern cached = cache.get(key);
     if (cached != null) {
       return cached;
     }
