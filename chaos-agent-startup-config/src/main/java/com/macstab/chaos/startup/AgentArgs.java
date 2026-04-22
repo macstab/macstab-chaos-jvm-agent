@@ -1,6 +1,8 @@
 package com.macstab.chaos.startup;
 
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Immutable view of parsed agent arguments.
@@ -13,6 +15,12 @@ import java.util.Map;
  * @param values unmodifiable key-value map; never null
  */
 public record AgentArgs(Map<String, String> values) {
+
+  /** Case-insensitive literals accepted as boolean {@code true}. */
+  private static final Set<String> TRUE_LITERALS = Set.of("true", "1", "yes", "on");
+
+  /** Case-insensitive literals accepted as boolean {@code false}. */
+  private static final Set<String> FALSE_LITERALS = Set.of("false", "0", "no", "off");
 
   /** Defensive copy to guarantee immutability regardless of caller. */
   public AgentArgs {
@@ -72,30 +80,24 @@ public record AgentArgs(Map<String, String> values) {
     if (stripped.isEmpty()) {
       return defaultValue;
     }
-    switch (stripped.toLowerCase(java.util.Locale.ROOT)) {
-      case "true":
-      case "1":
-      case "yes":
-      case "on":
-        return true;
-      case "false":
-      case "0":
-      case "no":
-      case "off":
-        return false;
-      default:
-        // Without this warning the operator who wrote `enabled=tru` (or pasted an inline
-        // `enabled=yeah` from a config management tool) sees no indication that the flag was
-        // silently ignored and diagnostics proceed with the default value. Printing the key
-        // and the raw value lets them find and fix the typo.
-        System.err.println(
-            "[chaos-agent] agent arg '"
-                + key
-                + "' has unrecognised boolean value '"
-                + raw
-                + "'; expected true|false|1|0|yes|no|on|off. Using default: "
-                + defaultValue);
-        return defaultValue;
+    final String normalized = stripped.toLowerCase(Locale.ROOT);
+    if (TRUE_LITERALS.contains(normalized)) {
+      return true;
     }
+    if (FALSE_LITERALS.contains(normalized)) {
+      return false;
+    }
+    // Without this warning the operator who wrote `enabled=tru` (or pasted an inline
+    // `enabled=yeah` from a config management tool) sees no indication that the flag was
+    // silently ignored and diagnostics proceed with the default value. Printing the key
+    // and the raw value lets them find and fix the typo.
+    System.err.println(
+        "[chaos-agent] agent arg '"
+            + key
+            + "' has unrecognised boolean value '"
+            + raw
+            + "'; expected true|false|1|0|yes|no|on|off. Using default: "
+            + defaultValue);
+    return defaultValue;
   }
 }

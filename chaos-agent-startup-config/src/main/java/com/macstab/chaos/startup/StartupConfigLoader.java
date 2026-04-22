@@ -55,6 +55,24 @@ public final class StartupConfigLoader {
   private static final String TRUE_LITERAL = "true";
   private static final String FALSE_LITERAL = "false";
 
+  /** Agent arg key carrying an inline JSON chaos plan. */
+  private static final String ARG_CONFIG_JSON = "configJson";
+  /** Agent arg key carrying a base64-encoded JSON chaos plan. */
+  private static final String ARG_CONFIG_BASE64 = "configBase64";
+  /** Agent arg key carrying a filesystem path to a JSON chaos plan. */
+  private static final String ARG_CONFIG_FILE = "configFile";
+  /** Agent arg key for opting into the startup-time plan dump. */
+  private static final String ARG_DEBUG_DUMP_ON_START = "debugDumpOnStart";
+
+  /** POSIX sticky-bit flag (01000) within the Unix mode word. */
+  private static final int POSIX_STICKY_BIT = 01000;
+
+  /** {@code java.nio.file} attribute-view name for POSIX filesystems. */
+  private static final String ATTR_VIEW_POSIX = "posix";
+
+  /** {@code java.nio.file} attribute name exposing the full Unix mode (sticky bit in high bits). */
+  private static final String ATTR_UNIX_MODE = "unix:mode";
+
   private StartupConfigLoader() {}
 
   /**
@@ -70,14 +88,14 @@ public final class StartupConfigLoader {
     final AgentArgs agentArgs = AgentArgsParser.parse(rawAgentArgs);
 
     final String inlineJson =
-        firstNonBlank(agentArgs.get("configJson"), environment.get(ENV_CONFIG_JSON));
+        firstNonBlank(agentArgs.get(ARG_CONFIG_JSON), environment.get(ENV_CONFIG_JSON));
     final String base64Json =
-        firstNonBlank(agentArgs.get("configBase64"), environment.get(ENV_CONFIG_BASE64));
+        firstNonBlank(agentArgs.get(ARG_CONFIG_BASE64), environment.get(ENV_CONFIG_BASE64));
     final String file =
-        firstNonBlank(agentArgs.get("configFile"), environment.get(ENV_CONFIG_FILE));
+        firstNonBlank(agentArgs.get(ARG_CONFIG_FILE), environment.get(ENV_CONFIG_FILE));
 
     final boolean debugDumpOnStart =
-        agentArgs.getBoolean("debugDumpOnStart", false)
+        agentArgs.getBoolean(ARG_DEBUG_DUMP_ON_START, false)
             || TRUE_LITERAL.equalsIgnoreCase(
                 environment.getOrDefault(ENV_DEBUG_DUMP, FALSE_LITERAL));
 
@@ -190,12 +208,23 @@ public final class StartupConfigLoader {
       throw new ConfigLoadException(
           "config path is not a regular file: " + path, SOURCE_FILE_PREFIX + filePath);
     }
+    rejectIfOversize(path, filePath);
+    rejectWorldWritable(path, filePath);
+    return path;
+  }
+
+  /**
+   * Rejects files whose size exceeds {@link #MAX_FILE_SIZE}.
+   *
+   * <p>Reads the size with {@link LinkOption#NOFOLLOW_LINKS} rather than {@link Files#size(Path)}:
+   * {@code Files.size} follows symlinks, so an attacker who flipped the path to a symlink between
+   * the caller's symlink check and this size check would see the <em>target</em> file's size while
+   * the eventual NOFOLLOW read opens a different file. Reading attributes with NOFOLLOW_LINKS
+   * measures the link entry itself, keeping the check aligned with the eventual NOFOLLOW open in
+   * {@link #readFileContents}.
+   */
+  private static void rejectIfOversize(final Path path, final String originalPath) {
     try {
-      // Files.size(path) follows symlinks; if an attacker flipped the path to a symlink between
-      // the symlink check above and this size check, we would measure the *target* file's size
-      // and then open a different file in the read step. Reading attributes with NOFOLLOW_LINKS
-      // measures the link entry itself, keeping the check aligned with the eventual
-      // NOFOLLOW_LINKS open in loadFromFile.
       final long size =
           Files.readAttributes(
                   path,
@@ -210,16 +239,14 @@ public final class StartupConfigLoader {
                 + size
                 + " actual): "
                 + path,
-            SOURCE_FILE_PREFIX + filePath);
+            SOURCE_FILE_PREFIX + originalPath);
       }
     } catch (IOException exception) {
       throw new ConfigLoadException(
           "cannot determine size of config file: " + path,
-          SOURCE_FILE_PREFIX + filePath,
+          SOURCE_FILE_PREFIX + originalPath,
           exception);
     }
-    rejectWorldWritable(path, filePath);
-    return path;
   }
 
   /**
@@ -231,7 +258,7 @@ public final class StartupConfigLoader {
    * than fail-closed on a platform where the check is meaningless.
    */
   private static void rejectWorldWritable(final Path path, final String originalPath) {
-    if (!FileSystems.getDefault().supportedFileAttributeViews().contains("posix")) {
+    if (!FileSystems.getDefault().supportedFileAttributeViews().contains(ATTR_VIEW_POSIX)) {
       return;
     }
     try {
@@ -275,9 +302,9 @@ public final class StartupConfigLoader {
     // returns the full 16-bit mode including setuid/setgid/sticky in the high bits. On
     // filesystems that don't expose it, assume sticky is NOT set — fail-closed.
     try {
-      final Object mode = Files.getAttribute(directory, "unix:mode", LinkOption.NOFOLLOW_LINKS);
+      final Object mode = Files.getAttribute(directory, ATTR_UNIX_MODE, LinkOption.NOFOLLOW_LINKS);
       if (mode instanceof Integer modeValue) {
-        return (modeValue & 01000) != 0;
+        return (modeValue & POSIX_STICKY_BIT) != 0;
       }
     } catch (UnsupportedOperationException | IllegalArgumentException | IOException ignored) {
       // Fall through to fail-closed.

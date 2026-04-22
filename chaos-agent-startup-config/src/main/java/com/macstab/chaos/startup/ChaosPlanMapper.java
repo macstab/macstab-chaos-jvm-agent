@@ -46,6 +46,12 @@ public final class ChaosPlanMapper {
 
   private static final String SOURCE_JSON_INPUT = "json-input";
 
+  /** Highest code point representable in a single UTF-8 byte (7-bit ASCII). */
+  private static final int UTF8_ONE_BYTE_LIMIT = 0x80;
+
+  /** Highest code point representable in two UTF-8 bytes (U+0000–U+07FF). */
+  private static final int UTF8_TWO_BYTE_LIMIT = 0x800;
+
   private static final ObjectMapper OBJECT_MAPPER = buildObjectMapper();
 
   private ChaosPlanMapper() {}
@@ -102,16 +108,16 @@ public final class ChaosPlanMapper {
    * exceeds {@code cap}. The returned value is exact when below {@code cap}; otherwise it is simply
    * {@code >= cap}.
    */
-  static int utf8ByteLengthCapped(final CharSequence s, final int cap) {
+  static int utf8ByteLengthCapped(final CharSequence text, final int cap) {
     int bytes = 0;
-    final int n = s.length();
-    for (int i = 0; i < n; i++) {
-      final char c = s.charAt(i);
-      if (c < 0x80) {
+    final int length = text.length();
+    for (int i = 0; i < length; i++) {
+      final char ch = text.charAt(i);
+      if (ch < UTF8_ONE_BYTE_LIMIT) {
         bytes += 1;
-      } else if (c < 0x800) {
+      } else if (ch < UTF8_TWO_BYTE_LIMIT) {
         bytes += 2;
-      } else if (Character.isHighSurrogate(c)) {
+      } else if (Character.isHighSurrogate(ch)) {
         // Only a well-formed surrogate pair encodes to 4 UTF-8 bytes. A lone high surrogate —
         // either at the end of the string or followed by a non-low-surrogate — gets replaced
         // with U+FFFD at encode time, which is 3 bytes, and the next char must still be counted
@@ -119,7 +125,7 @@ public final class ChaosPlanMapper {
         // counted lone surrogates by one byte each and under-counted the following CJK char by
         // three, shifting the net tally far enough off to let ~50% oversized JSON slip past the
         // 1 MiB guard on JDK 17/21.
-        if (i + 1 < n && Character.isLowSurrogate(s.charAt(i + 1))) {
+        if (i + 1 < length && Character.isLowSurrogate(text.charAt(i + 1))) {
           bytes += 4;
           i++;
         } else {
