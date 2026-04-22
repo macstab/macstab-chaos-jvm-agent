@@ -50,16 +50,17 @@ public final class ChaosAgentExtension
     final TrackingChaosControlPlane tracker =
         new TrackingChaosControlPlane(ChaosPlatform.installLocally());
     final ChaosSession session = tracker.openSession(context.getDisplayName());
-    context.getStore(NAMESPACE).put(ChaosControlPlane.class, tracker);
-    context.getStore(NAMESPACE).put(ChaosSession.class, session);
+    final ExtensionContext.Store store = context.getStore(NAMESPACE);
+    store.put(ChaosControlPlane.class, tracker);
+    store.put(ChaosSession.class, session);
   }
 
   @Override
   public void afterAll(final ExtensionContext context) {
-    final ChaosSession session =
-        context.getStore(NAMESPACE).remove(ChaosSession.class, ChaosSession.class);
+    final ExtensionContext.Store store = context.getStore(NAMESPACE);
+    final ChaosSession session = store.remove(ChaosSession.class, ChaosSession.class);
     final ChaosControlPlane controlPlane =
-        context.getStore(NAMESPACE).remove(ChaosControlPlane.class, ChaosControlPlane.class);
+        store.remove(ChaosControlPlane.class, ChaosControlPlane.class);
     // Close the session first so session-scoped scenarios stop via their owning session's
     // lifecycle, then drain any JVM-scoped handles the test class activated via the tracker.
     // try/finally ensures stopTracked() runs even if session.close() throws.
@@ -85,7 +86,20 @@ public final class ChaosAgentExtension
   public Object resolveParameter(
       final ParameterContext parameterContext, final ExtensionContext extensionContext) {
     final Class<?> parameterType = parameterContext.getParameter().getType();
-    ExtensionContext current = extensionContext;
+    final Object resolved = findInContextHierarchy(extensionContext, parameterType);
+    if (resolved != null) {
+      return resolved;
+    }
+    throw new ParameterResolutionException(
+        "ChaosAgentExtension: no "
+            + parameterType.getSimpleName()
+            + " available — ensure the test class is annotated with @ChaosTest"
+            + " and beforeAll() has run before parameter injection");
+  }
+
+  private Object findInContextHierarchy(
+      final ExtensionContext startContext, final Class<?> parameterType) {
+    ExtensionContext current = startContext;
     while (current != null) {
       final Object value = current.getStore(NAMESPACE).get(parameterType, parameterType);
       if (value != null) {
@@ -93,10 +107,6 @@ public final class ChaosAgentExtension
       }
       current = current.getParent().orElse(null);
     }
-    throw new ParameterResolutionException(
-        "ChaosAgentExtension: no "
-            + parameterType.getSimpleName()
-            + " available — ensure the test class is annotated with @ChaosTest"
-            + " and beforeAll() has run before parameter injection");
+    return null;
   }
 }
