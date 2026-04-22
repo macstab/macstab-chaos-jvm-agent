@@ -2,6 +2,7 @@ package com.macstab.chaos.startup;
 
 import com.macstab.chaos.api.ChaosPlan;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.FileSystems;
 import java.nio.file.Files;
@@ -131,22 +132,35 @@ public final class StartupConfigLoader {
 
   private static ValidatedRead readValidatedPlanFile(final String filePath) {
     final Path path = validateAndResolvePath(filePath);
-    final String json;
-    // NOFOLLOW_LINKS on the read itself closes the TOCTOU window: validateAndResolvePath's
-    // symlink rejection ran on a previous syscall, so an attacker with directory write access
-    // could swap the regular file for a symlink between validation and read. Opening the
-    // stream with NOFOLLOW_LINKS makes the read atomic with the symlink check — if the path
-    // has since become a symlink, the open fails.
-    try (final java.io.InputStream in = Files.newInputStream(path, LinkOption.NOFOLLOW_LINKS)) {
-      json = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+    final String json = readFileContents(path, filePath);
+    final ChaosPlan plan = ChaosPlanMapper.read(json);
+    return new ValidatedRead(plan, path);
+  }
+
+  /**
+   * Opens the file at {@code path} with {@link LinkOption#NOFOLLOW_LINKS} and returns its full
+   * contents as a UTF-8 string.
+   *
+   * <p>NOFOLLOW_LINKS on the read itself closes the TOCTOU window: {@code validateAndResolvePath}'s
+   * symlink rejection ran on a previous syscall, so an attacker with directory write access could
+   * swap the regular file for a symlink between validation and read. Opening the stream with
+   * NOFOLLOW_LINKS makes the read atomic with the symlink check — if the path has since become a
+   * symlink, the open fails.
+   *
+   * @param path resolved, validated file path to read
+   * @param originalFilePath the original caller-supplied path, used in the error source label
+   * @return full file contents decoded as UTF-8
+   * @throws ConfigLoadException if the file cannot be opened or read
+   */
+  private static String readFileContents(final Path path, final String originalFilePath) {
+    try (final InputStream inputStream = Files.newInputStream(path, LinkOption.NOFOLLOW_LINKS)) {
+      return new String(inputStream.readAllBytes(), StandardCharsets.UTF_8);
     } catch (IOException exception) {
       throw new ConfigLoadException(
           "failed to read chaos plan config file: " + path,
-          SOURCE_FILE_PREFIX + filePath,
+          SOURCE_FILE_PREFIX + originalFilePath,
           exception);
     }
-    final ChaosPlan plan = ChaosPlanMapper.read(json);
-    return new ValidatedRead(plan, path);
   }
 
   private record ValidatedRead(ChaosPlan plan, Path path) {}

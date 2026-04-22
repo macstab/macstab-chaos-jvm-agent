@@ -108,18 +108,25 @@ public final class TrackingChaosControlPlane implements ChaosControlPlane {
         snapshot = new ArrayDeque<>(handles);
         handles.clear();
       }
-      final Iterator<ChaosActivationHandle> iterator = snapshot.descendingIterator();
-      while (iterator.hasNext()) {
-        final ChaosActivationHandle handle = iterator.next();
-        try {
-          handle.stop();
-        } catch (final RuntimeException exception) {
-          LOGGER.log(
-              Level.WARNING,
-              exception,
-              () -> "chaos-agent: failed to stop JVM-scoped handle during test teardown");
-        }
-      }
+      stopHandlesInReverseOrder(snapshot);
+    }
+  }
+
+  private void stopHandlesInReverseOrder(final ArrayDeque<ChaosActivationHandle> snapshot) {
+    final Iterator<ChaosActivationHandle> reverseIterator = snapshot.descendingIterator();
+    while (reverseIterator.hasNext()) {
+      stopHandleSafely(reverseIterator.next());
+    }
+  }
+
+  private void stopHandleSafely(final ChaosActivationHandle handle) {
+    try {
+      handle.stop();
+    } catch (final RuntimeException exception) {
+      LOGGER.log(
+          Level.WARNING,
+          exception,
+          () -> "chaos-agent: failed to stop JVM-scoped handle during test teardown");
     }
   }
 }

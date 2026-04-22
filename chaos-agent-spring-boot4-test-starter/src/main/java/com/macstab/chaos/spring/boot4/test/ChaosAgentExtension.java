@@ -50,8 +50,9 @@ public final class ChaosAgentExtension
     final TrackingChaosControlPlane tracker =
         new TrackingChaosControlPlane(ChaosPlatform.installLocally());
     final ChaosSession session = tracker.openSession(context.getDisplayName());
-    context.getStore(NAMESPACE).put(ChaosControlPlane.class, tracker);
-    context.getStore(NAMESPACE).put(ChaosSession.class, session);
+    final ExtensionContext.Store store = context.getStore(NAMESPACE);
+    store.put(ChaosControlPlane.class, tracker);
+    store.put(ChaosSession.class, session);
   }
 
   @Override

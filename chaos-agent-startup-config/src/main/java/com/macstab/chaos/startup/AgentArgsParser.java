@@ -39,9 +39,10 @@ public final class AgentArgsParser {
 
     final Map<String, String> values = new LinkedHashMap<>();
     final StringBuilder current = new StringBuilder();
+    final int argLength = agentArgs.length();
     boolean escaped = false;
 
-    for (int i = 0; i < agentArgs.length(); i++) {
+    for (int i = 0; i < argLength; i++) {
       final char ch = agentArgs.charAt(i);
       if (escaped) {
         current.append(ch);
@@ -49,7 +50,7 @@ public final class AgentArgsParser {
         continue;
       }
       if (ch == '\\') {
-        if (i == agentArgs.length() - 1) {
+        if (i == argLength - 1) {
           throw new IllegalArgumentException(
               "trailing backslash at position " + i + " in agent args");
         }
