@@ -49,7 +49,7 @@ public class ChaosAgentEnvironmentPostProcessor implements EnvironmentPostProces
    * self-attaching a JVM agent based on a value flipped by a compromised Config Server turns any
    * config-server RCE into an instrumentation RCE. Operators who genuinely need to enable chaos
    * remotely can set {@code macstab.chaos.allow-remote-enable=true} (checked via {@link
-   * #environmentAllowsRemoteEnable}) through a trusted local source first, which is itself subject
+   * #remoteEnableIsAllowedViaTrustedSource}) through a trusted local source first, which is itself subject
    * to this trust filter.
    */
   private static final String CLASSPATH_CONFIG_SOURCE_PREFIX =
@@ -66,6 +66,8 @@ public class ChaosAgentEnvironmentPostProcessor implements EnvironmentPostProces
   /** System property / env-var name that opts in to honouring remote property sources. */
   private static final String ALLOW_REMOTE_ENABLE_PROPERTY = "macstab.chaos.allow-remote-enable";
 
+  private static final String CHAOS_ENABLED_PROPERTY = "macstab.chaos.enabled";
+
   @Override
   public void postProcessEnvironment(
       final ConfigurableEnvironment environment, final SpringApplication application) {
@@ -74,18 +76,19 @@ public class ChaosAgentEnvironmentPostProcessor implements EnvironmentPostProces
     }
     try {
       ChaosPlatform.installLocally();
-      environment
-          .getPropertySources()
-          .addFirst(
-              new MapPropertySource(
-                  ATTACH_MARKER_SOURCE,
-                  Collections.singletonMap(ATTACH_MARKER_PROPERTY, "spring-boot-3")));
+      environment.getPropertySources().addFirst(buildAttachMarkerSource());
     } catch (final RuntimeException exception) {
       LOGGER.log(
           Level.WARNING,
           exception,
           () -> "chaos-agent: failed to self-attach during Spring Boot startup");
     }
+  }
+
+  private static MapPropertySource buildAttachMarkerSource() {
+    return new MapPropertySource(
+        ATTACH_MARKER_SOURCE,
+        Collections.singletonMap(ATTACH_MARKER_PROPERTY, "spring-boot-3"));
   }
 
   /**
@@ -97,15 +100,14 @@ public class ChaosAgentEnvironmentPostProcessor implements EnvironmentPostProces
    * a runtime one.
    */
   private static boolean enabledByTrustedSource(final ConfigurableEnvironment environment) {
-    final String resolved = environment.getProperty("macstab.chaos.enabled");
-    if (!Boolean.parseBoolean(resolved)) {
+    final String chaosEnabledValue = environment.getProperty(CHAOS_ENABLED_PROPERTY);
+    if (!Boolean.parseBoolean(chaosEnabledValue)) {
       return false;
     }
-    if (valueComesFromTrustedSource(environment, "macstab.chaos.enabled")) {
+    if (valueComesFromTrustedSource(environment, CHAOS_ENABLED_PROPERTY)) {
       return true;
     }
-    if (Boolean.parseBoolean(environment.getProperty(ALLOW_REMOTE_ENABLE_PROPERTY))
-        && valueComesFromTrustedSource(environment, ALLOW_REMOTE_ENABLE_PROPERTY)) {
+    if (remoteEnableIsAllowedViaTrustedSource(environment)) {
       return true;
     }
     LOGGER.log(
@@ -115,6 +117,12 @@ public class ChaosAgentEnvironmentPostProcessor implements EnvironmentPostProces
                 + " trusted property source; set macstab.chaos.allow-remote-enable=true via a"
                 + " trusted source to opt in");
     return false;
+  }
+
+  private static boolean remoteEnableIsAllowedViaTrustedSource(
+      final ConfigurableEnvironment environment) {
+    return Boolean.parseBoolean(environment.getProperty(ALLOW_REMOTE_ENABLE_PROPERTY))
+        && valueComesFromTrustedSource(environment, ALLOW_REMOTE_ENABLE_PROPERTY);
   }
 
   private static boolean valueComesFromTrustedSource(
@@ -136,8 +144,11 @@ public class ChaosAgentEnvironmentPostProcessor implements EnvironmentPostProces
       // contains the key is the one whose value .getProperty() would return. If that source is
       // trusted, the value is trusted; if not, a later trusted source's copy is irrelevant
       // because Spring would never consult it.
-      return TRUSTED_ENABLE_SOURCES.contains(source.getName())
-          || source.getName().startsWith(CLASSPATH_CONFIG_SOURCE_PREFIX);
+      final String sourceName = source.getName();
+      final boolean isTrusted =
+          TRUSTED_ENABLE_SOURCES.contains(sourceName)
+              || sourceName.startsWith(CLASSPATH_CONFIG_SOURCE_PREFIX);
+      return isTrusted;
     }
     return false;
   }
