@@ -57,10 +57,13 @@ public final class StartupConfigLoader {
 
   /** Agent arg key carrying an inline JSON chaos plan. */
   private static final String ARG_CONFIG_JSON = "configJson";
+
   /** Agent arg key carrying a base64-encoded JSON chaos plan. */
   private static final String ARG_CONFIG_BASE64 = "configBase64";
+
   /** Agent arg key carrying a filesystem path to a JSON chaos plan. */
   private static final String ARG_CONFIG_FILE = "configFile";
+
   /** Agent arg key for opting into the startup-time plan dump. */
   private static final String ARG_DEBUG_DUMP_ON_START = "debugDumpOnStart";
 
