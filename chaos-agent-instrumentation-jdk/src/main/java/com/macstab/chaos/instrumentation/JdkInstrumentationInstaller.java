@@ -1286,18 +1286,32 @@ public final class JdkInstrumentationInstaller {
    * skipped. Gated behind {@code premainMode}.
    */
   private static AgentBuilder applyPhase2OptionalTransformations(AgentBuilder agentBuilder) {
-    // ── HTTP client interception ─────────────────────────────────────────
-    // All targets use instrumentOptional, which checks class presence before registering. If
-    // the target is absent, no transformation is added. Advice classes only use Object-typed
-    // arguments and reflective URL extraction, so the compileOnly dependencies (OkHttp,
-    // Apache HC, Reactor Netty) are not required at runtime.
-    //
-    // Java 11+ HttpClient (jdk.internal.net.http.HttpClientImpl) is NOT registered via
-    // instrumentOptional here. That class is always present on JDK 11+, but it lives in the
-    // non-exported java.net.http/jdk.internal.net.http package. Attempting to transform it
-    // without --add-opens java.net.http/jdk.internal.net.http=ALL-UNNAMED silently corrupts
-    // subsequent AgentBuilder transformations. If interception of the Java HttpClient is
-    // required, users can target its public API or wait for a dedicated --add-opens pathway.
+    agentBuilder = applyPhase2HttpClientInterception(agentBuilder);
+    agentBuilder = applyPhase2JdbcInterception(agentBuilder);
+    agentBuilder = applyPhase2JndiAndJmxInterception(agentBuilder);
+    agentBuilder = applyPhase2NativeLibraryLoadInterception(agentBuilder);
+    agentBuilder = applyPhase2ThreadSleepInterception(agentBuilder);
+    agentBuilder = applyPhase2DnsResolutionInterception(agentBuilder);
+    agentBuilder = applyPhase2FileIoInterception(agentBuilder);
+    return agentBuilder;
+  }
+
+  /**
+   * Registers HTTP client interception: OkHttp, Apache HC 4.x, Apache HC 5.x, Reactor Netty.
+   *
+   * <p>All targets use {@link #instrumentOptional}, which checks class presence before registering.
+   * If the target is absent, no transformation is added. Advice classes only use Object-typed
+   * arguments and reflective URL extraction, so the compileOnly dependencies (OkHttp, Apache HC,
+   * Reactor Netty) are not required at runtime.
+   *
+   * <p>Java 11+ HttpClient ({@code jdk.internal.net.http.HttpClientImpl}) is NOT registered here.
+   * That class is always present on JDK 11+, but it lives in the non-exported
+   * {@code java.net.http/jdk.internal.net.http} package. Attempting to transform it without
+   * {@code --add-opens java.net.http/jdk.internal.net.http=ALL-UNNAMED} silently corrupts
+   * subsequent AgentBuilder transformations. If interception of the Java HttpClient is required,
+   * users can target its public API or wait for a dedicated {@code --add-opens} pathway.
+   */
+  private static AgentBuilder applyPhase2HttpClientInterception(AgentBuilder agentBuilder) {
     agentBuilder =
         instrumentOptional(
             agentBuilder,
@@ -1365,23 +1379,27 @@ public final class JdkInstrumentationInstaller {
                                     ElementMatchers.takesArguments(2)
                                         .or(ElementMatchers.takesArguments(3))))));
 
-    agentBuilder =
-        instrumentOptional(
-            agentBuilder,
-            "reactor.netty.http.client.HttpClientConnect",
-            typeBuilder ->
-                typeBuilder.visit(
-                    Advice.to(HttpClientAdvice.ReactorNettyConnectAdvice.class)
-                        .on(ElementMatchers.named("connect"))));
+    return instrumentOptional(
+        agentBuilder,
+        "reactor.netty.http.client.HttpClientConnect",
+        typeBuilder ->
+            typeBuilder.visit(
+                Advice.to(HttpClientAdvice.ReactorNettyConnectAdvice.class)
+                    .on(ElementMatchers.named("connect"))));
+  }
 
-    // ── JDBC / connection pool interception ──────────────────────────────
-    //
-    // HikariCP and c3p0 are compileOnly dependencies and are instrumented via
-    // instrumentOptional so their absence is tolerated. java.sql.Statement and
-    // java.sql.Connection are JDK interfaces — we restrict the type matcher to
-    // concrete subtypes via isSubTypeOf + not(isInterface()) so the advice only
-    // binds to implementations (driver classes such as HikariProxyStatement,
-    // org.postgresql.jdbc.PgStatement, etc.).
+  /**
+   * Registers JDBC and connection-pool interception: HikariCP, c3p0, and concrete
+   * {@link java.sql.Statement} / {@link java.sql.Connection} subtypes.
+   *
+   * <p>HikariCP and c3p0 are compileOnly dependencies and are instrumented via
+   * {@link #instrumentOptional} so their absence is tolerated. {@code java.sql.Statement} and
+   * {@code java.sql.Connection} are JDK interfaces — the type matcher is restricted to concrete
+   * subtypes via {@code isSubTypeOf + not(isInterface())} so the advice only binds to
+   * implementations (driver classes such as {@code HikariProxyStatement},
+   * {@code org.postgresql.jdbc.PgStatement}, etc.).
+   */
+  private static AgentBuilder applyPhase2JdbcInterception(AgentBuilder agentBuilder) {
     agentBuilder =
         instrumentOptional(
             agentBuilder,
@@ -1414,64 +1432,65 @@ public final class JdkInstrumentationInstaller {
     // caller using Statement.RETURN_GENERATED_KEYS or column-name arrays bypassed
     // every chaos selector targeting JDBC. The advice only reads @Argument(0), so
     // takesArgument(0, String.class) is sufficient and binds to all overloads.
-    agentBuilder =
-        agentBuilder
-            .type(
-                ElementMatchers.isSubTypeOf(java.sql.Statement.class)
-                    .and(ElementMatchers.not(ElementMatchers.isInterface()))
-                    .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
-            .transform(
-                (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
-                    typeBuilder
-                        .visit(
-                            Advice.to(JdbcAdvice.StatementExecuteAdvice.class)
-                                .on(
-                                    ElementMatchers.named("execute")
-                                        .and(ElementMatchers.takesArgument(0, String.class))))
-                        .visit(
-                            Advice.to(JdbcAdvice.StatementExecuteAdvice.class)
-                                .on(
-                                    ElementMatchers.named("executeQuery")
-                                        .and(ElementMatchers.takesArgument(0, String.class))))
-                        .visit(
-                            Advice.to(JdbcAdvice.StatementExecuteAdvice.class)
-                                .on(
-                                    ElementMatchers.named("executeUpdate")
-                                        .and(ElementMatchers.takesArgument(0, String.class))))
-                        .visit(
-                            Advice.to(JdbcAdvice.StatementExecuteAdvice.class)
-                                .on(
-                                    ElementMatchers.named("executeLargeUpdate")
-                                        .and(ElementMatchers.takesArgument(0, String.class)))))
-            .type(
-                ElementMatchers.isSubTypeOf(java.sql.Connection.class)
-                    .and(ElementMatchers.not(ElementMatchers.isInterface()))
-                    .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
-            .transform(
-                (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
-                    typeBuilder
-                        .visit(
-                            Advice.to(JdbcAdvice.PrepareStatementAdvice.class)
-                                .on(
-                                    ElementMatchers.named("prepareStatement")
-                                        .and(ElementMatchers.takesArgument(0, String.class))))
-                        .visit(
-                            Advice.to(JdbcAdvice.PrepareStatementAdvice.class)
-                                .on(
-                                    ElementMatchers.named("prepareCall")
-                                        .and(ElementMatchers.takesArgument(0, String.class))))
-                        .visit(
-                            Advice.to(JdbcAdvice.CommitAdvice.class)
-                                .on(
-                                    ElementMatchers.named("commit")
-                                        .and(ElementMatchers.takesArguments(0))))
-                        .visit(
-                            Advice.to(JdbcAdvice.RollbackAdvice.class)
-                                .on(
-                                    ElementMatchers.named("rollback")
-                                        .and(ElementMatchers.takesArguments(0)))));
+    return agentBuilder
+        .type(
+            ElementMatchers.isSubTypeOf(java.sql.Statement.class)
+                .and(ElementMatchers.not(ElementMatchers.isInterface()))
+                .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder
+                    .visit(
+                        Advice.to(JdbcAdvice.StatementExecuteAdvice.class)
+                            .on(
+                                ElementMatchers.named("execute")
+                                    .and(ElementMatchers.takesArgument(0, String.class))))
+                    .visit(
+                        Advice.to(JdbcAdvice.StatementExecuteAdvice.class)
+                            .on(
+                                ElementMatchers.named("executeQuery")
+                                    .and(ElementMatchers.takesArgument(0, String.class))))
+                    .visit(
+                        Advice.to(JdbcAdvice.StatementExecuteAdvice.class)
+                            .on(
+                                ElementMatchers.named("executeUpdate")
+                                    .and(ElementMatchers.takesArgument(0, String.class))))
+                    .visit(
+                        Advice.to(JdbcAdvice.StatementExecuteAdvice.class)
+                            .on(
+                                ElementMatchers.named("executeLargeUpdate")
+                                    .and(ElementMatchers.takesArgument(0, String.class)))))
+        .type(
+            ElementMatchers.isSubTypeOf(java.sql.Connection.class)
+                .and(ElementMatchers.not(ElementMatchers.isInterface()))
+                .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder
+                    .visit(
+                        Advice.to(JdbcAdvice.PrepareStatementAdvice.class)
+                            .on(
+                                ElementMatchers.named("prepareStatement")
+                                    .and(ElementMatchers.takesArgument(0, String.class))))
+                    .visit(
+                        Advice.to(JdbcAdvice.PrepareStatementAdvice.class)
+                            .on(
+                                ElementMatchers.named("prepareCall")
+                                    .and(ElementMatchers.takesArgument(0, String.class))))
+                    .visit(
+                        Advice.to(JdbcAdvice.CommitAdvice.class)
+                            .on(
+                                ElementMatchers.named("commit")
+                                    .and(ElementMatchers.takesArguments(0))))
+                    .visit(
+                        Advice.to(JdbcAdvice.RollbackAdvice.class)
+                            .on(
+                                ElementMatchers.named("rollback")
+                                    .and(ElementMatchers.takesArguments(0)))));
+  }
 
-    // ── JNDI and JMX ─────────────────────────────────────────────────────
+  /** Registers JNDI ({@code javax.naming.InitialContext}) and JMX ({@code javax.management.MBeanServer}) interception. */
+  private static AgentBuilder applyPhase2JndiAndJmxInterception(AgentBuilder agentBuilder) {
     agentBuilder =
         instrumentOptional(
             agentBuilder,
@@ -1483,27 +1502,32 @@ public final class JdkInstrumentationInstaller {
                             ElementMatchers.named("lookup")
                                 .and(ElementMatchers.takesArguments(String.class)))));
 
-    agentBuilder =
-        instrumentOptional(
-            agentBuilder,
-            "javax.management.MBeanServer",
-            typeBuilder ->
-                typeBuilder
-                    .visit(
-                        Advice.to(JvmRuntimeAdvice.JmxInvokeAdvice.class)
-                            .on(
-                                ElementMatchers.named("invoke")
-                                    .and(ElementMatchers.takesArguments(4))))
-                    .visit(
-                        Advice.to(JvmRuntimeAdvice.JmxGetAttrAdvice.class)
-                            .on(
-                                ElementMatchers.named("getAttribute")
-                                    .and(ElementMatchers.takesArguments(2)))));
+    return instrumentOptional(
+        agentBuilder,
+        "javax.management.MBeanServer",
+        typeBuilder ->
+            typeBuilder
+                .visit(
+                    Advice.to(JvmRuntimeAdvice.JmxInvokeAdvice.class)
+                        .on(
+                            ElementMatchers.named("invoke")
+                                .and(ElementMatchers.takesArguments(4))))
+                .visit(
+                    Advice.to(JvmRuntimeAdvice.JmxGetAttrAdvice.class)
+                        .on(
+                            ElementMatchers.named("getAttribute")
+                                .and(ElementMatchers.takesArguments(2)))));
+  }
 
-    // On JDK 8-16 native library loading went through Runtime.loadLibrary0; on JDK 17+ the
-    // method was moved to jdk.internal.loader.NativeLibraries.load (private JDK internals). We
-    // weave both sites so NATIVE_LIBRARY_LOAD fires on every supported JDK; missing sites are
-    // tolerated by instrumentOptional so a mismatch is never a startup failure.
+  /**
+   * Registers native-library-load interception.
+   *
+   * <p>On JDK 8-16 native library loading went through {@code Runtime.loadLibrary0}; on JDK 17+ the
+   * method was moved to {@code jdk.internal.loader.NativeLibraries.load} (private JDK internals).
+   * Both sites are woven so {@code NATIVE_LIBRARY_LOAD} fires on every supported JDK; missing sites
+   * are tolerated by {@link #instrumentOptional} so a mismatch is never a startup failure.
+   */
+  private static AgentBuilder applyPhase2NativeLibraryLoadInterception(AgentBuilder agentBuilder) {
     agentBuilder =
         instrumentOptional(
             agentBuilder,
@@ -1512,113 +1536,118 @@ public final class JdkInstrumentationInstaller {
                 typeBuilder.visit(
                     Advice.to(JvmRuntimeAdvice.NativeLibraryLoadAdvice.class)
                         .on(ElementMatchers.named("loadLibrary0"))));
-    agentBuilder =
-        instrumentOptional(
-            agentBuilder,
-            "jdk.internal.loader.NativeLibraries",
-            typeBuilder ->
-                typeBuilder.visit(
-                    Advice.to(JvmRuntimeAdvice.NativeLibrariesLoadAdvice.class)
-                        .on(ElementMatchers.named("load"))));
+    return instrumentOptional(
+        agentBuilder,
+        "jdk.internal.loader.NativeLibraries",
+        typeBuilder ->
+            typeBuilder.visit(
+                Advice.to(JvmRuntimeAdvice.NativeLibrariesLoadAdvice.class)
+                    .on(ElementMatchers.named("load"))));
+  }
 
-    // ── Thread.sleep interception ─────────────────────────────────────────
-    agentBuilder =
-        agentBuilder
-            .type(ElementMatchers.named("java.lang.Thread"))
-            .transform(
-                (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
-                    typeBuilder
-                        // sleep(long millis)
-                        .visit(
-                            Advice.to(JvmRuntimeAdvice.ThreadSleepAdvice.class)
-                                .on(
-                                    ElementMatchers.named("sleep")
-                                        .and(ElementMatchers.isStatic())
-                                        .and(ElementMatchers.takesArguments(long.class))))
-                        // sleep(long millis, int nanos) — advice reads only arg 0 (millis)
-                        .visit(
-                            Advice.to(JvmRuntimeAdvice.ThreadSleepAdvice.class)
-                                .on(
-                                    ElementMatchers.named("sleep")
-                                        .and(ElementMatchers.isStatic())
-                                        .and(
-                                            ElementMatchers.takesArguments(
-                                                long.class, int.class)))));
+  /** Registers {@link Thread#sleep(long)} and {@link Thread#sleep(long, int)} interception. */
+  private static AgentBuilder applyPhase2ThreadSleepInterception(final AgentBuilder agentBuilder) {
+    return agentBuilder
+        .type(ElementMatchers.named("java.lang.Thread"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder
+                    // sleep(long millis)
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.ThreadSleepAdvice.class)
+                            .on(
+                                ElementMatchers.named("sleep")
+                                    .and(ElementMatchers.isStatic())
+                                    .and(ElementMatchers.takesArguments(long.class))))
+                    // sleep(long millis, int nanos) — advice reads only arg 0 (millis)
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.ThreadSleepAdvice.class)
+                            .on(
+                                ElementMatchers.named("sleep")
+                                    .and(ElementMatchers.isStatic())
+                                    .and(ElementMatchers.takesArguments(long.class, int.class)))));
+  }
 
-    // ── DNS resolution interception ───────────────────────────────────────
-    // InetAddress is always present; no instrumentOptional needed.
-    agentBuilder =
-        agentBuilder
-            .type(ElementMatchers.named("java.net.InetAddress"))
-            .transform(
-                (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
-                    typeBuilder
-                        .visit(
-                            Advice.to(JvmRuntimeAdvice.DnsResolveAdvice.class)
-                                .on(
-                                    ElementMatchers.named("getByName")
-                                        .and(ElementMatchers.isStatic())
-                                        .and(ElementMatchers.takesArguments(String.class))))
-                        .visit(
-                            Advice.to(JvmRuntimeAdvice.DnsResolveAdvice.class)
-                                .on(
-                                    ElementMatchers.named("getAllByName")
-                                        .and(ElementMatchers.isStatic())
-                                        .and(ElementMatchers.takesArguments(String.class))))
-                        .visit(
-                            Advice.to(JvmRuntimeAdvice.DnsLocalHostAdvice.class)
-                                .on(
-                                    ElementMatchers.named("getLocalHost")
-                                        .and(ElementMatchers.isStatic())
-                                        .and(ElementMatchers.takesArguments(0)))));
+  /**
+   * Registers DNS resolution interception ({@link java.net.InetAddress#getByName(String)},
+   * {@link java.net.InetAddress#getAllByName(String)}, {@link java.net.InetAddress#getLocalHost()}).
+   *
+   * <p>InetAddress is always present; no {@link #instrumentOptional} needed.
+   */
+  private static AgentBuilder applyPhase2DnsResolutionInterception(final AgentBuilder agentBuilder) {
+    return agentBuilder
+        .type(ElementMatchers.named("java.net.InetAddress"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.DnsResolveAdvice.class)
+                            .on(
+                                ElementMatchers.named("getByName")
+                                    .and(ElementMatchers.isStatic())
+                                    .and(ElementMatchers.takesArguments(String.class))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.DnsResolveAdvice.class)
+                            .on(
+                                ElementMatchers.named("getAllByName")
+                                    .and(ElementMatchers.isStatic())
+                                    .and(ElementMatchers.takesArguments(String.class))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.DnsLocalHostAdvice.class)
+                            .on(
+                                ElementMatchers.named("getLocalHost")
+                                    .and(ElementMatchers.isStatic())
+                                    .and(ElementMatchers.takesArguments(0)))));
+  }
 
-    // ── File I/O interception ─────────────────────────────────────────────
-    agentBuilder =
-        agentBuilder
-            .type(ElementMatchers.named("java.io.FileInputStream"))
-            .transform(
-                (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
-                    typeBuilder
-                        .visit(
-                            Advice.to(JvmRuntimeAdvice.FileReadAdvice.class)
-                                .on(
-                                    ElementMatchers.named("read")
-                                        .and(ElementMatchers.takesArguments(0))))
-                        .visit(
-                            Advice.to(JvmRuntimeAdvice.FileReadAdvice.class)
-                                .on(
-                                    ElementMatchers.named("read")
-                                        .and(ElementMatchers.takesArguments(byte[].class))))
-                        .visit(
-                            Advice.to(JvmRuntimeAdvice.FileReadAdvice.class)
-                                .on(
-                                    ElementMatchers.named("read")
-                                        .and(
-                                            ElementMatchers.takesArguments(
-                                                byte[].class, int.class, int.class)))))
-            .type(ElementMatchers.named("java.io.FileOutputStream"))
-            .transform(
-                (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
-                    typeBuilder
-                        .visit(
-                            Advice.to(JvmRuntimeAdvice.FileWriteAdvice.class)
-                                .on(
-                                    ElementMatchers.named("write")
-                                        .and(ElementMatchers.takesArguments(int.class))))
-                        .visit(
-                            Advice.to(JvmRuntimeAdvice.FileWriteAdvice.class)
-                                .on(
-                                    ElementMatchers.named("write")
-                                        .and(ElementMatchers.takesArguments(byte[].class))))
-                        .visit(
-                            Advice.to(JvmRuntimeAdvice.FileWriteAdvice.class)
-                                .on(
-                                    ElementMatchers.named("write")
-                                        .and(
-                                            ElementMatchers.takesArguments(
-                                                byte[].class, int.class, int.class)))));
-
-    return agentBuilder;
+  /**
+   * Registers file I/O interception ({@link java.io.FileInputStream#read()} overloads and
+   * {@link java.io.FileOutputStream#write(int)} overloads).
+   */
+  private static AgentBuilder applyPhase2FileIoInterception(final AgentBuilder agentBuilder) {
+    return agentBuilder
+        .type(ElementMatchers.named("java.io.FileInputStream"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.FileReadAdvice.class)
+                            .on(
+                                ElementMatchers.named("read")
+                                    .and(ElementMatchers.takesArguments(0))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.FileReadAdvice.class)
+                            .on(
+                                ElementMatchers.named("read")
+                                    .and(ElementMatchers.takesArguments(byte[].class))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.FileReadAdvice.class)
+                            .on(
+                                ElementMatchers.named("read")
+                                    .and(
+                                        ElementMatchers.takesArguments(
+                                            byte[].class, int.class, int.class)))))
+        .type(ElementMatchers.named("java.io.FileOutputStream"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.FileWriteAdvice.class)
+                            .on(
+                                ElementMatchers.named("write")
+                                    .and(ElementMatchers.takesArguments(int.class))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.FileWriteAdvice.class)
+                            .on(
+                                ElementMatchers.named("write")
+                                    .and(ElementMatchers.takesArguments(byte[].class))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.FileWriteAdvice.class)
+                            .on(
+                                ElementMatchers.named("write")
+                                    .and(
+                                        ElementMatchers.takesArguments(
+                                            byte[].class, int.class, int.class)))));
   }
 
   private static Path createSecureTempFile() throws IOException {
