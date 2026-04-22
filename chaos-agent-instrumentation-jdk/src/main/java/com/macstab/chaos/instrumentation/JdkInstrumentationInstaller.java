@@ -971,8 +971,20 @@ public final class JdkInstrumentationInstaller {
    * Gated behind {@code premainMode}.
    */
   private static AgentBuilder applyPhase2CoreJvmTransformations(final AgentBuilder builder) {
+    AgentBuilder b = builder;
+    b = applyRuntimeLifecycleTransformations(b);
+    b = applyReflectionAndSerializationTransformations(b);
+    b = applyLockSupportTransformations(b);
+    b = applyAqsMonitorTransformations(b);
+    b = applyNioChannelTransformations(b);
+    b = applySocketAndStreamTransformations(b);
+    b = applyZipTransformations(b);
+    return b;
+  }
+
+  /** System.exit, Runtime.gc, Runtime.halt instrumentation. */
+  private static AgentBuilder applyRuntimeLifecycleTransformations(final AgentBuilder builder) {
     return builder
-        // System.exit()
         .type(ElementMatchers.named("java.lang.System"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
@@ -981,7 +993,6 @@ public final class JdkInstrumentationInstaller {
                         .on(
                             ElementMatchers.named("exit")
                                 .and(ElementMatchers.takesArguments(int.class)))))
-        // GC and halt via Runtime
         .type(ElementMatchers.named("java.lang.Runtime"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
@@ -995,8 +1006,16 @@ public final class JdkInstrumentationInstaller {
                         Advice.to(JvmRuntimeAdvice.ExitRequestAdvice.class)
                             .on(
                                 ElementMatchers.named("halt")
-                                    .and(ElementMatchers.takesArguments(int.class)))))
-        // Reflection
+                                    .and(ElementMatchers.takesArguments(int.class)))));
+  }
+
+  /**
+   * Reflection (Method.invoke), direct-buffer allocation, object (de)serialization, and
+   * ClassLoader.defineClass instrumentation.
+   */
+  private static AgentBuilder applyReflectionAndSerializationTransformations(
+      final AgentBuilder builder) {
+    return builder
         .type(ElementMatchers.named("java.lang.reflect.Method"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
@@ -1007,7 +1026,6 @@ public final class JdkInstrumentationInstaller {
                                 .and(
                                     ElementMatchers.takesArguments(
                                         Object.class, Object[].class)))))
-        // Direct buffer allocation
         .type(ElementMatchers.named("java.nio.ByteBuffer"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
@@ -1016,7 +1034,6 @@ public final class JdkInstrumentationInstaller {
                         .on(
                             ElementMatchers.named("allocateDirect")
                                 .and(ElementMatchers.takesArguments(int.class)))))
-        // Object deserialization and serialization
         .type(ElementMatchers.named("java.io.ObjectInputStream"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
@@ -1033,7 +1050,6 @@ public final class JdkInstrumentationInstaller {
                         .on(
                             ElementMatchers.named("writeObject")
                                 .and(ElementMatchers.takesArguments(Object.class)))))
-        // ClassLoader.defineClass
         .type(ElementMatchers.named("java.lang.ClassLoader"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
@@ -1041,13 +1057,18 @@ public final class JdkInstrumentationInstaller {
                     Advice.to(JvmRuntimeAdvice.ClassDefineAdvice.class)
                         .on(
                             ElementMatchers.named("defineClass")
-                                .and(ElementMatchers.takesArgument(0, String.class)))))
-        // LockSupport.park / parkNanos / parkUntil (THREAD_PARK)
-        // Safe to instrument globally: the chaos runtime never calls LockSupport.park()
-        // directly. Internal locks (ManualGate via ReentrantLock) do call park(), but by
-        // the time park() fires, BootstrapDispatcher.DEPTH is already > 0 (set before
-        // delegating to ChaosRuntime), so the DEPTH guard in invoke() returns the fallback
-        // immediately without entering chaos evaluation.
+                                .and(ElementMatchers.takesArgument(0, String.class)))));
+  }
+
+  /**
+   * LockSupport park / parkNanos / parkUntil (THREAD_PARK). Safe to instrument globally: the chaos
+   * runtime never calls LockSupport.park() directly. Internal locks (ManualGate via ReentrantLock)
+   * do call park(), but by the time park() fires, BootstrapDispatcher.DEPTH is already > 0 (set
+   * before delegating to ChaosRuntime), so the DEPTH guard in invoke() returns the fallback
+   * immediately without entering chaos evaluation.
+   */
+  private static AgentBuilder applyLockSupportTransformations(final AgentBuilder builder) {
+    return builder
         .type(ElementMatchers.named("java.util.concurrent.locks.LockSupport"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
@@ -1089,12 +1110,17 @@ public final class JdkInstrumentationInstaller {
                         Advice.to(JvmRuntimeAdvice.ThreadParkAdvice.class)
                             .on(
                                 ElementMatchers.named("parkUntil")
-                                    .and(ElementMatchers.takesArguments(long.class)))))
-        // AQS.acquire (MONITOR_ENTER proxy)
-        // Safe: ChaosRuntime uses ConcurrentHashMap (lock-free) for registry.match().
-        // The one internal AQS user is ManualGate (ReentrantLock), but ManualGate is only
-        // entered from applyGate() which runs inside DEPTH > 0 context — the DEPTH guard
-        // short-circuits before chaos evaluation begins, preventing recursion.
+                                    .and(ElementMatchers.takesArguments(long.class)))));
+  }
+
+  /**
+   * AQS.acquire (MONITOR_ENTER proxy). Safe: ChaosRuntime uses ConcurrentHashMap (lock-free) for
+   * registry.match(). The one internal AQS user is ManualGate (ReentrantLock), but ManualGate is
+   * only entered from applyGate() which runs inside DEPTH > 0 context — the DEPTH guard
+   * short-circuits before chaos evaluation begins, preventing recursion.
+   */
+  private static AgentBuilder applyAqsMonitorTransformations(final AgentBuilder builder) {
+    return builder
         .type(ElementMatchers.named("java.util.concurrent.locks.AbstractQueuedSynchronizer"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
@@ -1102,7 +1128,15 @@ public final class JdkInstrumentationInstaller {
                     Advice.to(JvmRuntimeAdvice.MonitorEnterAdvice.class)
                         .on(
                             ElementMatchers.named("acquire")
-                                .and(ElementMatchers.takesArguments(int.class)))))
+                                .and(ElementMatchers.takesArguments(int.class)))));
+  }
+
+  /**
+   * NIO Selector, SocketChannel, and ServerSocketChannel instrumentation. Concrete-subtype-only
+   * matchers avoid VerifyError on bridge / synthetic methods of abstract bases.
+   */
+  private static AgentBuilder applyNioChannelTransformations(final AgentBuilder builder) {
+    return builder
         // NIO Selector — target AbstractSelector subtypes (KQueueSelectorImpl etc.).
         // Exclude abstract / interface / synthetic matches for the same VerifyError reason
         // as SocketChannel below: bytecode generated for bridge / synthetic methods on
@@ -1175,8 +1209,18 @@ public final class JdkInstrumentationInstaller {
                     Advice.to(JvmRuntimeAdvice.NioChannelAcceptAdvice.class)
                         .on(
                             ElementMatchers.named("accept")
-                                .and(ElementMatchers.takesArguments(0)))))
-        // Socket
+                                .and(ElementMatchers.takesArguments(0)))));
+  }
+
+  /**
+   * Socket / ServerSocket / SocketInputStream / SocketOutputStream instrumentation. Only
+   * instruments the 3-argument bulk variant of SocketInputStream.read(): the 0-arg single-byte
+   * overload delegates internally to read(byte[], int, int), causing double-fire of
+   * beforeSocketRead for each single-byte application call. Restricting to the final I/O dispatch
+   * avoids double-counting rate-limit permits and probability draws.
+   */
+  private static AgentBuilder applySocketAndStreamTransformations(final AgentBuilder builder) {
+    return builder
         .type(ElementMatchers.named("java.net.Socket"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
@@ -1193,7 +1237,6 @@ public final class JdkInstrumentationInstaller {
                             .on(
                                 ElementMatchers.named("close")
                                     .and(ElementMatchers.takesArguments(0)))))
-        // ServerSocket
         .type(ElementMatchers.named("java.net.ServerSocket"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
@@ -1202,11 +1245,6 @@ public final class JdkInstrumentationInstaller {
                         .on(
                             ElementMatchers.named("accept")
                                 .and(ElementMatchers.takesArguments(0)))))
-        // SocketInputStream / SocketOutputStream (package-private)
-        // Only instrument the 3-argument bulk variant of read(): the 0-arg single-byte
-        // overload delegates internally to read(byte[], int, int), causing double-fire of
-        // beforeSocketRead for each single-byte application call. Restricting to the final
-        // I/O dispatch avoids double-counting rate-limit permits and probability draws.
         .type(ElementMatchers.named("java.net.SocketInputStream"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
@@ -1232,8 +1270,12 @@ public final class JdkInstrumentationInstaller {
                                 ElementMatchers.named("write")
                                     .and(
                                         ElementMatchers.takesArguments(
-                                            byte[].class, int.class, int.class)))))
-        // ZIP Inflater / Deflater
+                                            byte[].class, int.class, int.class)))));
+  }
+
+  /** ZIP Inflater / Deflater instrumentation. */
+  private static AgentBuilder applyZipTransformations(final AgentBuilder builder) {
+    return builder
         .type(ElementMatchers.named("java.util.zip.Inflater"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
