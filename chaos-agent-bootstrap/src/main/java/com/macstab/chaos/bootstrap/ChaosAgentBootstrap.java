@@ -283,54 +283,64 @@ public final class ChaosAgentBootstrap {
       installJfrIntegration(runtime);
       final Optional<StartupConfigLoader.LoadedPlan> loadedPlan =
           StartupConfigLoader.load(agentArgs, environment);
-      loadedPlan.ifPresent(
-          loaded -> {
-            if (loaded.filePath() != null) {
-              final Optional<StartupConfigPoller> poller =
-                  StartupConfigPoller.createIfEnabled(
-                      agentArgs, environment, loaded.filePath(), runtime);
-              if (poller.isPresent()) {
-                final StartupConfigPoller instance = poller.get();
-                POLLER.set(instance);
-                try {
-                  instance.startWithInitialPlan(loaded.plan().scenarios());
-                } catch (final RuntimeException startFailure) {
-                  // startWithInitialPlan can throw after POLLER has been populated — e.g. an
-                  // activation failure on the initial plan, a scheduler rejection, or an I/O
-                  // hiccup reading the plan file. Without this, the poller scheduler daemon
-                  // thread is leaked for the JVM lifetime and POLLER holds a stray reference
-                  // even though startup failed. The outer try/catch at 247 will CAS the
-                  // RUNTIME back to null so the agent looks cleanly uninstalled — but the
-                  // poller thread would continue running, calling runtime.activate() on a
-                  // runtime that is no longer published. Close it before propagating.
-                  try {
-                    instance.close();
-                  } catch (final RuntimeException closeFailure) {
-                    startFailure.addSuppressed(closeFailure);
-                  }
-                  POLLER.compareAndSet(instance, null);
-                  throw startFailure;
-                }
-              } else {
-                runtime.activate(loaded.plan());
-              }
-            } else {
-              runtime.activate(loaded.plan());
-            }
-            if (loaded.debugDumpOnStart()) {
-              System.err.println(runtime.diagnostics().debugDump());
-            }
-          });
+      loadedPlan.ifPresent(loaded -> activateLoadedPlan(loaded, agentArgs, environment, runtime));
       return runtime;
     } catch (final Throwable installFailure) {
       RUNTIME.compareAndSet(runtime, null);
       if (installFailure instanceof RuntimeException re) {
         throw re;
       }
-      if (installFailure instanceof Error e) {
-        throw e;
+      if (installFailure instanceof Error error) {
+        throw error;
       }
       throw new IllegalStateException("agent initialization failed", installFailure);
+    }
+  }
+
+  private static void activateLoadedPlan(
+      final StartupConfigLoader.LoadedPlan loaded,
+      final String agentArgs,
+      final Map<String, String> environment,
+      final ChaosRuntime runtime) {
+    if (loaded.filePath() != null) {
+      final Optional<StartupConfigPoller> poller =
+          StartupConfigPoller.createIfEnabled(agentArgs, environment, loaded.filePath(), runtime);
+      if (poller.isPresent()) {
+        startPollerWithInitialPlan(poller.get(), loaded, runtime);
+      } else {
+        runtime.activate(loaded.plan());
+      }
+    } else {
+      runtime.activate(loaded.plan());
+    }
+    if (loaded.debugDumpOnStart()) {
+      System.err.println(runtime.diagnostics().debugDump());
+    }
+  }
+
+  private static void startPollerWithInitialPlan(
+      final StartupConfigPoller poller,
+      final StartupConfigLoader.LoadedPlan loaded,
+      final ChaosRuntime runtime) {
+    POLLER.set(poller);
+    try {
+      poller.startWithInitialPlan(loaded.plan().scenarios());
+    } catch (final RuntimeException startFailure) {
+      // startWithInitialPlan can throw after POLLER has been populated — e.g. an
+      // activation failure on the initial plan, a scheduler rejection, or an I/O
+      // hiccup reading the plan file. Without this, the poller scheduler daemon
+      // thread is leaked for the JVM lifetime and POLLER holds a stray reference
+      // even though startup failed. The outer try/catch in initialize() will CAS the
+      // RUNTIME back to null so the agent looks cleanly uninstalled — but the
+      // poller thread would continue running, calling runtime.activate() on a
+      // runtime that is no longer published. Close it before propagating.
+      try {
+        poller.close();
+      } catch (final RuntimeException closeFailure) {
+        startFailure.addSuppressed(closeFailure);
+      }
+      POLLER.compareAndSet(poller, null);
+      throw startFailure;
     }
   }
 

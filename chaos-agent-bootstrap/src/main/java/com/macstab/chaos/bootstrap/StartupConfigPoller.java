@@ -135,18 +135,21 @@ public final class StartupConfigPoller implements AutoCloseable {
     // the first pollOnce would silently skip the new content. Capturing mtime first ensures the
     // poller's baseline is anchored to the file the caller already read and passed as
     // initialScenarios; a subsequent file change will then produce a visible mtime difference.
-    FileTime initialMtime = FileTime.fromMillis(0);
+    final FileTime initialMtime = readLastModifiedTimeOrEpoch(configPath);
+    applyDiff(initialScenarios);
+    lastModified = initialMtime;
+    scheduler.scheduleAtFixedRate(this::pollOnce, intervalMs, intervalMs, TimeUnit.MILLISECONDS);
+  }
+
+  private static FileTime readLastModifiedTimeOrEpoch(final Path path) {
     try {
       // NOFOLLOW_LINKS: a symlink swap between startup validation and this stat should fail
       // rather than silently bind the poller to the target of the symlink. Matches the read
       // path in pollOnce and in StartupConfigLoader.
-      initialMtime = Files.getLastModifiedTime(configPath, LinkOption.NOFOLLOW_LINKS);
+      return Files.getLastModifiedTime(path, LinkOption.NOFOLLOW_LINKS);
     } catch (final IOException ignored) {
-      // best-effort; if the stat fails the next poll will re-read the file
+      return FileTime.fromMillis(0); // best-effort; if the stat fails the next poll will re-read
     }
-    applyDiff(initialScenarios);
-    lastModified = initialMtime;
-    scheduler.scheduleAtFixedRate(this::pollOnce, intervalMs, intervalMs, TimeUnit.MILLISECONDS);
   }
 
   /**
@@ -204,84 +207,21 @@ public final class StartupConfigPoller implements AutoCloseable {
   // ── internals ─────────────────────────────────────────────────────────────
 
   void pollOnce() {
-    final FileTime current;
+    final FileTime mtimeBeforeRead;
     try {
       // NOFOLLOW_LINKS on getLastModifiedTime for the same reason as on the read: detect a
       // symlink swap at the config path instead of silently watching the target.
-      current = Files.getLastModifiedTime(configPath, LinkOption.NOFOLLOW_LINKS);
+      mtimeBeforeRead = Files.getLastModifiedTime(configPath, LinkOption.NOFOLLOW_LINKS);
     } catch (final IOException exception) {
       System.err.println(
           "[chaos-agent] config poll failed (stat): " + sanitiseForLog(exception.getMessage()));
       return;
     }
-    if (current.equals(lastModified)) {
+    if (mtimeBeforeRead.equals(lastModified)) {
       return;
     }
     try {
-      // Guard against OOM from arbitrarily large files replacing the config between the
-      // mtime stat and the read. Mirrors the 1 MiB size cap in StartupConfigLoader.
-      final long fileSize;
-      try {
-        fileSize =
-            Files.readAttributes(configPath, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS)
-                .size();
-      } catch (final IOException exception) {
-        System.err.println(
-            "[chaos-agent] config poll failed (size-check): "
-                + sanitiseForLog(exception.getMessage()));
-        return;
-      }
-      if (fileSize > MAX_FILE_SIZE_BYTES) {
-        System.err.println(
-            "[chaos-agent] config reload skipped: file size "
-                + fileSize
-                + " exceeds limit "
-                + MAX_FILE_SIZE_BYTES);
-        return;
-      }
-      // NOFOLLOW_LINKS: if the config path was swapped for a symlink between stat and read
-      // (e.g. by an attacker with write access to the config directory), the open fails
-      // rather than silently following the link. Mirrors the check in StartupConfigLoader.
-      final String json;
-      try (final java.io.InputStream in =
-          Files.newInputStream(configPath, LinkOption.NOFOLLOW_LINKS)) {
-        json = new String(in.readAllBytes(), StandardCharsets.UTF_8);
-      }
-      // Re-stat after the read: if the mtime moved between the initial stat and end-of-read,
-      // the writer was still producing the file while we were consuming it, so the bytes we
-      // have are potentially truncated or mid-rewrite. Advancing lastModified with the stale
-      // stat would permanently mask the final (complete) mtime once the writer finishes,
-      // leaving the poller stuck on the torn read forever. Skip the parse and wait for the
-      // next tick, which will see the settled mtime and a clean read. Editors that perform
-      // atomic rename-into-place produce exactly one mtime change and are unaffected; editors
-      // that truncate-and-write (vim default, `echo > file`) produce two — only the second
-      // will parse.
-      final FileTime afterRead;
-      try {
-        afterRead = Files.getLastModifiedTime(configPath, LinkOption.NOFOLLOW_LINKS);
-      } catch (final IOException exception) {
-        System.err.println(
-            "[chaos-agent] config poll failed (post-read stat): "
-                + sanitiseForLog(exception.getMessage()));
-        return;
-      }
-      if (!afterRead.equals(current)) {
-        // Don't advance lastModified: the next tick should see afterRead (or a later value)
-        // as a fresh change and retry. Logging at FINE would flood for active writers; stay
-        // silent.
-        return;
-      }
-      final com.macstab.chaos.api.ChaosPlan newPlan = ChaosPlanMapper.read(json);
-      applyDiff(newPlan.scenarios());
-      // Only advance lastModified AFTER a successful parse+apply. Advancing it before the
-      // parse would permanently mask the same-mtime case: a parse failure followed by the
-      // operator correcting the file in place (without touching mtime) would never reload.
-      lastModified = current;
-      System.err.println(
-          "[chaos-agent] config reloaded: "
-              + newPlan.scenarios().size()
-              + " scenario(s) from "
-              + sanitiseForLog(configPath.toString()));
+      reloadIfFileSizeAcceptable(mtimeBeforeRead);
     } catch (final Throwable throwable) {
       // Catch Throwable, not Exception: ScheduledExecutorService.scheduleAtFixedRate silently
       // suppresses all future executions if the task throws anything, including Errors. A
@@ -296,10 +236,86 @@ public final class StartupConfigPoller implements AutoCloseable {
       }
       System.err.println(
           "[chaos-agent] config reload failed (parse): " + sanitiseForLog(throwable.getMessage()));
-      if (throwable instanceof VirtualMachineError) {
-        throw (VirtualMachineError) throwable;
+      if (throwable instanceof VirtualMachineError virtualMachineError) {
+        throw virtualMachineError;
       }
     }
+  }
+
+  private void reloadIfFileSizeAcceptable(final FileTime mtimeBeforeRead) throws IOException {
+    final long fileSize = readFileSize();
+    if (fileSize < 0) {
+      return; // size-check failed, error already logged
+    }
+    if (fileSize > MAX_FILE_SIZE_BYTES) {
+      System.err.println(
+          "[chaos-agent] config reload skipped: file size "
+              + fileSize
+              + " exceeds limit "
+              + MAX_FILE_SIZE_BYTES);
+      return;
+    }
+    // NOFOLLOW_LINKS: if the config path was swapped for a symlink between stat and read
+    // (e.g. by an attacker with write access to the config directory), the open fails
+    // rather than silently following the link. Mirrors the check in StartupConfigLoader.
+    final String json;
+    try (final java.io.InputStream inputStream =
+        Files.newInputStream(configPath, LinkOption.NOFOLLOW_LINKS)) {
+      json = new String(inputStream.readAllBytes(), StandardCharsets.UTF_8);
+    }
+    reloadIfMtimeSettled(json, mtimeBeforeRead);
+  }
+
+  private long readFileSize() {
+    try {
+      // Guard against OOM from arbitrarily large files replacing the config between the
+      // mtime stat and the read. Mirrors the 1 MiB size cap in StartupConfigLoader.
+      return Files.readAttributes(configPath, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS)
+          .size();
+    } catch (final IOException exception) {
+      System.err.println(
+          "[chaos-agent] config poll failed (size-check): "
+              + sanitiseForLog(exception.getMessage()));
+      return -1L;
+    }
+  }
+
+  private void reloadIfMtimeSettled(final String json, final FileTime mtimeBeforeRead)
+      throws IOException {
+    // Re-stat after the read: if the mtime moved between the initial stat and end-of-read,
+    // the writer was still producing the file while we were consuming it, so the bytes we
+    // have are potentially truncated or mid-rewrite. Advancing lastModified with the stale
+    // stat would permanently mask the final (complete) mtime once the writer finishes,
+    // leaving the poller stuck on the torn read forever. Skip the parse and wait for the
+    // next tick, which will see the settled mtime and a clean read. Editors that perform
+    // atomic rename-into-place produce exactly one mtime change and are unaffected; editors
+    // that truncate-and-write (vim default, `echo > file`) produce two — only the second
+    // will parse.
+    final FileTime mtimeAfterRead;
+    try {
+      mtimeAfterRead = Files.getLastModifiedTime(configPath, LinkOption.NOFOLLOW_LINKS);
+    } catch (final IOException exception) {
+      System.err.println(
+          "[chaos-agent] config poll failed (post-read stat): "
+              + sanitiseForLog(exception.getMessage()));
+      return;
+    }
+    if (!mtimeAfterRead.equals(mtimeBeforeRead)) {
+      // Don't advance lastModified: the next tick should see mtimeAfterRead (or a later value)
+      // as a fresh change and retry. Logging at FINE would flood for active writers; stay silent.
+      return;
+    }
+    final com.macstab.chaos.api.ChaosPlan newPlan = ChaosPlanMapper.read(json);
+    applyDiff(newPlan.scenarios());
+    // Only advance lastModified AFTER a successful parse+apply. Advancing it before the
+    // parse would permanently mask the same-mtime case: a parse failure followed by the
+    // operator correcting the file in place (without touching mtime) would never reload.
+    lastModified = mtimeBeforeRead;
+    System.err.println(
+        "[chaos-agent] config reloaded: "
+            + newPlan.scenarios().size()
+            + " scenario(s) from "
+            + sanitiseForLog(configPath.toString()));
   }
 
   synchronized void applyDiff(final List<ChaosScenario> newScenarios) {
@@ -362,6 +378,9 @@ public final class StartupConfigPoller implements AutoCloseable {
     }
   }
 
+  /** Maximum number of characters rendered from a single log message before truncation. */
+  static final int MAX_LOG_MESSAGE_LENGTH = 512;
+
   /**
    * Strips control characters (including CR/LF) from strings before they hit {@code System.err}.
    * Config file paths and parse-error messages can contain attacker-controlled bytes; without
@@ -373,18 +392,17 @@ public final class StartupConfigPoller implements AutoCloseable {
     if (raw == null) {
       return "null";
     }
-    final int max = 512;
-    final int end = Math.min(raw.length(), max);
+    final int end = Math.min(raw.length(), MAX_LOG_MESSAGE_LENGTH);
     final StringBuilder sanitised = new StringBuilder(end);
     for (int i = 0; i < end; i++) {
-      final char ch = raw.charAt(i);
-      if (ch < 0x20 || ch == 0x7F) {
+      final char character = raw.charAt(i);
+      if (character < 0x20 || character == 0x7F) {
         sanitised.append('\uFFFD');
       } else {
-        sanitised.append(ch);
+        sanitised.append(character);
       }
     }
-    if (raw.length() > max) {
+    if (raw.length() > MAX_LOG_MESSAGE_LENGTH) {
       sanitised.append("...[truncated]");
     }
     return sanitised.toString();
@@ -403,11 +421,11 @@ public final class StartupConfigPoller implements AutoCloseable {
   static final long MIN_WATCH_INTERVAL_MS = 50L;
 
   static long resolveInterval(final String rawAgentArgs, final Map<String, String> environment) {
-    final long raw = resolveRawInterval(rawAgentArgs, environment);
-    if (raw <= 0) {
+    final long rawIntervalMs = resolveRawInterval(rawAgentArgs, environment);
+    if (rawIntervalMs <= 0) {
       return 0L;
     }
-    return Math.max(raw, MIN_WATCH_INTERVAL_MS);
+    return Math.max(rawIntervalMs, MIN_WATCH_INTERVAL_MS);
   }
 
   private static long resolveRawInterval(
