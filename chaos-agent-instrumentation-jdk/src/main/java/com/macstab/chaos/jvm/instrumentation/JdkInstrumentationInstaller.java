@@ -702,14 +702,17 @@ public final class JdkInstrumentationInstaller {
       try (JarOutputStream jarOutputStream =
           new JarOutputStream(Files.newOutputStream(bridgeJar))) {
         writeClass(
-            jarOutputStream, "com/macstab/chaos/jvm/instrumentation/bridge/BootstrapDispatcher.class");
+            jarOutputStream,
+            "com/macstab/chaos/jvm/instrumentation/bridge/BootstrapDispatcher.class");
         writeClass(
             jarOutputStream,
             "com/macstab/chaos/jvm/instrumentation/bridge/BootstrapDispatcher$ThrowingSupplier.class");
         writeClass(
-            jarOutputStream, "com/macstab/chaos/jvm/instrumentation/ScheduledRunnableWrapper.class");
+            jarOutputStream,
+            "com/macstab/chaos/jvm/instrumentation/ScheduledRunnableWrapper.class");
         writeClass(
-            jarOutputStream, "com/macstab/chaos/jvm/instrumentation/ScheduledCallableWrapper.class");
+            jarOutputStream,
+            "com/macstab/chaos/jvm/instrumentation/ScheduledCallableWrapper.class");
       }
       // Retain the JarFile in a static field. appendToBootstrapClassLoaderSearch does not
       // document whether the JVM keeps a strong reference to the Java-side JarFile; on
