@@ -34,11 +34,19 @@ jobs:
       - name: Build aggregated Javadoc
         run: ./gradlew aggregatedJavadoc --no-daemon --stacktrace
 
-      - name: Extract version from tag
+      - name: Resolve version
         id: version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            echo "VERSION=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+            echo "IS_TAG=true" >> "$GITHUB_OUTPUT"
+          else
+            # Manual dispatch: no tag available, only refresh latest/ from current HEAD.
+            echo "IS_TAG=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Deploy versioned Javadoc
+        if: steps.version.outputs.IS_TAG == 'true'
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
