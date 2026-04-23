@@ -12,11 +12,11 @@ dependencies {
 }
 
 application {
-    mainClass = "com.macstab.chaos.examples.ExampleServiceMain"
+    mainClass = "com.macstab.chaos.jvm.examples.ExampleServiceMain"
 }
 
 tasks.jar {
     manifest {
-        attributes["Automatic-Module-Name"] = "com.macstab.chaos.agent.examples"
+        attributes["Automatic-Module-Name"] = "com.macstab.chaos.jvm.agent.examples"
     }
 }

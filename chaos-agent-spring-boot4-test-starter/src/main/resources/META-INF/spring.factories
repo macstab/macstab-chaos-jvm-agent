@@ -1,0 +1,2 @@
+# ChaosAgentInitializer is no longer registered globally here.
+# It is applied only when @ChaosTest is present, via @ContextConfiguration on that annotation.
