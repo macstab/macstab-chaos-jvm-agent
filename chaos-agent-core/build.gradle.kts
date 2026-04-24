@@ -6,10 +6,11 @@ dependencies {
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.assertj)
     testImplementation(libs.awaitility)
+    testImplementation(libs.jqwik)
 }
 
 tasks.jar {
     manifest {
-        attributes["Automatic-Module-Name"] = "com.macstab.chaos.agent.core"
+        attributes["Automatic-Module-Name"] = "com.macstab.chaos.jvm.agent.core"
     }
 }

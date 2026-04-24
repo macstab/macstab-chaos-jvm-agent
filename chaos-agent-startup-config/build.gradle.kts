@@ -10,6 +10,6 @@ dependencies {
 
 tasks.jar {
     manifest {
-        attributes["Automatic-Module-Name"] = "com.macstab.chaos.agent.startup"
+        attributes["Automatic-Module-Name"] = "com.macstab.chaos.jvm.agent.startup"
     }
 }

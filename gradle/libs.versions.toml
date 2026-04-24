@@ -1,24 +1,58 @@
 [versions]
+apacheHc4 = "4.5.14"
+apacheHc5 = "5.3.1"
 awaitility = "4.2.2"
 byteBuddy = "1.17.8"
+c3p0 = "0.10.1"
 googleJavaFormat = "1.33.0"
+h2 = "2.3.232"
+hikariCp = "5.1.0"
 jackson = "2.19.4"
+jmh = "1.37"
+jqwik = "1.9.3"
 junit = "5.10.1"
+mockito = "5.14.2"
+resilience4j = "2.2.0"
+wiremock = "3.0.1"
+micronautBom = "4.7.6"
+okhttp = "4.12.0"
+quarkusBom = "3.21.3"
+reactorNetty = "1.1.21"
 spotless = "8.2.1"
+springBoot3 = "3.5.13"
+springBoot4 = "4.0.5"
 
 [libraries]
+apache-httpclient4 = { module = "org.apache.httpcomponents:httpclient", version.ref = "apacheHc4" }
+apache-httpclient5 = { module = "org.apache.httpcomponents.client5:httpclient5", version.ref = "apacheHc5" }
 byte-buddy = { module = "net.bytebuddy:byte-buddy", version.ref = "byteBuddy" }
+c3p0 = { module = "com.mchange:c3p0", version.ref = "c3p0" }
+h2 = { module = "com.h2database:h2", version.ref = "h2" }
+hikari-cp = { module = "com.zaxxer:HikariCP", version.ref = "hikariCp" }
 byte-buddy-agent = { module = "net.bytebuddy:byte-buddy-agent", version.ref = "byteBuddy" }
 jackson-annotations = { module = "com.fasterxml.jackson.core:jackson-annotations", version.ref = "jackson" }
 jackson-databind = { module = "com.fasterxml.jackson.core:jackson-databind", version.ref = "jackson" }
 jackson-jsr310 = { module = "com.fasterxml.jackson.datatype:jackson-datatype-jsr310", version.ref = "jackson" }
+jmh-core = { module = "org.openjdk.jmh:jmh-core", version.ref = "jmh" }
+jmh-generator-annprocess = { module = "org.openjdk.jmh:jmh-generator-annprocess", version.ref = "jmh" }
+jqwik = { module = "net.jqwik:jqwik", version.ref = "jqwik" }
 assertj = { module = "org.assertj:assertj-core", version = "3.27.3" }
+mockito-core = { module = "org.mockito:mockito-core", version.ref = "mockito" }
+resilience4j-spring-boot3 = { module = "io.github.resilience4j:resilience4j-spring-boot3", version.ref = "resilience4j" }
+resilience4j-retry = { module = "io.github.resilience4j:resilience4j-retry", version.ref = "resilience4j" }
+wiremock-standalone = { module = "com.github.tomakehurst:wiremock-standalone", version.ref = "wiremock" }
 awaitility = { module = "org.awaitility:awaitility", version.ref = "awaitility" }
 junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" }
 junit-jupiter-api = { module = "org.junit.jupiter:junit-jupiter-api" }
 junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher" }
 lombok = { module = "org.projectlombok:lombok", version = "1.18.38" }
+micronaut-bom = { module = "io.micronaut.platform:micronaut-platform", version.ref = "micronautBom" }
+okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }
+quarkus-bom = { module = "io.quarkus:quarkus-bom", version.ref = "quarkusBom" }
+reactor-netty-http = { module = "io.projectreactor.netty:reactor-netty-http", version.ref = "reactorNetty" }
+spring-boot3-dependencies = { module = "org.springframework.boot:spring-boot-dependencies", version.ref = "springBoot3" }
+spring-boot4-dependencies = { module = "org.springframework.boot:spring-boot-dependencies", version.ref = "springBoot4" }
 
 [plugins]
 spotless = { id = "com.diffplug.spotless", version.ref = "spotless" }
