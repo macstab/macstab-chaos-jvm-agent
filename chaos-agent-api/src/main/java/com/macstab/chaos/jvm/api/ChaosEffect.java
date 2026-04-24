@@ -635,6 +635,7 @@ public sealed interface ChaosEffect
    * @param message non-blank message carried by the thrown exception
    */
   record RejectEffect(String message) implements ChaosEffect {
+    /** Validates the RejectEffect parameters. */
     public RejectEffect {
       if (message == null || message.isBlank()) {
         throw new IllegalArgumentException("message must be non-blank");
@@ -747,6 +748,7 @@ public sealed interface ChaosEffect
    * @param strategy corruption strategy applied to the method's return value
    */
   record ReturnValueCorruptionEffect(ReturnValueStrategy strategy) implements ChaosEffect {
+    /** Validates the ReturnValueCorruptionEffect parameters. */
     public ReturnValueCorruptionEffect {
       if (strategy == null) {
         throw new IllegalArgumentException("strategy must not be null");
@@ -1066,6 +1068,7 @@ public sealed interface ChaosEffect
      */
     public static final int MAX_THREAD_COUNT = 10_000;
 
+    /** Validates the ThreadLeakEffect parameters. */
     public ThreadLeakEffect {
       if (threadCount <= 0) {
         throw new IllegalArgumentException("threadCount must be > 0");
@@ -1100,6 +1103,7 @@ public sealed interface ChaosEffect
    * @param valueSizeBytes retained size per planted value; must be {@code > 0}
    */
   record ThreadLocalLeakEffect(int entriesPerThread, int valueSizeBytes) implements ChaosEffect {
+    /** Validates the ThreadLocalLeakEffect parameters. */
     public ThreadLocalLeakEffect {
       if (entriesPerThread <= 0) {
         throw new IllegalArgumentException("entriesPerThread must be > 0");
@@ -1201,6 +1205,7 @@ public sealed interface ChaosEffect
    */
   record SafepointStormEffect(Duration gcInterval, int retransformClassCount)
       implements ChaosEffect {
+    /** Validates the SafepointStormEffect parameters. */
     public SafepointStormEffect {
       if (gcInterval == null || gcInterval.isNegative() || gcInterval.isZero()) {
         throw new IllegalArgumentException("gcInterval must be positive");
@@ -1220,6 +1225,7 @@ public sealed interface ChaosEffect
    * @param stringLengthBytes byte length of each interned string; must be {@code > 0}
    */
   record StringInternPressureEffect(int internCount, int stringLengthBytes) implements ChaosEffect {
+    /** Validates the StringInternPressureEffect parameters. */
     public StringInternPressureEffect {
       if (internCount <= 0) {
         throw new IllegalArgumentException("internCount must be > 0");
@@ -1241,6 +1247,7 @@ public sealed interface ChaosEffect
    */
   record ReferenceQueueFloodEffect(int referenceCount, Duration floodInterval)
       implements ChaosEffect {
+    /** Validates the ReferenceQueueFloodEffect parameters. */
     public ReferenceQueueFloodEffect {
       if (referenceCount <= 0) {
         throw new IllegalArgumentException("referenceCount must be > 0");
@@ -1268,6 +1275,7 @@ public sealed interface ChaosEffect
    */
   record VirtualThreadCarrierPinningEffect(int pinnedThreadCount, Duration pinDuration)
       implements ChaosEffect {
+    /** Validates the VirtualThreadCarrierPinningEffect parameters. */
     public VirtualThreadCarrierPinningEffect {
       if (pinnedThreadCount <= 0) {
         throw new IllegalArgumentException("pinnedThreadCount must be > 0");

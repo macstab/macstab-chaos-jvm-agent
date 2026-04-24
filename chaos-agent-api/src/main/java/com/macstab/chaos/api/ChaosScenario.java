@@ -59,6 +59,7 @@ public record ChaosScenario(
     int precedence,
     Map<String, String> tags) {
 
+  /** Validates and normalises the ChaosScenario fields. */
   public ChaosScenario {
     if (id == null || id.isBlank()) {
       throw new IllegalArgumentException("id must be non-blank");

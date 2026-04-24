@@ -135,6 +135,7 @@ public sealed interface ChaosEffect
   /**
    * Returns a suppress effect that silently discards the matched operation. Callers receive {@code
    * null} or {@code false} depending on operation semantics.
+   *
    * @return a SuppressEffect
    */
   static SuppressEffect suppress() {
@@ -217,6 +218,7 @@ public sealed interface ChaosEffect
    *
    * <p>Only valid with {@link ChaosSelector.NioSelector} and {@link
    * OperationType#NIO_SELECTOR_SELECT}.
+   *
    * @return a SpuriousWakeupEffect
    */
   static SpuriousWakeupEffect spuriousWakeup() {
@@ -578,6 +580,7 @@ public sealed interface ChaosEffect
    * @param message the exception message; must be non-blank
    */
   record RejectEffect(String message) implements ChaosEffect {
+    /** Validates the RejectEffect parameters. */
     public RejectEffect {
       if (message == null || message.isBlank()) {
         throw new IllegalArgumentException("message must be non-blank");
@@ -659,6 +662,7 @@ public sealed interface ChaosEffect
    * @param strategy the substitution strategy to apply
    */
   record ReturnValueCorruptionEffect(ReturnValueStrategy strategy) implements ChaosEffect {
+    /** Validates the ReturnValueCorruptionEffect parameters. */
     public ReturnValueCorruptionEffect {
       if (strategy == null) {
         throw new IllegalArgumentException("strategy must not be null");
@@ -893,6 +897,7 @@ public sealed interface ChaosEffect
    */
   record ThreadLeakEffect(int threadCount, String namePrefix, boolean daemon, Duration lifespan)
       implements ChaosEffect {
+    /** Validates the ThreadLeakEffect parameters. */
     public ThreadLeakEffect {
       if (threadCount <= 0) {
         throw new IllegalArgumentException("threadCount must be > 0");
@@ -914,6 +919,7 @@ public sealed interface ChaosEffect
    * @param valueSizeBytes size of each entry's byte-array value; must be &gt; 0
    */
   record ThreadLocalLeakEffect(int entriesPerThread, int valueSizeBytes) implements ChaosEffect {
+    /** Validates the ThreadLocalLeakEffect parameters. */
     public ThreadLocalLeakEffect {
       if (entriesPerThread <= 0) {
         throw new IllegalArgumentException("entriesPerThread must be > 0");
@@ -1000,6 +1006,7 @@ public sealed interface ChaosEffect
    */
   record SafepointStormEffect(Duration gcInterval, int retransformClassCount)
       implements ChaosEffect {
+    /** Validates the SafepointStormEffect parameters. */
     public SafepointStormEffect {
       if (gcInterval == null || gcInterval.isNegative() || gcInterval.isZero()) {
         throw new IllegalArgumentException("gcInterval must be positive");
@@ -1019,6 +1026,7 @@ public sealed interface ChaosEffect
    * @param stringLengthBytes length of each string in bytes; must be &gt; 0
    */
   record StringInternPressureEffect(int internCount, int stringLengthBytes) implements ChaosEffect {
+    /** Validates the StringInternPressureEffect parameters. */
     public StringInternPressureEffect {
       if (internCount <= 0) {
         throw new IllegalArgumentException("internCount must be > 0");
@@ -1040,6 +1048,7 @@ public sealed interface ChaosEffect
    */
   record ReferenceQueueFloodEffect(int referenceCount, Duration floodInterval)
       implements ChaosEffect {
+    /** Validates the ReferenceQueueFloodEffect parameters. */
     public ReferenceQueueFloodEffect {
       if (referenceCount <= 0) {
         throw new IllegalArgumentException("referenceCount must be > 0");

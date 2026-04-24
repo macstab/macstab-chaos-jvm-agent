@@ -184,9 +184,7 @@ public interface ChaosDiagnostics {
       long matchedCount,
       long appliedCount,
       String reason) {
-    /**
-     * Validates the scenario report fields.
-     */
+    /** Validates the scenario report fields. */
     public ScenarioReport {
       Objects.requireNonNull(id, "id");
       Objects.requireNonNull(scopeKey, "scopeKey");
@@ -216,9 +214,7 @@ public interface ChaosDiagnostics {
    * @param message human-readable detail; suitable for logging or test failure messages
    */
   record ActivationFailure(String scenarioId, FailureCategory category, String message) {
-    /**
-     * Validates the activation failure fields.
-     */
+    /** Validates the activation failure fields. */
     public ActivationFailure {
       Objects.requireNonNull(scenarioId, "scenarioId");
       Objects.requireNonNull(category, "category");
