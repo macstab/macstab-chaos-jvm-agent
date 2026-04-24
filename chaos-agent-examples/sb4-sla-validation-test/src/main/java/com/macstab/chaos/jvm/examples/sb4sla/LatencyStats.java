@@ -1,5 +1,6 @@
 package com.macstab.chaos.jvm.examples.sb4sla;
 
+/** Utility class for computing percentile statistics from latency samples. */
 public final class LatencyStats {
 
   private LatencyStats() {}

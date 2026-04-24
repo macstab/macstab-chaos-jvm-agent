@@ -38,6 +38,16 @@ import java.util.Objects;
  * JVM. {@link ScenarioScope#SESSION} scenarios intercept only operations on threads {@link
  * ChaosSession#bind() bound} to a specific session, enabling per-test isolation in shared JVM
  * environments.
+ *
+ * @param id unique identifier for this scenario; used in diagnostics, JMX, JFR events, and logs
+ * @param description human-readable description of what this scenario tests
+ * @param scope visibility scope of the scenario; defaults to {@link ScenarioScope#JVM}
+ * @param selector selector that determines which JVM operations are eligible for chaos
+ * @param effect effect applied when the selector matches
+ * @param activationPolicy activation policy controlling when and how often the effect fires
+ * @param precedence precedence used to resolve conflicts when multiple scenarios match the same
+ *     operation; higher values win
+ * @param tags free-form metadata tags surfaced in diagnostics and JFR events
  */
 public record ChaosScenario(
     String id,

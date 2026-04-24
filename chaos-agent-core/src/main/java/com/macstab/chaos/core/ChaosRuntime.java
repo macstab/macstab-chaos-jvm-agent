@@ -393,6 +393,13 @@ public final class ChaosRuntime implements ChaosControlPlane {
 
   /**
    * Called before a {@link CompletableFuture} completion method to optionally override its outcome.
+   *
+   * @param operation the {@link OperationType} name for the completion operation
+   * @param future the future being completed
+   * @param payload the completion payload (result or exception)
+   * @return an override result to return from the completion method, or {@code null} to proceed
+   *     normally
+   * @throws Throwable if an active scenario throws to simulate a failure
    */
   public Boolean beforeCompletableFutureComplete(
       final String operation, final CompletableFuture<?> future, final Object payload)
@@ -427,6 +434,10 @@ public final class ChaosRuntime implements ChaosControlPlane {
 
   /**
    * Called before {@link ClassLoader#loadClass(String)} to apply scenarios targeting class loading.
+   *
+   * @param loader the class loader performing the load (may be {@code null} for bootstrap)
+   * @param className the binary class name being loaded
+   * @throws Throwable if an active scenario throws to simulate a failure
    */
   public void beforeClassLoad(final ClassLoader loader, final String className) throws Throwable {
     final InvocationContext context =
@@ -444,6 +455,12 @@ public final class ChaosRuntime implements ChaosControlPlane {
 
   /**
    * Called after {@link ClassLoader#getResource(String)} to optionally substitute the returned URL.
+   *
+   * @param loader the class loader performing the lookup (may be {@code null} for bootstrap)
+   * @param name the resource name being looked up
+   * @param currentValue the real URL returned by the loader
+   * @return the (possibly substituted) URL to return to the caller
+   * @throws Throwable if an active scenario throws to simulate a failure
    */
   public URL afterResourceLookup(
       final ClassLoader loader, final String name, final URL currentValue) throws Throwable {
@@ -472,6 +489,10 @@ public final class ChaosRuntime implements ChaosControlPlane {
   /**
    * Wraps a shutdown hook thread before it is registered with {@link
    * Runtime#addShutdownHook(Thread)}.
+   *
+   * @param hook the original shutdown hook being registered
+   * @return the wrapper thread that should actually be registered with the runtime
+   * @throws Throwable if an active scenario throws to simulate a failure
    */
   public Thread decorateShutdownHook(final Thread hook) throws Throwable {
     final InvocationContext context =
@@ -493,7 +514,12 @@ public final class ChaosRuntime implements ChaosControlPlane {
     return decorated;
   }
 
-  /** Resolves the registered wrapper thread for an original shutdown hook. */
+  /**
+   * Resolves the registered wrapper thread for an original shutdown hook.
+   *
+   * @param original the original shutdown hook that was registered
+   * @return the wrapper thread, or {@code original} if no wrapper is registered
+   */
   public Thread resolveShutdownHook(final Thread original) {
     return shutdownHooks.getOrDefault(original, original);
   }
@@ -501,6 +527,11 @@ public final class ChaosRuntime implements ChaosControlPlane {
   /**
    * Called before an executor's {@code shutdown} or {@code shutdownNow} to apply matching
    * scenarios.
+   *
+   * @param operation the {@link OperationType} name for the shutdown operation
+   * @param executor the executor being shut down
+   * @param timeoutMillis the shutdown timeout in milliseconds, or {@code 0} when not specified
+   * @throws Throwable if an active scenario throws to simulate a failure
    */
   public void beforeExecutorShutdown(
       final String operation, final Object executor, final long timeoutMillis) throws Throwable {
@@ -519,6 +550,12 @@ public final class ChaosRuntime implements ChaosControlPlane {
 
   /**
    * Called before each execution of a scheduled task; returns {@code false} to suppress the tick.
+   *
+   * @param executor the scheduling executor running the tick
+   * @param task the task being ticked
+   * @param periodic {@code true} if the tick is for a periodic schedule
+   * @return {@code true} if the tick should proceed normally, {@code false} to suppress it
+   * @throws Throwable if an active scenario throws to simulate a failure
    */
   public boolean beforeScheduledTick(
       final Object executor, final Object task, final boolean periodic) throws Throwable {

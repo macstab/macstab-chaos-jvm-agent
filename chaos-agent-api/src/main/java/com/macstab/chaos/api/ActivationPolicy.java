@@ -31,6 +31,19 @@ import java.time.Duration;
  *     null,           // rateLimit
  *     42L);           // randomSeed
  * }</pre>
+ *
+ * @param startMode when the scenario begins accepting matches; defaults to {@link
+ *     StartMode#AUTOMATIC}
+ * @param probability fraction of matches that result in effect application; must be in {@code (0.0,
+ *     1.0]}
+ * @param activateAfterMatches number of initial matches to skip before the effect becomes eligible;
+ *     {@code 0} means no warm-up
+ * @param maxApplications hard cap on total effect applications; {@code null} means unlimited
+ * @param activeFor time window from first start during which the scenario remains active; {@code
+ *     null} means no time bound
+ * @param rateLimit sliding-window rate cap on applications; {@code null} means unlimited
+ * @param randomSeed fixed PRNG seed for reproducible probability sampling; {@code null} uses {@code
+ *     0L}
  */
 public record ActivationPolicy(
     StartMode startMode,
@@ -142,6 +155,10 @@ public record ActivationPolicy(
    *
    * <p>Example: {@code new RateLimit(10, Duration.ofSeconds(1))} allows at most 10 effect
    * applications per second regardless of match frequency.
+   *
+   * @param permits maximum effect applications allowed within one {@code window}; must be {@code >
+   *     0}
+   * @param window rolling window duration; must be positive
    */
   public record RateLimit(long permits, Duration window) {
 

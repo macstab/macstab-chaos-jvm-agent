@@ -22,6 +22,9 @@ import jdk.jfr.StackTrace;
 @Enabled(true)
 public final class ChaosScenarioLifecycleEvent extends Event {
 
+  /** Creates a new ChaosScenarioLifecycleEvent. */
+  public ChaosScenarioLifecycleEvent() {}
+
   /** ID of the chaos scenario whose lifecycle state changed. */
   @Label("Scenario ID")
   public String scenarioId;

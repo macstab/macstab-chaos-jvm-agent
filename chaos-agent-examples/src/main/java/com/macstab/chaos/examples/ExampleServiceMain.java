@@ -11,9 +11,16 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
+/** Example service demonstrating chaos platform integration with thread pools and queues. */
 public final class ExampleServiceMain {
   private ExampleServiceMain() {}
 
+  /**
+   * Starts the example service.
+   *
+   * @param args command-line arguments
+   * @throws Exception if the service fails to start or complete within the timeout
+   */
   public static void main(String[] args) throws Exception {
     if (Boolean.getBoolean("macstab.chaos.install.local")) {
       ChaosPlatform.installLocally();

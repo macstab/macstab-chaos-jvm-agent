@@ -46,6 +46,8 @@ public record NamePattern(MatchMode mode, String value) {
    * Canonical constructor. Normalises {@code null} mode to {@link MatchMode#ANY} and {@code null}
    * value to {@code "*"}.
    *
+   * @param mode the matching algorithm; {@code null} is normalised to {@link MatchMode#ANY}
+   * @param value the pattern value; {@code null} is normalised to {@code "*"}
    * @throws IllegalArgumentException if mode is not {@link MatchMode#ANY} and value is blank
    */
   @JsonCreator

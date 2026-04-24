@@ -42,18 +42,31 @@ public final class ChaosRuntime implements ChaosControlPlane {
     this(Clock.systemUTC(), ChaosMetricsSink.NOOP);
   }
 
-  /** Creates a runtime backed by the supplied clock and metrics sink. */
+  /**
+   * Creates a runtime backed by the supplied clock and metrics sink.
+   *
+   * @param clock the clock used for scheduling and timestamping
+   * @param metricsSink the metrics sink to receive observability events
+   */
   public ChaosRuntime(final Clock clock, final ChaosMetricsSink metricsSink) {
     this.controlPlane = new ChaosControlPlaneImpl(clock, metricsSink);
     this.dispatcher = new ChaosDispatcher(controlPlane);
   }
 
-  /** Returns the hot-path {@link ChaosDispatcher} composed by this runtime. */
+  /**
+   * Returns the hot-path {@link ChaosDispatcher} composed by this runtime.
+   *
+   * @return the dispatcher used for hot-path dispatch calls
+   */
   public ChaosDispatcher dispatcher() {
     return dispatcher;
   }
 
-  /** Returns the control-plane implementation composed by this runtime. */
+  /**
+   * Returns the control-plane implementation composed by this runtime.
+   *
+   * @return the composed control-plane implementation
+   */
   public ChaosControlPlaneImpl controlPlane() {
     return controlPlane;
   }
@@ -88,41 +101,88 @@ public final class ChaosRuntime implements ChaosControlPlane {
     controlPlane.close();
   }
 
-  /** Returns the session id bound to the current thread, or {@code null} if none is active. */
+  /**
+   * Returns the session id bound to the current thread, or {@code null} if none is active.
+   *
+   * @return the current thread-bound session id, or {@code null} if no session is active
+   */
   public String currentSessionId() {
     return dispatcher.currentSessionId();
   }
 
-  /** Delegates to {@link ChaosDispatcher#decorateExecutorRunnable}. */
+  /**
+   * Delegates to {@link ChaosDispatcher#decorateExecutorRunnable}.
+   *
+   * @param operation the {@link OperationType} name for the submission
+   * @param executor the executor receiving the submission
+   * @param task the runnable being submitted
+   * @return the decorated runnable produced by the dispatcher
+   */
   public Runnable decorateExecutorRunnable(
       final String operation, final Object executor, final Runnable task) {
     return dispatcher.decorateExecutorRunnable(operation, executor, task);
   }
 
-  /** Delegates to {@link ChaosDispatcher#decorateExecutorCallable}. */
+  /**
+   * Delegates to {@link ChaosDispatcher#decorateExecutorCallable}.
+   *
+   * @param <T> the callable's result type
+   * @param operation the {@link OperationType} name for the submission
+   * @param executor the executor receiving the submission
+   * @param task the callable being submitted
+   * @return the decorated callable produced by the dispatcher
+   */
   public <T> Callable<T> decorateExecutorCallable(
       final String operation, final Object executor, final Callable<T> task) {
     return dispatcher.decorateExecutorCallable(operation, executor, task);
   }
 
-  /** Delegates to {@link ChaosDispatcher#beforeThreadStart}. */
+  /**
+   * Delegates to {@link ChaosDispatcher#beforeThreadStart}.
+   *
+   * @param thread the thread being started
+   * @throws Throwable if an active scenario throws to simulate a failure
+   */
   public void beforeThreadStart(final Thread thread) throws Throwable {
     dispatcher.beforeThreadStart(thread);
   }
 
-  /** Delegates to {@link ChaosDispatcher#beforeWorkerRun}. */
+  /**
+   * Delegates to {@link ChaosDispatcher#beforeWorkerRun}.
+   *
+   * @param executor the executor owning the worker
+   * @param worker the worker thread about to run the task
+   * @param task the task being run, or {@code null} if not yet known
+   * @throws Throwable if an active scenario throws to simulate a failure
+   */
   public void beforeWorkerRun(final Object executor, final Thread worker, final Runnable task)
       throws Throwable {
     dispatcher.beforeWorkerRun(executor, worker, task);
   }
 
-  /** Delegates to {@link ChaosDispatcher#beforeForkJoinTaskRun}. */
+  /**
+   * Delegates to {@link ChaosDispatcher#beforeForkJoinTaskRun}.
+   *
+   * @param task the fork-join task about to execute
+   * @throws Throwable if an active scenario throws to simulate a failure
+   */
   public void beforeForkJoinTaskRun(final java.util.concurrent.ForkJoinTask<?> task)
       throws Throwable {
     dispatcher.beforeForkJoinTaskRun(task);
   }
 
-  /** Delegates to {@link ChaosDispatcher#adjustScheduleDelay}. */
+  /**
+   * Delegates to {@link ChaosDispatcher#adjustScheduleDelay}.
+   *
+   * @param operation the {@link OperationType} name for the schedule operation
+   * @param executor the scheduling executor
+   * @param task the task being scheduled
+   * @param delay the originally requested delay
+   * @param periodic {@code true} if the submission is periodic
+   * @return the possibly-adjusted delay, or {@link Long#MAX_VALUE} to effectively suppress the
+   *     schedule
+   * @throws Throwable if an active scenario throws to simulate a failure
+   */
   public long adjustScheduleDelay(
       final String operation,
       final Object executor,
@@ -133,63 +193,140 @@ public final class ChaosRuntime implements ChaosControlPlane {
     return dispatcher.adjustScheduleDelay(operation, executor, task, delay, periodic);
   }
 
-  /** Delegates to {@link ChaosDispatcher#beforeQueueOperation}. */
+  /**
+   * Delegates to {@link ChaosDispatcher#beforeQueueOperation}.
+   *
+   * @param operation the {@link OperationType} name for the queue operation
+   * @param queue the queue being operated on
+   * @throws Throwable if an active scenario throws to simulate a failure
+   */
   public void beforeQueueOperation(final String operation, final Object queue) throws Throwable {
     dispatcher.beforeQueueOperation(operation, queue);
   }
 
-  /** Delegates to {@link ChaosDispatcher#beforeBooleanQueueOperation}. */
+  /**
+   * Delegates to {@link ChaosDispatcher#beforeBooleanQueueOperation}.
+   *
+   * @param operation the {@link OperationType} name for the queue operation
+   * @param queue the queue being operated on
+   * @return an override result from the queue operation, or {@code null} to proceed normally
+   * @throws Throwable if an active scenario throws to simulate a failure
+   */
   public Boolean beforeBooleanQueueOperation(final String operation, final Object queue)
       throws Throwable {
     return dispatcher.beforeBooleanQueueOperation(operation, queue);
   }
 
-  /** Delegates to {@link ChaosDispatcher#beforeCompletableFutureComplete}. */
+  /**
+   * Delegates to {@link ChaosDispatcher#beforeCompletableFutureComplete}.
+   *
+   * @param operation the {@link OperationType} name for the completion operation
+   * @param future the future being completed
+   * @param payload the completion payload (result or exception)
+   * @return an override result to return from the completion method, or {@code null} to proceed
+   *     normally
+   * @throws Throwable if an active scenario throws to simulate a failure
+   */
   public Boolean beforeCompletableFutureComplete(
       final String operation, final CompletableFuture<?> future, final Object payload)
       throws Throwable {
     return dispatcher.beforeCompletableFutureComplete(operation, future, payload);
   }
 
-  /** Delegates to {@link ChaosDispatcher#beforeClassLoad}. */
+  /**
+   * Delegates to {@link ChaosDispatcher#beforeClassLoad}.
+   *
+   * @param loader the class loader performing the load (may be {@code null} for bootstrap)
+   * @param className the binary class name being loaded
+   * @throws Throwable if an active scenario throws to simulate a failure
+   */
   public void beforeClassLoad(final ClassLoader loader, final String className) throws Throwable {
     dispatcher.beforeClassLoad(loader, className);
   }
 
-  /** Delegates to {@link ChaosDispatcher#afterResourceLookup}. */
+  /**
+   * Delegates to {@link ChaosDispatcher#afterResourceLookup}.
+   *
+   * @param loader the class loader performing the lookup (may be {@code null} for bootstrap)
+   * @param name the resource name being looked up
+   * @param currentValue the real URL returned by the loader
+   * @return the (possibly substituted) URL to return to the caller
+   * @throws Throwable if an active scenario throws to simulate a failure
+   */
   public URL afterResourceLookup(
       final ClassLoader loader, final String name, final URL currentValue) throws Throwable {
     return dispatcher.afterResourceLookup(loader, name, currentValue);
   }
 
-  /** Delegates to {@link ChaosDispatcher#decorateShutdownHook}. */
+  /**
+   * Delegates to {@link ChaosDispatcher#decorateShutdownHook}.
+   *
+   * @param hook the original shutdown hook being registered
+   * @return the wrapper thread that should actually be registered with the runtime
+   * @throws Throwable if an active scenario throws to simulate a failure
+   */
   public Thread decorateShutdownHook(final Thread hook) throws Throwable {
     return dispatcher.decorateShutdownHook(hook);
   }
 
-  /** Delegates to {@link ChaosDispatcher#resolveShutdownHook}. */
+  /**
+   * Delegates to {@link ChaosDispatcher#resolveShutdownHook}.
+   *
+   * @param original the original shutdown hook that was registered
+   * @return the wrapper thread, or {@code original} if no wrapper is registered
+   */
   public Thread resolveShutdownHook(final Thread original) {
     return dispatcher.resolveShutdownHook(original);
   }
 
-  /** Delegates to {@link ChaosDispatcher#beforeExecutorShutdown}. */
+  /**
+   * Delegates to {@link ChaosDispatcher#beforeExecutorShutdown}.
+   *
+   * @param operation the {@link OperationType} name for the shutdown operation
+   * @param executor the executor being shut down
+   * @param timeoutMillis the shutdown timeout in milliseconds, or {@code 0} when not specified
+   * @throws Throwable if an active scenario throws to simulate a failure
+   */
   public void beforeExecutorShutdown(
       final String operation, final Object executor, final long timeoutMillis) throws Throwable {
     dispatcher.beforeExecutorShutdown(operation, executor, timeoutMillis);
   }
 
-  /** Delegates to {@link ChaosDispatcher#beforeScheduledTick}. */
+  /**
+   * Delegates to {@link ChaosDispatcher#beforeScheduledTick}.
+   *
+   * @param executor the scheduling executor running the tick
+   * @param task the task being ticked
+   * @param periodic {@code true} if the tick is for a periodic schedule
+   * @return {@code true} if the tick should proceed normally, {@code false} to suppress it
+   * @throws Throwable if an active scenario throws to simulate a failure
+   */
   public boolean beforeScheduledTick(
       final Object executor, final Object task, final boolean periodic) throws Throwable {
     return dispatcher.beforeScheduledTick(executor, task, periodic);
   }
 
-  /** Delegates to {@link ChaosDispatcher#beforeMethodEnter}. */
+  /**
+   * Delegates to {@link ChaosDispatcher#beforeMethodEnter}.
+   *
+   * @param className the fully-qualified binary class name of the method's declaring class
+   * @param methodName the simple method name
+   * @throws Throwable if an active scenario throws to simulate a failure
+   */
   public void beforeMethodEnter(final String className, final String methodName) throws Throwable {
     dispatcher.beforeMethodEnter(className, methodName);
   }
 
-  /** Delegates to {@link ChaosDispatcher#afterMethodExit}. */
+  /**
+   * Delegates to {@link ChaosDispatcher#afterMethodExit}.
+   *
+   * @param className the fully-qualified binary class name of the method's declaring class
+   * @param methodName the simple method name
+   * @param returnType the declared return type; used to select an appropriate corrupted value
+   * @param actualValue the original return value; must be boxed for primitives
+   * @return the (possibly corrupted) return value
+   * @throws Throwable if an active scenario throws to simulate a failure
+   */
   public Object afterMethodExit(
       final String className,
       final String methodName,
@@ -199,7 +336,14 @@ public final class ChaosRuntime implements ChaosControlPlane {
     return dispatcher.afterMethodExit(className, methodName, returnType, actualValue);
   }
 
-  /** Delegates to {@link ChaosDispatcher#applyClockSkew}. */
+  /**
+   * Delegates to {@link ChaosDispatcher#applyClockSkew}.
+   *
+   * @param realValue the raw clock value as read from the OS
+   * @param clockType {@link OperationType#SYSTEM_CLOCK_MILLIS} or {@link
+   *     OperationType#SYSTEM_CLOCK_NANOS}
+   * @return the skewed (or unchanged) clock value
+   */
   public long applyClockSkew(final long realValue, final OperationType clockType) {
     return dispatcher.applyClockSkew(realValue, clockType);
   }

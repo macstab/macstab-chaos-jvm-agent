@@ -31,6 +31,9 @@ import jdk.jfr.StackTrace;
 @StackTrace(false)
 public final class ChaosStressorSnapshotEvent extends Event {
 
+  /** Creates a new ChaosStressorSnapshotEvent. */
+  public ChaosStressorSnapshotEvent() {}
+
   /** Number of chaos scenarios currently active at the snapshot instant. */
   @Label("Active Scenario Count")
   public int activeScenarioCount;

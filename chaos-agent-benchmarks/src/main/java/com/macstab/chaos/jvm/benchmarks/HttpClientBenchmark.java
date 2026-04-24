@@ -34,6 +34,9 @@ import org.openjdk.jmh.infra.Blackhole;
 @Fork(1)
 public class HttpClientBenchmark {
 
+  /** Creates a new benchmark instance (invoked reflectively by JMH). */
+  public HttpClientBenchmark() {}
+
   private static final String BENCHMARK_URL = "https://example.com/api/v1/orders";
   private static final String NO_MATCH_URL_PATTERN = "https://other\\.example\\.net/.*";
   private static final Duration ZERO_DELAY = Duration.ofMillis(0);
@@ -45,6 +48,9 @@ public class HttpClientBenchmark {
   /** State with the runtime installed but no active scenarios — measures pure dispatch overhead. */
   @State(Scope.Benchmark)
   public static class ZeroScenariosState {
+    /** Creates a new state instance (invoked reflectively by JMH). */
+    public ZeroScenariosState() {}
+
     ChaosRuntime runtime;
     ChaosDispatcher dispatcher;
 
@@ -65,6 +71,9 @@ public class HttpClientBenchmark {
   /** State with a single active scenario whose URL selector never matches the benchmark URL. */
   @State(Scope.Benchmark)
   public static class OneScenarioNoMatchState {
+    /** Creates a new state instance (invoked reflectively by JMH). */
+    public OneScenarioNoMatchState() {}
+
     ChaosRuntime runtime;
     ChaosDispatcher dispatcher;
 
@@ -95,6 +104,9 @@ public class HttpClientBenchmark {
   /** State with a matching scenario that applies a zero-delay no-op effect. */
   @State(Scope.Benchmark)
   public static class OneMatchNoEffectState {
+    /** Creates a new state instance (invoked reflectively by JMH). */
+    public OneMatchNoEffectState() {}
+
     ChaosRuntime runtime;
     ChaosDispatcher dispatcher;
 
@@ -127,6 +139,9 @@ public class HttpClientBenchmark {
    */
   @State(Scope.Benchmark)
   public static class SessionMissState {
+    /** Creates a new state instance (invoked reflectively by JMH). */
+    public SessionMissState() {}
+
     ChaosRuntime runtime;
     ChaosDispatcher dispatcher;
 
@@ -160,6 +175,9 @@ public class HttpClientBenchmark {
    */
   @State(Scope.Benchmark)
   public static class TenScenariosState {
+    /** Creates a new state instance (invoked reflectively by JMH). */
+    public TenScenariosState() {}
+
     ChaosRuntime runtime;
     ChaosDispatcher dispatcher;
 
@@ -199,13 +217,21 @@ public class HttpClientBenchmark {
 
   /**
    * Baseline benchmark: no chaos agent interaction, used as a reference for URL processing cost.
+   *
+   * @param bh the JMH blackhole used to consume results
    */
   @Benchmark
   public void baseline_noAgent(Blackhole bh) {
     bh.consume(BENCHMARK_URL.length());
   }
 
-  /** Measures dispatcher overhead on the HTTP-send path when no scenarios are active. */
+  /**
+   * Measures dispatcher overhead on the HTTP-send path when no scenarios are active.
+   *
+   * @param state the benchmark state holding the runtime and dispatcher
+   * @param bh the JMH blackhole used to consume results
+   * @throws Throwable if the dispatcher surfaces an unexpected failure
+   */
   @Benchmark
   public void agentInstalled_zeroScenarios(ZeroScenariosState state, Blackhole bh)
       throws Throwable {
@@ -214,6 +240,10 @@ public class HttpClientBenchmark {
 
   /**
    * Measures dispatcher overhead on the HTTP-send path when one non-matching scenario is active.
+   *
+   * @param state the benchmark state holding the runtime and dispatcher
+   * @param bh the JMH blackhole used to consume results
+   * @throws Throwable if the dispatcher surfaces an unexpected failure
    */
   @Benchmark
   public void agentInstalled_oneScenario_noMatch(OneScenarioNoMatchState state, Blackhole bh)
@@ -224,6 +254,10 @@ public class HttpClientBenchmark {
   /**
    * Measures dispatcher overhead on the HTTP-send path when one matching no-effect scenario is
    * active.
+   *
+   * @param state the benchmark state holding the runtime and dispatcher
+   * @param bh the JMH blackhole used to consume results
+   * @throws Throwable if the dispatcher surfaces an unexpected failure
    */
   @Benchmark
   public void agentInstalled_oneMatch_noEffect(OneMatchNoEffectState state, Blackhole bh)
@@ -234,6 +268,10 @@ public class HttpClientBenchmark {
   /**
    * Measures dispatcher overhead on the HTTP-send path when a session-scoped scenario misses the
    * session.
+   *
+   * @param state the benchmark state holding the runtime and dispatcher
+   * @param bh the JMH blackhole used to consume results
+   * @throws Throwable if the dispatcher surfaces an unexpected failure
    */
   @Benchmark
   public void sessionIdMiss(SessionMissState state, Blackhole bh) throws Throwable {
@@ -243,6 +281,10 @@ public class HttpClientBenchmark {
   /**
    * Measures dispatcher overhead on the HTTP-send path when ten scenarios are registered and one
    * matches.
+   *
+   * @param state the benchmark state holding the runtime and dispatcher
+   * @param bh the JMH blackhole used to consume results
+   * @throws Throwable if the dispatcher surfaces an unexpected failure
    */
   @Benchmark
   public void tenScenarios_oneMatch(TenScenariosState state, Blackhole bh) throws Throwable {

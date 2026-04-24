@@ -7,6 +7,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
+/** Service that issues concurrent requests to three downstream services and aggregates results. */
 @Service
 public class FanOutService {
 
@@ -15,6 +16,14 @@ public class FanOutService {
   private final String urlB;
   private final String urlC;
 
+  /**
+   * Creates a new FanOutService.
+   *
+   * @param restTemplate HTTP client
+   * @param urlA base URL of downstream service A
+   * @param urlB base URL of downstream service B
+   * @param urlC base URL of downstream service C
+   */
   public FanOutService(
       final RestTemplate restTemplate,
       @Value("${downstream.a.url}") final String urlA,
@@ -26,6 +35,11 @@ public class FanOutService {
     this.urlC = urlC;
   }
 
+  /**
+   * Calls all three downstream services concurrently and returns the aggregated result.
+   *
+   * @return the combined responses from services A, B, and C
+   */
   public FanOutResult call() {
     try (final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
       final CompletableFuture<String> futureA =
