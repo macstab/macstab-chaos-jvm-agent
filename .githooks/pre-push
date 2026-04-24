@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || true)
+
+# Only run on feature branches
+if [[ "$BRANCH" != feat/* ]]; then
+  exit 0
+fi
+
+echo "[pre-push] Running spotless check and compile on $BRANCH ..."
+
+REPO_ROOT=$(git rev-parse --show-toplevel)
+
+"$REPO_ROOT/gradlew" -p "$REPO_ROOT" spotlessCheck compileJava
+
+echo "[pre-push] All checks passed."
