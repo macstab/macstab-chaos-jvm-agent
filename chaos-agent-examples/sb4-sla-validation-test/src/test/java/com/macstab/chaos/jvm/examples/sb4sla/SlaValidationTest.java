@@ -8,15 +8,18 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
 import com.macstab.chaos.jvm.api.ActivationPolicy;
+import com.macstab.chaos.jvm.api.ChaosActivationHandle;
+import com.macstab.chaos.jvm.api.ChaosControlPlane;
 import com.macstab.chaos.jvm.api.ChaosEffect;
 import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.ChaosScenario.ScenarioScope;
 import com.macstab.chaos.jvm.api.ChaosSelector;
-import com.macstab.chaos.jvm.api.ChaosSession;
 import com.macstab.chaos.jvm.api.OperationType;
 import com.macstab.chaos.jvm.spring.boot4.test.ChaosTest;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -30,6 +33,7 @@ import org.springframework.web.client.RestClient;
 @ChaosTest(classes = SlaApplication.class, webEnvironment = WebEnvironment.RANDOM_PORT)
 class SlaValidationTest {
 
+  private static final int WARMUP = 30;
   private static final int ITERATIONS = 100;
   private static final long STEP_NANOS = Duration.ofMillis(80).toNanos();
 
@@ -64,83 +68,100 @@ class SlaValidationTest {
   /**
    * Verifies that 40% probabilistic socket-read delay stays within 500 ms of the clean baseline.
    *
-   * <p>The 500 ms budget is relative to the measured baseline so the assertion holds regardless of
-   * worker speed.
+   * <p>Uses JVM scope so the delay applies to all threads, including the fanout service's virtual
+   * threads calling the downstream WireMock servers. The 500 ms budget is relative to the measured
+   * baseline so the assertion holds regardless of worker speed.
    */
   @Test
-  void probabilisticDelayStaysWithin500msOfBaseline(ChaosSession session) {
+  void probabilisticDelayStaysWithin500msOfBaseline(final ChaosControlPlane controlPlane) {
     final RestClient client = RestClient.create("http://localhost:" + port);
 
-    final long p99Baseline = measureP99(session, client);
+    warmup(client);
+    final long p99Baseline = measureP99(client);
 
-    session.activate(
-        ChaosScenario.builder("socket-read-delay-40pct")
-            .description("40% probability of 20-80ms SOCKET_READ delay")
-            .scope(ScenarioScope.SESSION)
-            .selector(ChaosSelector.network(Set.of(OperationType.SOCKET_READ)))
-            .effect(ChaosEffect.delay(Duration.ofMillis(20), Duration.ofMillis(80)))
-            .activationPolicy(
-                new ActivationPolicy(
-                    ActivationPolicy.StartMode.AUTOMATIC, 0.4, 0, null, null, null, 0L, false))
-            .build());
+    final ChaosActivationHandle handle =
+        controlPlane.activate(
+            ChaosScenario.builder("socket-read-delay-40pct")
+                .description("40% probability of 20-80ms SOCKET_READ delay")
+                .scope(ScenarioScope.JVM)
+                .selector(ChaosSelector.network(Set.of(OperationType.SOCKET_READ)))
+                .effect(ChaosEffect.delay(Duration.ofMillis(20), Duration.ofMillis(80)))
+                .activationPolicy(
+                    new ActivationPolicy(
+                        ActivationPolicy.StartMode.AUTOMATIC, 0.4, 0, null, null, null, 0L, false))
+                .build());
 
-    final long p99WithChaos = measureP99(session, client);
+    try {
+      final long p99WithChaos = measureP99(client);
 
-    System.out.printf(
-        "[SlaValidationTest] baseline P99=%dms  chaos P99=%dms%n",
-        p99Baseline / 1_000_000, p99WithChaos / 1_000_000);
+      System.out.printf(
+          "[SlaValidationTest] baseline P99=%dms  chaos P99=%dms%n",
+          p99Baseline / 1_000_000, p99WithChaos / 1_000_000);
 
-    assertThat(p99WithChaos)
-        .as("P99 with 40%% socket-read delay must stay within 500 ms of baseline P99")
-        .isLessThan(p99Baseline + Duration.ofMillis(500).toNanos());
+      assertThat(p99WithChaos)
+          .as("P99 with 40%% socket-read delay must stay within 500 ms of baseline P99")
+          .isLessThan(p99Baseline + Duration.ofMillis(500).toNanos());
+    } finally {
+      handle.stop();
+    }
   }
 
   /**
    * Verifies that stacking delay scenarios raises P99 additively.
    *
-   * <p>Each scenario injects a fixed 80 ms delay on every SOCKET_READ. Because each HTTP exchange
-   * triggers multiple reads, each new scenario adds more than 80 ms to the measured P99. The
-   * ordering assertion is worker-speed-independent: it relies on relative differences, not absolute
-   * thresholds.
+   * <p>Each scenario injects a fixed 80 ms delay on every SOCKET_READ across the entire JVM. Because
+   * each HTTP exchange triggers multiple reads (status line, headers, body), each new scenario adds
+   * more than 80 ms to the measured P99. The ordering assertion is worker-speed-independent: it
+   * relies on relative differences, not absolute thresholds.
    */
   @Test
-  void graduatedDelayLadderStacksAdditively(ChaosSession session) {
+  void graduatedDelayLadderStacksAdditively(final ChaosControlPlane controlPlane) {
     final RestClient client = RestClient.create("http://localhost:" + port);
 
-    final long p99_0 = measureP99(session, client);
+    warmup(client);
+    final long p99_0 = measureP99(client);
 
-    session.activate(fixedDelayScenario("delay-1"));
-    final long p99_1 = measureP99(session, client);
+    final List<ChaosActivationHandle> handles = new ArrayList<>();
+    try {
+      handles.add(controlPlane.activate(fixedDelayScenario("delay-1")));
+      final long p99_1 = measureP99(client);
 
-    session.activate(fixedDelayScenario("delay-2"));
-    final long p99_2 = measureP99(session, client);
+      handles.add(controlPlane.activate(fixedDelayScenario("delay-2")));
+      final long p99_2 = measureP99(client);
 
-    session.activate(fixedDelayScenario("delay-3"));
-    final long p99_3 = measureP99(session, client);
+      handles.add(controlPlane.activate(fixedDelayScenario("delay-3")));
+      final long p99_3 = measureP99(client);
 
-    System.out.printf(
-        "[SlaValidationTest] P99 ladder: 0=%dms  1=%dms  2=%dms  3=%dms%n",
-        p99_0 / 1_000_000, p99_1 / 1_000_000, p99_2 / 1_000_000, p99_3 / 1_000_000);
+      System.out.printf(
+          "[SlaValidationTest] P99 ladder: 0=%dms  1=%dms  2=%dms  3=%dms%n",
+          p99_0 / 1_000_000, p99_1 / 1_000_000, p99_2 / 1_000_000, p99_3 / 1_000_000);
 
-    assertThat(p99_1)
-        .as("1 delay scenario must raise P99 by at least 80 ms over baseline")
-        .isGreaterThan(p99_0 + STEP_NANOS);
-    assertThat(p99_2)
-        .as("2 stacked scenarios must raise P99 by at least 80 ms over 1-scenario P99")
-        .isGreaterThan(p99_1 + STEP_NANOS);
-    assertThat(p99_3)
-        .as("3 stacked scenarios must raise P99 by at least 80 ms over 2-scenario P99")
-        .isGreaterThan(p99_2 + STEP_NANOS);
+      assertThat(p99_1)
+          .as("1 delay scenario must raise P99 by at least 80 ms over baseline")
+          .isGreaterThan(p99_0 + STEP_NANOS);
+      assertThat(p99_2)
+          .as("2 stacked scenarios must raise P99 by at least 80 ms over 1-scenario P99")
+          .isGreaterThan(p99_1 + STEP_NANOS);
+      assertThat(p99_3)
+          .as("3 stacked scenarios must raise P99 by at least 80 ms over 2-scenario P99")
+          .isGreaterThan(p99_2 + STEP_NANOS);
+    } finally {
+      handles.forEach(ChaosActivationHandle::stop);
+    }
   }
 
-  private long measureP99(final ChaosSession session, final RestClient client) {
+  private void warmup(final RestClient client) {
+    for (int i = 0; i < WARMUP; i++) {
+      client.get().uri("/fanout").retrieve().toEntity(FanOutResult.class);
+    }
+  }
+
+  private long measureP99(final RestClient client) {
     final long[] nanos = new long[ITERATIONS];
     for (int i = 0; i < ITERATIONS; i++) {
       final long start = System.nanoTime();
-      final ResponseEntity<FanOutResult> response;
-      try (ChaosSession.ScopeBinding binding = session.bind()) {
-        response = client.get().uri("/fanout").retrieve().toEntity(FanOutResult.class);
-      }
+      final ResponseEntity<FanOutResult> response =
+          client.get().uri("/fanout").retrieve().toEntity(FanOutResult.class);
       nanos[i] = System.nanoTime() - start;
 
       assertThat(response.getStatusCode())
@@ -153,7 +174,7 @@ class SlaValidationTest {
 
   private static ChaosScenario fixedDelayScenario(final String id) {
     return ChaosScenario.builder(id)
-        .scope(ScenarioScope.SESSION)
+        .scope(ScenarioScope.JVM)
         .selector(ChaosSelector.network(Set.of(OperationType.SOCKET_READ)))
         .effect(ChaosEffect.delay(Duration.ofMillis(80), Duration.ofMillis(80)))
         .activationPolicy(ActivationPolicy.always())
