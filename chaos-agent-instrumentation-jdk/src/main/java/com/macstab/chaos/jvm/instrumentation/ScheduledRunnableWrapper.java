@@ -5,6 +5,10 @@ import java.lang.ref.WeakReference;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+/**
+ * Wraps a {@link Runnable} scheduled on an executor so that chaos tick hooks fire around each
+ * invocation.
+ */
 public final class ScheduledRunnableWrapper implements Runnable {
   private static final Logger LOGGER = Logger.getLogger("com.macstab.chaos.jvm");
 
@@ -18,6 +22,15 @@ public final class ScheduledRunnableWrapper implements Runnable {
   private final Runnable delegate;
   private final boolean periodic;
 
+  /**
+   * Creates a wrapper holding a weak reference to {@code executor}, the delegate runnable, and
+   * periodicity flag.
+   *
+   * @param executor the scheduling executor; held via {@link WeakReference} to avoid retention
+   * @param delegate the wrapped runnable to invoke after chaos hooks have been applied
+   * @param periodic {@code true} if the task is scheduled to run repeatedly; {@code false} for
+   *     one-shot tasks
+   */
   public ScheduledRunnableWrapper(
       final Object executor, final Runnable delegate, final boolean periodic) {
     this.executorRef = new WeakReference<>(executor);

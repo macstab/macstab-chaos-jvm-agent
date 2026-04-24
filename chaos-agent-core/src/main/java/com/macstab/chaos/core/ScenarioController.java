@@ -79,6 +79,7 @@ final class ScenarioController {
   private volatile ClockSkewState clockSkewState;
   private volatile long rateWindowStartMillis;
   private volatile long rateWindowPermits;
+
   /** Base seed for PRNG draws; derived once from the scenario's randomSeed (or 0). */
   private final long baseSeed;
 
@@ -411,7 +412,6 @@ final class ScenarioController {
   ClockSkewState clockSkewState() {
     return clockSkewState;
   }
-
 
   private void closeStressor() {
     final ManagedStressor current = stressor;

@@ -26,6 +26,10 @@ import org.openjdk.jmh.annotations.TearDown;
 import org.openjdk.jmh.annotations.Warmup;
 import org.openjdk.jmh.infra.Blackhole;
 
+/**
+ * JMH benchmarks measuring core {@link ChaosRuntime} dispatch overhead under a range of scenario
+ * loads.
+ */
 @BenchmarkMode(Mode.AverageTime)
 @OutputTimeUnit(TimeUnit.NANOSECONDS)
 @State(Scope.Benchmark)
@@ -43,33 +47,39 @@ public class ChaosRuntimeBenchmark {
   private static final String BENCHMARK_SQL = "SELECT 1";
   private static final int NON_MATCHING_SCENARIO_COUNT = 9;
 
+  /** Baseline state used to measure raw executor throughput without the chaos agent installed. */
   @State(Scope.Benchmark)
   public static class NoAgentState {
     Executor executor = DUMMY_EXECUTOR;
   }
 
+  /** State with the runtime installed but no active scenarios — measures pure dispatch overhead. */
   @State(Scope.Benchmark)
   public static class ZeroScenariosState {
     ChaosRuntime runtime;
     ChaosDispatcher dispatcher;
 
+    /** Initialises the runtime and dispatcher before the measurement trial. */
     @Setup(Level.Trial)
     public void setup() {
       runtime = new ChaosRuntime();
       dispatcher = runtime.dispatcher();
     }
 
+    /** Closes the runtime after the measurement trial. */
     @TearDown(Level.Trial)
     public void tearDown() {
       runtime.close();
     }
   }
 
+  /** State with a single active scenario whose selector never matches the benchmark call. */
   @State(Scope.Benchmark)
   public static class OneScenarioNoMatchState {
     ChaosRuntime runtime;
     ChaosDispatcher dispatcher;
 
+    /** Registers the non-matching scenario before the trial. */
     @Setup(Level.Trial)
     public void setup() {
       runtime = new ChaosRuntime();
@@ -86,17 +96,20 @@ public class ChaosRuntimeBenchmark {
       dispatcher = runtime.dispatcher();
     }
 
+    /** Closes the runtime after the measurement trial. */
     @TearDown(Level.Trial)
     public void tearDown() {
       runtime.close();
     }
   }
 
+  /** State with a scenario that matches but applies a zero-delay no-op effect. */
   @State(Scope.Benchmark)
   public static class OneMatchNoEffectState {
     ChaosRuntime runtime;
     ChaosDispatcher dispatcher;
 
+    /** Registers the matching no-effect scenario before the trial. */
     @Setup(Level.Trial)
     public void setup() {
       runtime = new ChaosRuntime();
@@ -112,17 +125,23 @@ public class ChaosRuntimeBenchmark {
       dispatcher = runtime.dispatcher();
     }
 
+    /** Closes the runtime after the measurement trial. */
     @TearDown(Level.Trial)
     public void tearDown() {
       runtime.close();
     }
   }
 
+  /**
+   * State with a session-scoped scenario but no active session on the calling thread — measures
+   * session-miss path.
+   */
   @State(Scope.Benchmark)
   public static class SessionMissState {
     ChaosRuntime runtime;
     ChaosDispatcher dispatcher;
 
+    /** Registers the session-scoped scenario before the trial. */
     @Setup(Level.Trial)
     public void setup() {
       runtime = new ChaosRuntime();
@@ -139,17 +158,23 @@ public class ChaosRuntimeBenchmark {
       dispatcher = runtime.dispatcher();
     }
 
+    /** Closes the runtime after the measurement trial. */
     @TearDown(Level.Trial)
     public void tearDown() {
       runtime.close();
     }
   }
 
+  /**
+   * State with nine non-matching scenarios plus one matching scenario to measure registry scan
+   * cost.
+   */
   @State(Scope.Benchmark)
   public static class TenScenariosState {
     ChaosRuntime runtime;
     ChaosDispatcher dispatcher;
 
+    /** Registers the mix of non-matching and matching scenarios before the trial. */
     @Setup(Level.Trial)
     public void setup() {
       runtime = new ChaosRuntime();
@@ -176,41 +201,51 @@ public class ChaosRuntimeBenchmark {
       dispatcher = runtime.dispatcher();
     }
 
+    /** Closes the runtime after the measurement trial. */
     @TearDown(Level.Trial)
     public void tearDown() {
       runtime.close();
     }
   }
 
+  /** Baseline benchmark: plain executor dispatch without the chaos agent. */
   @Benchmark
   public void baseline_noAgent(NoAgentState state, Blackhole bh) {
     state.executor.execute(DUMMY_TASK);
     bh.consume(state.executor);
   }
 
+  /** Measures dispatcher overhead when the runtime is installed but has no active scenarios. */
   @Benchmark
   public void agentInstalled_zeroScenarios(ZeroScenariosState state, Blackhole bh)
       throws Throwable {
     bh.consume(state.dispatcher.beforeJdbcStatementExecute(BENCHMARK_SQL));
   }
 
+  /** Measures dispatcher overhead when exactly one non-matching scenario is active. */
   @Benchmark
   public void agentInstalled_oneScenario_noMatch(OneScenarioNoMatchState state, Blackhole bh)
       throws Throwable {
     bh.consume(state.dispatcher.beforeJdbcStatementExecute(BENCHMARK_SQL));
   }
 
+  /** Measures dispatcher overhead when exactly one matching scenario applies a no-op effect. */
   @Benchmark
   public void agentInstalled_oneMatch_noEffect(OneMatchNoEffectState state, Blackhole bh)
       throws Throwable {
     bh.consume(state.dispatcher.beforeJdbcStatementExecute(BENCHMARK_SQL));
   }
 
+  /**
+   * Measures dispatcher overhead when a session-scoped scenario does not match the calling thread's
+   * session.
+   */
   @Benchmark
   public void sessionIdMiss(SessionMissState state, Blackhole bh) throws Throwable {
     bh.consume(state.dispatcher.beforeJdbcStatementExecute(BENCHMARK_SQL));
   }
 
+  /** Measures dispatcher overhead when ten scenarios are registered but only one matches. */
   @Benchmark
   public void tenScenarios_oneMatch(TenScenariosState state, Blackhole bh) throws Throwable {
     bh.consume(state.dispatcher.beforeJdbcStatementExecute(BENCHMARK_SQL));

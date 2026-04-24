@@ -22,15 +22,22 @@ import jdk.jfr.StackTrace;
 @Enabled(true)
 public final class ChaosScenarioLifecycleEvent extends Event {
 
+  /** ID of the chaos scenario whose lifecycle state changed. */
   @Label("Scenario ID")
   public String scenarioId;
 
+  /** Human-readable description of the scenario at the time of the event. */
   @Label("Description")
   public String description;
 
+  /**
+   * Lifecycle transition type, one of {@code REGISTERED}, {@code STARTED}, {@code STOPPED}, {@code
+   * RELEASED}.
+   */
   @Label("Event Type")
   public String eventType;
 
+  /** Scope key identifying the activation context (JVM-wide or session-scoped). */
   @Label("Scope Key")
   public String scopeKey;
 }

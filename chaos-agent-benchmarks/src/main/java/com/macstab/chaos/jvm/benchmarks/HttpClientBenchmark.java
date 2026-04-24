@@ -25,6 +25,7 @@ import org.openjdk.jmh.annotations.TearDown;
 import org.openjdk.jmh.annotations.Warmup;
 import org.openjdk.jmh.infra.Blackhole;
 
+/** JMH benchmarks measuring dispatch overhead for the HTTP client interception path. */
 @BenchmarkMode(Mode.AverageTime)
 @OutputTimeUnit(TimeUnit.NANOSECONDS)
 @State(Scope.Benchmark)
@@ -41,28 +42,33 @@ public class HttpClientBenchmark {
           ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 0, null, null, null, 1L, false);
   private static final int NON_MATCHING_SCENARIO_COUNT = 9;
 
+  /** State with the runtime installed but no active scenarios — measures pure dispatch overhead. */
   @State(Scope.Benchmark)
   public static class ZeroScenariosState {
     ChaosRuntime runtime;
     ChaosDispatcher dispatcher;
 
+    /** Initialises the runtime and dispatcher before the measurement trial. */
     @Setup(Level.Trial)
     public void setup() {
       runtime = new ChaosRuntime();
       dispatcher = runtime.dispatcher();
     }
 
+    /** Closes the runtime after the measurement trial. */
     @TearDown(Level.Trial)
     public void tearDown() {
       runtime.close();
     }
   }
 
+  /** State with a single active scenario whose URL selector never matches the benchmark URL. */
   @State(Scope.Benchmark)
   public static class OneScenarioNoMatchState {
     ChaosRuntime runtime;
     ChaosDispatcher dispatcher;
 
+    /** Registers the non-matching scenario before the trial. */
     @Setup(Level.Trial)
     public void setup() {
       runtime = new ChaosRuntime();
@@ -79,17 +85,20 @@ public class HttpClientBenchmark {
       dispatcher = runtime.dispatcher();
     }
 
+    /** Closes the runtime after the measurement trial. */
     @TearDown(Level.Trial)
     public void tearDown() {
       runtime.close();
     }
   }
 
+  /** State with a matching scenario that applies a zero-delay no-op effect. */
   @State(Scope.Benchmark)
   public static class OneMatchNoEffectState {
     ChaosRuntime runtime;
     ChaosDispatcher dispatcher;
 
+    /** Registers the matching no-effect scenario before the trial. */
     @Setup(Level.Trial)
     public void setup() {
       runtime = new ChaosRuntime();
@@ -105,17 +114,23 @@ public class HttpClientBenchmark {
       dispatcher = runtime.dispatcher();
     }
 
+    /** Closes the runtime after the measurement trial. */
     @TearDown(Level.Trial)
     public void tearDown() {
       runtime.close();
     }
   }
 
+  /**
+   * State with a session-scoped scenario but no active session on the calling thread — measures
+   * session-miss path.
+   */
   @State(Scope.Benchmark)
   public static class SessionMissState {
     ChaosRuntime runtime;
     ChaosDispatcher dispatcher;
 
+    /** Registers the session-scoped scenario before the trial. */
     @Setup(Level.Trial)
     public void setup() {
       runtime = new ChaosRuntime();
@@ -132,17 +147,23 @@ public class HttpClientBenchmark {
       dispatcher = runtime.dispatcher();
     }
 
+    /** Closes the runtime after the measurement trial. */
     @TearDown(Level.Trial)
     public void tearDown() {
       runtime.close();
     }
   }
 
+  /**
+   * State with nine non-matching scenarios plus one matching scenario to measure registry scan
+   * cost.
+   */
   @State(Scope.Benchmark)
   public static class TenScenariosState {
     ChaosRuntime runtime;
     ChaosDispatcher dispatcher;
 
+    /** Registers the mix of non-matching and matching scenarios before the trial. */
     @Setup(Level.Trial)
     public void setup() {
       runtime = new ChaosRuntime();
@@ -169,40 +190,60 @@ public class HttpClientBenchmark {
       dispatcher = runtime.dispatcher();
     }
 
+    /** Closes the runtime after the measurement trial. */
     @TearDown(Level.Trial)
     public void tearDown() {
       runtime.close();
     }
   }
 
+  /**
+   * Baseline benchmark: no chaos agent interaction, used as a reference for URL processing cost.
+   */
   @Benchmark
   public void baseline_noAgent(Blackhole bh) {
     bh.consume(BENCHMARK_URL.length());
   }
 
+  /** Measures dispatcher overhead on the HTTP-send path when no scenarios are active. */
   @Benchmark
   public void agentInstalled_zeroScenarios(ZeroScenariosState state, Blackhole bh)
       throws Throwable {
     bh.consume(state.dispatcher.beforeHttpSend(BENCHMARK_URL, OperationType.HTTP_CLIENT_SEND));
   }
 
+  /**
+   * Measures dispatcher overhead on the HTTP-send path when one non-matching scenario is active.
+   */
   @Benchmark
   public void agentInstalled_oneScenario_noMatch(OneScenarioNoMatchState state, Blackhole bh)
       throws Throwable {
     bh.consume(state.dispatcher.beforeHttpSend(BENCHMARK_URL, OperationType.HTTP_CLIENT_SEND));
   }
 
+  /**
+   * Measures dispatcher overhead on the HTTP-send path when one matching no-effect scenario is
+   * active.
+   */
   @Benchmark
   public void agentInstalled_oneMatch_noEffect(OneMatchNoEffectState state, Blackhole bh)
       throws Throwable {
     bh.consume(state.dispatcher.beforeHttpSend(BENCHMARK_URL, OperationType.HTTP_CLIENT_SEND));
   }
 
+  /**
+   * Measures dispatcher overhead on the HTTP-send path when a session-scoped scenario misses the
+   * session.
+   */
   @Benchmark
   public void sessionIdMiss(SessionMissState state, Blackhole bh) throws Throwable {
     bh.consume(state.dispatcher.beforeHttpSend(BENCHMARK_URL, OperationType.HTTP_CLIENT_SEND));
   }
 
+  /**
+   * Measures dispatcher overhead on the HTTP-send path when ten scenarios are registered and one
+   * matches.
+   */
   @Benchmark
   public void tenScenarios_oneMatch(TenScenariosState state, Blackhole bh) throws Throwable {
     bh.consume(state.dispatcher.beforeHttpSend(BENCHMARK_URL, OperationType.HTTP_CLIENT_SEND));
