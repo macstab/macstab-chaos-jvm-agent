@@ -75,6 +75,7 @@ public record ChaosScenario(
    * Returns a new {@link Builder} seeded with the given scenario ID.
    *
    * @param id unique identifier for this scenario; used in diagnostics, JMX, JFR events, and logs
+   * @return a new builder for this scenario ID
    */
   public static Builder builder(String id) {
     return new Builder(id);

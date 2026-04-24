@@ -96,6 +96,8 @@ public record ActivationPolicy(
    * Returns a policy that fires on every match and starts immediately on activation.
    *
    * <p>Equivalent to: {@code probability=1.0, startMode=AUTOMATIC, no other constraints}.
+   *
+   * @return an always-fire activation policy
    */
   public static ActivationPolicy always() {
     return new ActivationPolicy(StartMode.AUTOMATIC, 1.0d, 0, null, null, null, 0L);
@@ -107,6 +109,8 @@ public record ActivationPolicy(
    * ChaosActivationHandle#start()} is called.
    *
    * <p>Use for synchronised test phases where chaos must be enabled at a precise moment.
+   *
+   * @return an activation policy that fires on every match but starts in INACTIVE state
    */
   public static ActivationPolicy manual() {
     return new ActivationPolicy(StartMode.MANUAL, 1.0d, 0, null, null, null, 0L);
@@ -163,6 +167,8 @@ public record ActivationPolicy(
   public record RateLimit(long permits, Duration window) {
 
     /**
+     * Validates the rate-limit parameters.
+     *
      * @param permits maximum effect applications allowed within one {@code window}; must be {@code
      *     > 0}
      * @param window rolling window duration; must be positive

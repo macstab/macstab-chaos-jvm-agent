@@ -33,6 +33,8 @@ public interface ChaosActivationHandle extends AutoCloseable {
   /**
    * Returns the unique identifier of the activated scenario. Matches {@link ChaosScenario#id()}.
    * For plan activations this is the composite plan handle ID.
+   *
+   * @return the scenario or plan handle ID
    */
   String id();
 
@@ -76,6 +78,7 @@ public interface ChaosActivationHandle extends AutoCloseable {
    * Returns the current lifecycle state of the scenario. The returned value is a snapshot; the
    * actual state may change concurrently.
    *
+   * @return the current scenario lifecycle state
    * @see ChaosDiagnostics.ScenarioState
    */
   ChaosDiagnostics.ScenarioState state();

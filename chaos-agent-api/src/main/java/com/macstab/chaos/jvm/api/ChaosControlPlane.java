@@ -80,6 +80,8 @@ public interface ChaosControlPlane extends AutoCloseable {
    * <p>Use to inspect scenario states, application counters, failure records, and runtime
    * capabilities. The same view is exposed over JMX at {@code
    * com.macstab.chaos.jvm:type=ChaosDiagnostics}.
+   *
+   * @return the diagnostics view for this control plane
    */
   ChaosDiagnostics diagnostics();
 

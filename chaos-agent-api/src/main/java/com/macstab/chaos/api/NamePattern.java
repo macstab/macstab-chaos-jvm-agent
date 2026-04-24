@@ -33,6 +33,9 @@ import java.util.regex.Pattern;
  * <p>Task 7: GLOB and REGEX patterns are compiled once and cached in a JVM-wide static {@link
  * ConcurrentHashMap} keyed by the pattern string. Repeated calls to {@link #matches} on hot paths
  * do not pay the {@link Pattern#compile} cost.
+ *
+ * @param mode the matching algorithm; {@code null} is normalised to {@link MatchMode#ANY}
+ * @param value the pattern value; {@code null} is normalised to {@code "*"}
  */
 public record NamePattern(MatchMode mode, String value) {
 

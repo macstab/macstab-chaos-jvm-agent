@@ -543,12 +543,23 @@ public final class ChaosRuntime implements ChaosControlPlane {
     return dispatcher.beforeJdbcTransactionRollback();
   }
 
-  /** Delegates to {@link ChaosDispatcher#beforeThreadSleep}. */
+  /**
+   * Delegates to {@link ChaosDispatcher#beforeThreadSleep}.
+   *
+   * @param millis the requested sleep duration in milliseconds
+   * @return {@code true} if the sleep should proceed
+   * @throws Throwable if a chaos effect injects an exception
+   */
   public boolean beforeThreadSleep(final long millis) throws Throwable {
     return dispatcher.beforeThreadSleep(millis);
   }
 
-  /** Delegates to {@link ChaosDispatcher#beforeDnsResolve}. */
+  /**
+   * Delegates to {@link ChaosDispatcher#beforeDnsResolve}.
+   *
+   * @param hostname the hostname being resolved
+   * @throws Throwable if a chaos effect injects an exception
+   */
   public void beforeDnsResolve(final String hostname) throws Throwable {
     dispatcher.beforeDnsResolve(hostname);
   }
