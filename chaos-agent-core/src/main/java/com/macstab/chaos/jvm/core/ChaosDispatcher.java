@@ -131,10 +131,23 @@ public final class ChaosDispatcher {
     this.shutdownHooks = controlPlane.shutdownHooks();
   }
 
+  /**
+   * Returns the session id bound to the current thread, or {@code null} if none is active.
+   *
+   * @return the current thread's session id, or {@code null} when no session is bound
+   */
   public String currentSessionId() {
     return scopeContext.currentSessionId();
   }
 
+  /**
+   * Returns a (possibly session-scoped or suppressed) wrapper for an executor-submitted runnable.
+   *
+   * @param operation the {@link OperationType} name describing the submission site
+   * @param executor the executor receiving the task; may be {@code null} when unknown
+   * @param task the submitted runnable; must not be {@code null}
+   * @return a runnable to submit in place of {@code task}, possibly a no-op when suppressed
+   */
   public Runnable decorateExecutorRunnable(
       final String operation, final Object executor, final Runnable task) {
     Objects.requireNonNull(task, "task");
@@ -173,6 +186,15 @@ public final class ChaosDispatcher {
     return scoped;
   }
 
+  /**
+   * Returns a (possibly session-scoped or suppressed) wrapper for an executor-submitted callable.
+   *
+   * @param <T> the result type produced by the callable
+   * @param operation the {@link OperationType} name describing the submission site
+   * @param executor the executor receiving the task; may be {@code null} when unknown
+   * @param task the submitted callable; must not be {@code null}
+   * @return a callable to submit in place of {@code task}, possibly a no-op when suppressed
+   */
   public <T> Callable<T> decorateExecutorCallable(
       final String operation, final Object executor, final Callable<T> task) {
     Objects.requireNonNull(task, "task");
@@ -211,6 +233,12 @@ public final class ChaosDispatcher {
     return scoped;
   }
 
+  /**
+   * Called before {@link Thread#start()} to apply any active chaos scenario matching the thread.
+   *
+   * @param thread the thread about to be started; may be {@code null}
+   * @throws Throwable if a matching scenario's terminal action mandates it
+   */
   public void beforeThreadStart(final Thread thread) throws Throwable {
     final InvocationContext context =
         new InvocationContext(
@@ -227,6 +255,14 @@ public final class ChaosDispatcher {
     applyPreDecision(evaluate(context));
   }
 
+  /**
+   * Called at the top of a pool worker's run loop before the next task is dequeued.
+   *
+   * @param executor the executor owning the worker
+   * @param worker the worker thread about to run the task; may be {@code null}
+   * @param task the task that the worker is about to execute; may be {@code null}
+   * @throws Throwable if a matching scenario's terminal action mandates it
+   */
   public void beforeWorkerRun(final Object executor, final Thread worker, final Runnable task)
       throws Throwable {
     final InvocationContext context =
@@ -242,6 +278,12 @@ public final class ChaosDispatcher {
     applyPreDecision(evaluate(context));
   }
 
+  /**
+   * Called before a {@link java.util.concurrent.ForkJoinTask} begins execution on a pool worker.
+   *
+   * @param task the fork-join task about to execute; may be {@code null}
+   * @throws Throwable if a matching scenario's terminal action mandates it
+   */
   public void beforeForkJoinTaskRun(final java.util.concurrent.ForkJoinTask<?> task)
       throws Throwable {
     final InvocationContext context =
@@ -257,6 +299,17 @@ public final class ChaosDispatcher {
     applyPreDecision(evaluate(context));
   }
 
+  /**
+   * Allows an active scenario to alter the scheduling delay of a scheduled executor submission.
+   *
+   * @param operation the {@link OperationType} name describing the schedule site
+   * @param executor the scheduling executor; may be {@code null} when unknown
+   * @param task the task being scheduled; may be {@code null}
+   * @param delay the caller-provided scheduling delay in milliseconds
+   * @param periodic {@code true} when the task is scheduled at a fixed rate or with fixed delay
+   * @return the (possibly adjusted) scheduling delay in milliseconds
+   * @throws Throwable if a matching scenario's terminal action mandates it
+   */
   public long adjustScheduleDelay(
       final String operation,
       final Object executor,
@@ -300,6 +353,13 @@ public final class ChaosDispatcher {
     return delay + chaosDelay;
   }
 
+  /**
+   * Called before a void-returning blocking queue operation such as {@code put} or {@code take}.
+   *
+   * @param operation the {@link OperationType} name describing the queue operation
+   * @param queue the queue receiving the operation; may be {@code null} when unknown
+   * @throws Throwable if a matching scenario's terminal action mandates it
+   */
   public void beforeQueueOperation(final String operation, final Object queue) throws Throwable {
     final InvocationContext context =
         new InvocationContext(
@@ -314,6 +374,16 @@ public final class ChaosDispatcher {
     applyPreDecision(evaluate(context));
   }
 
+  /**
+   * Called before a boolean-returning queue operation (e.g. {@code offer}) to optionally override
+   * its result.
+   *
+   * @param operation the {@link OperationType} name describing the queue operation
+   * @param queue the queue receiving the operation; may be {@code null} when unknown
+   * @return the forced boolean result to return to the caller, or {@code null} to keep the real
+   *     result
+   * @throws Throwable if a matching scenario's terminal action mandates it
+   */
   public Boolean beforeBooleanQueueOperation(final String operation, final Object queue)
       throws Throwable {
     final InvocationContext context =
@@ -341,6 +411,16 @@ public final class ChaosDispatcher {
     return null;
   }
 
+  /**
+   * Called before a {@link CompletableFuture} completion method to optionally override its outcome.
+   *
+   * @param operation the {@link OperationType} name describing the completion site
+   * @param future the future being completed
+   * @param payload the completion payload (value or exception); may be {@code null}
+   * @return the forced boolean result to return to the caller, or {@code null} to keep the real
+   *     result
+   * @throws Throwable if a matching scenario's terminal action mandates it
+   */
   public Boolean beforeCompletableFutureComplete(
       final String operation, final CompletableFuture<?> future, final Object payload)
       throws Throwable {
@@ -372,6 +452,13 @@ public final class ChaosDispatcher {
     return null;
   }
 
+  /**
+   * Called before {@link ClassLoader#loadClass(String)} to apply scenarios targeting class loading.
+   *
+   * @param loader the loader performing the lookup; {@code null} for the bootstrap loader
+   * @param className the binary name of the class being loaded
+   * @throws Throwable if a matching scenario's terminal action mandates it
+   */
   public void beforeClassLoad(final ClassLoader loader, final String className) throws Throwable {
     final InvocationContext context =
         new InvocationContext(
@@ -386,6 +473,15 @@ public final class ChaosDispatcher {
     applyPreDecision(evaluate(context));
   }
 
+  /**
+   * Called after {@link ClassLoader#getResource(String)} to optionally substitute the returned URL.
+   *
+   * @param loader the loader that performed the lookup; {@code null} for the bootstrap loader
+   * @param name the resource name that was requested
+   * @param currentValue the URL resolved by the real lookup; may be {@code null}
+   * @return the (possibly substituted) URL to return to the caller
+   * @throws Throwable if a matching scenario's terminal action mandates it
+   */
   public URL afterResourceLookup(
       final ClassLoader loader, final String name, final URL currentValue) throws Throwable {
     final InvocationContext context =
@@ -410,6 +506,15 @@ public final class ChaosDispatcher {
     return currentValue;
   }
 
+  /**
+   * Wraps a shutdown hook thread before it is registered with {@link
+   * Runtime#addShutdownHook(Thread)}.
+   *
+   * @param hook the shutdown hook being registered; may be {@code null}
+   * @return the thread to register in place of {@code hook}, or {@code hook} itself when decoration
+   *     is skipped
+   * @throws Throwable if a matching scenario's terminal action mandates it
+   */
   public Thread decorateShutdownHook(final Thread hook) throws Throwable {
     final InvocationContext context =
         new InvocationContext(
@@ -451,6 +556,14 @@ public final class ChaosDispatcher {
     return decorated;
   }
 
+  /**
+   * Resolves the registered wrapper thread for an original shutdown hook, removing the mapping on
+   * lookup.
+   *
+   * @param original the original user-supplied shutdown hook
+   * @return the decorated wrapper thread previously registered for {@code original}, or {@code
+   *     original} itself when no wrapper is recorded
+   */
   public Thread resolveShutdownHook(final Thread original) {
     // Destructive lookup: when Runtime.removeShutdownHook is called the JVM is about to drop its
     // own reference to the decorated thread, so we must release ours too. Leaving the mapping in
@@ -466,6 +579,15 @@ public final class ChaosDispatcher {
     return decorated == null ? original : decorated;
   }
 
+  /**
+   * Called before an executor's {@code shutdown} or {@code shutdownNow} to apply matching
+   * scenarios.
+   *
+   * @param operation the {@link OperationType} name describing the shutdown call
+   * @param executor the executor being shut down; may be {@code null} when unknown
+   * @param timeoutMillis the caller-supplied timeout in milliseconds (awaitTermination), or zero
+   * @throws Throwable if a matching scenario's terminal action mandates it
+   */
   public void beforeExecutorShutdown(
       final String operation, final Object executor, final long timeoutMillis) throws Throwable {
     final InvocationContext context =
@@ -481,6 +603,15 @@ public final class ChaosDispatcher {
     applyPreDecision(evaluate(context));
   }
 
+  /**
+   * Called before each execution of a scheduled task; returns {@code false} to suppress the tick.
+   *
+   * @param executor the scheduling executor; may be {@code null} when unknown
+   * @param task the task about to run; may be {@code null}
+   * @param periodic {@code true} when the task is scheduled at a fixed rate or with fixed delay
+   * @return {@code true} to let the tick proceed, {@code false} to suppress this execution
+   * @throws Throwable if a matching scenario's terminal action mandates it
+   */
   public boolean beforeScheduledTick(
       final Object executor, final Object task, final boolean periodic) throws Throwable {
     final InvocationContext context =
@@ -508,6 +639,13 @@ public final class ChaosDispatcher {
     return true;
   }
 
+  /**
+   * Called from advice at method entry to apply any scenario targeting the given class and method.
+   *
+   * @param className the fully qualified name of the class containing the advised method
+   * @param methodName the name of the advised method
+   * @throws Throwable if a matching scenario's terminal action mandates it
+   */
   public void beforeMethodEnter(final String className, final String methodName) throws Throwable {
     final InvocationContext context =
         new InvocationContext(
@@ -522,6 +660,16 @@ public final class ChaosDispatcher {
     applyPreDecision(evaluate(context));
   }
 
+  /**
+   * Called from advice at method exit to optionally corrupt the return value per active scenarios.
+   *
+   * @param className the fully qualified name of the class containing the advised method
+   * @param methodName the name of the advised method
+   * @param returnType the declared return type used to guide corruption strategies
+   * @param actualValue the real return value produced by the method; may be {@code null}
+   * @return the (possibly corrupted) value to return to the caller
+   * @throws Throwable if a matching scenario's terminal action mandates it
+   */
   public Object afterMethodExit(
       final String className,
       final String methodName,
@@ -564,6 +712,14 @@ public final class ChaosDispatcher {
     return actualValue;
   }
 
+  /**
+   * Applies any active clock-skew scenarios to a raw clock reading and returns the (possibly)
+   * skewed value.
+   *
+   * @param realValue the real clock value read from the JVM
+   * @param clockType the {@link OperationType} identifying which clock source was read
+   * @return the (possibly skewed) clock value to return to the caller
+   */
   public long applyClockSkew(final long realValue, final OperationType clockType) {
     // Clock-skew reads must NOT go through registry.match() → ScenarioController.evaluate().
     // evaluate() increments matchedCount, consumes rate-limit permits, rolls the probability
@@ -594,14 +750,32 @@ public final class ChaosDispatcher {
     return result;
   }
 
+  /**
+   * Returns the (possibly skewed) millisecond timestamp for {@link System#currentTimeMillis()}.
+   *
+   * @param realMillis the real value returned by {@link System#currentTimeMillis()}
+   * @return the (possibly skewed) millisecond timestamp to return to the caller
+   */
   public long adjustClockMillis(final long realMillis) {
     return applyClockSkew(realMillis, OperationType.SYSTEM_CLOCK_MILLIS);
   }
 
+  /**
+   * Returns the (possibly skewed) nanosecond timestamp for {@link System#nanoTime()}.
+   *
+   * @param realNanos the real value returned by {@link System#nanoTime()}
+   * @return the (possibly skewed) nanosecond timestamp to return to the caller
+   */
   public long adjustClockNanos(final long realNanos) {
     return applyClockSkew(realNanos, OperationType.SYSTEM_CLOCK_NANOS);
   }
 
+  /**
+   * Returns the (possibly skewed) {@link java.time.Instant} for {@code Instant.now()}.
+   *
+   * @param realInstant the real instant produced by {@code Instant.now()}
+   * @return the (possibly skewed) instant to return to the caller
+   */
   public java.time.Instant adjustInstantNow(final java.time.Instant realInstant) {
     final long realMillis = realInstant.toEpochMilli();
     final long skewed = applyClockSkew(realMillis, OperationType.INSTANT_NOW);
@@ -609,6 +783,12 @@ public final class ChaosDispatcher {
     return delta == 0L ? realInstant : realInstant.plusMillis(delta);
   }
 
+  /**
+   * Returns the (possibly skewed) {@link java.time.LocalDateTime} for {@code LocalDateTime.now()}.
+   *
+   * @param realValue the real local-date-time produced by {@code LocalDateTime.now()}
+   * @return the (possibly skewed) local-date-time to return to the caller
+   */
   public java.time.LocalDateTime adjustLocalDateTimeNow(final java.time.LocalDateTime realValue) {
     final java.time.ZoneId zone = java.time.ZoneId.systemDefault();
     final long realMillis = realValue.atZone(zone).toInstant().toEpochMilli();
@@ -619,6 +799,12 @@ public final class ChaosDispatcher {
     return java.time.LocalDateTime.ofInstant(java.time.Instant.ofEpochMilli(skewed), zone);
   }
 
+  /**
+   * Returns the (possibly skewed) {@link java.time.ZonedDateTime} for {@code ZonedDateTime.now()}.
+   *
+   * @param realValue the real zoned-date-time produced by {@code ZonedDateTime.now()}
+   * @return the (possibly skewed) zoned-date-time to return to the caller
+   */
   public java.time.ZonedDateTime adjustZonedDateTimeNow(final java.time.ZonedDateTime realValue) {
     final long realMillis = realValue.toInstant().toEpochMilli();
     final long skewed = applyClockSkew(realMillis, OperationType.ZONED_DATE_TIME_NOW);
@@ -628,10 +814,23 @@ public final class ChaosDispatcher {
     return java.time.Instant.ofEpochMilli(skewed).atZone(realValue.getZone());
   }
 
+  /**
+   * Returns the (possibly skewed) millis value used when constructing a new {@link java.util.Date}.
+   *
+   * @param realMillis the real millis argument passed to {@code new Date(long)}
+   * @return the (possibly skewed) millis value to use for the constructed {@link java.util.Date}
+   */
   public long adjustDateNew(final long realMillis) {
     return applyClockSkew(realMillis, OperationType.DATE_NEW);
   }
 
+  /**
+   * Called before {@code System.gc()}; returns {@code true} to suppress the GC request.
+   *
+   * @return {@code true} to suppress the real {@code System.gc()} call, {@code false} to let it
+   *     proceed
+   * @throws Throwable if a matching scenario's terminal action mandates it
+   */
   public boolean beforeGcRequest() throws Throwable {
     final InvocationContext context =
         new InvocationContext(
@@ -658,6 +857,13 @@ public final class ChaosDispatcher {
     return false;
   }
 
+  /**
+   * Called before {@code System.exit(status)} to apply scenarios that may suppress or delay the
+   * exit.
+   *
+   * @param status the exit status passed to {@code System.exit(int)}
+   * @throws Throwable if a matching scenario's terminal action mandates it
+   */
   public void beforeExitRequest(final int status) throws Throwable {
     final InvocationContext context =
         new InvocationContext(
@@ -672,6 +878,15 @@ public final class ChaosDispatcher {
     applyPreDecision(evaluate(context));
   }
 
+  /**
+   * Called before {@link java.lang.reflect.Method#invoke(Object, Object...)} to apply matching
+   * scenarios.
+   *
+   * @param method the {@link java.lang.reflect.Method} or {@link java.lang.reflect.Constructor}
+   *     being invoked; may be {@code null}
+   * @param target the receiver of the reflective invocation (static methods pass {@code null})
+   * @throws Throwable if a matching scenario's terminal action mandates it
+   */
   public void beforeReflectionInvoke(final Object method, final Object target) throws Throwable {
     final String methodName;
     final String declaringClass;
@@ -698,6 +913,12 @@ public final class ChaosDispatcher {
     applyPreDecision(evaluate(context));
   }
 
+  /**
+   * Called before {@link java.nio.ByteBuffer#allocateDirect(int)} to apply direct-buffer scenarios.
+   *
+   * @param capacity the capacity (in bytes) requested by the caller
+   * @throws Throwable if a matching scenario's terminal action mandates it
+   */
   public void beforeDirectBufferAllocate(final int capacity) throws Throwable {
     final InvocationContext context =
         new InvocationContext(
@@ -712,6 +933,14 @@ public final class ChaosDispatcher {
     applyPreDecision(evaluate(context));
   }
 
+  /**
+   * Called before {@link java.io.ObjectInputStream#readObject()} to apply deserialization
+   * scenarios.
+   *
+   * @param stream the {@link java.io.ObjectInputStream} performing the deserialization; may be
+   *     {@code null}
+   * @throws Throwable if a matching scenario's terminal action mandates it
+   */
   public void beforeObjectDeserialize(final Object stream) throws Throwable {
     final InvocationContext context =
         new InvocationContext(
@@ -726,6 +955,13 @@ public final class ChaosDispatcher {
     applyPreDecision(evaluate(context));
   }
 
+  /**
+   * Called before {@code ClassLoader.defineClass(...)} to apply class-definition scenarios.
+   *
+   * @param loader the loader performing the definition; {@code null} for the bootstrap loader
+   * @param className the binary name of the class being defined
+   * @throws Throwable if a matching scenario's terminal action mandates it
+   */
   public void beforeClassDefine(final Object loader, final String className) throws Throwable {
     final InvocationContext context =
         new InvocationContext(
@@ -740,6 +976,13 @@ public final class ChaosDispatcher {
     applyPreDecision(evaluate(context));
   }
 
+  /**
+   * Called before monitor entry (AQS acquire) to apply monitor-contention scenarios.
+   *
+   * @param lock the monitor or synchronizer being acquired; may be {@code null} when the advice
+   *     site cannot bind the receiver
+   * @throws Throwable if a matching scenario's terminal action mandates it
+   */
   public void beforeMonitorEnter(final Object lock) throws Throwable {
     // When Byte Buddy cannot bind `@Advice.This` (e.g. static synchronized blocks advised via a
     // proxy site, or interception points where the receiver is not a stack slot), `lock` is null
@@ -762,6 +1005,12 @@ public final class ChaosDispatcher {
     applyPreDecision(evaluate(context));
   }
 
+  /**
+   * Called before {@link java.util.concurrent.locks.LockSupport#park()} variants to apply
+   * scenarios.
+   *
+   * @throws Throwable if a matching scenario's terminal action mandates it
+   */
   public void beforeThreadPark() throws Throwable {
     final InvocationContext context =
         new InvocationContext(
@@ -776,6 +1025,15 @@ public final class ChaosDispatcher {
     applyPreDecision(evaluate(context));
   }
 
+  /**
+   * Called before {@link java.nio.channels.Selector#select()}; returns {@code true} to force a
+   * spurious wakeup.
+   *
+   * @param selector the NIO selector being invoked
+   * @param timeoutMillis the requested select timeout in milliseconds
+   * @return {@code true} to force a spurious wakeup; {@code false} for normal execution
+   * @throws Throwable if an active scenario throws to simulate a failure
+   */
   public boolean beforeNioSelect(final Object selector, final long timeoutMillis) throws Throwable {
     final InvocationContext context =
         new InvocationContext(
@@ -802,6 +1060,14 @@ public final class ChaosDispatcher {
     return false;
   }
 
+  /**
+   * Called before a NIO channel read/write/connect/accept to apply scenarios targeting that
+   * operation.
+   *
+   * @param operation the {@link OperationType} name for the channel operation
+   * @param channel the NIO channel being operated on
+   * @throws Throwable if an active scenario throws to simulate a failure
+   */
   public void beforeNioChannelOp(final String operation, final Object channel) throws Throwable {
     final InvocationContext context =
         new InvocationContext(
@@ -816,6 +1082,15 @@ public final class ChaosDispatcher {
     applyPreDecision(evaluate(context));
   }
 
+  /**
+   * Called before {@link java.net.Socket#connect(java.net.SocketAddress, int)} to apply socket
+   * scenarios.
+   *
+   * @param socket the socket being connected
+   * @param socketAddress the remote socket address being targeted
+   * @param timeoutMillis the connect timeout in milliseconds
+   * @throws Throwable if an active scenario throws to simulate a failure
+   */
   public void beforeSocketConnect(
       final Object socket, final Object socketAddress, final int timeoutMillis) throws Throwable {
     final String remoteHost = extractRemoteHost(socketAddress);
@@ -832,6 +1107,12 @@ public final class ChaosDispatcher {
     applyPreDecision(evaluate(context));
   }
 
+  /**
+   * Called before {@link java.net.ServerSocket#accept()} to apply server-accept scenarios.
+   *
+   * @param serverSocket the server socket performing the accept
+   * @throws Throwable if an active scenario throws to simulate a failure
+   */
   public void beforeSocketAccept(final Object serverSocket) throws Throwable {
     final InvocationContext context =
         new InvocationContext(
@@ -846,6 +1127,12 @@ public final class ChaosDispatcher {
     applyPreDecision(evaluate(context));
   }
 
+  /**
+   * Called before a socket input-stream read to apply scenarios targeting socket reads.
+   *
+   * @param stream the socket input stream being read from
+   * @throws Throwable if an active scenario throws to simulate a failure
+   */
   public void beforeSocketRead(final Object stream) throws Throwable {
     final InvocationContext context =
         new InvocationContext(
@@ -860,6 +1147,13 @@ public final class ChaosDispatcher {
     applyPreDecision(evaluate(context));
   }
 
+  /**
+   * Called before a socket output-stream write to apply scenarios targeting socket writes.
+   *
+   * @param stream the socket output stream being written to
+   * @param len the number of bytes being written
+   * @throws Throwable if an active scenario throws to simulate a failure
+   */
   public void beforeSocketWrite(final Object stream, final int len) throws Throwable {
     final InvocationContext context =
         new InvocationContext(
@@ -874,6 +1168,12 @@ public final class ChaosDispatcher {
     applyPreDecision(evaluate(context));
   }
 
+  /**
+   * Called before {@link java.net.Socket#close()} to apply socket-close scenarios.
+   *
+   * @param socket the socket being closed
+   * @throws Throwable if an active scenario throws to simulate a failure
+   */
   public void beforeSocketClose(final Object socket) throws Throwable {
     final InvocationContext context =
         new InvocationContext(
@@ -888,6 +1188,13 @@ public final class ChaosDispatcher {
     applyPreDecision(evaluate(context));
   }
 
+  /**
+   * Called before {@link javax.naming.InitialContext#lookup(String)} to apply JNDI scenarios.
+   *
+   * @param context the JNDI context performing the lookup
+   * @param name the JNDI name being looked up
+   * @throws Throwable if an active scenario throws to simulate a failure
+   */
   public void beforeJndiLookup(final Object context, final String name) throws Throwable {
     final InvocationContext invocationContext =
         new InvocationContext(
@@ -902,6 +1209,14 @@ public final class ChaosDispatcher {
     applyPreDecision(evaluate(invocationContext));
   }
 
+  /**
+   * Called before {@link java.io.ObjectOutputStream#writeObject(Object)} to apply serialization
+   * scenarios.
+   *
+   * @param stream the object output stream performing the write
+   * @param obj the object being serialized
+   * @throws Throwable if an active scenario throws to simulate a failure
+   */
   public void beforeObjectSerialize(final Object stream, final Object obj) throws Throwable {
     final InvocationContext context =
         new InvocationContext(
@@ -916,6 +1231,13 @@ public final class ChaosDispatcher {
     applyPreDecision(evaluate(context));
   }
 
+  /**
+   * Called before {@code System.loadLibrary} / {@code System.load} to apply native-library
+   * scenarios.
+   *
+   * @param libraryName the name of the native library being loaded
+   * @throws Throwable if an active scenario throws to simulate a failure
+   */
   public void beforeNativeLibraryLoad(final String libraryName) throws Throwable {
     final InvocationContext context =
         new InvocationContext(
@@ -930,6 +1252,16 @@ public final class ChaosDispatcher {
     applyPreDecision(evaluate(context));
   }
 
+  /**
+   * Called before {@link CompletableFuture#cancel(boolean)}; returns {@code true} to suppress
+   * cancellation.
+   *
+   * @param future the {@link CompletableFuture} being cancelled
+   * @param mayInterruptIfRunning whether the cancel may interrupt a running task
+   * @return {@code true} to suppress the cancel (caller short-circuits); {@code false} for normal
+   *     execution
+   * @throws Throwable if an active scenario throws to simulate a failure
+   */
   public boolean beforeAsyncCancel(final Object future, final boolean mayInterruptIfRunning)
       throws Throwable {
     final InvocationContext context =
@@ -968,6 +1300,11 @@ public final class ChaosDispatcher {
     return false;
   }
 
+  /**
+   * Called before {@code Inflater.inflate(...)} to apply decompression scenarios.
+   *
+   * @throws Throwable if an active scenario throws to simulate a failure
+   */
   public void beforeZipInflate() throws Throwable {
     final InvocationContext context =
         new InvocationContext(
@@ -982,6 +1319,11 @@ public final class ChaosDispatcher {
     applyPreDecision(evaluate(context));
   }
 
+  /**
+   * Called before {@code Deflater.deflate(...)} to apply compression scenarios.
+   *
+   * @throws Throwable if an active scenario throws to simulate a failure
+   */
   public void beforeZipDeflate() throws Throwable {
     final InvocationContext context =
         new InvocationContext(
@@ -996,6 +1338,15 @@ public final class ChaosDispatcher {
     applyPreDecision(evaluate(context));
   }
 
+  /**
+   * Called before {@link ThreadLocal#get()}; returns {@code true} to suppress the get and return
+   * {@code null}.
+   *
+   * @param threadLocal the {@link ThreadLocal} being accessed
+   * @return {@code true} to suppress the get and return {@code null}; {@code false} for normal
+   *     execution
+   * @throws Throwable if an active scenario throws to simulate a failure
+   */
   public boolean beforeThreadLocalGet(final Object threadLocal) throws Throwable {
     final InvocationContext context =
         new InvocationContext(
@@ -1022,6 +1373,14 @@ public final class ChaosDispatcher {
     return false;
   }
 
+  /**
+   * Called before {@link ThreadLocal#set(Object)}; returns {@code true} to suppress the set.
+   *
+   * @param threadLocal the {@link ThreadLocal} being mutated
+   * @param value the value being assigned
+   * @return {@code true} to suppress the set; {@code false} for normal execution
+   * @throws Throwable if an active scenario throws to simulate a failure
+   */
   public boolean beforeThreadLocalSet(final Object threadLocal, final Object value)
       throws Throwable {
     final InvocationContext context =
@@ -1049,6 +1408,14 @@ public final class ChaosDispatcher {
     return false;
   }
 
+  /**
+   * Called before {@code MBeanServer.invoke(...)} to apply JMX invoke scenarios.
+   *
+   * @param server the {@code MBeanServer} receiving the invocation
+   * @param objectName the target MBean {@code ObjectName}
+   * @param operationName the name of the JMX operation being invoked
+   * @throws Throwable if an active scenario throws to simulate a failure
+   */
   public void beforeJmxInvoke(
       final Object server, final Object objectName, final String operationName) throws Throwable {
     final InvocationContext context =
@@ -1064,6 +1431,14 @@ public final class ChaosDispatcher {
     applyPreDecision(evaluate(context));
   }
 
+  /**
+   * Called before {@code MBeanServer.getAttribute(...)} to apply JMX attribute-read scenarios.
+   *
+   * @param server the {@code MBeanServer} receiving the attribute read
+   * @param objectName the target MBean {@code ObjectName}
+   * @param attribute the attribute name being read
+   * @throws Throwable if an active scenario throws to simulate a failure
+   */
   public void beforeJmxGetAttr(final Object server, final Object objectName, final String attribute)
       throws Throwable {
     final InvocationContext context =
@@ -1079,6 +1454,14 @@ public final class ChaosDispatcher {
     applyPreDecision(evaluate(context));
   }
 
+  /**
+   * Called before an HTTP client send; returns {@code true} to suppress the call.
+   *
+   * @param url the target URL of the HTTP request
+   * @param opType the specific {@link OperationType} for this send
+   * @return {@code true} to suppress the call; {@code false} for normal execution
+   * @throws Throwable if an active scenario throws to simulate a failure
+   */
   public boolean beforeHttpSend(final String url, final OperationType opType) throws Throwable {
     final InvocationContext context =
         new InvocationContext(
@@ -1099,22 +1482,58 @@ public final class ChaosDispatcher {
     return false;
   }
 
+  /**
+   * Called before acquiring a JDBC connection from a pool; returns {@code true} to suppress the
+   * acquire.
+   *
+   * @param poolName the name of the JDBC connection pool
+   * @return {@code true} to suppress the acquire; {@code false} for normal execution
+   * @throws Throwable if an active scenario throws to simulate a failure
+   */
   public boolean beforeJdbcConnectionAcquire(final String poolName) throws Throwable {
     return evaluateJdbc(OperationType.JDBC_CONNECTION_ACQUIRE, "jdbc.pool", poolName);
   }
 
+  /**
+   * Called before executing a JDBC {@link java.sql.Statement}; returns {@code true} to suppress the
+   * call.
+   *
+   * @param sql the SQL statement being executed
+   * @return {@code true} to suppress the call; {@code false} for normal execution
+   * @throws Throwable if an active scenario throws to simulate a failure
+   */
   public boolean beforeJdbcStatementExecute(final String sql) throws Throwable {
     return evaluateJdbc(OperationType.JDBC_STATEMENT_EXECUTE, "java.sql.Statement", snippet(sql));
   }
 
+  /**
+   * Called before preparing a JDBC {@link java.sql.PreparedStatement}; returns {@code true} to
+   * suppress the call.
+   *
+   * @param sql the SQL being prepared
+   * @return {@code true} to suppress the call; {@code false} for normal execution
+   * @throws Throwable if an active scenario throws to simulate a failure
+   */
   public boolean beforeJdbcPreparedStatement(final String sql) throws Throwable {
     return evaluateJdbc(OperationType.JDBC_PREPARED_STATEMENT, "java.sql.Connection", snippet(sql));
   }
 
+  /**
+   * Called before a JDBC transaction commit; returns {@code true} to suppress the commit.
+   *
+   * @return {@code true} to suppress the commit; {@code false} for normal execution
+   * @throws Throwable if an active scenario throws to simulate a failure
+   */
   public boolean beforeJdbcTransactionCommit() throws Throwable {
     return evaluateJdbc(OperationType.JDBC_TRANSACTION_COMMIT, "java.sql.Connection", null);
   }
 
+  /**
+   * Called before a JDBC transaction rollback; returns {@code true} to suppress the rollback.
+   *
+   * @return {@code true} to suppress the rollback; {@code false} for normal execution
+   * @throws Throwable if an active scenario throws to simulate a failure
+   */
   public boolean beforeJdbcTransactionRollback() throws Throwable {
     return evaluateJdbc(OperationType.JDBC_TRANSACTION_ROLLBACK, "java.sql.Connection", null);
   }

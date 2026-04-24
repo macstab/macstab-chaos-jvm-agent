@@ -78,10 +78,17 @@ public final class ChaosRuntime implements ChaosControlPlane {
   private final Map<Thread, Thread> shutdownHooks = new java.util.concurrent.ConcurrentHashMap<>();
   private volatile Optional<Instrumentation> instrumentation = Optional.empty();
 
+  /** Creates a runtime using the system UTC clock and a no-op metrics sink. */
   public ChaosRuntime() {
     this(Clock.systemUTC(), ChaosMetricsSink.NOOP);
   }
 
+  /**
+   * Creates a runtime backed by the supplied clock and metrics sink.
+   *
+   * @param clock the clock used for scheduling and timestamping
+   * @param metricsSink the metrics sink to receive observability events
+   */
   public ChaosRuntime(final Clock clock, final ChaosMetricsSink metricsSink) {
     this.clock = clock;
     this.featureSet = new FeatureSet();
@@ -129,10 +136,23 @@ public final class ChaosRuntime implements ChaosControlPlane {
     registry.controllers().forEach(ScenarioController::destroy);
   }
 
+  /**
+   * Returns the session id bound to the current thread, or {@code null} if none is active.
+   *
+   * @return the current thread-bound session id, or {@code null} if no session is active
+   */
   public String currentSessionId() {
     return scopeContext.currentSessionId();
   }
 
+  /**
+   * Returns a (possibly session-scoped or suppressed) wrapper for an executor-submitted runnable.
+   *
+   * @param operation the {@link OperationType} name for the submission
+   * @param executor the executor receiving the submission
+   * @param task the runnable being submitted
+   * @return the decorated runnable (session-scoped, no-op if suppressed, or the original task)
+   */
   public Runnable decorateExecutorRunnable(
       final String operation, final Object executor, final Runnable task) {
     Objects.requireNonNull(task, "task");
@@ -163,6 +183,15 @@ public final class ChaosRuntime implements ChaosControlPlane {
     return scoped;
   }
 
+  /**
+   * Returns a (possibly session-scoped or suppressed) wrapper for an executor-submitted callable.
+   *
+   * @param <T> the callable's result type
+   * @param operation the {@link OperationType} name for the submission
+   * @param executor the executor receiving the submission
+   * @param task the callable being submitted
+   * @return the decorated callable (session-scoped, no-op if suppressed, or the original task)
+   */
   public <T> Callable<T> decorateExecutorCallable(
       final String operation, final Object executor, final Callable<T> task) {
     Objects.requireNonNull(task, "task");
@@ -194,6 +223,12 @@ public final class ChaosRuntime implements ChaosControlPlane {
     return scoped;
   }
 
+  /**
+   * Called before {@link Thread#start()} to apply any active chaos scenario matching the thread.
+   *
+   * @param thread the thread being started
+   * @throws Throwable if an active scenario throws to simulate a failure
+   */
   public void beforeThreadStart(final Thread thread) throws Throwable {
     final InvocationContext context =
         new InvocationContext(
@@ -210,6 +245,14 @@ public final class ChaosRuntime implements ChaosControlPlane {
     applyPreDecision(evaluate(context));
   }
 
+  /**
+   * Called at the top of a pool worker's run loop before the next task is dequeued.
+   *
+   * @param executor the executor owning the worker
+   * @param worker the worker thread about to run the task
+   * @param task the task being run, or {@code null} if not yet known
+   * @throws Throwable if an active scenario throws to simulate a failure
+   */
   public void beforeWorkerRun(final Object executor, final Thread worker, final Runnable task)
       throws Throwable {
     final InvocationContext context =
@@ -225,6 +268,12 @@ public final class ChaosRuntime implements ChaosControlPlane {
     applyPreDecision(evaluate(context));
   }
 
+  /**
+   * Called before a {@link java.util.concurrent.ForkJoinTask} begins execution on a pool worker.
+   *
+   * @param task the fork-join task about to execute
+   * @throws Throwable if an active scenario throws to simulate a failure
+   */
   public void beforeForkJoinTaskRun(final java.util.concurrent.ForkJoinTask<?> task)
       throws Throwable {
     final InvocationContext context =
@@ -240,6 +289,18 @@ public final class ChaosRuntime implements ChaosControlPlane {
     applyPreDecision(evaluate(context));
   }
 
+  /**
+   * Allows an active scenario to alter the scheduling delay of a scheduled executor submission.
+   *
+   * @param operation the {@link OperationType} name for the schedule operation
+   * @param executor the scheduling executor
+   * @param task the task being scheduled
+   * @param delay the originally requested delay
+   * @param periodic {@code true} if the submission is periodic
+   * @return the possibly-adjusted delay, or {@link Long#MAX_VALUE} to effectively suppress the
+   *     schedule
+   * @throws Throwable if an active scenario throws to simulate a failure
+   */
   public long adjustScheduleDelay(
       final String operation,
       final Object executor,
@@ -272,6 +333,13 @@ public final class ChaosRuntime implements ChaosControlPlane {
     return delay + decision.delayMillis();
   }
 
+  /**
+   * Called before a void-returning blocking queue operation such as {@code put} or {@code take}.
+   *
+   * @param operation the {@link OperationType} name for the queue operation
+   * @param queue the queue being operated on
+   * @throws Throwable if an active scenario throws to simulate a failure
+   */
   public void beforeQueueOperation(final String operation, final Object queue) throws Throwable {
     final InvocationContext context =
         new InvocationContext(
@@ -286,6 +354,16 @@ public final class ChaosRuntime implements ChaosControlPlane {
     applyPreDecision(evaluate(context));
   }
 
+  /**
+   * Called before a boolean-returning queue operation (e.g. {@code offer}) to optionally override
+   * its result.
+   *
+   * @param operation the {@link OperationType} name for the queue operation
+   * @param queue the queue being operated on
+   * @return an override result to return from the queue operation, or {@code null} to proceed
+   *     normally
+   * @throws Throwable if an active scenario throws to simulate a failure
+   */
   public Boolean beforeBooleanQueueOperation(final String operation, final Object queue)
       throws Throwable {
     final InvocationContext context =
@@ -313,6 +391,9 @@ public final class ChaosRuntime implements ChaosControlPlane {
     return null;
   }
 
+  /**
+   * Called before a {@link CompletableFuture} completion method to optionally override its outcome.
+   */
   public Boolean beforeCompletableFutureComplete(
       final String operation, final CompletableFuture<?> future, final Object payload)
       throws Throwable {
@@ -344,6 +425,9 @@ public final class ChaosRuntime implements ChaosControlPlane {
     return null;
   }
 
+  /**
+   * Called before {@link ClassLoader#loadClass(String)} to apply scenarios targeting class loading.
+   */
   public void beforeClassLoad(final ClassLoader loader, final String className) throws Throwable {
     final InvocationContext context =
         new InvocationContext(
@@ -358,6 +442,9 @@ public final class ChaosRuntime implements ChaosControlPlane {
     applyPreDecision(evaluate(context));
   }
 
+  /**
+   * Called after {@link ClassLoader#getResource(String)} to optionally substitute the returned URL.
+   */
   public URL afterResourceLookup(
       final ClassLoader loader, final String name, final URL currentValue) throws Throwable {
     final InvocationContext context =
@@ -382,6 +469,10 @@ public final class ChaosRuntime implements ChaosControlPlane {
     return currentValue;
   }
 
+  /**
+   * Wraps a shutdown hook thread before it is registered with {@link
+   * Runtime#addShutdownHook(Thread)}.
+   */
   public Thread decorateShutdownHook(final Thread hook) throws Throwable {
     final InvocationContext context =
         new InvocationContext(
@@ -402,10 +493,15 @@ public final class ChaosRuntime implements ChaosControlPlane {
     return decorated;
   }
 
+  /** Resolves the registered wrapper thread for an original shutdown hook. */
   public Thread resolveShutdownHook(final Thread original) {
     return shutdownHooks.getOrDefault(original, original);
   }
 
+  /**
+   * Called before an executor's {@code shutdown} or {@code shutdownNow} to apply matching
+   * scenarios.
+   */
   public void beforeExecutorShutdown(
       final String operation, final Object executor, final long timeoutMillis) throws Throwable {
     final InvocationContext context =
@@ -421,6 +517,9 @@ public final class ChaosRuntime implements ChaosControlPlane {
     applyPreDecision(evaluate(context));
   }
 
+  /**
+   * Called before each execution of a scheduled task; returns {@code false} to suppress the tick.
+   */
   public boolean beforeScheduledTick(
       final Object executor, final Object task, final boolean periodic) throws Throwable {
     final InvocationContext context =

@@ -5,6 +5,12 @@ import java.lang.ref.WeakReference;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CancellationException;
 
+/**
+ * Wraps a {@link Callable} scheduled on an executor so that chaos tick hooks fire around each
+ * invocation.
+ *
+ * @param <T> the result type produced by the wrapped callable
+ */
 public final class ScheduledCallableWrapper<T> implements Callable<T> {
   /**
    * Weak reference to break the retention cycle: the executor's internal queue holds this wrapper,
@@ -18,6 +24,13 @@ public final class ScheduledCallableWrapper<T> implements Callable<T> {
   /** The wrapped callable to invoke after chaos hooks have been applied. */
   private final Callable<T> delegate;
 
+  /**
+   * Creates a wrapper holding a weak reference to {@code executor} and a strong reference to {@code
+   * delegate}.
+   *
+   * @param executor the scheduling executor; held via {@link WeakReference} to avoid retention
+   * @param delegate the wrapped callable to invoke after chaos hooks have been applied
+   */
   public ScheduledCallableWrapper(final Object executor, final Callable<T> delegate) {
     this.executorRef = new WeakReference<>(executor);
     this.delegate = delegate;

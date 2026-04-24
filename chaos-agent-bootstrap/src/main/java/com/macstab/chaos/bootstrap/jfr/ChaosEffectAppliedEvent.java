@@ -29,15 +29,19 @@ import jdk.jfr.StackTrace;
 @Enabled(false)
 public final class ChaosEffectAppliedEvent extends Event {
 
+  /** ID of the chaos scenario that matched and triggered this effect. */
   @Label("Scenario ID")
   public String scenarioId;
 
+  /** Category of the intercepted operation, e.g. {@code HTTP_CLIENT}, {@code JDBC}. */
   @Label("Operation Type")
   public String operationType;
 
+  /** Simple class name of the applied effect, e.g. {@code DelayEffect}, {@code ExceptionEffect}. */
   @Label("Effect Type")
   public String effectType;
 
+  /** Scope key used to match this operation against the scenario's target criteria. */
   @Label("Scope Key")
   public String scopeKey;
 

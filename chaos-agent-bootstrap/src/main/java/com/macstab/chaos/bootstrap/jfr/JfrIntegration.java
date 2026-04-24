@@ -25,6 +25,8 @@ public final class JfrIntegration {
    * <p>This method is idempotent across multiple calls on the same runtime only in the sense that
    * each call will install an additional sink. Callers (e.g., {@code ChaosAgentBootstrap}) must
    * ensure it is called exactly once per runtime lifetime.
+   *
+   * @param runtime the chaos control plane to install the JFR sink on; never {@code null}
    */
   public static void installIfAvailable(final ChaosControlPlane runtime) {
     if (!JfrAvailability.probe()) {
