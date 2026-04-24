@@ -244,6 +244,7 @@ public record ChaosScenario(
     /**
      * Builds the scenario.
      *
+     * @return the constructed ChaosScenario
      * @throws IllegalArgumentException if selector or effect is null
      */
     public ChaosScenario build() {

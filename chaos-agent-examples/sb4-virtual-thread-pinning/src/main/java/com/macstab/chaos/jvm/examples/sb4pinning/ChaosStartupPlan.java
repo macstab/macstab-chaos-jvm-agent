@@ -13,6 +13,7 @@ import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.ApplicationListener;
 import org.springframework.stereotype.Component;
 
+/** Spring application listener that activates a chaos plan on startup. */
 @Component
 public class ChaosStartupPlan implements ApplicationListener<ApplicationReadyEvent> {
 
@@ -20,6 +21,12 @@ public class ChaosStartupPlan implements ApplicationListener<ApplicationReadyEve
   private final boolean contentionEnabled;
   private volatile ChaosActivationHandle handle;
 
+  /**
+   * Creates a new ChaosStartupPlan.
+   *
+   * @param controlPlane the chaos control plane used to activate scenarios
+   * @param contentionEnabled whether virtual-thread carrier pinning chaos is enabled
+   */
   public ChaosStartupPlan(
       final ChaosControlPlane controlPlane,
       @Value("${macstab.chaos.contention.enabled:false}") final boolean contentionEnabled) {
@@ -54,6 +61,7 @@ public class ChaosStartupPlan implements ApplicationListener<ApplicationReadyEve
     handle = controlPlane.activate(scenario);
   }
 
+  /** Stops the active chaos handle. */
   @PreDestroy
   public void shutdown() {
     final ChaosActivationHandle h = handle;

@@ -8,22 +8,39 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+/** REST controller exposing metrics recording and snapshot endpoints. */
 @RestController
 @RequestMapping("/metrics")
 public class MetricsController {
 
   private final MetricsAggregator aggregator;
 
+  /**
+   * Creates a new MetricsController.
+   *
+   * @param aggregator the metrics aggregator
+   */
   public MetricsController(final MetricsAggregator aggregator) {
     this.aggregator = aggregator;
   }
 
+  /**
+   * Records a metric event.
+   *
+   * @param name the metric name
+   * @return HTTP 204 No Content
+   */
   @PostMapping
   public ResponseEntity<Void> record(@RequestParam final String name) {
     aggregator.record(name);
     return ResponseEntity.noContent().build();
   }
 
+  /**
+   * Returns a snapshot of all metric counts.
+   *
+   * @return HTTP 200 with the metrics map
+   */
   @GetMapping("/snapshot")
   public ResponseEntity<Map<String, Long>> snapshot() {
     return ResponseEntity.ok(aggregator.snapshot());
