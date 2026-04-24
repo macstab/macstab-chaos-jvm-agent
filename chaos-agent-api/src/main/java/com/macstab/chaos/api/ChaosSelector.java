@@ -314,7 +314,9 @@ public sealed interface ChaosSelector
   enum ThreadKind {
     /** Matches any thread regardless of type. */
     ANY,
+    /** Matches only platform (OS-backed) threads. */
     PLATFORM,
+    /** Matches only virtual threads. */
     VIRTUAL,
   }
 
@@ -380,6 +382,7 @@ public sealed interface ChaosSelector
   record ThreadSelector(
       Set<OperationType> operations, ThreadKind kind, NamePattern threadNamePattern, Boolean daemon)
       implements ChaosSelector {
+    /** Validates the ThreadSelector parameters. */
     public ThreadSelector {
       operations = validatedOperations(operations);
       kind = kind == null ? ThreadKind.ANY : kind;

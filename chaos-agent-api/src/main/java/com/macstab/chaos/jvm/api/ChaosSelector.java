@@ -343,6 +343,7 @@ public sealed interface ChaosSelector
    * <p>Valid operations: {@link OperationType#JDBC_CONNECTION_ACQUIRE}, {@link
    * OperationType#JDBC_STATEMENT_EXECUTE}, {@link OperationType#JDBC_PREPARED_STATEMENT}, {@link
    * OperationType#JDBC_TRANSACTION_COMMIT}, {@link OperationType#JDBC_TRANSACTION_ROLLBACK}.
+   *
    * @return a JdbcSelector
    */
   static JdbcSelector jdbc() {
@@ -445,8 +446,11 @@ public sealed interface ChaosSelector
 
   /** Classifies the thread type targeted by a {@link ThreadSelector}. */
   enum ThreadKind {
+    /** Matches any thread regardless of type. */
     ANY,
+    /** Matches only platform (OS-backed) threads. */
     PLATFORM,
+    /** Matches only virtual threads. */
     VIRTUAL,
   }
 
@@ -521,6 +525,7 @@ public sealed interface ChaosSelector
             OperationType.VIRTUAL_THREAD_START,
             OperationType.THREAD_SLEEP);
 
+    /** Validates the ThreadSelector parameters. */
     public ThreadSelector {
       operations = validatedOperations(operations, VALID_OPS, "ThreadSelector");
       kind = kind == null ? ThreadKind.ANY : kind;
@@ -873,6 +878,7 @@ public sealed interface ChaosSelector
     static final Set<OperationType> VALID_OPS =
         EnumSet.of(OperationType.THREAD_LOCAL_GET, OperationType.THREAD_LOCAL_SET);
 
+    /** Validates the ThreadLocalSelector parameters. */
     public ThreadLocalSelector {
       operations = validatedOperations(operations, VALID_OPS, "ThreadLocalSelector");
       threadLocalClassPattern =
