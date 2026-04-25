@@ -23,6 +23,18 @@ tasks.jar {
             "Can-Redefine-Classes" to "true",
             "Can-Retransform-Classes" to "true",
             "Can-Set-Native-Method-Prefix" to "true",
+            // Self-grant access to JDK internals the agent instruments / reflects into.
+            // Honoured by the JVM only on -javaagent: (premain) attach; the runtime self-attach
+            // path (ChaosAgentBootstrap#installForLocalTests / agentmain) grants the same opens
+            // programmatically via Instrumentation#redefineModule in JdkInstrumentationInstaller.
+            // See docs/instrumentation.md "Module access strategy".
+            "Add-Opens" to listOf(
+                "java.net.http/jdk.internal.net.http",   // HttpClientImpl.send / sendAsync interception
+                "java.base/jdk.internal.misc",           // Attach API support paths on JDK 21+
+                "java.base/jdk.internal.loader",         // NativeLibraries.load instrumentation
+                "java.base/sun.nio.ch",                  // DirectBuffer.cleaner() reflection (DirectBufferPressureStressor)
+                "java.base/jdk.internal.ref",            // Modern Cleaner mechanism (Java 9+ replacement for sun.misc.Cleaner)
+            ).joinToString(" "),
         )
     }
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE

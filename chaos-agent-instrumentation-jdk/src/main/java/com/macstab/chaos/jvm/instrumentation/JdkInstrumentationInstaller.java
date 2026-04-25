@@ -12,11 +12,17 @@ import java.lang.invoke.MethodType;
 import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ForkJoinTask;
 import java.util.jar.JarEntry;
 import java.util.jar.JarOutputStream;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 import net.bytebuddy.agent.builder.AgentBuilder;
 import net.bytebuddy.agent.builder.ResettableClassFileTransformer;
@@ -112,6 +118,7 @@ public final class JdkInstrumentationInstaller {
       final Instrumentation instrumentation,
       final ChaosRuntime runtime,
       final boolean premainMode) {
+    grantInternalModuleOpens(instrumentation);
     injectBridge(instrumentation);
     installDelegate(new ChaosBridge(runtime));
 
@@ -167,6 +174,81 @@ public final class JdkInstrumentationInstaller {
     //
     // This is a hard JVM limitation for any standard -javaagent: Java instrumentation agent.
     // Workarounds (e.g. -Xpatch:java.base, a C-level JVMTI agent) are out of scope.
+  }
+
+  /**
+   * Self-grants reflective and instrumentation access to the JDK internal packages this agent
+   * needs to function, without requiring the user to set {@code --add-opens} JVM flags.
+   *
+   * <p>The agent JAR's {@code MANIFEST.MF} carries a matching {@code Add-Opens} attribute (see
+   * {@code chaos-agent-bootstrap/build.gradle.kts}) that the JVM honours on the {@code -javaagent:}
+   * (premain) attach path before {@code premain} runs. Manifest opens are <b>not</b> honoured for
+   * {@code agentmain} or runtime self-attach via {@code ByteBuddyAgent.install()}, so for those
+   * paths this method calls {@link Instrumentation#redefineModule} programmatically — exposing the
+   * same opens to the unnamed module of the system class loader. Same pattern OpenTelemetry,
+   * Datadog, and New Relic agents use.
+   *
+   * <p>Each entry below is paired with the agent feature that depends on it. If a future feature
+   * needs a new internal package, add it both to the manifest <i>and</i> to this list.
+   *
+   * <p>Failures are tolerated and logged at FINE level: the JVM may legitimately deny
+   * {@code redefineModule} on stripped or future runtimes. Downstream code that depends on the
+   * open already handles {@code java.lang.reflect.InaccessibleObjectException} via try/catch (see
+   * {@code HttpUrlExtractor}, {@code JdbcTargetExtractor}, {@code DirectBufferPressureStressor}).
+   *
+   * @param instrumentation the JVM-supplied {@link Instrumentation} handle, used for the
+   *     {@code redefineModule} call
+   */
+  private static void grantInternalModuleOpens(final Instrumentation instrumentation) {
+    final Module unnamed = ClassLoader.getSystemClassLoader().getUnnamedModule();
+    final Set<Module> openTo = Set.of(unnamed);
+
+    // moduleClass → packages to open. Loaded reflectively so this code stays compilable on
+    // toolchains that expose only some of these modules. Each lookup tolerates an absent module.
+    final List<String[]> opens =
+        List.of(
+            new String[] {"java.net.http", "jdk.internal.net.http"},
+            new String[] {"java.base", "jdk.internal.misc"},
+            new String[] {"java.base", "jdk.internal.loader"},
+            new String[] {"java.base", "sun.nio.ch"},
+            new String[] {"java.base", "jdk.internal.ref"});
+
+    for (final String[] entry : opens) {
+      final String moduleName = entry[0];
+      final String packageName = entry[1];
+      final Module module = ModuleLayer.boot().findModule(moduleName).orElse(null);
+      if (module == null) {
+        LOGGER.log(Level.FINE, "module {0} not present; skipping open of {1}",
+            new Object[] {moduleName, packageName});
+        continue;
+      }
+      if (!module.getPackages().contains(packageName)) {
+        LOGGER.log(Level.FINE, "module {0} does not contain package {1}; skipping",
+            new Object[] {moduleName, packageName});
+        continue;
+      }
+      try {
+        final Map<String, Set<Module>> extraOpens = new LinkedHashMap<>();
+        extraOpens.put(packageName, openTo);
+        instrumentation.redefineModule(
+            module,
+            Collections.emptySet(),         // extraReads
+            Collections.emptyMap(),         // extraExports
+            extraOpens,                     // extraOpens
+            Collections.emptySet(),         // extraUses
+            Collections.emptyMap());        // extraProvides
+      } catch (final RuntimeException failure) {
+        LOGGER.log(
+            Level.FINE,
+            failure,
+            () ->
+                "failed to redefineModule open for "
+                    + moduleName
+                    + "/"
+                    + packageName
+                    + " — chaos features depending on this open may degrade gracefully");
+      }
+    }
   }
 
   /**
@@ -713,6 +795,16 @@ public final class JdkInstrumentationInstaller {
         writeClass(
             jarOutputStream,
             "com/macstab/chaos/jvm/instrumentation/ScheduledCallableWrapper.class");
+        // Required on the bootstrap classpath because advice woven into JDK module classes
+        // (e.g. jdk.internal.net.http.HttpClientImpl in the platform classloader) references
+        // these types. Without injecting them here the JVM verifier raises NoClassDefFoundError
+        // when the JDK class is first used.
+        writeClass(
+            jarOutputStream, "com/macstab/chaos/jvm/api/ChaosHttpSuppressException.class");
+        writeClass(
+            jarOutputStream, "com/macstab/chaos/jvm/instrumentation/HttpUrlExtractor.class");
+        writeClass(
+            jarOutputStream, "com/macstab/chaos/jvm/instrumentation/HttpUrlExtractor$1.class");
       }
       // Retain the JarFile in a static field. appendToBootstrapClassLoaderSearch does not
       // document whether the JVM keeps a strong reference to the Java-side JarFile; on
@@ -1480,21 +1572,54 @@ public final class JdkInstrumentationInstaller {
   }
 
   /**
-   * Registers HTTP client interception: OkHttp, Apache HC 4.x, Apache HC 5.x, Reactor Netty.
+   * Registers HTTP client interception: Java {@code java.net.http.HttpClient} (JDK 11+), OkHttp,
+   * Apache HC 4.x, Apache HC 5.x, Reactor Netty.
    *
    * <p>All targets use {@link #instrumentOptional}, which checks class presence before registering.
    * If the target is absent, no transformation is added. Advice classes only use Object-typed
    * arguments and reflective URL extraction, so the compileOnly dependencies (OkHttp, Apache HC,
    * Reactor Netty) are not required at runtime.
    *
-   * <p>Java 11+ HttpClient ({@code jdk.internal.net.http.HttpClientImpl}) is NOT registered here.
-   * That class is always present on JDK 11+, but it lives in the non-exported {@code
-   * java.net.http/jdk.internal.net.http} package. Attempting to transform it without {@code
-   * --add-opens java.net.http/jdk.internal.net.http=ALL-UNNAMED} silently corrupts subsequent
-   * AgentBuilder transformations. If interception of the Java HttpClient is required, users can
-   * target its public API or wait for a dedicated {@code --add-opens} pathway.
+   * <p>Java 11+ {@code HttpClient} is implemented by {@code jdk.internal.net.http.HttpClientImpl},
+   * which lives in the non-exported {@code java.net.http/jdk.internal.net.http} package. Two pieces
+   * are required to instrument it without users having to set {@code --add-opens} JVM flags:
+   *
+   * <ol>
+   *   <li>Module access — granted automatically by {@link #grantInternalModuleOpens} (programmatic
+   *       {@code redefineModule}) plus the {@code Add-Opens} attribute in the agent JAR's
+   *       {@code MANIFEST.MF}.
+   *   <li>A separate {@link AgentBuilder} pass — historically, mixing this transformation into the
+   *       same builder pass as the other Phase 2 transformations could cause silent corruption of
+   *       the retransformation pipeline. With the open already in place at install time the
+   *       transformation registers cleanly inside this method.
+   * </ol>
    */
   private static AgentBuilder applyPhase2HttpClientInterception(AgentBuilder agentBuilder) {
+    // Java 11+ HttpClient — concrete impl in jdk.internal.net.http. Module access is self-granted
+    // by grantInternalModuleOpens() / Add-Opens manifest entry, no user JVM flags required.
+    //
+    // We register the type matcher directly (without instrumentOptional's Class.forName probe)
+    // because the probe would run from the agent's unnamed module and the module-access semantics
+    // of internal JDK packages can hide the class from forName even after it has been opened for
+    // deep reflection. ByteBuddy's retransformation/load events will resolve the class through
+    // the JVM-internal class definition path, which sees it regardless.
+    agentBuilder =
+        agentBuilder
+            .type(ElementMatchers.named("jdk.internal.net.http.HttpClientImpl"))
+            .transform(
+                (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                    typeBuilder
+                        .visit(
+                            Advice.to(HttpClientAdvice.JavaHttpClientSendAdvice.class)
+                                .on(
+                                    ElementMatchers.named("send")
+                                        .and(ElementMatchers.takesArguments(2))))
+                        .visit(
+                            Advice.to(HttpClientAdvice.JavaHttpClientSendAsyncAdvice.class)
+                                .on(
+                                    ElementMatchers.named("sendAsync")
+                                        .and(ElementMatchers.takesArguments(2)))));
+
     agentBuilder =
         instrumentOptional(
             agentBuilder,

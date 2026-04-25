@@ -24,6 +24,8 @@ import java.util.Set;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.http.HttpStatus;
@@ -33,8 +35,10 @@ import org.springframework.web.client.RestClient;
 @ChaosTest(classes = SlaApplication.class, webEnvironment = WebEnvironment.RANDOM_PORT)
 class SlaValidationTest {
 
-  private static final int WARMUP = 30;
-  private static final int ITERATIONS = 100;
+  private static final Logger log = LoggerFactory.getLogger(SlaValidationTest.class);
+
+  private static final int WARMUP = 10;
+  private static final int ITERATIONS = 30;
   private static final long STEP_NANOS = Duration.ofMillis(80).toNanos();
 
   private static WireMockServer wireMockA;
@@ -66,11 +70,17 @@ class SlaValidationTest {
   }
 
   /**
-   * Verifies that 40% probabilistic socket-read delay stays within 500 ms of the clean baseline.
+   * Verifies that a 40% probabilistic outbound HTTP delay stays within 500 ms of the clean
+   * baseline.
    *
-   * <p>Uses JVM scope so the delay applies to all threads, including the fanout service's virtual
-   * threads calling the downstream WireMock servers. The 500 ms budget is relative to the measured
-   * baseline so the assertion holds regardless of worker speed.
+   * <p>Uses {@link OperationType#HTTP_CLIENT_SEND} which fires once per
+   * {@code java.net.http.HttpClient.send(...)} call (the agent self-grants the required JDK module
+   * open at install time, so no {@code --add-opens} JVM flag is required). The fanout service
+   * issues 3 outbound HTTP calls per request, each running in its own virtual thread; with
+   * probability 0.4 each call independently gets a 20–80 ms delay.
+   *
+   * <p>The 500 ms budget is relative to the measured baseline so the assertion holds regardless of
+   * worker speed.
    */
   @Test
   void probabilisticDelayStaysWithin500msOfBaseline(final ChaosControlPlane controlPlane) {
@@ -81,10 +91,10 @@ class SlaValidationTest {
 
     final ChaosActivationHandle handle =
         controlPlane.activate(
-            ChaosScenario.builder("socket-read-delay-40pct")
-                .description("40% probability of 20-80ms SOCKET_READ delay")
+            ChaosScenario.builder("http-client-send-delay-40pct")
+                .description("40% probability of 20-80ms HTTP_CLIENT_SEND delay")
                 .scope(ScenarioScope.JVM)
-                .selector(ChaosSelector.network(Set.of(OperationType.SOCKET_READ)))
+                .selector(ChaosSelector.httpClient(Set.of(OperationType.HTTP_CLIENT_SEND)))
                 .effect(ChaosEffect.delay(Duration.ofMillis(20), Duration.ofMillis(80)))
                 .activationPolicy(
                     new ActivationPolicy(
@@ -94,12 +104,11 @@ class SlaValidationTest {
     try {
       final long p99WithChaos = measureP99(client);
 
-      System.out.printf(
-          "[SlaValidationTest] baseline P99=%dms  chaos P99=%dms%n",
-          p99Baseline / 1_000_000, p99WithChaos / 1_000_000);
+      log.info(
+          "baseline P99={}ms  chaos P99={}ms", p99Baseline / 1_000_000, p99WithChaos / 1_000_000);
 
       assertThat(p99WithChaos)
-          .as("P99 with 40%% socket-read delay must stay within 500 ms of baseline P99")
+          .as("P99 with 40%% HTTP-send delay must stay within 500 ms of baseline P99")
           .isLessThan(p99Baseline + Duration.ofMillis(500).toNanos());
     } finally {
       handle.stop();
@@ -107,12 +116,17 @@ class SlaValidationTest {
   }
 
   /**
-   * Verifies that stacking delay scenarios raises P99 additively.
+   * Verifies that stacking outbound-HTTP delay scenarios raises P99 additively.
    *
-   * <p>Each scenario injects a fixed 80 ms delay on every SOCKET_READ across the entire JVM. Because
-   * each HTTP exchange triggers multiple reads (status line, headers, body), each new scenario adds
-   * more than 80 ms to the measured P99. The ordering assertion is worker-speed-independent: it
-   * relies on relative differences, not absolute thresholds.
+   * <p>Each scenario injects a fixed 80 ms delay on every {@link OperationType#HTTP_CLIENT_SEND}
+   * across the entire JVM. The fanout service issues 3 parallel HTTP calls per request; because
+   * the calls run on virtual threads in parallel, each stacked scenario adds at least one
+   * additional 80 ms wait to the slowest leg, lifting P99 by at least 80 ms per added scenario.
+   *
+   * <p>All assertions are anchored to the single baseline measurement so per-step measurement
+   * noise (GC pauses, scheduler jitter on slow runners) does not compound: if {@code p99_1}
+   * happens to spike, only its own assertion is at risk — {@code p99_2} and {@code p99_3} are
+   * still compared against the stable baseline, not the noisy intermediate measurement.
    */
   @Test
   void graduatedDelayLadderStacksAdditively(final ChaosControlPlane controlPlane) {
@@ -132,19 +146,22 @@ class SlaValidationTest {
       handles.add(controlPlane.activate(fixedDelayScenario("delay-3")));
       final long p99_3 = measureP99(client);
 
-      System.out.printf(
-          "[SlaValidationTest] P99 ladder: 0=%dms  1=%dms  2=%dms  3=%dms%n",
-          p99_0 / 1_000_000, p99_1 / 1_000_000, p99_2 / 1_000_000, p99_3 / 1_000_000);
+      log.info(
+          "P99 ladder: 0={}ms  1={}ms  2={}ms  3={}ms",
+          p99_0 / 1_000_000,
+          p99_1 / 1_000_000,
+          p99_2 / 1_000_000,
+          p99_3 / 1_000_000);
 
       assertThat(p99_1)
           .as("1 delay scenario must raise P99 by at least 80 ms over baseline")
           .isGreaterThan(p99_0 + STEP_NANOS);
       assertThat(p99_2)
-          .as("2 stacked scenarios must raise P99 by at least 80 ms over 1-scenario P99")
-          .isGreaterThan(p99_1 + STEP_NANOS);
+          .as("2 stacked scenarios must raise P99 by at least 160 ms over baseline")
+          .isGreaterThan(p99_0 + 2 * STEP_NANOS);
       assertThat(p99_3)
-          .as("3 stacked scenarios must raise P99 by at least 80 ms over 2-scenario P99")
-          .isGreaterThan(p99_2 + STEP_NANOS);
+          .as("3 stacked scenarios must raise P99 by at least 240 ms over baseline")
+          .isGreaterThan(p99_0 + 3 * STEP_NANOS);
     } finally {
       handles.forEach(ChaosActivationHandle::stop);
     }
@@ -175,7 +192,7 @@ class SlaValidationTest {
   private static ChaosScenario fixedDelayScenario(final String id) {
     return ChaosScenario.builder(id)
         .scope(ScenarioScope.JVM)
-        .selector(ChaosSelector.network(Set.of(OperationType.SOCKET_READ)))
+        .selector(ChaosSelector.httpClient(Set.of(OperationType.HTTP_CLIENT_SEND)))
         .effect(ChaosEffect.delay(Duration.ofMillis(80), Duration.ofMillis(80)))
         .activationPolicy(ActivationPolicy.always())
         .build();

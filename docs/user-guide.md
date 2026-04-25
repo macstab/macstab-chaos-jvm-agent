@@ -784,9 +784,9 @@ The agent is designed to be permanently installed in production. With zero activ
 
 Both methods are JVM intrinsics with `@IntrinsicCandidate` annotations. The JIT replaces their call sites with CPU instructions — no method body is executed, so advice cannot be woven. The clock skew effect targets the higher-level `java.time` APIs (`Instant.now()`, `LocalDateTime.now()`, `ZonedDateTime.now()`) and `new Date()` instead. Application code reading the clock through `System.currentTimeMillis()` directly is not skewed.
 
-### `java.net.http.HttpClient` Is Not Intercepted
+### `java.net.http.HttpClient` Is Intercepted Out of the Box
 
-`jdk.internal.net.http.HttpClientImpl` lives in a non-exported JDK module. Including it in the same `AgentBuilder` pass as the rest of Phase 2 instrumentation causes other transformations to be silently dropped by the JVM's retransformation serialization pipeline. A dedicated second pass with `--add-opens java.net.http/jdk.internal.net.http=ALL-UNNAMED` is required and is not yet implemented. Use OkHttp, Apache HttpClient 4/5, or Spring `WebClient` (Reactor Netty) for interceptable HTTP.
+The agent self-grants the required `--add-opens java.net.http/jdk.internal.net.http=ALL-UNNAMED` at install time — via the `Add-Opens` manifest attribute on `-javaagent:` startup attach, and via `Instrumentation#redefineModule` for runtime self-attach (`agentmain`, test starters, `ByteBuddyAgent.install`). **Users do not need to add `--add-opens` JVM flags for any built-in chaos selector**, including `HttpClientSelector(HTTP_CLIENT_SEND/_ASYNC)` which targets `jdk.internal.net.http.HttpClientImpl`. See [Module access strategy](instrumentation.md#module-access-strategy) for the full set of opens granted.
 
 ### Dynamic Attach Installs Phase 1 Only
 
