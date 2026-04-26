@@ -197,6 +197,268 @@ class Phase4InstrumentationIntegrationTest {
     }
   }
 
+  // ── Executor ─────────────────────────────────────────────────────────────
+
+  @Nested
+  @DisplayName("Executor instrumentation")
+  class ExecutorInstrumentation {
+
+    @Test
+    @DisplayName("agent delays executor.execute() at submission (EXECUTOR_SUBMIT)")
+    void agentDelaysExecutorSubmit() throws Exception {
+      final ChaosPlan plan =
+          singleScenarioPlan(
+              "executor-submit-delay",
+              ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)),
+              ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
+      final long elapsed = parseElapsed(runProbe(plan, "executor-submit-delay"));
+      assertThat(elapsed)
+          .as(
+              "EXECUTOR_SUBMIT delay must add ≥%d ms to execute() (got %d ms)",
+              DELAY_MIN_MS, elapsed)
+          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+    }
+
+    @Test
+    @DisplayName("agent delays task execution in worker thread (EXECUTOR_WORKER_RUN)")
+    void agentDelaysExecutorWorkerRun() throws Exception {
+      final ChaosPlan plan =
+          singleScenarioPlan(
+              "executor-worker-delay",
+              ChaosSelector.executor(Set.of(OperationType.EXECUTOR_WORKER_RUN)),
+              ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
+      final long elapsed = parseElapsed(runProbe(plan, "executor-worker-delay"));
+      assertThat(elapsed)
+          .as(
+              "EXECUTOR_WORKER_RUN delay must add ≥%d ms to task execution (got %d ms)",
+              DELAY_MIN_MS, elapsed)
+          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+    }
+  }
+
+  // ── BlockingQueue ─────────────────────────────────────────────────────────
+
+  @Nested
+  @DisplayName("BlockingQueue instrumentation")
+  class QueueInstrumentation {
+
+    @Test
+    @DisplayName("agent delays BlockingQueue.put() (QUEUE_PUT)")
+    void agentDelaysQueuePut() throws Exception {
+      final ChaosPlan plan =
+          singleScenarioPlan(
+              "queue-put-delay",
+              ChaosSelector.queue(Set.of(OperationType.QUEUE_PUT)),
+              ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
+      final long elapsed = parseElapsed(runProbe(plan, "queue-put-delay"));
+      assertThat(elapsed)
+          .as("QUEUE_PUT delay must add ≥%d ms to put() (got %d ms)", DELAY_MIN_MS, elapsed)
+          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+    }
+
+    @Test
+    @DisplayName("agent delays BlockingQueue.take() (QUEUE_TAKE)")
+    void agentDelaysQueueTake() throws Exception {
+      final ChaosPlan plan =
+          singleScenarioPlan(
+              "queue-take-delay",
+              ChaosSelector.queue(Set.of(OperationType.QUEUE_TAKE)),
+              ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
+      final long elapsed = parseElapsed(runProbe(plan, "queue-take-delay"));
+      assertThat(elapsed)
+          .as("QUEUE_TAKE delay must add ≥%d ms to take() (got %d ms)", DELAY_MIN_MS, elapsed)
+          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+    }
+  }
+
+  // ── CompletableFuture ─────────────────────────────────────────────────────
+
+  @Nested
+  @DisplayName("CompletableFuture instrumentation")
+  class AsyncInstrumentation {
+
+    @Test
+    @DisplayName("agent delays CompletableFuture.complete() (ASYNC_COMPLETE)")
+    void agentDelaysAsyncComplete() throws Exception {
+      final ChaosPlan plan =
+          singleScenarioPlan(
+              "async-complete-delay",
+              ChaosSelector.async(Set.of(OperationType.ASYNC_COMPLETE)),
+              ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
+      final long elapsed = parseElapsed(runProbe(plan, "async-complete-delay"));
+      assertThat(elapsed)
+          .as(
+              "ASYNC_COMPLETE delay must add ≥%d ms to complete() (got %d ms)",
+              DELAY_MIN_MS, elapsed)
+          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+    }
+  }
+
+  // ── JVM runtime ───────────────────────────────────────────────────────────
+
+  @Nested
+  @DisplayName("JVM runtime instrumentation")
+  class JvmRuntimeInstrumentation {
+
+    @Test
+    @DisplayName("agent delays Method.invoke() (REFLECTION_INVOKE)")
+    void agentDelaysReflectionInvoke() throws Exception {
+      final ChaosPlan plan =
+          singleScenarioPlan(
+              "reflection-invoke-delay",
+              ChaosSelector.jvmRuntime(Set.of(OperationType.REFLECTION_INVOKE)),
+              ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
+      final long elapsed = parseElapsed(runProbe(plan, "reflection-invoke-delay"));
+      assertThat(elapsed)
+          .as(
+              "REFLECTION_INVOKE delay must add ≥%d ms to Method.invoke() (got %d ms)",
+              DELAY_MIN_MS, elapsed)
+          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+    }
+
+    @Test
+    @DisplayName("agent delays Deflater.deflate() (ZIP_DEFLATE)")
+    void agentDelaysZipDeflate() throws Exception {
+      final ChaosPlan plan =
+          singleScenarioPlan(
+              "zip-deflate-delay",
+              ChaosSelector.jvmRuntime(Set.of(OperationType.ZIP_DEFLATE)),
+              ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
+      final long elapsed = parseElapsed(runProbe(plan, "zip-deflate-delay"));
+      assertThat(elapsed)
+          .as(
+              "ZIP_DEFLATE delay must add ≥%d ms to Deflater.deflate() (got %d ms)",
+              DELAY_MIN_MS, elapsed)
+          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+    }
+
+    @Test
+    @DisplayName("agent delays Inflater.inflate() (ZIP_INFLATE)")
+    void agentDelaysZipInflate() throws Exception {
+      final ChaosPlan plan =
+          singleScenarioPlan(
+              "zip-inflate-delay",
+              ChaosSelector.jvmRuntime(Set.of(OperationType.ZIP_INFLATE)),
+              ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
+      final long elapsed = parseElapsed(runProbe(plan, "zip-inflate-delay"));
+      assertThat(elapsed)
+          .as(
+              "ZIP_INFLATE delay must add ≥%d ms to Inflater.inflate() (got %d ms)",
+              DELAY_MIN_MS, elapsed)
+          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+    }
+  }
+
+  // ── Thread and monitor ────────────────────────────────────────────────────
+
+  @Nested
+  @DisplayName("Thread and monitor instrumentation")
+  class ThreadingInstrumentation {
+
+    @Test
+    @DisplayName("agent delays Thread.start() (THREAD_START)")
+    void agentDelaysThreadStart() throws Exception {
+      final ChaosPlan plan =
+          singleScenarioPlan(
+              "thread-start-delay",
+              ChaosSelector.thread(
+                  Set.of(OperationType.THREAD_START), ChaosSelector.ThreadKind.ANY),
+              ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
+      final long elapsed = parseElapsed(runProbe(plan, "thread-start-delay"));
+      assertThat(elapsed)
+          .as(
+              "THREAD_START delay must add ≥%d ms to Thread.start() (got %d ms)",
+              DELAY_MIN_MS, elapsed)
+          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+    }
+
+  }
+
+  // ── NIO channels ──────────────────────────────────────────────────────────
+
+  @Nested
+  @DisplayName("NIO channel instrumentation")
+  class NioInstrumentation {
+
+    @Test
+    @DisplayName("agent delays NIO channel read (NIO_CHANNEL_READ)")
+    void agentDelaysNioChannelRead() throws Exception {
+      final ChaosPlan plan =
+          singleScenarioPlan(
+              "nio-read-delay",
+              ChaosSelector.nio(Set.of(OperationType.NIO_CHANNEL_READ)),
+              ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
+      final long elapsed = parseElapsed(runProbe(plan, "nio-read-delay"));
+      assertThat(elapsed)
+          .as(
+              "NIO_CHANNEL_READ delay must add ≥%d ms to channel.read() (got %d ms)",
+              DELAY_MIN_MS, elapsed)
+          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+    }
+
+    @Test
+    @DisplayName("agent delays NIO channel write (NIO_CHANNEL_WRITE)")
+    void agentDelaysNioChannelWrite() throws Exception {
+      final ChaosPlan plan =
+          singleScenarioPlan(
+              "nio-write-delay",
+              ChaosSelector.nio(Set.of(OperationType.NIO_CHANNEL_WRITE)),
+              ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
+      final long elapsed = parseElapsed(runProbe(plan, "nio-write-delay"));
+      assertThat(elapsed)
+          .as(
+              "NIO_CHANNEL_WRITE delay must add ≥%d ms to channel.write() (got %d ms)",
+              DELAY_MIN_MS, elapsed)
+          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+    }
+  }
+
+  // ── ThreadLocal ───────────────────────────────────────────────────────────
+
+  @Nested
+  @DisplayName("ThreadLocal instrumentation")
+  class ThreadLocalInstrumentation {
+
+    @Test
+    @DisplayName("agent delays ThreadLocal.get() (THREAD_LOCAL_GET)")
+    void agentDelaysThreadLocalGet() throws Exception {
+      final ChaosPlan plan =
+          singleScenarioPlan(
+              "thread-local-get-delay",
+              ChaosSelector.threadLocal(Set.of(OperationType.THREAD_LOCAL_GET)),
+              ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
+      final long elapsed = parseElapsed(runProbe(plan, "thread-local-get-delay"));
+      assertThat(elapsed)
+          .as(
+              "THREAD_LOCAL_GET delay must add ≥%d ms to ThreadLocal.get() (got %d ms)",
+              DELAY_MIN_MS, elapsed)
+          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+    }
+  }
+
+  // ── Scheduling ────────────────────────────────────────────────────────────
+
+  @Nested
+  @DisplayName("Scheduling instrumentation")
+  class SchedulingInstrumentation {
+
+    @Test
+    @DisplayName("agent delays ScheduledExecutorService.schedule() (SCHEDULE_SUBMIT)")
+    void agentDelaysScheduleSubmit() throws Exception {
+      final ChaosPlan plan =
+          singleScenarioPlan(
+              "schedule-submit-delay",
+              ChaosSelector.scheduling(Set.of(OperationType.SCHEDULE_SUBMIT)),
+              ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
+      final long elapsed = parseElapsed(runProbe(plan, "schedule-submit-delay"));
+      assertThat(elapsed)
+          .as(
+              "SCHEDULE_SUBMIT delay must add ≥%d ms to schedule() (got %d ms)",
+              DELAY_MIN_MS, elapsed)
+          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+    }
+  }
+
   // ── helpers ──────────────────────────────────────────────────────────────
 
   private ChaosPlan singleScenarioPlan(
