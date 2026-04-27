@@ -39,7 +39,23 @@ class SlaValidationTest {
 
   private static final int WARMUP = 10;
   private static final int ITERATIONS = 30;
-  private static final long STEP_NANOS = Duration.ofMillis(80).toNanos();
+
+  /**
+   * Fixed delay applied per stacked scenario (120 ms). Sized to give the assertion threshold
+   * meaningful absolute headroom over OS scheduler imprecision: macOS {@code mach_wait_until}
+   * commonly returns 1–5 ms early, Windows {@code Thread.sleep} can fall back to ~16 ms timer-tick
+   * granularity. With a 120 ms delay and 96 ms threshold (0.8×), absolute headroom is 24 ms — wide
+   * enough to absorb a single Windows tick or a small GC pause without flaking, while keeping the
+   * full ladder run under ~25 s.
+   */
+  private static final long STEP_NANOS = Duration.ofMillis(120).toNanos();
+
+  /**
+   * Lower bound on the P99 increment we expect per stacked scenario. {@code 0.8 × STEP_NANOS}
+   * mirrors the absorption ratio used in {@code Phase4InstrumentationIntegrationTest.DELAY_MIN_MS}
+   * and accounts for {@code Thread.sleep} returning slightly early on every supported platform.
+   */
+  private static final long STEP_MIN_NANOS = (long) (STEP_NANOS * 0.8);
 
   private static WireMockServer wireMockA;
   private static WireMockServer wireMockB;
@@ -73,11 +89,11 @@ class SlaValidationTest {
    * Verifies that a 40% probabilistic outbound HTTP delay stays within 500 ms of the clean
    * baseline.
    *
-   * <p>Uses {@link OperationType#HTTP_CLIENT_SEND} which fires once per
-   * {@code java.net.http.HttpClient.send(...)} call (the agent self-grants the required JDK module
-   * open at install time, so no {@code --add-opens} JVM flag is required). The fanout service
-   * issues 3 outbound HTTP calls per request, each running in its own virtual thread; with
-   * probability 0.4 each call independently gets a 20–80 ms delay.
+   * <p>Uses {@link OperationType#HTTP_CLIENT_SEND} which fires once per {@code
+   * java.net.http.HttpClient.send(...)} call (the agent self-grants the required JDK module open at
+   * install time, so no {@code --add-opens} JVM flag is required). The fanout service issues 3
+   * outbound HTTP calls per request, each running in its own virtual thread; with probability 0.4
+   * each call independently gets a 20–80 ms delay.
    *
    * <p>The 500 ms budget is relative to the measured baseline so the assertion holds regardless of
    * worker speed.
@@ -87,6 +103,7 @@ class SlaValidationTest {
     final RestClient client = RestClient.create("http://localhost:" + port);
 
     warmup(client);
+    quiesce();
     final long p99Baseline = measureP99(client);
 
     final ChaosActivationHandle handle =
@@ -102,6 +119,7 @@ class SlaValidationTest {
                 .build());
 
     try {
+      quiesce();
       final long p99WithChaos = measureP99(client);
 
       log.info(
@@ -118,50 +136,68 @@ class SlaValidationTest {
   /**
    * Verifies that stacking outbound-HTTP delay scenarios raises P99 additively.
    *
-   * <p>Each scenario injects a fixed 80 ms delay on every {@link OperationType#HTTP_CLIENT_SEND}
-   * across the entire JVM. The fanout service issues 3 parallel HTTP calls per request; because
-   * the calls run on virtual threads in parallel, each stacked scenario adds at least one
-   * additional 80 ms wait to the slowest leg, lifting P99 by at least 80 ms per added scenario.
+   * <p>Each scenario injects a fixed 120 ms delay on every {@link OperationType#HTTP_CLIENT_SEND}
+   * across the entire JVM. The fanout service issues 3 parallel HTTP calls per request; because the
+   * calls run on virtual threads in parallel, each stacked scenario adds one additional 120 ms wait
+   * to the slowest leg, lifting P99 by approximately 120 ms per added scenario.
    *
-   * <p>All assertions are anchored to the single baseline measurement so per-step measurement
-   * noise (GC pauses, scheduler jitter on slow runners) does not compound: if {@code p99_1}
-   * happens to spike, only its own assertion is at risk — {@code p99_2} and {@code p99_3} are
-   * still compared against the stable baseline, not the noisy intermediate measurement.
+   * <p><b>Threshold:</b> assertions use {@link #STEP_MIN_NANOS} (96 ms) rather than the full
+   * configured delay. The chaos agent applies the delay via {@code Thread.sleep(120)}, and OS
+   * scheduler granularity (especially on macOS and Windows) can return slightly under the requested
+   * duration. The 0.8× factor mirrors {@code Phase4InstrumentationIntegrationTest} and gives 24 ms
+   * absolute headroom — large enough to absorb one Windows timer tick or a young-gen GC pause
+   * without producing false negatives.
+   *
+   * <p><b>Per-step quiescence:</b> {@link #quiesce()} is called before every measurement so an
+   * incidental GC pause that happens to fall inside one of the 30-iteration windows does not
+   * inflate that step's P99 above its real value. All assertions are anchored to the single
+   * baseline measurement so per-step measurement noise does not compound.
    */
   @Test
   void graduatedDelayLadderStacksAdditively(final ChaosControlPlane controlPlane) {
     final RestClient client = RestClient.create("http://localhost:" + port);
 
     warmup(client);
+    quiesce();
     final long p99_0 = measureP99(client);
 
     final List<ChaosActivationHandle> handles = new ArrayList<>();
     try {
       handles.add(controlPlane.activate(fixedDelayScenario("delay-1")));
+      quiesce();
       final long p99_1 = measureP99(client);
 
       handles.add(controlPlane.activate(fixedDelayScenario("delay-2")));
+      quiesce();
       final long p99_2 = measureP99(client);
 
       handles.add(controlPlane.activate(fixedDelayScenario("delay-3")));
+      quiesce();
       final long p99_3 = measureP99(client);
 
       log.info(
-          "P99 ladder: 0={}ms  1={}ms  2={}ms  3={}ms",
+          "P99 ladder: 0={}ms  1={}ms  2={}ms  3={}ms  (threshold/step={}ms)",
           p99_0 / 1_000_000,
           p99_1 / 1_000_000,
           p99_2 / 1_000_000,
-          p99_3 / 1_000_000);
+          p99_3 / 1_000_000,
+          STEP_MIN_NANOS / 1_000_000);
 
       assertThat(p99_1)
-          .as("1 delay scenario must raise P99 by at least 80 ms over baseline")
-          .isGreaterThan(p99_0 + STEP_NANOS);
+          .as(
+              "1 delay scenario must raise P99 by at least %d ms over baseline",
+              STEP_MIN_NANOS / 1_000_000)
+          .isGreaterThanOrEqualTo(p99_0 + STEP_MIN_NANOS);
       assertThat(p99_2)
-          .as("2 stacked scenarios must raise P99 by at least 160 ms over baseline")
-          .isGreaterThan(p99_0 + 2 * STEP_NANOS);
+          .as(
+              "2 stacked scenarios must raise P99 by at least %d ms over baseline",
+              2 * STEP_MIN_NANOS / 1_000_000)
+          .isGreaterThanOrEqualTo(p99_0 + 2 * STEP_MIN_NANOS);
       assertThat(p99_3)
-          .as("3 stacked scenarios must raise P99 by at least 240 ms over baseline")
-          .isGreaterThan(p99_0 + 3 * STEP_NANOS);
+          .as(
+              "3 stacked scenarios must raise P99 by at least %d ms over baseline",
+              3 * STEP_MIN_NANOS / 1_000_000)
+          .isGreaterThanOrEqualTo(p99_0 + 3 * STEP_MIN_NANOS);
     } finally {
       handles.forEach(ChaosActivationHandle::stop);
     }
@@ -190,11 +226,30 @@ class SlaValidationTest {
   }
 
   private static ChaosScenario fixedDelayScenario(final String id) {
+    final long stepMs = STEP_NANOS / 1_000_000;
     return ChaosScenario.builder(id)
         .scope(ScenarioScope.JVM)
         .selector(ChaosSelector.httpClient(Set.of(OperationType.HTTP_CLIENT_SEND)))
-        .effect(ChaosEffect.delay(Duration.ofMillis(80), Duration.ofMillis(80)))
+        .effect(ChaosEffect.delay(Duration.ofMillis(stepMs), Duration.ofMillis(stepMs)))
         .activationPolicy(ActivationPolicy.always())
         .build();
+  }
+
+  /**
+   * Best-effort quiescence between P99 measurements: triggers GC three times with short pauses so
+   * deferred collections do not land inside the next 30-iteration window and inflate its P99.
+   * {@code System.gc()} is a hint only; three rounds with 50 ms gaps gives G1 / ZGC enough time to
+   * actually run on every supported JDK. Cost: ~150 ms per call, ~600 ms total for the ladder.
+   */
+  private static void quiesce() {
+    for (int i = 0; i < 3; i++) {
+      System.gc();
+      try {
+        Thread.sleep(50);
+      } catch (final InterruptedException interrupted) {
+        Thread.currentThread().interrupt();
+        return;
+      }
+    }
   }
 }
