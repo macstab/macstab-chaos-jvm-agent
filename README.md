@@ -1053,14 +1053,18 @@ This three-repo stack — `chaos-testing-java-agent`, [`chaos-testing`](https://
 
 ### Timeline
 
-| Year | What I was shipping |
-|---|---|
-| **1984** *(age 10)* | 6502 assembler on the Commodore 64 |
-| **1989** *(age 15)* | International demoscene — active in **Razor 1911**, **Sanity**, **Anthrox**, **Incal**, **Quartex**; multiple demo-competition wins with my groups |
-| **1990** | x86 assembler + C / C++ on PC. Part-time at German game studios (**Software 2000**, **Rainbow Arts**) and short stints at studios in Birmingham, UK — shipping on cartridges and floppies, where there was no patch button |
-| **1996** | Transitioned to business / enterprise software engineering — the arc that runs to today |
-| **2002** | Python — 24 years and counting |
-| **~2015** | Go — distributed-system internals, network programming |
+| Year                     | What I was shipping                                                                                                                                                                                                        |
+|--------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **1984** *(age 10)*      | 6502 assembler on the Commodore 64                                                                                                                                                                                         |
+| **1987** *(age 14)*      | Motorola 68000 (M68k) assembler / C on the Commodore Amiga                                                                                                                                                                 |
+| **1989** *(from age 15)* | International demoscene — active in **Razor 1911**, **Sanity**, **Anthrox**, **Incal**; multiple demo-competition wins with my groups                                                                                      |
+| **1990**                 | x86 assembler + C / C++ on PC. Part-time at German game studios (**Software 2000**, **Rainbow Arts**) and short stints at studios in Birmingham, UK — shipping on cartridges and floppies, where there was no patch button |
+| **1996**                 | Transitioned to business / enterprise software engineering — the arc that runs to today                                                                                                                                    |
+| **1996**                 | Java — since 1.0, 30 years and counting                                                                                                                                                                                    |
+| **2002**                 | Python — 24 years and counting                                                                                                                                                                                             |
+| **2013**                 | Docker — since first release; production use across enterprise stacks                                                                                                                                                      |
+| **~2015**                | Go — distributed-system internals, network programming                                                                                                                                                                     |
+| **~2014**                | Kubernetes                                                                                                                                                                                                                 |
 
 **Diplom Informatiker** — German pre-Bologna 5-year computer-science degree, equivalent to a master's. 42 years of programming, 36 years of professional systems work, 30 years of enterprise software, 24 of Python, 10 of Go.
 
