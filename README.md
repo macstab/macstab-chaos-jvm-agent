@@ -92,9 +92,10 @@ Three repos, one mental model: **the same selector × effect × policy DSL spans
 ---
 
 <!-- TOC -->
-* [macstab-chaos-jvm-agent](#macstab-chaos-jvm-agent)
+* [chaos-testing-java-agent](#chaos-testing-java-agent)
   * [The Short Version](#the-short-version)
-  * [Part of a Three-Layer Chaos Engineering Family](#part-of-a-three-layer-chaos-engineering-family)
+    * [What questions does it answer?](#what-questions-does-it-answer)
+  * [Part of a Three-Layer Chaos Engineering Stack](#part-of-a-three-layer-chaos-engineering-stack)
   * [Floor 0 — What it does (plain English)](#floor-0--what-it-does-plain-english)
   * [Floor -1 — Architecture (senior engineer territory)](#floor--1--architecture-senior-engineer-territory)
   * [Floor -2 — Runtime mechanics (principal-level)](#floor--2--runtime-mechanics-principal-level)
@@ -118,6 +119,11 @@ Three repos, one mental model: **the same selector × effect × policy DSL spans
   * [Selectors — Full Reference](#selectors--full-reference)
   * [Effects — Full Reference](#effects--full-reference)
     * [Choosing an effect](#choosing-an-effect)
+      * [Latency and timing](#latency-and-timing)
+      * [Errors and failure handling](#errors-and-failure-handling)
+      * [Resource pressure (background stressors)](#resource-pressure-background-stressors)
+      * [Threading and concurrency](#threading-and-concurrency)
+      * [JVM-wide pause pressure](#jvm-wide-pause-pressure)
     * [Inline effects (execute on the calling thread)](#inline-effects-execute-on-the-calling-thread)
     * [Background stressor effects](#background-stressor-effects)
   * [Activation Policy](#activation-policy)
@@ -145,6 +151,10 @@ Three repos, one mental model: **the same selector × effect × policy DSL spans
   * [Build](#build)
   * [Detailed Documentation](#detailed-documentation)
   * [License](#license)
+  * [About the Engineer](#about-the-engineer)
+    * [Timeline](#timeline)
+    * [Specific evidence in this project](#specific-evidence-in-this-project)
+    * [Available for senior engineering engagements](#available-for-senior-engineering-engagements)
 <!-- TOC -->
 
 ---
@@ -1043,15 +1053,18 @@ This three-repo stack — `chaos-testing-java-agent`, [`chaos-testing`](https://
 
 ### Timeline
 
-| Year | What I started shipping |
+| Year | What I was shipping |
 |---|---|
 | **1984** *(age 10)* | 6502 assembler on the Commodore 64 |
-| **1990** | x86 assembler and C / C++ on PC — the toolchain that built every system below |
+| **1989** *(age 15)* | International demoscene — active in **Razor 1911**, **Sanity**, **Anthrox**, **Incal**, **Quartex**; multiple demo-competition wins with my groups |
+| **1990** | x86 assembler + C / C++ on PC. Part-time at German game studios (**Software 2000**, **Rainbow Arts**) and short stints at studios in Birmingham, UK — shipping on cartridges and floppies, where there was no patch button |
+| **1996** | Transitioned to business / enterprise software engineering — the arc that runs to today |
 | **2002** | Python — 24 years and counting |
 | **~2015** | Go — distributed-system internals, network programming |
-| **today** | 42 years of programming, 36 years of professional systems work, 24 of Python, 10 of Go |
 
-The depth shown in this project — JVMTI re-entrancy debugging on JDK 25, `@IntrinsicCandidate` JIT bypass analysis for the clock-skew limitation, ByteBuddy advice composition with `disableClassFormatChanges()`, the post-install retransform pass for classes that escape `installOn()`, the agent self-granting JDK module opens via manifest *and* `Instrumentation.redefineModule` — comes from a career that started with peeking memory addresses on a C64 and never stopped doing systems work at that level. **Principal-engineer titles are job descriptions; assembler at 10 is a starting line.**
+**Diplom Informatiker** — German pre-Bologna 5-year computer-science degree, equivalent to a master's. 42 years of programming, 36 years of professional systems work, 30 years of enterprise software, 24 of Python, 10 of Go.
+
+The depth shown in this project — JVMTI re-entrancy debugging on JDK 25, `@IntrinsicCandidate` JIT bypass analysis for the clock-skew limitation, ByteBuddy advice composition with `disableClassFormatChanges()`, the post-install retransform pass for classes that escape `installOn()`, the agent self-granting JDK module opens via manifest *and* `Instrumentation.redefineModule` — comes from a path that started with peeking C64 memory at 10, ran through the demoscene where every cycle counted on the wire, through game studios that shipped on cartridges with no recall option, and then 30 years of production enterprise software. Most engineers enter at the framework layer and look down. **This stack reads from below.** Principal-engineer titles are job descriptions; assembler at 10, the demoscene at 15, and shipping for game studios at 16 — that is a starting line.
 
 ### Specific evidence in this project
 
