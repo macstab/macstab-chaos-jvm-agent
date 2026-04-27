@@ -222,6 +222,8 @@ public record ActivationPolicy(
   public record RateLimit(long permits, Duration window) {
 
     /**
+     * Validates the rate-limit parameters.
+     *
      * @param permits maximum effect applications allowed within one {@code window}; must be {@code
      *     > 0}
      * @param window rolling window duration; must be positive

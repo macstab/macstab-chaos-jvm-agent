@@ -59,6 +59,7 @@ public record ChaosScenario(
     int precedence,
     Map<String, String> tags) {
 
+  /** Validates and normalises the ChaosScenario fields. */
   public ChaosScenario {
     if (id == null || id.isBlank()) {
       throw new IllegalArgumentException("id must be non-blank");
@@ -94,6 +95,7 @@ public record ChaosScenario(
    * Returns a new {@link Builder} seeded with the given scenario ID.
    *
    * @param id unique identifier for this scenario; used in diagnostics, JMX, JFR events, and logs
+   * @return a new builder for this scenario ID
    */
   public static Builder builder(final String id) {
     return new Builder(id);
@@ -243,6 +245,7 @@ public record ChaosScenario(
     /**
      * Builds the scenario.
      *
+     * @return the constructed ChaosScenario
      * @throws IllegalArgumentException if selector or effect is null
      */
     public ChaosScenario build() {

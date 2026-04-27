@@ -19,7 +19,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * "no URL filter will match" which matches the {@link com.macstab.chaos.jvm.api.NamePattern#any()}
  * selector default.
  */
-final class HttpUrlExtractor {
+public final class HttpUrlExtractor {
 
   // ClassValue keyed on the actual Class (not just its name) so two okhttp3.RealCall
   // classes from different classloaders each get their own per-method cache; a shared
@@ -61,7 +61,7 @@ final class HttpUrlExtractor {
    * @param request the {@code HttpRequest} instance; may be {@code null}
    * @return the URL string, or {@code null} if extraction fails
    */
-  static String fromJavaHttpRequest(final Object request) {
+  public static String fromJavaHttpRequest(final Object request) {
     if (request == null) {
       return null;
     }
@@ -79,7 +79,7 @@ final class HttpUrlExtractor {
    * @param call the {@code okhttp3.Call} instance; may be {@code null}
    * @return the URL string, or {@code null} if extraction fails
    */
-  static String fromOkHttpCall(final Object call) {
+  public static String fromOkHttpCall(final Object call) {
     if (call == null) {
       return null;
     }
@@ -103,7 +103,7 @@ final class HttpUrlExtractor {
    * @param request an {@code org.apache.http.HttpRequest} instance; may be {@code null}
    * @return the combined URL string, or {@code null} if extraction fails
    */
-  static String fromApacheHc4Request(final Object host, final Object request) {
+  public static String fromApacheHc4Request(final Object host, final Object request) {
     try {
       final String hostPart = host == null ? "" : host.toString();
       final String requestPath = extractApacheHc4RequestPath(request);
@@ -135,7 +135,7 @@ final class HttpUrlExtractor {
    *     {@code null}
    * @return the URL string, or {@code null} if extraction fails
    */
-  static String fromApacheHc4UriRequest(final Object request) {
+  public static String fromApacheHc4UriRequest(final Object request) {
     if (request == null) {
       return null;
     }
@@ -167,7 +167,7 @@ final class HttpUrlExtractor {
    *     null}
    * @return the URI string, or {@code null} if extraction fails
    */
-  static String fromApacheHc5Request(final Object request) {
+  public static String fromApacheHc5Request(final Object request) {
     if (request == null) {
       return null;
     }
@@ -198,7 +198,7 @@ final class HttpUrlExtractor {
    *     null}
    * @return the URL string, or {@code null} if extraction fails
    */
-  static String fromReactorNettyRequest(final Object request) {
+  public static String fromReactorNettyRequest(final Object request) {
     if (request == null) {
       return null;
     }

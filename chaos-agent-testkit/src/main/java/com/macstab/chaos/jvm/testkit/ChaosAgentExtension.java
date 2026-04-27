@@ -61,6 +61,10 @@ import org.junit.jupiter.api.extension.ParameterResolver;
  */
 public final class ChaosAgentExtension
     implements BeforeEachCallback, AfterEachCallback, ParameterResolver {
+
+  /** Creates a new ChaosAgentExtension. */
+  public ChaosAgentExtension() {}
+
   private static final ExtensionContext.Namespace NAMESPACE =
       ExtensionContext.Namespace.create(ChaosAgentExtension.class);
 

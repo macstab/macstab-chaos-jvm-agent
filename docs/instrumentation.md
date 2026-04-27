@@ -60,6 +60,27 @@ Out of scope:
 
 **The classloader problem**: JDK classes are loaded by the bootstrap classloader. Advice woven into JDK methods executes in whatever classloader loaded the JDK class — the bootstrap classloader, which cannot see agent-classloader classes by name. The bootstrap bridge solves this by placing `BootstrapDispatcher` in the bootstrap classpath so JDK-loaded advice can call it as a static method, then routing to agent-classloader code via `MethodHandle`.
 
+## Module access strategy
+
+The agent reflects into and instruments classes in non-exported JDK internal packages. Rather than asking users to add `--add-opens` JVM flags, the agent self-grants every required open at install time. Two mechanisms combined cover all attach paths:
+
+| Attach path | Mechanism | Where |
+|---|---|---|
+| `-javaagent:` (premain at JVM startup) | `Add-Opens` attribute in agent JAR `MANIFEST.MF` | `chaos-agent-bootstrap/build.gradle.kts` |
+| `agentmain` / dynamic attach / `ByteBuddyAgent.install()` (runtime self-attach) | `Instrumentation.redefineModule(module, …, opens=…)` | `JdkInstrumentationInstaller#grantInternalModuleOpens`, called as the first step of `install(...)` |
+
+Both mechanisms grant the same set of opens to the unnamed module of the system classloader (matching `=ALL-UNNAMED`):
+
+| Module / package | Why the agent needs it |
+|---|---|
+| `java.net.http/jdk.internal.net.http` | Transform `HttpClientImpl.send(...)` / `sendAsync(...)` for `HTTP_CLIENT_SEND[_ASYNC]` chaos. |
+| `java.base/jdk.internal.misc` | Attach API support paths on JDK 21+. |
+| `java.base/jdk.internal.loader` | Transform `NativeLibraries.load(...)` for `NATIVE_LIBRARY_LOAD` chaos. |
+| `java.base/sun.nio.ch` | `DirectBuffer.cleaner()` reflection (`DirectBufferPressureStressor`). |
+| `java.base/jdk.internal.ref` | Modern `Cleaner` mechanism (Java 9+ replacement for `sun.misc.Cleaner`). |
+
+**Adding a new internal**: when a new feature requires access to another non-exported package, add it to **both** the manifest in `chaos-agent-bootstrap/build.gradle.kts` and the list inside `JdkInstrumentationInstaller#grantInternalModuleOpens`. Same pattern applies if a new advice class references additional helper types: those types must be injected into the bootstrap classloader from `injectBridge(...)` (see `ChaosHttpSuppressException` and `HttpUrlExtractor` for prior art).
+
 ---
 
 # 3. Key Concepts and Terminology
@@ -583,23 +604,12 @@ The OkHttp, Apache HC 4.x, Apache HC 5.x, and Reactor Netty transformations are 
 
 ## 12.6 The Java 11 `HttpClientImpl` Limitation
 
-The advice classes include `JavaHttpClientSendAdvice` and `JavaHttpClientSendAsyncAdvice` targeting `jdk.internal.net.http.HttpClientImpl.send(...)` and `sendAsync(...)`. These are present in the source and in `HttpClientAdvice.java`. They are deliberately **not** wired in `JdkInstrumentationInstaller`.
+The advice classes `JavaHttpClientSendAdvice` and `JavaHttpClientSendAsyncAdvice` target `jdk.internal.net.http.HttpClientImpl.send(...)` and `sendAsync(...)`. They are wired in `JdkInstrumentationInstaller#applyPhase2HttpClientInterception` alongside OkHttp, Apache HC 4/5, and Reactor Netty.
 
-The comment in `JdkInstrumentationInstaller` at the HTTP wiring block captures the investigation result verbatim. The concrete problem is this: `jdk.internal.net.http.HttpClientImpl` lives in the non-exported package `jdk.internal.net.http` inside the `java.net.http` module. ByteBuddy's `AgentBuilder` uses a single `AgentBuilder.Default` instance with `RETRANSFORMATION` strategy. When a transformation for `HttpClientImpl` is registered in the same `AgentBuilder` pass as the rest of Phase 2 transformations, the retransformation serialization step that ByteBuddy performs before calling `instrumentation.retransformClasses(...)` encounters the module-system restriction. ByteBuddy issues a transformation attempt for the class, which the JVM processes, but the side effect is that previously-queued retransformations for other classes in the same batch — specifically the Phase 2 JDK classes that were registered before the `HttpClientImpl` entry — have their advice silently dropped. The transformation of `Thread`, `LockSupport`, `System`, socket classes, and others fires (the `TRANSFORM` event is raised) but the instrumented bytecode is not retained by the JVM for the affected classes.
+`jdk.internal.net.http.HttpClientImpl` lives in the non-exported package `jdk.internal.net.http` inside the `java.net.http` module. The agent self-grants the required reflective open at install time — see [Module access strategy](#module-access-strategy) — so users never need to set `--add-opens` JVM flags. Two pieces are involved:
 
-The root cause is ByteBuddy's retransformation ordering: when a class in the batch lives in a non-opened module package, the JVM's retransformation serialization can interfere with the class file substitution pipeline for the entire batch. Classes that would be correctly transformed in isolation fail to hold their new bytecode when the bootstrap-adjacent `HttpClientImpl` transformation is included in the same `AgentBuilder` call.
-
-Empirical validation: an `AgentBuilder` with `enableNativeMethodPrefix("$chaos$")` plus a second standalone `AgentBuilder` installing `HttpClientImpl` was tested. The second builder issued the transformation in isolation. Woven advice fired correctly for `HttpClientImpl.send()`. The standalone builder approach with `--add-opens java.net.http/jdk.internal.net.http=ALL-UNNAMED` is the correct path to Java 11 `HttpClient` interception. This is noted in the codebase comment:
-
-```
-// Java 11+ HttpClient (jdk.internal.net.http.HttpClientImpl) is NOT registered via
-// instrumentOptional here. That class is always present on JDK 11+, but it lives in the
-// non-exported java.net.http/jdk.internal.net.http package. Attempting to transform it
-// without --add-opens java.net.http/jdk.internal.net.http=ALL-UNNAMED silently corrupts
-// subsequent AgentBuilder transformations.
-```
-
-Until a dedicated `AgentBuilder` pass is implemented with the correct `--add-opens` flag, applications using `java.net.http.HttpClient` are not intercepted by the agent's HTTP layer.
+1. **Module open** — `Instrumentation#redefineModule(...)` is called from `JdkInstrumentationInstaller#grantInternalModuleOpens` as the first step of `install`, and the agent JAR's `MANIFEST.MF` carries an `Add-Opens` line for the same packages (the manifest attribute is honoured on `-javaagent:` premain attach; `redefineModule` covers `agentmain` / runtime self-attach).
+2. **Bootstrap-classpath types** — types referenced by woven advice (`ChaosHttpSuppressException`, `HttpUrlExtractor`) are injected into the bootstrap classloader's classpath alongside `BootstrapDispatcher`. Without this the JVM verifier raises `NoClassDefFoundError` because `HttpClientImpl` is loaded by the platform classloader and cannot resolve agent-classloader types directly.
 
 ## 12.7 URL Pattern Matching in `SelectorMatcher`
 

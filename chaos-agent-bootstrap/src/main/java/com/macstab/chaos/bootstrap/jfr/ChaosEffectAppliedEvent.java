@@ -29,6 +29,9 @@ import jdk.jfr.StackTrace;
 @Enabled(false)
 public final class ChaosEffectAppliedEvent extends Event {
 
+  /** Creates a new ChaosEffectAppliedEvent. */
+  public ChaosEffectAppliedEvent() {}
+
   /** ID of the chaos scenario that matched and triggered this effect. */
   @Label("Scenario ID")
   public String scenarioId;

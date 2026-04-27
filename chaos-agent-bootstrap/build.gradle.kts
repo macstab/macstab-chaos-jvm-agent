@@ -9,6 +9,12 @@ dependencies {
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.assertj)
     testImplementation(libs.mockito.core)
+    // Compile-only: these JARs must not appear on the general fork-probe classpath because the
+    // agent's JDBC retransformation of their Statement subtypes interferes with other instrumentation
+    // (e.g. executor hooks). JDBC-specific probes extend the child-JVM classpath via the
+    // chaos.test.jdbcClasspath system property (set below in tasks.test).
+    testCompileOnly(libs.h2)
+    testCompileOnly(libs.hikari.cp)
 }
 
 tasks.jar {
@@ -23,6 +29,18 @@ tasks.jar {
             "Can-Redefine-Classes" to "true",
             "Can-Retransform-Classes" to "true",
             "Can-Set-Native-Method-Prefix" to "true",
+            // Self-grant access to JDK internals the agent instruments / reflects into.
+            // Honoured by the JVM only on -javaagent: (premain) attach; the runtime self-attach
+            // path (ChaosAgentBootstrap#installForLocalTests / agentmain) grants the same opens
+            // programmatically via Instrumentation#redefineModule in JdkInstrumentationInstaller.
+            // See docs/instrumentation.md "Module access strategy".
+            "Add-Opens" to listOf(
+                "java.net.http/jdk.internal.net.http",   // HttpClientImpl.send / sendAsync interception
+                "java.base/jdk.internal.misc",           // Attach API support paths on JDK 21+
+                "java.base/jdk.internal.loader",         // NativeLibraries.load instrumentation
+                "java.base/sun.nio.ch",                  // DirectBuffer.cleaner() reflection (DirectBufferPressureStressor)
+                "java.base/jdk.internal.ref",            // Modern Cleaner mechanism (Java 9+ replacement for sun.misc.Cleaner)
+            ).joinToString(" "),
         )
     }
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
@@ -43,4 +61,11 @@ tasks.jar {
 tasks.test {
     dependsOn(tasks.jar)
     systemProperty("chaos.bootstrap.agentJar", tasks.jar.flatMap { it.archiveFile }.get().asFile.absolutePath)
+
+    // Expose the H2 and HikariCP JAR paths so JDBC fork-probes can extend their child-JVM
+    // classpath without polluting the general test classpath (see testCompileOnly above).
+    val jdbcClasspath = configurations["testCompileClasspath"].resolvedConfiguration.resolvedArtifacts
+        .filter { it.name in listOf("h2", "HikariCP", "slf4j-api") }
+        .joinToString(File.pathSeparator) { it.file.absolutePath }
+    systemProperty("chaos.test.jdbcClasspath", jdbcClasspath)
 }

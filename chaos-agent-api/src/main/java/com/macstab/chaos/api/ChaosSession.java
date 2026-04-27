@@ -40,12 +40,16 @@ public interface ChaosSession extends AutoCloseable {
   /**
    * Returns the unique identifier of this session. Used as a filter key in session-scoped scenario
    * evaluation.
+   *
+   * @return the unique session ID
    */
   String id();
 
   /**
    * Returns the human-readable display name provided when the session was opened. Used in
    * diagnostics and log messages.
+   *
+   * @return the session display name
    */
   String displayName();
 

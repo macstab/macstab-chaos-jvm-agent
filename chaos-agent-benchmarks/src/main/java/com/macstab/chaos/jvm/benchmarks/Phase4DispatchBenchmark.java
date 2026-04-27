@@ -55,6 +55,9 @@ import org.openjdk.jmh.infra.Blackhole;
 @Fork(1)
 public class Phase4DispatchBenchmark {
 
+  /** Creates a new benchmark instance (invoked reflectively by JMH). */
+  public Phase4DispatchBenchmark() {}
+
   private static final Duration ZERO_DELAY = Duration.ofMillis(0);
   private static final ActivationPolicy ONE_SHOT_POLICY =
       new ActivationPolicy(
@@ -71,6 +74,9 @@ public class Phase4DispatchBenchmark {
   /** State with the runtime installed but no active scenarios — measures pure dispatch overhead. */
   @State(Scope.Benchmark)
   public static class ZeroScenariosState {
+    /** Creates a new state instance (invoked reflectively by JMH). */
+    public ZeroScenariosState() {}
+
     ChaosRuntime runtime;
     ChaosDispatcher dispatcher;
 
@@ -93,6 +99,9 @@ public class Phase4DispatchBenchmark {
    */
   @State(Scope.Benchmark)
   public static class OneScenarioNoMatchState {
+    /** Creates a new state instance (invoked reflectively by JMH). */
+    public OneScenarioNoMatchState() {}
+
     ChaosRuntime runtime;
     ChaosDispatcher dispatcher;
 
@@ -128,10 +137,17 @@ public class Phase4DispatchBenchmark {
    */
   @State(Scope.Benchmark)
   public static class FourScenariosExhaustedState {
+    /** Creates a new state instance (invoked reflectively by JMH). */
+    public FourScenariosExhaustedState() {}
+
     ChaosRuntime runtime;
     ChaosDispatcher dispatcher;
 
-    /** Registers and immediately consumes the four matching scenarios before the trial. */
+    /**
+     * Registers and immediately consumes the four matching scenarios before the trial.
+     *
+     * @throws Throwable if any dispatcher call surfaces an unexpected failure during setup
+     */
     @Setup(Level.Trial)
     public void setup() throws Throwable {
       runtime = new ChaosRuntime();
@@ -188,13 +204,25 @@ public class Phase4DispatchBenchmark {
 
   // ── Thread.sleep ─────────────────────────────────────────────────────────
 
-  /** Measures {@code beforeThreadSleep} dispatch overhead with zero active scenarios. */
+  /**
+   * Measures {@code beforeThreadSleep} dispatch overhead with zero active scenarios.
+   *
+   * @param state the benchmark state holding the runtime and dispatcher
+   * @return the dispatcher's decision whether the sleep should be suppressed
+   * @throws Throwable if the dispatcher surfaces an unexpected failure
+   */
   @Benchmark
   public boolean threadSleep_zeroScenarios(ZeroScenariosState state) throws Throwable {
     return state.dispatcher.beforeThreadSleep(SLEEP_DURATION_MILLIS);
   }
 
-  /** Measures {@code beforeThreadSleep} dispatch overhead with one non-matching scenario active. */
+  /**
+   * Measures {@code beforeThreadSleep} dispatch overhead with one non-matching scenario active.
+   *
+   * @param state the benchmark state holding the runtime and dispatcher
+   * @return the dispatcher's decision whether the sleep should be suppressed
+   * @throws Throwable if the dispatcher surfaces an unexpected failure
+   */
   @Benchmark
   public boolean threadSleep_oneScenarioNoMatch(OneScenarioNoMatchState state) throws Throwable {
     return state.dispatcher.beforeThreadSleep(SLEEP_DURATION_MILLIS);
@@ -202,6 +230,10 @@ public class Phase4DispatchBenchmark {
 
   /**
    * Measures {@code beforeThreadSleep} dispatch overhead against four exhausted matching scenarios.
+   *
+   * @param state the benchmark state holding the runtime and dispatcher
+   * @return the dispatcher's decision whether the sleep should be suppressed
+   * @throws Throwable if the dispatcher surfaces an unexpected failure
    */
   @Benchmark
   public boolean threadSleep_fourScenariosExhausted(FourScenariosExhaustedState state)
@@ -211,14 +243,26 @@ public class Phase4DispatchBenchmark {
 
   // ── DNS resolve ──────────────────────────────────────────────────────────
 
-  /** Measures {@code beforeDnsResolve} dispatch overhead with zero active scenarios. */
+  /**
+   * Measures {@code beforeDnsResolve} dispatch overhead with zero active scenarios.
+   *
+   * @param state the benchmark state holding the runtime and dispatcher
+   * @param bh the JMH blackhole used to consume results
+   * @throws Throwable if the dispatcher surfaces an unexpected failure
+   */
   @Benchmark
   public void dnsResolve_zeroScenarios(ZeroScenariosState state, Blackhole bh) throws Throwable {
     state.dispatcher.beforeDnsResolve(DNS_HOSTNAME);
     bh.consume(state);
   }
 
-  /** Measures {@code beforeDnsResolve} dispatch overhead with one non-matching scenario active. */
+  /**
+   * Measures {@code beforeDnsResolve} dispatch overhead with one non-matching scenario active.
+   *
+   * @param state the benchmark state holding the runtime and dispatcher
+   * @param bh the JMH blackhole used to consume results
+   * @throws Throwable if the dispatcher surfaces an unexpected failure
+   */
   @Benchmark
   public void dnsResolve_oneScenarioNoMatch(OneScenarioNoMatchState state, Blackhole bh)
       throws Throwable {
@@ -228,6 +272,10 @@ public class Phase4DispatchBenchmark {
 
   /**
    * Measures {@code beforeDnsResolve} dispatch overhead against four exhausted matching scenarios.
+   *
+   * @param state the benchmark state holding the runtime and dispatcher
+   * @param bh the JMH blackhole used to consume results
+   * @throws Throwable if the dispatcher surfaces an unexpected failure
    */
   @Benchmark
   public void dnsResolve_fourScenariosExhausted(FourScenariosExhaustedState state, Blackhole bh)
@@ -238,7 +286,13 @@ public class Phase4DispatchBenchmark {
 
   // ── SSL/TLS handshake ────────────────────────────────────────────────────
 
-  /** Measures {@code beforeSslHandshake} dispatch overhead with zero active scenarios. */
+  /**
+   * Measures {@code beforeSslHandshake} dispatch overhead with zero active scenarios.
+   *
+   * @param state the benchmark state holding the runtime and dispatcher
+   * @param bh the JMH blackhole used to consume results
+   * @throws Throwable if the dispatcher surfaces an unexpected failure
+   */
   @Benchmark
   public void sslHandshake_zeroScenarios(ZeroScenariosState state, Blackhole bh) throws Throwable {
     state.dispatcher.beforeSslHandshake(null);
@@ -247,6 +301,10 @@ public class Phase4DispatchBenchmark {
 
   /**
    * Measures {@code beforeSslHandshake} dispatch overhead with one non-matching scenario active.
+   *
+   * @param state the benchmark state holding the runtime and dispatcher
+   * @param bh the JMH blackhole used to consume results
+   * @throws Throwable if the dispatcher surfaces an unexpected failure
    */
   @Benchmark
   public void sslHandshake_oneScenarioNoMatch(OneScenarioNoMatchState state, Blackhole bh)
@@ -258,6 +316,10 @@ public class Phase4DispatchBenchmark {
   /**
    * Measures {@code beforeSslHandshake} dispatch overhead against four exhausted matching
    * scenarios.
+   *
+   * @param state the benchmark state holding the runtime and dispatcher
+   * @param bh the JMH blackhole used to consume results
+   * @throws Throwable if the dispatcher surfaces an unexpected failure
    */
   @Benchmark
   public void sslHandshake_fourScenariosExhausted(FourScenariosExhaustedState state, Blackhole bh)
@@ -268,7 +330,13 @@ public class Phase4DispatchBenchmark {
 
   // ── File I/O read ─────────────────────────────────────────────────────────
 
-  /** Measures {@code beforeFileIo(FILE_IO_READ)} dispatch overhead with zero active scenarios. */
+  /**
+   * Measures {@code beforeFileIo(FILE_IO_READ)} dispatch overhead with zero active scenarios.
+   *
+   * @param state the benchmark state holding the runtime and dispatcher
+   * @param bh the JMH blackhole used to consume results
+   * @throws Throwable if the dispatcher surfaces an unexpected failure
+   */
   @Benchmark
   public void fileIoRead_zeroScenarios(ZeroScenariosState state, Blackhole bh) throws Throwable {
     state.dispatcher.beforeFileIo(FILE_IO_READ_OPERATION, null);
@@ -278,6 +346,10 @@ public class Phase4DispatchBenchmark {
   /**
    * Measures {@code beforeFileIo(FILE_IO_READ)} dispatch overhead with one non-matching scenario
    * active.
+   *
+   * @param state the benchmark state holding the runtime and dispatcher
+   * @param bh the JMH blackhole used to consume results
+   * @throws Throwable if the dispatcher surfaces an unexpected failure
    */
   @Benchmark
   public void fileIoRead_oneScenarioNoMatch(OneScenarioNoMatchState state, Blackhole bh)
@@ -289,6 +361,10 @@ public class Phase4DispatchBenchmark {
   /**
    * Measures {@code beforeFileIo(FILE_IO_READ)} dispatch overhead against four exhausted matching
    * scenarios.
+   *
+   * @param state the benchmark state holding the runtime and dispatcher
+   * @param bh the JMH blackhole used to consume results
+   * @throws Throwable if the dispatcher surfaces an unexpected failure
    */
   @Benchmark
   public void fileIoRead_fourScenariosExhausted(FourScenariosExhaustedState state, Blackhole bh)
@@ -299,7 +375,13 @@ public class Phase4DispatchBenchmark {
 
   // ── File I/O write ────────────────────────────────────────────────────────
 
-  /** Measures {@code beforeFileIo(FILE_IO_WRITE)} dispatch overhead with zero active scenarios. */
+  /**
+   * Measures {@code beforeFileIo(FILE_IO_WRITE)} dispatch overhead with zero active scenarios.
+   *
+   * @param state the benchmark state holding the runtime and dispatcher
+   * @param bh the JMH blackhole used to consume results
+   * @throws Throwable if the dispatcher surfaces an unexpected failure
+   */
   @Benchmark
   public void fileIoWrite_zeroScenarios(ZeroScenariosState state, Blackhole bh) throws Throwable {
     state.dispatcher.beforeFileIo(FILE_IO_WRITE_OPERATION, null);
@@ -309,6 +391,10 @@ public class Phase4DispatchBenchmark {
   /**
    * Measures {@code beforeFileIo(FILE_IO_WRITE)} dispatch overhead with one non-matching scenario
    * active.
+   *
+   * @param state the benchmark state holding the runtime and dispatcher
+   * @param bh the JMH blackhole used to consume results
+   * @throws Throwable if the dispatcher surfaces an unexpected failure
    */
   @Benchmark
   public void fileIoWrite_oneScenarioNoMatch(OneScenarioNoMatchState state, Blackhole bh)
@@ -320,6 +406,10 @@ public class Phase4DispatchBenchmark {
   /**
    * Measures {@code beforeFileIo(FILE_IO_WRITE)} dispatch overhead against four exhausted matching
    * scenarios.
+   *
+   * @param state the benchmark state holding the runtime and dispatcher
+   * @param bh the JMH blackhole used to consume results
+   * @throws Throwable if the dispatcher surfaces an unexpected failure
    */
   @Benchmark
   public void fileIoWrite_fourScenariosExhausted(FourScenariosExhaustedState state, Blackhole bh)

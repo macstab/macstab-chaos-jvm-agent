@@ -9,16 +9,34 @@
 
 <div align="center">
 
-# macstab-chaos-jvm-agent
+# chaos-testing-java-agent
 
-**In-process JVM chaos engineering — bytecode-level fault injection with zero application changes**
+**Pipeline-grade chaos engineering for the JVM. The failures that page your on-call become commits that fail in PR review.**
 
 [![Java 21+](https://img.shields.io/badge/Java-21%2B-blue.svg)](https://openjdk.org/projects/jdk/21/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-green.svg)](LICENSE)
 [![ByteBuddy](https://img.shields.io/badge/ByteBuddy-instrumentation-orange.svg)](https://bytebuddy.net/)
+[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3%20%26%204-6DB33F.svg)](https://spring.io/projects/spring-boot)
+[![Quarkus](https://img.shields.io/badge/Quarkus-supported-4695EB.svg)](https://quarkus.io/)
+[![Micronaut](https://img.shields.io/badge/Micronaut-supported-1A1A1A.svg)](https://micronaut.io/)
 
 *Designed and engineered by* **[Christian Schnapka](https://macstab.com)** —
-Embedded Principal+ Engineer · [Macstab GmbH](https://macstab.com) · Hamburg, Germany
+Principal+ Engineer · [Macstab GmbH](https://macstab.com) · Hamburg, Germany
+
+</div>
+
+---
+
+<div align="center">
+
+### Part of the Macstab Chaos Engineering Stack
+
+| **JVM bytecode** *(this repo)* | [**Container orchestration**](https://github.com/macstab/chaos-testing) | [**LD_PRELOAD libc**](https://github.com/macstab/macstab-chaos-testing-libraries) |
+|:---:|:---:|:---:|
+| In-process chaos for JVM applications | Annotation-driven Testcontainers chaos for any service | Pure C99 syscall-level chaos for any Linux container |
+| 62 JDK call sites · Spring 3/4 · Micronaut · Quarkus | Network · disk · DNS · CPU · memory · pre-built scenarios | glibc + musl × amd64 + arm64 · 100 % line coverage |
+
+**One mental model — three layers.** Same selector × effect × policy DSL spans the JVM, the container, and the libc layer. Each layer ships and runs independently; combine them when you need full distributed-system chaos coverage.
 
 </div>
 
@@ -26,40 +44,73 @@ Embedded Principal+ Engineer · [Macstab GmbH](https://macstab.com) · Hamburg, 
 
 ## The Short Version
 
-Most chaos tools attack from outside: kill a container, poison DNS, drop packets at the network layer. This tool goes **inside** — it rewrites JDK bytecode at startup and intercepts 57 distinct JVM operations while the process is running. No sidecars. No mocks. No application code changes. Real `Thread.sleep`, real `ConnectException`, real `OutOfMemoryError` — injected surgically into the exact call sites you choose.
+Your Redis cluster is fine 99.9 % of the time.
+
+Then a pod drains. Replication lag spikes to 300 ms. Your retry logic hammers the primary. p99 doubles. PagerDuty fires at 3 AM.
+
+You've been in this room before. Toxiproxy didn't catch it — it's TCP-blind, it never sees `HikariPool.getConnection()` blocking. Your unit tests didn't catch it — they mocked the Redis client. Your integration tests didn't catch it — Testcontainers gave you a perfect Redis. The last game day was three months ago.
+
+**Add eight lines to your test suite. Catch it on the next PR.**
 
 ```java
-// Make socket connects to a specific host start failing on demand:
-session.activate(ChaosScenario.builder("reject-db-connects")
-    .selector(ChaosSelector.network(
-        Set.of(OperationType.SOCKET_CONNECT),
-        NamePattern.prefix("db.internal.")))
-    .effect(ChaosEffect.reject("chaos: connection refused"))
-    .build());
+@ChaosTest
+void retryLogicSurvivesReplicationLag(ChaosControlPlane chaos) {
+    chaos.activate(ChaosScenario.builder("replica-lag-300ms")
+        .selector(ChaosSelector.network(
+            Set.of(OperationType.SOCKET_READ),
+            NamePattern.prefix("redis-replica.")))
+        .effect(ChaosEffect.delay(Duration.ofMillis(300)))
+        .activationPolicy(ActivationPolicy.always())
+        .build());
+
+    assertThat(service.read1000Keys().latencyP99()).isLessThan(BUDGET);
+}
 ```
+
+No sidecar. No mocks. No application code changes. The bytecode of `java.net.Socket` reads is rewritten at JVM startup; chaos applies surgically inside the JVM that's already running your production code paths. **62 JDK call sites** auto-wired across DNS, SSL, JDBC, HTTP, NIO, sockets, virtual threads, monitors, scheduler, GC, class loading, file I/O, ThreadLocal, JNDI, JMX, serialization, native libraries, queues, executors, async completion, and more. One annotation. Zero `--add-opens` flags. The agent self-grants every JDK module open it needs at install time.
+
+Works in JUnit 5 with **Spring Boot 3, Spring Boot 4, Micronaut, and Quarkus** out of the box.
+
+### What questions does it answer?
+
+The questions your on-call has to answer at 3 AM — turned into PR-blocking assertions:
+
+- *"Will a 3-second network outage kill my HikariCP pool, or will it recover?"*
+- *"If one connection has 1 s latency, does my repeatable-read transaction still produce consistent data, or does it return stale rows?"*
+- *"Is `read_from = REPLICA_PREFERRED` actually routing reads correctly when the primary is slow?"*
+- *"Does my circuit breaker open before my caller's timeout fires?"*
+- *"When DNS resolution slows from 1 ms to 800 ms, does anything in my stack actually time out, or does it deadlock?"*
+- *"If GC pauses 200 ms during a burst, do my queue consumers fall behind permanently or catch up?"*
+
+Every one of those becomes a `@ChaosTest` method that runs on every PR. No game day required. No SRE team required. No production blast radius. **Failures become commits, not incidents.**
 
 ---
 
-## Part of a Three-Layer Chaos Engineering Family
+## Part of a Three-Layer Chaos Engineering Stack
 
-`macstab-chaos-jvm-agent` is the **JVM bytecode layer** of a vertically-integrated chaos engineering stack. This module is self-contained — everything in this README works standalone — but it composes with two sibling layers when deeper coverage is needed.
+`chaos-testing-java-agent` is the **JVM bytecode layer** of a vertically-integrated chaos engineering toolkit. This repo is self-contained — everything in this README works standalone — but it composes with two sibling layers when broader coverage is needed.
 
-| Layer | Project | What it covers |
+| Layer | Repo | What it covers |
 |---|---|---|
-| **JVM bytecode** (this repo) | `chaos-testing-java-agent` | 57 JDK operations instrumented in-process: DNS, SSL, JDBC, HTTP, NIO, monitors, safepoints, virtual-thread pinning, clock, GC, executors, class loading, file I/O, `ThreadLocal` |
-| **Container orchestration** | `chaos-testing` | JUnit 5 annotation-driven chaos on top of Testcontainers: CPU throttling, memory pressure, disk I/O, network latency & partitions, DNS failures, pre-built Redis Sentinel + chaos scenarios, auto-detecting Linux package manager across distros |
-| **LD_PRELOAD libc** | `chaos-testing-libraries` | Six LD_PRELOAD libraries intercepting libc at the process boundary: file I/O (latency / ERRNO / TORN / CORRUPT), network, DNS, clock, process, memory. Multi-arch (glibc + musl × amd64 + arm64). Language-agnostic — usable from any containerised process |
+| **JVM bytecode** (this repo) | [`macstab/chaos-testing-java-agent`](https://github.com/macstab/chaos-testing-java-agent) | 62 JDK call sites instrumented in-process. Spring Boot 3/4 + Micronaut + Quarkus integration. JUnit 5 `@ChaosTest`. Selector × effect × policy DSL. Live config reload. |
+| **Container orchestration** | [`macstab/chaos-testing`](https://github.com/macstab/chaos-testing) | Annotation-driven chaos on top of Testcontainers. CPU throttling, memory pressure, disk I/O, network partitions, DNS failures, pre-built Redis Sentinel + replication-lag scenarios, Toxiproxy adapter, Redis-aware fault injection. |
+| **LD_PRELOAD libc** | [`macstab/macstab-chaos-testing-libraries`](https://github.com/macstab/macstab-chaos-testing-libraries) | Pure C99 LD_PRELOAD shared objects: file I/O (latency / `errno` / torn / corrupt), network, DNS, clock, process, memory. **glibc + musl × amd64 + arm64**, 100 % line coverage on shipped sources, Docker runtime validation as a quality gate. Language-agnostic — works for any process inside any container, not just JVM. |
 
-**Start here** for JVM-native chaos in unit tests, CI pipelines, or a running Spring Boot / Quarkus / Micronaut application. This module is the entry point and the richest of the three layers.
+**Start here** if you're on the JVM. This is the entry point and the richest layer.
 
-**Combine layers** when you need OS-level fault injection alongside JVM chaos (add the LD_PRELOAD layer through your container's environment) or orchestrated container chaos in integration tests (add the orchestration layer as your Testcontainers harness). There is no cross-layer coupling — each layer is independently adoptable and independently releasable.
+**Compose layers** for full distributed-system coverage:
+- Add the LD_PRELOAD layer to inject *kernel-real* time skew, slow disks, and DNS slowdowns into containers — chaos for failure modes the JVM can't see (e.g. `clock_gettime` is a syscall the JVM can't intrinsically intercept; the LD_PRELOAD lib can).
+- Add the orchestration layer to wire `@ChaosTest` annotations directly to Testcontainers-managed Redis, Postgres, Kafka — including pre-built scenarios like *replication lag during pod drainage*.
+
+Three repos, one mental model: **the same selector × effect × policy DSL spans the libc layer, the JVM layer, and the orchestration layer.** No cross-layer coupling — each layer is independently adoptable, independently versioned, independently released.
 
 ---
 
 <!-- TOC -->
-* [macstab-chaos-jvm-agent](#macstab-chaos-jvm-agent)
+* [chaos-testing-java-agent](#chaos-testing-java-agent)
   * [The Short Version](#the-short-version)
-  * [Part of a Three-Layer Chaos Engineering Family](#part-of-a-three-layer-chaos-engineering-family)
+    * [What questions does it answer?](#what-questions-does-it-answer)
+  * [Part of a Three-Layer Chaos Engineering Stack](#part-of-a-three-layer-chaos-engineering-stack)
   * [Floor 0 — What it does (plain English)](#floor-0--what-it-does-plain-english)
   * [Floor -1 — Architecture (senior engineer territory)](#floor--1--architecture-senior-engineer-territory)
   * [Floor -2 — Runtime mechanics (principal-level)](#floor--2--runtime-mechanics-principal-level)
@@ -83,6 +134,11 @@ session.activate(ChaosScenario.builder("reject-db-connects")
   * [Selectors — Full Reference](#selectors--full-reference)
   * [Effects — Full Reference](#effects--full-reference)
     * [Choosing an effect](#choosing-an-effect)
+      * [Latency and timing](#latency-and-timing)
+      * [Errors and failure handling](#errors-and-failure-handling)
+      * [Resource pressure (background stressors)](#resource-pressure-background-stressors)
+      * [Threading and concurrency](#threading-and-concurrency)
+      * [JVM-wide pause pressure](#jvm-wide-pause-pressure)
     * [Inline effects (execute on the calling thread)](#inline-effects-execute-on-the-calling-thread)
     * [Background stressor effects](#background-stressor-effects)
   * [Activation Policy](#activation-policy)
@@ -110,6 +166,10 @@ session.activate(ChaosScenario.builder("reject-db-connects")
   * [Build](#build)
   * [Detailed Documentation](#detailed-documentation)
   * [License](#license)
+  * [About the Engineer](#about-the-engineer)
+    * [Timeline](#timeline)
+    * [Specific evidence in this project](#specific-evidence-in-this-project)
+    * [Available for senior engineering engagements](#available-for-senior-engineering-engagements)
 <!-- TOC -->
 
 ---
@@ -998,16 +1058,66 @@ Internal Architecture documentation lives in [`docs/`](docs/):
 
 ## License
 
-Apache License 2.0 — see [LICENSE](LICENSE).
+Apache License 2.0 — see [LICENSE](LICENSE). Use it in production, ship it in your products, fork it, build a business around it. The only thing you cannot do is claim you wrote it.
+
+---
+
+## About the Engineer
+
+This three-repo stack — `chaos-testing-java-agent`, [`chaos-testing`](https://github.com/macstab/chaos-testing), [`macstab-chaos-testing-libraries`](https://github.com/macstab/macstab-chaos-testing-libraries) — is the work of one engineer: **Christian Schnapka**, Hamburg, Germany.
+
+### Timeline
+
+| Year                     | What I was shipping                                                                                                                                                                                                        |
+|--------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **1984** *(age 10)*      | 6502 assembler on the Commodore 64                                                                                                                                                                                         |
+| **1987** *(age 14)*      | Motorola 68000 (M68k) assembler / C on the Commodore Amiga                                                                                                                                                                 |
+| **1989** *(from age 15)* | International demoscene — active in **Razor 1911**, **Sanity**, **Anthrox**, **Incal**; multiple demo-competition wins with my groups                                                                                      |
+| **1990**                 | x86 assembler + C / C++ on PC. Part-time at German game studios (**Software 2000**, **Rainbow Arts**) and short stints at studios in Birmingham, UK — shipping on cartridges and floppies, where there was no patch button |
+| **1996**                 | Transitioned to business / enterprise software engineering — the arc that runs to today                                                                                                                                    |
+| **1996**                 | Java — since 1.0, 30 years and counting                                                                                                                                                                                    |
+| **2002**                 | Python — 24 years and counting                                                                                                                                                                                             |
+| **2013**                 | Docker — since first release; production use across enterprise stacks                                                                                                                                                      |
+| **~2015**                | Go — distributed-system internals, network programming                                                                                                                                                                     |
+| **~2014**                | Kubernetes                                                                                                                                                                                                                 |
+
+**Diplom Informatiker** — German pre-Bologna 5-year computer-science degree, equivalent to a master's. 42 years of programming, 36 years of professional systems work, 30 years of enterprise software, 24 of Python, 10 of Go.
+
+The depth shown in this project — JVMTI re-entrancy debugging on JDK 25, `@IntrinsicCandidate` JIT bypass analysis for the clock-skew limitation, ByteBuddy advice composition with `disableClassFormatChanges()`, the post-install retransform pass for classes that escape `installOn()`, the agent self-granting JDK module opens via manifest *and* `Instrumentation.redefineModule` — comes from a path that started with peeking C64 memory at 10, ran through the demoscene where every cycle counted on the wire, through game studios that shipped on cartridges with no recall option, and then 30 years of production enterprise software. Most engineers enter at the framework layer and look down. **This stack reads from below.** Principal-engineer titles are job descriptions; assembler at 10, the demoscene at 15, and shipping for game studios at 16 — that is a starting line.
+
+### Specific evidence in this project
+
+Concrete artifacts a reviewer can read:
+
+- **62 of 67 `OperationType` values auto-wired** across modern JDK internals — including JDK 25 changes most chaos tools haven't caught up to (`Socket$SocketInputStream` rename, `sun.nio.ch.NioSocketImpl` as default `SocketImpl`, `jdk.internal.loader.NativeLibraries.load` going `native`)
+- **Single-annotation `@ChaosTest` integration** working on Spring Boot 3, Spring Boot 4, Micronaut, and Quarkus — four frameworks with four different test-context conventions, one annotation
+- **Honest documentation** of what *cannot* work and why — `SYSTEM_CLOCK_MILLIS` documented with the actual JVM constraints (native `@IntrinsicCandidate`, JIT replacement with `RDTSC`/`MRS CNTVCT_EL0`), not papered over
+- **Cross-libc and cross-arch validation** in the sister C repo — `glibc + musl × amd64 + arm64`, 100 % line coverage on shipped sources, Docker runtime validation as a quality gate
+- **Apache 2.0 throughout** — usable in production, in commercial products, no lock-in
+
+### Available for senior engineering engagements
+
+Limited capacity. Typically:
+
+- **Fractional / interim Principal Engineer** — architecture, mentoring, hardest-problem ownership
+- **Reliability engineering** — chaos-engineering / SRE-tooling enablement, post-incident systemic fixes, "we keep getting paged for X" investigations
+- **JVM performance** — agents, GC tuning, instrumentation, deep profiling
+- **Systems-level work** — C / C++ / assembler-adjacent investigations, native libraries, Linux internals
+
+If your team is fighting production issues that "more tests" hasn't fixed:
+
+- **[macstab.com](https://macstab.com)** — engagement enquiries
+- **info@macstab.com** — direct contact
+- **[GitHub @macstab](https://github.com/macstab)** — more open-source work
+
+A small number of engagements per year. The work is deep — production systems with receipts in `git log`, not slide decks.
 
 ---
 
 <div align="center">
 
-*Architecture, implementation, and documentation crafted with Love and Passion by*
-
 **[Christian Schnapka](https://macstab.com)**
-Embedded Principal+ Engineer
+Principal+ Engineer
 [Macstab GmbH](https://macstab.com) · Hamburg, Germany
 
 *Building systems that operate correctly at the edges — including the ones you deliberately break.*

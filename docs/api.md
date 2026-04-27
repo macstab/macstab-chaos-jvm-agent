@@ -404,7 +404,8 @@ The `OperationType` enum defines all intercepted JDK operations. Full list:
 | Thread | `THREAD_START`, `VIRTUAL_THREAD_START` |
 | Queue | `QUEUE_PUT`, `QUEUE_TAKE`, `QUEUE_OFFER`, `QUEUE_POLL` |
 | Async | `ASYNC_COMPLETE`, `ASYNC_COMPLETE_EXCEPTIONALLY`, `ASYNC_CANCEL` |
-| Clock | `SYSTEM_CLOCK_MILLIS`, `SYSTEM_CLOCK_NANOS` |
+| Clock (auto-wired) | `INSTANT_NOW`, `LOCAL_DATE_TIME_NOW`, `ZONED_DATE_TIME_NOW`, `DATE_NEW` |
+| Clock (manual hook — see §11) | `SYSTEM_CLOCK_MILLIS`, `SYSTEM_CLOCK_NANOS` |
 | GC | `SYSTEM_GC_REQUEST` |
 | Exit | `SYSTEM_EXIT_REQUEST` |
 | Reflection | `REFLECTION_INVOKE` |
@@ -418,8 +419,64 @@ The `OperationType` enum defines all intercepted JDK operations. Full list:
 | Compression | `ZIP_INFLATE`, `ZIP_DEFLATE` |
 | ThreadLocal | `THREAD_LOCAL_GET`, `THREAD_LOCAL_SET` |
 | Shutdown | `SHUTDOWN_HOOK_REGISTER` |
-| Method | `METHOD_ENTER`, `METHOD_EXIT` |
+| Method (manual hook — see §9.1) | `METHOD_ENTER`, `METHOD_EXIT` |
 | Stressor | `LIFECYCLE` (internal; targets stressor start/stop) |
+
+## 9.1 Manual hook operation types
+
+Most operation types in §9 are **auto-wired**: the agent installs ByteBuddy advice on a fixed JDK call site at `premain`, the advice fires automatically whenever application code reaches that site, and zero application changes are needed.
+
+Four operation types are **manual-hook only** — fully functional, fully tested, but the agent cannot trigger them automatically and the application must route the event through the agent's public API:
+
+| OperationType | Why it is not auto-wired | Public hook |
+|---|---|---|
+| `SYSTEM_CLOCK_MILLIS` | `System.currentTimeMillis()` is `native @IntrinsicCandidate`; HotSpot JIT replaces the call with a direct hardware-clock instruction (`RDTSC` / `MRS CNTVCT_EL0`) that bypasses any bytecode wrapper. Hard JVM limitation for `-javaagent:` agents. | `chaosRuntime.adjustClockMillis(real)` |
+| `SYSTEM_CLOCK_NANOS` | Same as above for `System.nanoTime()`. | `chaosRuntime.adjustClockNanos(real)` |
+| `METHOD_ENTER` | The agent has no engine that takes a `MethodSelector` and dynamically rewrites every matching class on activation. The runtime evaluation is built; the dynamic instrumentation pass is not. | `chaosRuntime.beforeMethodEnter(class, method)` |
+| `METHOD_EXIT` | Same as above. | `chaosRuntime.afterMethodExit(class, method, returnType, value)` |
+
+Selector matching, effect application, activation policy (probability, schedules, max activations), `ChaosDiagnostics`, and `ChaosEventListener` all behave identically to the auto-wired operation types — once the hook is invoked.
+
+### Clock skew via `TimeProvider` wrapper
+
+Most applications already use a `TimeProvider` / `Clock` wrapper for testability. Route real time through the agent in that wrapper:
+
+```java
+public final class TimeProvider {
+    private final ChaosRuntime chaos;
+    public long currentTimeMillis() {
+        return chaos.adjustClockMillis(System.currentTimeMillis());
+    }
+    public long nanoTime() {
+        return chaos.adjustClockNanos(System.nanoTime());
+    }
+}
+```
+
+Then any `JvmRuntimeSelector` scenario with `SYSTEM_CLOCK_MILLIS` and a `ClockSkewEffect` skews every `timeProvider.currentTimeMillis()` reading. For zero-config skew of plain `Instant.now()` / `LocalDateTime.now()` / `ZonedDateTime.now()` / `new Date()` call sites, use the auto-wired operations instead.
+
+### Method entry / exit via Spring AOP, AspectJ, or interceptor
+
+The agent does not auto-rewrite arbitrary user methods. Wire entry / exit hooks from any interception machinery the application already runs — Spring AOP `@Around`, AspectJ, Micronaut / Quarkus interceptors, an annotation processor, or your own ByteBuddy advice:
+
+```java
+@Around("@annotation(com.example.Audited)")
+public Object intercept(ProceedingJoinPoint pjp) throws Throwable {
+    String cls = pjp.getTarget().getClass().getName();
+    String mth = pjp.getSignature().getName();
+
+    chaosRuntime.beforeMethodEnter(cls, mth);            // may throw injected exception
+
+    Object result = pjp.proceed();
+
+    return chaosRuntime.afterMethodExit(
+        cls, mth,
+        ((MethodSignature) pjp.getSignature()).getReturnType(),
+        result);                                          // may corrupt return value
+}
+```
+
+A `MethodSelector` scenario then drives `ExceptionInjectionEffect` (entry) or `ReturnValueCorruptionEffect` (exit) for any matching class+method pattern.
 
 ---
 

@@ -92,6 +92,7 @@ public sealed interface ChaosEffect
    * delay}.
    *
    * @param delay the fixed pause duration; must be non-negative
+   * @return a DelayEffect with the given fixed delay
    */
   static DelayEffect delay(Duration delay) {
     return new DelayEffect(delay, delay);
@@ -103,6 +104,7 @@ public sealed interface ChaosEffect
    *
    * @param minDelay lower bound (inclusive); must be non-negative
    * @param maxDelay upper bound (inclusive); must be &gt;= minDelay
+   * @return a DelayEffect with random delay between min and max
    */
   static DelayEffect delay(Duration minDelay, Duration maxDelay) {
     return new DelayEffect(minDelay, maxDelay);
@@ -113,6 +115,7 @@ public sealed interface ChaosEffect
    * ChaosActivationHandle#release()} is called or {@code maxBlock} elapses.
    *
    * @param maxBlock maximum time to block; {@code null} blocks indefinitely
+   * @return a GateEffect that blocks for up to maxBlock
    */
   static GateEffect gate(Duration maxBlock) {
     return new GateEffect(maxBlock);
@@ -123,6 +126,7 @@ public sealed interface ChaosEffect
    * (e.g., {@link java.util.concurrent.RejectedExecutionException} for executor submissions).
    *
    * @param message the exception message; must be non-blank
+   * @return a RejectEffect with the given message
    */
   static RejectEffect reject(String message) {
     return new RejectEffect(message);
@@ -131,6 +135,8 @@ public sealed interface ChaosEffect
   /**
    * Returns a suppress effect that silently discards the matched operation. Callers receive {@code
    * null} or {@code false} depending on operation semantics.
+   *
+   * @return a SuppressEffect
    */
   static SuppressEffect suppress() {
     return new SuppressEffect();
@@ -143,6 +149,7 @@ public sealed interface ChaosEffect
    *
    * @param failureKind the type of exception to inject
    * @param message the exception message; must be non-blank
+   * @return an ExceptionalCompletionEffect
    */
   static ExceptionalCompletionEffect exceptionalCompletion(
       FailureKind failureKind, String message) {
@@ -165,6 +172,7 @@ public sealed interface ChaosEffect
    * @param exceptionClassName binary class name of the exception type (e.g., {@code
    *     "java.io.IOException"}); must be a valid binary class name
    * @param message the exception message passed to the constructor; must be non-blank
+   * @return an ExceptionInjectionEffect
    */
   static ExceptionInjectionEffect injectException(String exceptionClassName, String message) {
     return new ExceptionInjectionEffect(exceptionClassName, message, true);
@@ -180,6 +188,7 @@ public sealed interface ChaosEffect
    * ReturnValueStrategy#ZERO} and reports the substitution via the observability bus.
    *
    * @param strategy the substitution strategy to apply
+   * @return a ReturnValueCorruptionEffect
    */
   static ReturnValueCorruptionEffect corruptReturnValue(ReturnValueStrategy strategy) {
     return new ReturnValueCorruptionEffect(strategy);
@@ -196,6 +205,7 @@ public sealed interface ChaosEffect
    * @param skewAmount the clock offset to apply; positive = future, negative = past; must not be
    *     zero
    * @param mode how the skew evolves over time
+   * @return a ClockSkewEffect
    */
   static ClockSkewEffect skewClock(Duration skewAmount, ClockSkewMode mode) {
     return new ClockSkewEffect(skewAmount, mode);
@@ -208,6 +218,8 @@ public sealed interface ChaosEffect
    *
    * <p>Only valid with {@link ChaosSelector.NioSelector} and {@link
    * OperationType#NIO_SELECTOR_SELECT}.
+   *
+   * @return a SpuriousWakeupEffect
    */
   static SpuriousWakeupEffect spuriousWakeup() {
     return new SpuriousWakeupEffect();
@@ -225,6 +237,7 @@ public sealed interface ChaosEffect
    *
    * @param bytes total bytes to allocate and retain; must be &gt; 0
    * @param chunkSizeBytes size of each allocation chunk; must be &gt; 0
+   * @return a HeapPressureEffect
    */
   static HeapPressureEffect heapPressure(long bytes, int chunkSizeBytes) {
     return new HeapPressureEffect(bytes, chunkSizeBytes);
@@ -240,6 +253,7 @@ public sealed interface ChaosEffect
    * @param threadName name of the kept-alive thread; must be non-blank
    * @param daemon {@code false} prevents JVM shutdown until the handle is closed
    * @param heartbeat interval between keep-alive park cycles; must be positive
+   * @return a KeepAliveEffect
    */
   static KeepAliveEffect keepAlive(String threadName, boolean daemon, Duration heartbeat) {
     return new KeepAliveEffect(threadName, daemon, heartbeat);
@@ -256,6 +270,7 @@ public sealed interface ChaosEffect
    * @param generatedClassCount number of synthetic classes to generate; must be &gt; 0
    * @param fieldsPerClass static fields per class (controls per-class metaspace footprint); must be
    *     &gt;= 0
+   * @return a MetaspacePressureEffect
    */
   static MetaspacePressureEffect metaspacePressure(int generatedClassCount, int fieldsPerClass) {
     return new MetaspacePressureEffect(generatedClassCount, fieldsPerClass, true);
@@ -273,6 +288,7 @@ public sealed interface ChaosEffect
    * @param totalBytes total bytes of native memory to exhaust; must be &gt; 0
    * @param bufferSizeBytes size of each individual buffer allocation; must be &gt; 0 and &lt;=
    *     totalBytes
+   * @return a DirectBufferPressureEffect
    */
   static DirectBufferPressureEffect directBufferPressure(long totalBytes, int bufferSizeBytes) {
     return new DirectBufferPressureEffect(totalBytes, bufferSizeBytes, false);
@@ -288,6 +304,7 @@ public sealed interface ChaosEffect
    *
    * @param allocationRateBytesPerSecond target allocation rate; must be &gt; 0
    * @param duration how long the stressor runs; must be positive
+   * @return a GcPressureEffect
    */
   static GcPressureEffect gcPressure(long allocationRateBytesPerSecond, Duration duration) {
     return new GcPressureEffect(allocationRateBytesPerSecond, 1024, false, duration);
@@ -303,6 +320,7 @@ public sealed interface ChaosEffect
    *
    * @param objectCount number of objects with slow finalizers to create; must be &gt; 0
    * @param finalizerDelay how long each finalizer sleeps; must be &gt;= 0
+   * @return a FinalizerBacklogEffect
    */
   static FinalizerBacklogEffect finalizerBacklog(int objectCount, Duration finalizerDelay) {
     return new FinalizerBacklogEffect(objectCount, finalizerDelay);
@@ -317,6 +335,7 @@ public sealed interface ChaosEffect
    * ChaosSelector.StressTarget#DEADLOCK}.
    *
    * @param participantCount number of threads to deadlock; must be &gt;= 2
+   * @return a DeadlockEffect
    */
   static DeadlockEffect deadlock(int participantCount) {
     return new DeadlockEffect(participantCount, Duration.ofSeconds(1));
@@ -334,6 +353,7 @@ public sealed interface ChaosEffect
    * @param namePrefix prefix for thread names (e.g., {@code "leaked-worker-"}); must be non-blank
    * @param daemon if {@code false}, the threads block JVM exit until they terminate or the handle
    *     is closed
+   * @return a ThreadLeakEffect
    */
   static ThreadLeakEffect threadLeak(int threadCount, String namePrefix, boolean daemon) {
     return new ThreadLeakEffect(threadCount, namePrefix, daemon, null);
@@ -349,6 +369,7 @@ public sealed interface ChaosEffect
    *
    * @param entriesPerThread number of ThreadLocal entries per pool thread; must be &gt; 0
    * @param valueSizeBytes size of each entry's byte-array value; must be &gt; 0
+   * @return a ThreadLocalLeakEffect
    */
   static ThreadLocalLeakEffect threadLocalLeak(int entriesPerThread, int valueSizeBytes) {
     return new ThreadLocalLeakEffect(entriesPerThread, valueSizeBytes);
@@ -365,6 +386,7 @@ public sealed interface ChaosEffect
    *
    * @param lockHoldDuration how long each thread holds the lock per cycle; must be positive
    * @param contendingThreadCount number of threads competing for the lock; must be &gt;= 2
+   * @return a MonitorContentionEffect
    */
   static MonitorContentionEffect monitorContention(
       Duration lockHoldDuration, int contendingThreadCount) {
@@ -382,6 +404,7 @@ public sealed interface ChaosEffect
    *
    * @param classCount number of synthetic classes to generate; must be &gt; 0
    * @param methodsPerClass methods per class; must be &gt; 0
+   * @return a CodeCachePressureEffect
    */
   static CodeCachePressureEffect codeCachePressure(int classCount, int methodsPerClass) {
     return new CodeCachePressureEffect(classCount, methodsPerClass);
@@ -396,6 +419,7 @@ public sealed interface ChaosEffect
    * ChaosSelector.StressTarget#SAFEPOINT_STORM}.
    *
    * @param gcInterval interval between forced GC calls; must be positive
+   * @return a SafepointStormEffect
    */
   static SafepointStormEffect safepointStorm(Duration gcInterval) {
     return new SafepointStormEffect(gcInterval, 0);
@@ -411,6 +435,7 @@ public sealed interface ChaosEffect
    *
    * @param internCount number of strings to intern; must be &gt; 0
    * @param stringLengthBytes length of each string in bytes; must be &gt; 0
+   * @return a StringInternPressureEffect
    */
   static StringInternPressureEffect stringInternPressure(int internCount, int stringLengthBytes) {
     return new StringInternPressureEffect(internCount, stringLengthBytes);
@@ -426,6 +451,7 @@ public sealed interface ChaosEffect
    *
    * @param referenceCount number of references to create per flood cycle; must be &gt; 0
    * @param floodInterval interval between flood cycles; must be positive
+   * @return a ReferenceQueueFloodEffect
    */
   static ReferenceQueueFloodEffect referenceQueueFlood(int referenceCount, Duration floodInterval) {
     return new ReferenceQueueFloodEffect(referenceCount, floodInterval);
@@ -513,8 +539,12 @@ public sealed interface ChaosEffect
   /**
    * Delays the matched operation by a random duration in [minDelay, maxDelay]. If min equals max
    * the delay is deterministic.
+   *
+   * @param minDelay lower bound (inclusive); must be non-negative
+   * @param maxDelay upper bound (inclusive); must be &gt;= minDelay
    */
   record DelayEffect(Duration minDelay, Duration maxDelay) implements ChaosEffect {
+    /** Validates the delay parameters. */
     public DelayEffect {
       if (minDelay == null || maxDelay == null) {
         throw new IllegalArgumentException("delay bounds must be non-null");
@@ -531,8 +561,11 @@ public sealed interface ChaosEffect
   /**
    * Blocks the matched operation on a manual gate until the gate is opened or maxBlock elapses. A
    * null maxBlock blocks indefinitely.
+   *
+   * @param maxBlock maximum time to block; {@code null} blocks indefinitely
    */
   record GateEffect(Duration maxBlock) implements ChaosEffect {
+    /** Validates the gate parameters. */
     public GateEffect {
       if (maxBlock != null && (maxBlock.isZero() || maxBlock.isNegative())) {
         throw new IllegalArgumentException("maxBlock must be positive when set");
@@ -543,8 +576,11 @@ public sealed interface ChaosEffect
   /**
    * Rejects the matched operation by throwing an appropriate exception. The exception type is
    * inferred from the OperationType by the runtime.
+   *
+   * @param message the exception message; must be non-blank
    */
   record RejectEffect(String message) implements ChaosEffect {
+    /** Validates the RejectEffect parameters. */
     public RejectEffect {
       if (message == null || message.isBlank()) {
         throw new IllegalArgumentException("message must be non-blank");
@@ -561,9 +597,13 @@ public sealed interface ChaosEffect
   /**
    * Completes a matched CompletableFuture exceptionally before normal completion runs. Only valid
    * with {@link ChaosSelector.AsyncSelector}.
+   *
+   * @param failureKind the type of exception to inject
+   * @param message the exception message; must be non-blank
    */
   record ExceptionalCompletionEffect(FailureKind failureKind, String message)
       implements ChaosEffect {
+    /** Validates the exceptional completion parameters. */
     public ExceptionalCompletionEffect {
       if (failureKind == null) {
         throw new IllegalArgumentException("failureKind must not be null");
@@ -585,9 +625,15 @@ public sealed interface ChaosEffect
    *
    * <p>When withStackTrace is false the exception is constructed without a stack trace, which is
    * faster and not detectable by callers inspecting the stack trace.
+   *
+   * @param exceptionClassName binary class name of the exception type; must be a valid binary class
+   *     name
+   * @param message the exception message passed to the constructor; must be non-blank
+   * @param withStackTrace whether the constructed exception carries a stack trace
    */
   record ExceptionInjectionEffect(String exceptionClassName, String message, boolean withStackTrace)
       implements ChaosEffect {
+    /** Validates the exception injection parameters. */
     public ExceptionInjectionEffect {
       if (exceptionClassName == null || exceptionClassName.isBlank()) {
         throw new IllegalArgumentException("exceptionClassName must be non-blank");
@@ -612,8 +658,11 @@ public sealed interface ChaosEffect
    *
    * <p>If the chosen strategy is inapplicable to the actual return type (e.g., EMPTY on a
    * primitive), the runtime falls back to ZERO and reports the fallback via the observability bus.
+   *
+   * @param strategy the substitution strategy to apply
    */
   record ReturnValueCorruptionEffect(ReturnValueStrategy strategy) implements ChaosEffect {
+    /** Validates the ReturnValueCorruptionEffect parameters. */
     public ReturnValueCorruptionEffect {
       if (strategy == null) {
         throw new IllegalArgumentException("strategy must not be null");
@@ -629,8 +678,13 @@ public sealed interface ChaosEffect
    * skewAmount moves the clock forward; negative moves it backward. A backward skew on nanoTime
    * violates its monotonicity contract — this is intentional as it simulates a defective or
    * replaced clock source.
+   *
+   * @param skewAmount the clock offset to apply; positive = future, negative = past; must not be
+   *     zero
+   * @param mode how the skew evolves over time
    */
   record ClockSkewEffect(Duration skewAmount, ClockSkewMode mode) implements ChaosEffect {
+    /** Validates the clock skew parameters. */
     public ClockSkewEffect {
       if (skewAmount == null) {
         throw new IllegalArgumentException("skewAmount must not be null");
@@ -651,8 +705,12 @@ public sealed interface ChaosEffect
   /**
    * Allocates and retains heap memory in chunks, simulating a memory leak or spike. Released when
    * the activation handle is closed.
+   *
+   * @param bytes total bytes to allocate and retain; must be &gt; 0
+   * @param chunkSizeBytes size of each allocation chunk; must be &gt; 0
    */
   record HeapPressureEffect(long bytes, int chunkSizeBytes) implements ChaosEffect {
+    /** Validates the heap pressure parameters. */
     public HeapPressureEffect {
       if (bytes <= 0) {
         throw new IllegalArgumentException("bytes must be > 0");
@@ -666,9 +724,14 @@ public sealed interface ChaosEffect
   /**
    * Keeps a named thread alive to simulate a thread that refuses to terminate. Released when the
    * activation handle is closed.
+   *
+   * @param threadName name of the kept-alive thread; must be non-blank
+   * @param daemon {@code false} prevents JVM shutdown until the handle is closed
+   * @param heartbeat interval between keep-alive park cycles; must be positive
    */
   record KeepAliveEffect(String threadName, boolean daemon, Duration heartbeat)
       implements ChaosEffect {
+    /** Validates the keep-alive parameters. */
     public KeepAliveEffect {
       if (threadName == null || threadName.isBlank()) {
         throw new IllegalArgumentException("threadName must be non-blank");
@@ -685,9 +748,14 @@ public sealed interface ChaosEffect
    *
    * <p>When retain is true, strong references to the generated classes are kept to prevent
    * unloading during GC — the realistic scenario for a classloader leak.
+   *
+   * @param generatedClassCount number of synthetic classes to generate; must be &gt; 0
+   * @param fieldsPerClass static fields per class; must be &gt;= 0
+   * @param retain whether strong references to the generated classes are retained
    */
   record MetaspacePressureEffect(int generatedClassCount, int fieldsPerClass, boolean retain)
       implements ChaosEffect {
+    /** Validates the metaspace pressure parameters. */
     public MetaspacePressureEffect {
       if (generatedClassCount <= 0) {
         throw new IllegalArgumentException("generatedClassCount must be > 0");
@@ -705,9 +773,15 @@ public sealed interface ChaosEffect
    * <p>When registerCleaner is false the buffers are intentionally leaked — no Cleaner is
    * registered. When true a Cleaner is registered but the reference is dropped, so the buffer is
    * cleaned only when GC runs.
+   *
+   * @param totalBytes total bytes of native memory to exhaust; must be &gt; 0
+   * @param bufferSizeBytes size of each individual buffer allocation; must be &gt; 0 and &lt;=
+   *     totalBytes
+   * @param registerCleaner whether to register a Cleaner for the allocated buffers
    */
   record DirectBufferPressureEffect(long totalBytes, int bufferSizeBytes, boolean registerCleaner)
       implements ChaosEffect {
+    /** Validates the direct buffer pressure parameters. */
     public DirectBufferPressureEffect {
       if (totalBytes <= 0) {
         throw new IllegalArgumentException("totalBytes must be > 0");
@@ -728,6 +802,11 @@ public sealed interface ChaosEffect
    * <p>When promoteToOldGen is true, allocated objects are kept alive long enough to survive a
    * young-gen collection, forcing them into the old generation and triggering major or full GC
    * cycles.
+   *
+   * @param allocationRateBytesPerSecond target allocation rate; must be &gt; 0
+   * @param objectSizeBytes size of each allocated object; must be &gt; 0
+   * @param promoteToOldGen whether allocated objects are promoted to the old generation
+   * @param duration how long the stressor runs; must be positive
    */
   record GcPressureEffect(
       long allocationRateBytesPerSecond,
@@ -735,6 +814,7 @@ public sealed interface ChaosEffect
       boolean promoteToOldGen,
       Duration duration)
       implements ChaosEffect {
+    /** Validates the GC pressure parameters. */
     public GcPressureEffect {
       if (allocationRateBytesPerSecond <= 0) {
         throw new IllegalArgumentException("allocationRateBytesPerSecond must be > 0");
@@ -755,8 +835,12 @@ public sealed interface ChaosEffect
    * <p>finalizerDelay is the duration each finalizer sleeps before completing. A long delay
    * combined with a high objectCount causes the finalizer thread to fall progressively further
    * behind.
+   *
+   * @param objectCount number of objects with slow finalizers to create; must be &gt; 0
+   * @param finalizerDelay how long each finalizer sleeps; must be &gt;= 0
    */
   record FinalizerBacklogEffect(int objectCount, Duration finalizerDelay) implements ChaosEffect {
+    /** Validates the finalizer backlog parameters. */
     public FinalizerBacklogEffect {
       if (objectCount <= 0) {
         throw new IllegalArgumentException("objectCount must be > 0");
@@ -777,8 +861,12 @@ public sealed interface ChaosEffect
    * <p>acquisitionDelay is the pause each thread takes after acquiring its first lock before
    * attempting the second. A longer delay makes the deadlock harder to detect via thread dump
    * analysis alone.
+   *
+   * @param participantCount number of threads to deadlock; must be &gt;= 2
+   * @param acquisitionDelay pause each thread takes after acquiring its first lock; must be &gt;= 0
    */
   record DeadlockEffect(int participantCount, Duration acquisitionDelay) implements ChaosEffect {
+    /** Validates the deadlock parameters. */
     public DeadlockEffect {
       if (participantCount < 2) {
         throw new IllegalArgumentException(
@@ -799,9 +887,17 @@ public sealed interface ChaosEffect
    *
    * <p>lifespan sets a maximum lifetime per leaked thread. Null means threads run until JVM exit or
    * the activation handle is closed.
+   *
+   * @param threadCount number of threads to leak; must be &gt; 0
+   * @param namePrefix prefix for thread names; must be non-blank
+   * @param daemon if {@code false}, the threads block JVM exit until they terminate or the handle
+   *     is closed
+   * @param lifespan maximum lifetime per leaked thread; {@code null} means threads run until JVM
+   *     exit or the handle is closed
    */
   record ThreadLeakEffect(int threadCount, String namePrefix, boolean daemon, Duration lifespan)
       implements ChaosEffect {
+    /** Validates the ThreadLeakEffect parameters. */
     public ThreadLeakEffect {
       if (threadCount <= 0) {
         throw new IllegalArgumentException("threadCount must be > 0");
@@ -818,8 +914,12 @@ public sealed interface ChaosEffect
    * request-scoped objects across requests.
    *
    * <p>Planted entries are removed when the activation handle is closed.
+   *
+   * @param entriesPerThread number of ThreadLocal entries per pool thread; must be &gt; 0
+   * @param valueSizeBytes size of each entry's byte-array value; must be &gt; 0
    */
   record ThreadLocalLeakEffect(int entriesPerThread, int valueSizeBytes) implements ChaosEffect {
+    /** Validates the ThreadLocalLeakEffect parameters. */
     public ThreadLocalLeakEffect {
       if (entriesPerThread <= 0) {
         throw new IllegalArgumentException("entriesPerThread must be > 0");
@@ -836,9 +936,14 @@ public sealed interface ChaosEffect
    *
    * <p>When unfair is true the underlying lock does not guarantee FIFO ordering, increasing the
    * likelihood of thread starvation — the more destructive and realistic scenario.
+   *
+   * @param lockHoldDuration how long each thread holds the lock per cycle; must be positive
+   * @param contendingThreadCount number of threads competing for the lock; must be &gt;= 2
+   * @param unfair when {@code true}, the underlying lock does not guarantee FIFO ordering
    */
   record MonitorContentionEffect(
       Duration lockHoldDuration, int contendingThreadCount, boolean unfair) implements ChaosEffect {
+    /** Validates the monitor contention parameters. */
     public MonitorContentionEffect {
       if (lockHoldDuration == null || lockHoldDuration.isNegative() || lockHoldDuration.isZero()) {
         throw new IllegalArgumentException("lockHoldDuration must be positive");
@@ -871,8 +976,12 @@ public sealed interface ChaosEffect
    *
    * <p>Cleanup note: code-cache memory is only reclaimed when the JIT deoptimizes the compiled
    * methods, which may not happen immediately after the activation handle is closed.
+   *
+   * @param classCount number of synthetic classes to generate; must be &gt; 0
+   * @param methodsPerClass methods per class; must be &gt; 0
    */
   record CodeCachePressureEffect(int classCount, int methodsPerClass) implements ChaosEffect {
+    /** Validates the code cache pressure parameters. */
     public CodeCachePressureEffect {
       if (classCount <= 0) {
         throw new IllegalArgumentException("classCount must be > 0");
@@ -890,9 +999,14 @@ public sealed interface ChaosEffect
    *
    * <p>Lower {@code gcInterval} values cause more frequent STW pauses at the cost of higher CPU
    * usage on GC threads.
+   *
+   * @param gcInterval interval between forced GC calls; must be positive
+   * @param retransformClassCount number of classes to retransform on each safepoint; must be &gt;=
+   *     0
    */
   record SafepointStormEffect(Duration gcInterval, int retransformClassCount)
       implements ChaosEffect {
+    /** Validates the SafepointStormEffect parameters. */
     public SafepointStormEffect {
       if (gcInterval == null || gcInterval.isNegative() || gcInterval.isZero()) {
         throw new IllegalArgumentException("gcInterval must be positive");
@@ -907,8 +1021,12 @@ public sealed interface ChaosEffect
    * Interns a large number of unique strings into the JVM's native string table (Metaspace),
    * creating memory pressure distinct from heap and class-loading pressure. Interned strings are
    * not eligible for GC until the classloader that owns them is collected.
+   *
+   * @param internCount number of strings to intern; must be &gt; 0
+   * @param stringLengthBytes length of each string in bytes; must be &gt; 0
    */
   record StringInternPressureEffect(int internCount, int stringLengthBytes) implements ChaosEffect {
+    /** Validates the StringInternPressureEffect parameters. */
     public StringInternPressureEffect {
       if (internCount <= 0) {
         throw new IllegalArgumentException("internCount must be > 0");
@@ -924,9 +1042,13 @@ public sealed interface ChaosEffect
    * java.lang.ref.WeakReference} objects pointing to immediately-unreachable objects, then
    * triggering GC. The ReferenceHandler must process every enqueued reference before GC can reclaim
    * the backing memory, extending STW pause durations.
+   *
+   * @param referenceCount number of references to create per flood cycle; must be &gt; 0
+   * @param floodInterval interval between flood cycles; must be positive
    */
   record ReferenceQueueFloodEffect(int referenceCount, Duration floodInterval)
       implements ChaosEffect {
+    /** Validates the ReferenceQueueFloodEffect parameters. */
     public ReferenceQueueFloodEffect {
       if (referenceCount <= 0) {
         throw new IllegalArgumentException("referenceCount must be > 0");

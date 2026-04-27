@@ -36,6 +36,8 @@ public interface ChaosDiagnostics {
    *   <li>all {@link ActivationFailure} records accumulated since agent startup
    *   <li>runtime capability details: JDK version, virtual thread support, JFR availability
    * </ul>
+   *
+   * @return the current diagnostics snapshot
    */
   Snapshot snapshot();
 
@@ -44,6 +46,7 @@ public interface ChaosDiagnostics {
    * that ID is registered.
    *
    * @param scenarioId the scenario ID as provided to {@link ChaosScenario.Builder#build()}
+   * @return the scenario report, or empty if not found
    */
   Optional<ScenarioReport> scenario(String scenarioId);
 
@@ -53,6 +56,8 @@ public interface ChaosDiagnostics {
    *
    * <p>Use in test failure messages or agent startup logging ({@link
    * ChaosPlan.Observability#debugDumpOnStart()}).
+   *
+   * @return a formatted multi-line diagnostics string
    */
   String debugDump();
 
@@ -179,6 +184,7 @@ public interface ChaosDiagnostics {
       long matchedCount,
       long appliedCount,
       String reason) {
+    /** Validates the scenario report fields. */
     public ScenarioReport {
       Objects.requireNonNull(id, "id");
       Objects.requireNonNull(scopeKey, "scopeKey");
@@ -208,6 +214,7 @@ public interface ChaosDiagnostics {
    * @param message human-readable detail; suitable for logging or test failure messages
    */
   record ActivationFailure(String scenarioId, FailureCategory category, String message) {
+    /** Validates the activation failure fields. */
     public ActivationFailure {
       Objects.requireNonNull(scenarioId, "scenarioId");
       Objects.requireNonNull(category, "category");

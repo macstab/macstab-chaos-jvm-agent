@@ -10,6 +10,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import org.junit.jupiter.api.Test;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.core.ParameterizedTypeReference;
@@ -22,6 +24,8 @@ import org.springframework.web.client.RestClient;
     webEnvironment = WebEnvironment.RANDOM_PORT,
     properties = "macstab.chaos.contention.enabled=true")
 class VirtualThreadPinningIT {
+
+  private static final Logger log = LoggerFactory.getLogger(VirtualThreadPinningIT.class);
 
   @LocalServerPort private int port;
 
@@ -60,9 +64,7 @@ class VirtualThreadPinningIT {
         .as("All 100 concurrent virtual-thread requests must succeed (no 5xx)")
         .isZero();
 
-    System.out.printf(
-        "[VirtualThreadPinningIT] 100 concurrent POST /metrics under MonitorContention: %d ms wall-clock%n",
-        wallMillis);
+    log.info("100 concurrent POST /metrics under MonitorContention: {} ms wall-clock", wallMillis);
 
     ResponseEntity<Map<String, Long>> snapshot =
         client

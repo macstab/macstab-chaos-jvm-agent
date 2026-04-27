@@ -29,9 +29,23 @@ import java.util.Optional;
  */
 public final class StartupConfigLoader {
 
+  /** Environment variable name for the config file path, where the file is loaded from. */
   public static final String ENV_CONFIG_FILE = "MACSTAB_CHAOS_CONFIG_FILE";
+
+  /** Environment variable name for the inline JSON config; the value is parsed directly as JSON. */
   public static final String ENV_CONFIG_JSON = "MACSTAB_CHAOS_CONFIG_JSON";
+
+  /**
+   * Environment variable name for the base64-encoded JSON config; the value is decoded from base64
+   * and then parsed as JSON text.
+   */
   public static final String ENV_CONFIG_BASE64 = "MACSTAB_CHAOS_CONFIG_BASE64";
+
+  /**
+   * Environment variable name for the debug dump flag; if set to {@code "true"} (case-insensitive)
+   * or if the agent arg {@code debugDumpOnStart} is true, a diagnostic dump of the loaded plan is
+   * printed at startup.
+   */
   public static final String ENV_DEBUG_DUMP = "MACSTAB_CHAOS_DEBUG_DUMP_ON_START";
 
   /** Maximum config file size: 1 MiB. Prevents OOM from oversized files. */
@@ -154,6 +168,12 @@ public final class StartupConfigLoader {
     return null;
   }
 
-  /** Result of successfully loading a chaos plan from a configuration source. */
+  /**
+   * Result of successfully loading a chaos plan from a configuration source.
+   *
+   * @param plan the loaded chaos plan
+   * @param source identifier describing where the plan was loaded from
+   * @param debugDumpOnStart whether to dump the loaded plan at startup for debugging
+   */
   public record LoadedPlan(ChaosPlan plan, String source, boolean debugDumpOnStart) {}
 }

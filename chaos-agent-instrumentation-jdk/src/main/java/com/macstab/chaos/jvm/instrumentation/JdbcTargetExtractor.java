@@ -14,7 +14,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * name as "no pool filter will match" which matches the {@link
  * com.macstab.chaos.jvm.api.NamePattern#any()} selector default.
  */
-final class JdbcTargetExtractor {
+public final class JdbcTargetExtractor {
 
   // ClassValue keyed on the Class object (not its name) — see HttpUrlExtractor for the
   // shared rationale: a String cache keyed on class name collides across classloaders,
@@ -37,7 +37,7 @@ final class JdbcTargetExtractor {
    * @return the pool name, or the class name as a fallback, or {@code null} when {@code pool} is
    *     {@code null}
    */
-  static String fromHikariPool(final Object pool) {
+  public static String fromHikariPool(final Object pool) {
     if (pool == null) {
       return null;
     }

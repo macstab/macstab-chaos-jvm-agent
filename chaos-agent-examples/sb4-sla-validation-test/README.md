@@ -23,7 +23,7 @@ it also validates that the service's concurrency model holds under realistic net
 |---|---|
 | `SlaApplication` | Spring Boot entry point |
 | `FanOutResult` | Record carrying results from all three legs |
-| `AppConfig` | `RestTemplate` bean |
+| `AppConfig` | `HttpClient` bean (NIO; routes through instrumented `SocketChannelImpl`) |
 | `FanOutService` | Concurrent fan-out via `CompletableFuture` + virtual threads |
 | `FanOutController` | `GET /fanout` endpoint |
 | `LatencyStats` | `percentile(sortedNanos, pct)` utility |
