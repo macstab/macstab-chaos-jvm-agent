@@ -1039,26 +1039,46 @@ Apache License 2.0 — see [LICENSE](LICENSE). Use it in production, ship it in 
 
 ## About the Engineer
 
-This stack — `chaos-testing-java-agent`, [`chaos-testing`](https://github.com/macstab/chaos-testing), [`chaos-testing-libraries`](https://github.com/macstab/chaos-testing-libraries) — is the work of one engineer: **Christian Schnapka**, principal-level systems engineer based in Hamburg, Germany.
+This three-repo stack — `chaos-testing-java-agent`, [`chaos-testing`](https://github.com/macstab/chaos-testing), [`chaos-testing-libraries`](https://github.com/macstab/chaos-testing-libraries) — is the work of one engineer: **Christian Schnapka**, Hamburg, Germany.
 
-Areas of practice that informed it:
-- **JVM internals & bytecode engineering** — agents, instrumentation, JIT-aware design, JVMTI re-entrancy, module-system module-opens, modern JDK call sites including JDK 25 internals
-- **Distributed-system reliability** — connection pools, retry semantics, circuit breakers, replica routing, transaction consistency under partial failure, on-call experience translated into testable assertions
-- **Linux systems programming** — pure C99 LD_PRELOAD libraries with cross-libc (glibc + musl) and cross-arch (amd64 + arm64) validation as a quality gate
-- **Framework integration** — Spring Boot 3 / 4, Micronaut, Quarkus — single-annotation chaos that respects each framework's test-context conventions
-- **Production engineering at scale** — building things that hold up at the edges, not just the happy path
+### Timeline
+
+| Year | What I started shipping |
+|---|---|
+| **1984** *(age 10)* | 6502 assembler on the Commodore 64 |
+| **1990** | x86 assembler and C / C++ on PC — the toolchain that built every system below |
+| **2002** | Python — 24 years and counting |
+| **~2015** | Go — distributed-system internals, network programming |
+| **today** | 42 years of programming, 36 years of professional systems work, 24 of Python, 10 of Go |
+
+The depth shown in this project — JVMTI re-entrancy debugging on JDK 25, `@IntrinsicCandidate` JIT bypass analysis for the clock-skew limitation, ByteBuddy advice composition with `disableClassFormatChanges()`, the post-install retransform pass for classes that escape `installOn()`, the agent self-granting JDK module opens via manifest *and* `Instrumentation.redefineModule` — comes from a career that started with peeking memory addresses on a C64 and never stopped doing systems work at that level. **Principal-engineer titles are job descriptions; assembler at 10 is a starting line.**
+
+### Specific evidence in this project
+
+Concrete artifacts a reviewer can read:
+
+- **62 of 67 `OperationType` values auto-wired** across modern JDK internals — including JDK 25 changes most chaos tools haven't caught up to (`Socket$SocketInputStream` rename, `sun.nio.ch.NioSocketImpl` as default `SocketImpl`, `jdk.internal.loader.NativeLibraries.load` going `native`)
+- **Single-annotation `@ChaosTest` integration** working on Spring Boot 3, Spring Boot 4, Micronaut, and Quarkus — four frameworks with four different test-context conventions, one annotation
+- **Honest documentation** of what *cannot* work and why — `SYSTEM_CLOCK_MILLIS` documented with the actual JVM constraints (native `@IntrinsicCandidate`, JIT replacement with `RDTSC`/`MRS CNTVCT_EL0`), not papered over
+- **Cross-libc and cross-arch validation** in the sister C repo — `glibc + musl × amd64 + arm64`, 100 % line coverage on shipped sources, Docker runtime validation as a quality gate
+- **Apache 2.0 throughout** — usable in production, in commercial products, no lock-in
 
 ### Available for senior engineering engagements
 
-Limited consulting capacity for organisations that want this kind of engineering rigour applied to their reliability problem — typically **fractional / interim Principal Engineer**, **architecture review**, **chaos-engineering / SRE-tooling enablement**, or **deep-dive JVM performance work**.
+Limited capacity. Typically:
 
-If your team is fighting production reliability issues that "more tests" hasn't fixed, reach out:
+- **Fractional / interim Principal Engineer** — architecture, mentoring, hardest-problem ownership
+- **Reliability engineering** — chaos-engineering / SRE-tooling enablement, post-incident systemic fixes, "we keep getting paged for X" investigations
+- **JVM performance** — agents, GC tuning, instrumentation, deep profiling
+- **Systems-level work** — C / C++ / assembler-adjacent investigations, native libraries, Linux internals
+
+If your team is fighting production issues that "more tests" hasn't fixed:
 
 - **[macstab.com](https://macstab.com)** — engagement enquiries
 - **info@macstab.com** — direct contact
 - **[GitHub @macstab](https://github.com/macstab)** — more open-source work
 
-I work on a small number of engagements per year. If the fit is right, the work is deep — not a slide deck deliverable, real systems shipped to production with the receipts to prove it.
+A small number of engagements per year. The work is deep — production systems with receipts in `git log`, not slide decks.
 
 ---
 
