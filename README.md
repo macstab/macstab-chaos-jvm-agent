@@ -27,6 +27,21 @@ Principal+ Engineer · [Macstab GmbH](https://macstab.com) · Hamburg, Germany
 
 ---
 
+<div align="center">
+
+### Part of the Macstab Chaos Engineering Stack
+
+| **JVM bytecode** *(this repo)* | [**Container orchestration**](https://github.com/macstab/chaos-testing) | [**LD_PRELOAD libc**](https://github.com/macstab/macstab-chaos-testing-libraries) |
+|:---:|:---:|:---:|
+| In-process chaos for JVM applications | Annotation-driven Testcontainers chaos for any service | Pure C99 syscall-level chaos for any Linux container |
+| 62 JDK call sites · Spring 3/4 · Micronaut · Quarkus | Network · disk · DNS · CPU · memory · pre-built scenarios | glibc + musl × amd64 + arm64 · 100 % line coverage |
+
+**One mental model — three layers.** Same selector × effect × policy DSL spans the JVM, the container, and the libc layer. Each layer ships and runs independently; combine them when you need full distributed-system chaos coverage.
+
+</div>
+
+---
+
 ## The Short Version
 
 Your Redis cluster is fine 99.9 % of the time.
@@ -79,7 +94,7 @@ Every one of those becomes a `@ChaosTest` method that runs on every PR. No game 
 |---|---|---|
 | **JVM bytecode** (this repo) | [`macstab/chaos-testing-java-agent`](https://github.com/macstab/chaos-testing-java-agent) | 62 JDK call sites instrumented in-process. Spring Boot 3/4 + Micronaut + Quarkus integration. JUnit 5 `@ChaosTest`. Selector × effect × policy DSL. Live config reload. |
 | **Container orchestration** | [`macstab/chaos-testing`](https://github.com/macstab/chaos-testing) | Annotation-driven chaos on top of Testcontainers. CPU throttling, memory pressure, disk I/O, network partitions, DNS failures, pre-built Redis Sentinel + replication-lag scenarios, Toxiproxy adapter, Redis-aware fault injection. |
-| **LD_PRELOAD libc** | [`macstab/chaos-testing-libraries`](https://github.com/macstab/chaos-testing-libraries) | Pure C99 LD_PRELOAD shared objects: file I/O (latency / `errno` / torn / corrupt), network, DNS, clock, process, memory. **glibc + musl × amd64 + arm64**, 100 % line coverage on shipped sources, Docker runtime validation as a quality gate. Language-agnostic — works for any process inside any container, not just JVM. |
+| **LD_PRELOAD libc** | [`macstab/macstab-chaos-testing-libraries`](https://github.com/macstab/macstab-chaos-testing-libraries) | Pure C99 LD_PRELOAD shared objects: file I/O (latency / `errno` / torn / corrupt), network, DNS, clock, process, memory. **glibc + musl × amd64 + arm64**, 100 % line coverage on shipped sources, Docker runtime validation as a quality gate. Language-agnostic — works for any process inside any container, not just JVM. |
 
 **Start here** if you're on the JVM. This is the entry point and the richest layer.
 
@@ -1049,7 +1064,7 @@ Apache License 2.0 — see [LICENSE](LICENSE). Use it in production, ship it in 
 
 ## About the Engineer
 
-This three-repo stack — `chaos-testing-java-agent`, [`chaos-testing`](https://github.com/macstab/chaos-testing), [`chaos-testing-libraries`](https://github.com/macstab/chaos-testing-libraries) — is the work of one engineer: **Christian Schnapka**, Hamburg, Germany.
+This three-repo stack — `chaos-testing-java-agent`, [`chaos-testing`](https://github.com/macstab/chaos-testing), [`macstab-chaos-testing-libraries`](https://github.com/macstab/macstab-chaos-testing-libraries) — is the work of one engineer: **Christian Schnapka**, Hamburg, Germany.
 
 ### Timeline
 
