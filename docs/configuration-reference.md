@@ -917,7 +917,18 @@ All selectors use `"type"` as the JSON discriminator.
 
 **JSON type:** `"method"`  
 **Operations:** `METHOD_ENTER`, `METHOD_EXIT`  
-**Purpose:** Intercept entry to or exit from any method in any class. The most powerful selector.
+**Purpose:** Match entry to or exit from any method in any class.
+
+> **⚠️ Manual wiring required.** Unlike the other selectors in this reference, the agent **does not auto-instrument arbitrary user methods** for `METHOD_ENTER` / `METHOD_EXIT`. There is no engine in this build that takes a `MethodSelector` and dynamically rewrites every matching class on activation. The selector is matched against an `InvocationContext` raised by application-side interception machinery — Spring AOP, AspectJ, Micronaut / Quarkus interceptors, an annotation processor, or your own bytecode advice — that calls the agent's public hook:
+>
+> ```java
+> // inside your @Around aspect / interceptor
+> chaosRuntime.beforeMethodEnter(className, methodName);          // METHOD_ENTER
+> Object out = chaosRuntime.afterMethodExit(
+>     className, methodName, returnType, returnValue);            // METHOD_EXIT
+> ```
+>
+> Once the hook is wired, the matcher, effect, activation policy, and JSON form below all behave like every other selector. If you need zero-config interception of fixed JDK call sites, use the dedicated selectors (`network`, `nio`, `httpClient`, `jdbc`, `jvmRuntime`, …) instead.
 
 **Fields:**
 
@@ -931,7 +942,7 @@ All selectors use `"type"` as the JSON discriminator.
 **Safety constraint:** both `classPattern` and `methodNamePattern` cannot both be `ANY` simultaneously.
 
 **Paired effects:**
-- `METHOD_ENTER` + `ExceptionInjectionEffect` → inject any exception into any method before execution
+- `METHOD_ENTER` + `ExceptionInjectionEffect` → inject any exception before the method body
 - `METHOD_EXIT` + `ReturnValueCorruptionEffect` → corrupt the return value on method exit
 
 **JSON example:**
@@ -973,7 +984,23 @@ All selectors use `"type"` as the JSON discriminator.
 |-------|------|---------|-------------|
 | `operations` | Set\<OperationType\> | required | Any subset of the 18 valid operations |
 
-**Note on clock interception:** `SYSTEM_CLOCK_MILLIS`/`SYSTEM_CLOCK_NANOS` intercept `System.currentTimeMillis()` and `System.nanoTime()`. `INSTANT_NOW` intercepts `Instant.now()` — necessary because `@IntrinsicCandidate` constraints block direct retransformation of `currentTimeMillis` in some JVM configurations.
+**Note on clock interception:**
+
+`INSTANT_NOW`, `LOCAL_DATE_TIME_NOW`, `ZONED_DATE_TIME_NOW`, and `DATE_NEW` are **auto-wired** — the agent intercepts the corresponding `java.time` / `java.util.Date` calls at runtime and applies skew transparently. This is the recommended path for clock skew on modern code.
+
+`SYSTEM_CLOCK_MILLIS` and `SYSTEM_CLOCK_NANOS` are **not auto-wired and cannot be**. `System.currentTimeMillis()` and `System.nanoTime()` are `public static native @IntrinsicCandidate` methods on `java.lang.System`: retransformation cannot un-`native` them, and HotSpot's C2 JIT replaces the call with a direct hardware-clock instruction (`RDTSC` on x86, `MRS CNTVCT_EL0` on ARM) that bypasses any bytecode wrapper. This is a hard limitation of `-javaagent:` Java instrumentation.
+
+To skew a millisecond / nanosecond timestamp, route real time through the agent's public hook from your own code (typically an application-level `TimeProvider` or `Clock` wrapper):
+
+```java
+long real = System.currentTimeMillis();
+long now  = chaosRuntime.adjustClockMillis(real);   // SYSTEM_CLOCK_MILLIS
+
+long realNs = System.nanoTime();
+long nowNs  = chaosRuntime.adjustClockNanos(realNs); // SYSTEM_CLOCK_NANOS
+```
+
+Once the hook is wired, the matcher, effect, and activation policy behave like every other operation type. For zero-config skew of plain `Instant.now()` / `LocalDateTime.now()` / `ZonedDateTime.now()` / `new Date()` call sites, use the auto-wired operations above instead.
 
 ---
 

@@ -204,9 +204,26 @@ public enum OperationType {
   // ── Method-level interception ───────────────────────────────────────────────
 
   /**
-   * Fires before the body of an instrumented method executes. Combined with {@link
-   * ChaosEffect.ExceptionInjectionEffect} this injects any exception into any method in any library
-   * without modifying its bytecode at the source level.
+   * Fires when application-side instrumentation routes a method-entry event through the agent's
+   * public hook. Combined with {@link ChaosEffect.ExceptionInjectionEffect} this injects any
+   * exception into any method without modifying its bytecode at the source level.
+   *
+   * <p><b>Manual hook required.</b> The agent does <i>not</i> auto-instrument arbitrary user
+   * methods — there is no engine in this build that takes a {@link ChaosSelector.MethodSelector}
+   * and dynamically rewrites every matching class on activation. The method-entry event must be
+   * raised by interception machinery the application already runs (Spring AOP, AspectJ, Micronaut /
+   * Quarkus interceptors, a custom annotation processor, or your own ByteBuddy / ASM advice).
+   * Inside that interceptor:
+   *
+   * <pre>{@code
+   * @Around("@annotation(com.example.Audited)")
+   * public Object intercept(ProceedingJoinPoint pjp) throws Throwable {
+   *   String cls = pjp.getTarget().getClass().getName();
+   *   String mth = pjp.getSignature().getName();
+   *   chaosRuntime.beforeMethodEnter(cls, mth);  // may throw the configured exception
+   *   return pjp.proceed();
+   * }
+   * }</pre>
    *
    * <p>Used exclusively with {@link ChaosSelector.MethodSelector}.
    *
@@ -216,9 +233,20 @@ public enum OperationType {
   METHOD_ENTER,
 
   /**
-   * Fires after the body of an instrumented method completes and the return value is available.
-   * Combined with {@link ChaosEffect.ReturnValueCorruptionEffect} this replaces the return value
-   * with a boundary, null, zero, or empty value.
+   * Fires when application-side instrumentation routes a method-exit event through the agent's
+   * public hook. Combined with {@link ChaosEffect.ReturnValueCorruptionEffect} this replaces the
+   * return value with a boundary, null, zero, or empty value.
+   *
+   * <p><b>Manual hook required.</b> Same constraint as {@link #METHOD_ENTER}: no automatic dynamic
+   * per-class instrumentation is built. Wire from the same interceptor:
+   *
+   * <pre>{@code
+   * Object result = pjp.proceed();
+   * return chaosRuntime.afterMethodExit(
+   *     cls, mth,
+   *     ((MethodSignature) pjp.getSignature()).getReturnType(),
+   *     result);  // returns possibly-corrupted value
+   * }</pre>
    *
    * <p>Used exclusively with {@link ChaosSelector.MethodSelector}.
    *
@@ -250,17 +278,44 @@ public enum OperationType {
   // ── JVM runtime services ────────────────────────────────────────────────────
 
   /**
-   * Fires on every call to {@link System#currentTimeMillis()}. Used with {@link
-   * ChaosEffect.ClockSkewEffect} to apply fixed, drifting, or frozen clock offsets and test
-   * time-dependent logic.
+   * Fires when application code routes a {@link System#currentTimeMillis()} value through the
+   * agent's public clock-skew hook. Used with {@link ChaosEffect.ClockSkewEffect} to apply fixed,
+   * drifting, or frozen offsets and test time-dependent logic.
+   *
+   * <p><b>Manual hook required.</b> The agent does <i>not</i> auto-instrument {@link
+   * System#currentTimeMillis()} — that method is {@code public static native} and marked
+   * {@code @IntrinsicCandidate}, and HotSpot's JIT replaces the call with a direct hardware-clock
+   * instruction (RDTSC / MRS CNTVCT_EL0) that bypasses any bytecode wrapper, so retransformation
+   * has no effect. Apply this operation type by routing real time through the agent yourself:
+   *
+   * <pre>{@code
+   * long real = System.currentTimeMillis();
+   * long now  = chaosRuntime.adjustClockMillis(real); // returns chaos-skewed value
+   * }</pre>
+   *
+   * <p>Typical wiring point: an application-level {@code TimeProvider} / {@code Clock} wrapper
+   * already used in place of {@code System.currentTimeMillis()}. For zero-config skew of plain
+   * {@code System.currentTimeMillis()} call sites this operation type is unsupported; use {@link
+   * #INSTANT_NOW} instead, which the agent <i>does</i> auto-wire.
    *
    * <p>Used exclusively with {@link ChaosSelector.JvmRuntimeSelector}.
    */
   SYSTEM_CLOCK_MILLIS,
 
   /**
-   * Fires on every call to {@link System#nanoTime()}. A backward skew intentionally violates the
-   * monotonicity contract to expose assumptions in timing loops and profiling code.
+   * Fires when application code routes a {@link System#nanoTime()} value through the agent's public
+   * clock-skew hook. A backward skew intentionally violates the monotonicity contract to expose
+   * assumptions in timing loops and profiling code.
+   *
+   * <p><b>Manual hook required.</b> Same JVM constraint as {@link #SYSTEM_CLOCK_MILLIS}: {@link
+   * System#nanoTime()} is {@code native @IntrinsicCandidate} and is JIT-replaced with a direct
+   * hardware counter read; bytecode advice on it does not take effect. Apply this operation type by
+   * routing real time through the agent yourself:
+   *
+   * <pre>{@code
+   * long real = System.nanoTime();
+   * long now  = chaosRuntime.adjustClockNanos(real); // returns chaos-skewed value
+   * }</pre>
    *
    * <p>Used exclusively with {@link ChaosSelector.JvmRuntimeSelector}.
    */

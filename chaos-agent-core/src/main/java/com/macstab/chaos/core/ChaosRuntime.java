@@ -585,18 +585,18 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Intercepts a method entry point. Evaluates active {@link ChaosEffect.ExceptionInjectionEffect}
-   * scenarios matching the given class and method name and throws the injected exception if
-   * applicable.
+   * Public hook for {@code OperationType.METHOD_ENTER}. Evaluates active {@link
+   * ChaosEffect.ExceptionInjectionEffect} scenarios matching the given class and method name and
+   * throws the injected exception if applicable.
    *
-   * <p>This method is the runtime target called by ByteBuddy {@code @Advice.OnMethodEnter}
-   * instrumentation. It may also be called directly in tests that verify injection behaviour
-   * without installing a full instrumentation stack.
+   * <p><b>Manual hook required.</b> The agent does not auto-rewrite arbitrary user methods. Call
+   * this hook from the application's interception machinery (Spring AOP {@code @Around}, AspectJ,
+   * Micronaut / Quarkus interceptors, or your own bytecode advice) at the start of every
+   * intercepted method body.
    *
    * @param className the fully-qualified binary class name of the method's declaring class
    * @param methodName the simple method name
-   * @throws Throwable the injected exception when a matching scenario fires; never a checked
-   *     exception from this method itself
+   * @throws Throwable the injected exception when a matching scenario fires
    */
   public void beforeMethodEnter(final String className, final String methodName) throws Throwable {
     final InvocationContext context =
@@ -613,17 +613,19 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Intercepts a method exit point and applies any active {@link
-   * ChaosEffect.ReturnValueCorruptionEffect} to the return value.
+   * Public hook for {@code OperationType.METHOD_EXIT}. Applies any active {@link
+   * ChaosEffect.ReturnValueCorruptionEffect} to the supplied return value and returns the
+   * possibly-corrupted result.
    *
-   * <p>This method is the runtime target called by ByteBuddy {@code @Advice.OnMethodExit}
-   * instrumentation. It may also be called directly in tests.
+   * <p><b>Manual hook required.</b> Call this from the same interception machinery as {@link
+   * #beforeMethodEnter(String, String)} after the method body returns; pass the original return
+   * value and hand the result returned by this hook back to the caller.
    *
    * @param className the fully-qualified binary class name of the method's declaring class
    * @param methodName the simple method name
    * @param returnType the declared return type; used to select an appropriate corrupted value
-   * @param actualValue the original return value; must be boxed for primitives
-   * @return the (possibly corrupted) return value
+   * @param actualValue the original return value; primitives must be boxed
+   * @return the (possibly-corrupted) return value
    * @throws Throwable if gate or other pre-decision actions require it
    */
   public Object afterMethodExit(
@@ -700,20 +702,33 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Returns the (possibly skewed) millis value for {@link System#currentTimeMillis()}.
+   * Public hook for {@code OperationType.SYSTEM_CLOCK_MILLIS}. Pass a raw {@link
+   * System#currentTimeMillis()} reading; receive the chaos-skewed value to use downstream.
    *
-   * @param realMillis the raw OS clock value
-   * @return the adjusted value
+   * <p><b>Manual hook required.</b> The agent cannot auto-instrument {@link
+   * System#currentTimeMillis()} (it is {@code native @IntrinsicCandidate} and the JIT replaces the
+   * call with a direct hardware-clock instruction). Wire this into a {@code TimeProvider} / {@code
+   * Clock} wrapper that the application uses in place of {@code currentTimeMillis()} directly.
+   *
+   * @param realMillis the raw OS clock value, typically from {@link System#currentTimeMillis()}
+   * @return chaos-skewed milliseconds when an active {@code SYSTEM_CLOCK_MILLIS} scenario applies;
+   *     {@code realMillis} unchanged otherwise
    */
   public long adjustClockMillis(final long realMillis) {
     return applyClockSkew(realMillis, OperationType.SYSTEM_CLOCK_MILLIS);
   }
 
   /**
-   * Returns the (possibly skewed) nanos value for {@link System#nanoTime()}.
+   * Public hook for {@code OperationType.SYSTEM_CLOCK_NANOS}. Pass a raw {@link System#nanoTime()}
+   * reading; receive the chaos-skewed value. See {@link #adjustClockMillis(long)} for the broader
+   * context — same JVM constraint applies.
    *
-   * @param realNanos the raw OS clock value
-   * @return the adjusted value
+   * <p>A backward {@code DRIFT} skew on this hook intentionally violates the {@code nanoTime()}
+   * monotonicity contract to expose timing-loop and profiling assumptions.
+   *
+   * @param realNanos the raw OS monotonic value, typically from {@link System#nanoTime()}
+   * @return chaos-skewed nanoseconds when an active {@code SYSTEM_CLOCK_NANOS} scenario applies;
+   *     {@code realNanos} unchanged otherwise
    */
   public long adjustClockNanos(final long realNanos) {
     return applyClockSkew(realNanos, OperationType.SYSTEM_CLOCK_NANOS);

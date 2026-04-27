@@ -307,25 +307,63 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeMethodEnter}.
+   * Public hook for {@link com.macstab.chaos.jvm.api.OperationType#METHOD_ENTER}. Call this from
+   * the application's interception machinery (Spring AOP {@code @Around}, AspectJ, Micronaut /
+   * Quarkus interceptors, or your own bytecode advice) at the start of every intercepted method to
+   * give chaos scenarios a chance to inject an exception before the body runs.
+   *
+   * <p>The agent does <i>not</i> auto-rewrite arbitrary user methods, so the entry event must be
+   * raised here. A matching {@code MethodSelector} scenario with {@link
+   * com.macstab.chaos.jvm.api.ChaosEffect.ExceptionInjectionEffect} causes this method to throw the
+   * configured exception type.
+   *
+   * <pre>{@code
+   * @Around("@annotation(com.example.Audited)")
+   * public Object intercept(ProceedingJoinPoint pjp) throws Throwable {
+   *   chaosRuntime.beforeMethodEnter(
+   *       pjp.getTarget().getClass().getName(),
+   *       pjp.getSignature().getName());
+   *   return pjp.proceed();
+   * }
+   * }</pre>
    *
    * @param className the fully-qualified binary class name of the method's declaring class
-   * @param methodName the simple method name
-   * @throws Throwable if an active scenario throws to simulate a failure
+   * @param methodName the simple method name (no descriptor)
+   * @throws Throwable the exception type configured by an active {@code ExceptionInjectionEffect};
+   *     no-op if no scenario matches
    */
   public void beforeMethodEnter(final String className, final String methodName) throws Throwable {
     dispatcher.beforeMethodEnter(className, methodName);
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#afterMethodExit}.
+   * Public hook for {@link com.macstab.chaos.jvm.api.OperationType#METHOD_EXIT}. Call this from the
+   * same interception machinery as {@link #beforeMethodEnter(String, String)} after the intercepted
+   * method body returns; pass the original return value and receive the (possibly-corrupted) value
+   * to hand back to the caller.
+   *
+   * <p>A matching {@code MethodSelector} scenario with {@link
+   * com.macstab.chaos.jvm.api.ChaosEffect.ReturnValueCorruptionEffect} replaces {@code actualValue}
+   * with a boundary, null, zero, or empty value selected for {@code returnType}.
+   *
+   * <pre>{@code
+   * Object result = pjp.proceed();
+   * return chaosRuntime.afterMethodExit(
+   *     cls, mth,
+   *     ((MethodSignature) pjp.getSignature()).getReturnType(),
+   *     result);
+   * }</pre>
    *
    * @param className the fully-qualified binary class name of the method's declaring class
-   * @param methodName the simple method name
+   * @param methodName the simple method name (no descriptor)
    * @param returnType the declared return type; used to select an appropriate corrupted value
-   * @param actualValue the original return value; must be boxed for primitives
-   * @return the (possibly corrupted) return value
-   * @throws Throwable if an active scenario throws to simulate a failure
+   *     ({@code null} for reference types, {@code 0} for numeric primitives, {@code false} for
+   *     booleans, empty collections / arrays / strings)
+   * @param actualValue the original return value; primitives must be boxed
+   * @return the (possibly-corrupted) value to return to the caller; equals {@code actualValue} when
+   *     no scenario matches
+   * @throws Throwable the exception type configured by an active {@code ExceptionInjectionEffect}
+   *     paired with {@code METHOD_EXIT}
    */
   public Object afterMethodExit(
       final String className,
@@ -358,20 +396,42 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#adjustClockMillis}.
+   * Public hook for {@link com.macstab.chaos.jvm.api.OperationType#SYSTEM_CLOCK_MILLIS}. Pass a raw
+   * {@link System#currentTimeMillis()} reading and receive the chaos-skewed value to use
+   * downstream.
    *
-   * @param realMillis real wall-clock time in milliseconds
-   * @return adjusted time in milliseconds
+   * <p>The agent cannot auto-instrument {@link System#currentTimeMillis()} (it is {@code
+   * native @IntrinsicCandidate} and the JIT replaces calls with a direct hardware-clock read).
+   * Application code typically wires this hook into a {@code TimeProvider} / {@code Clock} wrapper:
+   *
+   * <pre>{@code
+   * public long now() {
+   *   return chaosRuntime.adjustClockMillis(System.currentTimeMillis());
+   * }
+   * }</pre>
+   *
+   * @param realMillis real wall-clock time in milliseconds, typically obtained from {@link
+   *     System#currentTimeMillis()}
+   * @return chaos-skewed milliseconds when an active {@code SYSTEM_CLOCK_MILLIS} scenario applies;
+   *     {@code realMillis} unchanged otherwise
    */
   public long adjustClockMillis(final long realMillis) {
     return dispatcher.adjustClockMillis(realMillis);
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#adjustClockNanos}.
+   * Public hook for {@link com.macstab.chaos.jvm.api.OperationType#SYSTEM_CLOCK_NANOS}. Pass a raw
+   * {@link System#nanoTime()} reading and receive the chaos-skewed value. See {@link
+   * #adjustClockMillis(long)} for the broader context — the same JVM constraint (native intrinsic)
+   * applies to {@code nanoTime()}.
    *
-   * @param realNanos real wall-clock time in nanoseconds
-   * @return adjusted time in nanoseconds
+   * <p>A backward {@code DRIFT} skew on this hook intentionally violates the monotonicity contract
+   * of {@code nanoTime()} to expose timing-loop and profiling assumptions.
+   *
+   * @param realNanos real monotonic time in nanoseconds, typically obtained from {@link
+   *     System#nanoTime()}
+   * @return chaos-skewed nanoseconds when an active {@code SYSTEM_CLOCK_NANOS} scenario applies;
+   *     {@code realNanos} unchanged otherwise
    */
   public long adjustClockNanos(final long realNanos) {
     return dispatcher.adjustClockNanos(realNanos);
