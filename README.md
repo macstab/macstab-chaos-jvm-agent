@@ -9,16 +9,19 @@
 
 <div align="center">
 
-# macstab-chaos-jvm-agent
+# chaos-testing-java-agent
 
-**In-process JVM chaos engineering — bytecode-level fault injection with zero application changes**
+**Pipeline-grade chaos engineering for the JVM. The failures that page your on-call become commits that fail in PR review.**
 
 [![Java 21+](https://img.shields.io/badge/Java-21%2B-blue.svg)](https://openjdk.org/projects/jdk/21/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-green.svg)](LICENSE)
 [![ByteBuddy](https://img.shields.io/badge/ByteBuddy-instrumentation-orange.svg)](https://bytebuddy.net/)
+[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3%20%26%204-6DB33F.svg)](https://spring.io/projects/spring-boot)
+[![Quarkus](https://img.shields.io/badge/Quarkus-supported-4695EB.svg)](https://quarkus.io/)
+[![Micronaut](https://img.shields.io/badge/Micronaut-supported-1A1A1A.svg)](https://micronaut.io/)
 
 *Designed and engineered by* **[Christian Schnapka](https://macstab.com)** —
-Embedded Principal+ Engineer · [Macstab GmbH](https://macstab.com) · Hamburg, Germany
+Principal+ Engineer · [Macstab GmbH](https://macstab.com) · Hamburg, Germany
 
 </div>
 
@@ -26,33 +29,65 @@ Embedded Principal+ Engineer · [Macstab GmbH](https://macstab.com) · Hamburg, 
 
 ## The Short Version
 
-Most chaos tools attack from outside: kill a container, poison DNS, drop packets at the network layer. This tool goes **inside** — it rewrites JDK bytecode at startup and intercepts 57 distinct JVM operations while the process is running. No sidecars. No mocks. No application code changes. Real `Thread.sleep`, real `ConnectException`, real `OutOfMemoryError` — injected surgically into the exact call sites you choose.
+Your Redis cluster is fine 99.9 % of the time.
+
+Then a pod drains. Replication lag spikes to 300 ms. Your retry logic hammers the primary. p99 doubles. PagerDuty fires at 3 AM.
+
+You've been in this room before. Toxiproxy didn't catch it — it's TCP-blind, it never sees `HikariPool.getConnection()` blocking. Your unit tests didn't catch it — they mocked the Redis client. Your integration tests didn't catch it — Testcontainers gave you a perfect Redis. The last game day was three months ago.
+
+**Add eight lines to your test suite. Catch it on the next PR.**
 
 ```java
-// Make socket connects to a specific host start failing on demand:
-session.activate(ChaosScenario.builder("reject-db-connects")
-    .selector(ChaosSelector.network(
-        Set.of(OperationType.SOCKET_CONNECT),
-        NamePattern.prefix("db.internal.")))
-    .effect(ChaosEffect.reject("chaos: connection refused"))
-    .build());
+@ChaosTest
+void retryLogicSurvivesReplicationLag(ChaosControlPlane chaos) {
+    chaos.activate(ChaosScenario.builder("replica-lag-300ms")
+        .selector(ChaosSelector.network(
+            Set.of(OperationType.SOCKET_READ),
+            NamePattern.prefix("redis-replica.")))
+        .effect(ChaosEffect.delay(Duration.ofMillis(300)))
+        .activationPolicy(ActivationPolicy.always())
+        .build());
+
+    assertThat(service.read1000Keys().latencyP99()).isLessThan(BUDGET);
+}
 ```
+
+No sidecar. No mocks. No application code changes. The bytecode of `java.net.Socket` reads is rewritten at JVM startup; chaos applies surgically inside the JVM that's already running your production code paths. **62 JDK call sites** auto-wired across DNS, SSL, JDBC, HTTP, NIO, sockets, virtual threads, monitors, scheduler, GC, class loading, file I/O, ThreadLocal, JNDI, JMX, serialization, native libraries, queues, executors, async completion, and more. One annotation. Zero `--add-opens` flags. The agent self-grants every JDK module open it needs at install time.
+
+Works in JUnit 5 with **Spring Boot 3, Spring Boot 4, Micronaut, and Quarkus** out of the box.
+
+### What questions does it answer?
+
+The questions your on-call has to answer at 3 AM — turned into PR-blocking assertions:
+
+- *"Will a 3-second network outage kill my HikariCP pool, or will it recover?"*
+- *"If one connection has 1 s latency, does my repeatable-read transaction still produce consistent data, or does it return stale rows?"*
+- *"Is `read_from = REPLICA_PREFERRED` actually routing reads correctly when the primary is slow?"*
+- *"Does my circuit breaker open before my caller's timeout fires?"*
+- *"When DNS resolution slows from 1 ms to 800 ms, does anything in my stack actually time out, or does it deadlock?"*
+- *"If GC pauses 200 ms during a burst, do my queue consumers fall behind permanently or catch up?"*
+
+Every one of those becomes a `@ChaosTest` method that runs on every PR. No game day required. No SRE team required. No production blast radius. **Failures become commits, not incidents.**
 
 ---
 
-## Part of a Three-Layer Chaos Engineering Family
+## Part of a Three-Layer Chaos Engineering Stack
 
-`macstab-chaos-jvm-agent` is the **JVM bytecode layer** of a vertically-integrated chaos engineering stack. This module is self-contained — everything in this README works standalone — but it composes with two sibling layers when deeper coverage is needed.
+`chaos-testing-java-agent` is the **JVM bytecode layer** of a vertically-integrated chaos engineering toolkit. This repo is self-contained — everything in this README works standalone — but it composes with two sibling layers when broader coverage is needed.
 
-| Layer | Project | What it covers |
+| Layer | Repo | What it covers |
 |---|---|---|
-| **JVM bytecode** (this repo) | `chaos-testing-java-agent` | 57 JDK operations instrumented in-process: DNS, SSL, JDBC, HTTP, NIO, monitors, safepoints, virtual-thread pinning, clock, GC, executors, class loading, file I/O, `ThreadLocal` |
-| **Container orchestration** | `chaos-testing` | JUnit 5 annotation-driven chaos on top of Testcontainers: CPU throttling, memory pressure, disk I/O, network latency & partitions, DNS failures, pre-built Redis Sentinel + chaos scenarios, auto-detecting Linux package manager across distros |
-| **LD_PRELOAD libc** | `chaos-testing-libraries` | Six LD_PRELOAD libraries intercepting libc at the process boundary: file I/O (latency / ERRNO / TORN / CORRUPT), network, DNS, clock, process, memory. Multi-arch (glibc + musl × amd64 + arm64). Language-agnostic — usable from any containerised process |
+| **JVM bytecode** (this repo) | [`macstab/chaos-testing-java-agent`](https://github.com/macstab/chaos-testing-java-agent) | 62 JDK call sites instrumented in-process. Spring Boot 3/4 + Micronaut + Quarkus integration. JUnit 5 `@ChaosTest`. Selector × effect × policy DSL. Live config reload. |
+| **Container orchestration** | [`macstab/chaos-testing`](https://github.com/macstab/chaos-testing) | Annotation-driven chaos on top of Testcontainers. CPU throttling, memory pressure, disk I/O, network partitions, DNS failures, pre-built Redis Sentinel + replication-lag scenarios, Toxiproxy adapter, Redis-aware fault injection. |
+| **LD_PRELOAD libc** | [`macstab/chaos-testing-libraries`](https://github.com/macstab/chaos-testing-libraries) | Pure C99 LD_PRELOAD shared objects: file I/O (latency / `errno` / torn / corrupt), network, DNS, clock, process, memory. **glibc + musl × amd64 + arm64**, 100 % line coverage on shipped sources, Docker runtime validation as a quality gate. Language-agnostic — works for any process inside any container, not just JVM. |
 
-**Start here** for JVM-native chaos in unit tests, CI pipelines, or a running Spring Boot / Quarkus / Micronaut application. This module is the entry point and the richest of the three layers.
+**Start here** if you're on the JVM. This is the entry point and the richest layer.
 
-**Combine layers** when you need OS-level fault injection alongside JVM chaos (add the LD_PRELOAD layer through your container's environment) or orchestrated container chaos in integration tests (add the orchestration layer as your Testcontainers harness). There is no cross-layer coupling — each layer is independently adoptable and independently releasable.
+**Compose layers** for full distributed-system coverage:
+- Add the LD_PRELOAD layer to inject *kernel-real* time skew, slow disks, and DNS slowdowns into containers — chaos for failure modes the JVM can't see (e.g. `clock_gettime` is a syscall the JVM can't intrinsically intercept; the LD_PRELOAD lib can).
+- Add the orchestration layer to wire `@ChaosTest` annotations directly to Testcontainers-managed Redis, Postgres, Kafka — including pre-built scenarios like *replication lag during pod drainage*.
+
+Three repos, one mental model: **the same selector × effect × policy DSL spans the libc layer, the JVM layer, and the orchestration layer.** No cross-layer coupling — each layer is independently adoptable, independently versioned, independently released.
 
 ---
 
@@ -998,16 +1033,39 @@ Internal Architecture documentation lives in [`docs/`](docs/):
 
 ## License
 
-Apache License 2.0 — see [LICENSE](LICENSE).
+Apache License 2.0 — see [LICENSE](LICENSE). Use it in production, ship it in your products, fork it, build a business around it. The only thing you cannot do is claim you wrote it.
+
+---
+
+## About the Engineer
+
+This stack — `chaos-testing-java-agent`, [`chaos-testing`](https://github.com/macstab/chaos-testing), [`chaos-testing-libraries`](https://github.com/macstab/chaos-testing-libraries) — is the work of one engineer: **Christian Schnapka**, principal-level systems engineer based in Hamburg, Germany.
+
+Areas of practice that informed it:
+- **JVM internals & bytecode engineering** — agents, instrumentation, JIT-aware design, JVMTI re-entrancy, module-system module-opens, modern JDK call sites including JDK 25 internals
+- **Distributed-system reliability** — connection pools, retry semantics, circuit breakers, replica routing, transaction consistency under partial failure, on-call experience translated into testable assertions
+- **Linux systems programming** — pure C99 LD_PRELOAD libraries with cross-libc (glibc + musl) and cross-arch (amd64 + arm64) validation as a quality gate
+- **Framework integration** — Spring Boot 3 / 4, Micronaut, Quarkus — single-annotation chaos that respects each framework's test-context conventions
+- **Production engineering at scale** — building things that hold up at the edges, not just the happy path
+
+### Available for senior engineering engagements
+
+Limited consulting capacity for organisations that want this kind of engineering rigour applied to their reliability problem — typically **fractional / interim Principal Engineer**, **architecture review**, **chaos-engineering / SRE-tooling enablement**, or **deep-dive JVM performance work**.
+
+If your team is fighting production reliability issues that "more tests" hasn't fixed, reach out:
+
+- **[macstab.com](https://macstab.com)** — engagement enquiries
+- **info@macstab.com** — direct contact
+- **[GitHub @macstab](https://github.com/macstab)** — more open-source work
+
+I work on a small number of engagements per year. If the fit is right, the work is deep — not a slide deck deliverable, real systems shipped to production with the receipts to prove it.
 
 ---
 
 <div align="center">
 
-*Architecture, implementation, and documentation crafted with Love and Passion by*
-
 **[Christian Schnapka](https://macstab.com)**
-Embedded Principal+ Engineer
+Principal+ Engineer
 [Macstab GmbH](https://macstab.com) · Hamburg, Germany
 
 *Building systems that operate correctly at the edges — including the ones you deliberately break.*
