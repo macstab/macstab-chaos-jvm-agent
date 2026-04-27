@@ -139,6 +139,16 @@ public final class JdkInstrumentationInstaller {
     // RUNTIME CAS serialises install() calls JVM-wide to at most one.
     installedTransformer = agentBuilder.installOn(instrumentation);
 
+    // Some JDK classes (e.g. java.io.ObjectOutputStream / ObjectInputStream) get loaded as a
+    // side-effect of ByteBuddy's installOn() while it is already inside a JVMTI
+    // ClassFileLoadHook callback for another class. The JVMTI re-entrancy rule then suppresses
+    // the hook for those side-effect loads, so they escape our transformer entirely. After
+    // installOn() returns we are no longer inside any hook, so we can request an explicit
+    // retransformation that fires the hook normally and applies the missing advice.
+    if (premainMode) {
+      retransformPostInstallEscapees(instrumentation);
+    }
+
     // ── Clock skew limitation: direct System.currentTimeMillis() cannot be intercepted ────────
     //
     // System.currentTimeMillis() and System.nanoTime() are @IntrinsicCandidate native methods
@@ -177,8 +187,8 @@ public final class JdkInstrumentationInstaller {
   }
 
   /**
-   * Self-grants reflective and instrumentation access to the JDK internal packages this agent
-   * needs to function, without requiring the user to set {@code --add-opens} JVM flags.
+   * Self-grants reflective and instrumentation access to the JDK internal packages this agent needs
+   * to function, without requiring the user to set {@code --add-opens} JVM flags.
    *
    * <p>The agent JAR's {@code MANIFEST.MF} carries a matching {@code Add-Opens} attribute (see
    * {@code chaos-agent-bootstrap/build.gradle.kts}) that the JVM honours on the {@code -javaagent:}
@@ -191,13 +201,13 @@ public final class JdkInstrumentationInstaller {
    * <p>Each entry below is paired with the agent feature that depends on it. If a future feature
    * needs a new internal package, add it both to the manifest <i>and</i> to this list.
    *
-   * <p>Failures are tolerated and logged at FINE level: the JVM may legitimately deny
-   * {@code redefineModule} on stripped or future runtimes. Downstream code that depends on the
-   * open already handles {@code java.lang.reflect.InaccessibleObjectException} via try/catch (see
-   * {@code HttpUrlExtractor}, {@code JdbcTargetExtractor}, {@code DirectBufferPressureStressor}).
+   * <p>Failures are tolerated and logged at FINE level: the JVM may legitimately deny {@code
+   * redefineModule} on stripped or future runtimes. Downstream code that depends on the open
+   * already handles {@code java.lang.reflect.InaccessibleObjectException} via try/catch (see {@code
+   * HttpUrlExtractor}, {@code JdbcTargetExtractor}, {@code DirectBufferPressureStressor}).
    *
-   * @param instrumentation the JVM-supplied {@link Instrumentation} handle, used for the
-   *     {@code redefineModule} call
+   * @param instrumentation the JVM-supplied {@link Instrumentation} handle, used for the {@code
+   *     redefineModule} call
    */
   private static void grantInternalModuleOpens(final Instrumentation instrumentation) {
     final Module unnamed = ClassLoader.getSystemClassLoader().getUnnamedModule();
@@ -218,12 +228,16 @@ public final class JdkInstrumentationInstaller {
       final String packageName = entry[1];
       final Module module = ModuleLayer.boot().findModule(moduleName).orElse(null);
       if (module == null) {
-        LOGGER.log(Level.FINE, "module {0} not present; skipping open of {1}",
+        LOGGER.log(
+            Level.FINE,
+            "module {0} not present; skipping open of {1}",
             new Object[] {moduleName, packageName});
         continue;
       }
       if (!module.getPackages().contains(packageName)) {
-        LOGGER.log(Level.FINE, "module {0} does not contain package {1}; skipping",
+        LOGGER.log(
+            Level.FINE,
+            "module {0} does not contain package {1}; skipping",
             new Object[] {moduleName, packageName});
         continue;
       }
@@ -232,11 +246,11 @@ public final class JdkInstrumentationInstaller {
         extraOpens.put(packageName, openTo);
         instrumentation.redefineModule(
             module,
-            Collections.emptySet(),         // extraReads
-            Collections.emptyMap(),         // extraExports
-            extraOpens,                     // extraOpens
-            Collections.emptySet(),         // extraUses
-            Collections.emptyMap());        // extraProvides
+            Collections.emptySet(), // extraReads
+            Collections.emptyMap(), // extraExports
+            extraOpens, // extraOpens
+            Collections.emptySet(), // extraUses
+            Collections.emptyMap()); // extraProvides
       } catch (final RuntimeException failure) {
         LOGGER.log(
             Level.FINE,
@@ -799,12 +813,19 @@ public final class JdkInstrumentationInstaller {
         // (e.g. jdk.internal.net.http.HttpClientImpl in the platform classloader) references
         // these types. Without injecting them here the JVM verifier raises NoClassDefFoundError
         // when the JDK class is first used.
-        writeClass(
-            jarOutputStream, "com/macstab/chaos/jvm/api/ChaosHttpSuppressException.class");
-        writeClass(
-            jarOutputStream, "com/macstab/chaos/jvm/instrumentation/HttpUrlExtractor.class");
+        writeClass(jarOutputStream, "com/macstab/chaos/jvm/api/ChaosHttpSuppressException.class");
+        writeClass(jarOutputStream, "com/macstab/chaos/jvm/instrumentation/HttpUrlExtractor.class");
         writeClass(
             jarOutputStream, "com/macstab/chaos/jvm/instrumentation/HttpUrlExtractor$1.class");
+        // JDBC advice woven into HikariPool / c3p0 / java.sql types references these classes.
+        // HikariPool is loaded by the application classloader, but the inlined advice references
+        // must resolve through the bootstrap classpath, so the exception type and the reflective
+        // pool-name extractor both have to be visible there.
+        writeClass(jarOutputStream, "com/macstab/chaos/jvm/api/ChaosJdbcSuppressException.class");
+        writeClass(
+            jarOutputStream, "com/macstab/chaos/jvm/instrumentation/JdbcTargetExtractor.class");
+        writeClass(
+            jarOutputStream, "com/macstab/chaos/jvm/instrumentation/JdbcTargetExtractor$1.class");
       }
       // Retain the JarFile in a static field. appendToBootstrapClassLoaderSearch does not
       // document whether the JVM keeps a strong reference to the Java-side JarFile; on
@@ -845,6 +866,45 @@ public final class JdkInstrumentationInstaller {
       java.util.Collections.synchronizedList(new java.util.ArrayList<>());
 
   /**
+   * Names of classes that are reliably loaded as a side-effect of {@link AgentBuilder#installOn}
+   * itself — usually because ByteBuddy's own machinery touches them while it is already inside a
+   * JVMTI {@code ClassFileLoadHook} for some other type, and the hook is not re-entrant. Any
+   * matcher that should fire on these classes has to be applied via an explicit post-install {@code
+   * retransformClasses} call (the JVMTI re-entrancy rule no longer applies once {@code installOn}
+   * has returned).
+   */
+  private static final String[] POST_INSTALL_RETRANSFORM_TARGETS = {
+    "java.io.ObjectOutputStream",
+    "java.io.ObjectInputStream",
+    // VirtualThread overrides Thread.start(); a Thread-only weave silently misses every
+    // VIRTUAL_THREAD_START event because vt.start() dispatches to VirtualThread.start() (its
+    // own override), bypassing Thread.start() entirely. We weave VirtualThread.start() above,
+    // but the class is loaded as a side-effect of retransforming java.lang.Thread, so the
+    // ClassFileTransformer is suppressed by the JVMTI re-entrancy rule.
+    "java.lang.VirtualThread",
+  };
+
+  /**
+   * Re-runs the {@link java.lang.instrument.ClassFileTransformer} for classes that were loaded as a
+   * side-effect during {@link AgentBuilder#installOn} and so escaped the original transformer pass.
+   * See {@link #POST_INSTALL_RETRANSFORM_TARGETS} for the list and rationale.
+   */
+  private static void retransformPostInstallEscapees(final Instrumentation instrumentation) {
+    for (final String name : POST_INSTALL_RETRANSFORM_TARGETS) {
+      try {
+        final Class<?> cls = Class.forName(name, false, null);
+        if (instrumentation.isModifiableClass(cls)) {
+          instrumentation.retransformClasses(cls);
+        }
+      } catch (final ClassNotFoundException notLoaded) {
+        // Not loaded yet — the regular ClassFileTransformer will catch it on first use.
+      } catch (final Throwable failure) {
+        LOGGER.warning("failed to retransform " + name + ": " + failure);
+      }
+    }
+  }
+
+  /**
    * Builds the base {@link AgentBuilder} with retransformation strategy, error logging, and ignore
    * rules for ByteBuddy and chaos-agent internal packages.
    */
@@ -883,10 +943,26 @@ public final class JdkInstrumentationInstaller {
     return b;
   }
 
-  /** Thread.start instrumentation. */
+  /**
+   * Thread.start instrumentation.
+   *
+   * <p>Targets {@code java.lang.Thread.start()} for platform threads <i>and</i> {@code
+   * java.lang.VirtualThread.start()} for virtual threads. Virtual threads override {@code
+   * Thread.start()} (it is not {@code final}) and dispatch directly to {@code
+   * VirtualThread.start(DEFAULT_SCHEDULER)} without calling {@code Thread.start()}, so a
+   * Thread-only weave silently misses every {@code VIRTUAL_THREAD_START} event. The shared advice
+   * captures {@code @Advice.This Thread} and the runtime dispatcher emits {@code THREAD_START} vs
+   * {@code VIRTUAL_THREAD_START} based on {@code Thread.isVirtual()}.
+   */
   private static AgentBuilder applyThreadStartTransformations(final AgentBuilder builder) {
     return builder
         .type(ElementMatchers.named("java.lang.Thread"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(ThreadAdvice.StartAdvice.class)
+                        .on(ElementMatchers.named("start").and(ElementMatchers.takesArguments(0)))))
+        .type(ElementMatchers.named("java.lang.VirtualThread"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder.visit(
@@ -1117,29 +1193,33 @@ public final class JdkInstrumentationInstaller {
     return b;
   }
 
-  /** System.exit, Runtime.gc, Runtime.halt instrumentation. */
+  /** System.exit, System.gc, Runtime.gc, Runtime.halt instrumentation. */
   private static AgentBuilder applyRuntimeLifecycleTransformations(final AgentBuilder builder) {
     return builder
         .type(ElementMatchers.named("java.lang.System"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
-                typeBuilder.visit(
-                    Advice.to(JvmRuntimeAdvice.ExitRequestAdvice.class)
-                        .on(
-                            ElementMatchers.named("exit")
-                                .and(ElementMatchers.takesArguments(int.class)))))
-        .type(ElementMatchers.named("java.lang.Runtime"))
-        .transform(
-            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder
-                    .visit(
-                        Advice.to(JvmRuntimeAdvice.GcRequestAdvice.class)
-                            .on(ElementMatchers.named("gc").and(ElementMatchers.takesArguments(0))))
                     .visit(
                         Advice.to(JvmRuntimeAdvice.ExitRequestAdvice.class)
                             .on(
-                                ElementMatchers.named("halt")
-                                    .and(ElementMatchers.takesArguments(int.class)))));
+                                ElementMatchers.named("exit")
+                                    .and(ElementMatchers.takesArguments(int.class))))
+                    // System.gc() is a non-native Java method that delegates to Runtime.gc().
+                    // Runtime.gc() is native and cannot be instrumented; System.gc() can be.
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.GcRequestAdvice.class)
+                            .on(
+                                ElementMatchers.named("gc")
+                                    .and(ElementMatchers.takesArguments(0)))))
+        .type(ElementMatchers.named("java.lang.Runtime"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(JvmRuntimeAdvice.ExitRequestAdvice.class)
+                        .on(
+                            ElementMatchers.named("halt")
+                                .and(ElementMatchers.takesArguments(int.class)))));
   }
 
   /**
@@ -1265,10 +1345,30 @@ public final class JdkInstrumentationInstaller {
    */
   private static AgentBuilder applyNioChannelTransformations(final AgentBuilder builder) {
     return builder
-        // NIO Selector — target AbstractSelector subtypes (KQueueSelectorImpl etc.).
-        // Exclude abstract / interface / synthetic matches for the same VerifyError reason
-        // as SocketChannel below: bytecode generated for bridge / synthetic methods on
-        // abstract bases cannot satisfy the advice's stack-map expectations.
+        // NIO Selector — target sun.nio.ch.SelectorImpl directly (it declares select(long),
+        // select(), selectNow()) AND concrete AbstractSelector subtypes. Concrete-subtype
+        // targeting alone misses the methods because KQueueSelectorImpl does not re-declare
+        // them; they are inherited from SelectorImpl. Exclude abstract/interface/synthetic
+        // matches on the subtype sweep to avoid VerifyError on bridge methods.
+        .type(ElementMatchers.named("sun.nio.ch.SelectorImpl"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.NioSelectNoArgAdvice.class)
+                            .on(
+                                ElementMatchers.named("select")
+                                    .and(ElementMatchers.takesArguments(0))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.NioSelectTimeoutAdvice.class)
+                            .on(
+                                ElementMatchers.named("select")
+                                    .and(ElementMatchers.takesArguments(long.class))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.NioSelectNowAdvice.class)
+                            .on(
+                                ElementMatchers.named("selectNow")
+                                    .and(ElementMatchers.takesArguments(0)))))
         .type(
             ElementMatchers.isSubTypeOf(java.nio.channels.spi.AbstractSelector.class)
                 .and(ElementMatchers.not(ElementMatchers.isAbstract()))
@@ -1372,20 +1472,23 @@ public final class JdkInstrumentationInstaller {
                         .on(
                             ElementMatchers.named("accept")
                                 .and(ElementMatchers.takesArguments(0)))))
-        .type(ElementMatchers.named("java.net.SocketInputStream"))
-        .transform(
-            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
-                typeBuilder.visit(
-                    Advice.to(JvmRuntimeAdvice.SocketReadAdvice.class)
-                        .on(
-                            ElementMatchers.named("read")
-                                .and(
-                                    ElementMatchers.takesArguments(
-                                        byte[].class, int.class, int.class)))))
-        .type(ElementMatchers.named("java.net.SocketOutputStream"))
+        // Socket$SocketInputStream / Socket$SocketOutputStream are private inner classes loaded
+        // as a side-effect of ByteBuddy retransforming java.net.Socket (JVMTI ClassFileLoadHook
+        // is not re-entrant, so the inner-class loads escape the transformer). Target
+        // sun.nio.ch.NioSocketImpl instead: it is the default SocketImpl since JDK 13, is a
+        // public top-level class that retransforms cleanly, and is always reached by
+        // Socket.getInputStream().read() / getOutputStream().write() on modern JDKs.
+        .type(ElementMatchers.named("sun.nio.ch.NioSocketImpl"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.SocketReadAdvice.class)
+                            .on(
+                                ElementMatchers.named("read")
+                                    .and(
+                                        ElementMatchers.takesArguments(
+                                            byte[].class, int.class, int.class))))
                     .visit(
                         Advice.to(JvmRuntimeAdvice.SocketWriteSingleByteAdvice.class)
                             .on(
@@ -1586,8 +1689,8 @@ public final class JdkInstrumentationInstaller {
    *
    * <ol>
    *   <li>Module access — granted automatically by {@link #grantInternalModuleOpens} (programmatic
-   *       {@code redefineModule}) plus the {@code Add-Opens} attribute in the agent JAR's
-   *       {@code MANIFEST.MF}.
+   *       {@code redefineModule}) plus the {@code Add-Opens} attribute in the agent JAR's {@code
+   *       MANIFEST.MF}.
    *   <li>A separate {@link AgentBuilder} pass — historically, mixing this transformation into the
    *       same builder pass as the other Phase 2 transformations could cause silent corruption of
    *       the retransformation pipeline. With the open already in place at install time the
@@ -1812,45 +1915,50 @@ public final class JdkInstrumentationInstaller {
                             ElementMatchers.named("lookup")
                                 .and(ElementMatchers.takesArguments(String.class)))));
 
-    return instrumentOptional(
-        agentBuilder,
-        "javax.management.MBeanServer",
-        typeBuilder ->
-            typeBuilder
-                .visit(
-                    Advice.to(JvmRuntimeAdvice.JmxInvokeAdvice.class)
-                        .on(ElementMatchers.named("invoke").and(ElementMatchers.takesArguments(4))))
-                .visit(
-                    Advice.to(JvmRuntimeAdvice.JmxGetAttrAdvice.class)
-                        .on(
-                            ElementMatchers.named("getAttribute")
-                                .and(ElementMatchers.takesArguments(2)))));
+    // MBeanServer is an interface — ByteBuddy cannot inline advice into abstract interface
+    // methods. Target concrete subtypes (e.g. JmxMBeanServer) instead.
+    return agentBuilder
+        .type(
+            ElementMatchers.isSubTypeOf(javax.management.MBeanServer.class)
+                .and(ElementMatchers.not(ElementMatchers.isInterface()))
+                .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.JmxInvokeAdvice.class)
+                            .on(
+                                ElementMatchers.named("invoke")
+                                    .and(ElementMatchers.takesArguments(4))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.JmxGetAttrAdvice.class)
+                            .on(
+                                ElementMatchers.named("getAttribute")
+                                    .and(ElementMatchers.takesArguments(2)))));
   }
 
   /**
    * Registers native-library-load interception.
    *
-   * <p>On JDK 8-16 native library loading went through {@code Runtime.loadLibrary0}; on JDK 17+ the
-   * method was moved to {@code jdk.internal.loader.NativeLibraries.load} (private JDK internals).
-   * Both sites are woven so {@code NATIVE_LIBRARY_LOAD} fires on every supported JDK; missing sites
-   * are tolerated by {@link #instrumentOptional} so a mismatch is never a startup failure.
+   * <p>{@code System.load(path)} and {@code System.loadLibrary(name)} both delegate to non-native
+   * {@code Runtime.load0(Class, String)} / {@code Runtime.loadLibrary0(Class, String)} — these are
+   * the stable interception points across modern JDKs. {@code
+   * jdk.internal.loader.NativeLibraries.load} cannot be woven because on JDK 17+ it is declared
+   * {@code native} (the actual library load is performed by JNI), and bytecode advice cannot be
+   * inlined into a native method. Missing sites are tolerated by {@link #instrumentOptional}.
    */
   private static AgentBuilder applyPhase2NativeLibraryLoadInterception(AgentBuilder agentBuilder) {
-    agentBuilder =
-        instrumentOptional(
-            agentBuilder,
-            "java.lang.Runtime",
-            typeBuilder ->
-                typeBuilder.visit(
-                    Advice.to(JvmRuntimeAdvice.NativeLibraryLoadAdvice.class)
-                        .on(ElementMatchers.named("loadLibrary0"))));
     return instrumentOptional(
         agentBuilder,
-        "jdk.internal.loader.NativeLibraries",
+        "java.lang.Runtime",
         typeBuilder ->
-            typeBuilder.visit(
-                Advice.to(JvmRuntimeAdvice.NativeLibrariesLoadAdvice.class)
-                    .on(ElementMatchers.named("load"))));
+            typeBuilder
+                .visit(
+                    Advice.to(JvmRuntimeAdvice.NativeLibraryLoadAdvice.class)
+                        .on(ElementMatchers.named("loadLibrary0")))
+                .visit(
+                    Advice.to(JvmRuntimeAdvice.NativeLibraryLoadAdvice.class)
+                        .on(ElementMatchers.named("load0"))));
   }
 
   /** Registers {@link Thread#sleep(long)} and {@link Thread#sleep(long, int)} interception. */
