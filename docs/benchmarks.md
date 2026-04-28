@@ -159,14 +159,14 @@ Each benchmark variant has its own `@State` inner class that pre-activates a spe
 
 ### 3.3 Benchmark Variants and Targets
 
-| Benchmark method | State class | What it measures | Design target |
-|-----------------|-------------|-----------------|---------------|
-| `baseline_noAgent` | `NoAgentState` | Raw executor call + `Blackhole.consume()` with no agent on the path | Reference: ~1–5 ns |
-| `agentInstalled_zeroScenarios` | `ZeroScenariosState` | Empty registry fast path | < 50 ns |
-| `agentInstalled_oneScenario_noMatch` | `OneScenarioNoMatchState` | One scenario, regex non-match | < 100 ns |
-| `agentInstalled_oneMatch_noEffect` | `OneMatchNoEffectState` | Selector match, zero-probability effect | < 300 ns |
-| `sessionIdMiss` | `SessionMissState` | Session scope check short-circuit | < 20 ns additional over `zeroScenarios` |
-| `tenScenarios_oneMatch` | `TenScenariosState` | Linear scan through 10 entries | < 1 µs |
+| Benchmark method                     | State class               | What it measures                                                    | Design target                           |
+|--------------------------------------|---------------------------|---------------------------------------------------------------------|-----------------------------------------|
+| `baseline_noAgent`                   | `NoAgentState`            | Raw executor call + `Blackhole.consume()` with no agent on the path | Reference: ~1–5 ns                      |
+| `agentInstalled_zeroScenarios`       | `ZeroScenariosState`      | Empty registry fast path                                            | < 50 ns                                 |
+| `agentInstalled_oneScenario_noMatch` | `OneScenarioNoMatchState` | One scenario, regex non-match                                       | < 100 ns                                |
+| `agentInstalled_oneMatch_noEffect`   | `OneMatchNoEffectState`   | Selector match, zero-probability effect                             | < 300 ns                                |
+| `sessionIdMiss`                      | `SessionMissState`        | Session scope check short-circuit                                   | < 20 ns additional over `zeroScenarios` |
+| `tenScenarios_oneMatch`              | `TenScenariosState`       | Linear scan through 10 entries                                      | < 1 µs                                  |
 
 ### 3.4 What the Targets Mean in Production Terms
 
@@ -219,14 +219,14 @@ The HTTP benchmark replicates all five non-baseline variants from `ChaosRuntimeB
 
 ### 4.3 Benchmark Variants and Targets
 
-| Benchmark method | Target | Notes |
-|-----------------|--------|-------|
-| `baseline_noAgent` | Reference: ~1–3 ns | `bh.consume(URL.length())` — string length read as proxy for "no agent work" |
-| `agentInstalled_zeroScenarios` | < 50 ns | Empty registry fast path |
-| `agentInstalled_oneScenario_noMatch` | < 150 ns | Regex non-match against URL string |
-| `agentInstalled_oneMatch_noEffect` | < 300 ns | `any()` URL match, zero-probability |
-| `sessionIdMiss` | < 20 ns additional | Session scope short-circuit |
-| `tenScenarios_oneMatch` | < 1 µs | Linear scan, operation-type filter dominant |
+| Benchmark method                     | Target             | Notes                                                                        |
+|--------------------------------------|--------------------|------------------------------------------------------------------------------|
+| `baseline_noAgent`                   | Reference: ~1–3 ns | `bh.consume(URL.length())` — string length read as proxy for "no agent work" |
+| `agentInstalled_zeroScenarios`       | < 50 ns            | Empty registry fast path                                                     |
+| `agentInstalled_oneScenario_noMatch` | < 150 ns           | Regex non-match against URL string                                           |
+| `agentInstalled_oneMatch_noEffect`   | < 300 ns           | `any()` URL match, zero-probability                                          |
+| `sessionIdMiss`                      | < 20 ns additional | Session scope short-circuit                                                  |
+| `tenScenarios_oneMatch`              | < 1 µs             | Linear scan, operation-type filter dominant                                  |
 
 The HTTP `oneScenario_noMatch` target is 50 ns higher than the JDBC equivalent (150 ns vs 100 ns) because the regex evaluation against a URL string is measurably more expensive than a regex evaluation against a short SQL verb string (`"SELECT 1"`). The URL string `"https://example.com/api/v1/orders"` is 36 characters; `"SELECT \\s+\\*\\s+FROM\\s+no_match_table"` must scan farther before it fails than a short SQL non-match.
 
@@ -335,13 +335,13 @@ The `ChaosRuntime.dispatcher()` accessor is `public` and returns the live `Chaos
 types — `THREAD_SLEEP`, `DNS_RESOLVE`, `SSL_HANDSHAKE`, `FILE_IO_READ`, and `FILE_IO_WRITE` — that
 were added in the roadmap 4.x instrumentation wave. The benchmark entry points map to:
 
-| Benchmark family | Dispatcher method | Instrumented JDK target |
-|---|---|---|
-| `threadSleep_*` | `beforeThreadSleep(long millis)` | `Thread.sleep(long)` |
-| `dnsResolve_*` | `beforeDnsResolve(String hostname)` | `InetAddress.getByName(String)` |
-| `sslHandshake_*` | `beforeSslHandshake(Object engine)` | `SSLEngineImpl.beginHandshake()` / `SSLSocketImpl.startHandshake()` |
-| `fileIoRead_*` | `beforeFileIo("FILE_IO_READ", Object)` | `FileInputStream.read()` |
-| `fileIoWrite_*` | `beforeFileIo("FILE_IO_WRITE", Object)` | `FileOutputStream.write(int)` |
+| Benchmark family  | Dispatcher method                       | Instrumented JDK target                                             |
+|-------------------|-----------------------------------------|---------------------------------------------------------------------|
+| `threadSleep_*`   | `beforeThreadSleep(long millis)`        | `Thread.sleep(long)`                                                |
+| `dnsResolve_*`    | `beforeDnsResolve(String hostname)`     | `InetAddress.getByName(String)`                                     |
+| `sslHandshake_*`  | `beforeSslHandshake(Object engine)`     | `SSLEngineImpl.beginHandshake()` / `SSLSocketImpl.startHandshake()` |
+| `fileIoRead_*`    | `beforeFileIo("FILE_IO_READ", Object)`  | `FileInputStream.read()`                                            |
+| `fileIoWrite_*`   | `beforeFileIo("FILE_IO_WRITE", Object)` | `FileOutputStream.write(int)`                                       |
 
 Like the JDBC and HTTP benchmarks in sections 3–4, the measurement does **not** include
 `BootstrapDispatcher` bridge overhead (~5–15 ns) or ByteBuddy advice prolog cost. It isolates the
@@ -429,13 +429,13 @@ instead.
 
 #### Reference: Baseline Operation Costs
 
-| Operation | Realistic cost | Note |
-|---|---|---|
-| `FileInputStream.read()`, 1 KB, page cache hot | ~1 000 ns (1 µs) | Only if the same file page is accessed repeatedly by one process |
-| `FileInputStream.read()`, 1 KB, container under memory pressure | ~50 000–200 000 ns | Page cache evicted; kernel fetches from storage |
-| `InetAddress.getByName()`, JVM cache hit | ~500 ns | JVM-internal HashMap; no OS call; requires same host, within TTL |
-| `InetAddress.getByName()`, real DNS via local resolver | ~500 000 ns (500 µs) | UDP to a caching resolver; cache miss at OS level |
-| SSL/TLS handshake (TLS 1.3) | ~1 000 000–10 000 000 ns | Asymmetric crypto; ~100–1 000 handshakes/sec per core maximum |
+| Operation                                                       | Realistic cost           | Note                                                             |
+|-----------------------------------------------------------------|--------------------------|------------------------------------------------------------------|
+| `FileInputStream.read()`, 1 KB, page cache hot                  | ~1 000 ns (1 µs)         | Only if the same file page is accessed repeatedly by one process |
+| `FileInputStream.read()`, 1 KB, container under memory pressure | ~50 000–200 000 ns       | Page cache evicted; kernel fetches from storage                  |
+| `InetAddress.getByName()`, JVM cache hit                        | ~500 ns                  | JVM-internal HashMap; no OS call; requires same host, within TTL |
+| `InetAddress.getByName()`, real DNS via local resolver          | ~500 000 ns (500 µs)     | UDP to a caching resolver; cache miss at OS level                |
+| SSL/TLS handshake (TLS 1.3)                                     | ~1 000 000–10 000 000 ns | Asymmetric crypto; ~100–1 000 handshakes/sec per core maximum    |
 
 ---
 
@@ -448,12 +448,12 @@ defines the ceiling.
 **Baseline maximum throughput (no agent):**
 1 000 000 000 ns / 1 000 ns per read = **1 000 000 reads/sec**
 
-| Active chaos scenarios | Cost per read | Max reads/sec | Throughput loss |
-|---|---|---|---|
-| 0 (agent installed, no scenarios) | 1 000 + 58 = 1 058 ns | 945 180 | **−5.5 %** |
-| 1 scenario, different type (type-miss) | 1 000 + 87 = 1 087 ns | 919 960 | **−8.0 %** |
-| 1 scenario, FILE_IO_READ, exhausted | 1 000 + 333 = 1 333 ns | 750 188 | **−25.0 %** |
-| 4 scenarios, all exhausted (worst case) | 1 000 + 333 = 1 333 ns | 750 188 | **−25.0 %** |
+| Active chaos scenarios                  | Cost per read          | Max reads/sec   | Throughput loss   |
+|-----------------------------------------|------------------------|-----------------|-------------------|
+| 0 (agent installed, no scenarios)       | 1 000 + 58 = 1 058 ns  | 945 180         | **−5.5 %**        |
+| 1 scenario, different type (type-miss)  | 1 000 + 87 = 1 087 ns  | 919 960         | **−8.0 %**        |
+| 1 scenario, FILE_IO_READ, exhausted     | 1 000 + 333 = 1 333 ns | 750 188         | **−25.0 %**       |
+| 4 scenarios, all exhausted (worst case) | 1 000 + 333 = 1 333 ns | 750 188         | **−25.0 %**       |
 
 > **The −25% figure is the maximum realistic worst case for File I/O dispatch overhead.**
 > It requires: page-cache-hot reads (rare in containers), exhausted scenarios left resident in the
@@ -471,11 +471,11 @@ operation is also a HashMap lookup, roughly the same complexity as the dispatch 
 **Baseline maximum throughput (no agent, JVM cache hot):**
 1 000 000 000 ns / 500 ns per lookup = **2 000 000 lookups/sec**
 
-| Active chaos scenarios | Cost per lookup | Max lookups/sec | Throughput loss |
-|---|---|---|---|
-| 0 (agent installed, no scenarios) | 500 + 56 = 556 ns | 1 798 561 | **−10.1 %** |
-| 1 scenario, different type (type-miss) | 500 + 89 = 589 ns | 1 697 793 | **−15.1 %** |
-| 1 scenario, DNS_RESOLVE, exhausted | 500 + 306 = 806 ns | 1 240 695 | **−37.9 %** |
+| Active chaos scenarios                 | Cost per lookup    | Max lookups/sec   | Throughput loss  |
+|----------------------------------------|--------------------|-------------------|------------------|
+| 0 (agent installed, no scenarios)      | 500 + 56 = 556 ns  | 1 798 561         | **−10.1 %**      |
+| 1 scenario, different type (type-miss) | 500 + 89 = 589 ns  | 1 697 793         | **−15.1 %**      |
+| 1 scenario, DNS_RESOLVE, exhausted     | 500 + 306 = 806 ns | 1 240 695         | **−37.9 %**      |
 
 2 million DNS lookups per second on the same host from one JVM is not DNS traffic — it is a tight
 loop. In practice, achieving this rate requires the application to do essentially nothing else.
@@ -489,10 +489,10 @@ When the hostname is not in the JVM cache and the OS resolver is queried, the op
 
 **Baseline maximum throughput:** 1 000 000 000 ns / 500 000 ns = **2 000 lookups/sec**
 
-| Active chaos scenarios | Cost per lookup | Max lookups/sec | Throughput loss |
-|---|---|---|---|
-| 0 (agent installed, no scenarios) | 500 000 + 56 ns | 1 999.8 | **−0.01 %** |
-| 4 scenarios, all exhausted (worst case) | 500 000 + 306 ns | 1 998.8 | **−0.06 %** |
+| Active chaos scenarios                  | Cost per lookup   | Max lookups/sec   | Throughput loss  |
+|-----------------------------------------|-------------------|-------------------|------------------|
+| 0 (agent installed, no scenarios)       | 500 000 + 56 ns   | 1 999.8           | **−0.01 %**      |
+| 4 scenarios, all exhausted (worst case) | 500 000 + 306 ns  | 1 998.8           | **−0.06 %**      |
 
 The agent is invisible. The same applies to SSL handshakes (1–10 ms) and any `Thread.sleep` call
 by definition. **Any operation that crosses a network boundary makes the dispatch overhead
@@ -505,13 +505,13 @@ immeasurable.**
 A typical Java HTTP microservice handling 2 000 requests/sec with the following per-request
 profile:
 
-| Operation | Calls/request | Total calls/sec |
-|---|---|---|
-| File reads (config, templates, classpath resources) | 2 | 4 000 |
-| DNS resolutions (distinct upstream hostnames, mostly JVM-cached) | 0.5 | 1 000 |
-| SSL handshakes (TLS keep-alive; connections reused) | 0.05 | 100 |
-| Thread.sleep (retry backoff, health check timers) | 0.1 | 200 |
-| **Total intercepted calls/sec** | | **5 300** |
+| Operation                                                        | Calls/request   | Total calls/sec   |
+|------------------------------------------------------------------|-----------------|-------------------|
+| File reads (config, templates, classpath resources)              | 2               | 4 000             |
+| DNS resolutions (distinct upstream hostnames, mostly JVM-cached) | 0.5             | 1 000             |
+| SSL handshakes (TLS keep-alive; connections reused)              | 0.05            | 100               |
+| Thread.sleep (retry backoff, health check timers)                | 0.1             | 200               |
+| **Total intercepted calls/sec**                                  |                 | **5 300**         |
 
 **Total agent overhead — no chaos scenarios active:**
 5 300 calls/sec × 58 ns/call = **307 400 ns = 0.31 ms per second**
@@ -541,22 +541,22 @@ nothing in return. Everything else is noise.
 
 #### Summary: When Agent Overhead Actually Matters
 
-| Situation | Impact | Verdict |
-|---|---|---|
-| Agent installed, no active scenarios | −5–10% throughput on cheapest ops | Acceptable; unavoidable |
-| Real network operations (DNS query, SSL, HTTP) | < 0.1% on any load | Negligible |
+| Situation                                                 | Impact                            | Verdict                              |
+|-----------------------------------------------------------|-----------------------------------|--------------------------------------|
+| Agent installed, no active scenarios                      | −5–10% throughput on cheapest ops | Acceptable; unavoidable              |
+| Real network operations (DNS query, SSL, HTTP)            | < 0.1% on any load                | Negligible                           |
 | Cheap ops (page-cache reads) + active/exhausted scenarios | −8–25% on that specific call type | Manageable; stop exhausted scenarios |
-| Typical mixed microservice, any scenario count | < 0.02% total CPU | Irrelevant |
-| Pathological: same-host JVM-cached DNS at 2M/sec | −10–38% on that loop | Artificial; not a real workload |
+| Typical mixed microservice, any scenario count            | < 0.02% total CPU                 | Irrelevant                           |
+| Pathological: same-host JVM-cached DNS at 2M/sec          | −10–38% on that loop              | Artificial; not a real workload      |
 
 ### 7.5 Design Targets and Compliance
 
-| Path | Target | Measured | Compliant |
-|---|---|---|---|
-| Empty registry | < 100 ns | 55.8–58.9 ns | ✓ |
-| One mismatching scenario | < 150 ns | 82.5–89.4 ns | ✓ |
-| Four exhausted (type-miss) | < 200 ns | 120.8 ns | ✓ |
-| Four exhausted (type-match) | < 500 ns | 306–333 ns | ✓ |
+| Path                        | Target   | Measured     | Compliant   |
+|-----------------------------|----------|--------------|-------------|
+| Empty registry              | < 100 ns | 55.8–58.9 ns | ✓           |
+| One mismatching scenario    | < 150 ns | 82.5–89.4 ns | ✓           |
+| Four exhausted (type-miss)  | < 200 ns | 120.8 ns     | ✓           |
+| Four exhausted (type-match) | < 500 ns | 306–333 ns   | ✓           |
 
 All four paths meet their design targets. The exhausted-type-match path (306–333 ns) has the largest
 error bar for `fileIoRead` (±24 ns), attributable to `AtomicLong` memory-fence variance under

@@ -308,12 +308,12 @@ On every poll tick `StartupConfigPoller`:
 2. If the mtime changed: reads and parses the new plan.
 3. Computes a structural diff against the currently active scenario set:
 
-| Case | Action |
-|---|---|
-| Same `id`, all 8 fields identical | Kept running — untouched |
-| Same `id`, any field changed | Stopped, then re-activated |
-| Present in new plan, absent from active set | Activated |
-| Present in active set, absent from new plan | Stopped |
+| Case                                        | Action                     |
+|---------------------------------------------|----------------------------|
+| Same `id`, all 8 fields identical           | Kept running — untouched   |
+| Same `id`, any field changed                | Stopped, then re-activated |
+| Present in new plan, absent from active set | Activated                  |
+| Present in active set, absent from new plan | Stopped                    |
 
 Equality is record equality across all eight `ChaosScenario` fields. A single field change — even probability — triggers a stop + re-activate cycle.
 
@@ -340,8 +340,8 @@ No JVM restart required.
 
 ## Configuration reference
 
-| Agent arg | Environment variable | Type | Default | Description |
-|---|---|---|---|---|
+| Agent arg             | Environment variable           | Type      | Default      | Description                  |
+|-----------------------|--------------------------------|-----------|--------------|------------------------------|
 | `configWatchInterval` | `MACSTAB_CHAOS_WATCH_INTERVAL` | long (ms) | 0 (disabled) | Poll interval; 0 = read-once |
 
 ---

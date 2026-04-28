@@ -87,8 +87,8 @@ Out of scope:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  JVM Process under test                                      │
-│                                                              │
+│  JVM Process under test                                     │
+│                                                             │
 │  ┌─────────────────┐      ┌───────────────────────────────┐ │
 │  │  Application    │      │  Chaos Agent Runtime          │ │
 │  │  code           │      │                               │ │
@@ -98,11 +98,11 @@ Out of scope:
 │  │  Test/CI code   │      │  BootstrapDispatcher          │ │
 │  │                 │─────▶│  (bootstrap classloader)      │ │
 │  └─────────────────┘      └───────────────────────────────┘ │
-│                                                              │
-│  ┌─────────────────────────────────────────────────────────┐ │
-│  │  JDK classes (Thread, Executor, Socket, …)              │ │
-│  │  Instrumented by ByteBuddy at premain/agentmain time    │ │
-│  └─────────────────────────────────────────────────────────┘ │
+│                                                             │
+│  ┌────────────────────────────────────────────────────────┐ │
+│  │  JDK classes (Thread, Executor, Socket, …)             │ │
+│  │  Instrumented by ByteBuddy at premain/agentmain time   │ │
+│  └────────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────┘
 
 External configuration inputs:
@@ -116,14 +116,14 @@ External configuration inputs:
 
 Six sources are evaluated in strict priority order. **First match wins; no merging.**
 
-| Priority | Source | Form |
-|----------|--------|------|
-| 1 | JVM arg `configJson` | Inline JSON string |
-| 2 | Env `MACSTAB_CHAOS_CONFIG_JSON` | Inline JSON string |
-| 3 | JVM arg `configBase64` | Base64-encoded JSON |
-| 4 | Env `MACSTAB_CHAOS_CONFIG_BASE64` | Base64-encoded JSON |
-| 5 | JVM arg `configFile` | File path |
-| 6 | Env `MACSTAB_CHAOS_CONFIG_FILE` | File path |
+| Priority   | Source                            | Form                |
+|------------|-----------------------------------|---------------------|
+| 1          | JVM arg `configJson`              | Inline JSON string  |
+| 2          | Env `MACSTAB_CHAOS_CONFIG_JSON`   | Inline JSON string  |
+| 3          | JVM arg `configBase64`            | Base64-encoded JSON |
+| 4          | Env `MACSTAB_CHAOS_CONFIG_BASE64` | Base64-encoded JSON |
+| 5          | JVM arg `configFile`              | File path           |
+| 6          | Env `MACSTAB_CHAOS_CONFIG_FILE`   | File path           |
 
 If no source is present, the agent starts with no active scenarios. Programmatic activation is still possible at any time after startup via `ChaosControlPlane`.
 
@@ -138,21 +138,21 @@ If no source is present, the agent starts with no active scenarios. Programmatic
 
 # 3. Key Concepts and Terminology
 
-| Term | Definition |
-|------|-----------|
-| **Scenario** | A triplet of (selector, effect, activationPolicy) bound to a unique string ID. The atomic unit of chaos configuration. |
-| **Plan** | An ordered, named collection of scenarios that activate atomically as a unit. The primary vehicle for startup-time chaos. |
-| **Selector** | A predicate that determines which JVM operation invocations are eligible for chaos. Evaluated on every instrumented call. |
-| **Effect** | The chaos behavior applied when a selector matches: a delay, exception, rejection, suppression, value corruption, stressor start, etc. |
-| **OperationType** | An enum value identifying a specific JVM interception point (e.g., `EXECUTOR_SUBMIT`, `SOCKET_CONNECT`). A selector declares which operation types it matches. |
-| **ActivationPolicy** | Controls the probability, rate, count, time-window, and start-mode governing when an effect fires after a selector match. |
-| **NamePattern** | A string-matching predicate (ANY / EXACT / PREFIX / GLOB / REGEX) used by selectors to filter class names, method names, hostnames, URLs, etc. |
-| **Handle** | A `ChaosActivationHandle` returned by `activate()`. Provides start/stop/release/close lifecycle control over one or more active scenarios. |
-| **Interceptor effect** | An effect that modifies an in-flight JVM operation: delay, reject, suppress, exception injection, return-value corruption, clock skew, gate, spurious wakeup. |
-| **Stressor effect** | An effect that runs as a background task independent of any specific JVM operation: heap pressure, deadlock, thread leak, GC pressure, etc. Used with `StressSelector`. |
-| **Session scope** | A `ChaosSession` creates an isolated scope where scenarios only fire for threads explicitly bound to that session via `session.bind()`. Enables per-test isolation in shared JVMs. |
-| **JVM scope** | The default scope: a scenario fires for any thread in the JVM that triggers a matching operation. |
-| **Precedence** | An integer tie-breaker. When multiple terminal effects (reject, suppress, exception) match the same operation simultaneously, the highest-precedence effect wins. Delay effects always accumulate across all matching scenarios regardless of precedence. |
+| Term                   | Definition                                                                                                                                                                                                                                                |
+|------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Scenario**           | A triplet of (selector, effect, activationPolicy) bound to a unique string ID. The atomic unit of chaos configuration.                                                                                                                                    |
+| **Plan**               | An ordered, named collection of scenarios that activate atomically as a unit. The primary vehicle for startup-time chaos.                                                                                                                                 |
+| **Selector**           | A predicate that determines which JVM operation invocations are eligible for chaos. Evaluated on every instrumented call.                                                                                                                                 |
+| **Effect**             | The chaos behavior applied when a selector matches: a delay, exception, rejection, suppression, value corruption, stressor start, etc.                                                                                                                    |
+| **OperationType**      | An enum value identifying a specific JVM interception point (e.g., `EXECUTOR_SUBMIT`, `SOCKET_CONNECT`). A selector declares which operation types it matches.                                                                                            |
+| **ActivationPolicy**   | Controls the probability, rate, count, time-window, and start-mode governing when an effect fires after a selector match.                                                                                                                                 |
+| **NamePattern**        | A string-matching predicate (ANY / EXACT / PREFIX / GLOB / REGEX) used by selectors to filter class names, method names, hostnames, URLs, etc.                                                                                                            |
+| **Handle**             | A `ChaosActivationHandle` returned by `activate()`. Provides start/stop/release/close lifecycle control over one or more active scenarios.                                                                                                                |
+| **Interceptor effect** | An effect that modifies an in-flight JVM operation: delay, reject, suppress, exception injection, return-value corruption, clock skew, gate, spurious wakeup.                                                                                             |
+| **Stressor effect**    | An effect that runs as a background task independent of any specific JVM operation: heap pressure, deadlock, thread leak, GC pressure, etc. Used with `StressSelector`.                                                                                   |
+| **Session scope**      | A `ChaosSession` creates an isolated scope where scenarios only fire for threads explicitly bound to that session via `session.bind()`. Enables per-test isolation in shared JVMs.                                                                        |
+| **JVM scope**          | The default scope: a scenario fires for any thread in the JVM that triggers a matching operation.                                                                                                                                                         |
+| **Precedence**         | An integer tie-breaker. When multiple terminal effects (reject, suppress, exception) match the same operation simultaneously, the highest-precedence effect wins. Delay effects always accumulate across all matching scenarios regardless of precedence. |
 
 ---
 
@@ -482,13 +482,13 @@ NamePattern {
 
 **Match semantics:**
 
-| Mode | Behaviour | Null candidate | Cost |
-|------|-----------|----------------|------|
-| `ANY` | Always true | true | O(1) |
-| `EXACT` | `candidate.equals(value)` | false | O(n) string equals |
-| `PREFIX` | `candidate.startsWith(value)` | false | O(k) where k = prefix length |
-| `GLOB` | `*` = any sequence, `?` = one char; compiled to regex | false | O(m) regex match |
-| `REGEX` | Full `java.util.regex.Pattern` match (anchored `^…$`) | false | O(m) regex match |
+| Mode     | Behaviour                                             | Null candidate   | Cost                         |
+|----------|-------------------------------------------------------|------------------|------------------------------|
+| `ANY`    | Always true                                           | true             | O(1)                         |
+| `EXACT`  | `candidate.equals(value)`                             | false            | O(n) string equals           |
+| `PREFIX` | `candidate.startsWith(value)`                         | false            | O(k) where k = prefix length |
+| `GLOB`   | `*` = any sequence, `?` = one char; compiled to regex | false            | O(m) regex match             |
+| `REGEX`  | Full `java.util.regex.Pattern` match (anchored `^…$`) | false            | O(m) regex match             |
 
 ---
 
@@ -529,17 +529,17 @@ Interceptors run on the calling virtual thread if the application uses Project L
 
 ## 9.1 Activation-time Failures
 
-| Failure | Exception | When |
-|---------|-----------|------|
-| Selector ↔ effect mismatch | `ChaosValidationException` | At `activate()` call |
-| Duplicate scenario ID | `ChaosActivationException` | At `activate()` call |
-| Destructive effect without `allowDestructiveEffects` | `ChaosActivationException` | At `activate()` call |
-| Feature not available (e.g., virtual threads on JDK 17) | `ChaosUnsupportedFeatureException` | At `activate()` call |
-| Invalid `ActivationPolicy` field | `IllegalArgumentException` | At `ActivationPolicy` construction |
-| Invalid `NamePattern` regex | `IllegalArgumentException` | At `NamePattern` construction |
-| Invalid `NamePattern` glob | `IllegalArgumentException` | At `NamePattern` construction |
-| Invalid exception class name in `ExceptionInjectionEffect` | `IllegalArgumentException` | At `ExceptionInjectionEffect` construction |
-| `probability = 0.0` | `IllegalArgumentException` | At `ActivationPolicy` construction |
+| Failure                                                    | Exception                          | When                                       |
+|------------------------------------------------------------|------------------------------------|--------------------------------------------|
+| Selector ↔ effect mismatch                                 | `ChaosValidationException`         | At `activate()` call                       |
+| Duplicate scenario ID                                      | `ChaosActivationException`         | At `activate()` call                       |
+| Destructive effect without `allowDestructiveEffects`       | `ChaosActivationException`         | At `activate()` call                       |
+| Feature not available (e.g., virtual threads on JDK 17)    | `ChaosUnsupportedFeatureException` | At `activate()` call                       |
+| Invalid `ActivationPolicy` field                           | `IllegalArgumentException`         | At `ActivationPolicy` construction         |
+| Invalid `NamePattern` regex                                | `IllegalArgumentException`         | At `NamePattern` construction              |
+| Invalid `NamePattern` glob                                 | `IllegalArgumentException`         | At `NamePattern` construction              |
+| Invalid exception class name in `ExceptionInjectionEffect` | `IllegalArgumentException`         | At `ExceptionInjectionEffect` construction |
+| `probability = 0.0`                                        | `IllegalArgumentException`         | At `ActivationPolicy` construction         |
 
 ## 9.2 Runtime Failures (Hot Path)
 
@@ -547,12 +547,12 @@ The chaos runtime is designed to be non-fatal to the application. If an effect t
 
 ## 9.3 Config Loading Failures
 
-| Failure | Result |
-|---------|--------|
-| No config source present | Agent starts with no active scenarios; no error |
-| JSON parse failure | `ConfigLoadException` thrown; agent startup fails with a clear error message |
-| File not found / path safety violation | `ConfigLoadException` thrown; agent startup fails |
-| Base64 decode failure | `ConfigLoadException` thrown |
+| Failure                                | Result                                                                       |
+|----------------------------------------|------------------------------------------------------------------------------|
+| No config source present               | Agent starts with no active scenarios; no error                              |
+| JSON parse failure                     | `ConfigLoadException` thrown; agent startup fails with a clear error message |
+| File not found / path safety violation | `ConfigLoadException` thrown; agent startup fails                            |
+| Base64 decode failure                  | `ConfigLoadException` thrown                                                 |
 
 ## 9.4 `GateEffect` Timeout
 
@@ -599,15 +599,15 @@ All chaos events are emitted to registered `ChaosEventListener`s and to JMX (`co
 
 The evaluation path for each instrumented operation call has the following cost components:
 
-| Step | Cost |
-|------|------|
-| `BootstrapDispatcher` slot read | One array index + virtual dispatch; O(1) |
-| `ThreadLocal<int[]> DEPTH` read | `ThreadLocalMap` lookup; O(1) amortized |
-| Active scenario iteration | O(N) where N = active scenarios; typically < 10 in tests |
-| `NamePattern.matches()` per scenario | O(1) for ANY/EXACT/PREFIX; O(m) for GLOB/REGEX |
-| `ActivationPolicy` evaluation | O(1); atomic reads + RNG sample |
-| `DelayEffect` | `Thread.sleep(t)` or virtual-thread park; dominates overall cost |
-| No-match path (most common in benchmarks) | ~50–120 ns per intercepted call |
+| Step                                      | Cost                                                             |
+|-------------------------------------------|------------------------------------------------------------------|
+| `BootstrapDispatcher` slot read           | One array index + virtual dispatch; O(1)                         |
+| `ThreadLocal<int[]> DEPTH` read           | `ThreadLocalMap` lookup; O(1) amortized                          |
+| Active scenario iteration                 | O(N) where N = active scenarios; typically < 10 in tests         |
+| `NamePattern.matches()` per scenario      | O(1) for ANY/EXACT/PREFIX; O(m) for GLOB/REGEX                   |
+| `ActivationPolicy` evaluation             | O(1); atomic reads + RNG sample                                  |
+| `DelayEffect`                             | `Thread.sleep(t)` or virtual-thread park; dominates overall cost |
+| No-match path (most common in benchmarks) | ~50–120 ns per intercepted call                                  |
 
 **Reference benchmark (from `docs/benchmarks.md`):** `OneMatchNoEffectState` measures a one-shot policy scenario where the single application is consumed immediately, leaving subsequent calls on the no-match path. Throughput: ~8.4M ops/s (i.e., ~120 ns/call overhead).
 
@@ -617,14 +617,14 @@ GLOB and REGEX patterns are compiled once per unique expression string and cache
 
 ## 11.3 Stressor Memory Impact
 
-| Stressor | Memory impact |
-|----------|--------------|
-| `HeapPressureEffect` | `bytes` bytes retained on JVM heap until handle.close() |
-| `DirectBufferPressureEffect` | `totalBytes` native direct memory; not reclaimed by GC, only on handle.close() |
-| `MetaspacePressureEffect` | JVM Metaspace used for synthetic classes; not reclaimed until classloader is collected |
-| `ThreadLeakEffect` | ~1 MiB native stack per leaked thread (OS kernel allocation) |
-| `DeadlockEffect` | N platform threads parked; minimal heap; holds OS thread handles |
-| `CodeCachePressureEffect` | JIT code cache; deoptimization timing after close() is JIT-controlled, not guaranteed immediate |
+| Stressor                     | Memory impact                                                                                   |
+|------------------------------|-------------------------------------------------------------------------------------------------|
+| `HeapPressureEffect`         | `bytes` bytes retained on JVM heap until handle.close()                                         |
+| `DirectBufferPressureEffect` | `totalBytes` native direct memory; not reclaimed by GC, only on handle.close()                  |
+| `MetaspacePressureEffect`    | JVM Metaspace used for synthetic classes; not reclaimed until classloader is collected          |
+| `ThreadLeakEffect`           | ~1 MiB native stack per leaked thread (OS kernel allocation)                                    |
+| `DeadlockEffect`             | N platform threads parked; minimal heap; holds OS thread handles                                |
+| `CodeCachePressureEffect`    | JIT code cache; deoptimization timing after close() is JIT-controlled, not guaranteed immediate |
 
 ## 11.4 Reentrancy Guard Overhead
 
@@ -691,20 +691,20 @@ Register custom listeners via `controlPlane.addEventListener(listener)`. Listene
 
 ### Supported Agent Args
 
-| Argument | Type | Description |
-|----------|------|-------------|
-| `configJson` | String | Inline JSON plan |
-| `configBase64` | String | Base64-encoded JSON plan |
-| `configFile` | Path | File system path to JSON plan file |
-| `debugDump` | Boolean flag | Equivalent to `debugDumpOnStart=true` in plan observability |
+| Argument       | Type         | Description                                                 |
+|----------------|--------------|-------------------------------------------------------------|
+| `configJson`   | String       | Inline JSON plan                                            |
+| `configBase64` | String       | Base64-encoded JSON plan                                    |
+| `configFile`   | Path         | File system path to JSON plan file                          |
+| `debugDump`    | Boolean flag | Equivalent to `debugDumpOnStart=true` in plan observability |
 
 ### Supported Environment Variables
 
-| Variable | Equivalent to arg |
-|----------|------------------|
-| `MACSTAB_CHAOS_CONFIG_JSON` | `configJson` |
-| `MACSTAB_CHAOS_CONFIG_BASE64` | `configBase64` |
-| `MACSTAB_CHAOS_CONFIG_FILE` | `configFile` |
+| Variable v                    | Equivalent to arg v |
+|-------------------------------|---------------------|
+| `MACSTAB_CHAOS_CONFIG_JSON`   | `configJson`        |
+| `MACSTAB_CHAOS_CONFIG_BASE64` | `configBase64`      |
+| `MACSTAB_CHAOS_CONFIG_FILE`   | `configFile`        |
 
 ---
 
@@ -796,12 +796,12 @@ All selectors use `"type"` as the JSON discriminator.
 
 **Fields:**
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `operations` | Set\<OperationType\> | required | One or more of: `THREAD_START`, `VIRTUAL_THREAD_START`, `THREAD_SLEEP` |
-| `kind` | ThreadKind | `ANY` | `ANY` \| `PLATFORM` \| `VIRTUAL` |
-| `threadNamePattern` | NamePattern | `ANY` | Matched against `Thread.getName()` at intercept time |
-| `daemon` | Boolean | `null` (both) | `true` = daemon threads only; `false` = non-daemon only |
+| Field               | Type                 | Default       | Description                                                            |
+|---------------------|----------------------|---------------|------------------------------------------------------------------------|
+| `operations`        | Set\<OperationType\> | required      | One or more of: `THREAD_START`, `VIRTUAL_THREAD_START`, `THREAD_SLEEP` |
+| `kind`              | ThreadKind           | `ANY`         | `ANY` \| `PLATFORM` \| `VIRTUAL`                                       |
+| `threadNamePattern` | NamePattern          | `ANY`         | Matched against `Thread.getName()` at intercept time                   |
+| `daemon`            | Boolean              | `null` (both) | `true` = daemon threads only; `false` = non-daemon only                |
 
 **JSON example:**
 ```json
@@ -828,12 +828,12 @@ All selectors use `"type"` as the JSON discriminator.
 
 **Fields:**
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `operations` | Set\<OperationType\> | required | Subset of valid operations |
-| `executorClassPattern` | NamePattern | `ANY` | Matched against executor's runtime class name |
-| `taskClassPattern` | NamePattern | `ANY` | Matched against submitted task's class name |
-| `scheduledOnly` | Boolean | `null` (both) | `true` = scheduled executors only |
+| Field                  | Type                 | Default       | Description                                   |
+|------------------------|----------------------|---------------|-----------------------------------------------|
+| `operations`           | Set\<OperationType\> | required      | Subset of valid operations                    |
+| `executorClassPattern` | NamePattern          | `ANY`         | Matched against executor's runtime class name |
+| `taskClassPattern`     | NamePattern          | `ANY`         | Matched against submitted task's class name   |
+| `scheduledOnly`        | Boolean              | `null` (both) | `true` = scheduled executors only             |
 
 ---
 
@@ -845,10 +845,10 @@ All selectors use `"type"` as the JSON discriminator.
 
 **Fields:**
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `operations` | Set\<OperationType\> | required | Subset of valid operations |
-| `queueClassPattern` | NamePattern | `ANY` | Matched against queue implementation class name |
+| Field               | Type                 | Default  | Description                                     |
+|---------------------|----------------------|----------|-------------------------------------------------|
+| `operations`        | Set\<OperationType\> | required | Subset of valid operations                      |
+| `queueClassPattern` | NamePattern          | `ANY`    | Matched against queue implementation class name |
 
 ---
 
@@ -860,9 +860,9 @@ All selectors use `"type"` as the JSON discriminator.
 
 **Fields:**
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `operations` | Set\<OperationType\> | required | Subset of valid operations |
+| Field        | Type                 | Default   | Description                |
+|--------------|----------------------|-----------|----------------------------|
+| `operations` | Set\<OperationType\> | required  | Subset of valid operations |
 
 ---
 
@@ -874,11 +874,11 @@ All selectors use `"type"` as the JSON discriminator.
 
 **Fields:**
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `operations` | Set\<OperationType\> | required | `SCHEDULE_SUBMIT` and/or `SCHEDULE_TICK` |
-| `executorClassPattern` | NamePattern | `ANY` | Matched against executor class name |
-| `periodicOnly` | Boolean | `null` (both) | `true` = periodic schedules only (`scheduleAtFixedRate`/`scheduleWithFixedDelay`) |
+| Field                  | Type                 | Default       | Description                                                                       |
+|------------------------|----------------------|---------------|-----------------------------------------------------------------------------------|
+| `operations`           | Set\<OperationType\> | required      | `SCHEDULE_SUBMIT` and/or `SCHEDULE_TICK`                                          |
+| `executorClassPattern` | NamePattern          | `ANY`         | Matched against executor class name                                               |
+| `periodicOnly`         | Boolean              | `null` (both) | `true` = periodic schedules only (`scheduleAtFixedRate`/`scheduleWithFixedDelay`) |
 
 ---
 
@@ -890,10 +890,10 @@ All selectors use `"type"` as the JSON discriminator.
 
 **Fields:**
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `operations` | Set\<OperationType\> | required | Subset of valid operations |
-| `targetClassPattern` | NamePattern | `ANY` | Matched against shutdown target class name |
+| Field                | Type                 | Default  | Description                               |
+|----------------------|----------------------|----------|-------------------------------------------|
+| `operations`         | Set\<OperationType\> | required | Subset of valid operations                |
+| `targetClassPattern` | NamePattern          | `ANY`    | Matched against shutdown target class name |
 
 ---
 
@@ -905,11 +905,11 @@ All selectors use `"type"` as the JSON discriminator.
 
 **Fields:**
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `operations` | Set\<OperationType\> | required | Subset of valid operations |
-| `targetNamePattern` | NamePattern | `ANY` | Matched against class/resource name |
-| `loaderClassPattern` | NamePattern | `ANY` | Matched against `ClassLoader` implementation class name |
+| Field                | Type                 | Default  | Description                                             |
+|----------------------|----------------------|----------|---------------------------------------------------------|
+| `operations`         | Set\<OperationType\> | required | Subset of valid operations                              |
+| `targetNamePattern`  | NamePattern          | `ANY`    | Matched against class/resource name                     |
+| `loaderClassPattern` | NamePattern          | `ANY`    | Matched against `ClassLoader` implementation class name |
 
 ---
 
@@ -932,12 +932,12 @@ All selectors use `"type"` as the JSON discriminator.
 
 **Fields:**
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `operations` | Set\<OperationType\> | required | `METHOD_ENTER` and/or `METHOD_EXIT` |
-| `classPattern` | NamePattern | `ANY` | Matched against fully-qualified declaring class name (binary form, dots) |
-| `methodNamePattern` | NamePattern | `ANY` | Matched against method name |
-| `signaturePattern` | NamePattern | `ANY` | **Reserved; must be `ANY` or null**. Non-ANY values throw at construction. |
+| Field               | Type                 | Default   | Description                                                                |
+|---------------------|----------------------|-----------|----------------------------------------------------------------------------|
+| `operations`        | Set\<OperationType\> | required  | `METHOD_ENTER` and/or `METHOD_EXIT`                                        |
+| `classPattern`      | NamePattern          | `ANY`     | Matched against fully-qualified declaring class name (binary form, dots)   |
+| `methodNamePattern` | NamePattern          | `ANY`     | Matched against method name                                                |
+| `signaturePattern`  | NamePattern          | `ANY`     | **Reserved; must be `ANY` or null**. Non-ANY values throw at construction. |
 
 **Safety constraint:** both `classPattern` and `methodNamePattern` cannot both be `ANY` simultaneously.
 
@@ -965,10 +965,10 @@ All selectors use `"type"` as the JSON discriminator.
 
 **Fields:**
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `operations` | Set\<OperationType\> | required | `MONITOR_ENTER` and/or `THREAD_PARK` |
-| `monitorClassPattern` | NamePattern | `ANY` | Matched against the class of the monitor object |
+| Field                 | Type                 | Default  | Description                                     |
+|-----------------------|----------------------|----------|-------------------------------------------------|
+| `operations`          | Set\<OperationType\> | required | `MONITOR_ENTER` and/or `THREAD_PARK`            |
+| `monitorClassPattern` | NamePattern          | `ANY`    | Matched against the class of the monitor object |
 
 ---
 
@@ -980,8 +980,8 @@ All selectors use `"type"` as the JSON discriminator.
 
 **Fields:**
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
+| Field        | Type                 | Default  | Description                           |
+|--------------|----------------------|----------|---------------------------------------|
 | `operations` | Set\<OperationType\> | required | Any subset of the 18 valid operations |
 
 **Note on clock interception:**
@@ -1012,10 +1012,10 @@ Once the hook is wired, the matcher, effect, and activation policy behave like e
 
 **Fields:**
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `operations` | Set\<OperationType\> | required | Subset of valid operations |
-| `channelClassPattern` | NamePattern | `ANY` | Matched against the NIO channel's runtime class name |
+| Field                 | Type                 | Default  | Description                                          |
+|-----------------------|----------------------|----------|------------------------------------------------------|
+| `operations`          | Set\<OperationType\> | required | Subset of valid operations                           |
+| `channelClassPattern` | NamePattern          | `ANY`    | Matched against the NIO channel's runtime class name |
 
 ---
 
@@ -1027,10 +1027,10 @@ Once the hook is wired, the matcher, effect, and activation policy behave like e
 
 **Fields:**
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `operations` | Set\<OperationType\> | required | Subset of valid operations |
-| `remoteHostPattern` | NamePattern | `ANY` | For `SOCKET_CONNECT`: matched against `InetSocketAddress` host string. For others: matched against remote host recorded at connect time. |
+| Field               | Type                 | Default  | Description                                                                                                                              |
+|---------------------|----------------------|----------|------------------------------------------------------------------------------------------------------------------------------------------|
+| `operations`        | Set\<OperationType\> | required | Subset of valid operations                                                                                                               |
+| `remoteHostPattern` | NamePattern          | `ANY`    | For `SOCKET_CONNECT`: matched against `InetSocketAddress` host string. For others: matched against remote host recorded at connect time. |
 
 ---
 
@@ -1042,10 +1042,10 @@ Once the hook is wired, the matcher, effect, and activation policy behave like e
 
 **Fields:**
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `operations` | Set\<OperationType\> | required | `THREAD_LOCAL_GET` and/or `THREAD_LOCAL_SET` |
-| `threadLocalClassPattern` | NamePattern | `ANY` | Matched against the `ThreadLocal` subclass name |
+| Field                     | Type                 | Default  | Description                                     |
+|---------------------------|----------------------|----------|-------------------------------------------------|
+| `operations`              | Set\<OperationType\> | required | `THREAD_LOCAL_GET` and/or `THREAD_LOCAL_SET`    |
+| `threadLocalClassPattern` | NamePattern          | `ANY`    | Matched against the `ThreadLocal` subclass name |
 
 **Caution:** `ThreadLocal.get()` is called pervasively inside the JVM and the chaos runtime itself. Without a restrictive `threadLocalClassPattern`, this selector will match an extremely high volume of calls. Always specify a precise pattern.
 
@@ -1059,10 +1059,10 @@ Once the hook is wired, the matcher, effect, and activation policy behave like e
 
 **Fields:**
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `operations` | Set\<OperationType\> | required | `HTTP_CLIENT_SEND` and/or `HTTP_CLIENT_SEND_ASYNC` |
-| `urlPattern` | NamePattern | `ANY` | Matched against request URL in `scheme://host/path` form |
+| Field        | Type                 | Default   | Description                                              |
+|--------------|----------------------|-----------|----------------------------------------------------------|
+| `operations` | Set\<OperationType\> | required  | `HTTP_CLIENT_SEND` and/or `HTTP_CLIENT_SEND_ASYNC`       |
+| `urlPattern` | NamePattern          | `ANY`     | Matched against request URL in `scheme://host/path` form |
 
 **`targetName` in invocation context:** the request URL (`scheme://host/path`). Use with `urlPattern` to restrict chaos to a specific upstream service.
 
@@ -1085,10 +1085,10 @@ Once the hook is wired, the matcher, effect, and activation policy behave like e
 
 **Fields:**
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `operations` | Set\<OperationType\> | all 5 | Subset of valid operations |
-| `targetPattern` | NamePattern | `ANY` | For `JDBC_CONNECTION_ACQUIRE`: matched against pool identifier. For `JDBC_STATEMENT_EXECUTE`/`JDBC_PREPARED_STATEMENT`: matched against first 200 chars of SQL. For commit/rollback: always `null` (ANY matches). |
+| Field | Type                 | Default   | Description                                                                                                                                                                                                       |
+|-------|----------------------|-----------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `operations` | Set\<OperationType\> | all 5     | Subset of valid operations                                                                                                                                                                                        |
+| `targetPattern` | NamePattern          | `ANY`     | For `JDBC_CONNECTION_ACQUIRE`: matched against pool identifier. For `JDBC_STATEMENT_EXECUTE`/`JDBC_PREPARED_STATEMENT`: matched against first 200 chars of SQL. For commit/rollback: always `null` (ANY matches). |
 
 **JSON example — slow connection acquisition from "main" pool:**
 ```json
@@ -1109,10 +1109,10 @@ Once the hook is wired, the matcher, effect, and activation policy behave like e
 
 **Fields:**
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `operations` | Set\<OperationType\> | required | Must contain `DNS_RESOLVE` |
-| `hostnamePattern` | NamePattern | `ANY` | Matched against hostname argument. `getLocalHost()` has `null` hostname — matches only `ANY`. |
+| Field             | Type                 | Default   | Description                                                                                   |
+|-------------------|----------------------|-----------|-----------------------------------------------------------------------------------------------|
+| `operations`      | Set\<OperationType\> | required  | Must contain `DNS_RESOLVE`                                                                    |
+| `hostnamePattern` | NamePattern          | `ANY`     | Matched against hostname argument. `getLocalHost()` has `null` hostname — matches only `ANY`. |
 
 ---
 
@@ -1124,8 +1124,8 @@ Once the hook is wired, the matcher, effect, and activation policy behave like e
 
 **Fields:**
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
+| Field        | Type                 | Default  | Description                  |
+|--------------|----------------------|----------|------------------------------|
 | `operations` | Set\<OperationType\> | required | Must contain `SSL_HANDSHAKE` |
 
 ---
@@ -1138,9 +1138,9 @@ Once the hook is wired, the matcher, effect, and activation policy behave like e
 
 **Fields:**
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `operations` | Set\<OperationType\> | required | `FILE_IO_READ` and/or `FILE_IO_WRITE` |
+| Field        | Type                 | Default   | Description                           |
+|--------------|----------------------|-----------|---------------------------------------|
+| `operations` | Set\<OperationType\> | required  | `FILE_IO_READ` and/or `FILE_IO_WRITE` |
 
 ---
 
@@ -1152,29 +1152,29 @@ Once the hook is wired, the matcher, effect, and activation policy behave like e
 
 **Fields:**
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `target` | StressTarget | required | Must correspond exactly to the `ChaosEffect` type in the same scenario |
+| Field    | Type         | Default   | Description                                                            |
+|----------|--------------|-----------|------------------------------------------------------------------------|
+| `target` | StressTarget | required  | Must correspond exactly to the `ChaosEffect` type in the same scenario |
 
 **StressTarget values:**
 
-| Value | Paired effect |
-|-------|--------------|
-| `HEAP` | `HeapPressureEffect` |
-| `METASPACE` | `MetaspacePressureEffect` |
-| `DIRECT_BUFFER` | `DirectBufferPressureEffect` |
-| `GC_PRESSURE` | `GcPressureEffect` |
-| `FINALIZER_BACKLOG` | `FinalizerBacklogEffect` |
-| `KEEPALIVE` | `KeepAliveEffect` |
-| `THREAD_LEAK` | `ThreadLeakEffect` |
-| `THREAD_LOCAL_LEAK` | `ThreadLocalLeakEffect` |
-| `DEADLOCK` | `DeadlockEffect` |
-| `MONITOR_CONTENTION` | `MonitorContentionEffect` |
+| Value                            | Paired effect                       |
+|----------------------------------|-------------------------------------|
+| `HEAP`                           | `HeapPressureEffect`                |
+| `METASPACE`                      | `MetaspacePressureEffect`           |
+| `DIRECT_BUFFER`                  | `DirectBufferPressureEffect`        |
+| `GC_PRESSURE`                    | `GcPressureEffect`                  |
+| `FINALIZER_BACKLOG`              | `FinalizerBacklogEffect`            |
+| `KEEPALIVE`                      | `KeepAliveEffect`                   |
+| `THREAD_LEAK`                    | `ThreadLeakEffect`                  |
+| `THREAD_LOCAL_LEAK`              | `ThreadLocalLeakEffect`             |
+| `DEADLOCK`                       | `DeadlockEffect`                    |
+| `MONITOR_CONTENTION`             | `MonitorContentionEffect`           |
 | `VIRTUAL_THREAD_CARRIER_PINNING` | `VirtualThreadCarrierPinningEffect` |
-| `CODE_CACHE_PRESSURE` | `CodeCachePressureEffect` |
-| `SAFEPOINT_STORM` | `SafepointStormEffect` |
-| `STRING_INTERN_PRESSURE` | `StringInternPressureEffect` |
-| `REFERENCE_QUEUE_FLOOD` | `ReferenceQueueFloodEffect` |
+| `CODE_CACHE_PRESSURE`            | `CodeCachePressureEffect`           |
+| `SAFEPOINT_STORM`                | `SafepointStormEffect`              |
+| `STRING_INTERN_PRESSURE`         | `StringInternPressureEffect`        |
+| `REFERENCE_QUEUE_FLOOD`          | `ReferenceQueueFloodEffect`         |
 
 **JSON example:**
 ```json
@@ -1190,15 +1190,15 @@ Once the hook is wired, the matcher, effect, and activation policy behave like e
 
 The runtime validator enforces this at activation time. Mismatches throw `ChaosValidationException`.
 
-| Selector type | Compatible effect types |
-|---------------|------------------------|
-| Any interception selector | `delay`, `reject`, `suppress`, `exceptionInjection`\*, `returnValueCorruption`\*, `gate`, `clockSkew`\*\* |
-| `async` | + `exceptionalCompletion` |
-| `nio` (NIO_SELECTOR_SELECT) | + `spuriousWakeup` |
-| `method` (METHOD_ENTER) | `exceptionInjection` ✓ |
-| `method` (METHOD_EXIT) | `returnValueCorruption` ✓ |
-| `jvmRuntime` | `clockSkew` ✓ |
-| `stress` | Stressor effects only (`heapPressure`, `deadlock`, etc.) |
+| Selector type               | Compatible effect types                                                                                   |
+|-----------------------------|-----------------------------------------------------------------------------------------------------------|
+| Any interception selector   | `delay`, `reject`, `suppress`, `exceptionInjection`\*, `returnValueCorruption`\*, `gate`, `clockSkew`\*\* |
+| `async`                     | + `exceptionalCompletion`                                                                                 |
+| `nio` (NIO_SELECTOR_SELECT) | + `spuriousWakeup`                                                                                        |
+| `method` (METHOD_ENTER)     | `exceptionInjection` ✓                                                                                    |
+| `method` (METHOD_EXIT)      | `returnValueCorruption` ✓                                                                                 |
+| `jvmRuntime`                | `clockSkew` ✓                                                                                             |
+| `stress`                    | Stressor effects only (`heapPressure`, `deadlock`, etc.)                                                  |
 
 \* `exceptionInjection` is only valid with `MethodSelector` + `METHOD_ENTER`.  
 \* `returnValueCorruption` is only valid with `MethodSelector` + `METHOD_EXIT`.  
@@ -1219,9 +1219,9 @@ The runtime validator enforces this at activation time. Mismatches throw `ChaosV
 
 **Fields:**
 
-| Field | Type | Constraint | Description |
-|-------|------|-----------|-------------|
-| `minDelay` | Duration (ISO-8601) | ≥ 0, ≤ 30 days | Lower bound of the injected delay |
+| Field      | Type                | Constraint              | Description                       |
+|------------|---------------------|-------------------------|-----------------------------------|
+| `minDelay` | Duration (ISO-8601) | ≥ 0, ≤ 30 days          | Lower bound of the injected delay |
 | `maxDelay` | Duration (ISO-8601) | ≥ `minDelay`, ≤ 30 days | Upper bound of the injected delay |
 
 If `minDelay == maxDelay`, the delay is deterministic.  
@@ -1247,8 +1247,8 @@ ChaosEffect.delay(Duration.ofSeconds(2))  // deterministic
 
 **Fields:**
 
-| Field | Type | Constraint | Description |
-|-------|------|-----------|-------------|
+| Field      | Type                | Constraint       | Description                                          |
+|------------|---------------------|------------------|------------------------------------------------------|
 | `maxBlock` | Duration (ISO-8601) | positive or null | Maximum block duration. `null` = block indefinitely. |
 
 **JSON example:**
@@ -1267,9 +1267,9 @@ ChaosEffect.delay(Duration.ofSeconds(2))  // deterministic
 
 **Fields:**
 
-| Field | Type | Constraint | Description |
-|-------|------|-----------|-------------|
-| `message` | String | non-blank | Exception message |
+| Field     | Type   | Constraint  | Description       |
+|-----------|--------|-------------|-------------------|
+| `message` | String | non-blank   | Exception message |
 
 **JSON example:**
 ```json
@@ -1301,23 +1301,23 @@ ChaosEffect.delay(Duration.ofSeconds(2))  // deterministic
 
 **Fields:**
 
-| Field | Type | Constraint | Description |
-|-------|------|-----------|-------------|
-| `failureKind` | FailureKind | required | Category of exception to inject |
-| `message` | String | non-blank | Exception message |
+| Field         | Type        | Constraint   | Description                     |
+|---------------|-------------|--------------|---------------------------------|
+| `failureKind` | FailureKind | required     | Category of exception to inject |
+| `message`     | String      | non-blank    | Exception message               |
 
 **FailureKind values:**
 
-| Value | Exception type |
-|-------|---------------|
-| `REJECTED` | `RejectedExecutionException` |
-| `TIMEOUT` | `TimeoutException` |
-| `ILLEGAL_STATE` | `IllegalStateException` |
+| Value             | Exception type                                              |
+|-------------------|-------------------------------------------------------------|
+| `REJECTED`        | `RejectedExecutionException`                                |
+| `TIMEOUT`         | `TimeoutException`                                          |
+| `ILLEGAL_STATE`   | `IllegalStateException`                                     |
 | `CLASS_NOT_FOUND` | `ClassNotFoundException` wrapped in `IllegalStateException` |
-| `IO` | `IOException` |
-| `INTERRUPTED` | `InterruptedException` wrapped in `IllegalStateException` |
-| `RUNTIME` | `RuntimeException` |
-| `SECURITY` | `SecurityException` |
+| `IO`              | `IOException`                                               |
+| `INTERRUPTED`     | `InterruptedException` wrapped in `IllegalStateException`   |
+| `RUNTIME`         | `RuntimeException`                                          |
+| `SECURITY`        | `SecurityException`                                         |
 
 **JSON example:**
 ```json
@@ -1333,11 +1333,11 @@ ChaosEffect.delay(Duration.ofSeconds(2))  // deterministic
 
 **Fields:**
 
-| Field | Type | Constraint | Description |
-|-------|------|-----------|-------------|
-| `exceptionClassName` | String | Valid binary class name; allowed package prefix | Fully-qualified binary class name (e.g., `"java.io.IOException"`) |
-| `message` | String | non-blank | Exception message |
-| `withStackTrace` | boolean | default `true` | `false` = no stack trace; lower overhead, less detectable |
+| Field                | Type    | Constraint                                      | Description                                                       |
+|----------------------|---------|-------------------------------------------------|-------------------------------------------------------------------|
+| `exceptionClassName` | String  | Valid binary class name; allowed package prefix | Fully-qualified binary class name (e.g., `"java.io.IOException"`) |
+| `message`            | String  | non-blank                                       | Exception message                                                 |
+| `withStackTrace`     | boolean | default `true`                                  | `false` = no stack trace; lower overhead, less detectable         |
 
 **Allowed package prefixes:** `java.`, `javax.`, `jakarta.`, `com.macstab.chaos.jvm.`
 
@@ -1360,19 +1360,19 @@ ChaosEffect.delay(Duration.ofSeconds(2))  // deterministic
 
 **Fields:**
 
-| Field | Type | Constraint | Description |
-|-------|------|-----------|-------------|
-| `strategy` | ReturnValueStrategy | required | Substitution strategy |
+| Field      | Type                | Constraint   | Description           |
+|------------|---------------------|--------------|-----------------------|
+| `strategy` | ReturnValueStrategy | required     | Substitution strategy |
 
 **ReturnValueStrategy values:**
 
-| Value | Result | Applicable types |
-|-------|--------|-----------------|
-| `NULL` | `null` | Reference types |
-| `ZERO` | `0` / `false` | All primitives; fallback for reference when `EMPTY` inapplicable |
-| `EMPTY` | Empty collection / `Optional.empty()` / `""` | `Collection`, `Map`, `Optional`, `String` |
-| `BOUNDARY_MAX` | `Integer.MAX_VALUE`, `Long.MAX_VALUE`, etc. | Numeric primitives |
-| `BOUNDARY_MIN` | `Integer.MIN_VALUE`, `Long.MIN_VALUE`, etc. | Numeric primitives |
+| Value          | Result                                       | Applicable types                                                 |
+|----------------|----------------------------------------------|------------------------------------------------------------------|
+| `NULL`         | `null`                                       | Reference types                                                  |
+| `ZERO`         | `0` / `false`                                | All primitives; fallback for reference when `EMPTY` inapplicable |
+| `EMPTY`        | Empty collection / `Optional.empty()` / `""` | `Collection`, `Map`, `Optional`, `String`                        |
+| `BOUNDARY_MAX` | `Integer.MAX_VALUE`, `Long.MAX_VALUE`, etc.  | Numeric primitives                                               |
+| `BOUNDARY_MIN` | `Integer.MIN_VALUE`, `Long.MIN_VALUE`, etc.  | Numeric primitives                                               |
 
 If `strategy` is inapplicable to the actual return type (e.g., `EMPTY` on a primitive), the runtime falls back to `ZERO` and emits a `ChaosEvent.APPLIED` noting the substitution.
 
@@ -1390,18 +1390,18 @@ If `strategy` is inapplicable to the actual return type (e.g., `EMPTY` on a prim
 
 **Fields:**
 
-| Field | Type | Constraint | Description |
-|-------|------|-----------|-------------|
+| Field        | Type                | Constraint                                | Description                        |
+|--------------|---------------------|-------------------------------------------|------------------------------------|
 | `skewAmount` | Duration (ISO-8601) | non-zero; fits in Long nanos (±292 years) | Positive = future; negative = past |
-| `mode` | ClockSkewMode | required | `FIXED` \| `DRIFT` \| `FREEZE` |
+| `mode`       | ClockSkewMode       | required                                  | `FIXED` \| `DRIFT` \| `FREEZE`     |
 
 **ClockSkewMode values:**
 
-| Value | Behaviour |
-|-------|-----------|
-| `FIXED` | Constant offset added to every clock read: `real + skewAmount` |
-| `DRIFT` | Accumulating offset: each read adds `skewAmount` to the running total (simulates clock drift) |
-| `FREEZE` | Clock is frozen at the timestamp captured at activation; every read returns the same value |
+| Value    | Behaviour                                                                                     |
+|----------|-----------------------------------------------------------------------------------------------|
+| `FIXED`  | Constant offset added to every clock read: `real + skewAmount`                                |
+| `DRIFT`  | Accumulating offset: each read adds `skewAmount` to the running total (simulates clock drift) |
+| `FREEZE` | Clock is frozen at the timestamp captured at activation; every read returns the same value    |
 
 **JSON example — 1-hour future jump:**
 ```json
@@ -1442,10 +1442,10 @@ Stressor effects are used exclusively with `StressSelector`. They launch backgro
 
 **Fields:**
 
-| Field | Type | Constraint | Description |
-|-------|------|-----------|-------------|
-| `bytes` | long | > 0, ≤ 64 GiB | Total bytes to allocate and retain |
-| `chunkSizeBytes` | int | > 0, ≤ 256 MiB | Size of each individual allocation chunk |
+| Field            | Type  | Constraint     | Description                              |
+|------------------|-------|----------------|------------------------------------------|
+| `bytes`          | long  | > 0, ≤ 64 GiB  | Total bytes to allocate and retain       |
+| `chunkSizeBytes` | int   | > 0, ≤ 256 MiB | Size of each individual allocation chunk |
 
 **Cleanup:** retained chunks are released when the handle is closed.
 
@@ -1459,11 +1459,11 @@ Stressor effects are used exclusively with `StressSelector`. They launch backgro
 
 **Fields:**
 
-| Field | Type | Constraint | Description |
-|-------|------|-----------|-------------|
-| `threadName` | String | non-blank | Name for the kept-alive thread |
-| `daemon` | boolean | — | `false` = prevents JVM exit |
-| `heartbeat` | Duration | positive | Interval between park cycles |
+| Field        | Type     | Constraint  | Description                    |
+|--------------|----------|-------------|--------------------------------|
+| `threadName` | String   | non-blank   | Name for the kept-alive thread |
+| `daemon`     | boolean  | —           | `false` = prevents JVM exit    |
+| `heartbeat`  | Duration | positive    | Interval between park cycles   |
 
 ---
 
@@ -1475,11 +1475,11 @@ Stressor effects are used exclusively with `StressSelector`. They launch backgro
 
 **Fields:**
 
-| Field | Type | Constraint | Description |
-|-------|------|-----------|-------------|
-| `generatedClassCount` | int | > 0 | Number of synthetic classes to generate |
-| `fieldsPerClass` | int | ≥ 0 | Static fields per class (controls per-class Metaspace footprint) |
-| `retain` | boolean | default `true` | `true` = strong references held to prevent GC unloading |
+| Field                 | Type    | Constraint     | Description                                                      |
+|-----------------------|---------|----------------|------------------------------------------------------------------|
+| `generatedClassCount` | int     | > 0            | Number of synthetic classes to generate                          |
+| `fieldsPerClass`      | int     | ≥ 0            | Static fields per class (controls per-class Metaspace footprint) |
+| `retain`              | boolean | default `true` | `true` = strong references held to prevent GC unloading          |
 
 **Cleanup:** Metaspace is only reclaimed when the classloader that loaded the synthetic classes is collected by GC — not immediately on handle close.
 
@@ -1493,11 +1493,11 @@ Stressor effects are used exclusively with `StressSelector`. They launch backgro
 
 **Fields:**
 
-| Field | Type | Constraint | Description |
-|-------|------|-----------|-------------|
-| `totalBytes` | long | > 0 | Total native memory to exhaust |
-| `bufferSizeBytes` | int | > 0, ≤ `totalBytes` | Size of each buffer allocation |
-| `registerCleaner` | boolean | default `false` | `false` = intentional leak; `true` = Cleaner registered but reference dropped |
+| Field             | Type    | Constraint          | Description                                                                   |
+|-------------------|---------|---------------------|-------------------------------------------------------------------------------|
+| `totalBytes`      | long    | > 0                 | Total native memory to exhaust                                                |
+| `bufferSizeBytes` | int     | > 0, ≤ `totalBytes` | Size of each buffer allocation                                                |
+| `registerCleaner` | boolean | default `false`     | `false` = intentional leak; `true` = Cleaner registered but reference dropped |
 
 **Warning:** Direct memory is not GC-managed. Buffers allocated with `registerCleaner=false` persist until JVM exit. Use `registerCleaner=true` if the scenario may outlive the test.
 
@@ -1511,12 +1511,12 @@ Stressor effects are used exclusively with `StressSelector`. They launch backgro
 
 **Fields:**
 
-| Field | Type | Constraint | Description |
-|-------|------|-----------|-------------|
-| `allocationRateBytesPerSecond` | long | > 0 | Target allocation rate |
-| `objectSizeBytes` | int | > 0 | Size of each allocated object; default 1024 bytes |
-| `promoteToOldGen` | boolean | — | `true` = objects held long enough to reach old generation (triggers major GC) |
-| `duration` | Duration | positive | Total duration of the allocation workload |
+| Field                          | Type     | Constraint   | Description                                                                   |
+|--------------------------------|----------|--------------|-------------------------------------------------------------------------------|
+| `allocationRateBytesPerSecond` | long     | > 0          | Target allocation rate                                                        |
+| `objectSizeBytes`              | int      | > 0          | Size of each allocated object; default 1024 bytes                             |
+| `promoteToOldGen`              | boolean  | —            | `true` = objects held long enough to reach old generation (triggers major GC) |
+| `duration`                     | Duration | positive     | Total duration of the allocation workload                                     |
 
 ---
 
@@ -1528,10 +1528,10 @@ Stressor effects are used exclusively with `StressSelector`. They launch backgro
 
 **Fields:**
 
-| Field | Type | Constraint | Description |
-|-------|------|-----------|-------------|
-| `objectCount` | int | > 0, ≤ 50,000,000 | Number of finalizable objects to allocate |
-| `finalizerDelay` | Duration | ≥ 0 | How long each finalizer sleeps before completing |
+| Field            | Type     | Constraint        | Description                                      |
+|------------------|----------|-------------------|--------------------------------------------------|
+| `objectCount`    | int      | > 0, ≤ 50,000,000 | Number of finalizable objects to allocate        |
+| `finalizerDelay` | Duration | ≥ 0               | How long each finalizer sleeps before completing |
 
 ---
 
@@ -1543,9 +1543,9 @@ Stressor effects are used exclusively with `StressSelector`. They launch backgro
 
 **Fields:**
 
-| Field | Type | Constraint | Description |
-|-------|------|-----------|-------------|
-| `participantCount` | int | ≥ 2, ≤ 1024 | Number of threads to deadlock |
+| Field              | Type     | Constraint            | Description                                     |
+|--------------------|----------|-----------------------|-------------------------------------------------|
+| `participantCount` | int      | ≥ 2, ≤ 1024           | Number of threads to deadlock                   |
 | `acquisitionDelay` | Duration | ≥ 0; default 1 second | Pause between first and second lock acquisition |
 
 **Requires:** `ActivationPolicy.allowDestructiveEffects = true`  
@@ -1561,12 +1561,12 @@ Stressor effects are used exclusively with `StressSelector`. They launch backgro
 
 **Fields:**
 
-| Field | Type | Constraint | Description |
-|-------|------|-----------|-------------|
-| `threadCount` | int | > 0, ≤ 10,000 | Number of threads to leak |
-| `namePrefix` | String | non-blank | Prefix for leaked thread names |
-| `daemon` | boolean | — | `false` = prevents JVM exit |
-| `lifespan` | Duration | positive or null | Maximum lifetime per thread; `null` = no limit |
+| Field         | Type     | Constraint       | Description                                    |
+|---------------|----------|------------------|------------------------------------------------|
+| `threadCount` | int      | > 0, ≤ 10,000    | Number of threads to leak                      |
+| `namePrefix`  | String   | non-blank        | Prefix for leaked thread names                 |
+| `daemon`      | boolean  | —                | `false` = prevents JVM exit                    |
+| `lifespan`    | Duration | positive or null | Maximum lifetime per thread; `null` = no limit |
 
 **Requires:** `ActivationPolicy.allowDestructiveEffects = true` when `daemon=false` and `lifespan=null`.
 
@@ -1580,10 +1580,10 @@ Stressor effects are used exclusively with `StressSelector`. They launch backgro
 
 **Fields:**
 
-| Field | Type | Constraint | Description |
-|-------|------|-----------|-------------|
-| `entriesPerThread` | int | > 0 | Number of ThreadLocal entries per pool thread |
-| `valueSizeBytes` | int | > 0 | Size of each entry's byte-array value |
+| Field              | Type | Constraint | Description                                   |
+|--------------------|------|------------|-----------------------------------------------|
+| `entriesPerThread` | int  | > 0        | Number of ThreadLocal entries per pool thread |
+| `valueSizeBytes`   | int  | > 0        | Size of each entry's byte-array value         |
 
 **Cleanup:** planted entries are removed when the handle is closed.
 
@@ -1597,11 +1597,11 @@ Stressor effects are used exclusively with `StressSelector`. They launch backgro
 
 **Fields:**
 
-| Field | Type | Constraint | Description |
-|-------|------|-----------|-------------|
-| `lockHoldDuration` | Duration | positive | How long each thread holds the lock per cycle |
-| `contendingThreadCount` | int | ≥ 2, ≤ 1000 | Number of contending threads |
-| `unfair` | boolean | default `false` | `true` = no FIFO ordering; increases starvation risk |
+| Field                   | Type     | Constraint      | Description                                          |
+|-------------------------|----------|-----------------|------------------------------------------------------|
+| `lockHoldDuration`      | Duration | positive        | How long each thread holds the lock per cycle        |
+| `contendingThreadCount` | int      | ≥ 2, ≤ 1000     | Number of contending threads                         |
+| `unfair`                | boolean  | default `false` | `true` = no FIFO ordering; increases starvation risk |
 
 ---
 
@@ -1613,10 +1613,10 @@ Stressor effects are used exclusively with `StressSelector`. They launch backgro
 
 **Fields:**
 
-| Field | Type | Constraint | Description |
-|-------|------|-----------|-------------|
-| `classCount` | int | > 0 | Number of synthetic classes to generate |
-| `methodsPerClass` | int | > 0 | Methods per generated class |
+| Field             | Type | Constraint | Description                             |
+|-------------------|------|------------|-----------------------------------------|
+| `classCount`      | int  | > 0        | Number of synthetic classes to generate |
+| `methodsPerClass` | int  | > 0        | Methods per generated class             |
 
 **Cleanup note:** code-cache memory is only reclaimed when the JIT deoptimizes the compiled methods. This may not happen immediately after `handle.close()`.
 
@@ -1630,10 +1630,10 @@ Stressor effects are used exclusively with `StressSelector`. They launch backgro
 
 **Fields:**
 
-| Field | Type | Constraint | Description |
-|-------|------|-----------|-------------|
-| `gcInterval` | Duration | positive | Interval between forced `System.gc()` calls |
-| `retransformClassCount` | int | ≥ 0 | Number of classes to retransform per cycle (additional safepoint source) |
+| Field                   | Type     | Constraint | Description                                                              |
+|-------------------------|----------|------------|--------------------------------------------------------------------------|
+| `gcInterval`            | Duration | positive   | Interval between forced `System.gc()` calls                              |
+| `retransformClassCount` | int      | ≥ 0        | Number of classes to retransform per cycle (additional safepoint source) |
 
 ---
 
@@ -1645,10 +1645,10 @@ Stressor effects are used exclusively with `StressSelector`. They launch backgro
 
 **Fields:**
 
-| Field | Type | Constraint | Description |
-|-------|------|-----------|-------------|
-| `internCount` | int | > 0 | Number of unique strings to intern |
-| `stringLengthBytes` | int | > 0 | Byte length of each interned string |
+| Field               | Type | Constraint | Description                         |
+|---------------------|------|------------|-------------------------------------|
+| `internCount`       | int  | > 0        | Number of unique strings to intern  |
+| `stringLengthBytes` | int  | > 0        | Byte length of each interned string |
 
 ---
 
@@ -1660,10 +1660,10 @@ Stressor effects are used exclusively with `StressSelector`. They launch backgro
 
 **Fields:**
 
-| Field | Type | Constraint | Description |
-|-------|------|-----------|-------------|
-| `referenceCount` | int | > 0 | WeakReferences created per flood cycle |
-| `floodInterval` | Duration | positive | Interval between flood cycles |
+| Field            | Type     | Constraint | Description                            |
+|------------------|----------|------------|----------------------------------------|
+| `referenceCount` | int      | > 0        | WeakReferences created per flood cycle |
+| `floodInterval`  | Duration | positive   | Interval between flood cycles          |
 
 ---
 
@@ -1677,10 +1677,10 @@ Stressor effects are used exclusively with `StressSelector`. They launch backgro
 
 **Fields:**
 
-| Field | Type | Constraint | Description |
-|-------|------|-----------|-------------|
-| `pinnedThreadCount` | int | > 0 | Number of carrier threads to pin |
-| `pinDuration` | Duration | positive | How long each thread holds the pin per cycle |
+| Field               | Type     | Constraint | Description                                  |
+|---------------------|----------|------------|----------------------------------------------|
+| `pinnedThreadCount` | int      | > 0        | Number of carrier threads to pin             |
+| `pinDuration`       | Duration | positive   | How long each thread holds the pin per cycle |
 
 **Cleanup:** all pinning threads are interrupted and the monitor released on `handle.close()`.
 

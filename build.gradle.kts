@@ -121,7 +121,7 @@ subprojects {
                         description.set(
                             "JVM in-process chaos engineering agent - bytecode-level fault injection for Java applications",
                         )
-                        url.set("https://github.com/macstab/chaos-testing-java-agent")
+                        url.set("https://github.com/macstab/macstab-chaos-jvm-agent")
 
                         licenses {
                             license {
@@ -141,9 +141,9 @@ subprojects {
                         }
 
                         scm {
-                            connection.set("scm:git:git://github.com/macstab/chaos-testing-java-agent.git")
-                            developerConnection.set("scm:git:ssh://github.com/macstab/chaos-testing-java-agent.git")
-                            url.set("https://github.com/macstab/chaos-testing-java-agent")
+                            connection.set("scm:git:git://github.com/macstab/macstab-chaos-jvm-agent.git")
+                            developerConnection.set("scm:git:ssh://github.com/macstab/macstab-chaos-jvm-agent.git")
+                            url.set("https://github.com/macstab/macstab-chaos-jvm-agent")
                         }
                     }
                 }
@@ -156,7 +156,7 @@ subprojects {
                 if (ghActor != null && ghToken != null) {
                     maven {
                         name = "GitHubPackages"
-                        url = uri("https://maven.pkg.github.com/macstab/chaos-testing-java-agent")
+                        url = uri("https://maven.pkg.github.com/macstab/macstab-chaos-jvm-agent")
                         credentials {
                             username = ghActor
                             password = ghToken
@@ -279,7 +279,7 @@ tasks.register<Javadoc>("aggregatedJavadoc") {
     description = "Aggregate Javadoc from all publishable subprojects into one site."
 
     setDestinationDir(layout.buildDirectory.dir("docs/aggregated-javadoc").get().asFile)
-    title = "macstab chaos-testing-java-agent ${project.version} API"
+    title = "macstab macstab-chaos-jvm-agent ${project.version} API"
 
     publishableSubprojects.forEach { sub ->
         dependsOn(sub.tasks.matching { it.name == "compileJava" })

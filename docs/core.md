@@ -72,17 +72,17 @@ Out of scope:
 
 # 3. Key Concepts and Terminology
 
-| Term | Definition |
-|------|-----------|
-| **InvocationContext** | Immutable record built at each instrumentation point: operation type, class names, target name, periodic flag, daemon/virtual thread flags, session ID. |
-| **ScenarioContribution** | The value returned by `ScenarioController.evaluate()` when all 8 checks pass: carries the controller, effect, sampled delay, and gate timeout. |
-| **RuntimeDecision** | Merged output of all matching contributions: accumulated delay, last gate action, highest-precedence terminal action. |
-| **TerminalAction** | The final action to execute: THROW, RETURN (with value), SUPPRESS, COMPLETE_EXCEPTIONALLY, or CORRUPT_RETURN. |
-| **TerminalKind** | Enum discriminating TerminalAction variants. |
-| **GateAction** | A pair of (ManualGate, maxBlockDuration) triggering a conditional block on the calling thread. |
-| **SessionId** | A string assigned by `DefaultChaosSession` and stored in `ScopeContext` as a `ThreadLocal`. Null means "not bound to any session" (JVM-scope applies). |
-| **ScopeContext** | Single mutable source of truth for the current thread's session ID. Used by `ChaosRuntime` dispatch methods and `DefaultChaosSession.bind()`. |
-| **baseSeed** | Per-controller seed for `SplittableRandom`, derived from `ActivationPolicy.randomSeed` or 0. XOR-ed with `matchedCount` and `scenarioId.hashCode()` per evaluation to produce varied-but-reproducible samples. |
+| Term                     | Definition                                                                                                                                                                                                     |
+|--------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **InvocationContext**    | Immutable record built at each instrumentation point: operation type, class names, target name, periodic flag, daemon/virtual thread flags, session ID.                                                        |
+| **ScenarioContribution** | The value returned by `ScenarioController.evaluate()` when all 8 checks pass: carries the controller, effect, sampled delay, and gate timeout.                                                                 |
+| **RuntimeDecision**      | Merged output of all matching contributions: accumulated delay, last gate action, highest-precedence terminal action.                                                                                          |
+| **TerminalAction**       | The final action to execute: THROW, RETURN (with value), SUPPRESS, COMPLETE_EXCEPTIONALLY, or CORRUPT_RETURN.                                                                                                  |
+| **TerminalKind**         | Enum discriminating TerminalAction variants.                                                                                                                                                                   |
+| **GateAction**           | A pair of (ManualGate, maxBlockDuration) triggering a conditional block on the calling thread.                                                                                                                 |
+| **SessionId**            | A string assigned by `DefaultChaosSession` and stored in `ScopeContext` as a `ThreadLocal`. Null means "not bound to any session" (JVM-scope applies).                                                         |
+| **ScopeContext**         | Single mutable source of truth for the current thread's session ID. Used by `ChaosRuntime` dispatch methods and `DefaultChaosSession.bind()`.                                                                  |
+| **baseSeed**             | Per-controller seed for `SplittableRandom`, derived from `ActivationPolicy.randomSeed` or 0. XOR-ed with `matchedCount` and `scenarioId.hashCode()` per evaluation to produce varied-but-reproducible samples. |
 
 ---
 
@@ -341,22 +341,22 @@ Exhaustive `switch` over the sealed `ChaosSelector` hierarchy. Each case extract
 
 Key matching rules:
 
-| Selector type | Primary match fields | Additional constraints |
-|---------------|---------------------|----------------------|
-| `ThreadSelector` | `operationType` in operations, `threadNamePattern.matches(targetName)` | `kind` (ANY/PLATFORM/VIRTUAL), `daemon` flag |
-| `ExecutorSelector` | `operationType` in operations, `executorClassPattern.matches(targetClassName)` | `taskClassPattern.matches(subjectClassName)` |
-| `QueueSelector` | `operationType` in operations, `queueClassPattern.matches(targetClassName)` | — |
-| `AsyncSelector` | `operationType` in operations | No class/name filtering |
-| `SchedulingSelector` | `operationType` in operations, `executorClassPattern.matches(targetClassName)` | `periodicOnly` flag |
-| `ShutdownSelector` | `operationType` in operations, `targetClassPattern.matches(targetClassName)` | — |
-| `ClassLoadingSelector` | `operationType` in operations, `targetNamePattern.matches(targetName)` | `loaderClassPattern.matches(targetClassName)` |
-| `MethodSelector` | `operationType` in operations, `classPattern.matches(targetClassName)` | `methodNamePattern.matches(targetName)`, optional `signaturePattern` |
-| `MonitorSelector` | `operationType` in operations, `monitorClassPattern.matches(targetClassName)` | — |
-| `JvmRuntimeSelector` | `operationType` in operations | No class/name filtering |
-| `NioSelector` | `operationType` in operations, `channelClassPattern.matches(targetClassName)` | — |
-| `NetworkSelector` | `operationType` in operations, `remoteHostPattern.matches(targetName)` | — |
-| `ThreadLocalSelector` | `operationType` in operations, `threadLocalClassPattern.matches(targetClassName)` | — |
-| `StressSelector` | `operationType == LIFECYCLE`, `target != null` | No class/name filtering |
+| Selector type          | Primary match fields                                                              | Additional constraints                                               |
+|------------------------|-----------------------------------------------------------------------------------|----------------------------------------------------------------------|
+| `ThreadSelector`       | `operationType` in operations, `threadNamePattern.matches(targetName)`            | `kind` (ANY/PLATFORM/VIRTUAL), `daemon` flag                         |
+| `ExecutorSelector`     | `operationType` in operations, `executorClassPattern.matches(targetClassName)`    | `taskClassPattern.matches(subjectClassName)`                         |
+| `QueueSelector`        | `operationType` in operations, `queueClassPattern.matches(targetClassName)`       | —                                                                    |
+| `AsyncSelector`        | `operationType` in operations                                                     | No class/name filtering                                              |
+| `SchedulingSelector`   | `operationType` in operations, `executorClassPattern.matches(targetClassName)`    | `periodicOnly` flag                                                  |
+| `ShutdownSelector`     | `operationType` in operations, `targetClassPattern.matches(targetClassName)`      | —                                                                    |
+| `ClassLoadingSelector` | `operationType` in operations, `targetNamePattern.matches(targetName)`            | `loaderClassPattern.matches(targetClassName)`                        |
+| `MethodSelector`       | `operationType` in operations, `classPattern.matches(targetClassName)`            | `methodNamePattern.matches(targetName)`, optional `signaturePattern` |
+| `MonitorSelector`      | `operationType` in operations, `monitorClassPattern.matches(targetClassName)`     | —                                                                    |
+| `JvmRuntimeSelector`   | `operationType` in operations                                                     | No class/name filtering                                              |
+| `NioSelector`          | `operationType` in operations, `channelClassPattern.matches(targetClassName)`     | —                                                                    |
+| `NetworkSelector`      | `operationType` in operations, `remoteHostPattern.matches(targetName)`            | —                                                                    |
+| `ThreadLocalSelector`  | `operationType` in operations, `threadLocalClassPattern.matches(targetClassName)` | —                                                                    |
+| `StressSelector`       | `operationType == LIFECYCLE`, `target != null`                                    | No class/name filtering                                              |
 
 **null == wildcard**: Pattern fields that are `null` match anything. This is consistent across all selector types.
 
@@ -423,13 +423,13 @@ Test coverage: `ClockSkewRuntimeTest$HigherLevelTimeApis` (8 tests) covers FIXED
 
 Applies a `ChaosEffect.ReturnValueCorruptionEffect.Strategy` to a (returnType, actualValue) pair:
 
-| Strategy | int/long | float/double | String | Collection | Boolean | null return |
-|----------|----------|-------------|--------|-----------|---------|-------------|
-| NULL | null | null | null | null | null | null |
-| ZERO | 0 / 0L | 0.0f / 0.0d | "0" | empty | false | null |
-| EMPTY | "" (if String) | 0.0 | "" | empty | false | null |
-| BOUNDARY_MAX | `Integer.MAX_VALUE` / `Long.MAX_VALUE` | `Float.MAX_VALUE` / `Double.MAX_VALUE` | unchanged | unchanged | true | null |
-| BOUNDARY_MIN | `Integer.MIN_VALUE` / `Long.MIN_VALUE` | `Float.MIN_VALUE` / `Double.MIN_VALUE` | unchanged | unchanged | false | null |
+| Strategy     | int/long                               | float/double                           | String    | Collection | Boolean | null return |
+|--------------|----------------------------------------|----------------------------------------|-----------|------------|---------|-------------|
+| NULL         | null                                   | null                                   | null      | null       | null    | null        |
+| ZERO         | 0 / 0L                                 | 0.0f / 0.0d                            | "0"       | empty      | false   | null        |
+| EMPTY        | "" (if String)                         | 0.0                                    | ""        | empty      | false   | null        |
+| BOUNDARY_MAX | `Integer.MAX_VALUE` / `Long.MAX_VALUE` | `Float.MAX_VALUE` / `Double.MAX_VALUE` | unchanged | unchanged  | true    | null        |
+| BOUNDARY_MIN | `Integer.MIN_VALUE` / `Long.MIN_VALUE` | `Float.MIN_VALUE` / `Double.MIN_VALUE` | unchanged | unchanged  | false   | null        |
 
 The return type is determined from the actual value's runtime class if the declared type is erased to `Object`. Unrecognized types fall through with the actual value unchanged (no silent data corruption for unknown types).
 
@@ -437,20 +437,20 @@ The return type is determined from the actual value's runtime class if the decla
 
 Constructs operation-appropriate exceptions for `RejectEffect` and `ExceptionalCompletionEffect`:
 
-| Operation type | Exception type |
-|---------------|----------------|
-| `SOCKET_CONNECT`, `NIO_CHANNEL_CONNECT` | `ConnectException` |
-| `SOCKET_READ`, `SOCKET_ACCEPT` | `SocketTimeoutException` |
-| `SOCKET_WRITE`, `NIO_CHANNEL_WRITE` | `IOException` |
-| `EXECUTOR_SUBMIT` | `RejectedExecutionException` |
-| `JNDI_LOOKUP` | `NamingException` |
-| `CLASS_LOAD`, `CLASS_DEFINE` | `ClassNotFoundException` / `ClassFormatError` |
-| `OBJECT_DESERIALIZE` | `InvalidClassException` |
-| `OBJECT_SERIALIZE` | `NotSerializableException` |
-| `NATIVE_LIBRARY_LOAD` | `UnsatisfiedLinkError` |
-| `DIRECT_BUFFER_ALLOCATE` | `OutOfMemoryError` |
-| `SYSTEM_EXIT_REQUEST` | `SecurityException` (via suppressTerminal) |
-| default | `RuntimeException` with the reject message |
+| Operation type                          | Exception type                                |
+|-----------------------------------------|-----------------------------------------------|
+| `SOCKET_CONNECT`, `NIO_CHANNEL_CONNECT` | `ConnectException`                            |
+| `SOCKET_READ`, `SOCKET_ACCEPT`          | `SocketTimeoutException`                      |
+| `SOCKET_WRITE`, `NIO_CHANNEL_WRITE`     | `IOException`                                 |
+| `EXECUTOR_SUBMIT`                       | `RejectedExecutionException`                  |
+| `JNDI_LOOKUP`                           | `NamingException`                             |
+| `CLASS_LOAD`, `CLASS_DEFINE`            | `ClassNotFoundException` / `ClassFormatError` |
+| `OBJECT_DESERIALIZE`                    | `InvalidClassException`                       |
+| `OBJECT_SERIALIZE`                      | `NotSerializableException`                    |
+| `NATIVE_LIBRARY_LOAD`                   | `UnsatisfiedLinkError`                        |
+| `DIRECT_BUFFER_ALLOCATE`                | `OutOfMemoryError`                            |
+| `SYSTEM_EXIT_REQUEST`                   | `SecurityException` (via suppressTerminal)    |
+| default                                 | `RuntimeException` with the reject message    |
 
 ---
 
@@ -528,11 +528,11 @@ The `synchronized(this)` guard that protects the rate-limit window does more tha
 
 **Invariant (test coverage in `RateLimitUnderHighConcurrencyTest`)**:
 
-| Scenario | Expected `appliedCount` | Assertion |
-|---|---|---|
-| 100 threads, 7 permits, 10 s window | `<= 7` | overshoot prevention |
-| 100 threads, 10 permits, 10 s window | `== 10` | no permit wasted |
-| 50 threads, `maxApplications=3`, `rateLimit=20` | `<= 3` | `maxApplications` wins when tighter |
+| Scenario                                        | Expected `appliedCount` | Assertion                           |
+|-------------------------------------------------|-------------------------|-------------------------------------|
+| 100 threads, 7 permits, 10 s window             | `<= 7`                  | overshoot prevention                |
+| 100 threads, 10 permits, 10 s window            | `== 10`                 | no permit wasted                    |
+| 50 threads, `maxApplications=3`, `rateLimit=20` | `<= 3`                  | `maxApplications` wins when tighter |
 
 The last row confirms that `maxApplications` and `rateLimit` are independent guards: the tighter constraint wins. When `maxApplications < permitsPerWindow`, the CAS loop on `appliedCount` fires before the rate-limit window is exhausted.
 
@@ -570,11 +570,11 @@ Sessions provide hard isolation boundaries via `ScopeContext`, a thread-local st
 
 **Invariants (test coverage in `SessionIsolationParallelTest`)**:
 
-| Scenario | Invariant |
-|---|---|
-| 10 sessions × 10 threads × 5 iterations | Each session's `appliedCount == 50` — no cross-session bleed |
+| Scenario                                        | Invariant                                                                        |
+|-------------------------------------------------|----------------------------------------------------------------------------------|
+| 10 sessions × 10 threads × 5 iterations         | Each session's `appliedCount == 50` — no cross-session bleed                     |
 | 50 unbound threads, 10 active session scenarios | All session `appliedCount == 0` — unbound threads invisible to session selectors |
-| Session closed after pre-close applications | Post-close calls on any thread are not delayed — effect stops immediately |
+| Session closed after pre-close applications     | Post-close calls on any thread are not delayed — effect stops immediately        |
 
 **Why cross-session bleed is impossible**: `ScopeContext.currentSessionId()` returns the top of the calling thread's session ID stack. The `ScenarioController` for a SESSION-scoped scenario stores its session ID at registration time. The evaluation pipeline (step 3) compares `currentSessionId()` against the controller's ID with reference equality on interned session UUIDs. A thread in session A can never satisfy the guard for a controller registered to session B.
 

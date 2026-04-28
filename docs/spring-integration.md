@@ -24,12 +24,12 @@ The Spring integration layer is organized along two independent axes:
 
 This gives four modules, each compiled against its own Spring Boot BOM and carrying its own `Automatic-Module-Name`. No module carries a runtime Spring Boot dependency — all Spring artifacts are declared `compileOnly` so the starters are inert unless the consuming application supplies Spring Boot on the classpath.
 
-| Module | Scope | Spring Boot | Automatic-Module-Name | Base Package |
-|--------|-------|-------------|----------------------|--------------|
-| `chaos-agent-spring-boot3-test-starter` | Test (JUnit 5 + `@SpringBootTest`) | 3.5.13 | `com.macstab.chaos.jvm.agent.spring.boot3.test` | `com.macstab.chaos.jvm.spring.boot3.test` |
-| `chaos-agent-spring-boot4-test-starter` | Test (JUnit 5 + `@SpringBootTest`) | 4.0.5 | `com.macstab.chaos.jvm.agent.spring.boot4.test` | `com.macstab.chaos.jvm.spring.boot4.test` |
-| `chaos-agent-spring-boot3-starter` | Runtime (production / soak / game day) | 3.5.13 | `com.macstab.chaos.jvm.agent.spring.boot3` | `com.macstab.chaos.jvm.spring.boot3` |
-| `chaos-agent-spring-boot4-starter` | Runtime (production / soak / game day) | 4.0.5 | `com.macstab.chaos.jvm.agent.spring.boot4` | `com.macstab.chaos.jvm.spring.boot4` |
+| Module                                  | Scope                                  | Spring Boot | Automatic-Module-Name                           | Base Package                              |
+|-----------------------------------------|----------------------------------------|-------------|-------------------------------------------------|-------------------------------------------|
+| `chaos-agent-spring-boot3-test-starter` | Test (JUnit 5 + `@SpringBootTest`)     | 3.5.13      | `com.macstab.chaos.jvm.agent.spring.boot3.test` | `com.macstab.chaos.jvm.spring.boot3.test` |
+| `chaos-agent-spring-boot4-test-starter` | Test (JUnit 5 + `@SpringBootTest`)     | 4.0.5       | `com.macstab.chaos.jvm.agent.spring.boot4.test` | `com.macstab.chaos.jvm.spring.boot4.test` |
+| `chaos-agent-spring-boot3-starter`      | Runtime (production / soak / game day) | 3.5.13      | `com.macstab.chaos.jvm.agent.spring.boot3`      | `com.macstab.chaos.jvm.spring.boot3`      |
+| `chaos-agent-spring-boot4-starter`      | Runtime (production / soak / game day) | 4.0.5       | `com.macstab.chaos.jvm.agent.spring.boot4`      | `com.macstab.chaos.jvm.spring.boot4`      |
 
 The test and runtime starters are intentionally separate. Combining them in a single artifact would put Actuator plumbing on the test classpath and test-only classes in production JARs. The separation enforces the blast-radius boundary at the Gradle dependency level rather than requiring callers to remember which scope to use.
 
@@ -53,13 +53,13 @@ public @interface ChaosTest { ... }
 
 All `@SpringBootTest` attributes are re-declared on `@ChaosTest` and forwarded by annotation processors at compile time:
 
-| Attribute | Forwarded to | Type |
-|-----------|-------------|------|
-| `properties` | `@SpringBootTest.properties` | `String[]` |
-| `classes` | `@SpringBootTest.classes` | `Class<?>[]` |
-| `webEnvironment` | `@SpringBootTest.webEnvironment` | `WebEnvironment` (default `MOCK`) |
-| `args` | `@SpringBootTest.args` | `String[]` |
-| `initializers` | `@SpringBootTest.initializers` | `Class<? extends ApplicationContextInitializer<?>>[]` |
+| Attribute        | Forwarded to                     | Type                                                  |
+|------------------|----------------------------------|-------------------------------------------------------|
+| `properties`     | `@SpringBootTest.properties`     | `String[]`                                            |
+| `classes`        | `@SpringBootTest.classes`        | `Class<?>[]`                                          |
+| `webEnvironment` | `@SpringBootTest.webEnvironment` | `WebEnvironment` (default `MOCK`)                     |
+| `args`           | `@SpringBootTest.args`           | `String[]`                                            |
+| `initializers`   | `@SpringBootTest.initializers`   | `Class<? extends ApplicationContextInitializer<?>>[]` |
 
 This means callers pay zero annotation-composition cost. `@ChaosTest(webEnvironment = WebEnvironment.RANDOM_PORT)` works exactly as `@SpringBootTest(webEnvironment = RANDOM_PORT)` does, with the chaos extension layered on top.
 
@@ -456,12 +456,12 @@ public class ChaosActuatorEndpoint { ... }
 
 `@Endpoint(id = "chaos")` registers the endpoint under the path `/actuator/chaos`. Spring Boot Actuator's endpoint infrastructure maps the four JUnit-style operation annotations to HTTP verbs automatically:
 
-| Annotation | HTTP method | Path | Description |
-|-----------|-------------|------|-------------|
-| `@ReadOperation` | `GET` | `/actuator/chaos` | Returns `ChaosDiagnostics.Snapshot` |
-| `@WriteOperation` | `POST` | `/actuator/chaos` | Activates a plan from inline JSON body |
-| `@WriteOperation` (stopAll) | `POST` | `/actuator/chaos/stopAll` | Stops all starter-managed scenarios |
-| `@DeleteOperation` | `DELETE` | `/actuator/chaos/{scenarioId}` | Stops a specific scenario by ID |
+| Annotation                  | HTTP method | Path                           | Description                            |
+|-----------------------------|-------------|--------------------------------|----------------------------------------|
+| `@ReadOperation`            | `GET`       | `/actuator/chaos`              | Returns `ChaosDiagnostics.Snapshot`    |
+| `@WriteOperation`           | `POST`      | `/actuator/chaos`              | Activates a plan from inline JSON body |
+| `@WriteOperation` (stopAll) | `POST`      | `/actuator/chaos/stopAll`      | Stops all starter-managed scenarios    |
+| `@DeleteOperation`          | `DELETE`    | `/actuator/chaos/{scenarioId}` | Stops a specific scenario by ID        |
 
 The `@WriteOperation` annotation is applied to two methods (`activate` and `stopAll`). Spring Boot Actuator disambiguates them at runtime by path: `activate` maps to the base path, `stopAll` maps to the `stopAll` sub-path.
 
@@ -687,12 +687,12 @@ Spring Boot 4 moved from `spring.factories` to `.imports` files for most factory
 
 Both the auto-configuration registration (runtime starters) and the test auto-configuration registration (test starters) use `*.imports` files in both Boot 3 and Boot 4:
 
-| File | Boot 3 | Boot 4 |
-|------|--------|--------|
-| Runtime auto-configuration | `org.springframework.boot.autoconfigure.AutoConfiguration.imports` | Same |
-| Test auto-configuration | `org.springframework.boot.test.autoconfigure.ImportAutoConfiguration.imports` | Same |
-| `ApplicationContextInitializer` (test starter) | `META-INF/spring.factories` | `META-INF/spring/org.springframework.context.ApplicationContextInitializer.imports` |
-| `EnvironmentPostProcessor` (runtime starter) | `META-INF/spring/org.springframework.boot.env.EnvironmentPostProcessor.imports` | `META-INF/spring.factories` keyed on `org.springframework.boot.EnvironmentPostProcessor` |
+| File                                           | Boot 3                                                                          | Boot 4                                                                                   |
+|------------------------------------------------|---------------------------------------------------------------------------------|------------------------------------------------------------------------------------------|
+| Runtime auto-configuration                     | `org.springframework.boot.autoconfigure.AutoConfiguration.imports`              | Same                                                                                     |
+| Test auto-configuration                        | `org.springframework.boot.test.autoconfigure.ImportAutoConfiguration.imports`   | Same                                                                                     |
+| `ApplicationContextInitializer` (test starter) | `META-INF/spring.factories`                                                     | `META-INF/spring/org.springframework.context.ApplicationContextInitializer.imports`      |
+| `EnvironmentPostProcessor` (runtime starter)   | `META-INF/spring/org.springframework.boot.env.EnvironmentPostProcessor.imports` | `META-INF/spring.factories` keyed on `org.springframework.boot.EnvironmentPostProcessor` |
 
 ### What is Identical
 
@@ -716,12 +716,12 @@ The duplication is intentional and has a concrete justification: Spring Boot 3 a
 
 All properties live under the `macstab.chaos` prefix and apply to both Boot 3 and Boot 4 runtime starters.
 
-| Property | Type | Default | Description |
-|----------|------|---------|-------------|
-| `macstab.chaos.enabled` | `boolean` | `false` | Master switch. All beans in `ChaosAutoConfiguration` are conditional on this being `true`. |
-| `macstab.chaos.config-file` | `String` | `null` | Absolute or relative path to a JSON plan file. Loaded on `ApplicationReadyEvent`. Null or blank = no startup plan. |
+| Property                            | Type      | Default | Description                                                                                                          |
+|-------------------------------------|-----------|---------|----------------------------------------------------------------------------------------------------------------------|
+| `macstab.chaos.enabled`             | `boolean` | `false` | Master switch. All beans in `ChaosAutoConfiguration` are conditional on this being `true`.                           |
+| `macstab.chaos.config-file`         | `String`  | `null`  | Absolute or relative path to a JSON plan file. Loaded on `ApplicationReadyEvent`. Null or blank = no startup plan.   |
 | `macstab.chaos.debug-dump-on-start` | `boolean` | `false` | If `true`, logs the full `controlPlane.diagnostics().debugDump()` output at `INFO` after the startup plan activates. |
-| `macstab.chaos.actuator.enabled` | `boolean` | `false` | Enables `ChaosActuatorEndpoint`. Requires both this flag and `spring-boot-actuator` on the classpath. |
+| `macstab.chaos.actuator.enabled`    | `boolean` | `false` | Enables `ChaosActuatorEndpoint`. Requires both this flag and `spring-boot-actuator` on the classpath.                |
 
 Full YAML example showing all options:
 
@@ -749,15 +749,15 @@ All properties participate in Spring's full environment abstraction — they can
 
 ## 6. Test Coverage
 
-| Test Class | Module | What It Verifies | Test Count |
-|------------|--------|-----------------|-----------|
-| `ChaosAgentExtensionTest` (Boot 3) | `chaos-agent-spring-boot3-test-starter` | `ChaosSession` parameter injection; `ChaosControlPlane` parameter injection; session id non-null; session open and `bind()` usable during test; session identity stable across methods in a class; `@TestInstance(PER_CLASS)` + bind lifecycle | 6 |
-| `ChaosAgentExtensionTest` (Boot 4) | `chaos-agent-spring-boot4-test-starter` | Same contract as Boot 3 variant; exercises Boot 4 Spring Boot BOM | 6 |
-| `ChaosAutoConfigurationTest` (Boot 3) | `chaos-agent-spring-boot3-starter` | `ChaosControlPlane` bean present when `enabled=true`; `ChaosHandleRegistry` bean present when `enabled=true`; no bean when `enabled` absent (default); no bean when `enabled=false`; user-supplied `ChaosControlPlane` overrides auto-config (`@ConditionalOnMissingBean`) | 5 |
-| `ChaosAutoConfigurationTest` (Boot 4) | `chaos-agent-spring-boot4-starter` | Same contract as Boot 3 variant | 5 |
-| `ChaosActuatorEndpointTest` (Boot 3) | `chaos-agent-spring-boot3-starter` | Endpoint bean present when `actuator.enabled=true`; absent when default; absent when `actuator.enabled=false`; `snapshot()` returns non-null with non-null `scenarios()` and `runtimeDetails()`; `stop()` returns `not-found` for unknown ID; `stopAll()` returns 0 when registry empty | 6 |
-| `ChaosActuatorEndpointTest` (Boot 4) | `chaos-agent-spring-boot4-starter` | Same contract as Boot 3 variant | 6 |
-| `ChaosPropertiesTest` (Boot 4) | `chaos-agent-spring-boot4-starter` | `enabled` defaults to `false`; `actuator.enabled` defaults to `false`; `configFile` defaults to `null`; `debugDumpOnStart` defaults to `false` | 4 |
+| Test Class                            | Module                                  | What It Verifies                                                                                                                                                                                                                                                                        | Test Count |
+|---------------------------------------|-----------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------|
+| `ChaosAgentExtensionTest` (Boot 3)    | `chaos-agent-spring-boot3-test-starter` | `ChaosSession` parameter injection; `ChaosControlPlane` parameter injection; session id non-null; session open and `bind()` usable during test; session identity stable across methods in a class; `@TestInstance(PER_CLASS)` + bind lifecycle                                          | 6          |
+| `ChaosAgentExtensionTest` (Boot 4)    | `chaos-agent-spring-boot4-test-starter` | Same contract as Boot 3 variant; exercises Boot 4 Spring Boot BOM                                                                                                                                                                                                                       | 6          |
+| `ChaosAutoConfigurationTest` (Boot 3) | `chaos-agent-spring-boot3-starter`      | `ChaosControlPlane` bean present when `enabled=true`; `ChaosHandleRegistry` bean present when `enabled=true`; no bean when `enabled` absent (default); no bean when `enabled=false`; user-supplied `ChaosControlPlane` overrides auto-config (`@ConditionalOnMissingBean`)              | 5          |
+| `ChaosAutoConfigurationTest` (Boot 4) | `chaos-agent-spring-boot4-starter`      | Same contract as Boot 3 variant                                                                                                                                                                                                                                                         | 5          |
+| `ChaosActuatorEndpointTest` (Boot 3)  | `chaos-agent-spring-boot3-starter`      | Endpoint bean present when `actuator.enabled=true`; absent when default; absent when `actuator.enabled=false`; `snapshot()` returns non-null with non-null `scenarios()` and `runtimeDetails()`; `stop()` returns `not-found` for unknown ID; `stopAll()` returns 0 when registry empty | 6          |
+| `ChaosActuatorEndpointTest` (Boot 4)  | `chaos-agent-spring-boot4-starter`      | Same contract as Boot 3 variant                                                                                                                                                                                                                                                         | 6          |
+| `ChaosPropertiesTest` (Boot 4)        | `chaos-agent-spring-boot4-starter`      | `enabled` defaults to `false`; `actuator.enabled` defaults to `false`; `configFile` defaults to `null`; `debugDumpOnStart` defaults to `false`                                                                                                                                          | 4          |
 
 All test classes use `ApplicationContextRunner` for the Spring wiring tests (lightweight, no embedded server) and `@ExtendWith(ChaosAgentExtension.class)` for the extension tests (no Spring context needed to verify JUnit lifecycle). Stub `ChaosControlPlane` implementations avoid attaching the real agent in tests that only verify Spring bean wiring, keeping those tests fast and environment-agnostic.
 

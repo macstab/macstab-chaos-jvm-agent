@@ -1,6 +1,6 @@
 # Release Process
 
-Release pipeline for `chaos-testing-java-agent` - GitHub Packages (automated),
+Release pipeline for `macstab-chaos-jvm-agent` - GitHub Packages (automated),
 Maven Central (manual), and Javadoc on GitHub Pages (automated).
 
 ## First-time Maven Central setup

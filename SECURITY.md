@@ -37,7 +37,7 @@ Security fixes are backported to:
 - The previous major version, for **6 months** after a new major releases
 
 Older versions receive no security backports. The current supported list is
-visible on the [releases page](https://github.com/macstab/chaos-testing-java-agent/releases).
+visible on the [releases page](https://github.com/macstab/macstab-chaos-jvm-agent/releases).
 
 ## In scope
 

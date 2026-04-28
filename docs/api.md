@@ -355,16 +355,16 @@ All guards compose as AND: a scenario fires only if every configured guard passe
 
 ### Fields
 
-| Field | Type | Default | Meaning |
-|-------|------|---------|---------|
-| `startMode` | `StartMode` | `AUTOMATIC` | `AUTOMATIC` starts on registration; `MANUAL` waits for `handle.start()` |
-| `probability` | `double` | `1.0` | Fraction of passing matches that fire; must be in `(0.0, 1.0]`. An explicit `0.0` is rejected with `IllegalArgumentException`; omit the scenario activation entirely to disable it. A `null` value in JSON defaults to `1.0`. |
-| `activateAfterMatches` | `long` | `0` | Skip this many initial matches before becoming eligible |
-| `maxApplications` | `Long` | `null` | Hard cap on total applications; `null` = unlimited |
-| `activeFor` | `Duration` | `null` | Auto-expire this long after first start; `null` = no expiry |
-| `rateLimit` | `RateLimit` | `null` | Sliding-window permit cap; `null` = unlimited |
-| `randomSeed` | `Long` | `0L` | Seed for `SplittableRandom`; XOR-ed with `scenario.id().hashCode()` for per-scenario uniqueness |
-| `allowDestructiveEffects` | `boolean` | `false` | Must be `true` to activate `DeadlockEffect` or `ThreadLeakEffect`; see below |
+| Field                     | Type        | Default     | Meaning                                                                                                                                                                                                                       |
+|---------------------------|-------------|-------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `startMode`               | `StartMode` | `AUTOMATIC` | `AUTOMATIC` starts on registration; `MANUAL` waits for `handle.start()`                                                                                                                                                       |
+| `probability`             | `double`    | `1.0`       | Fraction of passing matches that fire; must be in `(0.0, 1.0]`. An explicit `0.0` is rejected with `IllegalArgumentException`; omit the scenario activation entirely to disable it. A `null` value in JSON defaults to `1.0`. |
+| `activateAfterMatches`    | `long`      | `0`         | Skip this many initial matches before becoming eligible                                                                                                                                                                       |
+| `maxApplications`         | `Long`      | `null`      | Hard cap on total applications; `null` = unlimited                                                                                                                                                                            |
+| `activeFor`               | `Duration`  | `null`      | Auto-expire this long after first start; `null` = no expiry                                                                                                                                                                   |
+| `rateLimit`               | `RateLimit` | `null`      | Sliding-window permit cap; `null` = unlimited                                                                                                                                                                                 |
+| `randomSeed`              | `Long`      | `0L`        | Seed for `SplittableRandom`; XOR-ed with `scenario.id().hashCode()` for per-scenario uniqueness                                                                                                                               |
+| `allowDestructiveEffects` | `boolean`   | `false`     | Must be `true` to activate `DeadlockEffect` or `ThreadLeakEffect`; see below                                                                                                                                                  |
 
 ### Destructive Effects Safeguard
 
@@ -396,31 +396,31 @@ ChaosScenario.builder("deadlock-test")
 
 The `OperationType` enum defines all intercepted JDK operations. Full list:
 
-| Category | OperationType values |
-|----------|---------------------|
-| Executor | `EXECUTOR_SUBMIT`, `EXECUTOR_WORKER_RUN`, `EXECUTOR_SHUTDOWN`, `EXECUTOR_AWAIT_TERMINATION` |
-| Scheduled | `SCHEDULE_SUBMIT`, `SCHEDULE_TICK` |
-| ForkJoin | `FORK_JOIN_TASK_RUN` |
-| Thread | `THREAD_START`, `VIRTUAL_THREAD_START` |
-| Queue | `QUEUE_PUT`, `QUEUE_TAKE`, `QUEUE_OFFER`, `QUEUE_POLL` |
-| Async | `ASYNC_COMPLETE`, `ASYNC_COMPLETE_EXCEPTIONALLY`, `ASYNC_CANCEL` |
-| Clock (auto-wired) | `INSTANT_NOW`, `LOCAL_DATE_TIME_NOW`, `ZONED_DATE_TIME_NOW`, `DATE_NEW` |
-| Clock (manual hook — see §11) | `SYSTEM_CLOCK_MILLIS`, `SYSTEM_CLOCK_NANOS` |
-| GC | `SYSTEM_GC_REQUEST` |
-| Exit | `SYSTEM_EXIT_REQUEST` |
-| Reflection | `REFLECTION_INVOKE` |
-| Memory | `DIRECT_BUFFER_ALLOCATE` |
-| Serialization | `OBJECT_DESERIALIZE`, `OBJECT_SERIALIZE` |
-| Class | `CLASS_LOAD`, `CLASS_DEFINE`, `RESOURCE_LOAD` |
-| Synchronization | `MONITOR_ENTER`, `THREAD_PARK` |
-| NIO | `NIO_SELECTOR_SELECT`, `NIO_CHANNEL_READ`, `NIO_CHANNEL_WRITE`, `NIO_CHANNEL_CONNECT`, `NIO_CHANNEL_ACCEPT` |
-| Network | `SOCKET_CONNECT`, `SOCKET_ACCEPT`, `SOCKET_READ`, `SOCKET_WRITE`, `SOCKET_CLOSE` |
-| Infrastructure | `JNDI_LOOKUP`, `JMX_INVOKE`, `JMX_GET_ATTR`, `NATIVE_LIBRARY_LOAD` |
-| Compression | `ZIP_INFLATE`, `ZIP_DEFLATE` |
-| ThreadLocal | `THREAD_LOCAL_GET`, `THREAD_LOCAL_SET` |
-| Shutdown | `SHUTDOWN_HOOK_REGISTER` |
-| Method (manual hook — see §9.1) | `METHOD_ENTER`, `METHOD_EXIT` |
-| Stressor | `LIFECYCLE` (internal; targets stressor start/stop) |
+| Category                        | OperationType values                                                                                        |
+|---------------------------------|-------------------------------------------------------------------------------------------------------------|
+| Executor                        | `EXECUTOR_SUBMIT`, `EXECUTOR_WORKER_RUN`, `EXECUTOR_SHUTDOWN`, `EXECUTOR_AWAIT_TERMINATION`                 |
+| Scheduled                       | `SCHEDULE_SUBMIT`, `SCHEDULE_TICK`                                                                          |
+| ForkJoin                        | `FORK_JOIN_TASK_RUN`                                                                                        |
+| Thread                          | `THREAD_START`, `VIRTUAL_THREAD_START`                                                                      |
+| Queue                           | `QUEUE_PUT`, `QUEUE_TAKE`, `QUEUE_OFFER`, `QUEUE_POLL`                                                      |
+| Async                           | `ASYNC_COMPLETE`, `ASYNC_COMPLETE_EXCEPTIONALLY`, `ASYNC_CANCEL`                                            |
+| Clock (auto-wired)              | `INSTANT_NOW`, `LOCAL_DATE_TIME_NOW`, `ZONED_DATE_TIME_NOW`, `DATE_NEW`                                     |
+| Clock (manual hook — see §11)   | `SYSTEM_CLOCK_MILLIS`, `SYSTEM_CLOCK_NANOS`                                                                 |
+| GC                              | `SYSTEM_GC_REQUEST`                                                                                         |
+| Exit                            | `SYSTEM_EXIT_REQUEST`                                                                                       |
+| Reflection                      | `REFLECTION_INVOKE`                                                                                         |
+| Memory                          | `DIRECT_BUFFER_ALLOCATE`                                                                                    |
+| Serialization                   | `OBJECT_DESERIALIZE`, `OBJECT_SERIALIZE`                                                                    |
+| Class                           | `CLASS_LOAD`, `CLASS_DEFINE`, `RESOURCE_LOAD`                                                               |
+| Synchronization                 | `MONITOR_ENTER`, `THREAD_PARK`                                                                              |
+| NIO                             | `NIO_SELECTOR_SELECT`, `NIO_CHANNEL_READ`, `NIO_CHANNEL_WRITE`, `NIO_CHANNEL_CONNECT`, `NIO_CHANNEL_ACCEPT` |
+| Network                         | `SOCKET_CONNECT`, `SOCKET_ACCEPT`, `SOCKET_READ`, `SOCKET_WRITE`, `SOCKET_CLOSE`                            |
+| Infrastructure                  | `JNDI_LOOKUP`, `JMX_INVOKE`, `JMX_GET_ATTR`, `NATIVE_LIBRARY_LOAD`                                          |
+| Compression                     | `ZIP_INFLATE`, `ZIP_DEFLATE`                                                                                |
+| ThreadLocal                     | `THREAD_LOCAL_GET`, `THREAD_LOCAL_SET`                                                                      |
+| Shutdown                        | `SHUTDOWN_HOOK_REGISTER`                                                                                    |
+| Method (manual hook — see §9.1) | `METHOD_ENTER`, `METHOD_EXIT`                                                                               |
+| Stressor                        | `LIFECYCLE` (internal; targets stressor start/stop)                                                         |
 
 ## 9.1 Manual hook operation types
 
@@ -428,12 +428,12 @@ Most operation types in §9 are **auto-wired**: the agent installs ByteBuddy adv
 
 Four operation types are **manual-hook only** — fully functional, fully tested, but the agent cannot trigger them automatically and the application must route the event through the agent's public API:
 
-| OperationType | Why it is not auto-wired | Public hook |
-|---|---|---|
-| `SYSTEM_CLOCK_MILLIS` | `System.currentTimeMillis()` is `native @IntrinsicCandidate`; HotSpot JIT replaces the call with a direct hardware-clock instruction (`RDTSC` / `MRS CNTVCT_EL0`) that bypasses any bytecode wrapper. Hard JVM limitation for `-javaagent:` agents. | `chaosRuntime.adjustClockMillis(real)` |
-| `SYSTEM_CLOCK_NANOS` | Same as above for `System.nanoTime()`. | `chaosRuntime.adjustClockNanos(real)` |
-| `METHOD_ENTER` | The agent has no engine that takes a `MethodSelector` and dynamically rewrites every matching class on activation. The runtime evaluation is built; the dynamic instrumentation pass is not. | `chaosRuntime.beforeMethodEnter(class, method)` |
-| `METHOD_EXIT` | Same as above. | `chaosRuntime.afterMethodExit(class, method, returnType, value)` |
+| OperationType         | Why it is not auto-wired                                                                                                                                                                                                                            | Public hook                                                      |
+|-----------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------|
+| `SYSTEM_CLOCK_MILLIS` | `System.currentTimeMillis()` is `native @IntrinsicCandidate`; HotSpot JIT replaces the call with a direct hardware-clock instruction (`RDTSC` / `MRS CNTVCT_EL0`) that bypasses any bytecode wrapper. Hard JVM limitation for `-javaagent:` agents. | `chaosRuntime.adjustClockMillis(real)`                           |
+| `SYSTEM_CLOCK_NANOS`  | Same as above for `System.nanoTime()`.                                                                                                                                                                                                              | `chaosRuntime.adjustClockNanos(real)`                            |
+| `METHOD_ENTER`        | The agent has no engine that takes a `MethodSelector` and dynamically rewrites every matching class on activation. The runtime evaluation is built; the dynamic instrumentation pass is not.                                                        | `chaosRuntime.beforeMethodEnter(class, method)`                  |
+| `METHOD_EXIT`         | Same as above.                                                                                                                                                                                                                                      | `chaosRuntime.afterMethodExit(class, method, returnType, value)` |
 
 Selector matching, effect application, activation policy (probability, schedules, max activations), `ChaosDiagnostics`, and `ChaosEventListener` all behave identically to the auto-wired operation types — once the hook is invoked.
 

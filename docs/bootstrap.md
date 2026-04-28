@@ -183,13 +183,13 @@ public static ChaosControlPlane current() {
 
 # 7. Error Handling
 
-| Failure | Behavior |
-|---------|----------|
-| Config file not found / parse error | `ConfigLoadException` thrown; agent startup fails; JVM may not start (depends on JVM's `-javaagent` error policy) |
-| ByteBuddy transformation failure for a class | Warning logged; specific class uninstrumented; agent continues |
-| Bootstrap bridge injection failure | `IllegalStateException`; agent startup fails |
-| MBean registration failure | Warning logged; diagnostics accessible only via API; agent continues |
-| `installLocally()` self-attach failure | `IllegalStateException` propagated to `ChaosTestKit.install()` caller |
+| Failure                                      | Behavior                                                                                                          |
+|----------------------------------------------|-------------------------------------------------------------------------------------------------------------------|
+| Config file not found / parse error          | `ConfigLoadException` thrown; agent startup fails; JVM may not start (depends on JVM's `-javaagent` error policy) |
+| ByteBuddy transformation failure for a class | Warning logged; specific class uninstrumented; agent continues                                                    |
+| Bootstrap bridge injection failure           | `IllegalStateException`; agent startup fails                                                                      |
+| MBean registration failure                   | Warning logged; diagnostics accessible only via API; agent continues                                              |
+| `installLocally()` self-attach failure       | `IllegalStateException` propagated to `ChaosTestKit.install()` caller                                             |
 
 ---
 

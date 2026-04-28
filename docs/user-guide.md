@@ -514,14 +514,14 @@ kubectl exec -n chaos-lab <chaos-runner-pod> -- \
 
 Sources are evaluated in priority order; first match wins:
 
-| Priority | Source | How to provide |
-|----------|--------|----------------|
-| 1 | Agent arg `configJson` | `-javaagent:...=configJson={"name":"..."}` |
-| 2 | Env `MACSTAB_CHAOS_CONFIG_JSON` | `export MACSTAB_CHAOS_CONFIG_JSON='...'` |
-| 3 | Agent arg `configBase64` | `-javaagent:...=configBase64=<b64>` |
-| 4 | Env `MACSTAB_CHAOS_CONFIG_BASE64` | `export MACSTAB_CHAOS_CONFIG_BASE64=<b64>` |
-| 5 | Agent arg `configFile` | `-javaagent:...=configFile=/etc/chaos/plan.json` |
-| 6 | Env `MACSTAB_CHAOS_CONFIG_FILE` | `export MACSTAB_CHAOS_CONFIG_FILE=/etc/chaos/plan.json` |
+| Priority | Source                            | How to provide                                          |
+|----------|-----------------------------------|---------------------------------------------------------|
+| 1        | Agent arg `configJson`            | `-javaagent:...=configJson={"name":"..."}`              |
+| 2        | Env `MACSTAB_CHAOS_CONFIG_JSON`   | `export MACSTAB_CHAOS_CONFIG_JSON='...'`                |
+| 3        | Agent arg `configBase64`          | `-javaagent:...=configBase64=<b64>`                     |
+| 4        | Env `MACSTAB_CHAOS_CONFIG_BASE64` | `export MACSTAB_CHAOS_CONFIG_BASE64=<b64>`              |
+| 5        | Agent arg `configFile`            | `-javaagent:...=configFile=/etc/chaos/plan.json`        |
+| 6        | Env `MACSTAB_CHAOS_CONFIG_FILE`   | `export MACSTAB_CHAOS_CONFIG_FILE=/etc/chaos/plan.json` |
 
 If no source is present, the agent starts with zero active scenarios.
 
@@ -641,15 +641,15 @@ Events fire synchronously on the intercepting thread. Keep listeners fast; do no
 
 All seven event types:
 
-| Type | Fired when |
-|------|-----------|
-| `REGISTERED` | `activate()` is called; scenario is registered but not yet started |
-| `STARTED` | Scenario transitions to ACTIVE |
-| `APPLIED` | Effect fired on an intercepted call |
-| `SKIPPED` | Selector matched but policy suppressed the effect (probability, rate limit, warm-up) |
-| `FAILED` | Exception during effect execution — effect threw unexpectedly |
-| `RELEASED` | `GateEffect` gate opened via `handle.release()` |
-| `STOPPED` | `handle.stop()` or `close()` called |
+| Type         | Fired when                                                                           |
+|--------------|--------------------------------------------------------------------------------------|
+| `REGISTERED` | `activate()` is called; scenario is registered but not yet started                   |
+| `STARTED`    | Scenario transitions to ACTIVE                                                       |
+| `APPLIED`    | Effect fired on an intercepted call                                                  |
+| `SKIPPED`    | Selector matched but policy suppressed the effect (probability, rate limit, warm-up) |
+| `FAILED`     | Exception during effect execution — effect threw unexpectedly                        |
+| `RELEASED`   | `GateEffect` gate opened via `handle.release()`                                      |
+| `STOPPED`    | `handle.stop()` or `close()` called                                                  |
 
 ### 8.3 Debug Dump
 
@@ -767,12 +767,12 @@ ActivationPolicy.builder()
 
 Measured with JMH on JDK 21, x86-64 (see `docs/benchmarks.md` for the full methodology):
 
-| Scenario | Overhead | Production impact |
-|----------|----------|-----------------|
-| Agent installed, zero active scenarios | < 50 ns | Invisible; below noise floor of any I/O operation |
-| One scenario, selector doesn't match | < 100 ns | < 0.5% of a 20 µs loopback TCP call |
-| One scenario, selector matches, no effect fires | < 300 ns | < 3% of a 10 µs HikariCP pool acquire |
-| Ten scenarios, one match | < 1 µs | 10% of a 10 µs pool acquire — use only transiently |
+| Scenario                                        | Overhead | Production impact                                  |
+|-------------------------------------------------|----------|----------------------------------------------------|
+| Agent installed, zero active scenarios          | < 50 ns  | Invisible; below noise floor of any I/O operation  |
+| One scenario, selector doesn't match            | < 100 ns | < 0.5% of a 20 µs loopback TCP call                |
+| One scenario, selector matches, no effect fires | < 300 ns | < 3% of a 10 µs HikariCP pool acquire              |
+| Ten scenarios, one match                        | < 1 µs   | 10% of a 10 µs pool acquire — use only transiently |
 
 The agent is designed to be permanently installed in production. With zero active scenarios, every intercepted call site costs approximately 5–15 ns for the `BootstrapDispatcher.invoke()` fast path.
 
@@ -831,21 +831,21 @@ The CI build runs `spotlessCheck` and fails on any formatting violation.
 
 ### Module Structure
 
-| Module | Role |
-|--------|------|
-| `chaos-agent-api` | Public API types: `ChaosScenario`, `ChaosSelector`, `ChaosEffect`, `ActivationPolicy`, `ChaosControlPlane`, `ChaosSession`, `ChaosActivationHandle` |
-| `chaos-agent-core` | Scenario evaluation engine: `ChaosRuntime`, `ChaosDispatcher`, `ScenarioRegistry`, `ScenarioController` |
-| `chaos-agent-instrumentation-jdk` | ByteBuddy advice, bootstrap bridge, `BootstrapDispatcher`, `BridgeDelegate`, `ChaosBridge` |
-| `chaos-agent-bootstrap` | Agent entry point: `premain`, `agentmain`, JMX MBean, singleton `ChaosRuntime` |
-| `chaos-agent-startup-config` | JSON plan loading, `AgentArgsParser`, `ChaosPlanMapper` |
-| `chaos-agent-testkit` | JUnit 5 extension, `ChaosTestKit`, `TrackingChaosControlPlane` |
-| `chaos-agent-spring-boot3-test-starter` | Spring Boot 3 `@ChaosTest`, `ChaosAgentExtension` (BeforeAllCallback), `ChaosAgentInitializer` |
-| `chaos-agent-spring-boot4-test-starter` | Spring Boot 4 equivalent |
-| `chaos-agent-spring-boot3-starter` | Spring Boot 3 Actuator endpoint, auto-configuration |
-| `chaos-agent-spring-boot4-starter` | Spring Boot 4 equivalent |
-| `chaos-agent-quarkus-extension` | Quarkus CDI integration |
-| `chaos-agent-micronaut-integration` | Micronaut DI integration |
-| `chaos-agent-benchmarks` | JMH benchmark suite |
+| Module                                  | Role                                                                                                                                                |
+|-----------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------|
+| `chaos-agent-api`                       | Public API types: `ChaosScenario`, `ChaosSelector`, `ChaosEffect`, `ActivationPolicy`, `ChaosControlPlane`, `ChaosSession`, `ChaosActivationHandle` |
+| `chaos-agent-core`                      | Scenario evaluation engine: `ChaosRuntime`, `ChaosDispatcher`, `ScenarioRegistry`, `ScenarioController`                                             |
+| `chaos-agent-instrumentation-jdk`       | ByteBuddy advice, bootstrap bridge, `BootstrapDispatcher`, `BridgeDelegate`, `ChaosBridge`                                                          |
+| `chaos-agent-bootstrap`                 | Agent entry point: `premain`, `agentmain`, JMX MBean, singleton `ChaosRuntime`                                                                      |
+| `chaos-agent-startup-config`            | JSON plan loading, `AgentArgsParser`, `ChaosPlanMapper`                                                                                             |
+| `chaos-agent-testkit`                   | JUnit 5 extension, `ChaosTestKit`, `TrackingChaosControlPlane`                                                                                      |
+| `chaos-agent-spring-boot3-test-starter` | Spring Boot 3 `@ChaosTest`, `ChaosAgentExtension` (BeforeAllCallback), `ChaosAgentInitializer`                                                      |
+| `chaos-agent-spring-boot4-test-starter` | Spring Boot 4 equivalent                                                                                                                            |
+| `chaos-agent-spring-boot3-starter`      | Spring Boot 3 Actuator endpoint, auto-configuration                                                                                                 |
+| `chaos-agent-spring-boot4-starter`      | Spring Boot 4 equivalent                                                                                                                            |
+| `chaos-agent-quarkus-extension`         | Quarkus CDI integration                                                                                                                             |
+| `chaos-agent-micronaut-integration`     | Micronaut DI integration                                                                                                                            |
+| `chaos-agent-benchmarks`                | JMH benchmark suite                                                                                                                                 |
 
 ### Writing a New Interception Point
 

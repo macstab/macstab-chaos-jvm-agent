@@ -119,24 +119,24 @@ The agent is attached in one of two modes:
 
 # 3. Key Concepts and Terminology
 
-| Term | Definition |
-|------|-----------|
-| **Scenario** | A named combination of selector, effect, and activation policy. The atomic unit of chaos. |
-| **Selector** | A matching rule specifying which JVM operations trigger the scenario. Evaluated against an `InvocationContext`. |
-| **Effect** | What happens when a scenario fires: delay, reject, suppress, gate, exception injection, return-value corruption, clock skew, or background stressor. |
-| **Activation policy** | A set of guards (probability, rate limit, warm-up count, time window, max applications) that filter matches before applying effects. All guards compose as AND. |
-| **Plan** | A named list of scenarios; the unit of configuration at startup. |
-| **Session** | A thread-local isolation scope. Chaos registered under a session is only applied to threads explicitly bound to that session. |
-| **JVM scope** | Chaos that applies to all threads regardless of session binding. |
-| **ScenarioController** | The per-scenario runtime object that owns lifecycle state, counters, and gate. |
-| **ScenarioRegistry** | The `ConcurrentHashMap`-backed store of all active controllers. |
-| **InvocationContext** | A value object capturing the operation type, class names, target name, and session ID at each instrumentation point. Built by `ChaosRuntime` dispatch methods. |
-| **RuntimeDecision** | The merged output of all matching contributions: total delay, optional gate action, optional terminal action. |
-| **BootstrapDispatcher** | Bootstrap-classloader-resident static dispatcher; the crossing point between instrumented JDK code and the agent. |
-| **Handle** | `ChaosActivationHandle` — an `AutoCloseable` returned by `activate()`; close it to stop the scenario. |
-| **Stressor** | A `ManagedStressor` that runs as a background thread or thread group for the duration of a stressor-effect scenario. |
-| **Phase 1** | Instrumentation of thread pool, scheduler, queue, classloader, and ForkJoin surfaces. Installed in both premain and agentmain. |
-| **Phase 2** | Instrumentation of clock, GC, exit, NIO, sockets, serialization, reflection, LockSupport, AQS, JMX, JNDI, native library load, and higher-level Java time APIs (`Instant.now`, `LocalDateTime.now`, `ZonedDateTime.now`, `new Date()`). Premain only. |
+| Term                    | Definition                                                                                                                                                                                                                                            |
+|-------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Scenario**            | A named combination of selector, effect, and activation policy. The atomic unit of chaos.                                                                                                                                                             |
+| **Selector**            | A matching rule specifying which JVM operations trigger the scenario. Evaluated against an `InvocationContext`.                                                                                                                                       |
+| **Effect**              | What happens when a scenario fires: delay, reject, suppress, gate, exception injection, return-value corruption, clock skew, or background stressor.                                                                                                  |
+| **Activation policy**   | A set of guards (probability, rate limit, warm-up count, time window, max applications) that filter matches before applying effects. All guards compose as AND.                                                                                       |
+| **Plan**                | A named list of scenarios; the unit of configuration at startup.                                                                                                                                                                                      |
+| **Session**             | A thread-local isolation scope. Chaos registered under a session is only applied to threads explicitly bound to that session.                                                                                                                         |
+| **JVM scope**           | Chaos that applies to all threads regardless of session binding.                                                                                                                                                                                      |
+| **ScenarioController**  | The per-scenario runtime object that owns lifecycle state, counters, and gate.                                                                                                                                                                        |
+| **ScenarioRegistry**    | The `ConcurrentHashMap`-backed store of all active controllers.                                                                                                                                                                                       |
+| **InvocationContext**   | A value object capturing the operation type, class names, target name, and session ID at each instrumentation point. Built by `ChaosRuntime` dispatch methods.                                                                                        |
+| **RuntimeDecision**     | The merged output of all matching contributions: total delay, optional gate action, optional terminal action.                                                                                                                                         |
+| **BootstrapDispatcher** | Bootstrap-classloader-resident static dispatcher; the crossing point between instrumented JDK code and the agent.                                                                                                                                     |
+| **Handle**              | `ChaosActivationHandle` — an `AutoCloseable` returned by `activate()`; close it to stop the scenario.                                                                                                                                                 |
+| **Stressor**            | A `ManagedStressor` that runs as a background thread or thread group for the duration of a stressor-effect scenario.                                                                                                                                  |
+| **Phase 1**             | Instrumentation of thread pool, scheduler, queue, classloader, and ForkJoin surfaces. Installed in both premain and agentmain.                                                                                                                        |
+| **Phase 2**             | Instrumentation of clock, GC, exit, NIO, sockets, serialization, reflection, LockSupport, AQS, JMX, JNDI, native library load, and higher-level Java time APIs (`Instant.now`, `LocalDateTime.now`, `ZonedDateTime.now`, `new Date()`). Premain only. |
 
 ---
 
@@ -478,22 +478,22 @@ node "JVM Process" {
 
 Stressors implement `ManagedStressor extends AutoCloseable`. Each starts one or more background threads or performs background JVM operations for the duration of the scenario.
 
-| Stressor | Mechanism | Close behavior |
-|----------|-----------|----------------|
-| `HeapPressureStressor` | Retains `byte[]` allocations in a list | Clears list, GC hint |
-| `KeepAliveStressor` | Starts N non-daemon threads in a wait loop | Interrupts all threads |
-| `MetaspacePressureStressor` | Defines synthetic classes via `ClassWriter` + `ClassLoader.defineClass` | Drops classloader; GC eventually reclaims metaspace |
-| `DirectBufferPressureStressor` | Allocates `ByteBuffer.allocateDirect` slabs | Sets references to null; `Cleaner` reclaims off-heap on GC |
-| `GcPressureStressor` | Continuously allocates short-lived `byte[]` in a background thread | Interrupts thread |
-| `FinalizerBacklogStressor` | Creates `Object` subclasses with `finalize()` methods | Interrupts producer thread |
-| `DeadlockStressor` | Two threads each acquire lock A then B vs B then A | Cannot interrupt (threads are deadlocked); JVM process must terminate to recover |
-| `ThreadLeakStressor` | Starts N threads that park indefinitely | Cannot recover (threads are parked); requires JVM restart |
-| `ThreadLocalLeakStressor` | Sets N `ThreadLocal` entries on a pooled thread that is never cleaned up | Interrupts carrier thread |
-| `MonitorContentionStressor` | N background threads repeatedly `synchronized(sharedLock)` | Interrupts all contenders |
-| `CodeCachePressureStressor` | Generates ByteBuddy classes via `ClassWriter` at high rate | Interrupts generator thread |
-| `SafepointStormStressor` | Calls `System.gc()` + `Instrumentation.retransformClasses()` on a timer | Interrupts timer thread |
-| `StringInternPressureStressor` | Interns unique strings in a background loop | Interrupts intern thread (interned strings are GC roots; memory is not recovered unless the pool is explicitly cleared) |
-| `ReferenceQueueFloodStressor` | Enqueues `PhantomReference` objects targeting the JVM's reference queue | Interrupts flood thread |
+| Stressor                       | Mechanism                                                                | Close behavior                                                                                                          |
+|--------------------------------|--------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------|
+| `HeapPressureStressor`         | Retains `byte[]` allocations in a list                                   | Clears list, GC hint                                                                                                    |
+| `KeepAliveStressor`            | Starts N non-daemon threads in a wait loop                               | Interrupts all threads                                                                                                  |
+| `MetaspacePressureStressor`    | Defines synthetic classes via `ClassWriter` + `ClassLoader.defineClass`  | Drops classloader; GC eventually reclaims metaspace                                                                     |
+| `DirectBufferPressureStressor` | Allocates `ByteBuffer.allocateDirect` slabs                              | Sets references to null; `Cleaner` reclaims off-heap on GC                                                              |
+| `GcPressureStressor`           | Continuously allocates short-lived `byte[]` in a background thread       | Interrupts thread                                                                                                       |
+| `FinalizerBacklogStressor`     | Creates `Object` subclasses with `finalize()` methods                    | Interrupts producer thread                                                                                              |
+| `DeadlockStressor`             | Two threads each acquire lock A then B vs B then A                       | Cannot interrupt (threads are deadlocked); JVM process must terminate to recover                                        |
+| `ThreadLeakStressor`           | Starts N threads that park indefinitely                                  | Cannot recover (threads are parked); requires JVM restart                                                               |
+| `ThreadLocalLeakStressor`      | Sets N `ThreadLocal` entries on a pooled thread that is never cleaned up | Interrupts carrier thread                                                                                               |
+| `MonitorContentionStressor`    | N background threads repeatedly `synchronized(sharedLock)`               | Interrupts all contenders                                                                                               |
+| `CodeCachePressureStressor`    | Generates ByteBuddy classes via `ClassWriter` at high rate               | Interrupts generator thread                                                                                             |
+| `SafepointStormStressor`       | Calls `System.gc()` + `Instrumentation.retransformClasses()` on a timer  | Interrupts timer thread                                                                                                 |
+| `StringInternPressureStressor` | Interns unique strings in a background loop                              | Interrupts intern thread (interned strings are GC roots; memory is not recovered unless the pool is explicitly cleared) |
+| `ReferenceQueueFloodStressor`  | Enqueues `PhantomReference` objects targeting the JVM's reference queue  | Interrupts flood thread                                                                                                 |
 
 **Critical operational note**: `DeadlockStressor` and `ThreadLeakStressor` are **non-recoverable within the JVM process**. `stop()`/`close()` cannot terminate deadlocked or permanently-parked threads. These stressors are intended only for short-lived test processes or scenarios where the test verifies deadlock-detection behavior.
 
@@ -548,27 +548,27 @@ Delay is additive: if three matching scenarios each contribute 100 ms, the total
 
 The same logical effect (e.g., `SuppressEffect`) produces different terminal actions depending on the operation type:
 
-| Effect | Operation Type | Terminal behavior |
-|--------|---------------|-------------------|
-| Suppress | THREAD_START, VIRTUAL_THREAD_START | THROW `RejectedExecutionException` |
-| Suppress | SYSTEM_EXIT_REQUEST | THROW `SecurityException` |
-| Suppress | QUEUE_OFFER, ASYNC_COMPLETE | RETURN `false` |
-| Suppress | RESOURCE_LOAD | RETURN `null` |
-| Suppress | (default: executor decoration, worker run, etc.) | SUPPRESS (no-op passthrough) |
-| Reject | QUEUE_OFFER, ASYNC_COMPLETE | RETURN `false` |
-| Reject | RESOURCE_LOAD | RETURN `null` |
-| Reject | (default) | THROW operation-specific exception via `FailureFactory` |
+| Effect   | Operation Type                                   | Terminal behavior                                       |
+|----------|--------------------------------------------------|---------------------------------------------------------|
+| Suppress | THREAD_START, VIRTUAL_THREAD_START               | THROW `RejectedExecutionException`                      |
+| Suppress | SYSTEM_EXIT_REQUEST                              | THROW `SecurityException`                               |
+| Suppress | QUEUE_OFFER, ASYNC_COMPLETE                      | RETURN `false`                                          |
+| Suppress | RESOURCE_LOAD                                    | RETURN `null`                                           |
+| Suppress | (default: executor decoration, worker run, etc.) | SUPPRESS (no-op passthrough)                            |
+| Reject   | QUEUE_OFFER, ASYNC_COMPLETE                      | RETURN `false`                                          |
+| Reject   | RESOURCE_LOAD                                    | RETURN `null`                                           |
+| Reject   | (default)                                        | THROW operation-specific exception via `FailureFactory` |
 
 This per-operation specialization is necessary because operations have different contracts for indicating failure: `BlockingQueue.offer()` returns `false` for rejection, while `Thread.start()` throws. Mapping a uniform `SuppressEffect` to operation-specific behavior is centralized in `ChaosRuntime.suppressTerminal()` and `rejectTerminal()`.
 
 ## Scenario State Transitions
 
-| Transition | Trigger | Thread that executes it |
-|-----------|---------|------------------------|
-| REGISTERED → ACTIVE | `ScenarioController.start()` | Thread calling `handle.start()` or `activate()` with AUTOMATIC start mode |
-| ACTIVE → INACTIVE | `activeFor` exceeded inside `evaluate()` | Application thread triggering the interception |
-| ACTIVE → INACTIVE | `maxApplications` CAS fails inside `evaluate()` | Application thread triggering the interception |
-| ACTIVE/INACTIVE → STOPPED | `stop()` or `destroy()` | Thread calling `handle.close()` or `controlPlane.close()` |
+| Transition                | Trigger                                         | Thread that executes it                                                   |
+|---------------------------|-------------------------------------------------|---------------------------------------------------------------------------|
+| REGISTERED → ACTIVE       | `ScenarioController.start()`                    | Thread calling `handle.start()` or `activate()` with AUTOMATIC start mode |
+| ACTIVE → INACTIVE         | `activeFor` exceeded inside `evaluate()`        | Application thread triggering the interception                            |
+| ACTIVE → INACTIVE         | `maxApplications` CAS fails inside `evaluate()` | Application thread triggering the interception                            |
+| ACTIVE/INACTIVE → STOPPED | `stop()` or `destroy()`                         | Thread calling `handle.close()` or `controlPlane.close()`                 |
 
 **There is no background state-transition sweeper.** All ACTIVE→INACTIVE transitions happen lazily on the first application thread that calls `evaluate()` after the condition is met.
 
@@ -582,21 +582,21 @@ The agent is strictly reactive — it does not introduce background threads unle
 
 ## State Ownership
 
-| State | Owner | Concurrency primitive |
-|-------|-------|----------------------|
-| `ScenarioController.started` | Per-controller | `AtomicBoolean` |
-| `ScenarioController.matchedCount` | Per-controller | `AtomicLong` |
-| `ScenarioController.appliedCount` | Per-controller | `AtomicLong` + CAS loop for maxApplications |
-| `ScenarioController.state` / `reason` | Per-controller | `volatile` field |
-| `ScenarioController.rateWindowStartMillis`, `rateWindowPermits` | Per-controller | `synchronized(this)` |
-| `ScenarioController.stressor` / `clockSkewState` | Per-controller | `volatile` field |
-| `ScenarioRegistry.controllers` | Registry | `ConcurrentHashMap` (lock-free read) |
-| `ScenarioRegistry.failures` | Registry | `ConcurrentLinkedQueue` |
-| `ChaosRuntime.instrumentation` | Runtime | `volatile Optional` |
-| `ChaosRuntime.shutdownHooks` | Runtime | `ConcurrentHashMap` |
-| `ScopeContext.currentSessionId()` | Per-thread | `ThreadLocal` |
-| `BootstrapDispatcher.handles` / `delegate` | Static, JVM-wide | `volatile` (two-field safe publication protocol) |
-| `BootstrapDispatcher.DEPTH` | Per-thread | `ThreadLocal<int[]>` |
+| State                                                           | Owner            | Concurrency primitive                            |
+|-----------------------------------------------------------------|------------------|--------------------------------------------------|
+| `ScenarioController.started`                                    | Per-controller   | `AtomicBoolean`                                  |
+| `ScenarioController.matchedCount`                               | Per-controller   | `AtomicLong`                                     |
+| `ScenarioController.appliedCount`                               | Per-controller   | `AtomicLong` + CAS loop for maxApplications      |
+| `ScenarioController.state` / `reason`                           | Per-controller   | `volatile` field                                 |
+| `ScenarioController.rateWindowStartMillis`, `rateWindowPermits` | Per-controller   | `synchronized(this)`                             |
+| `ScenarioController.stressor` / `clockSkewState`                | Per-controller   | `volatile` field                                 |
+| `ScenarioRegistry.controllers`                                  | Registry         | `ConcurrentHashMap` (lock-free read)             |
+| `ScenarioRegistry.failures`                                     | Registry         | `ConcurrentLinkedQueue`                          |
+| `ChaosRuntime.instrumentation`                                  | Runtime          | `volatile Optional`                              |
+| `ChaosRuntime.shutdownHooks`                                    | Runtime          | `ConcurrentHashMap`                              |
+| `ScopeContext.currentSessionId()`                               | Per-thread       | `ThreadLocal`                                    |
+| `BootstrapDispatcher.handles` / `delegate`                      | Static, JVM-wide | `volatile` (two-field safe publication protocol) |
+| `BootstrapDispatcher.DEPTH`                                     | Per-thread       | `ThreadLocal<int[]>`                             |
 
 ## Visibility and Publication Guarantees
 
@@ -622,12 +622,12 @@ The probability sampling creates a new `SplittableRandom` per call to avoid conc
 
 Activation errors are caught in `ChaosRuntime.registerScenario()` and classified:
 
-| Exception type | Category | Handling |
-|---------------|----------|---------|
-| `ChaosUnsupportedFeatureException` | `UNSUPPORTED_RUNTIME` | Recorded in registry, rethrown |
-| `IllegalStateException` with "already active" | `ACTIVATION_CONFLICT` | Recorded in registry, rethrown |
-| `IllegalStateException` (other) | `INVALID_CONFIGURATION` | Recorded in registry, rethrown |
-| Any other `RuntimeException` | `INVALID_CONFIGURATION` | Recorded in registry, rethrown |
+| Exception type                                | Category                | Handling                       |
+|-----------------------------------------------|-------------------------|--------------------------------|
+| `ChaosUnsupportedFeatureException`            | `UNSUPPORTED_RUNTIME`   | Recorded in registry, rethrown |
+| `IllegalStateException` with "already active" | `ACTIVATION_CONFLICT`   | Recorded in registry, rethrown |
+| `IllegalStateException` (other)               | `INVALID_CONFIGURATION` | Recorded in registry, rethrown |
+| Any other `RuntimeException`                  | `INVALID_CONFIGURATION` | Recorded in registry, rethrown |
 
 All activation failures are surfaced in `ChaosDiagnostics.snapshot().failures()`.
 
@@ -706,15 +706,15 @@ The agent does not transmit or log sensitive data. `InvocationContext` fields ar
 
 Per intercepted JDK call that has at least one active matching scenario:
 
-| Operation | Cost estimate |
-|-----------|--------------|
-| `ScopeContext.currentSessionId()` | 1 `ThreadLocal.get()` — nanoseconds (with `DEPTH` identity check overhead on ThreadLocal instrumentation) |
-| `InvocationContext` allocation | 1 record allocation, ~60–80 bytes on-heap |
-| `ScenarioRegistry.match()` | N `ScenarioController.evaluate()` calls; stream allocation; sort if N > 1 |
-| Per-`evaluate()`: started + sessionId + SelectorMatcher | Lock-free reads; sub-microsecond for typical selectors |
-| Per-`evaluate()`: rate limit | `synchronized(this)` — contended only if N threads are hitting the same scenario at the same time; typically nanosecond-range |
-| Per-`evaluate()`: probability | `new SplittableRandom(...).nextDouble()` — allocation + compute; ~50 ns |
-| `sleep(delayMillis)` | Actual blocking delay per scenario (intentional) |
+| Operation                                               | Cost estimate                                                                                                                 |
+|---------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------|
+| `ScopeContext.currentSessionId()`                       | 1 `ThreadLocal.get()` — nanoseconds (with `DEPTH` identity check overhead on ThreadLocal instrumentation)                     |
+| `InvocationContext` allocation                          | 1 record allocation, ~60–80 bytes on-heap                                                                                     |
+| `ScenarioRegistry.match()`                              | N `ScenarioController.evaluate()` calls; stream allocation; sort if N > 1                                                     |
+| Per-`evaluate()`: started + sessionId + SelectorMatcher | Lock-free reads; sub-microsecond for typical selectors                                                                        |
+| Per-`evaluate()`: rate limit                            | `synchronized(this)` — contended only if N threads are hitting the same scenario at the same time; typically nanosecond-range |
+| Per-`evaluate()`: probability                           | `new SplittableRandom(...).nextDouble()` — allocation + compute; ~50 ns                                                       |
+| `sleep(delayMillis)`                                    | Actual blocking delay per scenario (intentional)                                                                              |
 
 ## Zero-Scenario Fast Path
 
@@ -821,21 +821,21 @@ Comma-separated `key=value` pairs. Values containing commas must be escaped with
 
 ## Startup Arguments
 
-| Key | Default | Description |
-|-----|---------|-------------|
-| `configFile` | none | Absolute or relative path to a JSON plan file. Symlinks rejected. Max 1 MiB. |
-| `configJson` | none | Inline JSON string of the plan. |
-| `configBase64` | none | Base64-encoded JSON plan. Standard Base64 encoding (not URL-safe). |
-| `debugDumpOnStart` | `false` | Print diagnostic dump to stdout after plan activation. |
+| Key                | Default | Description                                                                  |
+|--------------------|---------|------------------------------------------------------------------------------|
+| `configFile`       | none    | Absolute or relative path to a JSON plan file. Symlinks rejected. Max 1 MiB. |
+| `configJson`       | none    | Inline JSON string of the plan.                                              |
+| `configBase64`     | none    | Base64-encoded JSON plan. Standard Base64 encoding (not URL-safe).           |
+| `debugDumpOnStart` | `false` | Print diagnostic dump to stdout after plan activation.                       |
 
 ## Environment Variables
 
-| Variable | Equivalent arg | Description |
-|----------|---------------|-------------|
-| `MACSTAB_CHAOS_CONFIG_FILE` | `configFile` | Path to JSON plan file. Agent arg takes precedence. |
-| `MACSTAB_CHAOS_CONFIG_JSON` | `configJson` | Inline JSON. Agent arg takes precedence. |
-| `MACSTAB_CHAOS_CONFIG_BASE64` | `configBase64` | Base64 JSON. Agent arg takes precedence. |
-| `MACSTAB_CHAOS_DEBUG_DUMP_ON_START` | `debugDumpOnStart` | `"true"` to enable. Agent arg takes precedence. |
+| Variable                            | Equivalent arg     | Description                                         |
+|-------------------------------------|--------------------|-----------------------------------------------------|
+| `MACSTAB_CHAOS_CONFIG_FILE`         | `configFile`       | Path to JSON plan file. Agent arg takes precedence. |
+| `MACSTAB_CHAOS_CONFIG_JSON`         | `configJson`       | Inline JSON. Agent arg takes precedence.            |
+| `MACSTAB_CHAOS_CONFIG_BASE64`       | `configBase64`     | Base64 JSON. Agent arg takes precedence.            |
+| `MACSTAB_CHAOS_DEBUG_DUMP_ON_START` | `debugDumpOnStart` | `"true"` to enable. Agent arg takes precedence.     |
 
 ## Priority Order
 

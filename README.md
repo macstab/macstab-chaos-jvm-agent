@@ -9,7 +9,7 @@
 
 <div align="center">
 
-# chaos-testing-java-agent
+# macstab-chaos-jvm-agent
 
 **Pipeline-grade chaos engineering for the JVM. The failures that page your on-call become commits that fail in PR review.**
 
@@ -31,10 +31,10 @@ Principal+ Engineer · [Macstab GmbH](https://macstab.com) · Hamburg, Germany
 
 ### Part of the Macstab Chaos Engineering Stack
 
-| **JVM bytecode** *(this repo)* | [**Container orchestration**](https://github.com/macstab/chaos-testing) | [**LD_PRELOAD libc**](https://github.com/macstab/macstab-chaos-testing-libraries) |
-|:---:|:---:|:---:|
-| In-process chaos for JVM applications | Annotation-driven Testcontainers chaos for any service | Pure C99 syscall-level chaos for any Linux container |
-| 62 JDK call sites · Spring 3/4 · Micronaut · Quarkus | Network · disk · DNS · CPU · memory · pre-built scenarios | glibc + musl × amd64 + arm64 · 100 % line coverage |
+|            **JVM bytecode** *(this repo)*            | [**Container orchestration**](https://github.com/macstab/chaos-testing) | [**LD_PRELOAD libc**](https://github.com/macstab/macstab-chaos-testing-libraries) |
+|:----------------------------------------------------:|:-----------------------------------------------------------------------:|:---------------------------------------------------------------------------------:|
+|        In-process chaos for JVM applications         |         Annotation-driven Testcontainers chaos for any service          |               Pure C99 syscall-level chaos for any Linux container                |
+| 62 JDK call sites · Spring 3/4 · Micronaut · Quarkus |        Network · disk · DNS · CPU · memory · pre-built scenarios        |                glibc + musl × amd64 + arm64 · 100 % line coverage                 |
 
 **One mental model — three layers.** Same selector × effect × policy DSL spans the JVM, the container, and the libc layer. Each layer ships and runs independently; combine them when you need full distributed-system chaos coverage.
 
@@ -88,13 +88,13 @@ Every one of those becomes a `@ChaosTest` method that runs on every PR. No game 
 
 ## Part of a Three-Layer Chaos Engineering Stack
 
-`chaos-testing-java-agent` is the **JVM bytecode layer** of a vertically-integrated chaos engineering toolkit. This repo is self-contained — everything in this README works standalone — but it composes with two sibling layers when broader coverage is needed.
+`macstab-chaos-jvm-agent` is the **JVM bytecode layer** of a vertically-integrated chaos engineering toolkit. This repo is self-contained — everything in this README works standalone — but it composes with two sibling layers when broader coverage is needed.
 
-| Layer | Repo | What it covers |
-|---|---|---|
-| **JVM bytecode** (this repo) | [`macstab/chaos-testing-java-agent`](https://github.com/macstab/chaos-testing-java-agent) | 62 JDK call sites instrumented in-process. Spring Boot 3/4 + Micronaut + Quarkus integration. JUnit 5 `@ChaosTest`. Selector × effect × policy DSL. Live config reload. |
-| **Container orchestration** | [`macstab/chaos-testing`](https://github.com/macstab/chaos-testing) | Annotation-driven chaos on top of Testcontainers. CPU throttling, memory pressure, disk I/O, network partitions, DNS failures, pre-built Redis Sentinel + replication-lag scenarios, Toxiproxy adapter, Redis-aware fault injection. |
-| **LD_PRELOAD libc** | [`macstab/macstab-chaos-testing-libraries`](https://github.com/macstab/macstab-chaos-testing-libraries) | Pure C99 LD_PRELOAD shared objects: file I/O (latency / `errno` / torn / corrupt), network, DNS, clock, process, memory. **glibc + musl × amd64 + arm64**, 100 % line coverage on shipped sources, Docker runtime validation as a quality gate. Language-agnostic — works for any process inside any container, not just JVM. |
+| Layer                        | Repo                                                                                                    | What it covers                                                                                                                                                                                                                                                                                                                |
+|------------------------------|---------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **JVM bytecode** (this repo) | [`macstab/macstab-chaos-jvm-agent`](https://github.com/macstab/macstab-chaos-jvm-agent)                 | 62 JDK call sites instrumented in-process. Spring Boot 3/4 + Micronaut + Quarkus integration. JUnit 5 `@ChaosTest`. Selector × effect × policy DSL. Live config reload.                                                                                                                                                       |
+| **Container orchestration**  | [`macstab/chaos-testing`](https://github.com/macstab/chaos-testing)                                     | Annotation-driven chaos on top of Testcontainers. CPU throttling, memory pressure, disk I/O, network partitions, DNS failures, pre-built Redis Sentinel + replication-lag scenarios, Toxiproxy adapter, Redis-aware fault injection.                                                                                          |
+| **LD_PRELOAD libc**          | [`macstab/macstab-chaos-testing-libraries`](https://github.com/macstab/macstab-chaos-testing-libraries) | Pure C99 LD_PRELOAD shared objects: file I/O (latency / `errno` / torn / corrupt), network, DNS, clock, process, memory. **glibc + musl × amd64 + arm64**, 100 % line coverage on shipped sources, Docker runtime validation as a quality gate. Language-agnostic — works for any process inside any container, not just JVM. |
 
 **Start here** if you're on the JVM. This is the entry point and the richest layer.
 
@@ -107,7 +107,7 @@ Three repos, one mental model: **the same selector × effect × policy DSL spans
 ---
 
 <!-- TOC -->
-* [chaos-testing-java-agent](#chaos-testing-java-agent)
+* [macstab-chaos-jvm-agent](#macstab-chaos-jvm-agent)
   * [The Short Version](#the-short-version)
     * [What questions does it answer?](#what-questions-does-it-answer)
   * [Part of a Three-Layer Chaos Engineering Stack](#part-of-a-three-layer-chaos-engineering-stack)
@@ -389,14 +389,14 @@ java -javaagent:chaos-agent-bootstrap-0.1.0-SNAPSHOT.jar=configFile=/etc/chaos/p
 
 ## Core Concepts
 
-| Concept | What it is |
-|---------|-----------|
-| **Scenario** | One selector + one effect + one activation policy |
-| **Selector** | Matching rule: which JVM operation(s) trigger this scenario |
-| **Effect** | What happens: delay, reject, suppress, gate, exception, corrupt, stress, skew |
-| **Activation policy** | Gating: probability, rate limit, warm-up, time window, max applications |
-| **Session** | Thread-local isolation scope — chaos targets only session-bound threads |
-| **Handle** | `AutoCloseable` returned by `activate()`; close to stop the scenario |
+| Concept               | What it is                                                                    |
+|-----------------------|-------------------------------------------------------------------------------|
+| **Scenario**          | One selector + one effect + one activation policy                             |
+| **Selector**          | Matching rule: which JVM operation(s) trigger this scenario                   |
+| **Effect**            | What happens: delay, reject, suppress, gate, exception, corrupt, stress, skew |
+| **Activation policy** | Gating: probability, rate limit, warm-up, time window, max applications       |
+| **Session**           | Thread-local isolation scope — chaos targets only session-bound threads       |
+| **Handle**            | `AutoCloseable` returned by `activate()`; close to stop the scenario          |
 
 ---
 
@@ -404,27 +404,27 @@ java -javaagent:chaos-agent-bootstrap-0.1.0-SNAPSHOT.jar=configFile=/etc/chaos/p
 
 Every selector factory takes a `Set<OperationType>`. Pass an empty set to accept every operation the selector understands. For pattern-based filters, pass a `NamePattern` (e.g. `NamePattern.prefix(...)`, `NamePattern.regex(...)`, `NamePattern.any()`).
 
-| Factory | Intercepts |
-|---------|------------|
-| `ChaosSelector.executor(Set<OperationType>)` | `ThreadPoolExecutor.execute()` / `submit()` / `invokeAll()` |
-| `ChaosSelector.scheduling(Set<OperationType>)` | `ScheduledExecutorService.schedule*()` |
-| `ChaosSelector.thread(Set<OperationType>, ThreadKind)` | `Thread.start()` — platform and virtual threads |
-| `ChaosSelector.queue(Set<OperationType>)` | `BlockingQueue.put()` / `take()` / `offer()` / `poll()` |
-| `ChaosSelector.async(Set<OperationType>)` | `CompletableFuture.complete()` / `completeExceptionally()` / `cancel()` |
-| `ChaosSelector.network(Set<OperationType>[, NamePattern remoteHostPattern])` | `Socket` connect / read / write, `ServerSocket.accept()` |
-| `ChaosSelector.nio(Set<OperationType>[, NamePattern channelClassPattern])` | `SocketChannel`, `ServerSocketChannel`, `Selector.select()` |
-| `ChaosSelector.method(Set<OperationType>, NamePattern classPattern, NamePattern methodPattern)` | Arbitrary method entry (`METHOD_ENTER`) and exit (`METHOD_EXIT`) |
-| `ChaosSelector.classLoading(Set<OperationType>, NamePattern loaderClassPattern, NamePattern classNamePattern)` | `ClassLoader.loadClass()` / `defineClass()` / `getResource()` |
-| `ChaosSelector.monitor(Set<OperationType>)` | `synchronized` monitor enter/exit |
-| `ChaosSelector.jvmRuntime(Set<OperationType>)` | `currentTimeMillis()`, `nanoTime()`, `gc()`, `exit()`, `halt()` |
-| `ChaosSelector.threadLocal(Set<OperationType>[, NamePattern valueClassPattern])` | `ThreadLocal.get()` / `ThreadLocal.set()` |
-| `ChaosSelector.shutdown(Set<OperationType>)` | `System.exit()` / `Runtime.halt()` / shutdown hook register/remove |
-| `ChaosSelector.httpClient(Set<OperationType>[, NamePattern urlPattern])` | `HttpClient.send()` / `sendAsync()` |
-| `ChaosSelector.jdbc()` / `ChaosSelector.jdbc(OperationType...)` | JDBC `Connection`, `Statement`, `PreparedStatement`, `ResultSet` |
-| `ChaosSelector.dns(Set<OperationType>[, NamePattern hostnamePattern])` | `InetAddress.getAllByName()` |
-| `ChaosSelector.ssl(Set<OperationType>)` | `SSLEngine.wrap()` / `unwrap()` handshake |
-| `ChaosSelector.fileIo(Set<OperationType>)` | `FileInputStream` / `FileOutputStream` / `RandomAccessFile` / `Files` |
-| `ChaosSelector.stress(StressTarget)` | Background stressor lifecycle binding |
+| Factory                                                                                                        | Intercepts                                                              |
+|----------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------|
+| `ChaosSelector.executor(Set<OperationType>)`                                                                   | `ThreadPoolExecutor.execute()` / `submit()` / `invokeAll()`             |
+| `ChaosSelector.scheduling(Set<OperationType>)`                                                                 | `ScheduledExecutorService.schedule*()`                                  |
+| `ChaosSelector.thread(Set<OperationType>, ThreadKind)`                                                         | `Thread.start()` — platform and virtual threads                         |
+| `ChaosSelector.queue(Set<OperationType>)`                                                                      | `BlockingQueue.put()` / `take()` / `offer()` / `poll()`                 |
+| `ChaosSelector.async(Set<OperationType>)`                                                                      | `CompletableFuture.complete()` / `completeExceptionally()` / `cancel()` |
+| `ChaosSelector.network(Set<OperationType>[, NamePattern remoteHostPattern])`                                   | `Socket` connect / read / write, `ServerSocket.accept()`                |
+| `ChaosSelector.nio(Set<OperationType>[, NamePattern channelClassPattern])`                                     | `SocketChannel`, `ServerSocketChannel`, `Selector.select()`             |
+| `ChaosSelector.method(Set<OperationType>, NamePattern classPattern, NamePattern methodPattern)`                | Arbitrary method entry (`METHOD_ENTER`) and exit (`METHOD_EXIT`)        |
+| `ChaosSelector.classLoading(Set<OperationType>, NamePattern loaderClassPattern, NamePattern classNamePattern)` | `ClassLoader.loadClass()` / `defineClass()` / `getResource()`           |
+| `ChaosSelector.monitor(Set<OperationType>)`                                                                    | `synchronized` monitor enter/exit                                       |
+| `ChaosSelector.jvmRuntime(Set<OperationType>)`                                                                 | `currentTimeMillis()`, `nanoTime()`, `gc()`, `exit()`, `halt()`         |
+| `ChaosSelector.threadLocal(Set<OperationType>[, NamePattern valueClassPattern])`                               | `ThreadLocal.get()` / `ThreadLocal.set()`                               |
+| `ChaosSelector.shutdown(Set<OperationType>)`                                                                   | `System.exit()` / `Runtime.halt()` / shutdown hook register/remove      |
+| `ChaosSelector.httpClient(Set<OperationType>[, NamePattern urlPattern])`                                       | `HttpClient.send()` / `sendAsync()`                                     |
+| `ChaosSelector.jdbc()` / `ChaosSelector.jdbc(OperationType...)`                                                | JDBC `Connection`, `Statement`, `PreparedStatement`, `ResultSet`        |
+| `ChaosSelector.dns(Set<OperationType>[, NamePattern hostnamePattern])`                                         | `InetAddress.getAllByName()`                                            |
+| `ChaosSelector.ssl(Set<OperationType>)`                                                                        | `SSLEngine.wrap()` / `unwrap()` handshake                               |
+| `ChaosSelector.fileIo(Set<OperationType>)`                                                                     | `FileInputStream` / `FileOutputStream` / `RandomAccessFile` / `Files`   |
+| `ChaosSelector.stress(StressTarget)`                                                                           | Background stressor lifecycle binding                                   |
 
 For full parameter semantics and edge-case behaviour of every selector, see [`docs/configuration-reference.md`](docs/configuration-reference.md).
 
@@ -438,53 +438,53 @@ The decision guide below maps **testing goals** to effects. Every effect in the 
 
 #### Latency and timing
 
-| I want to test… | Effect |
-|---|---|
-| What happens when a downstream is slow | `delay(Duration)` — fixed pause |
-| Behaviour under variable latency (realistic network jitter) | `delay(Duration min, Duration max)` — uniform-random pause |
-| A caller's timeout logic when the callee blocks indefinitely | `gate(Duration maxBlock)` — block until released or capped |
-| Clock-based logic (TTLs, retries, token expiry) under continuous drift | `skewClock(Duration, ClockSkewMode.DRIFT)` |
-| Behaviour when the clock stops advancing | `skewClock(Duration, ClockSkewMode.FREEZE)` |
-| Behaviour under a fixed clock offset (positive or negative) | `skewClock(Duration, ClockSkewMode.FIXED)` |
-| Code that handles `Selector.select()` spurious wakeups | `spuriousWakeup()` |
+| I want to test…                                                        | Effect                                                     |
+|------------------------------------------------------------------------|------------------------------------------------------------|
+| What happens when a downstream is slow                                 | `delay(Duration)` — fixed pause                            |
+| Behaviour under variable latency (realistic network jitter)            | `delay(Duration min, Duration max)` — uniform-random pause |
+| A caller's timeout logic when the callee blocks indefinitely           | `gate(Duration maxBlock)` — block until released or capped |
+| Clock-based logic (TTLs, retries, token expiry) under continuous drift | `skewClock(Duration, ClockSkewMode.DRIFT)`                 |
+| Behaviour when the clock stops advancing                               | `skewClock(Duration, ClockSkewMode.FREEZE)`                |
+| Behaviour under a fixed clock offset (positive or negative)            | `skewClock(Duration, ClockSkewMode.FIXED)`                 |
+| Code that handles `Selector.select()` spurious wakeups                 | `spuriousWakeup()`                                         |
 
 #### Errors and failure handling
 
-| I want to test… | Effect |
-|---|---|
-| A downstream returning "not available" | `reject(String message)` — throws a semantically correct exception for the intercepted operation type |
-| A call that silently fails (returns `null` / `false` / empty) | `suppress()` |
-| A `CompletableFuture` completing exceptionally mid-pipeline | `exceptionalCompletion(FailureKind, String)` |
-| A callee throwing a *specific* exception class | `injectException(String className, String message)` |
-| A return value that is technically valid but semantically wrong | `corruptReturnValue(ReturnValueStrategy.NULL / ZERO / EMPTY / BOUNDARY_MAX / BOUNDARY_MIN)` |
+| I want to test…                                                 | Effect                                                                                                |
+|-----------------------------------------------------------------|-------------------------------------------------------------------------------------------------------|
+| A downstream returning "not available"                          | `reject(String message)` — throws a semantically correct exception for the intercepted operation type |
+| A call that silently fails (returns `null` / `false` / empty)   | `suppress()`                                                                                          |
+| A `CompletableFuture` completing exceptionally mid-pipeline     | `exceptionalCompletion(FailureKind, String)`                                                          |
+| A callee throwing a *specific* exception class                  | `injectException(String className, String message)`                                                   |
+| A return value that is technically valid but semantically wrong | `corruptReturnValue(ReturnValueStrategy.NULL / ZERO / EMPTY / BOUNDARY_MAX / BOUNDARY_MIN)`           |
 
 #### Resource pressure (background stressors)
 
-| I want to test… | Effect |
-|---|---|
-| Behaviour under sustained heap pressure | `heapPressure(long bytes, int chunkSize)` |
-| GC behaviour under high allocation churn | `gcPressure(long bytesPerSecond, Duration)` |
-| Metaspace (class metadata) pressure from dynamic class loading | `metaspacePressure(int classCount, int fieldsPerClass)` |
-| Direct (off-heap) buffer pressure | `directBufferPressure(long totalBytes, int bufferSize)` |
-| JIT code cache filling up (inline-cache thrash, deopt) | `codeCachePressure(int classCount, int methodsPerClass)` |
-| String intern pool growth (permanent root retention) | `stringInternPressure(int count, int length)` |
-| Reference-queue flood (phantom-reference reclamation delay) | `referenceQueueFlood(int count, Duration interval)` |
-| Finalizer backlog stalling GC | `finalizerBacklog(int objectCount, Duration delay)` |
+| I want to test…                                                | Effect                                                   |
+|----------------------------------------------------------------|----------------------------------------------------------|
+| Behaviour under sustained heap pressure                        | `heapPressure(long bytes, int chunkSize)`                |
+| GC behaviour under high allocation churn                       | `gcPressure(long bytesPerSecond, Duration)`              |
+| Metaspace (class metadata) pressure from dynamic class loading | `metaspacePressure(int classCount, int fieldsPerClass)`  |
+| Direct (off-heap) buffer pressure                              | `directBufferPressure(long totalBytes, int bufferSize)`  |
+| JIT code cache filling up (inline-cache thrash, deopt)         | `codeCachePressure(int classCount, int methodsPerClass)` |
+| String intern pool growth (permanent root retention)           | `stringInternPressure(int count, int length)`            |
+| Reference-queue flood (phantom-reference reclamation delay)    | `referenceQueueFlood(int count, Duration interval)`      |
+| Finalizer backlog stalling GC                                  | `finalizerBacklog(int objectCount, Duration delay)`      |
 
 #### Threading and concurrency
 
-| I want to test… | Effect |
-|---|---|
-| A real JVM monitor deadlock between N participants | `deadlock(int participantCount)` — requires `ActivationPolicy.withDestructiveEffects()` |
-| Thread-leak behaviour (unbounded thread creation) | `threadLeak(int count, String prefix, boolean daemon)` — requires `ActivationPolicy.withDestructiveEffects()` |
-| `ThreadLocal` leaks on a pooled thread | `threadLocalLeak(int entries, int valueSize)` |
-| Monitor contention on a shared lock | `monitorContention(...)` |
-| A keep-alive thread preventing clean shutdown | `keepAlive(String name, boolean daemon, Duration heartbeat)` |
+| I want to test…                                    | Effect                                                                                                        |
+|----------------------------------------------------|---------------------------------------------------------------------------------------------------------------|
+| A real JVM monitor deadlock between N participants | `deadlock(int participantCount)` — requires `ActivationPolicy.withDestructiveEffects()`                       |
+| Thread-leak behaviour (unbounded thread creation)  | `threadLeak(int count, String prefix, boolean daemon)` — requires `ActivationPolicy.withDestructiveEffects()` |
+| `ThreadLocal` leaks on a pooled thread             | `threadLocalLeak(int entries, int valueSize)`                                                                 |
+| Monitor contention on a shared lock                | `monitorContention(...)`                                                                                      |
+| A keep-alive thread preventing clean shutdown      | `keepAlive(String name, boolean daemon, Duration heartbeat)`                                                  |
 
 #### JVM-wide pause pressure
 
-| I want to test… | Effect |
-|---|---|
+| I want to test…                                    | Effect                                                                                                  |
+|----------------------------------------------------|---------------------------------------------------------------------------------------------------------|
 | Application behaviour during stop-the-world pauses | `safepointStorm(Duration gcInterval)` — periodic `System.gc()` + `Instrumentation.retransformClasses()` |
 
 Two behavioural notes that the table cannot express:
@@ -494,37 +494,37 @@ Two behavioural notes that the table cannot express:
 
 ### Inline effects (execute on the calling thread)
 
-| Factory | Description |
-|---------|-------------|
-| `ChaosEffect.delay(Duration)` | Fixed pause before the operation proceeds |
-| `ChaosEffect.delay(Duration min, Duration max)` | Uniform random pause in `[min, max]` |
-| `ChaosEffect.gate(Duration maxBlock)` | Block until `handle.release()` is called (or `maxBlock` elapses) |
-| `ChaosEffect.reject(String message)` | Throw a semantically correct exception for the operation type |
-| `ChaosEffect.suppress()` | Silently discard; return `null` / `false` per operation contract |
-| `ChaosEffect.exceptionalCompletion(FailureKind, String message)` | Complete a `CompletableFuture` with a failure |
-| `ChaosEffect.injectException(String className, String message)` | Inject arbitrary exception at method entry via reflection |
-| `ChaosEffect.corruptReturnValue(ReturnValueStrategy)` | Corrupt return value: `NULL`, `ZERO`, `EMPTY`, `BOUNDARY_MAX`, `BOUNDARY_MIN` |
-| `ChaosEffect.skewClock(Duration, ClockSkewMode)` | Skew `currentTimeMillis()` / `nanoTime()`: `FIXED`, `DRIFT`, `FREEZE` |
-| `ChaosEffect.spuriousWakeup()` | Force `Selector.select()` to return 0 immediately |
+| Factory                                                          | Description                                                                   |
+|------------------------------------------------------------------|-------------------------------------------------------------------------------|
+| `ChaosEffect.delay(Duration)`                                    | Fixed pause before the operation proceeds                                     |
+| `ChaosEffect.delay(Duration min, Duration max)`                  | Uniform random pause in `[min, max]`                                          |
+| `ChaosEffect.gate(Duration maxBlock)`                            | Block until `handle.release()` is called (or `maxBlock` elapses)              |
+| `ChaosEffect.reject(String message)`                             | Throw a semantically correct exception for the operation type                 |
+| `ChaosEffect.suppress()`                                         | Silently discard; return `null` / `false` per operation contract              |
+| `ChaosEffect.exceptionalCompletion(FailureKind, String message)` | Complete a `CompletableFuture` with a failure                                 |
+| `ChaosEffect.injectException(String className, String message)`  | Inject arbitrary exception at method entry via reflection                     |
+| `ChaosEffect.corruptReturnValue(ReturnValueStrategy)`            | Corrupt return value: `NULL`, `ZERO`, `EMPTY`, `BOUNDARY_MAX`, `BOUNDARY_MIN` |
+| `ChaosEffect.skewClock(Duration, ClockSkewMode)`                 | Skew `currentTimeMillis()` / `nanoTime()`: `FIXED`, `DRIFT`, `FREEZE`         |
+| `ChaosEffect.spuriousWakeup()`                                   | Force `Selector.select()` to return 0 immediately                             |
 
 ### Background stressor effects
 
-| Factory | What it does | Recoverable? |
-|---------|--------------|:---:|
-| `ChaosEffect.heapPressure(long bytes, int chunkSizeBytes)` | Retain `byte[]` allocations on heap | ✅ |
-| `ChaosEffect.keepAlive(String threadName, boolean daemon, Duration heartbeat)` | Spawn an idle keep-alive thread | ✅ |
-| `ChaosEffect.metaspacePressure(int classCount, int fieldsPerClass)` | Define synthetic classes into an isolated classloader | ✅ (slow GC) |
-| `ChaosEffect.directBufferPressure(long totalBytes, int bufferSizeBytes)` | Allocate off-heap `ByteBuffer.allocateDirect` | ✅ (GC-dependent) |
-| `ChaosEffect.gcPressure(long allocationRateBytesPerSecond, Duration duration)` | Continuously allocate short-lived objects | ✅ |
-| `ChaosEffect.finalizerBacklog(int objectCount, Duration finalizerDelay)` | Flood the finalizer queue | ✅ |
-| `ChaosEffect.deadlock(int participantCount)` | Create a real JVM monitor deadlock between N threads | ✅ |
-| `ChaosEffect.threadLeak(int threadCount, String namePrefix, boolean daemon)` | Start permanently-parked threads that are never joined | ✅ |
-| `ChaosEffect.threadLocalLeak(int entriesPerThread, int valueSizeBytes)` | Leak `ThreadLocal` entries on a background thread | ✅ (partial) |
-| `ChaosEffect.monitorContention(…)` | Saturate a shared lock with background contenders | ✅ |
-| `ChaosEffect.codeCachePressure(int classCount, int methodsPerClass)` | Generate ByteBuddy classes to fill the JIT code cache | ✅ |
-| `ChaosEffect.safepointStorm(Duration gcInterval)` | Trigger periodic GC + retransformation (STW pauses) | ✅ |
-| `ChaosEffect.stringInternPressure(int internCount, int stringLengthBytes)` | Intern unique strings into the JVM string pool | ✅ (pool is GC root) |
-| `ChaosEffect.referenceQueueFlood(int referenceCount, Duration floodInterval)` | Flood the JVM reference queue with phantom refs | ✅ |
+| Factory                                                                        | What it does                                           |    Recoverable?     |
+|--------------------------------------------------------------------------------|--------------------------------------------------------|:-------------------:|
+| `ChaosEffect.heapPressure(long bytes, int chunkSizeBytes)`                     | Retain `byte[]` allocations on heap                    |          ✅          |
+| `ChaosEffect.keepAlive(String threadName, boolean daemon, Duration heartbeat)` | Spawn an idle keep-alive thread                        |          ✅          |
+| `ChaosEffect.metaspacePressure(int classCount, int fieldsPerClass)`            | Define synthetic classes into an isolated classloader  |     ✅ (slow GC)     |
+| `ChaosEffect.directBufferPressure(long totalBytes, int bufferSizeBytes)`       | Allocate off-heap `ByteBuffer.allocateDirect`          |  ✅ (GC-dependent)   |
+| `ChaosEffect.gcPressure(long allocationRateBytesPerSecond, Duration duration)` | Continuously allocate short-lived objects              |          ✅          |
+| `ChaosEffect.finalizerBacklog(int objectCount, Duration finalizerDelay)`       | Flood the finalizer queue                              |          ✅          |
+| `ChaosEffect.deadlock(int participantCount)`                                   | Create a real JVM monitor deadlock between N threads   |          ✅          |
+| `ChaosEffect.threadLeak(int threadCount, String namePrefix, boolean daemon)`   | Start permanently-parked threads that are never joined |          ✅          |
+| `ChaosEffect.threadLocalLeak(int entriesPerThread, int valueSizeBytes)`        | Leak `ThreadLocal` entries on a background thread      |     ✅ (partial)     |
+| `ChaosEffect.monitorContention(…)`                                             | Saturate a shared lock with background contenders      |          ✅          |
+| `ChaosEffect.codeCachePressure(int classCount, int methodsPerClass)`           | Generate ByteBuddy classes to fill the JIT code cache  |          ✅          |
+| `ChaosEffect.safepointStorm(Duration gcInterval)`                              | Trigger periodic GC + retransformation (STW pauses)    |          ✅          |
+| `ChaosEffect.stringInternPressure(int internCount, int stringLengthBytes)`     | Intern unique strings into the JVM string pool         | ✅ (pool is GC root) |
+| `ChaosEffect.referenceQueueFlood(int referenceCount, Duration floodInterval)`  | Flood the JVM reference queue with phantom refs        |          ✅          |
 
 > ⚠️ `deadlock()` and `threadLeak()` with `daemon=false` prevent a clean JVM exit until the activation handle is closed. Both require `ActivationPolicy.withDestructiveEffects()` at registration time. Closing the handle interrupts all participating threads and releases all locks.
 
@@ -858,19 +858,19 @@ end note
 
 ### Module reference
 
-| Module | Role |
-|--------|------|
-| `chaos-agent-api` | **Stable public API** — the only module application code should depend on |
-| `chaos-agent-bootstrap` | Agent entry point (`premain`/`agentmain`), singleton, MBean registration |
-| `chaos-agent-core` | Scenario registry, evaluation pipeline, session scoping, stressors |
-| `chaos-agent-instrumentation-jdk` | ByteBuddy advice, bootstrap bridge (57 interception handles) |
-| `chaos-agent-startup-config` | JSON/base64/file config resolution and Jackson mapping |
-| `chaos-agent-testkit` | JUnit 5 extension, `ChaosPlatform.installLocally()` for self-attach |
-| `chaos-agent-spring-boot3-test-starter` | `@ChaosTest` + `ChaosAgentExtension` for Spring Boot 3 tests |
-| `chaos-agent-spring-boot4-test-starter` | `@ChaosTest` + `ChaosAgentExtension` for Spring Boot 4 tests |
-| `chaos-agent-spring-boot3-starter` | Runtime starter with Actuator endpoint for Spring Boot 3 |
-| `chaos-agent-spring-boot4-starter` | Runtime starter with Actuator endpoint for Spring Boot 4 |
-| `chaos-agent-examples` | Runnable usage examples |
+| Module                                  | Role                                                                      |
+|-----------------------------------------|---------------------------------------------------------------------------|
+| `chaos-agent-api`                       | **Stable public API** — the only module application code should depend on |
+| `chaos-agent-bootstrap`                 | Agent entry point (`premain`/`agentmain`), singleton, MBean registration  |
+| `chaos-agent-core`                      | Scenario registry, evaluation pipeline, session scoping, stressors        |
+| `chaos-agent-instrumentation-jdk`       | ByteBuddy advice, bootstrap bridge (57 interception handles)              |
+| `chaos-agent-startup-config`            | JSON/base64/file config resolution and Jackson mapping                    |
+| `chaos-agent-testkit`                   | JUnit 5 extension, `ChaosPlatform.installLocally()` for self-attach       |
+| `chaos-agent-spring-boot3-test-starter` | `@ChaosTest` + `ChaosAgentExtension` for Spring Boot 3 tests              |
+| `chaos-agent-spring-boot4-test-starter` | `@ChaosTest` + `ChaosAgentExtension` for Spring Boot 4 tests              |
+| `chaos-agent-spring-boot3-starter`      | Runtime starter with Actuator endpoint for Spring Boot 3                  |
+| `chaos-agent-spring-boot4-starter`      | Runtime starter with Actuator endpoint for Spring Boot 4                  |
+| `chaos-agent-examples`                  | Runnable usage examples                                                   |
 
 ---
 
@@ -969,23 +969,23 @@ The number that matters is not nanoseconds per call — it is the total overhead
 while chaos is active. For a typical Java microservice handling **2 000 requests/sec** with a
 realistic mix of file reads, DNS lookups, SSL connections, and timed retries:
 
-| Agent state | Total dispatch overhead | % of one CPU core (2.5 GHz) |
-|---|---|---|
-| Agent installed, **no scenarios** | ~0.31 ms/sec | **0.003 %** |
-| **4 active scenarios**, all Phase 4 operation types | ~1.74 ms/sec | **0.017 %** |
-| **4 exhausted scenarios** left resident in registry | ~1.74 ms/sec | **0.017 %** |
+| Agent state                                         | Total dispatch overhead | % of one CPU core (2.5 GHz) |
+|-----------------------------------------------------|-------------------------|-----------------------------|
+| Agent installed, **no scenarios**                   | ~0.31 ms/sec            | **0.003 %**                 |
+| **4 active scenarios**, all Phase 4 operation types | ~1.74 ms/sec            | **0.017 %**                 |
+| **4 exhausted scenarios** left resident in registry | ~1.74 ms/sec            | **0.017 %**                 |
 
 Two hundredths of one percent. That is the tax for running four simultaneous chaos scenarios
 across all instrumented operation types in a busy service.
 
 The practical implication by operation type:
 
-| Operation | Cost matters when… | Cost is negligible when… |
-|---|---|---|
-| File I/O read (page cache hot) | Exhausted scenarios left resident; >100 K reads/sec | Container under memory pressure, page cache evicted → syscall dominates |
-| DNS resolution | JVM address cache hit + exhausted scenarios | Real DNS query involved → network roundtrip (≥500 µs) dwarfs 300 ns |
-| SSL handshake | Never — TLS crypto (1–10 ms) is always 3–4 orders of magnitude larger | Always |
-| Thread.sleep | Never — the sleep duration dominates completely | Always |
+| Operation                      | Cost matters when…                                                    | Cost is negligible when…                                                |
+|--------------------------------|-----------------------------------------------------------------------|-------------------------------------------------------------------------|
+| File I/O read (page cache hot) | Exhausted scenarios left resident; >100 K reads/sec                   | Container under memory pressure, page cache evicted → syscall dominates |
+| DNS resolution                 | JVM address cache hit + exhausted scenarios                           | Real DNS query involved → network roundtrip (≥500 µs) dwarfs 300 ns     |
+| SSL handshake                  | Never — TLS crypto (1–10 ms) is always 3–4 orders of magnitude larger | Always                                                                  |
+| Thread.sleep                   | Never — the sleep duration dominates completely                       | Always                                                                  |
 
 **One rule to remember:** call `ChaosActivationHandle.stop()` when a scenario is done.
 An exhausted scenario (one that hit `maxApplications`) costs as much to evaluate per call as one
@@ -994,13 +994,13 @@ floor immediately.
 
 ### Hot-path overhead targets
 
-| Scenario | Target | What drives the cost |
-|----------|--------|----------------------|
-| Agent installed, zero active scenarios | **< 60 ns** | Registry empty check + early return |
-| One scenario active, no selector match | **< 100 ns** | Operation-type mismatch exits before pattern evaluation |
-| One scenario active, match, no terminal effect | **< 300 ns** | Full 8-check evaluation pipeline, no effect applied |
-| Session scope miss (wrong session ID) | **< 20 ns additional** | ThreadLocal read + identity compare, exits before selector evaluation |
-| 10 active scenarios, one match | **< 1 µs** | Linear registry scan, all misses exit at selector check |
+| Scenario                                       | Target                 | What drives the cost                                                  |
+|------------------------------------------------|------------------------|-----------------------------------------------------------------------|
+| Agent installed, zero active scenarios         | **< 60 ns**            | Registry empty check + early return                                   |
+| One scenario active, no selector match         | **< 100 ns**           | Operation-type mismatch exits before pattern evaluation               |
+| One scenario active, match, no terminal effect | **< 300 ns**           | Full 8-check evaluation pipeline, no effect applied                   |
+| Session scope miss (wrong session ID)          | **< 20 ns additional** | ThreadLocal read + identity compare, exits before selector evaluation |
+| 10 active scenarios, one match                 | **< 1 µs**             | Linear registry scan, all misses exit at selector check               |
 
 For reference: HikariCP connection borrow ~5–15 µs · local TCP roundtrip ~50–200 µs · `Thread.sleep(1)` ~1 ms.
 
@@ -1042,17 +1042,17 @@ Requires JDK 21+ at runtime. Build toolchain targets JDK 25; `--release 21` is e
 
 Internal Architecture documentation lives in [`docs/`](docs/):
 
-| Document | What it covers |
-|----------|---------------|
-| [`overall-agent.md`](docs/overall-agent.md) | System Architecture, all analysis dimensions, stack walkdown, PlantUML diagrams |
-| [`api.md`](docs/api.md) | Stable API contract: builders, selectors, effects, diagnostics |
-| [`core.md`](docs/core.md) | Evaluation pipeline, session scoping, stressor lifecycle, JMM analysis |
-| [`instrumentation.md`](docs/instrumentation.md) | ByteBuddy advice, bootstrap bridge, reentrancy guard, 57-handle table |
-| [`bootstrap.md`](docs/bootstrap.md) | Agent initialization, self-attach, MBean registration |
-| [`startup-config.md`](docs/startup-config.md) | Config source resolution, JSON schema, path safety |
-| [`testkit.md`](docs/testkit.md) | JUnit 5 extension, session lifecycle, anti-patterns |
-| [`spring-integration.md`](docs/spring-integration.md) | Spring Boot 3 and 4 starters: `@ChaosTest`, `ChaosAgentExtension`, Actuator endpoint, configuration reference |
-| [`benchmarks.md`](docs/benchmarks.md) | JMH benchmark suite: hot-path targets, JIT analysis, result interpretation, `ChaosDispatcher` vs `ChaosRuntime` profiling |
+| Document                                              | What it covers                                                                                                            |
+|-------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------|
+| [`overall-agent.md`](docs/overall-agent.md)           | System Architecture, all analysis dimensions, stack walkdown, PlantUML diagrams                                           |
+| [`api.md`](docs/api.md)                               | Stable API contract: builders, selectors, effects, diagnostics                                                            |
+| [`core.md`](docs/core.md)                             | Evaluation pipeline, session scoping, stressor lifecycle, JMM analysis                                                    |
+| [`instrumentation.md`](docs/instrumentation.md)       | ByteBuddy advice, bootstrap bridge, reentrancy guard, 57-handle table                                                     |
+| [`bootstrap.md`](docs/bootstrap.md)                   | Agent initialization, self-attach, MBean registration                                                                     |
+| [`startup-config.md`](docs/startup-config.md)         | Config source resolution, JSON schema, path safety                                                                        |
+| [`testkit.md`](docs/testkit.md)                       | JUnit 5 extension, session lifecycle, anti-patterns                                                                       |
+| [`spring-integration.md`](docs/spring-integration.md) | Spring Boot 3 and 4 starters: `@ChaosTest`, `ChaosAgentExtension`, Actuator endpoint, configuration reference             |
+| [`benchmarks.md`](docs/benchmarks.md)                 | JMH benchmark suite: hot-path targets, JIT analysis, result interpretation, `ChaosDispatcher` vs `ChaosRuntime` profiling |
 
 ---
 
@@ -1064,7 +1064,7 @@ Apache License 2.0 — see [LICENSE](LICENSE). Use it in production, ship it in 
 
 ## About the Engineer
 
-This three-repo stack — `chaos-testing-java-agent`, [`chaos-testing`](https://github.com/macstab/chaos-testing), [`macstab-chaos-testing-libraries`](https://github.com/macstab/macstab-chaos-testing-libraries) — is the work of one engineer: **Christian Schnapka**, Hamburg, Germany.
+This three-repo stack — `macstab-chaos-jvm-agent`, [`chaos-testing`](https://github.com/macstab/chaos-testing), [`macstab-chaos-testing-libraries`](https://github.com/macstab/macstab-chaos-testing-libraries) — is the work of one engineer: **Christian Schnapka**, Hamburg, Germany.
 
 ### Timeline
 
