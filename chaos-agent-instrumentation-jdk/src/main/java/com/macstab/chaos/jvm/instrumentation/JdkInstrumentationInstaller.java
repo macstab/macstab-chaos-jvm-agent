@@ -1,0 +1,2095 @@
+package com.macstab.chaos.jvm.instrumentation;
+
+import com.macstab.chaos.jvm.core.ChaosRuntime;
+import com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher;
+import com.macstab.chaos.jvm.instrumentation.bridge.BridgeDelegate;
+import java.io.IOException;
+import java.io.InputStream;
+import java.lang.instrument.Instrumentation;
+import java.lang.invoke.MethodHandle;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.MethodType;
+import java.net.URL;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ForkJoinTask;
+import java.util.jar.JarEntry;
+import java.util.jar.JarOutputStream;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+import net.bytebuddy.agent.builder.AgentBuilder;
+import net.bytebuddy.agent.builder.ResettableClassFileTransformer;
+import net.bytebuddy.asm.Advice;
+import net.bytebuddy.matcher.ElementMatchers;
+import net.bytebuddy.utility.JavaModule;
+
+/**
+ * Static-only installer that wires ByteBuddy instrumentation for all JDK interception points.
+ *
+ * <h2>Startup sequence</h2>
+ *
+ * <ol>
+ *   <li>{@link #install} is called once by {@code ChaosAgentBootstrap} after the runtime is ready.
+ *   <li>{@link #injectBridge(java.lang.instrument.Instrumentation)} packages {@link
+ *       com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher} and {@link
+ *       com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher.ThrowingSupplier} into a
+ *       temporary JAR and appends it to the bootstrap classpath so that bootstrap-loaded JDK
+ *       classes can see it.
+ *   <li>{@link #installDelegate(Object)} constructs a {@link
+ *       com.macstab.chaos.jvm.instrumentation.ChaosBridge}, builds the {@link
+ *       com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher#HANDLE_COUNT
+ *       HANDLE_COUNT}-slot {@link java.lang.invoke.MethodHandle} array via {@link
+ *       #buildMethodHandles}, and calls the bootstrap-loaded {@code BootstrapDispatcher.install()}
+ *       via reflection to wire the bridge.
+ *   <li>ByteBuddy's {@code AgentBuilder} is assembled with one transformation per interception
+ *       point and installed via {@link
+ *       net.bytebuddy.agent.builder.AgentBuilder#installOn(java.lang.instrument.Instrumentation)}.
+ * </ol>
+ *
+ * <h2>Phase 1 vs Phase 2</h2>
+ *
+ * <p><b>Phase 1</b> interception points (thread pool, scheduling, queues, shutdown hooks, class
+ * loading) are always installed.
+ *
+ * <p><b>Phase 2</b> interception points (clock, GC, exit, NIO, sockets, JNDI, serialization, native
+ * libraries, JMX, ThreadLocal, etc.) are gated behind the {@code premainMode} flag. The flag is set
+ * to {@code true} both when the agent is attached at JVM startup via {@code -javaagent:} and when
+ * it is self-attached at runtime via {@code ChaosAgentBootstrap#installForLocalTests()}. In both
+ * modes the installer relies on ByteBuddy's {@code RedefinitionStrategy.RETRANSFORMATION} combined
+ * with {@code disableClassFormatChanges()} to rewrite already-loaded JDK classes such as {@code
+ * java.net.Socket}, so the same interception points fire regardless of whether the agent was on the
+ * command line or attached programmatically.
+ *
+ * <h2>Retransformation</h2>
+ *
+ * <p>All transformations use {@code disableClassFormatChanges()} combined with {@code
+ * RedefinitionStrategy.RETRANSFORMATION} to allow live retransformation of already-loaded JDK
+ * classes without changing the class format.
+ *
+ * <h2>Thread safety</h2>
+ *
+ * <p>This class is stateless. {@link #install} is expected to be called exactly once at startup,
+ * from a single thread.
+ */
+public final class JdkInstrumentationInstaller {
+  private static final Logger LOGGER =
+      Logger.getLogger(JdkInstrumentationInstaller.class.getName());
+
+  private static final String BRIDGE_JAR_PREFIX = "macstab-chaos-bootstrap-bridge";
+  private static final String BRIDGE_JAR_SUFFIX = ".jar";
+
+  /**
+   * The transformer returned by the last successful {@link AgentBuilder#installOn} call. Retained
+   * so dynamic-attach test runners and framework teardown paths can call {@link #uninstall} to
+   * reset applied class transformations. {@code volatile} so the latest reference is visible to
+   * {@link #uninstall} on any thread.
+   */
+  private static volatile ResettableClassFileTransformer installedTransformer;
+
+  private JdkInstrumentationInstaller() {}
+
+  /**
+   * Entry point called once at agent startup to install all ByteBuddy transformations.
+   *
+   * <p>The method first injects the bootstrap bridge JAR, then wires the {@link ChaosBridge}
+   * delegate, and finally assembles and installs the {@code AgentBuilder}. Phase 1 transformations
+   * are always applied. Phase 2 transformations (JVM runtime interception points such as clock, GC,
+   * NIO, and sockets) are applied only when {@code premainMode} is {@code true} because those
+   * points require retransformation of already-loaded JDK classes.
+   *
+   * @param instrumentation the {@link Instrumentation} handle provided by the JVM at agent
+   *     attachment; used both for bootstrap classpath injection and for installing transformations
+   * @param runtime the live {@link ChaosRuntime} instance that supplies the active scenario
+   *     configuration to the bridge
+   * @param premainMode {@code true} to enable Phase 2 JVM-level interception. Set by both {@code
+   *     premain}/{@code agentmain} and by self-attach test helpers so that Socket/NIO/HTTP chaos
+   *     fires in every supported attach path. Pass {@code false} only from callers that cannot rely
+   *     on retransformation (legacy attach flows that pre-date JVMTI class retransformation
+   *     support).
+   */
+  public static void install(
+      final Instrumentation instrumentation,
+      final ChaosRuntime runtime,
+      final boolean premainMode) {
+    grantInternalModuleOpens(instrumentation);
+    injectBridge(instrumentation);
+    installDelegate(new ChaosBridge(runtime));
+
+    AgentBuilder agentBuilder = buildBaseAgentBuilder();
+    agentBuilder = applyPhase1ThreadAndExecutorTransformations(agentBuilder);
+
+    if (premainMode) {
+      agentBuilder = applyPhase1ConcurrencyTransformations(agentBuilder);
+      agentBuilder = applyPhase2CoreJvmTransformations(agentBuilder);
+      agentBuilder = applyPhase2NetworkTransformations(agentBuilder);
+      agentBuilder = applyPhase2OptionalTransformations(agentBuilder);
+    }
+
+    // Retain the transformer returned by installOn so uninstall() can reset class transformations.
+    // Without this, once ByteBuddy has rewritten bootstrap-loaded JDK classes there is no handle
+    // to undo the transformation — dynamic-attach test runners that want to detach the agent
+    // between suites have no way back. Last-writer-wins is acceptable because ChaosAgentBootstrap's
+    // RUNTIME CAS serialises install() calls JVM-wide to at most one.
+    installedTransformer = agentBuilder.installOn(instrumentation);
+
+    // Some JDK classes (e.g. java.io.ObjectOutputStream / ObjectInputStream) get loaded as a
+    // side-effect of ByteBuddy's installOn() while it is already inside a JVMTI
+    // ClassFileLoadHook callback for another class. The JVMTI re-entrancy rule then suppresses
+    // the hook for those side-effect loads, so they escape our transformer entirely. After
+    // installOn() returns we are no longer inside any hook, so we can request an explicit
+    // retransformation that fires the hook normally and applies the missing advice.
+    if (premainMode) {
+      retransformPostInstallEscapees(instrumentation);
+    }
+
+    // ── Clock skew limitation: direct System.currentTimeMillis() cannot be intercepted ────────
+    //
+    // System.currentTimeMillis() and System.nanoTime() are @IntrinsicCandidate native methods
+    // in java.lang.System (java.base module). Two independent JVM constraints prevent advice
+    // from reaching them:
+    //
+    // Constraint 1 — Retransformation cannot add methods or change native modifiers.
+    //   JVMTI SetNativeMethodPrefix works by transforming a native method to a Java wrapper that
+    //   calls the renamed native ($chaos$currentTimeMillis). This requires (a) adding the renamed
+    //   native method and (b) changing currentTimeMillis() from native to non-native. Both
+    //   operations are prohibited by the JVM spec for retransformation of already-loaded classes.
+    //   java.lang.System is loaded before premain runs, so this approach is unavailable.
+    //
+    // Constraint 2 — @IntrinsicCandidate JIT bypass (secondary; moot given constraint 1).
+    //   Even if a Java wrapper existed, HotSpot C2 JIT recognises
+    // java.lang.System.currentTimeMillis
+    //   by class+method name and replaces the call with a direct RDTSC / MRS CNTVCT_EL0 hardware
+    //   read, bypassing the wrapper entirely after ~10 000 invocations.
+    //
+    // Investigation: a second AgentBuilder with enableNativeMethodPrefix("$chaos$") and
+    // RETRANSFORMATION was tested. ByteBuddy fires a TRANSFORM event for java.lang.System but
+    // the JVM silently retains the original native binding. currentTimeMillis() remains native
+    // with its original hardware-clock implementation. No error is reported.
+    //
+    // Consequence: ClockSkewEffect cannot intercept direct System.currentTimeMillis() or
+    // System.nanoTime() calls. Clock skew IS applied through two supported paths:
+    //   1. Code explicitly calls BootstrapDispatcher.adjustClockMillis / adjustClockNanos
+    //      (the hot path wired by this agent for custom instrumentation points).
+    //   2. Application code uses java.time.Instant.now(), java.time.LocalDateTime.now(),
+    //      java.time.ZonedDateTime.now(), or new java.util.Date() — these are non-native Java
+    //      members that are woven above in the Phase 2 block when the agent is attached via
+    //      -javaagent: at JVM startup.
+    //
+    // This is a hard JVM limitation for any standard -javaagent: Java instrumentation agent.
+    // Workarounds (e.g. -Xpatch:java.base, a C-level JVMTI agent) are out of scope.
+  }
+
+  /**
+   * Self-grants reflective and instrumentation access to the JDK internal packages this agent needs
+   * to function, without requiring the user to set {@code --add-opens} JVM flags.
+   *
+   * <p>The agent JAR's {@code MANIFEST.MF} carries a matching {@code Add-Opens} attribute (see
+   * {@code chaos-agent-bootstrap/build.gradle.kts}) that the JVM honours on the {@code -javaagent:}
+   * (premain) attach path before {@code premain} runs. Manifest opens are <b>not</b> honoured for
+   * {@code agentmain} or runtime self-attach via {@code ByteBuddyAgent.install()}, so for those
+   * paths this method calls {@link Instrumentation#redefineModule} programmatically — exposing the
+   * same opens to the unnamed module of the system class loader. Same pattern OpenTelemetry,
+   * Datadog, and New Relic agents use.
+   *
+   * <p>Each entry below is paired with the agent feature that depends on it. If a future feature
+   * needs a new internal package, add it both to the manifest <i>and</i> to this list.
+   *
+   * <p>Failures are tolerated and logged at FINE level: the JVM may legitimately deny {@code
+   * redefineModule} on stripped or future runtimes. Downstream code that depends on the open
+   * already handles {@code java.lang.reflect.InaccessibleObjectException} via try/catch (see {@code
+   * HttpUrlExtractor}, {@code JdbcTargetExtractor}, {@code DirectBufferPressureStressor}).
+   *
+   * @param instrumentation the JVM-supplied {@link Instrumentation} handle, used for the {@code
+   *     redefineModule} call
+   */
+  private static void grantInternalModuleOpens(final Instrumentation instrumentation) {
+    final Module unnamed = ClassLoader.getSystemClassLoader().getUnnamedModule();
+    final Set<Module> openTo = Set.of(unnamed);
+
+    // moduleClass → packages to open. Loaded reflectively so this code stays compilable on
+    // toolchains that expose only some of these modules. Each lookup tolerates an absent module.
+    final List<String[]> opens =
+        List.of(
+            new String[] {"java.net.http", "jdk.internal.net.http"},
+            new String[] {"java.base", "jdk.internal.misc"},
+            new String[] {"java.base", "jdk.internal.loader"},
+            new String[] {"java.base", "sun.nio.ch"},
+            new String[] {"java.base", "jdk.internal.ref"});
+
+    for (final String[] entry : opens) {
+      final String moduleName = entry[0];
+      final String packageName = entry[1];
+      final Module module = ModuleLayer.boot().findModule(moduleName).orElse(null);
+      if (module == null) {
+        LOGGER.log(
+            Level.FINE,
+            "module {0} not present; skipping open of {1}",
+            new Object[] {moduleName, packageName});
+        continue;
+      }
+      if (!module.getPackages().contains(packageName)) {
+        LOGGER.log(
+            Level.FINE,
+            "module {0} does not contain package {1}; skipping",
+            new Object[] {moduleName, packageName});
+        continue;
+      }
+      try {
+        final Map<String, Set<Module>> extraOpens = new LinkedHashMap<>();
+        extraOpens.put(packageName, openTo);
+        instrumentation.redefineModule(
+            module,
+            Collections.emptySet(), // extraReads
+            Collections.emptyMap(), // extraExports
+            extraOpens, // extraOpens
+            Collections.emptySet(), // extraUses
+            Collections.emptyMap()); // extraProvides
+      } catch (final RuntimeException failure) {
+        LOGGER.log(
+            Level.FINE,
+            failure,
+            () ->
+                "failed to redefineModule open for "
+                    + moduleName
+                    + "/"
+                    + packageName
+                    + " — chaos features depending on this open may degrade gracefully");
+      }
+    }
+  }
+
+  /**
+   * Resets the installed ByteBuddy transformer, reverting class transformations applied by the most
+   * recent {@link #install} call.
+   *
+   * <p>Callable by dynamic-attach test runners between suites, or by framework teardown paths that
+   * need to detach chaos interception without restarting the JVM. Safe to call when no install has
+   * occurred — the no-transformer state is a silent no-op.
+   *
+   * @param instrumentation the same {@link Instrumentation} handle originally passed to {@link
+   *     #install}; required so the underlying JVMTI retransformation can see the previously
+   *     transformed classes
+   * @return {@code true} if a transformer was reset; {@code false} if no transformer was recorded
+   *     (i.e. {@link #install} was never called or already uninstalled)
+   */
+  public static boolean uninstall(final Instrumentation instrumentation) {
+    final ResettableClassFileTransformer current = installedTransformer;
+    if (current == null) {
+      return false;
+    }
+    installedTransformer = null;
+    current.reset(instrumentation, AgentBuilder.RedefinitionStrategy.RETRANSFORMATION);
+    return true;
+  }
+
+  /**
+   * Builds the fixed-size {@link MethodHandle} array that backs {@link
+   * com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher}.
+   *
+   * <p>Each slot in the returned array corresponds to one of the {@code public static final int}
+   * index constants declared on {@link
+   * com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher} (e.g. {@code
+   * ADJUST_CLOCK_MILLIS}, {@code BEFORE_GC_REQUEST}, etc.). The array has exactly {@link
+   * com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher#HANDLE_COUNT} elements, one
+   * per dispatch slot. All handles are unbound virtual handles resolved against the {@link
+   * BridgeDelegate} interface via a public lookup; each dispatch call passes the delegate instance
+   * as the first argument so handles remain callable from the bootstrap classloader context.
+   *
+   * @return an array of {@link MethodHandle} objects sized to {@link
+   *     com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher#HANDLE_COUNT} and indexed
+   *     by the {@code HANDLE_*} constants on {@link
+   *     com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher}; no element is {@code
+   *     null}
+   * @throws Exception if any required method is absent from {@link BridgeDelegate} or if the lookup
+   *     fails for any reason
+   */
+  static MethodHandle[] buildMethodHandles() throws Exception {
+    final MethodHandles.Lookup lookup = MethodHandles.publicLookup();
+    final Class<?> delegateInterface = BridgeDelegate.class;
+    final MethodHandle[] methodHandles = new MethodHandle[BootstrapDispatcher.HANDLE_COUNT];
+    wireExecutorHandles(lookup, delegateInterface, methodHandles);
+    wireSchedulingHandles(lookup, delegateInterface, methodHandles);
+    wireClassLoadingAndShutdownHandles(lookup, delegateInterface, methodHandles);
+    wireClockGcAndExitHandles(lookup, delegateInterface, methodHandles);
+    wireReflectionAndMemoryHandles(lookup, delegateInterface, methodHandles);
+    wireNetworkHandles(lookup, delegateInterface, methodHandles);
+    wireMiscRuntimeHandles(lookup, delegateInterface, methodHandles);
+    wireTimeApiHandles(lookup, delegateInterface, methodHandles);
+    wireHttpAndJdbcHandles(lookup, delegateInterface, methodHandles);
+    wireMiscIoHandles(lookup, delegateInterface, methodHandles);
+    return methodHandles;
+  }
+
+  /** Wires handles for executor and raw thread lifecycle instrumentation. */
+  private static void wireExecutorHandles(
+      final MethodHandles.Lookup lookup,
+      final Class<?> delegateInterface,
+      final MethodHandle[] methodHandles)
+      throws ReflectiveOperationException {
+    methodHandles[BootstrapDispatcher.DECORATE_EXECUTOR_RUNNABLE] =
+        lookup.findVirtual(
+            delegateInterface,
+            "decorateExecutorRunnable",
+            MethodType.methodType(Runnable.class, String.class, Object.class, Runnable.class));
+    methodHandles[BootstrapDispatcher.DECORATE_EXECUTOR_CALLABLE] =
+        lookup.findVirtual(
+            delegateInterface,
+            "decorateExecutorCallable",
+            MethodType.methodType(Callable.class, String.class, Object.class, Callable.class));
+    methodHandles[BootstrapDispatcher.BEFORE_THREAD_START] =
+        lookup.findVirtual(
+            delegateInterface,
+            "beforeThreadStart",
+            MethodType.methodType(void.class, Thread.class));
+    methodHandles[BootstrapDispatcher.BEFORE_WORKER_RUN] =
+        lookup.findVirtual(
+            delegateInterface,
+            "beforeWorkerRun",
+            MethodType.methodType(void.class, Object.class, Thread.class, Runnable.class));
+    methodHandles[BootstrapDispatcher.BEFORE_FORK_JOIN_TASK_RUN] =
+        lookup.findVirtual(
+            delegateInterface,
+            "beforeForkJoinTaskRun",
+            MethodType.methodType(void.class, ForkJoinTask.class));
+  }
+
+  /** Wires handles for scheduling, queue, and CompletableFuture instrumentation. */
+  private static void wireSchedulingHandles(
+      final MethodHandles.Lookup lookup,
+      final Class<?> delegateInterface,
+      final MethodHandle[] methodHandles)
+      throws ReflectiveOperationException {
+    methodHandles[BootstrapDispatcher.ADJUST_SCHEDULE_DELAY] =
+        lookup.findVirtual(
+            delegateInterface,
+            "adjustScheduleDelay",
+            MethodType.methodType(
+                long.class, String.class, Object.class, Object.class, long.class, boolean.class));
+    methodHandles[BootstrapDispatcher.BEFORE_SCHEDULED_TICK] =
+        lookup.findVirtual(
+            delegateInterface,
+            "beforeScheduledTick",
+            MethodType.methodType(boolean.class, Object.class, Object.class, boolean.class));
+    methodHandles[BootstrapDispatcher.BEFORE_QUEUE_OPERATION] =
+        lookup.findVirtual(
+            delegateInterface,
+            "beforeQueueOperation",
+            MethodType.methodType(void.class, String.class, Object.class));
+    methodHandles[BootstrapDispatcher.BEFORE_BOOLEAN_QUEUE_OPERATION] =
+        lookup.findVirtual(
+            delegateInterface,
+            "beforeBooleanQueueOperation",
+            MethodType.methodType(Boolean.class, String.class, Object.class));
+    methodHandles[BootstrapDispatcher.BEFORE_COMPLETABLE_FUTURE_COMPLETE] =
+        lookup.findVirtual(
+            delegateInterface,
+            "beforeCompletableFutureComplete",
+            MethodType.methodType(
+                Boolean.class, String.class, CompletableFuture.class, Object.class));
+  }
+
+  /** Wires handles for class loading, resource lookup, and shutdown hook instrumentation. */
+  private static void wireClassLoadingAndShutdownHandles(
+      final MethodHandles.Lookup lookup,
+      final Class<?> delegateInterface,
+      final MethodHandle[] methodHandles)
+      throws ReflectiveOperationException {
+    methodHandles[BootstrapDispatcher.BEFORE_CLASS_LOAD] =
+        lookup.findVirtual(
+            delegateInterface,
+            "beforeClassLoad",
+            MethodType.methodType(void.class, ClassLoader.class, String.class));
+    methodHandles[BootstrapDispatcher.AFTER_RESOURCE_LOOKUP] =
+        lookup.findVirtual(
+            delegateInterface,
+            "afterResourceLookup",
+            MethodType.methodType(URL.class, ClassLoader.class, String.class, URL.class));
+    methodHandles[BootstrapDispatcher.DECORATE_SHUTDOWN_HOOK] =
+        lookup.findVirtual(
+            delegateInterface,
+            "decorateShutdownHook",
+            MethodType.methodType(Thread.class, Thread.class));
+    methodHandles[BootstrapDispatcher.RESOLVE_SHUTDOWN_HOOK] =
+        lookup.findVirtual(
+            delegateInterface,
+            "resolveShutdownHook",
+            MethodType.methodType(Thread.class, Thread.class));
+    methodHandles[BootstrapDispatcher.BEFORE_EXECUTOR_SHUTDOWN] =
+        lookup.findVirtual(
+            delegateInterface,
+            "beforeExecutorShutdown",
+            MethodType.methodType(void.class, String.class, Object.class, long.class));
+  }
+
+  /** Wires handles for clock adjustment, GC requests, and VM exit interception. */
+  private static void wireClockGcAndExitHandles(
+      final MethodHandles.Lookup lookup,
+      final Class<?> delegateInterface,
+      final MethodHandle[] methodHandles)
+      throws ReflectiveOperationException {
+    methodHandles[BootstrapDispatcher.ADJUST_CLOCK_MILLIS] =
+        lookup.findVirtual(
+            delegateInterface, "adjustClockMillis", MethodType.methodType(long.class, long.class));
+    methodHandles[BootstrapDispatcher.ADJUST_CLOCK_NANOS] =
+        lookup.findVirtual(
+            delegateInterface, "adjustClockNanos", MethodType.methodType(long.class, long.class));
+    methodHandles[BootstrapDispatcher.BEFORE_GC_REQUEST] =
+        lookup.findVirtual(
+            delegateInterface, "beforeGcRequest", MethodType.methodType(boolean.class));
+    methodHandles[BootstrapDispatcher.BEFORE_EXIT_REQUEST] =
+        lookup.findVirtual(
+            delegateInterface, "beforeExitRequest", MethodType.methodType(void.class, int.class));
+  }
+
+  /** Wires handles for reflection, direct buffers, class redefinition, monitors, and parking. */
+  private static void wireReflectionAndMemoryHandles(
+      final MethodHandles.Lookup lookup,
+      final Class<?> delegateInterface,
+      final MethodHandle[] methodHandles)
+      throws ReflectiveOperationException {
+    methodHandles[BootstrapDispatcher.BEFORE_REFLECTION_INVOKE] =
+        lookup.findVirtual(
+            delegateInterface,
+            "beforeReflectionInvoke",
+            MethodType.methodType(void.class, Object.class, Object.class));
+    methodHandles[BootstrapDispatcher.BEFORE_DIRECT_BUFFER_ALLOCATE] =
+        lookup.findVirtual(
+            delegateInterface,
+            "beforeDirectBufferAllocate",
+            MethodType.methodType(void.class, int.class));
+    methodHandles[BootstrapDispatcher.BEFORE_OBJECT_DESERIALIZE] =
+        lookup.findVirtual(
+            delegateInterface,
+            "beforeObjectDeserialize",
+            MethodType.methodType(void.class, Object.class));
+    methodHandles[BootstrapDispatcher.BEFORE_CLASS_DEFINE] =
+        lookup.findVirtual(
+            delegateInterface,
+            "beforeClassDefine",
+            MethodType.methodType(void.class, Object.class, String.class));
+    methodHandles[BootstrapDispatcher.BEFORE_MONITOR_ENTER] =
+        lookup.findVirtual(
+            delegateInterface,
+            "beforeMonitorEnter",
+            MethodType.methodType(void.class, Object.class));
+    methodHandles[BootstrapDispatcher.BEFORE_THREAD_PARK] =
+        lookup.findVirtual(
+            delegateInterface, "beforeThreadPark", MethodType.methodType(void.class));
+  }
+
+  /** Wires handles for NIO and socket I/O instrumentation. */
+  private static void wireNetworkHandles(
+      final MethodHandles.Lookup lookup,
+      final Class<?> delegateInterface,
+      final MethodHandle[] methodHandles)
+      throws ReflectiveOperationException {
+    methodHandles[BootstrapDispatcher.BEFORE_NIO_SELECT] =
+        lookup.findVirtual(
+            delegateInterface,
+            "beforeNioSelect",
+            MethodType.methodType(boolean.class, Object.class, long.class));
+    methodHandles[BootstrapDispatcher.BEFORE_NIO_CHANNEL_OP] =
+        lookup.findVirtual(
+            delegateInterface,
+            "beforeNioChannelOp",
+            MethodType.methodType(void.class, String.class, Object.class));
+    methodHandles[BootstrapDispatcher.BEFORE_SOCKET_CONNECT] =
+        lookup.findVirtual(
+            delegateInterface,
+            "beforeSocketConnect",
+            MethodType.methodType(void.class, Object.class, Object.class, int.class));
+    methodHandles[BootstrapDispatcher.BEFORE_SOCKET_ACCEPT] =
+        lookup.findVirtual(
+            delegateInterface,
+            "beforeSocketAccept",
+            MethodType.methodType(void.class, Object.class));
+    methodHandles[BootstrapDispatcher.BEFORE_SOCKET_READ] =
+        lookup.findVirtual(
+            delegateInterface, "beforeSocketRead", MethodType.methodType(void.class, Object.class));
+    methodHandles[BootstrapDispatcher.BEFORE_SOCKET_WRITE] =
+        lookup.findVirtual(
+            delegateInterface,
+            "beforeSocketWrite",
+            MethodType.methodType(void.class, Object.class, int.class));
+    methodHandles[BootstrapDispatcher.BEFORE_SOCKET_CLOSE] =
+        lookup.findVirtual(
+            delegateInterface,
+            "beforeSocketClose",
+            MethodType.methodType(void.class, Object.class));
+  }
+
+  /** Wires handles for JNDI, serialization, native libs, async cancel, zip, thread-locals, JMX. */
+  private static void wireMiscRuntimeHandles(
+      final MethodHandles.Lookup lookup,
+      final Class<?> delegateInterface,
+      final MethodHandle[] methodHandles)
+      throws ReflectiveOperationException {
+    methodHandles[BootstrapDispatcher.BEFORE_JNDI_LOOKUP] =
+        lookup.findVirtual(
+            delegateInterface,
+            "beforeJndiLookup",
+            MethodType.methodType(void.class, Object.class, String.class));
+    methodHandles[BootstrapDispatcher.BEFORE_OBJECT_SERIALIZE] =
+        lookup.findVirtual(
+            delegateInterface,
+            "beforeObjectSerialize",
+            MethodType.methodType(void.class, Object.class, Object.class));
+    methodHandles[BootstrapDispatcher.BEFORE_NATIVE_LIBRARY_LOAD] =
+        lookup.findVirtual(
+            delegateInterface,
+            "beforeNativeLibraryLoad",
+            MethodType.methodType(void.class, String.class));
+    methodHandles[BootstrapDispatcher.BEFORE_ASYNC_CANCEL] =
+        lookup.findVirtual(
+            delegateInterface,
+            "beforeAsyncCancel",
+            MethodType.methodType(boolean.class, Object.class, boolean.class));
+    methodHandles[BootstrapDispatcher.BEFORE_ZIP_INFLATE] =
+        lookup.findVirtual(
+            delegateInterface, "beforeZipInflate", MethodType.methodType(void.class));
+    methodHandles[BootstrapDispatcher.BEFORE_ZIP_DEFLATE] =
+        lookup.findVirtual(
+            delegateInterface, "beforeZipDeflate", MethodType.methodType(void.class));
+    methodHandles[BootstrapDispatcher.BEFORE_THREAD_LOCAL_GET] =
+        lookup.findVirtual(
+            delegateInterface,
+            "beforeThreadLocalGet",
+            MethodType.methodType(boolean.class, Object.class));
+    methodHandles[BootstrapDispatcher.BEFORE_THREAD_LOCAL_SET] =
+        lookup.findVirtual(
+            delegateInterface,
+            "beforeThreadLocalSet",
+            MethodType.methodType(boolean.class, Object.class, Object.class));
+    methodHandles[BootstrapDispatcher.BEFORE_JMX_INVOKE] =
+        lookup.findVirtual(
+            delegateInterface,
+            "beforeJmxInvoke",
+            MethodType.methodType(void.class, Object.class, Object.class, String.class));
+    methodHandles[BootstrapDispatcher.BEFORE_JMX_GET_ATTR] =
+        lookup.findVirtual(
+            delegateInterface,
+            "beforeJmxGetAttr",
+            MethodType.methodType(void.class, Object.class, Object.class, String.class));
+  }
+
+  /** Wires handles for java.time API now() adjustments and java.util.Date construction. */
+  private static void wireTimeApiHandles(
+      final MethodHandles.Lookup lookup,
+      final Class<?> delegateInterface,
+      final MethodHandle[] methodHandles)
+      throws ReflectiveOperationException {
+    methodHandles[BootstrapDispatcher.ADJUST_INSTANT_NOW] =
+        lookup.findVirtual(
+            delegateInterface,
+            "adjustInstantNow",
+            MethodType.methodType(java.time.Instant.class, java.time.Instant.class));
+    methodHandles[BootstrapDispatcher.ADJUST_LOCAL_DATE_TIME_NOW] =
+        lookup.findVirtual(
+            delegateInterface,
+            "adjustLocalDateTimeNow",
+            MethodType.methodType(java.time.LocalDateTime.class, java.time.LocalDateTime.class));
+    methodHandles[BootstrapDispatcher.ADJUST_ZONED_DATE_TIME_NOW] =
+        lookup.findVirtual(
+            delegateInterface,
+            "adjustZonedDateTimeNow",
+            MethodType.methodType(java.time.ZonedDateTime.class, java.time.ZonedDateTime.class));
+    methodHandles[BootstrapDispatcher.ADJUST_DATE_NEW] =
+        lookup.findVirtual(
+            delegateInterface, "adjustDateNew", MethodType.methodType(long.class, long.class));
+  }
+
+  /** Wires handles for HTTP client and JDBC instrumentation. */
+  private static void wireHttpAndJdbcHandles(
+      final MethodHandles.Lookup lookup,
+      final Class<?> delegateInterface,
+      final MethodHandle[] methodHandles)
+      throws ReflectiveOperationException {
+    methodHandles[BootstrapDispatcher.BEFORE_HTTP_SEND] =
+        lookup.findVirtual(
+            delegateInterface,
+            "beforeHttpSend",
+            MethodType.methodType(boolean.class, String.class));
+    methodHandles[BootstrapDispatcher.BEFORE_HTTP_SEND_ASYNC] =
+        lookup.findVirtual(
+            delegateInterface,
+            "beforeHttpSendAsync",
+            MethodType.methodType(boolean.class, String.class));
+    methodHandles[BootstrapDispatcher.BEFORE_JDBC_CONNECTION_ACQUIRE] =
+        lookup.findVirtual(
+            delegateInterface,
+            "beforeJdbcConnectionAcquire",
+            MethodType.methodType(boolean.class, String.class));
+    methodHandles[BootstrapDispatcher.BEFORE_JDBC_STATEMENT_EXECUTE] =
+        lookup.findVirtual(
+            delegateInterface,
+            "beforeJdbcStatementExecute",
+            MethodType.methodType(boolean.class, String.class));
+    methodHandles[BootstrapDispatcher.BEFORE_JDBC_PREPARED_STATEMENT] =
+        lookup.findVirtual(
+            delegateInterface,
+            "beforeJdbcPreparedStatement",
+            MethodType.methodType(boolean.class, String.class));
+    methodHandles[BootstrapDispatcher.BEFORE_JDBC_TRANSACTION_COMMIT] =
+        lookup.findVirtual(
+            delegateInterface, "beforeJdbcTransactionCommit", MethodType.methodType(boolean.class));
+    methodHandles[BootstrapDispatcher.BEFORE_JDBC_TRANSACTION_ROLLBACK] =
+        lookup.findVirtual(
+            delegateInterface,
+            "beforeJdbcTransactionRollback",
+            MethodType.methodType(boolean.class));
+  }
+
+  /** Wires handles for thread sleep, DNS, SSL handshake, and file I/O instrumentation. */
+  private static void wireMiscIoHandles(
+      final MethodHandles.Lookup lookup,
+      final Class<?> delegateInterface,
+      final MethodHandle[] methodHandles)
+      throws ReflectiveOperationException {
+    methodHandles[BootstrapDispatcher.BEFORE_THREAD_SLEEP] =
+        lookup.findVirtual(
+            delegateInterface,
+            "beforeThreadSleep",
+            MethodType.methodType(boolean.class, long.class));
+    methodHandles[BootstrapDispatcher.BEFORE_DNS_RESOLVE] =
+        lookup.findVirtual(
+            delegateInterface, "beforeDnsResolve", MethodType.methodType(void.class, String.class));
+    methodHandles[BootstrapDispatcher.BEFORE_SSL_HANDSHAKE] =
+        lookup.findVirtual(
+            delegateInterface,
+            "beforeSslHandshake",
+            MethodType.methodType(void.class, Object.class));
+    methodHandles[BootstrapDispatcher.BEFORE_FILE_IO] =
+        lookup.findVirtual(
+            delegateInterface,
+            "beforeFileIo",
+            MethodType.methodType(void.class, String.class, Object.class));
+  }
+
+  @FunctionalInterface
+  private interface BuilderTransformer {
+    net.bytebuddy.dynamic.DynamicType.Builder<?> transform(
+        net.bytebuddy.dynamic.DynamicType.Builder<?> builder);
+  }
+
+  /**
+   * Conditionally instruments a JDK class that may not be present in all environments.
+   *
+   * <p>Before registering the type matcher, this method attempts to load the named class via the
+   * system classloader. If the class is not found ({@link ClassNotFoundException}), the method logs
+   * a fine-level message and returns the original {@code builder} unchanged so that a missing
+   * optional dependency never aborts agent startup. If the class is present, a standard {@code
+   * .type(...).transform(...)} entry is added to the builder.
+   *
+   * @param builder the current {@link AgentBuilder} chain to which the transformation may be
+   *     appended
+   * @param typeName fully-qualified binary name of the target class (e.g. {@code
+   *     "javax.naming.InitialContext"})
+   * @param transformer a {@link BuilderTransformer} that applies one or more {@link
+   *     net.bytebuddy.asm.Advice} visits to the ByteBuddy type builder
+   * @return the (possibly unchanged) {@link AgentBuilder} with the transformation appended when the
+   *     class is present, or the original builder when it is absent
+   */
+  private static AgentBuilder instrumentOptional(
+      final AgentBuilder builder, final String typeName, final BuilderTransformer transformer) {
+    try {
+      // Prefer the thread context classloader: OSGi containers and Spring Boot fat-JAR launchers
+      // (LaunchedURLClassLoader) load application classes under a custom CL that is invisible to
+      // the system classloader. Fall back to the system CL on startup threads where the context
+      // CL may be null or may be the bootstrap CL (before the app CL is installed).
+      final ClassLoader probe = Thread.currentThread().getContextClassLoader();
+      Class.forName(typeName, false, probe != null ? probe : ClassLoader.getSystemClassLoader());
+    } catch (final ClassNotFoundException ignored) {
+      LOGGER.fine("[chaos-agent] optional instrumentation target not present: " + typeName);
+      return builder;
+    }
+    return builder
+        .type(ElementMatchers.named(typeName))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                transformer.transform(typeBuilder));
+  }
+
+  /**
+   * Wires the {@link ChaosBridge} delegate into the bootstrap-loaded {@link
+   * com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher}.
+   *
+   * <p>Because {@code BootstrapDispatcher} is loaded by the bootstrap classloader (after {@link
+   * #injectBridge} appends it) and this class is loaded by the agent classloader, the two share no
+   * common type. The method therefore resolves {@code BootstrapDispatcher} via {@link
+   * Class#forName(String, boolean, ClassLoader)} with a {@code null} classloader argument
+   * (bootstrap) and invokes its {@code install(Object, MethodHandle[])} method reflectively. The
+   * {@link MethodHandle} array is built fresh by {@link #buildMethodHandles} for each call.
+   *
+   * @param bridgeDelegate the {@link ChaosBridge} instance (cast to {@link Object} because the
+   *     bootstrap classloader cannot see the {@link ChaosBridge} type directly) that receives all
+   *     dispatched calls
+   * @throws IllegalStateException if {@link #buildMethodHandles} fails or if the reflective
+   *     invocation of {@code BootstrapDispatcher.install} cannot be completed
+   */
+  private static void installDelegate(final Object bridgeDelegate) {
+    try {
+      final MethodHandle[] methodHandles = buildMethodHandles();
+      // Use reflection to call install on the bootstrap CL version of BootstrapDispatcher
+      final Class<?> bootstrapDispatcher =
+          Class.forName(
+              "com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher", true, null);
+      bootstrapDispatcher
+          .getMethod("install", Object.class, MethodHandle[].class)
+          .invoke(null, bridgeDelegate, methodHandles);
+    } catch (final Exception exception) {
+      throw new IllegalStateException("failed to install bridge delegate", exception);
+    }
+  }
+
+  /**
+   * Packages the bootstrap bridge classes into a temporary JAR and appends it to the bootstrap
+   * classpath.
+   *
+   * <p>The classes written are:
+   *
+   * <ul>
+   *   <li>{@code com/macstab/chaos/jvm/instrumentation/bridge/BootstrapDispatcher.class}
+   *   <li>{@code
+   *       com/macstab/chaos/jvm/instrumentation/bridge/BootstrapDispatcher$ThrowingSupplier.class}
+   * </ul>
+   *
+   * <p>Both are read from the agent classloader's resources (the same JAR that contains this class)
+   * and written verbatim into the temp JAR. The temp file is registered for deletion on JVM exit.
+   * After the JAR is written, {@link Instrumentation#appendToBootstrapClassLoaderSearch} makes its
+   * contents visible to the bootstrap classloader, allowing instrumented JDK classes — which are
+   * loaded by the bootstrap classloader — to call {@code BootstrapDispatcher} static methods.
+   *
+   * @param instrumentation the {@link Instrumentation} handle used to append to the bootstrap
+   *     classpath
+   * @throws IllegalStateException wrapping the underlying {@link java.io.IOException} if the
+   *     temporary JAR cannot be created, if a required class resource is missing from the agent
+   *     JAR, or if appending to the bootstrap classpath fails
+   */
+  private static void injectBridge(final Instrumentation instrumentation) {
+    // Idempotency: appendToBootstrapClassLoaderSearch has no unwind operation — once a JAR
+    // is appended, its entries stay visible to the bootstrap classloader for the JVM's
+    // lifetime, and the bootstrap classloader caches the classes it has loaded. A second
+    // install() call (dynamic-attach test runners that cycle install→uninstall→install)
+    // that rebuilds and re-appends a fresh temp JAR would:
+    //   (1) leak file descriptors in BRIDGE_JARS on every cycle,
+    //   (2) shadow the already-loaded BootstrapDispatcher with a new Class object on a
+    //       newer classpath entry for any class still resolvable lazily (inner classes),
+    // neither of which is desirable. The bridge classes are fixed bytecode — once injected,
+    // they never change — so skipping subsequent calls is both safe and correct.
+    if (!BRIDGE_INJECTED.compareAndSet(false, true)) {
+      return;
+    }
+    try {
+      // On POSIX filesystems create with 0600: the bridge JAR contains the code that bootstrap
+      // classloader will load, so a world-readable/writable file (the default 0644 umask-adjusted
+      // file) is a privilege-escalation hazard — any local user who can write to /tmp could swap
+      // the file before the JVM opens it and run arbitrary bootstrap-level code. On non-POSIX
+      // filesystems (e.g. Windows) fall back to the default because PosixFileAttributes are
+      // unsupported there; other platform-specific ACLs would have to be layered in separately.
+      final Path bridgeJar = createSecureTempFile();
+      bridgeJar.toFile().deleteOnExit();
+      try (JarOutputStream jarOutputStream =
+          new JarOutputStream(Files.newOutputStream(bridgeJar))) {
+        writeClass(
+            jarOutputStream,
+            "com/macstab/chaos/jvm/instrumentation/bridge/BootstrapDispatcher.class");
+        writeClass(
+            jarOutputStream,
+            "com/macstab/chaos/jvm/instrumentation/bridge/BootstrapDispatcher$ThrowingSupplier.class");
+        writeClass(
+            jarOutputStream,
+            "com/macstab/chaos/jvm/instrumentation/ScheduledRunnableWrapper.class");
+        writeClass(
+            jarOutputStream,
+            "com/macstab/chaos/jvm/instrumentation/ScheduledCallableWrapper.class");
+        // Required on the bootstrap classpath because advice woven into JDK module classes
+        // (e.g. jdk.internal.net.http.HttpClientImpl in the platform classloader) references
+        // these types. Without injecting them here the JVM verifier raises NoClassDefFoundError
+        // when the JDK class is first used.
+        writeClass(jarOutputStream, "com/macstab/chaos/jvm/api/ChaosHttpSuppressException.class");
+        writeClass(jarOutputStream, "com/macstab/chaos/jvm/instrumentation/HttpUrlExtractor.class");
+        writeClass(
+            jarOutputStream, "com/macstab/chaos/jvm/instrumentation/HttpUrlExtractor$1.class");
+        // JDBC advice woven into HikariPool / c3p0 / java.sql types references these classes.
+        // HikariPool is loaded by the application classloader, but the inlined advice references
+        // must resolve through the bootstrap classpath, so the exception type and the reflective
+        // pool-name extractor both have to be visible there.
+        writeClass(jarOutputStream, "com/macstab/chaos/jvm/api/ChaosJdbcSuppressException.class");
+        writeClass(
+            jarOutputStream, "com/macstab/chaos/jvm/instrumentation/JdbcTargetExtractor.class");
+        writeClass(
+            jarOutputStream, "com/macstab/chaos/jvm/instrumentation/JdbcTargetExtractor$1.class");
+      }
+      // Retain the JarFile in a static field. appendToBootstrapClassLoaderSearch does not
+      // document whether the JVM keeps a strong reference to the Java-side JarFile; on
+      // HotSpot the underlying native classpath entry is kept open, but the Java wrapper
+      // becomes unreachable as soon as this method returns. If the JarFile is finalized and
+      // its ZipFile closed, later bootstrap loads of ScheduledRunnableWrapper /
+      // ScheduledCallableWrapper / BootstrapDispatcher classes can fail with
+      // ZipException("ZipFile closed") at the first intercepted schedule() call — hours or
+      // days into an otherwise-healthy run. Holding the reference is cheap (one file handle
+      // per JVM) and eliminates the finalizer race. Note that BRIDGE_JARS is NEVER cleared
+      // on uninstall — the bootstrap classloader has already loaded classes from the JAR and
+      // releasing the JarFile would let its ZipFile finalize, breaking every future class
+      // load that resolves lazily through the bootstrap classpath entry.
+      final java.util.jar.JarFile jarFile = new java.util.jar.JarFile(bridgeJar.toFile());
+      BRIDGE_JARS.add(jarFile);
+      instrumentation.appendToBootstrapClassLoaderSearch(jarFile);
+    } catch (final IOException exception) {
+      // Failure path: clear the injected flag so a subsequent install() can retry rather
+      // than silently returning success when the bridge was never actually in place.
+      BRIDGE_INJECTED.set(false);
+      throw new IllegalStateException("failed to inject bootstrap bridge", exception);
+    }
+  }
+
+  /**
+   * Tracks whether {@link #injectBridge} has successfully installed the bootstrap bridge JAR.
+   * JVM-wide single-shot because {@code Instrumentation.appendToBootstrapClassLoaderSearch} has no
+   * reverse operation.
+   */
+  private static final java.util.concurrent.atomic.AtomicBoolean BRIDGE_INJECTED =
+      new java.util.concurrent.atomic.AtomicBoolean(false);
+
+  /**
+   * Strong-reference holder for the injected bridge {@link java.util.jar.JarFile}. See the call
+   * site above for the rationale.
+   */
+  private static final java.util.List<java.util.jar.JarFile> BRIDGE_JARS =
+      java.util.Collections.synchronizedList(new java.util.ArrayList<>());
+
+  /**
+   * Names of classes that are reliably loaded as a side-effect of {@link AgentBuilder#installOn}
+   * itself — usually because ByteBuddy's own machinery touches them while it is already inside a
+   * JVMTI {@code ClassFileLoadHook} for some other type, and the hook is not re-entrant. Any
+   * matcher that should fire on these classes has to be applied via an explicit post-install {@code
+   * retransformClasses} call (the JVMTI re-entrancy rule no longer applies once {@code installOn}
+   * has returned).
+   */
+  private static final String[] POST_INSTALL_RETRANSFORM_TARGETS = {
+    "java.io.ObjectOutputStream",
+    "java.io.ObjectInputStream",
+    // VirtualThread overrides Thread.start(); a Thread-only weave silently misses every
+    // VIRTUAL_THREAD_START event because vt.start() dispatches to VirtualThread.start() (its
+    // own override), bypassing Thread.start() entirely. We weave VirtualThread.start() above,
+    // but the class is loaded as a side-effect of retransforming java.lang.Thread, so the
+    // ClassFileTransformer is suppressed by the JVMTI re-entrancy rule.
+    "java.lang.VirtualThread",
+  };
+
+  /**
+   * Re-runs the {@link java.lang.instrument.ClassFileTransformer} for classes that were loaded as a
+   * side-effect during {@link AgentBuilder#installOn} and so escaped the original transformer pass.
+   * See {@link #POST_INSTALL_RETRANSFORM_TARGETS} for the list and rationale.
+   */
+  private static void retransformPostInstallEscapees(final Instrumentation instrumentation) {
+    for (final String name : POST_INSTALL_RETRANSFORM_TARGETS) {
+      try {
+        final Class<?> cls = Class.forName(name, false, null);
+        if (instrumentation.isModifiableClass(cls)) {
+          instrumentation.retransformClasses(cls);
+        }
+      } catch (final ClassNotFoundException notLoaded) {
+        // Not loaded yet — the regular ClassFileTransformer will catch it on first use.
+      } catch (final Throwable failure) {
+        LOGGER.warning("failed to retransform " + name + ": " + failure);
+      }
+    }
+  }
+
+  /**
+   * Builds the base {@link AgentBuilder} with retransformation strategy, error logging, and ignore
+   * rules for ByteBuddy and chaos-agent internal packages.
+   */
+  private static AgentBuilder buildBaseAgentBuilder() {
+    final AgentBuilder.Listener.Adapter errorListener =
+        new AgentBuilder.Listener.Adapter() {
+          @Override
+          public void onError(
+              final String typeName,
+              final ClassLoader classLoader,
+              final JavaModule module,
+              final boolean loaded,
+              final Throwable throwable) {
+            LOGGER.warning("chaos instrumentation failed for " + typeName + ": " + throwable);
+          }
+        };
+    return new AgentBuilder.Default()
+        .disableClassFormatChanges()
+        .with(AgentBuilder.RedefinitionStrategy.RETRANSFORMATION)
+        .with(errorListener)
+        .ignore(
+            ElementMatchers.nameStartsWith("net.bytebuddy.")
+                .or(ElementMatchers.nameStartsWith("com.macstab.chaos.jvm.")));
+  }
+
+  /**
+   * Applies Phase 1 thread, executor, and scheduler transformations that are always installed
+   * regardless of the {@code premainMode} flag.
+   */
+  private static AgentBuilder applyPhase1ThreadAndExecutorTransformations(
+      final AgentBuilder builder) {
+    AgentBuilder b = builder;
+    b = applyThreadStartTransformations(b);
+    b = applyThreadPoolExecutorTransformations(b);
+    b = applyScheduledExecutorTransformations(b);
+    return b;
+  }
+
+  /**
+   * Thread.start instrumentation.
+   *
+   * <p>Targets {@code java.lang.Thread.start()} for platform threads <i>and</i> {@code
+   * java.lang.VirtualThread.start()} for virtual threads. Virtual threads override {@code
+   * Thread.start()} (it is not {@code final}) and dispatch directly to {@code
+   * VirtualThread.start(DEFAULT_SCHEDULER)} without calling {@code Thread.start()}, so a
+   * Thread-only weave silently misses every {@code VIRTUAL_THREAD_START} event. The shared advice
+   * captures {@code @Advice.This Thread} and the runtime dispatcher emits {@code THREAD_START} vs
+   * {@code VIRTUAL_THREAD_START} based on {@code Thread.isVirtual()}.
+   */
+  private static AgentBuilder applyThreadStartTransformations(final AgentBuilder builder) {
+    return builder
+        .type(ElementMatchers.named("java.lang.Thread"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(ThreadAdvice.StartAdvice.class)
+                        .on(ElementMatchers.named("start").and(ElementMatchers.takesArguments(0)))))
+        .type(ElementMatchers.named("java.lang.VirtualThread"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(ThreadAdvice.StartAdvice.class)
+                        .on(
+                            ElementMatchers.named("start")
+                                .and(ElementMatchers.takesArguments(0)))));
+  }
+
+  /** ThreadPoolExecutor execute/beforeExecute/shutdown/shutdownNow/awaitTermination. */
+  private static AgentBuilder applyThreadPoolExecutorTransformations(final AgentBuilder builder) {
+    return builder
+        .type(ElementMatchers.named("java.util.concurrent.ThreadPoolExecutor"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder
+                    .visit(
+                        Advice.to(ExecutorAdvice.ExecuteAdvice.class)
+                            .on(
+                                ElementMatchers.named("execute")
+                                    .and(ElementMatchers.takesArguments(Runnable.class))))
+                    .visit(
+                        Advice.to(ExecutorAdvice.BeforeExecuteAdvice.class)
+                            .on(
+                                ElementMatchers.named("beforeExecute")
+                                    .and(
+                                        ElementMatchers.takesArguments(
+                                            Thread.class, Runnable.class))))
+                    .visit(
+                        Advice.to(ExecutorAdvice.ShutdownAdvice.class)
+                            .on(
+                                ElementMatchers.named("shutdown")
+                                    .and(ElementMatchers.takesArguments(0))))
+                    // shutdownNow() intercepts the forced-shutdown variant that interrupts
+                    // in-flight tasks and returns the undrained queue. Omitting it left any
+                    // selector targeting EXECUTOR_SHUTDOWN silently missing shutdown paths
+                    // that went through shutdownNow instead of shutdown.
+                    .visit(
+                        Advice.to(ExecutorAdvice.ShutdownNowAdvice.class)
+                            .on(
+                                ElementMatchers.named("shutdownNow")
+                                    .and(ElementMatchers.takesArguments(0))))
+                    .visit(
+                        Advice.to(ExecutorAdvice.AwaitTerminationAdvice.class)
+                            .on(
+                                ElementMatchers.named("awaitTermination")
+                                    .and(
+                                        ElementMatchers.takesArguments(
+                                            long.class, java.util.concurrent.TimeUnit.class)))));
+  }
+
+  /** ScheduledThreadPoolExecutor schedule / scheduleAtFixedRate / scheduleWithFixedDelay. */
+  private static AgentBuilder applyScheduledExecutorTransformations(final AgentBuilder builder) {
+    return builder
+        .type(ElementMatchers.named("java.util.concurrent.ScheduledThreadPoolExecutor"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder
+                    .visit(
+                        Advice.to(ScheduledExecutorAdvice.ScheduleRunnableAdvice.class)
+                            .on(
+                                ElementMatchers.named("schedule")
+                                    .and(
+                                        ElementMatchers.takesArguments(
+                                            Runnable.class,
+                                            long.class,
+                                            java.util.concurrent.TimeUnit.class))))
+                    .visit(
+                        Advice.to(ScheduledExecutorAdvice.ScheduleCallableAdvice.class)
+                            .on(
+                                ElementMatchers.named("schedule")
+                                    .and(
+                                        ElementMatchers.takesArguments(
+                                            Callable.class,
+                                            long.class,
+                                            java.util.concurrent.TimeUnit.class))))
+                    .visit(
+                        Advice.to(ScheduledExecutorAdvice.PeriodicAdvice.class)
+                            .on(
+                                ElementMatchers.named("scheduleAtFixedRate")
+                                    .and(
+                                        ElementMatchers.takesArguments(
+                                            Runnable.class,
+                                            long.class,
+                                            long.class,
+                                            java.util.concurrent.TimeUnit.class))))
+                    .visit(
+                        Advice.to(ScheduledExecutorAdvice.PeriodicAdvice.class)
+                            .on(
+                                ElementMatchers.named("scheduleWithFixedDelay")
+                                    .and(
+                                        ElementMatchers.takesArguments(
+                                            Runnable.class,
+                                            long.class,
+                                            long.class,
+                                            java.util.concurrent.TimeUnit.class)))));
+  }
+
+  /**
+   * Applies Phase 1 concurrency transformations (queues, CompletableFuture, ClassLoader, shutdown
+   * hooks, ForkJoin). Gated behind {@code premainMode}.
+   */
+  private static AgentBuilder applyPhase1ConcurrencyTransformations(final AgentBuilder builder) {
+    AgentBuilder b = builder;
+    b = applyBlockingQueueTransformations(b);
+    b = applyCompletableFutureTransformations(b);
+    b = applyClassLoaderTransformations(b);
+    b = applyShutdownHookTransformations(b);
+    b = applyForkJoinTransformations(b);
+    return b;
+  }
+
+  /** BlockingQueue put/take/poll/offer instrumentation. */
+  private static AgentBuilder applyBlockingQueueTransformations(final AgentBuilder builder) {
+    return builder
+        .type(
+            ElementMatchers.isSubTypeOf(java.util.concurrent.BlockingQueue.class)
+                .and(ElementMatchers.not(ElementMatchers.isInterface()))
+                .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder
+                    .visit(Advice.to(QueueAdvice.PutAdvice.class).on(ElementMatchers.named("put")))
+                    .visit(
+                        Advice.to(QueueAdvice.TakeAdvice.class).on(ElementMatchers.named("take")))
+                    .visit(
+                        Advice.to(QueueAdvice.PollAdvice.class).on(ElementMatchers.named("poll")))
+                    .visit(
+                        Advice.to(QueueAdvice.OfferAdvice.class)
+                            .on(
+                                ElementMatchers.named("offer")
+                                    .and(ElementMatchers.takesArguments(1)))));
+  }
+
+  /** CompletableFuture complete / completeExceptionally instrumentation. */
+  private static AgentBuilder applyCompletableFutureTransformations(final AgentBuilder builder) {
+    return builder
+        .type(ElementMatchers.named("java.util.concurrent.CompletableFuture"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder
+                    .visit(
+                        Advice.to(CompletableFutureAdvice.CompleteAdvice.class)
+                            .on(
+                                ElementMatchers.named("complete")
+                                    .and(ElementMatchers.takesArguments(1))))
+                    .visit(
+                        Advice.to(CompletableFutureAdvice.CompleteExceptionallyAdvice.class)
+                            .on(
+                                ElementMatchers.named("completeExceptionally")
+                                    .and(ElementMatchers.takesArguments(Throwable.class)))));
+  }
+
+  /** ClassLoader loadClass / getResource instrumentation. */
+  private static AgentBuilder applyClassLoaderTransformations(final AgentBuilder builder) {
+    return builder
+        .type(ElementMatchers.named("java.lang.ClassLoader"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder
+                    .visit(
+                        // Must match BOTH 1-arg and 2-arg overloads: BuiltinClassLoader
+                        // (the superclass of every default JDK classloader) overrides the
+                        // 2-arg variant but inherits the 1-arg from java.lang.ClassLoader,
+                        // so instrumenting only the 2-arg would miss every standard class
+                        // load via Class.forName / loader.loadClass(name). Custom
+                        // classloaders that inherit both will double-dispatch, which is a
+                        // known cost of the single-class retransformation strategy.
+                        Advice.to(ClassLoaderAdvice.LoadClassAdvice.class)
+                            .on(
+                                ElementMatchers.named("loadClass")
+                                    .and(
+                                        ElementMatchers.takesArguments(String.class, boolean.class)
+                                            .or(ElementMatchers.takesArguments(String.class)))))
+                    .visit(
+                        Advice.to(ClassLoaderAdvice.GetResourceAdvice.class)
+                            .on(
+                                ElementMatchers.named("getResource")
+                                    .and(ElementMatchers.takesArguments(String.class)))));
+  }
+
+  /** Runtime addShutdownHook / removeShutdownHook instrumentation. */
+  private static AgentBuilder applyShutdownHookTransformations(final AgentBuilder builder) {
+    return builder
+        .type(ElementMatchers.named("java.lang.Runtime"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder
+                    .visit(
+                        Advice.to(ShutdownAdvice.AddShutdownHookAdvice.class)
+                            .on(
+                                ElementMatchers.named("addShutdownHook")
+                                    .and(ElementMatchers.takesArguments(Thread.class))))
+                    .visit(
+                        Advice.to(ShutdownAdvice.RemoveShutdownHookAdvice.class)
+                            .on(
+                                ElementMatchers.named("removeShutdownHook")
+                                    .and(ElementMatchers.takesArguments(Thread.class)))));
+  }
+
+  /** ForkJoinTask.doExec instrumentation. */
+  private static AgentBuilder applyForkJoinTransformations(final AgentBuilder builder) {
+    return builder
+        .type(ElementMatchers.named("java.util.concurrent.ForkJoinTask"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(ForkJoinAdvice.DoExecAdvice.class)
+                        .on(
+                            ElementMatchers.named("doExec")
+                                .and(ElementMatchers.takesArguments(0)))));
+  }
+
+  /**
+   * Applies Phase 2 core JVM transformations: System.exit, Runtime gc/halt, reflection, NIO
+   * buffers, serialization, ClassLoader.defineClass, LockSupport, AQS, NIO channels, and sockets.
+   * Gated behind {@code premainMode}.
+   */
+  private static AgentBuilder applyPhase2CoreJvmTransformations(final AgentBuilder builder) {
+    AgentBuilder b = builder;
+    b = applyRuntimeLifecycleTransformations(b);
+    b = applyReflectionAndSerializationTransformations(b);
+    b = applyLockSupportTransformations(b);
+    b = applyAqsMonitorTransformations(b);
+    b = applyNioChannelTransformations(b);
+    b = applySocketAndStreamTransformations(b);
+    b = applyZipTransformations(b);
+    return b;
+  }
+
+  /** System.exit, System.gc, Runtime.gc, Runtime.halt instrumentation. */
+  private static AgentBuilder applyRuntimeLifecycleTransformations(final AgentBuilder builder) {
+    return builder
+        .type(ElementMatchers.named("java.lang.System"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.ExitRequestAdvice.class)
+                            .on(
+                                ElementMatchers.named("exit")
+                                    .and(ElementMatchers.takesArguments(int.class))))
+                    // System.gc() is a non-native Java method that delegates to Runtime.gc().
+                    // Runtime.gc() is native and cannot be instrumented; System.gc() can be.
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.GcRequestAdvice.class)
+                            .on(
+                                ElementMatchers.named("gc")
+                                    .and(ElementMatchers.takesArguments(0)))))
+        .type(ElementMatchers.named("java.lang.Runtime"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(JvmRuntimeAdvice.ExitRequestAdvice.class)
+                        .on(
+                            ElementMatchers.named("halt")
+                                .and(ElementMatchers.takesArguments(int.class)))));
+  }
+
+  /**
+   * Reflection (Method.invoke), direct-buffer allocation, object (de)serialization, and
+   * ClassLoader.defineClass instrumentation.
+   */
+  private static AgentBuilder applyReflectionAndSerializationTransformations(
+      final AgentBuilder builder) {
+    return builder
+        .type(ElementMatchers.named("java.lang.reflect.Method"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(JvmRuntimeAdvice.ReflectionInvokeAdvice.class)
+                        .on(
+                            ElementMatchers.named("invoke")
+                                .and(
+                                    ElementMatchers.takesArguments(Object.class, Object[].class)))))
+        .type(ElementMatchers.named("java.nio.ByteBuffer"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(JvmRuntimeAdvice.DirectBufferAllocateAdvice.class)
+                        .on(
+                            ElementMatchers.named("allocateDirect")
+                                .and(ElementMatchers.takesArguments(int.class)))))
+        .type(ElementMatchers.named("java.io.ObjectInputStream"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(JvmRuntimeAdvice.ObjectDeserializeAdvice.class)
+                        .on(
+                            ElementMatchers.named("readObject")
+                                .and(ElementMatchers.takesArguments(0)))))
+        .type(ElementMatchers.named("java.io.ObjectOutputStream"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(JvmRuntimeAdvice.ObjectSerializeAdvice.class)
+                        .on(
+                            ElementMatchers.named("writeObject")
+                                .and(ElementMatchers.takesArguments(Object.class)))))
+        .type(ElementMatchers.named("java.lang.ClassLoader"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(JvmRuntimeAdvice.ClassDefineAdvice.class)
+                        .on(
+                            ElementMatchers.named("defineClass")
+                                .and(ElementMatchers.takesArgument(0, String.class)))));
+  }
+
+  /**
+   * LockSupport park / parkNanos / parkUntil (THREAD_PARK). Safe to instrument globally: the chaos
+   * runtime never calls LockSupport.park() directly. Internal locks (ManualGate via ReentrantLock)
+   * do call park(), but by the time park() fires, BootstrapDispatcher.DEPTH is already > 0 (set
+   * before delegating to ChaosRuntime), so the DEPTH guard in invoke() returns the fallback
+   * immediately without entering chaos evaluation.
+   */
+  private static AgentBuilder applyLockSupportTransformations(final AgentBuilder builder) {
+    return builder
+        .type(ElementMatchers.named("java.util.concurrent.locks.LockSupport"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder
+                    // park(Object blocker) — used by j.u.c. locks that set the blocker
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.ThreadParkAdvice.class)
+                            .on(
+                                ElementMatchers.named("park")
+                                    .and(ElementMatchers.takesArguments(Object.class))))
+                    // park() — 0-arg variant used by direct LockSupport callers
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.ThreadParkAdvice.class)
+                            .on(
+                                ElementMatchers.named("park")
+                                    .and(ElementMatchers.takesArguments(0))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.ThreadParkAdvice.class)
+                            .on(
+                                ElementMatchers.named("parkNanos")
+                                    .and(ElementMatchers.takesArguments(Object.class, long.class))))
+                    // parkNanos(long nanos) — 1-arg variant without blocker
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.ThreadParkAdvice.class)
+                            .on(
+                                ElementMatchers.named("parkNanos")
+                                    .and(ElementMatchers.takesArguments(long.class))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.ThreadParkAdvice.class)
+                            .on(
+                                ElementMatchers.named("parkUntil")
+                                    .and(ElementMatchers.takesArguments(Object.class, long.class))))
+                    // parkUntil(long deadline) — 1-arg variant without blocker
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.ThreadParkAdvice.class)
+                            .on(
+                                ElementMatchers.named("parkUntil")
+                                    .and(ElementMatchers.takesArguments(long.class)))));
+  }
+
+  /**
+   * AQS.acquire (MONITOR_ENTER proxy). Safe: ChaosRuntime uses ConcurrentHashMap (lock-free) for
+   * registry.match(). The one internal AQS user is ManualGate (ReentrantLock), but ManualGate is
+   * only entered from applyGate() which runs inside DEPTH > 0 context — the DEPTH guard
+   * short-circuits before chaos evaluation begins, preventing recursion.
+   */
+  private static AgentBuilder applyAqsMonitorTransformations(final AgentBuilder builder) {
+    return builder
+        .type(ElementMatchers.named("java.util.concurrent.locks.AbstractQueuedSynchronizer"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(JvmRuntimeAdvice.MonitorEnterAdvice.class)
+                        .on(
+                            ElementMatchers.named("acquire")
+                                .and(ElementMatchers.takesArguments(int.class)))));
+  }
+
+  /**
+   * NIO Selector, SocketChannel, and ServerSocketChannel instrumentation. Concrete-subtype-only
+   * matchers avoid VerifyError on bridge / synthetic methods of abstract bases.
+   */
+  private static AgentBuilder applyNioChannelTransformations(final AgentBuilder builder) {
+    return builder
+        // NIO Selector — target sun.nio.ch.SelectorImpl directly (it declares select(long),
+        // select(), selectNow()) AND concrete AbstractSelector subtypes. Concrete-subtype
+        // targeting alone misses the methods because KQueueSelectorImpl does not re-declare
+        // them; they are inherited from SelectorImpl. Exclude abstract/interface/synthetic
+        // matches on the subtype sweep to avoid VerifyError on bridge methods.
+        .type(ElementMatchers.named("sun.nio.ch.SelectorImpl"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.NioSelectNoArgAdvice.class)
+                            .on(
+                                ElementMatchers.named("select")
+                                    .and(ElementMatchers.takesArguments(0))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.NioSelectTimeoutAdvice.class)
+                            .on(
+                                ElementMatchers.named("select")
+                                    .and(ElementMatchers.takesArguments(long.class))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.NioSelectNowAdvice.class)
+                            .on(
+                                ElementMatchers.named("selectNow")
+                                    .and(ElementMatchers.takesArguments(0)))))
+        .type(
+            ElementMatchers.isSubTypeOf(java.nio.channels.spi.AbstractSelector.class)
+                .and(ElementMatchers.not(ElementMatchers.isAbstract()))
+                .and(ElementMatchers.not(ElementMatchers.isInterface()))
+                .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.NioSelectNoArgAdvice.class)
+                            .on(
+                                ElementMatchers.named("select")
+                                    .and(ElementMatchers.takesArguments(0))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.NioSelectTimeoutAdvice.class)
+                            .on(
+                                ElementMatchers.named("select")
+                                    .and(ElementMatchers.takesArguments(long.class))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.NioSelectNowAdvice.class)
+                            .on(
+                                ElementMatchers.named("selectNow")
+                                    .and(ElementMatchers.takesArguments(0)))))
+        // NIO SocketChannel — the public class is abstract, so name() would only match the
+        // abstract copy; instrument concrete subtypes (sun.nio.ch.SocketChannelImpl,
+        // possibly vendor variants) where the actual I/O code lives. Exclude abstract /
+        // synthetic matches to avoid VerifyError on bridge methods.
+        .type(
+            ElementMatchers.isSubTypeOf(java.nio.channels.SocketChannel.class)
+                .and(ElementMatchers.not(ElementMatchers.isAbstract()))
+                .and(ElementMatchers.not(ElementMatchers.isInterface()))
+                .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.NioChannelConnectAdvice.class)
+                            .on(
+                                ElementMatchers.named("connect")
+                                    .and(
+                                        ElementMatchers.takesArguments(
+                                            java.net.SocketAddress.class))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.NioChannelReadAdvice.class)
+                            .on(
+                                ElementMatchers.named("read")
+                                    .and(
+                                        ElementMatchers.takesArguments(java.nio.ByteBuffer.class))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.NioChannelWriteAdvice.class)
+                            .on(
+                                ElementMatchers.named("write")
+                                    .and(
+                                        ElementMatchers.takesArguments(
+                                            java.nio.ByteBuffer.class)))))
+        // NIO ServerSocketChannel — same abstract-base issue as SocketChannel above.
+        .type(
+            ElementMatchers.isSubTypeOf(java.nio.channels.ServerSocketChannel.class)
+                .and(ElementMatchers.not(ElementMatchers.isAbstract()))
+                .and(ElementMatchers.not(ElementMatchers.isInterface()))
+                .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(JvmRuntimeAdvice.NioChannelAcceptAdvice.class)
+                        .on(
+                            ElementMatchers.named("accept")
+                                .and(ElementMatchers.takesArguments(0)))));
+  }
+
+  /**
+   * Socket / ServerSocket / SocketInputStream / SocketOutputStream instrumentation. Only
+   * instruments the 3-argument bulk variant of SocketInputStream.read(): the 0-arg single-byte
+   * overload delegates internally to read(byte[], int, int), causing double-fire of
+   * beforeSocketRead for each single-byte application call. Restricting to the final I/O dispatch
+   * avoids double-counting rate-limit permits and probability draws.
+   */
+  private static AgentBuilder applySocketAndStreamTransformations(final AgentBuilder builder) {
+    return builder
+        .type(ElementMatchers.named("java.net.Socket"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.SocketConnectAdvice.class)
+                            .on(
+                                ElementMatchers.named("connect")
+                                    .and(
+                                        ElementMatchers.takesArguments(
+                                            java.net.SocketAddress.class, int.class))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.SocketCloseAdvice.class)
+                            .on(
+                                ElementMatchers.named("close")
+                                    .and(ElementMatchers.takesArguments(0)))))
+        .type(ElementMatchers.named("java.net.ServerSocket"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(JvmRuntimeAdvice.SocketAcceptAdvice.class)
+                        .on(
+                            ElementMatchers.named("accept")
+                                .and(ElementMatchers.takesArguments(0)))))
+        // Socket$SocketInputStream / Socket$SocketOutputStream are private inner classes loaded
+        // as a side-effect of ByteBuddy retransforming java.net.Socket (JVMTI ClassFileLoadHook
+        // is not re-entrant, so the inner-class loads escape the transformer). Target
+        // sun.nio.ch.NioSocketImpl instead: it is the default SocketImpl since JDK 13, is a
+        // public top-level class that retransforms cleanly, and is always reached by
+        // Socket.getInputStream().read() / getOutputStream().write() on modern JDKs.
+        .type(ElementMatchers.named("sun.nio.ch.NioSocketImpl"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.SocketReadAdvice.class)
+                            .on(
+                                ElementMatchers.named("read")
+                                    .and(
+                                        ElementMatchers.takesArguments(
+                                            byte[].class, int.class, int.class))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.SocketWriteSingleByteAdvice.class)
+                            .on(
+                                ElementMatchers.named("write")
+                                    .and(ElementMatchers.takesArguments(int.class))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.SocketWriteBulkAdvice.class)
+                            .on(
+                                ElementMatchers.named("write")
+                                    .and(
+                                        ElementMatchers.takesArguments(
+                                            byte[].class, int.class, int.class)))));
+  }
+
+  /** ZIP Inflater / Deflater instrumentation. */
+  private static AgentBuilder applyZipTransformations(final AgentBuilder builder) {
+    return builder
+        .type(ElementMatchers.named("java.util.zip.Inflater"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(JvmRuntimeAdvice.ZipInflateAdvice.class)
+                        .on(ElementMatchers.named("inflate"))))
+        .type(ElementMatchers.named("java.util.zip.Deflater"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(JvmRuntimeAdvice.ZipDeflateAdvice.class)
+                        .on(ElementMatchers.named("deflate"))));
+  }
+
+  /**
+   * Applies Phase 2 network-adjacent transformations: ThreadLocal, clock APIs, CompletableFuture
+   * cancel, and SSL/TLS handshake. Gated behind {@code premainMode}.
+   */
+  private static AgentBuilder applyPhase2NetworkTransformations(final AgentBuilder builder) {
+    AgentBuilder agentBuilder = builder;
+    agentBuilder = applyThreadLocalTransformations(agentBuilder);
+    agentBuilder = applyTimeApiTransformations(agentBuilder);
+    agentBuilder = applyCompletableFutureCancelTransformations(agentBuilder);
+    agentBuilder = applySslHandshakeTransformations(agentBuilder);
+    return agentBuilder;
+  }
+
+  /**
+   * ThreadLocal.get() / set() (THREAD_LOCAL_GET / THREAD_LOCAL_SET). Previously excluded due to
+   * reentrancy with BootstrapDispatcher.DEPTH (also a ThreadLocal). Now safe: ThreadLocalGetAdvice
+   * and ThreadLocalSetAdvice include an identity check (threadLocal == BootstrapDispatcher.DEPTH)
+   * that exits before any delegation, breaking the recursion at the only point where it could
+   * occur. See ThreadLocalGetAdvice for the full reentrancy analysis.
+   */
+  private static AgentBuilder applyThreadLocalTransformations(final AgentBuilder builder) {
+    return builder
+        .type(ElementMatchers.named("java.lang.ThreadLocal"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.ThreadLocalGetAdvice.class)
+                            .on(
+                                ElementMatchers.named("get")
+                                    .and(ElementMatchers.takesArguments(0))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.ThreadLocalSetAdvice.class)
+                            .on(
+                                ElementMatchers.named("set")
+                                    .and(ElementMatchers.takesArguments(1)))));
+  }
+
+  /**
+   * Higher-level time APIs. Direct System.currentTimeMillis() / System.nanoTime() cannot be
+   * intercepted (see note in install()) but java.time.Instant.now(), java.time.LocalDateTime.now(),
+   * java.time.ZonedDateTime.now(), and java.util.Date() are regular Java members that can be woven
+   * at exit.
+   */
+  private static AgentBuilder applyTimeApiTransformations(final AgentBuilder builder) {
+    return builder
+        .type(ElementMatchers.named("java.time.Instant"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(JvmRuntimeAdvice.InstantNowAdvice.class)
+                        .on(
+                            ElementMatchers.named("now")
+                                .and(ElementMatchers.isStatic())
+                                .and(ElementMatchers.takesArguments(0)))))
+        .type(ElementMatchers.named("java.time.LocalDateTime"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(JvmRuntimeAdvice.LocalDateTimeNowAdvice.class)
+                        .on(
+                            ElementMatchers.named("now")
+                                .and(ElementMatchers.isStatic())
+                                .and(ElementMatchers.takesArguments(0)))))
+        .type(ElementMatchers.named("java.time.ZonedDateTime"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(JvmRuntimeAdvice.ZonedDateTimeNowAdvice.class)
+                        .on(
+                            ElementMatchers.named("now")
+                                .and(ElementMatchers.isStatic())
+                                .and(ElementMatchers.takesArguments(0)))))
+        .type(ElementMatchers.named("java.util.Date"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(JvmRuntimeAdvice.DateNewAdvice.class)
+                        .on(
+                            ElementMatchers.isConstructor()
+                                .and(ElementMatchers.takesArguments(0)))));
+  }
+
+  /** CompletableFuture.cancel instrumentation. */
+  private static AgentBuilder applyCompletableFutureCancelTransformations(
+      final AgentBuilder builder) {
+    return builder
+        .type(ElementMatchers.named("java.util.concurrent.CompletableFuture"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(JvmRuntimeAdvice.AsyncCancelAdvice.class)
+                        .on(
+                            ElementMatchers.named("cancel")
+                                .and(ElementMatchers.takesArguments(boolean.class)))));
+  }
+
+  /**
+   * SSL/TLS handshake interception on concrete SSLSocket / SSLEngine subtypes. SSLSocket and
+   * SSLEngine themselves are abstract; concrete subclasses (SSLSocketImpl, SSLEngineImpl) override
+   * startHandshake / beginHandshake, so advice on the abstract class alone would never fire.
+   * Interface / synthetic filters exclude Mockito/CGLIB generated proxies that would otherwise trip
+   * VerifyError during class transformation.
+   */
+  private static AgentBuilder applySslHandshakeTransformations(final AgentBuilder builder) {
+    AgentBuilder agentBuilder =
+        builder
+            .type(
+                ElementMatchers.isSubTypeOf(javax.net.ssl.SSLSocket.class)
+                    .and(ElementMatchers.not(ElementMatchers.isAbstract()))
+                    .and(ElementMatchers.not(ElementMatchers.isInterface()))
+                    .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
+            .transform(
+                (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                    typeBuilder.visit(
+                        Advice.to(JvmRuntimeAdvice.SslHandshakeAdvice.class)
+                            .on(
+                                ElementMatchers.named("startHandshake")
+                                    .and(ElementMatchers.takesArguments(0)))));
+
+    agentBuilder =
+        agentBuilder
+            .type(
+                ElementMatchers.isSubTypeOf(javax.net.ssl.SSLEngine.class)
+                    .and(ElementMatchers.not(ElementMatchers.isAbstract()))
+                    .and(ElementMatchers.not(ElementMatchers.isInterface()))
+                    .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
+            .transform(
+                (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                    typeBuilder.visit(
+                        Advice.to(JvmRuntimeAdvice.SslHandshakeAdvice.class)
+                            .on(
+                                ElementMatchers.named("beginHandshake")
+                                    .and(ElementMatchers.takesArguments(0)))));
+
+    return agentBuilder;
+  }
+
+  /**
+   * Applies Phase 2 optional transformations (HTTP clients, JDBC, Thread.sleep, DNS, file I/O).
+   * Each optional target is guarded by a class-presence check so missing dependencies are silently
+   * skipped. Gated behind {@code premainMode}.
+   */
+  private static AgentBuilder applyPhase2OptionalTransformations(AgentBuilder agentBuilder) {
+    agentBuilder = applyPhase2HttpClientInterception(agentBuilder);
+    agentBuilder = applyPhase2JdbcInterception(agentBuilder);
+    agentBuilder = applyPhase2JndiAndJmxInterception(agentBuilder);
+    agentBuilder = applyPhase2NativeLibraryLoadInterception(agentBuilder);
+    agentBuilder = applyPhase2ThreadSleepInterception(agentBuilder);
+    agentBuilder = applyPhase2DnsResolutionInterception(agentBuilder);
+    agentBuilder = applyPhase2FileIoInterception(agentBuilder);
+    return agentBuilder;
+  }
+
+  /**
+   * Registers HTTP client interception: Java {@code java.net.http.HttpClient} (JDK 11+), OkHttp,
+   * Apache HC 4.x, Apache HC 5.x, Reactor Netty.
+   *
+   * <p>All targets use {@link #instrumentOptional}, which checks class presence before registering.
+   * If the target is absent, no transformation is added. Advice classes only use Object-typed
+   * arguments and reflective URL extraction, so the compileOnly dependencies (OkHttp, Apache HC,
+   * Reactor Netty) are not required at runtime.
+   *
+   * <p>Java 11+ {@code HttpClient} is implemented by {@code jdk.internal.net.http.HttpClientImpl},
+   * which lives in the non-exported {@code java.net.http/jdk.internal.net.http} package. Two pieces
+   * are required to instrument it without users having to set {@code --add-opens} JVM flags:
+   *
+   * <ol>
+   *   <li>Module access — granted automatically by {@link #grantInternalModuleOpens} (programmatic
+   *       {@code redefineModule}) plus the {@code Add-Opens} attribute in the agent JAR's {@code
+   *       MANIFEST.MF}.
+   *   <li>A separate {@link AgentBuilder} pass — historically, mixing this transformation into the
+   *       same builder pass as the other Phase 2 transformations could cause silent corruption of
+   *       the retransformation pipeline. With the open already in place at install time the
+   *       transformation registers cleanly inside this method.
+   * </ol>
+   */
+  private static AgentBuilder applyPhase2HttpClientInterception(AgentBuilder agentBuilder) {
+    // Java 11+ HttpClient — concrete impl in jdk.internal.net.http. Module access is self-granted
+    // by grantInternalModuleOpens() / Add-Opens manifest entry, no user JVM flags required.
+    //
+    // We register the type matcher directly (without instrumentOptional's Class.forName probe)
+    // because the probe would run from the agent's unnamed module and the module-access semantics
+    // of internal JDK packages can hide the class from forName even after it has been opened for
+    // deep reflection. ByteBuddy's retransformation/load events will resolve the class through
+    // the JVM-internal class definition path, which sees it regardless.
+    agentBuilder =
+        agentBuilder
+            .type(ElementMatchers.named("jdk.internal.net.http.HttpClientImpl"))
+            .transform(
+                (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                    typeBuilder
+                        .visit(
+                            Advice.to(HttpClientAdvice.JavaHttpClientSendAdvice.class)
+                                .on(
+                                    ElementMatchers.named("send")
+                                        .and(ElementMatchers.takesArguments(2))))
+                        .visit(
+                            Advice.to(HttpClientAdvice.JavaHttpClientSendAsyncAdvice.class)
+                                .on(
+                                    ElementMatchers.named("sendAsync")
+                                        .and(ElementMatchers.takesArguments(2)))));
+
+    agentBuilder =
+        instrumentOptional(
+            agentBuilder,
+            "okhttp3.RealCall",
+            typeBuilder ->
+                typeBuilder
+                    .visit(
+                        Advice.to(HttpClientAdvice.OkHttpExecuteAdvice.class)
+                            .on(
+                                ElementMatchers.named("execute")
+                                    .and(ElementMatchers.takesArguments(0))))
+                    .visit(
+                        Advice.to(HttpClientAdvice.OkHttpEnqueueAdvice.class)
+                            .on(
+                                ElementMatchers.named("enqueue")
+                                    .and(ElementMatchers.takesArguments(1)))));
+
+    // Apache HC 4.x exposes eight execute() overloads split across two shapes:
+    //   execute(HttpHost, HttpRequest [, HttpContext] [, ResponseHandler])  — HttpHost first
+    //   execute(HttpUriRequest [, HttpContext] [, ResponseHandler])         — request first
+    //
+    // A flat takesArguments(2) matcher (the previous wiring) bound
+    // ApacheHc4ExecuteAdvice indiscriminately to all three 2-arg overloads,
+    // handing the advice an HttpUriRequest where it expected an HttpHost and
+    // leaving single-arg + 3-arg + 4-arg variants completely uncovered. The
+    // refined matchers below disambiguate by first-argument type so every
+    // overload routes to the advice that understands its signature.
+    agentBuilder =
+        instrumentOptional(
+            agentBuilder,
+            "org.apache.http.impl.client.CloseableHttpClient",
+            typeBuilder ->
+                typeBuilder
+                    .visit(
+                        Advice.to(HttpClientAdvice.ApacheHc4ExecuteAdvice.class)
+                            .on(
+                                ElementMatchers.named("execute")
+                                    .and(
+                                        ElementMatchers.takesArgument(
+                                            0, ElementMatchers.named("org.apache.http.HttpHost")))))
+                    .visit(
+                        Advice.to(HttpClientAdvice.ApacheHc4UriExecuteAdvice.class)
+                            .on(
+                                ElementMatchers.named("execute")
+                                    .and(
+                                        ElementMatchers.takesArgument(
+                                            0,
+                                            ElementMatchers.named(
+                                                "org.apache.http.client.methods.HttpUriRequest"))))));
+
+    agentBuilder =
+        instrumentOptional(
+            agentBuilder,
+            "org.apache.hc.client5.http.impl.classic.CloseableHttpClient",
+            typeBuilder ->
+                typeBuilder.visit(
+                    Advice.to(HttpClientAdvice.ApacheHc5ExecuteAdvice.class)
+                        .on(
+                            ElementMatchers.named("execute")
+                                // 2-arg: execute(ClassicHttpRequest, ClassicHttpResponseHandler)
+                                // 3-arg: execute(ClassicHttpRequest, HttpContext,
+                                //                ClassicHttpResponseHandler)
+                                .and(
+                                    ElementMatchers.takesArguments(2)
+                                        .or(ElementMatchers.takesArguments(3))))));
+
+    return instrumentOptional(
+        agentBuilder,
+        "reactor.netty.http.client.HttpClientConnect",
+        typeBuilder ->
+            typeBuilder.visit(
+                Advice.to(HttpClientAdvice.ReactorNettyConnectAdvice.class)
+                    .on(ElementMatchers.named("connect"))));
+  }
+
+  /**
+   * Registers JDBC and connection-pool interception: HikariCP, c3p0, and concrete {@link
+   * java.sql.Statement} / {@link java.sql.Connection} subtypes.
+   *
+   * <p>HikariCP and c3p0 are compileOnly dependencies and are instrumented via {@link
+   * #instrumentOptional} so their absence is tolerated. {@code java.sql.Statement} and {@code
+   * java.sql.Connection} are JDK interfaces — the type matcher is restricted to concrete subtypes
+   * via {@code isSubTypeOf + not(isInterface())} so the advice only binds to implementations
+   * (driver classes such as {@code HikariProxyStatement}, {@code org.postgresql.jdbc.PgStatement},
+   * etc.).
+   */
+  private static AgentBuilder applyPhase2JdbcInterception(AgentBuilder agentBuilder) {
+    agentBuilder =
+        instrumentOptional(
+            agentBuilder,
+            "com.zaxxer.hikari.pool.HikariPool",
+            typeBuilder ->
+                typeBuilder.visit(
+                    Advice.to(JdbcAdvice.HikariGetConnectionAdvice.class)
+                        .on(
+                            ElementMatchers.named("getConnection")
+                                .and(ElementMatchers.takesArguments(long.class)))));
+
+    agentBuilder =
+        instrumentOptional(
+            agentBuilder,
+            "com.mchange.v2.c3p0.impl.C3P0PooledConnectionPool",
+            typeBuilder ->
+                typeBuilder.visit(
+                    Advice.to(JdbcAdvice.C3p0CheckoutAdvice.class)
+                        .on(
+                            ElementMatchers.named("checkoutPooledConnection")
+                                .and(ElementMatchers.takesArguments(0)))));
+
+    // Match every Statement.execute*/Connection.prepareStatement overload whose first
+    // argument is the SQL String. The JDBC API defines generated-keys variants
+    // (execute(String, int), execute(String, int[]), execute(String, String[]),
+    // executeUpdate(String, int), ..., prepareStatement(String, int),
+    // prepareStatement(String, int[]), prepareStatement(String, int, int),
+    // prepareStatement(String, int, int, int), prepareStatement(String, String[]))
+    // that restricting to takesArguments(String.class) silently skipped — any JDBC
+    // caller using Statement.RETURN_GENERATED_KEYS or column-name arrays bypassed
+    // every chaos selector targeting JDBC. The advice only reads @Argument(0), so
+    // takesArgument(0, String.class) is sufficient and binds to all overloads.
+    return agentBuilder
+        .type(
+            ElementMatchers.isSubTypeOf(java.sql.Statement.class)
+                .and(ElementMatchers.not(ElementMatchers.isInterface()))
+                .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder
+                    .visit(
+                        Advice.to(JdbcAdvice.StatementExecuteAdvice.class)
+                            .on(
+                                ElementMatchers.named("execute")
+                                    .and(ElementMatchers.takesArgument(0, String.class))))
+                    .visit(
+                        Advice.to(JdbcAdvice.StatementExecuteAdvice.class)
+                            .on(
+                                ElementMatchers.named("executeQuery")
+                                    .and(ElementMatchers.takesArgument(0, String.class))))
+                    .visit(
+                        Advice.to(JdbcAdvice.StatementExecuteAdvice.class)
+                            .on(
+                                ElementMatchers.named("executeUpdate")
+                                    .and(ElementMatchers.takesArgument(0, String.class))))
+                    .visit(
+                        Advice.to(JdbcAdvice.StatementExecuteAdvice.class)
+                            .on(
+                                ElementMatchers.named("executeLargeUpdate")
+                                    .and(ElementMatchers.takesArgument(0, String.class)))))
+        .type(
+            ElementMatchers.isSubTypeOf(java.sql.Connection.class)
+                .and(ElementMatchers.not(ElementMatchers.isInterface()))
+                .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder
+                    .visit(
+                        Advice.to(JdbcAdvice.PrepareStatementAdvice.class)
+                            .on(
+                                ElementMatchers.named("prepareStatement")
+                                    .and(ElementMatchers.takesArgument(0, String.class))))
+                    .visit(
+                        Advice.to(JdbcAdvice.PrepareStatementAdvice.class)
+                            .on(
+                                ElementMatchers.named("prepareCall")
+                                    .and(ElementMatchers.takesArgument(0, String.class))))
+                    .visit(
+                        Advice.to(JdbcAdvice.CommitAdvice.class)
+                            .on(
+                                ElementMatchers.named("commit")
+                                    .and(ElementMatchers.takesArguments(0))))
+                    .visit(
+                        Advice.to(JdbcAdvice.RollbackAdvice.class)
+                            .on(
+                                ElementMatchers.named("rollback")
+                                    .and(ElementMatchers.takesArguments(0)))));
+  }
+
+  /**
+   * Registers JNDI ({@code javax.naming.InitialContext}) and JMX ({@code
+   * javax.management.MBeanServer}) interception.
+   */
+  private static AgentBuilder applyPhase2JndiAndJmxInterception(AgentBuilder agentBuilder) {
+    agentBuilder =
+        instrumentOptional(
+            agentBuilder,
+            "javax.naming.InitialContext",
+            typeBuilder ->
+                typeBuilder.visit(
+                    Advice.to(JvmRuntimeAdvice.JndiLookupAdvice.class)
+                        .on(
+                            ElementMatchers.named("lookup")
+                                .and(ElementMatchers.takesArguments(String.class)))));
+
+    // MBeanServer is an interface — ByteBuddy cannot inline advice into abstract interface
+    // methods. Target concrete subtypes (e.g. JmxMBeanServer) instead.
+    return agentBuilder
+        .type(
+            ElementMatchers.isSubTypeOf(javax.management.MBeanServer.class)
+                .and(ElementMatchers.not(ElementMatchers.isInterface()))
+                .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.JmxInvokeAdvice.class)
+                            .on(
+                                ElementMatchers.named("invoke")
+                                    .and(ElementMatchers.takesArguments(4))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.JmxGetAttrAdvice.class)
+                            .on(
+                                ElementMatchers.named("getAttribute")
+                                    .and(ElementMatchers.takesArguments(2)))));
+  }
+
+  /**
+   * Registers native-library-load interception.
+   *
+   * <p>{@code System.load(path)} and {@code System.loadLibrary(name)} both delegate to non-native
+   * {@code Runtime.load0(Class, String)} / {@code Runtime.loadLibrary0(Class, String)} — these are
+   * the stable interception points across modern JDKs. {@code
+   * jdk.internal.loader.NativeLibraries.load} cannot be woven because on JDK 17+ it is declared
+   * {@code native} (the actual library load is performed by JNI), and bytecode advice cannot be
+   * inlined into a native method. Missing sites are tolerated by {@link #instrumentOptional}.
+   */
+  private static AgentBuilder applyPhase2NativeLibraryLoadInterception(AgentBuilder agentBuilder) {
+    return instrumentOptional(
+        agentBuilder,
+        "java.lang.Runtime",
+        typeBuilder ->
+            typeBuilder
+                .visit(
+                    Advice.to(JvmRuntimeAdvice.NativeLibraryLoadAdvice.class)
+                        .on(ElementMatchers.named("loadLibrary0")))
+                .visit(
+                    Advice.to(JvmRuntimeAdvice.NativeLibraryLoadAdvice.class)
+                        .on(ElementMatchers.named("load0"))));
+  }
+
+  /** Registers {@link Thread#sleep(long)} and {@link Thread#sleep(long, int)} interception. */
+  private static AgentBuilder applyPhase2ThreadSleepInterception(final AgentBuilder agentBuilder) {
+    return agentBuilder
+        .type(ElementMatchers.named("java.lang.Thread"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder
+                    // sleep(long millis)
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.ThreadSleepAdvice.class)
+                            .on(
+                                ElementMatchers.named("sleep")
+                                    .and(ElementMatchers.isStatic())
+                                    .and(ElementMatchers.takesArguments(long.class))))
+                    // sleep(long millis, int nanos) — advice reads only arg 0 (millis)
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.ThreadSleepAdvice.class)
+                            .on(
+                                ElementMatchers.named("sleep")
+                                    .and(ElementMatchers.isStatic())
+                                    .and(ElementMatchers.takesArguments(long.class, int.class)))));
+  }
+
+  /**
+   * Registers DNS resolution interception ({@link java.net.InetAddress#getByName(String)}, {@link
+   * java.net.InetAddress#getAllByName(String)}, {@link java.net.InetAddress#getLocalHost()}).
+   *
+   * <p>InetAddress is always present; no {@link #instrumentOptional} needed.
+   */
+  private static AgentBuilder applyPhase2DnsResolutionInterception(
+      final AgentBuilder agentBuilder) {
+    return agentBuilder
+        .type(ElementMatchers.named("java.net.InetAddress"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.DnsResolveAdvice.class)
+                            .on(
+                                ElementMatchers.named("getByName")
+                                    .and(ElementMatchers.isStatic())
+                                    .and(ElementMatchers.takesArguments(String.class))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.DnsResolveAdvice.class)
+                            .on(
+                                ElementMatchers.named("getAllByName")
+                                    .and(ElementMatchers.isStatic())
+                                    .and(ElementMatchers.takesArguments(String.class))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.DnsLocalHostAdvice.class)
+                            .on(
+                                ElementMatchers.named("getLocalHost")
+                                    .and(ElementMatchers.isStatic())
+                                    .and(ElementMatchers.takesArguments(0)))));
+  }
+
+  /**
+   * Registers file I/O interception ({@link java.io.FileInputStream#read()} overloads and {@link
+   * java.io.FileOutputStream#write(int)} overloads).
+   */
+  private static AgentBuilder applyPhase2FileIoInterception(final AgentBuilder agentBuilder) {
+    return agentBuilder
+        .type(ElementMatchers.named("java.io.FileInputStream"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.FileReadAdvice.class)
+                            .on(
+                                ElementMatchers.named("read")
+                                    .and(ElementMatchers.takesArguments(0))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.FileReadAdvice.class)
+                            .on(
+                                ElementMatchers.named("read")
+                                    .and(ElementMatchers.takesArguments(byte[].class))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.FileReadAdvice.class)
+                            .on(
+                                ElementMatchers.named("read")
+                                    .and(
+                                        ElementMatchers.takesArguments(
+                                            byte[].class, int.class, int.class)))))
+        .type(ElementMatchers.named("java.io.FileOutputStream"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.FileWriteAdvice.class)
+                            .on(
+                                ElementMatchers.named("write")
+                                    .and(ElementMatchers.takesArguments(int.class))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.FileWriteAdvice.class)
+                            .on(
+                                ElementMatchers.named("write")
+                                    .and(ElementMatchers.takesArguments(byte[].class))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.FileWriteAdvice.class)
+                            .on(
+                                ElementMatchers.named("write")
+                                    .and(
+                                        ElementMatchers.takesArguments(
+                                            byte[].class, int.class, int.class)))));
+  }
+
+  private static Path createSecureTempFile() throws IOException {
+    final String tmpDir = System.getProperty("java.io.tmpdir");
+    final Path tmpPath = Path.of(tmpDir);
+    if (Files.getFileStore(tmpPath).supportsFileAttributeView("posix")) {
+      final java.nio.file.attribute.FileAttribute<?> ownerOnly =
+          java.nio.file.attribute.PosixFilePermissions.asFileAttribute(
+              java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"));
+      return Files.createTempFile(BRIDGE_JAR_PREFIX, BRIDGE_JAR_SUFFIX, ownerOnly);
+    }
+    return Files.createTempFile(BRIDGE_JAR_PREFIX, BRIDGE_JAR_SUFFIX);
+  }
+
+  private static void writeClass(final JarOutputStream jarOutputStream, final String resourcePath)
+      throws IOException {
+    final JarEntry jarEntry = new JarEntry(resourcePath);
+    jarOutputStream.putNextEntry(jarEntry);
+    try (InputStream inputStream =
+        JdkInstrumentationInstaller.class.getClassLoader().getResourceAsStream(resourcePath)) {
+      if (inputStream == null) {
+        throw new IOException("missing bridge resource " + resourcePath);
+      }
+      inputStream.transferTo(jarOutputStream);
+    }
+    jarOutputStream.closeEntry();
+  }
+}

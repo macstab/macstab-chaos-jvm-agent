@@ -35,6 +35,8 @@ public interface ChaosDiagnostics {
    *   <li>all {@link ActivationFailure} records accumulated since agent startup
    *   <li>runtime capability details: JDK version, virtual thread support, JFR availability
    * </ul>
+   *
+   * @return the current diagnostics snapshot
    */
   Snapshot snapshot();
 
@@ -43,6 +45,7 @@ public interface ChaosDiagnostics {
    * that ID is registered.
    *
    * @param scenarioId the scenario ID as provided to {@link ChaosScenario.Builder#build()}
+   * @return the scenario report, or empty if not found
    */
   Optional<ScenarioReport> scenario(String scenarioId);
 
@@ -52,6 +55,8 @@ public interface ChaosDiagnostics {
    *
    * <p>Use in test failure messages or agent startup logging ({@link
    * ChaosPlan.Observability#debugDumpOnStart()}).
+   *
+   * @return a formatted multi-line diagnostics string
    */
   String debugDump();
 

@@ -192,9 +192,14 @@ public enum OperationType {
   // ── Method-level interception ───────────────────────────────────────────────
 
   /**
-   * Fires before the body of an instrumented method executes. Combined with {@link
-   * ChaosEffect.ExceptionInjectionEffect} this injects any exception into any method in any library
-   * without modifying its bytecode at the source level.
+   * Fires when application-side instrumentation routes a method-entry event through the agent's
+   * public hook ({@code chaosRuntime.beforeMethodEnter(className, methodName)}). Combined with
+   * {@link ChaosEffect.ExceptionInjectionEffect} this injects any exception into any method without
+   * modifying its bytecode at the source level.
+   *
+   * <p><b>Manual hook required.</b> The agent does not auto-instrument arbitrary user methods; the
+   * entry event must be raised from interception machinery the application already runs (Spring
+   * AOP, AspectJ, Micronaut / Quarkus interceptors, or your own bytecode advice).
    *
    * <p>Used exclusively with {@link ChaosSelector.MethodSelector}.
    *
@@ -204,9 +209,13 @@ public enum OperationType {
   METHOD_ENTER,
 
   /**
-   * Fires after the body of an instrumented method completes and the return value is available.
-   * Combined with {@link ChaosEffect.ReturnValueCorruptionEffect} this replaces the return value
-   * with a boundary, null, zero, or empty value.
+   * Fires when application-side instrumentation routes a method-exit event through the agent's
+   * public hook ({@code chaosRuntime.afterMethodExit(...)}). Combined with {@link
+   * ChaosEffect.ReturnValueCorruptionEffect} this replaces the return value with a boundary, null,
+   * zero, or empty value.
+   *
+   * <p><b>Manual hook required.</b> Same constraint as {@link #METHOD_ENTER}: wire from your AOP /
+   * interceptor / annotation processor.
    *
    * <p>Used exclusively with {@link ChaosSelector.MethodSelector}.
    *
@@ -238,17 +247,28 @@ public enum OperationType {
   // ── JVM runtime services ────────────────────────────────────────────────────
 
   /**
-   * Fires on every call to {@link System#currentTimeMillis()}. Used with {@link
-   * ChaosEffect.ClockSkewEffect} to apply fixed, drifting, or frozen clock offsets and test
-   * time-dependent logic.
+   * Fires when application code routes a {@link System#currentTimeMillis()} value through the
+   * agent's public clock-skew hook ({@code chaosRuntime.adjustClockMillis(real)}). Used with {@link
+   * ChaosEffect.ClockSkewEffect} to apply fixed, drifting, or frozen offsets.
+   *
+   * <p><b>Manual hook required.</b> The agent does not auto-instrument {@link
+   * System#currentTimeMillis()}: that method is {@code native @IntrinsicCandidate} and HotSpot's
+   * JIT replaces the call with a direct hardware-clock instruction that bypasses any bytecode
+   * wrapper. Use a {@code TimeProvider} / {@code Clock} wrapper that calls {@code
+   * adjustClockMillis} explicitly.
    *
    * <p>Used exclusively with {@link ChaosSelector.JvmRuntimeSelector}.
    */
   SYSTEM_CLOCK_MILLIS,
 
   /**
-   * Fires on every call to {@link System#nanoTime()}. A backward skew intentionally violates the
-   * monotonicity contract to expose assumptions in timing loops and profiling code.
+   * Fires when application code routes a {@link System#nanoTime()} value through the agent's public
+   * clock-skew hook ({@code chaosRuntime.adjustClockNanos(real)}). A backward skew intentionally
+   * violates the monotonicity contract to expose assumptions in timing loops and profiling code.
+   *
+   * <p><b>Manual hook required.</b> Same constraint as {@link #SYSTEM_CLOCK_MILLIS}: {@link
+   * System#nanoTime()} is {@code native @IntrinsicCandidate} and is JIT-replaced with a direct
+   * hardware counter read.
    *
    * <p>Used exclusively with {@link ChaosSelector.JvmRuntimeSelector}.
    */

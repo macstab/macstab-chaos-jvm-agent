@@ -94,19 +94,46 @@ public final class BootstrapDispatcher {
   // ── Phase 1 handles (0-14) ────────────────────────────────────────────────
   public static final int DECORATE_EXECUTOR_RUNNABLE = 0;
 
+  /** Handle index for {@code decorateExecutorCallable}. */
   public static final int DECORATE_EXECUTOR_CALLABLE = 1;
+
+  /** Handle index for {@code beforeThreadStart}. */
   public static final int BEFORE_THREAD_START = 2;
+
+  /** Handle index for {@code beforeWorkerRun}. */
   public static final int BEFORE_WORKER_RUN = 3;
+
+  /** Handle index for {@code beforeForkJoinTaskRun}. */
   public static final int BEFORE_FORK_JOIN_TASK_RUN = 4;
+
+  /** Handle index for {@code adjustScheduleDelay}. */
   public static final int ADJUST_SCHEDULE_DELAY = 5;
+
+  /** Handle index for {@code beforeScheduledTick}. */
   public static final int BEFORE_SCHEDULED_TICK = 6;
+
+  /** Handle index for {@code beforeQueueOperation}. */
   public static final int BEFORE_QUEUE_OPERATION = 7;
+
+  /** Handle index for {@code beforeBooleanQueueOperation}. */
   public static final int BEFORE_BOOLEAN_QUEUE_OPERATION = 8;
+
+  /** Handle index for {@code beforeCompletableFutureComplete}. */
   public static final int BEFORE_COMPLETABLE_FUTURE_COMPLETE = 9;
+
+  /** Handle index for {@code beforeClassLoad}. */
   public static final int BEFORE_CLASS_LOAD = 10;
+
+  /** Handle index for {@code afterResourceLookup}. */
   public static final int AFTER_RESOURCE_LOOKUP = 11;
+
+  /** Handle index for {@code decorateShutdownHook}. */
   public static final int DECORATE_SHUTDOWN_HOOK = 12;
+
+  /** Handle index for {@code resolveShutdownHook}. */
   public static final int RESOLVE_SHUTDOWN_HOOK = 13;
+
+  /** Handle index for {@code beforeExecutorShutdown}. */
   public static final int BEFORE_EXECUTOR_SHUTDOWN = 14;
 
   /**
@@ -117,31 +144,82 @@ public final class BootstrapDispatcher {
   // ── Phase 2 handles (15-41) ───────────────────────────────────────────────
   public static final int ADJUST_CLOCK_MILLIS = 15;
 
+  /** Handle index for {@code adjustClockNanos}. */
   public static final int ADJUST_CLOCK_NANOS = 16;
+
+  /** Handle index for {@code beforeGcRequest}. */
   public static final int BEFORE_GC_REQUEST = 17;
+
+  /** Handle index for {@code beforeExitRequest}. */
   public static final int BEFORE_EXIT_REQUEST = 18;
+
+  /** Handle index for {@code beforeReflectionInvoke}. */
   public static final int BEFORE_REFLECTION_INVOKE = 19;
+
+  /** Handle index for {@code beforeDirectBufferAllocate}. */
   public static final int BEFORE_DIRECT_BUFFER_ALLOCATE = 20;
+
+  /** Handle index for {@code beforeObjectDeserialize}. */
   public static final int BEFORE_OBJECT_DESERIALIZE = 21;
+
+  /** Handle index for {@code beforeClassDefine}. */
   public static final int BEFORE_CLASS_DEFINE = 22;
+
+  /** Handle index for {@code beforeMonitorEnter}. */
   public static final int BEFORE_MONITOR_ENTER = 23;
+
+  /** Handle index for {@code beforeThreadPark}. */
   public static final int BEFORE_THREAD_PARK = 24;
+
+  /** Handle index for {@code beforeNioSelect}. */
   public static final int BEFORE_NIO_SELECT = 25;
+
+  /** Handle index for {@code beforeNioChannelOp}. */
   public static final int BEFORE_NIO_CHANNEL_OP = 26;
+
+  /** Handle index for {@code beforeSocketConnect}. */
   public static final int BEFORE_SOCKET_CONNECT = 27;
+
+  /** Handle index for {@code beforeSocketAccept}. */
   public static final int BEFORE_SOCKET_ACCEPT = 28;
+
+  /** Handle index for {@code beforeSocketRead}. */
   public static final int BEFORE_SOCKET_READ = 29;
+
+  /** Handle index for {@code beforeSocketWrite}. */
   public static final int BEFORE_SOCKET_WRITE = 30;
+
+  /** Handle index for {@code beforeSocketClose}. */
   public static final int BEFORE_SOCKET_CLOSE = 31;
+
+  /** Handle index for {@code beforeJndiLookup}. */
   public static final int BEFORE_JNDI_LOOKUP = 32;
+
+  /** Handle index for {@code beforeObjectSerialize}. */
   public static final int BEFORE_OBJECT_SERIALIZE = 33;
+
+  /** Handle index for {@code beforeNativeLibraryLoad}. */
   public static final int BEFORE_NATIVE_LIBRARY_LOAD = 34;
+
+  /** Handle index for {@code beforeAsyncCancel}. */
   public static final int BEFORE_ASYNC_CANCEL = 35;
+
+  /** Handle index for {@code beforeZipInflate}. */
   public static final int BEFORE_ZIP_INFLATE = 36;
+
+  /** Handle index for {@code beforeZipDeflate}. */
   public static final int BEFORE_ZIP_DEFLATE = 37;
+
+  /** Handle index for {@code beforeThreadLocalGet}. */
   public static final int BEFORE_THREAD_LOCAL_GET = 38;
+
+  /** Handle index for {@code beforeThreadLocalSet}. */
   public static final int BEFORE_THREAD_LOCAL_SET = 39;
+
+  /** Handle index for {@code beforeJmxInvoke}. */
   public static final int BEFORE_JMX_INVOKE = 40;
+
+  /** Handle index for {@code beforeJmxGetAttr}. */
   public static final int BEFORE_JMX_GET_ATTR = 41;
 
   /** Total number of method-handle slots; equals the highest index plus one. */

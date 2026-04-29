@@ -33,6 +33,9 @@ import java.util.regex.Pattern;
  * <p>Task 7: GLOB and REGEX patterns are compiled once and cached in a JVM-wide static {@link
  * ConcurrentHashMap} keyed by the pattern string. Repeated calls to {@link #matches} on hot paths
  * do not pay the {@link Pattern#compile} cost.
+ *
+ * @param mode the matching algorithm; {@code null} is normalised to {@link MatchMode#ANY}
+ * @param value the pattern value; {@code null} is normalised to {@code "*"}
  */
 public record NamePattern(MatchMode mode, String value) {
 
@@ -46,6 +49,8 @@ public record NamePattern(MatchMode mode, String value) {
    * Canonical constructor. Normalises {@code null} mode to {@link MatchMode#ANY} and {@code null}
    * value to {@code "*"}.
    *
+   * @param mode the matching algorithm; {@code null} is normalised to {@link MatchMode#ANY}
+   * @param value the pattern value; {@code null} is normalised to {@code "*"}
    * @throws IllegalArgumentException if mode is not {@link MatchMode#ANY} and value is blank
    */
   @JsonCreator
@@ -61,6 +66,8 @@ public record NamePattern(MatchMode mode, String value) {
   /**
    * Returns a pattern that matches any string, including {@code null}. The standard choice when a
    * selector field is not constrained.
+   *
+   * @return a NamePattern matching any string
    */
   public static NamePattern any() {
     return new NamePattern(MatchMode.ANY, "*");
@@ -70,6 +77,7 @@ public record NamePattern(MatchMode mode, String value) {
    * Returns a pattern that matches only strings exactly equal to {@code value}.
    *
    * @param value the exact string to match; must be non-blank
+   * @return a NamePattern matching the exact value
    */
   public static NamePattern exact(String value) {
     return new NamePattern(MatchMode.EXACT, value);
@@ -80,6 +88,7 @@ public record NamePattern(MatchMode mode, String value) {
    * prefix filtering (e.g., {@code "io.lettuce"} matches all Lettuce classes).
    *
    * @param value the prefix; must be non-blank
+   * @return a NamePattern matching names with the given prefix
    */
   public static NamePattern prefix(String value) {
     return new NamePattern(MatchMode.PREFIX, value);
@@ -92,6 +101,7 @@ public record NamePattern(MatchMode mode, String value) {
    * <p>Examples: {@code "com.example.*.Repository"}, {@code "worker-thread-?"}.
    *
    * @param value the glob expression; must be non-blank
+   * @return a NamePattern matching names with the given glob pattern
    */
   public static NamePattern glob(String value) {
     return new NamePattern(MatchMode.GLOB, value);
@@ -102,6 +112,7 @@ public record NamePattern(MatchMode mode, String value) {
    * candidate string (implicit {@code ^...$} anchoring).
    *
    * @param value a valid Java regex; must be non-blank
+   * @return a NamePattern matching names with the given regex
    * @see Pattern#matches(String, CharSequence)
    */
   public static NamePattern regex(String value) {

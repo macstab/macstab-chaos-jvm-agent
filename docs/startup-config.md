@@ -1,299 +1,372 @@
+<!--
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Engineered by  Christian Schnapka
+                 Embedded Principal+ Engineer
+                 Macstab GmbH · Hamburg, Germany
+                 https://macstab.com
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-->
+
+# chaos-agent-startup-config — Startup Configuration Reference
+
+> Internal reference for configuration source resolution, argument parsing, path safety, and JSON plan mapping.
+> 
+> *Engineered by* **[Christian Schnapka](https://macstab.com)** — Embedded Principal+ Engineer · [Macstab GmbH](https://macstab.com) · Hamburg, Germany
+
+---
+
 # 1. Overview
 
 ## Purpose
 
-`chaos-agent-startup-config` resolves and parses startup-time chaos configuration before the application begins normal execution. It converts agent args, environment variables, inline JSON, base64 payloads, or files into a `ChaosPlan`.
+`chaos-agent-startup-config` resolves a `ChaosPlan` from externally supplied configuration at agent startup. It handles three source types (inline JSON, base64-encoded JSON, file path), applies priority ordering, performs path safety checks for file sources, and delegates JSON deserialization to `ChaosPlanMapper` (Jackson).
 
 ## Scope
 
 In scope:
-
-- agent arg parsing
-- precedence resolution
-- JSON mapping
-- startup debug dump flag resolution
+- `StartupConfigLoader` — source resolution and loading
+- `AgentArgsParser` — comma-separated key=value agent argument parsing
+- `AgentArgs` — parsed argument accessor
+- `ChaosPlanMapper` — Jackson ObjectMapper configuration; `ChaosPlan` serialization/deserialization
+- `ConfigLoadException` — failure type with source metadata
 
 Out of scope:
+- Runtime scenario activation (delegated to `ChaosRuntime`)
+- Agent argument validation beyond parsing
 
-- runtime validation beyond deserialization
-- steady-state configuration reload
-- remote config fetch
+---
 
-# 2. Architectural Context
+# 2. Configuration Source Priority
 
-This module is called by bootstrap during initialization. It depends on:
+Sources are evaluated in fixed priority order. **First match wins.** No merging.
 
-- `chaos-agent-api`
-- Jackson databind
-- Jackson JSR-310 module
-
-It is intentionally small and init-time oriented.
-
-# 3. Key Concepts And Terminology
-
-- Agent args: the raw string passed after `-javaagent:jar=...`
-- Inline JSON: JSON carried directly in `configJson`
-- Base64 JSON: JSON carried in `configBase64`
-- Loaded plan: the parsed `ChaosPlan` plus source and debug-dump metadata
-
-# 4. End-to-End Behavior
-
-Resolution algorithm:
-
-1. Parse raw agent args into `key=value` tokens.
-2. Resolve `configJson` from agent args first, then environment.
-3. Resolve `configBase64` from agent args first, then environment.
-4. Resolve `configFile` from agent args first, then environment.
-5. Resolve `debugDumpOnStart` as agent arg OR environment flag.
-6. Load the first available config source in the order inline JSON, base64 JSON, file.
-7. Deserialize into `ChaosPlan`.
-
-Important consequence:
-
-- source precedence is hard-coded and mutually exclusive; if inline JSON is present, file config is ignored even if also present
-
-# 5. Architecture Diagrams
-
-No PlantUML diagram is included here. The flow is linear, fully local, and short enough that a precedence table is more precise than a diagram.
-
-# 6. Component Breakdown
-
-## `AgentArgsParser`
-
-Responsibility:
-
-- split `key=value` pairs on `;`
-- support backslash escaping
-
-Design trade-off:
-
-- simple and deterministic
-- not a shell-like quoting language
-
-## `StartupConfigLoader`
-
-Responsibility:
-
-- resolve config precedence across args and environment
-- decode base64 when needed
-- read config files when needed
-- expose `LoadedPlan`
-
-## `ChaosPlanMapper`
-
-Responsibility:
-
-- map JSON to and from `ChaosPlan`
-
-# 7. Data Model And State
-
-## Resolution Precedence
-
-Current precedence:
-
-1. `configJson` from agent args, else `MACSTAB_CHAOS_CONFIG_JSON`
-2. `configBase64` from agent args, else `MACSTAB_CHAOS_CONFIG_BASE64`
-3. `configFile` from agent args, else `MACSTAB_CHAOS_CONFIG_FILE`
-
-For the same key, agent args win over environment variables.
-
-## Debug Dump Flag
-
-Current precedence behavior:
-
-- `debugDumpOnStart=true` in agent args enables it
-- `MACSTAB_CHAOS_DEBUG_DUMP_ON_START=true` also enables it
-- the two are OR-ed rather than chosen by precedence
-
-Important caveat:
-
-- `ChaosPlan.Observability.debugDumpOnStart` is not what controls startup dumping in the current bootstrap path
-
-## Parser Grammar
-
-The parser expects:
-
-- tokens separated by `;`
-- each token formatted as `key=value`
-
-Important caveats:
-
-- invalid tokens throw immediately
-- this is not quoted shell syntax
-- inline JSON in agent args is operationally awkward because shell escaping and Java agent argument parsing interact poorly
-
-For production use, `configFile` or `configBase64` is typically safer than raw inline JSON.
-
-## JSON Mapping Behavior
-
-`ChaosPlanMapper`:
-
-- registers `JavaTimeModule`
-- disables trailing-token failures
-- enables unknown-property failures
-
-Operational consequence:
-
-- config is strict about field names
-- extra keys are rejected
-- trailing tokens after the main JSON document are tolerated
-
-# 8. Concurrency And Threading Model
-
-This module is effectively single-threaded init code. It has no meaningful concurrent shared state of its own.
-
-# 9. Error Handling And Failure Modes
-
-Expected failures:
-
-- malformed agent arg token
-- invalid base64 payload
-- unreadable config file
-- invalid JSON
-- unknown JSON properties
-
-Failure behavior:
-
-- file read failures are wrapped in `IllegalArgumentException`
-- JSON parse errors are wrapped in `IllegalArgumentException`
-- there is no fallback from a chosen source to a lower-precedence source if the chosen source is present but invalid
-
-That last point matters operationally. A broken `configJson` value blocks loading even if a valid file path is also present.
-
-# 10. Security Model
-
-Configuration is treated as trusted operator input.
-
-Security-relevant implications:
-
-- config directly controls exception injection, blocking, and resource stress behavior
-- no secret management or encryption model is present
-- inline JSON and environment transport may expose config in process listings or environment inspection depending on deployment practices
-
-# 11. Performance Model
-
-All cost is startup-only:
-
-- string parsing
-- optional base64 decoding
-- optional file read
-- JSON parse and object allocation
-
-This module is not on the steady-state hot path.
-
-# 12. Observability And Operations
-
-This module exposes source provenance only through `LoadedPlan.source`, which bootstrap currently does not surface to operators after initialization.
-
-Operational guidance:
-
-- prefer `configFile` or `configBase64` for reproducibility
-- enable `debugDumpOnStart` when verifying startup activation, not as a permanent observability strategy
-
-# 13. Configuration Reference
-
-Supported keys:
-
-- `configJson`
-- `configBase64`
-- `configFile`
-- `debugDumpOnStart`
-
-Supported environment variables:
-
-- `MACSTAB_CHAOS_CONFIG_JSON`
-- `MACSTAB_CHAOS_CONFIG_BASE64`
-- `MACSTAB_CHAOS_CONFIG_FILE`
-- `MACSTAB_CHAOS_DEBUG_DUMP_ON_START`
-
-Example:
-
-```text
-configFile=/opt/app/chaos-plan.json;debugDumpOnStart=true
+```
+Priority 1: agent arg "configJson"           (inline JSON string in JVM argument)
+Priority 2: env MACSTAB_CHAOS_CONFIG_JSON    (inline JSON in environment variable)
+Priority 3: agent arg "configBase64"         (base64-encoded JSON in JVM argument)
+Priority 4: env MACSTAB_CHAOS_CONFIG_BASE64  (base64-encoded JSON in environment variable)
+Priority 5: agent arg "configFile"           (file path in JVM argument)
+Priority 6: env MACSTAB_CHAOS_CONFIG_FILE    (file path in environment variable)
 ```
 
-Example plan shape:
+If none of the above is present, `StartupConfigLoader.load()` returns `Optional.empty()`. The agent starts with no active scenarios.
+
+---
+
+# 3. Agent Argument Parsing
+
+## Syntax
+
+```
+-javaagent:chaos-agent-bootstrap.jar=key1=value1,key2=value2,...
+```
+
+The raw argument string (the part after `=`) is parsed by `AgentArgsParser`:
+- Split on `,` (but `\,` is an escaped comma — treated as literal `,` within a value)
+- Each token split on the first `=` into key and value
+- Keys and values are trimmed of whitespace
+- Duplicate keys: last value wins
+- Keys without `=`: treated as a boolean flag set to `true`
+- Empty or null argument string: produces empty `AgentArgs`
+
+## AgentArgs Access
+
+```java
+agentArgs.get("configFile")           // String or null
+agentArgs.getBoolean("debugDump", false)  // boolean with default
+```
+
+---
+
+# 4. File Path Safety
+
+When loading from a file path, `StartupConfigLoader.validateAndResolvePath()` applies:
+
+1. **Normalize**: `Path.of(filePath).toAbsolutePath().normalize()` — resolves all `..` and `.` components, neutralizing directory traversal sequences before any check
+2. **Existence check**: `Files.exists(path, LinkOption.NOFOLLOW_LINKS)` — `NOFOLLOW_LINKS` detects broken symlinks without following them
+3. **Symlink rejection**: `Files.isSymbolicLink(path)` — symlinks are rejected outright. This prevents attackers from redirecting config file reads to sensitive files via symlink manipulation after path validation
+4. **Regular file check**: `Files.isRegularFile(path)` — rejects directories, pipes, devices
+5. **Size limit**: `Files.size(path) > 1_048_576` — rejects files larger than 1 MiB to prevent OOM from oversized configs
+
+**TOCTOU risk**: The `exists` + `isSymbolicLink` + `isRegularFile` + `size` sequence is not atomic. A race between the checks and `Files.readString()` is theoretically possible on adversarial filesystems. This risk is accepted because the agent operates in a trusted environment; the size limit is the primary OOM protection.
+
+---
+
+# 5. Base64 Encoding
+
+The `configBase64` source expects **standard Base64** (not URL-safe Base64). `Base64.getDecoder()` is used, not `Base64.getUrlDecoder()`. Decoded bytes are interpreted as UTF-8.
+
+Malformed base64 input throws `ConfigLoadException` with category `base64`.
+
+---
+
+# 6. JSON Plan Format
+
+`ChaosPlanMapper` uses Jackson with:
+- `FAIL_ON_UNKNOWN_PROPERTIES = true`: unknown fields in the JSON cause a `ConfigLoadException`. This prevents silent partial configuration from misconfigured JSON.
+- Duration fields: ISO-8601 strings via Jackson's JavaTimeModule (e.g., `"PT0.1S"` = 100 ms, `"PT30S"` = 30 seconds, `"PT1M"` = 1 minute)
+- Enums: case-insensitive string matching
+
+## Full Plan Schema
 
 ```json
 {
+  "name": "string (required)",
   "metadata": {
-    "name": "startup-delay",
-    "description": "Delay executor submissions at JVM startup"
-  },
-  "observability": {
-    "jmxEnabled": true,
-    "structuredLoggingEnabled": true,
-    "debugDumpOnStart": false
+    "description": "string (optional)",
+    "tags": ["string"] 
   },
   "scenarios": [
     {
-      "id": "delay-submit",
-      "scope": "JVM",
-      "selector": {
-        "type": "executor",
-        "operations": ["EXECUTOR_SUBMIT"],
-        "executorClassPattern": {
-          "mode": "EXACT",
-          "value": "java.util.concurrent.ThreadPoolExecutor"
-        },
-        "taskClassPattern": {
-          "mode": "ANY",
-          "value": "*"
-        },
-        "scheduledOnly": null
-      },
-      "effect": {
-        "type": "delay",
-        "minDelay": "PT0.075S",
-        "maxDelay": "PT0.075S"
-      },
-      "activationPolicy": {
-        "startMode": "AUTOMATIC",
-        "probability": 1.0,
-        "activateAfterMatches": 0,
-        "maxApplications": null,
-        "activeFor": null,
-        "rateLimit": null,
-        "randomSeed": 0
-      },
+      "id": "string (required, unique per plan)",
+      "description": "string (optional)",
+      "scope": "JVM | SESSION",
       "precedence": 0,
-      "tags": {}
+      "selector": { ...selector object... },
+      "effect": { ...effect object... },
+      "activationPolicy": { ...policy object... }
     }
   ]
 }
 ```
 
-# 14. Extension Points And Compatibility Guarantees
+## Selector Object Formats
 
-Treat this module as internal bootstrap support code. The stable compatibility point is the serialized shape of `ChaosPlan` and related API records, not the exact precedence algorithm or helper class names.
+```json
+{ "type": "executor",
+  "operations": ["EXECUTOR_SUBMIT"],          // optional; defaults to all executor ops
+  "executorClassPattern": ".*ThreadPool.*",   // optional; null = wildcard
+  "taskClassPattern": null }
 
-# 15. Stack Walkdown
+{ "type": "thread",
+  "operations": ["THREAD_START"],
+  "threadNamePattern": "worker-.*",
+  "kind": "ANY | PLATFORM | VIRTUAL",
+  "daemon": true }                            // optional; null = wildcard
 
-## API Layer
+{ "type": "network",
+  "operations": ["SOCKET_CONNECT", "SOCKET_READ", "SOCKET_WRITE"],
+  "remoteHostPattern": "db.internal.*" }
 
-Relevant because this module materializes serialized data into API records.
+{ "type": "method",
+  "operations": ["METHOD_ENTER"],
+  "classPattern": "com.example.MyService",
+  "methodNamePattern": "processOrder",
+  "signaturePattern": null }                  // optional; matches parameter type string
 
-## Application / Runtime Layer
+{ "type": "jvmRuntime",
+  "operations": ["SYSTEM_CLOCK_MILLIS", "SYSTEM_CLOCK_NANOS"] }
 
-Relevant only at startup; once the plan is loaded, runtime semantics move to the core.
+{ "type": "stress",
+  "target": "HEAP | THREADS | GC | METASPACE | DIRECT_BUFFER | FINALIZER |
+             DEADLOCK | THREAD_LEAK | THREAD_LOCAL_LEAK | MONITOR_CONTENTION |
+             CODE_CACHE | SAFEPOINT | STRING_INTERN | REFERENCE_QUEUE" }
+```
 
-## JVM Layer
+## Effect Object Formats
 
-Materially relevant only because agent args and environment are part of JVM process startup context.
+```json
+{ "type": "delay",
+  "minDelay": "PT0.1S",       // ISO-8601 duration
+  "maxDelay": "PT0.5S" }      // equal to minDelay for fixed delay
 
-## Memory / Concurrency Layer
+{ "type": "reject",
+  "message": "synthetic failure" }
 
-Not materially relevant. This is init-time parsing code.
+{ "type": "suppress" }
 
-## OS / Container Layer
+{ "type": "gate",
+  "maxBlock": "PT30S" }       // null = block indefinitely until release()
 
-Relevant for file path visibility, environment injection, and the security posture of environment variables and process arguments.
+{ "type": "exceptionalCompletion",
+  "failureKind": "TIMEOUT | CANCELLATION | EXECUTION | IO",
+  "message": "simulated timeout" }
 
-## Infrastructure Layer
+{ "type": "exceptionInjection",
+  "exceptionClassName": "java.io.IOException",
+  "message": "chaos injected",
+  "withStackTrace": true }
 
-Relevant where external deployment tooling or orchestration systems inject config values.
+{ "type": "returnValueCorruption",
+  "strategy": "NULL | ZERO | EMPTY | BOUNDARY_MAX | BOUNDARY_MIN" }
 
-# 16. References
+{ "type": "clockSkew",
+  "mode": "FIXED | DRIFT | FREEZE",
+  "offsetMillis": 5000 }      // irrelevant for FREEZE
 
-- Reference: Java Platform SE API Specification — `java.util.Base64`
-- Reference: Java Platform SE API Specification — `java.nio.file`
+{ "type": "spuriousWakeup" }
+
+{ "type": "heapPressure",
+  "bytes": 67108864 }         // 64 MiB
+
+{ "type": "keepAlive",
+  "threads": 4 }
+
+{ "type": "metaspacePressure",
+  "classCount": 200 }
+
+{ "type": "directBufferPressure",
+  "bytes": 33554432 }         // 32 MiB
+
+{ "type": "gcPressure",
+  "allocationRatePerSecond": 104857600 }  // 100 MiB/s
+
+{ "type": "finalizerBacklog",
+  "objectCount": 1000 }
+
+{ "type": "deadlock" }
+
+{ "type": "threadLeak",
+  "count": 5 }
+
+{ "type": "threadLocalLeak",
+  "entryCount": 50 }
+
+{ "type": "monitorContention",
+  "threads": 8 }
+
+{ "type": "codeCachePressure",
+  "classCount": 500 }
+
+{ "type": "safepointStorm",
+  "intervalMillis": 100 }
+
+{ "type": "stringInternPressure",
+  "count": 100000 }
+
+{ "type": "referenceQueueFlood",
+  "count": 50000 }
+```
+
+## Activation Policy Object Format
+
+```json
+{
+  "startMode": "AUTOMATIC | MANUAL",
+  "probability": 1.0,
+  "rateLimit": {
+    "permits": 10,
+    "window": "PT1S"
+  },
+  "activateAfterMatches": 0,
+  "activeFor": "PT30S",
+  "maxApplications": 100,
+  "randomSeed": 42
+}
+```
+
+All fields are optional. Absent fields use defaults:
+- `startMode`: `AUTOMATIC`
+- `probability`: `1.0`
+- `rateLimit`: null (no limit)
+- `activateAfterMatches`: `0`
+- `activeFor`: null (no expiry)
+- `maxApplications`: null (unlimited)
+- `randomSeed`: null (equivalent to `0`)
+
+---
+
+# 7. Error Handling
+
+`ConfigLoadException` carries:
+- `message`: human-readable description
+- `source`: identifies the source type (`"inline-json"`, `"base64"`, `"file:/path/to/file"`)
+- `cause`: wrapped `IOException` or `JsonParseException` where applicable
+
+`ConfigLoadException` is an unchecked exception. It propagates out of `StartupConfigLoader.load()` and, if uncaught, aborts `premain()` — which typically causes the JVM to fail to start.
+
+---
+
+# 8. Observability
+
+No logs are emitted by this module during normal operation. Errors throw `ConfigLoadException` with descriptive messages. The `debugDumpOnStart` flag causes `ChaosRuntime.diagnostics().debugDump()` to be printed to `System.out` immediately after plan activation — useful for startup verification.
+
+---
+
+# 10. Live Config Reload — File Watch Mode
+
+When the config source is a **file**, the agent can poll it continuously and apply incremental diffs to the live scenario registry. This is the primary integration point for external chaos pipeline frameworks that need to change the running scenario set without restarting the JVM.
+
+## Enabling watch mode
+
+```bash
+# agent arg (milliseconds)
+-javaagent:agent.jar=configFile=/etc/chaos/plan.json,configWatchInterval=500
+
+# or via environment variables
+MACSTAB_CHAOS_CONFIG_FILE=/etc/chaos/plan.json
+MACSTAB_CHAOS_WATCH_INTERVAL=500
+```
+
+`configWatchInterval` (agent arg) takes precedence over `MACSTAB_CHAOS_WATCH_INTERVAL` (env var). A value of `0` or absent disables watching — the file is read once at startup. Watch mode is only available for file sources; inline JSON and base64 sources always use read-once mode.
+
+## Diff algorithm
+
+On every poll tick `StartupConfigPoller`:
+
+1. Stats the file (`Files.getLastModifiedTime`). If the mtime matches the last successful read, the tick is a no-op — no parse, no diff.
+2. If the mtime changed: reads and parses the new plan.
+3. Computes a structural diff against the currently active scenario set:
+
+| Case                                        | Action                     |
+|---------------------------------------------|----------------------------|
+| Same `id`, all 8 fields identical           | Kept running — untouched   |
+| Same `id`, any field changed                | Stopped, then re-activated |
+| Present in new plan, absent from active set | Activated                  |
+| Present in active set, absent from new plan | Stopped                    |
+
+Equality is record equality across all eight `ChaosScenario` fields. A single field change — even probability — triggers a stop + re-activate cycle.
+
+## Isolation guarantee
+
+The poller only manages scenarios it activated itself (from the config file). Scenarios activated programmatically via `ChaosRuntime.activate()` or through a `ChaosSession` are invisible to the poller and are never stopped or modified by a reload.
+
+## Implementation details
+
+- Single daemon thread named `chaos-config-poller`.
+- Scheduler started by `startWithInitialPlan()` during agent initialization; stopped by `close()`.
+- `close()` stops the scheduler and calls `ChaosActivationHandle.stop()` on all managed scenarios.
+- The daemon thread does not prevent JVM shutdown.
+
+## External framework integration
+
+A chaos pipeline framework that wants to push a new scenario set into a running JVM:
+
+1. Write the updated plan to a temp file in the same directory.
+2. Atomically rename it over the watched file (`mv` / `Files.move` with `ATOMIC_MOVE`).
+3. Wait one poll interval — the agent detects the mtime change, diffs, and applies.
+
+No JVM restart required.
+
+## Configuration reference
+
+| Agent arg             | Environment variable           | Type      | Default      | Description                  |
+|-----------------------|--------------------------------|-----------|--------------|------------------------------|
+| `configWatchInterval` | `MACSTAB_CHAOS_WATCH_INTERVAL` | long (ms) | 0 (disabled) | Poll interval; 0 = read-once |
+
+---
+
+# 9. References
+
+- Reference: ISO 8601 — Date and time format; duration strings (`PT0.1S`, `PT30S`) — https://www.iso.org/iso-8601-date-and-time-format.html
+- Reference: Jackson `ObjectMapper` — `FAIL_ON_UNKNOWN_PROPERTIES`, `JavaTimeModule` for `Duration` — https://github.com/FasterXML/jackson-databind
+- Reference: Java SE API — `java.util.Base64.Decoder` (standard Base64 alphabet, RFC 4648 §4) — https://docs.oracle.com/en/java/docs/api/java.base/java/util/Base64.html
+- Reference: RFC 4648 §4 — Base64 Encoding — https://www.rfc-editor.org/rfc/rfc4648#section-4
+- Reference: Java SE API — `java.nio.file.Files.exists(Path, LinkOption...)`, `LinkOption.NOFOLLOW_LINKS` — https://docs.oracle.com/en/java/docs/api/java.base/java/nio/file/Files.html
+- Reference: Java SE API — `java.nio.file.Path.normalize()` (resolves `..` path traversal) — https://docs.oracle.com/en/java/docs/api/java.base/java/nio/file/Path.html#normalize()
+- Reference: CWE-22 — Path Traversal — https://cwe.mitre.org/data/definitions/22.html
+- Reference: CWE-61 — UNIX Symbolic Link Following — https://cwe.mitre.org/data/definitions/61.html
+
+---
+
+<div align="center">
+
+*Architecture, implementation, and documentation crafted with Love and Passion by*
+
+**[Christian Schnapka](https://macstab.com)**  
+Embedded Principal+ Engineer  
+[Macstab GmbH](https://macstab.com) · Hamburg, Germany
+
+*Building systems that operate correctly at the edges — including the ones you deliberately break.*
+
+</div>

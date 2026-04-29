@@ -24,11 +24,17 @@ import java.util.List;
  * <p>All scenarios in a plan must have {@link ChaosScenario.ScenarioScope#JVM JVM} scope when
  * activated at the JVM level. For session-scoped plans use {@link
  * ChaosSession#activate(ChaosPlan)}.
+ *
+ * @param metadata plan identity; defaults to {@code Metadata("default", "")} if null
+ * @param observability per-plan observability toggles; defaults to JMX+logging enabled if null
+ * @param scenarios the chaos scenarios to activate; must be non-empty
  */
 public record ChaosPlan(
     Metadata metadata, Observability observability, List<ChaosScenario> scenarios) {
 
   /**
+   * Validates and normalises the ChaosPlan fields.
+   *
    * @param metadata plan identity; defaults to {@code Metadata("default", "")} if null
    * @param observability per-plan observability toggles; defaults to JMX+logging enabled if null
    * @param scenarios the chaos scenarios to activate; must be non-empty
@@ -47,10 +53,15 @@ public record ChaosPlan(
    * Identity and human-readable description of a chaos plan.
    *
    * <p>The name appears in diagnostics, JMX MBean attributes, JFR events, and log messages.
+   *
+   * @param name unique plan name used in diagnostics; must be non-blank
+   * @param description optional free-text description; null is normalised to {@code ""}
    */
   public record Metadata(String name, String description) {
 
     /**
+     * Validates and normalises the Metadata fields.
+     *
      * @param name unique plan name used in diagnostics; must be non-blank
      * @param description optional free-text description; null is normalised to {@code ""}
      * @throws IllegalArgumentException if {@code name} is null or blank

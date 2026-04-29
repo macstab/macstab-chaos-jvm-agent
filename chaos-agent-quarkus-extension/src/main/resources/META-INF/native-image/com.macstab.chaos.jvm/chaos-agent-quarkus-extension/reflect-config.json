@@ -1,0 +1,368 @@
+[
+  {
+    "name": "com.macstab.chaos.jvm.api.ChaosPlan",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.macstab.chaos.jvm.api.ChaosPlan$Metadata",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.macstab.chaos.jvm.api.ChaosPlan$Observability",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.macstab.chaos.jvm.api.ChaosScenario",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.macstab.chaos.jvm.api.ChaosScenario$ScenarioScope",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.macstab.chaos.jvm.api.ActivationPolicy",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.macstab.chaos.jvm.api.ActivationPolicy$RateLimit",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.macstab.chaos.jvm.api.ActivationPolicy$StartMode",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.macstab.chaos.jvm.api.NamePattern",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.macstab.chaos.jvm.api.NamePattern$MatchMode",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.macstab.chaos.jvm.api.OperationType",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.macstab.chaos.jvm.api.ChaosSelector",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.macstab.chaos.jvm.api.ChaosSelector$ThreadKind",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.macstab.chaos.jvm.api.ChaosSelector$StressTarget",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.macstab.chaos.jvm.api.ChaosSelector$ThreadSelector",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.macstab.chaos.jvm.api.ChaosSelector$ExecutorSelector",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.macstab.chaos.jvm.api.ChaosSelector$QueueSelector",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.macstab.chaos.jvm.api.ChaosSelector$AsyncSelector",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.macstab.chaos.jvm.api.ChaosSelector$SchedulingSelector",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.macstab.chaos.jvm.api.ChaosSelector$ShutdownSelector",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.macstab.chaos.jvm.api.ChaosSelector$ClassLoadingSelector",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.macstab.chaos.jvm.api.ChaosSelector$MethodSelector",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.macstab.chaos.jvm.api.ChaosSelector$MonitorSelector",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.macstab.chaos.jvm.api.ChaosSelector$JvmRuntimeSelector",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.macstab.chaos.jvm.api.ChaosSelector$NioSelector",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.macstab.chaos.jvm.api.ChaosSelector$NetworkSelector",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.macstab.chaos.jvm.api.ChaosSelector$ThreadLocalSelector",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.macstab.chaos.jvm.api.ChaosSelector$HttpClientSelector",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.macstab.chaos.jvm.api.ChaosSelector$JdbcSelector",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.macstab.chaos.jvm.api.ChaosSelector$DnsSelector",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.macstab.chaos.jvm.api.ChaosSelector$SslSelector",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.macstab.chaos.jvm.api.ChaosSelector$FileIoSelector",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.macstab.chaos.jvm.api.ChaosSelector$StressSelector",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.macstab.chaos.jvm.api.ChaosEffect",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.macstab.chaos.jvm.api.ChaosEffect$FailureKind",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.macstab.chaos.jvm.api.ChaosEffect$ReturnValueStrategy",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.macstab.chaos.jvm.api.ChaosEffect$ClockSkewMode",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.macstab.chaos.jvm.api.ChaosEffect$DelayEffect",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.macstab.chaos.jvm.api.ChaosEffect$GateEffect",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.macstab.chaos.jvm.api.ChaosEffect$RejectEffect",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.macstab.chaos.jvm.api.ChaosEffect$SuppressEffect",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.macstab.chaos.jvm.api.ChaosEffect$ExceptionalCompletionEffect",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.macstab.chaos.jvm.api.ChaosEffect$ExceptionInjectionEffect",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.macstab.chaos.jvm.api.ChaosEffect$ReturnValueCorruptionEffect",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.macstab.chaos.jvm.api.ChaosEffect$ClockSkewEffect",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.macstab.chaos.jvm.api.ChaosEffect$HeapPressureEffect",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.macstab.chaos.jvm.api.ChaosEffect$KeepAliveEffect",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.macstab.chaos.jvm.api.ChaosEffect$MetaspacePressureEffect",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.macstab.chaos.jvm.api.ChaosEffect$DirectBufferPressureEffect",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.macstab.chaos.jvm.api.ChaosEffect$GcPressureEffect",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.macstab.chaos.jvm.api.ChaosEffect$FinalizerBacklogEffect",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.macstab.chaos.jvm.api.ChaosEffect$DeadlockEffect",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.macstab.chaos.jvm.api.ChaosEffect$ThreadLeakEffect",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.macstab.chaos.jvm.api.ChaosEffect$ThreadLocalLeakEffect",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.macstab.chaos.jvm.api.ChaosEffect$MonitorContentionEffect",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.macstab.chaos.jvm.api.ChaosEffect$SpuriousWakeupEffect",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.macstab.chaos.jvm.api.ChaosEffect$CodeCachePressureEffect",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.macstab.chaos.jvm.api.ChaosEffect$SafepointStormEffect",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.macstab.chaos.jvm.api.ChaosEffect$StringInternPressureEffect",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.macstab.chaos.jvm.api.ChaosEffect$ReferenceQueueFloodEffect",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "com.macstab.chaos.jvm.api.ChaosEffect$VirtualThreadCarrierPinningEffect",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  }
+]
