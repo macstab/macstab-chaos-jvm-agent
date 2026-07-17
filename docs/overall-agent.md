@@ -891,7 +891,7 @@ Internal modules (`chaos-agent-core`, `chaos-agent-instrumentation-jdk`, `chaos-
 
 ## Versioning
 
-Current version: `0.1.0-SNAPSHOT`. No GA release. API stability guarantees are aspirational at this stage.
+Current version: `1.0.0`. No GA release. API stability guarantees are aspirational at this stage.
 
 ## Migration Notes
 
