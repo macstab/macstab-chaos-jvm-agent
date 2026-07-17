@@ -352,7 +352,7 @@ This is documented in JEP 444: "A virtual thread cannot be unmounted when it is 
 
 ```kotlin
 // build.gradle.kts
-testImplementation("com.macstab:chaos-agent-testkit:1.0.0")
+testImplementation("com.macstab:chaos-agent-testkit:0.1.0-SNAPSHOT")
 ```
 
 ### 2. Annotate your test
@@ -381,7 +381,7 @@ class MyServiceTest {
 ### 3. Or attach at startup for production-like testing
 
 ```bash
-java -javaagent:chaos-agent-bootstrap-1.0.0.jar=configFile=/etc/chaos/plan.json \
+java -javaagent:chaos-agent-bootstrap-0.1.0-SNAPSHOT.jar=configFile=/etc/chaos/plan.json \
      -jar your-app.jar
 ```
 
@@ -884,10 +884,10 @@ The test starters give a `@SpringBootTest` class one-annotation access to chaos 
 
 ```kotlin
 // build.gradle.kts — Spring Boot 3
-testImplementation("com.macstab:chaos-agent-spring-boot3-test-starter:1.0.0")
+testImplementation("com.macstab:chaos-agent-spring-boot3-test-starter:0.1.0-SNAPSHOT")
 
 // Spring Boot 4
-testImplementation("com.macstab:chaos-agent-spring-boot4-test-starter:1.0.0")
+testImplementation("com.macstab:chaos-agent-spring-boot4-test-starter:0.1.0-SNAPSHOT")
 ```
 
 ```java
@@ -918,10 +918,10 @@ The runtime starters wire the chaos agent into a running Spring Boot application
 
 ```kotlin
 // build.gradle.kts — Spring Boot 3
-implementation("com.macstab:chaos-agent-spring-boot3-starter:1.0.0")
+implementation("com.macstab:chaos-agent-spring-boot3-starter:0.1.0-SNAPSHOT")
 
 // Spring Boot 4
-implementation("com.macstab:chaos-agent-spring-boot4-starter:1.0.0")
+implementation("com.macstab:chaos-agent-spring-boot4-starter:0.1.0-SNAPSHOT")
 ```
 
 ```yaml

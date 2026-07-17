@@ -53,17 +53,17 @@ The most novel capability is **CI/CD pipeline integration**: chaos scenarios run
 ```kotlin
 dependencies {
     // Required for all usage — the API types and agent bootstrap
-    testImplementation("com.macstab.chaos.jvm:chaos-agent-testkit:1.0.0")
+    testImplementation("com.macstab.chaos.jvm:chaos-agent-testkit:0.1.0-SNAPSHOT")
 
     // Spring Boot 3 test integration (choose one)
-    testImplementation("com.macstab.chaos.jvm:chaos-agent-spring-boot3-test-starter:1.0.0")
+    testImplementation("com.macstab.chaos.jvm:chaos-agent-spring-boot3-test-starter:0.1.0-SNAPSHOT")
     // or Spring Boot 4:
-    testImplementation("com.macstab.chaos.jvm:chaos-agent-spring-boot4-test-starter:1.0.0")
+    testImplementation("com.macstab.chaos.jvm:chaos-agent-spring-boot4-test-starter:0.1.0-SNAPSHOT")
 
     // Spring Boot 3 runtime starter (Actuator endpoint, live reload)
-    implementation("com.macstab.chaos.jvm:chaos-agent-spring-boot3-starter:1.0.0")
+    implementation("com.macstab.chaos.jvm:chaos-agent-spring-boot3-starter:0.1.0-SNAPSHOT")
     // or Spring Boot 4:
-    implementation("com.macstab.chaos.jvm:chaos-agent-spring-boot4-starter:1.0.0")
+    implementation("com.macstab.chaos.jvm:chaos-agent-spring-boot4-starter:0.1.0-SNAPSHOT")
 }
 ```
 
@@ -75,14 +75,14 @@ The agent self-attaches at test time via the JDK Attach API — no `-javaagent:`
 <dependency>
     <groupId>com.macstab.chaos.jvm</groupId>
     <artifactId>chaos-agent-testkit</artifactId>
-    <version>1.0.0</version>
+    <version>0.1.0-SNAPSHOT</version>
     <scope>test</scope>
 </dependency>
 <!-- Or Spring Boot 3 test starter: -->
 <dependency>
     <groupId>com.macstab.chaos.jvm</groupId>
     <artifactId>chaos-agent-spring-boot3-test-starter</artifactId>
-    <version>1.0.0</version>
+    <version>0.1.0-SNAPSHOT</version>
     <scope>test</scope>
 </dependency>
 ```
@@ -92,14 +92,14 @@ The agent self-attaches at test time via the JDK Attach API — no `-javaagent:`
 For production deployments or CLI-driven chaos, attach at startup:
 
 ```
-java -javaagent:chaos-agent-bootstrap-1.0.0.jar \
+java -javaagent:chaos-agent-bootstrap-0.1.0-SNAPSHOT.jar \
      -jar your-application.jar
 ```
 
 Pass a startup config via agent args or environment variable (see §7 for the full config reference):
 
 ```
-java -javaagent:chaos-agent-bootstrap-1.0.0.jar=configFile=/etc/chaos/plan.json \
+java -javaagent:chaos-agent-bootstrap-0.1.0-SNAPSHOT.jar=configFile=/etc/chaos/plan.json \
      -jar your-application.jar
 ```
 
@@ -418,7 +418,7 @@ FROM eclipse-temurin:21-jre-jammy
 WORKDIR /app
 
 COPY build/libs/your-application.jar app.jar
-COPY build/libs/chaos-agent-bootstrap-1.0.0.jar chaos-agent.jar
+COPY build/libs/chaos-agent-bootstrap-0.1.0-SNAPSHOT.jar chaos-agent.jar
 
 # Mount a chaos plan at runtime via environment variable or file
 ENV MACSTAB_CHAOS_CONFIG_FILE=/etc/chaos/plan.json
@@ -463,7 +463,7 @@ spec:
     spec:
       initContainers:
         - name: copy-chaos-agent
-          image: your-registry/chaos-agent:1.0.0
+          image: your-registry/chaos-agent:0.1.0-SNAPSHOT
           command: ["cp", "/chaos-agent-bootstrap.jar", "/shared/chaos-agent.jar"]
           volumeMounts:
             - name: agent-volume
@@ -580,7 +580,7 @@ The MBean is read-only: it provides diagnostics but does not accept scenario act
 Add the runtime starter to expose a `/chaos` Actuator endpoint:
 
 ```kotlin
-implementation("com.macstab.chaos.jvm:chaos-agent-spring-boot3-starter:1.0.0")
+implementation("com.macstab.chaos.jvm:chaos-agent-spring-boot3-starter:0.1.0-SNAPSHOT")
 ```
 
 ```yaml
