@@ -28,7 +28,7 @@ public class ChaosActuatorEndpoint {
   private static final Logger LOGGER = Logger.getLogger(ChaosActuatorEndpoint.class.getName());
 
   /** Key prefix used by the core runtime for JVM-scoped scenario handles. */
-  private static final String JVM_SCOPE_KEY_PREFIX = "jvm::";
+  private static final String PLAN_HANDLE_PREFIX = "plan:";
 
   private final ChaosControlPlane controlPlane;
   private final ChaosHandleRegistry handleRegistry;
@@ -81,9 +81,11 @@ public class ChaosActuatorEndpoint {
       final ChaosActivationHandle handle = controlPlane.activate(plan);
       handleRegistry.register(handle);
       return new ActivationResponse("activated", handle.id(), null);
-    } catch (final IllegalStateException | IllegalArgumentException activationFailure) {
-      // Scope conflicts ("scenario key already active"), selector/effect validation mismatches,
-      // or feature-unsupported errors surface here. Same redaction rationale as the parse path:
+    } catch (final RuntimeException activationFailure) {
+      // Scope conflicts (ChaosActivationException "scenario key already active"), selector/effect
+      // validation failures (ChaosValidationException) and unsupported features surface here.
+      // Catching every RuntimeException keeps them out of the default 500 error rendering, which
+      // would expose stack frames in the response body. Same redaction rationale as the parse path:
       // a plan-author mistake must not leak the library's internal exception hierarchy to the
       // HTTP client.
       LOGGER.log(Level.WARNING, activationFailure, () -> "chaos-agent: plan activation rejected");
@@ -92,38 +94,31 @@ public class ChaosActuatorEndpoint {
   }
 
   /**
-   * Stops a specific scenario by its scenario ID.
+   * Stops a plan activated through this endpoint ({@code DELETE /actuator/chaos/{id}}).
    *
-   * <p><b>Note on TOCTOU</b>: the "not-found" vs "unmanaged" distinction involves a non-atomic
-   * check between {@link ChaosHandleRegistry#stop} and {@link
-   * com.macstab.chaos.jvm.api.ChaosDiagnostics#scenario}. A concurrent stop on another thread (or
-   * via a different handle) can race the diagnostics lookup, producing a transient "not-found"
-   * response for a scenario that was stopped between the two calls. This is accepted as a
-   * documentation-only race: locking both registries together would require cross-module coupling
-   * that is not warranted for an informational status response.
+   * <p>{@code id} is the {@code handleId} returned by {@link #activate(String)} ({@code
+   * plan:<name>}) or the plan name alone. Plans are activated atomically, so an individual scenario
+   * of a plan cannot be stopped on its own: a scenario id answers {@code "part-of-plan"} with the
+   * plan handle id to stop instead. An earlier version looked handles up under {@code
+   * jvm::<scenarioId>}, a key this endpoint never registers, so every stop by scenario id answered
+   * {@code "unmanaged"}.
    *
-   * @param scenarioId scenario identifier
-   * @return summary of the stop outcome
+   * @param id plan handle id, plan name, or scenario id
+   * @return the outcome; never {@code null}
    */
   @DeleteOperation
-  public StopResponse stop(@Selector final String scenarioId) {
-    // Handles are stored under the composite key "<scopeKey>::<scenarioId>" (e.g. "jvm::my-id").
-    // Try the composite JVM-scope key first, then the plain id as a fallback for handles activated
-    // with a different scope prefix (session-scoped, custom).
-    boolean stopped = handleRegistry.stop(JVM_SCOPE_KEY_PREFIX + scenarioId);
-    if (!stopped) {
-      stopped = handleRegistry.stop(scenarioId);
+  public StopResponse stop(@Selector final String id) {
+    if (handleRegistry.stop(id) || handleRegistry.stop(PLAN_HANDLE_PREFIX + id)) {
+      return new StopResponse("stopped", id, null);
     }
-    if (stopped) {
-      return new StopResponse("stopped", scenarioId, null);
-    }
-    if (controlPlane.diagnostics().scenario(scenarioId).isPresent()) {
+    if (controlPlane.diagnostics().scenario(id).isPresent()) {
       return new StopResponse(
           "unmanaged",
-          scenarioId,
-          "scenario is registered but not managed by this starter; stop via its activation handle");
+          id,
+          "scenario was not activated through this endpoint, or is part of a plan; stop the plan"
+              + " by its handle id (plan:<name>), or the scenario via its activation handle");
     }
-    return new StopResponse("not-found", scenarioId, "no scenario with id " + scenarioId);
+    return new StopResponse("not-found", id, "no plan or scenario with id " + id);
   }
 
   /**

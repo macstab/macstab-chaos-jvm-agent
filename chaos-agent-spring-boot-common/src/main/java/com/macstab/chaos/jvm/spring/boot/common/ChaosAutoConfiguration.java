@@ -17,6 +17,7 @@ import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.ApplicationListener;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Configuration;
 
 /**
@@ -28,11 +29,13 @@ import org.springframework.context.annotation.Configuration;
  * META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports} in each
  * version-specific starter points at this class.
  *
- * <p>All beans are gated behind {@code macstab.chaos.enabled=true}. When disabled, no chaos
- * infrastructure is loaded into the application context.
+ * <p>All beans are gated behind {@code macstab.chaos.enabled=true} from a trusted property source,
+ * decided by {@link TrustedChaosEnablement} — the same rule the early-attach {@code
+ * EnvironmentPostProcessor} applies. When disabled, no chaos infrastructure is loaded into the
+ * application context.
  */
 @AutoConfiguration
-@ConditionalOnProperty(prefix = "macstab.chaos", name = "enabled", havingValue = "true")
+@Conditional(OnTrustedChaosEnablementCondition.class)
 @EnableConfigurationProperties(ChaosProperties.class)
 public class ChaosAutoConfiguration {
 
@@ -45,15 +48,16 @@ public class ChaosAutoConfiguration {
    * Exposes the installed {@link ChaosControlPlane} as a Spring-managed bean.
    *
    * <p>The control plane is a JVM-wide singleton held by {@code ChaosAgentBootstrap.RUNTIME}; it
-   * survives context close and is safely shared across multiple application contexts in the same
-   * JVM (common in test suites). For that reason the bean intentionally does <b>not</b> declare
-   * {@code destroyMethod="close"} — tearing it down with the context would inert the runtime for
-   * every other context as well. Per-context cleanup is handled by {@link ChaosHandleRegistry}
-   * which stops only the handles it registered.
+   * outlives any single application context and is shared by every context in the JVM (common in
+   * test suites), and by a {@code -javaagent} startup plan. {@code destroyMethod = ""} is required:
+   * {@link ChaosControlPlane} is {@link AutoCloseable}, so Spring's default inferred destroy method
+   * would call {@code close()} on context shutdown and tear down every scenario, listener and the
+   * JFR sink JVM-wide. Per-context cleanup is handled by {@link ChaosHandleRegistry}, which stops
+   * only the handles it registered.
    *
    * @return the installed control plane
    */
-  @Bean
+  @Bean(destroyMethod = "")
   @ConditionalOnMissingBean
   public ChaosControlPlane chaosControlPlane() {
     return ChaosPlatform.installLocally();

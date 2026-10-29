@@ -65,6 +65,12 @@ final class CompositeActivationHandle implements ChaosActivationHandle {
     broadcast("stop", ChaosActivationHandle::stop);
   }
 
+  /** Closes every scenario of the plan, removing each from the registry. */
+  @Override
+  public void close() {
+    broadcast("close", ChaosActivationHandle::close);
+  }
+
   /** Broadcasts {@link ChaosActivationHandle#release()} to all delegate handles. */
   @Override
   public void release() {
