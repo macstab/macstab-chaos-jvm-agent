@@ -191,20 +191,53 @@ public final class HttpUrlExtractor {
   }
 
   /**
-   * Extracts a URL-like string from a Reactor Netty {@code HttpClientRequest} by calling {@code
-   * uri()}.
+   * Builds a URL string for an Apache HttpComponents 5.x request executed against an explicit
+   * {@code HttpHost}: the host's URI ({@code HttpHost.toURI()}) followed by the request target. A
+   * request that already carries an absolute URI is returned as is.
    *
-   * @param request an {@code reactor.netty.http.client.HttpClientRequest} instance; may be {@code
-   *     null}
+   * @param host an {@code org.apache.hc.core5.http.HttpHost}; may be {@code null}
+   * @param request an {@code org.apache.hc.core5.http.ClassicHttpRequest}; may be {@code null}
    * @return the URL string, or {@code null} if extraction fails
    */
-  public static String fromReactorNettyRequest(final Object request) {
-    if (request == null) {
+  public static String fromApacheHc5HostRequest(final Object host, final Object request) {
+    try {
+      final Object target = request == null ? null : invoke(request, "getRequestUri");
+      final String path = target == null ? "" : target.toString();
+      if (path.startsWith("http://") || path.startsWith("https://")) {
+        return path;
+      }
+      final Object hostUri = host == null ? null : invoke(host, "toURI");
+      final String combined = (hostUri == null ? "" : hostUri.toString()) + path;
+      return combined.isEmpty() ? null : combined;
+    } catch (final Throwable ignored) {
+      return null;
+    }
+  }
+
+  /**
+   * Extracts the request URI from a Reactor Netty {@code HttpClientConnect} (the client instance
+   * whose no-argument {@code connect()} is intercepted) through its public {@code configuration()}:
+   * the configured {@code uri()}, falling back to {@code baseUrl()}.
+   *
+   * @param client the {@code reactor.netty.http.client.HttpClientConnect} instance; may be {@code
+   *     null}
+   * @return the URI string, or {@code null} if extraction fails
+   */
+  public static String fromReactorNettyClient(final Object client) {
+    if (client == null) {
       return null;
     }
     try {
-      final Object uri = invoke(request, "uri");
-      return uri == null ? null : uri.toString();
+      final Object configuration = invoke(client, "configuration");
+      if (configuration == null) {
+        return null;
+      }
+      final Object uri = invoke(configuration, "uri");
+      if (uri != null) {
+        return uri.toString();
+      }
+      final Object baseUrl = invoke(configuration, "baseUrl");
+      return baseUrl == null ? null : baseUrl.toString();
     } catch (final Throwable ignored) {
       return null;
     }

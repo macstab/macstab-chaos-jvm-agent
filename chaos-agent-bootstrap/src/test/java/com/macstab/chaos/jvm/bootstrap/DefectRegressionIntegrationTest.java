@@ -277,6 +277,189 @@ class DefectRegressionIntegrationTest {
     }
   }
 
+  @Nested
+  @DisplayName("call paths that 1.0.0 never intercepted")
+  class PreviouslyUnhooked {
+
+    private final String httpClasspath = System.getProperty("chaos.test.httpClasspath");
+
+    @Test
+    @DisplayName("PreparedStatement.executeQuery() with no arguments is intercepted")
+    void preparedStatementExecuteQuery() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.run(
+              plan(
+                  scenario(
+                      "execute",
+                      ChaosSelector.jdbc(OperationType.JDBC_STATEMENT_EXECUTE),
+                      ChaosEffect.delay(Duration.ofMillis(1)))),
+              DefectProbeMain.class,
+              "jdbc-prepared-execute",
+              System.getProperty("chaos.test.jdbcClasspath"));
+      assertThat(result.longValue("matched.execute")).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("threads started by newVirtualThreadPerTaskExecutor are intercepted")
+    void virtualThreadPerTaskExecutor() throws Exception {
+      assertSingleMatch(
+          "vt-start",
+          ChaosSelector.thread(
+              Set.of(OperationType.VIRTUAL_THREAD_START), ChaosSelector.ThreadKind.VIRTUAL),
+          "virtual-thread-executor",
+          null);
+    }
+
+    @Test
+    @DisplayName("Thread.ofVirtual().start() is one VIRTUAL_THREAD_START match")
+    void virtualThreadStart() throws Exception {
+      assertSingleMatch(
+          "vt-start",
+          ChaosSelector.thread(
+              Set.of(OperationType.VIRTUAL_THREAD_START), ChaosSelector.ThreadKind.VIRTUAL),
+          "virtual-thread-start",
+          null);
+    }
+
+    @Test
+    @DisplayName("Runtime.exit is intercepted and can be vetoed")
+    void runtimeExit() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.run(
+              plan(
+                  scenario(
+                      "exit",
+                      ChaosSelector.jvmRuntime(Set.of(OperationType.SYSTEM_EXIT_REQUEST)),
+                      ChaosEffect.suppress())),
+              DefectProbeMain.class,
+              "runtime-exit",
+              null);
+      assertThat(result.value("exitSuppressed")).isEqualTo("true");
+      assertThat(result.longValue("matched.exit")).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("Selector.select(Consumer, long) is intercepted")
+    void selectWithConsumer() throws Exception {
+      assertSingleMatch(
+          "select",
+          ChaosSelector.nio(Set.of(OperationType.NIO_SELECTOR_SELECT)),
+          "select-consumer",
+          null);
+    }
+
+    @Test
+    @DisplayName("Thread.sleep(Duration) is intercepted")
+    void sleepWithDuration() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.run(
+              plan(
+                  scenario(
+                      "sleep",
+                      ChaosSelector.thread(
+                          Set.of(OperationType.THREAD_SLEEP), ChaosSelector.ThreadKind.ANY),
+                      ChaosEffect.suppress())),
+              DefectProbeMain.class,
+              "sleep-duration",
+              null);
+      assertThat(result.longValue("elapsedMillis"))
+          .as("a suppressed Thread.sleep(Duration.ofSeconds(2)) returns at once")
+          .isLessThan(1_000L);
+    }
+
+    @Test
+    @DisplayName("HttpClient.sendAsync(request, handler) is one HTTP_CLIENT_SEND_ASYNC match")
+    void jdkSendAsync() throws Exception {
+      assertSingleMatch(
+          "send-async",
+          ChaosSelector.httpClient(Set.of(OperationType.HTTP_CLIENT_SEND_ASYNC)),
+          "jdk-send-async",
+          null);
+    }
+
+    @Test
+    @DisplayName("OkHttp 4 Call.execute() is intercepted")
+    void okHttp4Execute() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.run(
+              plan(
+                  scenario(
+                      "okhttp",
+                      ChaosSelector.httpClient(Set.of(OperationType.HTTP_CLIENT_SEND)),
+                      ChaosEffect.suppress())),
+              HttpLibraryProbeMain.class,
+              "okhttp-execute",
+              httpClasspath);
+      assertThat(result.value("suppressed")).isEqualTo("true");
+      assertThat(result.longValue("matched.okhttp")).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("Apache HC5 execute(request) with one argument is one HTTP_CLIENT_SEND match")
+    void hc5ExecuteOneArgument() throws Exception {
+      assertSingleMatch(
+          "hc5",
+          ChaosSelector.httpClient(
+              Set.of(OperationType.HTTP_CLIENT_SEND), NamePattern.glob("http://127.0.0.1:*/probe")),
+          "hc5-execute",
+          httpClasspath,
+          HttpLibraryProbeMain.class);
+    }
+
+    @Test
+    @DisplayName("Apache HC5 execute(HttpHost, request, handler) matches on the full URL")
+    void hc5ExecuteWithHost() throws Exception {
+      assertSingleMatch(
+          "hc5-host",
+          ChaosSelector.httpClient(
+              Set.of(OperationType.HTTP_CLIENT_SEND), NamePattern.glob("http://127.0.0.1:*/probe")),
+          "hc5-execute-host",
+          httpClasspath,
+          HttpLibraryProbeMain.class);
+    }
+
+    @Test
+    @DisplayName("Reactor Netty requests are intercepted")
+    void reactorNetty() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.run(
+              plan(
+                  scenario(
+                      "reactor",
+                      ChaosSelector.httpClient(
+                          Set.of(OperationType.HTTP_CLIENT_SEND_ASYNC),
+                          NamePattern.glob("http://127.0.0.1:*/probe")),
+                      ChaosEffect.delay(Duration.ofMillis(1)))),
+              HttpLibraryProbeMain.class,
+              "reactor-netty-get",
+              httpClasspath);
+      assertThat(result.value("body")).isEqualTo("ok");
+      assertThat(result.longValue("matched.reactor")).isEqualTo(1L);
+    }
+
+    private void assertSingleMatch(
+        final String id, final ChaosSelector selector, final String mode, final String classpath)
+        throws Exception {
+      assertSingleMatch(id, selector, mode, classpath, DefectProbeMain.class);
+    }
+
+    private void assertSingleMatch(
+        final String id,
+        final ChaosSelector selector,
+        final String mode,
+        final String classpath,
+        final Class<?> probeMain)
+        throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.run(
+              plan(scenario(id, selector, ChaosEffect.delay(Duration.ofMillis(1)))),
+              probeMain,
+              mode,
+              classpath);
+      assertThat(result.longValue("matched." + id)).as("matches of one call").isEqualTo(1L);
+    }
+  }
+
   private static ChaosPlan plan(final ChaosScenario... scenarios) {
     return new ChaosPlan(new ChaosPlan.Metadata("defect-regression", ""), null, List.of(scenarios));
   }

@@ -280,12 +280,15 @@ final class HttpClientAdvice {
   }
 
   /**
-   * Intercepts Reactor Netty {@code HttpClientConnect.connect(HttpClientRequest, NettyOutbound,
-   * ...)}. Spring {@code WebClient} internally dispatches through this method.
+   * Intercepts Apache HttpComponents 5.x {@code CloseableHttpClient.execute(HttpHost,
+   * ClassicHttpRequest, ...)} overloads, where the target host is passed separately from the
+   * request.
    */
-  static final class ReactorNettyConnectAdvice {
+  static final class ApacheHc5HostExecuteAdvice {
     @Advice.OnMethodEnter
-    static void enter(@Advice.Argument(0) final Object request) throws Throwable {
+    static void enter(
+        @Advice.Argument(0) final Object host, @Advice.Argument(1) final Object request)
+        throws Throwable {
       if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_HTTP)) {
         return;
       }
@@ -294,7 +297,43 @@ final class HttpClientAdvice {
       try {
         BootstrapDispatcher.beginInternalCall();
         try {
-          url = HttpUrlExtractor.fromReactorNettyRequest(request);
+          url = HttpUrlExtractor.fromApacheHc5HostRequest(host, request);
+        } finally {
+          BootstrapDispatcher.endInternalCall();
+        }
+        suppressed = BootstrapDispatcher.beforeHttpSend(url);
+      } catch (final Throwable throwable) {
+        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
+        throw throwable;
+      }
+      if (suppressed) {
+        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
+        throw new ChaosHttpSuppressException("HTTP execute suppressed by chaos agent: " + url);
+      }
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit() {
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
+    }
+  }
+
+  /**
+   * Intercepts Reactor Netty {@code HttpClientConnect.connect(HttpClientRequest, NettyOutbound,
+   * ...)}. Spring {@code WebClient} internally dispatches through this method.
+   */
+  static final class ReactorNettyConnectAdvice {
+    @Advice.OnMethodEnter
+    static void enter(@Advice.This final Object client) throws Throwable {
+      if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_HTTP)) {
+        return;
+      }
+      final String url;
+      final boolean suppressed;
+      try {
+        BootstrapDispatcher.beginInternalCall();
+        try {
+          url = HttpUrlExtractor.fromReactorNettyClient(client);
         } finally {
           BootstrapDispatcher.endInternalCall();
         }

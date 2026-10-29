@@ -4,18 +4,31 @@ import com.macstab.chaos.jvm.api.ActivationPolicy;
 import com.macstab.chaos.jvm.api.ChaosControlPlane;
 import com.macstab.chaos.jvm.api.ChaosDiagnostics;
 import com.macstab.chaos.jvm.api.ChaosEffect;
+import com.macstab.chaos.jvm.api.ChaosHttpSuppressException;
 import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.ChaosSelector;
 import com.macstab.chaos.jvm.api.ChaosSession;
 import com.macstab.chaos.jvm.api.OperationType;
+import com.sun.net.httpserver.HttpServer;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 import java.io.ByteArrayOutputStream;
+import java.io.OutputStream;
 import java.lang.management.ManagementFactory;
 import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.net.URI;
 import java.net.URL;
 import java.net.URLClassLoader;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.channels.Selector;
+import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.Statement;
 import java.time.Duration;
 import java.util.Set;
@@ -23,6 +36,7 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.DelayQueue;
 import java.util.concurrent.Delayed;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.PriorityBlockingQueue;
 import java.util.concurrent.ScheduledExecutorService;
@@ -58,6 +72,13 @@ public final class DefectProbeMain {
       case "get-resource" -> getResource();
       case "park-until-in-session" -> parkUntilInSession();
       case "jdbc-hikari-execute" -> jdbcHikariExecute();
+      case "jdbc-prepared-execute" -> jdbcPreparedExecute();
+      case "virtual-thread-executor" -> virtualThreadExecutor();
+      case "virtual-thread-start" -> Thread.ofVirtual().start(() -> {}).join();
+      case "runtime-exit" -> runtimeExit();
+      case "select-consumer" -> selectConsumer();
+      case "sleep-duration" -> sleepDuration();
+      case "jdk-send-async" -> withHttpServer(DefectProbeMain::jdkSendAsync);
       default -> throw new IllegalArgumentException("unknown probe mode: " + args[0]);
     }
     printCounts();
@@ -187,6 +208,81 @@ public final class DefectProbeMain {
     }
   }
 
+  private static void jdbcPreparedExecute() throws Exception {
+    try (final Connection connection = DriverManager.getConnection("jdbc:h2:mem:prepared");
+        final PreparedStatement statement = connection.prepareStatement("SELECT 1");
+        final ResultSet resultSet = statement.executeQuery()) {
+      System.out.println("row=" + resultSet.next());
+    }
+  }
+
+  private static void virtualThreadExecutor() throws Exception {
+    try (final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
+      executor.submit(() -> {}).get(5L, TimeUnit.SECONDS);
+    }
+  }
+
+  /** Calls {@code Runtime.exit} under a SUPPRESS scenario, which must veto the exit. */
+  private static void runtimeExit() {
+    try {
+      Runtime.getRuntime().exit(3);
+      System.out.println("exitSuppressed=false");
+    } catch (final SecurityException expected) {
+      System.out.println("exitSuppressed=true");
+    }
+  }
+
+  private static void selectConsumer() throws Exception {
+    try (final Selector selector = Selector.open()) {
+      selector.select(key -> {}, 5L);
+    }
+  }
+
+  private static void sleepDuration() throws Exception {
+    final long start = System.nanoTime();
+    Thread.sleep(Duration.ofSeconds(2L));
+    System.out.println("elapsedMillis=" + TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start));
+  }
+
+  /** Runs {@code client} against a local HTTP server that answers every request with 200 "ok". */
+  static void withHttpServer(final HttpProbe client) throws Exception {
+    final HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    server.createContext(
+        "/",
+        exchange -> {
+          final byte[] body = "ok".getBytes(StandardCharsets.UTF_8);
+          exchange.sendResponseHeaders(200, body.length);
+          try (OutputStream out = exchange.getResponseBody()) {
+            out.write(body);
+          }
+        });
+    server.start();
+    try {
+      client.call("http://127.0.0.1:" + server.getAddress().getPort() + "/probe");
+    } catch (final ChaosHttpSuppressException suppressed) {
+      System.out.println("suppressed=true");
+    } finally {
+      server.stop(0);
+    }
+  }
+
+  @FunctionalInterface
+  interface HttpProbe {
+    void call(String url) throws Exception;
+  }
+
+  private static void jdkSendAsync(final String url) throws Exception {
+    final HttpClient client = HttpClient.newHttpClient();
+    System.out.println(
+        "status="
+            + client
+                .sendAsync(
+                    HttpRequest.newBuilder(URI.create(url)).build(),
+                    HttpResponse.BodyHandlers.ofString())
+                .get(10L, TimeUnit.SECONDS)
+                .statusCode());
+  }
+
   /** A {@link Delayed} that is due immediately. */
   private static final class ImmediateDelayed implements Delayed {
     @Override
@@ -200,7 +296,7 @@ public final class DefectProbeMain {
     }
   }
 
-  private static void printCounts() {
+  static void printCounts() {
     final ChaosControlPlane controlPlane = ChaosPlatform.current();
     for (final ChaosDiagnostics.ScenarioReport report :
         controlPlane.diagnostics().snapshot().scenarios()) {

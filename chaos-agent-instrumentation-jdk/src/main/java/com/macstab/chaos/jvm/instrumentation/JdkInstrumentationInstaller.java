@@ -679,38 +679,32 @@ public final class JdkInstrumentationInstaller {
   }
 
   /**
-   * Conditionally instruments a JDK class that may not be present in all environments.
+   * Instruments classes that may not be present in every application (OkHttp, Apache HttpClient,
+   * HikariCP, c3p0, Reactor Netty) or every JDK.
    *
-   * <p>Before registering the type matcher, this method attempts to load the named class via the
-   * system classloader. If the class is not found ({@link ClassNotFoundException}), the method logs
-   * a fine-level message and returns the original {@code builder} unchanged so that a missing
-   * optional dependency never aborts agent startup. If the class is present, a standard {@code
-   * .type(...).transform(...)} entry is added to the builder.
+   * <p>The type is matched by name only. ByteBuddy evaluates the matcher whenever a class is
+   * defined, by any class loader, so a library loaded later by an application class loader (for
+   * example Spring Boot's fat-jar launcher, which does not exist yet when {@code premain} runs) is
+   * still woven. An absent library costs one string comparison per class definition and nothing
+   * else. Advice applied this way only uses {@code Object}-typed parameters and reflective access,
+   * so the libraries are not needed on the agent's classpath.
    *
-   * @param builder the current {@link AgentBuilder} chain to which the transformation may be
-   *     appended
-   * @param typeName fully-qualified binary name of the target class (e.g. {@code
-   *     "javax.naming.InitialContext"})
+   * <p>An earlier version probed for the class with {@code Class.forName} at install time and
+   * skipped the transformation when the probe failed. Under {@code premain} in a fat jar the probe
+   * always failed, so OkHttp, Apache HttpClient, HikariCP, c3p0 and Reactor Netty chaos silently
+   * never applied.
+   *
+   * @param builder the current {@link AgentBuilder} chain
    * @param transformer a {@link BuilderTransformer} that applies one or more {@link
    *     net.bytebuddy.asm.Advice} visits to the ByteBuddy type builder
-   * @return the (possibly unchanged) {@link AgentBuilder} with the transformation appended when the
-   *     class is present, or the original builder when it is absent
+   * @param typeNames fully-qualified binary names of the target classes; several names cover a
+   *     class that moved between library versions
+   * @return the {@link AgentBuilder} with the transformation appended
    */
   private static AgentBuilder instrumentOptional(
-      final AgentBuilder builder, final String typeName, final BuilderTransformer transformer) {
-    try {
-      // Prefer the thread context classloader: OSGi containers and Spring Boot fat-JAR launchers
-      // (LaunchedURLClassLoader) load application classes under a custom CL that is invisible to
-      // the system classloader. Fall back to the system CL on startup threads where the context
-      // CL may be null or may be the bootstrap CL (before the app CL is installed).
-      final ClassLoader probe = Thread.currentThread().getContextClassLoader();
-      Class.forName(typeName, false, probe != null ? probe : ClassLoader.getSystemClassLoader());
-    } catch (final ClassNotFoundException ignored) {
-      LOGGER.fine("[chaos-agent] optional instrumentation target not present: " + typeName);
-      return builder;
-    }
+      final AgentBuilder builder, final BuilderTransformer transformer, final String... typeNames) {
     return builder
-        .type(ElementMatchers.named(typeName))
+        .type(ElementMatchers.namedOneOf(typeNames))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 transformer.transform(typeBuilder));
@@ -961,7 +955,17 @@ public final class JdkInstrumentationInstaller {
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder.visit(
                     Advice.to(ThreadAdvice.StartAdvice.class)
-                        .on(ElementMatchers.named("start").and(ElementMatchers.takesArguments(0)))))
+                        .on(
+                            ElementMatchers.named("start")
+                                .and(
+                                    ElementMatchers.takesArguments(0)
+                                        .or(
+                                            ElementMatchers.takesArguments(1)
+                                                .and(
+                                                    ElementMatchers.takesArgument(
+                                                        0,
+                                                        ElementMatchers.named(
+                                                            "jdk.internal.vm.ThreadContainer"))))))))
         .type(ElementMatchers.named("java.lang.VirtualThread"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
@@ -969,7 +973,15 @@ public final class JdkInstrumentationInstaller {
                     Advice.to(ThreadAdvice.StartAdvice.class)
                         .on(
                             ElementMatchers.named("start")
-                                .and(ElementMatchers.takesArguments(0)))));
+                                .and(
+                                    ElementMatchers.takesArguments(0)
+                                        .or(
+                                            ElementMatchers.takesArguments(1)
+                                                .and(
+                                                    ElementMatchers.takesArgument(
+                                                        0,
+                                                        ElementMatchers.named(
+                                                            "jdk.internal.vm.ThreadContainer"))))))));
   }
 
   /** ThreadPoolExecutor execute/beforeExecute/shutdown/shutdownNow/awaitTermination. */
@@ -1200,26 +1212,20 @@ public final class JdkInstrumentationInstaller {
         .type(ElementMatchers.named("java.lang.System"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
-                typeBuilder
-                    .visit(
-                        Advice.to(JvmRuntimeAdvice.ExitRequestAdvice.class)
-                            .on(
-                                ElementMatchers.named("exit")
-                                    .and(ElementMatchers.takesArguments(int.class))))
-                    // System.gc() is a non-native Java method that delegates to Runtime.gc().
-                    // Runtime.gc() is native and cannot be instrumented; System.gc() can be.
-                    .visit(
-                        Advice.to(JvmRuntimeAdvice.GcRequestAdvice.class)
-                            .on(
-                                ElementMatchers.named("gc")
-                                    .and(ElementMatchers.takesArguments(0)))))
+                // System.gc() is a non-native Java method that delegates to Runtime.gc().
+                // Runtime.gc() is native and cannot be instrumented; System.gc() can be.
+                typeBuilder.visit(
+                    Advice.to(JvmRuntimeAdvice.GcRequestAdvice.class)
+                        .on(ElementMatchers.named("gc").and(ElementMatchers.takesArguments(0)))))
+        // System.exit(int) delegates to Runtime.exit(int); hooking Runtime.exit covers both
+        // entry points once. Runtime.halt does not go through Runtime.exit.
         .type(ElementMatchers.named("java.lang.Runtime"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder.visit(
                     Advice.to(JvmRuntimeAdvice.ExitRequestAdvice.class)
                         .on(
-                            ElementMatchers.named("halt")
+                            ElementMatchers.namedOneOf("exit", "halt")
                                 .and(ElementMatchers.takesArguments(int.class)))));
   }
 
@@ -1369,7 +1375,30 @@ public final class JdkInstrumentationInstaller {
                         Advice.to(JvmRuntimeAdvice.NioSelectNowAdvice.class)
                             .on(
                                 ElementMatchers.named("selectNow")
-                                    .and(ElementMatchers.takesArguments(0)))))
+                                    .and(ElementMatchers.takesArguments(0))))
+                    // JDK 11+ select(Consumer) / select(Consumer, long) / selectNow(Consumer)
+                    // reach lockAndDoSelect without calling the overloads above.
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.NioSelectNoArgAdvice.class)
+                            .on(
+                                ElementMatchers.named("select")
+                                    .and(
+                                        ElementMatchers.takesArguments(
+                                            java.util.function.Consumer.class))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.NioSelectConsumerTimeoutAdvice.class)
+                            .on(
+                                ElementMatchers.named("select")
+                                    .and(
+                                        ElementMatchers.takesArguments(
+                                            java.util.function.Consumer.class, long.class))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.NioSelectNowAdvice.class)
+                            .on(
+                                ElementMatchers.named("selectNow")
+                                    .and(
+                                        ElementMatchers.takesArguments(
+                                            java.util.function.Consumer.class)))))
         .type(
             ElementMatchers.isSubTypeOf(java.nio.channels.spi.AbstractSelector.class)
                 .and(ElementMatchers.not(ElementMatchers.isAbstract()))
@@ -1636,10 +1665,16 @@ public final class JdkInstrumentationInstaller {
             .transform(
                 (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                     typeBuilder.visit(
+                        // Implicit handshakes (first read/write on an unconnected TLS
+                        // socket) go through the private startHandshake(boolean) without
+                        // calling startHandshake(); the SCOPE_SSL_HANDSHAKE scope evaluates an
+                        // explicit startHandshake() → startHandshake(true) chain once.
                         Advice.to(JvmRuntimeAdvice.SslHandshakeAdvice.class)
                             .on(
                                 ElementMatchers.named("startHandshake")
-                                    .and(ElementMatchers.takesArguments(0)))));
+                                    .and(
+                                        ElementMatchers.takesArguments(0)
+                                            .or(ElementMatchers.takesArguments(boolean.class))))));
 
     agentBuilder =
         agentBuilder
@@ -1679,10 +1714,10 @@ public final class JdkInstrumentationInstaller {
    * Registers HTTP client interception: Java {@code java.net.http.HttpClient} (JDK 11+), OkHttp,
    * Apache HC 4.x, Apache HC 5.x, Reactor Netty.
    *
-   * <p>All targets use {@link #instrumentOptional}, which checks class presence before registering.
-   * If the target is absent, no transformation is added. Advice classes only use Object-typed
-   * arguments and reflective URL extraction, so the compileOnly dependencies (OkHttp, Apache HC,
-   * Reactor Netty) are not required at runtime.
+   * <p>All library targets use {@link #instrumentOptional}, which matches them by name whenever
+   * they are loaded, by any class loader. Advice classes only use Object-typed arguments and
+   * reflective URL extraction, so the compileOnly dependencies (OkHttp, Apache HC, Reactor Netty)
+   * are not required at runtime.
    *
    * <p>Java 11+ {@code HttpClient} is implemented by {@code jdk.internal.net.http.HttpClientImpl},
    * which lives in the non-exported {@code java.net.http/jdk.internal.net.http} package. Two pieces
@@ -1701,12 +1736,8 @@ public final class JdkInstrumentationInstaller {
   private static AgentBuilder applyPhase2HttpClientInterception(AgentBuilder agentBuilder) {
     // Java 11+ HttpClient — concrete impl in jdk.internal.net.http. Module access is self-granted
     // by grantInternalModuleOpens() / Add-Opens manifest entry, no user JVM flags required.
-    //
-    // We register the type matcher directly (without instrumentOptional's Class.forName probe)
-    // because the probe would run from the agent's unnamed module and the module-access semantics
-    // of internal JDK packages can hide the class from forName even after it has been opened for
-    // deep reflection. ByteBuddy's retransformation/load events will resolve the class through
-    // the JVM-internal class definition path, which sees it regardless.
+    // sendAsync(request, handler) delegates to the public sendAsync(request, handler,
+    // pushPromiseHandler); both are hooked and SCOPE_HTTP evaluates one call once.
     agentBuilder =
         agentBuilder
             .type(ElementMatchers.named("jdk.internal.net.http.HttpClientImpl"))
@@ -1722,12 +1753,13 @@ public final class JdkInstrumentationInstaller {
                             Advice.to(HttpClientAdvice.JavaHttpClientSendAsyncAdvice.class)
                                 .on(
                                     ElementMatchers.named("sendAsync")
-                                        .and(ElementMatchers.takesArguments(2)))));
+                                        .and(
+                                            ElementMatchers.takesArguments(2)
+                                                .or(ElementMatchers.takesArguments(3))))));
 
     agentBuilder =
         instrumentOptional(
             agentBuilder,
-            "okhttp3.RealCall",
             typeBuilder ->
                 typeBuilder
                     .visit(
@@ -1739,7 +1771,9 @@ public final class JdkInstrumentationInstaller {
                         Advice.to(HttpClientAdvice.OkHttpEnqueueAdvice.class)
                             .on(
                                 ElementMatchers.named("enqueue")
-                                    .and(ElementMatchers.takesArguments(1)))));
+                                    .and(ElementMatchers.takesArguments(1)))),
+            "okhttp3.RealCall",
+            "okhttp3.internal.connection.RealCall");
 
     // Apache HC 4.x exposes eight execute() overloads split across two shapes:
     //   execute(HttpHost, HttpRequest [, HttpContext] [, ResponseHandler])  — HttpHost first
@@ -1754,7 +1788,6 @@ public final class JdkInstrumentationInstaller {
     agentBuilder =
         instrumentOptional(
             agentBuilder,
-            "org.apache.http.impl.client.CloseableHttpClient",
             typeBuilder ->
                 typeBuilder
                     .visit(
@@ -1772,31 +1805,51 @@ public final class JdkInstrumentationInstaller {
                                         ElementMatchers.takesArgument(
                                             0,
                                             ElementMatchers.named(
-                                                "org.apache.http.client.methods.HttpUriRequest"))))));
+                                                "org.apache.http.client.methods.HttpUriRequest"))))),
+            "org.apache.http.impl.client.CloseableHttpClient");
 
     agentBuilder =
         instrumentOptional(
             agentBuilder,
-            "org.apache.hc.client5.http.impl.classic.CloseableHttpClient",
             typeBuilder ->
-                typeBuilder.visit(
-                    Advice.to(HttpClientAdvice.ApacheHc5ExecuteAdvice.class)
-                        .on(
-                            ElementMatchers.named("execute")
-                                // 2-arg: execute(ClassicHttpRequest, ClassicHttpResponseHandler)
-                                // 3-arg: execute(ClassicHttpRequest, HttpContext,
-                                //                ClassicHttpResponseHandler)
-                                .and(
-                                    ElementMatchers.takesArguments(2)
-                                        .or(ElementMatchers.takesArguments(3))))));
+                // HC5 execute overloads come in two shapes, distinguished by the first argument
+                // (as for HC4): request-first execute(ClassicHttpRequest [, HttpContext]
+                // [, handler]) and host-first execute(HttpHost, ClassicHttpRequest [, ...]). The
+                // common one-argument execute(request) goes straight to doExecute, so matching
+                // by arity missed it, and the host-first overloads handed an HttpHost to advice
+                // expecting a request. Overloads delegate to each other; SCOPE_HTTP evaluates one
+                // call once.
+                typeBuilder
+                    .visit(
+                        Advice.to(HttpClientAdvice.ApacheHc5ExecuteAdvice.class)
+                            .on(
+                                ElementMatchers.named("execute")
+                                    .and(
+                                        ElementMatchers.takesArgument(
+                                            0,
+                                            ElementMatchers.named(
+                                                "org.apache.hc.core5.http.ClassicHttpRequest")))))
+                    .visit(
+                        Advice.to(HttpClientAdvice.ApacheHc5HostExecuteAdvice.class)
+                            .on(
+                                ElementMatchers.named("execute")
+                                    .and(
+                                        ElementMatchers.takesArgument(
+                                            0,
+                                            ElementMatchers.named(
+                                                "org.apache.hc.core5.http.HttpHost"))))),
+            "org.apache.hc.client5.http.impl.classic.CloseableHttpClient");
 
     return instrumentOptional(
         agentBuilder,
-        "reactor.netty.http.client.HttpClientConnect",
         typeBuilder ->
             typeBuilder.visit(
+                // HttpClientConnect.connect() takes no arguments; the request URI comes from the
+                // client configuration. Matching named("connect") alone also hit the generated
+                // lambda$connect$N methods.
                 Advice.to(HttpClientAdvice.ReactorNettyConnectAdvice.class)
-                    .on(ElementMatchers.named("connect"))));
+                    .on(ElementMatchers.named("connect").and(ElementMatchers.takesArguments(0)))),
+        "reactor.netty.http.client.HttpClientConnect");
   }
 
   /**
@@ -1814,24 +1867,24 @@ public final class JdkInstrumentationInstaller {
     agentBuilder =
         instrumentOptional(
             agentBuilder,
-            "com.zaxxer.hikari.pool.HikariPool",
             typeBuilder ->
                 typeBuilder.visit(
                     Advice.to(JdbcAdvice.HikariGetConnectionAdvice.class)
                         .on(
                             ElementMatchers.named("getConnection")
-                                .and(ElementMatchers.takesArguments(long.class)))));
+                                .and(ElementMatchers.takesArguments(long.class)))),
+            "com.zaxxer.hikari.pool.HikariPool");
 
     agentBuilder =
         instrumentOptional(
             agentBuilder,
-            "com.mchange.v2.c3p0.impl.C3P0PooledConnectionPool",
             typeBuilder ->
                 typeBuilder.visit(
                     Advice.to(JdbcAdvice.C3p0CheckoutAdvice.class)
                         .on(
                             ElementMatchers.named("checkoutPooledConnection")
-                                .and(ElementMatchers.takesArguments(0)))));
+                                .and(ElementMatchers.takesArguments(0)))),
+            "com.mchange.v2.c3p0.impl.C3P0PooledConnectionPool");
 
     // Match every Statement.execute*/Connection.prepareStatement overload whose first
     // argument is the SQL String. The JDBC API defines generated-keys variants
@@ -1872,6 +1925,22 @@ public final class JdkInstrumentationInstaller {
                                 ElementMatchers.named("executeLargeUpdate")
                                     .and(ElementMatchers.takesArgument(0, String.class)))))
         .type(
+            ElementMatchers.isSubTypeOf(java.sql.PreparedStatement.class)
+                .and(ElementMatchers.not(ElementMatchers.isInterface()))
+                .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(JdbcAdvice.PreparedStatementExecuteAdvice.class)
+                        .on(
+                            ElementMatchers.namedOneOf(
+                                    "execute",
+                                    "executeQuery",
+                                    "executeUpdate",
+                                    "executeLargeUpdate")
+                                .and(ElementMatchers.takesArguments(0))
+                                .and(ElementMatchers.not(ElementMatchers.isAbstract())))))
+        .type(
             ElementMatchers.isSubTypeOf(java.sql.Connection.class)
                 .and(ElementMatchers.not(ElementMatchers.isInterface()))
                 .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
@@ -1908,13 +1977,13 @@ public final class JdkInstrumentationInstaller {
     agentBuilder =
         instrumentOptional(
             agentBuilder,
-            "javax.naming.InitialContext",
             typeBuilder ->
                 typeBuilder.visit(
                     Advice.to(JvmRuntimeAdvice.JndiLookupAdvice.class)
                         .on(
                             ElementMatchers.named("lookup")
-                                .and(ElementMatchers.takesArguments(String.class)))));
+                                .and(ElementMatchers.takesArguments(String.class)))),
+            "javax.naming.InitialContext");
 
     // MBeanServer is an interface — ByteBuddy cannot inline advice into abstract interface
     // methods. Target concrete subtypes (e.g. JmxMBeanServer) instead.
@@ -1951,7 +2020,6 @@ public final class JdkInstrumentationInstaller {
   private static AgentBuilder applyPhase2NativeLibraryLoadInterception(AgentBuilder agentBuilder) {
     return instrumentOptional(
         agentBuilder,
-        "java.lang.Runtime",
         typeBuilder ->
             typeBuilder
                 .visit(
@@ -1959,7 +2027,8 @@ public final class JdkInstrumentationInstaller {
                         .on(ElementMatchers.named("loadLibrary0")))
                 .visit(
                     Advice.to(JvmRuntimeAdvice.NativeLibraryLoadAdvice.class)
-                        .on(ElementMatchers.named("load0"))));
+                        .on(ElementMatchers.named("load0"))),
+        "java.lang.Runtime");
   }
 
   /** Registers {@link Thread#sleep(long)} and {@link Thread#sleep(long, int)} interception. */
@@ -1982,7 +2051,16 @@ public final class JdkInstrumentationInstaller {
                             .on(
                                 ElementMatchers.named("sleep")
                                     .and(ElementMatchers.isStatic())
-                                    .and(ElementMatchers.takesArguments(long.class, int.class)))));
+                                    .and(ElementMatchers.takesArguments(long.class, int.class))))
+                    // sleep(Duration) — converts to nanos itself instead of calling sleep(long)
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.ThreadSleepDurationAdvice.class)
+                            .on(
+                                ElementMatchers.named("sleep")
+                                    .and(ElementMatchers.isStatic())
+                                    .and(
+                                        ElementMatchers.takesArguments(
+                                            java.time.Duration.class)))));
   }
 
   /**

@@ -116,8 +116,9 @@ final class JvmRuntimeAdvice {
   // ── A3: Exit ──────────────────────────────────────────────────────────────
 
   /**
-   * Intercepts {@code System.exit(int)} and {@code Runtime.halt(int)}. Throws {@code
-   * SecurityException} when a SUPPRESS scenario is active.
+   * Intercepts {@code Runtime.exit(int)} and {@code Runtime.halt(int)}. {@code System.exit(int)}
+   * delegates to {@code Runtime.exit(int)}, so both entry points are covered exactly once. Throws
+   * {@code SecurityException} when a SUPPRESS scenario is active.
    */
   static final class ExitRequestAdvice {
     @Advice.OnMethodEnter
@@ -288,6 +289,27 @@ final class JvmRuntimeAdvice {
     @Advice.OnMethodEnter(skipOn = Advice.OnNonDefaultValue.class)
     static boolean enter(
         @Advice.This final Object selector, @Advice.Argument(0) final long timeoutMillis)
+        throws Throwable {
+      return BootstrapDispatcher.beforeNioSelect(selector, timeoutMillis);
+    }
+
+    @Advice.OnMethodExit
+    static void exit(
+        @Advice.Enter final boolean spurious, @Advice.Return(readOnly = false) int returned) {
+      if (spurious) {
+        returned = 0;
+      }
+    }
+  }
+
+  /**
+   * Intercepts {@code Selector.select(Consumer, long)}. Identical to {@link NioSelectTimeoutAdvice}
+   * except that the timeout is the second argument.
+   */
+  static final class NioSelectConsumerTimeoutAdvice {
+    @Advice.OnMethodEnter(skipOn = Advice.OnNonDefaultValue.class)
+    static boolean enter(
+        @Advice.This final Object selector, @Advice.Argument(1) final long timeoutMillis)
         throws Throwable {
       return BootstrapDispatcher.beforeNioSelect(selector, timeoutMillis);
     }
@@ -669,7 +691,52 @@ final class JvmRuntimeAdvice {
   static final class ThreadSleepAdvice {
     @Advice.OnMethodEnter(skipOn = Advice.OnNonDefaultValue.class)
     static boolean enter(@Advice.Argument(0) final long millis) throws Throwable {
-      return BootstrapDispatcher.beforeThreadSleep(millis);
+      if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_THREAD_SLEEP)) {
+        return false;
+      }
+      try {
+        return BootstrapDispatcher.beforeThreadSleep(millis);
+      } catch (final Throwable throwable) {
+        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_THREAD_SLEEP);
+        throw throwable;
+      }
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit() {
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_THREAD_SLEEP);
+    }
+  }
+
+  /**
+   * Intercepts {@link Thread#sleep(java.time.Duration)}, which does not delegate to {@code
+   * sleep(long)} on JDK 21+ and was previously not instrumented. Same skip semantics as {@link
+   * ThreadSleepAdvice}; the duration is passed to the dispatcher in milliseconds, saturating for
+   * durations beyond {@code Long.MAX_VALUE} ms.
+   */
+  static final class ThreadSleepDurationAdvice {
+    @Advice.OnMethodEnter(skipOn = Advice.OnNonDefaultValue.class)
+    static boolean enter(@Advice.Argument(0) final java.time.Duration duration) throws Throwable {
+      if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_THREAD_SLEEP)) {
+        return false;
+      }
+      try {
+        long millis;
+        try {
+          millis = duration == null ? 0L : duration.toMillis();
+        } catch (final ArithmeticException overflow) {
+          millis = duration.isNegative() ? Long.MIN_VALUE : Long.MAX_VALUE;
+        }
+        return BootstrapDispatcher.beforeThreadSleep(millis);
+      } catch (final Throwable throwable) {
+        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_THREAD_SLEEP);
+        throw throwable;
+      }
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit() {
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_THREAD_SLEEP);
     }
   }
 

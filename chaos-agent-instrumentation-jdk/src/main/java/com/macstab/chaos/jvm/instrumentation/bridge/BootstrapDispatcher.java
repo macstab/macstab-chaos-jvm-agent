@@ -131,8 +131,14 @@ public final class BootstrapDispatcher {
   /** Scope index for TLS handshakes (wrapping engines delegate to the JDK engine). */
   public static final int SCOPE_SSL_HANDSHAKE = 15;
 
+  /** Scope index for thread start ({@code VirtualThread.start()} → {@code start(container)}). */
+  public static final int SCOPE_THREAD_START = 16;
+
+  /** Scope index for {@code Thread.sleep} overloads. */
+  public static final int SCOPE_THREAD_SLEEP = 17;
+
   /** Size of the per-thread counter array: index 0 is the reentrancy depth, then the scopes. */
-  static final int SCOPE_COUNT = 16;
+  static final int SCOPE_COUNT = 18;
 
   /**
    * Enters a call-depth scope on the current thread.

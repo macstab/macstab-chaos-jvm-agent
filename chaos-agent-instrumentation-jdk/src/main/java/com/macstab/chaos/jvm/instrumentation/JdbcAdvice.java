@@ -96,6 +96,40 @@ final class JdbcAdvice {
   }
 
   /**
+   * Intercepts the no-argument {@code PreparedStatement.execute()}, {@code executeQuery()}, {@code
+   * executeUpdate()} and {@code executeLargeUpdate()} — the execution path of JPA, Hibernate, jOOQ
+   * and Spring {@code JdbcTemplate}. The SQL text was bound at prepare time and is not available
+   * here, so these calls report a {@code null} target: they match JDBC_STATEMENT_EXECUTE scenarios
+   * whose target pattern is ANY. The SQL is visible to JDBC_PREPARED_STATEMENT scenarios at prepare
+   * time.
+   */
+  static final class PreparedStatementExecuteAdvice {
+    @Advice.OnMethodEnter
+    static void enter() throws Throwable {
+      if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_JDBC_EXECUTE)) {
+        return;
+      }
+      final boolean suppressed;
+      try {
+        suppressed = BootstrapDispatcher.beforeJdbcStatementExecute(null);
+      } catch (final Throwable throwable) {
+        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_JDBC_EXECUTE);
+        throw throwable;
+      }
+      if (suppressed) {
+        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_JDBC_EXECUTE);
+        throw new ChaosJdbcSuppressException(
+            "JDBC prepared statement execute suppressed by chaos agent");
+      }
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit() {
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_JDBC_EXECUTE);
+    }
+  }
+
+  /**
    * Intercepts every {@code java.sql.Connection.prepareStatement} / {@code prepareCall} overload
    * whose first argument is the SQL string, including the generated-keys and column-index/name
    * variants such as {@code prepareStatement(String, int)}, {@code prepareStatement(String,
