@@ -1128,9 +1128,10 @@ public final class JdkInstrumentationInstaller {
                         // (the superclass of every default JDK classloader) overrides the
                         // 2-arg variant but inherits the 1-arg from java.lang.ClassLoader,
                         // so instrumenting only the 2-arg would miss every standard class
-                        // load via Class.forName / loader.loadClass(name). Custom
-                        // classloaders that inherit both will double-dispatch, which is a
-                        // known cost of the single-class retransformation strategy.
+                        // load via Class.forName / loader.loadClass(name). Loaders that
+                        // inherit both overloads (URLClassLoader) and parent delegation reach
+                        // the advice more than once per load; the SCOPE_CLASS_LOAD call-depth
+                        // scope in LoadClassAdvice evaluates only the outermost call.
                         Advice.to(ClassLoaderAdvice.LoadClassAdvice.class)
                             .on(
                                 ElementMatchers.named("loadClass")

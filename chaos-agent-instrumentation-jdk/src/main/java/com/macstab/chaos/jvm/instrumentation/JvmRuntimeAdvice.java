@@ -167,7 +167,19 @@ final class JvmRuntimeAdvice {
     @Advice.OnMethodEnter
     static void enter(@Advice.This final Object loader, @Advice.Argument(0) final String className)
         throws Throwable {
-      BootstrapDispatcher.beforeClassDefine(loader, className);
+      if (BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_CLASS_DEFINE)) {
+        try {
+          BootstrapDispatcher.beforeClassDefine(loader, className);
+        } catch (final Throwable throwable) {
+          BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_CLASS_DEFINE);
+          throw throwable;
+        }
+      }
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit() {
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_CLASS_DEFINE);
     }
   }
 
@@ -194,7 +206,19 @@ final class JvmRuntimeAdvice {
   static final class ThreadParkAdvice {
     @Advice.OnMethodEnter
     static void enter() throws Throwable {
-      BootstrapDispatcher.beforeThreadPark();
+      if (BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_THREAD_PARK)) {
+        try {
+          BootstrapDispatcher.beforeThreadPark();
+        } catch (final Throwable throwable) {
+          BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_THREAD_PARK);
+          throw throwable;
+        }
+      }
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit() {
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_THREAD_PARK);
     }
   }
 
@@ -460,7 +484,19 @@ final class JvmRuntimeAdvice {
   static final class ZipInflateAdvice {
     @Advice.OnMethodEnter
     static void enter() throws Throwable {
-      BootstrapDispatcher.beforeZipInflate();
+      if (BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_ZIP_INFLATE)) {
+        try {
+          BootstrapDispatcher.beforeZipInflate();
+        } catch (final Throwable throwable) {
+          BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_ZIP_INFLATE);
+          throw throwable;
+        }
+      }
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit() {
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_ZIP_INFLATE);
     }
   }
 
@@ -468,7 +504,19 @@ final class JvmRuntimeAdvice {
   static final class ZipDeflateAdvice {
     @Advice.OnMethodEnter
     static void enter() throws Throwable {
-      BootstrapDispatcher.beforeZipDeflate();
+      if (BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_ZIP_DEFLATE)) {
+        try {
+          BootstrapDispatcher.beforeZipDeflate();
+        } catch (final Throwable throwable) {
+          BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_ZIP_DEFLATE);
+          throw throwable;
+        }
+      }
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit() {
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_ZIP_DEFLATE);
     }
   }
 
@@ -565,7 +613,19 @@ final class JvmRuntimeAdvice {
         @Advice.Argument(0) final Object objectName,
         @Advice.Argument(1) final String operationName)
         throws Throwable {
-      BootstrapDispatcher.beforeJmxInvoke(server, objectName, operationName);
+      if (BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_JMX)) {
+        try {
+          BootstrapDispatcher.beforeJmxInvoke(server, objectName, operationName);
+        } catch (final Throwable throwable) {
+          BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_JMX);
+          throw throwable;
+        }
+      }
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit() {
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_JMX);
     }
   }
 
@@ -579,7 +639,19 @@ final class JvmRuntimeAdvice {
         @Advice.Argument(0) final Object objectName,
         @Advice.Argument(1) final String attribute)
         throws Throwable {
-      BootstrapDispatcher.beforeJmxGetAttr(server, objectName, attribute);
+      if (BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_JMX)) {
+        try {
+          BootstrapDispatcher.beforeJmxGetAttr(server, objectName, attribute);
+        } catch (final Throwable throwable) {
+          BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_JMX);
+          throw throwable;
+        }
+      }
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit() {
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_JMX);
     }
   }
 
@@ -605,7 +677,8 @@ final class JvmRuntimeAdvice {
 
   /**
    * Intercepts {@link java.net.InetAddress#getByName(String)} and {@link
-   * java.net.InetAddress#getAllByName(String)}.
+   * java.net.InetAddress#getAllByName(String)}. {@code getByName} delegates to {@code
+   * getAllByName}; the {@code SCOPE_DNS} call-depth scope evaluates a lookup once.
    *
    * <p>These are static methods, so no {@code @Advice.This} is present. The hostname argument is
    * forwarded to the dispatcher, which can inject latency or throw {@link
@@ -614,7 +687,19 @@ final class JvmRuntimeAdvice {
   static final class DnsResolveAdvice {
     @Advice.OnMethodEnter
     static void enter(@Advice.Argument(0) final String hostname) throws Throwable {
-      BootstrapDispatcher.beforeDnsResolve(hostname);
+      if (BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_DNS)) {
+        try {
+          BootstrapDispatcher.beforeDnsResolve(hostname);
+        } catch (final Throwable throwable) {
+          BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_DNS);
+          throw throwable;
+        }
+      }
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit() {
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_DNS);
     }
   }
 
@@ -626,7 +711,19 @@ final class JvmRuntimeAdvice {
   static final class DnsLocalHostAdvice {
     @Advice.OnMethodEnter
     static void enter() throws Throwable {
-      BootstrapDispatcher.beforeDnsResolve(null);
+      if (BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_DNS)) {
+        try {
+          BootstrapDispatcher.beforeDnsResolve(null);
+        } catch (final Throwable throwable) {
+          BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_DNS);
+          throw throwable;
+        }
+      }
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit() {
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_DNS);
     }
   }
 
@@ -642,7 +739,19 @@ final class JvmRuntimeAdvice {
   static final class SslHandshakeAdvice {
     @Advice.OnMethodEnter
     static void enter(@Advice.This final Object socket) throws Throwable {
-      BootstrapDispatcher.beforeSslHandshake(socket);
+      if (BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_SSL_HANDSHAKE)) {
+        try {
+          BootstrapDispatcher.beforeSslHandshake(socket);
+        } catch (final Throwable throwable) {
+          BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_SSL_HANDSHAKE);
+          throw throwable;
+        }
+      }
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit() {
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_SSL_HANDSHAKE);
     }
   }
 
