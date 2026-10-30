@@ -76,10 +76,20 @@ final class StressorFactory {
    * effect type does not require a background stressor.
    *
    * @param effect the chaos effect from the active scenario; must not be {@code null}
+   * @param allowDestructiveEffects the scenario's {@code allowDestructiveEffects}; without it a
+   *     carrier-pinning stressor leaves one carrier of the virtual-thread scheduler free
    * @return a started {@link ManagedStressor}, or {@code null}
    */
-  ManagedStressor createIfNeeded(final ChaosEffect effect) {
-    final Factory<ChaosEffect> factory = registry.get(effect.getClass());
-    return factory != null ? factory.create(effect) : null;
+  ManagedStressor createIfNeeded(final ChaosEffect effect, final boolean allowDestructiveEffects) {
+    ChaosEffect effective = effect;
+    if (effect instanceof ChaosEffect.VirtualThreadCarrierPinningEffect pinning
+        && !allowDestructiveEffects) {
+      effective = VirtualThreadCarrierPinningStressor.leavingOneCarrier(pinning);
+      if (effective == null) {
+        return null;
+      }
+    }
+    final Factory<ChaosEffect> factory = registry.get(effective.getClass());
+    return factory != null ? factory.create(effective) : null;
   }
 }
