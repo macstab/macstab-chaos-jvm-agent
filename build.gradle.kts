@@ -14,6 +14,7 @@ buildscript {
 
 plugins {
     base
+    id("com.gradleup.shadow") version "8.3.9" apply false
 }
 
 apply(plugin = "com.diffplug.spotless")
@@ -126,7 +127,10 @@ subprojects {
         extensions.configure<PublishingExtension> {
             publications {
                 create<MavenPublication>("maven") {
-                    from(components["java"])
+                    // The agent jar publishes its shaded jar instead (see chaos-agent-bootstrap).
+                    if (project.name != "chaos-agent-bootstrap") {
+                        from(components["java"])
+                    }
 
                     pom {
                         name.set(project.name)

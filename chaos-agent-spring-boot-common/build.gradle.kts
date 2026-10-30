@@ -1,8 +1,12 @@
 dependencies {
     api(project(":chaos-agent-api"))
-    implementation(project(":chaos-agent-core"))
+    // Inside the agent jar (chaos-agent-bootstrap) at runtime; declaring it here would put a
+    // second, unshaded copy on the application classpath.
+    compileOnly(project(":chaos-agent-core"))
+    testImplementation(project(":chaos-agent-core"))
     implementation(project(":chaos-agent-bootstrap"))
-    implementation(project(":chaos-agent-startup-config"))
+    compileOnly(project(":chaos-agent-startup-config"))
+    testImplementation(project(":chaos-agent-startup-config"))
 
     // Compile-time only so this module can be linked against either Spring Boot 3 or 4
     // at the consumer's classpath. The Spring APIs used here (@AutoConfiguration,
