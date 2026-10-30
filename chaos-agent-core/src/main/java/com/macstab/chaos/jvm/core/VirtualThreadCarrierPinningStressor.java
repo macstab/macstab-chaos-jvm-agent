@@ -92,6 +92,58 @@ final class VirtualThreadCarrierPinningStressor implements ManagedStressor {
   }
 
   /**
+   * Returns {@code effect} with its thread count reduced so at least one carrier of the
+   * virtual-thread scheduler stays free, or {@code null} when the scheduler has a single carrier.
+   *
+   * <p>Holding every carrier stops every virtual thread in the JVM until the scenario ends: an
+   * application serving requests on virtual threads stops responding, which is a deadlock rather
+   * than pinning. Whether a plan does that depended on the machine — {@code pinnedThreadCount = 4}
+   * leaves carriers free on a 16-core workstation and holds all of them on a 4-core CI runner. It
+   * now requires {@code allowDestructiveEffects}.
+   *
+   * @param effect the requested effect
+   * @return the effect to run, or {@code null} to run nothing
+   */
+  static ChaosEffect.VirtualThreadCarrierPinningEffect leavingOneCarrier(
+      final ChaosEffect.VirtualThreadCarrierPinningEffect effect) {
+    final int carriers = schedulerParallelism();
+    final int allowed = carriers - 1;
+    if (effect.pinnedThreadCount() <= allowed) {
+      return effect;
+    }
+    if (allowed < 1) {
+      LOGGER.warning(
+          () ->
+              "chaos-agent: virtual-thread carrier pinning skipped: the scheduler has a single"
+                  + " carrier, and holding it needs allowDestructiveEffects");
+      return null;
+    }
+    LOGGER.warning(
+        () ->
+            "chaos-agent: virtual-thread carrier pinning of "
+                + effect.pinnedThreadCount()
+                + " carriers capped at "
+                + allowed
+                + " of "
+                + carriers
+                + "; holding every carrier needs allowDestructiveEffects");
+    return new ChaosEffect.VirtualThreadCarrierPinningEffect(allowed, effect.pinDuration());
+  }
+
+  /** The default virtual-thread scheduler's parallelism (its number of carriers). */
+  static int schedulerParallelism() {
+    final String configured = System.getProperty("jdk.virtualThreadScheduler.parallelism");
+    if (configured != null) {
+      try {
+        return Integer.parseInt(configured.trim());
+      } catch (final NumberFormatException ignored) {
+        // the JDK rejects such a value too; fall back to its default
+      }
+    }
+    return Runtime.getRuntime().availableProcessors();
+  }
+
+  /**
    * Holds the carrier by sleeping inside a private monitor. Each thread uses its own monitor so the
    * threads do not serialise on one lock. The monitor is re-entered immediately after each cycle,
    * without unmounting, so the carrier is never handed back while active.

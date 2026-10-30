@@ -48,7 +48,8 @@ class VirtualThreadCarrierPinningThroughputTest {
                       ChaosSelector.stress(
                           ChaosSelector.StressTarget.VIRTUAL_THREAD_CARRIER_PINNING))
                   .effect(HOLD_ALL_CARRIERS)
-                  .activationPolicy(ActivationPolicy.always())
+                  // Holding every carrier stalls all virtual threads; it needs the opt-in.
+                  .activationPolicy(ActivationPolicy.withDestructiveEffects())
                   .build());
       try {
         assertStarvedUntil(handle::stop);
@@ -85,6 +86,51 @@ class VirtualThreadCarrierPinningThroughputTest {
         assertStarvedUntil(stressor::close);
       } finally {
         stressor.close();
+      }
+    }
+  }
+
+  @Nested
+  @DisplayName("without allowDestructiveEffects")
+  class WithoutConsent {
+
+    @Test
+    @DisplayName("leaves one carrier free, so other virtual threads still run")
+    void leavesOneCarrierFree() throws Exception {
+      final ChaosRuntime runtime = new ChaosRuntime();
+      try {
+        runtime.activate(
+            ChaosScenario.builder("carrier-pin-capped")
+                .scope(ChaosScenario.ScenarioScope.JVM)
+                .selector(
+                    ChaosSelector.stress(ChaosSelector.StressTarget.VIRTUAL_THREAD_CARRIER_PINNING))
+                .effect(HOLD_ALL_CARRIERS)
+                .activationPolicy(ActivationPolicy.always())
+                .build());
+        Thread.sleep(300L);
+        final CountDownLatch ran = new CountDownLatch(1);
+        Thread.ofVirtual().start(ran::countDown);
+
+        assertThat(ran.await(5L, TimeUnit.SECONDS))
+            .as("a virtual thread runs on the carrier left free")
+            .isTrue();
+      } finally {
+        runtime.close();
+      }
+    }
+
+    @Test
+    @DisplayName("caps the thread count at parallelism - 1")
+    void capsThreadCount() {
+      final ChaosEffect.VirtualThreadCarrierPinningEffect capped =
+          VirtualThreadCarrierPinningStressor.leavingOneCarrier(
+              new ChaosEffect.VirtualThreadCarrierPinningEffect(
+                  CARRIERS + 3, Duration.ofMillis(10)));
+
+      if (CARRIERS == 1) {
+        assertThat(capped).isNull();
+      } else {
+        assertThat(capped.pinnedThreadCount()).isEqualTo(CARRIERS - 1);
       }
     }
   }

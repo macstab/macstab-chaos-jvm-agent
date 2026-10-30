@@ -254,7 +254,9 @@ final class ScenarioController {
     // Holding the monitor across this work blocks every concurrent evaluate(), stop(), and
     // JFR snapshot that needs synchronized(this) for the entire startup duration.
     // If state has changed (STOPPED raced us) we close the freshly-constructed stressor below.
-    final ManagedStressor newStressor = stressorFactory.createIfNeeded(scenario.effect());
+    final ManagedStressor newStressor =
+        stressorFactory.createIfNeeded(
+            scenario.effect(), scenario.activationPolicy().allowDestructiveEffects());
     final boolean transitioned;
     synchronized (this) {
       if (state == ChaosDiagnostics.ScenarioState.STOPPED) {
