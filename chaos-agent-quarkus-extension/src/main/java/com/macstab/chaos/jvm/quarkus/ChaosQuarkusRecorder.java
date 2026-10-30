@@ -5,6 +5,7 @@ import io.quarkus.runtime.RuntimeValue;
 import io.quarkus.runtime.annotations.Recorder;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import org.eclipse.microprofile.config.ConfigProvider;
 
 /**
  * Quarkus build-time recorder that installs the chaos agent at runtime initialization.
@@ -55,7 +56,9 @@ public class ChaosQuarkusRecorder {
     try {
       ChaosPlatform.installLocally();
       return new RuntimeValue<>(Boolean.TRUE);
-    } catch (final RuntimeException exception) {
+    } catch (final RuntimeException | LinkageError exception) {
+      // LinkageError: self-attach is unavailable in a native image and on JVMs without the
+      // attach mechanism; that must not abort application startup.
       LOGGER.log(
           Level.WARNING,
           exception,
@@ -65,16 +68,15 @@ public class ChaosQuarkusRecorder {
   }
 
   /**
-   * Resolves the {@value #ENABLED_PROPERTY} flag, preferring the system property over the
-   * environment variable. The environment fallback uses upper-snake-case ({@code
-   * MACSTAB_CHAOS_ENABLED}) to match twelve-factor conventions used by Quarkus itself.
+   * Reads {@code macstab.chaos.enabled} through MicroProfile Config, which in Quarkus covers system
+   * properties, environment variables ({@code MACSTAB_CHAOS_ENABLED}) and {@code
+   * application.properties}. Reading only system properties and environment variables ignored
+   * {@code application.properties}, while the ArC producer honoured it, so the producer created the
+   * bean but the runtime-init attach was skipped.
    */
   private static boolean chaosEnabled() {
-    final String sysProp = System.getProperty(ENABLED_PROPERTY);
-    if (sysProp != null) {
-      return Boolean.parseBoolean(sysProp);
-    }
-    final String envVar = System.getenv(ENABLED_PROPERTY.replace('.', '_').toUpperCase());
-    return Boolean.parseBoolean(envVar);
+    return ConfigProvider.getConfig()
+        .getOptionalValue(ENABLED_PROPERTY, Boolean.class)
+        .orElse(Boolean.FALSE);
   }
 }

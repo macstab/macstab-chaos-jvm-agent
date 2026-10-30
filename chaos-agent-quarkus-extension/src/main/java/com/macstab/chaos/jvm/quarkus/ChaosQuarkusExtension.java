@@ -268,6 +268,17 @@ public final class ChaosQuarkusExtension
             annotation.scope().toUpperCase(Locale.ROOT));
     final ChaosSelector selector = parseSelector(annotation.selector());
     final ChaosEffect effect = parseEffect(annotation.effect());
+    if (selector instanceof ChaosSelector.JvmRuntimeSelector
+        && !(effect instanceof ChaosEffect.ClockSkewEffect)) {
+      // Clock reads only take a clock skew; a delay or suppress on them would never apply.
+      throw new IllegalArgumentException(
+          "selector jvmRuntime only supports effect=freeze, got: " + annotation.effect());
+    }
+    if (effect instanceof ChaosEffect.ClockSkewEffect
+        && !(selector instanceof ChaosSelector.JvmRuntimeSelector)) {
+      throw new IllegalArgumentException(
+          "effect=freeze requires selector=jvmRuntime, got: " + annotation.selector());
+    }
     return com.macstab.chaos.jvm.api.ChaosScenario.builder(annotation.id())
         .scope(scope)
         .selector(selector)
@@ -286,7 +297,15 @@ public final class ChaosQuarkusExtension
         return ChaosSelector.executor(
             EnumSet.of(OperationType.EXECUTOR_SUBMIT, OperationType.EXECUTOR_WORKER_RUN));
       case "jvmRuntime":
-        return ChaosSelector.jvmRuntime(EnumSet.of(OperationType.SYSTEM_CLOCK_MILLIS));
+        // The clock reads that are actually instrumented. SYSTEM_CLOCK_MILLIS
+        // (System.currentTimeMillis) is a JIT intrinsic that is never woven, so mapping to it made
+        // effect="freeze" silently do nothing.
+        return ChaosSelector.jvmRuntime(
+            EnumSet.of(
+                OperationType.INSTANT_NOW,
+                OperationType.LOCAL_DATE_TIME_NOW,
+                OperationType.ZONED_DATE_TIME_NOW,
+                OperationType.DATE_NEW));
       case "httpClient":
         return ChaosSelector.httpClient(
             EnumSet.of(OperationType.HTTP_CLIENT_SEND, OperationType.HTTP_CLIENT_SEND_ASYNC));

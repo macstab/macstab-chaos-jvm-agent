@@ -8,11 +8,14 @@ dependencies {
     compileOnly(platform(libs.quarkus.bom))
     compileOnly("io.quarkus:quarkus-core")
     compileOnly("io.quarkus:quarkus-core-deployment")
+    compileOnly("io.quarkus:quarkus-arc-deployment")
 
     testImplementation(platform(libs.quarkus.bom))
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.assertj)
+    testImplementation("io.quarkus:quarkus-core-deployment")
+    testImplementation("io.quarkus:quarkus-arc-deployment")
 }
 
 tasks.jar {
