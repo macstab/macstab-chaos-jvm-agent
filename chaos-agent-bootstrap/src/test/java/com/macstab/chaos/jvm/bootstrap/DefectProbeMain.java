@@ -485,6 +485,8 @@ public final class DefectProbeMain {
         System.out.println(directory + "=ok");
       } catch (final java.io.IOException rejected) {
         System.out.println(directory + "=rejected");
+        System.out.println(directory + ".type=" + rejected.getClass().getName());
+        System.out.println(directory + ".message=" + rejected.getMessage());
       }
     }
   }

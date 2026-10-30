@@ -1892,8 +1892,7 @@ public final class ChaosDispatcher {
           continue;
         }
         final TerminalAction candidate =
-            terminalActionFor(
-                context.operationType(), contribution.effect(), contribution.scenario());
+            terminalActionFor(context, contribution.effect(), contribution.scenario());
         if (candidate == null) {
           // A delay (or an effect without a terminal action for this operation) always takes
           // effect: delays of all matching scenarios are summed.
@@ -1928,7 +1927,14 @@ public final class ChaosDispatcher {
   }
 
   private TerminalAction terminalActionFor(
-      final OperationType operationType, final ChaosEffect effect, final ChaosScenario scenario) {
+      final InvocationContext context, final ChaosEffect effect, final ChaosScenario scenario) {
+    final OperationType operationType = context.operationType();
+    if (effect instanceof ChaosEffect.ErrnoEffect errnoEffect) {
+      return new TerminalAction(
+          TerminalKind.THROW,
+          null,
+          FailureFactory.errno(errnoEffect.errno(), operationType, context.path()));
+    }
     if (effect instanceof ChaosEffect.RejectEffect rejectEffect) {
       return rejectTerminal(operationType, rejectEffect.message());
     }

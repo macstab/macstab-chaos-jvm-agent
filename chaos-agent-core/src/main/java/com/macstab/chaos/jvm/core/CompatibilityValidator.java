@@ -541,6 +541,23 @@ final class CompatibilityValidator {
     }
   }
 
+  /** Operations a network {@link ChaosEffect.Errno} applies to. */
+  private static final Set<OperationType> ERRNO_NETWORK_OPS =
+      EnumSet.of(
+          OperationType.SOCKET_CONNECT,
+          OperationType.SOCKET_ACCEPT,
+          OperationType.SOCKET_READ,
+          OperationType.SOCKET_WRITE,
+          OperationType.SOCKET_CLOSE,
+          OperationType.NIO_CHANNEL_CONNECT,
+          OperationType.NIO_CHANNEL_ACCEPT,
+          OperationType.NIO_CHANNEL_READ,
+          OperationType.NIO_CHANNEL_WRITE);
+
+  /** Operations a file {@link ChaosEffect.Errno} applies to. */
+  private static final Set<OperationType> ERRNO_FILE_OPS =
+      EnumSet.of(OperationType.FILE_IO_READ, OperationType.FILE_IO_WRITE);
+
   /**
    * Operations whose interception point can carry out a {@link ChaosEffect.SuppressEffect}: it
    * skips the call, substitutes a no-op or returns an empty result, or — where skipping cannot be
@@ -601,6 +618,24 @@ final class CompatibilityValidator {
                   + "; this interception point can only delay or throw (use delay or reject)."
                   + " Operations supporting suppress: "
                   + SUPPRESS_OPS);
+        }
+      }
+    }
+    if (effect instanceof ChaosEffect.ErrnoEffect errnoEffect) {
+      final Set<OperationType> allowed =
+          errnoEffect.errno().family() == ChaosEffect.Errno.Family.NETWORK
+              ? ERRNO_NETWORK_OPS
+              : ERRNO_FILE_OPS;
+      for (final OperationType operation : operations) {
+        if (!allowed.contains(operation)) {
+          throw new ChaosValidationException(
+              errnoEffect.errno()
+                  + " is a "
+                  + errnoEffect.errno().family().name().toLowerCase(java.util.Locale.ROOT)
+                  + " error and does not apply to "
+                  + operation
+                  + "; it applies to "
+                  + allowed);
         }
       }
     }

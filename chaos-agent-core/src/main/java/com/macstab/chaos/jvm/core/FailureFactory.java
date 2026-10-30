@@ -103,6 +103,43 @@ final class FailureFactory {
   }
 
   /**
+   * Creates the exception the JDK raises when the operating system reports {@code errno} for an
+   * operation of {@code operationType}.
+   *
+   * @param errno the error
+   * @param operationType the failing operation
+   * @param path the file of a file operation, or {@code null}
+   * @return the exception
+   */
+  static Throwable errno(
+      final ChaosEffect.Errno errno, final OperationType operationType, final String path) {
+    final String reason = errno.reason();
+    return switch (errno) {
+      case ECONNREFUSED -> new java.net.ConnectException(reason);
+      case ETIMEDOUT ->
+          operationType == OperationType.SOCKET_CONNECT
+                  || operationType == OperationType.NIO_CHANNEL_CONNECT
+              ? new java.net.ConnectException(reason)
+              : new java.net.SocketTimeoutException("Read timed out");
+      case ECONNRESET, ENETUNREACH, EPIPE -> new java.net.SocketException(reason);
+      case EHOSTUNREACH -> new java.net.NoRouteToHostException(reason);
+      case EADDRINUSE -> new java.net.BindException(reason);
+      case EACCES ->
+          path == null
+              ? new java.io.IOException(reason)
+              : new java.nio.file.AccessDeniedException(path);
+      case ENOENT ->
+          path == null
+              ? new java.io.FileNotFoundException(reason)
+              : new java.nio.file.NoSuchFileException(path);
+      case ENOSPC, EDQUOT, EROFS, EIO, EMFILE ->
+          path == null
+              ? new java.io.IOException(reason)
+              : new java.nio.file.FileSystemException(path, null, reason);
+    };
+  }
+
+  /**
    * Creates the failure a client library raises for a rejected call, loaded through the client's
    * class loader so it is the library's own type: what the application's error handling catches.
    * Falls back to {@link #reject} when the library type cannot be built.

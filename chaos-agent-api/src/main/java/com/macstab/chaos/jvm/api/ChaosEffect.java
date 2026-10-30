@@ -27,6 +27,7 @@ public sealed interface ChaosEffect
         ChaosEffect.ReturnValueCorruptionEffect,
         ChaosEffect.ClockSkewEffect,
         ChaosEffect.SpuriousWakeupEffect,
+        ChaosEffect.ErrnoEffect,
         ChaosEffect.HeapPressureEffect,
         ChaosEffect.KeepAliveEffect,
         ChaosEffect.MetaspacePressureEffect,
@@ -77,6 +78,17 @@ public sealed interface ChaosEffect
    */
   static GateEffect gate(final Duration maxBlock) {
     return new GateEffect(maxBlock);
+  }
+
+  /**
+   * Returns an effect that fails the operation the way the operating system reports {@code errno}:
+   * the native library's {@code ERRNO} effect, expressed as the Java exception callers catch.
+   *
+   * @param errno the error
+   * @return a new {@link ErrnoEffect}
+   */
+  static ErrnoEffect errno(final Errno errno) {
+    return new ErrnoEffect(errno);
   }
 
   /**
@@ -602,6 +614,95 @@ public sealed interface ChaosEffect
       if (message == null || message.isBlank()) {
         throw new IllegalArgumentException("message must be non-blank");
       }
+    }
+  }
+
+  /**
+   * Fails the operation the way the operating system reports {@code errno}, as the Java exception
+   * an application catches for it — the native library's {@code ERRNO} effect. Network errors apply
+   * to socket and NIO channel operations, file errors to file operations; a mismatch is rejected at
+   * activation.
+   *
+   * <p>File errors carry the file's path when the stream or channel has one ({@link
+   * java.nio.file.FileSystemException#getFile()}).
+   *
+   * @param errno the error to raise
+   */
+  record ErrnoEffect(Errno errno) implements ChaosEffect {
+    /** Validates the ErrnoEffect parameters. */
+    public ErrnoEffect {
+      if (errno == null) {
+        throw new IllegalArgumentException("errno must not be null");
+      }
+    }
+  }
+
+  /** The errors an {@link ErrnoEffect} can raise, with the Java exception each becomes. */
+  enum Errno {
+    /** Connection refused: {@link java.net.ConnectException}. */
+    ECONNREFUSED(Family.NETWORK, "Connection refused"),
+    /**
+     * Timed out: {@link java.net.SocketTimeoutException} on a read, {@link
+     * java.net.ConnectException} on a connect.
+     */
+    ETIMEDOUT(Family.NETWORK, "Connection timed out"),
+    /** Connection reset by peer: {@link java.net.SocketException}. */
+    ECONNRESET(Family.NETWORK, "Connection reset"),
+    /** No route to host: {@link java.net.NoRouteToHostException}. */
+    EHOSTUNREACH(Family.NETWORK, "No route to host"),
+    /** Network is unreachable: {@link java.net.SocketException}. */
+    ENETUNREACH(Family.NETWORK, "Network is unreachable"),
+    /** Broken pipe (write to a closed connection): {@link java.net.SocketException}. */
+    EPIPE(Family.NETWORK, "Broken pipe"),
+    /** Address already in use: {@link java.net.BindException}. */
+    EADDRINUSE(Family.NETWORK, "Address already in use"),
+    /** No space left on device: {@link java.nio.file.FileSystemException}. */
+    ENOSPC(Family.FILE, "No space left on device"),
+    /** Disk quota exceeded: {@link java.nio.file.FileSystemException}. */
+    EDQUOT(Family.FILE, "Disk quota exceeded"),
+    /** Read-only file system: {@link java.nio.file.FileSystemException}. */
+    EROFS(Family.FILE, "Read-only file system"),
+    /** Permission denied: {@link java.nio.file.AccessDeniedException}. */
+    EACCES(Family.FILE, "Permission denied"),
+    /** No such file or directory: {@link java.nio.file.NoSuchFileException}. */
+    ENOENT(Family.FILE, "No such file or directory"),
+    /** Input/output error (a failing disk): {@link java.nio.file.FileSystemException}. */
+    EIO(Family.FILE, "Input/output error"),
+    /** Too many open files: {@link java.nio.file.FileSystemException}. */
+    EMFILE(Family.FILE, "Too many open files");
+
+    /** Which operations an error belongs to. */
+    public enum Family {
+      /** Socket and NIO channel operations. */
+      NETWORK,
+      /** File operations. */
+      FILE
+    }
+
+    private final Family family;
+    private final String reason;
+
+    Errno(final Family family, final String reason) {
+      this.family = family;
+      this.reason = reason;
+    }
+
+    /**
+     * Returns the operations this error belongs to.
+     *
+     * @return the family
+     */
+    public Family family() {
+      return family;
+    }
+
+    /**
+     * Returns the operating system's text for this error, used as the exception reason.
+     *
+     * @return the reason
+     */
+    public String reason() {
+      return reason;
     }
   }
 

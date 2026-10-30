@@ -75,6 +75,7 @@ final class ApiJsonMixins {
     @JsonSubTypes.Type(value = ChaosEffect.DelayEffect.class, name = "delay"),
     @JsonSubTypes.Type(value = ChaosEffect.GateEffect.class, name = "gate"),
     @JsonSubTypes.Type(value = ChaosEffect.RejectEffect.class, name = "reject"),
+    @JsonSubTypes.Type(value = ChaosEffect.ErrnoEffect.class, name = "errno"),
     @JsonSubTypes.Type(value = ChaosEffect.SuppressEffect.class, name = "suppress"),
     @JsonSubTypes.Type(
         value = ChaosEffect.ExceptionalCompletionEffect.class,

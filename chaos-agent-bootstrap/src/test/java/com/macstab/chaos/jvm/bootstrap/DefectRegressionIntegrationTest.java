@@ -670,6 +670,31 @@ class DefectRegressionIntegrationTest {
       assertThat(result.value("a")).isEqualTo("rejected");
       assertThat(result.value("b")).isEqualTo("ok");
     }
+
+    @Test
+    @DisplayName("ENOSPC on a real FileOutputStream write is a FileSystemException with the path")
+    void fileWriteNoSpace() throws Exception {
+      final Path root = Files.createDirectories(tempDir.resolve("errno"));
+      final ChildJvmProbe.ProbeResult result =
+          probe.run(
+              plan(
+                  scenario(
+                      "no-space-under-a",
+                      new ChaosSelector.FileIoSelector(
+                          Set.of(OperationType.FILE_IO_WRITE),
+                          PathPattern.under(root.resolve("a").toString()),
+                          null,
+                          null),
+                      ChaosEffect.errno(ChaosEffect.Errno.ENOSPC))),
+              DefectProbeMain.class,
+              "file-writes-by-path",
+              null,
+              "-Dchaos.test.dir=" + root);
+      assertThat(result.value("a.type")).isEqualTo("java.nio.file.FileSystemException");
+      assertThat(result.value("a.message"))
+          .isEqualTo(root.resolve("a").resolve("f") + ": No space left on device");
+      assertThat(result.value("b")).isEqualTo("ok");
+    }
   }
 
   @Nested

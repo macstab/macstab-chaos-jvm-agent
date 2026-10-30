@@ -1340,6 +1340,36 @@ ChaosEffect.delay(Duration.ofSeconds(2))  // deterministic
 
 ---
 
+#### `errno` — ErrnoEffect
+
+**JSON type:** `"errno"`  
+**Purpose:** Fail the operation the way the operating system reports an `errno`, as the Java exception code actually catches for it — the native library's `ERRNO` effect. Network errors apply to `SOCKET_*` and `NIO_CHANNEL_*` operations, file errors to `FILE_IO_*`; a mismatch is rejected at activation.
+
+| `errno`        | Family  | Exception                                                                 |
+|----------------|---------|---------------------------------------------------------------------------|
+| `ECONNREFUSED` | network | `ConnectException("Connection refused")`                                  |
+| `ETIMEDOUT`    | network | `ConnectException("Connection timed out")` on connect, else `SocketTimeoutException("Read timed out")` |
+| `ECONNRESET`   | network | `SocketException("Connection reset")`                                     |
+| `EHOSTUNREACH` | network | `NoRouteToHostException("No route to host")`                              |
+| `ENETUNREACH`  | network | `SocketException("Network is unreachable")`                               |
+| `EPIPE`        | network | `SocketException("Broken pipe")`                                          |
+| `EADDRINUSE`   | network | `BindException("Address already in use")`                                 |
+| `ENOSPC`       | file    | `FileSystemException(path, null, "No space left on device")`              |
+| `EDQUOT`       | file    | `FileSystemException(path, null, "Disk quota exceeded")`                  |
+| `EROFS`        | file    | `FileSystemException(path, null, "Read-only file system")`                |
+| `EACCES`       | file    | `AccessDeniedException(path)`                                             |
+| `ENOENT`       | file    | `NoSuchFileException(path)`                                               |
+| `EIO`          | file    | `FileSystemException(path, null, "Input/output error")`                   |
+| `EMFILE`       | file    | `FileSystemException(path, null, "Too many open files")`                  |
+
+File errors carry the path the stream was opened with; without one they are a plain `IOException` (`FileNotFoundException` for `ENOENT`) with the same text.
+
+```json
+{ "type": "errno", "errno": "ENOSPC" }
+```
+
+---
+
 #### `suppress` — SuppressEffect
 
 **JSON type:** `"suppress"`  
