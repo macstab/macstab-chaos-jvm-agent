@@ -8,6 +8,7 @@ import com.macstab.chaos.jvm.api.ChaosSelector;
 import com.macstab.chaos.jvm.api.ChaosSession;
 import com.macstab.chaos.jvm.api.OperationType;
 import com.macstab.chaos.jvm.bootstrap.ChaosPlatform;
+import com.macstab.chaos.jvm.testkit.WithChaosSupport;
 import java.lang.reflect.Method;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -96,6 +97,8 @@ public final class ChaosQuarkusExtension
           session,
           testClass.getAnnotationsByType(ChaosScenario.class),
           jvmHandles(context));
+      // @WithChaos (full JSON model): both scopes are released in afterAll.
+      jvmHandles(context).addAll(WithChaosSupport.activate(testClass, controlPlane, session));
     }
   }
 
@@ -122,6 +125,8 @@ public final class ChaosQuarkusExtension
         session,
         testMethod.getAnnotationsByType(ChaosScenario.class),
         methodJvmHandles);
+    // Method-level @WithChaos scenarios of either scope end with the method.
+    methodJvmHandles.addAll(WithChaosSupport.activate(testMethod, controlPlane, session));
   }
 
   @Override

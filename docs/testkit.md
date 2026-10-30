@@ -23,6 +23,8 @@
 
 1. **`ChaosAgentExtension`** — JUnit 5 extension that manages agent installation, session lifecycle, and parameter injection automatically
 2. **`ChaosTestKit`** — static helper for tests that do not use the JUnit 5 extension and manage chaos lifecycle manually
+3. **`@WithChaos`** — declares a test's chaos in the plan JSON model; honoured by this extension and by the Spring Boot, Micronaut and Quarkus test extensions
+4. **`ChaosAssertions`** — assertions on handle and diagnostics counters (`applied().atLeast(3)`, `never()`, `hasNoFailuresFor(...)`)
 
 Both surfaces delegate to `ChaosPlatform.installLocally()` in `chaos-agent-bootstrap` for the actual agent installation.
 
@@ -126,7 +128,73 @@ The caller is responsible for `session.close()` in all branches (preferably try-
 
 ---
 
-# 4. Self-Attach Requirements
+# 4. Declarative chaos: `@WithChaos`
+
+`@WithChaos` activates scenarios written in the same JSON model as a startup plan ([startup-config.md](startup-config.md)). The JSON is either inline (`value`) or a class-path resource (`resource`, with or without a leading `/` or `classpath:`), and is a whole plan or a single scenario object. The annotation is repeatable and allowed on the test class and on test methods.
+
+```java
+@ExtendWith(ChaosAgentExtension.class)
+@WithChaos(resource = "chaos/slow-downstream.json")          // whole plan, from the class path
+class CheckoutTest {
+
+  @Test
+  @WithChaos("""
+      {"id": "slow-db", "scope": "SESSION",
+       "selector": {"type": "jdbc", "operations": ["JDBC_STATEMENT_EXECUTE"]},
+       "effect": {"type": "delay", "minDelay": "PT0.2S", "maxDelay": "PT0.2S"}}
+      """)
+  void timesOutOnSlowDatabase(ChaosControlPlane chaos) {
+    // ... exercise the code ...
+    ChaosAssertions.assertThat(chaos.diagnostics()).scenario("slow-db").applied().atLeast(1);
+  }
+}
+```
+
+| Scenario `scope` | Activated with              | Reaches                                                           |
+|------------------|-----------------------------|-------------------------------------------------------------------|
+| `SESSION`        | the test's `ChaosSession`   | threads bound to the session and the work they hand off ([sessions](user-guide.md)) |
+| `JVM`            | the (tracking) control plane | every thread in the JVM                                           |
+
+When each extension activates and stops them:
+
+| Extension                                   | Class-level `@WithChaos`             | Method-level `@WithChaos`        | Test thread bound to the session |
+|---------------------------------------------|--------------------------------------|----------------------------------|----------------------------------|
+| testkit `ChaosAgentExtension`               | each test (session per test)         | each test                        | yes, while any `@WithChaos` applies |
+| Spring Boot 3/4 `ChaosAgentExtension`       | `beforeAll` → `afterAll`             | `beforeEach` → `afterEach`       | no (bind, or use `JVM` scope)    |
+| `ChaosMicronautExtension`                   | `beforeAll` → `afterAll`             | `beforeEach` → `afterEach`       | no (bind, or use `JVM` scope)    |
+| `ChaosQuarkusExtension`                     | `beforeAll` → `afterAll`             | `beforeEach` → `afterEach`       | no (bind, or use `JVM` scope)    |
+
+An annotation with neither or both of `value` and `resource`, a missing resource or invalid JSON fails the test before it runs (`IllegalArgumentException`, or the parser's `ConfigLoadException` with line and column); scenarios already activated for that test are stopped first. The Quarkus extension's older `@ChaosScenario` annotation keeps working; `@WithChaos` covers every selector and effect.
+
+`WithChaosSupport.activate(element, controlPlane, session)` does the work and is public, for extensions of other frameworks.
+
+---
+
+# 5. Assertions: `ChaosAssertions`
+
+```java
+ChaosAssertions.assertThat(handle).applied().atLeast(3);
+ChaosAssertions.assertThat(handle).applied().within(Duration.ofSeconds(2)).exactly(1);
+ChaosAssertions.assertThat(handle).matched().never();
+ChaosAssertions.assertThat(handle).hasState(ChaosDiagnostics.ScenarioState.ACTIVE);
+ChaosAssertions.assertThat(chaos.diagnostics()).hasNoFailuresFor("slow-db").scenario("slow-db").applied().atMost(5);
+```
+
+| Assertion                         | Holds when                                                                            |
+|-----------------------------------|---------------------------------------------------------------------------------------|
+| `applied()` / `matched()`         | selects the counter: effects that took effect (L14 in [semantics.md](semantics.md)) or selector matches |
+| `atLeast(n)` / `exactly(n)`       | the counter is ≥ n / = n; after `within(d)`, retried every 10 ms until it holds or `d` elapses |
+| `atMost(n)` / `never()`           | the counter is ≤ n / 0, checked once (waiting cannot make an upper bound hold)        |
+| `hasState(s)`                     | the scenario is in state `s`                                                          |
+| `hasNoFailures()`                 | no activation has failed since the agent started (JVM-wide; prefer the next one)      |
+| `hasNoFailuresFor(ids...)`        | no activation of these scenario ids has failed                                        |
+| `scenario(id)`                    | starts scenario assertions read from diagnostics; fails if no scenario has the id     |
+
+Failures are `org.opentest4j.AssertionFailedError`, which every JUnit and IDE renders as a test failure, with the scenario id, the expectation and the actual count in the message.
+
+---
+
+# 6. Self-Attach Requirements
 
 `ChaosPlatform.installLocally()` uses the JDK Attach API to self-attach the agent. Requirements:
 
@@ -146,7 +214,7 @@ tasks.test {
 
 ---
 
-# 5. Typical Usage Patterns
+# 7. Typical Usage Patterns
 
 ## Session-scoped delay on executor
 
@@ -249,7 +317,7 @@ void gateBlocksAndReleasesCorrectly(ChaosSession session) throws Exception {
 
 ---
 
-# 6. Anti-Patterns and Misuse Risks
+# 8. Anti-Patterns and Misuse Risks
 
 | Anti-pattern                                                               | Risk                                                                                                         | Correct approach                                                                                     |
 |----------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------|
@@ -261,7 +329,7 @@ void gateBlocksAndReleasesCorrectly(ChaosSession session) throws Exception {
 
 ---
 
-# 7. Diagnostics in Test Context
+# 9. Diagnostics in Test Context
 
 ```java
 @Test
@@ -288,7 +356,7 @@ If `matchedCount == 0`:
 
 ---
 
-# 8. References
+# 10. References
 
 - Reference: JUnit 5 — `Extension`, `BeforeEachCallback`, `AfterEachCallback`, `ParameterResolver` — https://junit.org/junit5/docs/current/user-guide/#extensions
 - Reference: Java SE API — `com.sun.tools.attach.VirtualMachine` (self-attach via Attach API) — https://docs.oracle.com/en/java/docs/api/jdk.attach/com/sun/tools/attach/VirtualMachine.html
