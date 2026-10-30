@@ -865,6 +865,7 @@ public final class JdkInstrumentationInstaller {
       // the file before the JVM opens it and run arbitrary bootstrap-level code. On non-POSIX
       // filesystems (e.g. Windows) fall back to the default because PosixFileAttributes are
       // unsupported there; other platform-specific ACLs would have to be layered in separately.
+      sweepStaleBridgeJars();
       final Path bridgeJar = createSecureTempFile();
       bridgeJar.toFile().deleteOnExit();
       try (JarOutputStream jarOutputStream =
@@ -914,6 +915,16 @@ public final class JdkInstrumentationInstaller {
       final java.util.jar.JarFile jarFile = new java.util.jar.JarFile(bridgeJar.toFile());
       BRIDGE_JARS.add(jarFile);
       instrumentation.appendToBootstrapClassLoaderSearch(jarFile);
+      // The bootstrap class path entry is opened when it is appended, and the JarFile above holds
+      // its own handle, so on POSIX the file can be unlinked now and nothing is left in the temp
+      // directory, even when the JVM is killed. deleteOnExit alone left one jar per JVM start
+      // behind after kill -9. Windows refuses to delete an open file: there the jar stays until
+      // a later start sweeps it (see sweepStaleBridgeJars).
+      try {
+        Files.deleteIfExists(bridgeJar);
+      } catch (final IOException inUse) {
+        LOGGER.fine(() -> "bridge jar kept until exit: " + bridgeJar);
+      }
     } catch (final IOException exception) {
       // Failure path: clear the injected flag so a subsequent install() can retry rather
       // than silently returning success when the bridge was never actually in place.
@@ -2234,6 +2245,37 @@ public final class JdkInstrumentationInstaller {
                                     .and(
                                         ElementMatchers.takesArguments(
                                             byte[].class, int.class, int.class)))));
+  }
+
+  /** Bridge jars older than this are left over from earlier JVMs and are removed. */
+  private static final java.time.Duration STALE_BRIDGE_JAR_AGE = java.time.Duration.ofDays(1);
+
+  /**
+   * Removes bridge jars of earlier JVMs that could not delete their own (Windows, where an open
+   * file cannot be deleted, or JVMs killed before exit). Only files with the bridge prefix that are
+   * older than a day are considered; a jar still in use by a running JVM is locked on Windows and
+   * the delete simply fails. Failures are ignored: the sweep is housekeeping only.
+   */
+  private static void sweepStaleBridgeJars() {
+    final Path tmpPath = Path.of(System.getProperty("java.io.tmpdir"));
+    final java.time.Instant cutoff = java.time.Instant.now().minus(STALE_BRIDGE_JAR_AGE);
+    try (java.nio.file.DirectoryStream<Path> candidates =
+        Files.newDirectoryStream(tmpPath, BRIDGE_JAR_PREFIX + "*" + BRIDGE_JAR_SUFFIX)) {
+      for (final Path candidate : candidates) {
+        try {
+          if (Files.isRegularFile(candidate, java.nio.file.LinkOption.NOFOLLOW_LINKS)
+              && Files.getLastModifiedTime(candidate, java.nio.file.LinkOption.NOFOLLOW_LINKS)
+                  .toInstant()
+                  .isBefore(cutoff)) {
+            Files.deleteIfExists(candidate);
+          }
+        } catch (final IOException | SecurityException skipped) {
+          // In use, owned by another user, or already gone.
+        }
+      }
+    } catch (final IOException | SecurityException unavailable) {
+      LOGGER.fine(() -> "bridge jar sweep skipped: " + unavailable);
+    }
   }
 
   private static Path createSecureTempFile() throws IOException {

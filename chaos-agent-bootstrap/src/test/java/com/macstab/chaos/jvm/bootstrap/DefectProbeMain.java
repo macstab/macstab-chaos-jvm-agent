@@ -82,6 +82,7 @@ public final class DefectProbeMain {
       case "clock-now-in-zone" -> clockNowInZone();
       case "socket-read-loopback" -> socketReadLoopback();
       case "direct-buffer-release" -> directBufferRelease();
+      case "bridge-jars-on-disk" -> bridgeJarsOnDisk();
       case "virtual-thread-start" -> Thread.ofVirtual().start(() -> {}).join();
       case "runtime-exit" -> runtimeExit();
       case "select-consumer" -> selectConsumer();
@@ -335,6 +336,23 @@ public final class DefectProbeMain {
     final long after = direct.getMemoryUsed();
     System.out.println("directDuringMiB=" + (during - before) / (1024 * 1024));
     System.out.println("directAfterMiB=" + (after - before) / (1024 * 1024));
+  }
+
+  /** Prints how many bridge jars are left in java.io.tmpdir while the agent is running. */
+  private static void bridgeJarsOnDisk() throws Exception {
+    try (java.nio.file.DirectoryStream<Path> jars =
+        java.nio.file.Files.newDirectoryStream(
+            Path.of(System.getProperty("java.io.tmpdir")), "macstab-chaos-bootstrap-bridge*")) {
+      long count = 0;
+      for (final Path ignored : jars) {
+        count++;
+      }
+      System.out.println("bridgeJars=" + count);
+    }
+    // The bridge must still work after its file is gone.
+    final long start = System.nanoTime();
+    Thread.sleep(1L);
+    System.out.println("sleepMillis=" + TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start));
   }
 
   /** Reads one byte from a loopback server; the read's peer is 127.0.0.1. */

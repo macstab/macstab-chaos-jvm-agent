@@ -9,6 +9,7 @@ import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.ChaosSelector;
 import com.macstab.chaos.jvm.api.NamePattern;
 import com.macstab.chaos.jvm.api.OperationType;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
@@ -540,6 +541,28 @@ class DefectRegressionIntegrationTest {
       assertThat(result.value("mbeanReportsRetry"))
           .as("the diagnostics MBean belongs to the runtime that was installed")
           .isEqualTo("true");
+    }
+
+    @Test
+    @DisplayName("the bridge jar is removed from the temp directory once it is on the class path")
+    void bridgeJarIsNotLeftOnDisk() throws Exception {
+      final Path privateTmp = Files.createDirectories(tempDir.resolve("tmp"));
+      final ChildJvmProbe.ProbeResult result =
+          probe.run(
+              plan(
+                  scenario(
+                      "sleep",
+                      ChaosSelector.thread(
+                          Set.of(OperationType.THREAD_SLEEP), ChaosSelector.ThreadKind.ANY),
+                      ChaosEffect.delay(Duration.ofMillis(200)))),
+              DefectProbeMain.class,
+              "bridge-jars-on-disk",
+              null,
+              "-Djava.io.tmpdir=" + privateTmp);
+      assertThat(result.longValue("bridgeJars")).isZero();
+      assertThat(result.longValue("sleepMillis"))
+          .as("instrumentation still works without the file")
+          .isGreaterThanOrEqualTo(150L);
     }
 
     @Test
