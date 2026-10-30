@@ -1977,17 +1977,19 @@ public final class ChaosDispatcher {
   }
 
   /**
-   * Strips the JVM-generated synthetic lambda suffix ({@code $$Lambda$N/0x...}) from a class name
-   * so that {@code EXACT} and {@code GLOB} task-class patterns work transparently for lambda tasks.
-   * Without stripping, a task defined as a lambda in {@code com.example.MyService} has the name
-   * {@code com.example.MyService$$Lambda$14/0x00000007004a1c40}, which defeats exact patterns.
+   * Strips the JVM-generated synthetic lambda suffix from a class name so that {@code EXACT} and
+   * {@code GLOB} task-class patterns work transparently for lambda tasks. A lambda defined in
+   * {@code com.example.MyService} is named {@code com.example.MyService$$Lambda/0x0000...} on JDK
+   * 21+ (hidden classes) and {@code com.example.MyService$$Lambda$14/0x0000...} on older JDKs; both
+   * become {@code com.example.MyService}. Matching only the older form left the hex suffix on every
+   * lambda on the supported JDKs.
    */
   static String taskClassName(final Object task) {
     if (task == null) {
       return null;
     }
     final String fullName = task.getClass().getName();
-    final int lambdaSuffixIndex = fullName.indexOf("$$Lambda$");
+    final int lambdaSuffixIndex = fullName.indexOf("$$Lambda");
     return lambdaSuffixIndex == -1 ? fullName : fullName.substring(0, lambdaSuffixIndex);
   }
 
