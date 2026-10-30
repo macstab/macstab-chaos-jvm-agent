@@ -316,10 +316,10 @@ public final class BootstrapDispatcher {
   /** Handle index for {@link #beforeSocketAccept(Object)}. */
   public static final int BEFORE_SOCKET_ACCEPT = 28;
 
-  /** Handle index for {@link #beforeSocketRead(Object)}. */
+  /** Handle index for {@link #beforeSocketRead(Object, Object)}. */
   public static final int BEFORE_SOCKET_READ = 29;
 
-  /** Handle index for {@link #beforeSocketWrite(Object, int)}. */
+  /** Handle index for {@link #beforeSocketWrite(Object, int, Object)}. */
   public static final int BEFORE_SOCKET_WRITE = 30;
 
   /** Handle index for {@link #beforeSocketClose(Object)}. */

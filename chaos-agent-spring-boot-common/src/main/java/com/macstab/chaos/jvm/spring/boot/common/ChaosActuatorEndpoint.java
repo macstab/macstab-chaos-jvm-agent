@@ -98,10 +98,10 @@ public class ChaosActuatorEndpoint {
    *
    * <p>{@code id} is the {@code handleId} returned by {@link #activate(String)} ({@code
    * plan:<name>}) or the plan name alone. Plans are activated atomically, so an individual scenario
-   * of a plan cannot be stopped on its own: a scenario id answers {@code "part-of-plan"} with the
-   * plan handle id to stop instead. An earlier version looked handles up under {@code
-   * jvm::<scenarioId>}, a key this endpoint never registers, so every stop by scenario id answered
-   * {@code "unmanaged"}.
+   * of a plan cannot be stopped on its own: a scenario id answers {@code "unmanaged"} with a hint
+   * to stop the plan by its handle id. An earlier version looked handles up under {@code
+   * jvm::<scenarioId>}, a key this endpoint never registers, so a stop by the plan handle id was
+   * the only one that could ever succeed, and nothing told the caller.
    *
    * @param id plan handle id, plan name, or scenario id
    * @return the outcome; never {@code null}

@@ -191,6 +191,152 @@ public record ActivationPolicy(
   }
 
   /**
+   * Returns a builder whose defaults equal {@link #always()}: automatic start, probability {@code
+   * 1.0}, no warm-up, cap, window or rate limit, seed {@code 0}, no destructive effects.
+   *
+   * @return a new builder
+   */
+  public static Builder builder() {
+    return new Builder();
+  }
+
+  /**
+   * Builder for {@link ActivationPolicy}. Unlike the canonical constructor it does not break when
+   * the record gains a field, so it is the recommended way to construct a policy in code.
+   */
+  public static final class Builder {
+    private StartMode startMode = StartMode.AUTOMATIC;
+    private double probability = 1.0d;
+    private long activateAfterMatches;
+    private Long maxApplications;
+    private Duration activeFor;
+    private RateLimit rateLimit;
+    private Long randomSeed = 0L;
+    private boolean allowDestructiveEffects;
+
+    private Builder() {}
+
+    /**
+     * Sets when the scenario starts accepting matches.
+     *
+     * @param value the start mode
+     * @return this builder
+     */
+    public Builder startMode(final StartMode value) {
+      this.startMode = value;
+      return this;
+    }
+
+    /**
+     * Sets the fraction of matches that apply the effect, in {@code (0.0, 1.0]}.
+     *
+     * @param value the probability
+     * @return this builder
+     */
+    public Builder probability(final double value) {
+      this.probability = value;
+      return this;
+    }
+
+    /**
+     * Sets how many initial matches are skipped before the effect applies.
+     *
+     * @param value the number of matches to skip; {@code >= 0}
+     * @return this builder
+     */
+    public Builder activateAfterMatches(final long value) {
+      this.activateAfterMatches = value;
+      return this;
+    }
+
+    /**
+     * Sets the maximum number of applications.
+     *
+     * @param value the cap; {@code null} for unlimited
+     * @return this builder
+     */
+    public Builder maxApplications(final Long value) {
+      this.maxApplications = value;
+      return this;
+    }
+
+    /**
+     * Sets how long after start the scenario stays active.
+     *
+     * @param value the window; {@code null} for none
+     * @return this builder
+     */
+    public Builder activeFor(final Duration value) {
+      this.activeFor = value;
+      return this;
+    }
+
+    /**
+     * Limits applications to {@code permits} per fixed window of {@code window}.
+     *
+     * @param permits applications per window; {@code > 0}
+     * @param window the window length; positive
+     * @return this builder
+     */
+    public Builder rateLimit(final long permits, final Duration window) {
+      this.rateLimit = new RateLimit(permits, window);
+      return this;
+    }
+
+    /**
+     * Sets the rate limit.
+     *
+     * @param value the rate limit; {@code null} for none
+     * @return this builder
+     */
+    public Builder rateLimit(final RateLimit value) {
+      this.rateLimit = value;
+      return this;
+    }
+
+    /**
+     * Sets the PRNG seed; {@code null} draws a random seed on activation.
+     *
+     * @param value the seed, or {@code null}
+     * @return this builder
+     */
+    public Builder randomSeed(final Long value) {
+      this.randomSeed = value;
+      return this;
+    }
+
+    /**
+     * Permits non-recoverable effects ({@link ChaosEffect.DeadlockEffect}, {@link
+     * ChaosEffect.ThreadLeakEffect}).
+     *
+     * @param value {@code true} to permit them
+     * @return this builder
+     */
+    public Builder allowDestructiveEffects(final boolean value) {
+      this.allowDestructiveEffects = value;
+      return this;
+    }
+
+    /**
+     * Builds the policy.
+     *
+     * @return the policy
+     * @throws IllegalArgumentException if a value is out of range
+     */
+    public ActivationPolicy build() {
+      return new ActivationPolicy(
+          startMode,
+          probability,
+          activateAfterMatches,
+          maxApplications,
+          activeFor,
+          rateLimit,
+          randomSeed,
+          allowDestructiveEffects);
+    }
+  }
+
+  /**
    * Controls whether a scenario activates automatically on registration or waits for an explicit
    * {@link ChaosActivationHandle#start()} call.
    */
