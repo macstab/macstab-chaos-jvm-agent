@@ -748,11 +748,28 @@ final class ChaosBridge implements BridgeDelegate {
    * java.net.InetAddress#getAllByName(String)}, or {@link java.net.InetAddress#getLocalHost()}.
    *
    * @param hostname the hostname being resolved; {@code null} for {@code getLocalHost()}
+   * @return the name to resolve
    * @throws Throwable if the runtime decides to abort the lookup
    */
   @Override
-  public void beforeDnsResolve(final String hostname) throws Throwable {
-    runtime.beforeDnsResolve(hostname);
+  public String beforeDnsResolve(final String hostname) throws Throwable {
+    return runtime.beforeDnsResolve(hostname);
+  }
+
+  /**
+   * Invoked when {@link java.net.InetAddress#getAllByName(String)} returns or fails.
+   *
+   * @param hostname the name that was looked up
+   * @param answer the resolver's answer, or {@code null}
+   * @param failure the lookup failure, or {@code null}
+   * @return the answer to return instead, or {@code null} to keep the original outcome
+   * @throws Throwable if a scenario rejects the lookup
+   */
+  @Override
+  public java.net.InetAddress[] afterDnsAnswer(
+      final String hostname, final java.net.InetAddress[] answer, final Throwable failure)
+      throws Throwable {
+    return runtime.afterDnsAnswer(hostname, answer, failure);
   }
 
   /**

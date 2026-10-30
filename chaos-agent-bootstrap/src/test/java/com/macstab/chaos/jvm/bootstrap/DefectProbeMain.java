@@ -91,6 +91,7 @@ public final class DefectProbeMain {
       case "socket-reset" -> socketReset();
       case "file-corrupt-read" -> fileCorruptRead();
       case "file-channel-write" -> fileChannelWrite();
+      case "dns-lookups" -> dnsLookups();
       case "random-access-write" -> randomAccessWrite();
       case "file-writes-by-path" -> fileWritesByPath();
       case "method-weaving" -> methodWeaving();
@@ -541,6 +542,21 @@ public final class DefectProbeMain {
     }
     System.out.println("size=" + java.nio.file.Files.size(file));
     java.nio.file.Files.deleteIfExists(file);
+  }
+
+  /** Resolves an unresolvable name and localhost, reporting answers or failures. */
+  private static void dnsLookups() {
+    for (final String host : new String[] {"chaos-probe.invalid", "localhost"}) {
+      try {
+        final StringBuilder addresses = new StringBuilder();
+        for (final InetAddress address : InetAddress.getAllByName(host)) {
+          addresses.append(addresses.length() == 0 ? "" : ",").append(address.getHostAddress());
+        }
+        System.out.println(host + "=" + addresses);
+      } catch (final java.net.UnknownHostException unknown) {
+        System.out.println(host + "=unknown");
+      }
+    }
   }
 
   /** Writes through a RandomAccessFile and reports the failure, if any. */

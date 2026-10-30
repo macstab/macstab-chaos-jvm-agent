@@ -275,7 +275,7 @@ package "chaos-agent-core" {
 }
 
 package "chaos-agent-bootstrap" {
-  [BootstrapDispatcher\n(60 slots)] as BD
+  [BootstrapDispatcher\n(61 slots)] as BD
 }
 
 AgentArgs --> AAP
@@ -1396,6 +1396,24 @@ A failing fsync (`FILE_IO_SYNC` with `reject` or an `errno`) throws `SyncFailedE
 
 ---
 
+#### DNS effects — `dnsAnswer`, `dnsRewrite`
+
+The native library's DNS answer effects. `DNS_RESOLVE` fires before a lookup (delay, reject, `dnsRewrite`); `DNS_ANSWER` fires when `InetAddress.getAllByName` returns or fails — `getByName` resolves through it — and is where `dnsAnswer` reshapes the answer. Both are `dns` selector operations, matched by `hostnamePattern`.
+
+| JSON type    | Effect             | Operation     | Fields                                                                                                                         |
+|--------------|--------------------|---------------|--------------------------------------------------------------------------------------------------------------------------------|
+| `dnsAnswer`  | `DnsAnswerEffect`  | `DNS_ANSWER`  | `override` (IP literals answered instead — also when the real lookup failed: `OVERRIDE`), `family` (`IPV4`/`IPV6`, keep one; an empty result is `UnknownHostException`: `FILTER_FAMILY`), `shuffle` (`SHUFFLE`), `limit` (keep the first n: `LIMIT`); applied in that order, at least one set |
+| `dnsRewrite` | `DnsRewriteEffect` | `DNS_RESOLVE` | `host` — the name resolved instead of the requested one (`REWRITE`)                                                           |
+
+```json
+{ "type": "dns", "operations": ["DNS_ANSWER"], "hostnamePattern": { "mode": "EXACT", "value": "db.internal" } }
+{ "type": "dnsAnswer", "override": ["10.0.0.99"] }
+{ "type": "dnsAnswer", "family": "IPV4", "shuffle": true, "limit": 1 }
+{ "type": "dnsRewrite", "host": "db-replica.internal" }
+```
+
+---
+
 #### `suppress` — SuppressEffect
 
 **JSON type:** `"suppress"`  
@@ -2028,7 +2046,7 @@ ByteBuddy `AgentBuilder` installs `Advice` on JDK classes per hook group — on 
 
 ### BootstrapDispatcher
 
-60 static `MethodHandle` slots in `BootstrapDispatcher` (slots do not map one-to-one to the 67 `OperationType` values). The slot for a given operation type holds a method handle to the `ChaosDispatcher` evaluation method. Advice woven into JDK classes calls the slot directly from the bootstrap classloader context.
+61 static `MethodHandle` slots in `BootstrapDispatcher` (slots do not map one-to-one to the 67 `OperationType` values). The slot for a given operation type holds a method handle to the `ChaosDispatcher` evaluation method. Advice woven into JDK classes calls the slot directly from the bootstrap classloader context.
 
 ### ThreadLocal Reentrancy Guard
 

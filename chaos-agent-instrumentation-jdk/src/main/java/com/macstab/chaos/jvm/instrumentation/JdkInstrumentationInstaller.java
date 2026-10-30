@@ -330,7 +330,8 @@ public final class JdkInstrumentationInstaller {
         OperationType.THREAD_SLEEP),
     DNS(
         JdkInstrumentationInstaller::applyPhase2DnsResolutionInterception,
-        OperationType.DNS_RESOLVE),
+        OperationType.DNS_RESOLVE,
+        OperationType.DNS_ANSWER),
     FILE_IO(
         JdkInstrumentationInstaller::applyPhase2FileIoInterception,
         OperationType.FILE_IO_READ,
@@ -899,7 +900,18 @@ public final class JdkInstrumentationInstaller {
             MethodType.methodType(boolean.class, long.class));
     methodHandles[BootstrapDispatcher.BEFORE_DNS_RESOLVE] =
         lookup.findVirtual(
-            delegateInterface, "beforeDnsResolve", MethodType.methodType(void.class, String.class));
+            delegateInterface,
+            "beforeDnsResolve",
+            MethodType.methodType(String.class, String.class));
+    methodHandles[BootstrapDispatcher.AFTER_DNS_ANSWER] =
+        lookup.findVirtual(
+            delegateInterface,
+            "afterDnsAnswer",
+            MethodType.methodType(
+                java.net.InetAddress[].class,
+                String.class,
+                java.net.InetAddress[].class,
+                Throwable.class));
     methodHandles[BootstrapDispatcher.BEFORE_SSL_HANDSHAKE] =
         lookup.findVirtual(
             delegateInterface,
@@ -2309,6 +2321,12 @@ public final class JdkInstrumentationInstaller {
                                     .and(ElementMatchers.takesArguments(String.class))))
                     .visit(
                         Advice.to(JvmRuntimeAdvice.DnsResolveAdvice.class)
+                            .on(
+                                ElementMatchers.named("getAllByName")
+                                    .and(ElementMatchers.isStatic())
+                                    .and(ElementMatchers.takesArguments(String.class))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.DnsAnswerAdvice.class)
                             .on(
                                 ElementMatchers.named("getAllByName")
                                     .and(ElementMatchers.isStatic())

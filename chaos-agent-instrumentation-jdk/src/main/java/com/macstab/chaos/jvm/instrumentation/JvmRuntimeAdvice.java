@@ -789,10 +789,11 @@ final class JvmRuntimeAdvice {
    */
   static final class DnsResolveAdvice {
     @Advice.OnMethodEnter
-    static void enter(@Advice.Argument(0) final String hostname) throws Throwable {
+    static void enter(@Advice.Argument(value = 0, readOnly = false) String hostname)
+        throws Throwable {
       if (BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_DNS)) {
         try {
-          BootstrapDispatcher.beforeDnsResolve(hostname);
+          hostname = BootstrapDispatcher.beforeDnsResolve(hostname);
         } catch (final Throwable throwable) {
           BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_DNS);
           throw throwable;
@@ -1095,6 +1096,30 @@ final class JvmRuntimeAdvice {
         @Advice.Return final int read) {
       if (corrupt) {
         BootstrapDispatcher.corruptBytes(buffer, offset, read);
+      }
+    }
+  }
+
+  /**
+   * Reshapes the answer of {@link java.net.InetAddress#getAllByName(String)} under a {@code
+   * DnsAnswerEffect}: on return, or on an {@link java.net.UnknownHostException} an override can
+   * replace. {@code getByName} resolves through it, so both see the reshaped answer.
+   */
+  static final class DnsAnswerAdvice {
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit(
+        @Advice.Argument(0) final String hostname,
+        @Advice.Return(readOnly = false) java.net.InetAddress[] answer,
+        @Advice.Thrown(readOnly = false) Throwable failure)
+        throws Throwable {
+      if (failure != null && !(failure instanceof java.net.UnknownHostException)) {
+        return;
+      }
+      final java.net.InetAddress[] reshaped =
+          BootstrapDispatcher.afterDnsAnswer(hostname, answer, failure);
+      if (reshaped != null) {
+        answer = reshaped;
+        failure = null;
       }
     }
   }

@@ -1766,9 +1766,10 @@ public final class ChaosDispatcher {
    * java.net.InetAddress#getAllByName(String)}, or {@link java.net.InetAddress#getLocalHost()}.
    *
    * @param hostname the hostname being resolved; {@code null} for {@code getLocalHost()}
+   * @return the name to resolve: {@code hostname}, or another under a {@code DnsRewriteEffect}
    * @throws Throwable if an active scenario throws to simulate a DNS failure
    */
-  public void beforeDnsResolve(final String hostname) throws Throwable {
+  public String beforeDnsResolve(final String hostname) throws Throwable {
     final InvocationContext context =
         new InvocationContext(
             OperationType.DNS_RESOLVE,
@@ -1779,7 +1780,53 @@ public final class ChaosDispatcher {
             null,
             null,
             scopeContext.currentSessionId());
-    applyPreDecision(evaluate(context));
+    final RuntimeDecision decision = evaluate(context);
+    if (decision.terminalAction() != null
+        && decision.terminalAction().kind() == TerminalKind.REWRITE) {
+      applyDelayAndGate(decision);
+      return (String) decision.terminalAction().returnValue();
+    }
+    applyPreDecision(decision);
+    return hostname;
+  }
+
+  /**
+   * Called when {@code InetAddress.getAllByName} returns or fails, to reshape the answer under a
+   * {@code DnsAnswerEffect} (override, family filter, shuffle, limit).
+   *
+   * @param hostname the name that was looked up
+   * @param answer the resolver's answer, or {@code null} when the lookup failed
+   * @param failure the lookup's {@link java.net.UnknownHostException}, or {@code null}
+   * @return the answer to return instead, or {@code null} to keep the original outcome
+   * @throws Throwable if a scenario rejects the lookup or a filter leaves no address
+   */
+  public java.net.InetAddress[] afterDnsAnswer(
+      final String hostname, final java.net.InetAddress[] answer, final Throwable failure)
+      throws Throwable {
+    final RuntimeDecision decision =
+        evaluate(
+            new InvocationContext(
+                OperationType.DNS_ANSWER,
+                "java.net.InetAddress",
+                null,
+                hostname,
+                false,
+                null,
+                null,
+                scopeContext.currentSessionId()));
+    applyDelayAndGate(decision);
+    final TerminalAction terminal = decision.terminalAction();
+    if (terminal == null) {
+      return null;
+    }
+    if (terminal.kind() == TerminalKind.THROW) {
+      throw terminal.throwable();
+    }
+    if (terminal.kind() != TerminalKind.DNS_SHAPE) {
+      return null;
+    }
+    return DnsAnswers.shape(
+        (ChaosEffect.DnsAnswerEffect) terminal.returnValue(), hostname, answer, failure);
   }
 
   /**
@@ -2021,6 +2068,12 @@ public final class ChaosDispatcher {
     if (effect instanceof ChaosEffect.TrickleEffect trickleEffect) {
       return new TerminalAction(
           TerminalKind.CAP_LENGTH, trickleEffect.maxBytes(), null, scenario.id());
+    }
+    if (effect instanceof ChaosEffect.DnsAnswerEffect answerEffect) {
+      return new TerminalAction(TerminalKind.DNS_SHAPE, answerEffect, null, scenario.id());
+    }
+    if (effect instanceof ChaosEffect.DnsRewriteEffect rewriteEffect) {
+      return new TerminalAction(TerminalKind.REWRITE, rewriteEffect.host(), null, scenario.id());
     }
     if (effect instanceof ChaosEffect.TornWriteEffect) {
       // Only a channel write can succeed short; a stream write completes or throws. A single

@@ -47,4 +47,10 @@ enum TerminalKind {
    * the scenario neither takes effect nor counts an application.
    */
   NOT_APPLICABLE,
+  /**
+   * Reshape a DNS answer by the {@code DnsAnswerEffect} in {@link TerminalAction#returnValue()}.
+   */
+  DNS_SHAPE,
+  /** Resolve the host in {@link TerminalAction#returnValue()} instead: {@code DnsRewriteEffect}. */
+  REWRITE,
 }

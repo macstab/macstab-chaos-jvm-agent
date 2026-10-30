@@ -81,6 +81,8 @@ final class ApiJsonMixins {
     @JsonSubTypes.Type(value = ChaosEffect.CorruptReadEffect.class, name = "corruptRead"),
     @JsonSubTypes.Type(value = ChaosEffect.TimeoutEffect.class, name = "timeout"),
     @JsonSubTypes.Type(value = ChaosEffect.TornWriteEffect.class, name = "tornWrite"),
+    @JsonSubTypes.Type(value = ChaosEffect.DnsAnswerEffect.class, name = "dnsAnswer"),
+    @JsonSubTypes.Type(value = ChaosEffect.DnsRewriteEffect.class, name = "dnsRewrite"),
     @JsonSubTypes.Type(value = ChaosEffect.SuppressEffect.class, name = "suppress"),
     @JsonSubTypes.Type(
         value = ChaosEffect.ExceptionalCompletionEffect.class,

@@ -1041,7 +1041,8 @@ public sealed interface ChaosSelector
    */
   record DnsSelector(Set<OperationType> operations, NamePattern hostnamePattern)
       implements ChaosSelector {
-    static final Set<OperationType> VALID_OPS = EnumSet.of(OperationType.DNS_RESOLVE);
+    static final Set<OperationType> VALID_OPS =
+        EnumSet.of(OperationType.DNS_RESOLVE, OperationType.DNS_ANSWER);
 
     /** Validates the DnsSelector parameters. */
     public DnsSelector {

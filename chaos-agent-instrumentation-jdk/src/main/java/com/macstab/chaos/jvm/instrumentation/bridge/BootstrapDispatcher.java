@@ -416,8 +416,11 @@ public final class BootstrapDispatcher {
   /** Handle index for {@link #beforeClientCall(String, Object, String, String, Object)}. */
   public static final int BEFORE_CLIENT_CALL = 59;
 
+  /** Handle index for {@link #afterDnsAnswer(String, java.net.InetAddress[], Throwable)}. */
+  public static final int AFTER_DNS_ANSWER = 60;
+
   /** Total number of method-handle slots; equals the highest index plus one. */
-  public static final int HANDLE_COUNT = 60;
+  public static final int HANDLE_COUNT = 61;
 
   /** Utility class; do not instantiate. */
   private BootstrapDispatcher() {}
@@ -2054,22 +2057,55 @@ public final class BootstrapDispatcher {
    * java.net.InetAddress#getAllByName(String)}, or {@link java.net.InetAddress#getLocalHost()}.
    *
    * @param hostname the hostname being resolved; {@code null} for {@code getLocalHost()}
+   * @return the name to resolve: {@code hostname}, or another under a {@code DnsRewriteEffect}
    * @throws Throwable if an active scenario injects an exception to simulate a DNS failure
    */
-  public static void beforeDnsResolve(final String hostname) throws Throwable {
+  public static String beforeDnsResolve(final String hostname) throws Throwable {
     final int[] depth = DEPTH.get();
     if (depth[0] > 0) {
-      return;
+      return hostname;
     }
     depth[0]++;
     try {
       final MethodHandle[] h = handles;
       final Object d = delegate;
-      if (d != null && h != null) {
-        h[BEFORE_DNS_RESOLVE].invoke(d, hostname);
-      }
+      return (d == null || h == null)
+          ? hostname
+          : (String) h[BEFORE_DNS_RESOLVE].invoke(d, hostname);
     } catch (final Throwable throwable) {
       sneakyThrow(throwable);
+      return hostname;
+    } finally {
+      depth[0]--;
+    }
+  }
+
+  /**
+   * Called when {@link java.net.InetAddress#getAllByName(String)} returns or fails.
+   *
+   * @param hostname the name that was looked up
+   * @param answer the resolver's answer, or {@code null} when it failed
+   * @param failure the lookup's failure, or {@code null}
+   * @return the answer to return instead, or {@code null} to keep the original outcome
+   * @throws Throwable if an active scenario rejects the lookup
+   */
+  public static java.net.InetAddress[] afterDnsAnswer(
+      final String hostname, final java.net.InetAddress[] answer, final Throwable failure)
+      throws Throwable {
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return null;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      return (d == null || h == null)
+          ? null
+          : (java.net.InetAddress[]) h[AFTER_DNS_ANSWER].invoke(d, hostname, answer, failure);
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+      return null;
     } finally {
       depth[0]--;
     }

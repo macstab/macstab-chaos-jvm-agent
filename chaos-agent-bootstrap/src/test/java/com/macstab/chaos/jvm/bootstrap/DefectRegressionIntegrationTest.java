@@ -972,6 +972,41 @@ class DefectRegressionIntegrationTest {
     }
 
     @Test
+    @DisplayName("dnsOverride answers a lookup that would fail")
+    void dnsOverride() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          run(
+              ChaosSelector.dns(
+                  Set.of(OperationType.DNS_ANSWER), NamePattern.exact("chaos-probe.invalid")),
+              ChaosEffect.dnsOverride("192.0.2.7"),
+              "dns-lookups");
+      assertThat(result.value("chaos-probe.invalid")).isEqualTo("192.0.2.7");
+    }
+
+    @Test
+    @DisplayName("dnsFamily keeps only IPv4 addresses")
+    void dnsFamily() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          run(
+              ChaosSelector.dns(Set.of(OperationType.DNS_ANSWER), NamePattern.exact("localhost")),
+              ChaosEffect.dnsFamily(ChaosEffect.AddressFamily.IPV4),
+              "dns-lookups");
+      assertThat(result.value("localhost")).isEqualTo("127.0.0.1");
+    }
+
+    @Test
+    @DisplayName("dnsRewrite resolves another name instead")
+    void dnsRewrite() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          run(
+              ChaosSelector.dns(
+                  Set.of(OperationType.DNS_RESOLVE), NamePattern.exact("chaos-probe.invalid")),
+              ChaosEffect.dnsRewrite("localhost"),
+              "dns-lookups");
+      assertThat(result.value("chaos-probe.invalid")).contains("127.0.0.1");
+    }
+
+    @Test
     @DisplayName("timeout waits for SO_TIMEOUT, then throws SocketTimeoutException")
     void timeout() throws Exception {
       final ChildJvmProbe.ProbeResult result =

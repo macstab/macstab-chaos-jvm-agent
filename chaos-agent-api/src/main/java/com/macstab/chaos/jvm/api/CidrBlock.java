@@ -102,6 +102,24 @@ public final class CidrBlock {
   }
 
   /**
+   * Parses an IPv4 or IPv6 literal without resolving anything.
+   *
+   * @param literal the address, e.g. {@code 10.0.0.5} or {@code 2001:db8::1}
+   * @return its bytes (4 or 16)
+   * @throws IllegalArgumentException if {@code literal} is not an address literal
+   */
+  public static byte[] parseAddress(final String literal) {
+    final byte[] address =
+        literal == null
+            ? null
+            : literal.indexOf(':') >= 0 ? parseIpv6(literal.trim()) : parseIpv4(literal.trim());
+    if (address == null) {
+      throw new IllegalArgumentException("not an IPv4 or IPv6 literal: " + literal);
+    }
+    return address;
+  }
+
+  /**
    * Returns whether {@code address} lies in this block.
    *
    * @param address the address; {@code null} never matches

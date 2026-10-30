@@ -630,9 +630,22 @@ public interface BridgeDelegate {
    * java.net.InetAddress#getAllByName(String)}, or {@link java.net.InetAddress#getLocalHost()}.
    *
    * @param hostname the hostname being resolved; {@code null} for {@code getLocalHost()}
+   * @return the name to resolve: {@code hostname}, or another under a {@code DnsRewriteEffect}
    * @throws Throwable if the delegate throws
    */
-  void beforeDnsResolve(String hostname) throws Throwable;
+  String beforeDnsResolve(String hostname) throws Throwable;
+
+  /**
+   * Called when {@link java.net.InetAddress#getAllByName(String)} returns or fails.
+   *
+   * @param hostname the name that was looked up
+   * @param answer the resolver's answer, or {@code null}
+   * @param failure the lookup failure, or {@code null}
+   * @return the answer to return instead, or {@code null} to keep the original outcome
+   * @throws Throwable if a scenario rejects the lookup
+   */
+  java.net.InetAddress[] afterDnsAnswer(
+      String hostname, java.net.InetAddress[] answer, Throwable failure) throws Throwable;
 
   /**
    * Called before {@link javax.net.ssl.SSLSocket#startHandshake()} or {@link

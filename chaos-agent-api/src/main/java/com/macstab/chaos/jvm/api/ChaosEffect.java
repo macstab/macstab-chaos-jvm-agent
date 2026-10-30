@@ -33,6 +33,8 @@ public sealed interface ChaosEffect
         ChaosEffect.CorruptReadEffect,
         ChaosEffect.TimeoutEffect,
         ChaosEffect.TornWriteEffect,
+        ChaosEffect.DnsAnswerEffect,
+        ChaosEffect.DnsRewriteEffect,
         ChaosEffect.HeapPressureEffect,
         ChaosEffect.KeepAliveEffect,
         ChaosEffect.MetaspacePressureEffect,
@@ -152,6 +154,62 @@ public sealed interface ChaosEffect
    */
   static TornWriteEffect tornWrite() {
     return new TornWriteEffect();
+  }
+
+  /**
+   * Returns an effect that answers DNS lookups with {@code addresses} instead of the resolver's
+   * answer — even when the real lookup failed: the native library's {@code OVERRIDE}. Valid for
+   * {@link OperationType#DNS_ANSWER}.
+   *
+   * @param addresses IPv4 or IPv6 literals; at least one
+   * @return a new {@link DnsAnswerEffect}
+   */
+  static DnsAnswerEffect dnsOverride(final String... addresses) {
+    return new DnsAnswerEffect(java.util.List.of(addresses), null, false, null);
+  }
+
+  /**
+   * Returns an effect that keeps only the addresses of {@code family} in a DNS answer; an answer
+   * left empty fails with {@link java.net.UnknownHostException}: the native library's {@code
+   * FILTER_FAMILY}. Valid for {@link OperationType#DNS_ANSWER}.
+   *
+   * @param family the family to keep
+   * @return a new {@link DnsAnswerEffect}
+   */
+  static DnsAnswerEffect dnsFamily(final AddressFamily family) {
+    return new DnsAnswerEffect(null, family, false, null);
+  }
+
+  /**
+   * Returns an effect that shuffles the addresses of a DNS answer: the native library's {@code
+   * SHUFFLE}. Valid for {@link OperationType#DNS_ANSWER}.
+   *
+   * @return a new {@link DnsAnswerEffect}
+   */
+  static DnsAnswerEffect dnsShuffle() {
+    return new DnsAnswerEffect(null, null, true, null);
+  }
+
+  /**
+   * Returns an effect that keeps at most {@code count} addresses of a DNS answer: the native
+   * library's {@code LIMIT}. Valid for {@link OperationType#DNS_ANSWER}.
+   *
+   * @param count the most addresses to keep; {@code >= 1}
+   * @return a new {@link DnsAnswerEffect}
+   */
+  static DnsAnswerEffect dnsLimit(final int count) {
+    return new DnsAnswerEffect(null, null, false, count);
+  }
+
+  /**
+   * Returns an effect that looks up {@code host} instead of the name the application asked for: the
+   * native library's {@code REWRITE}. Valid for {@link OperationType#DNS_RESOLVE}.
+   *
+   * @param host the name to resolve instead
+   * @return a new {@link DnsRewriteEffect}
+   */
+  static DnsRewriteEffect dnsRewrite(final String host) {
+    return new DnsRewriteEffect(host);
   }
 
   /**
@@ -725,6 +783,62 @@ public sealed interface ChaosEffect
    * fires when the timeout is infinite.
    */
   record TimeoutEffect() implements ChaosEffect {}
+
+  /** The address family a {@link DnsAnswerEffect} keeps. */
+  enum AddressFamily {
+    /** IPv4 addresses. */
+    IPV4,
+    /** IPv6 addresses. */
+    IPV6
+  }
+
+  /**
+   * Reshapes a DNS answer: replaces it ({@code override}, IP literals; applied even when the real
+   * lookup failed), keeps one address family, shuffles it and limits its size, in that order. Every
+   * field is optional, but at least one must be set.
+   *
+   * @param override the addresses to answer with instead; {@code null} to keep the real answer
+   * @param family the family to keep; {@code null} to keep both
+   * @param shuffle whether to shuffle the addresses
+   * @param limit the most addresses to keep; {@code null} for no limit
+   */
+  record DnsAnswerEffect(
+      java.util.List<String> override, AddressFamily family, boolean shuffle, Integer limit)
+      implements ChaosEffect {
+    /** Validates the DnsAnswerEffect parameters. */
+    public DnsAnswerEffect {
+      if (override != null) {
+        if (override.isEmpty()) {
+          throw new IllegalArgumentException("override must name at least one address");
+        }
+        override = java.util.List.copyOf(override);
+        for (final String address : override) {
+          CidrBlock.parseAddress(address);
+        }
+      }
+      if (limit != null && limit < 1) {
+        throw new IllegalArgumentException("limit must be >= 1, got " + limit);
+      }
+      if (override == null && family == null && !shuffle && limit == null) {
+        throw new IllegalArgumentException(
+            "DnsAnswerEffect needs override, family, shuffle or limit");
+      }
+    }
+  }
+
+  /**
+   * Resolves {@code host} instead of the name the application asked for.
+   *
+   * @param host the name to resolve instead; non-blank
+   */
+  record DnsRewriteEffect(String host) implements ChaosEffect {
+    /** Validates the DnsRewriteEffect parameters. */
+    public DnsRewriteEffect {
+      if (host == null || host.isBlank()) {
+        throw new IllegalArgumentException("host must be non-blank");
+      }
+    }
+  }
 
   /** Makes a file-channel write succeed short: 1 to n-1 of the n bytes are written. */
   record TornWriteEffect() implements ChaosEffect {}

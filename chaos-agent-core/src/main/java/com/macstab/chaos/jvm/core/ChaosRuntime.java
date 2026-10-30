@@ -900,10 +900,26 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * Delegates to {@link ChaosDispatcher#beforeDnsResolve}.
    *
    * @param hostname the hostname being resolved
+   * @return the name to resolve: {@code hostname}, or another under a {@code DnsRewriteEffect}
    * @throws Throwable if a chaos effect injects an exception
    */
-  public void beforeDnsResolve(final String hostname) throws Throwable {
-    dispatcher.beforeDnsResolve(hostname);
+  public String beforeDnsResolve(final String hostname) throws Throwable {
+    return dispatcher.beforeDnsResolve(hostname);
+  }
+
+  /**
+   * Delegates to {@link ChaosDispatcher#afterDnsAnswer}.
+   *
+   * @param hostname the name that was looked up
+   * @param answer the resolver's answer, or {@code null}
+   * @param failure the lookup failure, or {@code null}
+   * @return the reshaped answer, or {@code null} to keep the original outcome
+   * @throws Throwable if a scenario rejects the lookup
+   */
+  public java.net.InetAddress[] afterDnsAnswer(
+      final String hostname, final java.net.InetAddress[] answer, final Throwable failure)
+      throws Throwable {
+    return dispatcher.afterDnsAnswer(hostname, answer, failure);
   }
 
   /**

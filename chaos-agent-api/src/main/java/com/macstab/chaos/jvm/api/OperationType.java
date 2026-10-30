@@ -681,6 +681,16 @@ public enum OperationType {
    */
   DNS_RESOLVE,
 
+  /**
+   * Fires when {@code InetAddress.getAllByName} returns or fails, with the answer: the point where
+   * a {@link ChaosEffect.DnsAnswerEffect} overrides, filters, shuffles or limits the addresses.
+   * {@code InetAddress.getByName} resolves through it too. Evaluated once per lookup, separately
+   * from {@link #DNS_RESOLVE} (which fires before the lookup).
+   *
+   * <p>Use with {@link ChaosSelector.DnsSelector}.
+   */
+  DNS_ANSWER,
+
   // ── SSL/TLS handshake ───────────────────────────────────────────────────────
 
   /**

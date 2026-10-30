@@ -554,7 +554,11 @@ final class CompatibilityValidator {
               ChaosEffect.TimeoutEffect.class,
               EnumSet.of(OperationType.SOCKET_READ, OperationType.SOCKET_CONNECT),
               ChaosEffect.TornWriteEffect.class,
-              EnumSet.of(OperationType.FILE_IO_WRITE));
+              EnumSet.of(OperationType.FILE_IO_WRITE),
+              ChaosEffect.DnsAnswerEffect.class,
+              EnumSet.of(OperationType.DNS_ANSWER),
+              ChaosEffect.DnsRewriteEffect.class,
+              EnumSet.of(OperationType.DNS_RESOLVE));
 
   /** Operations a network {@link ChaosEffect.Errno} applies to. */
   private static final Set<OperationType> ERRNO_NETWORK_OPS =
