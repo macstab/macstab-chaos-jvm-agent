@@ -203,7 +203,7 @@ Application Thread
 
 **57 interception handles** span: thread lifecycle, executor submission, scheduled ticks, blocking queues, `CompletableFuture`, NIO selectors, TCP sockets, clock (`currentTimeMillis`/`nanoTime`), GC, `System.exit`, reflection, `ObjectInputStream`, class loading, `LockSupport.park`, AQS acquire, JNDI, JMX, ZIP compression, `ThreadLocal`, native library loading, HTTP client send, JDBC execute, DNS resolve, SSL handshake, `Thread.sleep`, file I/O, and arbitrary method entry/exit.
 
-**Session isolation**: each test gets a `ChaosSession` backed by a `ThreadLocal<String>`. Session-scoped chaos evaluates only when the session ID on the current thread matches. Executor submissions within a `session.bind()` scope carry the session ID into worker threads via task decoration — chaos propagates exactly where intended and nowhere else.
+**Session isolation**: each test gets a `ChaosSession` backed by a `ThreadLocal<String>`. Session-scoped chaos evaluates only when the session ID on the current thread matches. Work handed off within a `session.bind()` scope — executor submissions, `ForkJoinPool` tasks (`CompletableFuture.*Async`, parallel streams), started threads and virtual threads — carries the session ID into the thread that runs it, so chaos propagates exactly where intended and nowhere else.
 
 ---
 

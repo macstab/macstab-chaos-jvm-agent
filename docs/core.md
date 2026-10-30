@@ -398,7 +398,7 @@ Wraps a single `ThreadLocal<String>` holding the current session ID. Key operati
 
 **Why ThreadLocal and not a method argument**: The session ID must be available at every instrumentation point without changing the signature of any JDK method. `ThreadLocal` is the only transparent carrier for per-thread state in a JVM agent context.
 
-**Limitation**: Session context propagates only to threads that are explicitly wrapped via `session.wrap(task)` or `ScopeContext.wrap(sessionId, task)`. Threads spawned independently (e.g., by third-party libraries) without wrapping do not carry the session ID and will not be affected by session-scoped scenarios.
+**Propagation**: besides explicit wrapping (`session.wrap(task)`, `ScopeContext.wrap(sessionId, task)`) and executor decoration, `SessionHandoff` carries the session across `ForkJoinPool` submissions and forks, `Thread.start()` and virtual threads: the session is recorded against the task or thread (weak, identity-keyed) when it is handed off and bound for the duration of its run. Work handed off from a thread without a session carries none; a `Thread` subclass whose `run()` does not call `super.run()` does not receive the session.
 
 ## ManualGate
 

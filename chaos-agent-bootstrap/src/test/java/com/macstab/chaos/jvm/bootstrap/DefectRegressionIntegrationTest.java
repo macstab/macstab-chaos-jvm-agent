@@ -1122,6 +1122,31 @@ class DefectRegressionIntegrationTest {
   }
 
   @Nested
+  @DisplayName("session hand-off")
+  class SessionHandoff {
+
+    @Test
+    @DisplayName(
+        "ForkJoin tasks, started threads, virtual threads and parallel streams run in the session")
+    void propagates() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.runWithoutPlan(DefectProbeMain.class, "session-handoff");
+      assertThat(result.value("caller")).isEqualTo("injected");
+      assertThat(result.value("forkJoin"))
+          .as("CompletableFuture.supplyAsync")
+          .isEqualTo("injected");
+      assertThat(result.value("thread")).as("Thread.start").isEqualTo("injected");
+      assertThat(result.value("virtual")).as("virtual thread").isEqualTo("injected");
+      assertThat(result.value("parallel"))
+          .as("every parallel-stream element")
+          .isEqualTo("injected");
+      assertThat(result.value("outside"))
+          .as("a thread started after the session closed is not in it")
+          .isEqualTo("ok");
+    }
+  }
+
+  @Nested
   @DisplayName("on-demand weaving")
   class OnDemandWeaving {
 

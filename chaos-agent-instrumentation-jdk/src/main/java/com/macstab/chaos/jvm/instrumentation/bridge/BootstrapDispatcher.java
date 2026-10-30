@@ -419,8 +419,17 @@ public final class BootstrapDispatcher {
   /** Handle index for {@link #afterDnsAnswer(String, java.net.InetAddress[], Throwable)}. */
   public static final int AFTER_DNS_ANSWER = 60;
 
+  /** Handle index for {@link #captureSession(Object)}. */
+  public static final int CAPTURE_SESSION = 61;
+
+  /** Handle index for {@link #enterSession(Object)}. */
+  public static final int ENTER_SESSION = 62;
+
+  /** Handle index for {@link #exitSession(Object)}. */
+  public static final int EXIT_SESSION = 63;
+
   /** Total number of method-handle slots; equals the highest index plus one. */
-  public static final int HANDLE_COUNT = 61;
+  public static final int HANDLE_COUNT = 64;
 
   /** Utility class; do not instantiate. */
   private BootstrapDispatcher() {}
@@ -2326,6 +2335,78 @@ public final class BootstrapDispatcher {
       final Object d = delegate;
       if (d != null && h != null) {
         h[BEFORE_CLIENT_CALL].invoke(d, operation, client, target, detail, remoteAddress);
+      }
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+    } finally {
+      depth[0]--;
+    }
+  }
+
+  /**
+   * Records the current session for a fork-join task being submitted or forked.
+   *
+   * @param carrier the task or thread
+   */
+  public static void captureSession(final Object carrier) {
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      if (d != null && h != null) {
+        h[CAPTURE_SESSION].invoke(d, carrier);
+      }
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+    } finally {
+      depth[0]--;
+    }
+  }
+
+  /**
+   * Binds the session handed to a task or thread that starts running.
+   *
+   * @param carrier the task or thread
+   */
+  public static void enterSession(final Object carrier) {
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      if (d != null && h != null) {
+        h[ENTER_SESSION].invoke(d, carrier);
+      }
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+    } finally {
+      depth[0]--;
+    }
+  }
+
+  /**
+   * Releases the session bound by {@link #enterSession(Object)}.
+   *
+   * @param carrier the task or thread
+   */
+  public static void exitSession(final Object carrier) {
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      if (d != null && h != null) {
+        h[EXIT_SESSION].invoke(d, carrier);
       }
     } catch (final Throwable throwable) {
       sneakyThrow(throwable);

@@ -857,4 +857,19 @@ final class ChaosBridge implements BridgeDelegate {
       throws Throwable {
     runtime.beforeClientCall(operation, client, target, detail, remoteAddress);
   }
+
+  @Override
+  public void captureSession(final Object carrier) {
+    runtime.captureSession(carrier);
+  }
+
+  @Override
+  public void enterSession(final Object carrier) {
+    runtime.enterSession(carrier);
+  }
+
+  @Override
+  public void exitSession(final Object carrier) {
+    runtime.exitSession(carrier);
+  }
 }

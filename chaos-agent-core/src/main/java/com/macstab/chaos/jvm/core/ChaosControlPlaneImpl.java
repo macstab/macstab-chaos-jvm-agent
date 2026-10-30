@@ -58,7 +58,11 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
    * a session is opened, so session-scoped scenarios of any operation see work handed to executors.
    */
   private static final Set<OperationType> SESSION_PROPAGATION_OPERATIONS =
-      EnumSet.of(OperationType.EXECUTOR_SUBMIT, OperationType.SCHEDULE_SUBMIT);
+      EnumSet.of(
+          OperationType.EXECUTOR_SUBMIT,
+          OperationType.SCHEDULE_SUBMIT,
+          OperationType.THREAD_START,
+          OperationType.FORK_JOIN_TASK_RUN);
 
   ChaosControlPlaneImpl(final Clock clock, final ChaosMetricsSink metricsSink) {
     this.clock = clock;

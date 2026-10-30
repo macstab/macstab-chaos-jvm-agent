@@ -119,6 +119,7 @@ public final class ChaosDispatcher {
 
   private final FeatureSet featureSet;
   private final ScopeContext scopeContext;
+  private final SessionHandoff sessionHandoff = new SessionHandoff();
   private final ScenarioRegistry registry;
   private final Map<Thread, Thread> shutdownHooks;
   private final Map<Thread, java.util.concurrent.atomic.AtomicReference<Thread>> hookDelegateRefs =
@@ -255,6 +256,36 @@ public final class ChaosDispatcher {
             thread == null ? null : featureSet.isVirtualThread(thread),
             scopeContext.currentSessionId());
     applyPreDecision(evaluate(context));
+    // The started thread runs in the starting thread's session (see enterSession).
+    sessionHandoff.capture(thread, context.sessionId());
+  }
+
+  /**
+   * Records the current session for a fork-join task being submitted or forked, so that the task
+   * runs in it.
+   *
+   * @param carrier the task
+   */
+  public void captureSession(final Object carrier) {
+    sessionHandoff.capture(carrier, scopeContext.currentSessionId());
+  }
+
+  /**
+   * Binds the session recorded for a task or thread that starts running.
+   *
+   * @param carrier the task or thread
+   */
+  public void enterSession(final Object carrier) {
+    sessionHandoff.enter(carrier, scopeContext);
+  }
+
+  /**
+   * Releases the session bound by {@link #enterSession} when the task or thread finishes.
+   *
+   * @param carrier the task or thread
+   */
+  public void exitSession(final Object carrier) {
+    sessionHandoff.exit(carrier);
   }
 
   /**

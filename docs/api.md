@@ -74,7 +74,7 @@ public interface ChaosControlPlane {
 
 **`activate(ChaosPlan)`**: Rejects any session-scoped scenario in the plan with `ChaosActivationException`. Activation is atomic: if any scenario fails, the ones already registered are removed again before the exception propagates.
 
-**`openSession(String)`**: Weaves the executor hook groups (`EXECUTOR_SUBMIT`, `SCHEDULE_SUBMIT`) needed to propagate the session to worker threads, if not woven yet, then creates a `DefaultChaosSession` with a UUID and the given display name. The opening thread is bound to the session until `session.close()`; call `session.bind()` on other threads that should participate.
+**`openSession(String)`**: Weaves the hook groups needed to propagate the session (executors, schedulers, thread start, fork-join), if not woven yet, then creates a `DefaultChaosSession` with a UUID and the given display name. The opening thread is bound to the session until `session.close()`; call `session.bind()` on other threads that should participate.
 
 **After `close()`**: `activate`, `openSession` and `addEventListener` throw `IllegalStateException("chaos control plane is closed")`.
 
@@ -113,7 +113,7 @@ public interface ChaosSession {
 }
 ```
 
-**Thread propagation**: `bind()` pushes the session ID onto a per-thread stack (plain `ThreadLocal`) on the calling thread. The session ID is automatically propagated to tasks submitted to executors and schedulers (via the `decorateExecutorRunnable/Callable` instrumentation) — the worker run and every scheduled tick of a periodic task execute bound to the session — but only for tasks submitted while the thread is bound. A session-scoped clock skew applies only on bound threads.
+**Thread propagation**: `bind()` pushes the session ID onto a per-thread stack (plain `ThreadLocal`) on the calling thread. The session ID is automatically propagated to work handed off while the thread is bound: tasks submitted to executors and schedulers (the worker run and every scheduled tick of a periodic task execute bound to the session), `ForkJoinPool` submissions and forks (so `CompletableFuture.*Async` and parallel streams), threads started with `Thread.start()` and virtual threads (including `Executors.newVirtualThreadPerTaskExecutor()`). The receiving task or thread is bound for the duration of its run. A `Thread` subclass that overrides `run()` without calling `super.run()` does not receive the session. A session-scoped clock skew applies only on bound threads.
 
 For tasks submitted to executors outside a `bind()` block, use `session.wrap(task)` to explicitly carry the session context.
 

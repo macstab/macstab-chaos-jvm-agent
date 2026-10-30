@@ -903,6 +903,17 @@ public final class JdkInstrumentationInstaller {
             delegateInterface,
             "beforeDnsResolve",
             MethodType.methodType(String.class, String.class));
+    for (final String sessionMethod :
+        new String[] {"captureSession", "enterSession", "exitSession"}) {
+      methodHandles[
+              switch (sessionMethod) {
+                case "captureSession" -> BootstrapDispatcher.CAPTURE_SESSION;
+                case "enterSession" -> BootstrapDispatcher.ENTER_SESSION;
+                default -> BootstrapDispatcher.EXIT_SESSION;
+              }] =
+          lookup.findVirtual(
+              delegateInterface, sessionMethod, MethodType.methodType(void.class, Object.class));
+    }
     methodHandles[BootstrapDispatcher.AFTER_DNS_ANSWER] =
         lookup.findVirtual(
             delegateInterface,
@@ -1229,6 +1240,26 @@ public final class JdkInstrumentationInstaller {
                                                         0,
                                                         ElementMatchers.named(
                                                             "jdk.internal.vm.ThreadContainer"))))))))
+        .type(ElementMatchers.named("java.lang.Thread"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(ThreadAdvice.RunSessionAdvice.class)
+                        .on(ElementMatchers.named("run").and(ElementMatchers.takesArguments(0)))))
+        .type(ElementMatchers.named("java.lang.VirtualThread"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder
+                    .visit(
+                        Advice.to(ThreadAdvice.RunSessionAdvice.class)
+                            .on(
+                                ElementMatchers.named("run")
+                                    .and(ElementMatchers.takesArguments(Runnable.class))))
+                    .visit(
+                        Advice.to(ThreadAdvice.MountSessionAdvice.class)
+                            .on(
+                                ElementMatchers.named("mount")
+                                    .and(ElementMatchers.takesArguments(0)))))
         .type(ElementMatchers.named("java.lang.VirtualThread"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
@@ -1431,11 +1462,25 @@ public final class JdkInstrumentationInstaller {
         .type(ElementMatchers.named("java.util.concurrent.ForkJoinTask"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder
+                    .visit(
+                        Advice.to(ForkJoinAdvice.DoExecAdvice.class)
+                            .on(
+                                ElementMatchers.named("doExec")
+                                    .and(ElementMatchers.takesArguments(0))))
+                    .visit(
+                        Advice.to(ForkJoinAdvice.ForkAdvice.class)
+                            .on(
+                                ElementMatchers.named("fork")
+                                    .and(ElementMatchers.takesArguments(0)))))
+        .type(ElementMatchers.named("java.util.concurrent.ForkJoinPool"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder.visit(
-                    Advice.to(ForkJoinAdvice.DoExecAdvice.class)
+                    Advice.to(ForkJoinAdvice.PoolSubmitAdvice.class)
                         .on(
-                            ElementMatchers.named("doExec")
-                                .and(ElementMatchers.takesArguments(0)))));
+                            ElementMatchers.named("poolSubmit")
+                                .and(ElementMatchers.takesArguments(2)))));
   }
 
   /** System.exit, System.gc, Runtime.gc, Runtime.halt instrumentation. */

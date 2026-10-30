@@ -92,6 +92,7 @@ public final class DefectProbeMain {
       case "file-corrupt-read" -> fileCorruptRead();
       case "file-channel-write" -> fileChannelWrite();
       case "dns-lookups" -> dnsLookups();
+      case "session-handoff" -> sessionHandoff();
       case "random-access-write" -> randomAccessWrite();
       case "file-writes-by-path" -> fileWritesByPath();
       case "method-weaving" -> methodWeaving();
@@ -542,6 +543,64 @@ public final class DefectProbeMain {
     }
     System.out.println("size=" + java.nio.file.Files.size(file));
     java.nio.file.Files.deleteIfExists(file);
+  }
+
+  /**
+   * Inside a session whose method scenario injects an exception into Greeter.greet, calls it from a
+   * ForkJoin task, a started thread, a virtual thread and a parallel stream; prints what each saw.
+   */
+  private static void sessionHandoff() throws Exception {
+    final com.example.chaostarget.Greeter greeter = new com.example.chaostarget.Greeter();
+    final java.util.function.Supplier<String> attempt =
+        () -> {
+          try {
+            greeter.greet("x");
+            return "ok";
+          } catch (final IllegalStateException injected) {
+            return "injected";
+          }
+        };
+    try (ChaosSession session = ChaosPlatform.current().openSession("handoff")) {
+      session.activate(
+          ChaosScenario.builder("inject-in-session")
+              .scope(ChaosScenario.ScenarioScope.SESSION)
+              .selector(
+                  new ChaosSelector.MethodSelector(
+                      Set.of(OperationType.METHOD_ENTER),
+                      NamePattern.exact("com.example.chaostarget.Greeter"),
+                      NamePattern.exact("greet"),
+                      null))
+              .effect(
+                  new ChaosEffect.ExceptionInjectionEffect(
+                      "java.lang.IllegalStateException", "injected", false))
+              .activationPolicy(ActivationPolicy.always())
+              .build());
+      System.out.println("caller=" + attempt.get());
+      System.out.println(
+          "forkJoin=" + java.util.concurrent.CompletableFuture.supplyAsync(attempt).get());
+      final java.util.concurrent.atomic.AtomicReference<String> seen =
+          new java.util.concurrent.atomic.AtomicReference<>();
+      final Thread thread = new Thread(() -> seen.set(attempt.get()));
+      thread.start();
+      thread.join();
+      System.out.println("thread=" + seen.get());
+      Thread.ofVirtual().start(() -> seen.set(attempt.get())).join();
+      System.out.println("virtual=" + seen.get());
+      System.out.println(
+          "parallel="
+              + java.util.stream.IntStream.range(0, 16)
+                  .parallel()
+                  .mapToObj(i -> attempt.get())
+                  .distinct()
+                  .sorted()
+                  .collect(java.util.stream.Collectors.joining(",")));
+    }
+    final java.util.concurrent.atomic.AtomicReference<String> after =
+        new java.util.concurrent.atomic.AtomicReference<>();
+    final Thread outside = new Thread(() -> after.set(attempt.get()));
+    outside.start();
+    outside.join();
+    System.out.println("outside=" + after.get());
   }
 
   /** Resolves an unresolvable name and localhost, reporting answers or failures. */

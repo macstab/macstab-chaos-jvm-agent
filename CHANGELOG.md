@@ -35,6 +35,8 @@
 
 * **startup-config:** reload robustness: changes are detected by the resolved file, modification time, size, file key and a SHA-256 of the contents (a touch reloads nothing; a rewrite in the same timestamp tick is caught by re-reading provisional reads made within 20 ms of the modification); broken contents keep the current plan and are parsed once; a removed config file stops its scenarios and removes the status file; Kubernetes ConfigMap and Secret mounts (`<name>` → `..data/<name>`) are followed, every other symbolic link is still rejected.
 
+* **sessions:** a session now follows work handed off from a bound thread to `ForkJoinPool` tasks (submissions and forks — `CompletableFuture.*Async`, parallel streams), threads started with `Thread.start()` and virtual threads (`newVirtualThreadPerTaskExecutor` too), not only executor submissions.
+
 ### Performance Improvements
 
 * **core:** `ScenarioRegistry` keeps an immutable index from operation type to controllers, pre-sorted by descending precedence then id and swapped on register/unregister. `match()` evaluates only the scenarios whose selector names the intercepted operation and no longer sorts per call; clock-skew reads use the same index and return immediately when no scenario names the clock.

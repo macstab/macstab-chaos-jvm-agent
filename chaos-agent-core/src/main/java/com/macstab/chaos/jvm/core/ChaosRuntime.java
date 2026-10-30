@@ -958,6 +958,33 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
+   * Delegates to {@link ChaosDispatcher#captureSession}.
+   *
+   * @param carrier the fork-join task being submitted or forked
+   */
+  public void captureSession(final Object carrier) {
+    dispatcher.captureSession(carrier);
+  }
+
+  /**
+   * Delegates to {@link ChaosDispatcher#enterSession}.
+   *
+   * @param carrier the task or thread starting to run
+   */
+  public void enterSession(final Object carrier) {
+    dispatcher.enterSession(carrier);
+  }
+
+  /**
+   * Delegates to {@link ChaosDispatcher#exitSession}.
+   *
+   * @param carrier the task or thread that finished
+   */
+  public void exitSession(final Object carrier) {
+    dispatcher.exitSession(carrier);
+  }
+
+  /**
    * Delegates to {@link ChaosDispatcher#beforeFileIo}.
    *
    * @param operation the file I/O operation name

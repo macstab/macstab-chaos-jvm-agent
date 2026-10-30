@@ -706,4 +706,28 @@ public interface BridgeDelegate {
   void beforeClientCall(
       String operation, Object client, String target, String detail, Object remoteAddress)
       throws Throwable;
+
+  /**
+   * Records the current session for a fork-join task being submitted or forked.
+   *
+   * @param carrier the task
+   * @throws Throwable never in practice
+   */
+  void captureSession(Object carrier) throws Throwable;
+
+  /**
+   * Binds the session handed to a task or thread that starts running.
+   *
+   * @param carrier the task or thread
+   * @throws Throwable never in practice
+   */
+  void enterSession(Object carrier) throws Throwable;
+
+  /**
+   * Releases the session bound by {@link #enterSession(Object)}.
+   *
+   * @param carrier the task or thread
+   * @throws Throwable never in practice
+   */
+  void exitSession(Object carrier) throws Throwable;
 }
