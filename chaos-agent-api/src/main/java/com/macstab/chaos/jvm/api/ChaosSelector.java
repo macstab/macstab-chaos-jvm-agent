@@ -1,7 +1,5 @@
 package com.macstab.chaos.jvm.api;
 
-import com.fasterxml.jackson.annotation.JsonSubTypes;
-import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import java.util.EnumSet;
 import java.util.Set;
 
@@ -20,28 +18,6 @@ import java.util.Set;
  *       any specific operation. Used with stressor effects (HeapPressure, Deadlock, etc.).
  * </ul>
  */
-@JsonTypeInfo(use = JsonTypeInfo.Id.NAME, include = JsonTypeInfo.As.PROPERTY, property = "type")
-@JsonSubTypes({
-  @JsonSubTypes.Type(value = ChaosSelector.ThreadSelector.class, name = "thread"),
-  @JsonSubTypes.Type(value = ChaosSelector.ExecutorSelector.class, name = "executor"),
-  @JsonSubTypes.Type(value = ChaosSelector.QueueSelector.class, name = "queue"),
-  @JsonSubTypes.Type(value = ChaosSelector.AsyncSelector.class, name = "async"),
-  @JsonSubTypes.Type(value = ChaosSelector.SchedulingSelector.class, name = "scheduling"),
-  @JsonSubTypes.Type(value = ChaosSelector.ShutdownSelector.class, name = "shutdown"),
-  @JsonSubTypes.Type(value = ChaosSelector.ClassLoadingSelector.class, name = "classLoading"),
-  @JsonSubTypes.Type(value = ChaosSelector.MethodSelector.class, name = "method"),
-  @JsonSubTypes.Type(value = ChaosSelector.MonitorSelector.class, name = "monitor"),
-  @JsonSubTypes.Type(value = ChaosSelector.JvmRuntimeSelector.class, name = "jvmRuntime"),
-  @JsonSubTypes.Type(value = ChaosSelector.NioSelector.class, name = "nio"),
-  @JsonSubTypes.Type(value = ChaosSelector.NetworkSelector.class, name = "network"),
-  @JsonSubTypes.Type(value = ChaosSelector.ThreadLocalSelector.class, name = "threadLocal"),
-  @JsonSubTypes.Type(value = ChaosSelector.HttpClientSelector.class, name = "httpClient"),
-  @JsonSubTypes.Type(value = ChaosSelector.JdbcSelector.class, name = "jdbc"),
-  @JsonSubTypes.Type(value = ChaosSelector.DnsSelector.class, name = "dns"),
-  @JsonSubTypes.Type(value = ChaosSelector.SslSelector.class, name = "ssl"),
-  @JsonSubTypes.Type(value = ChaosSelector.FileIoSelector.class, name = "fileIo"),
-  @JsonSubTypes.Type(value = ChaosSelector.StressSelector.class, name = "stress"),
-})
 public sealed interface ChaosSelector
     permits ChaosSelector.ThreadSelector,
         ChaosSelector.ExecutorSelector,

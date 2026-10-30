@@ -65,7 +65,7 @@ public final class ChaosPlanMapper {
                     .maxStringLength(MAX_STRING_LENGTH)
                     .build())
             .build();
-    return JsonMapper.builder(factory)
+    return ApiJsonMixins.register(JsonMapper.builder(factory))
         .addModule(new JavaTimeModule())
         .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
         .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)

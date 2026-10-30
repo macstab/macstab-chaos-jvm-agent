@@ -1,7 +1,5 @@
 package com.macstab.chaos.jvm.api;
 
-import com.fasterxml.jackson.annotation.JsonCreator;
-import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
@@ -93,9 +91,7 @@ public record NamePattern(MatchMode mode, String value) {
    *
    * @throws IllegalArgumentException if mode is not {@link MatchMode#ANY} and value is blank
    */
-  @JsonCreator
-  public NamePattern(
-      @JsonProperty("mode") final MatchMode mode, @JsonProperty("value") final String value) {
+  public NamePattern(final MatchMode mode, final String value) {
     this.mode = Objects.requireNonNullElse(mode, MatchMode.ANY);
     // Canonicalise ANY's value to "*" so that `new NamePattern(ANY, "anything")` equals the
     // singleton returned by `any()`. Without this, a YAML/JSON round-trip that preserves a

@@ -1,7 +1,5 @@
 package com.macstab.chaos.jvm.api;
 
-import com.fasterxml.jackson.annotation.JsonSubTypes;
-import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import java.time.Duration;
 
 /**
@@ -19,50 +17,6 @@ import java.time.Duration;
  * <p>Valid selector ↔ effect combinations are enforced by the runtime validator at activation time,
  * not by the type system.
  */
-@JsonTypeInfo(use = JsonTypeInfo.Id.NAME, include = JsonTypeInfo.As.PROPERTY, property = "type")
-@JsonSubTypes({
-  // ── Interceptor effects ────────────────────────────────────────────────────
-  @JsonSubTypes.Type(value = ChaosEffect.DelayEffect.class, name = "delay"),
-  @JsonSubTypes.Type(value = ChaosEffect.GateEffect.class, name = "gate"),
-  @JsonSubTypes.Type(value = ChaosEffect.RejectEffect.class, name = "reject"),
-  @JsonSubTypes.Type(value = ChaosEffect.SuppressEffect.class, name = "suppress"),
-  @JsonSubTypes.Type(
-      value = ChaosEffect.ExceptionalCompletionEffect.class,
-      name = "exceptionalCompletion"),
-  @JsonSubTypes.Type(
-      value = ChaosEffect.ExceptionInjectionEffect.class,
-      name = "exceptionInjection"),
-  @JsonSubTypes.Type(
-      value = ChaosEffect.ReturnValueCorruptionEffect.class,
-      name = "returnValueCorruption"),
-  @JsonSubTypes.Type(value = ChaosEffect.ClockSkewEffect.class, name = "clockSkew"),
-
-  // ── Stressor effects ───────────────────────────────────────────────────────
-  @JsonSubTypes.Type(value = ChaosEffect.HeapPressureEffect.class, name = "heapPressure"),
-  @JsonSubTypes.Type(value = ChaosEffect.KeepAliveEffect.class, name = "keepAlive"),
-  @JsonSubTypes.Type(value = ChaosEffect.MetaspacePressureEffect.class, name = "metaspacePressure"),
-  @JsonSubTypes.Type(
-      value = ChaosEffect.DirectBufferPressureEffect.class,
-      name = "directBufferPressure"),
-  @JsonSubTypes.Type(value = ChaosEffect.GcPressureEffect.class, name = "gcPressure"),
-  @JsonSubTypes.Type(value = ChaosEffect.FinalizerBacklogEffect.class, name = "finalizerBacklog"),
-  @JsonSubTypes.Type(value = ChaosEffect.DeadlockEffect.class, name = "deadlock"),
-  @JsonSubTypes.Type(value = ChaosEffect.ThreadLeakEffect.class, name = "threadLeak"),
-  @JsonSubTypes.Type(value = ChaosEffect.ThreadLocalLeakEffect.class, name = "threadLocalLeak"),
-  @JsonSubTypes.Type(value = ChaosEffect.MonitorContentionEffect.class, name = "monitorContention"),
-  @JsonSubTypes.Type(value = ChaosEffect.SpuriousWakeupEffect.class, name = "spuriousWakeup"),
-  @JsonSubTypes.Type(value = ChaosEffect.CodeCachePressureEffect.class, name = "codeCachePressure"),
-  @JsonSubTypes.Type(value = ChaosEffect.SafepointStormEffect.class, name = "safepointStorm"),
-  @JsonSubTypes.Type(
-      value = ChaosEffect.StringInternPressureEffect.class,
-      name = "stringInternPressure"),
-  @JsonSubTypes.Type(
-      value = ChaosEffect.ReferenceQueueFloodEffect.class,
-      name = "referenceQueueFlood"),
-  @JsonSubTypes.Type(
-      value = ChaosEffect.VirtualThreadCarrierPinningEffect.class,
-      name = "virtualThreadCarrierPinning"),
-})
 public sealed interface ChaosEffect
     permits ChaosEffect.DelayEffect,
         ChaosEffect.GateEffect,

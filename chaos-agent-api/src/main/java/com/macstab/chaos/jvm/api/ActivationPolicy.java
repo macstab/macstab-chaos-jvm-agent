@@ -1,7 +1,5 @@
 package com.macstab.chaos.jvm.api;
 
-import com.fasterxml.jackson.annotation.JsonCreator;
-import com.fasterxml.jackson.annotation.JsonProperty;
 import java.time.Duration;
 
 /**
@@ -127,16 +125,15 @@ public record ActivationPolicy(
    * @param allowDestructiveEffects whether non-recoverable effects may be activated
    * @return a new {@link ActivationPolicy} built from the parsed JSON values
    */
-  @JsonCreator
   public static ActivationPolicy fromJson(
-      @JsonProperty("startMode") final StartMode startMode,
-      @JsonProperty("probability") final Double probability,
-      @JsonProperty("activateAfterMatches") final long activateAfterMatches,
-      @JsonProperty("maxApplications") final Long maxApplications,
-      @JsonProperty("activeFor") final Duration activeFor,
-      @JsonProperty("rateLimit") final RateLimit rateLimit,
-      @JsonProperty("randomSeed") final Long randomSeed,
-      @JsonProperty("allowDestructiveEffects") final boolean allowDestructiveEffects) {
+      final StartMode startMode,
+      final Double probability,
+      final long activateAfterMatches,
+      final Long maxApplications,
+      final Duration activeFor,
+      final RateLimit rateLimit,
+      final Long randomSeed,
+      final boolean allowDestructiveEffects) {
     return new ActivationPolicy(
         startMode,
         probability == null ? 1.0d : probability,
