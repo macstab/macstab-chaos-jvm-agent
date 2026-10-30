@@ -95,6 +95,7 @@ public final class DefectProbeMain {
       case "select-consumer" -> selectConsumer();
       case "sleep-duration" -> sleepDuration();
       case "jdk-send-async" -> withHttpServer(DefectProbeMain::jdkSendAsync);
+      case "http-url-connection" -> withHttpServer(DefectProbeMain::httpUrlConnection);
       default -> throw new IllegalArgumentException("unknown probe mode: " + args[0]);
     }
     printCounts();
@@ -556,6 +557,21 @@ public final class DefectProbeMain {
   @FunctionalInterface
   interface HttpProbe {
     void call(String url) throws Exception;
+  }
+
+  /** Reads a response through java.net.HttpURLConnection; a suppressed call is reported. */
+  private static void httpUrlConnection(final String url) throws Exception {
+    final java.net.HttpURLConnection connection =
+        (java.net.HttpURLConnection) URI.create(url).toURL().openConnection();
+    try {
+      // Drives connect() through getResponseCode() and then reads the body: one request.
+      System.out.println("status=" + connection.getResponseCode());
+      System.out.println("body=" + new String(connection.getInputStream().readAllBytes()));
+    } catch (final java.net.ConnectException suppressed) {
+      System.out.println("connectException=" + suppressed.getMessage());
+    } finally {
+      connection.disconnect();
+    }
   }
 
   private static void jdkSendAsync(final String url) throws Exception {

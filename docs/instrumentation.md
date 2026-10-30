@@ -267,7 +267,7 @@ rectangle "JDK and library hook groups" {
   [LocalDateTime.now() / now(ZoneId)]
   [ZonedDateTime.now() / now(ZoneId)]
   [Date() constructor]
-  [HttpClientImpl.send/sendAsync, OkHttp 3/4, Apache HC 4/5, Reactor Netty]
+  [HttpClientImpl.send/sendAsync, HttpURLConnection, OkHttp 3/4, Apache HC 4/5, Reactor Netty]
   [JDBC pools, Statement/PreparedStatement execute*, Connection prepare/commit/rollback]
 }
 @enduml
@@ -411,7 +411,7 @@ If the bridge is not installed (`BootstrapDispatcher.handles == null`), the wrap
 | 42    | `ADJUST_LOCAL_DATE_TIME_NOW`         | `LocalDateTime.now()` (no-arg static)                                                                                                                                           | exit (`LocalDateTime` rewrite)               |
 | 43    | `ADJUST_ZONED_DATE_TIME_NOW`         | `ZonedDateTime.now()`, `now(ZoneId)` (static)                                                                                                                                   | exit (`ZonedDateTime` rewrite)               |
 | 44    | `ADJUST_DATE_NEW`                    | `Date()` (no-arg constructor)                                                                                                                                                   | exit (embedded millis rewrite via `setTime`) |
-| 45    | `BEFORE_HTTP_SEND`                   | `HttpClientImpl.send`, OkHttp 3/4 `RealCall.execute()`, Apache HC 4/5 `CloseableHttpClient.execute(...)` (request-first and host-first)                                         | enter (boolean suppress)                     |
+| 45    | `BEFORE_HTTP_SEND`                   | `HttpClientImpl.send`, `HttpURLConnection.plainConnect0()`, OkHttp 3/4 `RealCall.execute()`, Apache HC 4/5 `CloseableHttpClient.execute(...)` (request-first and host-first)                                         | enter (boolean suppress)                     |
 | 46    | `BEFORE_HTTP_SEND_ASYNC`             | `HttpClientImpl.sendAsync` (2- and 3-arg), OkHttp 3/4 `RealCall.enqueue(Callback)`, Reactor Netty `HttpClientConnect.connect()`                                                 | enter (boolean suppress)                     |
 | 47    | `BEFORE_JDBC_CONNECTION_ACQUIRE`     | `HikariPool.getConnection(long)`, c3p0 `checkoutPooledConnection()`                                                                                                             | enter (boolean suppress)                     |
 | 48    | `BEFORE_JDBC_STATEMENT_EXECUTE`      | `Statement.execute*(String, …)`; `PreparedStatement.execute()`, `executeQuery()`, `executeUpdate()`, `executeLargeUpdate()` (target `null`)                                     | enter (boolean suppress)                     |
@@ -571,6 +571,7 @@ The agent instruments the JDK `HttpClient` plus four third-party HTTP client lib
 |----------------------------------|-----------------------------------------------------------|------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------|
 | JDK `HttpClient` synchronous     | JDK 11+                                                   | `jdk.internal.net.http.HttpClientImpl`                                 | `send(HttpRequest, BodyHandler)` (2-arg)                                                                                                                          | `BEFORE_HTTP_SEND` (sync)        |
 | JDK `HttpClient` asynchronous    | JDK 11+                                                   | `jdk.internal.net.http.HttpClientImpl`                                 | `sendAsync(...)` (2-arg and 3-arg with `PushPromiseHandler`)                                                                                                      | `BEFORE_HTTP_SEND_ASYNC` (async) |
+| JDK `HttpURLConnection` (and HTTPS) | JDK                                                    | `sun.net.www.protocol.http.HttpURLConnection`                          | `plainConnect0()` — once per request, however it is driven (`connect`, `getResponseCode`, `getInputStream`, `getOutputStream`); suppress throws `ConnectException` | `BEFORE_HTTP_SEND` (sync)        |
 | OkHttp synchronous               | `com.squareup.okhttp3:okhttp:4.12.0` (3.x also supported) | `okhttp3.RealCall` (3.x), `okhttp3.internal.connection.RealCall` (4.x) | `execute()` (0-arg)                                                                                                                                               | `BEFORE_HTTP_SEND` (sync)        |
 | OkHttp asynchronous              | same                                                      | same                                                                   | `enqueue(Callback)` (1-arg)                                                                                                                                       | `BEFORE_HTTP_SEND_ASYNC` (async) |
 | Apache HC 4.x                    | `org.apache.httpcomponents:httpclient:4.5.14`             | `org.apache.http.impl.client.CloseableHttpClient`                      | every `execute(HttpHost, HttpRequest, …)` and `execute(HttpUriRequest, …)` overload                                                                               | `BEFORE_HTTP_SEND` (sync)        |
@@ -583,7 +584,7 @@ Spring `WebClient` dispatches all HTTP through Reactor Netty's internal `HttpCli
 
 The handle slots in `BootstrapDispatcher` are:
 
-- `BEFORE_HTTP_SEND = 45` — synchronous send (JDK `send()`, OkHttp `execute()`, Apache HC 4/5 `execute()`)
+- `BEFORE_HTTP_SEND = 45` — synchronous send (JDK `send()`, `HttpURLConnection`, OkHttp `execute()`, Apache HC 4/5 `execute()`)
 - `BEFORE_HTTP_SEND_ASYNC = 46` — asynchronous / reactive send (JDK `sendAsync()`, OkHttp `enqueue()`, Reactor Netty `connect()`)
 
 Both slots carry the URL string as a single `String` argument and return `boolean` (`true` = suppress).

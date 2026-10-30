@@ -370,6 +370,41 @@ class DefectRegressionIntegrationTest {
     }
 
     @Test
+    @DisplayName("java.net.HttpURLConnection is one HTTP_CLIENT_SEND match per request")
+    void httpUrlConnection() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.run(
+              plan(
+                  scenario(
+                      "url-connection",
+                      ChaosSelector.httpClient(Set.of(OperationType.HTTP_CLIENT_SEND)),
+                      ChaosEffect.delay(Duration.ofMillis(1)))),
+              DefectProbeMain.class,
+              "http-url-connection",
+              null);
+      assertThat(result.value("body")).isEqualTo("ok");
+      assertThat(result.longValue("matched.url-connection"))
+          .as("getResponseCode() and getInputStream() drive one request")
+          .isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("a suppressed HttpURLConnection request fails with ConnectException")
+    void httpUrlConnectionSuppressed() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.run(
+              plan(
+                  scenario(
+                      "url-connection-suppressed",
+                      ChaosSelector.httpClient(Set.of(OperationType.HTTP_CLIENT_SEND)),
+                      ChaosEffect.suppress())),
+              DefectProbeMain.class,
+              "http-url-connection",
+              null);
+      assertThat(result.value("connectException")).contains("suppressed by chaos agent");
+    }
+
+    @Test
     @DisplayName("HttpClient.sendAsync(request, handler) is one HTTP_CLIENT_SEND_ASYNC match")
     void jdkSendAsync() throws Exception {
       assertSingleMatch(

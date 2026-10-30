@@ -2033,6 +2033,16 @@ public final class JdkInstrumentationInstaller {
                                                 "org.apache.hc.core5.http.HttpHost"))))),
             "org.apache.hc.client5.http.impl.classic.CloseableHttpClient");
 
+    agentBuilder =
+        agentBuilder
+            .type(ElementMatchers.named("sun.net.www.protocol.http.HttpURLConnection"))
+            .transform(
+                (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                    typeBuilder.visit(
+                        Advice.to(HttpClientAdvice.HttpUrlConnectionConnectAdvice.class)
+                            .on(
+                                ElementMatchers.named("plainConnect0")
+                                    .and(ElementMatchers.takesArguments(0)))));
     return instrumentOptional(
         agentBuilder,
         typeBuilder ->

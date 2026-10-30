@@ -97,6 +97,46 @@ final class HttpClientAdvice {
     }
   }
 
+  /**
+   * Intercepts {@code sun.net.www.protocol.http.HttpURLConnection.plainConnect0()}: the JDK's
+   * {@link java.net.HttpURLConnection} (and {@code HttpsURLConnection}, which delegates to it). It
+   * runs once per request, when the connection is first used ({@code connect()}, {@code
+   * getInputStream()}, {@code getOutputStream()}, {@code getResponseCode()}), so a request is
+   * evaluated once however it is driven. This is the transport of Spring's {@code
+   * SimpleClientHttpRequestFactory} ({@code RestTemplate}'s default) and of the AWS SDK's URL
+   * connection client.
+   *
+   * <p>A suppressed request fails with {@link java.net.ConnectException}: callers of {@code
+   * URLConnection} handle {@link java.io.IOException}, and a refused connection is what they expect
+   * to see.
+   */
+  static final class HttpUrlConnectionConnectAdvice {
+    @Advice.OnMethodEnter
+    static void enter(@Advice.FieldValue("url") final java.net.URL url) throws Throwable {
+      if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_HTTP)) {
+        return;
+      }
+      // URL.toString() formats the URL; unlike equals()/hashCode() it never resolves the host.
+      final String target = url == null ? null : url.toString();
+      final boolean suppressed;
+      try {
+        suppressed = BootstrapDispatcher.beforeHttpSend(target);
+      } catch (final Throwable throwable) {
+        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
+        throw throwable;
+      }
+      if (suppressed) {
+        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
+        throw new java.net.ConnectException("HTTP connect suppressed by chaos agent: " + target);
+      }
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit() {
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
+    }
+  }
+
   /** Intercepts {@code okhttp3.RealCall.execute()}. */
   static final class OkHttpExecuteAdvice {
     @Advice.OnMethodEnter
