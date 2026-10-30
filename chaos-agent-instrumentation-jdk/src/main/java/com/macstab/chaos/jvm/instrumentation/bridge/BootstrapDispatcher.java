@@ -438,6 +438,18 @@ public final class BootstrapDispatcher {
     delegate = bridgeDelegate;
   }
 
+  /**
+   * Returns the delegate wired by {@link #install}, or {@code null} when none is installed. Used by
+   * the installer to detect a second copy of the agent, loaded by another class loader, before it
+   * replaces the first copy's delegate: the dispatcher is JVM-wide (bootstrap-loaded) while each
+   * agent copy has its own runtime.
+   *
+   * @return the installed delegate, or {@code null}
+   */
+  public static Object installedDelegate() {
+    return delegate;
+  }
+
   // ── Phase 1 dispatch methods ───────────────────────────────────────────────
 
   /**

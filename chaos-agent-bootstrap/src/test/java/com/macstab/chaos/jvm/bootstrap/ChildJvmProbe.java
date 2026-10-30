@@ -34,6 +34,26 @@ final class ChildJvmProbe {
   }
 
   /**
+   * Runs {@code mainClass mode} in a child JVM without {@code -javaagent:}; the probe attaches the
+   * agent itself (self-attach is allowed for the child).
+   *
+   * @param mainClass the probe main class
+   * @param mode the probe mode passed as the first program argument
+   * @return the probe's {@code key=value} output lines
+   */
+  ProbeResult runWithoutAgent(final Class<?> mainClass, final String mode) throws Exception {
+    final List<String> command = new ArrayList<>();
+    command.add(Path.of(System.getProperty("java.home"), "bin", "java").toString());
+    command.add("-Djdk.attach.allowAttachSelf=true");
+    command.add("-XX:+EnableDynamicAgentLoading");
+    command.add("-cp");
+    command.add(System.getProperty("java.class.path"));
+    command.add(mainClass.getName());
+    command.add(mode);
+    return execute(command);
+  }
+
+  /**
    * Runs {@code mainClass mode} in a child JVM with the agent attached and {@code plan} loaded.
    *
    * @param plan the plan written to the child's config file
@@ -67,6 +87,10 @@ final class ChildJvmProbe {
     command.add(mainClass.getName());
     command.add(mode);
 
+    return execute(command);
+  }
+
+  private static ProbeResult execute(final List<String> command) throws Exception {
     final Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
     final List<String> lines = new ArrayList<>();
     try (final BufferedReader reader =

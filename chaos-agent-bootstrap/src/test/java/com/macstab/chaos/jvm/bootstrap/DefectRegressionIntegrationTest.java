@@ -460,6 +460,39 @@ class DefectRegressionIntegrationTest {
     }
   }
 
+  @Nested
+  @DisplayName("agent initialization")
+  class Initialization {
+
+    @Test
+    @DisplayName("a failed initialization is rolled back completely before a retry")
+    void failedInitializationIsRolledBack() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.runWithoutAgent(DefectProbeMain.class, "initialize-retry");
+
+      assertThat(result.value("firstFailed")).isEqualTo("true");
+      assertThat(result.longValue("sleepMillis"))
+          .as("one set of transformers: the 300 ms delay applies once, not twice")
+          .isBetween(250L, 550L);
+      assertThat(result.value("mbeanReportsRetry"))
+          .as("the diagnostics MBean belongs to the runtime that was installed")
+          .isEqualTo("true");
+    }
+
+    @Test
+    @DisplayName("a second copy of the agent in another class loader is refused, not hijacking")
+    void secondAgentCopyIsRefused() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.runWithoutAgent(DefectProbeMain.class, "second-agent-copy");
+
+      assertThat(result.value("secondRefused")).isEqualTo("true");
+      assertThat(result.value("refusalMentionsClassLoader")).isEqualTo("true");
+      assertThat(result.longValue("firstCopySleepMillis"))
+          .as("the first copy's scenarios still apply")
+          .isGreaterThanOrEqualTo(250L);
+    }
+  }
+
   private static ChaosPlan plan(final ChaosScenario... scenarios) {
     return new ChaosPlan(new ChaosPlan.Metadata("defect-regression", ""), null, List.of(scenarios));
   }

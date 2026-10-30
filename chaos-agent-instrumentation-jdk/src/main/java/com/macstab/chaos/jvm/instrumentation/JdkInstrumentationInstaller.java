@@ -120,8 +120,21 @@ public final class JdkInstrumentationInstaller {
       final boolean premainMode) {
     grantInternalModuleOpens(instrumentation);
     injectBridge(instrumentation);
+    rejectForeignDelegate();
     installDelegate(new ChaosBridge(runtime));
+    try {
+      installTransformations(instrumentation, premainMode);
+    } catch (final RuntimeException | Error failure) {
+      // Leave nothing bound to this runtime: a later install attempt must start from a clean
+      // dispatcher, and the instrumented JDK classes must not call into a runtime that never
+      // became active.
+      uninstall(instrumentation);
+      throw failure;
+    }
+  }
 
+  private static void installTransformations(
+      final Instrumentation instrumentation, final boolean premainMode) {
     AgentBuilder agentBuilder = buildBaseAgentBuilder();
     agentBuilder = applyPhase1ThreadAndExecutorTransformations(agentBuilder);
 
@@ -280,13 +293,72 @@ public final class JdkInstrumentationInstaller {
    *     (i.e. {@link #install} was never called or already uninstalled)
    */
   public static boolean uninstall(final Instrumentation instrumentation) {
+    final boolean delegateCleared = clearOwnDelegate();
     final ResettableClassFileTransformer current = installedTransformer;
     if (current == null) {
-      return false;
+      return delegateCleared;
     }
     installedTransformer = null;
     current.reset(instrumentation, AgentBuilder.RedefinitionStrategy.RETRANSFORMATION);
     return true;
+  }
+
+  /**
+   * Refuses to install when the JVM-wide dispatcher already carries a delegate from a copy of the
+   * agent loaded by a different class loader (for example an agent jar on the system class path
+   * plus a starter bundled child-first in a web application). Installing would replace that
+   * delegate: the first copy's startup plan, scenarios and diagnostics would silently stop
+   * receiving any call.
+   */
+  private static void rejectForeignDelegate() {
+    final Object existing = installedDelegateOrNull();
+    if (existing != null
+        && existing.getClass().getClassLoader()
+            != JdkInstrumentationInstaller.class.getClassLoader()) {
+      throw new IllegalStateException(
+          "the chaos agent is already installed in this JVM by another class loader ("
+              + existing.getClass().getClassLoader()
+              + "); only one copy of the agent can be active per JVM. Remove the duplicate"
+              + " chaos-agent jar from the application, or use the copy that is already installed");
+    }
+  }
+
+  /** Clears the dispatcher delegate when it belongs to this copy of the agent. */
+  private static boolean clearOwnDelegate() {
+    final Object existing = installedDelegateOrNull();
+    if (existing == null
+        || existing.getClass().getClassLoader()
+            != JdkInstrumentationInstaller.class.getClassLoader()) {
+      return false;
+    }
+    installDelegateRaw(null, null);
+    return true;
+  }
+
+  private static Object installedDelegateOrNull() {
+    try {
+      return bootstrapDispatcherClass().getMethod("installedDelegate").invoke(null);
+    } catch (final ClassNotFoundException notInjected) {
+      return null;
+    } catch (final ReflectiveOperationException exception) {
+      throw new IllegalStateException("failed to read the bridge delegate", exception);
+    }
+  }
+
+  private static Class<?> bootstrapDispatcherClass() throws ClassNotFoundException {
+    return Class.forName(
+        "com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher", true, null);
+  }
+
+  private static void installDelegateRaw(
+      final Object bridgeDelegate, final MethodHandle[] methodHandles) {
+    try {
+      bootstrapDispatcherClass()
+          .getMethod("install", Object.class, MethodHandle[].class)
+          .invoke(null, bridgeDelegate, methodHandles);
+    } catch (final ReflectiveOperationException exception) {
+      throw new IllegalStateException("failed to install bridge delegate", exception);
+    }
   }
 
   /**
@@ -728,18 +800,14 @@ public final class JdkInstrumentationInstaller {
    *     invocation of {@code BootstrapDispatcher.install} cannot be completed
    */
   private static void installDelegate(final Object bridgeDelegate) {
+    final MethodHandle[] methodHandles;
     try {
-      final MethodHandle[] methodHandles = buildMethodHandles();
-      // Use reflection to call install on the bootstrap CL version of BootstrapDispatcher
-      final Class<?> bootstrapDispatcher =
-          Class.forName(
-              "com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher", true, null);
-      bootstrapDispatcher
-          .getMethod("install", Object.class, MethodHandle[].class)
-          .invoke(null, bridgeDelegate, methodHandles);
+      methodHandles = buildMethodHandles();
     } catch (final Exception exception) {
-      throw new IllegalStateException("failed to install bridge delegate", exception);
+      throw new IllegalStateException("failed to build bridge method handles", exception);
     }
+    // Reflection: install() lives on the bootstrap-loaded copy of BootstrapDispatcher.
+    installDelegateRaw(bridgeDelegate, methodHandles);
   }
 
   /**

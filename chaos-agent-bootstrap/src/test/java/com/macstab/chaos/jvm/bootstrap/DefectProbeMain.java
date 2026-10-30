@@ -25,12 +25,15 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.channels.Selector;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.Statement;
 import java.time.Duration;
+import java.util.Arrays;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CountDownLatch;
@@ -74,6 +77,8 @@ public final class DefectProbeMain {
       case "jdbc-hikari-execute" -> jdbcHikariExecute();
       case "jdbc-prepared-execute" -> jdbcPreparedExecute();
       case "virtual-thread-executor" -> virtualThreadExecutor();
+      case "initialize-retry" -> initializeRetry();
+      case "second-agent-copy" -> secondAgentCopy();
       case "virtual-thread-start" -> Thread.ofVirtual().start(() -> {}).join();
       case "runtime-exit" -> runtimeExit();
       case "select-consumer" -> selectConsumer();
@@ -214,6 +219,90 @@ public final class DefectProbeMain {
         final ResultSet resultSet = statement.executeQuery()) {
       System.out.println("row=" + resultSet.next());
     }
+  }
+
+  /**
+   * Attaches the agent with a startup plan that fails to activate, then again with a valid plan.
+   * The second installation must be the only one in effect: one set of transformers (a sleep delay
+   * applied once, not twice) and the diagnostics MBean reporting the second runtime.
+   */
+  private static void initializeRetry() throws Exception {
+    final java.lang.instrument.Instrumentation instrumentation =
+        net.bytebuddy.agent.ByteBuddyAgent.install();
+    final String failingPlan =
+        "{\"metadata\":{\"name\":\"failing\"},\"scenarios\":[{\"id\":\"deadlock\","
+            + "\"scope\":\"JVM\",\"selector\":{\"type\":\"stress\",\"target\":\"DEADLOCK\"},"
+            + "\"effect\":{\"type\":\"deadlock\",\"participantCount\":2}}]}";
+    try {
+      ChaosAgentBootstrap.initialize("configJson=" + failingPlan, instrumentation, Map.of(), true);
+      System.out.println("firstFailed=false");
+    } catch (final RuntimeException expected) {
+      System.out.println("firstFailed=true");
+    }
+    final String sleepPlan =
+        "{\"metadata\":{\"name\":\"retry\"},\"scenarios\":[{\"id\":\"sleep-delay\","
+            + "\"scope\":\"JVM\",\"selector\":{\"type\":\"thread\","
+            + "\"operations\":[\"THREAD_SLEEP\"],\"kind\":\"ANY\"},"
+            + "\"effect\":{\"type\":\"delay\",\"minDelay\":\"PT0.3S\",\"maxDelay\":\"PT0.3S\"}}]}";
+    ChaosAgentBootstrap.initialize("configJson=" + sleepPlan, instrumentation, Map.of(), true);
+    final long start = System.nanoTime();
+    Thread.sleep(1L);
+    System.out.println("sleepMillis=" + TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start));
+    final Object dump =
+        ManagementFactory.getPlatformMBeanServer()
+            .invoke(
+                new ObjectName("com.macstab.chaos.jvm:type=ChaosDiagnostics"),
+                "debugDump",
+                new Object[0],
+                new String[0]);
+    System.out.println("mbeanReportsRetry=" + String.valueOf(dump).contains("sleep-delay"));
+  }
+
+  /**
+   * Installs the agent, then loads a second copy of the agent classes in an isolated class loader
+   * (as a child-first web application would) and lets it try to install. The second copy must be
+   * refused instead of replacing the first copy's dispatcher delegate.
+   */
+  private static void secondAgentCopy() throws Exception {
+    final ChaosControlPlane first = ChaosPlatform.installLocally();
+    first.activate(
+        ChaosScenario.builder("first-copy-sleep")
+            .scope(ChaosScenario.ScenarioScope.JVM)
+            .selector(
+                ChaosSelector.thread(
+                    Set.of(OperationType.THREAD_SLEEP), ChaosSelector.ThreadKind.ANY))
+            .effect(ChaosEffect.delay(Duration.ofMillis(300L)))
+            .activationPolicy(ActivationPolicy.always())
+            .build());
+    final URL[] classpath =
+        Arrays.stream(System.getProperty("java.class.path").split(java.io.File.pathSeparator))
+            .map(
+                entry -> {
+                  try {
+                    return Path.of(entry).toUri().toURL();
+                  } catch (final java.net.MalformedURLException exception) {
+                    throw new IllegalStateException(exception);
+                  }
+                })
+            .toArray(URL[]::new);
+    try (URLClassLoader isolated =
+        new URLClassLoader(classpath, ClassLoader.getPlatformClassLoader())) {
+      final Class<?> secondBootstrap =
+          Class.forName(ChaosAgentBootstrap.class.getName(), true, isolated);
+      try {
+        secondBootstrap.getMethod("installForLocalTests").invoke(null);
+        System.out.println("secondRefused=false");
+      } catch (final java.lang.reflect.InvocationTargetException refused) {
+        System.out.println("secondRefused=true");
+        System.out.println(
+            "refusalMentionsClassLoader="
+                + String.valueOf(refused.getCause().getMessage()).contains("another class loader"));
+      }
+    }
+    final long start = System.nanoTime();
+    Thread.sleep(1L);
+    System.out.println(
+        "firstCopySleepMillis=" + TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start));
   }
 
   private static void virtualThreadExecutor() throws Exception {
