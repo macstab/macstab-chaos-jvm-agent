@@ -7,12 +7,12 @@ import com.macstab.chaos.jvm.core.DefaultChaosActivationHandle;
 import com.macstab.chaos.jvm.startup.AgentArgsParser;
 import com.macstab.chaos.jvm.startup.ChaosPlanMapper;
 import com.macstab.chaos.jvm.startup.ConfigLoadException;
+import com.macstab.chaos.jvm.startup.StartupConfigLoader;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
-import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.FileTime;
 import java.util.HashMap;
 import java.util.List;
@@ -73,7 +73,19 @@ public final class StartupConfigPoller implements AutoCloseable {
   private final Map<String, ChaosScenario> activeScenarios = new HashMap<>();
   private final Map<String, ChaosActivationHandle> activeHandles = new HashMap<>();
 
-  private volatile FileTime lastModified = FileTime.fromMillis(0);
+  /**
+   * What identifies the file's contents for change detection: the regular file actually read (a
+   * Kubernetes ConfigMap update replaces it), its modification time, size and file key.
+   */
+  private record Stamp(Path target, FileTime lastModified, long size, Object fileKey) {}
+
+  /** A read whose file was modified this recently may still be in the middle of a write. */
+  private static final long PROVISIONAL_MILLIS = 20L;
+
+  private volatile Stamp lastStamp;
+  private volatile byte[] lastDigest;
+  private volatile byte[] failedDigest;
+  private volatile boolean provisional;
 
   // Volatile close flag observed by applyDiff so a pollOnce that wins the race against
   // close() (e.g. blocked in Files.newInputStream and not interruptible) cannot silently
@@ -130,26 +142,17 @@ public final class StartupConfigPoller implements AutoCloseable {
    * @param initialScenarios scenarios from the first file read, already parsed by the caller
    */
   public void startWithInitialPlan(final List<ChaosScenario> initialScenarios) {
-    // Capture the file's mtime BEFORE applying the initial plan. If the file is atomically
-    // renamed between applyDiff and the stat, lastModified reflects the new file's mtime and
-    // the first pollOnce would silently skip the new content. Capturing mtime first ensures the
-    // poller's baseline is anchored to the file the caller already read and passed as
-    // initialScenarios; a subsequent file change will then produce a visible mtime difference.
-    final FileTime initialMtime = readLastModifiedTimeOrEpoch(configPath);
+    // Capture the file's stamp BEFORE applying the initial plan, so the baseline is anchored to
+    // the file the caller already read; a later change then shows as a different stamp.
+    readCurrentFile()
+        .ifPresent(
+            file -> {
+              lastStamp = stampOf(file);
+              lastDigest = digest(file.json());
+              provisional = isRecent(file.lastModified());
+            });
     applyDiff(initialScenarios);
-    lastModified = initialMtime;
     scheduler.scheduleAtFixedRate(this::pollOnce, intervalMs, intervalMs, TimeUnit.MILLISECONDS);
-  }
-
-  private static FileTime readLastModifiedTimeOrEpoch(final Path path) {
-    try {
-      // NOFOLLOW_LINKS: a symlink swap between startup validation and this stat should fail
-      // rather than silently bind the poller to the target of the symlink. Matches the read
-      // path in pollOnce and in StartupConfigLoader.
-      return Files.getLastModifiedTime(path, LinkOption.NOFOLLOW_LINKS);
-    } catch (final IOException ignored) {
-      return FileTime.fromMillis(0); // best-effort; if the stat fails the next poll will re-read
-    }
   }
 
   /**
@@ -207,30 +210,19 @@ public final class StartupConfigPoller implements AutoCloseable {
   // ── internals ─────────────────────────────────────────────────────────────
 
   void pollOnce() {
-    final FileTime mtimeBeforeRead;
     try {
-      // NOFOLLOW_LINKS on getLastModifiedTime for the same reason as on the read: detect a
-      // symlink swap at the config path instead of silently watching the target.
-      mtimeBeforeRead = Files.getLastModifiedTime(configPath, LinkOption.NOFOLLOW_LINKS);
-    } catch (final IOException exception) {
-      System.err.println(
-          "[chaos-agent] config poll failed (stat): " + sanitiseForLog(exception.getMessage()));
-      return;
-    }
-    if (mtimeBeforeRead.equals(lastModified)) {
-      return;
-    }
-    try {
-      reloadIfFileSizeAcceptable(mtimeBeforeRead);
+      final Optional<StartupConfigLoader.PlanFile> file = readCurrentFile();
+      if (file.isEmpty()) {
+        handleMissingFile();
+        return;
+      }
+      reloadIfChanged(file.get());
     } catch (final Throwable throwable) {
       // Catch Throwable, not Exception: ScheduledExecutorService.scheduleAtFixedRate silently
-      // suppresses all future executions if the task throws anything, including Errors. A
-      // transient NoClassDefFoundError from the JSON mapper's classloader, an OOM from a
-      // huge plan, a StackOverflowError from a pathological config — any of those would
-      // permanently kill config reloading with no log and no way to notice. Log here and keep
-      // the scheduler alive; the next tick retries. Re-interrupt on InterruptedException to
-      // preserve the flag, and re-throw VirtualMachineError (OOM etc.) since continuing past
-      // those is not meaningful.
+      // suppresses all future executions if the task throws anything, including Errors. Log here
+      // and keep the scheduler alive; the next tick retries. Re-interrupt on
+      // InterruptedException and re-throw VirtualMachineError, past which continuing is not
+      // meaningful. A failed read or parse keeps the current plan.
       if (throwable instanceof InterruptedException) {
         Thread.currentThread().interrupt();
       }
@@ -242,83 +234,109 @@ public final class StartupConfigPoller implements AutoCloseable {
     }
   }
 
-  private void reloadIfFileSizeAcceptable(final FileTime mtimeBeforeRead) throws IOException {
-    final long fileSize = readFileSize();
-    if (fileSize < 0) {
-      return; // size-check failed, error already logged
-    }
-    if (fileSize > MAX_FILE_SIZE_BYTES) {
-      System.err.println(
-          "[chaos-agent] config reload skipped: file size "
-              + fileSize
-              + " exceeds limit "
-              + MAX_FILE_SIZE_BYTES);
-      return;
-    }
-    // NOFOLLOW_LINKS: if the config path was swapped for a symlink between stat and read
-    // (e.g. by an attacker with write access to the config directory), the open fails
-    // rather than silently following the link. Mirrors the check in StartupConfigLoader.
-    final String json;
-    try (final java.io.InputStream inputStream =
-        Files.newInputStream(configPath, LinkOption.NOFOLLOW_LINKS)) {
-      json = new String(inputStream.readAllBytes(), StandardCharsets.UTF_8);
-    }
-    reloadIfMtimeSettled(json, mtimeBeforeRead);
+  private Optional<StartupConfigLoader.PlanFile> readCurrentFile() {
+    return StartupConfigLoader.readPlanFile(configPath.toString());
   }
 
-  private long readFileSize() {
-    try {
-      // Guard against OOM from arbitrarily large files replacing the config between the
-      // mtime stat and the read. Mirrors the 1 MiB size cap in StartupConfigLoader.
-      return Files.readAttributes(configPath, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS)
-          .size();
-    } catch (final IOException exception) {
-      System.err.println(
-          "[chaos-agent] config poll failed (size-check): "
-              + sanitiseForLog(exception.getMessage()));
-      return -1L;
-    }
-  }
-
-  private void reloadIfMtimeSettled(final String json, final FileTime mtimeBeforeRead)
-      throws IOException {
-    // Re-stat after the read: if the mtime moved between the initial stat and end-of-read,
-    // the writer was still producing the file while we were consuming it, so the bytes we
-    // have are potentially truncated or mid-rewrite. Advancing lastModified with the stale
-    // stat would permanently mask the final (complete) mtime once the writer finishes,
-    // leaving the poller stuck on the torn read forever. Skip the parse and wait for the
-    // next tick, which will see the settled mtime and a clean read. Editors that perform
-    // atomic rename-into-place produce exactly one mtime change and are unaffected; editors
-    // that truncate-and-write (vim default, `echo > file`) produce two — only the second
-    // will parse.
-    final FileTime mtimeAfterRead;
-    try {
-      mtimeAfterRead = Files.getLastModifiedTime(configPath, LinkOption.NOFOLLOW_LINKS);
-    } catch (final IOException exception) {
-      System.err.println(
-          "[chaos-agent] config poll failed (post-read stat): "
-              + sanitiseForLog(exception.getMessage()));
+  /**
+   * Reloads when the contents changed. A new stamp with the same contents (a touch, a ConfigMap
+   * re-sync) only updates the stamp. Contents that already failed to parse are not parsed again
+   * until they change. A file read within {@value #PROVISIONAL_MILLIS} ms of its modification may
+   * be mid-write, so it is read again on the next tick even if its stamp did not change.
+   */
+  private void reloadIfChanged(final StartupConfigLoader.PlanFile file) throws IOException {
+    final Stamp stamp = stampOf(file);
+    if (!provisional && stamp.equals(lastStamp)) {
       return;
     }
-    if (!mtimeAfterRead.equals(mtimeBeforeRead)) {
-      // Don't advance lastModified: the next tick should see mtimeAfterRead (or a later value)
-      // as a fresh change and retry. Logging at FINE would flood for active writers; stay silent.
+    final byte[] digest = digest(file.json());
+    if (java.util.Arrays.equals(digest, lastDigest)) {
+      lastStamp = stamp;
+      provisional = isRecent(file.lastModified());
       return;
     }
-    final com.macstab.chaos.jvm.api.ChaosPlan newPlan = ChaosPlanMapper.read(json);
-    applyDiff(newPlan.scenarios());
+    if (java.util.Arrays.equals(digest, failedDigest)) {
+      return;
+    }
+    // Re-stat after the read: if the file changed while it was being read, the bytes may be
+    // torn. Skip and retry on the next tick, which sees the settled file.
+    final java.nio.file.attribute.BasicFileAttributes after =
+        Files.readAttributes(
+            file.target(),
+            java.nio.file.attribute.BasicFileAttributes.class,
+            LinkOption.NOFOLLOW_LINKS);
+    if (!after.lastModifiedTime().equals(file.lastModified()) || after.size() != file.size()) {
+      return;
+    }
+    final com.macstab.chaos.jvm.api.ChaosPlan newPlan;
+    try {
+      newPlan = ChaosPlanMapper.read(file.json());
+      applyDiff(newPlan.scenarios());
+    } catch (final RuntimeException failure) {
+      failedDigest = digest;
+      throw failure;
+    }
+    lastStamp = stamp;
+    lastDigest = digest;
+    failedDigest = null;
+    provisional = isRecent(file.lastModified());
     lastLoggedFailure = null;
+    missingReported = false;
     ChaosReports.current()
         .ifPresent(reports -> reports.statusOk(newPlan.scenarios().size(), "file:" + configPath));
-    // Only advance lastModified AFTER a successful parse+apply. Advancing it before the
-    // parse would permanently mask the same-mtime case: a parse failure followed by the
-    // operator correcting the file in place (without touching mtime) would never reload.
-    lastModified = mtimeBeforeRead;
     System.err.println(
         "[chaos-agent] config reloaded: "
             + newPlan.scenarios().size()
             + " scenario(s) from "
             + sanitiseForLog(configPath.toString()));
+  }
+
+  /** Whether a missing file has been reported since it disappeared. */
+  private boolean missingReported;
+
+  /**
+   * The configured file is gone: every scenario it activated is stopped, and the status file is
+   * removed, like the native library does without a rule file. When the file comes back it is
+   * loaded as a change.
+   */
+  private void handleMissingFile() {
+    if (missingReported) {
+      return;
+    }
+    missingReported = true;
+    final int stopped;
+    synchronized (this) {
+      stopped = activeScenarios.size();
+    }
+    applyDiff(List.of());
+    lastStamp = null;
+    lastDigest = null;
+    failedDigest = null;
+    ChaosReports.current().ifPresent(ChaosReports::removeStatus);
+    System.err.println(
+        "[chaos-agent] config file removed: "
+            + stopped
+            + " scenario(s) stopped ("
+            + sanitiseForLog(configPath.toString())
+            + ")");
+  }
+
+  private static Stamp stampOf(final StartupConfigLoader.PlanFile file) {
+    return new Stamp(file.target(), file.lastModified(), file.size(), file.fileKey());
+  }
+
+  private static boolean isRecent(final FileTime lastModified) {
+    return System.currentTimeMillis() - lastModified.toMillis() < PROVISIONAL_MILLIS;
+  }
+
+  private static byte[] digest(final String json) {
+    try {
+      return java.security.MessageDigest.getInstance("SHA-256")
+          .digest(json.getBytes(StandardCharsets.UTF_8));
+    } catch (final java.security.NoSuchAlgorithmException unavailable) {
+      // Every JDK provides SHA-256; fall back to the content itself.
+      return json.getBytes(StandardCharsets.UTF_8);
+    }
   }
 
   /**

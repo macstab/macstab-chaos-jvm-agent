@@ -190,6 +190,18 @@ final class ChaosReports implements AutoCloseable {
     }
   }
 
+  /** Removes the status file: the configured plan file no longer exists. */
+  void removeStatus() {
+    BootstrapDispatcher.beginInternalCall();
+    try {
+      Files.deleteIfExists(directory.resolve(STATUS_FILE));
+    } catch (final IOException ignored) {
+      // a stale report is better than a failing poller
+    } finally {
+      BootstrapDispatcher.endInternalCall();
+    }
+  }
+
   /** Writes the hits file now. */
   void writeHits() {
     final StringBuilder lines = new StringBuilder();

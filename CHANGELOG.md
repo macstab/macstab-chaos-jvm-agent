@@ -33,6 +33,8 @@
 * **events:** `REGISTERED`, `SKIPPED` (with the policy check as `reason`, published while a listener is registered) and `FAILED` (activation failures with their `category`) are now published; `ChaosEventListener.async(listener)` delivers on an agent-owned thread through a bounded queue (`droppedEvents` in the diagnostics); `ChaosControlPlane.removeEventListener`.
 * **observability:** `ChaosActivationHandle.matchedCount()` / `appliedCount()`; the MBean gains `listScenarios`, and — behind the opt-in `jmxControl=true` — `activatePlan(json)`, `stopScenario(id)` and `stopAll()`; new optional module `chaos-agent-micrometer` (`ChaosMeterBinder`).
 
+* **startup-config:** reload robustness: changes are detected by the resolved file, modification time, size, file key and a SHA-256 of the contents (a touch reloads nothing; a rewrite in the same timestamp tick is caught by re-reading provisional reads made within 20 ms of the modification); broken contents keep the current plan and are parsed once; a removed config file stops its scenarios and removes the status file; Kubernetes ConfigMap and Secret mounts (`<name>` → `..data/<name>`) are followed, every other symbolic link is still rejected.
+
 ### Performance Improvements
 
 * **core:** `ScenarioRegistry` keeps an immutable index from operation type to controllers, pre-sorted by descending precedence then id and swapped on register/unregister. `match()` evaluates only the scenarios whose selector names the intercepted operation and no longer sorts per call; clock-skew reads use the same index and return immediately when no scenario names the clock.

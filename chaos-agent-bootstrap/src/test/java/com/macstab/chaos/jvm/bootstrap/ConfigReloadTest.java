@@ -1,0 +1,179 @@
+package com.macstab.chaos.jvm.bootstrap;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import com.macstab.chaos.jvm.api.ChaosDiagnostics;
+import com.macstab.chaos.jvm.api.ChaosEvent;
+import com.macstab.chaos.jvm.core.ChaosRuntime;
+import com.macstab.chaos.jvm.startup.ChaosPlanMapper;
+import com.macstab.chaos.jvm.startup.ConfigLoadException;
+import com.macstab.chaos.jvm.startup.StartupConfigLoader;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+/** Reload robustness: change detection, broken and missing files, Kubernetes ConfigMap links. */
+@DisplayName("Config reload")
+class ConfigReloadTest {
+
+  @TempDir Path tempDir;
+
+  private final ChaosRuntime runtime = new ChaosRuntime();
+  private final List<ChaosEvent> started = new CopyOnWriteArrayList<>();
+  private StartupConfigPoller poller;
+
+  @AfterEach
+  void tearDown() {
+    if (poller != null) {
+      poller.close();
+    }
+    runtime.close();
+  }
+
+  private static String plan(final String id) {
+    return """
+        {"metadata":{"name":"p"},"scenarios":[{"id":"%s","scope":"JVM",
+         "selector":{"type":"executor","operations":["EXECUTOR_SUBMIT"]},
+         "effect":{"type":"delay","minDelay":"PT0.001S","maxDelay":"PT0.001S"}}]}
+        """
+        .formatted(id);
+  }
+
+  private void start(final Path configured) throws Exception {
+    runtime.addEventListener(
+        event -> {
+          if (event.type() == ChaosEvent.Type.STARTED) {
+            started.add(event);
+          }
+        });
+    poller =
+        StartupConfigPoller.createIfEnabled(
+                "configWatchInterval=3600000", Map.of(), configured, runtime)
+            .orElseThrow();
+    poller.startWithInitialPlan(ChaosPlanMapper.read(Files.readString(configured)).scenarios());
+  }
+
+  private ChaosDiagnostics.ScenarioState state(final String id) {
+    return runtime
+        .diagnostics()
+        .scenario(id)
+        .map(ChaosDiagnostics.ScenarioReport::state)
+        .orElse(null);
+  }
+
+  private static void backdate(final Path file) throws Exception {
+    Files.setLastModifiedTime(file, FileTime.fromMillis(System.currentTimeMillis() - 60_000));
+  }
+
+  @Test
+  @DisplayName("a touch without a content change does not reload")
+  void touchDoesNotReload() throws Exception {
+    final Path file = tempDir.resolve("plan.json");
+    Files.writeString(file, plan("a"));
+    backdate(file);
+    start(file);
+
+    Files.setLastModifiedTime(file, FileTime.fromMillis(System.currentTimeMillis() - 30_000));
+    poller.pollOnce();
+
+    assertThat(started).hasSize(1);
+  }
+
+  @Test
+  @DisplayName("a change under the same stamp is caught while the read is provisional")
+  void provisionalRead() throws Exception {
+    final Path file = tempDir.resolve("plan.json");
+    Files.writeString(file, plan("a"));
+    final FileTime fresh = FileTime.fromMillis(System.currentTimeMillis());
+    Files.setLastModifiedTime(file, fresh);
+    start(file);
+
+    Files.writeString(file, plan("b"));
+    Files.setLastModifiedTime(file, fresh);
+    poller.pollOnce();
+
+    assertThat(state("b")).isEqualTo(ChaosDiagnostics.ScenarioState.ACTIVE);
+  }
+
+  @Test
+  @DisplayName("broken contents keep the current plan and are parsed once")
+  void brokenContentsKeepPlan() throws Exception {
+    final Path file = tempDir.resolve("plan.json");
+    Files.writeString(file, plan("a"));
+    backdate(file);
+    start(file);
+
+    Files.writeString(file, "{ broken");
+    poller.pollOnce();
+    poller.pollOnce();
+
+    assertThat(state("a")).isEqualTo(ChaosDiagnostics.ScenarioState.ACTIVE);
+
+    Files.writeString(file, plan("c"));
+    poller.pollOnce();
+    assertThat(state("c")).isEqualTo(ChaosDiagnostics.ScenarioState.ACTIVE);
+  }
+
+  @Test
+  @DisplayName("removing the file stops its scenarios; bringing it back loads it again")
+  void missingFile() throws Exception {
+    final Path file = tempDir.resolve("plan.json");
+    Files.writeString(file, plan("a"));
+    backdate(file);
+    start(file);
+
+    Files.delete(file);
+    poller.pollOnce();
+    assertThat(state("a")).isNotEqualTo(ChaosDiagnostics.ScenarioState.ACTIVE);
+
+    Files.writeString(file, plan("a"));
+    poller.pollOnce();
+    assertThat(state("a")).isEqualTo(ChaosDiagnostics.ScenarioState.ACTIVE);
+  }
+
+  @Test
+  @DisplayName("a Kubernetes ConfigMap update (..data swap) is followed and reloaded")
+  void configMapSwap() throws Exception {
+    final Path volume = Files.createDirectories(tempDir.resolve("configmap"));
+    final Path first = Files.createDirectories(volume.resolve("..2026_10_30_12_00_00.1"));
+    Files.writeString(first.resolve("plan.json"), plan("first"));
+    Files.createSymbolicLink(volume.resolve("..data"), Path.of(first.getFileName().toString()));
+    Files.createSymbolicLink(volume.resolve("plan.json"), Path.of("..data", "plan.json"));
+    start(volume.resolve("plan.json"));
+    assertThat(state("first")).isEqualTo(ChaosDiagnostics.ScenarioState.ACTIVE);
+
+    final Path second = Files.createDirectories(volume.resolve("..2026_10_30_12_05_00.2"));
+    Files.writeString(second.resolve("plan.json"), plan("second"));
+    final Path swap = volume.resolve("..data_tmp");
+    Files.createSymbolicLink(swap, Path.of(second.getFileName().toString()));
+    Files.move(
+        swap,
+        volume.resolve("..data"),
+        java.nio.file.StandardCopyOption.ATOMIC_MOVE,
+        java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+    poller.pollOnce();
+
+    assertThat(state("second")).isEqualTo(ChaosDiagnostics.ScenarioState.ACTIVE);
+  }
+
+  @Test
+  @DisplayName("any other symbolic link is still rejected")
+  void otherSymlinkRejected() throws Exception {
+    final Path real = tempDir.resolve("real.json");
+    Files.writeString(real, plan("a"));
+    final Path link = tempDir.resolve("plan.json");
+    Files.createSymbolicLink(link, real);
+
+    assertThatThrownBy(() -> StartupConfigLoader.readPlanFile(link.toString()))
+        .isInstanceOf(ConfigLoadException.class)
+        .hasMessageContaining("symbolic link");
+  }
+}

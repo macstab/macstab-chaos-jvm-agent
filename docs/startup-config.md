@@ -100,7 +100,7 @@ When loading from a file path, `StartupConfigLoader.validateAndResolvePath()` ap
 
 1. **Normalize**: `Path.of(filePath).toAbsolutePath().normalize()` — resolves all `..` and `.` components, neutralizing directory traversal sequences before any check
 2. **Existence check**: `Files.exists(path, LinkOption.NOFOLLOW_LINKS)` — `NOFOLLOW_LINKS` detects broken symlinks without following them
-3. **Symlink rejection**: `Files.isSymbolicLink(path)` — symlinks are rejected outright. This prevents attackers from redirecting config file reads to sensitive files via symlink manipulation after path validation
+3. **Symlink rejection**: `Files.isSymbolicLink(path)` — symlinks are rejected, with one exception: the layout Kubernetes uses for ConfigMap and Secret volumes (`<dir>/plan.json` → `..data/plan.json`, `<dir>/..data` → a `..<timestamp>` directory beside it). There the real file inside the timestamped directory is checked (regular file, size, permissions) and read without following further links. Any other link is still rejected. This prevents attackers from redirecting config file reads to sensitive files via symlink manipulation after path validation
 4. **Regular file check**: `Files.isRegularFile(path)` — rejects directories, pipes, devices
 5. **Size limit**: size read with `NOFOLLOW_LINKS` `> 1_048_576` — rejects files larger than 1 MiB to prevent OOM from oversized configs
 6. **Permissions** (POSIX filesystems only): a world-writable file, or a world-writable parent directory without the sticky bit, is rejected
@@ -323,9 +323,11 @@ MACSTAB_CHAOS_WATCH_INTERVAL=500
 
 On every poll tick `StartupConfigPoller`:
 
-1. Stats the file (`Files.getLastModifiedTime`). If the mtime matches the last successful read, the tick is a no-op — no parse, no diff.
-2. If the mtime changed: reads and parses the new plan.
-3. Computes a structural diff against the currently active scenario set:
+1. Resolves the file (following a Kubernetes ConfigMap link, see §3) and compares its stamp — the real file, modification time, size and file key — with the last successful read. An unchanged stamp is a no-op.
+2. Otherwise reads it and compares a SHA-256 of the contents: an unchanged digest (a touch, a ConfigMap re-sync) only records the new stamp; contents that already failed to parse are not parsed again until they change.
+3. A read within 20 ms of the file's modification time is provisional: the writer may still be writing, so the next tick reads again even if the stamp did not change (a second write in the same timestamp tick is not missed).
+4. If the file changed while it was being read, the tick is skipped and the next one retries.
+5. Parses the new plan and computes a structural diff against the currently active scenario set:
 
 | Case                                        | Action                     |
 |---------------------------------------------|----------------------------|
@@ -335,6 +337,8 @@ On every poll tick `StartupConfigPoller`:
 | Present in active set, absent from new plan | Stopped                    |
 
 Equality is record equality across all eight `ChaosScenario` fields. A single field change — even probability — triggers a stop + re-activate cycle.
+
+**A removed file** stops every scenario it activated and removes the status file; when the file comes back it is loaded as a change. A file that cannot be read or parsed keeps the current plan and is reported in the status file (see [`observability.md`](observability.md)).
 
 The reload is applied atomically: removed and changed scenarios are stopped first, then every new or changed scenario is activated. If any activation fails (or the plan contains duplicate ids), the scenarios activated by this reload are removed again and the previous versions are restored; the failure is logged to stderr and the next file change is retried. A file that fails to parse leaves the active set untouched.
 
@@ -355,7 +359,9 @@ A chaos pipeline framework that wants to push a new scenario set into a running 
 
 1. Write the updated plan to a temp file in the same directory.
 2. Atomically rename it over the watched file (`mv` / `Files.move` with `ATOMIC_MOVE`).
-3. Wait one poll interval — the agent detects the mtime change, diffs, and applies.
+3. Wait one poll interval — the agent detects the change, diffs, and applies; `<tmpdir>/.chaos-jvm.status` reports the result (`state=ok` or the parse error's line and column).
+
+On Kubernetes, mount the plan from a ConfigMap and point `configFile` at the mounted file: updates of the ConfigMap (an atomic swap of the volume's `..data` link) are picked up like any other change.
 
 No JVM restart required.
 
