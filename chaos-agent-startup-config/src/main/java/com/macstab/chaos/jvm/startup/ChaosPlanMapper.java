@@ -98,7 +98,15 @@ public final class ChaosPlanMapper {
     try {
       return OBJECT_MAPPER.readValue(json, ChaosPlan.class);
     } catch (JsonProcessingException exception) {
-      throw new ConfigLoadException(parseFailureMessage(exception), SOURCE_JSON_INPUT, exception);
+      final com.fasterxml.jackson.core.JsonLocation location = exception.getLocation();
+      final boolean positioned = location != null && location.getLineNr() > 0;
+      throw new ConfigLoadException(
+          parseFailureMessage(exception),
+          SOURCE_JSON_INPUT,
+          exception,
+          positioned ? location.getLineNr() : 0,
+          positioned ? location.getColumnNr() : 0,
+          parseFailureReason(exception));
     }
   }
 
@@ -127,6 +135,18 @@ public final class ChaosPlanMapper {
       }
     }
     return message.toString();
+  }
+
+  /** The failure without its position: the kind and, for mapping failures, the JSON path. */
+  static String parseFailureReason(final JsonProcessingException exception) {
+    final StringBuilder reason = new StringBuilder(failureKind(exception));
+    if (exception instanceof com.fasterxml.jackson.databind.JsonMappingException mapping) {
+      final String path = jsonPath(mapping);
+      if (!path.isEmpty()) {
+        reason.append(" at ").append(path);
+      }
+    }
+    return reason.toString();
   }
 
   private static String failureKind(final JsonProcessingException exception) {

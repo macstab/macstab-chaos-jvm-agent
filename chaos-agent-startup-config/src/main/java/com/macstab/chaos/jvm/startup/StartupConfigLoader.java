@@ -114,7 +114,7 @@ public final class StartupConfigLoader {
             || AgentArgs.parseBoolean(ENV_DEBUG_DUMP, environment.get(ENV_DEBUG_DUMP), false);
 
     if (inlineJson != null) {
-      final ChaosPlan plan = ChaosPlanMapper.read(inlineJson);
+      final ChaosPlan plan = parse(inlineJson, SOURCE_INLINE_JSON);
       return Optional.of(new LoadedPlan(plan, SOURCE_INLINE_JSON, debugDumpOnStart, null));
     }
     if (base64Json != null) {
@@ -151,7 +151,7 @@ public final class StartupConfigLoader {
       final String base64Json, final boolean debugDumpOnStart) {
     final byte[] decoded = decodeBase64(base64Json);
     final String json = new String(decoded, StandardCharsets.UTF_8);
-    final ChaosPlan plan = ChaosPlanMapper.read(json);
+    final ChaosPlan plan = parse(json, SOURCE_BASE64);
     return new LoadedPlan(plan, SOURCE_BASE64, debugDumpOnStart, null);
   }
 
@@ -180,8 +180,26 @@ public final class StartupConfigLoader {
   private static ValidatedRead readValidatedPlanFile(final String filePath) {
     final Path path = validateAndResolvePath(filePath);
     final String json = readFileContents(path, filePath);
-    final ChaosPlan plan = ChaosPlanMapper.read(json);
+    final ChaosPlan plan = parse(json, SOURCE_FILE_PREFIX + filePath);
     return new ValidatedRead(plan, path);
+  }
+
+  /**
+   * Parses a plan, reporting a failure with the source it came from instead of the mapper's generic
+   * one; the position and reason are kept.
+   */
+  private static ChaosPlan parse(final String json, final String source) {
+    try {
+      return ChaosPlanMapper.read(json);
+    } catch (final ConfigLoadException failure) {
+      throw new ConfigLoadException(
+          failure.getMessage(),
+          source,
+          failure.getCause(),
+          failure.line(),
+          failure.column(),
+          failure.reason());
+    }
   }
 
   /**

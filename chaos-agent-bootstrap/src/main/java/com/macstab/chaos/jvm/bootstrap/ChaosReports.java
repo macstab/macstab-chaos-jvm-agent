@@ -1,0 +1,279 @@
+package com.macstab.chaos.jvm.bootstrap;
+
+import com.macstab.chaos.jvm.api.ChaosDiagnostics;
+import com.macstab.chaos.jvm.api.ChaosEvent;
+import com.macstab.chaos.jvm.core.ChaosRuntime;
+import com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher;
+import com.macstab.chaos.jvm.startup.AgentArgsParser;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.locks.LockSupport;
+
+/**
+ * The status and hits files, in the native library's format, so tools that read the library's
+ * reports read the agent's the same way.
+ *
+ * <ul>
+ *   <li><b>Status file</b> {@code <dir>/.chaos-jvm.status}, rewritten after every load of the
+ *       startup plan and every reload: {@code state=ok} with {@code scenarios=<n>}, or {@code
+ *       state=error} with {@code line} and {@code column} (1-based, {@code 0} without a position)
+ *       and {@code reason}; then {@code source} and {@code pid}. Without a startup plan it is not
+ *       written.
+ *   <li><b>Hits file</b> {@code <dir>/.chaos-jvm.hits.<pid>}, one line per scenario: {@code
+ *       <applied count>\t<scenario id>}. Written after each of the first 64 applications, then at
+ *       most every 100 ms while applications happen, and at exit; not at all in a JVM where no
+ *       scenario ever applied.
+ * </ul>
+ *
+ * <p>Both are written to a staging file and renamed over the report, so a reader never sees a
+ * partial file. The writes run with the dispatch depth raised: a file I/O scenario never applies to
+ * the agent's own reports. {@code <dir>} is {@code java.io.tmpdir} ({@code /tmp} on Linux, like the
+ * library) unless {@code reportsDir} is set; {@code reports=off} disables both files.
+ */
+final class ChaosReports implements AutoCloseable {
+
+  static final String STATUS_FILE = ".chaos-jvm.status";
+  static final String HITS_FILE_PREFIX = ".chaos-jvm.hits.";
+
+  static final String REPORTS_ARG = "reports";
+  static final String REPORTS_PROPERTY = "macstab.chaos.reports";
+  static final String REPORTS_ENV = "MACSTAB_CHAOS_REPORTS";
+  static final String REPORTS_DIR_ARG = "reportsDir";
+  static final String REPORTS_DIR_PROPERTY = "macstab.chaos.reportsDir";
+  static final String REPORTS_DIR_ENV = "MACSTAB_CHAOS_REPORTS_DIR";
+
+  /** Applications written at once; later ones are batched. */
+  private static final int IMMEDIATE_HITS = 64;
+
+  private static final long BATCH_NANOS = TimeUnit.MILLISECONDS.toNanos(100);
+
+  private static volatile ChaosReports current;
+
+  private final Path directory;
+  private final long pid;
+  private final ChaosRuntime runtime;
+  private final AtomicBoolean hitsDirty = new AtomicBoolean();
+  private final AtomicLong applications = new AtomicLong();
+  private final AtomicBoolean closed = new AtomicBoolean();
+  private final Thread hitsWriter;
+  private final Thread shutdownHook;
+
+  private ChaosReports(final Path directory, final ChaosRuntime runtime) {
+    this.directory = directory;
+    this.pid = ProcessHandle.current().pid();
+    this.runtime = runtime;
+    this.hitsWriter = new Thread(this::writeHitsWhileOpen, "macstab-chaos-hits-writer");
+    this.hitsWriter.setDaemon(true);
+    this.shutdownHook = new Thread(this::writeFinalHits, "macstab-chaos-hits-final");
+  }
+
+  /**
+   * Creates and starts the reports unless they are switched off ({@code reports=off}).
+   *
+   * @param agentArgs the raw agent arguments
+   * @param environment the process environment
+   * @param runtime the runtime whose scenarios are reported
+   * @return the reports, or empty when switched off
+   */
+  static Optional<ChaosReports> createIfEnabled(
+      final String agentArgs, final Map<String, String> environment, final ChaosRuntime runtime) {
+    final Map<String, String> args = AgentArgsParser.parse(agentArgs).values();
+    final String enabled = setting(args, environment, REPORTS_ARG, REPORTS_PROPERTY, REPORTS_ENV);
+    if (enabled != null && ("off".equalsIgnoreCase(enabled) || "false".equalsIgnoreCase(enabled))) {
+      return Optional.empty();
+    }
+    final String dir =
+        setting(args, environment, REPORTS_DIR_ARG, REPORTS_DIR_PROPERTY, REPORTS_DIR_ENV);
+    final ChaosReports reports =
+        new ChaosReports(
+            Path.of(dir == null || dir.isBlank() ? System.getProperty("java.io.tmpdir") : dir),
+            runtime);
+    reports.start();
+    current = reports;
+    return Optional.of(reports);
+  }
+
+  /**
+   * Returns the reports of the installed agent.
+   *
+   * @return the reports, or empty when switched off or not installed
+   */
+  static Optional<ChaosReports> current() {
+    return Optional.ofNullable(current);
+  }
+
+  private static String setting(
+      final Map<String, String> args,
+      final Map<String, String> environment,
+      final String arg,
+      final String property,
+      final String env) {
+    final String fromArgs = args.get(arg);
+    if (fromArgs != null) {
+      return fromArgs;
+    }
+    final String fromProperty = System.getProperty(property);
+    return fromProperty != null ? fromProperty : environment.get(env);
+  }
+
+  private void start() {
+    runtime.addEventListener(
+        event -> {
+          if (event.type() == ChaosEvent.Type.APPLIED) {
+            hitsDirty.set(true);
+            if (applications.incrementAndGet() <= IMMEDIATE_HITS) {
+              LockSupport.unpark(hitsWriter);
+            }
+          }
+        });
+    BootstrapDispatcher.beginInternalCall();
+    try {
+      hitsWriter.start();
+      Runtime.getRuntime().addShutdownHook(shutdownHook);
+    } finally {
+      BootstrapDispatcher.endInternalCall();
+    }
+  }
+
+  /**
+   * Reports a loaded plan.
+   *
+   * @param scenarios the number of scenarios in the plan
+   * @param source where the plan came from
+   */
+  void statusOk(final int scenarios, final String source) {
+    writeAtomically(
+        STATUS_FILE,
+        "state=ok\nscenarios=" + scenarios + "\nsource=" + oneLine(source) + "\npid=" + pid + "\n");
+  }
+
+  /**
+   * Reports a plan that could not be loaded or activated.
+   *
+   * @param source where the plan came from
+   * @param line 1-based line of the failure; {@code 0} without a position
+   * @param column 1-based column of the failure; {@code 0} without a position
+   * @param reason what is wrong
+   */
+  void statusError(final String source, final int line, final int column, final String reason) {
+    writeAtomically(
+        STATUS_FILE,
+        "state=error\nscenarios=0\nline="
+            + line
+            + "\ncolumn="
+            + column
+            + "\nreason="
+            + oneLine(reason)
+            + "\nsource="
+            + oneLine(source)
+            + "\npid="
+            + pid
+            + "\n");
+  }
+
+  /**
+   * Writes the hits file a last time, if anything was applied: a JVM in which no scenario ever
+   * applied leaves no hits file behind.
+   */
+  private void writeFinalHits() {
+    if (applications.get() > 0) {
+      writeHits();
+    }
+  }
+
+  /** Writes the hits file now. */
+  void writeHits() {
+    final StringBuilder lines = new StringBuilder();
+    for (final ChaosDiagnostics.ScenarioReport report :
+        runtime.diagnostics().snapshot().scenarios()) {
+      lines.append(report.appliedCount()).append('\t').append(oneLine(report.id())).append('\n');
+    }
+    writeAtomically(HITS_FILE_PREFIX + pid, lines.toString());
+  }
+
+  private void writeHitsWhileOpen() {
+    BootstrapDispatcher.beginInternalCall();
+    try {
+      while (!closed.get()) {
+        LockSupport.parkNanos(this, BATCH_NANOS);
+        if (hitsDirty.getAndSet(false)) {
+          writeHits();
+        }
+      }
+    } finally {
+      BootstrapDispatcher.endInternalCall();
+    }
+  }
+
+  private void writeAtomically(final String name, final String content) {
+    BootstrapDispatcher.beginInternalCall();
+    Path staging = null;
+    try {
+      Files.createDirectories(directory);
+      staging =
+          directory.resolve(
+              ".chaos-staging-"
+                  + pid
+                  + "-"
+                  + Long.toHexString(ThreadLocalRandom.current().nextLong())
+                  + "-"
+                  + name);
+      Files.writeString(staging, content, StandardCharsets.UTF_8);
+      Files.move(
+          staging,
+          directory.resolve(name),
+          StandardCopyOption.ATOMIC_MOVE,
+          StandardCopyOption.REPLACE_EXISTING);
+    } catch (final IOException | RuntimeException failed) {
+      // A report that cannot be written leaves the previous one in place; chaos must not fail
+      // because a report directory is unwritable.
+      if (staging != null) {
+        try {
+          Files.deleteIfExists(staging);
+        } catch (final IOException ignored) {
+          // nothing more to do
+        }
+      }
+    } finally {
+      BootstrapDispatcher.endInternalCall();
+    }
+  }
+
+  private static String oneLine(final String value) {
+    if (value == null) {
+      return "";
+    }
+    final String flat = value.replaceAll("[\\p{Cntrl}]", " ");
+    return flat.length() > 200 ? flat.substring(0, 200) : flat;
+  }
+
+  /** Writes the hits file a last time and stops the writer thread. */
+  @Override
+  public void close() {
+    if (!closed.compareAndSet(false, true)) {
+      return;
+    }
+    LockSupport.unpark(hitsWriter);
+    writeFinalHits();
+    if (current == this) {
+      current = null;
+    }
+    BootstrapDispatcher.beginInternalCall();
+    try {
+      Runtime.getRuntime().removeShutdownHook(shutdownHook);
+    } catch (final IllegalStateException shuttingDown) {
+      // the hook is running or has run
+    } finally {
+      BootstrapDispatcher.endInternalCall();
+    }
+  }
+}

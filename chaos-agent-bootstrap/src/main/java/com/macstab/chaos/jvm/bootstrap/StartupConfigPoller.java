@@ -6,6 +6,7 @@ import com.macstab.chaos.jvm.core.ChaosRuntime;
 import com.macstab.chaos.jvm.core.DefaultChaosActivationHandle;
 import com.macstab.chaos.jvm.startup.AgentArgsParser;
 import com.macstab.chaos.jvm.startup.ChaosPlanMapper;
+import com.macstab.chaos.jvm.startup.ConfigLoadException;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -234,6 +235,7 @@ public final class StartupConfigPoller implements AutoCloseable {
         Thread.currentThread().interrupt();
       }
       logReloadFailure(String.valueOf(throwable.getMessage()));
+      reportReloadFailure(throwable);
       if (throwable instanceof VirtualMachineError virtualMachineError) {
         throw virtualMachineError;
       }
@@ -306,6 +308,8 @@ public final class StartupConfigPoller implements AutoCloseable {
     final com.macstab.chaos.jvm.api.ChaosPlan newPlan = ChaosPlanMapper.read(json);
     applyDiff(newPlan.scenarios());
     lastLoggedFailure = null;
+    ChaosReports.current()
+        .ifPresent(reports -> reports.statusOk(newPlan.scenarios().size(), "file:" + configPath));
     // Only advance lastModified AFTER a successful parse+apply. Advancing it before the
     // parse would permanently mask the same-mtime case: a parse failure followed by the
     // operator correcting the file in place (without touching mtime) would never reload.
@@ -383,6 +387,23 @@ public final class StartupConfigPoller implements AutoCloseable {
       activeHandles.put(entry.getKey(), entry.getValue());
       activeScenarios.put(entry.getKey(), newById.get(entry.getKey()));
     }
+  }
+
+  private void reportReloadFailure(final Throwable failure) {
+    ChaosReports.current()
+        .ifPresent(
+            reports -> {
+              if (failure instanceof ConfigLoadException loadFailure) {
+                reports.statusError(
+                    "file:" + configPath,
+                    loadFailure.line(),
+                    loadFailure.column(),
+                    loadFailure.reason());
+              } else {
+                reports.statusError(
+                    "file:" + configPath, 0, 0, String.valueOf(failure.getMessage()));
+              }
+            });
   }
 
   /** Last reload failure that was logged; identical consecutive failures are logged once. */

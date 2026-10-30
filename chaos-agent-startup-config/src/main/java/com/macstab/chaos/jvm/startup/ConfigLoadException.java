@@ -16,6 +16,15 @@ public final class ConfigLoadException extends RuntimeException {
    */
   private final String source;
 
+  /** 1-based line of a JSON parse failure; {@code 0} when the failure has no position. */
+  private final int line;
+
+  /** 1-based column of a JSON parse failure; {@code 0} when the failure has no position. */
+  private final int column;
+
+  /** Short description of what is wrong, without the position; never null. */
+  private final String reason;
+
   /**
    * Constructs an exception for a configuration load failure without an underlying cause.
    *
@@ -24,8 +33,7 @@ public final class ConfigLoadException extends RuntimeException {
    *     "inline-json"}, {@code "base64"}, {@code "file:/etc/chaos/plan.json"})
    */
   public ConfigLoadException(final String message, final String source) {
-    super(message);
-    this.source = source;
+    this(message, source, null, 0, 0, message);
   }
 
   /**
@@ -37,8 +45,58 @@ public final class ConfigLoadException extends RuntimeException {
    *     {@link com.fasterxml.jackson.core.JsonProcessingException})
    */
   public ConfigLoadException(final String message, final String source, final Throwable cause) {
+    this(message, source, cause, 0, 0, message);
+  }
+
+  /**
+   * Constructs an exception for a parse failure with its position in the input.
+   *
+   * @param message human-readable description, including the position
+   * @param source stable identifier of the configuration source that failed
+   * @param cause the root cause, or {@code null}
+   * @param line 1-based line of the failure; {@code 0} when unknown
+   * @param column 1-based column of the failure; {@code 0} when unknown
+   * @param reason what is wrong, without the position
+   */
+  public ConfigLoadException(
+      final String message,
+      final String source,
+      final Throwable cause,
+      final int line,
+      final int column,
+      final String reason) {
     super(message, cause);
     this.source = source;
+    this.line = line;
+    this.column = column;
+    this.reason = reason == null ? String.valueOf(message) : reason;
+  }
+
+  /**
+   * Returns the 1-based line of a JSON parse failure.
+   *
+   * @return the line; {@code 0} when the failure has no position
+   */
+  public int line() {
+    return line;
+  }
+
+  /**
+   * Returns the 1-based column of a JSON parse failure.
+   *
+   * @return the column; {@code 0} when the failure has no position
+   */
+  public int column() {
+    return column;
+  }
+
+  /**
+   * Returns what is wrong, without the position: the {@code reason} of the status file.
+   *
+   * @return the reason; never null
+   */
+  public String reason() {
+    return reason;
   }
 
   /**
