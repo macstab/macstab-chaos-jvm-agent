@@ -87,6 +87,9 @@ final class ScenarioController {
    */
   private final Object applicationBudgetLock = new Object();
 
+  /** Thread that ends a stressor scenario when {@code activeFor} elapses; {@code null} if none. */
+  private volatile Thread expiryThread;
+
   /** Reservations taken by {@link #reserveApplication()} and not yet committed or released. */
   private long reservedApplications;
 
@@ -306,6 +309,10 @@ final class ScenarioController {
     if (transitioned) {
       observabilityBus.publish(
           ChaosEvent.Type.STARTED, scenario.id(), "scenario started", Map.of("scope", scopeKey));
+      final Duration activeFor = scenario.activationPolicy().activeFor();
+      if (newStressor != null && activeFor != null) {
+        scheduleStressorExpiry(activeFor);
+      }
     }
   }
 
@@ -339,6 +346,7 @@ final class ScenarioController {
       reason = "stopped";
       gate.release();
       closeStressor();
+      cancelStressorExpiry();
       clockSkewState = null;
     }
     observabilityBus.publish(
@@ -599,7 +607,65 @@ final class ScenarioController {
         state = ChaosDiagnostics.ScenarioState.INACTIVE;
         started.set(false);
         reason = newReason;
+        // An inactive scenario applies nothing more: release threads parked on its gate (an
+        // indefinite gate would otherwise hold them until stop()) and end its background load.
+        gate.release();
+        closeStressor();
       }
+    }
+  }
+
+  /**
+   * Ends a stressor scenario when its {@code activeFor} window elapses. Stressors are never
+   * evaluated per call, so the window check in {@link #evaluate(InvocationContext)} never ran for
+   * them and a heap, thread-leak or deadlock stressor with {@code activeFor} kept running until
+   * {@code stop()}.
+   *
+   * <p>The expiry thread is agent-owned: it runs with the dispatch depth raised for its whole life,
+   * so user scenarios (thread start, park, sleep) never apply to it. It ends early when the
+   * scenario is stopped.
+   */
+  private void scheduleStressorExpiry(final Duration activeFor) {
+    long timeoutNanos;
+    try {
+      timeoutNanos = activeFor.toNanos();
+    } catch (final ArithmeticException overflow) {
+      return; // beyond ~292 years: effectively never expires
+    }
+    final long deadline = System.nanoTime() + timeoutNanos;
+    final Thread expiry =
+        new Thread(
+            () -> {
+              ChaosDispatcher.incrementDispatchDepth();
+              try {
+                long remaining;
+                while ((remaining = deadline - System.nanoTime()) > 0L) {
+                  java.util.concurrent.locks.LockSupport.parkNanos(this, remaining);
+                  if (Thread.currentThread().isInterrupted()) {
+                    return;
+                  }
+                }
+                markInactive("expired");
+              } finally {
+                ChaosDispatcher.decrementDispatchDepth();
+              }
+            },
+            "macstab-chaos-expiry-" + scenario.id());
+    expiry.setDaemon(true);
+    expiryThread = expiry;
+    ChaosDispatcher.incrementDispatchDepth();
+    try {
+      expiry.start();
+    } finally {
+      ChaosDispatcher.decrementDispatchDepth();
+    }
+  }
+
+  private void cancelStressorExpiry() {
+    final Thread expiry = expiryThread;
+    expiryThread = null;
+    if (expiry != null) {
+      expiry.interrupt();
     }
   }
 

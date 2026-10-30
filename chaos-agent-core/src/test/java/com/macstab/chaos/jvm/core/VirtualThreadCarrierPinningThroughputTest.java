@@ -1,7 +1,7 @@
 package com.macstab.chaos.jvm.core;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.awaitility.Awaitility.await;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.macstab.chaos.jvm.api.ActivationPolicy;
 import com.macstab.chaos.jvm.api.ChaosActivationHandle;
@@ -9,135 +9,100 @@ import com.macstab.chaos.jvm.api.ChaosEffect;
 import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.ChaosSelector;
 import java.time.Duration;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 /**
- * Integration tests for the {@link ChaosEffect.VirtualThreadCarrierPinningEffect} activation
- * pipeline through {@link ChaosRuntime}.
- *
- * <p>The {@link VirtualThreadCarrierPinningStressor} spawns platform daemon threads that stay
- * inside a {@code synchronized} block for a configurable duration. These tests verify that
- * activating the effect via {@link ChaosRuntime#activate} properly creates and starts the stressor,
- * that the expected number of pinning threads are alive during activation, and that {@link
- * ChaosActivationHandle#stop()} cleanly terminates all stressor threads.
+ * Verifies that the carrier-pinning stressor actually takes virtual-thread carriers out of service:
+ * while it holds every carrier, a newly started virtual thread cannot run; once it stops, the
+ * virtual thread runs. The 1.0.0 stressor used platform threads and passed its old tests (which
+ * only counted threads) while having no effect on the scheduler at all.
  */
-@DisplayName("VirtualThreadCarrierPinning activation integration")
+@DisplayName("VirtualThreadCarrierPinning holds virtual-thread carriers")
 class VirtualThreadCarrierPinningThroughputTest {
 
+  /** Carriers of the default virtual-thread scheduler. */
+  private static final int CARRIERS =
+      Integer.getInteger(
+          "jdk.virtualThreadScheduler.parallelism", Runtime.getRuntime().availableProcessors());
+
+  private static final ChaosEffect.VirtualThreadCarrierPinningEffect HOLD_ALL_CARRIERS =
+      new ChaosEffect.VirtualThreadCarrierPinningEffect(CARRIERS, Duration.ofMillis(200));
+
   @Nested
-  @DisplayName("Activation pipeline")
-  class ActivationPipeline {
+  @DisplayName("activated through ChaosRuntime (strategy of the running JDK)")
+  class ThroughRuntime {
 
     @Test
-    @DisplayName("activating effect via ChaosRuntime starts the expected pinning threads")
-    void activatingEffectStartsPinningThreads() {
-      final int pinnedCount = 3;
+    @DisplayName("a virtual thread cannot run while all carriers are held, and runs after stop")
+    void starvesVirtualThreadsUntilStopped() throws Exception {
       final ChaosRuntime runtime = new ChaosRuntime();
       final ChaosActivationHandle handle =
           runtime.activate(
-              ChaosScenario.builder("carrier-pin-start")
+              ChaosScenario.builder("carrier-pin")
                   .scope(ChaosScenario.ScenarioScope.JVM)
                   .selector(
                       ChaosSelector.stress(
                           ChaosSelector.StressTarget.VIRTUAL_THREAD_CARRIER_PINNING))
-                  .effect(
-                      new ChaosEffect.VirtualThreadCarrierPinningEffect(
-                          pinnedCount, Duration.ofSeconds(30)))
+                  .effect(HOLD_ALL_CARRIERS)
                   .activationPolicy(ActivationPolicy.always())
                   .build());
-
       try {
-        await()
-            .atMost(3, TimeUnit.SECONDS)
-            .untilAsserted(
-                () ->
-                    assertThat(aliveCarrierPinThreads())
-                        .as("stressor should start %d pinning threads", pinnedCount)
-                        .isEqualTo(pinnedCount));
+        assertStarvedUntil(handle::stop);
       } finally {
-        handle.stop();
+        handle.close();
+        runtime.close();
+      }
+    }
+  }
+
+  @Nested
+  @DisplayName("each holding strategy")
+  class Strategies {
+
+    @Test
+    @DisplayName("spin-wait holds carriers on every JDK")
+    void spinStrategy() throws Exception {
+      final VirtualThreadCarrierPinningStressor stressor =
+          new VirtualThreadCarrierPinningStressor(HOLD_ALL_CARRIERS, false);
+      try {
+        assertStarvedUntil(stressor::close);
+      } finally {
+        stressor.close();
       }
     }
 
     @Test
-    @DisplayName("stopping the handle terminates all pinning threads")
-    void stoppingHandleTerminatesPinningThreads() {
-      final int pinnedCount = 2;
-      final ChaosRuntime runtime = new ChaosRuntime();
-      final ChaosActivationHandle handle =
-          runtime.activate(
-              ChaosScenario.builder("carrier-pin-stop")
-                  .scope(ChaosScenario.ScenarioScope.JVM)
-                  .selector(
-                      ChaosSelector.stress(
-                          ChaosSelector.StressTarget.VIRTUAL_THREAD_CARRIER_PINNING))
-                  .effect(
-                      new ChaosEffect.VirtualThreadCarrierPinningEffect(
-                          pinnedCount, Duration.ofSeconds(30)))
-                  .activationPolicy(ActivationPolicy.always())
-                  .build());
-
-      await().atMost(3, TimeUnit.SECONDS).until(() -> aliveCarrierPinThreads() == pinnedCount);
-
-      handle.stop();
-
-      await()
-          .atMost(3, TimeUnit.SECONDS)
-          .untilAsserted(
-              () ->
-                  assertThat(aliveCarrierPinThreads())
-                      .as("all pinning threads should be stopped after handle.stop()")
-                      .isZero());
-    }
-
-    @Test
-    @DisplayName("stop is idempotent across multiple ChaosRuntime instances")
-    void stopIsIdempotentAcrossRuntimes() {
-      final ChaosRuntime r1 = new ChaosRuntime();
-      final ChaosRuntime r2 = new ChaosRuntime();
-
-      final ChaosActivationHandle h1 =
-          r1.activate(
-              ChaosScenario.builder("carrier-pin-r1")
-                  .scope(ChaosScenario.ScenarioScope.JVM)
-                  .selector(
-                      ChaosSelector.stress(
-                          ChaosSelector.StressTarget.VIRTUAL_THREAD_CARRIER_PINNING))
-                  .effect(
-                      new ChaosEffect.VirtualThreadCarrierPinningEffect(1, Duration.ofSeconds(30)))
-                  .activationPolicy(ActivationPolicy.always())
-                  .build());
-
-      final ChaosActivationHandle h2 =
-          r2.activate(
-              ChaosScenario.builder("carrier-pin-r2")
-                  .scope(ChaosScenario.ScenarioScope.JVM)
-                  .selector(
-                      ChaosSelector.stress(
-                          ChaosSelector.StressTarget.VIRTUAL_THREAD_CARRIER_PINNING))
-                  .effect(
-                      new ChaosEffect.VirtualThreadCarrierPinningEffect(1, Duration.ofSeconds(30)))
-                  .activationPolicy(ActivationPolicy.always())
-                  .build());
-
-      await().atMost(3, TimeUnit.SECONDS).until(() -> aliveCarrierPinThreads() == 2);
-
-      h1.stop();
-      h2.stop();
-
-      await()
-          .atMost(3, TimeUnit.SECONDS)
-          .untilAsserted(() -> assertThat(aliveCarrierPinThreads()).isZero());
+    @DisplayName("monitor pinning holds carriers on JDK 21-23")
+    void monitorStrategy() throws Exception {
+      assumeTrue(Runtime.version().feature() < 24, "synchronized no longer pins on JDK 24+");
+      final VirtualThreadCarrierPinningStressor stressor =
+          new VirtualThreadCarrierPinningStressor(HOLD_ALL_CARRIERS, true);
+      try {
+        assertStarvedUntil(stressor::close);
+      } finally {
+        stressor.close();
+      }
     }
   }
 
-  private static long aliveCarrierPinThreads() {
-    return Thread.getAllStackTraces().keySet().stream()
-        .filter(t -> t.getName().startsWith("chaos-carrier-pin-"))
-        .filter(Thread::isAlive)
-        .count();
+  private static void assertStarvedUntil(final Runnable stop) throws InterruptedException {
+    // Give the stressor's virtual threads time to mount on every carrier.
+    Thread.sleep(300L);
+    final CountDownLatch ran = new CountDownLatch(1);
+    Thread.ofVirtual().start(ran::countDown);
+
+    assertThat(ran.await(500L, TimeUnit.MILLISECONDS))
+        .as("no carrier is free while the stressor holds all %d", CARRIERS)
+        .isFalse();
+
+    stop.run();
+
+    assertThat(ran.await(5L, TimeUnit.SECONDS))
+        .as("the waiting virtual thread runs once the carriers are released")
+        .isTrue();
   }
 }

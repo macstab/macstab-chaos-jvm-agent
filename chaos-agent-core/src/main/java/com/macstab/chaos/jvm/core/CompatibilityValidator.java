@@ -1,5 +1,6 @@
 package com.macstab.chaos.jvm.core;
 
+import com.macstab.chaos.jvm.api.ActivationPolicy;
 import com.macstab.chaos.jvm.api.ChaosActivationException;
 import com.macstab.chaos.jvm.api.ChaosEffect;
 import com.macstab.chaos.jvm.api.ChaosScenario;
@@ -86,6 +87,7 @@ final class CompatibilityValidator {
         throw new ChaosValidationException("stress scenarios must be JVM scoped");
       }
       validateStressBinding(stressSelector.target(), scenario.effect());
+      validateStressActivationPolicy(scenario.activationPolicy());
       if (stressSelector.target() == ChaosSelector.StressTarget.VIRTUAL_THREAD_CARRIER_PINNING
           && !featureSet.supportsVirtualThreads()) {
         throw new ChaosUnsupportedFeatureException(
@@ -93,6 +95,23 @@ final class CompatibilityValidator {
       }
     }
     validateInterceptorConstraints(scenario);
+  }
+
+  /**
+   * Rejects activation-policy fields that cannot apply to a stressor. A stressor runs as background
+   * load from {@code start()} until it is stopped or its {@code activeFor} window ends; it is never
+   * evaluated per call, so per-call gating (probability, warm-up, rate limit, application cap)
+   * never took effect. Rejecting them makes the misconfiguration visible instead of silent.
+   */
+  private static void validateStressActivationPolicy(final ActivationPolicy policy) {
+    if (policy.maxApplications() != null
+        || policy.rateLimit() != null
+        || policy.activateAfterMatches() > 0
+        || policy.probability() < 1.0d) {
+      throw new ChaosValidationException(
+          "stress scenarios run from start until stop or activeFor ends; maxApplications,"
+              + " rateLimit, activateAfterMatches and probability do not apply to them");
+    }
   }
 
   /**

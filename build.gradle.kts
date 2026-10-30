@@ -73,7 +73,19 @@ subprojects {
         "testRuntimeOnly"(junitPlatformLauncher)
     }
 
+    // -PtestJavaVersion=21 runs the tests on another installed JDK (bytecode stays --release 21).
+    // Used by the JDK matrix in CI; behaviour differs between JDK 21 and 25 in places the agent
+    // instruments (Thread.sleep, LockSupport, virtual-thread pinning).
+    val testJavaVersion = providers.gradleProperty("testJavaVersion").orNull
+    val javaToolchains = extensions.getByType<JavaToolchainService>()
     tasks.withType<Test>().configureEach {
+        if (testJavaVersion != null) {
+            javaLauncher.set(
+                javaToolchains.launcherFor {
+                    languageVersion.set(JavaLanguageVersion.of(testJavaVersion.toInt()))
+                },
+            )
+        }
         useJUnitPlatform()
         jvmArgs(
             "-Djdk.attach.allowAttachSelf=true",
