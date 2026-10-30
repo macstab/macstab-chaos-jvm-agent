@@ -41,10 +41,9 @@ import net.bytebuddy.utility.JavaModule;
  * <ol>
  *   <li>{@link #install} is called once by {@code ChaosAgentBootstrap} after the runtime is ready.
  *   <li>{@link #injectBridge(java.lang.instrument.Instrumentation)} packages {@link
- *       com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher} and {@link
- *       com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher.ThrowingSupplier} into a
- *       temporary JAR and appends it to the bootstrap classpath so that bootstrap-loaded JDK
- *       classes can see it.
+ *       com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher} and the types woven
+ *       advice references into a temporary JAR and appends it to the bootstrap classpath so that
+ *       bootstrap-loaded JDK classes can see it.
  *   <li>{@link #installDelegate(Object)} constructs a {@link
  *       com.macstab.chaos.jvm.instrumentation.ChaosBridge}, builds the {@link
  *       com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher#HANDLE_COUNT
@@ -970,15 +969,10 @@ public final class JdkInstrumentationInstaller {
    * Packages the bootstrap bridge classes into a temporary JAR and appends it to the bootstrap
    * classpath.
    *
-   * <p>The classes written are:
+   * <p>The classes written are {@code BootstrapDispatcher} and the types that advice woven into JDK
+   * classes references (the scheduled-task wrappers and the API exceptions it throws).
    *
-   * <ul>
-   *   <li>{@code com/macstab/chaos/jvm/instrumentation/bridge/BootstrapDispatcher.class}
-   *   <li>{@code
-   *       com/macstab/chaos/jvm/instrumentation/bridge/BootstrapDispatcher$ThrowingSupplier.class}
-   * </ul>
-   *
-   * <p>Both are read from the agent classloader's resources (the same JAR that contains this class)
+   * <p>They are read from the agent classloader's resources (the same JAR that contains this class)
    * and written verbatim into the temp JAR. The temp file is registered for deletion on JVM exit.
    * After the JAR is written, {@link Instrumentation#appendToBootstrapClassLoaderSearch} makes its
    * contents visible to the bootstrap classloader, allowing instrumented JDK classes — which are
@@ -1019,9 +1013,6 @@ public final class JdkInstrumentationInstaller {
         writeClass(
             jarOutputStream,
             "com/macstab/chaos/jvm/instrumentation/bridge/BootstrapDispatcher.class");
-        writeClass(
-            jarOutputStream,
-            "com/macstab/chaos/jvm/instrumentation/bridge/BootstrapDispatcher$ThrowingSupplier.class");
         writeClass(
             jarOutputStream,
             "com/macstab/chaos/jvm/instrumentation/ScheduledRunnableWrapper.class");

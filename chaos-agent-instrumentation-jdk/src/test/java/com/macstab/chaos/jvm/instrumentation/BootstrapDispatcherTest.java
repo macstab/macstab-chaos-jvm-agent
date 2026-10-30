@@ -432,6 +432,43 @@ class BootstrapDispatcherTest {
     boolean tick(Object executor, Object task, boolean periodic) throws Throwable;
   }
 
+  @Nested
+  @DisplayName("dispatch allocation")
+  class DispatchAllocation {
+
+    private static final int CALLS = 10_000;
+
+    @Test
+    @DisplayName("a dispatch that changes nothing allocates no per-call objects")
+    void dispatchDoesNotAllocatePerCall() throws Throwable {
+      final Runnable task = () -> {};
+      BootstrapDispatcher.install(null, null);
+      allocatedBytesOver(task);
+      final long notInstalled = allocatedBytesOver(task);
+      installDecorateBridge((operation, executor, runnable) -> runnable);
+      // The first round warms up the method-handle adaptation, which allocates once.
+      allocatedBytesOver(task);
+      final long installed = allocatedBytesOver(task);
+
+      // A capturing lambda per call costs at least 24 bytes, i.e. 240 KB over 10,000 calls; the
+      // bound leaves room for the measurement's own noise but not for any per-call object.
+      assertThat(notInstalled).as("bytes allocated with no delegate").isLessThan(CALLS);
+      assertThat(installed).as("bytes allocated with a pass-through delegate").isLessThan(CALLS);
+    }
+
+    private long allocatedBytesOver(final Runnable task) throws Throwable {
+      final com.sun.management.ThreadMXBean threads =
+          (com.sun.management.ThreadMXBean)
+              java.lang.management.ManagementFactory.getThreadMXBean();
+      final long threadId = Thread.currentThread().threadId();
+      final long before = threads.getThreadAllocatedBytes(threadId);
+      for (int i = 0; i < CALLS; i++) {
+        BootstrapDispatcher.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, task);
+      }
+      return threads.getThreadAllocatedBytes(threadId) - before;
+    }
+  }
+
   @FunctionalInterface
   interface DecorateBehavior {
     Runnable decorate(String operation, Object executor, Runnable task) throws Throwable;

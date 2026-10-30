@@ -220,6 +220,18 @@ final class ScenarioRegistry implements ChaosDiagnostics {
   }
 
   /**
+   * Returns the controllers whose selector names {@code operation}, in match order, straight from
+   * the index: no copy is made, so callers must not modify the array.
+   *
+   * @param operation the intercepted operation
+   * @return the indexed controllers; an empty array when none can match
+   */
+  ScenarioController[] candidates(final OperationType operation) {
+    final ScenarioController[] candidates = index.get(operation);
+    return candidates == null ? NO_CONTROLLERS : candidates;
+  }
+
+  /**
    * Returns an unmodifiable snapshot of all currently registered controllers.
    *
    * <p>The returned list reflects the registry state at the moment of the call; subsequent

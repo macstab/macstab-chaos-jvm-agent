@@ -567,7 +567,7 @@ final class JvmRuntimeAdvice {
    * <pre>
    *   ThreadLocal.get() [any call]
    *     → ThreadLocalGetAdvice.enter()
-   *       → BootstrapDispatcher.invoke()
+   *       → BootstrapDispatcher.beforeThreadLocalGet()
    *         → DEPTH.get()   ← ThreadLocal.get() again!
    *           → ThreadLocalGetAdvice.enter()
    *             → ... StackOverflowError
@@ -584,16 +584,16 @@ final class JvmRuntimeAdvice {
    *       is always accessible from this advice.
    *   <li>The check is a single reference comparison — zero allocation, nanosecond cost.
    *   <li>All other internal {@code ThreadLocal} reads (e.g. {@code ScopeContext.sessionStack}) are
-   *       already protected by the {@code DEPTH > 0} guard inside {@code
-   *       BootstrapDispatcher.invoke()}, because they are only read during chaos evaluation which
-   *       happens after DEPTH has been incremented to 1.
+   *       already protected by the {@code DEPTH > 0} guard inside the dispatch methods of {@code
+   *       BootstrapDispatcher}, because they are only read during chaos evaluation which happens
+   *       after DEPTH has been incremented to 1.
    * </ul>
    */
   static final class ThreadLocalGetAdvice {
     @Advice.OnMethodEnter(skipOn = Advice.OnNonDefaultValue.class)
     static boolean enter(@Advice.This final Object threadLocal) throws Throwable {
       // Guard: skip interception of the dispatcher's own reentrancy-depth ThreadLocal.
-      // Without this check, DEPTH.get() inside BootstrapDispatcher.invoke() would re-trigger
+      // Without this check, DEPTH.get() inside the BootstrapDispatcher guard would re-trigger
       // this advice, causing a StackOverflowError before the DEPTH guard can protect us.
       // Identity comparison is safe: DEPTH is a static-final bootstrap-CL singleton.
       if (threadLocal == BootstrapDispatcher.depthThreadLocal()) {

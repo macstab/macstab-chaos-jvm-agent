@@ -208,14 +208,71 @@ public record NamePattern(MatchMode mode, String value) {
     return switch (mode) {
       case EXACT -> candidate.equals(value);
       case PREFIX -> candidate.startsWith(value);
-      case GLOB -> compiledGlob(value).matcher(candidate).matches();
+      case GLOB -> globMatches(value, candidate);
       case REGEX -> compiledRegex(value).matcher(candidate).matches();
       case ANY -> true;
     };
   }
 
   private static Pattern compiledGlob(final String value) {
-    return cachedCompile(GLOB_CACHE, value, toRegex(value));
+    // Look the pattern up before building its regex: toRegex allocates a new string per call.
+    final Pattern cached = GLOB_CACHE.get(value);
+    return cached != null ? cached : cachedCompile(GLOB_CACHE, value, toRegex(value));
+  }
+
+  /**
+   * Matches {@code candidate} against {@code glob} without allocating. For a candidate without line
+   * terminators or surrogates, '*' (regex {@code .*}) matches any sequence and '?' exactly one
+   * char, so the two-pointer wildcard match below gives the same answer as the compiled regex.
+   * Other candidates go through the regex, which keeps the exact semantics for them.
+   */
+  private static boolean globMatches(final String glob, final String candidate) {
+    if (needsRegex(candidate)) {
+      return compiledGlob(glob).matcher(candidate).matches();
+    }
+    int patternIndex = 0;
+    int candidateIndex = 0;
+    int starIndex = -1;
+    int starMatchEnd = 0;
+    while (candidateIndex < candidate.length()) {
+      if (patternIndex < glob.length()) {
+        final char token = glob.charAt(patternIndex);
+        if (token == '*') {
+          starIndex = patternIndex++;
+          starMatchEnd = candidateIndex;
+          continue;
+        }
+        if (token == '?' || token == candidate.charAt(candidateIndex)) {
+          patternIndex++;
+          candidateIndex++;
+          continue;
+        }
+      }
+      if (starIndex < 0) {
+        return false;
+      }
+      patternIndex = starIndex + 1;
+      candidateIndex = ++starMatchEnd;
+    }
+    while (patternIndex < glob.length() && glob.charAt(patternIndex) == '*') {
+      patternIndex++;
+    }
+    return patternIndex == glob.length();
+  }
+
+  private static boolean needsRegex(final String candidate) {
+    for (int i = 0; i < candidate.length(); i++) {
+      final char c = candidate.charAt(i);
+      if (c == '\n'
+          || c == '\r'
+          || c == '\u0085'
+          || c == '\u2028'
+          || c == '\u2029'
+          || Character.isSurrogate(c)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private static Pattern compiledRegex(final String value) {

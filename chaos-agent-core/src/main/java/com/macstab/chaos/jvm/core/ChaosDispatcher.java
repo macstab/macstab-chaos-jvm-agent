@@ -730,13 +730,17 @@ public final class ChaosDispatcher {
     // thousands of times per second. Routing through evaluate() would exhaust any activation
     // policy budget within milliseconds. Instead, iterate controllers directly: check started
     // + selector + ClockSkewEffect without touching policy accounting.
+    final ScenarioController[] candidates = registry.candidates(clockType);
+    if (candidates.length == 0) {
+      return realValue;
+    }
     final InvocationContext context =
         new InvocationContext(clockType, "java.lang.System", null, null, false, null, null, null);
     final boolean isNanos = clockType == OperationType.SYSTEM_CLOCK_NANOS;
     long result = realValue;
     String currentSession = null;
     boolean currentSessionResolved = false;
-    for (final ScenarioController controller : registry.controllers()) {
+    for (final ScenarioController controller : candidates) {
       final ClockSkewState state = controller.clockSkewState();
       if (state == null) {
         continue;

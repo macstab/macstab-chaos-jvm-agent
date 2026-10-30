@@ -63,7 +63,7 @@ public final class BootstrapDispatcher {
    * JvmRuntimeAdvice.ThreadLocalGetAdvice} for the full reentrancy analysis.
    *
    * <p>An {@code int[]} (index 0: reentrancy depth, then one counter per call-depth scope) is held
-   * rather than an {@link Integer} so the fast path in {@link #invoke} performs exactly one {@link
+   * rather than an {@link Integer} so each dispatch method's guard performs exactly one {@link
    * ThreadLocal#get()} (per call) and mutates the counter in place — avoiding both a second {@code
    * get()} and the Integer autoboxing that a {@code set(get()+1)} pair would incur. This matters
    * because every intercepted JDK call hits this guard.
@@ -473,15 +473,23 @@ public final class BootstrapDispatcher {
    */
   public static Runnable decorateExecutorRunnable(
       final String operation, final Object executor, final Runnable task) throws Throwable {
-    return invoke(
-        () -> {
-          final MethodHandle[] h = handles;
-          final Object d = delegate;
-          return (d == null || h == null)
-              ? task
-              : (Runnable) h[DECORATE_EXECUTOR_RUNNABLE].invoke(d, operation, executor, task);
-        },
-        task);
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return task;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      return (d == null || h == null)
+          ? task
+          : (Runnable) h[DECORATE_EXECUTOR_RUNNABLE].invoke(d, operation, executor, task);
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+      return task;
+    } finally {
+      depth[0]--;
+    }
   }
 
   /**
@@ -497,17 +505,25 @@ public final class BootstrapDispatcher {
    */
   public static <T> Callable<T> decorateExecutorCallable(
       final String operation, final Object executor, final Callable<T> task) throws Throwable {
-    return invoke(
-        () -> {
-          final MethodHandle[] h = handles;
-          final Object d = delegate;
-          if (d == null || h == null) return task;
-          @SuppressWarnings("unchecked")
-          Callable<T> result =
-              (Callable<T>) h[DECORATE_EXECUTOR_CALLABLE].invoke(d, operation, executor, task);
-          return result;
-        },
-        task);
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return task;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      if (d == null || h == null) return task;
+      @SuppressWarnings("unchecked")
+      Callable<T> result =
+          (Callable<T>) h[DECORATE_EXECUTOR_CALLABLE].invoke(d, operation, executor, task);
+      return result;
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+      return task;
+    } finally {
+      depth[0]--;
+    }
   }
 
   /**
@@ -520,16 +536,22 @@ public final class BootstrapDispatcher {
    * @throws Throwable if an active scenario injects an exception to suppress the start
    */
   public static void beforeThreadStart(final Thread thread) throws Throwable {
-    invoke(
-        () -> {
-          final MethodHandle[] h = handles;
-          final Object d = delegate;
-          if (d != null && h != null) {
-            h[BEFORE_THREAD_START].invoke(d, thread);
-          }
-          return null;
-        },
-        null);
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      if (d != null && h != null) {
+        h[BEFORE_THREAD_START].invoke(d, thread);
+      }
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+    } finally {
+      depth[0]--;
+    }
   }
 
   /**
@@ -542,16 +564,22 @@ public final class BootstrapDispatcher {
    */
   public static void beforeWorkerRun(
       final Object executor, final Thread worker, final Runnable task) throws Throwable {
-    invoke(
-        () -> {
-          final MethodHandle[] h = handles;
-          final Object d = delegate;
-          if (d != null && h != null) {
-            h[BEFORE_WORKER_RUN].invoke(d, executor, worker, task);
-          }
-          return null;
-        },
-        null);
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      if (d != null && h != null) {
+        h[BEFORE_WORKER_RUN].invoke(d, executor, worker, task);
+      }
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+    } finally {
+      depth[0]--;
+    }
   }
 
   /**
@@ -562,16 +590,22 @@ public final class BootstrapDispatcher {
    * @throws Throwable if an active scenario injects an exception
    */
   public static void beforeForkJoinTaskRun(final ForkJoinTask<?> task) throws Throwable {
-    invoke(
-        () -> {
-          final MethodHandle[] h = handles;
-          final Object d = delegate;
-          if (d != null && h != null) {
-            h[BEFORE_FORK_JOIN_TASK_RUN].invoke(d, task);
-          }
-          return null;
-        },
-        null);
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      if (d != null && h != null) {
+        h[BEFORE_FORK_JOIN_TASK_RUN].invoke(d, task);
+      }
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+    } finally {
+      depth[0]--;
+    }
   }
 
   /**
@@ -595,16 +629,23 @@ public final class BootstrapDispatcher {
       final long delay,
       final boolean periodic)
       throws Throwable {
-    return invoke(
-        () -> {
-          final MethodHandle[] h = handles;
-          final Object d = delegate;
-          return (d == null || h == null)
-              ? delay
-              : (long)
-                  h[ADJUST_SCHEDULE_DELAY].invoke(d, operation, executor, task, delay, periodic);
-        },
-        delay);
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return delay;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      return (d == null || h == null)
+          ? delay
+          : (long) h[ADJUST_SCHEDULE_DELAY].invoke(d, operation, executor, task, delay, periodic);
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+      return delay;
+    } finally {
+      depth[0]--;
+    }
   }
 
   /**
@@ -620,14 +661,22 @@ public final class BootstrapDispatcher {
    */
   public static boolean beforeScheduledTick(
       final Object executor, final Object task, final boolean periodic) throws Throwable {
-    return invoke(
-        () -> {
-          final MethodHandle[] h = handles;
-          final Object d = delegate;
-          return (d == null || h == null)
-              || (boolean) h[BEFORE_SCHEDULED_TICK].invoke(d, executor, task, periodic);
-        },
-        true);
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return true;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      return (d == null || h == null)
+          || (boolean) h[BEFORE_SCHEDULED_TICK].invoke(d, executor, task, periodic);
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+      return true;
+    } finally {
+      depth[0]--;
+    }
   }
 
   /**
@@ -640,16 +689,22 @@ public final class BootstrapDispatcher {
    */
   public static void beforeQueueOperation(final String operation, final Object queue)
       throws Throwable {
-    invoke(
-        () -> {
-          final MethodHandle[] h = handles;
-          final Object d = delegate;
-          if (d != null && h != null) {
-            h[BEFORE_QUEUE_OPERATION].invoke(d, operation, queue);
-          }
-          return null;
-        },
-        null);
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      if (d != null && h != null) {
+        h[BEFORE_QUEUE_OPERATION].invoke(d, operation, queue);
+      }
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+    } finally {
+      depth[0]--;
+    }
   }
 
   /**
@@ -664,15 +719,23 @@ public final class BootstrapDispatcher {
    */
   public static Boolean beforeBooleanQueueOperation(final String operation, final Object queue)
       throws Throwable {
-    return invoke(
-        () -> {
-          final MethodHandle[] h = handles;
-          final Object d = delegate;
-          return (d == null || h == null)
-              ? null
-              : (Boolean) h[BEFORE_BOOLEAN_QUEUE_OPERATION].invoke(d, operation, queue);
-        },
-        null);
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return null;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      return (d == null || h == null)
+          ? null
+          : (Boolean) h[BEFORE_BOOLEAN_QUEUE_OPERATION].invoke(d, operation, queue);
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+      return null;
+    } finally {
+      depth[0]--;
+    }
   }
 
   /**
@@ -692,16 +755,23 @@ public final class BootstrapDispatcher {
   public static Boolean beforeCompletableFutureComplete(
       final String operation, final CompletableFuture<?> future, final Object payload)
       throws Throwable {
-    return invoke(
-        () -> {
-          final MethodHandle[] h = handles;
-          final Object d = delegate;
-          return (d == null || h == null)
-              ? null
-              : (Boolean)
-                  h[BEFORE_COMPLETABLE_FUTURE_COMPLETE].invoke(d, operation, future, payload);
-        },
-        null);
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return null;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      return (d == null || h == null)
+          ? null
+          : (Boolean) h[BEFORE_COMPLETABLE_FUTURE_COMPLETE].invoke(d, operation, future, payload);
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+      return null;
+    } finally {
+      depth[0]--;
+    }
   }
 
   /**
@@ -714,16 +784,22 @@ public final class BootstrapDispatcher {
    */
   public static void beforeClassLoad(final ClassLoader loader, final String className)
       throws Throwable {
-    invoke(
-        () -> {
-          final MethodHandle[] h = handles;
-          final Object d = delegate;
-          if (d != null && h != null) {
-            h[BEFORE_CLASS_LOAD].invoke(d, loader, className);
-          }
-          return null;
-        },
-        null);
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      if (d != null && h != null) {
+        h[BEFORE_CLASS_LOAD].invoke(d, loader, className);
+      }
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+    } finally {
+      depth[0]--;
+    }
   }
 
   /**
@@ -741,15 +817,23 @@ public final class BootstrapDispatcher {
    */
   public static URL afterResourceLookup(
       final ClassLoader loader, final String name, final URL currentValue) throws Throwable {
-    return invoke(
-        () -> {
-          final MethodHandle[] h = handles;
-          final Object d = delegate;
-          return (d == null || h == null)
-              ? currentValue
-              : (URL) h[AFTER_RESOURCE_LOOKUP].invoke(d, loader, name, currentValue);
-        },
-        currentValue);
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return currentValue;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      return (d == null || h == null)
+          ? currentValue
+          : (URL) h[AFTER_RESOURCE_LOOKUP].invoke(d, loader, name, currentValue);
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+      return currentValue;
+    } finally {
+      depth[0]--;
+    }
   }
 
   /**
@@ -761,15 +845,21 @@ public final class BootstrapDispatcher {
    * @throws Throwable if the delegate throws
    */
   public static Thread decorateShutdownHook(final Thread hook) throws Throwable {
-    return invoke(
-        () -> {
-          final MethodHandle[] h = handles;
-          final Object d = delegate;
-          return (d == null || h == null)
-              ? hook
-              : (Thread) h[DECORATE_SHUTDOWN_HOOK].invoke(d, hook);
-        },
-        hook);
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return hook;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      return (d == null || h == null) ? hook : (Thread) h[DECORATE_SHUTDOWN_HOOK].invoke(d, hook);
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+      return hook;
+    } finally {
+      depth[0]--;
+    }
   }
 
   /**
@@ -799,9 +889,7 @@ public final class BootstrapDispatcher {
             ? original
             : (Thread) h[RESOLVE_SHUTDOWN_HOOK].invoke(d, original);
       } finally {
-        if (--depth[0] == 0) {
-          DEPTH.remove();
-        }
+        depth[0]--;
       }
     } catch (final Throwable ignored) {
       return original;
@@ -820,16 +908,22 @@ public final class BootstrapDispatcher {
    */
   public static void beforeExecutorShutdown(
       final String operation, final Object executor, final long timeoutMillis) throws Throwable {
-    invoke(
-        () -> {
-          final MethodHandle[] h = handles;
-          final Object d = delegate;
-          if (d != null && h != null) {
-            h[BEFORE_EXECUTOR_SHUTDOWN].invoke(d, operation, executor, timeoutMillis);
-          }
-          return null;
-        },
-        null);
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      if (d != null && h != null) {
+        h[BEFORE_EXECUTOR_SHUTDOWN].invoke(d, operation, executor, timeoutMillis);
+      }
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+    } finally {
+      depth[0]--;
+    }
   }
 
   // ── Phase 2 dispatch methods ───────────────────────────────────────────────
@@ -846,15 +940,23 @@ public final class BootstrapDispatcher {
    * @throws Throwable if the delegate throws
    */
   public static long adjustClockMillis(final long realMillis) throws Throwable {
-    return invoke(
-        () -> {
-          final MethodHandle[] h = handles;
-          final Object d = delegate;
-          return (d == null || h == null)
-              ? realMillis
-              : (long) h[ADJUST_CLOCK_MILLIS].invoke(d, realMillis);
-        },
-        realMillis);
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return realMillis;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      return (d == null || h == null)
+          ? realMillis
+          : (long) h[ADJUST_CLOCK_MILLIS].invoke(d, realMillis);
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+      return realMillis;
+    } finally {
+      depth[0]--;
+    }
   }
 
   /**
@@ -867,15 +969,23 @@ public final class BootstrapDispatcher {
    * @throws Throwable if the delegate throws
    */
   public static long adjustClockNanos(final long realNanos) throws Throwable {
-    return invoke(
-        () -> {
-          final MethodHandle[] h = handles;
-          final Object d = delegate;
-          return (d == null || h == null)
-              ? realNanos
-              : (long) h[ADJUST_CLOCK_NANOS].invoke(d, realNanos);
-        },
-        realNanos);
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return realNanos;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      return (d == null || h == null)
+          ? realNanos
+          : (long) h[ADJUST_CLOCK_NANOS].invoke(d, realNanos);
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+      return realNanos;
+    } finally {
+      depth[0]--;
+    }
   }
 
   /**
@@ -888,15 +998,23 @@ public final class BootstrapDispatcher {
    */
   public static java.time.Instant adjustInstantNow(final java.time.Instant realInstant)
       throws Throwable {
-    return invoke(
-        () -> {
-          final MethodHandle[] h = handles;
-          final Object d = delegate;
-          return (d == null || h == null)
-              ? realInstant
-              : (java.time.Instant) h[ADJUST_INSTANT_NOW].invoke(d, realInstant);
-        },
-        realInstant);
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return realInstant;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      return (d == null || h == null)
+          ? realInstant
+          : (java.time.Instant) h[ADJUST_INSTANT_NOW].invoke(d, realInstant);
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+      return realInstant;
+    } finally {
+      depth[0]--;
+    }
   }
 
   /**
@@ -910,16 +1028,24 @@ public final class BootstrapDispatcher {
    */
   public static java.time.LocalDateTime adjustLocalDateTimeNowInZone(
       final java.time.LocalDateTime realValue, final java.time.ZoneId zone) throws Throwable {
-    return invoke(
-        () -> {
-          final MethodHandle[] h = handles;
-          final Object d = delegate;
-          return (d == null || h == null)
-              ? realValue
-              : (java.time.LocalDateTime)
-                  h[ADJUST_LOCAL_DATE_TIME_NOW_IN_ZONE].invoke(d, realValue, zone);
-        },
-        realValue);
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return realValue;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      return (d == null || h == null)
+          ? realValue
+          : (java.time.LocalDateTime)
+              h[ADJUST_LOCAL_DATE_TIME_NOW_IN_ZONE].invoke(d, realValue, zone);
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+      return realValue;
+    } finally {
+      depth[0]--;
+    }
   }
 
   /**
@@ -933,15 +1059,23 @@ public final class BootstrapDispatcher {
    */
   public static java.time.LocalDateTime adjustLocalDateTimeNow(
       final java.time.LocalDateTime realValue) throws Throwable {
-    return invoke(
-        () -> {
-          final MethodHandle[] h = handles;
-          final Object d = delegate;
-          return (d == null || h == null)
-              ? realValue
-              : (java.time.LocalDateTime) h[ADJUST_LOCAL_DATE_TIME_NOW].invoke(d, realValue);
-        },
-        realValue);
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return realValue;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      return (d == null || h == null)
+          ? realValue
+          : (java.time.LocalDateTime) h[ADJUST_LOCAL_DATE_TIME_NOW].invoke(d, realValue);
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+      return realValue;
+    } finally {
+      depth[0]--;
+    }
   }
 
   /**
@@ -955,15 +1089,23 @@ public final class BootstrapDispatcher {
    */
   public static java.time.ZonedDateTime adjustZonedDateTimeNow(
       final java.time.ZonedDateTime realValue) throws Throwable {
-    return invoke(
-        () -> {
-          final MethodHandle[] h = handles;
-          final Object d = delegate;
-          return (d == null || h == null)
-              ? realValue
-              : (java.time.ZonedDateTime) h[ADJUST_ZONED_DATE_TIME_NOW].invoke(d, realValue);
-        },
-        realValue);
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return realValue;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      return (d == null || h == null)
+          ? realValue
+          : (java.time.ZonedDateTime) h[ADJUST_ZONED_DATE_TIME_NOW].invoke(d, realValue);
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+      return realValue;
+    } finally {
+      depth[0]--;
+    }
   }
 
   /**
@@ -976,15 +1118,23 @@ public final class BootstrapDispatcher {
    * @throws Throwable if the delegate throws
    */
   public static long adjustDateNew(final long realMillis) throws Throwable {
-    return invoke(
-        () -> {
-          final MethodHandle[] h = handles;
-          final Object d = delegate;
-          return (d == null || h == null)
-              ? realMillis
-              : (long) h[ADJUST_DATE_NEW].invoke(d, realMillis);
-        },
-        realMillis);
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return realMillis;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      return (d == null || h == null)
+          ? realMillis
+          : (long) h[ADJUST_DATE_NEW].invoke(d, realMillis);
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+      return realMillis;
+    } finally {
+      depth[0]--;
+    }
   }
 
   /**
@@ -998,13 +1148,21 @@ public final class BootstrapDispatcher {
    * @throws Throwable if the delegate throws
    */
   public static boolean beforeGcRequest() throws Throwable {
-    return invoke(
-        () -> {
-          final MethodHandle[] h = handles;
-          final Object d = delegate;
-          return (d != null && h != null) && (boolean) h[BEFORE_GC_REQUEST].invoke(d);
-        },
-        false);
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return false;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      return (d != null && h != null) && (boolean) h[BEFORE_GC_REQUEST].invoke(d);
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+      return false;
+    } finally {
+      depth[0]--;
+    }
   }
 
   /**
@@ -1018,16 +1176,22 @@ public final class BootstrapDispatcher {
    * @throws Throwable if any other scenario-driven exception is injected
    */
   public static void beforeExitRequest(final int status) throws Throwable {
-    invoke(
-        () -> {
-          final MethodHandle[] h = handles;
-          final Object d = delegate;
-          if (d != null && h != null) {
-            h[BEFORE_EXIT_REQUEST].invoke(d, status);
-          }
-          return null;
-        },
-        null);
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      if (d != null && h != null) {
+        h[BEFORE_EXIT_REQUEST].invoke(d, status);
+      }
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+    } finally {
+      depth[0]--;
+    }
   }
 
   /**
@@ -1039,16 +1203,22 @@ public final class BootstrapDispatcher {
    */
   public static void beforeReflectionInvoke(final Object method, final Object target)
       throws Throwable {
-    invoke(
-        () -> {
-          final MethodHandle[] h = handles;
-          final Object d = delegate;
-          if (d != null && h != null) {
-            h[BEFORE_REFLECTION_INVOKE].invoke(d, method, target);
-          }
-          return null;
-        },
-        null);
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      if (d != null && h != null) {
+        h[BEFORE_REFLECTION_INVOKE].invoke(d, method, target);
+      }
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+    } finally {
+      depth[0]--;
+    }
   }
 
   /**
@@ -1059,16 +1229,22 @@ public final class BootstrapDispatcher {
    *     another allocation failure
    */
   public static void beforeDirectBufferAllocate(final int capacity) throws Throwable {
-    invoke(
-        () -> {
-          final MethodHandle[] h = handles;
-          final Object d = delegate;
-          if (d != null && h != null) {
-            h[BEFORE_DIRECT_BUFFER_ALLOCATE].invoke(d, capacity);
-          }
-          return null;
-        },
-        null);
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      if (d != null && h != null) {
+        h[BEFORE_DIRECT_BUFFER_ALLOCATE].invoke(d, capacity);
+      }
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+    } finally {
+      depth[0]--;
+    }
   }
 
   /**
@@ -1080,16 +1256,22 @@ public final class BootstrapDispatcher {
    *     serialized data
    */
   public static void beforeObjectDeserialize(final Object stream) throws Throwable {
-    invoke(
-        () -> {
-          final MethodHandle[] h = handles;
-          final Object d = delegate;
-          if (d != null && h != null) {
-            h[BEFORE_OBJECT_DESERIALIZE].invoke(d, stream);
-          }
-          return null;
-        },
-        null);
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      if (d != null && h != null) {
+        h[BEFORE_OBJECT_DESERIALIZE].invoke(d, stream);
+      }
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+    } finally {
+      depth[0]--;
+    }
   }
 
   /**
@@ -1102,16 +1284,22 @@ public final class BootstrapDispatcher {
    */
   public static void beforeClassDefine(final Object loader, final String className)
       throws Throwable {
-    invoke(
-        () -> {
-          final MethodHandle[] h = handles;
-          final Object d = delegate;
-          if (d != null && h != null) {
-            h[BEFORE_CLASS_DEFINE].invoke(d, loader, className);
-          }
-          return null;
-        },
-        null);
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      if (d != null && h != null) {
+        h[BEFORE_CLASS_DEFINE].invoke(d, loader, className);
+      }
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+    } finally {
+      depth[0]--;
+    }
   }
 
   /**
@@ -1124,16 +1312,22 @@ public final class BootstrapDispatcher {
    * @throws Throwable if an active scenario injects an exception
    */
   public static void beforeMonitorEnter(final Object lock) throws Throwable {
-    invoke(
-        () -> {
-          final MethodHandle[] h = handles;
-          final Object d = delegate;
-          if (d != null && h != null) {
-            h[BEFORE_MONITOR_ENTER].invoke(d, lock);
-          }
-          return null;
-        },
-        null);
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      if (d != null && h != null) {
+        h[BEFORE_MONITOR_ENTER].invoke(d, lock);
+      }
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+    } finally {
+      depth[0]--;
+    }
   }
 
   /**
@@ -1144,16 +1338,22 @@ public final class BootstrapDispatcher {
    * @throws Throwable if an active scenario injects an exception
    */
   public static void beforeThreadPark() throws Throwable {
-    invoke(
-        () -> {
-          final MethodHandle[] h = handles;
-          final Object d = delegate;
-          if (d != null && h != null) {
-            h[BEFORE_THREAD_PARK].invoke(d);
-          }
-          return null;
-        },
-        null);
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      if (d != null && h != null) {
+        h[BEFORE_THREAD_PARK].invoke(d);
+      }
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+    } finally {
+      depth[0]--;
+    }
   }
 
   /**
@@ -1173,14 +1373,22 @@ public final class BootstrapDispatcher {
    */
   public static boolean beforeNioSelect(final Object selector, final long timeoutMillis)
       throws Throwable {
-    return invoke(
-        () -> {
-          final MethodHandle[] h = handles;
-          final Object d = delegate;
-          return (d != null && h != null)
-              && (boolean) h[BEFORE_NIO_SELECT].invoke(d, selector, timeoutMillis);
-        },
-        false);
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return false;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      return (d != null && h != null)
+          && (boolean) h[BEFORE_NIO_SELECT].invoke(d, selector, timeoutMillis);
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+      return false;
+    } finally {
+      depth[0]--;
+    }
   }
 
   /**
@@ -1193,16 +1401,22 @@ public final class BootstrapDispatcher {
    */
   public static void beforeNioChannelOp(final String operation, final Object channel)
       throws Throwable {
-    invoke(
-        () -> {
-          final MethodHandle[] h = handles;
-          final Object d = delegate;
-          if (d != null && h != null) {
-            h[BEFORE_NIO_CHANNEL_OP].invoke(d, operation, channel);
-          }
-          return null;
-        },
-        null);
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      if (d != null && h != null) {
+        h[BEFORE_NIO_CHANNEL_OP].invoke(d, operation, channel);
+      }
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+    } finally {
+      depth[0]--;
+    }
   }
 
   /**
@@ -1216,16 +1430,22 @@ public final class BootstrapDispatcher {
    */
   public static void beforeSocketConnect(
       final Object socket, final Object socketAddress, final int timeoutMillis) throws Throwable {
-    invoke(
-        () -> {
-          final MethodHandle[] h = handles;
-          final Object d = delegate;
-          if (d != null && h != null) {
-            h[BEFORE_SOCKET_CONNECT].invoke(d, socket, socketAddress, timeoutMillis);
-          }
-          return null;
-        },
-        null);
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      if (d != null && h != null) {
+        h[BEFORE_SOCKET_CONNECT].invoke(d, socket, socketAddress, timeoutMillis);
+      }
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+    } finally {
+      depth[0]--;
+    }
   }
 
   /**
@@ -1236,16 +1456,22 @@ public final class BootstrapDispatcher {
    * @throws Throwable if an active scenario injects a failure to simulate an accept error
    */
   public static void beforeSocketAccept(final Object serverSocket) throws Throwable {
-    invoke(
-        () -> {
-          final MethodHandle[] h = handles;
-          final Object d = delegate;
-          if (d != null && h != null) {
-            h[BEFORE_SOCKET_ACCEPT].invoke(d, serverSocket);
-          }
-          return null;
-        },
-        null);
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      if (d != null && h != null) {
+        h[BEFORE_SOCKET_ACCEPT].invoke(d, serverSocket);
+      }
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+    } finally {
+      depth[0]--;
+    }
   }
 
   /**
@@ -1258,16 +1484,22 @@ public final class BootstrapDispatcher {
    */
   public static void beforeSocketRead(final Object stream, final Object remoteAddress)
       throws Throwable {
-    invoke(
-        () -> {
-          final MethodHandle[] h = handles;
-          final Object d = delegate;
-          if (d != null && h != null) {
-            h[BEFORE_SOCKET_READ].invoke(d, stream, remoteAddress);
-          }
-          return null;
-        },
-        null);
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      if (d != null && h != null) {
+        h[BEFORE_SOCKET_READ].invoke(d, stream, remoteAddress);
+      }
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+    } finally {
+      depth[0]--;
+    }
   }
 
   /**
@@ -1281,16 +1513,22 @@ public final class BootstrapDispatcher {
    */
   public static void beforeSocketWrite(
       final Object stream, final int len, final Object remoteAddress) throws Throwable {
-    invoke(
-        () -> {
-          final MethodHandle[] h = handles;
-          final Object d = delegate;
-          if (d != null && h != null) {
-            h[BEFORE_SOCKET_WRITE].invoke(d, stream, len, remoteAddress);
-          }
-          return null;
-        },
-        null);
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      if (d != null && h != null) {
+        h[BEFORE_SOCKET_WRITE].invoke(d, stream, len, remoteAddress);
+      }
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+    } finally {
+      depth[0]--;
+    }
   }
 
   /**
@@ -1300,16 +1538,22 @@ public final class BootstrapDispatcher {
    * @throws Throwable if an active scenario injects a failure to simulate a close error
    */
   public static void beforeSocketClose(final Object socket) throws Throwable {
-    invoke(
-        () -> {
-          final MethodHandle[] h = handles;
-          final Object d = delegate;
-          if (d != null && h != null) {
-            h[BEFORE_SOCKET_CLOSE].invoke(d, socket);
-          }
-          return null;
-        },
-        null);
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      if (d != null && h != null) {
+        h[BEFORE_SOCKET_CLOSE].invoke(d, socket);
+      }
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+    } finally {
+      depth[0]--;
+    }
   }
 
   /**
@@ -1321,16 +1565,22 @@ public final class BootstrapDispatcher {
    *     simulate a JNDI failure
    */
   public static void beforeJndiLookup(final Object context, final String name) throws Throwable {
-    invoke(
-        () -> {
-          final MethodHandle[] h = handles;
-          final Object d = delegate;
-          if (d != null && h != null) {
-            h[BEFORE_JNDI_LOOKUP].invoke(d, context, name);
-          }
-          return null;
-        },
-        null);
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      if (d != null && h != null) {
+        h[BEFORE_JNDI_LOOKUP].invoke(d, context, name);
+      }
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+    } finally {
+      depth[0]--;
+    }
   }
 
   /**
@@ -1343,16 +1593,22 @@ public final class BootstrapDispatcher {
    * @throws Throwable if an active scenario injects a failure to simulate a serialization error
    */
   public static void beforeObjectSerialize(final Object stream, final Object obj) throws Throwable {
-    invoke(
-        () -> {
-          final MethodHandle[] h = handles;
-          final Object d = delegate;
-          if (d != null && h != null) {
-            h[BEFORE_OBJECT_SERIALIZE].invoke(d, stream, obj);
-          }
-          return null;
-        },
-        null);
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      if (d != null && h != null) {
+        h[BEFORE_OBJECT_SERIALIZE].invoke(d, stream, obj);
+      }
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+    } finally {
+      depth[0]--;
+    }
   }
 
   /**
@@ -1364,16 +1620,22 @@ public final class BootstrapDispatcher {
    *     block native library loading
    */
   public static void beforeNativeLibraryLoad(final String libraryName) throws Throwable {
-    invoke(
-        () -> {
-          final MethodHandle[] h = handles;
-          final Object d = delegate;
-          if (d != null && h != null) {
-            h[BEFORE_NATIVE_LIBRARY_LOAD].invoke(d, libraryName);
-          }
-          return null;
-        },
-        null);
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      if (d != null && h != null) {
+        h[BEFORE_NATIVE_LIBRARY_LOAD].invoke(d, libraryName);
+      }
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+    } finally {
+      depth[0]--;
+    }
   }
 
   /**
@@ -1391,14 +1653,22 @@ public final class BootstrapDispatcher {
    */
   public static boolean beforeAsyncCancel(final Object future, final boolean mayInterruptIfRunning)
       throws Throwable {
-    return invoke(
-        () -> {
-          final MethodHandle[] h = handles;
-          final Object d = delegate;
-          return (d != null && h != null)
-              && (boolean) h[BEFORE_ASYNC_CANCEL].invoke(d, future, mayInterruptIfRunning);
-        },
-        false);
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return false;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      return (d != null && h != null)
+          && (boolean) h[BEFORE_ASYNC_CANCEL].invoke(d, future, mayInterruptIfRunning);
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+      return false;
+    } finally {
+      depth[0]--;
+    }
   }
 
   /**
@@ -1409,16 +1679,22 @@ public final class BootstrapDispatcher {
    * @throws Throwable if an active scenario injects an exception
    */
   public static void beforeZipInflate() throws Throwable {
-    invoke(
-        () -> {
-          final MethodHandle[] h = handles;
-          final Object d = delegate;
-          if (d != null && h != null) {
-            h[BEFORE_ZIP_INFLATE].invoke(d);
-          }
-          return null;
-        },
-        null);
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      if (d != null && h != null) {
+        h[BEFORE_ZIP_INFLATE].invoke(d);
+      }
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+    } finally {
+      depth[0]--;
+    }
   }
 
   /**
@@ -1429,16 +1705,22 @@ public final class BootstrapDispatcher {
    * @throws Throwable if an active scenario injects an exception
    */
   public static void beforeZipDeflate() throws Throwable {
-    invoke(
-        () -> {
-          final MethodHandle[] h = handles;
-          final Object d = delegate;
-          if (d != null && h != null) {
-            h[BEFORE_ZIP_DEFLATE].invoke(d);
-          }
-          return null;
-        },
-        null);
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      if (d != null && h != null) {
+        h[BEFORE_ZIP_DEFLATE].invoke(d);
+      }
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+    } finally {
+      depth[0]--;
+    }
   }
 
   /**
@@ -1453,14 +1735,22 @@ public final class BootstrapDispatcher {
    * @throws Throwable if the delegate throws
    */
   public static boolean beforeThreadLocalGet(final Object threadLocal) throws Throwable {
-    return invoke(
-        () -> {
-          final MethodHandle[] h = handles;
-          final Object d = delegate;
-          return (d != null && h != null)
-              && (boolean) h[BEFORE_THREAD_LOCAL_GET].invoke(d, threadLocal);
-        },
-        false);
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return false;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      return (d != null && h != null)
+          && (boolean) h[BEFORE_THREAD_LOCAL_GET].invoke(d, threadLocal);
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+      return false;
+    } finally {
+      depth[0]--;
+    }
   }
 
   /**
@@ -1477,14 +1767,22 @@ public final class BootstrapDispatcher {
    */
   public static boolean beforeThreadLocalSet(final Object threadLocal, final Object value)
       throws Throwable {
-    return invoke(
-        () -> {
-          final MethodHandle[] h = handles;
-          final Object d = delegate;
-          return (d != null && h != null)
-              && (boolean) h[BEFORE_THREAD_LOCAL_SET].invoke(d, threadLocal, value);
-        },
-        false);
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return false;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      return (d != null && h != null)
+          && (boolean) h[BEFORE_THREAD_LOCAL_SET].invoke(d, threadLocal, value);
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+      return false;
+    } finally {
+      depth[0]--;
+    }
   }
 
   /**
@@ -1498,16 +1796,22 @@ public final class BootstrapDispatcher {
    */
   public static void beforeJmxInvoke(
       final Object server, final Object objectName, final String operationName) throws Throwable {
-    invoke(
-        () -> {
-          final MethodHandle[] h = handles;
-          final Object d = delegate;
-          if (d != null && h != null) {
-            h[BEFORE_JMX_INVOKE].invoke(d, server, objectName, operationName);
-          }
-          return null;
-        },
-        null);
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      if (d != null && h != null) {
+        h[BEFORE_JMX_INVOKE].invoke(d, server, objectName, operationName);
+      }
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+    } finally {
+      depth[0]--;
+    }
   }
 
   /**
@@ -1521,16 +1825,22 @@ public final class BootstrapDispatcher {
    */
   public static void beforeJmxGetAttr(
       final Object server, final Object objectName, final String attribute) throws Throwable {
-    invoke(
-        () -> {
-          final MethodHandle[] h = handles;
-          final Object d = delegate;
-          if (d != null && h != null) {
-            h[BEFORE_JMX_GET_ATTR].invoke(d, server, objectName, attribute);
-          }
-          return null;
-        },
-        null);
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      if (d != null && h != null) {
+        h[BEFORE_JMX_GET_ATTR].invoke(d, server, objectName, attribute);
+      }
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+    } finally {
+      depth[0]--;
+    }
   }
 
   /**
@@ -1548,13 +1858,21 @@ public final class BootstrapDispatcher {
    * @throws Throwable if the delegate throws
    */
   public static boolean beforeHttpSend(final String url) throws Throwable {
-    return invoke(
-        () -> {
-          final MethodHandle[] h = handles;
-          final Object d = delegate;
-          return (d != null && h != null) && (boolean) h[BEFORE_HTTP_SEND].invoke(d, url);
-        },
-        false);
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return false;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      return (d != null && h != null) && (boolean) h[BEFORE_HTTP_SEND].invoke(d, url);
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+      return false;
+    } finally {
+      depth[0]--;
+    }
   }
 
   /**
@@ -1569,13 +1887,21 @@ public final class BootstrapDispatcher {
    * @throws Throwable if the delegate throws
    */
   public static boolean beforeHttpSendAsync(final String url) throws Throwable {
-    return invoke(
-        () -> {
-          final MethodHandle[] h = handles;
-          final Object d = delegate;
-          return (d != null && h != null) && (boolean) h[BEFORE_HTTP_SEND_ASYNC].invoke(d, url);
-        },
-        false);
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return false;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      return (d != null && h != null) && (boolean) h[BEFORE_HTTP_SEND_ASYNC].invoke(d, url);
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+      return false;
+    } finally {
+      depth[0]--;
+    }
   }
 
   /**
@@ -1590,14 +1916,22 @@ public final class BootstrapDispatcher {
    * @throws Throwable if the delegate throws
    */
   public static boolean beforeJdbcConnectionAcquire(final String poolName) throws Throwable {
-    return invoke(
-        () -> {
-          final MethodHandle[] h = handles;
-          final Object d = delegate;
-          return (d != null && h != null)
-              && (boolean) h[BEFORE_JDBC_CONNECTION_ACQUIRE].invoke(d, poolName);
-        },
-        false);
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return false;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      return (d != null && h != null)
+          && (boolean) h[BEFORE_JDBC_CONNECTION_ACQUIRE].invoke(d, poolName);
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+      return false;
+    } finally {
+      depth[0]--;
+    }
   }
 
   /**
@@ -1609,14 +1943,21 @@ public final class BootstrapDispatcher {
    * @throws Throwable if the delegate throws
    */
   public static boolean beforeJdbcStatementExecute(final String sql) throws Throwable {
-    return invoke(
-        () -> {
-          final MethodHandle[] h = handles;
-          final Object d = delegate;
-          return (d != null && h != null)
-              && (boolean) h[BEFORE_JDBC_STATEMENT_EXECUTE].invoke(d, sql);
-        },
-        false);
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return false;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      return (d != null && h != null) && (boolean) h[BEFORE_JDBC_STATEMENT_EXECUTE].invoke(d, sql);
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+      return false;
+    } finally {
+      depth[0]--;
+    }
   }
 
   /**
@@ -1628,14 +1969,21 @@ public final class BootstrapDispatcher {
    * @throws Throwable if the delegate throws
    */
   public static boolean beforeJdbcPreparedStatement(final String sql) throws Throwable {
-    return invoke(
-        () -> {
-          final MethodHandle[] h = handles;
-          final Object d = delegate;
-          return (d != null && h != null)
-              && (boolean) h[BEFORE_JDBC_PREPARED_STATEMENT].invoke(d, sql);
-        },
-        false);
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return false;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      return (d != null && h != null) && (boolean) h[BEFORE_JDBC_PREPARED_STATEMENT].invoke(d, sql);
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+      return false;
+    } finally {
+      depth[0]--;
+    }
   }
 
   /**
@@ -1646,13 +1994,21 @@ public final class BootstrapDispatcher {
    * @throws Throwable if the delegate throws
    */
   public static boolean beforeJdbcTransactionCommit() throws Throwable {
-    return invoke(
-        () -> {
-          final MethodHandle[] h = handles;
-          final Object d = delegate;
-          return (d != null && h != null) && (boolean) h[BEFORE_JDBC_TRANSACTION_COMMIT].invoke(d);
-        },
-        false);
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return false;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      return (d != null && h != null) && (boolean) h[BEFORE_JDBC_TRANSACTION_COMMIT].invoke(d);
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+      return false;
+    } finally {
+      depth[0]--;
+    }
   }
 
   /**
@@ -1663,14 +2019,21 @@ public final class BootstrapDispatcher {
    * @throws Throwable if the delegate throws
    */
   public static boolean beforeJdbcTransactionRollback() throws Throwable {
-    return invoke(
-        () -> {
-          final MethodHandle[] h = handles;
-          final Object d = delegate;
-          return (d != null && h != null)
-              && (boolean) h[BEFORE_JDBC_TRANSACTION_ROLLBACK].invoke(d);
-        },
-        false);
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return false;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      return (d != null && h != null) && (boolean) h[BEFORE_JDBC_TRANSACTION_ROLLBACK].invoke(d);
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+      return false;
+    } finally {
+      depth[0]--;
+    }
   }
 
   /**
@@ -1685,13 +2048,21 @@ public final class BootstrapDispatcher {
    * @throws Throwable if the delegate throws
    */
   public static boolean beforeThreadSleep(final long millis) throws Throwable {
-    return invoke(
-        () -> {
-          final MethodHandle[] h = handles;
-          final Object d = delegate;
-          return (d != null && h != null) && (boolean) h[BEFORE_THREAD_SLEEP].invoke(d, millis);
-        },
-        false);
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return false;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      return (d != null && h != null) && (boolean) h[BEFORE_THREAD_SLEEP].invoke(d, millis);
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+      return false;
+    } finally {
+      depth[0]--;
+    }
   }
 
   /**
@@ -1702,16 +2073,22 @@ public final class BootstrapDispatcher {
    * @throws Throwable if an active scenario injects an exception to simulate a DNS failure
    */
   public static void beforeDnsResolve(final String hostname) throws Throwable {
-    invoke(
-        () -> {
-          final MethodHandle[] h = handles;
-          final Object d = delegate;
-          if (d != null && h != null) {
-            h[BEFORE_DNS_RESOLVE].invoke(d, hostname);
-          }
-          return null;
-        },
-        null);
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      if (d != null && h != null) {
+        h[BEFORE_DNS_RESOLVE].invoke(d, hostname);
+      }
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+    } finally {
+      depth[0]--;
+    }
   }
 
   /**
@@ -1723,16 +2100,22 @@ public final class BootstrapDispatcher {
    *     failure
    */
   public static void beforeSslHandshake(final Object socket) throws Throwable {
-    invoke(
-        () -> {
-          final MethodHandle[] h = handles;
-          final Object d = delegate;
-          if (d != null && h != null) {
-            h[BEFORE_SSL_HANDSHAKE].invoke(d, socket);
-          }
-          return null;
-        },
-        null);
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      if (d != null && h != null) {
+        h[BEFORE_SSL_HANDSHAKE].invoke(d, socket);
+      }
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+    } finally {
+      depth[0]--;
+    }
   }
 
   /**
@@ -1745,65 +2128,35 @@ public final class BootstrapDispatcher {
    * @throws Throwable if an active scenario injects an exception to simulate an I/O failure
    */
   public static void beforeFileIo(final String operation, final Object stream) throws Throwable {
-    invoke(
-        () -> {
-          final MethodHandle[] h = handles;
-          final Object d = delegate;
-          if (d != null && h != null) {
-            h[BEFORE_FILE_IO].invoke(d, operation, stream);
-          }
-          return null;
-        },
-        null);
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      if (d != null && h != null) {
+        h[BEFORE_FILE_IO].invoke(d, operation, stream);
+      }
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+    } finally {
+      depth[0]--;
+    }
   }
 
   // ── Internal helpers ───────────────────────────────────────────────────────
 
-  /**
-   * Reentrancy-guarded dispatch trampoline shared by all public dispatch methods.
-   *
-   * <p>If {@code DEPTH > 0} (i.e., the current thread is already inside a chaos dispatch), this
-   * method returns {@code fallback} immediately without invoking {@code supplier}. This prevents
-   * infinite recursion when chaos-processing code itself calls an instrumented JDK method.
-   *
-   * <p>On normal completion or on exception, the {@code DEPTH} counter is decremented.
-   *
-   * @param <T> the return type
-   * @param supplier the lambda that snapshot-reads {@link #handles} and {@link #delegate} and
-   *     invokes the appropriate method handle; must not be {@code null}
-   * @param fallback the value to return when the reentrancy guard fires or when {@code supplier}
-   *     throws and no rethrow is needed
-   * @return the value produced by {@code supplier}, or {@code fallback} on reentrancy
-   * @throws Throwable any exception thrown by {@code supplier}, rethrown via {@link
-   *     #sneakyThrow(Throwable)} to avoid checked-exception declaration pollution
+  /*
+   * Every dispatch method guards itself inline: it returns its fallback when DEPTH[0] > 0 (the
+   * thread is already inside a dispatch), otherwise increments DEPTH[0] (++, never = 1, so the
+   * counter stays a pure balance), invokes the delegate handle and decrements in finally. The
+   * array is kept when the depth returns to zero, because it also holds the call-depth scope
+   * counters of enclosing instrumented calls. The guard is inlined rather than shared through a
+   * Supplier-taking trampoline: that trampoline's call site saw every dispatch's lambda, so the
+   * JIT could not inline it and every intercepted call allocated a capturing lambda.
    */
-  private static <T> T invoke(final ThrowingSupplier<T> supplier, final T fallback) {
-    final int[] depth = DEPTH.get();
-    if (depth[0] > 0) {
-      return fallback;
-    }
-    // Must be ++, not `= 1`. The reentrancy guard short-circuits when depth > 0 so the happy
-    // path only ever enters this branch at depth == 0, where ++ and = 1 produce the same
-    // observable counter. But if a future change relaxes the guard — or a bytebuddy advice
-    // class re-enters this path via a partially-installed delegate before the guard has been
-    // flipped — `= 1` clobbers the current depth, and the `--depth[0] == 0` unwind check then
-    // decrements past zero on outer exits. A negative depth slips past `> 0`, so the next
-    // legitimate call skips the guard, recurses into chaos dispatch, and typically stack-
-    // overflows. Keep ++ / -- paired so the counter is always a pure balance.
-    depth[0]++;
-    try {
-      return supplier.get();
-    } catch (final Throwable throwable) {
-      sneakyThrow(throwable);
-      return fallback;
-    } finally {
-      // The array is kept (not removed) when the depth returns to zero: it also holds the
-      // call-depth scope counters of enclosing instrumented calls, which must survive this
-      // dispatch. Its footprint is one small int[] per thread that ever reaches an instrumented
-      // call, released with the thread.
-      depth[0]--;
-    }
-  }
 
   /**
    * Rethrows any {@link Throwable} without requiring a checked-exception declaration.
@@ -1821,22 +2174,5 @@ public final class BootstrapDispatcher {
   @SuppressWarnings("unchecked")
   private static <T extends Throwable> void sneakyThrow(final Throwable throwable) throws T {
     throw (T) throwable;
-  }
-
-  /**
-   * A supplier that is permitted to throw any {@link Throwable}, used as the lambda type for the
-   * dispatch trampoline in {@link #invoke(ThrowingSupplier, Object)}.
-   *
-   * @param <T> the type of the supplied value
-   */
-  @FunctionalInterface
-  interface ThrowingSupplier<T> {
-    /**
-     * Computes a value, potentially throwing any checked or unchecked exception.
-     *
-     * @return the computed value
-     * @throws Throwable any exception raised during computation
-     */
-    T get() throws Throwable;
   }
 }
