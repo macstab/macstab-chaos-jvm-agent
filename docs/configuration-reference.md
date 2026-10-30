@@ -101,7 +101,7 @@ Out of scope:
 │                                                             │
 │  ┌────────────────────────────────────────────────────────┐ │
 │  │  JDK classes (Thread, Executor, Socket, …)             │ │
-│  │  Instrumented by ByteBuddy at premain/agentmain time   │ │
+│  │  Instrumented by ByteBuddy on demand (per hook group)  │ │
 │  └────────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────┘
 
@@ -162,14 +162,18 @@ If no source is present, the agent starts with no active scenarios. Programmatic
 
 ```
 1. JVM starts; premain() runs in the bootstrap classloader context
-2. Phase 1 instrumentation is woven (Thread, Executor, ForkJoin, BlockingQueue,
-   CompletableFuture, ClassLoader, ShutdownHook, ScheduledThreadPoolExecutor)
-3. Phase 2 instrumentation is woven (Socket/NIO, HTTP, JDBC, TLS, DNS, clock,
-   GC, JNDI, JMX, Serialization, file I/O) — premain only
+2. The bootstrap bridge and delegate are installed; no hook is woven yet
+   (with instrumentation=eager, every hook group is woven here instead, as in 1.x)
+3. Hook groups (Thread, Executor, ForkJoin, BlockingQueue, CompletableFuture,
+   ClassLoader, ShutdownHook, Socket/NIO, HTTP, JDBC, TLS, DNS, clock, GC, JNDI,
+   JMX, Serialization, file I/O, …) are woven by retransformation on demand —
+   the same for premain, agentmain and self-attach
 4. StartupConfigLoader resolves configuration source (priority 1–6)
 5. ChaosPlanMapper.read() deserializes the JSON plan
 6. ChaosRuntime.activate(plan) registers all scenarios atomically:
    a. Each scenario is validated (selector ↔ effect compatibility)
+   a'. The hook groups serving its selector's operations are woven, if not
+       already (failure → activation fails, INSTRUMENTATION_FAILURE)
    b. Each scenario is registered in ScenarioRegistry under its ID
    c. AUTOMATIC-start scenarios transition to ACTIVE immediately
    d. MANUAL-start scenarios remain INACTIVE until handle.start()
@@ -271,7 +275,7 @@ package "chaos-agent-core" {
 }
 
 package "chaos-agent-bootstrap" {
-  [BootstrapDispatcher\n(58 slots)] as BD
+  [BootstrapDispatcher\n(57 slots)] as BD
 }
 
 AgentArgs --> AAP
@@ -376,7 +380,7 @@ Not diagrammed — tabular representation is clearer. See [Section 13.4 — Comp
 
 **Responsibility:** Provide a reusable, cached, pattern-matched string predicate for class names, method names, hostnames, URLs, thread names, and any other string-valued attribute in a selector.
 
-**Performance:** GLOB and REGEX patterns are compiled once on `NamePattern` construction and cached in JVM-wide `ConcurrentHashMap`s (capacity 1024 each). Hot-path `matches()` calls do not recompile. The cache is non-evicting once at capacity (inserts are skipped, not evicted) to preserve correctness under concurrent access.
+**Performance:** GLOB and REGEX patterns are compiled once on `NamePattern` construction and cached in JVM-wide `ConcurrentHashMap`s (capacity 1024 each). Hot-path `matches()` calls do not recompile. GLOB matching does not use the regex for ordinary candidates: an allocation-free wildcard matcher gives identical results (candidates containing line terminators or surrogate characters still go through the compiled regex). REGEX matching allocates one `Matcher` per call. The cache is non-evicting once at capacity (inserts are skipped, not evicted) to preserve correctness under concurrent access.
 
 **Safety:** Pattern strings are capped at 4096 characters to mitigate ReDoS risk (Java regex is a backtracking NFA). Patterns are compiled eagerly at construction; syntax errors surface at plan-build time, not at first dispatch.
 
@@ -388,7 +392,7 @@ Not diagrammed — tabular representation is clearer. See [Section 13.4 — Comp
 
 **Responsibility:** Primary interface for activating scenarios and plans, opening sessions, querying diagnostics, and attaching event listeners. Implemented by `ChaosControlPlaneImpl` in `chaos-agent-core` (internal, not part of the public API).
 
-**Access:** `ChaosAgentBootstrap.current()` in production; `ChaosAgentBootstrap.installForLocalTests()` in unit tests (installs a lightweight local agent without premain instrumentation for JDK-internal classes — only session-scope interception is available).
+**Access:** `ChaosAgentBootstrap.current()` in production; `ChaosAgentBootstrap.installForLocalTests()` in unit tests (self-attaches the agent to the current JVM; it gets the same on-demand hook set as `-javaagent:`).
 
 ---
 
@@ -496,7 +500,7 @@ NamePattern {
 | `ANY`    | Always true                                           | true             | O(1)                         |
 | `EXACT`  | `candidate.equals(value)`                             | false            | O(n) string equals           |
 | `PREFIX` | `candidate.startsWith(value)`                         | false            | O(k) where k = prefix length |
-| `GLOB`   | `*` = any sequence, `?` = one char; compiled to regex | false            | O(m) regex match             |
+| `GLOB`   | `*` = any sequence, `?` = one char                    | false            | O(m) wildcard, no alloc      |
 | `REGEX`  | Full `java.util.regex.Pattern` match (anchored `^…$`) | false            | O(m) regex match             |
 
 ---
@@ -612,8 +616,8 @@ The evaluation path for each instrumented operation call has the following cost 
 |-------------------------------------------|------------------------------------------------------------------|
 | `BootstrapDispatcher` slot read           | One array index + virtual dispatch; O(1)                         |
 | `ThreadLocal<int[]> DEPTH` read           | `ThreadLocalMap` lookup; O(1) amortized                          |
-| Active scenario iteration                 | O(N) where N = active scenarios; typically < 10 in tests         |
-| `NamePattern.matches()` per scenario      | O(1) for ANY/EXACT/PREFIX; O(m) for GLOB/REGEX                   |
+| Active scenario iteration                 | O(N), N = scenarios naming the operation (operation-type index)  |
+| `NamePattern.matches()` per scenario      | O(1) for ANY/EXACT/PREFIX; O(m) for GLOB (no alloc) and REGEX    |
 | `ActivationPolicy` evaluation             | O(1); atomic reads + RNG sample                                  |
 | `DelayEffect`                             | `Thread.sleep(t)` or virtual-thread park; dominates overall cost |
 | No-match path (most common in benchmarks) | ~50–120 ns per intercepted call                                  |
@@ -702,6 +706,7 @@ Register custom listeners via `controlPlane.addEventListener(listener)`. Listene
 | `configFile`          | Path         | File system path to JSON plan file                                                              |
 | `debugDumpOnStart`    | Boolean flag | Print a diagnostics dump to stderr after the startup plan is activated; `debugDump` is an alias |
 | `configWatchInterval` | long (ms)    | Poll a `configFile` for changes and reload it; off by default, minimum 50 ms                    |
+| `instrumentation`     | String       | `eager` weaves every hook group at start (1.x); anything else or absent = on demand (default)   |
 
 ### Supported Environment Variables
 
@@ -712,6 +717,9 @@ Register custom listeners via `controlPlane.addEventListener(listener)`. Listene
 | `MACSTAB_CHAOS_CONFIG_FILE`         | `configFile`                               |
 | `MACSTAB_CHAOS_DEBUG_DUMP_ON_START` | `debugDumpOnStart` (`true`/`1`/`yes`/`on`) |
 | `MACSTAB_CHAOS_WATCH_INTERVAL`      | `configWatchInterval`                      |
+| `MACSTAB_CHAOS_INSTRUMENTATION`     | `instrumentation`                          |
+
+The weaving mode can also be set with the system property `-Dmacstab.chaos.instrumentation=eager`. Precedence: agent arg `instrumentation` > system property > `MACSTAB_CHAOS_INSTRUMENTATION`. Only `eager` (case-insensitive) changes the mode; any other value, or none, keeps on-demand weaving.
 
 ---
 
@@ -1902,8 +1910,8 @@ No heap allocation occurs on the interception hot path from the API layer — al
 ## 15.2 Application / Runtime Layer
 
 `ChaosControlPlane` (facade) delegates to `ChaosControlPlaneImpl` which owns:
-- `ScenarioRegistry`: a `ConcurrentHashMap<String, ScenarioController>` storing active scenario controllers keyed by scenario ID
-- `ChaosDispatcher`: the runtime evaluator; iterates active scenarios on every instrumented call
+- `ScenarioRegistry`: a `ConcurrentHashMap<String, ScenarioController>` storing active scenario controllers keyed by scenario ID, plus an immutable `OperationType` → controllers index (pre-sorted by precedence, then id) swapped on register/unregister
+- `ChaosDispatcher`: the runtime evaluator; on every instrumented call it evaluates only the scenarios indexed under the intercepted operation
 - Event bus: a `CopyOnWriteArrayList<ChaosEventListener>` (safe for concurrent add during dispatch)
 
 `ScenarioController` holds the per-scenario mutable state:
@@ -1916,11 +1924,11 @@ No heap allocation occurs on the interception hot path from the API layer — al
 
 ### Instrumentation
 
-ByteBuddy `AgentBuilder` installs `Advice` on JDK classes at premain time using `RETRANSFORMATION` strategy (requires `can-retransform-classes: true` in `MANIFEST.MF`). Advice code cannot reference chaos runtime classes directly — all dispatch goes through `BootstrapDispatcher` static methods to avoid classloader dependency issues.
+ByteBuddy `AgentBuilder` installs `Advice` on JDK classes per hook group — on the first activation that needs the group, or at start with `instrumentation=eager` — using `RETRANSFORMATION` strategy (requires `can-retransform-classes: true` in `MANIFEST.MF`). Advice code cannot reference chaos runtime classes directly — all dispatch goes through `BootstrapDispatcher` static methods to avoid classloader dependency issues.
 
 ### BootstrapDispatcher
 
-58 static `MethodHandle` slots in `BootstrapDispatcher` (slots do not map one-to-one to the 67 `OperationType` values). The slot for a given operation type holds a method handle to the `ChaosDispatcher` evaluation method. Advice woven into JDK classes calls the slot directly from the bootstrap classloader context.
+57 static `MethodHandle` slots in `BootstrapDispatcher` (slots do not map one-to-one to the 67 `OperationType` values). The slot for a given operation type holds a method handle to the `ChaosDispatcher` evaluation method. Advice woven into JDK classes calls the slot directly from the bootstrap classloader context.
 
 ### ThreadLocal Reentrancy Guard
 

@@ -80,6 +80,18 @@ agentArgs.get("configFile")           // String or null
 agentArgs.getBoolean("debugDumpOnStart", false)  // boolean with default
 ```
 
+## Instrumentation Mode
+
+The `instrumentation` key is parsed by `AgentArgsParser` but read by `chaos-agent-bootstrap`, not by the plan loader. It selects when the agent weaves its hooks:
+
+| Source                 | Key                              | Values                                                     |
+|------------------------|----------------------------------|------------------------------------------------------------|
+| Agent arg              | `instrumentation`                | `eager`; anything else or absent = on demand (the default) |
+| System property        | `macstab.chaos.instrumentation`  | same                                                       |
+| Environment variable   | `MACSTAB_CHAOS_INSTRUMENTATION`  | same                                                       |
+
+The agent arg takes precedence over the system property, which takes precedence over the environment variable; `eager` is case-insensitive. On demand, each hook group is woven the first time an activated scenario needs it, and a JVM without scenarios runs unmodified JDK classes. `eager` weaves every group at start (the 1.x behaviour), so no activation pays the one-time weaving cost.
+
 ---
 
 # 4. File Path Safety

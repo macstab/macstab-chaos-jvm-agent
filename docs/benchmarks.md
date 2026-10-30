@@ -19,7 +19,7 @@
 
 ### Why This Module Exists
 
-The chaos agent intercepts hundreds of JVM operations per second in production. Most of those interceptions will fire with zero active scenarios — the agent is installed but no chaos is currently scheduled. In that condition, every call site touched by a ByteBuddy advice class bears a small overhead: the advice bytecode executes, `BootstrapDispatcher.invoke()` runs, the DEPTH guard fires, the delegate null-check passes, and control returns. That round-trip must stay below the noise floor of the I/O operation it guards. A connection acquisition that takes 500 µs must not see 10 µs of agent overhead — that would be a 2% tax on every database call without any chaos being active.
+The chaos agent intercepts hundreds of JVM operations per second in production. Most of those interceptions will fire with zero active scenarios — the agent is installed but no chaos is currently scheduled. In that condition, every call site touched by a ByteBuddy advice class bears a small overhead: the advice bytecode executes, the `BootstrapDispatcher` dispatch method runs its inlined DEPTH guard, the delegate null-check passes, and control returns. That round-trip must stay below the noise floor of the I/O operation it guards. A connection acquisition that takes 500 µs must not see 10 µs of agent overhead — that would be a 2% tax on every database call without any chaos being active.
 
 The JMH suite in `chaos-agent-benchmarks` exists to verify that claim with numbers. It measures the cost of the `ChaosDispatcher` hot path — the code executed on every instrumented call — across a spectrum of scenario configurations, from zero scenarios to ten, and from a complete miss to a selector hit with no terminal effect. The benchmarks do not measure the cost of the ByteBuddy advice wrapper itself (that is an instrumentation concern tested separately); they measure the dispatch logic that runs unconditionally after the advice calls `BootstrapDispatcher`.
 
@@ -75,7 +75,7 @@ Both `ChaosRuntimeBenchmark` and `HttpClientBenchmark` declare their state class
 - `Scope.Benchmark` — a single instance shared across all threads of a benchmark fork; appropriate when the state is thread-safe and you want multiple threads competing on the same registry (realistic for a production scenario)
 - `Scope.Group` — used with `@Group` benchmarks (not used here)
 
-`Scope.Benchmark` is the correct choice because `ScenarioRegistry` — the data structure being read on every hot-path call — is a shared, thread-safe structure backed by a `ConcurrentHashMap`. In production, multiple application threads concurrently call `registry.match()`. Using `Scope.Benchmark` reproduces this contention pattern accurately even in the single-thread JMH fork used here.
+`Scope.Benchmark` is the correct choice because `ScenarioRegistry` — the data structure being read on every hot-path call — is a shared, thread-safe structure (a `ConcurrentHashMap` of controllers plus an immutable operation-type index that `match()` reads). In production, multiple application threads concurrently call `registry.match()`. Using `Scope.Benchmark` reproduces this contention pattern accurately even in the single-thread JMH fork used here.
 
 ### 2.3 `@Setup(Level.Trial)` — Scenario Activation Outside Measurement
 
@@ -90,9 +90,9 @@ public void setup() {
 }
 ```
 
-`Level.Trial` runs once per benchmark fork, before any warmup or measurement iterations begin. The alternatives — `Level.Iteration` (once per iteration) and `Level.Invocation` (once per benchmark method call) — would both include scenario activation cost in the measurement. Scenario activation modifies `ScenarioRegistry` via an atomic `ConcurrentHashMap.compute()` plus validation and controller construction: a few hundred nanoseconds or more. Including that cost would make the benchmark measure scenario management overhead rather than dispatch overhead, which is not the intent.
+`Level.Trial` runs once per benchmark fork, before any warmup or measurement iterations begin. The alternatives — `Level.Iteration` (once per iteration) and `Level.Invocation` (once per benchmark method call) — would both include scenario activation cost in the measurement. Scenario activation modifies `ScenarioRegistry` via an atomic `ConcurrentHashMap.compute()` and an operation-index rebuild, plus validation, controller construction and — the first time a hook group is needed in an agent-installed JVM — weaving: a few hundred nanoseconds or more. Including that cost would make the benchmark measure scenario management overhead rather than dispatch overhead, which is not the intent.
 
-With `Level.Trial` setup, by the time JMH begins the warmup iterations, all scenarios are fully activated and the `ScenarioRegistry` snapshot is in its final stable state. The measurement iterations see exactly the runtime cost of traversing and matching against a static scenario list.
+With `Level.Trial` setup, by the time JMH begins the warmup iterations, all scenarios are fully activated and the `ScenarioRegistry` snapshot is in its final stable state. The measurement iterations see exactly the runtime cost of looking up and matching against a static scenario index.
 
 ### 2.4 `Blackhole.consume()` — Dead Code Prevention
 
@@ -147,15 +147,15 @@ Each benchmark variant has its own `@State` inner class that pre-activates a spe
 
 **`NoAgentState`**: No `ChaosRuntime` is created. The baseline variant executes `state.executor.execute(DUMMY_TASK)` with a trivial `Executor` (`Runnable::run`). This is the zero-overhead reference point: the cost of a method call through a functional interface with no agent involvement.
 
-**`ZeroScenariosState`**: A live `ChaosRuntime` is created with no scenarios activated. The `ScenarioRegistry` is empty. `registry.match()` returns an empty list on the first registry snapshot read. The dispatch terminates immediately at the `contributions.isEmpty()` check and returns `RuntimeDecision.none()`.
+**`ZeroScenariosState`**: A live `ChaosRuntime` is created with no scenarios activated. The `ScenarioRegistry` is empty. `registry.match()` finds no entry for the operation in the index and returns an empty list. The dispatch terminates immediately at the `contributions.isEmpty()` check and returns `RuntimeDecision.none()`.
 
-**`OneScenarioNoMatchState`**: One scenario is activated targeting `JDBC_STATEMENT_EXECUTE` with a regex pattern `"SELECT\\s+\\*\\s+FROM\\s+no_match_table"`. The scenario is active but will never match `"SELECT 1"`. `registry.match()` returns one contribution, `SelectorMatcher` evaluates the regex and fails, the contribution list is empty after filtering, and `evaluateJdbc` returns `false`. This measures the cost of a full registry traverse including regex evaluation.
+**`OneScenarioNoMatchState`**: One scenario is activated targeting `JDBC_STATEMENT_EXECUTE` with a regex pattern `"SELECT\\s+\\*\\s+FROM\\s+no_match_table"`. The scenario is active but will never match `"SELECT 1"`. `registry.match()` finds the scenario under `JDBC_STATEMENT_EXECUTE` in the operation index, `SelectorMatcher` evaluates the regex and fails, the contribution list is empty, and `evaluateJdbc` returns `false`. This measures the cost of one indexed evaluation including regex evaluation.
 
 **`OneMatchNoEffectState`**: One scenario is activated targeting `JDBC_STATEMENT_EXECUTE` with `NamePattern.any()`. The scenario uses `ONE_SHOT_POLICY` — `ActivationPolicy` constructed with `probability=1.0d` and `maxApplications=1L` — and a `ChaosEffect.delay(Duration.ofMillis(0))` (zero-delay). The scenario matches every call; on the very first application it fires a 0ms delay (no observable pause), then `maxApplications` is reached and the scenario transitions to INACTIVE. All warmup and measurement iterations after the first see the INACTIVE fast path. This measures the cost of a full selector match plus the INACTIVE state check once the quota is exhausted.
 
 **`SessionMissState`**: A session-scoped scenario is activated on a session that is never joined on the calling thread. `ChaosDispatcher.evaluateJdbc()` calls `scopeContext.currentSessionId()` to get the current thread's session ID. If the current thread is not inside a session (`currentSessionId()` returns `null`), session-scoped scenarios are filtered out by `registry.match()` at the session-scope check. The scenario exists in the registry but never contributes. This measures the additional cost of the session scope check: approximately one `ThreadLocal.get()` call.
 
-**`TenScenariosState`**: Nine scenarios are activated targeting `JDBC_CONNECTION_ACQUIRE` (a different operation type) and one scenario targets `JDBC_STATEMENT_EXECUTE` with a zero-probability activation. `registry.match()` must traverse all ten scenario entries. Nine are discarded at the `operationType` check; one matches but produces no terminal effect. This measures the linear scan cost across ten scenarios.
+**`TenScenariosState`**: Nine scenarios are activated targeting `JDBC_CONNECTION_ACQUIRE` (a different operation type) and one scenario targets `JDBC_STATEMENT_EXECUTE` with a zero-probability activation. `registry.match()` reads only the `JDBC_STATEMENT_EXECUTE` entry of the operation index: the nine `JDBC_CONNECTION_ACQUIRE` scenarios are never evaluated; one matches but produces no terminal effect. This measures that scenarios for other operations add no per-call cost. (The recorded results predate the operation index, when all ten entries were scanned and nine discarded at the `operationType` check.)
 
 ### 3.3 Benchmark Variants and Targets
 
@@ -166,7 +166,7 @@ Each benchmark variant has its own `@State` inner class that pre-activates a spe
 | `agentInstalled_oneScenario_noMatch` | `OneScenarioNoMatchState` | One scenario, regex non-match                                       | < 100 ns                                |
 | `agentInstalled_oneMatch_noEffect`   | `OneMatchNoEffectState`   | Selector match, zero-probability effect                             | < 300 ns                                |
 | `sessionIdMiss`                      | `SessionMissState`        | Session scope check short-circuit                                   | < 20 ns additional over `zeroScenarios` |
-| `tenScenarios_oneMatch`              | `TenScenariosState`       | Linear scan through 10 entries                                      | < 1 µs                                  |
+| `tenScenarios_oneMatch`              | `TenScenariosState`       | Index lookup; 9 other-operation entries not evaluated               | < 1 µs                                  |
 
 ### 3.4 What the Targets Mean in Production Terms
 
@@ -215,7 +215,7 @@ The HTTP benchmark replicates all five non-baseline variants from `ChaosRuntimeB
 
 **`SessionMissState`**: Session-scoped HTTP scenario. Current thread carries no session ID; the scenario is filtered out.
 
-**`TenScenariosState`**: Nine scenarios targeting `HTTP_CLIENT_SEND_ASYNC` (operation type mismatch) and one targeting `HTTP_CLIENT_SEND` with `NamePattern.any()` and zero-probability activation. All nine are discarded at the operation type filter; one matches but does not fire.
+**`TenScenariosState`**: Nine scenarios targeting `HTTP_CLIENT_SEND_ASYNC` (operation type mismatch) and one targeting `HTTP_CLIENT_SEND` with `NamePattern.any()` and zero-probability activation. The nine are never evaluated (operation-type index); one matches but does not fire.
 
 ### 4.3 Benchmark Variants and Targets
 
@@ -226,7 +226,7 @@ The HTTP benchmark replicates all five non-baseline variants from `ChaosRuntimeB
 | `agentInstalled_oneScenario_noMatch` | < 150 ns           | Regex non-match against URL string                                           |
 | `agentInstalled_oneMatch_noEffect`   | < 300 ns           | `any()` URL match, zero-probability                                          |
 | `sessionIdMiss`                      | < 20 ns additional | Session scope short-circuit                                                  |
-| `tenScenarios_oneMatch`              | < 1 µs             | Linear scan, operation-type filter dominant                                  |
+| `tenScenarios_oneMatch`              | < 1 µs             | Operation-type index; the nine other-operation scenarios are not evaluated   |
 
 The HTTP `oneScenario_noMatch` target is 50 ns higher than the JDBC equivalent (150 ns vs 100 ns) because the regex evaluation against a URL string is measurably more expensive than a regex evaluation against a short SQL verb string (`"SELECT 1"`). The URL string `"https://example.com/api/v1/orders"` is 36 characters; `"SELECT \\s+\\*\\s+FROM\\s+no_match_table"` must scan farther before it fails than a short SQL non-match.
 
@@ -271,7 +271,7 @@ At these scales, the agent overhead in the zero-scenario path is below the preci
 
 The benchmarks measure the **dispatch fast path only**. They do not measure:
 
-- **Scenario activation cost**: `ChaosRuntime.activate()` validates the scenario and inserts its controller into the registry's `ConcurrentHashMap`. This is a one-time cost per activation, not a per-call cost.
+- **Scenario activation cost**: `ChaosRuntime.activate()` validates the scenario and inserts its controller into the registry's `ConcurrentHashMap` (rebuilding the operation index); the first activation of a hook group also pays its weaving (retransformation) cost in an agent-installed JVM. This is a one-time cost per activation, not a per-call cost.
 - **Session open/close cost**: `ChaosRuntime.openSession()` and `ChaosSession.close()` touch `ScopeContext`, which uses a plain (non-inheritable) `ThreadLocal` holding a per-thread `ConcurrentLinkedDeque` of session ids. These are test-lifecycle operations.
 - **Effect execution cost**: When a `DelayEffect` fires, the benchmark measures `Thread.sleep()` latency which dominates everything else. These are intentional delays, not overhead.
 - **`BootstrapDispatcher` bridge overhead**: The `MethodHandle.invoke()` through `ChaosBridge` to `ChaosDispatcher` adds ~5–15 ns at JIT saturation. This is not included in the benchmark measurements but is included in any production callsite.
@@ -354,8 +354,8 @@ Each operation type is benchmarked against three states, yielding 15 benchmarks 
 **`ZeroScenariosState`** — the runtime is live but the registry is empty. This is the theoretical
 lower bound for any installed agent. Dispatch terminates at the first `registry.isEmpty()` check.
 
-**`OneScenarioNoMatchState`** — one JDBC scenario is active. All Phase 4 dispatch calls miss it on
-`operationType` mismatch before any pattern evaluation. This isolates the cost of a non-empty
+**`OneScenarioNoMatchState`** — one JDBC scenario is active. All Phase 4 dispatch calls miss it at
+the operation-type index lookup, before any scenario is evaluated. This isolates the cost of a non-empty
 registry with a guaranteed early reject.
 
 **`FourScenariosExhaustedState`** — one scenario per Phase 4 operation type, each activated with

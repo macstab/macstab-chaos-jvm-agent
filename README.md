@@ -67,7 +67,7 @@ void retryLogicSurvivesReplicationLag(ChaosControlPlane chaos) {
 }
 ```
 
-No sidecar. No mocks. No application code changes. The bytecode of `java.net.Socket` reads is rewritten at JVM startup; chaos applies surgically inside the JVM that's already running your production code paths. **62 JDK call sites** auto-wired across DNS, SSL, JDBC, HTTP, NIO, sockets, virtual threads, monitors, scheduler, GC, class loading, file I/O, ThreadLocal, JNDI, JMX, serialization, native libraries, queues, executors, async completion, and more. One annotation. Zero `--add-opens` flags. The agent self-grants every JDK module open it needs at install time.
+No sidecar. No mocks. No application code changes. The bytecode of `java.net.Socket` reads is rewritten the moment a scenario needs it; chaos applies surgically inside the JVM that's already running your production code paths. **62 JDK call sites** auto-wired across DNS, SSL, JDBC, HTTP, NIO, sockets, virtual threads, monitors, scheduler, GC, class loading, file I/O, ThreadLocal, JNDI, JMX, serialization, native libraries, queues, executors, async completion, and more. One annotation. Zero `--add-opens` flags. The agent self-grants every JDK module open it needs at install time.
 
 Works in JUnit 5 with **Spring Boot 3, Spring Boot 4, Micronaut, and Quarkus** out of the box.
 
@@ -189,7 +189,7 @@ This library lets you **turn those scenarios on and off programmatically**, scop
 
 ## Floor -1 — Architecture (senior engineer territory)
 
-The agent loads via the standard Java Instrumentation API (`-javaagent:` or dynamic self-attach). ByteBuddy weaves `@Advice` hooks into selected JDK methods at startup. Those hooks call a static dispatcher that routes to the live scenario registry, evaluates matching scenarios against an 8-check activation pipeline, and executes the decision inline on the calling thread.
+The agent loads via the standard Java Instrumentation API (`-javaagent:` or dynamic self-attach). ByteBuddy weaves `@Advice` hooks into selected JDK methods on demand — each hook group is retransformed the first time an activated scenario needs one of its operations (`instrumentation=eager` weaves everything at start, as in 1.x). Those hooks call a static dispatcher that routes to the live scenario registry, evaluates the scenarios indexed under the intercepted operation against an 8-check activation pipeline, and executes the decision inline on the calling thread.
 
 ```
 Application Thread
@@ -201,7 +201,7 @@ Application Thread
                                 └─► RuntimeDecision: delay + gate + terminal action
 ```
 
-**58 interception handles** span: thread lifecycle, executor submission, scheduled ticks, blocking queues, `CompletableFuture`, NIO selectors, TCP sockets, clock (`currentTimeMillis`/`nanoTime`), GC, `System.exit`, reflection, `ObjectInputStream`, class loading, `LockSupport.park`, AQS acquire, JNDI, JMX, ZIP compression, `ThreadLocal`, native library loading, HTTP client send, JDBC execute, DNS resolve, SSL handshake, `Thread.sleep`, file I/O, and arbitrary method entry/exit.
+**57 interception handles** span: thread lifecycle, executor submission, scheduled ticks, blocking queues, `CompletableFuture`, NIO selectors, TCP sockets, clock (`currentTimeMillis`/`nanoTime`), GC, `System.exit`, reflection, `ObjectInputStream`, class loading, `LockSupport.park`, AQS acquire, JNDI, JMX, ZIP compression, `ThreadLocal`, native library loading, HTTP client send, JDBC execute, DNS resolve, SSL handshake, `Thread.sleep`, file I/O, and arbitrary method entry/exit.
 
 **Session isolation**: each test gets a `ChaosSession` backed by a `ThreadLocal<String>`. Session-scoped chaos evaluates only when the session ID on the current thread matches. Executor submissions within a `session.bind()` scope carry the session ID into worker threads via task decoration — chaos propagates exactly where intended and nowhere else.
 
@@ -228,8 +228,8 @@ Every intercepted JVM operation runs through `ScenarioController.evaluate()` —
 
 JDK classes (`Thread`, `Socket`, `System`, etc.) are loaded by the **bootstrap classloader** — the root of the classloader hierarchy with no parent. ByteBuddy advice woven into these classes executes *in* the bootstrap classloader's namespace, which cannot see agent classes by name. The bridge:
 
-1. At startup, `BootstrapDispatcher.class` bytecode is extracted from the agent JAR, written to a temp JAR, and appended to the bootstrap classpath via `Instrumentation.appendToBootstrapClassLoaderSearch`
-2. A 58-slot `MethodHandle[]` array is built against `BridgeDelegate.class` using `MethodHandles.publicLookup()` and wired into `BootstrapDispatcher.install()` via reflection against the bootstrap-classloader version (`Class.forName("...BootstrapDispatcher", true, null)`)
+1. At startup, `BootstrapDispatcher.class` bytecode (plus the few types woven advice references) is extracted from the agent JAR, written to a temp JAR, and appended to the bootstrap classpath via `Instrumentation.appendToBootstrapClassLoaderSearch`
+2. A 57-slot `MethodHandle[]` array is built against `BridgeDelegate.class` using `MethodHandles.publicLookup()` and wired into `BootstrapDispatcher.install()` via reflection against the bootstrap-classloader version (`Class.forName("...BootstrapDispatcher", true, null)`)
 3. `handles` is written to the `volatile` field **before** `delegate` — the Java Memory Model's happens-before rule on volatile writes guarantees any thread that observes `delegate != null` also observes the fully-initialized `handles` array
 
 ### Reentrancy Guard
@@ -238,7 +238,7 @@ Chaos code itself calls instrumented JDK methods (`Thread.sleep`, `LockSupport.p
 
 ```
 DEPTH : ThreadLocal<int[]>  (bootstrap-classloader resident)
-invoke():
+every dispatch method (guard inlined, no shared trampoline, no per-call lambda):
   int[] depth = DEPTH.get()
   if depth[0] > 0 → return fallback immediately
   depth[0]++
@@ -248,7 +248,7 @@ invoke():
 
 The `int[]` is kept for the thread's lifetime rather than removed when the depth returns to zero: it also holds the call-depth scope counters that make nested or delegating instrumented calls (an HTTP client calling another instrumented client, a JDBC proxy delegating to the driver) evaluate chaos only once, at the outermost call. Its footprint is one small array per thread that ever reaches an instrumented call, released with the thread.
 
-A second recursion risk: `ThreadLocal.get()` is itself instrumented in Phase 2. Reading `DEPTH.get()` inside `invoke()` would re-trigger `ThreadLocalGetAdvice`, which would call `invoke()`, which would call `DEPTH.get()` ... The advice contains an identity check:
+A second recursion risk: `ThreadLocal.get()` is itself instrumented once the `THREAD_LOCAL` hook group is woven. Reading `DEPTH.get()` inside a dispatch method would re-trigger `ThreadLocalGetAdvice`, which would call `BootstrapDispatcher.beforeThreadLocalGet()`, which would call `DEPTH.get()` ... The advice contains an identity check:
 
 ```java
 if (threadLocal == BootstrapDispatcher.depthThreadLocal()) return false;
@@ -715,6 +715,8 @@ Agent args are separated by `;` (quote the whole `-javaagent:` argument in a she
 
 Environment variables: `MACSTAB_CHAOS_CONFIG_FILE`, `MACSTAB_CHAOS_CONFIG_JSON`, `MACSTAB_CHAOS_CONFIG_BASE64`.
 
+Hooks are woven on demand by default. `instrumentation=eager` (agent arg), `-Dmacstab.chaos.instrumentation=eager` or `MACSTAB_CHAOS_INSTRUMENTATION=eager` weaves every hook group at start instead (the 1.x behaviour), so no activation pays the one-time weaving cost.
+
 ### Live config reload (file watch)
 
 Point the agent at a file and enable watch mode — the agent polls the file at the configured interval, computes the diff, and updates only what changed while the JVM runs:
@@ -761,7 +763,7 @@ The agent is a multi-module Gradle project organised as a strict directed depend
 
 - **Public contract** — `chaos-agent-api` is the only module application code compiles against. Sealed hierarchies (`ChaosSelector`, `ChaosEffect`), records (`ChaosScenario`, `ChaosPlan`, `ActivationPolicy`, `NamePattern`), and the `ChaosControlPlane` / `ChaosSession` interfaces form the stable surface. Everything else is implementation.
 - **Runtime core** — `chaos-agent-core` holds the scenario registry, the 8-gate evaluation pipeline, session scoping, and every stressor implementation (heap, metaspace, direct-buffer, GC, finalizer, deadlock, thread-leak, monitor, code-cache, safepoint, string-intern, reference-queue, thread-local, keep-alive, virtual-thread carrier pinning). Hot-path code (`ChaosDispatcher`, `ScenarioController`) is profiled against JMH benchmarks.
-- **Bytecode instrumentation** — `chaos-agent-instrumentation-jdk` defines the ByteBuddy `@Advice` classes and the bootstrap-classloader bridge. `BootstrapDispatcher` (bootstrap-resident, appended via `Instrumentation.appendToBootstrapClassLoaderSearch`) is the only path by which instrumented JDK methods reach the agent classloader — a `volatile` two-field publication protocol guarantees JMM visibility of the 58-slot `MethodHandle[]` dispatch table.
+- **Bytecode instrumentation** — `chaos-agent-instrumentation-jdk` defines the ByteBuddy `@Advice` classes and the bootstrap-classloader bridge. `BootstrapDispatcher` (bootstrap-resident, appended via `Instrumentation.appendToBootstrapClassLoaderSearch`) is the only path by which instrumented JDK methods reach the agent classloader — a `volatile` two-field publication protocol guarantees JMM visibility of the 57-slot `MethodHandle[]` dispatch table.
 - **Agent lifecycle** — `chaos-agent-bootstrap` owns the `premain` / `agentmain` entry points, the singleton `ChaosControlPlane` installation, and JMX MBean registration.
 - **Configuration resolution** — `chaos-agent-startup-config` resolves plans from `configFile`, `configJson`, `configBase64`, and environment variables, deserialises them via Jackson polymorphic mapping, and runs the live-reload file watcher.
 - **Test integrations** — `chaos-agent-testkit` provides `ChaosAgentExtension` (JUnit 5) and `ChaosPlatform.installLocally()` for self-attach. `chaos-agent-spring-boot3-test-starter` and `chaos-agent-spring-boot4-test-starter` compose `@ChaosTest` on top and wire a class-scoped `ChaosSession` into Spring Boot tests.
@@ -771,8 +773,8 @@ The agent is a multi-module Gradle project organised as a strict directed depend
 
 Every intercepted JVM operation travels through five bytecode frames before a decision is reached:
 
-1. **Instrumented JDK method** — e.g. `ThreadPoolExecutor.execute()`, with ByteBuddy advice woven into the method body at agent startup (not called — *copied* inline)
-2. **`BootstrapDispatcher`** — bootstrap-classloader-resident static entry point holding the 58-slot `MethodHandle[]` and a `ThreadLocal<int[]>` reentrancy depth guard (a one-element `int` array avoids `Integer` autoboxing per call)
+1. **Instrumented JDK method** — e.g. `ThreadPoolExecutor.execute()`, with ByteBuddy advice woven into the method body when a scenario first needs its hook group (not called — *copied* inline)
+2. **`BootstrapDispatcher`** — bootstrap-classloader-resident static entry point holding the 57-slot `MethodHandle[]` and a `ThreadLocal<int[]>` reentrancy depth guard (a one-element `int` array avoids `Integer` autoboxing per call)
 3. **`BridgeDelegate`** — agent-classloader bridge that unboxes arguments and forwards to the active runtime
 4. **`ChaosDispatcher` / `ScenarioController`** — registry lookup + the 8-gate evaluation pipeline: `started` → session match → selector match → `matchedCount++` + activation window → warm-up → rate limit → probability → max-applications CAS
 5. **`ChaosEffect`** — terminal action executed inline on the calling thread (`delay` / `reject` / `suppress` / `gate` / `exception` / `corruptReturnValue` / `skewClock` / stressor handle)
@@ -850,7 +852,7 @@ end note
 note bottom of [chaos-agent-instrumentation-jdk]
   ByteBuddy @Advice +
   BootstrapDispatcher (bootstrap CL)
-  — 58 MethodHandles
+  — 57 MethodHandles
   — ThreadLocal<int[]> reentrancy guard
   — volatile two-field publication
 end note
@@ -864,10 +866,10 @@ end note
 
 | Module                                  | Role                                                                      |
 |-----------------------------------------|---------------------------------------------------------------------------|
-| `chaos-agent-api`                       | **Stable public API** — the only module application code should depend on |
-| `chaos-agent-bootstrap`                 | Agent entry point (`premain`/`agentmain`), singleton, MBean registration  |
+| `chaos-agent-api`                       | **Stable public API** — the only module application code should depend on; no dependencies |
+| `chaos-agent-bootstrap`                 | The agent JAR: entry points, singleton, MBean registration; self-contained, ByteBuddy and Jackson relocated, no transitive dependencies |
 | `chaos-agent-core`                      | Scenario registry, evaluation pipeline, session scoping, stressors        |
-| `chaos-agent-instrumentation-jdk`       | ByteBuddy advice, bootstrap bridge (58 interception handles)              |
+| `chaos-agent-instrumentation-jdk`       | ByteBuddy advice, bootstrap bridge (57 interception handles)              |
 | `chaos-agent-startup-config`            | JSON/base64/file config resolution and Jackson mapping                    |
 | `chaos-agent-testkit`                   | JUnit 5 extension, `ChaosPlatform.installLocally()` for self-attach       |
 | `chaos-agent-spring-boot3-test-starter` | `@ChaosTest` + `ChaosAgentExtension` for Spring Boot 3 tests              |
@@ -1005,7 +1007,7 @@ returning overhead to the zero-scenario floor immediately (`stop()` alone leaves
 | One scenario active, no selector match         | **< 100 ns**           | Operation-type mismatch exits before pattern evaluation               |
 | One scenario active, match, no terminal effect | **< 300 ns**           | Full 8-check evaluation pipeline, no effect applied                   |
 | Session scope miss (wrong session ID)          | **< 20 ns additional** | ThreadLocal read + identity compare, exits before selector evaluation |
-| 10 active scenarios, one match                 | **< 1 µs**             | Linear registry scan, all misses exit at selector check               |
+| 10 active scenarios, one match                 | **< 1 µs**             | Operation-type index; only scenarios naming it are evaluated          |
 
 For reference: HikariCP connection borrow ~5–15 µs · local TCP roundtrip ~50–200 µs · `Thread.sleep(1)` ~1 ms.
 
@@ -1035,7 +1037,7 @@ microservice modelling.
 ```bash
 ./gradlew build                        # compile + test all modules
 ./gradlew test                         # tests only
-./gradlew :chaos-agent-bootstrap:jar   # produce the agent JAR
+./gradlew :chaos-agent-bootstrap:shadowJar   # produce the agent JAR (dependencies relocated)
 ./gradlew :chaos-agent-benchmarks:run  # run JMH benchmarks
 ```
 
@@ -1052,7 +1054,7 @@ Internal Architecture documentation lives in [`docs/`](docs/):
 | [`overall-agent.md`](docs/overall-agent.md)           | System Architecture, all analysis dimensions, stack walkdown, PlantUML diagrams                                           |
 | [`api.md`](docs/api.md)                               | Stable API contract: builders, selectors, effects, diagnostics                                                            |
 | [`core.md`](docs/core.md)                             | Evaluation pipeline, session scoping, stressor lifecycle, JMM analysis                                                    |
-| [`instrumentation.md`](docs/instrumentation.md)       | ByteBuddy advice, bootstrap bridge, reentrancy guard, 58-handle table                                                     |
+| [`instrumentation.md`](docs/instrumentation.md)       | ByteBuddy advice, bootstrap bridge, reentrancy guard, 57-handle table                                                     |
 | [`bootstrap.md`](docs/bootstrap.md)                   | Agent initialization, self-attach, MBean registration                                                                     |
 | [`startup-config.md`](docs/startup-config.md)         | Config source resolution, JSON schema, path safety                                                                        |
 | [`testkit.md`](docs/testkit.md)                       | JUnit 5 extension, session lifecycle, anti-patterns                                                                       |

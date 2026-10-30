@@ -28,7 +28,7 @@ In scope:
 - `ChaosControlPlaneImpl` (package-private) — actual control-plane implementation. Owns scenario registration, session lifecycle, diagnostics, event listeners, instrumentation handle, shutdown-hook tracking.
 - `ChaosDispatcher` (package-private) — hot-path half. Owns the `before*` / `after*` / `adjust*` / `decorate*` interception methods invoked from `BootstrapDispatcher`.
 - `ScenarioController` — per-scenario runtime guard with 8-check evaluation pipeline
-- `ScenarioRegistry` — thread-safe store of controllers; implements `ChaosDiagnostics`
+- `ScenarioRegistry` — thread-safe store of controllers plus an immutable `OperationType` → controllers index used by `match()`; implements `ChaosDiagnostics`
 - `SelectorMatcher` — stateless invocation-context matcher
 - `InvocationContext` — value object capturing per-call data
 - `RuntimeDecision` — merged decision: delay + gate + terminal action
@@ -99,11 +99,17 @@ CompatibilityValidator.validate(scenario, featureSet)
   — throws ChaosUnsupportedFeatureException on JVM feature mismatch
   — throws ChaosValidationException on selector/effect/operation incompatibility
   ↓
+hookDemand.require(SelectorOperations.of(scenario.selector()))
+  — the instrumentation layer weaves the hook groups serving these operations, once each
+    (no-op for stress selectors and for groups already woven)
+  — a weaving failure fails the activation (failure category INSTRUMENTATION_FAILURE)
+  ↓
 new ScenarioController(scenario, scopeKey, sessionId, clock, observabilityBus, instrumentationSupplier)
   — state = REGISTERED; started = false
   ↓
 ScenarioRegistry.register(controller)
   — atomic ConcurrentHashMap.compute(key, ...)
+  — rebuilds and swaps the immutable operation index (pre-sorted per operation)
   — an existing STOPPED or INACTIVE controller under the key is replaced (and destroyed)
   — throws ChaosActivationException("scenario key already active") if the existing
     controller is REGISTERED or ACTIVE
@@ -203,7 +209,7 @@ Delay composition: multiple delay scenarios stack. Three scenarios each contribu
 
 Gate composition: only the last gate in the sorted contribution list applies. Two gate scenarios = the higher-precedence gate blocks; the lower-precedence gate is ignored. This is a limitation of the current implementation (not a deliberate multi-gate feature).
 
-Terminal action selection: the highest-precedence scenario wins. If two scenarios share the same precedence, the lexicographically first `id` wins (due to the stable sort in `ScenarioRegistry.match()`).
+Terminal action selection: the highest-precedence scenario wins. If two scenarios share the same precedence, the lexicographically first `id` wins (the `ScenarioRegistry` operation index keeps each operation's controllers pre-sorted by descending precedence, then id; `match()` preserves that order and does not sort per call).
 
 ## Decision Execution
 
@@ -246,6 +252,7 @@ class ScenarioRegistry {
   +match(context) : List<ScenarioContribution>
   +snapshot() : Snapshot
   -controllers : ConcurrentHashMap<String, ScenarioController>
+  -index : volatile Map<OperationType, ScenarioController[]>
   -failures : ConcurrentLinkedQueue<ActivationFailure>
 }
 
@@ -627,9 +634,13 @@ JVM-scoped controllers are NOT removed on session close. They stay registered un
 
 # 11. Performance Model
 
+## Scenario Lookup Cost
+
+`ScenarioRegistry.match()` reads the immutable operation index once and evaluates only the controllers whose selector names the intercepted operation, in their pre-sorted order — scenarios for other operations cost nothing and nothing is sorted per call. Clock-skew reads use the same index and return immediately when no scenario names the clock operation.
+
 ## Selector Matching Cost
 
-`SelectorMatcher.matches()` is a sealed-hierarchy switch. Each case is at most 3–4 field comparisons and `Pattern.matches()` calls. For simple string patterns (exact match), this is sub-microsecond. For regex patterns, the cost depends on the regex complexity.
+`SelectorMatcher.matches()` is a sealed-hierarchy switch. Each case is at most 3–4 field comparisons and `NamePattern.matches()` calls. For simple string patterns (exact match), this is sub-microsecond. GLOB patterns use an allocation-free wildcard matcher (the compiled regex is only used for candidates containing line terminators or surrogate characters). For regex patterns, the cost depends on the regex complexity, and each match allocates a `Matcher`.
 
 **Recommendation**: Use exact class name matches or simple prefix patterns rather than complex regexes in performance-sensitive scenarios.
 
@@ -680,7 +691,7 @@ Key invariants enforced at construction time by the builder API or `Compatibilit
 
 **Hot path**: See Section 4 for the full call sequence from `ChaosRuntime.before*()` to `evaluate()` to decision execution.
 
-**JVM layer**: `AtomicBoolean.get()`, `AtomicLong.incrementAndGet()`, `AtomicLong.compareAndSet()` — all mapped to x86 `LOCK CMPXCHG` / `LOCK XADD` instructions. `ConcurrentHashMap.values().stream()` — no lock acquisition on the map's read path in JDK 17+.
+**JVM layer**: `AtomicBoolean.get()`, `AtomicLong.incrementAndGet()`, `AtomicLong.compareAndSet()` — all mapped to x86 `LOCK CMPXCHG` / `LOCK XADD` instructions. `ScenarioRegistry.match()` — one `volatile` read of the immutable operation index; no lock, no stream.
 
 **OS layer**: `Thread.sleep(delayMillis)` → `nanosleep(2)` on Linux. `synchronized(this)` → OS mutex via HotSpot's biased locking / lightweight locking / inflated lock stack depending on contention level.
 

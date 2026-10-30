@@ -70,11 +70,11 @@ public interface ChaosControlPlane {
 }
 ```
 
-**`activate(ChaosScenario)`**: Requires `scenario.scope() == JVM`. Registers the scenario with `ScenarioRegistry`, starts it if `startMode == AUTOMATIC`, returns a handle. Throws `ChaosActivationException` when a scenario with the same id is still `REGISTERED` or `ACTIVE`, or on incompatible configuration. A previous scenario with the same id that is `STOPPED` or `INACTIVE` is replaced, so re-activating an id after `stop()` or `close()` works.
+**`activate(ChaosScenario)`**: Requires `scenario.scope() == JVM`. Weaves the hook groups serving the selector's operations if they are not woven yet (the first activation of a group pays its one-time retransformation cost; a weaving failure throws `IllegalStateException` and is recorded as `INSTRUMENTATION_FAILURE`), registers the scenario with `ScenarioRegistry`, starts it if `startMode == AUTOMATIC`, returns a handle. Throws `ChaosActivationException` when a scenario with the same id is still `REGISTERED` or `ACTIVE`, or on incompatible configuration. A previous scenario with the same id that is `STOPPED` or `INACTIVE` is replaced, so re-activating an id after `stop()` or `close()` works.
 
 **`activate(ChaosPlan)`**: Rejects any session-scoped scenario in the plan with `ChaosActivationException`. Activation is atomic: if any scenario fails, the ones already registered are removed again before the exception propagates.
 
-**`openSession(String)`**: Creates a `DefaultChaosSession` with a UUID and the given display name. The opening thread is bound to the session until `session.close()`; call `session.bind()` on other threads that should participate.
+**`openSession(String)`**: Weaves the executor hook groups (`EXECUTOR_SUBMIT`, `SCHEDULE_SUBMIT`) needed to propagate the session to worker threads, if not woven yet, then creates a `DefaultChaosSession` with a UUID and the given display name. The opening thread is bound to the session until `session.close()`; call `session.bind()` on other threads that should participate.
 
 **After `close()`**: `activate`, `openSession` and `addEventListener` throw `IllegalStateException("chaos control plane is closed")`.
 
@@ -437,7 +437,7 @@ The `OperationType` enum defines all intercepted JDK operations. Full list:
 
 ## 9.1 Manual hook operation types
 
-Most operation types in §9 are **auto-wired**: the agent installs ByteBuddy advice on a fixed JDK call site at `premain`, the advice fires automatically whenever application code reaches that site, and zero application changes are needed.
+Most operation types in §9 are **auto-wired**: the agent weaves ByteBuddy advice into a fixed JDK call site when a scenario first needs it (the call site's hook group is retransformed on that scenario's activation; `instrumentation=eager` weaves everything at start), the advice fires automatically whenever application code reaches that site, and zero application changes are needed.
 
 Four operation types are **manual-hook only** — fully functional, fully tested, but the agent cannot trigger them automatically and the application must route the event through the agent's public API:
 
@@ -535,10 +535,13 @@ public interface ChaosDiagnostics {
     enum FailureCategory {
         INVALID_CONFIGURATION,
         UNSUPPORTED_RUNTIME,
+        INSTRUMENTATION_FAILURE,   // the hook group the selector needs could not be woven
         ACTIVATION_CONFLICT
     }
 }
 ```
+
+**`runtimeDetails`**: key/value runtime metadata. Includes `wovenHookGroups` — the comma-separated, sorted names of the hook groups woven so far (empty when none; hooks are woven on demand).
 
 **`matchedCount`**: total invocations that matched the selector since `start()`. Incremented before activation policy checks.
 
