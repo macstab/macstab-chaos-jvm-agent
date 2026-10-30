@@ -275,7 +275,7 @@ package "chaos-agent-core" {
 }
 
 package "chaos-agent-bootstrap" {
-  [BootstrapDispatcher\n(61 slots)] as BD
+  [BootstrapDispatcher\n(64 slots)] as BD
 }
 
 AgentArgs --> AAP
@@ -2046,7 +2046,7 @@ ByteBuddy `AgentBuilder` installs `Advice` on JDK classes per hook group — on 
 
 ### BootstrapDispatcher
 
-61 static `MethodHandle` slots in `BootstrapDispatcher` (slots do not map one-to-one to the 67 `OperationType` values). The slot for a given operation type holds a method handle to the `ChaosDispatcher` evaluation method. Advice woven into JDK classes calls the slot directly from the bootstrap classloader context.
+64 static `MethodHandle` slots in `BootstrapDispatcher` (slots do not map one-to-one to the 67 `OperationType` values). The slot for a given operation type holds a method handle to the `ChaosDispatcher` evaluation method. Advice woven into JDK classes calls the slot directly from the bootstrap classloader context.
 
 ### ThreadLocal Reentrancy Guard
 

@@ -9,7 +9,7 @@
 
 # chaos-agent-instrumentation-jdk — Instrumentation Layer Reference
 
-> Internal reference for the bootstrap bridge, ByteBuddy advice classes, reentrancy guard, and the 61-handle interception surface.
+> Internal reference for the bootstrap bridge, ByteBuddy advice classes, reentrancy guard, and the 64-handle interception surface.
 > 
 > *Engineered by* **[Christian Schnapka](https://macstab.com)** — Embedded Principal+ Engineer · [Macstab GmbH](https://macstab.com) · Hamburg, Germany
 
@@ -31,8 +31,8 @@ Apart from weaving hook groups on demand, this module has no further runtime rol
 
 In scope:
 - `JdkInstrumentationInstaller` — entry point; orchestrates all startup steps
-- `BootstrapDispatcher` — bootstrap-classloader-resident static dispatcher (61 dispatch methods + reentrancy guard and call-depth scopes)
-- `BridgeDelegate` — interface defining the 61-method contract
+- `BootstrapDispatcher` — bootstrap-classloader-resident static dispatcher (64 dispatch methods + reentrancy guard and call-depth scopes)
+- `BridgeDelegate` — interface defining the 64-method contract
 - `ChaosBridge` — agent-classloader implementation of `BridgeDelegate`; thin delegation to `ChaosRuntime`
 - All `@Advice` classes, grouped into `JdkInstrumentationInstaller.HookGroup`s
 - `ScheduledCallableWrapper`, `ScheduledRunnableWrapper` — task wrappers for tick-level interception
@@ -90,8 +90,8 @@ Both mechanisms grant the same set of opens to the unnamed module of the system 
 | **Bootstrap classloader** | The JVM root classloader; loads `java.*`, `javax.*`. Has no parent. Can only see classes from `rt.jar`/`java.base` and explicitly appended JARs.                                                                                                         |
 | **Agent classloader**     | The classloader created for the agent JAR. Has the bootstrap classloader as parent (indirect). Can see all agent classes.                                                                                                                                |
 | **Advice class**          | A ByteBuddy concept: a class containing `@Advice.OnMethodEnter` and/or `@Advice.OnMethodExit` static methods, whose bytecode is inlined into the instrumented method. Not a real class instantiation at runtime — the advice body is copied as bytecode. |
-| **BootstrapDispatcher**   | A class that must be visible to the bootstrap classloader. Provides 61 static dispatch methods called from advice.                                                                                                                                       |
-| **BridgeDelegate**        | Interface in the agent classloader defining the 61-method contract. Implemented by `ChaosBridge`.                                                                                                                                                        |
+| **BootstrapDispatcher**   | A class that must be visible to the bootstrap classloader. Provides 64 static dispatch methods called from advice.                                                                                                                                       |
+| **BridgeDelegate**        | Interface in the agent classloader defining the 64-method contract. Implemented by `ChaosBridge`.                                                                                                                                                        |
 | **MethodHandle**          | A typed reference to a method, invokable across classloader boundaries. Built from the agent classloader; stored in `BootstrapDispatcher.handles[]`.                                                                                                     |
 | **DEPTH guard**           | `ThreadLocal<int[]>` in `BootstrapDispatcher`. Prevents infinite recursion when chaos code calls instrumented JDK methods.                                                                                                                               |
 | **Hook group**            | A `JdkInstrumentationInstaller.HookGroup`: related interception points (e.g. `SOCKET`, `JDBC`) tagged with the `OperationType`s they serve. Woven once, on the first activation needing them (or at start when eager); stays woven until uninstall.      |
@@ -362,7 +362,7 @@ If the bridge is not installed (`BootstrapDispatcher.handles == null`), the wrap
 
 ---
 
-# 7. The 61 Interception Handles
+# 7. The 64 Interception Handles
 
 | Index | Constant                             | JDK method(s) intercepted                                                                                                                                                       | Direction                                    |
 |-------|--------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------|
@@ -427,6 +427,9 @@ If the bridge is not installed (`BootstrapDispatcher.handles == null`), the wrap
 | 58    | `AFTER_METHOD_EXIT`                  | Normal exit of every method a `MethodSelector` names                                                                                                                              | exit (return-value rewrite)                  |
 | 59    | `BEFORE_CLIENT_CALL`                 | Kafka `KafkaProducer.send(record, callback)` / `KafkaConsumer.poll(Duration)`, gRPC `ClientCallImpl.start`, Jedis `Connection.sendCommand(CommandArguments)`, Lettuce `RedisChannelHandler.dispatch`, R2DBC `Statement.execute()`, AWS SDK v2 `BaseSync/AsyncClientHandler.execute`, Netty `AbstractUnsafe.flush0()` and stream-channel reads | enter (reject throws the library's exception) |
 | 60    | `AFTER_DNS_ANSWER`                   | `InetAddress.getAllByName(String)` exit, on return or `UnknownHostException` (`DNS_ANSWER`)                                                                                       | exit (answer rewrite)                        |
+| 61    | `CAPTURE_SESSION`                    | `ForkJoinPool.poolSubmit(boolean, ForkJoinTask)`, `ForkJoinTask.fork()` — records the submitting thread's session for the task                                                      | enter (session hand-off)                     |
+| 62    | `ENTER_SESSION`                      | `ForkJoinTask.doExec()` enter, `Thread.run()` enter, `VirtualThread.run(Runnable)` enter and `mount()` exit — binds the handed-off session                                        | enter (session hand-off)                     |
+| 63    | `EXIT_SESSION`                       | `ForkJoinTask.doExec()`, `Thread.run()`, `VirtualThread.run(Runnable)` exit — releases it                                                                                         | exit (session hand-off)                      |
 
 ---
 
