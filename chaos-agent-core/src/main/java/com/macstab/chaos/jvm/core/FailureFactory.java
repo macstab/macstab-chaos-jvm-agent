@@ -112,7 +112,8 @@ final class FailureFactory {
    *   <li>{@code REJECTED} → {@link java.util.concurrent.RejectedExecutionException}
    *   <li>{@code CLASS_NOT_FOUND}, {@code ILLEGAL_STATE} → {@link IllegalStateException}
    *   <li>{@code IO} → {@link java.io.IOException}
-   *   <li>{@code INTERRUPTED} → {@link IllegalStateException} (wraps the interrupt semantics)
+   *   <li>{@code INTERRUPTED} → {@link IllegalStateException} with an {@link InterruptedException}
+   *       cause
    *   <li>{@code RUNTIME} → {@link RuntimeException}
    *   <li>{@code SECURITY} → {@link SecurityException}
    * </ul>
@@ -126,9 +127,11 @@ final class FailureFactory {
     return switch (failureKind) {
       case TIMEOUT -> new TimeoutException(message);
       case REJECTED -> new RejectedExecutionException(message);
-      case CLASS_NOT_FOUND, ILLEGAL_STATE -> new IllegalStateException(message);
+      case CLASS_NOT_FOUND ->
+          new IllegalStateException(message, new ClassNotFoundException(message));
+      case ILLEGAL_STATE -> new IllegalStateException(message);
       case IO -> new IOException(message);
-      case INTERRUPTED -> new IllegalStateException("interrupted: " + message);
+      case INTERRUPTED -> new IllegalStateException(message, new InterruptedException(message));
       case RUNTIME -> new RuntimeException(message);
       case SECURITY -> new SecurityException(message);
     };

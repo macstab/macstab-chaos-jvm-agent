@@ -86,11 +86,10 @@ final class ScopeContext {
     final Deque<String> stack = sessionStack.get();
     stack.push(sessionId);
     return () -> {
-      // Verify the top matches what this binding pushed. A mismatch means either a
-      // double-close or a close() invoked in the wrong order (outer binding closed while an
-      // inner binding is still live). Popping anyway would silently corrupt the stack for every
-      // subsequent request served by this pooled thread — a subtle, hard-to-diagnose leak of
-      // scope between unrelated requests. Fail loud at the call site instead.
+      // Remove this binding's own entry, wherever it is on the stack. Closing out of order
+      // (outer before inner) is tolerated: the inner binding stays in effect until it is closed.
+      // A double close finds no entry and fails loud, instead of popping another binding's
+      // entry and leaking a session into later requests served by this pooled thread.
       // removeFirstOccurrence atomically finds and removes the entry in a single pass,
       // closing the TOCTOU window between a separate peek() and pop() where a concurrent
       // push() from another thread (cross-thread close is allowed by the class contract)
@@ -100,7 +99,7 @@ final class ScopeContext {
         throw new IllegalStateException(
             "ScopeBinding close() could not find sessionId='"
                 + sessionId
-                + "' on the stack (double-close or wrong-order close?)");
+                + "' on the stack (already closed?)");
       }
     };
   }

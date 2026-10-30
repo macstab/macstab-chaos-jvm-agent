@@ -49,7 +49,7 @@ import java.time.Duration;
  * @param activateAfterMatches number of initial matches to skip before the effect becomes eligible
  * @param maxApplications hard cap on total effect applications; {@code null} means unlimited
  * @param activeFor time window during which the scenario remains active; {@code null} means none
- * @param rateLimit sliding-window rate cap on applications; {@code null} means unlimited
+ * @param rateLimit fixed-window rate cap on applications; {@code null} means unlimited
  * @param randomSeed fixed PRNG seed for reproducible probability sampling; {@code null} draws a
  *     random seed from {@link java.util.concurrent.ThreadLocalRandom} on first activation —
  *     sampling is non-deterministic across JVM restarts; set an explicit value for reproducible
@@ -120,7 +120,7 @@ public record ActivationPolicy(
    * @param maxApplications hard cap on total effect applications; {@code null} means unlimited
    * @param activeFor time window from first start during which the scenario remains active; {@code
    *     null} means no time bound
-   * @param rateLimit sliding-window rate cap on applications; {@code null} means unlimited
+   * @param rateLimit fixed-window rate cap on applications; {@code null} means unlimited
    * @param randomSeed fixed PRNG seed for reproducible probability sampling; {@code null} draws a
    *     random seed from {@link java.util.concurrent.ThreadLocalRandom} — non-deterministic across
    *     JVM restarts
@@ -151,7 +151,9 @@ public record ActivationPolicy(
   /**
    * Returns a policy that fires on every match and starts immediately on activation.
    *
-   * <p>Equivalent to: {@code probability=1.0, startMode=AUTOMATIC, no other constraints}.
+   * <p>Equivalent to: {@code probability=1.0, startMode=AUTOMATIC, no other constraints}. Uses the
+   * fixed seed {@code 0}, so sampled delays of a delay range are reproducible across runs; pass
+   * {@code randomSeed = null} to the constructor (or omit it in JSON) for a random seed.
    *
    * @return an always-fire activation policy
    */
@@ -176,12 +178,13 @@ public record ActivationPolicy(
 
   /**
    * Returns a policy that fires on every match but starts in the {@link
-   * ChaosDiagnostics.ScenarioState#INACTIVE INACTIVE} state. The effect does not fire until {@link
-   * ChaosActivationHandle#start()} is called.
+   * ChaosDiagnostics.ScenarioState#REGISTERED REGISTERED} state. The effect does not fire until
+   * {@link ChaosActivationHandle#start()} is called. Uses the fixed seed {@code 0}, like {@link
+   * #always()}.
    *
    * <p>Use for synchronised test phases where chaos must be enabled at a precise moment.
    *
-   * @return an activation policy that fires on every match but starts in INACTIVE state
+   * @return an activation policy that fires on every match but starts in REGISTERED state
    */
   public static ActivationPolicy manual() {
     return new ActivationPolicy(StartMode.MANUAL, 1.0d, 0, null, null, null, 0L, false);
@@ -207,17 +210,19 @@ public record ActivationPolicy(
   }
 
   /**
-   * Sliding-window rate limit on effect applications.
+   * Fixed-window rate limit on effect applications.
    *
-   * <p>The rate limit is applied after probability sampling. At most {@link #permits} effects will
-   * fire within any rolling window of {@link #window} duration. Excess matches in the window are
-   * silently skipped.
+   * <p>The rate limit is applied after probability sampling. Time is divided into consecutive
+   * windows of {@link #window} duration, the first starting when the scenario starts; at most
+   * {@link #permits} effects fire per window and excess matches are skipped. Because the windows
+   * are fixed, up to {@code 2 × permits} effects can fire within one window length that straddles a
+   * window boundary.
    *
    * <p>Example: {@code new RateLimit(10, Duration.ofSeconds(1))} allows at most 10 effect
    * applications per second regardless of match frequency.
    *
    * @param permits maximum effect applications allowed within one {@code window}; must be positive
-   * @param window rolling window duration; must be positive
+   * @param window window duration; must be positive
    */
   public record RateLimit(long permits, Duration window) {
 
@@ -226,7 +231,7 @@ public record ActivationPolicy(
      *
      * @param permits maximum effect applications allowed within one {@code window}; must be {@code
      *     > 0}
-     * @param window rolling window duration; must be positive
+     * @param window window duration; must be positive
      * @throws IllegalArgumentException if {@code permits <= 0} or {@code window} is null, zero, or
      *     negative
      */

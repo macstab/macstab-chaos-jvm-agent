@@ -46,13 +46,13 @@ import java.util.function.Supplier;
  *   <li>Controller is ACTIVE (started and not stopped).
  *   <li>Session ID matches (when the scenario is session-scoped).
  *   <li>{@link SelectorMatcher} agrees the invocation context matches the scenario's selector.
- *   <li>Activation window: current time is within {@code activateAfter} and {@code deactivateAt}.
+ *   <li>Activation window: the time since start is within {@code activeFor}.
  *   <li>Warm-up: {@code matchedCount} has reached {@code activateAfterMatches}.
- *   <li>Rate limit: the sliding-window rate limit has not been exceeded (guarded by {@code
- *       synchronized(this)}).
  *   <li>Probability: random draw passes the configured probability.
- *   <li>Max-applications CAS: {@code appliedCount} is below {@code maxApplications} and the CAS
- *       increment succeeds.
+ *   <li>Rate limit: the fixed-window rate limit has not been exceeded (guarded by {@code
+ *       synchronized(this)}).
+ *   <li>Max applications: a reservation fits under {@code maxApplications}; the dispatcher later
+ *       commits it when the contribution takes effect, or releases it.
  * </ol>
  *
  * <h2>Thread safety</h2>
@@ -283,6 +283,10 @@ final class ScenarioController {
       ChaosDispatcher.incrementDispatchDepth();
       try {
         startedAt = clock.instant();
+        // Anchor the rate-limit window at activation. It started at epoch 0 before, so the first
+        // window ended at an arbitrary epoch-aligned instant instead of one window after start.
+        rateWindowStartMillis = startedAt.toEpochMilli();
+        rateWindowPermits = 0;
       } finally {
         ChaosDispatcher.decrementDispatchDepth();
       }
@@ -398,20 +402,20 @@ final class ScenarioController {
    *       time since {@link #start()} must not exceed it. A failure transitions the state to {@code
    *       INACTIVE} with reason {@code "expired"}.
    *   <li><b>Warm-up</b>: {@code matchedCount} must exceed {@code activateAfterMatches}.
-   *   <li><b>Rate limit</b>: if a rate limit is configured, the number of permits issued in the
-   *       current sliding window must not exceed the limit (guarded by {@code synchronized(this)}).
    *   <li><b>Probability</b>: a random draw using {@link java.util.SplittableRandom} seeded with
-   *       the configured seed XOR-ed with the match count and scenario ID hash must be &le; the
+   *       the configured seed XOR-ed with the match count and scenario ID hash must be below the
    *       configured probability.
-   *   <li><b>Max applications CAS</b>: if {@code maxApplications} is set, a compare-and-swap loop
-   *       ensures {@code appliedCount} does not exceed the cap under concurrent access. A failure
-   *       transitions the state to {@code INACTIVE} with reason {@code "max applications reached"}.
+   *   <li><b>Rate limit</b>: if a rate limit is configured, the number of permits issued in the
+   *       current fixed window must not exceed the limit (guarded by {@code synchronized(this)}).
+   *   <li><b>Max applications</b>: if {@code maxApplications} is set, a reservation must fit under
+   *       the cap. Once committed applications reach the cap the state becomes {@code INACTIVE}
+   *       with reason {@code "max applications reached"}.
    * </ol>
    *
-   * <p>When all checks pass, {@code appliedCount} is incremented, a {@link
-   * com.macstab.chaos.jvm.api.ChaosEvent.Type#APPLIED} event is published, and a {@link
-   * ScenarioContribution} is returned carrying the effect, a sampled delay, and the gate timeout
-   * (if any).
+   * <p>When all checks pass, a {@link ScenarioContribution} is returned carrying the effect, a
+   * sampled delay, and the gate timeout (if any). {@code appliedCount} and the {@link
+   * com.macstab.chaos.jvm.api.ChaosEvent.Type#APPLIED} event follow only when the dispatcher
+   * commits the contribution.
    *
    * <p>This method does not throw checked exceptions; all internal errors are handled silently.
    *
@@ -725,6 +729,13 @@ final class ScenarioController {
       // resets on every call — the rate limit silently degrades to "unlimited". Clamp to a 1 ms
       // floor; anything finer has no hope of being observed through System.currentTimeMillis.
       final long windowMillis = Math.max(1L, rateLimit.window().toMillis());
+      if (nowMillis < rateWindowStartMillis) {
+        // The wall clock stepped back (NTP correction, manual change). Without re-anchoring,
+        // elapsed stays negative and the window never rolls over: the permits remain exhausted
+        // until the clock catches up with the old window start.
+        rateWindowStartMillis = nowMillis;
+        rateWindowPermits = 0;
+      }
       if (nowMillis - rateWindowStartMillis >= windowMillis) {
         // Advance by whole window multiples rather than snapping to nowMillis, so the window
         // boundary stays aligned to the original start time. Resetting to nowMillis on every
@@ -773,7 +784,10 @@ final class ScenarioController {
     } else {
       upperExclusive = max + 1L;
     }
-    return splittableRandom(matched).nextLong(min, upperExclusive);
+    // split(): an independent stream derived from the same seed. Drawing the delay from the very
+    // generator the probability draw used made the two correlated (a draw just below the
+    // probability threshold always came with a short delay).
+    return splittableRandom(matched).split().nextLong(min, upperExclusive);
   }
 
   /**
