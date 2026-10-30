@@ -584,6 +584,73 @@ public final class ChaosDispatcher {
   }
 
   /**
+   * Called from advice woven into a method a {@code MethodSelector} names, before its body runs.
+   *
+   * @param declaringType the class declaring the method
+   * @param methodName the method name
+   * @param descriptor the method's JVM descriptor, matched by {@code signaturePattern}
+   * @throws Throwable if a matching scenario injects an exception
+   */
+  public void beforeMethodEnter(
+      final Class<?> declaringType, final String methodName, final String descriptor)
+      throws Throwable {
+    final String className = declaringType.getName();
+    applyPreDecision(
+        evaluate(
+            new InvocationContext(
+                OperationType.METHOD_ENTER,
+                className,
+                className,
+                methodName,
+                false,
+                null,
+                null,
+                scopeContext.currentSessionId(),
+                InvocationContext.UNKNOWN,
+                null,
+                null,
+                InvocationContext.UNKNOWN,
+                descriptor)));
+  }
+
+  /**
+   * Called from advice woven into a method a {@code MethodSelector} names, after it returned
+   * normally.
+   *
+   * @param declaringType the class declaring the method
+   * @param methodName the method name
+   * @param descriptor the method's JVM descriptor; its return type guides return-value corruption
+   * @param actualValue the value the method returned, boxed; {@code null} for a void method
+   * @return the (possibly corrupted) value to return
+   * @throws Throwable if a matching scenario fails the call
+   */
+  public Object afterMethodExit(
+      final Class<?> declaringType,
+      final String methodName,
+      final String descriptor,
+      final Object actualValue)
+      throws Throwable {
+    final String className = declaringType.getName();
+    return afterMethodExit(
+        new InvocationContext(
+            OperationType.METHOD_EXIT,
+            className,
+            className,
+            methodName,
+            false,
+            null,
+            null,
+            scopeContext.currentSessionId(),
+            InvocationContext.UNKNOWN,
+            null,
+            null,
+            InvocationContext.UNKNOWN,
+            descriptor),
+        MethodDescriptors.returnType(declaringType, descriptor),
+        actualValue);
+  }
+
+  /**
    * Called from advice at method entry to apply any scenario targeting the given class and method.
    *
    * @param className the fully qualified name of the class containing the advised method
@@ -620,7 +687,7 @@ public final class ChaosDispatcher {
       final Class<?> returnType,
       final Object actualValue)
       throws Throwable {
-    final InvocationContext context =
+    return afterMethodExit(
         new InvocationContext(
             OperationType.METHOD_EXIT,
             className,
@@ -629,7 +696,14 @@ public final class ChaosDispatcher {
             false,
             null,
             null,
-            scopeContext.currentSessionId());
+            scopeContext.currentSessionId()),
+        returnType,
+        actualValue);
+  }
+
+  private Object afterMethodExit(
+      final InvocationContext context, final Class<?> returnType, final Object actualValue)
+      throws Throwable {
     final RuntimeDecision decision = evaluate(context);
     applyDelayAndGate(decision);
     if (decision.terminalAction() != null
@@ -1096,7 +1170,8 @@ public final class ChaosDispatcher {
             InvocationContext.UNKNOWN,
             null,
             inetSocketAddress == null ? null : inetSocketAddress.getAddress(),
-            inetSocketAddress == null ? InvocationContext.UNKNOWN : inetSocketAddress.getPort());
+            inetSocketAddress == null ? InvocationContext.UNKNOWN : inetSocketAddress.getPort(),
+            null);
     applyPreDecision(evaluate(context));
   }
 
@@ -1145,7 +1220,8 @@ public final class ChaosDispatcher {
             len,
             null,
             remoteAddress instanceof java.net.InetAddress address ? address : null,
-            remoteAddress == null ? InvocationContext.UNKNOWN : remotePort);
+            remoteAddress == null ? InvocationContext.UNKNOWN : remotePort,
+            null);
     applyPreDecision(evaluate(context));
   }
 
@@ -1174,7 +1250,8 @@ public final class ChaosDispatcher {
             len,
             null,
             remoteAddress instanceof java.net.InetAddress address ? address : null,
-            remoteAddress == null ? InvocationContext.UNKNOWN : remotePort);
+            remoteAddress == null ? InvocationContext.UNKNOWN : remotePort,
+            null);
     applyPreDecision(evaluate(context));
   }
 
@@ -1200,7 +1277,8 @@ public final class ChaosDispatcher {
             socket instanceof java.net.Socket s ? s.getInetAddress() : null,
             socket instanceof java.net.Socket s && s.getInetAddress() != null
                 ? s.getPort()
-                : InvocationContext.UNKNOWN);
+                : InvocationContext.UNKNOWN,
+            null);
     applyPreDecision(evaluate(context));
   }
 
@@ -1673,7 +1751,8 @@ public final class ChaosDispatcher {
             byteCount,
             path,
             null,
-            InvocationContext.UNKNOWN);
+            InvocationContext.UNKNOWN,
+            null);
     applyPreDecision(evaluate(context));
   }
 

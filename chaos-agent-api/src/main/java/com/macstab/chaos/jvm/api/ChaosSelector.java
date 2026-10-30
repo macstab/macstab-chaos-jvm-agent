@@ -655,15 +655,23 @@ public sealed interface ChaosSelector
    * ChaosEffect.ReturnValueCorruptionEffect} and {@link OperationType#METHOD_EXIT} it corrupts
    * return values on exit.
    *
-   * <p><b>Safety constraint:</b> at least one of classPattern or methodNamePattern must be non-ANY.
-   * A fully wildcard selector would instrument every method in the JVM.
+   * <p><b>Automatic weaving.</b> With the agent attached, activating a scenario with this selector
+   * weaves entry and exit hooks into every concrete method the patterns name, in classes already
+   * loaded and in classes loaded later; removing the scenario (closing its handle, or replacing it)
+   * removes them. Constructors, static initialisers, abstract, native, synthetic and bridge methods
+   * are never woven, nor are the agent's own classes. Without the agent (a plain {@code
+   * ChaosRuntime} in a unit test) the events must come from the application's own interception
+   * through {@code ChaosRuntime.beforeMethodEnter} / {@code afterMethodExit}.
    *
-   * <p>signaturePattern is reserved: the runtime does not currently propagate the JVM method
-   * descriptor through to the matcher, so a non-null value here would silently never match any
-   * invocation. To prevent scenarios from being silently inert, the canonical constructor rejects
-   * any non-null {@code signaturePattern} other than {@link NamePattern#any()}. Support for
-   * descriptor-based filtering is tracked as a follow-up feature — construct with {@code null} or
-   * {@link NamePattern#any()} until it ships.
+   * <p><b>Safety constraint:</b> at least one of classPattern or methodNamePattern must be non-ANY.
+   * A fully wildcard selector would instrument every method in the JVM. Prefer {@link
+   * NamePattern#exact} or {@link NamePattern#prefix} class patterns: every class loaded while the
+   * scenario is active is tested against the class pattern.
+   *
+   * <p>{@code signaturePattern} is matched against the method's JVM descriptor, e.g. {@code
+   * (Ljava/lang/String;I)V} for {@code void m(String, int)}, so it can pick one overload: {@code
+   * NamePattern.prefix("(Ljava/lang/String;)")}. Events raised through the manual hooks carry no
+   * descriptor and never match a non-ANY signature pattern.
    *
    * <p><b>Valid operations:</b> {@link OperationType#METHOD_ENTER}, {@link
    * OperationType#METHOD_EXIT}.
@@ -671,8 +679,7 @@ public sealed interface ChaosSelector
    * @param operations operation types this selector matches
    * @param classPattern pattern matched against the declaring class name
    * @param methodNamePattern pattern matched against the method name
-   * @param signaturePattern reserved; must be {@code null} or {@link NamePattern#any()} until
-   *     descriptor-based filtering ships
+   * @param signaturePattern pattern matched against the JVM method descriptor; {@code null} for any
    */
   record MethodSelector(
       Set<OperationType> operations,
@@ -694,15 +701,7 @@ public sealed interface ChaosSelector
             "MethodSelector requires at least one non-ANY pattern to prevent "
                 + "accidental global method instrumentation");
       }
-      if (signaturePattern != null && signaturePattern.mode() != NamePattern.MatchMode.ANY) {
-        // A non-ANY signature pattern would silently never match: the InvocationContext fed to
-        // SelectorMatcher does not carry the JVM method descriptor for METHOD_ENTER/METHOD_EXIT
-        // advice, so the matcher would dereference a null subjectClassName and fail to match
-        // every call. Fail loud at plan-build time rather than ship a zero-activation scenario.
-        throw new IllegalArgumentException(
-            "MethodSelector.signaturePattern is not yet implemented in the runtime; use "
-                + "NamePattern.any() or null. Filter by classPattern/methodNamePattern for now.");
-      }
+      signaturePattern = signaturePattern == null ? NamePattern.any() : signaturePattern;
     }
   }
 

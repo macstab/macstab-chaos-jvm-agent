@@ -1,6 +1,7 @@
 package com.macstab.chaos.jvm.bootstrap;
 
 import com.macstab.chaos.jvm.api.ActivationPolicy;
+import com.macstab.chaos.jvm.api.ChaosActivationHandle;
 import com.macstab.chaos.jvm.api.ChaosControlPlane;
 import com.macstab.chaos.jvm.api.ChaosDiagnostics;
 import com.macstab.chaos.jvm.api.ChaosEffect;
@@ -8,6 +9,7 @@ import com.macstab.chaos.jvm.api.ChaosHttpSuppressException;
 import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.ChaosSelector;
 import com.macstab.chaos.jvm.api.ChaosSession;
+import com.macstab.chaos.jvm.api.NamePattern;
 import com.macstab.chaos.jvm.api.OperationType;
 import com.sun.net.httpserver.HttpServer;
 import com.zaxxer.hikari.HikariConfig;
@@ -85,6 +87,7 @@ public final class DefectProbeMain {
       case "bridge-jars-on-disk" -> bridgeJarsOnDisk();
       case "socket-write-sizes" -> socketWriteSizes();
       case "file-writes-by-path" -> fileWritesByPath();
+      case "method-weaving" -> methodWeaving();
       case "woven-groups" -> printWovenGroups();
       case "woven-groups-after-thread-local" -> wovenGroupsAfterThreadLocal();
       case "virtual-thread-start" -> Thread.ofVirtual().start(() -> {}).join();
@@ -402,6 +405,60 @@ public final class DefectProbeMain {
       accepted.getOutputStream().flush();
       System.out.println("byte=" + client.getInputStream().read());
     }
+  }
+
+  /**
+   * Activates method scenarios at runtime against {@link com.example.chaostarget.Greeter}, calls
+   * it, closes them and calls it again.
+   */
+  private static void methodWeaving() {
+    final com.example.chaostarget.Greeter greeter = new com.example.chaostarget.Greeter();
+    System.out.println("before=" + greeter.greet("a") + "|" + greeter.count());
+    final ChaosControlPlane plane = ChaosPlatform.current();
+    final ChaosActivationHandle inject =
+        plane.activate(
+            ChaosScenario.builder("inject-greet-one-arg")
+                .scope(ChaosScenario.ScenarioScope.JVM)
+                .selector(
+                    new ChaosSelector.MethodSelector(
+                        Set.of(OperationType.METHOD_ENTER),
+                        NamePattern.exact("com.example.chaostarget.Greeter"),
+                        NamePattern.exact("greet"),
+                        NamePattern.prefix("(Ljava/lang/String;)")))
+                .effect(
+                    new ChaosEffect.ExceptionInjectionEffect(
+                        "java.lang.IllegalStateException", "injected", false))
+                .activationPolicy(ActivationPolicy.always())
+                .build());
+    final ChaosActivationHandle corrupt =
+        plane.activate(
+            ChaosScenario.builder("zero-count")
+                .scope(ChaosScenario.ScenarioScope.JVM)
+                .selector(
+                    new ChaosSelector.MethodSelector(
+                        Set.of(OperationType.METHOD_EXIT),
+                        NamePattern.prefix("com.example.chaostarget."),
+                        NamePattern.exact("count"),
+                        null))
+                .effect(ChaosEffect.corruptReturnValue(ChaosEffect.ReturnValueStrategy.ZERO))
+                .activationPolicy(ActivationPolicy.always())
+                .build());
+    try {
+      greeter.greet("a");
+      System.out.println("during.greet=returned");
+    } catch (final IllegalStateException injected) {
+      System.out.println("during.greet=" + injected.getMessage());
+    }
+    System.out.println("during.overload=" + greeter.greet("a", 2));
+    System.out.println("during.count=" + greeter.count());
+    System.out.println("during.lateCount=" + new com.example.chaostarget.LateCounter().count());
+    System.out.println(
+        "during.woven=" + plane.diagnostics().snapshot().runtimeDetails().get("wovenHookGroups"));
+    inject.close();
+    corrupt.close();
+    System.out.println("after=" + greeter.greet("a") + "|" + greeter.count());
+    System.out.println(
+        "after.woven=" + plane.diagnostics().snapshot().runtimeDetails().get("wovenHookGroups"));
   }
 
   /** Writes 10 bytes and then 2000 bytes over a loopback connection. */

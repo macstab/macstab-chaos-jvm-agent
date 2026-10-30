@@ -638,6 +638,31 @@ class DefectRegressionIntegrationTest {
   }
 
   @Nested
+  @DisplayName("method selector weaving")
+  class MethodSelectorWeaving {
+
+    @Test
+    @DisplayName("activating weaves the named methods, closing restores them")
+    void weavesAndRestores() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.runWithoutPlan(DefectProbeMain.class, "method-weaving");
+
+      assertThat(result.value("before")).isEqualTo("hello a|42");
+      assertThat(result.value("during.greet")).isEqualTo("injected");
+      assertThat(result.value("during.overload"))
+          .as("the signature pattern leaves the other overload alone")
+          .isEqualTo("hello a hello a");
+      assertThat(result.value("during.count")).isEqualTo("0");
+      assertThat(result.value("during.lateCount"))
+          .as("a class loaded while the scenario is active is woven at load time")
+          .isEqualTo("0");
+      assertThat(result.value("during.woven")).contains("METHODS");
+      assertThat(result.value("after")).isEqualTo("hello a|42");
+      assertThat(result.value("after.woven")).doesNotContain("METHODS");
+    }
+  }
+
+  @Nested
   @DisplayName("on-demand weaving")
   class OnDemandWeaving {
 

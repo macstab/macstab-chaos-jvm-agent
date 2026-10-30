@@ -315,6 +315,41 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
+   * Delegates to {@link ChaosDispatcher#beforeMethodEnter(Class, String, String)}: the entry of a
+   * method woven for a {@code MethodSelector}.
+   *
+   * @param declaringType the class declaring the method
+   * @param methodName the method name
+   * @param descriptor the method's JVM descriptor
+   * @throws Throwable if a matching scenario injects an exception
+   */
+  public void beforeMethodEnter(
+      final Class<?> declaringType, final String methodName, final String descriptor)
+      throws Throwable {
+    dispatcher.beforeMethodEnter(declaringType, methodName, descriptor);
+  }
+
+  /**
+   * Delegates to {@link ChaosDispatcher#afterMethodExit(Class, String, String, Object)}: the normal
+   * exit of a method woven for a {@code MethodSelector}.
+   *
+   * @param declaringType the class declaring the method
+   * @param methodName the method name
+   * @param descriptor the method's JVM descriptor
+   * @param actualValue the returned value, boxed; {@code null} for a void method
+   * @return the (possibly corrupted) value to return
+   * @throws Throwable if a matching scenario fails the call
+   */
+  public Object afterMethodExit(
+      final Class<?> declaringType,
+      final String methodName,
+      final String descriptor,
+      final Object actualValue)
+      throws Throwable {
+    return dispatcher.afterMethodExit(declaringType, methodName, descriptor, actualValue);
+  }
+
+  /**
    * Public hook for {@link com.macstab.chaos.jvm.api.OperationType#METHOD_EXIT}. Call this from the
    * same interception machinery as {@link #beforeMethodEnter(String, String)} after the intercepted
    * method body returns; pass the original return value and receive the (possibly-corrupted) value

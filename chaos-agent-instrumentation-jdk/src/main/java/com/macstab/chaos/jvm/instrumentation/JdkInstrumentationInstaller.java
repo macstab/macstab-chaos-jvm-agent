@@ -1,5 +1,6 @@
 package com.macstab.chaos.jvm.instrumentation;
 
+import com.macstab.chaos.jvm.api.ChaosSelector;
 import com.macstab.chaos.jvm.api.OperationType;
 import com.macstab.chaos.jvm.core.ChaosRuntime;
 import com.macstab.chaos.jvm.core.HookDemand;
@@ -130,7 +131,16 @@ public final class JdkInstrumentationInstaller {
               for (final HookGroup group : wovenGroups()) {
                 names.add(group.name());
               }
+              if (MethodWeaver.active()) {
+                names.add("METHODS");
+              }
               return names;
+            }
+
+            @Override
+            public void methods(final Set<ChaosSelector.MethodSelector> selectors) {
+              MethodWeaver.weave(
+                  instrumentation, selectors, JdkInstrumentationInstaller::buildBaseAgentBuilder);
             }
           });
       if (eager) {
@@ -436,6 +446,7 @@ public final class JdkInstrumentationInstaller {
    */
   public static boolean uninstall(final Instrumentation instrumentation) {
     final boolean delegateCleared = clearOwnDelegate();
+    MethodWeaver.reset(instrumentation);
     synchronized (WOVEN_GROUPS) {
       if (WOVEN_GROUPS.isEmpty()) {
         return delegateCleared;
@@ -891,6 +902,17 @@ public final class JdkInstrumentationInstaller {
             delegateInterface,
             "beforeFileIo",
             MethodType.methodType(void.class, String.class, Object.class, String.class, int.class));
+    methodHandles[BootstrapDispatcher.BEFORE_METHOD_ENTER] =
+        lookup.findVirtual(
+            delegateInterface,
+            "beforeMethodEnter",
+            MethodType.methodType(void.class, Class.class, String.class, String.class));
+    methodHandles[BootstrapDispatcher.AFTER_METHOD_EXIT] =
+        lookup.findVirtual(
+            delegateInterface,
+            "afterMethodExit",
+            MethodType.methodType(
+                Object.class, Class.class, String.class, String.class, Object.class));
   }
 
   @FunctionalInterface

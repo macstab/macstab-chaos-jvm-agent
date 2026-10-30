@@ -9,6 +9,7 @@ import com.macstab.chaos.jvm.api.ChaosEventListener;
 import com.macstab.chaos.jvm.api.ChaosMetricsSink;
 import com.macstab.chaos.jvm.api.ChaosPlan;
 import com.macstab.chaos.jvm.api.ChaosScenario;
+import com.macstab.chaos.jvm.api.ChaosSelector;
 import com.macstab.chaos.jvm.api.ChaosSession;
 import com.macstab.chaos.jvm.api.ChaosUnsupportedFeatureException;
 import com.macstab.chaos.jvm.api.OperationType;
@@ -16,6 +17,7 @@ import java.lang.instrument.Instrumentation;
 import java.time.Clock;
 import java.util.ArrayList;
 import java.util.EnumSet;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -63,6 +65,9 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
     this.scopeContext = new ScopeContext();
     this.observabilityBus = new ObservabilityBus(metricsSink);
     this.registry = new ScenarioRegistry(clock, this::runtimeDetails);
+    // A removed method-selector scenario no longer needs its methods woven. Registration weaves
+    // beforehand (see registerScenario), so this only has work to do after a removal.
+    registry.onMethodSelectorsChanged(this::weaveMethods);
   }
 
   @Override
@@ -228,6 +233,13 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
       validated = true;
       try {
         hookDemand.require(SelectorOperations.of(scenario.selector()));
+        if (scenario.selector() instanceof ChaosSelector.MethodSelector methodSelector) {
+          // Weave before registering, so a weaving failure leaves nothing registered.
+          final Set<ChaosSelector.MethodSelector> selectors =
+              new HashSet<>(registry.methodSelectors());
+          selectors.add(methodSelector);
+          hookDemand.methods(Set.copyOf(selectors));
+        }
       } catch (final RuntimeException weavingFailure) {
         weavingFailed = true;
         throw weavingFailure;
@@ -279,6 +291,17 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
               : ChaosDiagnostics.FailureCategory.INVALID_CONFIGURATION,
           runtimeException.getMessage());
       throw runtimeException;
+    }
+  }
+
+  private void weaveMethods(final Set<ChaosSelector.MethodSelector> selectors) {
+    try {
+      hookDemand.methods(selectors);
+    } catch (final RuntimeException failure) {
+      // Unweaving after a removal: the scenario is already gone, so leftover advice only costs an
+      // evaluation that matches nothing. Report it and carry on.
+      java.util.logging.Logger.getLogger("com.macstab.chaos.jvm")
+          .warning(() -> "chaos-agent: could not update method hooks: " + failure);
     }
   }
 

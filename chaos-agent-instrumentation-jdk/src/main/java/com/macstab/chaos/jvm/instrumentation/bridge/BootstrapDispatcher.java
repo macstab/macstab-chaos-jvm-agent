@@ -404,8 +404,14 @@ public final class BootstrapDispatcher {
    */
   public static final int ADJUST_LOCAL_DATE_TIME_NOW_IN_ZONE = 56;
 
+  /** Handle index for {@link #beforeMethodEnter(Class, String, String)}. */
+  public static final int BEFORE_METHOD_ENTER = 57;
+
+  /** Handle index for {@link #afterMethodExit(Class, String, String, Object)}. */
+  public static final int AFTER_METHOD_EXIT = 58;
+
   /** Total number of method-handle slots; equals the highest index plus one. */
-  public static final int HANDLE_COUNT = 57;
+  public static final int HANDLE_COUNT = 59;
 
   /** Utility class; do not instantiate. */
   private BootstrapDispatcher() {}
@@ -2107,6 +2113,70 @@ public final class BootstrapDispatcher {
       }
     } catch (final Throwable throwable) {
       sneakyThrow(throwable);
+    } finally {
+      depth[0]--;
+    }
+  }
+
+  /**
+   * Called on entry to a method woven for a {@code MethodSelector}.
+   *
+   * @param declaringType the class declaring the method
+   * @param methodName the method name
+   * @param descriptor the method's JVM descriptor
+   * @throws Throwable if an active scenario injects an exception
+   */
+  public static void beforeMethodEnter(
+      final Class<?> declaringType, final String methodName, final String descriptor)
+      throws Throwable {
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      if (d != null && h != null) {
+        h[BEFORE_METHOD_ENTER].invoke(d, declaringType, methodName, descriptor);
+      }
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+    } finally {
+      depth[0]--;
+    }
+  }
+
+  /**
+   * Called on the normal exit of a method woven for a {@code MethodSelector}.
+   *
+   * @param declaringType the class declaring the method
+   * @param methodName the method name
+   * @param descriptor the method's JVM descriptor
+   * @param value the returned value, boxed; {@code null} for a void method
+   * @return the (possibly corrupted) value to return; {@code value} as the fallback
+   * @throws Throwable if an active scenario fails the call
+   */
+  public static Object afterMethodExit(
+      final Class<?> declaringType,
+      final String methodName,
+      final String descriptor,
+      final Object value)
+      throws Throwable {
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return value;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      return (d == null || h == null)
+          ? value
+          : h[AFTER_METHOD_EXIT].invoke(d, declaringType, methodName, descriptor, value);
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+      return value;
     } finally {
       depth[0]--;
     }

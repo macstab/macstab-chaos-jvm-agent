@@ -438,21 +438,19 @@ The `OperationType` enum defines all intercepted JDK operations. Full list:
 | DNS / TLS                       | `DNS_RESOLVE`, `SSL_HANDSHAKE`                                                                                                         |
 | File I/O                        | `FILE_IO_READ`, `FILE_IO_WRITE`                                                                                                        |
 | Shutdown                        | `SHUTDOWN_HOOK_REGISTER`                                                                                                               |
-| Method (manual hook — see §9.1) | `METHOD_ENTER`, `METHOD_EXIT`                                                                                                          |
+| Method (woven per scenario)     | `METHOD_ENTER`, `METHOD_EXIT`                                                                                                          |
 | Stressor                        | `LIFECYCLE` (internal; targets stressor start/stop)                                                                                    |
 
 ## 9.1 Manual hook operation types
 
 Most operation types in §9 are **auto-wired**: the agent weaves ByteBuddy advice into a fixed JDK call site when a scenario first needs it (the call site's hook group is retransformed on that scenario's activation; `instrumentation=eager` weaves everything at start), the advice fires automatically whenever application code reaches that site, and zero application changes are needed.
 
-Four operation types are **manual-hook only** — fully functional, fully tested, but the agent cannot trigger them automatically and the application must route the event through the agent's public API:
+Two operation types are **manual-hook only** — fully functional, fully tested, but the agent cannot trigger them automatically and the application must route the event through the agent's public API. (`METHOD_ENTER` / `METHOD_EXIT` are woven automatically for the methods a `MethodSelector` names; see "Method entry / exit" below.)
 
 | OperationType         | Why it is not auto-wired                                                                                                                                                                                                                            | Public hook                                                      |
 |-----------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------|
 | `SYSTEM_CLOCK_MILLIS` | `System.currentTimeMillis()` is `native @IntrinsicCandidate`; HotSpot JIT replaces the call with a direct hardware-clock instruction (`RDTSC` / `MRS CNTVCT_EL0`) that bypasses any bytecode wrapper. Hard JVM limitation for `-javaagent:` agents. | `chaosRuntime.adjustClockMillis(real)`                           |
 | `SYSTEM_CLOCK_NANOS`  | Same as above for `System.nanoTime()`.                                                                                                                                                                                                              | `chaosRuntime.adjustClockNanos(real)`                            |
-| `METHOD_ENTER`        | The agent has no engine that takes a `MethodSelector` and dynamically rewrites every matching class on activation. The runtime evaluation is built; the dynamic instrumentation pass is not.                                                        | `chaosRuntime.beforeMethodEnter(class, method)`                  |
-| `METHOD_EXIT`         | Same as above.                                                                                                                                                                                                                                      | `chaosRuntime.afterMethodExit(class, method, returnType, value)` |
 
 Selector matching, effect application, activation policy (probability, schedules, max activations), `ChaosDiagnostics`, and `ChaosEventListener` all behave identically to the auto-wired operation types — once the hook is invoked.
 
@@ -474,9 +472,11 @@ public final class TimeProvider {
 
 Then any `JvmRuntimeSelector` scenario with `SYSTEM_CLOCK_MILLIS` and a `ClockSkewEffect` skews every `timeProvider.currentTimeMillis()` reading. For zero-config skew of plain `Instant.now()` / `LocalDateTime.now()` / `ZonedDateTime.now()` / `new Date()` call sites, use the auto-wired operations instead.
 
-### Method entry / exit via Spring AOP, AspectJ, or interceptor
+### Method entry / exit
 
-The agent does not auto-rewrite arbitrary user methods. Wire entry / exit hooks from any interception machinery the application already runs — Spring AOP `@Around`, AspectJ, Micronaut / Quarkus interceptors, an annotation processor, or your own ByteBuddy advice:
+With the agent attached, activating a `MethodSelector` scenario weaves entry and exit hooks into the methods it names, and removing the scenario restores them (see `docs/configuration-reference.md`, `method` selector). `signaturePattern` selects overloads by JVM descriptor.
+
+Without the agent — a `ChaosRuntime` in a plain unit test — wire the events from interception the application already runs (Spring AOP `@Around`, AspectJ, Micronaut / Quarkus interceptors):
 
 ```java
 @Around("@annotation(com.example.Audited)")

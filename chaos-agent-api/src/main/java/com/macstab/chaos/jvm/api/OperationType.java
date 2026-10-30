@@ -204,16 +204,14 @@ public enum OperationType {
   // ── Method-level interception ───────────────────────────────────────────────
 
   /**
-   * Fires when application-side instrumentation routes a method-entry event through the agent's
-   * public hook. Combined with {@link ChaosEffect.ExceptionInjectionEffect} this injects any
-   * exception into any method without modifying its bytecode at the source level.
+   * Fires on entry to a method a {@link ChaosSelector.MethodSelector} names. Combined with {@link
+   * ChaosEffect.ExceptionInjectionEffect} this injects any exception into any method without
+   * modifying its source.
    *
-   * <p><b>Manual hook required.</b> The agent does <i>not</i> auto-instrument arbitrary user
-   * methods — there is no engine in this build that takes a {@link ChaosSelector.MethodSelector}
-   * and dynamically rewrites every matching class on activation. The method-entry event must be
-   * raised by interception machinery the application already runs (Spring AOP, AspectJ, Micronaut /
-   * Quarkus interceptors, a custom annotation processor, or your own ByteBuddy / ASM advice).
-   * Inside that interceptor:
+   * <p>With the agent attached, the methods are woven automatically when the scenario is activated
+   * (see {@link ChaosSelector.MethodSelector}). Without the agent — a {@code ChaosRuntime} in a
+   * plain unit test — the event can be raised by interception the application already runs (Spring
+   * AOP, AspectJ, Micronaut / Quarkus interceptors). Inside that interceptor:
    *
    * <pre>{@code
    * @Around("@annotation(com.example.Audited)")
@@ -233,12 +231,12 @@ public enum OperationType {
   METHOD_ENTER,
 
   /**
-   * Fires when application-side instrumentation routes a method-exit event through the agent's
-   * public hook. Combined with {@link ChaosEffect.ReturnValueCorruptionEffect} this replaces the
-   * return value with a boundary, null, zero, or empty value.
+   * Fires on the normal exit of a method a {@link ChaosSelector.MethodSelector} names. Combined
+   * with {@link ChaosEffect.ReturnValueCorruptionEffect} this replaces the return value with a
+   * boundary, null, zero, or empty value.
    *
-   * <p><b>Manual hook required.</b> Same constraint as {@link #METHOD_ENTER}: no automatic dynamic
-   * per-class instrumentation is built. Wire from the same interceptor:
+   * <p>Woven automatically like {@link #METHOD_ENTER}; without the agent, raise it from the same
+   * interceptor:
    *
    * <pre>{@code
    * Object result = pjp.proceed();

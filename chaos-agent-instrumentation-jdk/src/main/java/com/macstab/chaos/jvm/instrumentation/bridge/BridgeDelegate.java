@@ -651,4 +651,28 @@ public interface BridgeDelegate {
    * @throws Throwable if the delegate throws
    */
   void beforeFileIo(String operation, Object stream, String path, int byteCount) throws Throwable;
+
+  /**
+   * Called on entry to a method woven for a {@code MethodSelector}.
+   *
+   * @param declaringType the class declaring the method
+   * @param methodName the method name
+   * @param descriptor the method's JVM descriptor
+   * @throws Throwable if a scenario injects an exception
+   */
+  void beforeMethodEnter(Class<?> declaringType, String methodName, String descriptor)
+      throws Throwable;
+
+  /**
+   * Called on the normal exit of a method woven for a {@code MethodSelector}.
+   *
+   * @param declaringType the class declaring the method
+   * @param methodName the method name
+   * @param descriptor the method's JVM descriptor
+   * @param value the returned value, boxed; {@code null} for a void method
+   * @return the (possibly corrupted) value to return
+   * @throws Throwable if a scenario fails the call
+   */
+  Object afterMethodExit(Class<?> declaringType, String methodName, String descriptor, Object value)
+      throws Throwable;
 }

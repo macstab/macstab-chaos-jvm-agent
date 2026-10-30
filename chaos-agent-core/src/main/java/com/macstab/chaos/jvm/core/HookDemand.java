@@ -1,5 +1,6 @@
 package com.macstab.chaos.jvm.core;
 
+import com.macstab.chaos.jvm.api.ChaosSelector;
 import com.macstab.chaos.jvm.api.OperationType;
 import java.util.Set;
 
@@ -35,4 +36,16 @@ public interface HookDemand {
   default Set<String> woven() {
     return Set.of();
   }
+
+  /**
+   * Weaves method entry and exit hooks into exactly the methods {@code selectors} name, removing
+   * them from methods no selector names any more. Called with the method selectors of every
+   * registered scenario: before a scenario with a {@link ChaosSelector.MethodSelector} is
+   * registered, and after a scenario is removed. Implementations must be idempotent: a call with
+   * the set already woven does nothing.
+   *
+   * @param selectors the method selectors to weave; empty to remove every method hook
+   * @throws IllegalStateException if the hooks cannot be woven; the activation fails
+   */
+  default void methods(final Set<ChaosSelector.MethodSelector> selectors) {}
 }

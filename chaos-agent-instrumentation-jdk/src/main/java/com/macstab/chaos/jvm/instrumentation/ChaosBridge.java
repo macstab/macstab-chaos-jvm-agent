@@ -777,4 +777,39 @@ final class ChaosBridge implements BridgeDelegate {
       throws Throwable {
     runtime.beforeFileIo(operation, stream, path, byteCount);
   }
+
+  /**
+   * Invoked on entry to a method woven for a {@code MethodSelector}.
+   *
+   * @param declaringType the class declaring the method
+   * @param methodName the method name
+   * @param descriptor the method's JVM descriptor
+   * @throws Throwable if a scenario injects an exception
+   */
+  @Override
+  public void beforeMethodEnter(
+      final Class<?> declaringType, final String methodName, final String descriptor)
+      throws Throwable {
+    runtime.beforeMethodEnter(declaringType, methodName, descriptor);
+  }
+
+  /**
+   * Invoked on the normal exit of a method woven for a {@code MethodSelector}.
+   *
+   * @param declaringType the class declaring the method
+   * @param methodName the method name
+   * @param descriptor the method's JVM descriptor
+   * @param value the returned value, boxed; {@code null} for a void method
+   * @return the (possibly corrupted) value to return
+   * @throws Throwable if a scenario fails the call
+   */
+  @Override
+  public Object afterMethodExit(
+      final Class<?> declaringType,
+      final String methodName,
+      final String descriptor,
+      final Object value)
+      throws Throwable {
+    return runtime.afterMethodExit(declaringType, methodName, descriptor, value);
+  }
 }

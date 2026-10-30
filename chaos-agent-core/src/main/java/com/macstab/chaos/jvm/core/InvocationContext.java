@@ -38,6 +38,8 @@ import java.net.InetAddress;
  * @param remoteAddress the peer address of a socket operation, or {@code null} when unknown or
  *     unresolved
  * @param remotePort the peer port of a socket operation, or {@code -1} when unknown
+ * @param signature the JVM descriptor of a woven method (e.g. {@code (Ljava/lang/String;)V}), or
+ *     {@code null} when the call carries none
  */
 record InvocationContext(
     OperationType operationType,
@@ -51,7 +53,8 @@ record InvocationContext(
     long byteCount,
     String path,
     InetAddress remoteAddress,
-    int remotePort) {
+    int remotePort,
+    String signature) {
 
   /** {@code byteCount} / {@code remotePort} of an operation that has none. */
   static final int UNKNOWN = -1;
@@ -89,6 +92,7 @@ record InvocationContext(
         UNKNOWN,
         null,
         null,
-        UNKNOWN);
+        UNKNOWN,
+        null);
   }
 }

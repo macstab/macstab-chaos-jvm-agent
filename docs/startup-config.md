@@ -169,7 +169,7 @@ Malformed base64 input throws `ConfigLoadException` with category `base64`.
   "operations": ["METHOD_ENTER"],
   "classPattern": "com.example.MyService",
   "methodNamePattern": "processOrder",
-  "signaturePattern": null }                  // optional; matches parameter type string
+  "signaturePattern": null }                  // optional; matches the JVM descriptor, e.g. "(Ljava/lang/String;)V"
 
 { "type": "jvmRuntime",
   "operations": ["SYSTEM_CLOCK_MILLIS", "SYSTEM_CLOCK_NANOS"] }

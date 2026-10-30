@@ -348,7 +348,7 @@ Not diagrammed — tabular representation is clearer. See [Section 13.4 — Comp
 
 **Safety constraint on `MethodSelector`:** at least one of `classPattern` or `methodNamePattern` must be non-ANY. A fully wildcard `MethodSelector` would instrument every method in the JVM; the constructor rejects this with `IllegalArgumentException`.
 
-**Note on `signaturePattern`:** The `MethodSelector.signaturePattern` field exists in the record but the runtime does not currently propagate the JVM method descriptor. Non-null non-ANY `signaturePattern` values throw at construction. Use `null` or `NamePattern.any()` until descriptor filtering ships.
+**Note on `signaturePattern`:** matched against the method's JVM descriptor, e.g. `(Ljava/lang/String;I)V` for `void m(String, int)`, so one overload can be selected. Events raised through the manual hooks (`ChaosRuntime.beforeMethodEnter(String, String)`) carry no descriptor and never match a non-ANY signature pattern.
 
 ---
 
@@ -938,16 +938,18 @@ All selectors use `"type"` as the JSON discriminator.
 **Operations:** `METHOD_ENTER`, `METHOD_EXIT`  
 **Purpose:** Match entry to or exit from any method in any class.
 
-> **⚠️ Manual wiring required.** Unlike the other selectors in this reference, the agent **does not auto-instrument arbitrary user methods** for `METHOD_ENTER` / `METHOD_EXIT`. There is no engine in this build that takes a `MethodSelector` and dynamically rewrites every matching class on activation. The selector is matched against an `InvocationContext` raised by application-side interception machinery — Spring AOP, AspectJ, Micronaut / Quarkus interceptors, an annotation processor, or your own bytecode advice — that calls the agent's public hook:
->
-> ```java
-> // inside your @Around aspect / interceptor
-> chaosRuntime.beforeMethodEnter(className, methodName);          // METHOD_ENTER
-> Object out = chaosRuntime.afterMethodExit(
->     className, methodName, returnType, returnValue);            // METHOD_EXIT
-> ```
->
-> Once the hook is wired, the matcher, effect, activation policy, and JSON form below all behave like every other selector. If you need zero-config interception of fixed JDK call sites, use the dedicated selectors (`network`, `nio`, `httpClient`, `jdbc`, `jvmRuntime`, …) instead.
+**Weaving.** With the agent attached, activating a `method` scenario weaves entry and exit hooks into every concrete method the patterns name — in classes already loaded (retransformed) and in classes loaded later — and removing the scenario (closing its handle, or replacing it) restores the original bytecode. One transformer covers the union of all registered method selectors, so a method named by two scenarios is woven once. Never woven: constructors, static initialisers, abstract, native, synthetic and bridge methods, annotation types, and the agent's own classes. `diagnostics().snapshot().runtimeDetails().get("wovenHookGroups")` contains `METHODS` while method hooks are woven.
+
+Every class loaded while a `method` scenario is active is tested against its class pattern, so prefer `EXACT` or `PREFIX` class patterns over broad globs.
+
+Without the agent (a plain `ChaosRuntime` in a unit test), raise the events from interception the application already runs:
+
+```java
+// inside your @Around aspect / interceptor
+chaosRuntime.beforeMethodEnter(className, methodName);          // METHOD_ENTER
+Object out = chaosRuntime.afterMethodExit(
+    className, methodName, returnType, returnValue);            // METHOD_EXIT
+```
 
 **Fields:**
 
@@ -956,7 +958,7 @@ All selectors use `"type"` as the JSON discriminator.
 | `operations`        | Set\<OperationType\> | required  | `METHOD_ENTER` and/or `METHOD_EXIT`                                        |
 | `classPattern`      | NamePattern          | `ANY`     | Matched against fully-qualified declaring class name (binary form, dots)   |
 | `methodNamePattern` | NamePattern          | `ANY`     | Matched against method name                                                |
-| `signaturePattern`  | NamePattern          | `ANY`     | **Reserved; must be `ANY` or null**. Non-ANY values throw at construction. |
+| `signaturePattern`  | NamePattern          | `ANY`     | Matched against the JVM method descriptor, e.g. `(Ljava/lang/String;)V`   |
 
 **Safety constraint:** both `classPattern` and `methodNamePattern` cannot both be `ANY` simultaneously.
 
@@ -1911,7 +1913,6 @@ Constraints: listeners are called synchronously on the intercepting thread. Must
 
 ## 14.5 Compatibility Notes
 
-- `MethodSelector.signaturePattern` is reserved. Non-ANY values throw at construction. This restriction will be removed when descriptor-based method filtering ships.
 - `VIRTUAL_THREAD_START` and `VirtualThreadCarrierPinningEffect` require JDK 21+. The agent probes availability at startup and raises `ChaosUnsupportedFeatureException` on earlier runtimes.
 - An activated `ChaosPlan` object is immutable; to change scenarios programmatically, stop or close the handle and activate again. For file-based startup plans, hot reload is available: set the agent arg `configWatchInterval=<ms>` or `MACSTAB_CHAOS_WATCH_INTERVAL` (off by default, minimum 50 ms). Each reload is atomic — removed and changed scenarios are stopped, the new set is activated, and on any failure the previous versions are restored. Parse errors report line, column, kind and JSON path, never input values.
 

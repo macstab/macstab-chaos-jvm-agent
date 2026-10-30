@@ -2,6 +2,7 @@ package com.macstab.chaos.jvm.core;
 
 import com.macstab.chaos.jvm.api.ChaosActivationException;
 import com.macstab.chaos.jvm.api.ChaosDiagnostics;
+import com.macstab.chaos.jvm.api.ChaosSelector;
 import com.macstab.chaos.jvm.api.OperationType;
 import java.time.Clock;
 import java.time.Instant;
@@ -9,11 +10,14 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.EnumMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 /**
@@ -64,6 +68,9 @@ final class ScenarioRegistry implements ChaosDiagnostics {
   private final Object indexLock = new Object();
   private volatile Map<OperationType, ScenarioController[]> index =
       new EnumMap<>(OperationType.class);
+  private volatile Set<ChaosSelector.MethodSelector> methodSelectors = Set.of();
+  private volatile Consumer<Set<ChaosSelector.MethodSelector>> methodSelectorListener =
+      selectors -> {};
   private final ConcurrentLinkedQueue<ActivationFailure> failures = new ConcurrentLinkedQueue<>();
   private final Supplier<Map<String, String>> runtimeDetailsSupplier;
   private final Clock clock;
@@ -142,6 +149,7 @@ final class ScenarioRegistry implements ChaosDiagnostics {
    * always sees every change made before it.
    */
   private void rebuildIndex() {
+    final Set<ChaosSelector.MethodSelector> changedMethodSelectors;
     synchronized (indexLock) {
       final EnumMap<OperationType, List<ScenarioController>> byOperation =
           new EnumMap<>(OperationType.class);
@@ -158,7 +166,44 @@ final class ScenarioRegistry implements ChaosDiagnostics {
             next.put(operation, list.toArray(NO_CONTROLLERS));
           });
       index = next;
+      final Set<ChaosSelector.MethodSelector> nextMethodSelectors = collectMethodSelectors();
+      changedMethodSelectors =
+          nextMethodSelectors.equals(methodSelectors) ? null : nextMethodSelectors;
+      methodSelectors = nextMethodSelectors;
     }
+    if (changedMethodSelectors != null) {
+      methodSelectorListener.accept(changedMethodSelectors);
+    }
+  }
+
+  private Set<ChaosSelector.MethodSelector> collectMethodSelectors() {
+    final Set<ChaosSelector.MethodSelector> selectors = new HashSet<>();
+    for (final ScenarioController controller : controllers.values()) {
+      if (controller.scenario().selector() instanceof ChaosSelector.MethodSelector selector) {
+        selectors.add(selector);
+      }
+    }
+    return Set.copyOf(selectors);
+  }
+
+  /**
+   * Returns the method selectors of every registered scenario.
+   *
+   * @return the selectors; empty when no registered scenario uses a method selector
+   */
+  Set<ChaosSelector.MethodSelector> methodSelectors() {
+    return methodSelectors;
+  }
+
+  /**
+   * Sets the listener told about the registered method selectors whenever their set changes (a
+   * scenario with a method selector was registered or removed). It runs on the thread that changed
+   * the registry, outside the registry's locks.
+   *
+   * @param listener the listener; replaces the previous one
+   */
+  void onMethodSelectorsChanged(final Consumer<Set<ChaosSelector.MethodSelector>> listener) {
+    methodSelectorListener = listener;
   }
 
   /**
