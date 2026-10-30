@@ -71,6 +71,19 @@ class SessionPropagationTest {
   }
 
   @Test
+  @DisplayName("a FutureTask submitted from a session is still a Future the caller can cancel")
+  void sessionWrappedFutureStaysAFuture() {
+    final java.util.concurrent.FutureTask<String> task =
+        new java.util.concurrent.FutureTask<>(() -> "result");
+
+    final Runnable queued = runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, task);
+
+    assertThat(queued).isInstanceOf(java.util.concurrent.Future.class);
+    assertThat(((java.util.concurrent.Future<?>) queued).cancel(true)).isTrue();
+    assertThat(task.isCancelled()).as("cancelling the wrapper cancels the submitted task").isTrue();
+  }
+
+  @Test
   @DisplayName("a session-scoped clock skew applies only on threads bound to the session")
   void sessionClockSkewDoesNotLeak() throws Exception {
     // Arrange

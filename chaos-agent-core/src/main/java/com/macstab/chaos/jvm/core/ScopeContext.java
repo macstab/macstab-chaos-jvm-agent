@@ -4,6 +4,10 @@ import com.macstab.chaos.jvm.api.ChaosSession;
 import java.util.Deque;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentLinkedDeque;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.RunnableFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -163,6 +167,9 @@ final class ScopeContext {
     if (task instanceof ScopedRunnable scoped) {
       return scoped.sessionId();
     }
+    if (task instanceof ScopedRunnableFuture<?> scoped) {
+      return scoped.sessionId();
+    }
     if (task instanceof ScopedCallable<?> scoped) {
       return scoped.sessionId();
     }
@@ -178,6 +185,9 @@ final class ScopeContext {
    */
   static Object unwrap(final Object task) {
     if (task instanceof ScopedRunnable scoped) {
+      return scoped.delegate();
+    }
+    if (task instanceof ScopedRunnableFuture<?> scoped) {
       return scoped.delegate();
     }
     if (task instanceof ScopedCallable<?> scoped) {
@@ -202,6 +212,12 @@ final class ScopeContext {
    * @return a wrapped {@link Runnable}
    */
   Runnable wrap(final String sessionId, final Runnable runnable) {
+    // A submitted task is usually a FutureTask. Executors hand the queued Runnable back (for
+    // example from shutdownNow() or getQueue()), and callers routinely cast it to Future to cancel
+    // it; a plain wrapper broke that with a ClassCastException.
+    if (runnable instanceof RunnableFuture<?> future) {
+      return new ScopedRunnableFuture<>(this, sessionId, future);
+    }
     return new ScopedRunnable(this, sessionId, runnable);
   }
 
@@ -217,6 +233,46 @@ final class ScopeContext {
    */
   <T> Callable<T> wrap(final String sessionId, final Callable<T> callable) {
     return new ScopedCallable<>(this, sessionId, callable);
+  }
+
+  /**
+   * Session wrapper for a {@link RunnableFuture}: runs it with the session bound and forwards the
+   * {@link java.util.concurrent.Future} methods, so the wrapper can stand in for the submitted
+   * future wherever an executor exposes its queued tasks.
+   */
+  private record ScopedRunnableFuture<V>(
+      ScopeContext scopeContext, String sessionId, RunnableFuture<V> delegate)
+      implements RunnableFuture<V> {
+    @Override
+    public void run() {
+      new ScopedRunnable(scopeContext, sessionId, delegate).run();
+    }
+
+    @Override
+    public boolean cancel(final boolean mayInterruptIfRunning) {
+      return delegate.cancel(mayInterruptIfRunning);
+    }
+
+    @Override
+    public boolean isCancelled() {
+      return delegate.isCancelled();
+    }
+
+    @Override
+    public boolean isDone() {
+      return delegate.isDone();
+    }
+
+    @Override
+    public V get() throws InterruptedException, ExecutionException {
+      return delegate.get();
+    }
+
+    @Override
+    public V get(final long timeout, final TimeUnit unit)
+        throws InterruptedException, ExecutionException, TimeoutException {
+      return delegate.get(timeout, unit);
+    }
   }
 
   private record ScopedRunnable(ScopeContext scopeContext, String sessionId, Runnable delegate)
