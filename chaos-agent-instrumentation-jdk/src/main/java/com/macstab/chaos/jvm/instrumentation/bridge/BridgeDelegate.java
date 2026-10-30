@@ -426,20 +426,21 @@ public interface BridgeDelegate {
   /**
    * Called before a socket input-stream read operation.
    *
-   * @param stream the socket {@link java.io.InputStream}; never {@code null}
+   * @param stream the socket implementation being read from; never {@code null}
+   * @param remoteAddress the peer {@code java.net.InetAddress}, or {@code null} if not connected
    * @throws Throwable if an active scenario injects a failure to simulate a read error or timeout
    */
-  void beforeSocketRead(Object stream) throws Throwable;
+  void beforeSocketRead(Object stream, Object remoteAddress) throws Throwable;
 
   /**
    * Called before a socket output-stream write operation.
    *
    * @param stream the socket {@link java.io.OutputStream}; never {@code null}
-   * @param len the number of bytes about to be written; {@code 0} when the exact count is
-   *     unavailable from the advice context
+   * @param len the number of bytes about to be written
+   * @param remoteAddress the peer {@code java.net.InetAddress}, or {@code null} if not connected
    * @throws Throwable if an active scenario injects a failure to simulate a write error
    */
-  void beforeSocketWrite(Object stream, int len) throws Throwable;
+  void beforeSocketWrite(Object stream, int len, Object remoteAddress) throws Throwable;
 
   /**
    * Called before {@link java.net.Socket#close()}.

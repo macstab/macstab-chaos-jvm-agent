@@ -80,6 +80,7 @@ public final class DefectProbeMain {
       case "initialize-retry" -> initializeRetry();
       case "second-agent-copy" -> secondAgentCopy();
       case "clock-now-in-zone" -> clockNowInZone();
+      case "socket-read-loopback" -> socketReadLoopback();
       case "virtual-thread-start" -> Thread.ofVirtual().start(() -> {}).join();
       case "runtime-exit" -> runtimeExit();
       case "select-consumer" -> selectConsumer();
@@ -304,6 +305,18 @@ public final class DefectProbeMain {
     Thread.sleep(1L);
     System.out.println(
         "firstCopySleepMillis=" + TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start));
+  }
+
+  /** Reads one byte from a loopback server; the read's peer is 127.0.0.1. */
+  private static void socketReadLoopback() throws Exception {
+    try (java.net.ServerSocket server =
+            new java.net.ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"));
+        java.net.Socket client = new java.net.Socket("127.0.0.1", server.getLocalPort());
+        java.net.Socket accepted = server.accept()) {
+      accepted.getOutputStream().write(42);
+      accepted.getOutputStream().flush();
+      System.out.println("byte=" + client.getInputStream().read());
+    }
   }
 
   /** Prints how far now(ZoneId) is from the unskewed Instant.now(), in seconds. */

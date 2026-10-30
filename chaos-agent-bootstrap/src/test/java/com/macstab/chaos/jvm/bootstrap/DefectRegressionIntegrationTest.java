@@ -438,6 +438,30 @@ class DefectRegressionIntegrationTest {
     }
 
     @Test
+    @DisplayName("a host-filtered socket read scenario matches reads from that host only")
+    void socketReadHostFilter() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.run(
+              plan(
+                  scenario(
+                      "read-loopback",
+                      new ChaosSelector.NetworkSelector(
+                          Set.of(OperationType.SOCKET_READ), NamePattern.exact("127.0.0.1")),
+                      ChaosEffect.delay(Duration.ofMillis(1))),
+                  scenario(
+                      "read-elsewhere",
+                      new ChaosSelector.NetworkSelector(
+                          Set.of(OperationType.SOCKET_READ), NamePattern.exact("10.255.255.1")),
+                      ChaosEffect.delay(Duration.ofMillis(1)))),
+              DefectProbeMain.class,
+              "socket-read-loopback",
+              null);
+      assertThat(result.longValue("byte")).isEqualTo(42L);
+      assertThat(result.longValue("matched.read-loopback")).isPositive();
+      assertThat(result.longValue("matched.read-elsewhere")).isZero();
+    }
+
+    @Test
     @DisplayName("LocalDateTime.now(ZoneId) and ZonedDateTime.now(ZoneId) are clock-skewed")
     void nowWithZoneIsSkewed() throws Exception {
       final ChildJvmProbe.ProbeResult result =

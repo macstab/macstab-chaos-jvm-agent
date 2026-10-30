@@ -584,12 +584,14 @@ public final class JdkInstrumentationInstaller {
             MethodType.methodType(void.class, Object.class));
     methodHandles[BootstrapDispatcher.BEFORE_SOCKET_READ] =
         lookup.findVirtual(
-            delegateInterface, "beforeSocketRead", MethodType.methodType(void.class, Object.class));
+            delegateInterface,
+            "beforeSocketRead",
+            MethodType.methodType(void.class, Object.class, Object.class));
     methodHandles[BootstrapDispatcher.BEFORE_SOCKET_WRITE] =
         lookup.findVirtual(
             delegateInterface,
             "beforeSocketWrite",
-            MethodType.methodType(void.class, Object.class, int.class));
+            MethodType.methodType(void.class, Object.class, int.class, Object.class));
     methodHandles[BootstrapDispatcher.BEFORE_SOCKET_CLOSE] =
         lookup.findVirtual(
             delegateInterface,
@@ -1595,11 +1597,8 @@ public final class JdkInstrumentationInstaller {
                                     .and(
                                         ElementMatchers.takesArguments(
                                             byte[].class, int.class, int.class))))
-                    .visit(
-                        Advice.to(JvmRuntimeAdvice.SocketWriteSingleByteAdvice.class)
-                            .on(
-                                ElementMatchers.named("write")
-                                    .and(ElementMatchers.takesArguments(int.class))))
+                    // NioSocketImpl declares no write(int): single-byte writes of its output
+                    // stream go through write(byte[], int, int) with len 1.
                     .visit(
                         Advice.to(JvmRuntimeAdvice.SocketWriteBulkAdvice.class)
                             .on(

@@ -1251,16 +1251,19 @@ public final class BootstrapDispatcher {
   /**
    * Called before a socket input-stream read operation.
    *
-   * @param stream the socket {@link java.io.InputStream}; never {@code null}
+   * @param stream the socket implementation being read from; never {@code null}
+   * @param remoteAddress the peer address ({@code java.net.InetAddress}); {@code null} when the
+   *     socket is not connected
    * @throws Throwable if an active scenario injects a failure to simulate a read error or timeout
    */
-  public static void beforeSocketRead(final Object stream) throws Throwable {
+  public static void beforeSocketRead(final Object stream, final Object remoteAddress)
+      throws Throwable {
     invoke(
         () -> {
           final MethodHandle[] h = handles;
           final Object d = delegate;
           if (d != null && h != null) {
-            h[BEFORE_SOCKET_READ].invoke(d, stream);
+            h[BEFORE_SOCKET_READ].invoke(d, stream, remoteAddress);
           }
           return null;
         },
@@ -1271,17 +1274,19 @@ public final class BootstrapDispatcher {
    * Called before a socket output-stream write operation.
    *
    * @param stream the socket {@link java.io.OutputStream}; never {@code null}
-   * @param len the number of bytes about to be written; {@code 0} when the exact count is
-   *     unavailable from the advice context
+   * @param len the number of bytes about to be written
+   * @param remoteAddress the peer address ({@code java.net.InetAddress}); {@code null} when the
+   *     socket is not connected
    * @throws Throwable if an active scenario injects a failure to simulate a write error
    */
-  public static void beforeSocketWrite(final Object stream, final int len) throws Throwable {
+  public static void beforeSocketWrite(
+      final Object stream, final int len, final Object remoteAddress) throws Throwable {
     invoke(
         () -> {
           final MethodHandle[] h = handles;
           final Object d = delegate;
           if (d != null && h != null) {
-            h[BEFORE_SOCKET_WRITE].invoke(d, stream, len);
+            h[BEFORE_SOCKET_WRITE].invoke(d, stream, len, remoteAddress);
           }
           return null;
         },

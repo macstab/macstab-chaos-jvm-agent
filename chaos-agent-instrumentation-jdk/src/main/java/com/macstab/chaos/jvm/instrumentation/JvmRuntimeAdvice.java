@@ -391,35 +391,34 @@ final class JvmRuntimeAdvice {
     }
   }
 
-  /** Intercepts socket {@code InputStream.read(...)} variants. */
+  /**
+   * Intercepts {@code NioSocketImpl.read(byte[], int, int)}. The remote address is read from the
+   * inherited {@code SocketImpl.address} field — the advice is inlined into the socket
+   * implementation, so no reflection is involved — and lets {@code NetworkSelector} host patterns
+   * match reads, which previously never matched because no host was reported.
+   */
   static final class SocketReadAdvice {
     @Advice.OnMethodEnter
-    static void enter(@Advice.This final Object stream) throws Throwable {
-      BootstrapDispatcher.beforeSocketRead(stream);
+    static void enter(
+        @Advice.This final Object stream,
+        @Advice.FieldValue("address") final java.net.InetAddress remoteAddress)
+        throws Throwable {
+      BootstrapDispatcher.beforeSocketRead(stream, remoteAddress);
     }
   }
 
   /**
-   * Intercepts socket {@code OutputStream.write(int)} — the single-byte variant. Passes {@code 1}
-   * as the length so size-gated scenarios can distinguish per-byte writes from bulk writes.
-   */
-  static final class SocketWriteSingleByteAdvice {
-    @Advice.OnMethodEnter
-    static void enter(@Advice.This final Object stream) throws Throwable {
-      BootstrapDispatcher.beforeSocketWrite(stream, 1);
-    }
-  }
-
-  /**
-   * Intercepts socket {@code OutputStream.write(byte[], int, int)} — the bulk variant. Passes the
-   * actual {@code len} argument so {@code NetworkSelector} rules that filter on write byte count
-   * receive the real size instead of a hardcoded {@code 0}.
+   * Intercepts {@code NioSocketImpl.write(byte[], int, int)} with the byte count and the remote
+   * address (see {@link SocketReadAdvice}).
    */
   static final class SocketWriteBulkAdvice {
     @Advice.OnMethodEnter
-    static void enter(@Advice.This final Object stream, @Advice.Argument(2) final int len)
+    static void enter(
+        @Advice.This final Object stream,
+        @Advice.Argument(2) final int len,
+        @Advice.FieldValue("address") final java.net.InetAddress remoteAddress)
         throws Throwable {
-      BootstrapDispatcher.beforeSocketWrite(stream, len);
+      BootstrapDispatcher.beforeSocketWrite(stream, len, remoteAddress);
     }
   }
 

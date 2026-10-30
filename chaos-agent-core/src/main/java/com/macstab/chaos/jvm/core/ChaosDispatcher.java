@@ -1136,18 +1136,19 @@ public final class ChaosDispatcher {
   }
 
   /**
-   * Called before a socket input-stream read to apply scenarios targeting socket reads.
+   * Called before a socket read to apply scenarios targeting socket reads.
    *
-   * @param stream the socket input stream being read from
+   * @param stream the socket implementation being read from
+   * @param remoteAddress the peer {@link java.net.InetAddress}, or {@code null} if not connected
    * @throws Throwable if an active scenario throws to simulate a failure
    */
-  public void beforeSocketRead(final Object stream) throws Throwable {
+  public void beforeSocketRead(final Object stream, final Object remoteAddress) throws Throwable {
     final InvocationContext context =
         new InvocationContext(
             OperationType.SOCKET_READ,
             stream == null ? "java.net.SocketInputStream" : stream.getClass().getName(),
             null,
-            null,
+            remoteHost(remoteAddress),
             false,
             null,
             null,
@@ -1156,19 +1157,21 @@ public final class ChaosDispatcher {
   }
 
   /**
-   * Called before a socket output-stream write to apply scenarios targeting socket writes.
+   * Called before a socket write to apply scenarios targeting socket writes.
    *
-   * @param stream the socket output stream being written to
+   * @param stream the socket implementation being written to
    * @param len the number of bytes being written
+   * @param remoteAddress the peer {@link java.net.InetAddress}, or {@code null} if not connected
    * @throws Throwable if an active scenario throws to simulate a failure
    */
-  public void beforeSocketWrite(final Object stream, final int len) throws Throwable {
+  public void beforeSocketWrite(final Object stream, final int len, final Object remoteAddress)
+      throws Throwable {
     final InvocationContext context =
         new InvocationContext(
             OperationType.SOCKET_WRITE,
             stream == null ? "java.net.SocketOutputStream" : stream.getClass().getName(),
             null,
-            null,
+            remoteHost(remoteAddress),
             false,
             null,
             null,
@@ -1188,12 +1191,30 @@ public final class ChaosDispatcher {
             OperationType.SOCKET_CLOSE,
             socket == null ? "java.net.Socket" : socket.getClass().getName(),
             null,
-            null,
+            socket instanceof java.net.Socket s ? remoteHost(s.getInetAddress()) : null,
             false,
             null,
             null,
             scopeContext.currentSessionId());
     applyPreDecision(evaluate(context));
+  }
+
+  /**
+   * The host a {@code NetworkSelector} pattern is matched against for an established connection:
+   * the host name the address was created or resolved with when known, otherwise its IP literal.
+   * Read from {@link java.net.InetAddress#toString()} ({@code "host/ip"}), which never triggers a
+   * reverse lookup — unlike {@link java.net.InetAddress#getHostName()}.
+   */
+  static String remoteHost(final Object remoteAddress) {
+    if (!(remoteAddress instanceof java.net.InetAddress address)) {
+      return null;
+    }
+    final String text = address.toString();
+    final int separator = text.indexOf('/');
+    if (separator > 0) {
+      return text.substring(0, separator);
+    }
+    return address.getHostAddress();
   }
 
   /**
@@ -1550,15 +1571,19 @@ public final class ChaosDispatcher {
    * @throws Throwable if an active scenario throws to simulate an {@link InterruptedException}
    */
   public boolean beforeThreadSleep(final long millis) throws Throwable {
+    // The sleeping thread is the current thread. Its name, daemon flag and kind are reported so
+    // ThreadSelector filters (threadNamePattern, daemon, kind) apply to THREAD_SLEEP; they were
+    // left null, so a non-ANY filter never matched and kind=PLATFORM also matched virtual threads.
+    final Thread current = Thread.currentThread();
     final InvocationContext context =
         new InvocationContext(
             OperationType.THREAD_SLEEP,
             "java.lang.Thread",
             null,
-            null,
+            current.getName(),
             false,
-            null,
-            null,
+            current.isDaemon(),
+            featureSet.isVirtualThread(current),
             scopeContext.currentSessionId());
     final RuntimeDecision decision = evaluate(context);
     applyDelayAndGate(decision);

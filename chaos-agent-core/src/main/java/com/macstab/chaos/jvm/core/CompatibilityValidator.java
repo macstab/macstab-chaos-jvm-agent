@@ -7,6 +7,7 @@ import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.ChaosSelector;
 import com.macstab.chaos.jvm.api.ChaosUnsupportedFeatureException;
 import com.macstab.chaos.jvm.api.ChaosValidationException;
+import com.macstab.chaos.jvm.api.NamePattern;
 import com.macstab.chaos.jvm.api.OperationType;
 import java.util.EnumSet;
 import java.util.Set;
@@ -265,6 +266,7 @@ final class CompatibilityValidator {
     validateGateEffectNotWithStressSelector(effect, selector);
     validateEffectSelectorAffinity(effect, selector);
     validateEffectOperationSupport(effect, selector);
+    validateNetworkHostFilter(selector);
     validateSelectorOperationSets(selector);
     validateOperationTypeSelectorAffinity(selector);
   }
@@ -495,6 +497,22 @@ final class CompatibilityValidator {
   private static boolean selectorContainsAny(
       final ChaosSelector selector, final Set<OperationType> needles) {
     return containsAny(selectorOperations(selector), needles);
+  }
+
+  /**
+   * Rejects a host filter on {@code SOCKET_ACCEPT}: the remote host of an accepted connection is
+   * only known after {@code accept()} returns, so the pattern can never match before the call is
+   * intercepted.
+   */
+  private static void validateNetworkHostFilter(final ChaosSelector selector) {
+    if (selector instanceof ChaosSelector.NetworkSelector network
+        && network.operations().contains(OperationType.SOCKET_ACCEPT)
+        && network.remoteHostPattern() != null
+        && network.remoteHostPattern().mode() != NamePattern.MatchMode.ANY) {
+      throw new ChaosValidationException(
+          "NetworkSelector remoteHostPattern cannot apply to SOCKET_ACCEPT: the peer is unknown"
+              + " until accept() returns; use a separate scenario without a host filter for accepts");
+    }
   }
 
   /** Returns the operations a selector matches; a stress selector matches no call. */
