@@ -96,15 +96,6 @@ class BootstrapDispatcherTest {
     }
 
     @Test
-    @DisplayName("adjustScheduleDelay returns original delay unchanged")
-    void adjustScheduleDelayReturnsFallback() throws Throwable {
-      assertThat(
-              BootstrapDispatcher.adjustScheduleDelay(
-                  "SCHEDULE_SUBMIT", executor, task, 500L, false))
-          .isEqualTo(500L);
-    }
-
-    @Test
     @DisplayName("void dispatch methods complete without throwing")
     void voidDispatchMethodsCompleteWithoutThrowing() {
       final Thread thread = new Thread(() -> {});

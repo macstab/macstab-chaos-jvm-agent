@@ -172,28 +172,6 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#adjustScheduleDelay}.
-   *
-   * @param operation the {@link OperationType} name for the schedule operation
-   * @param executor the scheduling executor
-   * @param task the task being scheduled
-   * @param delay the originally requested delay
-   * @param periodic {@code true} if the submission is periodic
-   * @return the possibly-adjusted delay, or {@link Long#MAX_VALUE} to effectively suppress the
-   *     schedule
-   * @throws Throwable if an active scenario throws to simulate a failure
-   */
-  public long adjustScheduleDelay(
-      final String operation,
-      final Object executor,
-      final Object task,
-      final long delay,
-      final boolean periodic)
-      throws Throwable {
-    return dispatcher.adjustScheduleDelay(operation, executor, task, delay, periodic);
-  }
-
-  /**
    * Delegates to {@link ChaosDispatcher#beforeQueueOperation}.
    *
    * @param operation the {@link OperationType} name for the queue operation

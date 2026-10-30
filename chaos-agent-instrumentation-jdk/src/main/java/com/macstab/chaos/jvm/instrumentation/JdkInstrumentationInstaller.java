@@ -583,12 +583,6 @@ public final class JdkInstrumentationInstaller {
       final Class<?> delegateInterface,
       final MethodHandle[] methodHandles)
       throws ReflectiveOperationException {
-    methodHandles[BootstrapDispatcher.ADJUST_SCHEDULE_DELAY] =
-        lookup.findVirtual(
-            delegateInterface,
-            "adjustScheduleDelay",
-            MethodType.methodType(
-                long.class, String.class, Object.class, Object.class, long.class, boolean.class));
     methodHandles[BootstrapDispatcher.BEFORE_SCHEDULED_TICK] =
         lookup.findVirtual(
             delegateInterface,

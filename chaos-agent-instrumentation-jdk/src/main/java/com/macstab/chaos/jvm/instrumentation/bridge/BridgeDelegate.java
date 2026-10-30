@@ -100,24 +100,6 @@ public interface BridgeDelegate {
   void beforeForkJoinTaskRun(ForkJoinTask<?> task) throws Throwable;
 
   /**
-   * Allows an active scenario to alter the scheduling delay of a {@link
-   * java.util.concurrent.ScheduledExecutorService} submission.
-   *
-   * @param operation a tag identifying the scheduling call (e.g. {@code "schedule"}, {@code
-   *     "scheduleAtFixedRate"}); never {@code null}
-   * @param executor the scheduled executor; may be {@code null}
-   * @param task the task being scheduled; may be {@code null}
-   * @param delay the requested delay in milliseconds; may be zero or negative for immediate
-   *     execution
-   * @param periodic {@code true} if the task is a fixed-rate or fixed-delay repeating task
-   * @return the (possibly modified) delay in milliseconds
-   * @throws Throwable if the delegate throws
-   */
-  long adjustScheduleDelay(
-      String operation, Object executor, Object task, long delay, boolean periodic)
-      throws Throwable;
-
-  /**
    * Called before each execution of a scheduled task (both one-shot and periodic).
    *
    * @param executor the scheduled executor owning the task; may be {@code null}

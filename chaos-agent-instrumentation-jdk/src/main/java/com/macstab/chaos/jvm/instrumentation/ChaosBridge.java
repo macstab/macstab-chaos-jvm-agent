@@ -108,28 +108,6 @@ final class ChaosBridge implements BridgeDelegate {
   }
 
   /**
-   * Optionally adjusts the delay before a scheduled task fires.
-   *
-   * @param operation a label identifying the schedule operation
-   * @param executor the scheduled executor
-   * @param task the task being scheduled
-   * @param delay the originally requested delay in milliseconds
-   * @param periodic {@code true} if the task repeats on a fixed rate or fixed delay
-   * @return the (possibly modified) delay in milliseconds that should be applied
-   * @throws Throwable if the runtime decides to abort scheduling
-   */
-  @Override
-  public long adjustScheduleDelay(
-      final String operation,
-      final Object executor,
-      final Object task,
-      final long delay,
-      final boolean periodic)
-      throws Throwable {
-    return runtime.adjustScheduleDelay(operation, executor, task, delay, periodic);
-  }
-
-  /**
    * Invoked before a scheduled task's tick fires, giving the runtime a chance to suppress it.
    *
    * @param executor the scheduled executor

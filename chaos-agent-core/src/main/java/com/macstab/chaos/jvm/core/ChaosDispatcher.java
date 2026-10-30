@@ -302,60 +302,6 @@ public final class ChaosDispatcher {
   }
 
   /**
-   * Allows an active scenario to alter the scheduling delay of a scheduled executor submission.
-   *
-   * @param operation the {@link OperationType} name describing the schedule site
-   * @param executor the scheduling executor; may be {@code null} when unknown
-   * @param task the task being scheduled; may be {@code null}
-   * @param delay the caller-provided scheduling delay in milliseconds
-   * @param periodic {@code true} when the task is scheduled at a fixed rate or with fixed delay
-   * @return the (possibly adjusted) scheduling delay in milliseconds
-   * @throws Throwable if a matching scenario's terminal action mandates it
-   */
-  public long adjustScheduleDelay(
-      final String operation,
-      final Object executor,
-      final Object task,
-      final long delay,
-      final boolean periodic)
-      throws Throwable {
-    final InvocationContext context =
-        new InvocationContext(
-            OperationType.valueOf(operation),
-            executor == null ? "unknown" : executor.getClass().getName(),
-            taskClassName(task),
-            null,
-            periodic,
-            null,
-            null,
-            scopeContext.currentSessionId());
-    final RuntimeDecision decision = evaluate(context);
-    applyGate(decision.gateAction());
-    if (decision.terminalAction() != null) {
-      final TerminalAction terminalAction = decision.terminalAction();
-      if (terminalAction.kind() == TerminalKind.THROW) {
-        throw terminalAction.throwable();
-      }
-      if (terminalAction.kind() == TerminalKind.RETURN
-          || terminalAction.kind() == TerminalKind.SUPPRESS) {
-        return INDEFINITE_SCHEDULE_DELAY_MILLIS;
-      }
-    }
-    // Saturating add: a plain `delay + decision.delayMillis()` wraps to a negative long for
-    // large inputs, and ScheduledThreadPoolExecutor.schedule with a negative delay fires the
-    // task immediately — the exact opposite of the intended chaos. Mirrors the saturating add
-    // already present in the sibling adjustExecuteDelay path (see applyPreDecision).
-    final long chaosDelay = decision.delayMillis();
-    if (chaosDelay > 0L && delay > Long.MAX_VALUE - chaosDelay) {
-      return Long.MAX_VALUE;
-    }
-    if (chaosDelay < 0L && delay < Long.MIN_VALUE - chaosDelay) {
-      return Long.MIN_VALUE;
-    }
-    return delay + chaosDelay;
-  }
-
-  /**
    * Called before a void-returning blocking queue operation such as {@code put} or {@code take}.
    *
    * @param operation the {@link OperationType} name describing the queue operation

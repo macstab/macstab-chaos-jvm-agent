@@ -241,174 +241,171 @@ public final class BootstrapDispatcher {
   /** Handle index for {@link #beforeForkJoinTaskRun(ForkJoinTask)}. */
   public static final int BEFORE_FORK_JOIN_TASK_RUN = 4;
 
-  /** Handle index for {@link #adjustScheduleDelay(String, Object, Object, long, boolean)}. */
-  public static final int ADJUST_SCHEDULE_DELAY = 5;
-
   /** Handle index for {@link #beforeScheduledTick(Object, Object, boolean)}. */
-  public static final int BEFORE_SCHEDULED_TICK = 6;
+  public static final int BEFORE_SCHEDULED_TICK = 5;
 
   /** Handle index for {@link #beforeQueueOperation(String, Object)}. */
-  public static final int BEFORE_QUEUE_OPERATION = 7;
+  public static final int BEFORE_QUEUE_OPERATION = 6;
 
   /** Handle index for {@link #beforeBooleanQueueOperation(String, Object)}. */
-  public static final int BEFORE_BOOLEAN_QUEUE_OPERATION = 8;
+  public static final int BEFORE_BOOLEAN_QUEUE_OPERATION = 7;
 
   /**
    * Handle index for {@link #beforeCompletableFutureComplete(String, CompletableFuture, Object)}.
    */
-  public static final int BEFORE_COMPLETABLE_FUTURE_COMPLETE = 9;
+  public static final int BEFORE_COMPLETABLE_FUTURE_COMPLETE = 8;
 
   /** Handle index for {@link #beforeClassLoad(ClassLoader, String)}. */
-  public static final int BEFORE_CLASS_LOAD = 10;
+  public static final int BEFORE_CLASS_LOAD = 9;
 
   /** Handle index for {@link #afterResourceLookup(ClassLoader, String, java.net.URL)}. */
-  public static final int AFTER_RESOURCE_LOOKUP = 11;
+  public static final int AFTER_RESOURCE_LOOKUP = 10;
 
   /** Handle index for {@link #decorateShutdownHook(Thread)}. */
-  public static final int DECORATE_SHUTDOWN_HOOK = 12;
+  public static final int DECORATE_SHUTDOWN_HOOK = 11;
 
   /** Handle index for {@link #resolveShutdownHook(Thread)}. */
-  public static final int RESOLVE_SHUTDOWN_HOOK = 13;
+  public static final int RESOLVE_SHUTDOWN_HOOK = 12;
 
   /** Handle index for {@link #beforeExecutorShutdown(String, Object, long)}. */
-  public static final int BEFORE_EXECUTOR_SHUTDOWN = 14;
+  public static final int BEFORE_EXECUTOR_SHUTDOWN = 13;
 
   // ── Phase 2 handles (15-45): JVM-level interception points ─────────────────
   /** Handle index for {@link #adjustClockMillis(long)}. */
-  public static final int ADJUST_CLOCK_MILLIS = 15;
+  public static final int ADJUST_CLOCK_MILLIS = 14;
 
   /** Handle index for {@link #adjustClockNanos(long)}. */
-  public static final int ADJUST_CLOCK_NANOS = 16;
+  public static final int ADJUST_CLOCK_NANOS = 15;
 
   /** Handle index for {@link #beforeGcRequest()}. */
-  public static final int BEFORE_GC_REQUEST = 17;
+  public static final int BEFORE_GC_REQUEST = 16;
 
   /** Handle index for {@link #beforeExitRequest(int)}. */
-  public static final int BEFORE_EXIT_REQUEST = 18;
+  public static final int BEFORE_EXIT_REQUEST = 17;
 
   /** Handle index for {@link #beforeReflectionInvoke(Object, Object)}. */
-  public static final int BEFORE_REFLECTION_INVOKE = 19;
+  public static final int BEFORE_REFLECTION_INVOKE = 18;
 
   /** Handle index for {@link #beforeDirectBufferAllocate(int)}. */
-  public static final int BEFORE_DIRECT_BUFFER_ALLOCATE = 20;
+  public static final int BEFORE_DIRECT_BUFFER_ALLOCATE = 19;
 
   /** Handle index for {@link #beforeObjectDeserialize(Object)}. */
-  public static final int BEFORE_OBJECT_DESERIALIZE = 21;
+  public static final int BEFORE_OBJECT_DESERIALIZE = 20;
 
   /** Handle index for {@link #beforeClassDefine(Object, String)}. */
-  public static final int BEFORE_CLASS_DEFINE = 22;
+  public static final int BEFORE_CLASS_DEFINE = 21;
 
   /** Handle index for {@link #beforeMonitorEnter(Object)}. */
-  public static final int BEFORE_MONITOR_ENTER = 23;
+  public static final int BEFORE_MONITOR_ENTER = 22;
 
   /** Handle index for {@link #beforeThreadPark()}. */
-  public static final int BEFORE_THREAD_PARK = 24;
+  public static final int BEFORE_THREAD_PARK = 23;
 
   /** Handle index for {@link #beforeNioSelect(Object, long)}. */
-  public static final int BEFORE_NIO_SELECT = 25;
+  public static final int BEFORE_NIO_SELECT = 24;
 
   /** Handle index for {@link #beforeNioChannelOp(String, Object)}. */
-  public static final int BEFORE_NIO_CHANNEL_OP = 26;
+  public static final int BEFORE_NIO_CHANNEL_OP = 25;
 
   /** Handle index for {@link #beforeSocketConnect(Object, Object, int)}. */
-  public static final int BEFORE_SOCKET_CONNECT = 27;
+  public static final int BEFORE_SOCKET_CONNECT = 26;
 
   /** Handle index for {@link #beforeSocketAccept(Object)}. */
-  public static final int BEFORE_SOCKET_ACCEPT = 28;
+  public static final int BEFORE_SOCKET_ACCEPT = 27;
 
   /** Handle index for {@link #beforeSocketRead(Object, Object)}. */
-  public static final int BEFORE_SOCKET_READ = 29;
+  public static final int BEFORE_SOCKET_READ = 28;
 
   /** Handle index for {@link #beforeSocketWrite(Object, int, Object)}. */
-  public static final int BEFORE_SOCKET_WRITE = 30;
+  public static final int BEFORE_SOCKET_WRITE = 29;
 
   /** Handle index for {@link #beforeSocketClose(Object)}. */
-  public static final int BEFORE_SOCKET_CLOSE = 31;
+  public static final int BEFORE_SOCKET_CLOSE = 30;
 
   /** Handle index for {@link #beforeJndiLookup(Object, String)}. */
-  public static final int BEFORE_JNDI_LOOKUP = 32;
+  public static final int BEFORE_JNDI_LOOKUP = 31;
 
   /** Handle index for {@link #beforeObjectSerialize(Object, Object)}. */
-  public static final int BEFORE_OBJECT_SERIALIZE = 33;
+  public static final int BEFORE_OBJECT_SERIALIZE = 32;
 
   /** Handle index for {@link #beforeNativeLibraryLoad(String)}. */
-  public static final int BEFORE_NATIVE_LIBRARY_LOAD = 34;
+  public static final int BEFORE_NATIVE_LIBRARY_LOAD = 33;
 
   /** Handle index for {@link #beforeAsyncCancel(Object, boolean)}. */
-  public static final int BEFORE_ASYNC_CANCEL = 35;
+  public static final int BEFORE_ASYNC_CANCEL = 34;
 
   /** Handle index for {@link #beforeZipInflate()}. */
-  public static final int BEFORE_ZIP_INFLATE = 36;
+  public static final int BEFORE_ZIP_INFLATE = 35;
 
   /** Handle index for {@link #beforeZipDeflate()}. */
-  public static final int BEFORE_ZIP_DEFLATE = 37;
+  public static final int BEFORE_ZIP_DEFLATE = 36;
 
   /** Handle index for {@link #beforeThreadLocalGet(Object)}. */
-  public static final int BEFORE_THREAD_LOCAL_GET = 38;
+  public static final int BEFORE_THREAD_LOCAL_GET = 37;
 
   /** Handle index for {@link #beforeThreadLocalSet(Object, Object)}. */
-  public static final int BEFORE_THREAD_LOCAL_SET = 39;
+  public static final int BEFORE_THREAD_LOCAL_SET = 38;
 
   /** Handle index for {@link #beforeJmxInvoke(Object, Object, String)}. */
-  public static final int BEFORE_JMX_INVOKE = 40;
+  public static final int BEFORE_JMX_INVOKE = 39;
 
   /** Handle index for {@link #beforeJmxGetAttr(Object, Object, String)}. */
-  public static final int BEFORE_JMX_GET_ATTR = 41;
+  public static final int BEFORE_JMX_GET_ATTR = 40;
 
   /** Handle index for {@link #adjustInstantNow(java.time.Instant)}. */
-  public static final int ADJUST_INSTANT_NOW = 42;
+  public static final int ADJUST_INSTANT_NOW = 41;
 
   /** Handle index for {@link #adjustLocalDateTimeNow(java.time.LocalDateTime)}. */
-  public static final int ADJUST_LOCAL_DATE_TIME_NOW = 43;
+  public static final int ADJUST_LOCAL_DATE_TIME_NOW = 42;
 
   /** Handle index for {@link #adjustZonedDateTimeNow(java.time.ZonedDateTime)}. */
-  public static final int ADJUST_ZONED_DATE_TIME_NOW = 44;
+  public static final int ADJUST_ZONED_DATE_TIME_NOW = 43;
 
   /** Handle index for {@link #adjustDateNew(long)}. */
-  public static final int ADJUST_DATE_NEW = 45;
+  public static final int ADJUST_DATE_NEW = 44;
 
   /** Handle index for {@link #beforeHttpSend(String)}. */
-  public static final int BEFORE_HTTP_SEND = 46;
+  public static final int BEFORE_HTTP_SEND = 45;
 
   /** Handle index for {@link #beforeHttpSendAsync(String)}. */
-  public static final int BEFORE_HTTP_SEND_ASYNC = 47;
+  public static final int BEFORE_HTTP_SEND_ASYNC = 46;
 
   /** Handle index for {@link #beforeJdbcConnectionAcquire(String)}. */
-  public static final int BEFORE_JDBC_CONNECTION_ACQUIRE = 48;
+  public static final int BEFORE_JDBC_CONNECTION_ACQUIRE = 47;
 
   /** Handle index for {@link #beforeJdbcStatementExecute(String)}. */
-  public static final int BEFORE_JDBC_STATEMENT_EXECUTE = 49;
+  public static final int BEFORE_JDBC_STATEMENT_EXECUTE = 48;
 
   /** Handle index for {@link #beforeJdbcPreparedStatement(String)}. */
-  public static final int BEFORE_JDBC_PREPARED_STATEMENT = 50;
+  public static final int BEFORE_JDBC_PREPARED_STATEMENT = 49;
 
   /** Handle index for {@link #beforeJdbcTransactionCommit()}. */
-  public static final int BEFORE_JDBC_TRANSACTION_COMMIT = 51;
+  public static final int BEFORE_JDBC_TRANSACTION_COMMIT = 50;
 
   /** Handle index for {@link #beforeJdbcTransactionRollback()}. */
-  public static final int BEFORE_JDBC_TRANSACTION_ROLLBACK = 52;
+  public static final int BEFORE_JDBC_TRANSACTION_ROLLBACK = 51;
 
   // ── Phase 2 handles (53-56) ───────────────────────────────────────────────
   /** Handle index for {@link #beforeThreadSleep(long)}. */
-  public static final int BEFORE_THREAD_SLEEP = 53;
+  public static final int BEFORE_THREAD_SLEEP = 52;
 
   /** Handle index for {@link #beforeDnsResolve(String)}. */
-  public static final int BEFORE_DNS_RESOLVE = 54;
+  public static final int BEFORE_DNS_RESOLVE = 53;
 
   /** Handle index for {@link #beforeSslHandshake(Object)}. */
-  public static final int BEFORE_SSL_HANDSHAKE = 55;
+  public static final int BEFORE_SSL_HANDSHAKE = 54;
 
   /** Handle index for {@link #beforeFileIo(String, Object)}. */
-  public static final int BEFORE_FILE_IO = 56;
+  public static final int BEFORE_FILE_IO = 55;
 
   /**
    * Handle index for {@link #adjustLocalDateTimeNowInZone(java.time.LocalDateTime,
    * java.time.ZoneId)}.
    */
-  public static final int ADJUST_LOCAL_DATE_TIME_NOW_IN_ZONE = 57;
+  public static final int ADJUST_LOCAL_DATE_TIME_NOW_IN_ZONE = 56;
 
   /** Total number of method-handle slots; equals the highest index plus one. */
-  public static final int HANDLE_COUNT = 58;
+  public static final int HANDLE_COUNT = 57;
 
   /** Utility class; do not instantiate. */
   private BootstrapDispatcher() {}
@@ -603,46 +600,6 @@ public final class BootstrapDispatcher {
       }
     } catch (final Throwable throwable) {
       sneakyThrow(throwable);
-    } finally {
-      depth[0]--;
-    }
-  }
-
-  /**
-   * Allows an active scenario to alter the scheduling delay of a {@link
-   * java.util.concurrent.ScheduledExecutorService} submission.
-   *
-   * @param operation a tag identifying the scheduling call (e.g. {@code "schedule"}, {@code
-   *     "scheduleAtFixedRate"}); never {@code null}
-   * @param executor the scheduled executor; may be {@code null}
-   * @param task the task being scheduled; may be {@code null}
-   * @param delay the requested delay in milliseconds; may be zero or negative for immediate
-   *     execution
-   * @param periodic {@code true} if the task is a fixed-rate or fixed-delay repeating task
-   * @return the (possibly modified) delay in milliseconds; equals {@code delay} as the fallback
-   * @throws Throwable if the delegate throws
-   */
-  public static long adjustScheduleDelay(
-      final String operation,
-      final Object executor,
-      final Object task,
-      final long delay,
-      final boolean periodic)
-      throws Throwable {
-    final int[] depth = DEPTH.get();
-    if (depth[0] > 0) {
-      return delay;
-    }
-    depth[0]++;
-    try {
-      final MethodHandle[] h = handles;
-      final Object d = delegate;
-      return (d == null || h == null)
-          ? delay
-          : (long) h[ADJUST_SCHEDULE_DELAY].invoke(d, operation, executor, task, delay, periodic);
-    } catch (final Throwable throwable) {
-      sneakyThrow(throwable);
-      return delay;
     } finally {
       depth[0]--;
     }
