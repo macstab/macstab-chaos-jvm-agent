@@ -462,6 +462,25 @@ class DefectRegressionIntegrationTest {
     }
 
     @Test
+    @DisplayName("stopping a direct-buffer stressor frees its native memory at once")
+    void directBufferStressorFreesOnStop() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.run(
+              plan(
+                  scenario(
+                      "unrelated",
+                      ChaosSelector.dns(Set.of(OperationType.DNS_RESOLVE), NamePattern.exact("x")),
+                      ChaosEffect.delay(Duration.ofMillis(1)))),
+              DefectProbeMain.class,
+              "direct-buffer-release",
+              null);
+      assertThat(result.longValue("directDuringMiB")).isGreaterThanOrEqualTo(60L);
+      assertThat(result.longValue("directAfterMiB"))
+          .as("freed by the cleaner on close, not left for a later GC")
+          .isLessThan(8L);
+    }
+
+    @Test
     @DisplayName("LocalDateTime.now(ZoneId) and ZonedDateTime.now(ZoneId) are clock-skewed")
     void nowWithZoneIsSkewed() throws Exception {
       final ChildJvmProbe.ProbeResult result =

@@ -81,6 +81,7 @@ public final class DefectProbeMain {
       case "second-agent-copy" -> secondAgentCopy();
       case "clock-now-in-zone" -> clockNowInZone();
       case "socket-read-loopback" -> socketReadLoopback();
+      case "direct-buffer-release" -> directBufferRelease();
       case "virtual-thread-start" -> Thread.ofVirtual().start(() -> {}).join();
       case "runtime-exit" -> runtimeExit();
       case "select-consumer" -> selectConsumer();
@@ -305,6 +306,35 @@ public final class DefectProbeMain {
     Thread.sleep(1L);
     System.out.println(
         "firstCopySleepMillis=" + TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start));
+  }
+
+  /**
+   * Activates a 64 MiB direct-buffer stressor, stops it, and prints the direct-pool usage before,
+   * during and right after stop, without requesting a GC.
+   */
+  private static void directBufferRelease() {
+    final java.lang.management.BufferPoolMXBean direct =
+        ManagementFactory.getPlatformMXBeans(java.lang.management.BufferPoolMXBean.class).stream()
+            .filter(pool -> "direct".equals(pool.getName()))
+            .findFirst()
+            .orElseThrow();
+    final long before = direct.getMemoryUsed();
+    final com.macstab.chaos.jvm.api.ChaosActivationHandle handle =
+        ChaosPlatform.current()
+            .activate(
+                ChaosScenario.builder("direct")
+                    .scope(ChaosScenario.ScenarioScope.JVM)
+                    .selector(ChaosSelector.stress(ChaosSelector.StressTarget.DIRECT_BUFFER))
+                    .effect(
+                        new ChaosEffect.DirectBufferPressureEffect(
+                            64L * 1024 * 1024, 1024 * 1024, false))
+                    .activationPolicy(ActivationPolicy.always())
+                    .build());
+    final long during = direct.getMemoryUsed();
+    handle.close();
+    final long after = direct.getMemoryUsed();
+    System.out.println("directDuringMiB=" + (during - before) / (1024 * 1024));
+    System.out.println("directAfterMiB=" + (after - before) / (1024 * 1024));
   }
 
   /** Reads one byte from a loopback server; the read's peer is 127.0.0.1. */
