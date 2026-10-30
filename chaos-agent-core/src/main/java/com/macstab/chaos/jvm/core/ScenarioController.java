@@ -81,6 +81,15 @@ final class ScenarioController {
   private final AtomicBoolean started = new AtomicBoolean(false);
   private final AtomicLong matchedCount = new AtomicLong();
   private final AtomicLong appliedCount = new AtomicLong();
+
+  /**
+   * Guards {@link #reservedApplications} together with {@code appliedCount} for capped scenarios.
+   */
+  private final Object applicationBudgetLock = new Object();
+
+  /** Reservations taken by {@link #reserveApplication()} and not yet committed or released. */
+  private long reservedApplications;
+
   private volatile ChaosDiagnostics.ScenarioState state;
   private volatile String reason;
   private volatile Instant startedAt;
@@ -424,37 +433,76 @@ final class ScenarioController {
     if (!started.get()) {
       return null;
     }
-    if (!incrementAppliedCountWithinCap()) {
+    if (!reserveApplication()) {
       return null;
     }
-    publishAppliedEvent(context);
     return new ScenarioContribution(
-        this, scenario, scenario.effect(), sampleDelayMillis(matchCount), gateTimeout());
+        this, scenario, scenario.effect(), sampleDelayMillis(matchCount), gateTimeout(), context);
   }
 
   /**
-   * Increments {@code appliedCount} respecting the {@code maxApplications} cap via a CAS loop.
-   * Returns {@code true} if the count was successfully incremented, {@code false} if the cap was
-   * reached and the scenario should transition to {@code INACTIVE}.
+   * Reserves one application against {@code maxApplications} for a contribution that has not yet
+   * been chosen. The dispatcher decides afterwards which contributions take effect (every delay,
+   * the winning gate and the winning terminal action by precedence) and calls {@link
+   * #commitApplication(InvocationContext)} for those and {@link #releaseApplication()} for the
+   * rest. An earlier version counted and published {@code APPLIED} here, so a scenario that lost on
+   * precedence still reported itself as applied and used up its budget.
+   *
+   * <p>Committed applications plus outstanding reservations never exceed the cap. The scenario is
+   * marked {@code INACTIVE} only once committed applications reach the cap, so a reservation that
+   * is released can never leave the scenario inactive with budget left.
+   *
+   * @return {@code true} when a reservation was taken
    */
-  private boolean incrementAppliedCountWithinCap() {
+  private boolean reserveApplication() {
     final Long maxApplications = scenario.activationPolicy().maxApplications();
     if (maxApplications == null) {
-      appliedCount.incrementAndGet();
       return true;
     }
-    // CAS loop to ensure appliedCount never overshoots maxApplications under concurrency.
-    // The naive incrementAndGet-then-check pattern allowed the counter to exceed the cap
-    // when multiple threads raced through this branch simultaneously.
-    while (true) {
-      final long currentCount = appliedCount.get();
-      if (currentCount >= maxApplications) {
+    synchronized (applicationBudgetLock) {
+      if (appliedCount.get() >= maxApplications) {
         markInactive("max applications reached");
         return false;
       }
-      if (appliedCount.compareAndSet(currentCount, currentCount + 1L)) {
-        return true;
+      if (appliedCount.get() + reservedApplications >= maxApplications) {
+        return false;
       }
+      reservedApplications++;
+      return true;
+    }
+  }
+
+  /**
+   * Records a reserved application as applied: increments {@code appliedCount}, publishes {@code
+   * APPLIED} and the {@code chaos.effect.applied} metric, and marks the scenario {@code INACTIVE}
+   * when the cap is reached.
+   *
+   * @param context the invocation the contribution was evaluated for
+   */
+  void commitApplication(final InvocationContext context) {
+    final Long maxApplications = scenario.activationPolicy().maxApplications();
+    if (maxApplications == null) {
+      appliedCount.incrementAndGet();
+    } else {
+      final boolean capReached;
+      synchronized (applicationBudgetLock) {
+        reservedApplications--;
+        capReached = appliedCount.incrementAndGet() >= maxApplications;
+      }
+      if (capReached) {
+        markInactive("max applications reached");
+      }
+    }
+    publishAppliedEvent(context);
+  }
+
+  /** Returns a reservation taken by {@link #reserveApplication()} that was not applied. */
+  void releaseApplication() {
+    if (scenario.activationPolicy().maxApplications() == null) {
+      return;
+    }
+    synchronized (applicationBudgetLock) {
+      reservedApplications--;
     }
   }
 

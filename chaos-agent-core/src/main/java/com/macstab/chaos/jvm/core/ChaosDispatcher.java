@@ -1691,43 +1691,76 @@ public final class ChaosDispatcher {
     if (contributions.isEmpty()) {
       return RuntimeDecision.none();
     }
-    long delayMillis = 0L;
-    GateAction gateAction = null;
-    int gatePrecedence = Integer.MIN_VALUE;
-    TerminalAction terminalAction = null;
-    int terminalPrecedence = Integer.MIN_VALUE;
-    for (final ScenarioContribution contribution : contributions) {
-      // Saturating add: naive += with two large per-scenario delays would wrap to a negative
-      // value, and the sleep() helper treats negative as "skip sleep" — silently turning an
-      // intended multi-minute delay into no delay at all is exactly the kind of quiet bug we
-      // should not ship. Cap at Long.MAX_VALUE instead so the intent ("a very long delay") is
-      // preserved; downstream Thread.sleep still accepts it.
-      final long contributionDelay = contribution.delayMillis();
-      if (contributionDelay > 0L && delayMillis > Long.MAX_VALUE - contributionDelay) {
-        delayMillis = Long.MAX_VALUE;
-      } else {
-        delayMillis += contributionDelay;
+    final boolean[] applied = new boolean[contributions.size()];
+    boolean decided = false;
+    try {
+      long delayMillis = 0L;
+      GateAction gateAction = null;
+      int gateIndex = -1;
+      int gatePrecedence = Integer.MIN_VALUE;
+      TerminalAction terminalAction = null;
+      int terminalIndex = -1;
+      int terminalPrecedence = Integer.MIN_VALUE;
+      for (int index = 0; index < contributions.size(); index++) {
+        final ScenarioContribution contribution = contributions.get(index);
+        // Saturating add: naive += with two large per-scenario delays would wrap to a negative
+        // value, and the sleep() helper treats negative as "skip sleep" — silently turning an
+        // intended multi-minute delay into no delay at all is exactly the kind of quiet bug we
+        // should not ship. Cap at Long.MAX_VALUE instead so the intent ("a very long delay") is
+        // preserved; downstream Thread.sleep still accepts it.
+        final long contributionDelay = contribution.delayMillis();
+        if (contributionDelay > 0L && delayMillis > Long.MAX_VALUE - contributionDelay) {
+          delayMillis = Long.MAX_VALUE;
+        } else {
+          delayMillis += contributionDelay;
+        }
+        // Tie-break rule for both gate and terminal: the ScenarioRegistry sorts contributions by
+        // precedence DESC then id ASC, so on strict `>` the first-iterated (highest precedence,
+        // lowest id within that precedence) wins and subsequent equal-precedence candidates do
+        // not overwrite it.
+        if (contribution.effect() instanceof ChaosEffect.GateEffect) {
+          if (contribution.scenario().precedence() > gatePrecedence) {
+            gateAction =
+                new GateAction(contribution.controller().gate(), contribution.gateTimeout());
+            gateIndex = index;
+            gatePrecedence = contribution.scenario().precedence();
+          }
+          continue;
+        }
+        final TerminalAction candidate =
+            terminalActionFor(
+                context.operationType(), contribution.effect(), contribution.scenario());
+        if (candidate == null) {
+          // A delay (or an effect without a terminal action for this operation) always takes
+          // effect: delays of all matching scenarios are summed.
+          applied[index] = true;
+        } else if (contribution.scenario().precedence() > terminalPrecedence) {
+          terminalAction = candidate;
+          terminalIndex = index;
+          terminalPrecedence = contribution.scenario().precedence();
+        }
       }
-      // Tie-break rule for both gate and terminal: the ScenarioRegistry sorts contributions by
-      // precedence DESC then id ASC, so on strict `>` the first-iterated (highest precedence,
-      // lowest id within that precedence) wins and subsequent equal-precedence candidates do
-      // not overwrite it. Using `>=` inverted the id tie-break — the highest-id scenario won,
-      // contradicting the class javadoc and quietly swapping which of two composed scenarios
-      // applied at runtime.
-      if (contribution.effect() instanceof ChaosEffect.GateEffect
-          && contribution.scenario().precedence() > gatePrecedence) {
-        gateAction = new GateAction(contribution.controller().gate(), contribution.gateTimeout());
-        gatePrecedence = contribution.scenario().precedence();
+      if (gateIndex >= 0) {
+        applied[gateIndex] = true;
       }
-      final TerminalAction candidate =
-          terminalActionFor(
-              context.operationType(), contribution.effect(), contribution.scenario());
-      if (candidate != null && contribution.scenario().precedence() > terminalPrecedence) {
-        terminalAction = candidate;
-        terminalPrecedence = contribution.scenario().precedence();
+      if (terminalIndex >= 0) {
+        applied[terminalIndex] = true;
+      }
+      final RuntimeDecision decision = new RuntimeDecision(delayMillis, gateAction, terminalAction);
+      decided = true;
+      return decision;
+    } finally {
+      // Only contributions that take effect count as applied (and publish APPLIED); the others
+      // return their maxApplications reservation. When building the decision failed, nothing is
+      // applied and every reservation is returned, so a failure cannot leak reservations.
+      for (int index = 0; index < contributions.size(); index++) {
+        if (decided && applied[index]) {
+          contributions.get(index).commit();
+        } else {
+          contributions.get(index).release();
+        }
       }
     }
-    return new RuntimeDecision(delayMillis, gateAction, terminalAction);
   }
 
   private TerminalAction terminalActionFor(
