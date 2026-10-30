@@ -9,6 +9,7 @@ import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.ChaosSelector;
 import com.macstab.chaos.jvm.api.NamePattern;
 import com.macstab.chaos.jvm.api.OperationType;
+import com.macstab.chaos.jvm.api.PathPattern;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -576,6 +577,63 @@ class DefectRegressionIntegrationTest {
       assertThat(result.longValue("firstCopySleepMillis"))
           .as("the first copy's scenarios still apply")
           .isGreaterThanOrEqualTo(250L);
+    }
+  }
+
+  @Nested
+  @DisplayName("I/O call-context filters")
+  class IoContextFilters {
+
+    @Test
+    @DisplayName("a socket write is matched by peer CIDR and byte count")
+    void socketWriteByCidrAndSize() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.run(
+              plan(
+                  scenario(
+                      "big-loopback-write",
+                      new ChaosSelector.NetworkSelector(
+                          Set.of(OperationType.SOCKET_WRITE),
+                          null,
+                          "127.0.0.0/8",
+                          null,
+                          1000L,
+                          null),
+                      ChaosEffect.delay(Duration.ofMillis(1))),
+                  scenario(
+                      "write-elsewhere",
+                      new ChaosSelector.NetworkSelector(
+                          Set.of(OperationType.SOCKET_WRITE), null, "10.0.0.0/8", null, null, null),
+                      ChaosEffect.delay(Duration.ofMillis(1)))),
+              DefectProbeMain.class,
+              "socket-write-sizes",
+              null);
+      assertThat(result.longValue("received")).isEqualTo(2010L);
+      assertThat(result.longValue("matched.big-loopback-write")).isEqualTo(1L);
+      assertThat(result.longValue("matched.write-elsewhere")).isZero();
+    }
+
+    @Test
+    @DisplayName("a file write is rejected only under the selected directory")
+    void fileWriteByPath() throws Exception {
+      final Path root = Files.createDirectories(tempDir.resolve("files"));
+      final ChildJvmProbe.ProbeResult result =
+          probe.run(
+              plan(
+                  scenario(
+                      "reject-under-a",
+                      new ChaosSelector.FileIoSelector(
+                          Set.of(OperationType.FILE_IO_WRITE),
+                          PathPattern.under(root.resolve("a").toString()),
+                          null,
+                          null),
+                      ChaosEffect.reject("disk full"))),
+              DefectProbeMain.class,
+              "file-writes-by-path",
+              null,
+              "-Dchaos.test.dir=" + root);
+      assertThat(result.value("a")).isEqualTo("rejected");
+      assertThat(result.value("b")).isEqualTo("ok");
     }
   }
 

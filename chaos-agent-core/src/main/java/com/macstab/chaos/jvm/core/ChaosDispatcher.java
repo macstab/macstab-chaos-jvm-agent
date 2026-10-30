@@ -1081,6 +1081,8 @@ public final class ChaosDispatcher {
   public void beforeSocketConnect(
       final Object socket, final Object socketAddress, final int timeoutMillis) throws Throwable {
     final String remoteHost = extractRemoteHost(socketAddress);
+    final InetSocketAddress inetSocketAddress =
+        socketAddress instanceof InetSocketAddress address ? address : null;
     final InvocationContext context =
         new InvocationContext(
             OperationType.SOCKET_CONNECT,
@@ -1090,7 +1092,11 @@ public final class ChaosDispatcher {
             false,
             null,
             null,
-            scopeContext.currentSessionId());
+            scopeContext.currentSessionId(),
+            InvocationContext.UNKNOWN,
+            null,
+            inetSocketAddress == null ? null : inetSocketAddress.getAddress(),
+            inetSocketAddress == null ? InvocationContext.UNKNOWN : inetSocketAddress.getPort());
     applyPreDecision(evaluate(context));
   }
 
@@ -1118,10 +1124,14 @@ public final class ChaosDispatcher {
    * Called before a socket read to apply scenarios targeting socket reads.
    *
    * @param stream the socket implementation being read from
+   * @param len the number of bytes requested
    * @param remoteAddress the peer {@link java.net.InetAddress}, or {@code null} if not connected
+   * @param remotePort the peer port, or {@code 0} if not connected
    * @throws Throwable if an active scenario throws to simulate a failure
    */
-  public void beforeSocketRead(final Object stream, final Object remoteAddress) throws Throwable {
+  public void beforeSocketRead(
+      final Object stream, final int len, final Object remoteAddress, final int remotePort)
+      throws Throwable {
     final InvocationContext context =
         new InvocationContext(
             OperationType.SOCKET_READ,
@@ -1131,7 +1141,11 @@ public final class ChaosDispatcher {
             false,
             null,
             null,
-            scopeContext.currentSessionId());
+            scopeContext.currentSessionId(),
+            len,
+            null,
+            remoteAddress instanceof java.net.InetAddress address ? address : null,
+            remoteAddress == null ? InvocationContext.UNKNOWN : remotePort);
     applyPreDecision(evaluate(context));
   }
 
@@ -1141,9 +1155,11 @@ public final class ChaosDispatcher {
    * @param stream the socket implementation being written to
    * @param len the number of bytes being written
    * @param remoteAddress the peer {@link java.net.InetAddress}, or {@code null} if not connected
+   * @param remotePort the peer port, or {@code 0} if not connected
    * @throws Throwable if an active scenario throws to simulate a failure
    */
-  public void beforeSocketWrite(final Object stream, final int len, final Object remoteAddress)
+  public void beforeSocketWrite(
+      final Object stream, final int len, final Object remoteAddress, final int remotePort)
       throws Throwable {
     final InvocationContext context =
         new InvocationContext(
@@ -1154,7 +1170,11 @@ public final class ChaosDispatcher {
             false,
             null,
             null,
-            scopeContext.currentSessionId());
+            scopeContext.currentSessionId(),
+            len,
+            null,
+            remoteAddress instanceof java.net.InetAddress address ? address : null,
+            remoteAddress == null ? InvocationContext.UNKNOWN : remotePort);
     applyPreDecision(evaluate(context));
   }
 
@@ -1174,7 +1194,13 @@ public final class ChaosDispatcher {
             false,
             null,
             null,
-            scopeContext.currentSessionId());
+            scopeContext.currentSessionId(),
+            InvocationContext.UNKNOWN,
+            null,
+            socket instanceof java.net.Socket s ? s.getInetAddress() : null,
+            socket instanceof java.net.Socket s && s.getInetAddress() != null
+                ? s.getPort()
+                : InvocationContext.UNKNOWN);
     applyPreDecision(evaluate(context));
   }
 
@@ -1626,9 +1652,13 @@ public final class ChaosDispatcher {
    *
    * @param operation {@code "FILE_IO_READ"} or {@code "FILE_IO_WRITE"}
    * @param stream the stream instance
+   * @param path the path the stream was opened with, or {@code null}
+   * @param byteCount the bytes read (requested) or written by the call
    * @throws Throwable if an active scenario throws to simulate an I/O failure
    */
-  public void beforeFileIo(final String operation, final Object stream) throws Throwable {
+  public void beforeFileIo(
+      final String operation, final Object stream, final String path, final int byteCount)
+      throws Throwable {
     final OperationType fileIoOpType = resolveFileIoOperationType(operation);
     final InvocationContext context =
         new InvocationContext(
@@ -1639,7 +1669,11 @@ public final class ChaosDispatcher {
             false,
             null,
             null,
-            scopeContext.currentSessionId());
+            scopeContext.currentSessionId(),
+            byteCount,
+            path,
+            null,
+            InvocationContext.UNKNOWN);
     applyPreDecision(evaluate(context));
   }
 

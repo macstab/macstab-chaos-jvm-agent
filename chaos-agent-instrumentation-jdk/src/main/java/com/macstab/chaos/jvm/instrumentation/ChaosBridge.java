@@ -470,11 +470,16 @@ final class ChaosBridge implements BridgeDelegate {
    * Invoked before a socket read operation.
    *
    * @param stream the socket input stream from which data is about to be read
+   * @param len the number of bytes requested
+   * @param remoteAddress the peer address, or {@code null}
+   * @param remotePort the peer port
    * @throws Throwable if the runtime decides to abort or delay the read
    */
   @Override
-  public void beforeSocketRead(final Object stream, final Object remoteAddress) throws Throwable {
-    runtime.beforeSocketRead(stream, remoteAddress);
+  public void beforeSocketRead(
+      final Object stream, final int len, final Object remoteAddress, final int remotePort)
+      throws Throwable {
+    runtime.beforeSocketRead(stream, len, remoteAddress, remotePort);
   }
 
   /**
@@ -482,12 +487,15 @@ final class ChaosBridge implements BridgeDelegate {
    *
    * @param stream the socket output stream to which data is about to be written
    * @param len the number of bytes about to be written
+   * @param remoteAddress the peer address, or {@code null}
+   * @param remotePort the peer port
    * @throws Throwable if the runtime decides to abort or delay the write
    */
   @Override
-  public void beforeSocketWrite(final Object stream, final int len, final Object remoteAddress)
+  public void beforeSocketWrite(
+      final Object stream, final int len, final Object remoteAddress, final int remotePort)
       throws Throwable {
-    runtime.beforeSocketWrite(stream, len, remoteAddress);
+    runtime.beforeSocketWrite(stream, len, remoteAddress, remotePort);
   }
 
   /**
@@ -759,10 +767,14 @@ final class ChaosBridge implements BridgeDelegate {
    *
    * @param operation {@code "FILE_IO_READ"} or {@code "FILE_IO_WRITE"}
    * @param stream the stream instance
+   * @param path the path the stream was opened with, or {@code null}
+   * @param byteCount the bytes read (requested) or written by the call
    * @throws Throwable if the runtime decides to abort the I/O operation
    */
   @Override
-  public void beforeFileIo(final String operation, final Object stream) throws Throwable {
-    runtime.beforeFileIo(operation, stream);
+  public void beforeFileIo(
+      final String operation, final Object stream, final String path, final int byteCount)
+      throws Throwable {
+    runtime.beforeFileIo(operation, stream, path, byteCount);
   }
 }

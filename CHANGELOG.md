@@ -15,6 +15,7 @@
 ### Features
 
 * **api:** `ActivationPolicy` gains an absolute wall-clock window, `activeFrom` and `activeUntil` (JSON: ISO-8601 instants), read from the real system clock so an injected clock skew cannot move it; the equivalent of the native library's `@from`/`@until`. New factories `ActivationPolicy.count(n)` (`@first=N`) and `ActivationPolicy.window(from, until)`, and builder methods `activeFrom`, `activeUntil` and `window`. The 8-argument constructor is kept.
+* **api:** call-context filters, the equivalents of the native library's address, path and `@size` qualifiers. `NetworkSelector` gains `remoteCidr` (IPv4/IPv6 CIDR, parsed without DNS), `remotePort`, `minBytes` and `maxBytes`; `FileIoSelector` gains `pathPattern` (`PathPattern.under(dir)`, `/`-boundary prefix on the lexically normalised path), `minBytes` and `maxBytes`. Socket reads now report the bytes requested and every socket operation reports the peer port; file reads and writes report their path and byte count. The previous constructors are kept.
 * **core:** clock-skew scenarios honour `activeFor`, `activeFrom` and `activeUntil`, and stressors end at `activeUntil`.
 * **diagnostics:** `ChaosDiagnostics.snapshot().runtimeDetails()` contains `wovenHookGroups` — the comma-separated, sorted names of the hook groups woven so far (empty when none).
 

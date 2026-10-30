@@ -409,10 +409,13 @@ public interface BridgeDelegate {
    * Called before a socket input-stream read operation.
    *
    * @param stream the socket implementation being read from; never {@code null}
+   * @param len the number of bytes requested
    * @param remoteAddress the peer {@code java.net.InetAddress}, or {@code null} if not connected
+   * @param remotePort the peer port
    * @throws Throwable if an active scenario injects a failure to simulate a read error or timeout
    */
-  void beforeSocketRead(Object stream, Object remoteAddress) throws Throwable;
+  void beforeSocketRead(Object stream, int len, Object remoteAddress, int remotePort)
+      throws Throwable;
 
   /**
    * Called before a socket output-stream write operation.
@@ -420,9 +423,11 @@ public interface BridgeDelegate {
    * @param stream the socket {@link java.io.OutputStream}; never {@code null}
    * @param len the number of bytes about to be written
    * @param remoteAddress the peer {@code java.net.InetAddress}, or {@code null} if not connected
+   * @param remotePort the peer port
    * @throws Throwable if an active scenario injects a failure to simulate a write error
    */
-  void beforeSocketWrite(Object stream, int len, Object remoteAddress) throws Throwable;
+  void beforeSocketWrite(Object stream, int len, Object remoteAddress, int remotePort)
+      throws Throwable;
 
   /**
    * Called before {@link java.net.Socket#close()}.
@@ -641,7 +646,9 @@ public interface BridgeDelegate {
    *
    * @param operation {@code "FILE_IO_READ"} or {@code "FILE_IO_WRITE"}
    * @param stream the stream instance
+   * @param path the path the stream was opened with, or {@code null}
+   * @param byteCount the bytes read (requested) or written by the call
    * @throws Throwable if the delegate throws
    */
-  void beforeFileIo(String operation, Object stream) throws Throwable;
+  void beforeFileIo(String operation, Object stream, String path, int byteCount) throws Throwable;
 }

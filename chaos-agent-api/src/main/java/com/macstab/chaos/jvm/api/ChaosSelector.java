@@ -813,10 +813,35 @@ public sealed interface ChaosSelector
    * the {@link java.net.InetSocketAddress} host string. For other operations the pattern is matched
    * against the remote host recorded at connect time.
    *
+   * <p>The optional filters narrow the match further; a {@code null} filter does not restrict:
+   *
+   * <ul>
+   *   <li>{@code remoteCidr} — the peer address lies in this block ({@link CidrBlock}, e.g. {@code
+   *       "10.0.0.0/8"}). An unresolved peer never matches.
+   *   <li>{@code remotePort} — the peer port.
+   *   <li>{@code minBytes} / {@code maxBytes} — the byte count of a read or write lies in this
+   *       inclusive range (for a read, the number of bytes requested). Only {@link
+   *       OperationType#SOCKET_READ} and {@link OperationType#SOCKET_WRITE} carry a byte count, so
+   *       a size filter requires that the selector names only those operations.
+   * </ul>
+   *
+   * <p>{@link OperationType#SOCKET_ACCEPT} has no peer when it is evaluated (the connection is not
+   * yet accepted), so it never matches a host, CIDR or port filter.
+   *
    * @param operations operation types this selector matches
    * @param remoteHostPattern pattern matched against the remote host name or IP string
+   * @param remoteCidr CIDR block the peer address must lie in; {@code null} for any
+   * @param remotePort the peer port; {@code null} for any
+   * @param minBytes the smallest byte count matched, inclusive; {@code null} for no lower bound
+   * @param maxBytes the largest byte count matched, inclusive; {@code null} for no upper bound
    */
-  record NetworkSelector(Set<OperationType> operations, NamePattern remoteHostPattern)
+  record NetworkSelector(
+      Set<OperationType> operations,
+      NamePattern remoteHostPattern,
+      String remoteCidr,
+      Integer remotePort,
+      Long minBytes,
+      Long maxBytes)
       implements ChaosSelector {
     static final Set<OperationType> VALID_OPS =
         EnumSet.of(
@@ -826,10 +851,31 @@ public sealed interface ChaosSelector
             OperationType.SOCKET_WRITE,
             OperationType.SOCKET_CLOSE);
 
+    private static final Set<OperationType> SIZED_OPS =
+        EnumSet.of(OperationType.SOCKET_READ, OperationType.SOCKET_WRITE);
+
     /** Validates the NetworkSelector parameters. */
     public NetworkSelector {
       operations = validatedOperations(operations, VALID_OPS, "NetworkSelector");
       remoteHostPattern = remoteHostPattern == null ? NamePattern.any() : remoteHostPattern;
+      if (remoteCidr != null) {
+        CidrBlock.parse(remoteCidr);
+      }
+      if (remotePort != null && (remotePort < 0 || remotePort > 65_535)) {
+        throw new IllegalArgumentException("remotePort must be in [0, 65535], got " + remotePort);
+      }
+      validateSizeRange(minBytes, maxBytes, operations, SIZED_OPS, "NetworkSelector");
+    }
+
+    /**
+     * Creates a selector filtering only by host.
+     *
+     * @param operations operation types this selector matches
+     * @param remoteHostPattern pattern matched against the remote host name or IP string
+     */
+    public NetworkSelector(
+        final Set<OperationType> operations, final NamePattern remoteHostPattern) {
+      this(operations, remoteHostPattern, null, null, null, null);
     }
   }
 
@@ -976,15 +1022,36 @@ public sealed interface ChaosSelector
    * <p><b>Valid operations:</b> {@link OperationType#FILE_IO_READ}, {@link
    * OperationType#FILE_IO_WRITE}.
    *
+   * <p>The optional filters narrow the match further; a {@code null} filter does not restrict:
+   * {@code pathPattern} matches the path the stream was opened with (a stream created from a {@link
+   * java.io.FileDescriptor} has none and never matches it), and {@code minBytes} / {@code maxBytes}
+   * bound the byte count of the call, inclusive (1 for single-byte calls; for a read, the number of
+   * bytes requested).
+   *
    * @param operations operation types this selector matches
+   * @param pathPattern the files matched; {@code null} for any
+   * @param minBytes the smallest byte count matched, inclusive; {@code null} for no lower bound
+   * @param maxBytes the largest byte count matched, inclusive; {@code null} for no upper bound
    */
-  record FileIoSelector(Set<OperationType> operations) implements ChaosSelector {
+  record FileIoSelector(
+      Set<OperationType> operations, PathPattern pathPattern, Long minBytes, Long maxBytes)
+      implements ChaosSelector {
     static final Set<OperationType> VALID_OPS =
         EnumSet.of(OperationType.FILE_IO_READ, OperationType.FILE_IO_WRITE);
 
     /** Validates the FileIoSelector parameters. */
     public FileIoSelector {
       operations = validatedOperations(operations, VALID_OPS, "FileIoSelector");
+      validateSizeRange(minBytes, maxBytes, operations, VALID_OPS, "FileIoSelector");
+    }
+
+    /**
+     * Creates a selector without filters.
+     *
+     * @param operations operation types this selector matches
+     */
+    public FileIoSelector(final Set<OperationType> operations) {
+      this(operations, null, null, null);
     }
   }
 
@@ -1008,6 +1075,35 @@ public sealed interface ChaosSelector
   }
 
   // ── Internal utilities ─────────────────────────────────────────────────────
+
+  /**
+   * Validates an inclusive byte-count range and that every selected operation carries a byte count.
+   * Shared by the selectors with a size filter.
+   */
+  private static void validateSizeRange(
+      final Long minBytes,
+      final Long maxBytes,
+      final Set<OperationType> operations,
+      final Set<OperationType> sizedOperations,
+      final String selectorName) {
+    if (minBytes == null && maxBytes == null) {
+      return;
+    }
+    if ((minBytes != null && minBytes < 0) || (maxBytes != null && maxBytes < 0)) {
+      throw new IllegalArgumentException(selectorName + " byte bounds must be >= 0");
+    }
+    if (minBytes != null && maxBytes != null && minBytes > maxBytes) {
+      throw new IllegalArgumentException(
+          selectorName + " minBytes " + minBytes + " exceeds maxBytes " + maxBytes);
+    }
+    if (!sizedOperations.containsAll(operations)) {
+      throw new IllegalArgumentException(
+          selectorName
+              + " size filter applies only to "
+              + sizedOperations
+              + "; other operations carry no byte count");
+    }
+  }
 
   private static Set<OperationType> validatedOperations(
       final Set<OperationType> operations,

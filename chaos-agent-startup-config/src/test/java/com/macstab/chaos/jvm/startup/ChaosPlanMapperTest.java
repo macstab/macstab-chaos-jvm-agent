@@ -49,6 +49,55 @@ class ChaosPlanMapperTest {
     }
 
     @Test
+    @DisplayName("network and file-I/O filters survive a round trip and parse from JSON")
+    void ioFiltersPreserved() {
+      final ChaosSelector network =
+          new ChaosSelector.NetworkSelector(
+              Set.of(OperationType.SOCKET_WRITE), null, "10.0.0.0/8", 5432, 1024L, 65536L);
+      final ChaosSelector file =
+          new ChaosSelector.FileIoSelector(
+              Set.of(OperationType.FILE_IO_WRITE),
+              com.macstab.chaos.jvm.api.PathPattern.under("/var/lib/app"),
+              null,
+              4096L);
+      final ChaosPlan original =
+          new ChaosPlan(
+              new ChaosPlan.Metadata("io", ""),
+              null,
+              List.of(
+                  ChaosScenario.builder("net")
+                      .scope(ChaosScenario.ScenarioScope.JVM)
+                      .selector(network)
+                      .effect(ChaosEffect.delay(Duration.ofMillis(5)))
+                      .build(),
+                  ChaosScenario.builder("file")
+                      .scope(ChaosScenario.ScenarioScope.JVM)
+                      .selector(file)
+                      .effect(ChaosEffect.delay(Duration.ofMillis(5)))
+                      .build()));
+
+      final ChaosPlan restored = ChaosPlanMapper.read(ChaosPlanMapper.write(original));
+
+      assertThat(restored.scenarios().get(0).selector()).isEqualTo(network);
+      assertThat(restored.scenarios().get(1).selector()).isEqualTo(file);
+
+      final String json =
+          """
+          {"metadata":{"name":"p"},"scenarios":[{"id":"s","scope":"JVM",
+           "selector":{"type":"fileIo","operations":["FILE_IO_WRITE"],
+                       "pathPattern":{"prefix":"/data"},"maxBytes":10},
+           "effect":{"type":"delay","minDelay":"PT0.005S","maxDelay":"PT0.005S"}}]}
+          """;
+      assertThat(ChaosPlanMapper.read(json).scenarios().get(0).selector())
+          .isEqualTo(
+              new ChaosSelector.FileIoSelector(
+                  Set.of(OperationType.FILE_IO_WRITE),
+                  com.macstab.chaos.jvm.api.PathPattern.under("/data"),
+                  null,
+                  10L));
+    }
+
+    @Test
     @DisplayName("activeFrom and activeUntil survive a round trip and parse from ISO-8601")
     void wallClockWindowPreserved() {
       final ActivationPolicy policy =

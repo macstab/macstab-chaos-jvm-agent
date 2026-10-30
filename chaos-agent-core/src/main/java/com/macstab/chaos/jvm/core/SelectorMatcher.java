@@ -1,6 +1,7 @@
 package com.macstab.chaos.jvm.core;
 
 import com.macstab.chaos.jvm.api.ChaosSelector;
+import com.macstab.chaos.jvm.api.CidrBlock;
 import com.macstab.chaos.jvm.api.OperationType;
 
 /**
@@ -82,7 +83,14 @@ final class SelectorMatcher {
               && nioSelector.channelClassPattern().matches(context.targetClassName());
       case ChaosSelector.NetworkSelector networkSelector ->
           networkSelector.operations().contains(context.operationType())
-              && networkSelector.remoteHostPattern().matches(context.targetName());
+              && networkSelector.remoteHostPattern().matches(context.targetName())
+              && (networkSelector.remoteCidr() == null
+                  || CidrBlock.cached(networkSelector.remoteCidr())
+                      .contains(context.remoteAddress()))
+              && (networkSelector.remotePort() == null
+                  || networkSelector.remotePort() == context.remotePort())
+              && inSizeRange(
+                  networkSelector.minBytes(), networkSelector.maxBytes(), context.byteCount());
       case ChaosSelector.ThreadLocalSelector threadLocalSelector ->
           threadLocalSelector.operations().contains(context.operationType())
               && threadLocalSelector.threadLocalClassPattern().matches(context.targetClassName());
@@ -98,7 +106,11 @@ final class SelectorMatcher {
       case ChaosSelector.SslSelector sslSelector ->
           sslSelector.operations().contains(context.operationType());
       case ChaosSelector.FileIoSelector fileIoSelector ->
-          fileIoSelector.operations().contains(context.operationType());
+          fileIoSelector.operations().contains(context.operationType())
+              && (fileIoSelector.pathPattern() == null
+                  || fileIoSelector.pathPattern().matches(context.path()))
+              && inSizeRange(
+                  fileIoSelector.minBytes(), fileIoSelector.maxBytes(), context.byteCount());
       case ChaosSelector.StressSelector stressSelector ->
           context.operationType() == OperationType.LIFECYCLE && stressSelector.target() != null;
     };
@@ -141,5 +153,18 @@ final class SelectorMatcher {
   private static boolean matchesDaemon(
       final ChaosSelector.ThreadSelector selector, final InvocationContext context) {
     return selector.daemon() == null || selector.daemon().equals(context.daemonThread());
+  }
+
+  /**
+   * Checks a byte count against an inclusive range; an unknown count ({@code < 0}) never satisfies
+   * a range.
+   */
+  private static boolean inSizeRange(final Long minBytes, final Long maxBytes, final long bytes) {
+    if (minBytes == null && maxBytes == null) {
+      return true;
+    }
+    return bytes >= 0
+        && (minBytes == null || bytes >= minBytes)
+        && (maxBytes == null || bytes <= maxBytes);
   }
 }

@@ -192,7 +192,7 @@ public class Phase4DispatchBenchmark {
       dispatcher.beforeThreadSleep(SLEEP_DURATION_MILLIS);
       dispatcher.beforeDnsResolve(SETUP_DNS_HOSTNAME);
       dispatcher.beforeSslHandshake(null);
-      dispatcher.beforeFileIo(FILE_IO_READ_OPERATION, null);
+      dispatcher.beforeFileIo(FILE_IO_READ_OPERATION, null, "/tmp/bench.dat", 4096);
     }
 
     /** Closes the runtime after the measurement trial. */
@@ -339,7 +339,7 @@ public class Phase4DispatchBenchmark {
    */
   @Benchmark
   public void fileIoRead_zeroScenarios(ZeroScenariosState state, Blackhole bh) throws Throwable {
-    state.dispatcher.beforeFileIo(FILE_IO_READ_OPERATION, null);
+    state.dispatcher.beforeFileIo(FILE_IO_READ_OPERATION, null, "/tmp/bench.dat", 4096);
     bh.consume(state);
   }
 
@@ -354,7 +354,7 @@ public class Phase4DispatchBenchmark {
   @Benchmark
   public void fileIoRead_oneScenarioNoMatch(OneScenarioNoMatchState state, Blackhole bh)
       throws Throwable {
-    state.dispatcher.beforeFileIo(FILE_IO_READ_OPERATION, null);
+    state.dispatcher.beforeFileIo(FILE_IO_READ_OPERATION, null, "/tmp/bench.dat", 4096);
     bh.consume(state);
   }
 
@@ -369,7 +369,7 @@ public class Phase4DispatchBenchmark {
   @Benchmark
   public void fileIoRead_fourScenariosExhausted(FourScenariosExhaustedState state, Blackhole bh)
       throws Throwable {
-    state.dispatcher.beforeFileIo(FILE_IO_READ_OPERATION, null);
+    state.dispatcher.beforeFileIo(FILE_IO_READ_OPERATION, null, "/tmp/bench.dat", 4096);
     bh.consume(state);
   }
 
@@ -384,7 +384,7 @@ public class Phase4DispatchBenchmark {
    */
   @Benchmark
   public void fileIoWrite_zeroScenarios(ZeroScenariosState state, Blackhole bh) throws Throwable {
-    state.dispatcher.beforeFileIo(FILE_IO_WRITE_OPERATION, null);
+    state.dispatcher.beforeFileIo(FILE_IO_WRITE_OPERATION, null, "/tmp/bench.dat", 4096);
     bh.consume(state);
   }
 
@@ -399,7 +399,7 @@ public class Phase4DispatchBenchmark {
   @Benchmark
   public void fileIoWrite_oneScenarioNoMatch(OneScenarioNoMatchState state, Blackhole bh)
       throws Throwable {
-    state.dispatcher.beforeFileIo(FILE_IO_WRITE_OPERATION, null);
+    state.dispatcher.beforeFileIo(FILE_IO_WRITE_OPERATION, null, "/tmp/bench.dat", 4096);
     bh.consume(state);
   }
 
@@ -414,7 +414,7 @@ public class Phase4DispatchBenchmark {
   @Benchmark
   public void fileIoWrite_fourScenariosExhausted(FourScenariosExhaustedState state, Blackhole bh)
       throws Throwable {
-    state.dispatcher.beforeFileIo(FILE_IO_WRITE_OPERATION, null);
+    state.dispatcher.beforeFileIo(FILE_IO_WRITE_OPERATION, null, "/tmp/bench.dat", 4096);
     bh.consume(state);
   }
 }

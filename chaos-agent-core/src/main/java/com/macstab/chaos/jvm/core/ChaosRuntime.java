@@ -612,18 +612,22 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @throws Throwable if a chaos effect injects an exception
    */
   public void beforeSocketRead(final Object stream) throws Throwable {
-    dispatcher.beforeSocketRead(stream, null);
+    dispatcher.beforeSocketRead(stream, InvocationContext.UNKNOWN, null, 0);
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeSocketRead(Object, Object)}.
+   * Delegates to {@link ChaosDispatcher#beforeSocketRead(Object, int, Object, int)}.
    *
    * @param stream the socket implementation being read from
+   * @param len the number of bytes requested
    * @param remoteAddress the peer {@link java.net.InetAddress}, or {@code null} if not connected
+   * @param remotePort the peer port
    * @throws Throwable if an active scenario throws to simulate a failure
    */
-  public void beforeSocketRead(final Object stream, final Object remoteAddress) throws Throwable {
-    dispatcher.beforeSocketRead(stream, remoteAddress);
+  public void beforeSocketRead(
+      final Object stream, final int len, final Object remoteAddress, final int remotePort)
+      throws Throwable {
+    dispatcher.beforeSocketRead(stream, len, remoteAddress, remotePort);
   }
 
   /**
@@ -634,20 +638,22 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @throws Throwable if a chaos effect injects an exception
    */
   public void beforeSocketWrite(final Object stream, final int len) throws Throwable {
-    dispatcher.beforeSocketWrite(stream, len, null);
+    dispatcher.beforeSocketWrite(stream, len, null, 0);
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeSocketWrite(Object, int, Object)}.
+   * Delegates to {@link ChaosDispatcher#beforeSocketWrite(Object, int, Object, int)}.
    *
    * @param stream the socket implementation being written to
    * @param len the number of bytes about to be written
    * @param remoteAddress the peer {@link java.net.InetAddress}, or {@code null} if not connected
+   * @param remotePort the peer port
    * @throws Throwable if an active scenario throws to simulate a failure
    */
-  public void beforeSocketWrite(final Object stream, final int len, final Object remoteAddress)
+  public void beforeSocketWrite(
+      final Object stream, final int len, final Object remoteAddress, final int remotePort)
       throws Throwable {
-    dispatcher.beforeSocketWrite(stream, len, remoteAddress);
+    dispatcher.beforeSocketWrite(stream, len, remoteAddress, remotePort);
   }
 
   /**
@@ -877,7 +883,22 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @throws Throwable if a chaos effect injects an exception
    */
   public void beforeFileIo(final String operation, final Object stream) throws Throwable {
-    dispatcher.beforeFileIo(operation, stream);
+    dispatcher.beforeFileIo(operation, stream, null, InvocationContext.UNKNOWN);
+  }
+
+  /**
+   * Delegates to {@link ChaosDispatcher#beforeFileIo(String, Object, String, int)}.
+   *
+   * @param operation the file I/O operation name
+   * @param stream the file stream
+   * @param path the path the stream was opened with, or {@code null}
+   * @param byteCount the bytes read (requested) or written by the call
+   * @throws Throwable if a chaos effect injects an exception
+   */
+  public void beforeFileIo(
+      final String operation, final Object stream, final String path, final int byteCount)
+      throws Throwable {
+    dispatcher.beforeFileIo(operation, stream, path, byteCount);
   }
 
   Optional<Instrumentation> instrumentation() {

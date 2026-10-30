@@ -401,9 +401,11 @@ final class JvmRuntimeAdvice {
     @Advice.OnMethodEnter
     static void enter(
         @Advice.This final Object stream,
-        @Advice.FieldValue("address") final java.net.InetAddress remoteAddress)
+        @Advice.Argument(2) final int len,
+        @Advice.FieldValue("address") final java.net.InetAddress remoteAddress,
+        @Advice.FieldValue("port") final int remotePort)
         throws Throwable {
-      BootstrapDispatcher.beforeSocketRead(stream, remoteAddress);
+      BootstrapDispatcher.beforeSocketRead(stream, len, remoteAddress, remotePort);
     }
   }
 
@@ -416,9 +418,10 @@ final class JvmRuntimeAdvice {
     static void enter(
         @Advice.This final Object stream,
         @Advice.Argument(2) final int len,
-        @Advice.FieldValue("address") final java.net.InetAddress remoteAddress)
+        @Advice.FieldValue("address") final java.net.InetAddress remoteAddress,
+        @Advice.FieldValue("port") final int remotePort)
         throws Throwable {
-      BootstrapDispatcher.beforeSocketWrite(stream, len, remoteAddress);
+      BootstrapDispatcher.beforeSocketWrite(stream, len, remoteAddress, remotePort);
     }
   }
 
@@ -838,31 +841,84 @@ final class JvmRuntimeAdvice {
   // ── B17: File I/O ─────────────────────────────────────────────────────────
 
   /**
-   * Intercepts {@link java.io.FileInputStream#read(byte[], int, int)} and the single-byte {@link
-   * java.io.FileInputStream#read()} before bytes are consumed from the underlying file descriptor.
+   * Intercepts the single-byte {@link java.io.FileInputStream#read()} (one byte requested). The
+   * stream's {@code path} field is the path it was opened with, or {@code null} for a stream built
+   * from a {@link java.io.FileDescriptor}.
    *
    * <p>Passes {@code "FILE_IO_READ"} as the operation tag so the dispatcher can route to the
    * correct {@link com.macstab.chaos.jvm.api.OperationType#FILE_IO_READ} scenario.
    */
-  static final class FileReadAdvice {
+  static final class FileReadByteAdvice {
     @Advice.OnMethodEnter
-    static void enter(@Advice.This final Object stream) throws Throwable {
-      BootstrapDispatcher.beforeFileIo("FILE_IO_READ", stream);
+    static void enter(
+        @Advice.This final Object stream, @Advice.FieldValue("path") final String path)
+        throws Throwable {
+      BootstrapDispatcher.beforeFileIo("FILE_IO_READ", stream, path, 1);
+    }
+  }
+
+  /** Intercepts {@link java.io.FileInputStream#read(byte[])} ({@code b.length} requested). */
+  static final class FileReadArrayAdvice {
+    @Advice.OnMethodEnter
+    static void enter(
+        @Advice.This final Object stream,
+        @Advice.Argument(0) final byte[] buffer,
+        @Advice.FieldValue("path") final String path)
+        throws Throwable {
+      BootstrapDispatcher.beforeFileIo(
+          "FILE_IO_READ", stream, path, buffer == null ? -1 : buffer.length);
+    }
+  }
+
+  /** Intercepts {@link java.io.FileInputStream#read(byte[], int, int)} ({@code len} requested). */
+  static final class FileReadRangeAdvice {
+    @Advice.OnMethodEnter
+    static void enter(
+        @Advice.This final Object stream,
+        @Advice.Argument(2) final int len,
+        @Advice.FieldValue("path") final String path)
+        throws Throwable {
+      BootstrapDispatcher.beforeFileIo("FILE_IO_READ", stream, path, len);
     }
   }
 
   /**
-   * Intercepts {@link java.io.FileOutputStream#write(byte[], int, int)} and the single-byte {@link
-   * java.io.FileOutputStream#write(int)} before bytes are written to the underlying file
-   * descriptor.
+   * Intercepts the single-byte {@link java.io.FileOutputStream#write(int)}.
    *
    * <p>Passes {@code "FILE_IO_WRITE"} as the operation tag so the dispatcher can route to the
    * correct {@link com.macstab.chaos.jvm.api.OperationType#FILE_IO_WRITE} scenario.
    */
-  static final class FileWriteAdvice {
+  static final class FileWriteByteAdvice {
     @Advice.OnMethodEnter
-    static void enter(@Advice.This final Object stream) throws Throwable {
-      BootstrapDispatcher.beforeFileIo("FILE_IO_WRITE", stream);
+    static void enter(
+        @Advice.This final Object stream, @Advice.FieldValue("path") final String path)
+        throws Throwable {
+      BootstrapDispatcher.beforeFileIo("FILE_IO_WRITE", stream, path, 1);
+    }
+  }
+
+  /** Intercepts {@link java.io.FileOutputStream#write(byte[])} ({@code b.length} bytes). */
+  static final class FileWriteArrayAdvice {
+    @Advice.OnMethodEnter
+    static void enter(
+        @Advice.This final Object stream,
+        @Advice.Argument(0) final byte[] buffer,
+        @Advice.FieldValue("path") final String path)
+        throws Throwable {
+      BootstrapDispatcher.beforeFileIo(
+          "FILE_IO_WRITE", stream, path, buffer == null ? -1 : buffer.length);
+    }
+  }
+
+  /** Intercepts {@link java.io.FileOutputStream#write(byte[], int, int)} ({@code len} bytes). */
+  static final class FileWriteRangeAdvice {
+    @Advice.OnMethodEnter
+    static void enter(
+        @Advice.This final Object stream,
+        @Advice.Argument(2) final int len,
+        @Advice.FieldValue("path") final String path)
+        throws Throwable {
+      BootstrapDispatcher.beforeFileIo("FILE_IO_WRITE", stream, path, len);
     }
   }
 }

@@ -1050,6 +1050,17 @@ Once the hook is wired, the matcher, effect, and activation policy behave like e
 |---------------------|----------------------|----------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `operations`        | Set\<OperationType\> | required | Subset of valid operations                                                                                                                                                                                                                                                                                                             |
 | `remoteHostPattern` | NamePattern          | `ANY`    | For `SOCKET_CONNECT`: matched against `InetSocketAddress` host string. For `SOCKET_READ`/`SOCKET_WRITE`/`SOCKET_CLOSE`: matched against the connected peer — its host name if known, otherwise its IP literal. A non-`ANY` pattern is rejected when `SOCKET_ACCEPT` is in `operations` (the peer is unknown until `accept()` returns). |
+| `remoteCidr`        | String               | `null`   | The peer address must lie in this CIDR block (`"10.0.0.0/8"`, `"2001:db8::/32"`, or one address). IPv4 and IPv6 literals only — no names are resolved. An unresolved peer never matches. |
+| `remotePort`        | Integer              | `null`   | The peer port must equal this value. |
+| `minBytes`          | Long                 | `null`   | The byte count of the call must be at least this (inclusive). For a read it is the number of bytes requested. Requires `operations` ⊆ {`SOCKET_READ`, `SOCKET_WRITE`}: other operations carry no byte count. |
+| `maxBytes`          | Long                 | `null`   | The byte count of the call must be at most this (inclusive). Same restriction as `minBytes`. |
+
+`remoteCidr` and `remotePort` are rejected together with `SOCKET_ACCEPT`, like `remoteHostPattern`. All filters must hold for a call to match.
+
+```json
+{ "type": "network", "operations": ["SOCKET_WRITE"],
+  "remoteCidr": "10.20.0.0/16", "remotePort": 5432, "minBytes": 65536 }
+```
 
 ---
 
@@ -1157,9 +1168,17 @@ Once the hook is wired, the matcher, effect, and activation policy behave like e
 
 **Fields:**
 
-| Field        | Type                 | Default   | Description                           |
-|--------------|----------------------|-----------|---------------------------------------|
-| `operations` | Set\<OperationType\> | required  | `FILE_IO_READ` and/or `FILE_IO_WRITE` |
+| Field         | Type                 | Default   | Description                                                                                                                                                                                                                                       |
+|---------------|----------------------|-----------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `operations`  | Set\<OperationType\> | required  | `FILE_IO_READ` and/or `FILE_IO_WRITE`                                                                                                                                                                                                             |
+| `pathPattern` | PathPattern          | `null`    | `{"prefix": "/var/lib/app"}` matches that path and everything below it on a `/` boundary (`/var/lib/application` does not match). Paths are normalised lexically (`.`, `..`, repeated `/`; `\` counts as `/`); symbolic links are not resolved. A stream opened from a `FileDescriptor` has no path and never matches. |
+| `minBytes`    | Long                 | `null`    | The byte count of the call must be at least this (inclusive): 1 for `read()`/`write(int)`, the array length for `read(byte[])`/`write(byte[])`, otherwise `len`. For a read it is the number requested.                                        |
+| `maxBytes`    | Long                 | `null`    | The byte count of the call must be at most this (inclusive).                                                                                                                                                                                      |
+
+```json
+{ "type": "fileIo", "operations": ["FILE_IO_WRITE"],
+  "pathPattern": { "prefix": "/var/lib/app/wal" }, "minBytes": 4096 }
+```
 
 ---
 

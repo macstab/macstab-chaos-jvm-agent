@@ -313,10 +313,10 @@ public final class BootstrapDispatcher {
   /** Handle index for {@link #beforeSocketAccept(Object)}. */
   public static final int BEFORE_SOCKET_ACCEPT = 27;
 
-  /** Handle index for {@link #beforeSocketRead(Object, Object)}. */
+  /** Handle index for {@link #beforeSocketRead(Object, int, Object, int)}. */
   public static final int BEFORE_SOCKET_READ = 28;
 
-  /** Handle index for {@link #beforeSocketWrite(Object, int, Object)}. */
+  /** Handle index for {@link #beforeSocketWrite(Object, int, Object, int)}. */
   public static final int BEFORE_SOCKET_WRITE = 29;
 
   /** Handle index for {@link #beforeSocketClose(Object)}. */
@@ -395,7 +395,7 @@ public final class BootstrapDispatcher {
   /** Handle index for {@link #beforeSslHandshake(Object)}. */
   public static final int BEFORE_SSL_HANDSHAKE = 54;
 
-  /** Handle index for {@link #beforeFileIo(String, Object)}. */
+  /** Handle index for {@link #beforeFileIo(String, Object, String, int)}. */
   public static final int BEFORE_FILE_IO = 55;
 
   /**
@@ -1435,11 +1435,14 @@ public final class BootstrapDispatcher {
    * Called before a socket input-stream read operation.
    *
    * @param stream the socket implementation being read from; never {@code null}
+   * @param len the number of bytes requested
    * @param remoteAddress the peer address ({@code java.net.InetAddress}); {@code null} when the
    *     socket is not connected
+   * @param remotePort the peer port
    * @throws Throwable if an active scenario injects a failure to simulate a read error or timeout
    */
-  public static void beforeSocketRead(final Object stream, final Object remoteAddress)
+  public static void beforeSocketRead(
+      final Object stream, final int len, final Object remoteAddress, final int remotePort)
       throws Throwable {
     final int[] depth = DEPTH.get();
     if (depth[0] > 0) {
@@ -1450,7 +1453,7 @@ public final class BootstrapDispatcher {
       final MethodHandle[] h = handles;
       final Object d = delegate;
       if (d != null && h != null) {
-        h[BEFORE_SOCKET_READ].invoke(d, stream, remoteAddress);
+        h[BEFORE_SOCKET_READ].invoke(d, stream, len, remoteAddress, remotePort);
       }
     } catch (final Throwable throwable) {
       sneakyThrow(throwable);
@@ -1466,10 +1469,12 @@ public final class BootstrapDispatcher {
    * @param len the number of bytes about to be written
    * @param remoteAddress the peer address ({@code java.net.InetAddress}); {@code null} when the
    *     socket is not connected
+   * @param remotePort the peer port
    * @throws Throwable if an active scenario injects a failure to simulate a write error
    */
   public static void beforeSocketWrite(
-      final Object stream, final int len, final Object remoteAddress) throws Throwable {
+      final Object stream, final int len, final Object remoteAddress, final int remotePort)
+      throws Throwable {
     final int[] depth = DEPTH.get();
     if (depth[0] > 0) {
       return;
@@ -1479,7 +1484,7 @@ public final class BootstrapDispatcher {
       final MethodHandle[] h = handles;
       final Object d = delegate;
       if (d != null && h != null) {
-        h[BEFORE_SOCKET_WRITE].invoke(d, stream, len, remoteAddress);
+        h[BEFORE_SOCKET_WRITE].invoke(d, stream, len, remoteAddress, remotePort);
       }
     } catch (final Throwable throwable) {
       sneakyThrow(throwable);
@@ -2082,9 +2087,13 @@ public final class BootstrapDispatcher {
    * @param operation {@code "FILE_IO_READ"} or {@code "FILE_IO_WRITE"}; never {@code null}
    * @param stream the {@code FileInputStream} or {@code FileOutputStream} instance; never {@code
    *     null}
+   * @param path the path the stream was opened with, or {@code null}
+   * @param byteCount the bytes read (requested) or written by the call
    * @throws Throwable if an active scenario injects an exception to simulate an I/O failure
    */
-  public static void beforeFileIo(final String operation, final Object stream) throws Throwable {
+  public static void beforeFileIo(
+      final String operation, final Object stream, final String path, final int byteCount)
+      throws Throwable {
     final int[] depth = DEPTH.get();
     if (depth[0] > 0) {
       return;
@@ -2094,7 +2103,7 @@ public final class BootstrapDispatcher {
       final MethodHandle[] h = handles;
       final Object d = delegate;
       if (d != null && h != null) {
-        h[BEFORE_FILE_IO].invoke(d, operation, stream);
+        h[BEFORE_FILE_IO].invoke(d, operation, stream, path, byteCount);
       }
     } catch (final Throwable throwable) {
       sneakyThrow(throwable);

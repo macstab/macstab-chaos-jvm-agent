@@ -725,12 +725,12 @@ public final class JdkInstrumentationInstaller {
         lookup.findVirtual(
             delegateInterface,
             "beforeSocketRead",
-            MethodType.methodType(void.class, Object.class, Object.class));
+            MethodType.methodType(void.class, Object.class, int.class, Object.class, int.class));
     methodHandles[BootstrapDispatcher.BEFORE_SOCKET_WRITE] =
         lookup.findVirtual(
             delegateInterface,
             "beforeSocketWrite",
-            MethodType.methodType(void.class, Object.class, int.class, Object.class));
+            MethodType.methodType(void.class, Object.class, int.class, Object.class, int.class));
     methodHandles[BootstrapDispatcher.BEFORE_SOCKET_CLOSE] =
         lookup.findVirtual(
             delegateInterface,
@@ -890,7 +890,7 @@ public final class JdkInstrumentationInstaller {
         lookup.findVirtual(
             delegateInterface,
             "beforeFileIo",
-            MethodType.methodType(void.class, String.class, Object.class));
+            MethodType.methodType(void.class, String.class, Object.class, String.class, int.class));
   }
 
   @FunctionalInterface
@@ -2278,17 +2278,17 @@ public final class JdkInstrumentationInstaller {
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.FileReadAdvice.class)
+                        Advice.to(JvmRuntimeAdvice.FileReadByteAdvice.class)
                             .on(
                                 ElementMatchers.named("read")
                                     .and(ElementMatchers.takesArguments(0))))
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.FileReadAdvice.class)
+                        Advice.to(JvmRuntimeAdvice.FileReadArrayAdvice.class)
                             .on(
                                 ElementMatchers.named("read")
                                     .and(ElementMatchers.takesArguments(byte[].class))))
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.FileReadAdvice.class)
+                        Advice.to(JvmRuntimeAdvice.FileReadRangeAdvice.class)
                             .on(
                                 ElementMatchers.named("read")
                                     .and(
@@ -2299,17 +2299,17 @@ public final class JdkInstrumentationInstaller {
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.FileWriteAdvice.class)
+                        Advice.to(JvmRuntimeAdvice.FileWriteByteAdvice.class)
                             .on(
                                 ElementMatchers.named("write")
                                     .and(ElementMatchers.takesArguments(int.class))))
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.FileWriteAdvice.class)
+                        Advice.to(JvmRuntimeAdvice.FileWriteArrayAdvice.class)
                             .on(
                                 ElementMatchers.named("write")
                                     .and(ElementMatchers.takesArguments(byte[].class))))
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.FileWriteAdvice.class)
+                        Advice.to(JvmRuntimeAdvice.FileWriteRangeAdvice.class)
                             .on(
                                 ElementMatchers.named("write")
                                     .and(

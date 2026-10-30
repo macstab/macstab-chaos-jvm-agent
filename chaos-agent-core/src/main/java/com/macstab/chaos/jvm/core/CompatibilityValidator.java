@@ -529,11 +529,14 @@ final class CompatibilityValidator {
   private static void validateNetworkHostFilter(final ChaosSelector selector) {
     if (selector instanceof ChaosSelector.NetworkSelector network
         && network.operations().contains(OperationType.SOCKET_ACCEPT)
-        && network.remoteHostPattern() != null
-        && network.remoteHostPattern().mode() != NamePattern.MatchMode.ANY) {
+        && ((network.remoteHostPattern() != null
+                && network.remoteHostPattern().mode() != NamePattern.MatchMode.ANY)
+            || network.remoteCidr() != null
+            || network.remotePort() != null)) {
       throw new ChaosValidationException(
-          "NetworkSelector remoteHostPattern cannot apply to SOCKET_ACCEPT: the peer is unknown"
-              + " until accept() returns; use a separate scenario without a host filter for accepts");
+          "NetworkSelector remoteHostPattern, remoteCidr and remotePort cannot apply to"
+              + " SOCKET_ACCEPT: the peer is unknown until accept() returns; use a separate"
+              + " scenario without a peer filter for accepts");
     }
   }
 

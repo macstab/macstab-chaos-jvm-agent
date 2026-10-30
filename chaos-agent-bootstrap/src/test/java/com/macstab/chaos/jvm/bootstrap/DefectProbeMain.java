@@ -83,6 +83,8 @@ public final class DefectProbeMain {
       case "socket-read-loopback" -> socketReadLoopback();
       case "direct-buffer-release" -> directBufferRelease();
       case "bridge-jars-on-disk" -> bridgeJarsOnDisk();
+      case "socket-write-sizes" -> socketWriteSizes();
+      case "file-writes-by-path" -> fileWritesByPath();
       case "woven-groups" -> printWovenGroups();
       case "woven-groups-after-thread-local" -> wovenGroupsAfterThreadLocal();
       case "virtual-thread-start" -> Thread.ofVirtual().start(() -> {}).join();
@@ -399,6 +401,33 @@ public final class DefectProbeMain {
       accepted.getOutputStream().write(42);
       accepted.getOutputStream().flush();
       System.out.println("byte=" + client.getInputStream().read());
+    }
+  }
+
+  /** Writes 10 bytes and then 2000 bytes over a loopback connection. */
+  private static void socketWriteSizes() throws Exception {
+    try (java.net.ServerSocket server =
+            new java.net.ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"));
+        java.net.Socket client = new java.net.Socket("127.0.0.1", server.getLocalPort());
+        java.net.Socket accepted = server.accept()) {
+      client.getOutputStream().write(new byte[10]);
+      client.getOutputStream().write(new byte[2000]);
+      client.getOutputStream().flush();
+      System.out.println("received=" + accepted.getInputStream().readNBytes(2010).length);
+    }
+  }
+
+  /** Writes a file in directory "a" and one in directory "b" under -Dchaos.test.dir. */
+  private static void fileWritesByPath() throws Exception {
+    final java.nio.file.Path root = java.nio.file.Path.of(System.getProperty("chaos.test.dir"));
+    for (final String directory : new String[] {"a", "b"}) {
+      final java.nio.file.Path dir = java.nio.file.Files.createDirectories(root.resolve(directory));
+      try (java.io.FileOutputStream out = new java.io.FileOutputStream(dir.resolve("f").toFile())) {
+        out.write(new byte[] {1, 2, 3});
+        System.out.println(directory + "=ok");
+      } catch (final java.io.IOException rejected) {
+        System.out.println(directory + "=rejected");
+      }
     }
   }
 

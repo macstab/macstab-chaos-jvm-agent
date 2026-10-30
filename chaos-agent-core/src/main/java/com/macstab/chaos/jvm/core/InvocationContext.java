@@ -1,6 +1,7 @@
 package com.macstab.chaos.jvm.core;
 
 import com.macstab.chaos.jvm.api.OperationType;
+import java.net.InetAddress;
 
 /**
  * Immutable snapshot of a single intercepted JVM operation, passed to the scenario evaluation
@@ -31,6 +32,12 @@ import com.macstab.chaos.jvm.api.OperationType;
  *     not support virtual threads or the classification is unavailable
  * @param sessionId the chaos-session identifier bound to the current thread via {@link
  *     ScopeContext}, or {@code null} if no session is active on this thread
+ * @param byteCount the number of bytes of a read or write (requested for a read), or {@code -1}
+ *     when the operation carries none
+ * @param path the file path of a file operation, or {@code null}
+ * @param remoteAddress the peer address of a socket operation, or {@code null} when unknown or
+ *     unresolved
+ * @param remotePort the peer port of a socket operation, or {@code -1} when unknown
  */
 record InvocationContext(
     OperationType operationType,
@@ -40,4 +47,48 @@ record InvocationContext(
     boolean periodic,
     Boolean daemonThread,
     Boolean virtualThread,
-    String sessionId) {}
+    String sessionId,
+    long byteCount,
+    String path,
+    InetAddress remoteAddress,
+    int remotePort) {
+
+  /** {@code byteCount} / {@code remotePort} of an operation that has none. */
+  static final int UNKNOWN = -1;
+
+  /**
+   * Creates a context without byte count, path or peer, for operations that carry none.
+   *
+   * @param operationType the intercepted operation
+   * @param targetClassName the class owning the intercepted method
+   * @param subjectClassName the class of the concrete object, or {@code null}
+   * @param targetName the resource name, or {@code null}
+   * @param periodic whether the invocation is a recurring scheduled task
+   * @param daemonThread whether the calling thread is a daemon, or {@code null}
+   * @param virtualThread whether the calling thread is virtual, or {@code null}
+   * @param sessionId the bound session, or {@code null}
+   */
+  InvocationContext(
+      final OperationType operationType,
+      final String targetClassName,
+      final String subjectClassName,
+      final String targetName,
+      final boolean periodic,
+      final Boolean daemonThread,
+      final Boolean virtualThread,
+      final String sessionId) {
+    this(
+        operationType,
+        targetClassName,
+        subjectClassName,
+        targetName,
+        periodic,
+        daemonThread,
+        virtualThread,
+        sessionId,
+        UNKNOWN,
+        null,
+        null,
+        UNKNOWN);
+  }
+}
