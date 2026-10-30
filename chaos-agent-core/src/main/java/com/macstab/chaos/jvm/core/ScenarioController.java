@@ -550,14 +550,18 @@ final class ScenarioController {
   }
 
   ChaosDiagnostics.ScenarioReport snapshot() {
+    // Read appliedCount before matchedCount: a match is always counted before its application, so
+    // this order guarantees applied <= matched in the report even while calls are in flight.
+    final long applied = appliedCount.get();
+    final long matched = matchedCount.get();
     return new ChaosDiagnostics.ScenarioReport(
         scenario.id(),
         scenario.description(),
         scopeKey,
         scenario.scope(),
         state,
-        matchedCount.get(),
-        appliedCount.get(),
+        matched,
+        applied,
         reason());
   }
 

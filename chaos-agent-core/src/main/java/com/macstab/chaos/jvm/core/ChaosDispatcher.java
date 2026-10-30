@@ -175,7 +175,11 @@ public final class ChaosDispatcher {
       } catch (final Throwable throwable) {
         throw propagate(throwable);
       }
-      return NO_OP_RUNNABLE;
+      // A submitted FutureTask must still complete, or Future.get() blocks forever: cancel it
+      // instead of dropping it, so callers observe the suppression as a CancellationException.
+      return task instanceof java.util.concurrent.Future<?> future
+          ? () -> future.cancel(false)
+          : NO_OP_RUNNABLE;
     }
     try {
       applyPreDecision(decision);
