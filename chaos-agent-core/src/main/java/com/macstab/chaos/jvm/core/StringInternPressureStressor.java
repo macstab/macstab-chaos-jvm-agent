@@ -47,6 +47,19 @@ final class StringInternPressureStressor implements ManagedStressor {
   StringInternPressureStressor(final ChaosEffect.StringInternPressureEffect effect) {
     final int lengthBytes = clamp(effect.stringLengthBytes(), 1, MAX_STRING_LENGTH_BYTES);
     final int internCount = clamp(effect.internCount(), 0, MAX_INTERN_COUNT);
+    if (internCount != effect.internCount() || lengthBytes != effect.stringLengthBytes()) {
+      LOGGER.warning(
+          () ->
+              "chaos-agent: string-intern pressure clamped to "
+                  + internCount
+                  + " strings of "
+                  + lengthBytes
+                  + " bytes (limits "
+                  + MAX_INTERN_COUNT
+                  + " strings, "
+                  + MAX_STRING_LENGTH_BYTES
+                  + " bytes)");
+    }
     final List<String> strings = new ArrayList<>(internCount);
     for (int i = 0; i < internCount; i++) {
       strings.add(buildAndIntern(i, lengthBytes));

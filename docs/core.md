@@ -97,14 +97,16 @@ ChaosRuntime.registerScenario(scenario, scopeKey, sessionId)
   ↓
 CompatibilityValidator.validate(scenario, featureSet)
   — throws ChaosUnsupportedFeatureException on JVM feature mismatch
-  — throws IllegalArgumentException on selector/effect incompatibility
+  — throws ChaosValidationException on selector/effect/operation incompatibility
   ↓
 new ScenarioController(scenario, scopeKey, sessionId, clock, observabilityBus, instrumentationSupplier)
   — state = REGISTERED; started = false
   ↓
 ScenarioRegistry.register(controller)
-  — ConcurrentHashMap.putIfAbsent(key, controller)
-  — throws IllegalStateException("already active") if key exists
+  — atomic ConcurrentHashMap.compute(key, ...)
+  — an existing STOPPED or INACTIVE controller under the key is replaced (and destroyed)
+  — throws ChaosActivationException("scenario key already active") if the existing
+    controller is REGISTERED or ACTIVE
   ↓
 new DefaultChaosActivationHandle(controller, registry)
   if startMode == AUTOMATIC:
@@ -115,16 +117,17 @@ new DefaultChaosActivationHandle(controller, registry)
         startedAt = clock.instant()
         started.set(true)
         state = ACTIVE
-        stressor = StressorFactory.createIfNeeded(effect)  // starts background thread if needed
+        stressor = StressorFactory.createIfNeeded(effect)  // starts background thread if needed;
+                                                           // a creation failure propagates out of activation
         if ClockSkewEffect: clockSkewState = new ClockSkewState(skewEffect, ...)
         observabilityBus.publish(STARTED, ...)
   ↓
 return DefaultChaosActivationHandle
 
 // Plan activations (activate(ChaosPlan)) follow the same path for each scenario in the plan,
-// then wrap all resulting handles in CompositeActivationHandle, which delegates start/stop/release
-// to each member handle. The composite ID is a generated plan-level UUID, distinct from any
-// individual scenario ID.
+// then wrap all resulting handles in CompositeActivationHandle, which delegates start/stop/release/close
+// to each member handle. The composite ID is "plan:<plan name>". If any scenario fails, the ones
+// already registered are destroyed and the exception propagates (the plan is atomic).
 ```
 
 ## Per-Invocation Evaluation
@@ -152,26 +155,26 @@ return DefaultChaosActivationHandle
 5. if (matched <= activateAfterMatches) return null
    — Warm-up: skip first N matches
 
-6. if (!passesRateLimit()) return null
-   — synchronized(this): sliding window, O(1)
+6. if (!passesProbability(matched)) return null
+   — new SplittableRandom(baseSeed ^ matched ^ id.hashCode()).nextDouble() < probability
+   — checked before the rate limit so permits are only consumed by calls that will apply
 
-7. if (!passesProbability(matched)) return null
-   — new SplittableRandom(baseSeed ^ matched ^ id.hashCode()).nextDouble() <= probability
+7. if (!passesRateLimit()) return null
+   — synchronized(this): FIXED window anchored at start(), advanced in whole windows, O(1)
 
-8. if (maxApplications != null):
-   CAS loop:
-     current = appliedCount.get()
-     if current >= maxApplications: state=INACTIVE; reason="max applications reached"; return null
-     if compareAndSet(current, current+1): break
-   else:
-     appliedCount.incrementAndGet()
+8. if (!reserveApplication()) return null
+   — maxApplications budget: a reservation, not yet a count
+   — if appliedCount >= maxApplications: state=INACTIVE; reason="max applications reached"
 
-observabilityBus.publish(APPLIED, ...)
-observabilityBus.incrementMetric("chaos.effect.applied", ...)
-return new ScenarioContribution(this, scenario, effect, sampleDelayMillis(matched), gateTimeout())
+return new ScenarioContribution(this, scenario, effect, sampleDelayMillis(matched), gateTimeout(), context)
+
+// The dispatcher then merges all contributions (delay, then gate, then terminal action) and calls
+//   commitApplication(context)  — for every delay, the winning gate, the winning terminal action:
+//                                 appliedCount++, publish(APPLIED), metric "chaos.effect.applied"
+//   releaseApplication()        — for contributions that lost on precedence: budget returned
 ```
 
-**Note on matchedCount semantics**: `matchedCount` is incremented at step 4, before warm-up and rate-limit checks. This means it reflects the total number of times the selector matched, not the number of times the effect was applied. This is intentional: diagnostics consumers can distinguish "the selector is working" from "the effect is being suppressed by policy."
+**Note on matchedCount semantics**: `matchedCount` is incremented at step 4, before warm-up, probability and rate-limit checks. This means it reflects the total number of times the selector matched, not the number of times the effect was applied. This is intentional: diagnostics consumers can distinguish "the selector is working" from "the effect is being suppressed by policy."
 
 ## RuntimeDecision Merge
 
@@ -475,14 +478,14 @@ Immutable after construction.
 ```
 startMode: AUTOMATIC | MANUAL      — whether to start on activate() or require explicit start()
 probability: double [0.0, 1.0]    — fraction of matching invocations that apply the effect
-rateLimit: (permits, window)       — max applications within a sliding time window
+rateLimit: (permits, window)       — max applications per fixed window anchored at start (up to 2× permits across a boundary)
 activateAfterMatches: long ≥ 0    — skip first N matches (warm-up)
 activeFor: Duration                — auto-expire after this duration from start()
 maxApplications: Long              — stop after this many total applications; null = unlimited
 randomSeed: Long                   — seed for probability sampling; null = 0
 ```
 
-All fields are optional and compose independently (AND logic). A scenario passes all guards or fires on none.
+All fields are optional and compose independently (AND logic). A scenario passes all guards or fires on none. Stress scenarios reject `maxApplications`, `rateLimit`, `activateAfterMatches > 0` and `probability < 1.0`; for them `activeFor` ends the stressor (state `INACTIVE`, reason `"expired"`).
 
 ## ScenarioReport (Diagnostics)
 
@@ -518,9 +521,9 @@ Under high concurrency with many threads hitting the same rate-limited scenario,
 - `appliedCount` answers "is the effect being applied?"
 - `matchedCount > 0 && appliedCount == 0` diagnoses activation policy suppression
 
-## CAS Loop for maxApplications
+## Reservation for maxApplications
 
-Without the CAS loop, two threads could simultaneously read `appliedCount < maxApplications`, both increment, and both apply the effect — overshooting the cap by N-1 where N is the number of concurrent threads that raced through. The CAS loop ensures the increment is atomic with the read.
+`reserveApplication()` and `commitApplication()` update `appliedCount` and the outstanding reservations under a small lock, so committed applications plus reservations never exceed the cap — concurrent threads cannot overshoot it. A reservation is committed only when the dispatcher actually applies the contribution; a scenario that loses on precedence releases its reservation and keeps its budget. The scenario becomes `INACTIVE` only once committed applications reach the cap.
 
 ## RateLimit Precision under High Concurrency
 
@@ -534,11 +537,11 @@ The `synchronized(this)` guard that protects the rate-limit window does more tha
 | 100 threads, 10 permits, 10 s window            | `== 10`                 | no permit wasted                    |
 | 50 threads, `maxApplications=3`, `rateLimit=20` | `<= 3`                  | `maxApplications` wins when tighter |
 
-The last row confirms that `maxApplications` and `rateLimit` are independent guards: the tighter constraint wins. When `maxApplications < permitsPerWindow`, the CAS loop on `appliedCount` fires before the rate-limit window is exhausted.
+The last row confirms that `maxApplications` and `rateLimit` are independent guards: the tighter constraint wins. When `maxApplications < permitsPerWindow`, the budget on `appliedCount` is exhausted before the rate-limit window is.
 
 ## stop() Monotonic State Transition
 
-`ScenarioController` state transitions monotonically: `REGISTERED → ACTIVE → STOPPED`. Once a controller observes the stopped flag it never reverts.
+`ScenarioController` state transitions monotonically: `REGISTERED → ACTIVE → STOPPED` (or `ACTIVE → INACTIVE` on expiry / exhausted budget). Once a controller observes the stopped flag it never reverts. Re-activating the same id after `stop()` or `close()` registers a **new** controller that replaces the stopped one.
 
 **Guarantees (test coverage in `StopDuringEvaluationTest`)**:
 
@@ -553,8 +556,10 @@ The last row confirms that `maxApplications` and `rateLimit` are independent gua
 
 When two or more scenarios match the same invocation and both carry terminal actions (reject, suppress, exception), the merge rule is:
 
-1. **Delays accumulate**: all matching scenarios' delay durations are summed before sleeping.
-2. **Terminal action**: the scenario with the highest `precedence()` integer wins. Equal precedence is last-write (non-deterministic) but always results in exactly one terminal action being applied — never zero, never two.
+1. **Order**: delay first, then gate, then terminal action. A delay is never dropped because a terminal action wins.
+2. **Delays accumulate**: all matching scenarios' delay durations are summed before sleeping.
+3. **Gate**: the highest-precedence gate holds the thread.
+4. **Terminal action**: the scenario with the highest `precedence()` integer wins. Equal precedence is last-write (non-deterministic) but always results in exactly one terminal action being applied — never zero, never two.
 
 **Test coverage in `TwoScenariosConflictingTerminalActionsTest`**:
 
@@ -578,7 +583,7 @@ Sessions provide hard isolation boundaries via `ScopeContext`, a thread-local st
 
 **Why cross-session bleed is impossible**: `ScopeContext.currentSessionId()` returns the top of the calling thread's session ID stack. The `ScenarioController` for a SESSION-scoped scenario stores its session ID at registration time. The evaluation pipeline (step 3) compares `currentSessionId()` against the controller's ID with reference equality on interned session UUIDs. A thread in session A can never satisfy the guard for a controller registered to session B.
 
-**Root binding and lifecycle**: `DefaultChaosSession(...)` calls `scopeContext.bind(id)` in its constructor — the opening thread is automatically in-scope from construction. `session.close()` calls `rootBinding.close()` last, after all controllers are destroyed, ensuring no thread reads a dangling session ID.
+**Root binding and lifecycle**: `DefaultChaosSession(...)` calls `scopeContext.bindRoot(id)` in its constructor — the opening thread is automatically in-scope from construction. `session.close()` calls `rootBinding.close()` last, after all controllers are destroyed, ensuring no thread reads a dangling session ID.
 
 ---
 
@@ -592,17 +597,22 @@ If `Class.forName(exceptionClassName)` throws `ClassNotFoundException`, or if ne
 
 ## Stressor Creation Failure
 
-`StressorFactory.createIfNeeded()` catches stressor-creation errors silently (by design, since stressors start background threads that may fail for resource reasons). A failed stressor returns `null`; the scenario remains ACTIVE but produces no background load. This is a silent degradation. Future improvement: propagate stressor creation errors to the diagnostics failure queue.
+`StressorFactory.createIfNeeded()` does not catch stressor-creation errors. A failure (for example an `OutOfMemoryError` while allocating heap pressure, or a thread that cannot be started) propagates out of `start()` and therefore out of `activate()`. For a `RuntimeException` the scenario is unregistered again and the failure is recorded in the diagnostics failure list. A stressor never silently runs as a no-op.
+
+Stressor notes:
+- `activeFor` ends a stressor: when the window elapses the stressor is closed and the scenario becomes `INACTIVE` with reason `"expired"`.
+- `VirtualThreadCarrierPinningStressor` holds carriers with **virtual** threads: on JDK 21–23 by sleeping inside a monitor (true pinning, no CPU), on JDK 24+ (JEP 491, monitors no longer pin) with a spin-wait — the carrier is equally unavailable but each held carrier costs one CPU while active.
+- `MetaspacePressureStressor` with `retain=false` releases the class loader immediately after defining the classes (a transient spike); with `retain=true` the classes stay loaded until `close()`.
 
 ## Scenario Duplicate Registration
 
-`ScenarioRegistry.register()` throws `IllegalStateException("scenario key already active: " + key)` if a controller with the same key is already present. The key is `scopeKey + "::" + scenarioId`. Two scenarios with the same ID in the same scope cannot coexist. The registration exception is caught in `ChaosRuntime.registerScenario()` and classified as `ACTIVATION_CONFLICT`.
+`ScenarioRegistry.register()` throws `ChaosActivationException("scenario key already active: " + key)` if a controller with the same key is present and still `REGISTERED` or `ACTIVE`. A `STOPPED` or `INACTIVE` controller under the key is replaced instead, so the same id can be activated again after `stop()`, `close()`, expiry or an exhausted budget. The key is `scopeKey + "::" + scenarioId` (for example `jvm::slow-db` or `session:<sid>::slow-db`) and is what `handle.id()` returns. The conflict is recorded in the diagnostics failure list as `ACTIVATION_CONFLICT` and rethrown.
 
 ## Session Close and Registry Cleanup
 
 `DefaultChaosSession.close()` calls `ScenarioRegistry.unregister(controller)` for every session-scoped controller. `unregister()` uses `ConcurrentHashMap.remove(key, controller)` — identity-based conditional removal. If the controller was already replaced (e.g., by a duplicate-ID registration race), only the exact registered instance is removed.
 
-JVM-scoped controllers are NOT removed on session close. They persist until `controlPlane.close()` or `handle.close()`.
+JVM-scoped controllers are NOT removed on session close. They stay registered until `handle.close()` (which stops **and** unregisters) or `controlPlane.close()`. `handle.stop()` alone leaves a `STOPPED` entry in the registry until it is closed or replaced by a new activation of the same id. A closed control plane rejects `activate`, `openSession` and `addEventListener` with `IllegalStateException`.
 
 ---
 

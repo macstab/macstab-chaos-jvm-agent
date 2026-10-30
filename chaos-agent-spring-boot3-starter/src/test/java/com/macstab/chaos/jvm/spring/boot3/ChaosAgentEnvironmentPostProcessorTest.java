@@ -83,15 +83,38 @@ class ChaosAgentEnvironmentPostProcessorTest {
             .hasValueSatisfying(count -> assertThat(count).isGreaterThan(0));
       }
 
-      // After handle.close() the scenario is STOPPED — no further interception.
-      assertThat(chaos.diagnostics().scenario("ep-test-sb3-socket-connect"))
-          .hasValueSatisfying(
-              r ->
-                  assertThat(r.state())
-                      .isEqualTo(com.macstab.chaos.jvm.api.ChaosDiagnostics.ScenarioState.STOPPED));
+      // handle.close() stops the scenario and removes it from the registry.
+      assertThat(chaos.diagnostics().scenario("ep-test-sb3-socket-connect")).isEmpty();
     } finally {
       ctx.close();
     }
+  }
+
+  @Test
+  @DisplayName("early attach sees macstab.chaos.enabled set only in config data (properties file)")
+  void earlyAttachSeesConfigData() {
+    final ConfigurableApplicationContext ctx =
+        new SpringApplication(MinimalApp.class)
+            .run(
+                "--spring.main.web-application-type=none",
+                "--spring.config.location=classpath:chaos-enabled-by-config-data.properties");
+    try {
+      assertThat(
+              ctx.getEnvironment()
+                  .getProperty(ChaosAgentEnvironmentPostProcessor.ATTACH_MARKER_PROPERTY))
+          .as("the post-processor runs after config data and attaches early")
+          .isEqualTo("spring-boot-3");
+    } finally {
+      ctx.close();
+    }
+  }
+
+  @Test
+  @DisplayName("runs directly after ConfigDataEnvironmentPostProcessor")
+  void ordersAfterConfigData() {
+    assertThat(new ChaosAgentEnvironmentPostProcessor().getOrder())
+        .isGreaterThan(
+            org.springframework.boot.context.config.ConfigDataEnvironmentPostProcessor.ORDER);
   }
 
   @Test

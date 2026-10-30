@@ -14,7 +14,6 @@ import java.nio.file.Path;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.FileTime;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -234,8 +233,7 @@ public final class StartupConfigPoller implements AutoCloseable {
       if (throwable instanceof InterruptedException) {
         Thread.currentThread().interrupt();
       }
-      System.err.println(
-          "[chaos-agent] config reload failed (parse): " + sanitiseForLog(throwable.getMessage()));
+      logReloadFailure(String.valueOf(throwable.getMessage()));
       if (throwable instanceof VirtualMachineError virtualMachineError) {
         throw virtualMachineError;
       }
@@ -307,6 +305,7 @@ public final class StartupConfigPoller implements AutoCloseable {
     }
     final com.macstab.chaos.jvm.api.ChaosPlan newPlan = ChaosPlanMapper.read(json);
     applyDiff(newPlan.scenarios());
+    lastLoggedFailure = null;
     // Only advance lastModified AFTER a successful parse+apply. Advancing it before the
     // parse would permanently mask the same-mtime case: a parse failure followed by the
     // operator correcting the file in place (without touching mtime) would never reload.
@@ -318,63 +317,82 @@ public final class StartupConfigPoller implements AutoCloseable {
             + sanitiseForLog(configPath.toString()));
   }
 
+  /**
+   * Applies a reloaded plan atomically: either every new and changed scenario is active afterwards,
+   * or the previously active set is restored.
+   *
+   * <p>Scenarios that were removed or changed are stopped first (their ids must be free for the new
+   * versions), then every new or changed scenario is activated. If any activation fails, the
+   * scenarios activated by this call are closed and the previous versions are re-activated; they
+   * passed validation when they were first activated. An earlier version activated each scenario
+   * independently and logged failures, so a changed scenario that failed validation was left
+   * stopped and the plan was partially applied.
+   *
+   * @param newScenarios the scenarios of the reloaded plan
+   * @throws IllegalStateException when the plan has duplicate ids or a scenario fails to activate;
+   *     the previous set is active again when this is thrown
+   */
   synchronized void applyDiff(final List<ChaosScenario> newScenarios) {
     // Race guard: close() sets `closed=true` before entering this monitor. An in-flight pollOnce
-    // that was blocked on file I/O may reach applyDiff after close() returned, holding a freshly
-    // parsed plan. If we let it through, each "missing from activeScenarios" branch would call
-    // runtime.activate(...) into a torn-down poller whose maps are then cleared — leaving the
-    // activated handles orphaned in the runtime registry with no owner. Bail out instead.
+    // that was blocked on file I/O may reach applyDiff after close() returned; activating into a
+    // torn-down poller would orphan the handles. Bail out instead.
     if (closed) {
       return;
     }
-    // Detect duplicate IDs up front rather than letting Collectors.toMap throw
-    // IllegalStateException mid-diff (which would leave the runtime in a partially-torn-down
-    // state: scenarios whose content changed would already be stopped, but new/updated ones
-    // would never be re-activated). A duplicate ID means the reloaded plan is malformed, so
-    // skip the entire diff; the next successful reload will converge.
-    final Map<String, ChaosScenario> newById = new java.util.HashMap<>(newScenarios.size());
+    final Map<String, ChaosScenario> newById = new java.util.LinkedHashMap<>(newScenarios.size());
     for (final ChaosScenario scenario : newScenarios) {
-      final ChaosScenario previous = newById.putIfAbsent(scenario.id(), scenario);
-      if (previous != null) {
-        System.err.println(
-            "[chaos-agent] config reload skipped: duplicate scenario id '"
-                + sanitiseForLog(scenario.id())
-                + "' in reloaded plan; no scenarios were changed");
-        return;
+      if (newById.putIfAbsent(scenario.id(), scenario) != null) {
+        throw new IllegalStateException(
+            "duplicate scenario id '" + sanitiseForLog(scenario.id()) + "' in plan");
       }
     }
 
-    // Stop scenarios that were removed or whose content changed. Use destroy() rather than
-    // stop() so the registry slot is freed; otherwise every reload leaks the old scenario
-    // entry into diagnostics and the registry grows without bound.
-    for (final String id : new HashSet<>(activeScenarios.keySet())) {
+    final Map<String, ChaosScenario> replaced = new java.util.LinkedHashMap<>();
+    for (final String id : new java.util.ArrayList<>(activeScenarios.keySet())) {
       final ChaosScenario existing = activeScenarios.get(id);
       final ChaosScenario incoming = newById.get(id);
       if (incoming == null || !incoming.equals(existing)) {
         destroyHandle(activeHandles.remove(id));
         activeScenarios.remove(id);
+        replaced.put(id, existing);
       }
     }
 
-    // Activate scenarios that are new or were just stopped due to content change.
-    // Each activation is attempted independently: a validation failure on one scenario must not
-    // leave all subsequent scenarios unactivated, which would make the runtime inconsistent with
-    // every reload after the first partial failure. Log and continue so the successfully
-    // activatable subset is always applied.
-    for (final ChaosScenario scenario : newScenarios) {
-      if (!activeScenarios.containsKey(scenario.id())) {
-        try {
-          final ChaosActivationHandle handle = runtime.activate(scenario);
-          activeHandles.put(scenario.id(), handle);
-          activeScenarios.put(scenario.id(), scenario);
-        } catch (final RuntimeException activationFailure) {
-          System.err.println(
-              "[chaos-agent] config reload: failed to activate scenario '"
-                  + sanitiseForLog(scenario.id())
-                  + "': "
-                  + sanitiseForLog(activationFailure.getMessage()));
+    final Map<String, ChaosActivationHandle> activated = new java.util.LinkedHashMap<>();
+    try {
+      for (final ChaosScenario scenario : newById.values()) {
+        if (!activeScenarios.containsKey(scenario.id())) {
+          activated.put(scenario.id(), runtime.activate(scenario));
         }
       }
+    } catch (final RuntimeException activationFailure) {
+      activated.values().forEach(StartupConfigPoller::destroyHandle);
+      for (final ChaosScenario previous : replaced.values()) {
+        try {
+          activeHandles.put(previous.id(), runtime.activate(previous));
+          activeScenarios.put(previous.id(), previous);
+        } catch (final RuntimeException restoreFailure) {
+          activationFailure.addSuppressed(restoreFailure);
+        }
+      }
+      throw new IllegalStateException(
+          "plan not applied, previous scenarios kept: " + activationFailure.getMessage(),
+          activationFailure);
+    }
+    for (final Map.Entry<String, ChaosActivationHandle> entry : activated.entrySet()) {
+      activeHandles.put(entry.getKey(), entry.getValue());
+      activeScenarios.put(entry.getKey(), newById.get(entry.getKey()));
+    }
+  }
+
+  /** Last reload failure that was logged; identical consecutive failures are logged once. */
+  private String lastLoggedFailure;
+
+  private void logReloadFailure(final String message) {
+    final String sanitised = sanitiseForLog(message);
+    if (!sanitised.equals(lastLoggedFailure)) {
+      lastLoggedFailure = sanitised;
+      System.err.println("[chaos-agent] config reload failed: " + sanitised);
     }
   }
 

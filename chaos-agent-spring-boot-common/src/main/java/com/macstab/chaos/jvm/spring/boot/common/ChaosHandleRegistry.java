@@ -56,7 +56,7 @@ public final class ChaosHandleRegistry implements DisposableBean {
     if (closing) {
       // Context is tearing down — track would leak the handle past stopAll()'s drain.
       try {
-        handle.stop();
+        handle.close();
       } catch (final RuntimeException exception) {
         LOGGER.log(
             Level.WARNING,
@@ -68,7 +68,7 @@ public final class ChaosHandleRegistry implements DisposableBean {
     final ChaosActivationHandle previous = handles.put(handle.id(), handle);
     if (previous != null && previous != handle) {
       try {
-        previous.stop();
+        previous.close();
       } catch (final RuntimeException exception) {
         LOGGER.log(
             Level.WARNING,
@@ -82,7 +82,7 @@ public final class ChaosHandleRegistry implements DisposableBean {
     // and stop it inline, matching the short-circuit path above.
     if (closing && handles.remove(handle.id(), handle)) {
       try {
-        handle.stop();
+        handle.close();
       } catch (final RuntimeException exception) {
         LOGGER.log(
             Level.WARNING,
@@ -104,10 +104,10 @@ public final class ChaosHandleRegistry implements DisposableBean {
       return false;
     }
     try {
-      handle.stop();
+      handle.close();
       return true;
     } catch (final RuntimeException stopFailure) {
-      // handle.stop() can throw from stressor teardown (interrupted joins, SecurityException on
+      // handle.close() can throw from stressor teardown (interrupted joins, SecurityException on
       // thread-group access, IOException-wrapped errors during resource release). Without this
       // catch, the exception propagates through the Actuator HTTP handler into Spring MVC's
       // default error rendering, producing a 500 with internal stack frames in the response body
@@ -134,6 +134,21 @@ public final class ChaosHandleRegistry implements DisposableBean {
    * @return the number of handles that were stopped successfully
    */
   public int stopAll() {
+    int stoppedCount = 0;
+    for (final String handleId : java.util.List.copyOf(handles.keySet())) {
+      if (stop(handleId)) {
+        stoppedCount++;
+      }
+    }
+    return stoppedCount;
+  }
+
+  /**
+   * Stops every handle and refuses further registrations. Called on context shutdown only: the
+   * {@code closing} flag is permanent, so setting it from {@link #stopAll()} (the actuator's
+   * stop-all operation) made every later activation stop itself immediately.
+   */
+  private int shutDown() {
     // Flip the closing flag FIRST so any concurrent register() calls short-circuit and stop
     // their handles inline instead of racing our drain. Writes to the map after this point
     // come only from threads that observed closing=false before this write — those are
@@ -147,29 +162,13 @@ public final class ChaosHandleRegistry implements DisposableBean {
     // everything present at the time closing is set; pass 1 catches the bounded set of inserts
     // that slipped through the closing guard between our volatile write and pass 0's snapshot.
     for (int pass = 0; pass < 2; pass++) {
-      for (final String handleId : java.util.List.copyOf(handles.keySet())) {
-        final ChaosActivationHandle handle = handles.remove(handleId);
-        if (handle == null) {
-          continue;
-        }
-        try {
-          handle.stop();
-          stoppedCount++;
-        } catch (final RuntimeException ignored) {
-          // best-effort stop-all
-        }
-      }
+      stoppedCount += stopAll();
     }
     return stoppedCount;
   }
 
-  /**
-   * Invoked by Spring when the enclosing context closes. Delegates to {@link #stopAll()} so that
-   * handles created by this context (via the Actuator endpoint or {@code chaosStartupApplier}) do
-   * not leak into subsequent contexts.
-   */
   @Override
   public void destroy() {
-    stopAll();
+    shutDown();
   }
 }

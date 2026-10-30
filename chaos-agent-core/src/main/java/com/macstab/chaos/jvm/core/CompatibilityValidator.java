@@ -1,12 +1,15 @@
 package com.macstab.chaos.jvm.core;
 
+import com.macstab.chaos.jvm.api.ActivationPolicy;
 import com.macstab.chaos.jvm.api.ChaosActivationException;
 import com.macstab.chaos.jvm.api.ChaosEffect;
 import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.ChaosSelector;
 import com.macstab.chaos.jvm.api.ChaosUnsupportedFeatureException;
 import com.macstab.chaos.jvm.api.ChaosValidationException;
+import com.macstab.chaos.jvm.api.NamePattern;
 import com.macstab.chaos.jvm.api.OperationType;
+import java.util.EnumSet;
 import java.util.Set;
 
 /**
@@ -86,6 +89,7 @@ final class CompatibilityValidator {
         throw new ChaosValidationException("stress scenarios must be JVM scoped");
       }
       validateStressBinding(stressSelector.target(), scenario.effect());
+      validateStressActivationPolicy(scenario.activationPolicy());
       if (stressSelector.target() == ChaosSelector.StressTarget.VIRTUAL_THREAD_CARRIER_PINNING
           && !featureSet.supportsVirtualThreads()) {
         throw new ChaosUnsupportedFeatureException(
@@ -93,6 +97,23 @@ final class CompatibilityValidator {
       }
     }
     validateInterceptorConstraints(scenario);
+  }
+
+  /**
+   * Rejects activation-policy fields that cannot apply to a stressor. A stressor runs as background
+   * load from {@code start()} until it is stopped or its {@code activeFor} window ends; it is never
+   * evaluated per call, so per-call gating (probability, warm-up, rate limit, application cap)
+   * never took effect. Rejecting them makes the misconfiguration visible instead of silent.
+   */
+  private static void validateStressActivationPolicy(final ActivationPolicy policy) {
+    if (policy.maxApplications() != null
+        || policy.rateLimit() != null
+        || policy.activateAfterMatches() > 0
+        || policy.probability() < 1.0d) {
+      throw new ChaosValidationException(
+          "stress scenarios run from start until stop or activeFor ends; maxApplications,"
+              + " rateLimit, activateAfterMatches and probability do not apply to them");
+    }
   }
 
   /**
@@ -244,6 +265,8 @@ final class CompatibilityValidator {
     validateStressorEffectRequiresStressSelector(effect, selector);
     validateGateEffectNotWithStressSelector(effect, selector);
     validateEffectSelectorAffinity(effect, selector);
+    validateEffectOperationSupport(effect, selector);
+    validateNetworkHostFilter(selector);
     validateSelectorOperationSets(selector);
     validateOperationTypeSelectorAffinity(selector);
   }
@@ -473,36 +496,131 @@ final class CompatibilityValidator {
 
   private static boolean selectorContainsAny(
       final ChaosSelector selector, final Set<OperationType> needles) {
+    return containsAny(selectorOperations(selector), needles);
+  }
+
+  /**
+   * Rejects a host filter on {@code SOCKET_ACCEPT}: the remote host of an accepted connection is
+   * only known after {@code accept()} returns, so the pattern can never match before the call is
+   * intercepted.
+   */
+  private static void validateNetworkHostFilter(final ChaosSelector selector) {
+    if (selector instanceof ChaosSelector.NetworkSelector network
+        && network.operations().contains(OperationType.SOCKET_ACCEPT)
+        && network.remoteHostPattern() != null
+        && network.remoteHostPattern().mode() != NamePattern.MatchMode.ANY) {
+      throw new ChaosValidationException(
+          "NetworkSelector remoteHostPattern cannot apply to SOCKET_ACCEPT: the peer is unknown"
+              + " until accept() returns; use a separate scenario without a host filter for accepts");
+    }
+  }
+
+  /** Returns the operations a selector matches; a stress selector matches no call. */
+  private static Set<OperationType> selectorOperations(final ChaosSelector selector) {
     return switch (selector) {
-      case ChaosSelector.ThreadSelector threadSel -> containsAny(threadSel.operations(), needles);
-      case ChaosSelector.ExecutorSelector executorSel ->
-          containsAny(executorSel.operations(), needles);
-      case ChaosSelector.QueueSelector queueSel -> containsAny(queueSel.operations(), needles);
-      case ChaosSelector.AsyncSelector asyncSel -> containsAny(asyncSel.operations(), needles);
-      case ChaosSelector.SchedulingSelector schedulingSel ->
-          containsAny(schedulingSel.operations(), needles);
-      case ChaosSelector.ShutdownSelector shutdownSel ->
-          containsAny(shutdownSel.operations(), needles);
-      case ChaosSelector.ClassLoadingSelector classLoadingSel ->
-          containsAny(classLoadingSel.operations(), needles);
-      case ChaosSelector.MethodSelector methodSel -> containsAny(methodSel.operations(), needles);
-      case ChaosSelector.MonitorSelector monitorSel ->
-          containsAny(monitorSel.operations(), needles);
-      case ChaosSelector.JvmRuntimeSelector jvmRuntimeSel ->
-          containsAny(jvmRuntimeSel.operations(), needles);
-      case ChaosSelector.NioSelector nioSel -> containsAny(nioSel.operations(), needles);
-      case ChaosSelector.NetworkSelector networkSel ->
-          containsAny(networkSel.operations(), needles);
-      case ChaosSelector.ThreadLocalSelector threadLocalSel ->
-          containsAny(threadLocalSel.operations(), needles);
-      case ChaosSelector.HttpClientSelector httpClientSel ->
-          containsAny(httpClientSel.operations(), needles);
-      case ChaosSelector.JdbcSelector jdbcSel -> containsAny(jdbcSel.operations(), needles);
-      case ChaosSelector.DnsSelector dnsSel -> containsAny(dnsSel.operations(), needles);
-      case ChaosSelector.SslSelector sslSel -> containsAny(sslSel.operations(), needles);
-      case ChaosSelector.FileIoSelector fileIoSel -> containsAny(fileIoSel.operations(), needles);
-      case ChaosSelector.StressSelector ignored -> false;
+      case ChaosSelector.ThreadSelector threadSel -> threadSel.operations();
+      case ChaosSelector.ExecutorSelector executorSel -> executorSel.operations();
+      case ChaosSelector.QueueSelector queueSel -> queueSel.operations();
+      case ChaosSelector.AsyncSelector asyncSel -> asyncSel.operations();
+      case ChaosSelector.SchedulingSelector schedulingSel -> schedulingSel.operations();
+      case ChaosSelector.ShutdownSelector shutdownSel -> shutdownSel.operations();
+      case ChaosSelector.ClassLoadingSelector classLoadingSel -> classLoadingSel.operations();
+      case ChaosSelector.MethodSelector methodSel -> methodSel.operations();
+      case ChaosSelector.MonitorSelector monitorSel -> monitorSel.operations();
+      case ChaosSelector.JvmRuntimeSelector jvmRuntimeSel -> jvmRuntimeSel.operations();
+      case ChaosSelector.NioSelector nioSel -> nioSel.operations();
+      case ChaosSelector.NetworkSelector networkSel -> networkSel.operations();
+      case ChaosSelector.ThreadLocalSelector threadLocalSel -> threadLocalSel.operations();
+      case ChaosSelector.HttpClientSelector httpClientSel -> httpClientSel.operations();
+      case ChaosSelector.JdbcSelector jdbcSel -> jdbcSel.operations();
+      case ChaosSelector.DnsSelector dnsSel -> dnsSel.operations();
+      case ChaosSelector.SslSelector sslSel -> sslSel.operations();
+      case ChaosSelector.FileIoSelector fileIoSel -> fileIoSel.operations();
+      case ChaosSelector.StressSelector ignored -> Set.of();
     };
+  }
+
+  /**
+   * Operations whose interception point can carry out a {@link ChaosEffect.SuppressEffect}: it
+   * skips the call, substitutes a no-op or returns an empty result, or — where skipping cannot be
+   * expressed (thread start, exit, HTTP, JDBC) — fails the call with the documented exception.
+   * Every other interception point can only delay or throw; SUPPRESS there was silently ignored.
+   */
+  private static final Set<OperationType> SUPPRESS_OPS =
+      EnumSet.of(
+          OperationType.THREAD_START,
+          OperationType.VIRTUAL_THREAD_START,
+          OperationType.THREAD_SLEEP,
+          OperationType.EXECUTOR_SUBMIT,
+          OperationType.SCHEDULE_SUBMIT,
+          OperationType.SCHEDULE_TICK,
+          OperationType.QUEUE_OFFER,
+          OperationType.QUEUE_POLL,
+          OperationType.ASYNC_COMPLETE,
+          OperationType.ASYNC_COMPLETE_EXCEPTIONALLY,
+          OperationType.ASYNC_CANCEL,
+          OperationType.RESOURCE_LOAD,
+          OperationType.SYSTEM_GC_REQUEST,
+          OperationType.SYSTEM_EXIT_REQUEST,
+          OperationType.NIO_SELECTOR_SELECT,
+          OperationType.THREAD_LOCAL_GET,
+          OperationType.THREAD_LOCAL_SET,
+          OperationType.HTTP_CLIENT_SEND,
+          OperationType.HTTP_CLIENT_SEND_ASYNC,
+          OperationType.JDBC_CONNECTION_ACQUIRE,
+          OperationType.JDBC_STATEMENT_EXECUTE,
+          OperationType.JDBC_PREPARED_STATEMENT,
+          OperationType.JDBC_TRANSACTION_COMMIT,
+          OperationType.JDBC_TRANSACTION_ROLLBACK);
+
+  /** Clock reads: they only return a (possibly skewed) time and cannot be delayed or failed. */
+  private static final Set<OperationType> CLOCK_READ_OPS =
+      EnumSet.of(
+          OperationType.INSTANT_NOW,
+          OperationType.LOCAL_DATE_TIME_NOW,
+          OperationType.ZONED_DATE_TIME_NOW,
+          OperationType.DATE_NEW,
+          OperationType.SYSTEM_CLOCK_MILLIS,
+          OperationType.SYSTEM_CLOCK_NANOS);
+
+  /**
+   * Rejects effects the selected operations cannot carry out: SUPPRESS on an operation that does
+   * not honour it, any effect other than a clock skew on clock reads, and a clock skew on
+   * operations that are not clock reads. These combinations validated before but had no effect.
+   */
+  private static void validateEffectOperationSupport(
+      final ChaosEffect effect, final ChaosSelector selector) {
+    final Set<OperationType> operations = selectorOperations(selector);
+    if (effect instanceof ChaosEffect.SuppressEffect) {
+      for (final OperationType operation : operations) {
+        if (!SUPPRESS_OPS.contains(operation)) {
+          throw new ChaosValidationException(
+              "SuppressEffect is not supported for "
+                  + operation
+                  + "; this interception point can only delay or throw (use delay or reject)."
+                  + " Operations supporting suppress: "
+                  + SUPPRESS_OPS);
+        }
+      }
+    }
+    if (effect instanceof ChaosEffect.ClockSkewEffect) {
+      for (final OperationType operation : operations) {
+        if (!CLOCK_READ_OPS.contains(operation)) {
+          throw new ChaosValidationException(
+              "ClockSkewEffect only applies to clock reads "
+                  + CLOCK_READ_OPS
+                  + ", not "
+                  + operation);
+        }
+      }
+    } else if (containsAny(operations, CLOCK_READ_OPS)) {
+      throw new ChaosValidationException(
+          "clock reads "
+              + CLOCK_READ_OPS
+              + " only support ClockSkewEffect; "
+              + effect.getClass().getSimpleName()
+              + " would never apply to them");
+    }
   }
 
   private static boolean containsAny(

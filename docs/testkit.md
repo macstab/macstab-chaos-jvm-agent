@@ -75,7 +75,8 @@ com.macstab.chaos.jvm.testkit.ChaosAgentExtension
   — stops all session-scoped scenarios
   — unregisters session-scoped controllers from ScenarioRegistry
   tracker.stopTracked()
-  — stops any JVM-scoped handles activated via controlPlane.activate() during the test
+  — closes (stops and unregisters) any JVM-scoped handles activated via controlPlane.activate()
+    during the test, so the next test can activate the same ids
   — runs in finally block: executes even if session.close() throws
   — prevents JVM-scoped scenario leakage into subsequent tests
 ```
@@ -250,13 +251,13 @@ void gateBlocksAndReleasesCorrectly(ChaosSession session) throws Exception {
 
 # 6. Anti-Patterns and Misuse Risks
 
-| Anti-pattern                                                               | Risk                                                                                   | Correct approach                                                                                     |
-|----------------------------------------------------------------------------|----------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------|
-| Activating JVM-scoped scenario without closing the handle                  | Scenario leaks across tests; chaos remains active for subsequent tests in the same JVM | Always call `handle.close()` in `finally`                                                            |
-| Not binding session before submitting work to an executor                  | Session context not propagated; executor tasks not affected by session-scoped chaos    | Use `session.bind()` before submitting, or `session.wrap(task)` to create a context-carrying wrapper |
-| Using `ChaosTestKit.install()` without `-Djdk.attach.allowAttachSelf=true` | `IllegalStateException` at runtime                                                     | Add the JVM arg to test config                                                                       |
-| Checking `appliedCount` without waiting for scenarios to fire              | Race condition: the scenario may not have fired yet                                    | Use event listeners or explicit synchronization points                                               |
-| Registering the same scenario ID twice in the same scope                   | `IllegalStateException("scenario key already active")`                                 | Use unique IDs per test; let `ChaosAgentExtension` manage session lifecycle                          |
+| Anti-pattern                                                               | Risk                                                                                                         | Correct approach                                                                                     |
+|----------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------|
+| Activating JVM-scoped scenario without closing the handle                  | Scenario leaks across tests; chaos remains active for subsequent tests in the same JVM                       | Always call `handle.close()` in `finally`                                                            |
+| Not binding session before submitting work to an executor                  | Session context not propagated; executor tasks not affected by session-scoped chaos                          | Use `session.bind()` before submitting, or `session.wrap(task)` to create a context-carrying wrapper |
+| Using `ChaosTestKit.install()` without `-Djdk.attach.allowAttachSelf=true` | `IllegalStateException` at runtime                                                                           | Add the JVM arg to test config                                                                       |
+| Checking `appliedCount` without waiting for scenarios to fire              | Race condition: the scenario may not have fired yet                                                          | Use event listeners or explicit synchronization points                                               |
+| Registering the same scenario ID twice in the same scope                   | `ChaosActivationException("scenario key already active")` (only while the previous one is REGISTERED/ACTIVE) | Use unique IDs per test; let `ChaosAgentExtension` manage session lifecycle                          |
 
 ---
 

@@ -62,6 +62,7 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
     // partially applied and the operator has no way to tell apart "this plan is active" from
     // "part of this plan is active". Roll back by stopping and destroying every successfully
     // registered handle before propagating the original exception.
+    ensureOpen();
     final List<ChaosActivationHandle> handles = new ArrayList<>();
     try {
       for (final ChaosScenario scenario : plan.scenarios()) {
@@ -102,6 +103,7 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
     // bouncing through the ChaosRuntime facade. This removes the UnsupportedOperationException
     // trap that used to sit here for any caller who got to the control plane without going
     // through ChaosRuntime.
+    ensureOpen();
     return new DefaultChaosSession(displayName, scopeContext, this);
   }
 
@@ -117,6 +119,7 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
   @Override
   public void addEventListener(final ChaosEventListener listener) {
     Objects.requireNonNull(listener, "listener");
+    ensureOpen();
     observabilityBus.addListener(listener);
   }
 
@@ -195,26 +198,31 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
 
   private DefaultChaosActivationHandle registerScenario(
       final ChaosScenario scenario, final String scopeKey, final String sessionId) {
+    ensureOpen();
     ScenarioController controller = null;
+    boolean validated = false;
     boolean registeredInRegistry = false;
     try {
       CompatibilityValidator.validate(scenario, featureSet);
+      validated = true;
       controller =
           new ScenarioController(
               scenario, scopeKey, sessionId, clock, observabilityBus, () -> instrumentation);
       final DefaultChaosActivationHandle handle =
           new DefaultChaosActivationHandle(controller, registry);
+      // Register before starting. A duplicate id is rejected here, before any side effect: an
+      // earlier version started the new controller first (spawning its stressor and publishing
+      // STARTED), then rolled it back with a STOPPED event carrying the id of the scenario that
+      // was still running. A registered but not yet started controller is invisible to the
+      // dispatch path, because evaluate() returns null until start() has set the started flag.
+      final ScenarioController replaced = registry.register(controller);
+      registeredInRegistry = true;
+      if (replaced != null) {
+        destroyQuietly(replaced);
+      }
       if (scenario.activationPolicy().startMode() == ActivationPolicy.StartMode.AUTOMATIC) {
-        // Start before registering: the controller is not yet visible to evaluate() on the hot
-        // dispatch path. If start() throws (stressor OOM, ClockSkewState overflow, listener
-        // exception), the controller never enters the registry and the rollback catch below skips
-        // the unregister call (registeredInRegistry=false). The only downside is a brief gap
-        // between start and registration — in that window STARTED lifecycle events fire but
-        // diagnostics does not yet show the scenario. This is a tolerable ordering artefact.
         handle.start();
       }
-      registry.register(controller);
-      registeredInRegistry = true;
       return handle;
     } catch (final ChaosUnsupportedFeatureException unsupported) {
       unregisterAndDestroyQuietly(controller, registeredInRegistry);
@@ -223,15 +231,18 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
           ChaosDiagnostics.FailureCategory.UNSUPPORTED_RUNTIME,
           unsupported.getMessage());
       throw unsupported;
-    } catch (final IllegalStateException stateException) {
+    } catch (final ChaosActivationException activationFailure) {
+      // Thrown by the validator (e.g. destructive effect without opt-in) or by the registry for a
+      // duplicate id; only the latter is an activation conflict.
+      final boolean conflict = validated && !registeredInRegistry;
       unregisterAndDestroyQuietly(controller, registeredInRegistry);
-      final ChaosDiagnostics.FailureCategory category =
-          stateException.getMessage() != null
-                  && stateException.getMessage().contains("already active")
+      registry.recordFailure(
+          scenario.id(),
+          conflict
               ? ChaosDiagnostics.FailureCategory.ACTIVATION_CONFLICT
-              : ChaosDiagnostics.FailureCategory.INVALID_CONFIGURATION;
-      registry.recordFailure(scenario.id(), category, stateException.getMessage());
-      throw stateException;
+              : ChaosDiagnostics.FailureCategory.INVALID_CONFIGURATION,
+          activationFailure.getMessage());
+      throw activationFailure;
     } catch (final RuntimeException runtimeException) {
       unregisterAndDestroyQuietly(controller, registeredInRegistry);
       registry.recordFailure(
@@ -242,18 +253,35 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
     }
   }
 
+  private void ensureOpen() {
+    if (closed.get()) {
+      throw new IllegalStateException("chaos control plane is closed");
+    }
+  }
+
+  private static void destroyQuietly(final ScenarioController controller) {
+    try {
+      controller.destroy();
+    } catch (final RuntimeException ignored) {
+      // The replaced controller had already finished; a failure while releasing its remaining
+      // resources must not fail the new activation.
+    }
+  }
+
   private void unregisterAndDestroyQuietly(
       final ScenarioController controller, final boolean wasRegistered) {
-    if (controller == null) {
+    // A controller that never reached the registry was never started either (start() runs only
+    // after a successful register), so it holds no stressor, gate waiter or clock state.
+    // Destroying it would only publish a STOPPED event carrying an id that may belong to a
+    // scenario that is still running.
+    if (controller == null || !wasRegistered) {
       return;
     }
-    if (wasRegistered) {
-      try {
-        registry.unregister(controller);
-      } catch (final RuntimeException ignored) {
-        // Best-effort rollback: a failure here must not mask the original exception reported
-        // by the caller.
-      }
+    try {
+      registry.unregister(controller);
+    } catch (final RuntimeException ignored) {
+      // Best-effort rollback: a failure here must not mask the original exception reported by
+      // the caller.
     }
     try {
       controller.destroy();

@@ -46,13 +46,13 @@ import java.util.function.Supplier;
  *   <li>Controller is ACTIVE (started and not stopped).
  *   <li>Session ID matches (when the scenario is session-scoped).
  *   <li>{@link SelectorMatcher} agrees the invocation context matches the scenario's selector.
- *   <li>Activation window: current time is within {@code activateAfter} and {@code deactivateAt}.
+ *   <li>Activation window: the time since start is within {@code activeFor}.
  *   <li>Warm-up: {@code matchedCount} has reached {@code activateAfterMatches}.
- *   <li>Rate limit: the sliding-window rate limit has not been exceeded (guarded by {@code
- *       synchronized(this)}).
  *   <li>Probability: random draw passes the configured probability.
- *   <li>Max-applications CAS: {@code appliedCount} is below {@code maxApplications} and the CAS
- *       increment succeeds.
+ *   <li>Rate limit: the fixed-window rate limit has not been exceeded (guarded by {@code
+ *       synchronized(this)}).
+ *   <li>Max applications: a reservation fits under {@code maxApplications}; the dispatcher later
+ *       commits it when the contribution takes effect, or releases it.
  * </ol>
  *
  * <h2>Thread safety</h2>
@@ -81,6 +81,18 @@ final class ScenarioController {
   private final AtomicBoolean started = new AtomicBoolean(false);
   private final AtomicLong matchedCount = new AtomicLong();
   private final AtomicLong appliedCount = new AtomicLong();
+
+  /**
+   * Guards {@link #reservedApplications} together with {@code appliedCount} for capped scenarios.
+   */
+  private final Object applicationBudgetLock = new Object();
+
+  /** Thread that ends a stressor scenario when {@code activeFor} elapses; {@code null} if none. */
+  private volatile Thread expiryThread;
+
+  /** Reservations taken by {@link #reserveApplication()} and not yet committed or released. */
+  private long reservedApplications;
+
   private volatile ChaosDiagnostics.ScenarioState state;
   private volatile String reason;
   private volatile Instant startedAt;
@@ -178,6 +190,11 @@ final class ScenarioController {
     return appliedCount.get();
   }
 
+  /** Returns the session this controller is scoped to, or {@code null} for a JVM scenario. */
+  String sessionId() {
+    return sessionId;
+  }
+
   /**
    * Returns the current lifecycle state of this controller.
    *
@@ -237,7 +254,9 @@ final class ScenarioController {
     // Holding the monitor across this work blocks every concurrent evaluate(), stop(), and
     // JFR snapshot that needs synchronized(this) for the entire startup duration.
     // If state has changed (STOPPED raced us) we close the freshly-constructed stressor below.
-    final ManagedStressor newStressor = stressorFactory.createIfNeeded(scenario.effect());
+    final ManagedStressor newStressor =
+        stressorFactory.createIfNeeded(
+            scenario.effect(), scenario.activationPolicy().allowDestructiveEffects());
     final boolean transitioned;
     synchronized (this) {
       if (state == ChaosDiagnostics.ScenarioState.STOPPED) {
@@ -266,6 +285,10 @@ final class ScenarioController {
       ChaosDispatcher.incrementDispatchDepth();
       try {
         startedAt = clock.instant();
+        // Anchor the rate-limit window at activation. It started at epoch 0 before, so the first
+        // window ended at an arbitrary epoch-aligned instant instead of one window after start.
+        rateWindowStartMillis = startedAt.toEpochMilli();
+        rateWindowPermits = 0;
       } finally {
         ChaosDispatcher.decrementDispatchDepth();
       }
@@ -297,6 +320,10 @@ final class ScenarioController {
     if (transitioned) {
       observabilityBus.publish(
           ChaosEvent.Type.STARTED, scenario.id(), "scenario started", Map.of("scope", scopeKey));
+      final Duration activeFor = scenario.activationPolicy().activeFor();
+      if (newStressor != null && activeFor != null) {
+        scheduleStressorExpiry(activeFor);
+      }
     }
   }
 
@@ -330,6 +357,7 @@ final class ScenarioController {
       reason = "stopped";
       gate.release();
       closeStressor();
+      cancelStressorExpiry();
       clockSkewState = null;
     }
     observabilityBus.publish(
@@ -341,11 +369,22 @@ final class ScenarioController {
    * inside a gate-effect hold without stopping the scenario. Subsequent invocations that pass the
    * full evaluation pipeline will re-enter the gate and wait again until the next release.
    *
-   * <p>Publishes a {@link com.macstab.chaos.jvm.api.ChaosEvent.Type#RELEASED} event to the {@link
+   * <p>The gate closes again in the same step: an earlier version only counted the latch down, so
+   * after the first release the gate stayed open and no later call was ever held. Publishes a
+   * {@link com.macstab.chaos.jvm.api.ChaosEvent.Type#RELEASED} event to the {@link
    * ObservabilityBus}.
+   *
+   * <p>A no-op, without an event, for a scenario that has no gate effect or is not active, as
+   * {@link com.macstab.chaos.jvm.api.ChaosActivationHandle#release()} documents.
    */
   void release() {
-    gate.release();
+    synchronized (this) {
+      if (!(scenario.effect() instanceof ChaosEffect.GateEffect)
+          || state != ChaosDiagnostics.ScenarioState.ACTIVE) {
+        return;
+      }
+      gate.releaseAndReset();
+    }
     observabilityBus.publish(
         ChaosEvent.Type.RELEASED, scenario.id(), "manual gate released", Map.of("scope", scopeKey));
   }
@@ -365,20 +404,20 @@ final class ScenarioController {
    *       time since {@link #start()} must not exceed it. A failure transitions the state to {@code
    *       INACTIVE} with reason {@code "expired"}.
    *   <li><b>Warm-up</b>: {@code matchedCount} must exceed {@code activateAfterMatches}.
-   *   <li><b>Rate limit</b>: if a rate limit is configured, the number of permits issued in the
-   *       current sliding window must not exceed the limit (guarded by {@code synchronized(this)}).
    *   <li><b>Probability</b>: a random draw using {@link java.util.SplittableRandom} seeded with
-   *       the configured seed XOR-ed with the match count and scenario ID hash must be &le; the
+   *       the configured seed XOR-ed with the match count and scenario ID hash must be below the
    *       configured probability.
-   *   <li><b>Max applications CAS</b>: if {@code maxApplications} is set, a compare-and-swap loop
-   *       ensures {@code appliedCount} does not exceed the cap under concurrent access. A failure
-   *       transitions the state to {@code INACTIVE} with reason {@code "max applications reached"}.
+   *   <li><b>Rate limit</b>: if a rate limit is configured, the number of permits issued in the
+   *       current fixed window must not exceed the limit (guarded by {@code synchronized(this)}).
+   *   <li><b>Max applications</b>: if {@code maxApplications} is set, a reservation must fit under
+   *       the cap. Once committed applications reach the cap the state becomes {@code INACTIVE}
+   *       with reason {@code "max applications reached"}.
    * </ol>
    *
-   * <p>When all checks pass, {@code appliedCount} is incremented, a {@link
-   * com.macstab.chaos.jvm.api.ChaosEvent.Type#APPLIED} event is published, and a {@link
-   * ScenarioContribution} is returned carrying the effect, a sampled delay, and the gate timeout
-   * (if any).
+   * <p>When all checks pass, a {@link ScenarioContribution} is returned carrying the effect, a
+   * sampled delay, and the gate timeout (if any). {@code appliedCount} and the {@link
+   * com.macstab.chaos.jvm.api.ChaosEvent.Type#APPLIED} event follow only when the dispatcher
+   * commits the contribution.
    *
    * <p>This method does not throw checked exceptions; all internal errors are handled silently.
    *
@@ -424,37 +463,76 @@ final class ScenarioController {
     if (!started.get()) {
       return null;
     }
-    if (!incrementAppliedCountWithinCap()) {
+    if (!reserveApplication()) {
       return null;
     }
-    publishAppliedEvent(context);
     return new ScenarioContribution(
-        this, scenario, scenario.effect(), sampleDelayMillis(matchCount), gateTimeout());
+        this, scenario, scenario.effect(), sampleDelayMillis(matchCount), gateTimeout(), context);
   }
 
   /**
-   * Increments {@code appliedCount} respecting the {@code maxApplications} cap via a CAS loop.
-   * Returns {@code true} if the count was successfully incremented, {@code false} if the cap was
-   * reached and the scenario should transition to {@code INACTIVE}.
+   * Reserves one application against {@code maxApplications} for a contribution that has not yet
+   * been chosen. The dispatcher decides afterwards which contributions take effect (every delay,
+   * the winning gate and the winning terminal action by precedence) and calls {@link
+   * #commitApplication(InvocationContext)} for those and {@link #releaseApplication()} for the
+   * rest. An earlier version counted and published {@code APPLIED} here, so a scenario that lost on
+   * precedence still reported itself as applied and used up its budget.
+   *
+   * <p>Committed applications plus outstanding reservations never exceed the cap. The scenario is
+   * marked {@code INACTIVE} only once committed applications reach the cap, so a reservation that
+   * is released can never leave the scenario inactive with budget left.
+   *
+   * @return {@code true} when a reservation was taken
    */
-  private boolean incrementAppliedCountWithinCap() {
+  private boolean reserveApplication() {
     final Long maxApplications = scenario.activationPolicy().maxApplications();
     if (maxApplications == null) {
-      appliedCount.incrementAndGet();
       return true;
     }
-    // CAS loop to ensure appliedCount never overshoots maxApplications under concurrency.
-    // The naive incrementAndGet-then-check pattern allowed the counter to exceed the cap
-    // when multiple threads raced through this branch simultaneously.
-    while (true) {
-      final long currentCount = appliedCount.get();
-      if (currentCount >= maxApplications) {
+    synchronized (applicationBudgetLock) {
+      if (appliedCount.get() >= maxApplications) {
         markInactive("max applications reached");
         return false;
       }
-      if (appliedCount.compareAndSet(currentCount, currentCount + 1L)) {
-        return true;
+      if (appliedCount.get() + reservedApplications >= maxApplications) {
+        return false;
       }
+      reservedApplications++;
+      return true;
+    }
+  }
+
+  /**
+   * Records a reserved application as applied: increments {@code appliedCount}, publishes {@code
+   * APPLIED} and the {@code chaos.effect.applied} metric, and marks the scenario {@code INACTIVE}
+   * when the cap is reached.
+   *
+   * @param context the invocation the contribution was evaluated for
+   */
+  void commitApplication(final InvocationContext context) {
+    final Long maxApplications = scenario.activationPolicy().maxApplications();
+    if (maxApplications == null) {
+      appliedCount.incrementAndGet();
+    } else {
+      final boolean capReached;
+      synchronized (applicationBudgetLock) {
+        reservedApplications--;
+        capReached = appliedCount.incrementAndGet() >= maxApplications;
+      }
+      if (capReached) {
+        markInactive("max applications reached");
+      }
+    }
+    publishAppliedEvent(context);
+  }
+
+  /** Returns a reservation taken by {@link #reserveApplication()} that was not applied. */
+  void releaseApplication() {
+    if (scenario.activationPolicy().maxApplications() == null) {
+      return;
+    }
+    synchronized (applicationBudgetLock) {
+      reservedApplications--;
     }
   }
 
@@ -474,14 +552,18 @@ final class ScenarioController {
   }
 
   ChaosDiagnostics.ScenarioReport snapshot() {
+    // Read appliedCount before matchedCount: a match is always counted before its application, so
+    // this order guarantees applied <= matched in the report even while calls are in flight.
+    final long applied = appliedCount.get();
+    final long matched = matchedCount.get();
     return new ChaosDiagnostics.ScenarioReport(
         scenario.id(),
         scenario.description(),
         scopeKey,
         scenario.scope(),
         state,
-        matchedCount.get(),
-        appliedCount.get(),
+        matched,
+        applied,
         reason());
   }
 
@@ -551,7 +633,65 @@ final class ScenarioController {
         state = ChaosDiagnostics.ScenarioState.INACTIVE;
         started.set(false);
         reason = newReason;
+        // An inactive scenario applies nothing more: release threads parked on its gate (an
+        // indefinite gate would otherwise hold them until stop()) and end its background load.
+        gate.release();
+        closeStressor();
       }
+    }
+  }
+
+  /**
+   * Ends a stressor scenario when its {@code activeFor} window elapses. Stressors are never
+   * evaluated per call, so the window check in {@link #evaluate(InvocationContext)} never ran for
+   * them and a heap, thread-leak or deadlock stressor with {@code activeFor} kept running until
+   * {@code stop()}.
+   *
+   * <p>The expiry thread is agent-owned: it runs with the dispatch depth raised for its whole life,
+   * so user scenarios (thread start, park, sleep) never apply to it. It ends early when the
+   * scenario is stopped.
+   */
+  private void scheduleStressorExpiry(final Duration activeFor) {
+    long timeoutNanos;
+    try {
+      timeoutNanos = activeFor.toNanos();
+    } catch (final ArithmeticException overflow) {
+      return; // beyond ~292 years: effectively never expires
+    }
+    final long deadline = System.nanoTime() + timeoutNanos;
+    final Thread expiry =
+        new Thread(
+            () -> {
+              ChaosDispatcher.incrementDispatchDepth();
+              try {
+                long remaining;
+                while ((remaining = deadline - System.nanoTime()) > 0L) {
+                  java.util.concurrent.locks.LockSupport.parkNanos(this, remaining);
+                  if (Thread.currentThread().isInterrupted()) {
+                    return;
+                  }
+                }
+                markInactive("expired");
+              } finally {
+                ChaosDispatcher.decrementDispatchDepth();
+              }
+            },
+            "macstab-chaos-expiry-" + scenario.id());
+    expiry.setDaemon(true);
+    expiryThread = expiry;
+    ChaosDispatcher.incrementDispatchDepth();
+    try {
+      expiry.start();
+    } finally {
+      ChaosDispatcher.decrementDispatchDepth();
+    }
+  }
+
+  private void cancelStressorExpiry() {
+    final Thread expiry = expiryThread;
+    expiryThread = null;
+    if (expiry != null) {
+      expiry.interrupt();
     }
   }
 
@@ -595,6 +735,13 @@ final class ScenarioController {
       // resets on every call — the rate limit silently degrades to "unlimited". Clamp to a 1 ms
       // floor; anything finer has no hope of being observed through System.currentTimeMillis.
       final long windowMillis = Math.max(1L, rateLimit.window().toMillis());
+      if (nowMillis < rateWindowStartMillis) {
+        // The wall clock stepped back (NTP correction, manual change). Without re-anchoring,
+        // elapsed stays negative and the window never rolls over: the permits remain exhausted
+        // until the clock catches up with the old window start.
+        rateWindowStartMillis = nowMillis;
+        rateWindowPermits = 0;
+      }
       if (nowMillis - rateWindowStartMillis >= windowMillis) {
         // Advance by whole window multiples rather than snapping to nowMillis, so the window
         // boundary stays aligned to the original start time. Resetting to nowMillis on every
@@ -643,7 +790,10 @@ final class ScenarioController {
     } else {
       upperExclusive = max + 1L;
     }
-    return splittableRandom(matched).nextLong(min, upperExclusive);
+    // split(): an independent stream derived from the same seed. Drawing the delay from the very
+    // generator the probability draw used made the two correlated (a draw just below the
+    // probability threshold always came with a short delay).
+    return splittableRandom(matched).split().nextLong(min, upperExclusive);
   }
 
   /**

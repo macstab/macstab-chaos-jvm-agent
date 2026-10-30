@@ -55,7 +55,9 @@ public class ChaosStartupPlan implements ApplicationListener<ApplicationReadyEve
                     + " requests reveal the observability of pinning in jfr/JDK Flight Recorder.")
             .selector(
                 ChaosSelector.stress(ChaosSelector.StressTarget.VIRTUAL_THREAD_CARRIER_PINNING))
-            .effect(ChaosEffect.virtualThreadCarrierPinning(4, Duration.ofMillis(25)))
+            // Two carriers: enough to slow the requests down on any machine. Holding every
+            // carrier would stop the server's virtual threads altogether.
+            .effect(ChaosEffect.virtualThreadCarrierPinning(2, Duration.ofMillis(25)))
             .activationPolicy(ActivationPolicy.always())
             .build();
     handle = controlPlane.activate(scenario);

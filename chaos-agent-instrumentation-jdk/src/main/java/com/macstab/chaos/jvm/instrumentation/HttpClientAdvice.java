@@ -33,10 +33,32 @@ final class HttpClientAdvice {
   static final class JavaHttpClientSendAdvice {
     @Advice.OnMethodEnter
     static void enter(@Advice.Argument(0) final Object request) throws Throwable {
-      final String url = HttpUrlExtractor.fromJavaHttpRequest(request);
-      if (BootstrapDispatcher.beforeHttpSend(url)) {
+      if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_HTTP)) {
+        return;
+      }
+      final String url;
+      final boolean suppressed;
+      try {
+        BootstrapDispatcher.beginInternalCall();
+        try {
+          url = HttpUrlExtractor.fromJavaHttpRequest(request);
+        } finally {
+          BootstrapDispatcher.endInternalCall();
+        }
+        suppressed = BootstrapDispatcher.beforeHttpSend(url);
+      } catch (final Throwable throwable) {
+        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
+        throw throwable;
+      }
+      if (suppressed) {
+        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
         throw new ChaosHttpSuppressException("HTTP send suppressed by chaos agent: " + url);
       }
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit() {
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
     }
   }
 
@@ -46,10 +68,32 @@ final class HttpClientAdvice {
   static final class JavaHttpClientSendAsyncAdvice {
     @Advice.OnMethodEnter
     static void enter(@Advice.Argument(0) final Object request) throws Throwable {
-      final String url = HttpUrlExtractor.fromJavaHttpRequest(request);
-      if (BootstrapDispatcher.beforeHttpSendAsync(url)) {
+      if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_HTTP)) {
+        return;
+      }
+      final String url;
+      final boolean suppressed;
+      try {
+        BootstrapDispatcher.beginInternalCall();
+        try {
+          url = HttpUrlExtractor.fromJavaHttpRequest(request);
+        } finally {
+          BootstrapDispatcher.endInternalCall();
+        }
+        suppressed = BootstrapDispatcher.beforeHttpSendAsync(url);
+      } catch (final Throwable throwable) {
+        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
+        throw throwable;
+      }
+      if (suppressed) {
+        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
         throw new ChaosHttpSuppressException("HTTP sendAsync suppressed by chaos agent: " + url);
       }
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit() {
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
     }
   }
 
@@ -57,10 +101,32 @@ final class HttpClientAdvice {
   static final class OkHttpExecuteAdvice {
     @Advice.OnMethodEnter
     static void enter(@Advice.This final Object call) throws Throwable {
-      final String url = HttpUrlExtractor.fromOkHttpCall(call);
-      if (BootstrapDispatcher.beforeHttpSend(url)) {
+      if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_HTTP)) {
+        return;
+      }
+      final String url;
+      final boolean suppressed;
+      try {
+        BootstrapDispatcher.beginInternalCall();
+        try {
+          url = HttpUrlExtractor.fromOkHttpCall(call);
+        } finally {
+          BootstrapDispatcher.endInternalCall();
+        }
+        suppressed = BootstrapDispatcher.beforeHttpSend(url);
+      } catch (final Throwable throwable) {
+        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
+        throw throwable;
+      }
+      if (suppressed) {
+        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
         throw new ChaosHttpSuppressException("HTTP execute suppressed by chaos agent: " + url);
       }
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit() {
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
     }
   }
 
@@ -68,10 +134,32 @@ final class HttpClientAdvice {
   static final class OkHttpEnqueueAdvice {
     @Advice.OnMethodEnter
     static void enter(@Advice.This final Object call) throws Throwable {
-      final String url = HttpUrlExtractor.fromOkHttpCall(call);
-      if (BootstrapDispatcher.beforeHttpSendAsync(url)) {
+      if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_HTTP)) {
+        return;
+      }
+      final String url;
+      final boolean suppressed;
+      try {
+        BootstrapDispatcher.beginInternalCall();
+        try {
+          url = HttpUrlExtractor.fromOkHttpCall(call);
+        } finally {
+          BootstrapDispatcher.endInternalCall();
+        }
+        suppressed = BootstrapDispatcher.beforeHttpSendAsync(url);
+      } catch (final Throwable throwable) {
+        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
+        throw throwable;
+      }
+      if (suppressed) {
+        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
         throw new ChaosHttpSuppressException("HTTP enqueue suppressed by chaos agent: " + url);
       }
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit() {
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
     }
   }
 
@@ -86,10 +174,32 @@ final class HttpClientAdvice {
     @Advice.OnMethodEnter
     static void enter(@Advice.Argument(0) final Object host, @Advice.Argument(1) final Object req)
         throws Throwable {
-      final String url = HttpUrlExtractor.fromApacheHc4Request(host, req);
-      if (BootstrapDispatcher.beforeHttpSend(url)) {
+      if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_HTTP)) {
+        return;
+      }
+      final String url;
+      final boolean suppressed;
+      try {
+        BootstrapDispatcher.beginInternalCall();
+        try {
+          url = HttpUrlExtractor.fromApacheHc4Request(host, req);
+        } finally {
+          BootstrapDispatcher.endInternalCall();
+        }
+        suppressed = BootstrapDispatcher.beforeHttpSend(url);
+      } catch (final Throwable throwable) {
+        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
+        throw throwable;
+      }
+      if (suppressed) {
+        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
         throw new ChaosHttpSuppressException("HTTP execute suppressed by chaos agent: " + url);
       }
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit() {
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
     }
   }
 
@@ -104,10 +214,32 @@ final class HttpClientAdvice {
   static final class ApacheHc4UriExecuteAdvice {
     @Advice.OnMethodEnter
     static void enter(@Advice.Argument(0) final Object request) throws Throwable {
-      final String url = HttpUrlExtractor.fromApacheHc4UriRequest(request);
-      if (BootstrapDispatcher.beforeHttpSend(url)) {
+      if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_HTTP)) {
+        return;
+      }
+      final String url;
+      final boolean suppressed;
+      try {
+        BootstrapDispatcher.beginInternalCall();
+        try {
+          url = HttpUrlExtractor.fromApacheHc4UriRequest(request);
+        } finally {
+          BootstrapDispatcher.endInternalCall();
+        }
+        suppressed = BootstrapDispatcher.beforeHttpSend(url);
+      } catch (final Throwable throwable) {
+        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
+        throw throwable;
+      }
+      if (suppressed) {
+        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
         throw new ChaosHttpSuppressException("HTTP execute suppressed by chaos agent: " + url);
       }
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit() {
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
     }
   }
 
@@ -118,10 +250,71 @@ final class HttpClientAdvice {
   static final class ApacheHc5ExecuteAdvice {
     @Advice.OnMethodEnter
     static void enter(@Advice.Argument(0) final Object request) throws Throwable {
-      final String url = HttpUrlExtractor.fromApacheHc5Request(request);
-      if (BootstrapDispatcher.beforeHttpSend(url)) {
+      if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_HTTP)) {
+        return;
+      }
+      final String url;
+      final boolean suppressed;
+      try {
+        BootstrapDispatcher.beginInternalCall();
+        try {
+          url = HttpUrlExtractor.fromApacheHc5Request(request);
+        } finally {
+          BootstrapDispatcher.endInternalCall();
+        }
+        suppressed = BootstrapDispatcher.beforeHttpSend(url);
+      } catch (final Throwable throwable) {
+        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
+        throw throwable;
+      }
+      if (suppressed) {
+        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
         throw new ChaosHttpSuppressException("HTTP execute suppressed by chaos agent: " + url);
       }
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit() {
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
+    }
+  }
+
+  /**
+   * Intercepts Apache HttpComponents 5.x {@code CloseableHttpClient.execute(HttpHost,
+   * ClassicHttpRequest, ...)} overloads, where the target host is passed separately from the
+   * request.
+   */
+  static final class ApacheHc5HostExecuteAdvice {
+    @Advice.OnMethodEnter
+    static void enter(
+        @Advice.Argument(0) final Object host, @Advice.Argument(1) final Object request)
+        throws Throwable {
+      if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_HTTP)) {
+        return;
+      }
+      final String url;
+      final boolean suppressed;
+      try {
+        BootstrapDispatcher.beginInternalCall();
+        try {
+          url = HttpUrlExtractor.fromApacheHc5HostRequest(host, request);
+        } finally {
+          BootstrapDispatcher.endInternalCall();
+        }
+        suppressed = BootstrapDispatcher.beforeHttpSend(url);
+      } catch (final Throwable throwable) {
+        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
+        throw throwable;
+      }
+      if (suppressed) {
+        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
+        throw new ChaosHttpSuppressException("HTTP execute suppressed by chaos agent: " + url);
+      }
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit() {
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
     }
   }
 
@@ -131,11 +324,33 @@ final class HttpClientAdvice {
    */
   static final class ReactorNettyConnectAdvice {
     @Advice.OnMethodEnter
-    static void enter(@Advice.Argument(0) final Object request) throws Throwable {
-      final String url = HttpUrlExtractor.fromReactorNettyRequest(request);
-      if (BootstrapDispatcher.beforeHttpSendAsync(url)) {
+    static void enter(@Advice.This final Object client) throws Throwable {
+      if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_HTTP)) {
+        return;
+      }
+      final String url;
+      final boolean suppressed;
+      try {
+        BootstrapDispatcher.beginInternalCall();
+        try {
+          url = HttpUrlExtractor.fromReactorNettyClient(client);
+        } finally {
+          BootstrapDispatcher.endInternalCall();
+        }
+        suppressed = BootstrapDispatcher.beforeHttpSendAsync(url);
+      } catch (final Throwable throwable) {
+        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
+        throw throwable;
+      }
+      if (suppressed) {
+        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
         throw new ChaosHttpSuppressException("HTTP connect suppressed by chaos agent: " + url);
       }
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit() {
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
     }
   }
 }

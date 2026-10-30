@@ -171,12 +171,15 @@ public final class ChaosDispatcher {
       // already fire the gate and delay around their terminal. Previously the early return
       // silently dropped both, turning "pause 5 s then suppress" into instant suppression.
       try {
-        applyGate(decision.gateAction());
-        sleep(decision.delayMillis());
+        applyDelayAndGate(decision);
       } catch (final Throwable throwable) {
         throw propagate(throwable);
       }
-      return NO_OP_RUNNABLE;
+      // A submitted FutureTask must still complete, or Future.get() blocks forever: cancel it
+      // instead of dropping it, so callers observe the suppression as a CancellationException.
+      return task instanceof java.util.concurrent.Future<?> future
+          ? () -> future.cancel(false)
+          : NO_OP_RUNNABLE;
     }
     try {
       applyPreDecision(decision);
@@ -216,8 +219,7 @@ public final class ChaosDispatcher {
       // See decorateExecutorRunnable — apply gate + delay before returning the no-op Callable
       // so composed scenarios preserve the pre-terminal observables.
       try {
-        applyGate(decision.gateAction());
-        sleep(decision.delayMillis());
+        applyDelayAndGate(decision);
       } catch (final Throwable throwable) {
         throw propagate(throwable);
       }
@@ -269,12 +271,12 @@ public final class ChaosDispatcher {
         new InvocationContext(
             OperationType.EXECUTOR_WORKER_RUN,
             executor.getClass().getName(),
-            taskClassName(task),
+            taskClassName(ScopeContext.unwrap(task)),
             worker == null ? null : worker.getName(),
             false,
             worker == null ? null : worker.isDaemon(),
             worker == null ? null : featureSet.isVirtualThread(worker),
-            scopeContext.currentSessionId());
+            taskSession(task));
     applyPreDecision(evaluate(context));
   }
 
@@ -397,7 +399,7 @@ public final class ChaosDispatcher {
             null,
             scopeContext.currentSessionId());
     final RuntimeDecision decision = evaluate(context);
-    applyGate(decision.gateAction());
+    applyDelayAndGate(decision);
     if (decision.terminalAction() != null) {
       if (decision.terminalAction().kind() == TerminalKind.THROW) {
         throw decision.terminalAction().throwable();
@@ -407,7 +409,6 @@ public final class ChaosDispatcher {
         return (Boolean) decision.terminalAction().returnValue();
       }
     }
-    sleep(decision.delayMillis());
     return null;
   }
 
@@ -435,7 +436,7 @@ public final class ChaosDispatcher {
             null,
             scopeContext.currentSessionId());
     final RuntimeDecision decision = evaluate(context);
-    applyGate(decision.gateAction());
+    applyDelayAndGate(decision);
     if (decision.terminalAction() != null) {
       final TerminalAction terminalAction = decision.terminalAction();
       if (terminalAction.kind() == TerminalKind.THROW) {
@@ -448,7 +449,6 @@ public final class ChaosDispatcher {
         return future.completeExceptionally(terminalAction.throwable());
       }
     }
-    sleep(decision.delayMillis());
     return null;
   }
 
@@ -495,14 +495,13 @@ public final class ChaosDispatcher {
             null,
             null);
     final RuntimeDecision decision = evaluate(context);
-    applyGate(decision.gateAction());
+    applyDelayAndGate(decision);
     if (decision.terminalAction() != null) {
       if (decision.terminalAction().kind() == TerminalKind.THROW) {
         throw decision.terminalAction().throwable();
       }
       return (URL) decision.terminalAction().returnValue();
     }
-    sleep(decision.delayMillis());
     return currentValue;
   }
 
@@ -599,7 +598,7 @@ public final class ChaosDispatcher {
             false,
             null,
             null,
-            null);
+            scopeContext.currentSessionId());
     applyPreDecision(evaluate(context));
   }
 
@@ -618,14 +617,14 @@ public final class ChaosDispatcher {
         new InvocationContext(
             OperationType.SCHEDULE_TICK,
             executor == null ? "unknown" : executor.getClass().getName(),
-            taskClassName(task),
+            taskClassName(ScopeContext.unwrap(task)),
             null,
             periodic,
             null,
             null,
-            scopeContext.currentSessionId());
+            taskSession(task));
     final RuntimeDecision decision = evaluate(context);
-    applyGate(decision.gateAction());
+    applyDelayAndGate(decision);
     if (decision.terminalAction() != null) {
       if (decision.terminalAction().kind() == TerminalKind.THROW) {
         throw decision.terminalAction().throwable();
@@ -635,7 +634,6 @@ public final class ChaosDispatcher {
         return false;
       }
     }
-    sleep(decision.delayMillis());
     return true;
   }
 
@@ -687,7 +685,13 @@ public final class ChaosDispatcher {
             null,
             scopeContext.currentSessionId());
     final RuntimeDecision decision = evaluate(context);
-    applyGate(decision.gateAction());
+    applyDelayAndGate(decision);
+    if (decision.terminalAction() != null
+        && decision.terminalAction().kind() == TerminalKind.THROW) {
+      // A reject on METHOD_EXIT fails the call after its body ran (side effects done, result
+      // lost). It used to be dropped: only CORRUPT_RETURN was handled here.
+      throw decision.terminalAction().throwable();
+    }
     if (decision.terminalAction() != null
         && decision.terminalAction().kind() == TerminalKind.CORRUPT_RETURN) {
       // Sleep BEFORE substituting the corrupted return. RuntimeDecision documents "delay first,
@@ -695,7 +699,6 @@ public final class ChaosDispatcher {
       // THROW), so a composed "delay + corrupt" scenario must deliver both effects. Previously
       // the early return skipped sleep(), silently dropping the timing signal operators were
       // testing for.
-      sleep(decision.delayMillis());
       final ChaosEffect.ReturnValueCorruptionEffect corruptEffect =
           (ChaosEffect.ReturnValueCorruptionEffect) decision.terminalAction().returnValue();
       // Propagate the scenario id (stored on the TerminalAction at construction time in
@@ -708,7 +711,6 @@ public final class ChaosDispatcher {
           actualValue,
           scenarioId != null ? scenarioId : "method-exit");
     }
-    sleep(decision.delayMillis());
     return actualValue;
   }
 
@@ -732,6 +734,8 @@ public final class ChaosDispatcher {
         new InvocationContext(clockType, "java.lang.System", null, null, false, null, null, null);
     final boolean isNanos = clockType == OperationType.SYSTEM_CLOCK_NANOS;
     long result = realValue;
+    String currentSession = null;
+    boolean currentSessionResolved = false;
     for (final ScenarioController controller : registry.controllers()) {
       final ClockSkewState state = controller.clockSkewState();
       if (state == null) {
@@ -739,6 +743,18 @@ public final class ChaosDispatcher {
       }
       if (!SelectorMatcher.matches(controller.scenario().selector(), context)) {
         continue;
+      }
+      // A session-scoped clock skew applies only on threads bound to its session; it used to
+      // skew every thread in the JVM. The current session is resolved once, and only when a
+      // session-scoped skew is active, to keep the common clock-read path free of the lookup.
+      if (controller.sessionId() != null) {
+        if (!currentSessionResolved) {
+          currentSession = scopeContext.currentSessionId();
+          currentSessionResolved = true;
+        }
+        if (!controller.sessionId().equals(currentSession)) {
+          continue;
+        }
       }
       final ChaosEffect.ClockSkewEffect skewEffect =
           (ChaosEffect.ClockSkewEffect) controller.scenario().effect();
@@ -790,13 +806,30 @@ public final class ChaosDispatcher {
    * @return the (possibly skewed) local-date-time to return to the caller
    */
   public java.time.LocalDateTime adjustLocalDateTimeNow(final java.time.LocalDateTime realValue) {
-    final java.time.ZoneId zone = java.time.ZoneId.systemDefault();
-    final long realMillis = realValue.atZone(zone).toInstant().toEpochMilli();
+    return adjustLocalDateTimeNowInZone(realValue, java.time.ZoneId.systemDefault());
+  }
+
+  /**
+   * Returns the (possibly skewed) {@link java.time.LocalDateTime} for {@code
+   * LocalDateTime.now(ZoneId)}.
+   *
+   * <p>The skew (in milliseconds) is added to the real instant, so the sub-millisecond part of the
+   * real value is kept; an earlier version rebuilt the value from epoch milliseconds and dropped
+   * it.
+   *
+   * @param realValue the real local date-time
+   * @param zone the zone the local date-time was produced in
+   * @return the (possibly skewed) local date-time
+   */
+  public java.time.LocalDateTime adjustLocalDateTimeNowInZone(
+      final java.time.LocalDateTime realValue, final java.time.ZoneId zone) {
+    final java.time.Instant realInstant = realValue.atZone(zone).toInstant();
+    final long realMillis = realInstant.toEpochMilli();
     final long skewed = applyClockSkew(realMillis, OperationType.LOCAL_DATE_TIME_NOW);
     if (skewed == realMillis) {
       return realValue;
     }
-    return java.time.LocalDateTime.ofInstant(java.time.Instant.ofEpochMilli(skewed), zone);
+    return java.time.LocalDateTime.ofInstant(realInstant.plusMillis(skewed - realMillis), zone);
   }
 
   /**
@@ -806,12 +839,13 @@ public final class ChaosDispatcher {
    * @return the (possibly skewed) zoned-date-time to return to the caller
    */
   public java.time.ZonedDateTime adjustZonedDateTimeNow(final java.time.ZonedDateTime realValue) {
-    final long realMillis = realValue.toInstant().toEpochMilli();
+    final java.time.Instant realInstant = realValue.toInstant();
+    final long realMillis = realInstant.toEpochMilli();
     final long skewed = applyClockSkew(realMillis, OperationType.ZONED_DATE_TIME_NOW);
     if (skewed == realMillis) {
       return realValue;
     }
-    return java.time.Instant.ofEpochMilli(skewed).atZone(realValue.getZone());
+    return realInstant.plusMillis(skewed - realMillis).atZone(realValue.getZone());
   }
 
   /**
@@ -841,9 +875,9 @@ public final class ChaosDispatcher {
             false,
             null,
             null,
-            null);
+            scopeContext.currentSessionId());
     final RuntimeDecision decision = evaluate(context);
-    applyGate(decision.gateAction());
+    applyDelayAndGate(decision);
     if (decision.terminalAction() != null) {
       final TerminalAction terminalAction = decision.terminalAction();
       if (terminalAction.kind() == TerminalKind.THROW) {
@@ -853,7 +887,6 @@ public final class ChaosDispatcher {
         return true;
       }
     }
-    sleep(decision.delayMillis());
     return false;
   }
 
@@ -874,7 +907,7 @@ public final class ChaosDispatcher {
             false,
             null,
             null,
-            null);
+            scopeContext.currentSessionId());
     applyPreDecision(evaluate(context));
   }
 
@@ -1046,7 +1079,7 @@ public final class ChaosDispatcher {
             null,
             scopeContext.currentSessionId());
     final RuntimeDecision decision = evaluate(context);
-    applyGate(decision.gateAction());
+    applyDelayAndGate(decision);
     if (decision.terminalAction() != null) {
       final TerminalAction terminalAction = decision.terminalAction();
       if (terminalAction.kind() == TerminalKind.THROW) {
@@ -1056,7 +1089,6 @@ public final class ChaosDispatcher {
         return true;
       }
     }
-    sleep(decision.delayMillis());
     return false;
   }
 
@@ -1128,18 +1160,19 @@ public final class ChaosDispatcher {
   }
 
   /**
-   * Called before a socket input-stream read to apply scenarios targeting socket reads.
+   * Called before a socket read to apply scenarios targeting socket reads.
    *
-   * @param stream the socket input stream being read from
+   * @param stream the socket implementation being read from
+   * @param remoteAddress the peer {@link java.net.InetAddress}, or {@code null} if not connected
    * @throws Throwable if an active scenario throws to simulate a failure
    */
-  public void beforeSocketRead(final Object stream) throws Throwable {
+  public void beforeSocketRead(final Object stream, final Object remoteAddress) throws Throwable {
     final InvocationContext context =
         new InvocationContext(
             OperationType.SOCKET_READ,
             stream == null ? "java.net.SocketInputStream" : stream.getClass().getName(),
             null,
-            null,
+            remoteHost(remoteAddress),
             false,
             null,
             null,
@@ -1148,19 +1181,21 @@ public final class ChaosDispatcher {
   }
 
   /**
-   * Called before a socket output-stream write to apply scenarios targeting socket writes.
+   * Called before a socket write to apply scenarios targeting socket writes.
    *
-   * @param stream the socket output stream being written to
+   * @param stream the socket implementation being written to
    * @param len the number of bytes being written
+   * @param remoteAddress the peer {@link java.net.InetAddress}, or {@code null} if not connected
    * @throws Throwable if an active scenario throws to simulate a failure
    */
-  public void beforeSocketWrite(final Object stream, final int len) throws Throwable {
+  public void beforeSocketWrite(final Object stream, final int len, final Object remoteAddress)
+      throws Throwable {
     final InvocationContext context =
         new InvocationContext(
             OperationType.SOCKET_WRITE,
             stream == null ? "java.net.SocketOutputStream" : stream.getClass().getName(),
             null,
-            null,
+            remoteHost(remoteAddress),
             false,
             null,
             null,
@@ -1180,12 +1215,30 @@ public final class ChaosDispatcher {
             OperationType.SOCKET_CLOSE,
             socket == null ? "java.net.Socket" : socket.getClass().getName(),
             null,
-            null,
+            socket instanceof java.net.Socket s ? remoteHost(s.getInetAddress()) : null,
             false,
             null,
             null,
             scopeContext.currentSessionId());
     applyPreDecision(evaluate(context));
+  }
+
+  /**
+   * The host a {@code NetworkSelector} pattern is matched against for an established connection:
+   * the host name the address was created or resolved with when known, otherwise its IP literal.
+   * Read from {@link java.net.InetAddress#toString()} ({@code "host/ip"}), which never triggers a
+   * reverse lookup — unlike {@link java.net.InetAddress#getHostName()}.
+   */
+  static String remoteHost(final Object remoteAddress) {
+    if (!(remoteAddress instanceof java.net.InetAddress address)) {
+      return null;
+    }
+    final String text = address.toString();
+    final int separator = text.indexOf('/');
+    if (separator > 0) {
+      return text.substring(0, separator);
+    }
+    return address.getHostAddress();
   }
 
   /**
@@ -1248,7 +1301,7 @@ public final class ChaosDispatcher {
             false,
             null,
             null,
-            null);
+            scopeContext.currentSessionId());
     applyPreDecision(evaluate(context));
   }
 
@@ -1275,7 +1328,7 @@ public final class ChaosDispatcher {
             null,
             scopeContext.currentSessionId());
     final RuntimeDecision decision = evaluate(context);
-    applyGate(decision.gateAction());
+    applyDelayAndGate(decision);
     if (decision.terminalAction() != null) {
       final TerminalAction terminalAction = decision.terminalAction();
       if (terminalAction.kind() == TerminalKind.THROW) {
@@ -1296,7 +1349,6 @@ public final class ChaosDispatcher {
         return true;
       }
     }
-    sleep(decision.delayMillis());
     return false;
   }
 
@@ -1359,7 +1411,7 @@ public final class ChaosDispatcher {
             null,
             scopeContext.currentSessionId());
     final RuntimeDecision decision = evaluate(context);
-    applyGate(decision.gateAction());
+    applyDelayAndGate(decision);
     if (decision.terminalAction() != null) {
       final TerminalAction terminalAction = decision.terminalAction();
       if (terminalAction.kind() == TerminalKind.THROW) {
@@ -1369,7 +1421,6 @@ public final class ChaosDispatcher {
         return true;
       }
     }
-    sleep(decision.delayMillis());
     return false;
   }
 
@@ -1394,7 +1445,7 @@ public final class ChaosDispatcher {
             null,
             scopeContext.currentSessionId());
     final RuntimeDecision decision = evaluate(context);
-    applyGate(decision.gateAction());
+    applyDelayAndGate(decision);
     if (decision.terminalAction() != null) {
       final TerminalAction terminalAction = decision.terminalAction();
       if (terminalAction.kind() == TerminalKind.THROW) {
@@ -1404,7 +1455,6 @@ public final class ChaosDispatcher {
         return true;
       }
     }
-    sleep(decision.delayMillis());
     return false;
   }
 
@@ -1467,18 +1517,16 @@ public final class ChaosDispatcher {
         new InvocationContext(
             opType, "http.client", null, url, false, null, null, scopeContext.currentSessionId());
     final RuntimeDecision decision = evaluate(context);
-    applyGate(decision.gateAction());
+    applyDelayAndGate(decision);
     if (decision.terminalAction() != null) {
       final TerminalAction terminalAction = decision.terminalAction();
       if (terminalAction.kind() == TerminalKind.THROW) {
         throw terminalAction.throwable();
       }
       if (terminalAction.kind() == TerminalKind.SUPPRESS) {
-        sleep(decision.delayMillis());
         return true;
       }
     }
-    sleep(decision.delayMillis());
     return false;
   }
 
@@ -1547,18 +1595,22 @@ public final class ChaosDispatcher {
    * @throws Throwable if an active scenario throws to simulate an {@link InterruptedException}
    */
   public boolean beforeThreadSleep(final long millis) throws Throwable {
+    // The sleeping thread is the current thread. Its name, daemon flag and kind are reported so
+    // ThreadSelector filters (threadNamePattern, daemon, kind) apply to THREAD_SLEEP; they were
+    // left null, so a non-ANY filter never matched and kind=PLATFORM also matched virtual threads.
+    final Thread current = Thread.currentThread();
     final InvocationContext context =
         new InvocationContext(
             OperationType.THREAD_SLEEP,
             "java.lang.Thread",
             null,
-            null,
+            current.getName(),
             false,
-            null,
-            null,
+            current.isDaemon(),
+            featureSet.isVirtualThread(current),
             scopeContext.currentSessionId());
     final RuntimeDecision decision = evaluate(context);
-    applyGate(decision.gateAction());
+    applyDelayAndGate(decision);
     if (decision.terminalAction() != null) {
       final TerminalAction terminalAction = decision.terminalAction();
       if (terminalAction.kind() == TerminalKind.THROW) {
@@ -1568,7 +1620,6 @@ public final class ChaosDispatcher {
         return true;
       }
     }
-    sleep(decision.delayMillis());
     return false;
   }
 
@@ -1664,18 +1715,16 @@ public final class ChaosDispatcher {
             null,
             scopeContext.currentSessionId());
     final RuntimeDecision decision = evaluate(context);
-    applyGate(decision.gateAction());
+    applyDelayAndGate(decision);
     if (decision.terminalAction() != null) {
       final TerminalAction terminalAction = decision.terminalAction();
       if (terminalAction.kind() == TerminalKind.THROW) {
         throw terminalAction.throwable();
       }
       if (terminalAction.kind() == TerminalKind.SUPPRESS) {
-        sleep(decision.delayMillis());
         return true;
       }
     }
-    sleep(decision.delayMillis());
     return false;
   }
 
@@ -1691,43 +1740,76 @@ public final class ChaosDispatcher {
     if (contributions.isEmpty()) {
       return RuntimeDecision.none();
     }
-    long delayMillis = 0L;
-    GateAction gateAction = null;
-    int gatePrecedence = Integer.MIN_VALUE;
-    TerminalAction terminalAction = null;
-    int terminalPrecedence = Integer.MIN_VALUE;
-    for (final ScenarioContribution contribution : contributions) {
-      // Saturating add: naive += with two large per-scenario delays would wrap to a negative
-      // value, and the sleep() helper treats negative as "skip sleep" — silently turning an
-      // intended multi-minute delay into no delay at all is exactly the kind of quiet bug we
-      // should not ship. Cap at Long.MAX_VALUE instead so the intent ("a very long delay") is
-      // preserved; downstream Thread.sleep still accepts it.
-      final long contributionDelay = contribution.delayMillis();
-      if (contributionDelay > 0L && delayMillis > Long.MAX_VALUE - contributionDelay) {
-        delayMillis = Long.MAX_VALUE;
-      } else {
-        delayMillis += contributionDelay;
+    final boolean[] applied = new boolean[contributions.size()];
+    boolean decided = false;
+    try {
+      long delayMillis = 0L;
+      GateAction gateAction = null;
+      int gateIndex = -1;
+      int gatePrecedence = Integer.MIN_VALUE;
+      TerminalAction terminalAction = null;
+      int terminalIndex = -1;
+      int terminalPrecedence = Integer.MIN_VALUE;
+      for (int index = 0; index < contributions.size(); index++) {
+        final ScenarioContribution contribution = contributions.get(index);
+        // Saturating add: naive += with two large per-scenario delays would wrap to a negative
+        // value, and the sleep() helper treats negative as "skip sleep" — silently turning an
+        // intended multi-minute delay into no delay at all is exactly the kind of quiet bug we
+        // should not ship. Cap at Long.MAX_VALUE instead so the intent ("a very long delay") is
+        // preserved; downstream Thread.sleep still accepts it.
+        final long contributionDelay = contribution.delayMillis();
+        if (contributionDelay > 0L && delayMillis > Long.MAX_VALUE - contributionDelay) {
+          delayMillis = Long.MAX_VALUE;
+        } else {
+          delayMillis += contributionDelay;
+        }
+        // Tie-break rule for both gate and terminal: the ScenarioRegistry sorts contributions by
+        // precedence DESC then id ASC, so on strict `>` the first-iterated (highest precedence,
+        // lowest id within that precedence) wins and subsequent equal-precedence candidates do
+        // not overwrite it.
+        if (contribution.effect() instanceof ChaosEffect.GateEffect) {
+          if (contribution.scenario().precedence() > gatePrecedence) {
+            gateAction =
+                new GateAction(contribution.controller().gate(), contribution.gateTimeout());
+            gateIndex = index;
+            gatePrecedence = contribution.scenario().precedence();
+          }
+          continue;
+        }
+        final TerminalAction candidate =
+            terminalActionFor(
+                context.operationType(), contribution.effect(), contribution.scenario());
+        if (candidate == null) {
+          // A delay (or an effect without a terminal action for this operation) always takes
+          // effect: delays of all matching scenarios are summed.
+          applied[index] = true;
+        } else if (contribution.scenario().precedence() > terminalPrecedence) {
+          terminalAction = candidate;
+          terminalIndex = index;
+          terminalPrecedence = contribution.scenario().precedence();
+        }
       }
-      // Tie-break rule for both gate and terminal: the ScenarioRegistry sorts contributions by
-      // precedence DESC then id ASC, so on strict `>` the first-iterated (highest precedence,
-      // lowest id within that precedence) wins and subsequent equal-precedence candidates do
-      // not overwrite it. Using `>=` inverted the id tie-break — the highest-id scenario won,
-      // contradicting the class javadoc and quietly swapping which of two composed scenarios
-      // applied at runtime.
-      if (contribution.effect() instanceof ChaosEffect.GateEffect
-          && contribution.scenario().precedence() > gatePrecedence) {
-        gateAction = new GateAction(contribution.controller().gate(), contribution.gateTimeout());
-        gatePrecedence = contribution.scenario().precedence();
+      if (gateIndex >= 0) {
+        applied[gateIndex] = true;
       }
-      final TerminalAction candidate =
-          terminalActionFor(
-              context.operationType(), contribution.effect(), contribution.scenario());
-      if (candidate != null && contribution.scenario().precedence() > terminalPrecedence) {
-        terminalAction = candidate;
-        terminalPrecedence = contribution.scenario().precedence();
+      if (terminalIndex >= 0) {
+        applied[terminalIndex] = true;
+      }
+      final RuntimeDecision decision = new RuntimeDecision(delayMillis, gateAction, terminalAction);
+      decided = true;
+      return decision;
+    } finally {
+      // Only contributions that take effect count as applied (and publish APPLIED); the others
+      // return their maxApplications reservation. When building the decision failed, nothing is
+      // applied and every reservation is returned, so a failure cannot leak reservations.
+      for (int index = 0; index < contributions.size(); index++) {
+        if (decided && applied[index]) {
+          contributions.get(index).commit();
+        } else {
+          contributions.get(index).release();
+        }
       }
     }
-    return new RuntimeDecision(delayMillis, gateAction, terminalAction);
   }
 
   private TerminalAction terminalActionFor(
@@ -1854,7 +1936,7 @@ public final class ChaosDispatcher {
   }
 
   private void applyPreDecision(final RuntimeDecision decision) throws Throwable {
-    applyGate(decision.gateAction());
+    applyDelayAndGate(decision);
     if (decision.terminalAction() != null) {
       final TerminalAction terminalAction = decision.terminalAction();
       if (terminalAction.kind() == TerminalKind.THROW) {
@@ -1864,10 +1946,6 @@ public final class ChaosDispatcher {
         if (Boolean.FALSE.equals(terminalAction.returnValue())) {
           throw new RejectedExecutionException("operation suppressed by chaos agent");
         }
-        return;
-      }
-      if (terminalAction.kind() == TerminalKind.SUPPRESS) {
-        sleep(decision.delayMillis());
         return;
       }
       if (terminalAction.kind() == TerminalKind.CORRUPT_RETURN) {
@@ -1881,12 +1959,34 @@ public final class ChaosDispatcher {
             "CORRUPT_RETURN terminal reached applyPreDecision — only valid from afterMethodExit");
       }
     }
-    sleep(decision.delayMillis());
   }
 
-  private void applyGate(final GateAction gateAction) throws InterruptedException {
-    if (gateAction != null) {
+  /**
+   * Applies the delay and then the gate of a decision, in the order {@link RuntimeDecision}
+   * documents (delay, gate, terminal action). The delay of every matching scenario is applied even
+   * when a terminal action then throws or returns early; an earlier version ran the gate first and
+   * skipped the delay whenever a THROW or RETURN terminal won.
+   */
+  private void applyDelayAndGate(final RuntimeDecision decision) throws Throwable {
+    sleep(decision.delayMillis());
+    applyGate(decision.gateAction());
+  }
+
+  /**
+   * Holds the caller at the gate. An interrupt ends the wait: the interrupt flag is restored and
+   * the call proceeds, so the intercepted JDK method observes the interrupt exactly as it would
+   * have without chaos (sleep and wait throw, park returns, interruptible channels close). An
+   * earlier version let the checked {@link InterruptedException} escape into methods that do not
+   * declare it, with the flag already cleared.
+   */
+  private void applyGate(final GateAction gateAction) {
+    if (gateAction == null) {
+      return;
+    }
+    try {
       gateAction.gate().await(gateAction.maxBlock());
+    } catch (final InterruptedException interrupted) {
+      Thread.currentThread().interrupt();
     }
   }
 
@@ -1926,17 +2026,30 @@ public final class ChaosDispatcher {
   }
 
   /**
-   * Strips the JVM-generated synthetic lambda suffix ({@code $$Lambda$N/0x...}) from a class name
-   * so that {@code EXACT} and {@code GLOB} task-class patterns work transparently for lambda tasks.
-   * Without stripping, a task defined as a lambda in {@code com.example.MyService} has the name
-   * {@code com.example.MyService$$Lambda$14/0x00000007004a1c40}, which defeats exact patterns.
+   * The session for evaluating a task on a pool worker: the worker's own binding if it has one,
+   * else the session the task was submitted under. The worker evaluates before the task's session
+   * wrapper binds the session, so session-scoped EXECUTOR_WORKER_RUN and SCHEDULE_TICK scenarios
+   * never matched work submitted from a session.
+   */
+  private String taskSession(final Object task) {
+    final String bound = scopeContext.currentSessionId();
+    return bound != null ? bound : ScopeContext.sessionOf(task);
+  }
+
+  /**
+   * Strips the JVM-generated synthetic lambda suffix from a class name so that {@code EXACT} and
+   * {@code GLOB} task-class patterns work transparently for lambda tasks. A lambda defined in
+   * {@code com.example.MyService} is named {@code com.example.MyService$$Lambda/0x0000...} on JDK
+   * 21+ (hidden classes) and {@code com.example.MyService$$Lambda$14/0x0000...} on older JDKs; both
+   * become {@code com.example.MyService}. Matching only the older form left the hex suffix on every
+   * lambda on the supported JDKs.
    */
   static String taskClassName(final Object task) {
     if (task == null) {
       return null;
     }
     final String fullName = task.getClass().getName();
-    final int lambdaSuffixIndex = fullName.indexOf("$$Lambda$");
+    final int lambdaSuffixIndex = fullName.indexOf("$$Lambda");
     return lambdaSuffixIndex == -1 ? fullName : fullName.substring(0, lambdaSuffixIndex);
   }
 

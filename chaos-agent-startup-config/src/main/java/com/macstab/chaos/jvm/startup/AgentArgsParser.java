@@ -45,14 +45,20 @@ public final class AgentArgsParser {
     for (int i = 0; i < argLength; i++) {
       final char ch = agentArgs.charAt(i);
       if (escaped) {
+        // Only ';', '=' and '\\' are escapable. Any other backslash is kept as written, so
+        // Windows paths (configFile=C:\\chaos\\plan.json) and JSON escapes in configJson (\\",
+        // \\d) reach the consumer unchanged; dropping every backslash used to mangle both.
+        if (ch != ';' && ch != '=' && ch != '\\') {
+          current.append('\\');
+        }
         current.append(ch);
         escaped = false;
         continue;
       }
       if (ch == '\\') {
         if (i == argLength - 1) {
-          throw new IllegalArgumentException(
-              "trailing backslash at position " + i + " in agent args");
+          current.append(ch);
+          continue;
         }
         escaped = true;
         continue;
@@ -73,7 +79,13 @@ public final class AgentArgsParser {
       return;
     }
     final int separator = token.indexOf('=');
-    if (separator <= 0) {
+    if (separator < 0) {
+      // A bare key is a boolean flag (debugDumpOnStart is the same as debugDumpOnStart=true), as
+      // documented. Rejecting it threw from premain and aborted the JVM.
+      addFlag(target, token.trim());
+      return;
+    }
+    if (separator == 0) {
       throw new IllegalArgumentException(
           "invalid agent arg token '" + token + "': expected key=value");
     }
@@ -94,5 +106,15 @@ public final class AgentArgsParser {
               + "': previous value overwritten (last-wins)");
     }
     target.put(key, value);
+  }
+
+  private static void addFlag(final Map<String, String> target, final String key) {
+    if (target.containsKey(key)) {
+      System.err.println(
+          "[chaos-agent] duplicate agent arg key '"
+              + key
+              + "': previous value overwritten (last-wins)");
+    }
+    target.put(key, "true");
   }
 }

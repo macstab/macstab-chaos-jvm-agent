@@ -43,15 +43,16 @@ Add the dependency, put `@ChaosTest` on your test class, and declare a `ChaosSes
 
 ### 2.2 `@ChaosTest` — Meta-Annotation Composition
 
-`@ChaosTest` is a meta-annotation, not a standalone mechanism. It is assembled from two annotations:
+`@ChaosTest` is a meta-annotation, not a standalone mechanism. It is assembled from three annotations:
 
 ```java
 @SpringBootTest
 @ExtendWith(ChaosAgentExtension.class)
+@ContextConfiguration(initializers = ChaosAgentInitializer.class)
 public @interface ChaosTest { ... }
 ```
 
-All `@SpringBootTest` attributes are re-declared on `@ChaosTest` and forwarded by annotation processors at compile time:
+The following `@SpringBootTest` attributes are re-declared on `@ChaosTest` and forwarded via `@AliasFor`:
 
 | Attribute        | Forwarded to                     | Type                                                  |
 |------------------|----------------------------------|-------------------------------------------------------|
@@ -59,7 +60,6 @@ All `@SpringBootTest` attributes are re-declared on `@ChaosTest` and forwarded b
 | `classes`        | `@SpringBootTest.classes`        | `Class<?>[]`                                          |
 | `webEnvironment` | `@SpringBootTest.webEnvironment` | `WebEnvironment` (default `MOCK`)                     |
 | `args`           | `@SpringBootTest.args`           | `String[]`                                            |
-| `initializers`   | `@SpringBootTest.initializers`   | `Class<? extends ApplicationContextInitializer<?>>[]` |
 
 This means callers pay zero annotation-composition cost. `@ChaosTest(webEnvironment = WebEnvironment.RANDOM_PORT)` works exactly as `@SpringBootTest(webEnvironment = RANDOM_PORT)` does, with the chaos extension layered on top.
 
@@ -150,7 +150,7 @@ public Object resolveParameter(ParameterContext parameterContext,
         }
         current = current.getParent().orElse(null);
     }
-    return null;
+    throw new ParameterResolutionException("ChaosAgentExtension: no ... available — ...");
 }
 ```
 
@@ -164,71 +164,62 @@ This is the only correct design for nested tests. Alternatives would either requ
 
 ```java
 public void initialize(final ConfigurableApplicationContext applicationContext) {
-    final ChaosControlPlane controlPlane = ChaosPlatform.installLocally();
-    applicationContext.getBeanFactory().registerSingleton("chaosControlPlane", controlPlane);
+    applicationContext.getEnvironment().getPropertySources().addFirst(
+        new MapPropertySource("macstabChaosTestEnabled",
+            Map.of("macstab.chaos.test.enabled", "true")));
+    ChaosPlatform.installLocally();
 }
 ```
 
 Why is this needed separately from the JUnit extension?
 
-The JUnit extension's `beforeAll` fires before the test class methods run, but `@SpringBootTest` starts an `ApplicationContext` as part of test setup — potentially before `beforeAll` has run if the context is loaded from a shared context cache. The initializer fires at a precisely-defined point in the Spring context lifecycle: after the context is created but before `refresh()` is invoked. This guarantees that beans instantiated during refresh — `CommandLineRunner`, `ApplicationRunner`, beans with `@PostConstruct` that call instrumented JDK methods — see the chaos agent already installed and the `ChaosControlPlane` already registered as a singleton.
+The JUnit extension's `beforeAll` fires before the test class methods run, but `@SpringBootTest` starts an `ApplicationContext` as part of test setup — potentially before `beforeAll` has run if the context is loaded from a shared context cache. The initializer fires at a precisely-defined point in the Spring context lifecycle: after the context is created but before `refresh()` is invoked. This guarantees that beans instantiated during refresh — `CommandLineRunner`, `ApplicationRunner`, beans with `@PostConstruct` that call instrumented JDK methods — see the chaos agent already installed.
 
 Without the initializer, there would be a window where Spring is starting beans and the agent is not yet installed. Any instrumented JDK call happening inside a bean constructor during that window would pass through the uninstalled fast path. The initializer closes that window.
 
-The `registerSingleton("chaosControlPlane", controlPlane)` call makes the control plane available for `@Autowired` injection directly from the bean factory. It bypasses the normal `@Bean` lifecycle (no proxy, no destroy method registration from the factory side), which is intentional — the control plane's lifecycle is managed by `ChaosAgentExtension.afterAll()`, not by Spring's context close.
+The initializer does not register the control plane itself. It opts **this context** in by prepending a per-context property source named `macstabChaosTestEnabled` with `macstab.chaos.test.enabled=true`; `ChaosTestAutoConfiguration` then creates the `ChaosControlPlane` bean through the normal `@Bean` lifecycle, so `@MockBean`, `@Primary` and other override paths keep working. The flag lives only in this context's environment — no JVM-wide system property is set — so a plain `@SpringBootTest` context in the same JVM, before or after a `@ChaosTest` context, does not get the bean.
 
 #### Registration
 
-Boot 3 registers the initializer via `META-INF/spring.factories`:
-
-```properties
-org.springframework.context.ApplicationContextInitializer=\
-  com.macstab.chaos.jvm.spring.boot3.test.ChaosAgentInitializer
-```
-
-Boot 4 uses the newer `.imports` mechanism:
-
-```
-META-INF/spring/org.springframework.context.ApplicationContextInitializer.imports
-  → com.macstab.chaos.jvm.spring.boot4.test.ChaosAgentInitializer
-```
-
-This is one of the meaningful behavioral differences between Boot 3 and Boot 4 in this module. The `spring.factories` key-value format is still supported in Boot 4 but deprecated in favor of `.imports` files, which carry one fully-qualified class name per line. The Boot 4 test starter uses the `.imports` path exclusively.
+The initializer is **not** registered globally (the test starters' `META-INF/spring.factories` contain no initializer entry). It is applied only to contexts of classes annotated with `@ChaosTest`, through `@ContextConfiguration(initializers = ChaosAgentInitializer.class)` on the annotation. Boot 3 and Boot 4 test starters behave identically here.
 
 ### 2.5 `ChaosTestAutoConfiguration` — Auto-Configuration in Tests
 
-`ChaosTestAutoConfiguration` is a `@TestConfiguration` that exposes `ChaosControlPlane` as a Spring bean when the chaos extension classes are on the test classpath:
+`ChaosTestAutoConfiguration` is an `@AutoConfiguration` that exposes `ChaosControlPlane` as a Spring bean in contexts opted in by `@ChaosTest`:
 
 ```java
-@TestConfiguration(proxyBeanMethods = false)
+@AutoConfiguration
 @ConditionalOnClass(ChaosAgentExtension.class)
 public class ChaosTestAutoConfiguration {
 
-    @Bean
+    @Bean(destroyMethod = "")
     @ConditionalOnMissingBean(ChaosControlPlane.class)
+    @ConditionalOnProperty(name = "macstab.chaos.test.enabled", havingValue = "true")
     public ChaosControlPlane chaosControlPlane() {
         return ChaosPlatform.installLocally();
     }
 }
 ```
 
-`proxyBeanMethods = false` suppresses CGLIB proxying for this configuration class. There is no `@Bean` method that calls another `@Bean` method, so CGLIB proxying would add overhead without benefit.
+`@ConditionalOnProperty(name = "macstab.chaos.test.enabled")` matches only in contexts where `ChaosAgentInitializer` added its per-context property source, i.e. contexts of `@ChaosTest` classes. A plain `@SpringBootTest` context never self-attaches the agent through this configuration.
 
-`@ConditionalOnClass(ChaosAgentExtension.class)` is an existence guard. If somehow the test classpath lacks `ChaosAgentExtension` (e.g., the starter was excluded but `spring-boot-test-autoconfigure` still picked up the imports file from a transitive dependency), the configuration silently does nothing rather than failing with `ClassNotFoundException`.
+`destroyMethod = ""` is required: `ChaosControlPlane` is `AutoCloseable`, so Spring's inferred destroy method would call `close()` whenever any test context shuts down and tear down the JVM-wide runtime shared by every context.
+
+`@ConditionalOnClass(ChaosAgentExtension.class)` is an existence guard. If somehow the test classpath lacks `ChaosAgentExtension`, the configuration silently does nothing rather than failing with `ClassNotFoundException`.
 
 `@ConditionalOnMissingBean(ChaosControlPlane.class)` is the standard back-off contract. If a test configuration already declares a `ChaosControlPlane` bean — for example a stub implementation for isolated unit testing without agent attachment — the auto-configuration steps aside. This is the same pattern used by `ChaosAutoConfiguration` in the runtime starters, keeping the override contract consistent across all four modules.
 
 #### Registration
 
-Both Boot 3 and Boot 4 test starters register via:
+Both Boot 3 and Boot 4 test starters register via the standard auto-configuration SPI:
 
 ```
-META-INF/spring/org.springframework.boot.test.autoconfigure.ImportAutoConfiguration.imports
+META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports
   → com.macstab.chaos.jvm.spring.boot3.test.ChaosTestAutoConfiguration
   → (Boot 4 variant)   com.macstab.chaos.jvm.spring.boot4.test.ChaosTestAutoConfiguration
 ```
 
-The `ImportAutoConfiguration.imports` mechanism is the test-specific analogue of `AutoConfiguration.imports`. It is processed by `@ImportAutoConfiguration`-based test slices and by `@SpringBootTest` when the auto-configuration is not already on the main imports path. Using a test-specific imports file keeps the configuration class out of production auto-configuration scanning entirely.
+The `ImportAutoConfiguration.imports` layout is consulted only when the test class carries `@ImportAutoConfiguration` (directly or via a slice annotation), so it would leave the bean absent from plain `@SpringBootTest` and `@ChaosTest` contexts. Standard auto-configuration discovery runs for every `@SpringBootTest` context; the property condition above keeps the bean out of contexts that did not opt in. The test starters belong on the test classpath only, so the configuration never reaches production scanning.
 
 ### 2.6 Sequence Diagram — Test Lifecycle
 
@@ -262,12 +253,12 @@ note right of Init
   Guarantees agent is installed before any
   @Bean / @PostConstruct executes.
 end note
+Init -> Spring: addFirst(property source\n  macstab.chaos.test.enabled=true)
 Init -> Platform: installLocally()
 Platform --> Init: ChaosControlPlane (same instance)
-Init -> Spring: beanFactory.registerSingleton(\n  "chaosControlPlane", cp)
 
 JUnit -> Spring: refresh()
-Spring -> Spring: instantiate beans,\n@PostConstruct, listeners...
+Spring -> Spring: instantiate beans (incl.\nChaosTestAutoConfiguration\n.chaosControlPlane()),\n@PostConstruct, listeners...
 Spring --> JUnit: context ready
 
 JUnit -> Test: execute test method
@@ -278,8 +269,10 @@ JUnit -> After: afterAll(context)
 After -> After: store.remove(ChaosSession.class)
 After -> After: session.close()
 note right of After
-  Stops all session-scoped ScenarioControllers.
-  JVM-scoped scenarios are unaffected.
+  Stops all session-scoped ScenarioControllers,
+  then tracker.stopTracked() stops JVM-scoped
+  handles activated via the injected control plane.
+  Other JVM-scoped scenarios are unaffected.
 end note
 @enduml
 ```
@@ -294,48 +287,65 @@ Add the dependency, set `macstab.chaos.enabled=true` in `application.yml`, and t
 
 This is the deployment path for pre-production soak tests, game days, and controlled production experiments. It intentionally exposes no test APIs and uses no JUnit types.
 
-Starting with the current release, the agent is self-attached during the Spring Boot environment preparation phase — before the application context is refreshed and before any Spring beans are instantiated. This is earlier than context-refresh time, which means instrumented JDK classes (Socket, HTTP client, JDBC connections) are rewritten before any Spring bean creates them. The `ChaosControlPlane` bean in `ChaosAutoConfiguration` is still created during context refresh but is now a no-op attachment (the agent is already installed); its purpose is solely to expose the control plane as a Spring-managed bean with a `close()` destroy method.
+Starting with the current release, the agent is self-attached during the Spring Boot environment preparation phase — before the application context is refreshed and before any Spring beans are instantiated. This is earlier than context-refresh time, which means instrumented JDK classes (Socket, HTTP client, JDBC connections) are rewritten before any Spring bean creates them. The `ChaosControlPlane` bean in `ChaosAutoConfiguration` is still created during context refresh but is now a no-op attachment (the agent is already installed); its purpose is solely to expose the control plane as a Spring-managed bean. The bean is declared with `destroyMethod = ""`, so closing the context never closes the JVM-wide control plane.
 
 ### 3.2 `ChaosAgentEnvironmentPostProcessor` — Early Attach
 
 ```java
 public class ChaosAgentEnvironmentPostProcessor implements EnvironmentPostProcessor, Ordered {
+    static final int ORDER = ConfigDataEnvironmentPostProcessor.ORDER + 1;
+
     @Override
     public void postProcessEnvironment(
             final ConfigurableEnvironment environment,
             final SpringApplication application) {
-        if (!Boolean.parseBoolean(environment.getProperty("macstab.chaos.enabled", "false"))) {
+        final TrustedChaosEnablement.Decision decision = TrustedChaosEnablement.evaluate(environment);
+        if (decision == TrustedChaosEnablement.Decision.REJECTED_UNTRUSTED_SOURCE) {
+            // WARNING logged: flag ignored, set macstab.chaos.allow-remote-enable=true via a trusted source
             return;
         }
-        ChaosPlatform.installLocally();
+        if (decision != TrustedChaosEnablement.Decision.ENABLED) {
+            return;
+        }
+        ChaosPlatform.installLocally();   // failures are logged at WARNING, startup continues
+        environment.getPropertySources().addFirst(/* macstab.chaos.agent.attach-phase marker */);
     }
 
     @Override
     public int getOrder() {
-        return Ordered.HIGHEST_PRECEDENCE;
+        return ORDER;
     }
 }
 ```
 
-`EnvironmentPostProcessor` is the earliest Spring Boot extension point that has access to the resolved environment — it fires after `ConfigData` processing (so profiles, external config files, and system properties are fully resolved) but before the `ApplicationContext` is created. This is the correct place to attach the agent because:
+`EnvironmentPostProcessor` is the earliest Spring Boot extension point that has access to the resolved environment. This processor runs **directly after `ConfigDataEnvironmentPostProcessor`** (`ORDER = ConfigDataEnvironmentPostProcessor.ORDER + 1`), so `application.properties` / `application.yml` (including profile-specific variants) are already loaded and visible, but the `ApplicationContext` does not yet exist — no bean constructors, `@PostConstruct` callbacks, or Tomcat binding have run. When the context is subsequently created and refreshed, all instrumented JDK classes are already rewritten.
 
-1. The environment is fully resolved, so the `macstab.chaos.enabled` check accurately reflects the operator's intent (system properties, env vars, `application.yml`, and config server values are all in scope).
-2. The `ApplicationContext` does not yet exist — no bean constructors, `@PostConstruct` callbacks, or Tomcat binding have run. When the context is subsequently created and refreshed, all instrumented JDK classes are already rewritten.
+On a successful attach the processor prepends a single-entry property source `macstabChaosAgentAttachMarker` with `macstab.chaos.agent.attach-phase=spring-boot-3` (or `spring-boot-4`), so integration tests can assert that the early attach fired.
 
-`getOrder()` returns `HIGHEST_PRECEDENCE`, ensuring this processor runs before other environment post-processors (metrics, cloud config, etc.) can trigger any instrumented JDK calls.
+#### Trusted sources for `macstab.chaos.enabled`
+
+Attaching a JVM agent is a launch-time decision, so `macstab.chaos.enabled=true` is honoured only when the property source that wins for the key is a local, launch-time source (`TrustedChaosEnablement`):
+
+- JVM system properties, environment variables, command-line arguments
+- config data bundled on the classpath (`application.properties` / `.yml`, including profile-specific variants)
+- property sources created by Spring's test support (`@SpringBootTest(properties)`, `@TestPropertySource(properties)`, `@DynamicPropertySource`, `TestPropertyValues`)
+
+Every other source — Spring Cloud Config, Consul, Vault, any remote or runtime override, and config files outside the classpath — is ignored with a warning. To allow such sources, set `macstab.chaos.allow-remote-enable=true` through a trusted source (the opt-in is itself subject to the same check). The same decision gates **both** this processor and `ChaosAutoConfiguration` (via `OnTrustedChaosEnablementCondition`), so an untrusted source cannot attach the agent through the auto-configuration either.
 
 **Why the `ChaosAutoConfiguration.chaosControlPlane()` bean still exists**: `ChaosAgentEnvironmentPostProcessor` attaches the agent but does not register the `ChaosControlPlane` as a Spring bean. The bean in `ChaosAutoConfiguration` is still needed to:
 - Expose `ChaosControlPlane` as an injectable bean for application code and the Actuator endpoint.
-- Register `close()` as the Spring bean destroy method, ensuring all JVM-scoped stressor threads are stopped on `ApplicationContext.close()`.
 - Back off via `@ConditionalOnMissingBean` when user code provides its own control plane.
+
+The bean is never closed with the context (`destroyMethod = ""`). Per-context cleanup is done by `ChaosHandleRegistry`, which stops only the handles this starter registered.
 
 Both registrations call `ChaosPlatform.installLocally()`, which is idempotent — whichever runs first performs the actual attach; the second returns the already-installed instance in nanoseconds.
 
 **Registration difference between Spring Boot 3 and Spring Boot 4**:
 
-In Spring Boot 3, `EnvironmentPostProcessor` lives in `org.springframework.boot.env` and is registered via `META-INF/spring/org.springframework.boot.env.EnvironmentPostProcessor.imports`:
-```
-com.macstab.chaos.jvm.spring.boot3.ChaosAgentEnvironmentPostProcessor
+In Spring Boot 3, `EnvironmentPostProcessor` lives in `org.springframework.boot.env` and is registered via `META-INF/spring.factories` (Boot 3 discovers this SPI only through `spring.factories`):
+```properties
+org.springframework.boot.env.EnvironmentPostProcessor=\
+  com.macstab.chaos.jvm.spring.boot3.ChaosAgentEnvironmentPostProcessor
 ```
 
 In Spring Boot 4, the interface moved to `org.springframework.boot.EnvironmentPostProcessor` (no `.env` sub-package). Spring Boot 4 loads `EnvironmentPostProcessor` instances via `SpringFactoriesLoader` reading `META-INF/spring.factories`, so registration uses the legacy factories format:
@@ -344,7 +354,7 @@ org.springframework.boot.EnvironmentPostProcessor=\
   com.macstab.chaos.jvm.spring.boot4.ChaosAgentEnvironmentPostProcessor
 ```
 
-This is one of the two meaningful behavioral differences between the Boot 3 and Boot 4 runtime starters (the other being the `ApplicationContextInitializer` registration in the test starters).
+The interface package (and therefore the `spring.factories` key) is the only meaningful difference between the Boot 3 and Boot 4 runtime starters.
 
 ### 3.3 `ChaosProperties` — Configuration Binding
 
@@ -372,26 +382,26 @@ The top-level auto-configuration:
 
 ```java
 @AutoConfiguration
-@ConditionalOnProperty(prefix = "macstab.chaos", name = "enabled", havingValue = "true")
+@Conditional(OnTrustedChaosEnablementCondition.class)
 @EnableConfigurationProperties(ChaosProperties.class)
 public class ChaosAutoConfiguration { ... }
 ```
 
 `@AutoConfiguration` is the Boot 3/4 replacement for `@Configuration` + manual `AutoConfiguration.imports` registration. It carries slightly different processing semantics than `@Configuration` — notably, it is processed after user-defined `@Configuration` classes, giving user beans priority over auto-configured beans by default.
 
-`@ConditionalOnProperty(prefix = "macstab.chaos", name = "enabled", havingValue = "true")` is a hard gate. If `macstab.chaos.enabled` is absent from the environment or is anything other than the string `"true"`, the entire configuration class is skipped. No beans from this class reach the application context. The `@EnableConfigurationProperties(ChaosProperties.class)` binding also does not activate — property binding is conditional on the configuration class being processed.
+`OnTrustedChaosEnablementCondition` is a hard gate. If `macstab.chaos.enabled` is absent from the environment, is not `true`, or comes from an untrusted property source without `macstab.chaos.allow-remote-enable=true` (see §3.2), the entire configuration class is skipped. No beans from this class reach the application context. The `@EnableConfigurationProperties(ChaosProperties.class)` binding also does not activate — property binding is conditional on the configuration class being processed.
 
 #### `chaosControlPlane` — the primary bean
 
 ```java
-@Bean(destroyMethod = "close")
+@Bean(destroyMethod = "")
 @ConditionalOnMissingBean
 public ChaosControlPlane chaosControlPlane() {
     return ChaosPlatform.installLocally();
 }
 ```
 
-`destroyMethod = "close"` registers `ChaosControlPlane.close()` with Spring's bean destruction lifecycle. When the `ApplicationContext` is closed — on normal JVM shutdown, on a `SIGTERM`, or explicitly in tests via `context.close()` — Spring calls `chaosControlPlane.close()`, which stops all active `ScenarioController` instances in the JVM-scoped registry and releases any stressor threads they hold. Without this, stressor threads (heap pressure, monitor contention, etc.) would linger until the JVM exits.
+`destroyMethod = ""` disables Spring's inferred destroy method. The control plane is the JVM-wide runtime: it outlives any single application context, is shared by every context in the JVM (common in test suites) and by a `-javaagent` startup plan. Because `ChaosControlPlane` is `AutoCloseable`, the inferred destroy method would call `close()` on context shutdown and tear down every scenario, listener and the JFR sink JVM-wide. Instead, when the context closes, `ChaosHandleRegistry` (a `DisposableBean`) stops the handles this starter registered — the startup plan and Actuator activations — which also releases their stressor threads.
 
 `@ConditionalOnMissingBean` without a type argument defaults to checking for any existing bean of the same type — `ChaosControlPlane`. This is the standard override contract: if a user configuration already declares a `ChaosControlPlane` bean (e.g., a test double, a mock, or a custom implementation wrapping the real one), the auto-configuration backs off cleanly.
 
@@ -424,7 +434,7 @@ public ApplicationListener<ApplicationReadyEvent> chaosStartupApplier(
 
 The startup logic (`applyStartup`) performs two independent operations:
 
-1. **Startup plan activation**: if `macstab.chaos.config-file` is non-blank, reads the file at `Path.of(configFile)`, deserializes it via `ChaosPlanMapper.read(json)`, calls `controlPlane.activate(plan)`, and registers the resulting `ChaosActivationHandle` in `handleRegistry`. Both `IOException` and `RuntimeException` are caught independently and logged at `SEVERE` without propagating — a missing or malformed chaos plan file does not crash the application.
+1. **Startup plan activation**: if `macstab.chaos.config-file` is non-blank, reads the file via `StartupConfigLoader.loadPlanFromFile(configFile)` (the same hardening as the agent's `configFile`: symlink rejection, 1 MiB cap, world-writable rejection), calls `controlPlane.activate(plan)`, and registers the resulting `ChaosActivationHandle` in `handleRegistry`. `ConfigLoadException` and other `RuntimeException`s are caught and logged at `SEVERE` without propagating — a missing or malformed chaos plan file does not crash the application.
 
 2. **Diagnostics dump**: if `macstab.chaos.debug-dump-on-start` is true, calls `controlPlane.diagnostics().debugDump()` and logs the full text at `INFO`. This snapshot captures the activated scenario list, their states and counters, and JVM runtime details. It is intended as a one-shot startup confirmation that the plan loaded and the scenarios are in `ACTIVE` state.
 
@@ -454,16 +464,16 @@ This double-guard is the minimum safe design for an endpoint that can activate a
 public class ChaosActuatorEndpoint { ... }
 ```
 
-`@Endpoint(id = "chaos")` registers the endpoint under the path `/actuator/chaos`. Spring Boot Actuator's endpoint infrastructure maps the four JUnit-style operation annotations to HTTP verbs automatically:
+`@Endpoint(id = "chaos")` registers the endpoint under the path `/actuator/chaos`. Spring Boot Actuator's endpoint infrastructure maps the operation annotations to HTTP verbs automatically:
 
-| Annotation                  | HTTP method | Path                           | Description                            |
-|-----------------------------|-------------|--------------------------------|----------------------------------------|
-| `@ReadOperation`            | `GET`       | `/actuator/chaos`              | Returns `ChaosDiagnostics.Snapshot`    |
-| `@WriteOperation`           | `POST`      | `/actuator/chaos`              | Activates a plan from inline JSON body |
-| `@WriteOperation` (stopAll) | `POST`      | `/actuator/chaos/stopAll`      | Stops all starter-managed scenarios    |
-| `@DeleteOperation`          | `DELETE`    | `/actuator/chaos/{scenarioId}` | Stops a specific scenario by ID        |
+| Annotation                    | HTTP method | Path                   | Description                                                 |
+|-------------------------------|-------------|------------------------|-------------------------------------------------------------|
+| `@ReadOperation`              | `GET`       | `/actuator/chaos`      | Returns `ChaosDiagnostics.Snapshot`                         |
+| `@WriteOperation`             | `POST`      | `/actuator/chaos`      | Activates a plan; body `{"planJson": "<escaped plan JSON>"}` |
+| `@DeleteOperation` (stopAll)  | `DELETE`    | `/actuator/chaos`      | Stops all starter-managed plans                             |
+| `@DeleteOperation` (selector) | `DELETE`    | `/actuator/chaos/{id}` | Stops one plan by handle id (`plan:<name>`) or plan name    |
 
-The `@WriteOperation` annotation is applied to two methods (`activate` and `stopAll`). Spring Boot Actuator disambiguates them at runtime by path: `activate` maps to the base path, `stopAll` maps to the `stopAll` sub-path.
+Both delete operations are `@DeleteOperation`s; the `@Selector` path segment keeps them routable. (Two `@WriteOperation`s without distinguishing selectors would collide on the same verb and path, and Actuator refuses to start.)
 
 #### `snapshot()` — `GET /actuator/chaos`
 
@@ -490,14 +500,35 @@ public ActivationResponse activate(final String planJson) {
     if (planJson == null || planJson.isBlank()) {
         return new ActivationResponse("error", null, "plan JSON must not be blank");
     }
-    final ChaosPlan plan = ChaosPlanMapper.read(planJson);
-    final ChaosActivationHandle handle = controlPlane.activate(plan);
-    handleRegistry.register(handle);
-    return new ActivationResponse("activated", handle.id(), null);
+    final ChaosPlan plan;
+    try {
+        plan = ChaosPlanMapper.read(planJson);
+    } catch (final ConfigLoadException | IllegalArgumentException parseFailure) {
+        // full cause logged server-side at WARNING
+        return new ActivationResponse("error", null, "invalid plan");
+    }
+    try {
+        final ChaosActivationHandle handle = controlPlane.activate(plan);
+        handleRegistry.register(handle);
+        return new ActivationResponse("activated", handle.id(), null);
+    } catch (final RuntimeException activationFailure) {
+        // full cause logged server-side at WARNING
+        return new ActivationResponse("error", null, "plan rejected");
+    }
 }
 ```
 
-Accepts a raw JSON string in the request body. `ChaosPlanMapper.read(planJson)` deserializes it using Jackson with strict unknown-field policy — a typo in the JSON produces a `ConfigLoadException` rather than silently ignoring the field. The resulting `ChaosActivationHandle` is registered in `ChaosHandleRegistry` so that the DELETE operation can stop it later.
+Actuator binds the `String planJson` parameter **by name** from a JSON object body, so the request body is `{"planJson": "<plan JSON as an escaped string>"}` — not the raw plan document:
+
+```bash
+curl -X POST http://localhost:8080/actuator/chaos \
+  -H 'Content-Type: application/json' \
+  -d '{"planJson": "{\"metadata\":{\"name\":\"soak\"},\"scenarios\":[...]}"}'
+```
+
+`ChaosPlanMapper.read(planJson)` deserializes the plan using Jackson with strict unknown-field policy — a typo in the JSON is rejected rather than silently ignored. The resulting `ChaosActivationHandle` is registered in `ChaosHandleRegistry` so that the DELETE operation can stop it later.
+
+Parse and activation failures (duplicate active id, validation failure, unsupported feature) are logged server-side with the full cause and answered with `status = "error"` and a redacted message, never a stack trace or Jackson detail.
 
 Response record:
 
@@ -505,47 +536,48 @@ Response record:
 public record ActivationResponse(String status, String handleId, String message) {}
 ```
 
-On success: `status = "activated"`, `handleId = <handle.id()>`, `message = null`.
+On success: `status = "activated"`, `handleId = "plan:<name>"` (the plan handle id), `message = null`.
 On blank body: `status = "error"`, `handleId = null`, `message = "plan JSON must not be blank"`.
+On malformed plan: `status = "error"`, `message = "invalid plan"`. On activation failure: `status = "error"`, `message = "plan rejected"`.
 
-#### `stop(scenarioId)` — `DELETE /actuator/chaos/{scenarioId}`
+#### `stop(id)` — `DELETE /actuator/chaos/{id}`
 
 ```java
 @DeleteOperation
-public StopResponse stop(@Selector final String scenarioId) {
-    final boolean stopped = handleRegistry.stop(scenarioId);
-    if (stopped) {
-        return new StopResponse("stopped", scenarioId, null);
+public StopResponse stop(@Selector final String id) {
+    if (handleRegistry.stop(id) || handleRegistry.stop("plan:" + id)) {
+        return new StopResponse("stopped", id, null);
     }
-    if (controlPlane.diagnostics().scenario(scenarioId).isPresent()) {
-        return new StopResponse("unmanaged", scenarioId,
-            "scenario is registered but not managed by this starter; stop via its activation handle");
+    if (controlPlane.diagnostics().scenario(id).isPresent()) {
+        return new StopResponse("unmanaged", id,
+            "scenario was not activated through this endpoint, or is part of a plan; stop the plan"
+                + " by its handle id (plan:<name>), or the scenario via its activation handle");
     }
-    return new StopResponse("not-found", scenarioId, "no scenario with id " + scenarioId);
+    return new StopResponse("not-found", id, "no plan or scenario with id " + id);
 }
 ```
 
-`@Selector` binds `scenarioId` to the path segment. The three-state response is deliberate:
+`@Selector` binds `id` to the path segment. `id` is the `handleId` returned by `activate` (`plan:<name>`) or the plan name alone. Plans are activated atomically, so an individual scenario of a plan cannot be stopped on its own. The three-state response is deliberate:
 
-- `"stopped"` — the handle was in the registry and `handle.stop()` succeeded.
-- `"unmanaged"` — the scenario exists in the JVM's `ScenarioRegistry` (registered by some other activation path — perhaps by agent startup config or a direct API call) but this starter's `ChaosHandleRegistry` does not track a handle for it. The endpoint correctly refuses to stop it silently; the caller needs to locate the appropriate handle.
-- `"not-found"` — the scenario ID is unknown to both the handle registry and the diagnostic snapshot.
+- `"stopped"` — the plan handle was in the registry and was closed (its scenarios are stopped and unregistered, so the same plan can be activated again).
+- `"unmanaged"` — `id` is a scenario id known to the JVM's `ScenarioRegistry`, either a scenario of a plan (stop the plan by its handle id instead) or one registered by another activation path (agent startup config, a direct API call). The message carries that hint; the endpoint never stops it silently.
+- `"not-found"` — `id` is unknown to both the handle registry and the diagnostic snapshot.
 
 ```java
 public record StopResponse(String status, String scenarioId, String message) {}
 ```
 
-#### `stopAll()` — `POST /actuator/chaos/stopAll`
+#### `stopAll()` — `DELETE /actuator/chaos`
 
 ```java
-@WriteOperation
+@DeleteOperation
 public StopAllResponse stopAll() {
     final int stoppedCount = handleRegistry.stopAll();
     return new StopAllResponse(stoppedCount);
 }
 ```
 
-Stops every scenario in `ChaosHandleRegistry` — specifically, every scenario activated through this starter (startup plan or Actuator calls). Scenarios activated via other paths (direct API, agent startup args, test sessions) are unaffected. The response carries the count of handles successfully stopped.
+Stops every scenario in `ChaosHandleRegistry` — specifically, every scenario activated through this starter (startup plan or Actuator calls). Scenarios activated via other paths (direct API, agent startup args, test sessions) are unaffected. The response carries the count of handles successfully stopped. `stopAll()` does not close the registry: later `POST /actuator/chaos` activations work normally.
 
 ```java
 public record StopAllResponse(int stoppedCount) {}
@@ -582,7 +614,7 @@ http.requestMatcher(EndpointRequest.to(ChaosActuatorEndpoint.class))
 `ChaosHandleRegistry` is the decoupling layer:
 
 ```java
-public final class ChaosHandleRegistry {
+public final class ChaosHandleRegistry implements DisposableBean {
     private final Map<String, ChaosActivationHandle> handles = new ConcurrentHashMap<>();
 
     public void register(final ChaosActivationHandle handle) { ... }
@@ -592,31 +624,29 @@ public final class ChaosHandleRegistry {
 }
 ```
 
-Every `ChaosActivationHandle` returned by `controlPlane.activate()` from within the starter's scope (startup plan load, Actuator activate call) is registered here. The registry holds only the handles that this starter produced. When `stop(id)` is called, the registry removes and calls `handle.stop()` — it never reaches into `ScenarioRegistry` or calls any `chaos-agent-core` internal API.
+Every `ChaosActivationHandle` returned by `controlPlane.activate()` from within the starter's scope (startup plan load, Actuator activate call) is registered here, keyed by `handle.id()`. The registry holds only the handles that this starter produced. When `stop(id)` is called, the registry removes the handle and calls `handle.close()`, which stops and unregisters its scenarios — it never reaches into `ScenarioRegistry` or calls any `chaos-agent-core` internal API. Registering a handle under an id that is already tracked closes the previous handle.
 
 The `ConcurrentHashMap` backing is intentional. Both `register()` and `stop()` can be called concurrently — `register` from the startup event listener thread, `stop` from an HTTP thread serving a DELETE request. `ConcurrentHashMap` provides the necessary thread safety without requiring explicit locking in the registry methods.
 
-`stopAll()` uses a deliberate iteration-and-remove pattern:
+`stopAll()` iterates over a snapshot of the ids:
 
 ```java
 public int stopAll() {
-    int count = 0;
-    for (final Map.Entry<String, ChaosActivationHandle> entry : handles.entrySet()) {
-        handles.remove(entry.getKey());
-        try {
-            entry.getValue().stop();
-            count++;
-        } catch (final RuntimeException ignored) {
-            // best-effort stop-all
+    int stoppedCount = 0;
+    for (final String handleId : List.copyOf(handles.keySet())) {
+        if (stop(handleId)) {   // stop() catches and logs a RuntimeException from close()
+            stoppedCount++;
         }
     }
-    return count;
+    return stoppedCount;
 }
 ```
 
-`RuntimeException` is caught and swallowed because `stopAll` is a bulk best-effort operation. If one scenario's stop call throws (e.g., the stressor thread was already terminated by a JVM shutdown hook), the remaining scenarios should still be attempted. The count reflects successful stops only.
+`stopAll` is a bulk best-effort operation: `stop(id)` catches and logs a `RuntimeException` from `handle.close()` (e.g., stressor teardown failing), so the remaining handles are still attempted. The count reflects successful stops only.
 
-### 3.7 Sequence Diagram — POST `/actuator/chaos/activate`
+The registry is a `DisposableBean`. On context close, `destroy()` sets a closing flag (a `register()` racing the shutdown closes its handle immediately instead of tracking it) and drains the map. Only context close sets this flag; `stopAll()` does not.
+
+### 3.7 Sequence Diagram — POST `/actuator/chaos`
 
 ```plantuml
 @startuml
@@ -631,7 +661,7 @@ participant "ChaosControlPlane\n(ChaosRuntime)" as CP
 participant "ScenarioRegistry" as Registry
 participant "ChaosHandleRegistry" as HandleReg
 
-Op -> HTTP: POST /actuator/chaos\nBody: {"name":"...", "scenarios":[...]}
+Op -> HTTP: POST /actuator/chaos\nBody: {"planJson": "<escaped plan JSON>"}
 HTTP -> Endpoint: activate(planJson)
 Endpoint -> Endpoint: null/blank check
 Endpoint -> Mapper: read(planJson)
@@ -643,7 +673,7 @@ CP -> CP: controller.start()\n(AUTOMATIC start mode)
 CP --> Endpoint: ChaosActivationHandle
 Endpoint -> HandleReg: register(handle)
 Endpoint --> HTTP: ActivationResponse("activated", handleId, null)
-HTTP --> Op: 200 OK\n{"status":"activated","handleId":"<uuid>","message":null}
+HTTP --> Op: 200 OK\n{"status":"activated","handleId":"plan:<name>","message":null}
 
 note over Registry
   ScenarioController is now ACTIVE.
@@ -660,39 +690,20 @@ end note
 
 ### What Differs
 
-There are two meaningful differences between the Boot 3 and Boot 4 variants.
+There is one meaningful difference between the Boot 3 and Boot 4 variants: the `EnvironmentPostProcessor` interface package, and therefore its registration key.
 
-**First difference — `ApplicationContextInitializer` registration in the test starters**:
-
-**Boot 3 test starter** uses `META-INF/spring.factories` (key-value format, Spring Framework legacy mechanism):
-
-```properties
-org.springframework.context.ApplicationContextInitializer=\
-  com.macstab.chaos.jvm.spring.boot3.test.ChaosAgentInitializer
-```
-
-**Boot 4 test starter** uses `META-INF/spring/org.springframework.context.ApplicationContextInitializer.imports` (one class per line, the Boot 4 factory mechanism):
-
-```
-com.macstab.chaos.jvm.spring.boot4.test.ChaosAgentInitializer
-```
-
-Spring Boot 4 moved from `spring.factories` to `.imports` files for most factory types. The `.imports` format is simpler (no key prefix needed, no backslash continuation), and Spring's factory scanning preferentially uses it. The `spring.factories` file is still processed by Boot 4 for backward compatibility but is considered the legacy path.
-
-**Second difference — `EnvironmentPostProcessor` interface package and registration**:
-
-**Boot 3 runtime starter**: `org.springframework.boot.env.EnvironmentPostProcessor` (the interface is in the `.env` sub-package). Registered via `META-INF/spring/org.springframework.boot.env.EnvironmentPostProcessor.imports`.
+**Boot 3 runtime starter**: `org.springframework.boot.env.EnvironmentPostProcessor` (the interface is in the `.env` sub-package). Registered via `META-INF/spring.factories` using the `org.springframework.boot.env.EnvironmentPostProcessor` key.
 
 **Boot 4 runtime starter**: `org.springframework.boot.EnvironmentPostProcessor` (interface moved to the top-level `org.springframework.boot` package in Boot 4). Registered via `META-INF/spring.factories` using the `org.springframework.boot.EnvironmentPostProcessor` key, because Boot 4's `EnvironmentPostProcessorsFactory.fromSpringFactories()` still uses `SpringFactoriesLoader` for this type.
 
-Both the auto-configuration registration (runtime starters) and the test auto-configuration registration (test starters) use `*.imports` files in both Boot 3 and Boot 4:
+The `ApplicationContextInitializer` of the test starters is registered identically in both versions — not globally, but through `@ContextConfiguration(initializers = ChaosAgentInitializer.class)` on `@ChaosTest`. Both the auto-configuration registration (runtime starters) and the test auto-configuration registration (test starters) use the same `*.imports` file in Boot 3 and Boot 4:
 
-| File                                           | Boot 3                                                                          | Boot 4                                                                                   |
-|------------------------------------------------|---------------------------------------------------------------------------------|------------------------------------------------------------------------------------------|
-| Runtime auto-configuration                     | `org.springframework.boot.autoconfigure.AutoConfiguration.imports`              | Same                                                                                     |
-| Test auto-configuration                        | `org.springframework.boot.test.autoconfigure.ImportAutoConfiguration.imports`   | Same                                                                                     |
-| `ApplicationContextInitializer` (test starter) | `META-INF/spring.factories`                                                     | `META-INF/spring/org.springframework.context.ApplicationContextInitializer.imports`      |
-| `EnvironmentPostProcessor` (runtime starter)   | `META-INF/spring/org.springframework.boot.env.EnvironmentPostProcessor.imports` | `META-INF/spring.factories` keyed on `org.springframework.boot.EnvironmentPostProcessor` |
+| File                                           | Boot 3                                                                                       | Boot 4                                                                                   |
+|------------------------------------------------|----------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------|
+| Runtime auto-configuration                     | `org.springframework.boot.autoconfigure.AutoConfiguration.imports`                           | Same                                                                                     |
+| Test auto-configuration                        | `org.springframework.boot.autoconfigure.AutoConfiguration.imports`                           | Same                                                                                     |
+| `ApplicationContextInitializer` (test starter) | `@ContextConfiguration` on `@ChaosTest` (no global registration)                             | Same                                                                                     |
+| `EnvironmentPostProcessor` (runtime starter)   | `META-INF/spring.factories` keyed on `org.springframework.boot.env.EnvironmentPostProcessor` | `META-INF/spring.factories` keyed on `org.springframework.boot.EnvironmentPostProcessor` |
 
 ### What is Identical
 
@@ -701,12 +712,11 @@ Everything else is source-identical between Boot 3 and Boot 4 variants. The diff
 - Package names (`spring.boot3` vs `spring.boot4`)
 - The `Automatic-Module-Name` in the JAR manifest
 - The Spring Boot BOM version used for compilation (`3.5.13` vs `4.0.5`)
-- The `ApplicationContextInitializer` registration file (as described above)
-- The `EnvironmentPostProcessor` interface package and registration file (as described above)
+- The `EnvironmentPostProcessor` interface package and `spring.factories` key (as described above)
 
 All class names, method signatures, annotation usages, `@ConditionalOn*` expressions, JUnit 5 extension logic, parameter resolution, session lifecycle, and property key names are identical. The Java source of `ChaosProperties`, `ChaosAutoConfiguration`, `ChaosActuatorEndpoint`, `ChaosHandleRegistry`, `ChaosAgentExtension`, `ChaosAgentInitializer`, `ChaosTestAutoConfiguration`, and `@ChaosTest` contain no conditional logic — they compile against their respective BOMs and work identically at runtime.
 
-`ChaosAgentEnvironmentPostProcessor` carries the same logic in both Boot 3 and Boot 4. The only difference is the import: `org.springframework.boot.env.EnvironmentPostProcessor` in Boot 3 vs `org.springframework.boot.EnvironmentPostProcessor` in Boot 4, and the registration file as described above.
+`ChaosAgentEnvironmentPostProcessor` carries the same logic in both Boot 3 and Boot 4. The only differences are the import (`org.springframework.boot.env.EnvironmentPostProcessor` in Boot 3 vs `org.springframework.boot.EnvironmentPostProcessor` in Boot 4), the `spring.factories` key, and the attach-marker value (`spring-boot-3` / `spring-boot-4`).
 
 The duplication is intentional and has a concrete justification: Spring Boot 3 and Spring Boot 4 have incompatible `@AutoConfiguration` processing semantics and compile-time annotation processor outputs. A shared module compiled against Boot 3 cannot be used in a Boot 4 application without classloader issues, and vice versa. The clean separation means each module's JAR has a single, unambiguous compile-time dependency graph.
 
@@ -718,7 +728,8 @@ All properties live under the `macstab.chaos` prefix and apply to both Boot 3 an
 
 | Property                            | Type      | Default | Description                                                                                                          |
 |-------------------------------------|-----------|---------|----------------------------------------------------------------------------------------------------------------------|
-| `macstab.chaos.enabled`             | `boolean` | `false` | Master switch. All beans in `ChaosAutoConfiguration` are conditional on this being `true`.                           |
+| `macstab.chaos.enabled`             | `boolean` | `false` | Master switch. Gates the early attach and all beans in `ChaosAutoConfiguration`; honoured only from trusted sources. |
+| `macstab.chaos.allow-remote-enable` | `boolean` | `false` | Lets `macstab.chaos.enabled` come from any property source. Itself honoured only from a trusted source.              |
 | `macstab.chaos.config-file`         | `String`  | `null`  | Absolute or relative path to a JSON plan file. Loaded on `ApplicationReadyEvent`. Null or blank = no startup plan.   |
 | `macstab.chaos.debug-dump-on-start` | `boolean` | `false` | If `true`, logs the full `controlPlane.diagnostics().debugDump()` output at `INFO` after the startup plan activates. |
 | `macstab.chaos.actuator.enabled`    | `boolean` | `false` | Enables `ChaosActuatorEndpoint`. Requires both this flag and `spring-boot-actuator` on the classpath.                |
@@ -743,7 +754,7 @@ macstab:
     enabled: true
 ```
 
-All properties participate in Spring's full environment abstraction — they can be set via `application.yml`, `application.properties`, system properties (`-Dmacstab.chaos.enabled=true`), environment variables (`MACSTAB_CHAOS_ENABLED=true` using Spring's relaxed binding), or any `PropertySource` registered in the context.
+All properties participate in Spring's full environment abstraction — they can be set via `application.yml`, `application.properties`, system properties (`-Dmacstab.chaos.enabled=true`), environment variables (`MACSTAB_CHAOS_ENABLED=true` using Spring's relaxed binding), or any `PropertySource` registered in the context. The exception is `macstab.chaos.enabled` (and `macstab.chaos.allow-remote-enable`): they take effect only from system properties, environment variables, command-line arguments, classpath config data or Spring test property sources — see §3.2.
 
 ---
 

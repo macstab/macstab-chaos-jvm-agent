@@ -31,10 +31,11 @@ package com.macstab.chaos.jvm.api;
 public interface ChaosActivationHandle extends AutoCloseable {
 
   /**
-   * Returns the unique identifier of the activated scenario. Matches {@link ChaosScenario#id()}.
-   * For plan activations this is the composite plan handle ID.
+   * Returns the registry key of this activation: {@code jvm::<scenarioId>} for a JVM scenario,
+   * {@code session:<sessionId>::<scenarioId>} for a session scenario, {@code plan:<planName>} for a
+   * plan. The scenario's own id is {@link ChaosScenario#id()}.
    *
-   * @return the scenario or plan handle ID
+   * @return the activation key; never {@code null}
    */
   String id();
 

@@ -87,6 +87,15 @@ public final class DefaultChaosActivationHandle implements ChaosActivationHandle
   }
 
   /**
+   * Stops the scenario and removes it from the registry, so its id can be activated again and it no
+   * longer appears in diagnostics. Equivalent to {@link #destroy()}.
+   */
+  @Override
+  public void close() {
+    destroy();
+  }
+
+  /**
    * Permanently stops the scenario and removes it from the {@link ScenarioRegistry}.
    *
    * <p>Calling this method ensures that the scenario no longer appears in registry lookups and

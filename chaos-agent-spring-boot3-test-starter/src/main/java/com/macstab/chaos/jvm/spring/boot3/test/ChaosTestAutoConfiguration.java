@@ -26,6 +26,12 @@ import org.springframework.context.annotation.Bean;
 @ConditionalOnClass(ChaosAgentExtension.class)
 public class ChaosTestAutoConfiguration {
 
+  /**
+   * Property set in a context's environment by {@link ChaosAgentInitializer} for
+   * {@code @ChaosTest}.
+   */
+  static final String TEST_ENABLED_PROPERTY = "macstab.chaos.test.enabled";
+
   /** Default constructor invoked by Spring when the configuration is imported. */
   public ChaosTestAutoConfiguration() {}
 
@@ -34,9 +40,11 @@ public class ChaosTestAutoConfiguration {
    *
    * @return the JVM-wide control plane
    */
-  @Bean
+  // destroyMethod = "": the control plane is the JVM-wide runtime shared by every test context;
+  // Spring's inferred destroy method would close() it whenever any context shuts down.
+  @Bean(destroyMethod = "")
   @ConditionalOnMissingBean(ChaosControlPlane.class)
-  @ConditionalOnProperty(name = "macstab.chaos.test.enabled", havingValue = "true")
+  @ConditionalOnProperty(name = TEST_ENABLED_PROPERTY, havingValue = "true")
   public ChaosControlPlane chaosControlPlane() {
     // ChaosAgentInitializer.initialize() has already called installLocally() and set
     // the guard property; current() returns the same singleton without a second attach.

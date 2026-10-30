@@ -2,11 +2,13 @@ package com.macstab.chaos.jvm.quarkus;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.macstab.chaos.jvm.api.ChaosControlPlane;
 import com.macstab.chaos.jvm.api.ChaosEffect;
 import com.macstab.chaos.jvm.api.ChaosSelector;
 import com.macstab.chaos.jvm.api.ChaosSession;
+import com.macstab.chaos.jvm.api.OperationType;
 import java.time.Duration;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -118,6 +120,43 @@ class ChaosQuarkusExtensionTest {
       assertThat(scenario.effect()).isInstanceOf(ChaosEffect.ClockSkewEffect.class);
       final ChaosEffect.ClockSkewEffect skew = (ChaosEffect.ClockSkewEffect) scenario.effect();
       assertThat(skew.mode()).isEqualTo(ChaosEffect.ClockSkewMode.FREEZE);
+      assertThat(((ChaosSelector.JvmRuntimeSelector) scenario.selector()).operations())
+          .as("the clock reads that are actually instrumented, not System.currentTimeMillis")
+          .containsExactlyInAnyOrder(
+              OperationType.INSTANT_NOW,
+              OperationType.LOCAL_DATE_TIME_NOW,
+              OperationType.ZONED_DATE_TIME_NOW,
+              OperationType.DATE_NEW);
+    }
+
+    @ChaosScenario(id = "delay-clock", selector = "jvmRuntime", effect = "delay:PT0.1S")
+    void annotatedClockDelay() {}
+
+    @ChaosScenario(id = "freeze-jdbc", selector = "jdbc", effect = "freeze")
+    void annotatedJdbcFreeze() {}
+
+    @Test
+    @DisplayName("a delay on jvmRuntime is rejected because clock reads only take a skew")
+    void clockDelayIsRejected() throws Exception {
+      final ChaosScenario annotation =
+          AnnotationParsing.class
+              .getDeclaredMethod("annotatedClockDelay")
+              .getAnnotation(ChaosScenario.class);
+      assertThatThrownBy(() -> ChaosQuarkusExtension.toScenario(annotation))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("freeze");
+    }
+
+    @Test
+    @DisplayName("freeze on a non-clock selector is rejected")
+    void freezeOnNonClockSelectorIsRejected() throws Exception {
+      final ChaosScenario annotation =
+          AnnotationParsing.class
+              .getDeclaredMethod("annotatedJdbcFreeze")
+              .getAnnotation(ChaosScenario.class);
+      assertThatThrownBy(() -> ChaosQuarkusExtension.toScenario(annotation))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("jvmRuntime");
     }
   }
 

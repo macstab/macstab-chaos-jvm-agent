@@ -72,7 +72,21 @@ public record AgentArgs(Map<String, String> values) {
    * @return the parsed boolean, or {@code defaultValue}
    */
   public boolean getBoolean(final String key, final boolean defaultValue) {
-    final String raw = values.get(key);
+    return parseBoolean(key, values.get(key), defaultValue);
+  }
+
+  /**
+   * Parses a boolean flag the way agent args do ({@code true|false|1|0|yes|no|on|off}, case
+   * insensitive); also used for the equivalent environment variables so both spellings behave the
+   * same.
+   *
+   * @param name the arg or variable name, for the warning on an unrecognised value
+   * @param raw the raw value; {@code null} or blank means {@code defaultValue}
+   * @param defaultValue the value when {@code raw} is absent or unrecognised
+   * @return the parsed flag
+   */
+  public static boolean parseBoolean(
+      final String name, final String raw, final boolean defaultValue) {
     if (raw == null) {
       return defaultValue;
     }
@@ -93,7 +107,7 @@ public record AgentArgs(Map<String, String> values) {
     // and the raw value lets them find and fix the typo.
     System.err.println(
         "[chaos-agent] agent arg '"
-            + key
+            + name
             + "' has unrecognised boolean value '"
             + raw
             + "'; expected true|false|1|0|yes|no|on|off. Using default: "

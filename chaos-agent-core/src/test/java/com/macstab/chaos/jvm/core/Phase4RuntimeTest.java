@@ -424,15 +424,16 @@ class Phase4RuntimeTest {
     }
 
     @Test
-    @DisplayName("FILE_IO scenario does NOT suppress THREAD_SLEEP")
+    @DisplayName("FILE_IO scenario does NOT affect THREAD_SLEEP")
     void fileIoScenarioDoesNotAffectThreadSleep() throws Throwable {
       final ChaosRuntime runtime = new ChaosRuntime();
+      // File I/O only supports delay/reject; SUPPRESS on it is rejected at activation.
       final ChaosActivationHandle handle =
           activate(
               runtime,
               "file-no-sleep",
               ChaosSelector.fileIo(Set.of(OperationType.FILE_IO_READ, OperationType.FILE_IO_WRITE)),
-              ChaosEffect.suppress());
+              ChaosEffect.reject("file chaos"));
       try {
         assertThat(runtime.beforeThreadSleep(100L)).isFalse();
       } finally {

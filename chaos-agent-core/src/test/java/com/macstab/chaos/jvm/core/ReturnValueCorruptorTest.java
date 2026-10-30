@@ -3,12 +3,28 @@ package com.macstab.chaos.jvm.core;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.macstab.chaos.jvm.api.ChaosEffect;
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
+import java.util.Deque;
 import java.util.List;
+import java.util.Map;
+import java.util.NavigableSet;
 import java.util.Optional;
+import java.util.PriorityQueue;
+import java.util.Queue;
+import java.util.Set;
+import java.util.SortedMap;
+import java.util.concurrent.BlockingDeque;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.ConcurrentNavigableMap;
+import javax.management.AttributeList;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 @DisplayName("ReturnValueCorruptor")
 class ReturnValueCorruptorTest {
@@ -134,6 +150,54 @@ class ReturnValueCorruptorTest {
     void returnsLongMinForLong() {
       assertThat(corrupt(ChaosEffect.ReturnValueStrategy.BOUNDARY_MIN, long.class, 5L))
           .isEqualTo(Long.MIN_VALUE);
+    }
+  }
+
+  @Nested
+  @DisplayName("EMPTY always returns a value assignable to the declared type")
+  class EmptyAssignability {
+
+    @ParameterizedTest
+    @ValueSource(
+        classes = {
+          List.class,
+          Collection.class,
+          Set.class,
+          Map.class,
+          Queue.class,
+          Deque.class,
+          ArrayList.class,
+          PriorityQueue.class,
+          BlockingQueue.class,
+          BlockingDeque.class,
+          ConcurrentNavigableMap.class,
+          ConcurrentMap.class,
+          NavigableSet.class,
+          SortedMap.class,
+          Iterable.class
+        })
+    void emptyContainerFitsDeclaredType(final Class<?> declared) {
+      final Object empty = corrupt(ChaosEffect.ReturnValueStrategy.EMPTY, declared, new Object());
+
+      assertThat(empty).isNotNull();
+      assertThat(declared.isInstance(empty))
+          .as("%s is assignable to %s", empty.getClass().getName(), declared.getName())
+          .isTrue();
+      assertThat(
+              empty instanceof Collection<?> collection
+                  ? collection.isEmpty()
+                  : ((Map<?, ?>) empty).isEmpty())
+          .isTrue();
+    }
+
+    @Test
+    @DisplayName("a concrete subtype with no fitting empty value falls back to null")
+    void concreteSubtypeFallsBack() {
+      assertThat(
+              corrupt(
+                  ChaosEffect.ReturnValueStrategy.EMPTY, AttributeList.class, new AttributeList()))
+          .as("a plain ArrayList would fail the checkcast to AttributeList")
+          .isNull();
     }
   }
 

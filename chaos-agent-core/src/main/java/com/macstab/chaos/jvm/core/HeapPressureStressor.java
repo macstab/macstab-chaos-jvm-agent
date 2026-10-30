@@ -3,6 +3,7 @@ package com.macstab.chaos.jvm.core;
 import com.macstab.chaos.jvm.api.ChaosEffect;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.logging.Logger;
 
 /**
  * {@link ManagedStressor} that simulates heap pressure by allocating and retaining a configurable
@@ -24,6 +25,8 @@ import java.util.List;
  * close()} concurrently, no external synchronization is required.
  */
 final class HeapPressureStressor implements ManagedStressor {
+  private static final Logger LOGGER = Logger.getLogger("com.macstab.chaos.jvm");
+
   private final List<byte[]> retained = new ArrayList<>();
 
   /**
@@ -44,7 +47,17 @@ final class HeapPressureStressor implements ManagedStressor {
     // meaningful pressure while still leaving headroom for the application and the GC.
     final long maxHeap = Runtime.getRuntime().maxMemory();
     final long softCap = (maxHeap == Long.MAX_VALUE) ? Long.MAX_VALUE : maxHeap / 2L;
-    long remaining = Math.min(effect.bytes(), softCap);
+    final long target = Math.min(effect.bytes(), softCap);
+    if (target < effect.bytes()) {
+      LOGGER.warning(
+          () ->
+              "chaos-agent: heap pressure of "
+                  + effect.bytes()
+                  + " bytes capped at "
+                  + target
+                  + " bytes (half of the maximum heap)");
+    }
+    long remaining = target;
     while (remaining > 0) {
       final int allocation = (int) Math.min(effect.chunkSizeBytes(), remaining);
       retained.add(new byte[allocation]);

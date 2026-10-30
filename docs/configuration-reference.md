@@ -192,9 +192,15 @@ If no source is present, the agent starts with no active scenarios. Programmatic
       - If scenario is JVM-scoped: always eligible
       - Evaluate selector against invocationContext
       - If selector matches: evaluate activationPolicy (probability, rate, count, time)
-      - If policy passes: apply effect
-   b. Delay effects: all delays sum; thread sleeps for total
-   c. Terminal effects (reject/suppress/exception): highest-precedence wins
+      - If policy passes: the scenario contributes its effect
+   b. Applied in this order: delay, then gate, then terminal action
+      (a delay is never dropped because a terminal action wins)
+   c. Delay effects: all delays sum; thread sleeps for total
+   d. Gate: the highest-precedence gate holds the thread
+   e. Terminal effects (reject/suppress/exception): highest-precedence wins
+   f. APPLIED is published only for contributions that take effect (every
+      delay, the winning gate, the winning terminal action); losing
+      scenarios do not consume maxApplications
 6. Reentrancy guard depth decremented
 7. Method body executes (or is suppressed, or throws)
 ```
@@ -213,7 +219,7 @@ ChaosActivationHandle h = cp.activate(
 
 // … run test …
 
-h.close(); // stops the scenario; future matches no longer fire
+h.close(); // stops and unregisters the scenario; the id can be activated again
 ```
 
 ## Plan Activation via JSON
@@ -265,7 +271,7 @@ package "chaos-agent-core" {
 }
 
 package "chaos-agent-bootstrap" {
-  [BootstrapDispatcher\n(57 slots)] as BD
+  [BootstrapDispatcher\n(58 slots)] as BD
 }
 
 AgentArgs --> AAP
@@ -298,23 +304,23 @@ BD --> [JDK instrumented\nmethods] : advice woven
 @startuml chaos-scenario-state
 !theme plain
 
-[*] --> INACTIVE : activate() with StartMode.MANUAL
-[*] --> ACTIVE   : activate() with StartMode.AUTOMATIC
+[*] --> REGISTERED : activate() with StartMode.MANUAL
+[*] --> ACTIVE     : activate() with StartMode.AUTOMATIC
 
-INACTIVE --> ACTIVE   : handle.start()
-ACTIVE   --> INACTIVE : handle.stop()
-ACTIVE   --> ACTIVE   : effect applied (ChaosEvent.APPLIED)
-ACTIVE   --> ACTIVE   : selector matched, policy skipped (ChaosEvent.SKIPPED)
-ACTIVE   --> EXHAUSTED : maxApplications reached or activeFor elapsed
-INACTIVE --> RELEASED  : handle.release() / handle.close()
-ACTIVE   --> RELEASED  : handle.release() / handle.close()
-EXHAUSTED --> RELEASED : handle.release() / handle.close()
+REGISTERED --> ACTIVE   : handle.start()
+ACTIVE     --> ACTIVE   : effect applied (ChaosEvent.APPLIED)
+ACTIVE     --> ACTIVE   : handle.release() re-arms a gate (ChaosEvent.RELEASED)
+ACTIVE     --> INACTIVE : maxApplications reached or activeFor elapsed
+REGISTERED --> STOPPED  : handle.stop()
+ACTIVE     --> STOPPED  : handle.stop()
+INACTIVE   --> STOPPED  : handle.stop()
 
-RELEASED --> [*]
+STOPPED  --> [*] : handle.close() unregisters
+INACTIVE --> [*] : handle.close() unregisters
 @enduml
 ```
 
-**Takeaway:** `ACTIVE` does not mean "effect always fires" — the activation policy filters matches via probability, rate, count, and time constraints. `EXHAUSTED` is a terminal state that still allows `release()` for cleanup. `close()` implies `release()`.
+**Takeaway:** `ACTIVE` does not mean "effect always fires" — the activation policy filters matches via probability, rate, count, and time constraints. `STOPPED` is final: `start()` after `stop()` has no effect. `close()` stops **and** unregisters the scenario. Activating the same id again works once the previous scenario is `STOPPED` or `INACTIVE` (it is replaced); a duplicate id while the previous one is `REGISTERED` or `ACTIVE` throws `ChaosActivationException`.
 
 ---
 
@@ -390,7 +396,7 @@ Not diagrammed — tabular representation is clearer. See [Section 13.4 — Comp
 
 **Responsibility:** Create an isolated scope where SESSION-scoped scenarios fire only for threads explicitly bound to the session. Enables multiple tests to run concurrently in the same JVM without interfering with each other's chaos state.
 
-**Thread binding:** `session.bind()` associates the current thread to the session. `session.unbind()` removes it. Threads that are not bound to any session are only eligible for JVM-scoped scenarios.
+**Thread binding:** the thread that opens the session is bound to it; `session.bind()` binds another thread and returns a `ScopeBinding` whose `close()` removes it. Tasks submitted to executors or schedulers from a bound thread run bound to the same session. Threads that are not bound to any session are only eligible for JVM-scoped scenarios.
 
 **Restriction:** SESSION-scoped scenarios cannot use JVM-global selectors: `ThreadSelector`, `ShutdownSelector`, `ClassLoadingSelector`, `StressSelector`. These selectors target JVM-wide events that cannot be attributed to a single test thread.
 
@@ -435,7 +441,7 @@ ChaosPlan {
 - Duplicate `scenario.id` values within the list are rejected at construction.
 - All scenarios in a plan must be JVM-scoped when activated via `ChaosControlPlane.activate(ChaosPlan)`. SESSION-scoped plan activation is via `ChaosSession.activate(ChaosPlan)`.
 
-**`Observability` defaults:** `jmxEnabled=true, structuredLoggingEnabled=true, debugDumpOnStart=false`. `debugDumpOnStart=true` prints a full diagnostics dump to `System.err` at activation — useful for verifying that a plan parsed correctly in a new environment.
+**`Observability` defaults:** `jmxEnabled=true, structuredLoggingEnabled=true, debugDumpOnStart=false`. These fields are parsed and validated but **not read by the runtime**: the MBean is registered and events are logged regardless of their values. To print a diagnostics dump at startup, use the `debugDumpOnStart` agent arg or `MACSTAB_CHAOS_DEBUG_DUMP_ON_START` (see §13.1).
 
 ---
 
@@ -455,19 +461,22 @@ ActivationPolicy {
 
 RateLimit {
   permits : long     // max applications within one window; > 0
-  window  : Duration // rolling window duration; positive; must fit in Long nanos
+  window  : Duration // fixed window duration; positive; must fit in Long nanos
 }
 ```
 
 **Evaluation order at match time:**
-1. Is the scenario ACTIVE (not INACTIVE, EXHAUSTED, or RELEASED)?
-2. Has `activateAfterMatches` been satisfied (match counter ≥ threshold)?
-3. Does `probability` sampling pass (`ThreadLocalRandom.nextDouble() < probability`)?
-4. Does the sliding-window `rateLimit` permit another application?
-5. Has `maxApplications` not been reached?
-6. Has `activeFor` not elapsed since `handle.start()` was called?
+1. Is the scenario ACTIVE (not REGISTERED, INACTIVE or STOPPED)? For a SESSION scenario, is the current thread bound to its session?
+2. Does the selector match?
+3. Has `activeFor` not elapsed since `handle.start()` was called? (otherwise the scenario becomes INACTIVE, reason `"expired"`)
+4. Has `activateAfterMatches` been satisfied (match counter > threshold)?
+5. Does `probability` sampling pass (seeded `SplittableRandom` draw < probability)?
+6. Does the fixed-window `rateLimit` permit another application?
+7. Does `maxApplications` still have budget? (a reservation is taken; it is only consumed if the contribution actually takes effect)
 
-All six conditions must hold. Failure at any step records a `ChaosEvent.SKIPPED` event.
+All conditions must hold. No event is published for a skipped match — `ChaosEvent.SKIPPED` is defined in the API but not published; compare `matchedCount` and `appliedCount` in diagnostics instead.
+
+**Rate limit window:** the window is **fixed**, anchored at scenario start and advanced in whole window multiples — not sliding. A burst straddling a window boundary can therefore see up to `2 × permits` applications within one window length.
 
 ---
 
@@ -509,7 +518,7 @@ A `ThreadLocal<int[]> DEPTH` in `BootstrapDispatcher` prevents re-entrant dispat
 
 ## 8.3 Session Scope Thread Binding
 
-`ChaosSession.bind()` stores a session reference in a `ThreadLocal`. The `ChaosDispatcher` reads this on every SESSION-scoped scenario evaluation. `unbind()` removes it. There is no propagation to child threads — virtual threads and thread-pool tasks spawned by a bound thread are **not** automatically bound to the same session. Explicit `bind()` is required on each thread that should participate in a session-scoped scenario.
+`ChaosSession.bind()` pushes the session id onto a per-thread stack in `ScopeContext` (a plain, non-inheritable `ThreadLocal`). The `ChaosDispatcher` reads it on every SESSION-scoped scenario evaluation; closing the returned binding pops it. Tasks submitted to an executor or scheduler from a bound thread are wrapped so their worker runs (and every scheduled tick of a periodic task) execute bound to the same session. Threads started directly with `new Thread(...)` are **not** bound automatically — call `bind()` there explicitly. A session-scoped clock skew applies only on bound threads.
 
 **JMM relevance (JSR-133):** `ThreadLocal` reads/writes are always visible to the owning thread only. No cross-thread visibility concern applies to session binding state.
 
@@ -519,7 +528,7 @@ All stressor effects (HeapPressure, Deadlock, ThreadLeak, etc.) spawn platform d
 
 ## 8.5 Virtual Thread Compatibility
 
-Interceptors run on the calling virtual thread if the application uses Project Loom. `Thread.sleep()` within a `DelayEffect` on a virtual thread yields the carrier — this is the expected behavior. The `VirtualThreadCarrierPinningEffect` stressor explicitly exploits this by holding carrier platform threads inside `synchronized` blocks, preventing virtual thread unmounting and simulating the JDK 21 pinning behavior described in JEP 444.
+Interceptors run on the calling virtual thread if the application uses Project Loom. `Thread.sleep()` within a `DelayEffect` on a virtual thread yields the carrier — this is the expected behavior. The `VirtualThreadCarrierPinningEffect` stressor holds carriers with its own virtual threads — by blocking inside `synchronized` on JDK 21–23 (JEP 444 pinning) and with a spin-wait on JDK 24+, where JEP 491 removed monitor pinning (this variant costs one CPU per held carrier).
 
 **Reference:** JEP 444 — Virtual Threads (JDK 21).
 
@@ -543,7 +552,7 @@ Interceptors run on the calling virtual thread if the application uses Project L
 
 ## 9.2 Runtime Failures (Hot Path)
 
-The chaos runtime is designed to be non-fatal to the application. If an effect throws unexpectedly, the exception is caught, a `ChaosEvent.FAILED` is emitted, and the operation proceeds as if no chaos fired. The application thread is never left in an undefined state due to a chaos internal error.
+Exceptions produced on purpose by an effect (`reject`, `exceptionInjection`, exceptional completion) propagate to the caller by design. Failures in event listeners and the metrics sink are caught and logged so they never reach application code. `ChaosEvent.FAILED` is defined in the API but is not currently published by the runtime.
 
 ## 9.3 Config Loading Failures
 
@@ -556,7 +565,7 @@ The chaos runtime is designed to be non-fatal to the application. If an effect t
 
 ## 9.4 `GateEffect` Timeout
 
-`GateEffect(maxBlock=null)` blocks the matched operation's thread indefinitely until `handle.release()` is called. If the test fails to call `release()`, the application thread is permanently blocked. Use `maxBlock` to set a safety timeout. The testkit extensions call `stopTracked()` which releases all tracked handles in `afterEach`/`afterAll`.
+`GateEffect(maxBlock=null)` blocks the matched operation's thread indefinitely until `handle.release()` (or `stop()`/`close()`) is called. `release()` re-arms the gate: later matching calls block again until the next release. `release()` on a non-gate scenario or on a scenario that is not ACTIVE is a no-op. If the test fails to call `release()`, the application thread is permanently blocked. Use `maxBlock` to set a safety timeout. The testkit extensions call `stopTracked()` which releases all tracked handles in `afterEach`/`afterAll`.
 
 ---
 
@@ -589,7 +598,7 @@ A `StressSelector` / stressor effect combination applies JVM-wide chaos (heap ex
 
 ## 10.4 Observability of Chaos Activity
 
-All chaos events are emitted to registered `ChaosEventListener`s and to JMX (`com.macstab.chaos.jvm:type=ChaosDiagnostics`). Chaos activity is therefore visible to any JMX-capable monitoring tool attached to the JVM. In security-sensitive environments where the fact of chaos testing must not be visible to external observers, disable JMX via `ChaosPlan.Observability.jmxEnabled = false`.
+All chaos events are emitted to registered `ChaosEventListener`s and logged through `java.util.logging`; the agent also registers a JMX MBean (`com.macstab.chaos.jvm:type=ChaosDiagnostics`) whose `debugDump()` operation returns the current diagnostics text. Chaos activity is therefore visible to any JMX-capable monitoring tool attached to the JVM. `ChaosPlan.Observability.jmxEnabled = false` does **not** prevent this — the field is not read by the runtime. In security-sensitive environments where the fact of chaos testing must not be visible to external observers, restrict JMX access at the JVM level.
 
 ---
 
@@ -636,18 +645,13 @@ GLOB and REGEX patterns are compiled once per unique expression string and cache
 
 ## 12.1 JMX
 
-All active scenarios are published to `com.macstab.chaos.jvm:type=ChaosDiagnostics`. Attributes include:
-- Scenario state (INACTIVE / ACTIVE / EXHAUSTED / RELEASED)
-- Application count per scenario
-- Skip count per scenario
-- Failure count per scenario
-- Last applied timestamp
+The agent registers `ChaosDiagnosticsMXBean` at `com.macstab.chaos.jvm:type=ChaosDiagnostics`. It exposes a single operation, `debugDump()`, which returns the multi-line diagnostics text (every registered scenario with its state, counters and reason, plus stressor details). There are no per-scenario attributes; for structured data use `controlPlane.diagnostics().snapshot()`.
 
-Access via `jconsole`, `jmc`, or any JMX client. Disable per-plan via `Observability.jmxEnabled = false`.
+Access via `jconsole`, `jmc`, or any JMX client. `Observability.jmxEnabled = false` has no effect — the field is not read by the runtime.
 
 ## 12.2 Structured Logging
 
-Chaos events are written to `java.util.logging` at `FINE` level by default. Enable with `-Djava.util.logging.config.file=logging.properties` or configure programmatically. Event payload includes: scenario ID, operation type, effect type, thread name, timestamp, result (APPLIED/SKIPPED/FAILED).
+Chaos events are written to `java.util.logging` (logger `com.macstab.chaos.jvm`): `STARTED`/`STOPPED` at `INFO`, `APPLIED`/`RELEASED` at `FINE`. Configure with `-Djava.util.logging.config.file=logging.properties` or programmatically. Each line carries the event type, scenario ID, message and attributes (for `APPLIED`: operation, scope, effect type and, for session scenarios, session ID). `REGISTERED`, `SKIPPED` and `FAILED` are not published.
 
 ## 12.3 JFR Integration
 
@@ -681,30 +685,33 @@ Register custom listeners via `controlPlane.addEventListener(listener)`. Listene
 ### Agent Argument Syntax
 
 ```
--javaagent:/path/to/chaos-agent-bootstrap.jar=key1=value1,key2=value2
+-javaagent:/path/to/chaos-agent-bootstrap.jar=key1=value1;key2=value2
 ```
 
-- Values are comma-separated key=value pairs
-- Escaped comma `\,` is a literal comma within a value
+- Values are semicolon-separated key=value pairs (quote the argument in a shell)
+- Escapes: `\;` is a literal `;`, `\=` a literal `=`, `\\` a literal `\`; any other backslash is kept as written (Windows paths, JSON escapes)
 - Duplicate keys: last value wins
 - Boolean flags (key without `=`): treated as `true`
 
 ### Supported Agent Args
 
-| Argument       | Type         | Description                                                 |
-|----------------|--------------|-------------------------------------------------------------|
-| `configJson`   | String       | Inline JSON plan                                            |
-| `configBase64` | String       | Base64-encoded JSON plan                                    |
-| `configFile`   | Path         | File system path to JSON plan file                          |
-| `debugDump`    | Boolean flag | Equivalent to `debugDumpOnStart=true` in plan observability |
+| Argument              | Type         | Description                                                                                     |
+|-----------------------|--------------|-------------------------------------------------------------------------------------------------|
+| `configJson`          | String       | Inline JSON plan                                                                                |
+| `configBase64`        | String       | Base64-encoded JSON plan                                                                        |
+| `configFile`          | Path         | File system path to JSON plan file                                                              |
+| `debugDumpOnStart`    | Boolean flag | Print a diagnostics dump to stderr after the startup plan is activated; `debugDump` is an alias |
+| `configWatchInterval` | long (ms)    | Poll a `configFile` for changes and reload it; off by default, minimum 50 ms                    |
 
 ### Supported Environment Variables
 
-| Variable v                    | Equivalent to arg v |
-|-------------------------------|---------------------|
-| `MACSTAB_CHAOS_CONFIG_JSON`   | `configJson`        |
-| `MACSTAB_CHAOS_CONFIG_BASE64` | `configBase64`      |
-| `MACSTAB_CHAOS_CONFIG_FILE`   | `configFile`        |
+| Variable v                          | Equivalent to arg v                        |
+|-------------------------------------|--------------------------------------------|
+| `MACSTAB_CHAOS_CONFIG_JSON`         | `configJson`                               |
+| `MACSTAB_CHAOS_CONFIG_BASE64`       | `configBase64`                             |
+| `MACSTAB_CHAOS_CONFIG_FILE`         | `configFile`                               |
+| `MACSTAB_CHAOS_DEBUG_DUMP_ON_START` | `debugDumpOnStart` (`true`/`1`/`yes`/`on`) |
+| `MACSTAB_CHAOS_WATCH_INTERVAL`      | `configWatchInterval`                      |
 
 ---
 
@@ -872,6 +879,8 @@ All selectors use `"type"` as the JSON discriminator.
 **Operations:** `SCHEDULE_SUBMIT`, `SCHEDULE_TICK`  
 **Purpose:** Intercept `ScheduledExecutorService` task registration and timer firings.
 
+`SCHEDULE_SUBMIT` is evaluated once per `schedule*()` call, on the scheduling thread — a delay effect blocks that thread. The agent never rewrites the caller's schedule delay, period or unit. `SCHEDULE_TICK` is evaluated on each firing of the task.
+
 **Fields:**
 
 | Field                  | Type                 | Default       | Description                                                                       |
@@ -1027,10 +1036,10 @@ Once the hook is wired, the matcher, effect, and activation policy behave like e
 
 **Fields:**
 
-| Field               | Type                 | Default  | Description                                                                                                                              |
-|---------------------|----------------------|----------|------------------------------------------------------------------------------------------------------------------------------------------|
-| `operations`        | Set\<OperationType\> | required | Subset of valid operations                                                                                                               |
-| `remoteHostPattern` | NamePattern          | `ANY`    | For `SOCKET_CONNECT`: matched against `InetSocketAddress` host string. For others: matched against remote host recorded at connect time. |
+| Field               | Type                 | Default  | Description                                                                                                                                                                                                                                                                                                                            |
+|---------------------|----------------------|----------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `operations`        | Set\<OperationType\> | required | Subset of valid operations                                                                                                                                                                                                                                                                                                             |
+| `remoteHostPattern` | NamePattern          | `ANY`    | For `SOCKET_CONNECT`: matched against `InetSocketAddress` host string. For `SOCKET_READ`/`SOCKET_WRITE`/`SOCKET_CLOSE`: matched against the connected peer — its host name if known, otherwise its IP literal. A non-`ANY` pattern is rejected when `SOCKET_ACCEPT` is in `operations` (the peer is unknown until `accept()` returns). |
 
 ---
 
@@ -1055,7 +1064,7 @@ Once the hook is wired, the matcher, effect, and activation policy behave like e
 
 **JSON type:** `"httpClient"`  
 **Operations:** `HTTP_CLIENT_SEND`, `HTTP_CLIENT_SEND_ASYNC`  
-**Purpose:** Intercept HTTP client requests across `java.net.http.HttpClient`, OkHttp 4.x, Apache HttpComponents 4/5, and Spring WebClient (Reactor Netty).
+**Purpose:** Intercept HTTP client requests across `java.net.http.HttpClient` (`send`, 2- and 3-arg `sendAsync`), OkHttp 3 and 4, Apache HttpComponents 4/5 (including HC5 `execute(request)` and the host-first `execute` overloads), and Spring WebClient (Reactor Netty — the URI is taken from the client configuration). Nested or delegating client calls are evaluated once, at the outermost call.
 
 **Fields:**
 
@@ -1085,10 +1094,10 @@ Once the hook is wired, the matcher, effect, and activation policy behave like e
 
 **Fields:**
 
-| Field | Type                 | Default   | Description                                                                                                                                                                                                       |
-|-------|----------------------|-----------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `operations` | Set\<OperationType\> | all 5     | Subset of valid operations                                                                                                                                                                                        |
-| `targetPattern` | NamePattern          | `ANY`     | For `JDBC_CONNECTION_ACQUIRE`: matched against pool identifier. For `JDBC_STATEMENT_EXECUTE`/`JDBC_PREPARED_STATEMENT`: matched against first 200 chars of SQL. For commit/rollback: always `null` (ANY matches). |
+| Field           | Type                 | Default | Description                                                                                                                                                                                                                                                                                                                                                                                                              |
+|-----------------|----------------------|---------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `operations`    | Set\<OperationType\> | all 5   | Subset of valid operations                                                                                                                                                                                                                                                                                                                                                                                               |
+| `targetPattern` | NamePattern          | `ANY`   | For `JDBC_CONNECTION_ACQUIRE`: matched against pool identifier. For `JDBC_STATEMENT_EXECUTE`/`JDBC_PREPARED_STATEMENT`: matched against first 200 chars of SQL; the no-arg `PreparedStatement.execute()`/`executeQuery()`/`executeUpdate()`/`executeLargeUpdate()` calls report a `null` target (the SQL is visible at prepare time, under `JDBC_PREPARED_STATEMENT`). For commit/rollback: always `null` (ANY matches). |
 
 **JSON example — slow connection acquisition from "main" pool:**
 ```json
@@ -1192,7 +1201,7 @@ The runtime validator enforces this at activation time. Mismatches throw `ChaosV
 
 | Selector type               | Compatible effect types                                                                                   |
 |-----------------------------|-----------------------------------------------------------------------------------------------------------|
-| Any interception selector   | `delay`, `reject`, `suppress`, `exceptionInjection`\*, `returnValueCorruption`\*, `gate`, `clockSkew`\*\* |
+| Any interception selector   | `delay`, `reject`, `suppress`\*\*\*, `exceptionInjection`\*, `returnValueCorruption`\*, `gate`, `clockSkew`\*\* |
 | `async`                     | + `exceptionalCompletion`                                                                                 |
 | `nio` (NIO_SELECTOR_SELECT) | + `spuriousWakeup`                                                                                        |
 | `method` (METHOD_ENTER)     | `exceptionInjection` ✓                                                                                    |
@@ -1202,7 +1211,8 @@ The runtime validator enforces this at activation time. Mismatches throw `ChaosV
 
 \* `exceptionInjection` is only valid with `MethodSelector` + `METHOD_ENTER`.  
 \* `returnValueCorruption` is only valid with `MethodSelector` + `METHOD_EXIT`.  
-\*\* `clockSkew` is only valid with `JvmRuntimeSelector` (clock operation types).
+\*\* `clockSkew` is only valid with `JvmRuntimeSelector` and only for the clock reads `INSTANT_NOW`, `LOCAL_DATE_TIME_NOW`, `ZONED_DATE_TIME_NOW`, `DATE_NEW`, `SYSTEM_CLOCK_MILLIS`, `SYSTEM_CLOCK_NANOS`. Conversely, those clock reads accept **only** `clockSkew` — any other effect on them is rejected.  
+\*\*\* `suppress` is only accepted when every operation in the selector is one of: `THREAD_START`, `VIRTUAL_THREAD_START`, `THREAD_SLEEP`, `EXECUTOR_SUBMIT`, `SCHEDULE_SUBMIT`, `SCHEDULE_TICK`, `QUEUE_OFFER`, `QUEUE_POLL`, `ASYNC_COMPLETE`, `ASYNC_COMPLETE_EXCEPTIONALLY`, `ASYNC_CANCEL`, `RESOURCE_LOAD`, `SYSTEM_GC_REQUEST`, `SYSTEM_EXIT_REQUEST`, `NIO_SELECTOR_SELECT`, `THREAD_LOCAL_GET`, `THREAD_LOCAL_SET`, `HTTP_CLIENT_SEND`, `HTTP_CLIENT_SEND_ASYNC`, `JDBC_CONNECTION_ACQUIRE`, `JDBC_STATEMENT_EXECUTE`, `JDBC_PREPARED_STATEMENT`, `JDBC_TRANSACTION_COMMIT`, `JDBC_TRANSACTION_ROLLBACK`. Other interception points can only delay or throw.
 
 ---
 
@@ -1243,7 +1253,7 @@ ChaosEffect.delay(Duration.ofSeconds(2))  // deterministic
 #### `gate` — GateEffect
 
 **JSON type:** `"gate"`  
-**Purpose:** Block the matched operation's thread on a `CountDownLatch`-like gate until `handle.release()` is called or `maxBlock` elapses. Tests latency-sensitive code paths that must respond within a deadline, or simulates hung upstreams.
+**Purpose:** Block the matched operation's thread on a `CountDownLatch`-like gate until `handle.release()` is called or `maxBlock` elapses. `release()` re-arms the gate, so later matching calls block again. Tests latency-sensitive code paths that must respond within a deadline, or simulates hung upstreams.
 
 **Fields:**
 
@@ -1290,7 +1300,9 @@ ChaosEffect.delay(Duration.ofSeconds(2))  // deterministic
 { "type": "suppress" }
 ```
 
-**Use cases:** suppress `QUEUE_OFFER` to simulate a full queue; suppress `CLASS_LOAD` to simulate `ClassNotFoundException`; suppress HTTP calls (see also `ChaosHttpSuppressException`).
+**Accepted operations:** only the operations listed under \*\*\* in §13.4; any other operation in the selector is rejected at activation.
+
+**Use cases:** suppress `QUEUE_OFFER` to simulate a full queue; suppress `RESOURCE_LOAD` to simulate a missing resource; suppress HTTP calls (see also `ChaosHttpSuppressException`).
 
 ---
 
@@ -1475,13 +1487,13 @@ Stressor effects are used exclusively with `StressSelector`. They launch backgro
 
 **Fields:**
 
-| Field                 | Type    | Constraint     | Description                                                      |
-|-----------------------|---------|----------------|------------------------------------------------------------------|
-| `generatedClassCount` | int     | > 0            | Number of synthetic classes to generate                          |
-| `fieldsPerClass`      | int     | ≥ 0            | Static fields per class (controls per-class Metaspace footprint) |
-| `retain`              | boolean | default `true` | `true` = strong references held to prevent GC unloading          |
+| Field                 | Type    | Constraint     | Description                                                                                                                                             |
+|-----------------------|---------|----------------|---------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `generatedClassCount` | int     | > 0            | Number of synthetic classes to generate                                                                                                                 |
+| `fieldsPerClass`      | int     | ≥ 0            | Static fields per class (controls per-class Metaspace footprint)                                                                                        |
+| `retain`              | boolean | default `true` | `true` = strong references held to prevent GC unloading; `false` = the loader is released immediately after the classes are defined (a transient spike) |
 
-**Cleanup:** Metaspace is only reclaimed when the classloader that loaded the synthetic classes is collected by GC — not immediately on handle close.
+**Cleanup:** Metaspace is only reclaimed when the classloader that loaded the synthetic classes is collected by GC — not immediately on handle close. With `retain=false` the loader becomes collectable right after activation; with `retain=true` it is released on `handle.close()` or when `activeFor` ends.
 
 ---
 
@@ -1671,9 +1683,11 @@ Stressor effects are used exclusively with `StressSelector`. They launch backgro
 
 **JSON type:** `"virtualThreadCarrierPinning"`  
 **Paired target:** `VIRTUAL_THREAD_CARRIER_PINNING`  
-**Purpose:** Pin JDK 21 virtual-thread carrier platform threads by holding them inside `synchronized` blocks, reducing the effective carrier-thread pool and causing virtual-thread starvation under load.
+**Purpose:** Take carrier threads of the virtual-thread scheduler out of service, reducing the effective carrier pool and causing virtual-thread starvation under load.
 
-**Background (JEP 444):** In JDK 21, a virtual thread mounted on a carrier that enters a `synchronized` block cannot be unmounted until the block exits. This stressor replicates the condition by explicitly occupying platform threads in synchronized monitors.
+**Mechanism:** the stressor starts `pinnedThreadCount` **virtual** threads; each mounts on a carrier and holds it in cycles of `pinDuration` without unmounting.
+- **JDK 21–23 (JEP 444):** the virtual thread sleeps inside a `synchronized` block. Blocking inside a monitor pins the carrier, so it is held without using CPU — the same pinning an application causes.
+- **JDK 24+ (JEP 491):** monitors no longer pin, so the virtual thread keeps its carrier busy with a spin-wait. The carrier is just as unavailable, but **each held carrier costs one CPU** while the scenario is active.
 
 **Fields:**
 
@@ -1682,7 +1696,7 @@ Stressor effects are used exclusively with `StressSelector`. They launch backgro
 | `pinnedThreadCount` | int      | > 0        | Number of carrier threads to pin             |
 | `pinDuration`       | Duration | positive   | How long each thread holds the pin per cycle |
 
-**Cleanup:** all pinning threads are interrupted and the monitor released on `handle.close()`.
+**Cleanup:** all pinning threads are stopped and joined on `handle.stop()`/`handle.close()` or when `activeFor` ends.
 
 ---
 
@@ -1799,14 +1813,15 @@ ChaosActivationHandle h = cp.activate(
         .build());
 
 // ── Control the handle ───────────────────────────────────────
-h.start();    // transition INACTIVE → ACTIVE (MANUAL start mode only)
-h.stop();     // transition ACTIVE → INACTIVE (re-startable)
-h.release();  // permanently deactivate (no more effect applications)
-h.close();    // release() + release all resources
+h.start();    // transition REGISTERED → ACTIVE (MANUAL start mode only)
+h.stop();     // transition to STOPPED (final; start() afterwards has no effect)
+h.release();  // open a gate effect and re-arm it; no-op for other effects
+h.close();    // stop() + unregister; the same id can be activated again
+h.id();       // registry key: "jvm::my-scenario" (session: "session:<sid>::<id>", plan: "plan:<name>")
 
 // ── Per-test session isolation ───────────────────────────────
 try (ChaosSession session = cp.openSession("test-my-feature")) {
-    session.bind();  // bind current thread to this session
+    // the opening thread is bound to the session; use session.bind() on other threads
     ChaosActivationHandle sh = session.activate(
         ChaosScenario.builder("session-scenario")
             .scope(ScenarioScope.SESSION)
@@ -1814,7 +1829,7 @@ try (ChaosSession session = cp.openSession("test-my-feature")) {
             .effect(ChaosEffect.delay(Duration.ofMillis(100)))
             .build());
     // ... run test assertions ...
-    // session.close() stops all session scenarios and unbinds
+    // session.close() stops and unregisters all session scenarios and unbinds
 }
 
 // ── Inspect diagnostics ──────────────────────────────────────
@@ -1863,13 +1878,13 @@ Constraints: listeners are called synchronously on the intercepting thread. Must
 
 ## 14.4 Custom Metrics Sink
 
-`ChaosMetricsSink` (in `chaos-agent-api`) provides an additional push-based metrics integration point distinct from the event listener model. Implement and register via `ChaosControlPlane` to receive counters for applied/skipped/failed events without the overhead of the full event object.
+`ChaosMetricsSink` (in `chaos-agent-api`) provides an additional push-based metrics integration point distinct from the event listener model. Implement and register via `ChaosControlPlane` to receive counters without the overhead of the full event object. The runtime currently increments one counter, `chaos.effect.applied` (tags `scenarioId`, `operation`), once per committed application.
 
 ## 14.5 Compatibility Notes
 
 - `MethodSelector.signaturePattern` is reserved. Non-ANY values throw at construction. This restriction will be removed when descriptor-based method filtering ships.
 - `VIRTUAL_THREAD_START` and `VirtualThreadCarrierPinningEffect` require JDK 21+. The agent probes availability at startup and raises `ChaosUnsupportedFeatureException` on earlier runtimes.
-- Adding scenarios to an already-activated plan (hot-reload) is not supported. New scenarios must be activated via a fresh `activate()` call.
+- An activated `ChaosPlan` object is immutable; to change scenarios programmatically, stop or close the handle and activate again. For file-based startup plans, hot reload is available: set the agent arg `configWatchInterval=<ms>` or `MACSTAB_CHAOS_WATCH_INTERVAL` (off by default, minimum 50 ms). Each reload is atomic — removed and changed scenarios are stopped, the new set is activated, and on any failure the previous versions are restored. Parse errors report line, column, kind and JSON path, never input values.
 
 ---
 
@@ -1892,10 +1907,9 @@ No heap allocation occurs on the interception hot path from the API layer — al
 - Event bus: a `CopyOnWriteArrayList<ChaosEventListener>` (safe for concurrent add during dispatch)
 
 `ScenarioController` holds the per-scenario mutable state:
-- `AtomicLong applicationCount`, `skipCount`, `failureCount`
-- `volatile long startTimestamp` (for `activeFor` evaluation)
-- `AtomicLong matchCount` (for `activateAfterMatches` evaluation)
-- A `TokenBucket` for `rateLimit` (lock-free sliding window via CAS on `AtomicLong`)
+- `AtomicLong appliedCount` and `matchedCount` (`matchedCount` drives `activateAfterMatches`)
+- `volatile Instant startedAt` (for `activeFor` evaluation)
+- A fixed-window counter for `rateLimit` (window start + permits, guarded by `synchronized`)
 - The effect's own state object (e.g., `ClockSkewState`, `GateState`, stressor thread references)
 
 ## 15.3 JVM Layer
@@ -1906,7 +1920,7 @@ ByteBuddy `AgentBuilder` installs `Advice` on JDK classes at premain time using 
 
 ### BootstrapDispatcher
 
-57 static `InvocationContext`-shaped slots, one per `OperationType`. The slot for a given operation type holds a method handle to the `ChaosDispatcher` evaluation method. Advice woven into JDK classes calls the slot directly from the bootstrap classloader context.
+58 static `MethodHandle` slots in `BootstrapDispatcher` (slots do not map one-to-one to the 67 `OperationType` values). The slot for a given operation type holds a method handle to the `ChaosDispatcher` evaluation method. Advice woven into JDK classes calls the slot directly from the bootstrap classloader context.
 
 ### ThreadLocal Reentrancy Guard
 
