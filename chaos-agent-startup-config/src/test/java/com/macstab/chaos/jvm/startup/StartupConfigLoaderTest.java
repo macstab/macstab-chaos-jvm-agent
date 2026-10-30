@@ -74,6 +74,56 @@ class StartupConfigLoaderTest {
     }
 
     @Test
+    @DisplayName("URL-safe and line-wrapped base64 are accepted")
+    void base64VariantsAreAccepted() {
+      final byte[] json = writeSampleJson("b64-variants").getBytes(StandardCharsets.UTF_8);
+      final String urlSafe = Base64.getUrlEncoder().encodeToString(json);
+      final String wrapped = Base64.getMimeEncoder().encodeToString(json);
+
+      assertThat(
+              StartupConfigLoader.load(null, Map.of(StartupConfigLoader.ENV_CONFIG_BASE64, urlSafe))
+                  .orElseThrow()
+                  .plan()
+                  .metadata()
+                  .name())
+          .isEqualTo("b64-variants");
+      assertThat(
+              StartupConfigLoader.load(null, Map.of(StartupConfigLoader.ENV_CONFIG_BASE64, wrapped))
+                  .orElseThrow()
+                  .plan()
+                  .metadata()
+                  .name())
+          .isEqualTo("b64-variants");
+    }
+
+    @Test
+    @DisplayName("base64 with invalid characters is rejected as such, not as broken JSON")
+    void invalidBase64IsRejected() {
+      final String corrupted =
+          Base64.getEncoder().encodeToString(writeSampleJson("x").getBytes(StandardCharsets.UTF_8))
+              + "*#!";
+
+      assertThatThrownBy(
+              () ->
+                  StartupConfigLoader.load(
+                      null, Map.of(StartupConfigLoader.ENV_CONFIG_BASE64, corrupted)))
+          .isInstanceOf(ConfigLoadException.class)
+          .hasMessageContaining("invalid base64");
+    }
+
+    @Test
+    @DisplayName("MACSTAB_CHAOS_DEBUG_DUMP_ON_START accepts the same values as the agent arg")
+    void debugDumpEnvAcceptsArgSpellings() {
+      final String json = writeSampleJson("dump");
+      assertThat(
+              StartupConfigLoader.load(
+                      "configJson=" + json, Map.of(StartupConfigLoader.ENV_DEBUG_DUMP, "yes"))
+                  .orElseThrow()
+                  .debugDumpOnStart())
+          .isTrue();
+    }
+
+    @Test
     @DisplayName("file path from agent args is loaded")
     void fileFromArgs() throws Exception {
       Path configFile = tempDir.resolve("plan.json");
