@@ -859,7 +859,7 @@ Agent arg `configJson` > env `MACSTAB_CHAOS_CONFIG_JSON` > agent arg `configBase
 
 ## JSON Plan Format
 
-```json
+```jsonc
 {
   "metadata": { "name": "plan-name", "description": "optional" },
   "scenarios": [

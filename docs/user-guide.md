@@ -723,19 +723,19 @@ ChaosEffect.suppress()
 ChaosEffect.gate(Duration.ofSeconds(30))
 
 // Inject an arbitrary checked exception
-ChaosEffect.exception("java.io.IOException", "chaos injected", true)
+ChaosEffect.injectException("java.io.IOException", "chaos injected")
 
 // Corrupt a return value
 ChaosEffect.corruptReturnValue(ChaosEffect.ReturnValueStrategy.NULL)
 
-// Clock skew: advance all clock reads by 5 seconds
-ChaosEffect.clockSkew(ClockSkewEffect.Mode.FIXED, Duration.ofSeconds(5))
+// Clock skew: advance java.time and java.util.Date reads by 5 seconds
+ChaosEffect.skewClock(Duration.ofSeconds(5), ChaosEffect.ClockSkewMode.FIXED)
 
 // Heap pressure: allocate and retain 64 MiB until scenario stops
-ChaosEffect.heapPressure(64 * 1024 * 1024)
+ChaosEffect.heapPressure(64L * 1024 * 1024, 1024 * 1024)
 
 // Deadlock: spawn two threads that acquire locks in opposite order
-ChaosEffect.deadlock()
+ChaosEffect.deadlock(2)
 ```
 
 ### 9.3 Activation Policies

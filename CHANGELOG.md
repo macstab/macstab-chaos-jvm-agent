@@ -15,6 +15,7 @@
 
 ### Features
 
+* **docs:** `docs/cross-layer.md` maps every rule of the native chaos libraries to the agent's Java API and plan JSON, and lists what does not translate in either direction. `CrossLayerDocSyncTest` checks every API name, enum constant and plan JSON `type` in `README.md`, `docs/*.md` and the native library's `docs/DSL.md` against the code, and parses every plan and scenario JSON example; a CI job runs it against the library's `develop` branch. Fixed on the way: a README plan whose selector had no operations, and wrong factory names and arities in the user guide's effect list.
 * **core:** a dispatch whose operation has no scenario returns before building its `InvocationContext`: 0 B and about 7 ns per intercepted call, down from 104–200 B and 23–54 ns, on every hooked operation (it was only the case for clock reads).
 * **instrumentation:** `JdkInstrumentationInstaller.connectDispatcher(runtime)` connects a runtime to `BootstrapDispatcher` without weaving, for benchmarks and tests that drive the dispatch methods directly.
 * **build:** `BridgeDispatchBenchmark` measures the woven dispatch path through `BootstrapDispatcher`; a benchmark gate on pull requests into `main` fails a change that makes it more than 15 % and 25 ns slower than `main` (Mann-Whitney U, p < 0.01, same runner; `scripts/jmh-gate.py`). `check` enforces a line and branch coverage floor per module, and CI runs the tests on JDK 21 and 25 on amd64 and arm64.

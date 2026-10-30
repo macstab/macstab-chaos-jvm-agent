@@ -106,3 +106,37 @@ jobs:
         with:
           name: test-results-${{ matrix.os }}-jdk${{ matrix.java }}
           path: '**/build/test-results/**/*.xml'
+
+  # The native library's docs/DSL.md names this agent's API; the doc-sync test fails when a JVM
+  # name there does not exist here, or a JSON example does not parse.
+  cross-layer-docs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: |
+      github.event_name != 'pull_request' && github.event.pull_request == null
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Checkout the native library's documentation
+        uses: actions/checkout@v4
+        with:
+          repository: macstab/macstab-chaos-testing-libraries
+          ref: develop
+          path: native-library
+          sparse-checkout: docs
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '25'
+          cache: 'gradle'
+
+      - name: Check the cross-layer documentation
+        env:
+          CHAOS_DSL_PATH: ${{ github.workspace }}/native-library/docs/DSL.md
+        run: |
+          chmod +x gradlew
+          ./gradlew :chaos-agent-startup-config:test --tests '*CrossLayerDocSyncTest*' --no-daemon

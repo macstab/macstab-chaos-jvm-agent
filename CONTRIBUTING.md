@@ -10,6 +10,8 @@
 ```bash
 ./gradlew build                        # compile, format-check, test, Jacoco and coverage floors
 ./gradlew test -PtestJavaVersion=21    # run the tests on another installed JDK (CI: 21 and 25, amd64 and arm64)
+CHAOS_DSL_PATH=../macstab-chaos-testing-libraries/docs/DSL.md \
+  ./gradlew :chaos-agent-startup-config:test --tests '*CrossLayerDocSyncTest*'   # check the native library's DSL.md against this API
 ./gradlew spotlessApply                # auto-fix formatting before committing
 ./gradlew aggregatedJavadoc            # build API docs at build/docs/aggregated-javadoc/
 ./gradlew :chaos-agent-core:test       # run tests for a single module
@@ -150,5 +152,6 @@ Stressors are simpler — they live entirely in `chaos-agent-core` and have no B
 - One logical change per PR
 - Tests required for new interception points and stressors
 - `./gradlew build` must pass locally before opening a PR. It enforces a line and branch coverage floor per module (`coverageFloors` in `build.gradle.kts`); raise a floor when your tests raise coverage, never lower one to make a change pass
+- Documentation examples are checked: every API name, enum constant and plan JSON `type` in `README.md` and `docs/*.md` must exist, and every `json` plan or scenario must parse (`CrossLayerDocSyncTest`). Fence a schema sketch with placeholders as `jsonc`. When you rename API, update the native library's `docs/DSL.md` too; CI checks it against its `develop` branch
 - Pull requests into `main` run the benchmark gate (`docs/benchmarks.md` §8): a dispatch benchmark more than 15 % and 25 ns slower than `main` (p < 0.01) fails it
 - For breaking API changes, add a `BREAKING CHANGE:` footer to the commit message

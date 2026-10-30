@@ -94,7 +94,7 @@ Every one of those becomes a `@ChaosTest` method that runs on every PR. No game 
 |------------------------------|---------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | **JVM bytecode** (this repo) | [`macstab/macstab-chaos-jvm-agent`](https://github.com/macstab/macstab-chaos-jvm-agent)                 | 62 JDK call sites instrumented in-process. Spring Boot 3/4 + Micronaut + Quarkus integration. JUnit 5 `@ChaosTest`. Selector × effect × policy DSL. Live config reload.                                                                                                                                                       |
 | **Container orchestration**  | [`macstab/chaos-testing`](https://github.com/macstab/chaos-testing)                                     | Annotation-driven chaos on top of Testcontainers. CPU throttling, memory pressure, disk I/O, network partitions, DNS failures, pre-built Redis Sentinel + replication-lag scenarios, Toxiproxy adapter, Redis-aware fault injection.                                                                                          |
-| **LD_PRELOAD libc**          | [`macstab/macstab-chaos-testing-libraries`](https://github.com/macstab/macstab-chaos-testing-libraries) | Pure C99 LD_PRELOAD shared objects: file I/O (latency / `errno` / torn / corrupt), network, DNS, clock, process, memory. **glibc + musl × amd64 + arm64**, 100 % line coverage on shipped sources, Docker runtime validation as a quality gate. Language-agnostic — works for any process inside any container, not just JVM. |
+| **LD_PRELOAD libc**          | [`macstab/macstab-chaos-testing-libraries`](https://github.com/macstab/macstab-chaos-testing-libraries) | Pure C99 LD_PRELOAD shared objects: file I/O (latency / `errno` / torn / corrupt), network (reset / trickle / duplicate / timeout), DNS, clock (offset / regress), process, memory. Rule qualifiers `@first`, `@from`/`@until`, `@size`; status and hits files. A SECCOMP supervisor (`chaos-init`) reaches static binaries and Go programs that bypass libc. **glibc + musl × amd64 + arm64**, 100 % line coverage on shipped sources. Language-agnostic: any process in any container. |
 
 **Start here** if you're on the JVM. This is the entry point and the richest layer.
 
@@ -102,7 +102,17 @@ Every one of those becomes a `@ChaosTest` method that runs on every PR. No game 
 - Add the LD_PRELOAD layer to inject *kernel-real* time skew, slow disks, and DNS slowdowns into containers — chaos for failure modes the JVM can't see (e.g. `clock_gettime` is a syscall the JVM can't intrinsically intercept; the LD_PRELOAD lib can).
 - Add the orchestration layer to wire `@ChaosTest` annotations directly to Testcontainers-managed Redis, Postgres, Kafka — including pre-built scenarios like *replication lag during pod drainage*.
 
-Three repos, one mental model: **the same selector × effect × policy DSL spans the libc layer, the JVM layer, and the orchestration layer.** No cross-layer coupling — each layer is independently adoptable, independently versioned, independently released.
+Three repos, one mental model: **the same selector × effect × policy DSL spans the libc layer, the JVM layer, and the orchestration layer.** No cross-layer coupling — each layer is independently adoptable, independently versioned, independently released. The same fault in both in-process layers:
+
+| Native rule (`/tmp/.chaos-<lib>.conf`)                 | JVM scenario (plan JSON)                                                                                         |
+|--------------------------------------------------------|------------------------------------------------------------------------------------------------------------------|
+| `/var/lib/app:fsync:EIO:0.05`                          | selector `{"type": "fileIo", "operations": ["FILE_IO_SYNC"], "pathPattern": {"prefix": "/var/lib/app"}}`, effect `{"type": "errno", "errno": "EIO"}`, policy `{"probability": 0.05}` |
+| `tcp4://10.0.0.7:9092:send:LATENCY:200 @size>65536`    | selector `{"type": "network", "operations": ["SOCKET_WRITE"], "remoteCidr": "10.0.0.7", "remotePort": 9092, "minBytes": 65537}`, effect `{"type": "delay", "minDelay": "PT0.2S", "maxDelay": "PT0.2S"}` |
+| `tcp4://10.0.0.5:5432:connect:ECONNREFUSED:1.0 @first=3` | effect `{"type": "errno", "errno": "ECONNREFUSED"}`, policy `{"maxApplications": 3}`                           |
+| `dns://db.internal:FILTER_FAMILY:inet6`                | operation `DNS_ANSWER`, effect `{"type": "dnsAnswer", "family": "IPV6"}`                                         |
+| `clock_gettime/realtime:REGRESS:1000`                  | effect `{"type": "clockSkew", "skewAmount": "PT1S", "mode": "REGRESS"}` (on `java.time` reads; see the mapping for the intrinsic clocks) |
+
+The full mapping, including what does not translate in either direction, is [docs/cross-layer.md](docs/cross-layer.md); a test keeps it, and the native library's `docs/DSL.md`, in step with the API.
 
 ---
 
@@ -696,7 +706,7 @@ try (var handle = session.activate(heapSoak)) {
     {
       "id": "executor-latency",
       "scope": "JVM",
-      "selector": { "type": "executor" },
+      "selector": { "type": "executor", "operations": ["EXECUTOR_SUBMIT"] },
       "effect": { "type": "delay", "minDelay": "PT0.1S", "maxDelay": "PT0.5S" },
       "activationPolicy": { "probability": 0.5 }
     }

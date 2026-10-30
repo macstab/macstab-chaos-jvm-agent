@@ -126,7 +126,7 @@ Malformed base64 input throws `ConfigLoadException` with category `base64`.
 
 ## Full Plan Schema
 
-```json
+```jsonc
 {
   "metadata": {                       // optional; default name "default"
     "name": "string",

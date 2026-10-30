@@ -729,7 +729,7 @@ The weaving mode can also be set with the system property `-Dmacstab.chaos.instr
 
 ### Top-Level Structure
 
-```json
+```jsonc
 {
   "metadata": {
     "name": "my-chaos-plan",
@@ -748,7 +748,7 @@ The weaving mode can also be set with the system property `-Dmacstab.chaos.instr
 
 ### Scenario Object
 
-```json
+```jsonc
 {
   "id": "unique-scenario-id",
   "description": "Optional description",
