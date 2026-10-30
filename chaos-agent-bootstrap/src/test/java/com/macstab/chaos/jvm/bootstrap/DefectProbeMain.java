@@ -79,6 +79,7 @@ public final class DefectProbeMain {
       case "virtual-thread-executor" -> virtualThreadExecutor();
       case "initialize-retry" -> initializeRetry();
       case "second-agent-copy" -> secondAgentCopy();
+      case "clock-now-in-zone" -> clockNowInZone();
       case "virtual-thread-start" -> Thread.ofVirtual().start(() -> {}).join();
       case "runtime-exit" -> runtimeExit();
       case "select-consumer" -> selectConsumer();
@@ -303,6 +304,21 @@ public final class DefectProbeMain {
     Thread.sleep(1L);
     System.out.println(
         "firstCopySleepMillis=" + TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start));
+  }
+
+  /** Prints how far now(ZoneId) is from the unskewed Instant.now(), in seconds. */
+  private static void clockNowInZone() {
+    final java.time.ZoneId tokyo = java.time.ZoneId.of("Asia/Tokyo");
+    final java.time.Instant real = java.time.Instant.now();
+    System.out.println(
+        "localSkewSeconds="
+            + Duration.between(
+                    java.time.LocalDateTime.ofInstant(real, tokyo),
+                    java.time.LocalDateTime.now(tokyo))
+                .toSeconds());
+    System.out.println(
+        "zonedSkewSeconds="
+            + Duration.between(real, java.time.ZonedDateTime.now(tokyo).toInstant()).toSeconds());
   }
 
   private static void virtualThreadExecutor() throws Exception {

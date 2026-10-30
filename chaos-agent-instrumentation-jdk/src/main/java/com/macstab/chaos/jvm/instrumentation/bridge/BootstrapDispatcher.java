@@ -401,8 +401,14 @@ public final class BootstrapDispatcher {
   /** Handle index for {@link #beforeFileIo(String, Object)}. */
   public static final int BEFORE_FILE_IO = 56;
 
+  /**
+   * Handle index for {@link #adjustLocalDateTimeNowInZone(java.time.LocalDateTime,
+   * java.time.ZoneId)}.
+   */
+  public static final int ADJUST_LOCAL_DATE_TIME_NOW_IN_ZONE = 57;
+
   /** Total number of method-handle slots; equals the highest index plus one. */
-  public static final int HANDLE_COUNT = 57;
+  public static final int HANDLE_COUNT = 58;
 
   /** Utility class; do not instantiate. */
   private BootstrapDispatcher() {}
@@ -891,6 +897,29 @@ public final class BootstrapDispatcher {
               : (java.time.Instant) h[ADJUST_INSTANT_NOW].invoke(d, realInstant);
         },
         realInstant);
+  }
+
+  /**
+   * Rewrites the result of {@code LocalDateTime.now(ZoneId)} for clock skew; the zone is needed to
+   * map the local date-time to an instant and back.
+   *
+   * @param realValue the real local date-time
+   * @param zone the zone {@code now} was called with
+   * @return the (possibly skewed) local date-time; {@code realValue} as the fallback
+   * @throws Throwable if the delegate throws
+   */
+  public static java.time.LocalDateTime adjustLocalDateTimeNowInZone(
+      final java.time.LocalDateTime realValue, final java.time.ZoneId zone) throws Throwable {
+    return invoke(
+        () -> {
+          final MethodHandle[] h = handles;
+          final Object d = delegate;
+          return (d == null || h == null)
+              ? realValue
+              : (java.time.LocalDateTime)
+                  h[ADJUST_LOCAL_DATE_TIME_NOW_IN_ZONE].invoke(d, realValue, zone);
+        },
+        realValue);
   }
 
   /**

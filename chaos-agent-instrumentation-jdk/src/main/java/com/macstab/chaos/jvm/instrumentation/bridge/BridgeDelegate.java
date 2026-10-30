@@ -257,6 +257,17 @@ public interface BridgeDelegate {
   java.time.Instant adjustInstantNow(java.time.Instant realInstant) throws Throwable;
 
   /**
+   * Applies clock skew to the result of {@code LocalDateTime.now(ZoneId)}.
+   *
+   * @param realValue the real local date-time
+   * @param zone the zone {@code now} was called with
+   * @return the (possibly skewed) local date-time
+   * @throws Throwable if the runtime throws
+   */
+  java.time.LocalDateTime adjustLocalDateTimeNowInZone(
+      java.time.LocalDateTime realValue, java.time.ZoneId zone) throws Throwable;
+
+  /**
    * Returns the chaos-adjusted {@link java.time.LocalDateTime} for {@code LocalDateTime.now()}
    * interception.
    *

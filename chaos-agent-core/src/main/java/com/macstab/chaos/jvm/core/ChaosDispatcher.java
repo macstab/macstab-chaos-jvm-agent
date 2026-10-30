@@ -790,13 +790,30 @@ public final class ChaosDispatcher {
    * @return the (possibly skewed) local-date-time to return to the caller
    */
   public java.time.LocalDateTime adjustLocalDateTimeNow(final java.time.LocalDateTime realValue) {
-    final java.time.ZoneId zone = java.time.ZoneId.systemDefault();
-    final long realMillis = realValue.atZone(zone).toInstant().toEpochMilli();
+    return adjustLocalDateTimeNowInZone(realValue, java.time.ZoneId.systemDefault());
+  }
+
+  /**
+   * Returns the (possibly skewed) {@link java.time.LocalDateTime} for {@code
+   * LocalDateTime.now(ZoneId)}.
+   *
+   * <p>The skew (in milliseconds) is added to the real instant, so the sub-millisecond part of the
+   * real value is kept; an earlier version rebuilt the value from epoch milliseconds and dropped
+   * it.
+   *
+   * @param realValue the real local date-time
+   * @param zone the zone the local date-time was produced in
+   * @return the (possibly skewed) local date-time
+   */
+  public java.time.LocalDateTime adjustLocalDateTimeNowInZone(
+      final java.time.LocalDateTime realValue, final java.time.ZoneId zone) {
+    final java.time.Instant realInstant = realValue.atZone(zone).toInstant();
+    final long realMillis = realInstant.toEpochMilli();
     final long skewed = applyClockSkew(realMillis, OperationType.LOCAL_DATE_TIME_NOW);
     if (skewed == realMillis) {
       return realValue;
     }
-    return java.time.LocalDateTime.ofInstant(java.time.Instant.ofEpochMilli(skewed), zone);
+    return java.time.LocalDateTime.ofInstant(realInstant.plusMillis(skewed - realMillis), zone);
   }
 
   /**
@@ -806,12 +823,13 @@ public final class ChaosDispatcher {
    * @return the (possibly skewed) zoned-date-time to return to the caller
    */
   public java.time.ZonedDateTime adjustZonedDateTimeNow(final java.time.ZonedDateTime realValue) {
-    final long realMillis = realValue.toInstant().toEpochMilli();
+    final java.time.Instant realInstant = realValue.toInstant();
+    final long realMillis = realInstant.toEpochMilli();
     final long skewed = applyClockSkew(realMillis, OperationType.ZONED_DATE_TIME_NOW);
     if (skewed == realMillis) {
       return realValue;
     }
-    return java.time.Instant.ofEpochMilli(skewed).atZone(realValue.getZone());
+    return realInstant.plusMillis(skewed - realMillis).atZone(realValue.getZone());
   }
 
   /**

@@ -448,6 +448,18 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
+   * Delegates to {@link ChaosDispatcher#adjustLocalDateTimeNowInZone}.
+   *
+   * @param realValue the real local date-time
+   * @param zone the zone {@code LocalDateTime.now(ZoneId)} was called with
+   * @return the (possibly skewed) local date-time
+   */
+  public java.time.LocalDateTime adjustLocalDateTimeNowInZone(
+      final java.time.LocalDateTime realValue, final java.time.ZoneId zone) {
+    return dispatcher.adjustLocalDateTimeNowInZone(realValue, zone);
+  }
+
+  /**
    * Delegates to {@link ChaosDispatcher#adjustLocalDateTimeNow}.
    *
    * @param realValue the real current local date-time

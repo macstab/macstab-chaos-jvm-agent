@@ -57,8 +57,22 @@ final class JvmRuntimeAdvice {
   }
 
   /**
-   * Rewrites the return value of {@link java.time.ZonedDateTime#now()} (no-argument variant) for
-   * clock-skew injection.
+   * Rewrites the return value of {@link java.time.LocalDateTime#now(java.time.ZoneId)} for
+   * clock-skew injection, mapping through the zone it was called with.
+   */
+  static final class LocalDateTimeNowInZoneAdvice {
+    @Advice.OnMethodExit
+    static void exit(
+        @Advice.Argument(0) final java.time.ZoneId zone,
+        @Advice.Return(readOnly = false) java.time.LocalDateTime returned)
+        throws Throwable {
+      returned = BootstrapDispatcher.adjustLocalDateTimeNowInZone(returned, zone);
+    }
+  }
+
+  /**
+   * Rewrites the return value of {@link java.time.ZonedDateTime#now()} and {@link
+   * java.time.ZonedDateTime#now(java.time.ZoneId)} for clock-skew injection.
    */
   static final class ZonedDateTimeNowAdvice {
     @Advice.OnMethodExit

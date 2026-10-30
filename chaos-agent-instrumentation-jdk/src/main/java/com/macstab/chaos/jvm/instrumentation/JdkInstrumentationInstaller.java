@@ -737,6 +737,14 @@ public final class JdkInstrumentationInstaller {
             delegateInterface,
             "beforeSslHandshake",
             MethodType.methodType(void.class, Object.class));
+    methodHandles[BootstrapDispatcher.ADJUST_LOCAL_DATE_TIME_NOW_IN_ZONE] =
+        lookup.findVirtual(
+            delegateInterface,
+            "adjustLocalDateTimeNowInZone",
+            MethodType.methodType(
+                java.time.LocalDateTime.class,
+                java.time.LocalDateTime.class,
+                java.time.ZoneId.class));
     methodHandles[BootstrapDispatcher.BEFORE_FILE_IO] =
         lookup.findVirtual(
             delegateInterface,
@@ -1676,21 +1684,36 @@ public final class JdkInstrumentationInstaller {
         .type(ElementMatchers.named("java.time.LocalDateTime"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
-                typeBuilder.visit(
-                    Advice.to(JvmRuntimeAdvice.LocalDateTimeNowAdvice.class)
-                        .on(
-                            ElementMatchers.named("now")
-                                .and(ElementMatchers.isStatic())
-                                .and(ElementMatchers.takesArguments(0)))))
+                typeBuilder
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.LocalDateTimeNowAdvice.class)
+                            .on(
+                                ElementMatchers.named("now")
+                                    .and(ElementMatchers.isStatic())
+                                    .and(ElementMatchers.takesArguments(0))))
+                    // now(ZoneId) goes to now(Clock) without calling now(); now(Clock) is not
+                    // hooked because a caller-supplied clock (fixed, offset) must not be skewed.
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.LocalDateTimeNowInZoneAdvice.class)
+                            .on(
+                                ElementMatchers.named("now")
+                                    .and(ElementMatchers.isStatic())
+                                    .and(ElementMatchers.takesArguments(java.time.ZoneId.class)))))
         .type(ElementMatchers.named("java.time.ZonedDateTime"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                // The returned ZonedDateTime carries its zone, so one advice covers now() and
+                // now(ZoneId).
                 typeBuilder.visit(
                     Advice.to(JvmRuntimeAdvice.ZonedDateTimeNowAdvice.class)
                         .on(
                             ElementMatchers.named("now")
                                 .and(ElementMatchers.isStatic())
-                                .and(ElementMatchers.takesArguments(0)))))
+                                .and(
+                                    ElementMatchers.takesArguments(0)
+                                        .or(
+                                            ElementMatchers.takesArguments(
+                                                java.time.ZoneId.class))))))
         .type(ElementMatchers.named("java.util.Date"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->

@@ -306,6 +306,12 @@ final class ChaosBridge implements BridgeDelegate {
    * @throws Throwable if the runtime decides to abort the call
    */
   @Override
+  public java.time.LocalDateTime adjustLocalDateTimeNowInZone(
+      final java.time.LocalDateTime realValue, final java.time.ZoneId zone) {
+    return runtime.adjustLocalDateTimeNowInZone(realValue, zone);
+  }
+
+  @Override
   public java.time.LocalDateTime adjustLocalDateTimeNow(final java.time.LocalDateTime realValue)
       throws Throwable {
     return runtime.adjustLocalDateTimeNow(realValue);

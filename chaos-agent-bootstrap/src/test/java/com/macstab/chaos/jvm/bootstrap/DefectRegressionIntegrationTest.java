@@ -437,6 +437,26 @@ class DefectRegressionIntegrationTest {
       assertThat(result.longValue("matched.reactor")).isEqualTo(1L);
     }
 
+    @Test
+    @DisplayName("LocalDateTime.now(ZoneId) and ZonedDateTime.now(ZoneId) are clock-skewed")
+    void nowWithZoneIsSkewed() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.run(
+              plan(
+                  scenario(
+                      "skew",
+                      ChaosSelector.jvmRuntime(
+                          Set.of(
+                              OperationType.LOCAL_DATE_TIME_NOW,
+                              OperationType.ZONED_DATE_TIME_NOW)),
+                      ChaosEffect.skewClock(Duration.ofHours(1), ChaosEffect.ClockSkewMode.FIXED))),
+              DefectProbeMain.class,
+              "clock-now-in-zone",
+              null);
+      assertThat(result.longValue("localSkewSeconds")).isBetween(3590L, 3610L);
+      assertThat(result.longValue("zonedSkewSeconds")).isBetween(3590L, 3610L);
+    }
+
     private void assertSingleMatch(
         final String id, final ChaosSelector selector, final String mode, final String classpath)
         throws Exception {
