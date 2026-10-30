@@ -48,6 +48,13 @@ package com.macstab.chaos.jvm.api;
  *   <li>{@link ChaosSelector.DnsSelector} — {@link #DNS_RESOLVE}
  *   <li>{@link ChaosSelector.SslSelector} — {@link #SSL_HANDSHAKE}
  *   <li>{@link ChaosSelector.FileIoSelector} — {@link #FILE_IO_READ}, {@link #FILE_IO_WRITE}
+ *   <li>{@link ChaosSelector.MessagingSelector} — {@link #MESSAGE_SEND}, {@link #MESSAGE_RECEIVE}
+ *   <li>{@link ChaosSelector.RpcSelector} — {@link #RPC_CALL}
+ *   <li>{@link ChaosSelector.RedisSelector} — {@link #REDIS_COMMAND}
+ *   <li>{@link ChaosSelector.AwsSdkSelector} — {@link #AWS_SDK_CALL}
+ *   <li>{@link ChaosSelector.NettySelector} — {@link #NETTY_CHANNEL_WRITE}, {@link
+ *       #NETTY_CHANNEL_READ}
+ *   <li>{@link ChaosSelector.JdbcSelector} — also {@link #R2DBC_STATEMENT_EXECUTE}
  *   <li>{@link ChaosSelector.StressSelector} — {@link #LIFECYCLE} (internal; not set by callers)
  * </ul>
  */
@@ -703,6 +710,84 @@ public enum OperationType {
    * <p>Use with {@link ChaosSelector.FileIoSelector}.
    */
   FILE_IO_WRITE,
+
+  // ── Client libraries ───────────────────────────────────────────────────────────
+
+  /**
+   * Fires before a Kafka producer sends a record: {@code KafkaProducer.send(ProducerRecord,
+   * Callback)} (the one-argument {@code send} delegates to it). The destination is the record's
+   * topic. A reject throws Kafka's {@code org.apache.kafka.common.errors.TimeoutException} from
+   * {@code send()}.
+   *
+   * <p>Use with {@link ChaosSelector.MessagingSelector}.
+   */
+  MESSAGE_SEND,
+
+  /**
+   * Fires before a Kafka consumer polls: {@code KafkaConsumer.poll(Duration)}. The destinations are
+   * the consumer's subscribed topics. A reject throws Kafka's {@code
+   * org.apache.kafka.common.errors.TimeoutException} from {@code poll()}.
+   *
+   * <p>Use with {@link ChaosSelector.MessagingSelector}.
+   */
+  MESSAGE_RECEIVE,
+
+  /**
+   * Fires when a gRPC client call starts ({@code io.grpc.internal.ClientCallImpl.start}), once per
+   * call, for blocking, future and async stubs and any transport. The target is the full method
+   * name ({@code package.Service/Method}). A reject throws {@code StatusRuntimeException} with
+   * status {@code UNAVAILABLE}.
+   *
+   * <p>Use with {@link ChaosSelector.RpcSelector}.
+   */
+  RPC_CALL,
+
+  /**
+   * Fires before a Redis command is written: Jedis {@code Connection.sendCommand(CommandArguments)}
+   * (every Jedis command, pipelined or not) and Lettuce {@code RedisChannelHandler.dispatch}. The
+   * target is the command name in upper case ({@code GET}, {@code SET}, ...). A reject throws
+   * {@code JedisConnectionException} or Lettuce's {@code RedisCommandTimeoutException}.
+   *
+   * <p>Use with {@link ChaosSelector.RedisSelector}.
+   */
+  REDIS_COMMAND,
+
+  /**
+   * Fires when an R2DBC statement is executed ({@code io.r2dbc.spi.Statement.execute()}, in any
+   * driver). The call is evaluated when the execution is requested (the publisher is created), not
+   * when it is subscribed. A reject throws {@code R2dbcTransientResourceException}.
+   *
+   * <p>Use with {@link ChaosSelector.JdbcSelector}; the target pattern does not apply (R2DBC
+   * statements do not expose their SQL).
+   */
+  R2DBC_STATEMENT_EXECUTE,
+
+  /**
+   * Fires when an AWS SDK for Java v2 client calls an operation, sync or async ({@code
+   * BaseSyncClientHandler} / {@code BaseAsyncClientHandler.execute}), before signing and sending.
+   * The service is taken from the request's package ({@code s3}, {@code dynamodb}, ...), the
+   * operation from the SDK ({@code GetObject}). A reject throws {@code SdkClientException}.
+   *
+   * <p>Use with {@link ChaosSelector.AwsSdkSelector}.
+   */
+  AWS_SDK_CALL,
+
+  /**
+   * Fires before Netty flushes a channel's outbound buffer ({@code
+   * AbstractChannel.AbstractUnsafe.flush0()}), for every transport including the native epoll and
+   * kqueue ones that bypass {@code java.nio}. A reject throws {@link java.io.IOException}.
+   *
+   * <p>Use with {@link ChaosSelector.NettySelector}.
+   */
+  NETTY_CHANNEL_WRITE,
+
+  /**
+   * Fires before Netty reads from a channel: the NIO, epoll and kqueue stream-channel read loops. A
+   * reject throws {@link java.io.IOException}.
+   *
+   * <p>Use with {@link ChaosSelector.NettySelector}.
+   */
+  NETTY_CHANNEL_READ,
 
   // ── Agent lifecycle ─────────────────────────────────────────────────────────
 

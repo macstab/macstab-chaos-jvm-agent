@@ -1301,6 +1301,53 @@ public final class ChaosDispatcher {
   }
 
   /**
+   * Called before a call through a client library (Kafka, gRPC, Redis, R2DBC, AWS SDK, Netty). A
+   * reject throws the library's own exception type (see {@code FailureFactory.clientReject}).
+   *
+   * @param operation the {@link OperationType} name of the call
+   * @param client the client object the call is made on
+   * @param target what the selector's main pattern matches: topic(s), method, command, AWS
+   *     operation, or {@code null}
+   * @param detail a second attribute: the AWS service, or {@code null}
+   * @param remoteAddress the peer {@link InetSocketAddress} of a Netty channel, or {@code null}
+   * @throws Throwable if a scenario delays and then rejects the call
+   */
+  public void beforeClientCall(
+      final String operation,
+      final Object client,
+      final String target,
+      final String detail,
+      final Object remoteAddress)
+      throws Throwable {
+    final OperationType operationType = OperationType.valueOf(operation);
+    final InetSocketAddress peer =
+        remoteAddress instanceof InetSocketAddress address ? address : null;
+    final RuntimeDecision decision =
+        evaluate(
+            new InvocationContext(
+                operationType,
+                client == null ? operation : client.getClass().getName(),
+                detail,
+                target,
+                false,
+                null,
+                null,
+                scopeContext.currentSessionId(),
+                InvocationContext.UNKNOWN,
+                null,
+                peer == null ? null : peer.getAddress(),
+                peer == null ? InvocationContext.UNKNOWN : peer.getPort(),
+                null));
+    applyDelayAndGate(decision);
+    final TerminalAction terminal = decision.terminalAction();
+    if (terminal != null && terminal.kind() == TerminalKind.THROW) {
+      // Only a reject throws on a client operation (exception injection is for method selectors),
+      // so the failure is rebuilt as the library's own exception.
+      throw FailureFactory.clientReject(operationType, client, terminal.throwable().getMessage());
+    }
+  }
+
+  /**
    * Called before {@link javax.naming.InitialContext#lookup(String)} to apply JNDI scenarios.
    *
    * @param context the JNDI context performing the lookup

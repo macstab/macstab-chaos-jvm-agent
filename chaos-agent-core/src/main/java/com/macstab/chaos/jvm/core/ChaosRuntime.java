@@ -911,6 +911,26 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
+   * Delegates to {@link ChaosDispatcher#beforeClientCall}: a call through a client library.
+   *
+   * @param operation the {@link com.macstab.chaos.jvm.api.OperationType} name of the call
+   * @param client the client object
+   * @param target the topic(s), method, command or AWS operation, or {@code null}
+   * @param detail the AWS service, or {@code null}
+   * @param remoteAddress the peer address of a Netty channel, or {@code null}
+   * @throws Throwable if a scenario rejects the call
+   */
+  public void beforeClientCall(
+      final String operation,
+      final Object client,
+      final String target,
+      final String detail,
+      final Object remoteAddress)
+      throws Throwable {
+    dispatcher.beforeClientCall(operation, client, target, detail, remoteAddress);
+  }
+
+  /**
    * Delegates to {@link ChaosDispatcher#beforeFileIo}.
    *
    * @param operation the file I/O operation name

@@ -275,7 +275,7 @@ package "chaos-agent-core" {
 }
 
 package "chaos-agent-bootstrap" {
-  [BootstrapDispatcher\n(57 slots)] as BD
+  [BootstrapDispatcher\n(60 slots)] as BD
 }
 
 AgentArgs --> AAP
@@ -1184,6 +1184,27 @@ Once the hook is wired, the matcher, effect, and activation policy behave like e
 
 ---
 
+### Client-library selectors
+
+The client libraries below are hooked by class name and never loaded by the agent; each hook group is woven the first time a scenario needs one of its operations. The valid effects are delay, gate and reject — there is no meaningful "suppress" for a client call, so `SuppressEffect` is rejected. A reject throws the library's own exception, built through the client's class loader, so the application's error handling sees what a real failure produces; when that type cannot be built it falls back to a generic exception with the same message.
+
+| JSON type   | Selector            | Operations                                    | Fields                                                                                   | Hook                                                                                                   | Reject throws                                                                                   |
+|-------------|---------------------|-----------------------------------------------|------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------|
+| `messaging` | `MessagingSelector` | `MESSAGE_SEND`, `MESSAGE_RECEIVE`              | `destinationPattern` — the topic; a poll matches when any subscribed topic matches       | Kafka `KafkaProducer.send(record, callback)`, `KafkaConsumer.poll(Duration)`                           | `org.apache.kafka.common.errors.TimeoutException` from `send()` / `poll()`                      |
+| `rpc`       | `RpcSelector`       | `RPC_CALL`                                     | `methodPattern` — `package.Service/Method`                                              | gRPC `io.grpc.internal.ClientCallImpl.start` (every stub flavour and transport, once per call)         | `StatusRuntimeException` with status `UNAVAILABLE`                                              |
+| `redis`     | `RedisSelector`     | `REDIS_COMMAND`                                | `commandPattern` — upper-case command name (`GET`, `HSET`)                               | Jedis `Connection.sendCommand(CommandArguments)`, Lettuce `RedisChannelHandler.dispatch(RedisCommand)` | `JedisConnectionException` / `RedisCommandTimeoutException`                                     |
+| `jdbc`      | `JdbcSelector`      | `R2DBC_STATEMENT_EXECUTE` (with the JDBC ops)  | `targetPattern` does not apply (R2DBC statements do not expose their SQL)                | `io.r2dbc.spi.Statement.execute()` in any driver; a proxy delegating to the driver is evaluated once    | `R2dbcTransientResourceException`, synchronously from `execute()`                               |
+| `awsSdk`    | `AwsSdkSelector`    | `AWS_SDK_CALL`                                 | `servicePattern` (`s3`, `dynamodb`: the request's package), `operationPattern` (`GetObject`) | AWS SDK v2 `BaseSyncClientHandler` / `BaseAsyncClientHandler.execute`, before signing and sending       | `SdkClientException`                                                                            |
+| `netty`     | `NettySelector`     | `NETTY_CHANNEL_WRITE`, `NETTY_CHANNEL_READ`    | `remoteCidr`, `remotePort` — the channel's peer                                          | Netty `AbstractChannel.AbstractUnsafe.flush0()` (every transport); NIO / epoll / kqueue stream reads   | `IOException` through the pipeline (writes only; a reject on reads is rejected at validation)   |
+
+```json
+{ "type": "messaging", "operations": ["MESSAGE_SEND"], "destinationPattern": { "mode": "EXACT", "value": "orders" } }
+{ "type": "rpc", "operations": ["RPC_CALL"], "methodPattern": { "mode": "PREFIX", "value": "payments.Ledger/" } }
+{ "type": "awsSdk", "operations": ["AWS_SDK_CALL"], "servicePattern": { "mode": "EXACT", "value": "s3" } }
+```
+
+---
+
 ### `stress` — StressSelector
 
 **JSON type:** `"stress"`  
@@ -1950,7 +1971,7 @@ ByteBuddy `AgentBuilder` installs `Advice` on JDK classes per hook group — on 
 
 ### BootstrapDispatcher
 
-57 static `MethodHandle` slots in `BootstrapDispatcher` (slots do not map one-to-one to the 67 `OperationType` values). The slot for a given operation type holds a method handle to the `ChaosDispatcher` evaluation method. Advice woven into JDK classes calls the slot directly from the bootstrap classloader context.
+60 static `MethodHandle` slots in `BootstrapDispatcher` (slots do not map one-to-one to the 67 `OperationType` values). The slot for a given operation type holds a method handle to the `ChaosDispatcher` evaluation method. Advice woven into JDK classes calls the slot directly from the bootstrap classloader context.
 
 ### ThreadLocal Reentrancy Guard
 

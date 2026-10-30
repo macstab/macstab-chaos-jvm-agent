@@ -292,6 +292,20 @@ public final class JdkInstrumentationInstaller {
         OperationType.DATE_NEW),
     SSL_HANDSHAKE(
         JdkInstrumentationInstaller::applySslHandshakeTransformations, OperationType.SSL_HANDSHAKE),
+    KAFKA(
+        JdkInstrumentationInstaller::applyKafkaTransformations,
+        OperationType.MESSAGE_SEND,
+        OperationType.MESSAGE_RECEIVE),
+    GRPC(JdkInstrumentationInstaller::applyGrpcTransformations, OperationType.RPC_CALL),
+    REDIS(JdkInstrumentationInstaller::applyRedisTransformations, OperationType.REDIS_COMMAND),
+    R2DBC(
+        JdkInstrumentationInstaller::applyR2dbcTransformations,
+        OperationType.R2DBC_STATEMENT_EXECUTE),
+    AWS_SDK(JdkInstrumentationInstaller::applyAwsSdkTransformations, OperationType.AWS_SDK_CALL),
+    NETTY(
+        JdkInstrumentationInstaller::applyNettyTransformations,
+        OperationType.NETTY_CHANNEL_WRITE,
+        OperationType.NETTY_CHANNEL_READ),
     HTTP_CLIENT(
         JdkInstrumentationInstaller::applyPhase2HttpClientInterception,
         OperationType.HTTP_CLIENT_SEND,
@@ -907,6 +921,12 @@ public final class JdkInstrumentationInstaller {
             delegateInterface,
             "beforeMethodEnter",
             MethodType.methodType(void.class, Class.class, String.class, String.class));
+    methodHandles[BootstrapDispatcher.BEFORE_CLIENT_CALL] =
+        lookup.findVirtual(
+            delegateInterface,
+            "beforeClientCall",
+            MethodType.methodType(
+                void.class, String.class, Object.class, String.class, String.class, Object.class));
     methodHandles[BootstrapDispatcher.AFTER_METHOD_EXIT] =
         lookup.findVirtual(
             delegateInterface,
@@ -2347,6 +2367,143 @@ public final class JdkInstrumentationInstaller {
                                     .and(
                                         ElementMatchers.takesArguments(
                                             byte[].class, int.class, int.class)))));
+  }
+
+  /** Kafka producer send and consumer poll. */
+  private static AgentBuilder applyKafkaTransformations(final AgentBuilder builder) {
+    return builder
+        .type(ElementMatchers.named("org.apache.kafka.clients.producer.KafkaProducer"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(ClientCallAdvice.KafkaSend.class)
+                        .on(ElementMatchers.named("send").and(ElementMatchers.takesArguments(2)))))
+        .type(ElementMatchers.named("org.apache.kafka.clients.consumer.KafkaConsumer"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(ClientCallAdvice.KafkaPoll.class)
+                        .on(
+                            ElementMatchers.named("poll")
+                                .and(ElementMatchers.takesArguments(java.time.Duration.class)))));
+  }
+
+  /** gRPC client call start, once per call for every stub flavour and transport. */
+  private static AgentBuilder applyGrpcTransformations(final AgentBuilder builder) {
+    return builder
+        .type(ElementMatchers.named("io.grpc.internal.ClientCallImpl"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(ClientCallAdvice.GrpcStart.class)
+                        .on(
+                            ElementMatchers.named("start")
+                                .and(ElementMatchers.takesArguments(2)))));
+  }
+
+  /** Jedis and Lettuce command dispatch. */
+  private static AgentBuilder applyRedisTransformations(final AgentBuilder builder) {
+    return builder
+        .type(ElementMatchers.named("redis.clients.jedis.Connection"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(ClientCallAdvice.JedisSendCommand.class)
+                        .on(
+                            ElementMatchers.named("sendCommand")
+                                .and(
+                                    ElementMatchers.takesArguments(1)
+                                        .and(
+                                            ElementMatchers.takesArgument(
+                                                0,
+                                                ElementMatchers.named(
+                                                    "redis.clients.jedis.CommandArguments")))))))
+        .type(ElementMatchers.named("io.lettuce.core.RedisChannelHandler"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(ClientCallAdvice.LettuceDispatch.class)
+                        .on(
+                            ElementMatchers.named("dispatch")
+                                .and(
+                                    ElementMatchers.takesArgument(
+                                        0,
+                                        ElementMatchers.named(
+                                            "io.lettuce.core.protocol.RedisCommand"))))));
+  }
+
+  /** R2DBC {@code Statement.execute()} in any driver. */
+  private static AgentBuilder applyR2dbcTransformations(final AgentBuilder builder) {
+    return builder
+        .type(
+            ElementMatchers.hasSuperType(ElementMatchers.named("io.r2dbc.spi.Statement"))
+                .and(ElementMatchers.not(ElementMatchers.isInterface())))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(ClientCallAdvice.R2dbcExecute.class)
+                        .on(
+                            ElementMatchers.named("execute")
+                                .and(ElementMatchers.takesArguments(0))
+                                .and(ElementMatchers.not(ElementMatchers.isAbstract()))
+                                .and(ElementMatchers.not(ElementMatchers.isBridge())))));
+  }
+
+  /** AWS SDK v2 sync and async client handlers. */
+  private static AgentBuilder applyAwsSdkTransformations(final AgentBuilder builder) {
+    return builder
+        .type(
+            ElementMatchers.namedOneOf(
+                "software.amazon.awssdk.core.internal.handler.BaseSyncClientHandler",
+                "software.amazon.awssdk.core.internal.handler.BaseAsyncClientHandler"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(ClientCallAdvice.AwsExecute.class)
+                        .on(
+                            ElementMatchers.named("execute")
+                                .and(ElementMatchers.isPublic())
+                                .and(
+                                    ElementMatchers.takesArgument(
+                                        0,
+                                        ElementMatchers.named(
+                                            "software.amazon.awssdk.core.client.handler"
+                                                + ".ClientExecutionParams"))))));
+  }
+
+  /** Netty channel flush (every transport) and stream-channel reads (NIO, epoll, kqueue). */
+  private static AgentBuilder applyNettyTransformations(final AgentBuilder builder) {
+    return builder
+        .type(ElementMatchers.named("io.netty.channel.AbstractChannel$AbstractUnsafe"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(ClientCallAdvice.NettyFlush.class)
+                        .on(
+                            ElementMatchers.named("flush0")
+                                .and(ElementMatchers.takesArguments(0)))))
+        .type(ElementMatchers.named("io.netty.channel.nio.AbstractNioByteChannel$NioByteUnsafe"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(ClientCallAdvice.NettyRead.class)
+                        .on(ElementMatchers.named("read").and(ElementMatchers.takesArguments(0)))))
+        .type(
+            ElementMatchers.named(
+                "io.netty.channel.epoll.AbstractEpollStreamChannel$EpollStreamUnsafe"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(ClientCallAdvice.NettyRead.class)
+                        .on(ElementMatchers.named("epollInReady"))))
+        .type(
+            ElementMatchers.named(
+                "io.netty.channel.kqueue.AbstractKQueueStreamChannel$KQueueStreamUnsafe"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(ClientCallAdvice.NettyRead.class)
+                        .on(ElementMatchers.named("readReady"))));
   }
 
   /** Bridge jars older than this are left over from earlier JVMs and are removed. */

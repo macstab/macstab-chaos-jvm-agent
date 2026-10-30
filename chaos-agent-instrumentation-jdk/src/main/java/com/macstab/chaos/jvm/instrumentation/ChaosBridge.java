@@ -812,4 +812,25 @@ final class ChaosBridge implements BridgeDelegate {
       throws Throwable {
     return runtime.afterMethodExit(declaringType, methodName, descriptor, value);
   }
+
+  /**
+   * Invoked before a call through a client library.
+   *
+   * @param operation the {@code OperationType} name
+   * @param client the client object
+   * @param target the topic(s), method, command or AWS operation, or {@code null}
+   * @param detail the AWS service, or {@code null}
+   * @param remoteAddress the peer address of a Netty channel, or {@code null}
+   * @throws Throwable if a scenario rejects the call
+   */
+  @Override
+  public void beforeClientCall(
+      final String operation,
+      final Object client,
+      final String target,
+      final String detail,
+      final Object remoteAddress)
+      throws Throwable {
+    runtime.beforeClientCall(operation, client, target, detail, remoteAddress);
+  }
 }

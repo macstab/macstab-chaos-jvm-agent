@@ -96,8 +96,67 @@ final class FailureFactory {
       // HTTP client: java.net.http.HttpClient#send declares IOException; async send completes
       // the future exceptionally with IOException as well. Keep the expected checked type.
       case HTTP_CLIENT_SEND, HTTP_CLIENT_SEND_ASYNC -> new java.io.IOException(message);
+      // Netty surfaces transport failures as IOException through the pipeline.
+      case NETTY_CHANNEL_WRITE, NETTY_CHANNEL_READ -> new java.io.IOException(message);
       default -> new IllegalStateException(message);
     };
+  }
+
+  /**
+   * Creates the failure a client library raises for a rejected call, loaded through the client's
+   * class loader so it is the library's own type: what the application's error handling catches.
+   * Falls back to {@link #reject} when the library type cannot be built.
+   *
+   * @param operationType the client operation
+   * @param client the client object the call was made on; its class loader sees the library
+   * @param message the detail message
+   * @return the failure to throw
+   */
+  static Throwable clientReject(
+      final OperationType operationType, final Object client, final String message) {
+    final ClassLoader loader = client == null ? null : client.getClass().getClassLoader();
+    final String clientClass = client == null ? "" : client.getClass().getName();
+    try {
+      return switch (operationType) {
+        case MESSAGE_SEND, MESSAGE_RECEIVE ->
+            construct(loader, "org.apache.kafka.common.errors.TimeoutException", message);
+        case RPC_CALL -> grpcUnavailable(loader, message);
+        case REDIS_COMMAND ->
+            construct(
+                loader,
+                clientClass.startsWith("io.lettuce.")
+                    ? "io.lettuce.core.RedisCommandTimeoutException"
+                    : "redis.clients.jedis.exceptions.JedisConnectionException",
+                message);
+        case R2DBC_STATEMENT_EXECUTE ->
+            construct(loader, "io.r2dbc.spi.R2dbcTransientResourceException", message);
+        case AWS_SDK_CALL ->
+            (Throwable)
+                Class.forName(
+                        "software.amazon.awssdk.core.exception.SdkClientException", true, loader)
+                    .getMethod("create", String.class)
+                    .invoke(null, message);
+        default -> reject(operationType, message);
+      };
+    } catch (final ReflectiveOperationException | LinkageError | ClassCastException unavailable) {
+      return reject(operationType, message);
+    }
+  }
+
+  private static Throwable construct(
+      final ClassLoader loader, final String className, final String message)
+      throws ReflectiveOperationException {
+    return (Throwable)
+        Class.forName(className, true, loader).getConstructor(String.class).newInstance(message);
+  }
+
+  private static Throwable grpcUnavailable(final ClassLoader loader, final String message)
+      throws ReflectiveOperationException {
+    final Class<?> status = Class.forName("io.grpc.Status", true, loader);
+    final Object unavailable = status.getField("UNAVAILABLE").get(null);
+    final Object described =
+        status.getMethod("withDescription", String.class).invoke(unavailable, message);
+    return (Throwable) status.getMethod("asRuntimeException").invoke(described);
   }
 
   /**

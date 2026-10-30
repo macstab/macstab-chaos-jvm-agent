@@ -7,6 +7,10 @@ plugins {
 // chaos.test.httpClasspath system property (set in tasks.test).
 val httpClientProbe: Configuration by configurations.creating
 
+// Client libraries (Kafka, gRPC, Redis, R2DBC, AWS SDK, Netty) for the client-hook probes; kept
+// off the general probe classpath like the HTTP clients, exposed as chaos.test.clientClasspath.
+val clientLibraryProbe: Configuration by configurations.creating
+
 dependencies {
     api(project(":chaos-agent-api"))
     implementation(project(":chaos-agent-core"))
@@ -31,6 +35,15 @@ dependencies {
     httpClientProbe(libs.okhttp)
     httpClientProbe(libs.apache.httpclient5)
     httpClientProbe(libs.reactor.netty.http)
+
+    for (client in listOf(
+        libs.kafka.clients, libs.grpc.core, libs.grpc.inprocess, libs.grpc.stub, libs.jedis,
+        libs.lettuce.core, libs.r2dbc.h2, libs.aws.sdk.s3, libs.aws.sdk.url.connection.client,
+        libs.netty.transport,
+    )) {
+        testCompileOnly(client)
+        clientLibraryProbe(client)
+    }
 }
 
 val agentManifest = mapOf(
@@ -115,4 +128,5 @@ tasks.test {
         .joinToString(File.pathSeparator) { it.file.absolutePath }
     systemProperty("chaos.test.jdbcClasspath", jdbcClasspath)
     systemProperty("chaos.test.httpClasspath", httpClientProbe.asPath)
+    systemProperty("chaos.test.clientClasspath", clientLibraryProbe.asPath)
 }

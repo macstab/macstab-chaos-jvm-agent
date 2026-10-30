@@ -2,6 +2,7 @@ package com.macstab.chaos.jvm.core;
 
 import com.macstab.chaos.jvm.api.ChaosSelector;
 import com.macstab.chaos.jvm.api.CidrBlock;
+import com.macstab.chaos.jvm.api.NamePattern;
 import com.macstab.chaos.jvm.api.OperationType;
 
 /**
@@ -111,6 +112,26 @@ final class SelectorMatcher {
                   || fileIoSelector.pathPattern().matches(context.path()))
               && inSizeRange(
                   fileIoSelector.minBytes(), fileIoSelector.maxBytes(), context.byteCount());
+      case ChaosSelector.MessagingSelector messagingSelector ->
+          messagingSelector.operations().contains(context.operationType())
+              && anyDestinationMatches(
+                  messagingSelector.destinationPattern(), context.targetName());
+      case ChaosSelector.RpcSelector rpcSelector ->
+          rpcSelector.operations().contains(context.operationType())
+              && rpcSelector.methodPattern().matches(context.targetName());
+      case ChaosSelector.RedisSelector redisSelector ->
+          redisSelector.operations().contains(context.operationType())
+              && redisSelector.commandPattern().matches(context.targetName());
+      case ChaosSelector.AwsSdkSelector awsSdkSelector ->
+          awsSdkSelector.operations().contains(context.operationType())
+              && awsSdkSelector.servicePattern().matches(context.subjectClassName())
+              && awsSdkSelector.operationPattern().matches(context.targetName());
+      case ChaosSelector.NettySelector nettySelector ->
+          nettySelector.operations().contains(context.operationType())
+              && (nettySelector.remoteCidr() == null
+                  || CidrBlock.cached(nettySelector.remoteCidr()).contains(context.remoteAddress()))
+              && (nettySelector.remotePort() == null
+                  || nettySelector.remotePort() == context.remotePort());
       case ChaosSelector.StressSelector stressSelector ->
           context.operationType() == OperationType.LIFECYCLE && stressSelector.target() != null;
     };
@@ -153,6 +174,29 @@ final class SelectorMatcher {
   private static boolean matchesDaemon(
       final ChaosSelector.ThreadSelector selector, final InvocationContext context) {
     return selector.daemon() == null || selector.daemon().equals(context.daemonThread());
+  }
+
+  /**
+   * A consumer poll reports all subscribed topics, comma-separated (Kafka topic names cannot
+   * contain a comma); the pattern matches when it matches any of them.
+   */
+  private static boolean anyDestinationMatches(
+      final NamePattern pattern, final String destinations) {
+    if (pattern.mode() == NamePattern.MatchMode.ANY) {
+      return true;
+    }
+    if (destinations == null) {
+      return false;
+    }
+    if (destinations.indexOf(',') < 0) {
+      return pattern.matches(destinations);
+    }
+    for (final String destination : destinations.split(",")) {
+      if (pattern.matches(destination)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /**

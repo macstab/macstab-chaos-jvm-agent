@@ -137,8 +137,11 @@ public final class BootstrapDispatcher {
   /** Scope index for {@code Thread.sleep} overloads. */
   public static final int SCOPE_THREAD_SLEEP = 17;
 
+  /** Scope index for client-library calls that delegate to a wrapped client (R2DBC, AWS SDK). */
+  public static final int SCOPE_CLIENT = 18;
+
   /** Size of the per-thread counter array: index 0 is the reentrancy depth, then the scopes. */
-  static final int SCOPE_COUNT = 18;
+  static final int SCOPE_COUNT = 19;
 
   /**
    * Enters a call-depth scope on the current thread.
@@ -410,8 +413,11 @@ public final class BootstrapDispatcher {
   /** Handle index for {@link #afterMethodExit(Class, String, String, Object)}. */
   public static final int AFTER_METHOD_EXIT = 58;
 
+  /** Handle index for {@link #beforeClientCall(String, Object, String, String, Object)}. */
+  public static final int BEFORE_CLIENT_CALL = 59;
+
   /** Total number of method-handle slots; equals the highest index plus one. */
-  public static final int HANDLE_COUNT = 59;
+  public static final int HANDLE_COUNT = 60;
 
   /** Utility class; do not instantiate. */
   private BootstrapDispatcher() {}
@@ -2177,6 +2183,41 @@ public final class BootstrapDispatcher {
     } catch (final Throwable throwable) {
       sneakyThrow(throwable);
       return value;
+    } finally {
+      depth[0]--;
+    }
+  }
+
+  /**
+   * Called before a call through a client library (Kafka, gRPC, Redis, R2DBC, AWS SDK, Netty).
+   *
+   * @param operation the {@code OperationType} name
+   * @param client the client object
+   * @param target the topic(s), method, command or AWS operation, or {@code null}
+   * @param detail the AWS service, or {@code null}
+   * @param remoteAddress the peer address of a Netty channel, or {@code null}
+   * @throws Throwable if an active scenario rejects the call
+   */
+  public static void beforeClientCall(
+      final String operation,
+      final Object client,
+      final String target,
+      final String detail,
+      final Object remoteAddress)
+      throws Throwable {
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      if (d != null && h != null) {
+        h[BEFORE_CLIENT_CALL].invoke(d, operation, client, target, detail, remoteAddress);
+      }
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
     } finally {
       depth[0]--;
     }

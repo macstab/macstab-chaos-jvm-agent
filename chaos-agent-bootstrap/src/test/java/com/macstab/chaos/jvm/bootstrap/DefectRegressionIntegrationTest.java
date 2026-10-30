@@ -673,6 +673,136 @@ class DefectRegressionIntegrationTest {
   }
 
   @Nested
+  @DisplayName("client-library hooks")
+  class ClientLibraryHooks {
+
+    private final String clientClasspath = System.getProperty("chaos.test.clientClasspath");
+
+    private ChildJvmProbe.ProbeResult runReject(
+        final String id, final ChaosSelector selector, final String mode) throws Exception {
+      return probe.run(
+          plan(scenario(id, selector, ChaosEffect.reject(id + " down"))),
+          ClientLibraryProbeMain.class,
+          mode,
+          clientClasspath);
+    }
+
+    @Test
+    @DisplayName("Kafka send: a rejected topic throws Kafka's TimeoutException, others are sent")
+    void kafkaSend() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          runReject(
+              "kafka",
+              ChaosSelector.messaging(
+                  Set.of(OperationType.MESSAGE_SEND), NamePattern.exact("orders")),
+              "kafka-send");
+      assertThat(result.value("orders.type"))
+          .isEqualTo("org.apache.kafka.common.errors.TimeoutException");
+      assertThat(result.value("orders.message")).isEqualTo("kafka down");
+      assertThat(result.value("audit.type"))
+          .as(
+              "an unmatched topic is handed to Kafka, which reports its own failures via the Future")
+          .isEqualTo("sent");
+      assertThat(result.longValue("matched.kafka")).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("Kafka poll: matched by subscribed topic")
+    void kafkaPoll() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          runReject(
+              "kafka-poll",
+              ChaosSelector.messaging(
+                  Set.of(OperationType.MESSAGE_RECEIVE), NamePattern.exact("orders")),
+              "kafka-poll");
+      assertThat(result.value("poll.type"))
+          .isEqualTo("org.apache.kafka.common.errors.TimeoutException");
+    }
+
+    @Test
+    @DisplayName("gRPC call: a reject fails the call with UNAVAILABLE")
+    void grpcCall() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          runReject("grpc", ChaosSelector.rpc(NamePattern.exact("probe.Echo/Say")), "grpc-call");
+      assertThat(result.value("call.type")).isEqualTo("io.grpc.StatusRuntimeException");
+      assertThat(result.value("call.message")).isEqualTo("UNAVAILABLE: grpc down");
+    }
+
+    @Test
+    @DisplayName("gRPC call: an unmatched scenario leaves the call alone")
+    void grpcCallUnmatched() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          runReject(
+              "grpc-other", ChaosSelector.rpc(NamePattern.exact("probe.Echo/Other")), "grpc-call");
+      assertThat(result.value("reply")).isEqualTo("echo hi");
+    }
+
+    @Test
+    @DisplayName("Jedis: a rejected command throws JedisConnectionException, others run")
+    void jedis() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          runReject("redis", ChaosSelector.redis(NamePattern.exact("SET")), "jedis-set");
+      assertThat(result.value("set.type"))
+          .isEqualTo("redis.clients.jedis.exceptions.JedisConnectionException");
+      assertThat(result.value("ping")).isEqualTo("PONG");
+    }
+
+    @Test
+    @DisplayName("Lettuce: a rejected command throws RedisCommandTimeoutException")
+    void lettuce() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          runReject("lettuce", ChaosSelector.redis(NamePattern.exact("SET")), "lettuce-set");
+      assertThat(result.value("set.type"))
+          .isEqualTo("io.lettuce.core.RedisCommandTimeoutException");
+    }
+
+    @Test
+    @DisplayName("R2DBC: a rejected execute throws R2dbcTransientResourceException")
+    void r2dbc() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          runReject(
+              "r2dbc",
+              new ChaosSelector.JdbcSelector(Set.of(OperationType.R2DBC_STATEMENT_EXECUTE), null),
+              "r2dbc-execute");
+      assertThat(result.value("execute.type"))
+          .isEqualTo("io.r2dbc.spi.R2dbcTransientResourceException");
+      assertThat(result.longValue("matched.r2dbc")).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("AWS SDK: a rejected operation throws SdkClientException before any I/O")
+    void awsSdk() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          runReject(
+              "aws",
+              ChaosSelector.awsSdk(NamePattern.exact("s3"), NamePattern.exact("ListBuckets")),
+              "aws-list-buckets");
+      assertThat(result.value("list.type"))
+          .isEqualTo("software.amazon.awssdk.core.exception.SdkClientException");
+      assertThat(result.value("list.message")).isEqualTo("aws down");
+      assertThat(result.longValue("matched.aws")).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("Netty: a channel flush is matched by peer CIDR")
+    void nettyWrite() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.run(
+              plan(
+                  scenario(
+                      "netty",
+                      new ChaosSelector.NettySelector(
+                          Set.of(OperationType.NETTY_CHANNEL_WRITE), "127.0.0.0/8", null),
+                      ChaosEffect.delay(Duration.ofMillis(1)))),
+              ClientLibraryProbeMain.class,
+              "netty-write",
+              clientClasspath);
+      assertThat(result.longValue("received")).isEqualTo(3L);
+      assertThat(result.longValue("matched.netty")).isPositive();
+    }
+  }
+
+  @Nested
   @DisplayName("method selector weaving")
   class MethodSelectorWeaving {
 

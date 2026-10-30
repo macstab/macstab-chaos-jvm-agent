@@ -495,7 +495,8 @@ final class CompatibilityValidator {
           OperationType.JDBC_STATEMENT_EXECUTE,
           OperationType.JDBC_PREPARED_STATEMENT,
           OperationType.JDBC_TRANSACTION_COMMIT,
-          OperationType.JDBC_TRANSACTION_ROLLBACK);
+          OperationType.JDBC_TRANSACTION_ROLLBACK,
+          OperationType.R2DBC_STATEMENT_EXECUTE);
 
   private static final Set<OperationType> NIO_OPS =
       Set.of(
@@ -602,6 +603,14 @@ final class CompatibilityValidator {
                   + SUPPRESS_OPS);
         }
       }
+    }
+    if (effect instanceof ChaosEffect.RejectEffect
+        && operations.contains(OperationType.NETTY_CHANNEL_READ)) {
+      // The read loop runs on the event loop outside the pipeline's exception handling: a
+      // throwable there reaches the event loop, not the channel's handlers.
+      throw new ChaosValidationException(
+          "RejectEffect is not supported for NETTY_CHANNEL_READ; delay or gate the read, or"
+              + " reject NETTY_CHANNEL_WRITE, which fails through the pipeline");
     }
     if (effect instanceof ChaosEffect.ClockSkewEffect) {
       for (final OperationType operation : operations) {

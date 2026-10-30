@@ -437,6 +437,12 @@ The `OperationType` enum defines all intercepted JDK operations. Full list:
 | JDBC                            | `JDBC_CONNECTION_ACQUIRE`, `JDBC_STATEMENT_EXECUTE`, `JDBC_PREPARED_STATEMENT`, `JDBC_TRANSACTION_COMMIT`, `JDBC_TRANSACTION_ROLLBACK` |
 | DNS / TLS                       | `DNS_RESOLVE`, `SSL_HANDSHAKE`                                                                                                         |
 | File I/O                        | `FILE_IO_READ`, `FILE_IO_WRITE`                                                                                                        |
+| Messaging (Kafka)               | `MESSAGE_SEND`, `MESSAGE_RECEIVE`                                                                                                      |
+| RPC (gRPC)                      | `RPC_CALL`                                                                                                                             |
+| Redis (Jedis, Lettuce)          | `REDIS_COMMAND`                                                                                                                        |
+| R2DBC                           | `R2DBC_STATEMENT_EXECUTE`                                                                                                              |
+| AWS SDK v2                      | `AWS_SDK_CALL`                                                                                                                         |
+| Netty                           | `NETTY_CHANNEL_WRITE`, `NETTY_CHANNEL_READ`                                                                                            |
 | Shutdown                        | `SHUTDOWN_HOOK_REGISTER`                                                                                                               |
 | Method (woven per scenario)     | `METHOD_ENTER`, `METHOD_EXIT`                                                                                                          |
 | Stressor                        | `LIFECYCLE` (internal; targets stressor start/stop)                                                                                    |

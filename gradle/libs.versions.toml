@@ -22,7 +22,25 @@ spotless = "8.2.1"
 springBoot3 = "3.5.13"
 springBoot4 = "4.0.5"
 
+awsSdk = "2.57.7"
+grpc = "1.85.1"
+jedis = "8.0.2"
+kafka = "4.4.0"
+lettuce = "7.9.0.RELEASE"
+nettyProbe = "4.2.19.Final"
+r2dbcH2 = "1.1.0.RELEASE"
+
 [libraries]
+aws-sdk-s3 = { module = "software.amazon.awssdk:s3", version.ref = "awsSdk" }
+aws-sdk-url-connection-client = { module = "software.amazon.awssdk:url-connection-client", version.ref = "awsSdk" }
+grpc-core = { module = "io.grpc:grpc-core", version.ref = "grpc" }
+grpc-inprocess = { module = "io.grpc:grpc-inprocess", version.ref = "grpc" }
+grpc-stub = { module = "io.grpc:grpc-stub", version.ref = "grpc" }
+jedis = { module = "redis.clients:jedis", version.ref = "jedis" }
+kafka-clients = { module = "org.apache.kafka:kafka-clients", version.ref = "kafka" }
+lettuce-core = { module = "io.lettuce:lettuce-core", version.ref = "lettuce" }
+netty-transport = { module = "io.netty:netty-transport", version.ref = "nettyProbe" }
+r2dbc-h2 = { module = "io.r2dbc:r2dbc-h2", version.ref = "r2dbcH2" }
 apache-httpclient4 = { module = "org.apache.httpcomponents:httpclient", version.ref = "apacheHc4" }
 apache-httpclient5 = { module = "org.apache.httpcomponents.client5:httpclient5", version.ref = "apacheHc5" }
 byte-buddy = { module = "net.bytebuddy:byte-buddy", version.ref = "byteBuddy" }

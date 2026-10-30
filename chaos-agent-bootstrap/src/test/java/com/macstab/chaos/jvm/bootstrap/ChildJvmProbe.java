@@ -113,19 +113,31 @@ final class ChildJvmProbe {
 
   private static ProbeResult execute(final List<String> command) throws Exception {
     final Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
-    final List<String> lines = new ArrayList<>();
-    try (final BufferedReader reader =
-        new BufferedReader(
-            new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
-      String line;
-      while ((line = reader.readLine()) != null) {
-        lines.add(line);
-      }
-    }
+    final List<String> lines = new java.util.concurrent.CopyOnWriteArrayList<>();
+    // Read on another thread: reading to the end first would block until the child exits, so a
+    // hanging child would never reach the timeout below.
+    final Thread reader =
+        Thread.ofPlatform()
+            .daemon()
+            .start(
+                () -> {
+                  try (BufferedReader in =
+                      new BufferedReader(
+                          new InputStreamReader(
+                              process.getInputStream(), StandardCharsets.UTF_8))) {
+                    String line;
+                    while ((line = in.readLine()) != null) {
+                      lines.add(line);
+                    }
+                  } catch (final java.io.IOException closed) {
+                    // the process was destroyed
+                  }
+                });
     final boolean finished = process.waitFor(TIMEOUT_SECONDS, TimeUnit.SECONDS);
     if (!finished) {
       process.destroyForcibly();
     }
+    reader.join(TimeUnit.SECONDS.toMillis(5));
     final String output = String.join("\n", lines);
     assertThat(finished)
         .as("probe JVM must finish within %d s: %s", TIMEOUT_SECONDS, output)

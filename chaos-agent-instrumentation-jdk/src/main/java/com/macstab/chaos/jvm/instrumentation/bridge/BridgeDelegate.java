@@ -675,4 +675,18 @@ public interface BridgeDelegate {
    */
   Object afterMethodExit(Class<?> declaringType, String methodName, String descriptor, Object value)
       throws Throwable;
+
+  /**
+   * Called before a call through a client library.
+   *
+   * @param operation the {@code OperationType} name
+   * @param client the client object
+   * @param target the topic(s), method, command or AWS operation, or {@code null}
+   * @param detail the AWS service, or {@code null}
+   * @param remoteAddress the peer address of a Netty channel, or {@code null}
+   * @throws Throwable if a scenario rejects the call
+   */
+  void beforeClientCall(
+      String operation, Object client, String target, String detail, Object remoteAddress)
+      throws Throwable;
 }

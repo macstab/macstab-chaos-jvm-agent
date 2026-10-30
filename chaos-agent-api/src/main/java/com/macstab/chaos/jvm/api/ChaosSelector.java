@@ -37,6 +37,11 @@ public sealed interface ChaosSelector
         ChaosSelector.DnsSelector,
         ChaosSelector.SslSelector,
         ChaosSelector.FileIoSelector,
+        ChaosSelector.MessagingSelector,
+        ChaosSelector.RpcSelector,
+        ChaosSelector.RedisSelector,
+        ChaosSelector.AwsSdkSelector,
+        ChaosSelector.NettySelector,
         ChaosSelector.StressSelector {
 
   // ── Factory methods ────────────────────────────────────────────────────────
@@ -401,6 +406,53 @@ public sealed interface ChaosSelector
    */
   static FileIoSelector fileIo(final Set<OperationType> operations) {
     return new FileIoSelector(operations);
+  }
+
+  /**
+   * Returns a selector that matches Kafka sends and polls whose topic matches {@code
+   * destinationPattern}.
+   *
+   * @param operations {@link OperationType#MESSAGE_SEND} and/or {@link
+   *     OperationType#MESSAGE_RECEIVE}
+   * @param destinationPattern pattern matched against the topic
+   * @return a new {@link MessagingSelector}
+   */
+  static MessagingSelector messaging(
+      final Set<OperationType> operations, final NamePattern destinationPattern) {
+    return new MessagingSelector(operations, destinationPattern);
+  }
+
+  /**
+   * Returns a selector that matches gRPC client calls whose full method name matches {@code
+   * methodPattern}.
+   *
+   * @param methodPattern pattern matched against {@code package.Service/Method}
+   * @return a new {@link RpcSelector}
+   */
+  static RpcSelector rpc(final NamePattern methodPattern) {
+    return new RpcSelector(Set.of(OperationType.RPC_CALL), methodPattern);
+  }
+
+  /**
+   * Returns a selector that matches Redis commands whose name matches {@code commandPattern}.
+   *
+   * @param commandPattern pattern matched against the upper-case command name
+   * @return a new {@link RedisSelector}
+   */
+  static RedisSelector redis(final NamePattern commandPattern) {
+    return new RedisSelector(Set.of(OperationType.REDIS_COMMAND), commandPattern);
+  }
+
+  /**
+   * Returns a selector that matches AWS SDK v2 operations.
+   *
+   * @param servicePattern pattern matched against the service ({@code s3})
+   * @param operationPattern pattern matched against the operation ({@code GetObject})
+   * @return a new {@link AwsSdkSelector}
+   */
+  static AwsSdkSelector awsSdk(
+      final NamePattern servicePattern, final NamePattern operationPattern) {
+    return new AwsSdkSelector(Set.of(OperationType.AWS_SDK_CALL), servicePattern, operationPattern);
   }
 
   /**
@@ -964,7 +1016,8 @@ public sealed interface ChaosSelector
             OperationType.JDBC_STATEMENT_EXECUTE,
             OperationType.JDBC_PREPARED_STATEMENT,
             OperationType.JDBC_TRANSACTION_COMMIT,
-            OperationType.JDBC_TRANSACTION_ROLLBACK);
+            OperationType.JDBC_TRANSACTION_ROLLBACK,
+            OperationType.R2DBC_STATEMENT_EXECUTE);
 
     /** Validates the JdbcSelector parameters. */
     public JdbcSelector {
@@ -1051,6 +1104,121 @@ public sealed interface ChaosSelector
      */
     public FileIoSelector(final Set<OperationType> operations) {
       this(operations, null, null, null);
+    }
+  }
+
+  /**
+   * Matches messages sent and received through Kafka clients, optionally by topic.
+   *
+   * <p><b>Valid operations:</b> {@link OperationType#MESSAGE_SEND}, {@link
+   * OperationType#MESSAGE_RECEIVE}. A receive is matched when the pattern matches any of the
+   * consumer's subscribed topics.
+   *
+   * @param operations operation types this selector matches
+   * @param destinationPattern pattern matched against the topic; {@code null} for any
+   */
+  record MessagingSelector(Set<OperationType> operations, NamePattern destinationPattern)
+      implements ChaosSelector {
+    static final Set<OperationType> VALID_OPS =
+        EnumSet.of(OperationType.MESSAGE_SEND, OperationType.MESSAGE_RECEIVE);
+
+    /** Validates the MessagingSelector parameters. */
+    public MessagingSelector {
+      operations = validatedOperations(operations, VALID_OPS, "MessagingSelector");
+      destinationPattern = destinationPattern == null ? NamePattern.any() : destinationPattern;
+    }
+  }
+
+  /**
+   * Matches gRPC client calls, optionally by full method name ({@code package.Service/Method}).
+   *
+   * <p><b>Valid operations:</b> {@link OperationType#RPC_CALL}.
+   *
+   * @param operations operation types this selector matches
+   * @param methodPattern pattern matched against the full method name; {@code null} for any
+   */
+  record RpcSelector(Set<OperationType> operations, NamePattern methodPattern)
+      implements ChaosSelector {
+    static final Set<OperationType> VALID_OPS = EnumSet.of(OperationType.RPC_CALL);
+
+    /** Validates the RpcSelector parameters. */
+    public RpcSelector {
+      operations = validatedOperations(operations, VALID_OPS, "RpcSelector");
+      methodPattern = methodPattern == null ? NamePattern.any() : methodPattern;
+    }
+  }
+
+  /**
+   * Matches Redis commands sent through Jedis or Lettuce, optionally by command name.
+   *
+   * <p><b>Valid operations:</b> {@link OperationType#REDIS_COMMAND}. Command names are upper case
+   * ({@code GET}, {@code HSET}).
+   *
+   * @param operations operation types this selector matches
+   * @param commandPattern pattern matched against the command name; {@code null} for any
+   */
+  record RedisSelector(Set<OperationType> operations, NamePattern commandPattern)
+      implements ChaosSelector {
+    static final Set<OperationType> VALID_OPS = EnumSet.of(OperationType.REDIS_COMMAND);
+
+    /** Validates the RedisSelector parameters. */
+    public RedisSelector {
+      operations = validatedOperations(operations, VALID_OPS, "RedisSelector");
+      commandPattern = commandPattern == null ? NamePattern.any() : commandPattern;
+    }
+  }
+
+  /**
+   * Matches AWS SDK for Java v2 operations, optionally by service and operation.
+   *
+   * <p><b>Valid operations:</b> {@link OperationType#AWS_SDK_CALL}. The service is the request's
+   * package name under {@code software.amazon.awssdk.services} ({@code s3}, {@code dynamodb},
+   * {@code sqs}); the operation is the SDK operation name ({@code GetObject}, {@code PutItem}).
+   *
+   * @param operations operation types this selector matches
+   * @param servicePattern pattern matched against the service; {@code null} for any
+   * @param operationPattern pattern matched against the operation; {@code null} for any
+   */
+  record AwsSdkSelector(
+      Set<OperationType> operations, NamePattern servicePattern, NamePattern operationPattern)
+      implements ChaosSelector {
+    static final Set<OperationType> VALID_OPS = EnumSet.of(OperationType.AWS_SDK_CALL);
+
+    /** Validates the AwsSdkSelector parameters. */
+    public AwsSdkSelector {
+      operations = validatedOperations(operations, VALID_OPS, "AwsSdkSelector");
+      servicePattern = servicePattern == null ? NamePattern.any() : servicePattern;
+      operationPattern = operationPattern == null ? NamePattern.any() : operationPattern;
+    }
+  }
+
+  /**
+   * Matches Netty channel reads and writes on any transport, optionally by the peer.
+   *
+   * <p><b>Valid operations:</b> {@link OperationType#NETTY_CHANNEL_WRITE}, {@link
+   * OperationType#NETTY_CHANNEL_READ}. Use it for libraries built on Netty with native transports
+   * (epoll, kqueue) that bypass {@code java.nio}; on the NIO transport the {@link NioSelector}
+   * operations fire as well.
+   *
+   * @param operations operation types this selector matches
+   * @param remoteCidr CIDR block the peer address must lie in ({@link CidrBlock}); {@code null} for
+   *     any
+   * @param remotePort the peer port; {@code null} for any
+   */
+  record NettySelector(Set<OperationType> operations, String remoteCidr, Integer remotePort)
+      implements ChaosSelector {
+    static final Set<OperationType> VALID_OPS =
+        EnumSet.of(OperationType.NETTY_CHANNEL_WRITE, OperationType.NETTY_CHANNEL_READ);
+
+    /** Validates the NettySelector parameters. */
+    public NettySelector {
+      operations = validatedOperations(operations, VALID_OPS, "NettySelector");
+      if (remoteCidr != null) {
+        CidrBlock.parse(remoteCidr);
+      }
+      if (remotePort != null && (remotePort < 0 || remotePort > 65_535)) {
+        throw new IllegalArgumentException("remotePort must be in [0, 65535], got " + remotePort);
+      }
     }
   }
 

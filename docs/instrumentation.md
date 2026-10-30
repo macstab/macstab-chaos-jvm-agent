@@ -9,7 +9,7 @@
 
 # chaos-agent-instrumentation-jdk — Instrumentation Layer Reference
 
-> Internal reference for the bootstrap bridge, ByteBuddy advice classes, reentrancy guard, and the 57-handle interception surface.
+> Internal reference for the bootstrap bridge, ByteBuddy advice classes, reentrancy guard, and the 60-handle interception surface.
 > 
 > *Engineered by* **[Christian Schnapka](https://macstab.com)** — Embedded Principal+ Engineer · [Macstab GmbH](https://macstab.com) · Hamburg, Germany
 
@@ -31,8 +31,8 @@ Apart from weaving hook groups on demand, this module has no further runtime rol
 
 In scope:
 - `JdkInstrumentationInstaller` — entry point; orchestrates all startup steps
-- `BootstrapDispatcher` — bootstrap-classloader-resident static dispatcher (57 dispatch methods + reentrancy guard and call-depth scopes)
-- `BridgeDelegate` — interface defining the 57-method contract
+- `BootstrapDispatcher` — bootstrap-classloader-resident static dispatcher (60 dispatch methods + reentrancy guard and call-depth scopes)
+- `BridgeDelegate` — interface defining the 60-method contract
 - `ChaosBridge` — agent-classloader implementation of `BridgeDelegate`; thin delegation to `ChaosRuntime`
 - All `@Advice` classes, grouped into `JdkInstrumentationInstaller.HookGroup`s
 - `ScheduledCallableWrapper`, `ScheduledRunnableWrapper` — task wrappers for tick-level interception
@@ -90,8 +90,8 @@ Both mechanisms grant the same set of opens to the unnamed module of the system 
 | **Bootstrap classloader** | The JVM root classloader; loads `java.*`, `javax.*`. Has no parent. Can only see classes from `rt.jar`/`java.base` and explicitly appended JARs.                                                                                                         |
 | **Agent classloader**     | The classloader created for the agent JAR. Has the bootstrap classloader as parent (indirect). Can see all agent classes.                                                                                                                                |
 | **Advice class**          | A ByteBuddy concept: a class containing `@Advice.OnMethodEnter` and/or `@Advice.OnMethodExit` static methods, whose bytecode is inlined into the instrumented method. Not a real class instantiation at runtime — the advice body is copied as bytecode. |
-| **BootstrapDispatcher**   | A class that must be visible to the bootstrap classloader. Provides 57 static dispatch methods called from advice.                                                                                                                                       |
-| **BridgeDelegate**        | Interface in the agent classloader defining the 57-method contract. Implemented by `ChaosBridge`.                                                                                                                                                        |
+| **BootstrapDispatcher**   | A class that must be visible to the bootstrap classloader. Provides 60 static dispatch methods called from advice.                                                                                                                                       |
+| **BridgeDelegate**        | Interface in the agent classloader defining the 60-method contract. Implemented by `ChaosBridge`.                                                                                                                                                        |
 | **MethodHandle**          | A typed reference to a method, invokable across classloader boundaries. Built from the agent classloader; stored in `BootstrapDispatcher.handles[]`.                                                                                                     |
 | **DEPTH guard**           | `ThreadLocal<int[]>` in `BootstrapDispatcher`. Prevents infinite recursion when chaos code calls instrumented JDK methods.                                                                                                                               |
 | **Hook group**            | A `JdkInstrumentationInstaller.HookGroup`: related interception points (e.g. `SOCKET`, `JDBC`) tagged with the `OperationType`s they serve. Woven once, on the first activation needing them (or at start when eager); stays woven until uninstall.      |
@@ -283,7 +283,7 @@ rectangle "JDK and library hook groups" {
 
 **`injectBridge()`**: Reads class bytecode from the agent JAR's own classloader resources (the `.class` files are in the same JAR). Writes verbatim into a temp JAR. This ensures the bootstrap-injected class is byte-for-byte identical to the agent-classloader version — there is no separate bootstrap-dispatcher source; it is one class compiled once and loaded twice into different classloaders.
 
-**`buildMethodHandles()`**: Uses `MethodHandles.publicLookup()` against `BridgeDelegate.class`. Public lookup is required because the bootstrap classloader must be able to invoke the handles; a full-access lookup with the agent classloader's module system would not be reachable from the bootstrap context. Each handle is a virtual method handle; when invoked with `delegate` as the first argument, it dispatches to the `ChaosBridge` implementation. The array has exactly 57 slots (indices 0–56); see §7 for the full slot table.
+**`buildMethodHandles()`**: Uses `MethodHandles.publicLookup()` against `BridgeDelegate.class`. Public lookup is required because the bootstrap classloader must be able to invoke the handles; a full-access lookup with the agent classloader's module system would not be reachable from the bootstrap context. Each handle is a virtual method handle; when invoked with `delegate` as the first argument, it dispatches to the `ChaosBridge` implementation. The array has exactly 60 slots (indices 0–56); see §7 for the full slot table.
 
 **`installDelegate()`**: Uses `Class.forName("...BootstrapDispatcher", true, null)` — the `null` classloader argument requests loading from the bootstrap classloader, ensuring the instance obtained is the bootstrap-classloader version, not the agent-classloader version. Reflective invocation of `install()` crosses the classloader boundary without sharing type references.
 
@@ -362,7 +362,7 @@ If the bridge is not installed (`BootstrapDispatcher.handles == null`), the wrap
 
 ---
 
-# 7. The 57 Interception Handles
+# 7. The 60 Interception Handles
 
 | Index | Constant                             | JDK method(s) intercepted                                                                                                                                                       | Direction                                    |
 |-------|--------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------|
@@ -423,6 +423,9 @@ If the bridge is not installed (`BootstrapDispatcher.handles == null`), the wrap
 | 54    | `BEFORE_SSL_HANDSHAKE`               | `SSLSocket.startHandshake()` and implicit handshakes (`startHandshake(boolean)`), `SSLEngine.beginHandshake()`                                                                  | enter                                        |
 | 55    | `BEFORE_FILE_IO`                     | `FileInputStream`/`FileOutputStream` operations                                                                                                                                 | enter                                        |
 | 56    | `ADJUST_LOCAL_DATE_TIME_NOW_IN_ZONE` | `LocalDateTime.now(ZoneId)` (static; `now(Clock)` is not hooked)                                                                                                                | exit (`LocalDateTime` rewrite)               |
+| 57    | `BEFORE_METHOD_ENTER`                | Entry of every method a `MethodSelector` names (woven per scenario by `MethodWeaver`)                                                                                            | enter                                        |
+| 58    | `AFTER_METHOD_EXIT`                  | Normal exit of every method a `MethodSelector` names                                                                                                                              | exit (return-value rewrite)                  |
+| 59    | `BEFORE_CLIENT_CALL`                 | Kafka `KafkaProducer.send(record, callback)` / `KafkaConsumer.poll(Duration)`, gRPC `ClientCallImpl.start`, Jedis `Connection.sendCommand(CommandArguments)`, Lettuce `RedisChannelHandler.dispatch`, R2DBC `Statement.execute()`, AWS SDK v2 `BaseSync/AsyncClientHandler.execute`, Netty `AbstractUnsafe.flush0()` and stream-channel reads | enter (reject throws the library's exception) |
 
 ---
 
