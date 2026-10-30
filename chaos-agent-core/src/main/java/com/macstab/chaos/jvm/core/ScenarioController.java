@@ -318,9 +318,9 @@ final class ScenarioController {
     if (transitioned) {
       observabilityBus.publish(
           ChaosEvent.Type.STARTED, scenario.id(), "scenario started", Map.of("scope", scopeKey));
-      final Duration activeFor = scenario.activationPolicy().activeFor();
-      if (newStressor != null && activeFor != null) {
-        scheduleStressorExpiry(activeFor);
+      final Duration lifetime = stressorLifetime();
+      if (newStressor != null && lifetime != null) {
+        scheduleStressorExpiry(lifetime);
       }
     }
   }
@@ -398,9 +398,10 @@ final class ScenarioController {
    *       equal the session ID this controller was registered with.
    *   <li><b>Selector match</b>: {@link SelectorMatcher#matches} must return {@code true} for the
    *       scenario's selector and the given context.
-   *   <li><b>Activation window</b>: if an {@code activeFor} duration is configured, the elapsed
-   *       time since {@link #start()} must not exceed it. A failure transitions the state to {@code
-   *       INACTIVE} with reason {@code "expired"}.
+   *   <li><b>Activation window</b>: the current instant must lie before {@code activeUntil} and
+   *       within {@code activeFor} of {@link #start()}; otherwise the state becomes {@code
+   *       INACTIVE} with reason {@code "expired"}. Before {@code activeFrom} the call is skipped
+   *       without being counted.
    *   <li><b>Warm-up</b>: {@code matchedCount} must exceed {@code activateAfterMatches}.
    *   <li><b>Probability</b>: a random draw using {@link java.util.SplittableRandom} seeded with
    *       the configured seed XOR-ed with the match count and scenario ID hash must be below the
@@ -434,8 +435,12 @@ final class ScenarioController {
     if (!SelectorMatcher.matches(scenario.selector(), context)) {
       return null;
     }
-    if (!passesActivationWindow()) {
+    final Window window = window();
+    if (window == Window.EXPIRED) {
       markInactive("expired");
+      return null;
+    }
+    if (window == Window.NOT_YET) {
       return null;
     }
     final long matchCount = matchedCount.incrementAndGet();
@@ -640,10 +645,31 @@ final class ScenarioController {
   }
 
   /**
-   * Ends a stressor scenario when its {@code activeFor} window elapses. Stressors are never
-   * evaluated per call, so the window check in {@link #evaluate(InvocationContext)} never ran for
-   * them and a heap, thread-leak or deadlock stressor with {@code activeFor} kept running until
-   * {@code stop()}.
+   * Returns how long a stressor started now may run: the shorter of {@code activeFor} and the time
+   * left until {@code activeUntil}, or {@code null} when neither is set.
+   */
+  private Duration stressorLifetime() {
+    final ActivationPolicy policy = scenario.activationPolicy();
+    Duration lifetime = policy.activeFor();
+    if (policy.activeUntil() != null) {
+      final Duration untilEnd;
+      ChaosDispatcher.incrementDispatchDepth();
+      try {
+        untilEnd = Duration.between(clock.instant(), policy.activeUntil());
+      } finally {
+        ChaosDispatcher.decrementDispatchDepth();
+      }
+      final Duration bounded = untilEnd.isNegative() ? Duration.ZERO : untilEnd;
+      lifetime = lifetime == null || bounded.compareTo(lifetime) < 0 ? bounded : lifetime;
+    }
+    return lifetime;
+  }
+
+  /**
+   * Ends a stressor scenario when its lifetime ({@code activeFor}, {@code activeUntil}) elapses.
+   * Stressors are never evaluated per call, so the window check in {@link
+   * #evaluate(InvocationContext)} never ran for them and a heap, thread-leak or deadlock stressor
+   * with {@code activeFor} kept running until {@code stop()}.
    *
    * <p>The expiry thread is agent-owned: it runs with the dispatch depth raised for its whole life,
    * so user scenarios (thread start, park, sleep) never apply to it. It ends early when the
@@ -693,32 +719,70 @@ final class ScenarioController {
     }
   }
 
-  private boolean passesActivationWindow() {
-    final Duration activeFor = scenario.activationPolicy().activeFor();
-    if (activeFor == null) {
-      return true;
+  /** Where the current instant lies relative to the policy's time bounds. */
+  enum Window {
+    /** Before {@code activeFrom}: the scenario does not fire yet. */
+    NOT_YET,
+    /** Within every bound. */
+    OPEN,
+    /** At or after {@code activeUntil}, or {@code activeFor} has elapsed since start. */
+    EXPIRED
+  }
+
+  /**
+   * Checks the policy's time bounds against the controller's clock. The clock is the real system
+   * clock in production; it is read inside a dispatch, where the agent's own clock hooks return the
+   * real value, so an active clock skew cannot move the window.
+   *
+   * @return the window state; {@link Window#OPEN} when no bound is configured
+   */
+  Window window() {
+    final ActivationPolicy policy = scenario.activationPolicy();
+    final Duration activeFor = policy.activeFor();
+    final Instant activeFrom = policy.activeFrom();
+    final Instant activeUntil = policy.activeUntil();
+    if (activeFor == null && activeFrom == null && activeUntil == null) {
+      return Window.OPEN;
     }
-    // Snapshot the volatile reference to a local so the null-check and the plus() call observe
-    // the same value. Without the snapshot a concurrent stop()→start() sequence could set
-    // startedAt=null briefly (not today's contract but cheap to defend), and two separate reads
-    // could return non-null then null. One read, one check.
-    final Instant capturedStart = startedAt;
-    if (capturedStart == null) {
-      return true;
+    final Instant now = clock.instant();
+    if (activeUntil != null && !now.isBefore(activeUntil)) {
+      return Window.EXPIRED;
     }
-    // Instant.plus throws DateTimeException when activeFor would push the deadline past
-    // Instant.MAX, and ArithmeticException for nanos overflow. ActivationPolicy does not bound
-    // activeFor, so a misconfigured plan with e.g. Duration.ofDays(Long.MAX_VALUE) would leak a
-    // runtime exception into the instrumented application thread instead of expiring cleanly.
-    // Treat an un-representable deadline as "effectively never expires" — the common intent
-    // when someone writes a preposterously large duration.
-    final Instant deadline;
-    try {
-      deadline = capturedStart.plus(activeFor);
-    } catch (final java.time.DateTimeException | ArithmeticException overflow) {
-      return true;
+    if (activeFor != null) {
+      // Snapshot the volatile reference so the null-check and plus() observe the same value.
+      final Instant capturedStart = startedAt;
+      if (capturedStart != null) {
+        // Instant.plus throws for a deadline past Instant.MAX; ActivationPolicy does not bound
+        // activeFor, so treat an un-representable deadline as "never expires" instead of leaking
+        // the exception into the instrumented application thread.
+        try {
+          if (!now.isBefore(capturedStart.plus(activeFor))) {
+            return Window.EXPIRED;
+          }
+        } catch (final java.time.DateTimeException | ArithmeticException overflow) {
+          // never expires
+        }
+      }
     }
-    return clock.instant().isBefore(deadline);
+    if (activeFrom != null && now.isBefore(activeFrom)) {
+      return Window.NOT_YET;
+    }
+    return Window.OPEN;
+  }
+
+  /**
+   * Checks the time bounds for a caller that bypasses {@link #evaluate} (clock skew), marking the
+   * scenario {@code INACTIVE} once they have passed.
+   *
+   * @return {@code true} when the scenario may apply now
+   */
+  boolean withinWindow() {
+    final Window window = window();
+    if (window == Window.EXPIRED) {
+      markInactive("expired");
+      return false;
+    }
+    return window == Window.OPEN;
   }
 
   private boolean passesRateLimit() {

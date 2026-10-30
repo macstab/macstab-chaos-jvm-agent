@@ -96,6 +96,9 @@ final class CompatibilityValidator {
             "VIRTUAL_THREAD_CARRIER_PINNING requires JDK 21+ at runtime");
       }
     }
+    if (scenario.effect() instanceof ChaosEffect.ClockSkewEffect) {
+      validateClockSkewActivationPolicy(scenario.activationPolicy());
+    }
     validateInterceptorConstraints(scenario);
   }
 
@@ -109,10 +112,29 @@ final class CompatibilityValidator {
     if (policy.maxApplications() != null
         || policy.rateLimit() != null
         || policy.activateAfterMatches() > 0
+        || policy.probability() < 1.0d
+        || policy.activeFrom() != null) {
+      throw new ChaosValidationException(
+          "stress scenarios run from start until stop, activeFor or activeUntil ends;"
+              + " maxApplications, rateLimit, activateAfterMatches, probability and activeFrom"
+              + " do not apply to them");
+    }
+  }
+
+  /**
+   * A clock skew is applied on every clock read while its time bounds hold; it is not a per-call
+   * application, so the counting and sampling fields of the policy have no meaning for it. They
+   * used to be silently ignored.
+   */
+  private static void validateClockSkewActivationPolicy(final ActivationPolicy policy) {
+    if (policy.maxApplications() != null
+        || policy.rateLimit() != null
+        || policy.activateAfterMatches() > 0
         || policy.probability() < 1.0d) {
       throw new ChaosValidationException(
-          "stress scenarios run from start until stop or activeFor ends; maxApplications,"
-              + " rateLimit, activateAfterMatches and probability do not apply to them");
+          "a clock skew applies to every clock read while active (bounded by activeFor,"
+              + " activeFrom and activeUntil); maxApplications, rateLimit, activateAfterMatches"
+              + " and probability do not apply to it");
     }
   }
 

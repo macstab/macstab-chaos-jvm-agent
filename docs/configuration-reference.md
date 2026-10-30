@@ -461,6 +461,8 @@ ActivationPolicy {
   rateLimit              : RateLimit   // null = unlimited; see below
   randomSeed             : Long        // null = non-deterministic; explicit = reproducible sampling
   allowDestructiveEffects: boolean     // false; must be true for DeadlockEffect / ThreadLeakEffect
+  activeFrom             : Instant     // null = no lower bound; ISO-8601 in JSON, e.g. "2026-11-01T08:00:00Z"
+  activeUntil            : Instant     // null = no upper bound; must be after activeFrom
 }
 
 RateLimit {

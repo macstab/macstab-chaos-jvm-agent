@@ -10,6 +10,7 @@ import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.ChaosSelector;
 import com.macstab.chaos.jvm.api.OperationType;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.DisplayName;
@@ -45,6 +46,42 @@ class ChaosPlanMapperTest {
       ChaosEffect effect = restored.scenarios().get(0).effect();
       assertThat(effect).isInstanceOf(ChaosEffect.DelayEffect.class);
       assertThat(((ChaosEffect.DelayEffect) effect).minDelay()).isEqualTo(Duration.ofMillis(42));
+    }
+
+    @Test
+    @DisplayName("activeFrom and activeUntil survive a round trip and parse from ISO-8601")
+    void wallClockWindowPreserved() {
+      final ActivationPolicy policy =
+          ActivationPolicy.window(
+              Instant.parse("2026-11-01T08:00:00Z"), Instant.parse("2026-11-01T09:30:00Z"));
+      final ChaosPlan original =
+          new ChaosPlan(
+              new ChaosPlan.Metadata("window", ""),
+              null,
+              List.of(
+                  ChaosScenario.builder("windowed")
+                      .scope(ChaosScenario.ScenarioScope.JVM)
+                      .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+                      .effect(ChaosEffect.delay(Duration.ofMillis(5)))
+                      .activationPolicy(policy)
+                      .build()));
+
+      final ChaosPlan restored = ChaosPlanMapper.read(ChaosPlanMapper.write(original));
+
+      assertThat(restored.scenarios().get(0).activationPolicy()).isEqualTo(policy);
+
+      final String json =
+          """
+          {"metadata":{"name":"p"},"scenarios":[{"id":"s","scope":"JVM",
+           "selector":{"type":"executor","operations":["EXECUTOR_SUBMIT"]},
+           "effect":{"type":"delay","minDelay":"PT0.005S","maxDelay":"PT0.005S"},
+           "activationPolicy":{"activeFrom":"2026-11-01T08:00:00Z",
+                               "activeUntil":"2026-11-01T09:30:00Z"}}]}
+          """;
+      final ActivationPolicy parsed =
+          ChaosPlanMapper.read(json).scenarios().get(0).activationPolicy();
+      assertThat(parsed.activeFrom()).isEqualTo(Instant.parse("2026-11-01T08:00:00Z"));
+      assertThat(parsed.activeUntil()).isEqualTo(Instant.parse("2026-11-01T09:30:00Z"));
     }
   }
 

@@ -10,6 +10,7 @@ import com.macstab.chaos.jvm.api.ChaosEffect;
 import com.macstab.chaos.jvm.api.ChaosSelector;
 import com.macstab.chaos.jvm.api.NamePattern;
 import java.time.Duration;
+import java.time.Instant;
 
 /**
  * Jackson mix-ins that give the API types their JSON shape: the {@code "type"} discriminator and
@@ -125,7 +126,9 @@ final class ApiJsonMixins {
         @JsonProperty("activeFor") final Duration activeFor,
         @JsonProperty("rateLimit") final ActivationPolicy.RateLimit rateLimit,
         @JsonProperty("randomSeed") final Long randomSeed,
-        @JsonProperty("allowDestructiveEffects") final boolean allowDestructiveEffects) {
+        @JsonProperty("allowDestructiveEffects") final boolean allowDestructiveEffects,
+        @JsonProperty("activeFrom") final Instant activeFrom,
+        @JsonProperty("activeUntil") final Instant activeUntil) {
       throw new UnsupportedOperationException("mix-in");
     }
   }

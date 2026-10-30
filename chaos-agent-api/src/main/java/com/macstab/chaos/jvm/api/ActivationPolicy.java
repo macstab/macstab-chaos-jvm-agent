@@ -1,6 +1,7 @@
 package com.macstab.chaos.jvm.api;
 
 import java.time.Duration;
+import java.time.Instant;
 
 /**
  * Controls when and how often a chaos effect fires when its selector matches an operation.
@@ -53,6 +54,11 @@ import java.time.Duration;
  *     sampling is non-deterministic across JVM restarts; set an explicit value for reproducible
  *     sequences
  * @param allowDestructiveEffects whether non-recoverable effects may be activated
+ * @param activeFrom wall-clock instant before which the scenario does not fire; {@code null} means
+ *     no lower bound. Read from the real system clock, so a clock skew the agent injects cannot
+ *     move it
+ * @param activeUntil wall-clock instant from which on the scenario no longer fires and becomes
+ *     {@code INACTIVE}; {@code null} means no upper bound. Read from the real system clock
  */
 public record ActivationPolicy(
     StartMode startMode,
@@ -62,7 +68,9 @@ public record ActivationPolicy(
     Duration activeFor,
     RateLimit rateLimit,
     Long randomSeed,
-    boolean allowDestructiveEffects) {
+    boolean allowDestructiveEffects,
+    Instant activeFrom,
+    Instant activeUntil) {
 
   /**
    * Compact canonical constructor — normalises defaults and validates all field invariants.
@@ -99,6 +107,46 @@ public record ActivationPolicy(
     if (activeFor != null && (activeFor.isZero() || activeFor.isNegative())) {
       throw new IllegalArgumentException("activeFor must be positive when set");
     }
+    if (activeFrom != null && activeUntil != null && !activeFrom.isBefore(activeUntil)) {
+      throw new IllegalArgumentException(
+          "activeFrom must be before activeUntil, got " + activeFrom + " and " + activeUntil);
+    }
+  }
+
+  /**
+   * Creates a policy without an absolute wall-clock window ({@code activeFrom} and {@code
+   * activeUntil} are {@code null}). Kept so callers of the 1.x constructor keep compiling; prefer
+   * {@link #builder()}.
+   *
+   * @param startMode when the scenario begins accepting matches
+   * @param probability fraction of matches that result in effect application
+   * @param activateAfterMatches number of initial matches to skip
+   * @param maxApplications hard cap on total effect applications; {@code null} means unlimited
+   * @param activeFor time window from start; {@code null} means none
+   * @param rateLimit fixed-window rate cap; {@code null} means unlimited
+   * @param randomSeed fixed PRNG seed; {@code null} draws a random seed
+   * @param allowDestructiveEffects whether non-recoverable effects may be activated
+   */
+  public ActivationPolicy(
+      final StartMode startMode,
+      final double probability,
+      final long activateAfterMatches,
+      final Long maxApplications,
+      final Duration activeFor,
+      final RateLimit rateLimit,
+      final Long randomSeed,
+      final boolean allowDestructiveEffects) {
+    this(
+        startMode,
+        probability,
+        activateAfterMatches,
+        maxApplications,
+        activeFor,
+        rateLimit,
+        randomSeed,
+        allowDestructiveEffects,
+        null,
+        null);
   }
 
   /**
@@ -123,6 +171,10 @@ public record ActivationPolicy(
    *     random seed from {@link java.util.concurrent.ThreadLocalRandom} — non-deterministic across
    *     JVM restarts
    * @param allowDestructiveEffects whether non-recoverable effects may be activated
+   * @param activeFrom wall-clock instant before which the scenario does not fire; may be {@code
+   *     null}
+   * @param activeUntil wall-clock instant from which on the scenario no longer fires; may be {@code
+   *     null}
    * @return a new {@link ActivationPolicy} built from the parsed JSON values
    */
   public static ActivationPolicy fromJson(
@@ -133,7 +185,9 @@ public record ActivationPolicy(
       final Duration activeFor,
       final RateLimit rateLimit,
       final Long randomSeed,
-      final boolean allowDestructiveEffects) {
+      final boolean allowDestructiveEffects,
+      final Instant activeFrom,
+      final Instant activeUntil) {
     return new ActivationPolicy(
         startMode,
         probability == null ? 1.0d : probability,
@@ -142,7 +196,9 @@ public record ActivationPolicy(
         activeFor,
         rateLimit,
         randomSeed,
-        allowDestructiveEffects);
+        allowDestructiveEffects,
+        activeFrom,
+        activeUntil);
   }
 
   /**
@@ -188,6 +244,34 @@ public record ActivationPolicy(
   }
 
   /**
+   * Returns a policy that fires on the first {@code applications} matches and then becomes {@code
+   * INACTIVE}: {@link #always()} with {@code maxApplications = applications}. The equivalent of the
+   * native library's {@code @first=N} qualifier.
+   *
+   * @param applications the number of applications; {@code > 0}
+   * @return the policy
+   * @throws IllegalArgumentException if {@code applications} is not positive
+   */
+  public static ActivationPolicy count(final long applications) {
+    return builder().maxApplications(applications).build();
+  }
+
+  /**
+   * Returns a policy that fires on every match between two wall-clock instants: {@link #always()}
+   * with {@code activeFrom = from} and {@code activeUntil = until}. The equivalent of the native
+   * library's {@code @from}/{@code @until} qualifiers. Either bound may be {@code null}.
+   *
+   * @param from the first instant the scenario fires at; {@code null} for no lower bound
+   * @param until the instant from which on the scenario no longer fires; {@code null} for no upper
+   *     bound
+   * @return the policy
+   * @throws IllegalArgumentException if {@code from} is not before {@code until}
+   */
+  public static ActivationPolicy window(final Instant from, final Instant until) {
+    return builder().window(from, until).build();
+  }
+
+  /**
    * Returns a builder whose defaults equal {@link #always()}: automatic start, probability {@code
    * 1.0}, no warm-up, cap, window or rate limit, seed {@code 0}, no destructive effects.
    *
@@ -210,6 +294,8 @@ public record ActivationPolicy(
     private RateLimit rateLimit;
     private Long randomSeed = 0L;
     private boolean allowDestructiveEffects;
+    private Instant activeFrom;
+    private Instant activeUntil;
 
     private Builder() {}
 
@@ -315,6 +401,42 @@ public record ActivationPolicy(
     }
 
     /**
+     * Sets the wall-clock instant before which the scenario does not fire.
+     *
+     * @param value the instant; {@code null} for no lower bound
+     * @return this builder
+     */
+    public Builder activeFrom(final Instant value) {
+      this.activeFrom = value;
+      return this;
+    }
+
+    /**
+     * Sets the wall-clock instant from which on the scenario no longer fires.
+     *
+     * @param value the instant; {@code null} for no upper bound
+     * @return this builder
+     */
+    public Builder activeUntil(final Instant value) {
+      this.activeUntil = value;
+      return this;
+    }
+
+    /**
+     * Sets both wall-clock bounds.
+     *
+     * @param from the first instant the scenario fires at; {@code null} for no lower bound
+     * @param until the instant from which on the scenario no longer fires; {@code null} for no
+     *     upper bound
+     * @return this builder
+     */
+    public Builder window(final Instant from, final Instant until) {
+      this.activeFrom = from;
+      this.activeUntil = until;
+      return this;
+    }
+
+    /**
      * Builds the policy.
      *
      * @return the policy
@@ -329,7 +451,9 @@ public record ActivationPolicy(
           activeFor,
           rateLimit,
           randomSeed,
-          allowDestructiveEffects);
+          allowDestructiveEffects,
+          activeFrom,
+          activeUntil);
     }
   }
 

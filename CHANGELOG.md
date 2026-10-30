@@ -3,6 +3,7 @@
 
 ### BREAKING CHANGES
 
+* **core:** a clock-skew scenario whose policy sets `maxApplications`, `rateLimit`, `activateAfterMatches` or `probability < 1.0` is rejected with `ChaosValidationException`; 1.x ignored those fields for clock skew. `ActivationPolicy.fromJson` takes `activeFrom` and `activeUntil`.
 * **instrumentation:** hooks are woven on demand. The agent no longer weaves every hook at start: each interception point belongs to a hook group (`JdkInstrumentationInstaller.HookGroup`) that is retransformed the first time an activated scenario (or an opened session) needs one of its operation types, and stays woven until uninstall. A JVM without scenarios runs unmodified JDK classes; the first activation of a hook group pays its one-time weaving cost, and a weaving failure fails that activation with failure category `INSTRUMENTATION_FAILURE`. The agent argument `instrumentation=eager`, the system property `-Dmacstab.chaos.instrumentation=eager` or the environment variable `MACSTAB_CHAOS_INSTRUMENTATION=eager` restores the 1.x behaviour (every group woven at start).
 * **instrumentation:** the premain / agentmain split is gone. Dynamic attach (`agentmain`, still behind its opt-in) and `installForLocalTests()` get exactly the same hook set as `-javaagent:` — sockets, NIO, HTTP, JDBC, clock and the rest are no longer premain-only. `ChaosAgentBootstrap.initialize(agentArgs, instrumentation, environment)` lost its `premainMode` parameter, and `JdkInstrumentationInstaller.install` takes an `eager` flag instead.
 * **instrumentation:** the unused handle slot `ADJUST_SCHEDULE_DELAY` (index 5) and `BridgeDelegate.adjustScheduleDelay` were removed. Every `BootstrapDispatcher` handle index above 5 shifted down by one; `HANDLE_COUNT` is now 57.
@@ -13,6 +14,8 @@
 
 ### Features
 
+* **api:** `ActivationPolicy` gains an absolute wall-clock window, `activeFrom` and `activeUntil` (JSON: ISO-8601 instants), read from the real system clock so an injected clock skew cannot move it; the equivalent of the native library's `@from`/`@until`. New factories `ActivationPolicy.count(n)` (`@first=N`) and `ActivationPolicy.window(from, until)`, and builder methods `activeFrom`, `activeUntil` and `window`. The 8-argument constructor is kept.
+* **core:** clock-skew scenarios honour `activeFor`, `activeFrom` and `activeUntil`, and stressors end at `activeUntil`.
 * **diagnostics:** `ChaosDiagnostics.snapshot().runtimeDetails()` contains `wovenHookGroups` — the comma-separated, sorted names of the hook groups woven so far (empty when none).
 
 

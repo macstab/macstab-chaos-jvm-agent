@@ -372,6 +372,10 @@ All guards compose as AND: a scenario fires only if every configured guard passe
 | `rateLimit`               | `RateLimit` | `null`      | Fixed-window permit cap, window anchored at scenario start (up to 2× permits across a window boundary); `null` = unlimited                                                                                                    |
 | `randomSeed`              | `Long`      | `0L`        | Seed for `SplittableRandom`; XOR-ed with `scenario.id().hashCode()` for per-scenario uniqueness                                                                                                                               |
 | `allowDestructiveEffects` | `boolean`   | `false`     | Must be `true` to activate `DeadlockEffect` or `ThreadLeakEffect`; see below                                                                                                                                                  |
+| `activeFrom`              | `Instant`   | `null`      | Wall-clock instant before which the scenario does not fire; such calls are not counted as matches. Read from the real system clock, so an injected clock skew cannot move it. `null` = no lower bound                      |
+| `activeUntil`             | `Instant`   | `null`      | Wall-clock instant from which on the scenario no longer fires (state `INACTIVE`, reason `"expired"`); ends a stressor. Must be after `activeFrom`. `null` = no upper bound                                                  |
+
+**Factories.** `ActivationPolicy.always()`, `manual()` and `withDestructiveEffects()` cover the common cases; `count(n)` fires on the first `n` matches (`maxApplications = n`, the native library's `@first=N`) and `window(from, until)` fires between two instants (`@from`/`@until`). `ActivationPolicy.builder()` sets any combination and, unlike the canonical constructor, does not break when the record gains a field.
 
 ### Destructive Effects Safeguard
 
@@ -395,7 +399,9 @@ ChaosScenario.builder("deadlock-test")
     .build();
 ```
 
-**Stress scenarios** accept only `startMode`, `activeFor` and `allowDestructiveEffects`: `maxApplications`, `rateLimit`, `activateAfterMatches > 0` and `probability < 1.0` are rejected with `ChaosValidationException`, because a stressor runs from start until `stop()`/`close()` or until `activeFor` ends.
+**Stress scenarios** accept only `startMode`, `activeFor`, `activeUntil` and `allowDestructiveEffects`: `maxApplications`, `rateLimit`, `activateAfterMatches > 0`, `probability < 1.0` and `activeFrom` are rejected with `ChaosValidationException`, because a stressor runs from start until `stop()`/`close()` or until `activeFor` or `activeUntil` ends.
+
+**Clock-skew scenarios** apply to every clock read while active. They honour `activeFor`, `activeFrom` and `activeUntil`; `maxApplications`, `rateLimit`, `activateAfterMatches > 0` and `probability < 1.0` are rejected with `ChaosValidationException` (1.x ignored them silently).
 
 **`randomSeed`**: With the same seed, probability sampling is deterministic across runs given the same sequence of `matchedCount` values. Different scenarios with the same seed still produce different samples because the seed is XOR-ed with `scenario.id().hashCode()`.
 

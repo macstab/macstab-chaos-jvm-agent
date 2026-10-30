@@ -691,6 +691,11 @@ public final class ChaosDispatcher {
       if (state == null) {
         continue;
       }
+      // The time bounds (activeFor, activeFrom, activeUntil) apply to a clock skew like to any
+      // scenario; they used to be ignored here because clock reads bypass evaluate().
+      if (!controller.withinWindow()) {
+        continue;
+      }
       if (!SelectorMatcher.matches(controller.scenario().selector(), context)) {
         continue;
       }
