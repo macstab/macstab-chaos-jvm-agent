@@ -38,6 +38,11 @@ final class CodeCachePressureStressor implements ManagedStressor {
   private volatile List<Class<?>> retainedClasses;
   private volatile List<URLClassLoader> retainedLoaders;
 
+  /** Background thread driving JIT compilation; stopped and joined by {@link #close()}. */
+  private volatile Thread compilerThread;
+
+  private static final long COMPILER_JOIN_TIMEOUT_MILLIS = 1_000L;
+
   CodeCachePressureStressor(final ChaosEffect.CodeCachePressureEffect effect) {
     final CompilationMXBean compilationBean = ManagementFactory.getCompilationMXBean();
     final long compilationTimeBefore =
@@ -70,19 +75,32 @@ final class CodeCachePressureStressor implements ManagedStressor {
     if (!classes.isEmpty()) {
       final List<Class<?>> snapshot = List.copyOf(classes);
       final int methodsPerClass = effect.methodsPerClass();
+      // Agent-owned thread: it runs with the dispatch depth raised so the user's REFLECTION_INVOKE
+      // scenarios do not apply to its Method.invoke loop.
       final Thread compiler =
           new Thread(
               () -> {
-                for (final Class<?> loadedClass : snapshot) {
-                  if (retainedClasses == null) {
-                    return;
+                ChaosDispatcher.incrementDispatchDepth();
+                try {
+                  for (final Class<?> loadedClass : snapshot) {
+                    if (retainedClasses == null || Thread.currentThread().isInterrupted()) {
+                      return;
+                    }
+                    triggerCompilation(loadedClass, methodsPerClass);
                   }
-                  triggerCompilation(loadedClass, methodsPerClass);
+                } finally {
+                  ChaosDispatcher.decrementDispatchDepth();
                 }
               },
               "chaos-code-cache-compiler");
       compiler.setDaemon(true);
-      compiler.start();
+      compilerThread = compiler;
+      ChaosDispatcher.incrementDispatchDepth();
+      try {
+        compiler.start();
+      } finally {
+        ChaosDispatcher.decrementDispatchDepth();
+      }
     }
 
     if (compilationBean != null && compilationBean.isCompilationTimeMonitoringSupported()) {
@@ -98,8 +116,25 @@ final class CodeCachePressureStressor implements ManagedStressor {
     }
   }
 
+  /** Returns the compiler thread, or {@code null} once {@link #close()} has run. */
+  Thread compilerThread() {
+    return compilerThread;
+  }
+
   @Override
   public void close() {
+    // Stop the compiler thread first: it only checked for close between classes, so it kept
+    // invoking (and compiling) methods of classes whose loaders were being closed.
+    final Thread compiler = compilerThread;
+    compilerThread = null;
+    if (compiler != null) {
+      compiler.interrupt();
+      try {
+        compiler.join(COMPILER_JOIN_TIMEOUT_MILLIS);
+      } catch (final InterruptedException interrupted) {
+        Thread.currentThread().interrupt();
+      }
+    }
     final List<URLClassLoader> loaders = retainedLoaders;
     retainedLoaders = null;
     if (loaders != null) {
@@ -158,6 +193,9 @@ final class CodeCachePressureStressor implements ManagedStressor {
         // whole point of this stressor. 15 000 clears C2 comfortably per-method; iteration
         // counts beyond this give diminishing returns because the method is already compiled.
         for (int invocation = 0; invocation < 15_000; invocation++) {
+          if (Thread.currentThread().isInterrupted()) {
+            return;
+          }
           method.invoke(instance, (long) invocation);
         }
       }
