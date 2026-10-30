@@ -1,6 +1,7 @@
 package com.macstab.chaos.jvm.bootstrap;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -225,6 +226,35 @@ class StartupConfigPollerTest {
       verify(handle1).stop();
       verify(runtime).activate(v1);
       verify(runtime).activate(v2);
+    }
+
+    @Test
+    @DisplayName("a changed scenario that fails to activate restores the previous version")
+    void failedChangeRestoresPreviousVersion() {
+      final ChaosScenario v1 = scenarioWithMaxApplications("x", 1);
+      final ChaosScenario v2 = scenarioWithMaxApplications("x", 2);
+      final ChaosActivationHandle restored = mock(ChaosActivationHandle.class);
+      when(runtime.activate(v1)).thenReturn(handle1, restored);
+      when(runtime.activate(v2)).thenThrow(new IllegalArgumentException("invalid v2"));
+      poller.applyDiff(List.of(v1));
+
+      assertThatThrownBy(() -> poller.applyDiff(List.of(v2)))
+          .isInstanceOf(IllegalStateException.class)
+          .hasMessageContaining("previous scenarios kept");
+
+      verify(runtime, times(2)).activate(v1);
+    }
+
+    @Test
+    @DisplayName("a plan with one failing scenario activates none of its new scenarios")
+    void failingPlanActivatesNothing() {
+      when(runtime.activate(scenario("a"))).thenReturn(handle1);
+      when(runtime.activate(scenario("b"))).thenThrow(new IllegalArgumentException("invalid b"));
+
+      assertThatThrownBy(() -> poller.applyDiff(List.of(scenario("a"), scenario("b"))))
+          .isInstanceOf(IllegalStateException.class);
+
+      verify(handle1).stop();
     }
 
     @Test

@@ -1067,4 +1067,69 @@ class CompatibilityValidatorTest {
         .activationPolicy(ActivationPolicy.withDestructiveEffects())
         .build();
   }
+
+  @Nested
+  @DisplayName("effects the selected operations cannot carry out")
+  class EffectOperationSupport {
+
+    @Test
+    @DisplayName(
+        "SUPPRESS on socket reads is rejected: the interception point can only delay or throw")
+    void suppressOnSocketReadIsRejected() {
+      final ChaosScenario scenario =
+          jvm(ChaosSelector.network(Set.of(OperationType.SOCKET_READ)), ChaosEffect.suppress());
+
+      assertThatThrownBy(() -> CompatibilityValidator.validate(scenario, featureSet))
+          .isInstanceOf(ChaosValidationException.class)
+          .hasMessageContaining("SOCKET_READ");
+    }
+
+    @Test
+    @DisplayName("SUPPRESS on Thread.sleep is accepted")
+    void suppressOnSleepIsAccepted() {
+      final ChaosScenario scenario =
+          jvm(
+              ChaosSelector.thread(
+                  Set.of(OperationType.THREAD_SLEEP), ChaosSelector.ThreadKind.ANY),
+              ChaosEffect.suppress());
+
+      assertThatCode(() -> CompatibilityValidator.validate(scenario, featureSet))
+          .doesNotThrowAnyException();
+    }
+
+    @Test
+    @DisplayName("a delay on clock reads is rejected: clock reads only take a skew")
+    void delayOnClockReadIsRejected() {
+      final ChaosScenario scenario =
+          jvm(
+              ChaosSelector.jvmRuntime(Set.of(OperationType.INSTANT_NOW)),
+              ChaosEffect.delay(Duration.ofMillis(5)));
+
+      assertThatThrownBy(() -> CompatibilityValidator.validate(scenario, featureSet))
+          .isInstanceOf(ChaosValidationException.class)
+          .hasMessageContaining("ClockSkewEffect");
+    }
+
+    @Test
+    @DisplayName("a clock skew on a non-clock operation is rejected")
+    void skewOnNonClockOperationIsRejected() {
+      final ChaosScenario scenario =
+          jvm(
+              ChaosSelector.jvmRuntime(Set.of(OperationType.SYSTEM_GC_REQUEST)),
+              ChaosEffect.skewClock(Duration.ofSeconds(1), ChaosEffect.ClockSkewMode.FIXED));
+
+      assertThatThrownBy(() -> CompatibilityValidator.validate(scenario, featureSet))
+          .isInstanceOf(ChaosValidationException.class)
+          .hasMessageContaining("SYSTEM_GC_REQUEST");
+    }
+
+    private ChaosScenario jvm(final ChaosSelector selector, final ChaosEffect effect) {
+      return ChaosScenario.builder("support")
+          .scope(ChaosScenario.ScenarioScope.JVM)
+          .selector(selector)
+          .effect(effect)
+          .activationPolicy(ActivationPolicy.always())
+          .build();
+    }
+  }
 }

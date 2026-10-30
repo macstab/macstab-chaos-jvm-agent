@@ -306,6 +306,12 @@ final class ChaosBridge implements BridgeDelegate {
    * @throws Throwable if the runtime decides to abort the call
    */
   @Override
+  public java.time.LocalDateTime adjustLocalDateTimeNowInZone(
+      final java.time.LocalDateTime realValue, final java.time.ZoneId zone) {
+    return runtime.adjustLocalDateTimeNowInZone(realValue, zone);
+  }
+
+  @Override
   public java.time.LocalDateTime adjustLocalDateTimeNow(final java.time.LocalDateTime realValue)
       throws Throwable {
     return runtime.adjustLocalDateTimeNow(realValue);
@@ -489,8 +495,8 @@ final class ChaosBridge implements BridgeDelegate {
    * @throws Throwable if the runtime decides to abort or delay the read
    */
   @Override
-  public void beforeSocketRead(final Object stream) throws Throwable {
-    runtime.beforeSocketRead(stream);
+  public void beforeSocketRead(final Object stream, final Object remoteAddress) throws Throwable {
+    runtime.beforeSocketRead(stream, remoteAddress);
   }
 
   /**
@@ -501,8 +507,9 @@ final class ChaosBridge implements BridgeDelegate {
    * @throws Throwable if the runtime decides to abort or delay the write
    */
   @Override
-  public void beforeSocketWrite(final Object stream, final int len) throws Throwable {
-    runtime.beforeSocketWrite(stream, len);
+  public void beforeSocketWrite(final Object stream, final int len, final Object remoteAddress)
+      throws Throwable {
+    runtime.beforeSocketWrite(stream, len, remoteAddress);
   }
 
   /**

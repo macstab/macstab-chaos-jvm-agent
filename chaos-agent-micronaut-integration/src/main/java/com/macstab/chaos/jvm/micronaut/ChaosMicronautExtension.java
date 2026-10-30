@@ -12,6 +12,7 @@ import org.junit.jupiter.api.extension.ExtensionContext;
 import org.junit.jupiter.api.extension.ParameterContext;
 import org.junit.jupiter.api.extension.ParameterResolutionException;
 import org.junit.jupiter.api.extension.ParameterResolver;
+import org.junit.platform.commons.support.AnnotationSupport;
 
 /**
  * JUnit 5 extension that installs the chaos agent once per test JVM and opens a class-scoped {@link
@@ -113,7 +114,10 @@ public final class ChaosMicronautExtension
     ExtensionContext current = context;
     while (current != null) {
       final Optional<Class<?>> testClass = current.getTestClass();
-      if (testClass.isPresent() && testClass.get().isAnnotationPresent(MicronautTest.class)) {
+      // isAnnotated also finds @MicronautTest as a meta-annotation (it is one on
+      // @MicronautChaosTest); Class.isAnnotationPresent only sees direct annotations.
+      if (testClass.isPresent()
+          && AnnotationSupport.isAnnotated(testClass.get(), MicronautTest.class)) {
         return true;
       }
       current = current.getParent().orElse(null);

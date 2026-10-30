@@ -98,9 +98,78 @@ public final class ChaosPlanMapper {
     try {
       return OBJECT_MAPPER.readValue(json, ChaosPlan.class);
     } catch (JsonProcessingException exception) {
-      throw new ConfigLoadException(
-          "failed to parse chaos plan JSON", SOURCE_JSON_INPUT, exception);
+      throw new ConfigLoadException(parseFailureMessage(exception), SOURCE_JSON_INPUT, exception);
     }
+  }
+
+  /**
+   * Describes a parse failure by position, kind and JSON path, for example {@code "failed to parse
+   * chaos plan JSON at line 7, column 21: unknown property 'delayy' at scenarios[0].effect"}.
+   * Values from the input are never included — Jackson's own messages can quote them (a mistyped
+   * value would be echoed into logs), so only field names, which come from the plan's structure,
+   * are reported. An earlier version reported only "failed to parse chaos plan JSON".
+   */
+  static String parseFailureMessage(final JsonProcessingException exception) {
+    final StringBuilder message = new StringBuilder("failed to parse chaos plan JSON");
+    final com.fasterxml.jackson.core.JsonLocation location = exception.getLocation();
+    if (location != null && location.getLineNr() > 0) {
+      message
+          .append(" at line ")
+          .append(location.getLineNr())
+          .append(", column ")
+          .append(location.getColumnNr());
+    }
+    message.append(": ").append(failureKind(exception));
+    if (exception instanceof com.fasterxml.jackson.databind.JsonMappingException mapping) {
+      final String path = jsonPath(mapping);
+      if (!path.isEmpty()) {
+        message.append(" at ").append(path);
+      }
+    }
+    return message.toString();
+  }
+
+  private static String failureKind(final JsonProcessingException exception) {
+    if (exception
+        instanceof com.fasterxml.jackson.databind.exc.UnrecognizedPropertyException unrecognized) {
+      return "unknown property '" + unrecognized.getPropertyName() + "'";
+    }
+    if (exception instanceof com.fasterxml.jackson.databind.exc.InvalidTypeIdException) {
+      return "unknown or missing type";
+    }
+    if (exception
+        instanceof com.fasterxml.jackson.databind.exc.ValueInstantiationException instantiation) {
+      // The cause is the agent's own validation message (for example "delay bounds must be
+      // non-null"), not Jackson's description of the input.
+      final Throwable cause = instantiation.getCause();
+      return cause != null && cause.getMessage() != null
+          ? "invalid value: " + cause.getMessage()
+          : "invalid value";
+    }
+    if (exception instanceof com.fasterxml.jackson.databind.exc.MismatchedInputException) {
+      return "value of the wrong type";
+    }
+    if (exception instanceof com.fasterxml.jackson.core.JsonParseException) {
+      return "malformed JSON";
+    }
+    return exception.getClass().getSimpleName();
+  }
+
+  private static String jsonPath(
+      final com.fasterxml.jackson.databind.JsonMappingException mapping) {
+    final StringBuilder path = new StringBuilder();
+    for (final com.fasterxml.jackson.databind.JsonMappingException.Reference reference :
+        mapping.getPath()) {
+      if (reference.getFieldName() != null) {
+        if (!path.isEmpty()) {
+          path.append('.');
+        }
+        path.append(reference.getFieldName());
+      } else if (reference.getIndex() >= 0) {
+        path.append('[').append(reference.getIndex()).append(']');
+      }
+    }
+    return path.toString();
   }
 
   /**

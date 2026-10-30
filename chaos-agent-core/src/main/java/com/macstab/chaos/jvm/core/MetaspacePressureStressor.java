@@ -69,7 +69,20 @@ final class MetaspacePressureStressor implements ManagedStressor {
       }
       throw generationFailure;
     }
-    this.retainedClasses = effect.retain() ? List.copyOf(classes) : List.of();
+    if (effect.retain()) {
+      this.retainedClasses = List.copyOf(classes);
+    } else {
+      // retain=false: a transient spike. The loader (which keeps every class it defined
+      // reachable) is released right away so the classes become unloadable at the next
+      // collection; holding it until close() made retain=false behave exactly like retain=true.
+      this.retainedClasses = List.of();
+      this.isolatedLoader = null;
+      try {
+        loader.close();
+      } catch (final java.io.IOException e) {
+        LOGGER.fine(() -> "MetaspacePressureStressor: isolated loader close failed: " + e);
+      }
+    }
   }
 
   @Override
@@ -86,6 +99,11 @@ final class MetaspacePressureStressor implements ManagedStressor {
     // Null classes after the loader is closed: retainedClassCount() == 0 is used as a signal
     // that Metaspace pressure has been released, but Metaspace is anchored by the loader above.
     retainedClasses = null;
+  }
+
+  /** Returns {@code true} while the stressor still holds its class loader. */
+  boolean holdsLoader() {
+    return isolatedLoader != null;
   }
 
   /**

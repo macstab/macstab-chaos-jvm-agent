@@ -61,8 +61,6 @@ public final class StartupConfigLoader {
   private static final String SOURCE_FILE_PREFIX = "file:";
   private static final String SOURCE_INLINE_JSON = "inline-json";
   private static final String SOURCE_BASE64 = "base64";
-  private static final String TRUE_LITERAL = "true";
-  private static final String FALSE_LITERAL = "false";
 
   /** Agent arg key carrying an inline JSON chaos plan. */
   private static final String ARG_CONFIG_JSON = "configJson";
@@ -75,6 +73,9 @@ public final class StartupConfigLoader {
 
   /** Agent arg key for opting into the startup-time plan dump. */
   private static final String ARG_DEBUG_DUMP_ON_START = "debugDumpOnStart";
+
+  /** Alias of {@link #ARG_DEBUG_DUMP_ON_START}. */
+  private static final String ARG_DEBUG_DUMP_ALIAS = "debugDump";
 
   /** POSIX sticky-bit flag (01000) within the Unix mode word. */
   private static final int POSIX_STICKY_BIT = 01000;
@@ -106,10 +107,11 @@ public final class StartupConfigLoader {
     final String file =
         firstNonBlank(agentArgs.get(ARG_CONFIG_FILE), environment.get(ENV_CONFIG_FILE));
 
+    // "debugDump" is the spelling used in parts of the documentation; both keys are accepted.
     final boolean debugDumpOnStart =
         agentArgs.getBoolean(ARG_DEBUG_DUMP_ON_START, false)
-            || TRUE_LITERAL.equalsIgnoreCase(
-                environment.getOrDefault(ENV_DEBUG_DUMP, FALSE_LITERAL));
+            || agentArgs.getBoolean(ARG_DEBUG_DUMP_ALIAS, false)
+            || AgentArgs.parseBoolean(ENV_DEBUG_DUMP, environment.get(ENV_DEBUG_DUMP), false);
 
     if (inlineJson != null) {
       final ChaosPlan plan = ChaosPlanMapper.read(inlineJson);
@@ -124,15 +126,30 @@ public final class StartupConfigLoader {
     return Optional.empty();
   }
 
+  /**
+   * Decodes standard or URL-safe base64, ignoring whitespace (line breaks from wrapped {@code
+   * base64} output). Any other character is an error: the MIME decoder used before silently skipped
+   * invalid characters, so URL-safe input ({@code -} and {@code _}) decoded to garbage that then
+   * failed as a misleading JSON parse error.
+   */
+  private static byte[] decodeBase64(final String encoded) {
+    final String compact = encoded.replaceAll("\\s+", "");
+    try {
+      return Base64.getDecoder().decode(compact);
+    } catch (final IllegalArgumentException standardFailure) {
+      try {
+        return Base64.getUrlDecoder().decode(compact);
+      } catch (final IllegalArgumentException urlFailure) {
+        urlFailure.addSuppressed(standardFailure);
+        throw new ConfigLoadException(
+            "invalid base64 encoding in chaos plan configuration", SOURCE_BASE64, urlFailure);
+      }
+    }
+  }
+
   private static LoadedPlan loadFromBase64(
       final String base64Json, final boolean debugDumpOnStart) {
-    final byte[] decoded;
-    try {
-      decoded = Base64.getMimeDecoder().decode(base64Json);
-    } catch (IllegalArgumentException exception) {
-      throw new ConfigLoadException(
-          "invalid base64 encoding in chaos plan configuration", SOURCE_BASE64, exception);
-    }
+    final byte[] decoded = decodeBase64(base64Json);
     final String json = new String(decoded, StandardCharsets.UTF_8);
     final ChaosPlan plan = ChaosPlanMapper.read(json);
     return new LoadedPlan(plan, SOURCE_BASE64, debugDumpOnStart, null);
@@ -184,7 +201,15 @@ public final class StartupConfigLoader {
    */
   private static String readFileContents(final Path path, final String originalFilePath) {
     try (final InputStream inputStream = Files.newInputStream(path, LinkOption.NOFOLLOW_LINKS)) {
-      return new String(inputStream.readAllBytes(), StandardCharsets.UTF_8);
+      // Read at most one byte past the limit: the size check above ran on a stat, and a file that
+      // grows before the read must not be loaded into memory in full.
+      final byte[] content = inputStream.readNBytes((int) MAX_FILE_SIZE + 1);
+      if (content.length > MAX_FILE_SIZE) {
+        throw new ConfigLoadException(
+            "chaos plan config file exceeds maximum size of " + MAX_FILE_SIZE + " bytes: " + path,
+            SOURCE_FILE_PREFIX + originalFilePath);
+      }
+      return new String(content, StandardCharsets.UTF_8);
     } catch (IOException exception) {
       throw new ConfigLoadException(
           "failed to read chaos plan config file: " + path,

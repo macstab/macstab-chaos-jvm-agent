@@ -19,6 +19,17 @@ dependencies {
     testImplementation(libs.assertj)
 }
 
+// Quarkus bootstrap discovers an extension through META-INF/quarkus-extension.properties in the
+// runtime jar; its deployment-artifact entry names the jar holding the @BuildStep classes. The
+// quarkus-extension.yaml file next to it is catalog metadata only and is not read at bootstrap.
+tasks.processResources {
+    val coordinates = mapOf("group" to project.group.toString(), "version" to project.version.toString())
+    inputs.properties(coordinates)
+    filesMatching("META-INF/quarkus-extension.properties") {
+        expand(coordinates)
+    }
+}
+
 tasks.jar {
     manifest {
         attributes["Automatic-Module-Name"] = "com.macstab.chaos.jvm.agent.quarkus"

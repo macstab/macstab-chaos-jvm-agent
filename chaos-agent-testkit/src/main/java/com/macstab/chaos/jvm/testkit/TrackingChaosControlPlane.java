@@ -121,7 +121,9 @@ public final class TrackingChaosControlPlane implements ChaosControlPlane {
 
   private void stopHandleSafely(final ChaosActivationHandle handle) {
     try {
-      handle.stop();
+      // close(), not stop(): close() also removes the scenario from the registry, so the next
+      // test can activate the same id and diagnostics do not accumulate stopped entries.
+      handle.close();
     } catch (final RuntimeException exception) {
       LOGGER.log(
           Level.WARNING,

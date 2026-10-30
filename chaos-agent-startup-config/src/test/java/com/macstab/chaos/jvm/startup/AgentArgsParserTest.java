@@ -103,19 +103,32 @@ class AgentArgsParserTest {
   class ErrorHandling {
 
     @Test
-    @DisplayName("trailing backslash throws with position")
+    @DisplayName("a trailing backslash is kept literally")
     void trailingBackslash() {
-      assertThatThrownBy(() -> AgentArgsParser.parse("key=value\\"))
-          .isInstanceOf(IllegalArgumentException.class)
-          .hasMessageContaining("trailing backslash");
+      assertThat(AgentArgsParser.parse("key=value\\").get("key")).isEqualTo("value\\");
     }
 
     @Test
-    @DisplayName("missing equals sign throws")
-    void missingEquals() {
-      assertThatThrownBy(() -> AgentArgsParser.parse("justAKey"))
-          .isInstanceOf(IllegalArgumentException.class)
-          .hasMessageContaining("expected key=value");
+    @DisplayName("a bare key is a boolean flag, not an error that aborts the JVM")
+    void bareKeyIsFlag() {
+      assertThat(AgentArgsParser.parse("debugDumpOnStart").getBoolean("debugDumpOnStart", false))
+          .isTrue();
+    }
+
+    @Test
+    @DisplayName("backslashes of a Windows path are kept")
+    void windowsPath() {
+      assertThat(AgentArgsParser.parse("configFile=C:\\chaos\\plan.json").get("configFile"))
+          .isEqualTo("C:\\chaos\\plan.json");
+    }
+
+    @Test
+    @DisplayName("JSON escapes in an inline plan are kept, an escaped separator is unescaped")
+    void jsonEscapesAndSeparator() {
+      final AgentArgs args =
+          AgentArgsParser.parse("configJson={\"p\":\"a\\\"b\\;c\"};debugDump=true");
+      assertThat(args.get("configJson")).isEqualTo("{\"p\":\"a\\\"b;c\"}");
+      assertThat(args.get("debugDump")).isEqualTo("true");
     }
 
     @Test

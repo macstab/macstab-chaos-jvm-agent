@@ -25,7 +25,7 @@
 
 In scope:
 - `StartupConfigLoader` — source resolution and loading
-- `AgentArgsParser` — comma-separated key=value agent argument parsing
+- `AgentArgsParser` — semicolon-separated key=value agent argument parsing
 - `AgentArgs` — parsed argument accessor
 - `ChaosPlanMapper` — Jackson ObjectMapper configuration; `ChaosPlan` serialization/deserialization
 - `ConfigLoadException` — failure type with source metadata
@@ -58,22 +58,26 @@ If none of the above is present, `StartupConfigLoader.load()` returns `Optional.
 ## Syntax
 
 ```
--javaagent:chaos-agent-bootstrap.jar=key1=value1,key2=value2,...
+-javaagent:chaos-agent-bootstrap.jar=key1=value1;key2=value2;...
 ```
 
 The raw argument string (the part after `=`) is parsed by `AgentArgsParser`:
-- Split on `,` (but `\,` is an escaped comma — treated as literal `,` within a value)
+- Split on `;` — commas are ordinary characters and need no escaping
+- Escapes: `\;` is a literal `;`, `\=` a literal `=`, `\\` a literal `\`. Any other backslash is kept as written, so Windows paths (`configFile=C:\chaos\plan.json`) and JSON escapes inside `configJson` reach the consumer unchanged
 - Each token split on the first `=` into key and value
 - Keys and values are trimmed of whitespace
-- Duplicate keys: last value wins
-- Keys without `=`: treated as a boolean flag set to `true`
+- Duplicate keys: last value wins (a warning is printed to stderr)
+- Keys without `=`: treated as a boolean flag set to `true` (e.g. `debugDumpOnStart`)
 - Empty or null argument string: produces empty `AgentArgs`
+- Arguments longer than 8192 characters are rejected
+
+Boolean values accept `true|false|1|0|yes|no|on|off` (case-insensitive). `debugDump` is accepted as an alias of `debugDumpOnStart`; the environment variable `MACSTAB_CHAOS_DEBUG_DUMP_ON_START` accepts the same literals.
 
 ## AgentArgs Access
 
 ```java
 agentArgs.get("configFile")           // String or null
-agentArgs.getBoolean("debugDump", false)  // boolean with default
+agentArgs.getBoolean("debugDumpOnStart", false)  // boolean with default
 ```
 
 ---
@@ -86,15 +90,16 @@ When loading from a file path, `StartupConfigLoader.validateAndResolvePath()` ap
 2. **Existence check**: `Files.exists(path, LinkOption.NOFOLLOW_LINKS)` — `NOFOLLOW_LINKS` detects broken symlinks without following them
 3. **Symlink rejection**: `Files.isSymbolicLink(path)` — symlinks are rejected outright. This prevents attackers from redirecting config file reads to sensitive files via symlink manipulation after path validation
 4. **Regular file check**: `Files.isRegularFile(path)` — rejects directories, pipes, devices
-5. **Size limit**: `Files.size(path) > 1_048_576` — rejects files larger than 1 MiB to prevent OOM from oversized configs
+5. **Size limit**: size read with `NOFOLLOW_LINKS` `> 1_048_576` — rejects files larger than 1 MiB to prevent OOM from oversized configs
+6. **Permissions** (POSIX filesystems only): a world-writable file, or a world-writable parent directory without the sticky bit, is rejected
 
-**TOCTOU risk**: The `exists` + `isSymbolicLink` + `isRegularFile` + `size` sequence is not atomic. A race between the checks and `Files.readString()` is theoretically possible on adversarial filesystems. This risk is accepted because the agent operates in a trusted environment; the size limit is the primary OOM protection.
+**TOCTOU**: The checks above are not atomic with the read. The file is therefore opened with `LinkOption.NOFOLLOW_LINKS` (a path swapped for a symlink after validation fails to open), and at most 1 MiB + 1 byte is read, so a file that grows after the size check is rejected rather than loaded in full.
 
 ---
 
 # 5. Base64 Encoding
 
-The `configBase64` source expects **standard Base64** (not URL-safe Base64). `Base64.getDecoder()` is used, not `Base64.getUrlDecoder()`. Decoded bytes are interpreted as UTF-8.
+The `configBase64` source accepts **standard or URL-safe Base64**. Whitespace (for example line breaks from wrapped `base64` output) is removed first; the input is then decoded with `Base64.getDecoder()` and, if that fails, with `Base64.getUrlDecoder()`. Any other invalid character is rejected — it is not skipped. Decoded bytes are interpreted as UTF-8.
 
 Malformed base64 input throws `ConfigLoadException` with category `base64`.
 
@@ -111,11 +116,11 @@ Malformed base64 input throws `ConfigLoadException` with category `base64`.
 
 ```json
 {
-  "name": "string (required)",
-  "metadata": {
-    "description": "string (optional)",
-    "tags": ["string"] 
+  "metadata": {                       // optional; default name "default"
+    "name": "string",
+    "description": "string (optional)"
   },
+  "observability": { ... },           // optional; parsed but not read by the runtime
   "scenarios": [
     {
       "id": "string (required, unique per plan)",
@@ -273,13 +278,15 @@ All fields are optional. Absent fields use defaults:
 - `source`: identifies the source type (`"inline-json"`, `"base64"`, `"file:/path/to/file"`)
 - `cause`: wrapped `IOException` or `JsonParseException` where applicable
 
+JSON parse failures report line, column, the kind of failure and the JSON path, for example `failed to parse chaos plan JSON at line 7, column 21: unknown property 'delayy' at scenarios[0].effect`. Values from the input are never included in the message, only field names.
+
 `ConfigLoadException` is an unchecked exception. It propagates out of `StartupConfigLoader.load()` and, if uncaught, aborts `premain()` — which typically causes the JVM to fail to start.
 
 ---
 
 # 8. Observability
 
-No logs are emitted by this module during normal operation. Errors throw `ConfigLoadException` with descriptive messages. The `debugDumpOnStart` flag causes `ChaosRuntime.diagnostics().debugDump()` to be printed to `System.out` immediately after plan activation — useful for startup verification.
+No logs are emitted by this module during normal operation. Errors throw `ConfigLoadException` with descriptive messages. The `debugDumpOnStart` flag causes `ChaosRuntime.diagnostics().debugDump()` to be printed to `System.err` immediately after plan activation — useful for startup verification.
 
 ---
 
@@ -291,14 +298,14 @@ When the config source is a **file**, the agent can poll it continuously and app
 
 ```bash
 # agent arg (milliseconds)
--javaagent:agent.jar=configFile=/etc/chaos/plan.json,configWatchInterval=500
+-javaagent:agent.jar=configFile=/etc/chaos/plan.json;configWatchInterval=500
 
 # or via environment variables
 MACSTAB_CHAOS_CONFIG_FILE=/etc/chaos/plan.json
 MACSTAB_CHAOS_WATCH_INTERVAL=500
 ```
 
-`configWatchInterval` (agent arg) takes precedence over `MACSTAB_CHAOS_WATCH_INTERVAL` (env var). A value of `0` or absent disables watching — the file is read once at startup. Watch mode is only available for file sources; inline JSON and base64 sources always use read-once mode.
+`configWatchInterval` (agent arg) takes precedence over `MACSTAB_CHAOS_WATCH_INTERVAL` (env var). A value of `0` or absent disables watching — the file is read once at startup (watching is off by default). Values below 50 ms are raised to 50 ms. Watch mode is only available for file sources; inline JSON and base64 sources always use read-once mode.
 
 ## Diff algorithm
 
@@ -317,6 +324,8 @@ On every poll tick `StartupConfigPoller`:
 
 Equality is record equality across all eight `ChaosScenario` fields. A single field change — even probability — triggers a stop + re-activate cycle.
 
+The reload is applied atomically: removed and changed scenarios are stopped first, then every new or changed scenario is activated. If any activation fails (or the plan contains duplicate ids), the scenarios activated by this reload are removed again and the previous versions are restored; the failure is logged to stderr and the next file change is retried. A file that fails to parse leaves the active set untouched.
+
 ## Isolation guarantee
 
 The poller only manages scenarios it activated itself (from the config file). Scenarios activated programmatically via `ChaosRuntime.activate()` or through a `ChaosSession` are invisible to the poller and are never stopped or modified by a reload.
@@ -325,7 +334,7 @@ The poller only manages scenarios it activated itself (from the config file). Sc
 
 - Single daemon thread named `chaos-config-poller`.
 - Scheduler started by `startWithInitialPlan()` during agent initialization; stopped by `close()`.
-- `close()` stops the scheduler and calls `ChaosActivationHandle.stop()` on all managed scenarios.
+- `close()` stops the scheduler and stops and unregisters all managed scenarios.
 - The daemon thread does not prevent JVM shutdown.
 
 ## External framework integration
@@ -342,7 +351,7 @@ No JVM restart required.
 
 | Agent arg             | Environment variable           | Type      | Default      | Description                  |
 |-----------------------|--------------------------------|-----------|--------------|------------------------------|
-| `configWatchInterval` | `MACSTAB_CHAOS_WATCH_INTERVAL` | long (ms) | 0 (disabled) | Poll interval; 0 = read-once |
+| `configWatchInterval` | `MACSTAB_CHAOS_WATCH_INTERVAL` | long (ms) | 0 (disabled) | Poll interval; 0 = read-once; minimum 50 |
 
 ---
 

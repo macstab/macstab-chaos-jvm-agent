@@ -9,6 +9,8 @@ import java.lang.instrument.Instrumentation;
 import java.lang.management.ManagementFactory;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.management.ObjectName;
 import net.bytebuddy.agent.ByteBuddyAgent;
@@ -35,10 +37,10 @@ import net.bytebuddy.agent.ByteBuddyAgent;
  *
  * <h2>Idempotency</h2>
  *
- * <p>{@link #initialize} is protected by a compare-and-set on the static {@link #RUNTIME}
- * reference. If two threads race during startup (e.g., concurrent dynamic-attach calls), only one
- * {@link ChaosRuntime} is ever created; the loser discards its newly constructed instance and
- * returns the winner's runtime.
+ * <p>{@link #initialize} claims the static {@link #INITIALIZATION} slot with a compare-and-set
+ * before installing anything. If two threads race during startup (e.g., concurrent dynamic-attach
+ * calls), only one installs; the other waits for its outcome and returns the same runtime (or the
+ * same failure).
  *
  * <h2>Post-initialization steps</h2>
  *
@@ -55,16 +57,26 @@ import net.bytebuddy.agent.ByteBuddyAgent;
  *
  * <h2>Thread safety</h2>
  *
- * <p>All public methods are thread-safe. {@link #RUNTIME} is an {@link AtomicReference}; the
- * initialization CAS in {@link #initialize} ensures that exactly one runtime is ever installed per
- * JVM lifetime.
+ * <p>All public methods are thread-safe. The initialization CAS in {@link #initialize} ensures that
+ * at most one runtime is installed at a time, and {@link #current()} only ever returns a runtime
+ * whose installation completed.
  */
 public final class ChaosAgentBootstrap {
   /**
-   * The single {@link ChaosRuntime} for this JVM. {@code null} until {@link #initialize} completes
-   * successfully. Written exactly once via compare-and-set; subsequent reads are non-blocking.
+   * Initialization of the single {@link ChaosRuntime} for this JVM. {@code null} until an
+   * initialization starts; the future completes with the runtime once instrumentation, the bridge,
+   * the MBean, JFR and the startup plan are installed. Claiming the slot with a future (instead of
+   * publishing the runtime itself) keeps a runtime that is still being installed — or that is
+   * rolled back after a failure — invisible to {@link #current()} and to concurrent initializers,
+   * which wait for the outcome instead.
    */
-  private static final AtomicReference<ChaosRuntime> RUNTIME = new AtomicReference<>();
+  private static final AtomicReference<CompletableFuture<ChaosRuntime>> INITIALIZATION =
+      new AtomicReference<>();
+
+  /** Thread running the current initialization; detects re-entrant initialization. */
+  private static volatile Thread initializingThread;
+
+  private static final String MBEAN_NAME = "com.macstab.chaos.jvm:type=ChaosDiagnostics";
 
   /**
    * The active config-file poller, or {@code null} when watch mode is disabled or the plan was
@@ -163,8 +175,8 @@ public final class ChaosAgentBootstrap {
    * self-attach via the JVM Attach API, which may require the JVM to be started with {@code
    * -Djdk.attach.allowAttachSelf=true} on some JDK versions.
    *
-   * <p>If the agent is already installed (i.e. {@link #RUNTIME} is non-null), the existing {@link
-   * ChaosControlPlane} is returned immediately without reinitializing.
+   * <p>If the agent is already installed, the existing {@link ChaosControlPlane} is returned
+   * immediately without reinitializing.
    *
    * @return the installed {@link ChaosControlPlane}; never null
    * @throws IllegalStateException if dynamic self-attach is unavailable on this JVM (e.g., the JDK
@@ -172,18 +184,18 @@ public final class ChaosAgentBootstrap {
    *     with {@code -javaagent:chaos-agent.jar} instead.
    */
   public static ChaosControlPlane installForLocalTests() {
-    final ChaosRuntime existing = RUNTIME.get();
+    final ChaosRuntime existing = installedRuntime();
     if (existing != null) {
       return existing;
     }
     // Double-checked under INSTALL_LOCK so two test threads racing their first call do not
     // both perform the expensive self-attach. ByteBuddyAgent.install() caches internally, but
     // initialize() below has non-trivial side effects (bridge JAR materialisation, MBean
-    // registration attempts, JFR probe). The inner initialize() performs a CAS on RUNTIME so
-    // correctness doesn't depend on this lock, but serialising here avoids doing the attach
-    // work twice when the outcome is identical.
+    // registration attempts, JFR probe). The inner initialize() claims INITIALIZATION with a
+    // CAS so correctness doesn't depend on this lock, but serialising here avoids doing the
+    // attach work twice when the outcome is identical.
     synchronized (INSTALL_LOCK) {
-      final ChaosRuntime existingAfterLock = RUNTIME.get();
+      final ChaosRuntime existingAfterLock = installedRuntime();
       if (existingAfterLock != null) {
         return existingAfterLock;
       }
@@ -210,20 +222,31 @@ public final class ChaosAgentBootstrap {
    * @throws IllegalStateException if the chaos agent has not yet been installed in this JVM
    */
   public static ChaosControlPlane current() {
-    final ChaosRuntime runtime = RUNTIME.get();
+    final ChaosRuntime runtime = installedRuntime();
     if (runtime == null) {
       throw new IllegalStateException("chaos agent is not installed");
     }
     return runtime;
   }
 
+  /** Returns the fully installed runtime, or {@code null} when none is (yet) installed. */
+  private static ChaosRuntime installedRuntime() {
+    final CompletableFuture<ChaosRuntime> initialization = INITIALIZATION.get();
+    if (initialization == null
+        || !initialization.isDone()
+        || initialization.isCompletedExceptionally()) {
+      return null;
+    }
+    return initialization.join();
+  }
+
   /**
    * Core initialization routine; creates, wires, and publishes a {@link ChaosRuntime} for this JVM.
    *
-   * <p>This method is idempotent: if {@link #RUNTIME} is already set when this method is entered,
-   * the existing runtime is returned immediately without performing any further work. If two
-   * threads race to initialize, only one will succeed in the compare-and-set; the other will
-   * discard its freshly constructed runtime and return the winner's instance.
+   * <p>This method is idempotent: if an initialization already completed, its runtime is returned
+   * without further work; if one is in progress on another thread, this call waits for it. If the
+   * initialization fails, everything it installed is rolled back and the slot is freed, so a later
+   * call can retry.
    *
    * <p>On successful initialization, this method:
    *
@@ -236,7 +259,7 @@ public final class ChaosAgentBootstrap {
    *   <li>Loads a startup chaos plan from the agent args / environment (if configured) and
    *       activates it. If {@code debugDumpOnStart} is set, prints a diagnostics dump to {@code
    *       System.err}.
-   *   <li>Publishes the runtime via {@link AtomicReference#compareAndSet}.
+   *   <li>Completes the {@link #INITIALIZATION} future, which publishes the runtime.
    * </ol>
    *
    * @param agentArgs raw argument string from the {@code -javaagent} option or attach call; parsed
@@ -255,38 +278,24 @@ public final class ChaosAgentBootstrap {
       final Instrumentation instrumentation,
       final Map<String, String> environment,
       final boolean premainMode) {
-    final ChaosRuntime existing = RUNTIME.get();
+    final CompletableFuture<ChaosRuntime> claim = new CompletableFuture<>();
+    final CompletableFuture<ChaosRuntime> existing = INITIALIZATION.compareAndExchange(null, claim);
     if (existing != null) {
-      return existing;
+      return awaitInitialization(existing);
     }
-    // Claim the RUNTIME slot with a freshly constructed runtime *before* performing any
-    // side-effecting installation (instrumentation, MBean, JFR, config load). If we did the
-    // installation first and CAS'd after, a concurrent attach would run the whole install
-    // sequence twice against the same JVM — duplicate transformers, duplicate MBean
-    // registration attempts, a second StartupConfigPoller thread. Because installation is
-    // effectively unwindable once ByteBuddy has transformed bootstrap classes, we must decide
-    // who wins *first*. The loser simply discards its unused runtime object.
-    final ChaosRuntime runtime = new ChaosRuntime();
-    if (!RUNTIME.compareAndSet(null, runtime)) {
-      return RUNTIME.get();
-    }
-    // Rollback on installation failure. Without this, an IOException from injectBridge, a
-    // reflection error from installDelegate, or an unrecoverable startup-plan failure would leave
-    // RUNTIME permanently holding a half-initialised instance with a null BootstrapDispatcher
-    // delegate. Every later call to initialize() / installForLocalTests() short-circuits on
-    // RUNTIME.get() != null, so the JVM stays in a silently-broken state for its entire lifetime.
-    // CAS'ing back to null on failure lets a subsequent attach retry cleanly; re-throwing keeps
-    // the caller aware of the failure instead of hiding it behind the short-circuit path.
+    // This thread won the slot. Installation has JVM-wide side effects (transformers, the bridge
+    // delegate, the MBean), so exactly one initializer performs it; concurrent callers wait for
+    // the outcome above instead of seeing a half-installed runtime.
+    initializingThread = Thread.currentThread();
     try {
-      JdkInstrumentationInstaller.install(instrumentation, runtime, premainMode);
-      registerMBean(runtime);
-      installJfrIntegration(runtime);
-      final Optional<StartupConfigLoader.LoadedPlan> loadedPlan =
-          StartupConfigLoader.load(agentArgs, environment);
-      loadedPlan.ifPresent(loaded -> activateLoadedPlan(loaded, agentArgs, environment, runtime));
+      final ChaosRuntime runtime =
+          installRuntime(agentArgs, instrumentation, environment, premainMode);
+      claim.complete(runtime);
       return runtime;
     } catch (final Throwable installFailure) {
-      RUNTIME.compareAndSet(runtime, null);
+      // Free the slot before failing the future so waiters that retry find it empty.
+      INITIALIZATION.compareAndSet(claim, null);
+      claim.completeExceptionally(installFailure);
       if (installFailure instanceof RuntimeException re) {
         throw re;
       }
@@ -294,6 +303,84 @@ public final class ChaosAgentBootstrap {
         throw error;
       }
       throw new IllegalStateException("agent initialization failed", installFailure);
+    } finally {
+      initializingThread = null;
+    }
+  }
+
+  private static ChaosRuntime awaitInitialization(final CompletableFuture<ChaosRuntime> pending) {
+    if (initializingThread == Thread.currentThread()) {
+      throw new IllegalStateException(
+          "chaos agent initialization re-entered on the initializing thread");
+    }
+    try {
+      return pending.join();
+    } catch (final CompletionException failure) {
+      final Throwable cause = failure.getCause();
+      if (cause instanceof RuntimeException re) {
+        throw re;
+      }
+      if (cause instanceof Error error) {
+        throw error;
+      }
+      throw new IllegalStateException("agent initialization failed", cause);
+    }
+  }
+
+  /**
+   * Installs a new runtime: instrumentation, MBean, JFR and the startup plan. On failure every step
+   * that already ran is undone — the transformers and the bridge delegate are removed, the MBean is
+   * unregistered and the runtime (with its JFR listener) is closed — so a retry starts from a clean
+   * JVM. An earlier version only cleared the published reference: a retry installed a second set of
+   * transformers (advice ran twice) and the MBean kept reporting the dead runtime.
+   */
+  private static ChaosRuntime installRuntime(
+      final String agentArgs,
+      final Instrumentation instrumentation,
+      final Map<String, String> environment,
+      final boolean premainMode) {
+    final ChaosRuntime runtime = new ChaosRuntime();
+    boolean instrumentationInstalled = false;
+    ObjectName registeredMBean = null;
+    try {
+      JdkInstrumentationInstaller.install(instrumentation, runtime, premainMode);
+      instrumentationInstalled = true;
+      registeredMBean = registerMBean(runtime);
+      installJfrIntegration(runtime);
+      final Optional<StartupConfigLoader.LoadedPlan> loadedPlan =
+          StartupConfigLoader.load(agentArgs, environment);
+      loadedPlan.ifPresent(loaded -> activateLoadedPlan(loaded, agentArgs, environment, runtime));
+      return runtime;
+    } catch (final Throwable installFailure) {
+      rollBack(instrumentation, runtime, instrumentationInstalled, registeredMBean, installFailure);
+      throw installFailure;
+    }
+  }
+
+  private static void rollBack(
+      final Instrumentation instrumentation,
+      final ChaosRuntime runtime,
+      final boolean instrumentationInstalled,
+      final ObjectName registeredMBean,
+      final Throwable installFailure) {
+    if (instrumentationInstalled) {
+      try {
+        JdkInstrumentationInstaller.uninstall(instrumentation);
+      } catch (final RuntimeException rollbackFailure) {
+        installFailure.addSuppressed(rollbackFailure);
+      }
+    }
+    if (registeredMBean != null) {
+      try {
+        ManagementFactory.getPlatformMBeanServer().unregisterMBean(registeredMBean);
+      } catch (final Exception rollbackFailure) {
+        installFailure.addSuppressed(rollbackFailure);
+      }
+    }
+    try {
+      runtime.close();
+    } catch (final RuntimeException rollbackFailure) {
+      installFailure.addSuppressed(rollbackFailure);
     }
   }
 
@@ -330,9 +417,8 @@ public final class ChaosAgentBootstrap {
       // activation failure on the initial plan, a scheduler rejection, or an I/O
       // hiccup reading the plan file. Without this, the poller scheduler daemon
       // thread is leaked for the JVM lifetime and POLLER holds a stray reference
-      // even though startup failed. The outer try/catch in initialize() will CAS the
-      // RUNTIME back to null so the agent looks cleanly uninstalled — but the
-      // poller thread would continue running, calling runtime.activate() on a
+      // even though startup failed. The rollback in installRuntime() uninstalls the agent —
+      // but the poller thread would continue running, calling runtime.activate() on a
       // runtime that is no longer published. Close it before propagating.
       try {
         poller.close();
@@ -352,15 +438,26 @@ public final class ChaosAgentBootstrap {
     }
   }
 
-  private static void registerMBean(final ChaosRuntime runtime) {
+  /**
+   * Registers the diagnostics MBean.
+   *
+   * @return the registered name, or {@code null} when nothing was registered
+   */
+  private static ObjectName registerMBean(final ChaosRuntime runtime) {
     try {
-      final ObjectName objectName = new ObjectName("com.macstab.chaos.jvm:type=ChaosDiagnostics");
+      final ObjectName objectName = new ObjectName(MBEAN_NAME);
       ManagementFactory.getPlatformMBeanServer()
           .registerMBean(new ChaosDiagnosticsMBean(runtime.diagnostics()), objectName);
-    } catch (final javax.management.InstanceAlreadyExistsException ignored) {
-      // a concurrent registrant beat us; the existing MBean is functionally identical
+      return objectName;
+    } catch (final javax.management.InstanceAlreadyExistsException alreadyRegistered) {
+      System.err.println(
+          "[chaos-agent] MBean registration skipped: "
+              + MBEAN_NAME
+              + " is already registered in this JVM");
+      return null;
     } catch (final Exception exception) {
       System.err.println("[chaos-agent] MBean registration skipped: " + exception.getMessage());
+      return null;
     }
   }
 }

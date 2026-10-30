@@ -60,20 +60,23 @@ public interface ChaosControlPlane {
     // Inspect current agent state
     ChaosDiagnostics diagnostics();
 
-    // Register event listener. Invoked synchronously on every ChaosEvent.Type:
-    //   REGISTERED, STARTED, STOPPED, RELEASED, APPLIED, SKIPPED, FAILED
+    // Register event listener. Invoked synchronously for the published event types:
+    //   STARTED, STOPPED, RELEASED, APPLIED
     void addEventListener(ChaosEventListener listener);
 
-    // Stop all active scenarios (does not uninstall instrumentation)
+    // Stop and unregister all scenarios (does not uninstall instrumentation);
+    // afterwards activate/openSession/addEventListener throw IllegalStateException
     void close();
 }
 ```
 
-**`activate(ChaosScenario)`**: Requires `scenario.scope() == JVM`. Registers the scenario with `ScenarioRegistry`, starts it if `startMode == AUTOMATIC`, returns a handle. Throws `ChaosActivationException` on duplicate ID or incompatible configuration.
+**`activate(ChaosScenario)`**: Requires `scenario.scope() == JVM`. Registers the scenario with `ScenarioRegistry`, starts it if `startMode == AUTOMATIC`, returns a handle. Throws `ChaosActivationException` when a scenario with the same id is still `REGISTERED` or `ACTIVE`, or on incompatible configuration. A previous scenario with the same id that is `STOPPED` or `INACTIVE` is replaced, so re-activating an id after `stop()` or `close()` works.
 
-**`activate(ChaosPlan)`**: Rejects any session-scoped scenario in the plan with `ChaosActivationException`. Activates all scenarios atomically from the caller's perspective (though internal registration is sequential).
+**`activate(ChaosPlan)`**: Rejects any session-scoped scenario in the plan with `ChaosActivationException`. Activation is atomic: if any scenario fails, the ones already registered are removed again before the exception propagates.
 
-**`openSession(String)`**: Creates a `DefaultChaosSession` with a UUID and the given display name. Does not bind the session to the current thread — call `session.bind()` explicitly.
+**`openSession(String)`**: Creates a `DefaultChaosSession` with a UUID and the given display name. The opening thread is bound to the session until `session.close()`; call `session.bind()` on other threads that should participate.
+
+**After `close()`**: `activate`, `openSession` and `addEventListener` throw `IllegalStateException("chaos control plane is closed")`.
 
 ---
 
@@ -110,11 +113,11 @@ public interface ChaosSession {
 }
 ```
 
-**Thread propagation**: `bind()` sets the session ID in a `ThreadLocal` on the calling thread. The session ID is automatically propagated to tasks submitted to `ThreadPoolExecutor` (via the `decorateExecutorRunnable/Callable` instrumentation), but only for tasks submitted within the `bind()` scope.
+**Thread propagation**: `bind()` pushes the session ID onto a per-thread stack (plain `ThreadLocal`) on the calling thread. The session ID is automatically propagated to tasks submitted to executors and schedulers (via the `decorateExecutorRunnable/Callable` instrumentation) — the worker run and every scheduled tick of a periodic task execute bound to the session — but only for tasks submitted while the thread is bound. A session-scoped clock skew applies only on bound threads.
 
 For tasks submitted to executors outside a `bind()` block, use `session.wrap(task)` to explicitly carry the session context.
 
-**`close()` contract**: Stops all session-scoped scenarios. Subsequent calls to `bind()` on a closed session are undefined behavior.
+**`close()` contract**: Stops and unregisters all session-scoped scenarios and removes the opening thread's binding. Subsequent calls to `bind()` on a closed session are undefined behavior.
 
 ---
 
@@ -122,7 +125,7 @@ For tasks submitted to executors outside a `bind()` block, use `session.wrap(tas
 
 ```java
 public interface ChaosActivationHandle extends AutoCloseable {
-    // Unique ID of the activated scenario (plan handles return the composite plan ID)
+    // Registry key: "jvm::<id>", "session:<sessionId>::<id>", or "plan:<name>" for plans
     String id();
 
     // Start the scenario (if startMode == MANUAL; no-op for AUTOMATIC)
@@ -137,18 +140,21 @@ public interface ChaosActivationHandle extends AutoCloseable {
     // Current lifecycle state (snapshot; may change concurrently)
     ChaosDiagnostics.ScenarioState state();
 
-    // Equivalent to stop()
+    // Interface default is stop(); the handles returned by the runtime
+    // override it to stop AND unregister the scenario
     @Override default void close() { stop(); }
 }
 ```
 
-**`release()`**: Applicable only to gate-effect scenarios. Unblocks all threads currently waiting in `ManualGate.await()`. Does not stop the scenario — subsequent matching invocations will re-enter the gate.
+**`close()`**: On every handle returned by `activate()` (scenario, session and plan handles), `close()` stops the scenario **and** removes it from the registry, so it disappears from diagnostics and its id can be activated again. Use try-with-resources for automatic cleanup. `stop()` alone leaves a `STOPPED` entry registered (which is still replaced by a later activation of the same id).
+
+**`release()`**: Applicable only to gate-effect scenarios. Unblocks all threads currently waiting in `ManualGate.await()` and re-arms the gate. Does not stop the scenario — subsequent matching invocations will re-enter the gate. A no-op for non-gate scenarios and for scenarios that are not `ACTIVE`.
 
 **`state()`**: Returns one of `REGISTERED`, `ACTIVE`, `INACTIVE`, `STOPPED`. Useful for assertions in tests (`assertThat(handle.state()).isEqualTo(ACTIVE)`).
 
 **Idempotency**: `stop()` and `close()` are idempotent; calling them multiple times is safe.
 
-**Plan activations**: `controlPlane.activate(ChaosPlan)` returns a composite handle whose `stop()` stops every scenario in the plan and whose `id()` reports the plan ID.
+**Plan activations**: `controlPlane.activate(ChaosPlan)` returns a composite handle whose `stop()`/`close()` are broadcast to every scenario in the plan and whose `id()` is `plan:<plan name>`.
 
 ---
 
@@ -292,7 +298,8 @@ ChaosEffect.injectException("java.io.IOException", "chaos");
 // Corrupt a method's return value
 ChaosEffect.corruptReturnValue(ChaosEffect.ReturnValueStrategy.NULL);
 
-// Skew System.currentTimeMillis() / nanoTime()
+// Skew clock reads (Instant.now(), LocalDateTime/ZonedDateTime.now(), new Date();
+// System.currentTimeMillis()/nanoTime() only through the manual hook — see §9.1)
 ChaosEffect.skewClock(Duration.ofMillis(5000), ChaosEffect.ClockSkewMode.FIXED);
 ChaosEffect.skewClock(Duration.ofMillis(100),  ChaosEffect.ClockSkewMode.DRIFT);  // accumulates per call
 ChaosEffect.skewClock(Duration.ZERO,            ChaosEffect.ClockSkewMode.FREEZE); // freezes at start time
@@ -360,9 +367,9 @@ All guards compose as AND: a scenario fires only if every configured guard passe
 | `startMode`               | `StartMode` | `AUTOMATIC` | `AUTOMATIC` starts on registration; `MANUAL` waits for `handle.start()`                                                                                                                                                       |
 | `probability`             | `double`    | `1.0`       | Fraction of passing matches that fire; must be in `(0.0, 1.0]`. An explicit `0.0` is rejected with `IllegalArgumentException`; omit the scenario activation entirely to disable it. A `null` value in JSON defaults to `1.0`. |
 | `activateAfterMatches`    | `long`      | `0`         | Skip this many initial matches before becoming eligible                                                                                                                                                                       |
-| `maxApplications`         | `Long`      | `null`      | Hard cap on total applications; `null` = unlimited                                                                                                                                                                            |
-| `activeFor`               | `Duration`  | `null`      | Auto-expire this long after first start; `null` = no expiry                                                                                                                                                                   |
-| `rateLimit`               | `RateLimit` | `null`      | Sliding-window permit cap; `null` = unlimited                                                                                                                                                                                 |
+| `maxApplications`         | `Long`      | `null`      | Hard cap on total applications; `null` = unlimited. Only applications that take effect count — a scenario that loses on precedence does not consume budget                                                                    |
+| `activeFor`               | `Duration`  | `null`      | Auto-expire this long after first start (state `INACTIVE`, reason `"expired"`); for stress scenarios this also ends the stressor; `null` = no expiry                                                                          |
+| `rateLimit`               | `RateLimit` | `null`      | Fixed-window permit cap, window anchored at scenario start (up to 2× permits across a window boundary); `null` = unlimited                                                                                                    |
 | `randomSeed`              | `Long`      | `0L`        | Seed for `SplittableRandom`; XOR-ed with `scenario.id().hashCode()` for per-scenario uniqueness                                                                                                                               |
 | `allowDestructiveEffects` | `boolean`   | `false`     | Must be `true` to activate `DeadlockEffect` or `ThreadLeakEffect`; see below                                                                                                                                                  |
 
@@ -388,6 +395,8 @@ ChaosScenario.builder("deadlock-test")
     .build();
 ```
 
+**Stress scenarios** accept only `startMode`, `activeFor` and `allowDestructiveEffects`: `maxApplications`, `rateLimit`, `activateAfterMatches > 0` and `probability < 1.0` are rejected with `ChaosValidationException`, because a stressor runs from start until `stop()`/`close()` or until `activeFor` ends.
+
 **`randomSeed`**: With the same seed, probability sampling is deterministic across runs given the same sequence of `matchedCount` values. Different scenarios with the same seed still produce different samples because the seed is XOR-ed with `scenario.id().hashCode()`.
 
 ---
@@ -396,31 +405,35 @@ ChaosScenario.builder("deadlock-test")
 
 The `OperationType` enum defines all intercepted JDK operations. Full list:
 
-| Category                        | OperationType values                                                                                        |
-|---------------------------------|-------------------------------------------------------------------------------------------------------------|
-| Executor                        | `EXECUTOR_SUBMIT`, `EXECUTOR_WORKER_RUN`, `EXECUTOR_SHUTDOWN`, `EXECUTOR_AWAIT_TERMINATION`                 |
-| Scheduled                       | `SCHEDULE_SUBMIT`, `SCHEDULE_TICK`                                                                          |
-| ForkJoin                        | `FORK_JOIN_TASK_RUN`                                                                                        |
-| Thread                          | `THREAD_START`, `VIRTUAL_THREAD_START`                                                                      |
-| Queue                           | `QUEUE_PUT`, `QUEUE_TAKE`, `QUEUE_OFFER`, `QUEUE_POLL`                                                      |
-| Async                           | `ASYNC_COMPLETE`, `ASYNC_COMPLETE_EXCEPTIONALLY`, `ASYNC_CANCEL`                                            |
-| Clock (auto-wired)              | `INSTANT_NOW`, `LOCAL_DATE_TIME_NOW`, `ZONED_DATE_TIME_NOW`, `DATE_NEW`                                     |
-| Clock (manual hook — see §11)   | `SYSTEM_CLOCK_MILLIS`, `SYSTEM_CLOCK_NANOS`                                                                 |
-| GC                              | `SYSTEM_GC_REQUEST`                                                                                         |
-| Exit                            | `SYSTEM_EXIT_REQUEST`                                                                                       |
-| Reflection                      | `REFLECTION_INVOKE`                                                                                         |
-| Memory                          | `DIRECT_BUFFER_ALLOCATE`                                                                                    |
-| Serialization                   | `OBJECT_DESERIALIZE`, `OBJECT_SERIALIZE`                                                                    |
-| Class                           | `CLASS_LOAD`, `CLASS_DEFINE`, `RESOURCE_LOAD`                                                               |
-| Synchronization                 | `MONITOR_ENTER`, `THREAD_PARK`                                                                              |
-| NIO                             | `NIO_SELECTOR_SELECT`, `NIO_CHANNEL_READ`, `NIO_CHANNEL_WRITE`, `NIO_CHANNEL_CONNECT`, `NIO_CHANNEL_ACCEPT` |
-| Network                         | `SOCKET_CONNECT`, `SOCKET_ACCEPT`, `SOCKET_READ`, `SOCKET_WRITE`, `SOCKET_CLOSE`                            |
-| Infrastructure                  | `JNDI_LOOKUP`, `JMX_INVOKE`, `JMX_GET_ATTR`, `NATIVE_LIBRARY_LOAD`                                          |
-| Compression                     | `ZIP_INFLATE`, `ZIP_DEFLATE`                                                                                |
-| ThreadLocal                     | `THREAD_LOCAL_GET`, `THREAD_LOCAL_SET`                                                                      |
-| Shutdown                        | `SHUTDOWN_HOOK_REGISTER`                                                                                    |
-| Method (manual hook — see §9.1) | `METHOD_ENTER`, `METHOD_EXIT`                                                                               |
-| Stressor                        | `LIFECYCLE` (internal; targets stressor start/stop)                                                         |
+| Category                        | OperationType values                                                                                                                   |
+|---------------------------------|----------------------------------------------------------------------------------------------------------------------------------------|
+| Executor                        | `EXECUTOR_SUBMIT`, `EXECUTOR_WORKER_RUN`, `EXECUTOR_SHUTDOWN`, `EXECUTOR_AWAIT_TERMINATION`                                            |
+| Scheduled                       | `SCHEDULE_SUBMIT`, `SCHEDULE_TICK`                                                                                                     |
+| ForkJoin                        | `FORK_JOIN_TASK_RUN`                                                                                                                   |
+| Thread                          | `THREAD_START`, `VIRTUAL_THREAD_START`, `THREAD_SLEEP`                                                                                 |
+| Queue                           | `QUEUE_PUT`, `QUEUE_TAKE`, `QUEUE_OFFER`, `QUEUE_POLL`                                                                                 |
+| Async                           | `ASYNC_COMPLETE`, `ASYNC_COMPLETE_EXCEPTIONALLY`, `ASYNC_CANCEL`                                                                       |
+| Clock (auto-wired)              | `INSTANT_NOW`, `LOCAL_DATE_TIME_NOW`, `ZONED_DATE_TIME_NOW`, `DATE_NEW`                                                                |
+| Clock (manual hook — see §11)   | `SYSTEM_CLOCK_MILLIS`, `SYSTEM_CLOCK_NANOS`                                                                                            |
+| GC                              | `SYSTEM_GC_REQUEST`                                                                                                                    |
+| Exit                            | `SYSTEM_EXIT_REQUEST`                                                                                                                  |
+| Reflection                      | `REFLECTION_INVOKE`                                                                                                                    |
+| Memory                          | `DIRECT_BUFFER_ALLOCATE`                                                                                                               |
+| Serialization                   | `OBJECT_DESERIALIZE`, `OBJECT_SERIALIZE`                                                                                               |
+| Class                           | `CLASS_LOAD`, `CLASS_DEFINE`, `RESOURCE_LOAD`                                                                                          |
+| Synchronization                 | `MONITOR_ENTER`, `THREAD_PARK`                                                                                                         |
+| NIO                             | `NIO_SELECTOR_SELECT`, `NIO_CHANNEL_READ`, `NIO_CHANNEL_WRITE`, `NIO_CHANNEL_CONNECT`, `NIO_CHANNEL_ACCEPT`                            |
+| Network                         | `SOCKET_CONNECT`, `SOCKET_ACCEPT`, `SOCKET_READ`, `SOCKET_WRITE`, `SOCKET_CLOSE`                                                       |
+| Infrastructure                  | `JNDI_LOOKUP`, `JMX_INVOKE`, `JMX_GET_ATTR`, `NATIVE_LIBRARY_LOAD`                                                                     |
+| Compression                     | `ZIP_INFLATE`, `ZIP_DEFLATE`                                                                                                           |
+| ThreadLocal                     | `THREAD_LOCAL_GET`, `THREAD_LOCAL_SET`                                                                                                 |
+| HTTP client                     | `HTTP_CLIENT_SEND`, `HTTP_CLIENT_SEND_ASYNC`                                                                                           |
+| JDBC                            | `JDBC_CONNECTION_ACQUIRE`, `JDBC_STATEMENT_EXECUTE`, `JDBC_PREPARED_STATEMENT`, `JDBC_TRANSACTION_COMMIT`, `JDBC_TRANSACTION_ROLLBACK` |
+| DNS / TLS                       | `DNS_RESOLVE`, `SSL_HANDSHAKE`                                                                                                         |
+| File I/O                        | `FILE_IO_READ`, `FILE_IO_WRITE`                                                                                                        |
+| Shutdown                        | `SHUTDOWN_HOOK_REGISTER`                                                                                                               |
+| Method (manual hook — see §9.1) | `METHOD_ENTER`, `METHOD_EXIT`                                                                                                          |
+| Stressor                        | `LIFECYCLE` (internal; targets stressor start/stop)                                                                                    |
 
 ## 9.1 Manual hook operation types
 
@@ -544,27 +557,29 @@ public interface ChaosEventListener {
 }
 
 record ChaosEvent(
+    Instant timestamp,
     ChaosEvent.Type type,
     String scenarioId,
     String message,
-    Map<String, String> attributes,
-    Instant timestamp
+    Map<String, String> attributes
 ) {
     enum Type {
-        REGISTERED,  // scenario was registered with the control plane
-        STARTED,     // scenario transitioned INACTIVE → ACTIVE
-        APPLIED,     // effect was applied to a matched operation
-        SKIPPED,     // selector matched but activation policy vetoed (probability / rate limit)
-        FAILED,      // effect evaluation threw unexpectedly (listener / reflective failure)
+        REGISTERED,  // defined, not currently published
+        STARTED,     // scenario transitioned to ACTIVE
+        APPLIED,     // a contribution took effect on a matched operation
+        SKIPPED,     // defined, not currently published
+        FAILED,      // defined, not currently published
         RELEASED,    // gate-effect release() unblocked waiters
         STOPPED      // scenario transitioned to STOPPED
     }
 }
 ```
 
+**Published events**: only `STARTED`, `STOPPED`, `RELEASED` and `APPLIED` are published by the runtime. `APPLIED` is published only for contributions that actually take effect on a call — every matching delay, the winning gate and the winning terminal action by precedence. A scenario that loses on precedence publishes nothing and does not consume its `maxApplications` budget. `APPLIED` attributes carry `operation`, `scope`, `effectType` and, for session scenarios, `sessionId`.
+
 **Contract**: Listeners are called synchronously on the application thread that triggered the event. Must not block, perform I/O, or throw checked exceptions. Listener exceptions are caught and logged; they do not abort the chaos operation.
 
-**Observability use**: Subscribe a listener to count `APPLIED` vs `SKIPPED` per scenario ID — this is the ground truth for "how many times did my chaos actually fire during this test?".
+**Observability use**: Subscribe a listener to count `APPLIED` events per scenario ID — this is the ground truth for "how many times did my chaos actually fire during this test?". For skipped matches, compare `matchedCount` and `appliedCount` in `diagnostics().snapshot()`.
 
 ---
 

@@ -22,6 +22,16 @@ class QueueAdviceTest {
     BootstrapDispatcher.install(null, null);
   }
 
+  /**
+   * Runs OfferAdvice's enter and exit as woven code does: every enter is paired with an exit, which
+   * leaves the SCOPE_QUEUE call-depth scope.
+   */
+  private static Boolean enterAndExitOffer(final Object queue) throws Throwable {
+    final Boolean decision = QueueAdvice.OfferAdvice.enter(queue);
+    QueueAdvice.OfferAdvice.exit(decision, false);
+    return decision;
+  }
+
   @Nested
   @DisplayName("OfferAdvice enter \u2014 skip logic")
   class OfferAdviceEnterSkipLogic {
@@ -29,14 +39,14 @@ class QueueAdviceTest {
     @Test
     @DisplayName("returns null (no skip) when bridge is not installed")
     void returnsNullWhenBridgeNotInstalled() throws Throwable {
-      assertThat(QueueAdvice.OfferAdvice.enter(queue)).isNull();
+      assertThat(enterAndExitOffer(queue)).isNull();
     }
 
     @Test
     @DisplayName("returns null (no skip) when bridge returns null")
     void returnsNullWhenBridgeReturnsNull() throws Throwable {
       installBooleanQueueBridge((op, q) -> null);
-      assertThat(QueueAdvice.OfferAdvice.enter(queue)).isNull();
+      assertThat(enterAndExitOffer(queue)).isNull();
     }
 
     @Test
@@ -47,14 +57,14 @@ class QueueAdviceTest {
       // value. Previous collapsed contract (TRUE \u2192 no-skip) lost the ability for chaos to
       // report a fake successful offer.
       installBooleanQueueBridge((op, q) -> Boolean.TRUE);
-      assertThat(QueueAdvice.OfferAdvice.enter(queue)).isEqualTo(Boolean.TRUE);
+      assertThat(enterAndExitOffer(queue)).isEqualTo(Boolean.TRUE);
     }
 
     @Test
     @DisplayName("returns FALSE (skip) when bridge returns FALSE \u2014 offer is suppressed")
     void returnsFalseWhenBridgeReturnsFalse() throws Throwable {
       installBooleanQueueBridge((op, q) -> Boolean.FALSE);
-      assertThat(QueueAdvice.OfferAdvice.enter(queue)).isEqualTo(Boolean.FALSE);
+      assertThat(enterAndExitOffer(queue)).isEqualTo(Boolean.FALSE);
     }
 
     @Test
@@ -69,7 +79,7 @@ class QueueAdviceTest {
             return null;
           });
 
-      QueueAdvice.OfferAdvice.enter(queue);
+      enterAndExitOffer(queue);
 
       assertThat(capturedOp.get()).isEqualTo("QUEUE_OFFER");
       assertThat(capturedQueue.get()).isSameAs(queue);

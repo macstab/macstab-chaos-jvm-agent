@@ -57,8 +57,22 @@ final class JvmRuntimeAdvice {
   }
 
   /**
-   * Rewrites the return value of {@link java.time.ZonedDateTime#now()} (no-argument variant) for
-   * clock-skew injection.
+   * Rewrites the return value of {@link java.time.LocalDateTime#now(java.time.ZoneId)} for
+   * clock-skew injection, mapping through the zone it was called with.
+   */
+  static final class LocalDateTimeNowInZoneAdvice {
+    @Advice.OnMethodExit
+    static void exit(
+        @Advice.Argument(0) final java.time.ZoneId zone,
+        @Advice.Return(readOnly = false) java.time.LocalDateTime returned)
+        throws Throwable {
+      returned = BootstrapDispatcher.adjustLocalDateTimeNowInZone(returned, zone);
+    }
+  }
+
+  /**
+   * Rewrites the return value of {@link java.time.ZonedDateTime#now()} and {@link
+   * java.time.ZonedDateTime#now(java.time.ZoneId)} for clock-skew injection.
    */
   static final class ZonedDateTimeNowAdvice {
     @Advice.OnMethodExit
@@ -116,8 +130,9 @@ final class JvmRuntimeAdvice {
   // ── A3: Exit ──────────────────────────────────────────────────────────────
 
   /**
-   * Intercepts {@code System.exit(int)} and {@code Runtime.halt(int)}. Throws {@code
-   * SecurityException} when a SUPPRESS scenario is active.
+   * Intercepts {@code Runtime.exit(int)} and {@code Runtime.halt(int)}. {@code System.exit(int)}
+   * delegates to {@code Runtime.exit(int)}, so both entry points are covered exactly once. Throws
+   * {@code SecurityException} when a SUPPRESS scenario is active.
    */
   static final class ExitRequestAdvice {
     @Advice.OnMethodEnter
@@ -167,7 +182,19 @@ final class JvmRuntimeAdvice {
     @Advice.OnMethodEnter
     static void enter(@Advice.This final Object loader, @Advice.Argument(0) final String className)
         throws Throwable {
-      BootstrapDispatcher.beforeClassDefine(loader, className);
+      if (BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_CLASS_DEFINE)) {
+        try {
+          BootstrapDispatcher.beforeClassDefine(loader, className);
+        } catch (final Throwable throwable) {
+          BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_CLASS_DEFINE);
+          throw throwable;
+        }
+      }
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit() {
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_CLASS_DEFINE);
     }
   }
 
@@ -194,7 +221,19 @@ final class JvmRuntimeAdvice {
   static final class ThreadParkAdvice {
     @Advice.OnMethodEnter
     static void enter() throws Throwable {
-      BootstrapDispatcher.beforeThreadPark();
+      if (BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_THREAD_PARK)) {
+        try {
+          BootstrapDispatcher.beforeThreadPark();
+        } catch (final Throwable throwable) {
+          BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_THREAD_PARK);
+          throw throwable;
+        }
+      }
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit() {
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_THREAD_PARK);
     }
   }
 
@@ -277,6 +316,27 @@ final class JvmRuntimeAdvice {
     }
   }
 
+  /**
+   * Intercepts {@code Selector.select(Consumer, long)}. Identical to {@link NioSelectTimeoutAdvice}
+   * except that the timeout is the second argument.
+   */
+  static final class NioSelectConsumerTimeoutAdvice {
+    @Advice.OnMethodEnter(skipOn = Advice.OnNonDefaultValue.class)
+    static boolean enter(
+        @Advice.This final Object selector, @Advice.Argument(1) final long timeoutMillis)
+        throws Throwable {
+      return BootstrapDispatcher.beforeNioSelect(selector, timeoutMillis);
+    }
+
+    @Advice.OnMethodExit
+    static void exit(
+        @Advice.Enter final boolean spurious, @Advice.Return(readOnly = false) int returned) {
+      if (spurious) {
+        returned = 0;
+      }
+    }
+  }
+
   /** Intercepts {@code ReadableByteChannel.read(ByteBuffer)} (NIO_CHANNEL_READ). */
   static final class NioChannelReadAdvice {
     @Advice.OnMethodEnter
@@ -331,35 +391,34 @@ final class JvmRuntimeAdvice {
     }
   }
 
-  /** Intercepts socket {@code InputStream.read(...)} variants. */
+  /**
+   * Intercepts {@code NioSocketImpl.read(byte[], int, int)}. The remote address is read from the
+   * inherited {@code SocketImpl.address} field — the advice is inlined into the socket
+   * implementation, so no reflection is involved — and lets {@code NetworkSelector} host patterns
+   * match reads, which previously never matched because no host was reported.
+   */
   static final class SocketReadAdvice {
     @Advice.OnMethodEnter
-    static void enter(@Advice.This final Object stream) throws Throwable {
-      BootstrapDispatcher.beforeSocketRead(stream);
+    static void enter(
+        @Advice.This final Object stream,
+        @Advice.FieldValue("address") final java.net.InetAddress remoteAddress)
+        throws Throwable {
+      BootstrapDispatcher.beforeSocketRead(stream, remoteAddress);
     }
   }
 
   /**
-   * Intercepts socket {@code OutputStream.write(int)} — the single-byte variant. Passes {@code 1}
-   * as the length so size-gated scenarios can distinguish per-byte writes from bulk writes.
-   */
-  static final class SocketWriteSingleByteAdvice {
-    @Advice.OnMethodEnter
-    static void enter(@Advice.This final Object stream) throws Throwable {
-      BootstrapDispatcher.beforeSocketWrite(stream, 1);
-    }
-  }
-
-  /**
-   * Intercepts socket {@code OutputStream.write(byte[], int, int)} — the bulk variant. Passes the
-   * actual {@code len} argument so {@code NetworkSelector} rules that filter on write byte count
-   * receive the real size instead of a hardcoded {@code 0}.
+   * Intercepts {@code NioSocketImpl.write(byte[], int, int)} with the byte count and the remote
+   * address (see {@link SocketReadAdvice}).
    */
   static final class SocketWriteBulkAdvice {
     @Advice.OnMethodEnter
-    static void enter(@Advice.This final Object stream, @Advice.Argument(2) final int len)
+    static void enter(
+        @Advice.This final Object stream,
+        @Advice.Argument(2) final int len,
+        @Advice.FieldValue("address") final java.net.InetAddress remoteAddress)
         throws Throwable {
-      BootstrapDispatcher.beforeSocketWrite(stream, len);
+      BootstrapDispatcher.beforeSocketWrite(stream, len, remoteAddress);
     }
   }
 
@@ -460,7 +519,19 @@ final class JvmRuntimeAdvice {
   static final class ZipInflateAdvice {
     @Advice.OnMethodEnter
     static void enter() throws Throwable {
-      BootstrapDispatcher.beforeZipInflate();
+      if (BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_ZIP_INFLATE)) {
+        try {
+          BootstrapDispatcher.beforeZipInflate();
+        } catch (final Throwable throwable) {
+          BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_ZIP_INFLATE);
+          throw throwable;
+        }
+      }
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit() {
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_ZIP_INFLATE);
     }
   }
 
@@ -468,7 +539,19 @@ final class JvmRuntimeAdvice {
   static final class ZipDeflateAdvice {
     @Advice.OnMethodEnter
     static void enter() throws Throwable {
-      BootstrapDispatcher.beforeZipDeflate();
+      if (BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_ZIP_DEFLATE)) {
+        try {
+          BootstrapDispatcher.beforeZipDeflate();
+        } catch (final Throwable throwable) {
+          BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_ZIP_DEFLATE);
+          throw throwable;
+        }
+      }
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit() {
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_ZIP_DEFLATE);
     }
   }
 
@@ -565,7 +648,19 @@ final class JvmRuntimeAdvice {
         @Advice.Argument(0) final Object objectName,
         @Advice.Argument(1) final String operationName)
         throws Throwable {
-      BootstrapDispatcher.beforeJmxInvoke(server, objectName, operationName);
+      if (BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_JMX)) {
+        try {
+          BootstrapDispatcher.beforeJmxInvoke(server, objectName, operationName);
+        } catch (final Throwable throwable) {
+          BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_JMX);
+          throw throwable;
+        }
+      }
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit() {
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_JMX);
     }
   }
 
@@ -579,7 +674,19 @@ final class JvmRuntimeAdvice {
         @Advice.Argument(0) final Object objectName,
         @Advice.Argument(1) final String attribute)
         throws Throwable {
-      BootstrapDispatcher.beforeJmxGetAttr(server, objectName, attribute);
+      if (BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_JMX)) {
+        try {
+          BootstrapDispatcher.beforeJmxGetAttr(server, objectName, attribute);
+        } catch (final Throwable throwable) {
+          BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_JMX);
+          throw throwable;
+        }
+      }
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit() {
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_JMX);
     }
   }
 
@@ -597,7 +704,52 @@ final class JvmRuntimeAdvice {
   static final class ThreadSleepAdvice {
     @Advice.OnMethodEnter(skipOn = Advice.OnNonDefaultValue.class)
     static boolean enter(@Advice.Argument(0) final long millis) throws Throwable {
-      return BootstrapDispatcher.beforeThreadSleep(millis);
+      if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_THREAD_SLEEP)) {
+        return false;
+      }
+      try {
+        return BootstrapDispatcher.beforeThreadSleep(millis);
+      } catch (final Throwable throwable) {
+        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_THREAD_SLEEP);
+        throw throwable;
+      }
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit() {
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_THREAD_SLEEP);
+    }
+  }
+
+  /**
+   * Intercepts {@link Thread#sleep(java.time.Duration)}, which does not delegate to {@code
+   * sleep(long)} on JDK 21+ and was previously not instrumented. Same skip semantics as {@link
+   * ThreadSleepAdvice}; the duration is passed to the dispatcher in milliseconds, saturating for
+   * durations beyond {@code Long.MAX_VALUE} ms.
+   */
+  static final class ThreadSleepDurationAdvice {
+    @Advice.OnMethodEnter(skipOn = Advice.OnNonDefaultValue.class)
+    static boolean enter(@Advice.Argument(0) final java.time.Duration duration) throws Throwable {
+      if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_THREAD_SLEEP)) {
+        return false;
+      }
+      try {
+        long millis;
+        try {
+          millis = duration == null ? 0L : duration.toMillis();
+        } catch (final ArithmeticException overflow) {
+          millis = duration.isNegative() ? Long.MIN_VALUE : Long.MAX_VALUE;
+        }
+        return BootstrapDispatcher.beforeThreadSleep(millis);
+      } catch (final Throwable throwable) {
+        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_THREAD_SLEEP);
+        throw throwable;
+      }
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit() {
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_THREAD_SLEEP);
     }
   }
 
@@ -605,7 +757,8 @@ final class JvmRuntimeAdvice {
 
   /**
    * Intercepts {@link java.net.InetAddress#getByName(String)} and {@link
-   * java.net.InetAddress#getAllByName(String)}.
+   * java.net.InetAddress#getAllByName(String)}. {@code getByName} delegates to {@code
+   * getAllByName}; the {@code SCOPE_DNS} call-depth scope evaluates a lookup once.
    *
    * <p>These are static methods, so no {@code @Advice.This} is present. The hostname argument is
    * forwarded to the dispatcher, which can inject latency or throw {@link
@@ -614,7 +767,19 @@ final class JvmRuntimeAdvice {
   static final class DnsResolveAdvice {
     @Advice.OnMethodEnter
     static void enter(@Advice.Argument(0) final String hostname) throws Throwable {
-      BootstrapDispatcher.beforeDnsResolve(hostname);
+      if (BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_DNS)) {
+        try {
+          BootstrapDispatcher.beforeDnsResolve(hostname);
+        } catch (final Throwable throwable) {
+          BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_DNS);
+          throw throwable;
+        }
+      }
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit() {
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_DNS);
     }
   }
 
@@ -626,7 +791,19 @@ final class JvmRuntimeAdvice {
   static final class DnsLocalHostAdvice {
     @Advice.OnMethodEnter
     static void enter() throws Throwable {
-      BootstrapDispatcher.beforeDnsResolve(null);
+      if (BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_DNS)) {
+        try {
+          BootstrapDispatcher.beforeDnsResolve(null);
+        } catch (final Throwable throwable) {
+          BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_DNS);
+          throw throwable;
+        }
+      }
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit() {
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_DNS);
     }
   }
 
@@ -642,7 +819,19 @@ final class JvmRuntimeAdvice {
   static final class SslHandshakeAdvice {
     @Advice.OnMethodEnter
     static void enter(@Advice.This final Object socket) throws Throwable {
-      BootstrapDispatcher.beforeSslHandshake(socket);
+      if (BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_SSL_HANDSHAKE)) {
+        try {
+          BootstrapDispatcher.beforeSslHandshake(socket);
+        } catch (final Throwable throwable) {
+          BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_SSL_HANDSHAKE);
+          throw throwable;
+        }
+      }
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit() {
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_SSL_HANDSHAKE);
     }
   }
 

@@ -39,8 +39,8 @@ import java.util.concurrent.ForkJoinTask;
  * System.currentTimeMillis}). Without protection this would recurse infinitely. The {@code DEPTH}
  * {@link ThreadLocal} counts nested dispatch calls on the current thread. If {@code DEPTH > 0} when
  * a dispatch method is entered, the method returns its safe fallback immediately without invoking
- * the delegate. The {@code ThreadLocal} is {@linkplain ThreadLocal#remove() removed} when the
- * outermost call unwinds to avoid memory leaks in thread pools.
+ * the delegate. The same per-thread array also holds the call-depth scope counters (see {@link
+ * #enterScope(int)}), so it is kept for the thread's lifetime rather than removed on unwind.
  *
  * <h2>Thread safety</h2>
  *
@@ -62,13 +62,132 @@ public final class BootstrapDispatcher {
    * that would otherwise occur when {@code ThreadLocal.get()} is intercepted. See {@code
    * JvmRuntimeAdvice.ThreadLocalGetAdvice} for the full reentrancy analysis.
    *
-   * <p>A one-element {@code int[]} is held rather than an {@link Integer} so the fast path in
-   * {@link #invoke} performs exactly one {@link ThreadLocal#get()} (per call) and mutates the
-   * counter in place — avoiding both a second {@code get()} and the Integer autoboxing that a
-   * {@code set(get()+1)} pair would incur. This matters because every intercepted JDK call hits
-   * this guard.
+   * <p>An {@code int[]} (index 0: reentrancy depth, then one counter per call-depth scope) is held
+   * rather than an {@link Integer} so the fast path in {@link #invoke} performs exactly one {@link
+   * ThreadLocal#get()} (per call) and mutates the counter in place — avoiding both a second {@code
+   * get()} and the Integer autoboxing that a {@code set(get()+1)} pair would incur. This matters
+   * because every intercepted JDK call hits this guard.
    */
-  private static final ThreadLocal<int[]> DEPTH = ThreadLocal.withInitial(() -> new int[1]);
+  private static final ThreadLocal<int[]> DEPTH =
+      ThreadLocal.withInitial(() -> new int[BootstrapDispatcher.SCOPE_COUNT]);
+
+  // ── Call-depth scopes ──────────────────────────────────────────────────────
+  //
+  // Many instrumented methods call another instrumented method for the same logical operation:
+  // InetAddress.getByName → getAllByName, a generic bridge → its typed twin, a pool proxy →
+  // the driver statement, PgConnection.prepareStatement(String) → prepareStatement(String, int,
+  // int, int), CloseableHttpClient.execute(request) → execute(request, context), a class loader
+  // → its parent. Without a guard each nested hop is evaluated as a separate call: delays add
+  // up, probability is rolled several times and maxApplications runs out early.
+  //
+  // Advice for such operations brackets the method with enterScope/exitScope. enterScope
+  // returns true only for the outermost call on the current thread, and only that call
+  // dispatches. The counters live in the same per-thread array as the reentrancy depth (index
+  // 0), so ThreadLocalGetAdvice's identity check on DEPTH also covers them and no second
+  // instrumented ThreadLocal is introduced.
+
+  /** Scope index for DNS resolution ({@code InetAddress.getByName} / {@code getAllByName}). */
+  public static final int SCOPE_DNS = 1;
+
+  /** Scope index for {@code Inflater.inflate} overloads. */
+  public static final int SCOPE_ZIP_INFLATE = 2;
+
+  /** Scope index for {@code Deflater.deflate} overloads. */
+  public static final int SCOPE_ZIP_DEFLATE = 3;
+
+  /** Scope index for {@code MBeanServer.invoke} / {@code getAttribute} (server → interceptor). */
+  public static final int SCOPE_JMX = 4;
+
+  /** Scope index for {@code BlockingQueue} put / offer / take / poll (bridges, put → offer). */
+  public static final int SCOPE_QUEUE = 5;
+
+  /** Scope index for {@code ClassLoader.loadClass} (overloads and parent delegation). */
+  public static final int SCOPE_CLASS_LOAD = 6;
+
+  /** Scope index for {@code ClassLoader.defineClass} overloads. */
+  public static final int SCOPE_CLASS_DEFINE = 7;
+
+  /** Scope index for {@code ClassLoader.getResource} (parent delegation). */
+  public static final int SCOPE_RESOURCE_LOAD = 8;
+
+  /** Scope index for {@code LockSupport.park*} overloads. */
+  public static final int SCOPE_THREAD_PARK = 9;
+
+  /** Scope index for {@code Connection.prepareStatement} / {@code prepareCall} overloads. */
+  public static final int SCOPE_JDBC_PREPARE = 10;
+
+  /** Scope index for {@code Statement.execute*} overloads and proxy → driver delegation. */
+  public static final int SCOPE_JDBC_EXECUTE = 11;
+
+  /** Scope index for {@code Connection.commit} (proxy → driver). */
+  public static final int SCOPE_JDBC_COMMIT = 12;
+
+  /** Scope index for {@code Connection.rollback} (proxy → driver). */
+  public static final int SCOPE_JDBC_ROLLBACK = 13;
+
+  /** Scope index for HTTP client execute / send overloads. */
+  public static final int SCOPE_HTTP = 14;
+
+  /** Scope index for TLS handshakes (wrapping engines delegate to the JDK engine). */
+  public static final int SCOPE_SSL_HANDSHAKE = 15;
+
+  /** Scope index for thread start ({@code VirtualThread.start()} → {@code start(container)}). */
+  public static final int SCOPE_THREAD_START = 16;
+
+  /** Scope index for {@code Thread.sleep} overloads. */
+  public static final int SCOPE_THREAD_SLEEP = 17;
+
+  /** Size of the per-thread counter array: index 0 is the reentrancy depth, then the scopes. */
+  static final int SCOPE_COUNT = 18;
+
+  /**
+   * Enters a call-depth scope on the current thread.
+   *
+   * <p>Advice must pair every call with exactly one {@link #exitScope(int)}: from the {@code
+   * OnMethodExit(onThrowable = Throwable.class)} advice on normal and exceptional exits, and from
+   * the enter advice itself when the dispatch it performed throws (ByteBuddy does not run exit
+   * advice when enter advice throws).
+   *
+   * @param scope one of the {@code SCOPE_*} constants
+   * @return {@code true} when this is the outermost call of the scope on the current thread, i.e.
+   *     the call that should be evaluated
+   */
+  public static boolean enterScope(final int scope) {
+    return DEPTH.get()[scope]++ == 0;
+  }
+
+  /**
+   * Leaves a call-depth scope entered with {@link #enterScope(int)}.
+   *
+   * @param scope one of the {@code SCOPE_*} constants
+   * @return {@code true} when the outermost call of the scope has now left it
+   */
+  public static boolean exitScope(final int scope) {
+    final int[] counters = DEPTH.get();
+    if (counters[scope] > 0) {
+      counters[scope]--;
+    }
+    return counters[scope] == 0;
+  }
+
+  /**
+   * Marks the start of agent-internal work on the current thread that runs outside a dispatch, such
+   * as the reflective URL and pool-name extraction in the HTTP and JDBC advice. While marked, every
+   * dispatch returns its fallback, so the agent's own {@code Method.invoke} calls are not evaluated
+   * as application reflection. Must be paired with {@link #endInternalCall()} in a {@code finally}
+   * block.
+   */
+  public static void beginInternalCall() {
+    DEPTH.get()[0]++;
+  }
+
+  /** Ends agent-internal work started with {@link #beginInternalCall()}. */
+  public static void endInternalCall() {
+    final int[] counters = DEPTH.get();
+    if (counters[0] > 0) {
+      counters[0]--;
+    }
+  }
 
   /**
    * Returns the {@link ThreadLocal} instance used internally as the reentrancy depth counter.
@@ -197,10 +316,10 @@ public final class BootstrapDispatcher {
   /** Handle index for {@link #beforeSocketAccept(Object)}. */
   public static final int BEFORE_SOCKET_ACCEPT = 28;
 
-  /** Handle index for {@link #beforeSocketRead(Object)}. */
+  /** Handle index for {@link #beforeSocketRead(Object, Object)}. */
   public static final int BEFORE_SOCKET_READ = 29;
 
-  /** Handle index for {@link #beforeSocketWrite(Object, int)}. */
+  /** Handle index for {@link #beforeSocketWrite(Object, int, Object)}. */
   public static final int BEFORE_SOCKET_WRITE = 30;
 
   /** Handle index for {@link #beforeSocketClose(Object)}. */
@@ -282,8 +401,14 @@ public final class BootstrapDispatcher {
   /** Handle index for {@link #beforeFileIo(String, Object)}. */
   public static final int BEFORE_FILE_IO = 56;
 
+  /**
+   * Handle index for {@link #adjustLocalDateTimeNowInZone(java.time.LocalDateTime,
+   * java.time.ZoneId)}.
+   */
+  public static final int ADJUST_LOCAL_DATE_TIME_NOW_IN_ZONE = 57;
+
   /** Total number of method-handle slots; equals the highest index plus one. */
-  public static final int HANDLE_COUNT = 57;
+  public static final int HANDLE_COUNT = 58;
 
   /** Utility class; do not instantiate. */
   private BootstrapDispatcher() {}
@@ -317,6 +442,18 @@ public final class BootstrapDispatcher {
     // as an explicit uninstall — callers (tests, per-classloader teardown) rely on it.
     handles = methodHandles;
     delegate = bridgeDelegate;
+  }
+
+  /**
+   * Returns the delegate wired by {@link #install}, or {@code null} when none is installed. Used by
+   * the installer to detect a second copy of the agent, loaded by another class loader, before it
+   * replaces the first copy's delegate: the dispatcher is JVM-wide (bootstrap-loaded) while each
+   * agent copy has its own runtime.
+   *
+   * @return the installed delegate, or {@code null}
+   */
+  public static Object installedDelegate() {
+    return delegate;
   }
 
   // ── Phase 1 dispatch methods ───────────────────────────────────────────────
@@ -763,6 +900,29 @@ public final class BootstrapDispatcher {
   }
 
   /**
+   * Rewrites the result of {@code LocalDateTime.now(ZoneId)} for clock skew; the zone is needed to
+   * map the local date-time to an instant and back.
+   *
+   * @param realValue the real local date-time
+   * @param zone the zone {@code now} was called with
+   * @return the (possibly skewed) local date-time; {@code realValue} as the fallback
+   * @throws Throwable if the delegate throws
+   */
+  public static java.time.LocalDateTime adjustLocalDateTimeNowInZone(
+      final java.time.LocalDateTime realValue, final java.time.ZoneId zone) throws Throwable {
+    return invoke(
+        () -> {
+          final MethodHandle[] h = handles;
+          final Object d = delegate;
+          return (d == null || h == null)
+              ? realValue
+              : (java.time.LocalDateTime)
+                  h[ADJUST_LOCAL_DATE_TIME_NOW_IN_ZONE].invoke(d, realValue, zone);
+        },
+        realValue);
+  }
+
+  /**
    * Returns the chaos-adjusted {@link java.time.LocalDateTime} for {@code LocalDateTime.now()}
    * interception.
    *
@@ -1091,16 +1251,19 @@ public final class BootstrapDispatcher {
   /**
    * Called before a socket input-stream read operation.
    *
-   * @param stream the socket {@link java.io.InputStream}; never {@code null}
+   * @param stream the socket implementation being read from; never {@code null}
+   * @param remoteAddress the peer address ({@code java.net.InetAddress}); {@code null} when the
+   *     socket is not connected
    * @throws Throwable if an active scenario injects a failure to simulate a read error or timeout
    */
-  public static void beforeSocketRead(final Object stream) throws Throwable {
+  public static void beforeSocketRead(final Object stream, final Object remoteAddress)
+      throws Throwable {
     invoke(
         () -> {
           final MethodHandle[] h = handles;
           final Object d = delegate;
           if (d != null && h != null) {
-            h[BEFORE_SOCKET_READ].invoke(d, stream);
+            h[BEFORE_SOCKET_READ].invoke(d, stream, remoteAddress);
           }
           return null;
         },
@@ -1111,17 +1274,19 @@ public final class BootstrapDispatcher {
    * Called before a socket output-stream write operation.
    *
    * @param stream the socket {@link java.io.OutputStream}; never {@code null}
-   * @param len the number of bytes about to be written; {@code 0} when the exact count is
-   *     unavailable from the advice context
+   * @param len the number of bytes about to be written
+   * @param remoteAddress the peer address ({@code java.net.InetAddress}); {@code null} when the
+   *     socket is not connected
    * @throws Throwable if an active scenario injects a failure to simulate a write error
    */
-  public static void beforeSocketWrite(final Object stream, final int len) throws Throwable {
+  public static void beforeSocketWrite(
+      final Object stream, final int len, final Object remoteAddress) throws Throwable {
     invoke(
         () -> {
           final MethodHandle[] h = handles;
           final Object d = delegate;
           if (d != null && h != null) {
-            h[BEFORE_SOCKET_WRITE].invoke(d, stream, len);
+            h[BEFORE_SOCKET_WRITE].invoke(d, stream, len, remoteAddress);
           }
           return null;
         },
@@ -1601,9 +1766,7 @@ public final class BootstrapDispatcher {
    * method returns {@code fallback} immediately without invoking {@code supplier}. This prevents
    * infinite recursion when chaos-processing code itself calls an instrumented JDK method.
    *
-   * <p>On normal completion or on exception, the {@code DEPTH} counter is decremented. When it
-   * returns to zero the {@link ThreadLocal} is {@linkplain ThreadLocal#remove() removed} to prevent
-   * ThreadLocal leaks in pooled threads.
+   * <p>On normal completion or on exception, the {@code DEPTH} counter is decremented.
    *
    * @param <T> the return type
    * @param supplier the lambda that snapshot-reads {@link #handles} and {@link #delegate} and
@@ -1634,12 +1797,11 @@ public final class BootstrapDispatcher {
       sneakyThrow(throwable);
       return fallback;
     } finally {
-      if (--depth[0] == 0) {
-        // Remove the ThreadLocal entry on unwind to avoid retaining a per-thread reference in
-        // pooled threads. A subsequent reentry allocates a fresh int[] — cheap, and bounds the
-        // footprint by actual concurrency rather than pool size × JVM lifetime.
-        DEPTH.remove();
-      }
+      // The array is kept (not removed) when the depth returns to zero: it also holds the
+      // call-depth scope counters of enclosing instrumented calls, which must survive this
+      // dispatch. Its footprint is one small int[] per thread that ever reaches an instrumented
+      // call, released with the thread.
+      depth[0]--;
     }
   }
 

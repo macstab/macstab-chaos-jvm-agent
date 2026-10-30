@@ -1,3 +1,8 @@
+// HTTP client libraries for the child-JVM regression probes. Like the JDBC jars they stay off the
+// general fork-probe classpath; probes that need them extend the child classpath through the
+// chaos.test.httpClasspath system property (set in tasks.test).
+val httpClientProbe: Configuration by configurations.creating
+
 dependencies {
     api(project(":chaos-agent-api"))
     implementation(project(":chaos-agent-core"))
@@ -15,6 +20,13 @@ dependencies {
     // chaos.test.jdbcClasspath system property (set below in tasks.test).
     testCompileOnly(libs.h2)
     testCompileOnly(libs.hikari.cp)
+
+    testCompileOnly(libs.okhttp)
+    testCompileOnly(libs.apache.httpclient5)
+    testCompileOnly(libs.reactor.netty.http)
+    httpClientProbe(libs.okhttp)
+    httpClientProbe(libs.apache.httpclient5)
+    httpClientProbe(libs.reactor.netty.http)
 }
 
 tasks.jar {
@@ -60,6 +72,10 @@ tasks.jar {
 
 tasks.test {
     dependsOn(tasks.jar)
+    // Probe mains run in child JVMs whose classpath carries libraries (HTTP clients, JDBC) that
+    // the test JVM does not have; keep them out of test discovery, which would have to load and
+    // verify them.
+    exclude("**/*ProbeMain*")
     systemProperty("chaos.bootstrap.agentJar", tasks.jar.flatMap { it.archiveFile }.get().asFile.absolutePath)
 
     // Expose the H2 and HikariCP JAR paths so JDBC fork-probes can extend their child-JVM
@@ -68,4 +84,5 @@ tasks.test {
         .filter { it.name in listOf("h2", "HikariCP", "slf4j-api") }
         .joinToString(File.pathSeparator) { it.file.absolutePath }
     systemProperty("chaos.test.jdbcClasspath", jdbcClasspath)
+    systemProperty("chaos.test.httpClasspath", httpClientProbe.asPath)
 }

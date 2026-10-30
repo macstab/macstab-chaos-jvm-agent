@@ -1,5 +1,6 @@
 package com.macstab.chaos.jvm.core;
 
+import com.macstab.chaos.jvm.api.ChaosActivationException;
 import com.macstab.chaos.jvm.api.ChaosDiagnostics;
 import java.time.Clock;
 import java.time.Instant;
@@ -67,13 +68,40 @@ final class ScenarioRegistry implements ChaosDiagnostics {
   /**
    * Adds {@code controller} to the registry, keyed by {@link ScenarioController#key()}.
    *
+   * <p>A controller registered under the same key that has finished — {@link
+   * ChaosDiagnostics.ScenarioState#STOPPED} or {@link ChaosDiagnostics.ScenarioState#INACTIVE}
+   * (expired or out of applications) — is replaced and returned so the caller can destroy it. A
+   * stopped scenario can never run again ({@code start()} is a no-op after {@code stop()}), so
+   * keeping it registered only blocked re-activating the same id: the next test of a suite, a
+   * re-posted plan or a reloaded config failed with "already active". The check and the replacement
+   * are one atomic step.
+   *
    * @param controller the controller to register; must not be {@code null}
-   * @throws IllegalStateException if a controller with the same key is already registered
+   * @return the finished controller that was replaced, or {@code null}
+   * @throws ChaosActivationException if a controller with the same key is registered and still
+   *     {@code REGISTERED} or {@code ACTIVE}
    */
-  void register(final ScenarioController controller) {
-    if (controllers.putIfAbsent(controller.key(), controller) != null) {
-      throw new IllegalStateException("scenario key already active: " + controller.key());
-    }
+  ScenarioController register(final ScenarioController controller) {
+    final ScenarioController[] replaced = new ScenarioController[1];
+    controllers.compute(
+        controller.key(),
+        (key, existing) -> {
+          if (existing == null) {
+            return controller;
+          }
+          if (isFinished(existing)) {
+            replaced[0] = existing;
+            return controller;
+          }
+          throw new ChaosActivationException("scenario key already active: " + key);
+        });
+    return replaced[0];
+  }
+
+  private static boolean isFinished(final ScenarioController controller) {
+    final ChaosDiagnostics.ScenarioState state = controller.state();
+    return state == ChaosDiagnostics.ScenarioState.STOPPED
+        || state == ChaosDiagnostics.ScenarioState.INACTIVE;
   }
 
   /**

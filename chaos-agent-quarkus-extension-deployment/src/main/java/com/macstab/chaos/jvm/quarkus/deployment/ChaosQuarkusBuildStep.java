@@ -1,6 +1,8 @@
 package com.macstab.chaos.jvm.quarkus.deployment;
 
+import com.macstab.chaos.jvm.quarkus.ChaosArcProducer;
 import com.macstab.chaos.jvm.quarkus.ChaosQuarkusRecorder;
+import io.quarkus.arc.deployment.AdditionalBeanBuildItem;
 import io.quarkus.deployment.annotations.BuildStep;
 import io.quarkus.deployment.annotations.ExecutionTime;
 import io.quarkus.deployment.annotations.Record;
@@ -47,6 +49,19 @@ public final class ChaosQuarkusBuildStep {
   @BuildStep
   public FeatureBuildItem feature() {
     return new FeatureBuildItem(FEATURE_NAME);
+  }
+
+  /**
+   * Registers {@link ChaosArcProducer} as a bean. The runtime jar carries no Jandex index and no
+   * {@code beans.xml}, so ArC never discovered the producer on its own and injecting {@code
+   * ChaosControlPlane} failed. Unremovable because the bean is typically injected only into test
+   * classes, which ArC does not see as injection points.
+   *
+   * @return the additional-bean registration
+   */
+  @BuildStep
+  public AdditionalBeanBuildItem producerBean() {
+    return AdditionalBeanBuildItem.unremovableOf(ChaosArcProducer.class);
   }
 
   /**

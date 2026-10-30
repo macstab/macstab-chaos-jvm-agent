@@ -34,7 +34,13 @@ final class JdbcAdvice {
   static final class HikariGetConnectionAdvice {
     @Advice.OnMethodEnter
     static void enter(@Advice.This final Object pool) throws Throwable {
-      final String poolName = JdbcTargetExtractor.fromHikariPool(pool);
+      final String poolName;
+      BootstrapDispatcher.beginInternalCall();
+      try {
+        poolName = JdbcTargetExtractor.fromHikariPool(pool);
+      } finally {
+        BootstrapDispatcher.endInternalCall();
+      }
       if (BootstrapDispatcher.beforeJdbcConnectionAcquire(poolName)) {
         throw new ChaosJdbcSuppressException(
             "JDBC connection acquire suppressed by chaos agent: " + poolName);
@@ -66,10 +72,60 @@ final class JdbcAdvice {
   static final class StatementExecuteAdvice {
     @Advice.OnMethodEnter
     static void enter(@Advice.Argument(0) final String sql) throws Throwable {
-      if (BootstrapDispatcher.beforeJdbcStatementExecute(sql)) {
+      if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_JDBC_EXECUTE)) {
+        return;
+      }
+      final boolean suppressed;
+      try {
+        suppressed = BootstrapDispatcher.beforeJdbcStatementExecute(sql);
+      } catch (final Throwable throwable) {
+        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_JDBC_EXECUTE);
+        throw throwable;
+      }
+      if (suppressed) {
+        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_JDBC_EXECUTE);
         throw new ChaosJdbcSuppressException(
             "JDBC statement execute suppressed by chaos agent: " + sql);
       }
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit() {
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_JDBC_EXECUTE);
+    }
+  }
+
+  /**
+   * Intercepts the no-argument {@code PreparedStatement.execute()}, {@code executeQuery()}, {@code
+   * executeUpdate()} and {@code executeLargeUpdate()} — the execution path of JPA, Hibernate, jOOQ
+   * and Spring {@code JdbcTemplate}. The SQL text was bound at prepare time and is not available
+   * here, so these calls report a {@code null} target: they match JDBC_STATEMENT_EXECUTE scenarios
+   * whose target pattern is ANY. The SQL is visible to JDBC_PREPARED_STATEMENT scenarios at prepare
+   * time.
+   */
+  static final class PreparedStatementExecuteAdvice {
+    @Advice.OnMethodEnter
+    static void enter() throws Throwable {
+      if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_JDBC_EXECUTE)) {
+        return;
+      }
+      final boolean suppressed;
+      try {
+        suppressed = BootstrapDispatcher.beforeJdbcStatementExecute(null);
+      } catch (final Throwable throwable) {
+        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_JDBC_EXECUTE);
+        throw throwable;
+      }
+      if (suppressed) {
+        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_JDBC_EXECUTE);
+        throw new ChaosJdbcSuppressException(
+            "JDBC prepared statement execute suppressed by chaos agent");
+      }
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit() {
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_JDBC_EXECUTE);
     }
   }
 
@@ -83,10 +139,26 @@ final class JdbcAdvice {
   static final class PrepareStatementAdvice {
     @Advice.OnMethodEnter
     static void enter(@Advice.Argument(0) final String sql) throws Throwable {
-      if (BootstrapDispatcher.beforeJdbcPreparedStatement(sql)) {
+      if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_JDBC_PREPARE)) {
+        return;
+      }
+      final boolean suppressed;
+      try {
+        suppressed = BootstrapDispatcher.beforeJdbcPreparedStatement(sql);
+      } catch (final Throwable throwable) {
+        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_JDBC_PREPARE);
+        throw throwable;
+      }
+      if (suppressed) {
+        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_JDBC_PREPARE);
         throw new ChaosJdbcSuppressException(
             "JDBC prepareStatement suppressed by chaos agent: " + sql);
       }
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit() {
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_JDBC_PREPARE);
     }
   }
 
@@ -94,9 +166,25 @@ final class JdbcAdvice {
   static final class CommitAdvice {
     @Advice.OnMethodEnter
     static void enter() throws Throwable {
-      if (BootstrapDispatcher.beforeJdbcTransactionCommit()) {
+      if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_JDBC_COMMIT)) {
+        return;
+      }
+      final boolean suppressed;
+      try {
+        suppressed = BootstrapDispatcher.beforeJdbcTransactionCommit();
+      } catch (final Throwable throwable) {
+        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_JDBC_COMMIT);
+        throw throwable;
+      }
+      if (suppressed) {
+        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_JDBC_COMMIT);
         throw new ChaosJdbcSuppressException("JDBC commit suppressed by chaos agent");
       }
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit() {
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_JDBC_COMMIT);
     }
   }
 
@@ -104,9 +192,25 @@ final class JdbcAdvice {
   static final class RollbackAdvice {
     @Advice.OnMethodEnter
     static void enter() throws Throwable {
-      if (BootstrapDispatcher.beforeJdbcTransactionRollback()) {
+      if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_JDBC_ROLLBACK)) {
+        return;
+      }
+      final boolean suppressed;
+      try {
+        suppressed = BootstrapDispatcher.beforeJdbcTransactionRollback();
+      } catch (final Throwable throwable) {
+        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_JDBC_ROLLBACK);
+        throw throwable;
+      }
+      if (suppressed) {
+        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_JDBC_ROLLBACK);
         throw new ChaosJdbcSuppressException("JDBC rollback suppressed by chaos agent");
       }
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit() {
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_JDBC_ROLLBACK);
     }
   }
 }

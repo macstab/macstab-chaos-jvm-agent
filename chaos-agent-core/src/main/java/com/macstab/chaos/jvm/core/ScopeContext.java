@@ -4,6 +4,10 @@ import com.macstab.chaos.jvm.api.ChaosSession;
 import java.util.Deque;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentLinkedDeque;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.RunnableFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -86,11 +90,10 @@ final class ScopeContext {
     final Deque<String> stack = sessionStack.get();
     stack.push(sessionId);
     return () -> {
-      // Verify the top matches what this binding pushed. A mismatch means either a
-      // double-close or a close() invoked in the wrong order (outer binding closed while an
-      // inner binding is still live). Popping anyway would silently corrupt the stack for every
-      // subsequent request served by this pooled thread — a subtle, hard-to-diagnose leak of
-      // scope between unrelated requests. Fail loud at the call site instead.
+      // Remove this binding's own entry, wherever it is on the stack. Closing out of order
+      // (outer before inner) is tolerated: the inner binding stays in effect until it is closed.
+      // A double close finds no entry and fails loud, instead of popping another binding's
+      // entry and leaking a session into later requests served by this pooled thread.
       // removeFirstOccurrence atomically finds and removes the entry in a single pass,
       // closing the TOCTOU window between a separate peek() and pop() where a concurrent
       // push() from another thread (cross-thread close is allowed by the class contract)
@@ -100,7 +103,7 @@ final class ScopeContext {
         throw new IllegalStateException(
             "ScopeBinding close() could not find sessionId='"
                 + sessionId
-                + "' on the stack (double-close or wrong-order close?)");
+                + "' on the stack (already closed?)");
       }
     };
   }
@@ -153,6 +156,47 @@ final class ScopeContext {
   }
 
   /**
+   * Returns the session a task was submitted under when it is a session wrapper created by {@link
+   * #wrap}, else {@code null}. A pool worker evaluates EXECUTOR_WORKER_RUN / SCHEDULE_TICK before
+   * the wrapper binds the session, so the session has to be taken from the task itself.
+   *
+   * @param task the task as seen by the executor; may be {@code null}
+   * @return the session id carried by the task, or {@code null}
+   */
+  static String sessionOf(final Object task) {
+    if (task instanceof ScopedRunnable scoped) {
+      return scoped.sessionId();
+    }
+    if (task instanceof ScopedRunnableFuture<?> scoped) {
+      return scoped.sessionId();
+    }
+    if (task instanceof ScopedCallable<?> scoped) {
+      return scoped.sessionId();
+    }
+    return null;
+  }
+
+  /**
+   * Returns the application task inside a session wrapper created by {@link #wrap}, else {@code
+   * task} itself, so task-class selectors see the application class instead of the wrapper.
+   *
+   * @param task the task as seen by the executor; may be {@code null}
+   * @return the unwrapped task
+   */
+  static Object unwrap(final Object task) {
+    if (task instanceof ScopedRunnable scoped) {
+      return scoped.delegate();
+    }
+    if (task instanceof ScopedRunnableFuture<?> scoped) {
+      return scoped.delegate();
+    }
+    if (task instanceof ScopedCallable<?> scoped) {
+      return scoped.delegate();
+    }
+    return task;
+  }
+
+  /**
    * Returns a {@link Runnable} that, when executed on any thread, pushes {@code sessionId} onto
    * that thread's session stack, runs {@code runnable}, then pops the ID — even if {@code runnable}
    * throws.
@@ -168,6 +212,12 @@ final class ScopeContext {
    * @return a wrapped {@link Runnable}
    */
   Runnable wrap(final String sessionId, final Runnable runnable) {
+    // A submitted task is usually a FutureTask. Executors hand the queued Runnable back (for
+    // example from shutdownNow() or getQueue()), and callers routinely cast it to Future to cancel
+    // it; a plain wrapper broke that with a ClassCastException.
+    if (runnable instanceof RunnableFuture<?> future) {
+      return new ScopedRunnableFuture<>(this, sessionId, future);
+    }
     return new ScopedRunnable(this, sessionId, runnable);
   }
 
@@ -183,6 +233,46 @@ final class ScopeContext {
    */
   <T> Callable<T> wrap(final String sessionId, final Callable<T> callable) {
     return new ScopedCallable<>(this, sessionId, callable);
+  }
+
+  /**
+   * Session wrapper for a {@link RunnableFuture}: runs it with the session bound and forwards the
+   * {@link java.util.concurrent.Future} methods, so the wrapper can stand in for the submitted
+   * future wherever an executor exposes its queued tasks.
+   */
+  private record ScopedRunnableFuture<V>(
+      ScopeContext scopeContext, String sessionId, RunnableFuture<V> delegate)
+      implements RunnableFuture<V> {
+    @Override
+    public void run() {
+      new ScopedRunnable(scopeContext, sessionId, delegate).run();
+    }
+
+    @Override
+    public boolean cancel(final boolean mayInterruptIfRunning) {
+      return delegate.cancel(mayInterruptIfRunning);
+    }
+
+    @Override
+    public boolean isCancelled() {
+      return delegate.isCancelled();
+    }
+
+    @Override
+    public boolean isDone() {
+      return delegate.isDone();
+    }
+
+    @Override
+    public V get() throws InterruptedException, ExecutionException {
+      return delegate.get();
+    }
+
+    @Override
+    public V get(final long timeout, final TimeUnit unit)
+        throws InterruptedException, ExecutionException, TimeoutException {
+      return delegate.get(timeout, unit);
+    }
   }
 
   private record ScopedRunnable(ScopeContext scopeContext, String sessionId, Runnable delegate)

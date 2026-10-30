@@ -41,12 +41,20 @@ final class DirectBufferPressureStressor implements ManagedStressor {
   /** Cached reflection handle for {@code sun.misc.Cleaner.clean()}, or {@code null}. */
   private static final Method CLEANER_CLEAN = resolveCleanerCleanMethod();
 
+  /**
+   * Resolves {@code cleaner()} on the {@code sun.nio.ch.DirectBuffer} interface, whose package the
+   * agent opens (manifest {@code Add-Opens} and {@code redefineModule}). An earlier version looked
+   * the method up on the buffer's own class, {@code java.nio.DirectByteBuffer}, which is
+   * package-private in the unopened {@code java.nio} package: {@code setAccessible} always failed,
+   * the handle was {@code null}, and {@link #close()} never freed native memory eagerly — it was
+   * released only whenever a GC happened to collect the buffers.
+   */
   private static Method resolveCleanerMethod() {
     try {
-      final Method m = ByteBuffer.allocateDirect(1).getClass().getMethod("cleaner");
+      final Method m = Class.forName("sun.nio.ch.DirectBuffer").getMethod("cleaner");
       m.setAccessible(true);
       return m;
-    } catch (final Exception ignored) {
+    } catch (final Exception | LinkageError inaccessible) {
       return null;
     }
   }

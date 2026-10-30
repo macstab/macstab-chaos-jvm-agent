@@ -362,8 +362,9 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @param actualValue the original return value; primitives must be boxed
    * @return the (possibly-corrupted) value to return to the caller; equals {@code actualValue} when
    *     no scenario matches
-   * @throws Throwable the exception type configured by an active {@code ExceptionInjectionEffect}
-   *     paired with {@code METHOD_EXIT}
+   * @throws Throwable the exception of an active {@code RejectEffect} scenario on {@code
+   *     METHOD_EXIT}, thrown after the method body ran ({@code ExceptionInjectionEffect} is valid
+   *     on {@code METHOD_ENTER} only)
    */
   public Object afterMethodExit(
       final String className,
@@ -445,6 +446,18 @@ public final class ChaosRuntime implements ChaosControlPlane {
    */
   public java.time.Instant adjustInstantNow(final java.time.Instant realInstant) {
     return dispatcher.adjustInstantNow(realInstant);
+  }
+
+  /**
+   * Delegates to {@link ChaosDispatcher#adjustLocalDateTimeNowInZone}.
+   *
+   * @param realValue the real local date-time
+   * @param zone the zone {@code LocalDateTime.now(ZoneId)} was called with
+   * @return the (possibly skewed) local date-time
+   */
+  public java.time.LocalDateTime adjustLocalDateTimeNowInZone(
+      final java.time.LocalDateTime realValue, final java.time.ZoneId zone) {
+    return dispatcher.adjustLocalDateTimeNowInZone(realValue, zone);
   }
 
   /**
@@ -611,7 +624,18 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @throws Throwable if a chaos effect injects an exception
    */
   public void beforeSocketRead(final Object stream) throws Throwable {
-    dispatcher.beforeSocketRead(stream);
+    dispatcher.beforeSocketRead(stream, null);
+  }
+
+  /**
+   * Delegates to {@link ChaosDispatcher#beforeSocketRead(Object, Object)}.
+   *
+   * @param stream the socket implementation being read from
+   * @param remoteAddress the peer {@link java.net.InetAddress}, or {@code null} if not connected
+   * @throws Throwable if an active scenario throws to simulate a failure
+   */
+  public void beforeSocketRead(final Object stream, final Object remoteAddress) throws Throwable {
+    dispatcher.beforeSocketRead(stream, remoteAddress);
   }
 
   /**
@@ -622,7 +646,20 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @throws Throwable if a chaos effect injects an exception
    */
   public void beforeSocketWrite(final Object stream, final int len) throws Throwable {
-    dispatcher.beforeSocketWrite(stream, len);
+    dispatcher.beforeSocketWrite(stream, len, null);
+  }
+
+  /**
+   * Delegates to {@link ChaosDispatcher#beforeSocketWrite(Object, int, Object)}.
+   *
+   * @param stream the socket implementation being written to
+   * @param len the number of bytes about to be written
+   * @param remoteAddress the peer {@link java.net.InetAddress}, or {@code null} if not connected
+   * @throws Throwable if an active scenario throws to simulate a failure
+   */
+  public void beforeSocketWrite(final Object stream, final int len, final Object remoteAddress)
+      throws Throwable {
+    dispatcher.beforeSocketWrite(stream, len, remoteAddress);
   }
 
   /**

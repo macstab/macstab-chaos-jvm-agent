@@ -190,4 +190,68 @@ class ChaosPlanMapperTest {
                 .activationPolicy(ActivationPolicy.always())
                 .build()));
   }
+
+  @Nested
+  @DisplayName("parse failure messages")
+  class ParseFailureMessages {
+
+    @Test
+    @DisplayName("name the position, the kind of failure and the JSON path")
+    void reportPositionKindAndPath() {
+      final String json =
+          """
+          {
+            "metadata": {"name": "p"},
+            "scenarios": [
+              {
+                "id": "a",
+                "scope": "JVM",
+                "selector": {"type": "executor", "operations": ["EXECUTOR_SUBMIT"]},
+                "effect": {"type": "delay", "minDelay": "PT0.1S", "maxDelay": "PT0.1S"},
+                "precedencee": 1
+              }
+            ]
+          }
+          """;
+
+      assertThatThrownBy(() -> ChaosPlanMapper.read(json))
+          .isInstanceOf(ConfigLoadException.class)
+          .hasMessageContaining("at line 10")
+          .hasMessageContaining("unknown property 'precedencee'")
+          .hasMessageContaining("scenarios[0]");
+    }
+
+    @Test
+    @DisplayName("report the agent's validation message for a rejected value")
+    void reportValidationMessage() {
+      final String json =
+          """
+          {"metadata": {"name": "p"}, "scenarios": [{"id": "a", "scope": "JVM",
+            "selector": {"type": "executor", "operations": ["EXECUTOR_SUBMIT"]},
+            "effect": {"type": "delay", "minDelay": "PT0.1S"}}]}
+          """;
+
+      assertThatThrownBy(() -> ChaosPlanMapper.read(json))
+          .isInstanceOf(ConfigLoadException.class)
+          .hasMessageContaining("invalid value: delay bounds must be non-null")
+          .hasMessageContaining("scenarios[0].effect");
+    }
+
+    @Test
+    @DisplayName("never echo values from the input")
+    void doNotEchoValues() {
+      final String json =
+          """
+          {"metadata": {"name": "p"}, "scenarios": [{"id": "a", "scope": "JVM",
+            "selector": {"type": "executor", "operations": ["EXECUTOR_SUBMIT"]},
+            "effect": {"type": "delay", "minDelay": "PT0.1S", "maxDelay": "PT0.1S"},
+            "precedence": "s3cr3t-token"}]}
+          """;
+
+      assertThatThrownBy(() -> ChaosPlanMapper.read(json))
+          .isInstanceOf(ConfigLoadException.class)
+          .hasMessageContaining("precedence")
+          .hasMessageNotContaining("s3cr3t-token");
+    }
+  }
 }
