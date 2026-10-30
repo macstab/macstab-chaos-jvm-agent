@@ -2,11 +2,13 @@ package com.macstab.chaos.jvm.core;
 
 import com.macstab.chaos.jvm.api.ChaosActivationException;
 import com.macstab.chaos.jvm.api.ChaosDiagnostics;
+import com.macstab.chaos.jvm.api.OperationType;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -39,15 +41,29 @@ import java.util.function.Supplier;
  * <p>All methods are thread-safe. The internal map is a {@link
  * java.util.concurrent.ConcurrentHashMap}; the failure queue is a {@link
  * java.util.concurrent.ConcurrentLinkedQueue}.
+ *
+ * <h2>Operation index</h2>
+ *
+ * <p>Every selector matches a fixed, non-empty set of {@link OperationType}s ({@link
+ * SelectorOperations#of}). The registry keeps an immutable index from operation type to the
+ * controllers whose selector names it, already in match order, and replaces it whenever a
+ * controller is registered or unregistered. {@link #match(InvocationContext)} therefore only
+ * evaluates scenarios that can match the intercepted operation, instead of every registered
+ * scenario, and never sorts.
  */
 final class ScenarioRegistry implements ChaosDiagnostics {
-  private static final Comparator<ScenarioContribution> CONTRIBUTION_ORDER =
-      Comparator.comparingInt((ScenarioContribution c) -> c.scenario().precedence())
+  private static final Comparator<ScenarioController> MATCH_ORDER =
+      Comparator.comparingInt((ScenarioController c) -> c.scenario().precedence())
           .reversed()
           .thenComparing(c -> c.scenario().id());
 
+  private static final ScenarioController[] NO_CONTROLLERS = new ScenarioController[0];
+
   private final ConcurrentHashMap<String, ScenarioController> controllers =
       new ConcurrentHashMap<>();
+  private final Object indexLock = new Object();
+  private volatile Map<OperationType, ScenarioController[]> index =
+      new EnumMap<>(OperationType.class);
   private final ConcurrentLinkedQueue<ActivationFailure> failures = new ConcurrentLinkedQueue<>();
   private final Supplier<Map<String, String>> runtimeDetailsSupplier;
   private final Clock clock;
@@ -95,6 +111,7 @@ final class ScenarioRegistry implements ChaosDiagnostics {
           }
           throw new ChaosActivationException("scenario key already active: " + key);
         });
+    rebuildIndex();
     return replaced[0];
   }
 
@@ -114,7 +131,34 @@ final class ScenarioRegistry implements ChaosDiagnostics {
    * @param controller the controller to deregister; must not be {@code null}
    */
   void unregister(final ScenarioController controller) {
-    controllers.remove(controller.key(), controller);
+    if (controllers.remove(controller.key(), controller)) {
+      rebuildIndex();
+    }
+  }
+
+  /**
+   * Replaces the operation index with one built from the current controllers. Every change to
+   * {@link #controllers} is followed by a rebuild, and rebuilds are serialised, so the last rebuild
+   * always sees every change made before it.
+   */
+  private void rebuildIndex() {
+    synchronized (indexLock) {
+      final EnumMap<OperationType, List<ScenarioController>> byOperation =
+          new EnumMap<>(OperationType.class);
+      for (final ScenarioController controller : controllers.values()) {
+        for (final OperationType operation :
+            SelectorOperations.of(controller.scenario().selector())) {
+          byOperation.computeIfAbsent(operation, ignored -> new ArrayList<>()).add(controller);
+        }
+      }
+      final EnumMap<OperationType, ScenarioController[]> next = new EnumMap<>(OperationType.class);
+      byOperation.forEach(
+          (operation, list) -> {
+            list.sort(MATCH_ORDER);
+            next.put(operation, list.toArray(NO_CONTROLLERS));
+          });
+      index = next;
+    }
   }
 
   /**
@@ -130,11 +174,12 @@ final class ScenarioRegistry implements ChaosDiagnostics {
   }
 
   /**
-   * Evaluates all registered controllers against {@code context} and returns the matching
+   * Evaluates the controllers that can match {@code context}'s operation and returns the matching
    * contributions in deterministic order.
    *
-   * <p>Each registered {@link ScenarioController} is asked to evaluate the context. Controllers
-   * that return {@code null} (no match) are excluded. Survivors are sorted by:
+   * <p>Each {@link ScenarioController} indexed under the context's {@link OperationType} is asked
+   * to evaluate the context. Controllers that return {@code null} (no match) are excluded. The
+   * survivors keep the index order:
    *
    * <ol>
    *   <li>Descending {@link com.macstab.chaos.jvm.api.ChaosScenario#precedence()} — higher
@@ -153,11 +198,12 @@ final class ScenarioRegistry implements ChaosDiagnostics {
    *     scenario matches
    */
   List<ScenarioContribution> match(final InvocationContext context) {
-    if (controllers.isEmpty()) {
+    final ScenarioController[] candidates = index.get(context.operationType());
+    if (candidates == null) {
       return List.of();
     }
     ArrayList<ScenarioContribution> results = null;
-    for (final ScenarioController controller : controllers.values()) {
+    for (final ScenarioController controller : candidates) {
       final ScenarioContribution contribution = controller.evaluate(context);
       if (contribution == null) {
         continue;
@@ -169,9 +215,6 @@ final class ScenarioRegistry implements ChaosDiagnostics {
     }
     if (results == null) {
       return List.of();
-    }
-    if (results.size() > 1) {
-      results.sort(CONTRIBUTION_ORDER);
     }
     return Collections.unmodifiableList(results);
   }
