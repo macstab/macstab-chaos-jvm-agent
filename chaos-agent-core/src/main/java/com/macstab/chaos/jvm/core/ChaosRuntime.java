@@ -362,8 +362,9 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @param actualValue the original return value; primitives must be boxed
    * @return the (possibly-corrupted) value to return to the caller; equals {@code actualValue} when
    *     no scenario matches
-   * @throws Throwable the exception type configured by an active {@code ExceptionInjectionEffect}
-   *     paired with {@code METHOD_EXIT}
+   * @throws Throwable the exception of an active {@code RejectEffect} scenario on {@code
+   *     METHOD_EXIT}, thrown after the method body ran ({@code ExceptionInjectionEffect} is valid
+   *     on {@code METHOD_ENTER} only)
    */
   public Object afterMethodExit(
       final String className,

@@ -683,6 +683,12 @@ public final class ChaosDispatcher {
     final RuntimeDecision decision = evaluate(context);
     applyDelayAndGate(decision);
     if (decision.terminalAction() != null
+        && decision.terminalAction().kind() == TerminalKind.THROW) {
+      // A reject on METHOD_EXIT fails the call after its body ran (side effects done, result
+      // lost). It used to be dropped: only CORRUPT_RETURN was handled here.
+      throw decision.terminalAction().throwable();
+    }
+    if (decision.terminalAction() != null
         && decision.terminalAction().kind() == TerminalKind.CORRUPT_RETURN) {
       // Sleep BEFORE substituting the corrupted return. RuntimeDecision documents "delay first,
       // then gate, then terminal action" and CORRUPT_RETURN still returns normally (unlike
