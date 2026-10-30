@@ -1054,6 +1054,7 @@ Internal Architecture documentation lives in [`docs/`](docs/):
 | [`overall-agent.md`](docs/overall-agent.md)           | System Architecture, all analysis dimensions, stack walkdown, PlantUML diagrams                                           |
 | [`api.md`](docs/api.md)                               | Stable API contract: builders, selectors, effects, diagnostics                                                            |
 | [`core.md`](docs/core.md)                             | Evaluation pipeline, session scoping, stressor lifecycle, JMM analysis                                                    |
+| [`semantics.md`](docs/semantics.md)                   | Evaluation laws: matching, policy order, composition of scenarios, clock skew, stressors, lifecycle                       |
 | [`instrumentation.md`](docs/instrumentation.md)       | ByteBuddy advice, bootstrap bridge, reentrancy guard, 57-handle table                                                     |
 | [`bootstrap.md`](docs/bootstrap.md)                   | Agent initialization, self-attach, MBean registration                                                                     |
 | [`startup-config.md`](docs/startup-config.md)         | Config source resolution, JSON schema, path safety                                                                        |

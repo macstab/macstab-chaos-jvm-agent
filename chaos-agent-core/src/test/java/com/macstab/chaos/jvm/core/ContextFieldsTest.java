@@ -131,5 +131,29 @@ class ContextFieldsTest {
           .isInstanceOf(ChaosValidationException.class)
           .hasMessageContaining("SOCKET_ACCEPT");
     }
+
+    @Test
+    @DisplayName("a CIDR or port filter on SOCKET_ACCEPT is rejected for the same reason")
+    void peerFiltersOnAcceptAreRejected() {
+      for (final ChaosSelector selector :
+          new ChaosSelector[] {
+            new ChaosSelector.NetworkSelector(
+                Set.of(OperationType.SOCKET_ACCEPT), null, "10.0.0.0/8", null, null, null),
+            new ChaosSelector.NetworkSelector(
+                Set.of(OperationType.SOCKET_ACCEPT), null, null, 8080, null, null)
+          }) {
+        assertThatThrownBy(
+                () ->
+                    runtime.activate(
+                        ChaosScenario.builder("accept-peer")
+                            .scope(ChaosScenario.ScenarioScope.JVM)
+                            .selector(selector)
+                            .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+                            .activationPolicy(ActivationPolicy.always())
+                            .build()))
+            .isInstanceOf(ChaosValidationException.class)
+            .hasMessageContaining("SOCKET_ACCEPT");
+      }
+    }
   }
 }
