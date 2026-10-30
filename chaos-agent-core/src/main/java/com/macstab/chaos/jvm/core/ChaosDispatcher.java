@@ -267,12 +267,12 @@ public final class ChaosDispatcher {
         new InvocationContext(
             OperationType.EXECUTOR_WORKER_RUN,
             executor.getClass().getName(),
-            taskClassName(task),
+            taskClassName(ScopeContext.unwrap(task)),
             worker == null ? null : worker.getName(),
             false,
             worker == null ? null : worker.isDaemon(),
             worker == null ? null : featureSet.isVirtualThread(worker),
-            scopeContext.currentSessionId());
+            taskSession(task));
     applyPreDecision(evaluate(context));
   }
 
@@ -594,7 +594,7 @@ public final class ChaosDispatcher {
             false,
             null,
             null,
-            null);
+            scopeContext.currentSessionId());
     applyPreDecision(evaluate(context));
   }
 
@@ -613,12 +613,12 @@ public final class ChaosDispatcher {
         new InvocationContext(
             OperationType.SCHEDULE_TICK,
             executor == null ? "unknown" : executor.getClass().getName(),
-            taskClassName(task),
+            taskClassName(ScopeContext.unwrap(task)),
             null,
             periodic,
             null,
             null,
-            scopeContext.currentSessionId());
+            taskSession(task));
     final RuntimeDecision decision = evaluate(context);
     applyDelayAndGate(decision);
     if (decision.terminalAction() != null) {
@@ -724,6 +724,8 @@ public final class ChaosDispatcher {
         new InvocationContext(clockType, "java.lang.System", null, null, false, null, null, null);
     final boolean isNanos = clockType == OperationType.SYSTEM_CLOCK_NANOS;
     long result = realValue;
+    String currentSession = null;
+    boolean currentSessionResolved = false;
     for (final ScenarioController controller : registry.controllers()) {
       final ClockSkewState state = controller.clockSkewState();
       if (state == null) {
@@ -731,6 +733,18 @@ public final class ChaosDispatcher {
       }
       if (!SelectorMatcher.matches(controller.scenario().selector(), context)) {
         continue;
+      }
+      // A session-scoped clock skew applies only on threads bound to its session; it used to
+      // skew every thread in the JVM. The current session is resolved once, and only when a
+      // session-scoped skew is active, to keep the common clock-read path free of the lookup.
+      if (controller.sessionId() != null) {
+        if (!currentSessionResolved) {
+          currentSession = scopeContext.currentSessionId();
+          currentSessionResolved = true;
+        }
+        if (!controller.sessionId().equals(currentSession)) {
+          continue;
+        }
       }
       final ChaosEffect.ClockSkewEffect skewEffect =
           (ChaosEffect.ClockSkewEffect) controller.scenario().effect();
@@ -851,7 +865,7 @@ public final class ChaosDispatcher {
             false,
             null,
             null,
-            null);
+            scopeContext.currentSessionId());
     final RuntimeDecision decision = evaluate(context);
     applyDelayAndGate(decision);
     if (decision.terminalAction() != null) {
@@ -883,7 +897,7 @@ public final class ChaosDispatcher {
             false,
             null,
             null,
-            null);
+            scopeContext.currentSessionId());
     applyPreDecision(evaluate(context));
   }
 
@@ -1277,7 +1291,7 @@ public final class ChaosDispatcher {
             false,
             null,
             null,
-            null);
+            scopeContext.currentSessionId());
     applyPreDecision(evaluate(context));
   }
 
@@ -1999,6 +2013,17 @@ public final class ChaosDispatcher {
       Thread.currentThread().interrupt();
     }
     return new IllegalStateException("chaos interception failed", throwable);
+  }
+
+  /**
+   * The session for evaluating a task on a pool worker: the worker's own binding if it has one,
+   * else the session the task was submitted under. The worker evaluates before the task's session
+   * wrapper binds the session, so session-scoped EXECUTOR_WORKER_RUN and SCHEDULE_TICK scenarios
+   * never matched work submitted from a session.
+   */
+  private String taskSession(final Object task) {
+    final String bound = scopeContext.currentSessionId();
+    return bound != null ? bound : ScopeContext.sessionOf(task);
   }
 
   /**

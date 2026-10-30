@@ -190,6 +190,11 @@ final class ScenarioController {
     return appliedCount.get();
   }
 
+  /** Returns the session this controller is scoped to, or {@code null} for a JVM scenario. */
+  String sessionId() {
+    return sessionId;
+  }
+
   /**
    * Returns the current lifecycle state of this controller.
    *

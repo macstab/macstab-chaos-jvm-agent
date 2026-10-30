@@ -153,6 +153,41 @@ final class ScopeContext {
   }
 
   /**
+   * Returns the session a task was submitted under when it is a session wrapper created by {@link
+   * #wrap}, else {@code null}. A pool worker evaluates EXECUTOR_WORKER_RUN / SCHEDULE_TICK before
+   * the wrapper binds the session, so the session has to be taken from the task itself.
+   *
+   * @param task the task as seen by the executor; may be {@code null}
+   * @return the session id carried by the task, or {@code null}
+   */
+  static String sessionOf(final Object task) {
+    if (task instanceof ScopedRunnable scoped) {
+      return scoped.sessionId();
+    }
+    if (task instanceof ScopedCallable<?> scoped) {
+      return scoped.sessionId();
+    }
+    return null;
+  }
+
+  /**
+   * Returns the application task inside a session wrapper created by {@link #wrap}, else {@code
+   * task} itself, so task-class selectors see the application class instead of the wrapper.
+   *
+   * @param task the task as seen by the executor; may be {@code null}
+   * @return the unwrapped task
+   */
+  static Object unwrap(final Object task) {
+    if (task instanceof ScopedRunnable scoped) {
+      return scoped.delegate();
+    }
+    if (task instanceof ScopedCallable<?> scoped) {
+      return scoped.delegate();
+    }
+    return task;
+  }
+
+  /**
    * Returns a {@link Runnable} that, when executed on any thread, pushes {@code sessionId} onto
    * that thread's session stack, runs {@code runnable}, then pops the ID — even if {@code runnable}
    * throws.
