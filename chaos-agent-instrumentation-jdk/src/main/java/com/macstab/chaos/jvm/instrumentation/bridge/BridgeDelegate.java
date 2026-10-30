@@ -412,9 +412,12 @@ public interface BridgeDelegate {
    * @param len the number of bytes requested
    * @param remoteAddress the peer {@code java.net.InetAddress}, or {@code null} if not connected
    * @param remotePort the peer port
+   * @param soTimeoutMillis the socket's {@code SO_TIMEOUT}; {@code 0} for infinite
+   * @return the byte count to read, encoded as {@code -(count) - 1} to corrupt the bytes read
    * @throws Throwable if an active scenario injects a failure to simulate a read error or timeout
    */
-  void beforeSocketRead(Object stream, int len, Object remoteAddress, int remotePort)
+  int beforeSocketRead(
+      Object stream, int len, Object remoteAddress, int remotePort, int soTimeoutMillis)
       throws Throwable;
 
   /**
@@ -648,9 +651,10 @@ public interface BridgeDelegate {
    * @param stream the stream instance
    * @param path the path the stream was opened with, or {@code null}
    * @param byteCount the bytes read (requested) or written by the call
+   * @return {@code byteCount}, encoded as {@code -(count) - 1} to corrupt a read's bytes
    * @throws Throwable if the delegate throws
    */
-  void beforeFileIo(String operation, Object stream, String path, int byteCount) throws Throwable;
+  int beforeFileIo(String operation, Object stream, String path, int byteCount) throws Throwable;
 
   /**
    * Called on entry to a method woven for a {@code MethodSelector}.

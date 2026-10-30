@@ -59,8 +59,8 @@ class IoContextFilterTest {
                   Set.of(OperationType.SOCKET_READ), null, null, null, null, 100L)));
       final InetAddress peer = InetAddress.getLoopbackAddress();
 
-      runtime.beforeSocketRead(this, 64, peer, 80);
-      runtime.beforeSocketRead(this, 8192, peer, 80);
+      runtime.beforeSocketRead(this, 64, peer, 80, 0);
+      runtime.beforeSocketRead(this, 8192, peer, 80, 0);
 
       assertThat(matched()).isEqualTo(1L);
     }

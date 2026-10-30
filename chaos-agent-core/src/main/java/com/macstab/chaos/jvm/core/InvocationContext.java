@@ -40,6 +40,8 @@ import java.net.InetAddress;
  * @param remotePort the peer port of a socket operation, or {@code -1} when unknown
  * @param signature the JVM descriptor of a woven method (e.g. {@code (Ljava/lang/String;)V}), or
  *     {@code null} when the call carries none
+ * @param timeoutMillis the call's own timeout ({@code SO_TIMEOUT} of a read, the connect timeout),
+ *     {@code 0} for infinite, or {@code -1} when the call has none
  */
 record InvocationContext(
     OperationType operationType,
@@ -54,7 +56,8 @@ record InvocationContext(
     String path,
     InetAddress remoteAddress,
     int remotePort,
-    String signature) {
+    String signature,
+    int timeoutMillis) {
 
   /** {@code byteCount} / {@code remotePort} of an operation that has none. */
   static final int UNKNOWN = -1;
@@ -93,6 +96,7 @@ record InvocationContext(
         null,
         null,
         UNKNOWN,
-        null);
+        null,
+        UNKNOWN);
   }
 }

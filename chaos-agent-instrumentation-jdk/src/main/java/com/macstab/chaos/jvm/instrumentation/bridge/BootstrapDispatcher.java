@@ -316,7 +316,7 @@ public final class BootstrapDispatcher {
   /** Handle index for {@link #beforeSocketAccept(Object)}. */
   public static final int BEFORE_SOCKET_ACCEPT = 27;
 
-  /** Handle index for {@link #beforeSocketRead(Object, int, Object, int)}. */
+  /** Handle index for {@link #beforeSocketRead(Object, int, Object, int, int)}. */
   public static final int BEFORE_SOCKET_READ = 28;
 
   /** Handle index for {@link #beforeSocketWrite(Object, int, Object, int)}. */
@@ -1451,24 +1451,34 @@ public final class BootstrapDispatcher {
    * @param remoteAddress the peer address ({@code java.net.InetAddress}); {@code null} when the
    *     socket is not connected
    * @param remotePort the peer port
+   * @param soTimeoutMillis the socket's {@code SO_TIMEOUT}; {@code 0} for infinite
+   * @return the byte count to read: {@code len}, lower under a trickle, or {@code -(count) - 1}
+   *     when the bytes read must be corrupted (see {@link #corruptBytes})
    * @throws Throwable if an active scenario injects a failure to simulate a read error or timeout
    */
-  public static void beforeSocketRead(
-      final Object stream, final int len, final Object remoteAddress, final int remotePort)
+  public static int beforeSocketRead(
+      final Object stream,
+      final int len,
+      final Object remoteAddress,
+      final int remotePort,
+      final int soTimeoutMillis)
       throws Throwable {
     final int[] depth = DEPTH.get();
     if (depth[0] > 0) {
-      return;
+      return len;
     }
     depth[0]++;
     try {
       final MethodHandle[] h = handles;
       final Object d = delegate;
-      if (d != null && h != null) {
-        h[BEFORE_SOCKET_READ].invoke(d, stream, len, remoteAddress, remotePort);
-      }
+      return (d == null || h == null)
+          ? len
+          : (int)
+              h[BEFORE_SOCKET_READ].invoke(
+                  d, stream, len, remoteAddress, remotePort, soTimeoutMillis);
     } catch (final Throwable throwable) {
       sneakyThrow(throwable);
+      return len;
     } finally {
       depth[0]--;
     }
@@ -2101,27 +2111,60 @@ public final class BootstrapDispatcher {
    *     null}
    * @param path the path the stream was opened with, or {@code null}
    * @param byteCount the bytes read (requested) or written by the call
+   * @return {@code byteCount}, or {@code -(byteCount) - 1} when a read's bytes must be corrupted
    * @throws Throwable if an active scenario injects an exception to simulate an I/O failure
    */
-  public static void beforeFileIo(
+  public static int beforeFileIo(
       final String operation, final Object stream, final String path, final int byteCount)
       throws Throwable {
     final int[] depth = DEPTH.get();
     if (depth[0] > 0) {
-      return;
+      return byteCount;
     }
     depth[0]++;
     try {
       final MethodHandle[] h = handles;
       final Object d = delegate;
-      if (d != null && h != null) {
-        h[BEFORE_FILE_IO].invoke(d, operation, stream, path, byteCount);
-      }
+      return (d == null || h == null)
+          ? byteCount
+          : (int) h[BEFORE_FILE_IO].invoke(d, operation, stream, path, byteCount);
     } catch (final Throwable throwable) {
       sneakyThrow(throwable);
+      return byteCount;
     } finally {
       depth[0]--;
     }
+  }
+
+  /**
+   * Flips one random bit in {@code count} bytes of {@code buffer} starting at {@code offset}: the
+   * corruption a {@code CorruptReadEffect} applies to the bytes a read returned. Called by the read
+   * advice after the real read; makes no dispatch.
+   *
+   * @param buffer the buffer the read filled
+   * @param offset where the read started writing
+   * @param count the number of bytes the read returned; nothing happens when {@code <= 0}
+   */
+  public static void corruptBytes(final byte[] buffer, final int offset, final int count) {
+    if (buffer == null || count <= 0) {
+      return;
+    }
+    final java.util.concurrent.ThreadLocalRandom random =
+        java.util.concurrent.ThreadLocalRandom.current();
+    final int index = offset + random.nextInt(count);
+    buffer[index] = (byte) (buffer[index] ^ (1 << random.nextInt(8)));
+  }
+
+  /**
+   * Flips one random bit of a byte returned by a single-byte {@code read()}.
+   *
+   * @param value the value the read returned
+   * @return the corrupted value, or {@code value} at end of stream ({@code -1})
+   */
+  public static int corruptByte(final int value) {
+    return value < 0
+        ? value
+        : (value ^ (1 << java.util.concurrent.ThreadLocalRandom.current().nextInt(8))) & 0xFF;
   }
 
   /**

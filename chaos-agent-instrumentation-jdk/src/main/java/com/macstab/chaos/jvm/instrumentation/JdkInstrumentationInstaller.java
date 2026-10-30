@@ -750,7 +750,8 @@ public final class JdkInstrumentationInstaller {
         lookup.findVirtual(
             delegateInterface,
             "beforeSocketRead",
-            MethodType.methodType(void.class, Object.class, int.class, Object.class, int.class));
+            MethodType.methodType(
+                int.class, Object.class, int.class, Object.class, int.class, int.class));
     methodHandles[BootstrapDispatcher.BEFORE_SOCKET_WRITE] =
         lookup.findVirtual(
             delegateInterface,
@@ -915,7 +916,7 @@ public final class JdkInstrumentationInstaller {
         lookup.findVirtual(
             delegateInterface,
             "beforeFileIo",
-            MethodType.methodType(void.class, String.class, Object.class, String.class, int.class));
+            MethodType.methodType(int.class, String.class, Object.class, String.class, int.class));
     methodHandles[BootstrapDispatcher.BEFORE_METHOD_ENTER] =
         lookup.findVirtual(
             delegateInterface,

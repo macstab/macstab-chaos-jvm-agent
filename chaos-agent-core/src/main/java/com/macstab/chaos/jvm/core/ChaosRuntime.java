@@ -647,22 +647,28 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @throws Throwable if a chaos effect injects an exception
    */
   public void beforeSocketRead(final Object stream) throws Throwable {
-    dispatcher.beforeSocketRead(stream, InvocationContext.UNKNOWN, null, 0);
+    dispatcher.beforeSocketRead(stream, InvocationContext.UNKNOWN, null, 0, 0);
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeSocketRead(Object, int, Object, int)}.
+   * Delegates to {@link ChaosDispatcher#beforeSocketRead(Object, int, Object, int, int)}.
    *
    * @param stream the socket implementation being read from
    * @param len the number of bytes requested
    * @param remoteAddress the peer {@link java.net.InetAddress}, or {@code null} if not connected
    * @param remotePort the peer port
+   * @param soTimeoutMillis the socket's {@code SO_TIMEOUT}; {@code 0} for infinite
+   * @return the byte count to read, encoded when the read must be corrupted
    * @throws Throwable if an active scenario throws to simulate a failure
    */
-  public void beforeSocketRead(
-      final Object stream, final int len, final Object remoteAddress, final int remotePort)
+  public int beforeSocketRead(
+      final Object stream,
+      final int len,
+      final Object remoteAddress,
+      final int remotePort,
+      final int soTimeoutMillis)
       throws Throwable {
-    dispatcher.beforeSocketRead(stream, len, remoteAddress, remotePort);
+    return dispatcher.beforeSocketRead(stream, len, remoteAddress, remotePort, soTimeoutMillis);
   }
 
   /**
@@ -948,12 +954,13 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @param stream the file stream
    * @param path the path the stream was opened with, or {@code null}
    * @param byteCount the bytes read (requested) or written by the call
+   * @return {@code byteCount}, encoded when a read's bytes must be corrupted
    * @throws Throwable if a chaos effect injects an exception
    */
-  public void beforeFileIo(
+  public int beforeFileIo(
       final String operation, final Object stream, final String path, final int byteCount)
       throws Throwable {
-    dispatcher.beforeFileIo(operation, stream, path, byteCount);
+    return dispatcher.beforeFileIo(operation, stream, path, byteCount);
   }
 
   Optional<Instrumentation> instrumentation() {

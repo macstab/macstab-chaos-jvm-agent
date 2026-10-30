@@ -853,6 +853,101 @@ class DefectRegressionIntegrationTest {
   }
 
   @Nested
+  @DisplayName("data-delivery effects")
+  class DataDeliveryEffects {
+
+    private ChildJvmProbe.ProbeResult run(
+        final ChaosSelector selector, final ChaosEffect effect, final String mode)
+        throws Exception {
+      return probe.run(
+          plan(scenario("effect", selector, effect)), DefectProbeMain.class, mode, null);
+    }
+
+    private ChaosSelector socketReads() {
+      return new ChaosSelector.NetworkSelector(
+          Set.of(OperationType.SOCKET_READ), null, "127.0.0.0/8", null, null, null);
+    }
+
+    @Test
+    @DisplayName("trickle caps a socket read")
+    void trickle() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          run(socketReads(), ChaosEffect.trickle(10), "socket-read-effects");
+      assertThat(result.longValue("read")).isEqualTo(10L);
+      assertThat(result.longValue("differingBits")).isZero();
+    }
+
+    @Test
+    @DisplayName("corruptRead flips exactly one bit of a socket read")
+    void corruptSocketRead() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          run(socketReads(), ChaosEffect.corruptRead(), "socket-read-effects");
+      assertThat(result.longValue("read")).isEqualTo(64L);
+      assertThat(result.longValue("differingBits")).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("corruptRead flips exactly one bit of a file read")
+    void corruptFileRead() throws Exception {
+      // Scoped to the probe's temporary directory: without a path filter the scenario would
+      // corrupt every file read, including the class files the JVM loads from directories.
+      final Path tmp = Files.createDirectories(tempDir.resolve("corrupt-tmp"));
+      final ChildJvmProbe.ProbeResult result =
+          probe.run(
+              plan(
+                  scenario(
+                      "effect",
+                      new ChaosSelector.FileIoSelector(
+                          Set.of(OperationType.FILE_IO_READ),
+                          PathPattern.under(tmp.toString()),
+                          null,
+                          null),
+                      ChaosEffect.corruptRead())),
+              DefectProbeMain.class,
+              "file-corrupt-read",
+              null,
+              "-Djava.io.tmpdir=" + tmp);
+      assertThat(result.longValue("read")).isEqualTo(64L);
+      assertThat(result.longValue("differingBits")).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("timeout waits for SO_TIMEOUT, then throws SocketTimeoutException")
+    void timeout() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          run(socketReads(), ChaosEffect.timeout(), "socket-read-effects");
+      assertThat(result.value("timeout")).isEqualTo("Read timed out");
+      assertThat(result.longValue("waitedMillis")).isGreaterThanOrEqualTo(190L);
+      assertThat(result.longValue("applied.effect")).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("timeout never fires on a socket without a timeout")
+    void timeoutInfinite() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.run(
+              plan(scenario("effect", socketReads(), ChaosEffect.timeout())),
+              DefectProbeMain.class,
+              "socket-read-effects",
+              null,
+              "-Dchaos.test.soTimeout=0");
+      assertThat(result.longValue("read")).isEqualTo(64L);
+      assertThat(result.longValue("applied.effect")).as("it did not fire").isZero();
+    }
+
+    @Test
+    @DisplayName("connectionReset makes the peer see a reset instead of end of stream")
+    void connectionReset() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          run(
+              ChaosSelector.network(Set.of(OperationType.SOCKET_CLOSE)),
+              ChaosEffect.connectionReset(),
+              "socket-reset");
+      assertThat(result.value("clientSaw")).isEqualTo("Connection reset");
+    }
+  }
+
+  @Nested
   @DisplayName("on-demand weaving")
   class OnDemandWeaving {
 

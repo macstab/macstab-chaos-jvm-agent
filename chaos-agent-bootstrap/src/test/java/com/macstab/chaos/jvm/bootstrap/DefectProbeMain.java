@@ -86,6 +86,10 @@ public final class DefectProbeMain {
       case "direct-buffer-release" -> directBufferRelease();
       case "bridge-jars-on-disk" -> bridgeJarsOnDisk();
       case "socket-write-sizes" -> socketWriteSizes();
+      case "socket-read-effects" ->
+          socketReadEffects(System.getProperty("chaos.test.soTimeout", "200"));
+      case "socket-reset" -> socketReset();
+      case "file-corrupt-read" -> fileCorruptRead();
       case "file-writes-by-path" -> fileWritesByPath();
       case "method-weaving" -> methodWeaving();
       case "woven-groups" -> printWovenGroups();
@@ -460,6 +464,81 @@ public final class DefectProbeMain {
     System.out.println("after=" + greeter.greet("a") + "|" + greeter.count());
     System.out.println(
         "after.woven=" + plane.diagnostics().snapshot().runtimeDetails().get("wovenHookGroups"));
+  }
+
+  /**
+   * Sends 64 known bytes over loopback and reads them with one read on a socket whose SO_TIMEOUT is
+   * {@code timeoutMillis}; prints how many bytes the read returned, how many bits differ, and any
+   * timeout.
+   */
+  private static void socketReadEffects(final String timeoutMillis) throws Exception {
+    final byte[] sent = new byte[64];
+    for (int i = 0; i < sent.length; i++) {
+      sent[i] = (byte) i;
+    }
+    try (java.net.ServerSocket server =
+            new java.net.ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"));
+        java.net.Socket client = new java.net.Socket("127.0.0.1", server.getLocalPort());
+        java.net.Socket accepted = server.accept()) {
+      accepted.getOutputStream().write(sent);
+      accepted.getOutputStream().flush();
+      Thread.sleep(100L);
+      client.setSoTimeout(Integer.parseInt(timeoutMillis));
+      final byte[] received = new byte[64];
+      final long start = System.nanoTime();
+      try {
+        final int read = client.getInputStream().read(received, 0, received.length);
+        System.out.println("read=" + read);
+        int differingBits = 0;
+        for (int i = 0; i < read; i++) {
+          differingBits += Integer.bitCount((received[i] ^ sent[i]) & 0xFF);
+        }
+        System.out.println("differingBits=" + differingBits);
+      } catch (final java.net.SocketTimeoutException timedOut) {
+        System.out.println("timeout=" + timedOut.getMessage());
+        System.out.println("waitedMillis=" + (System.nanoTime() - start) / 1_000_000L);
+      }
+    }
+  }
+
+  /** Closes the accepted side of a loopback connection and reports what the client's read sees. */
+  private static void socketReset() throws Exception {
+    try (java.net.ServerSocket server =
+            new java.net.ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"));
+        java.net.Socket client = new java.net.Socket("127.0.0.1", server.getLocalPort())) {
+      final java.net.Socket accepted = server.accept();
+      accepted.close();
+      client.setSoTimeout(2000);
+      try {
+        System.out.println("read=" + client.getInputStream().read());
+      } catch (final java.net.SocketException reset) {
+        System.out.println("clientSaw=" + reset.getMessage());
+      }
+    }
+  }
+
+  /** Writes 64 known bytes to a temporary file and reads them back with read(byte[]). */
+  private static void fileCorruptRead() throws Exception {
+    final java.nio.file.Path file = java.nio.file.Files.createTempFile("chaos-corrupt", ".bin");
+    try {
+      final byte[] sent = new byte[64];
+      for (int i = 0; i < sent.length; i++) {
+        sent[i] = (byte) i;
+      }
+      java.nio.file.Files.write(file, sent);
+      final byte[] received = new byte[64];
+      try (java.io.FileInputStream in = new java.io.FileInputStream(file.toFile())) {
+        final int read = in.read(received);
+        int differingBits = 0;
+        for (int i = 0; i < read; i++) {
+          differingBits += Integer.bitCount((received[i] ^ sent[i]) & 0xFF);
+        }
+        System.out.println("read=" + read);
+        System.out.println("differingBits=" + differingBits);
+      }
+    } finally {
+      java.nio.file.Files.deleteIfExists(file);
+    }
   }
 
   /** Writes 10 bytes and then 2000 bytes over a loopback connection. */

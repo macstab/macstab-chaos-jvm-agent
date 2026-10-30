@@ -76,6 +76,10 @@ final class ApiJsonMixins {
     @JsonSubTypes.Type(value = ChaosEffect.GateEffect.class, name = "gate"),
     @JsonSubTypes.Type(value = ChaosEffect.RejectEffect.class, name = "reject"),
     @JsonSubTypes.Type(value = ChaosEffect.ErrnoEffect.class, name = "errno"),
+    @JsonSubTypes.Type(value = ChaosEffect.ConnectionResetEffect.class, name = "connectionReset"),
+    @JsonSubTypes.Type(value = ChaosEffect.TrickleEffect.class, name = "trickle"),
+    @JsonSubTypes.Type(value = ChaosEffect.CorruptReadEffect.class, name = "corruptRead"),
+    @JsonSubTypes.Type(value = ChaosEffect.TimeoutEffect.class, name = "timeout"),
     @JsonSubTypes.Type(value = ChaosEffect.SuppressEffect.class, name = "suppress"),
     @JsonSubTypes.Type(
         value = ChaosEffect.ExceptionalCompletionEffect.class,

@@ -778,7 +778,8 @@ class SelectorMatcherTest {
           null,
           null,
           InvocationContext.UNKNOWN,
-          descriptor);
+          descriptor,
+          InvocationContext.UNKNOWN);
     }
 
     @Test

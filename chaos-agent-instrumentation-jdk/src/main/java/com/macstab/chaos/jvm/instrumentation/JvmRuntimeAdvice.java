@@ -399,13 +399,33 @@ final class JvmRuntimeAdvice {
    */
   static final class SocketReadAdvice {
     @Advice.OnMethodEnter
-    static void enter(
+    static boolean enter(
         @Advice.This final Object stream,
-        @Advice.Argument(2) final int len,
+        @Advice.Argument(value = 2, readOnly = false) int len,
         @Advice.FieldValue("address") final java.net.InetAddress remoteAddress,
-        @Advice.FieldValue("port") final int remotePort)
+        @Advice.FieldValue("port") final int remotePort,
+        @Advice.FieldValue("timeout") final int soTimeoutMillis)
         throws Throwable {
-      BootstrapDispatcher.beforeSocketRead(stream, len, remoteAddress, remotePort);
+      final int count =
+          BootstrapDispatcher.beforeSocketRead(
+              stream, len, remoteAddress, remotePort, soTimeoutMillis);
+      if (count < 0) {
+        len = -count - 1;
+        return true;
+      }
+      len = count;
+      return false;
+    }
+
+    @Advice.OnMethodExit
+    static void exit(
+        @Advice.Enter final boolean corrupt,
+        @Advice.Argument(0) final byte[] buffer,
+        @Advice.Argument(1) final int offset,
+        @Advice.Return final int read) {
+      if (corrupt) {
+        BootstrapDispatcher.corruptBytes(buffer, offset, read);
+      }
     }
   }
 
@@ -850,35 +870,65 @@ final class JvmRuntimeAdvice {
    */
   static final class FileReadByteAdvice {
     @Advice.OnMethodEnter
-    static void enter(
+    static boolean enter(
         @Advice.This final Object stream, @Advice.FieldValue("path") final String path)
         throws Throwable {
-      BootstrapDispatcher.beforeFileIo("FILE_IO_READ", stream, path, 1);
+      return BootstrapDispatcher.beforeFileIo("FILE_IO_READ", stream, path, 1) < 0;
+    }
+
+    @Advice.OnMethodExit
+    static void exit(
+        @Advice.Enter final boolean corrupt, @Advice.Return(readOnly = false) int value) {
+      if (corrupt) {
+        value = BootstrapDispatcher.corruptByte(value);
+      }
     }
   }
 
   /** Intercepts {@link java.io.FileInputStream#read(byte[])} ({@code b.length} requested). */
   static final class FileReadArrayAdvice {
     @Advice.OnMethodEnter
-    static void enter(
+    static boolean enter(
         @Advice.This final Object stream,
         @Advice.Argument(0) final byte[] buffer,
         @Advice.FieldValue("path") final String path)
         throws Throwable {
-      BootstrapDispatcher.beforeFileIo(
-          "FILE_IO_READ", stream, path, buffer == null ? -1 : buffer.length);
+      return BootstrapDispatcher.beforeFileIo(
+              "FILE_IO_READ", stream, path, buffer == null ? -1 : buffer.length)
+          < 0;
+    }
+
+    @Advice.OnMethodExit
+    static void exit(
+        @Advice.Enter final boolean corrupt,
+        @Advice.Argument(0) final byte[] buffer,
+        @Advice.Return final int read) {
+      if (corrupt) {
+        BootstrapDispatcher.corruptBytes(buffer, 0, read);
+      }
     }
   }
 
   /** Intercepts {@link java.io.FileInputStream#read(byte[], int, int)} ({@code len} requested). */
   static final class FileReadRangeAdvice {
     @Advice.OnMethodEnter
-    static void enter(
+    static boolean enter(
         @Advice.This final Object stream,
         @Advice.Argument(2) final int len,
         @Advice.FieldValue("path") final String path)
         throws Throwable {
-      BootstrapDispatcher.beforeFileIo("FILE_IO_READ", stream, path, len);
+      return BootstrapDispatcher.beforeFileIo("FILE_IO_READ", stream, path, len) < 0;
+    }
+
+    @Advice.OnMethodExit
+    static void exit(
+        @Advice.Enter final boolean corrupt,
+        @Advice.Argument(0) final byte[] buffer,
+        @Advice.Argument(1) final int offset,
+        @Advice.Return final int read) {
+      if (corrupt) {
+        BootstrapDispatcher.corruptBytes(buffer, offset, read);
+      }
     }
   }
 

@@ -388,6 +388,10 @@ public final class ChaosDispatcher {
       if (terminalAction.kind() == TerminalKind.THROW) {
         throw terminalAction.throwable();
       }
+      if (terminalAction.kind() == TerminalKind.TIMEOUT) {
+        sleep((Long) terminalAction.returnValue());
+        throw terminalAction.throwable();
+      }
       if (terminalAction.kind() == TerminalKind.RETURN) {
         return (Boolean) terminalAction.returnValue();
       }
@@ -610,7 +614,8 @@ public final class ChaosDispatcher {
                 null,
                 null,
                 InvocationContext.UNKNOWN,
-                descriptor)));
+                descriptor,
+                InvocationContext.UNKNOWN)));
   }
 
   /**
@@ -645,7 +650,8 @@ public final class ChaosDispatcher {
             null,
             null,
             InvocationContext.UNKNOWN,
-            descriptor),
+            descriptor,
+            InvocationContext.UNKNOWN),
         MethodDescriptors.returnType(declaringType, descriptor),
         actualValue);
   }
@@ -1171,7 +1177,8 @@ public final class ChaosDispatcher {
             null,
             inetSocketAddress == null ? null : inetSocketAddress.getAddress(),
             inetSocketAddress == null ? InvocationContext.UNKNOWN : inetSocketAddress.getPort(),
-            null);
+            null,
+            timeoutMillis);
     applyPreDecision(evaluate(context));
   }
 
@@ -1202,10 +1209,17 @@ public final class ChaosDispatcher {
    * @param len the number of bytes requested
    * @param remoteAddress the peer {@link java.net.InetAddress}, or {@code null} if not connected
    * @param remotePort the peer port, or {@code 0} if not connected
+   * @param soTimeoutMillis the socket's {@code SO_TIMEOUT}; {@code 0} for infinite
+   * @return the byte count to read: {@code len}, or less under a {@code TrickleEffect}; encoded as
+   *     {@code -(count) - 1} when the bytes read must be corrupted ({@link #corruptFlag})
    * @throws Throwable if an active scenario throws to simulate a failure
    */
-  public void beforeSocketRead(
-      final Object stream, final int len, final Object remoteAddress, final int remotePort)
+  public int beforeSocketRead(
+      final Object stream,
+      final int len,
+      final Object remoteAddress,
+      final int remotePort,
+      final int soTimeoutMillis)
       throws Throwable {
     final InvocationContext context =
         new InvocationContext(
@@ -1221,8 +1235,9 @@ public final class ChaosDispatcher {
             null,
             remoteAddress instanceof java.net.InetAddress address ? address : null,
             remoteAddress == null ? InvocationContext.UNKNOWN : remotePort,
-            null);
-    applyPreDecision(evaluate(context));
+            null,
+            soTimeoutMillis);
+    return readCount(evaluate(context), len);
   }
 
   /**
@@ -1251,7 +1266,8 @@ public final class ChaosDispatcher {
             null,
             remoteAddress instanceof java.net.InetAddress address ? address : null,
             remoteAddress == null ? InvocationContext.UNKNOWN : remotePort,
-            null);
+            null,
+            InvocationContext.UNKNOWN);
     applyPreDecision(evaluate(context));
   }
 
@@ -1278,8 +1294,23 @@ public final class ChaosDispatcher {
             socket instanceof java.net.Socket s && s.getInetAddress() != null
                 ? s.getPort()
                 : InvocationContext.UNKNOWN,
-            null);
-    applyPreDecision(evaluate(context));
+            null,
+            InvocationContext.UNKNOWN);
+    final RuntimeDecision decision = evaluate(context);
+    if (decision.terminalAction() != null
+        && decision.terminalAction().kind() == TerminalKind.ABORTIVE_CLOSE) {
+      applyDelayAndGate(decision);
+      if (socket instanceof java.net.Socket closing && !closing.isClosed()) {
+        try {
+          // Linger 0: close() discards unsent data and sends RST instead of FIN.
+          closing.setSoLinger(true, 0);
+        } catch (final java.net.SocketException alreadyBroken) {
+          // the connection is already gone; close normally
+        }
+      }
+      return;
+    }
+    applyPreDecision(decision);
   }
 
   /**
@@ -1337,7 +1368,8 @@ public final class ChaosDispatcher {
                 null,
                 peer == null ? null : peer.getAddress(),
                 peer == null ? InvocationContext.UNKNOWN : peer.getPort(),
-                null));
+                null,
+                InvocationContext.UNKNOWN));
     applyDelayAndGate(decision);
     final TerminalAction terminal = decision.terminalAction();
     if (terminal != null && terminal.kind() == TerminalKind.THROW) {
@@ -1779,9 +1811,11 @@ public final class ChaosDispatcher {
    * @param stream the stream instance
    * @param path the path the stream was opened with, or {@code null}
    * @param byteCount the bytes read (requested) or written by the call
+   * @return {@code byteCount}, encoded as {@code -(byteCount) - 1} when a read's bytes must be
+   *     corrupted ({@link #corruptFlag})
    * @throws Throwable if an active scenario throws to simulate an I/O failure
    */
-  public void beforeFileIo(
+  public int beforeFileIo(
       final String operation, final Object stream, final String path, final int byteCount)
       throws Throwable {
     final OperationType fileIoOpType = resolveFileIoOperationType(operation);
@@ -1799,8 +1833,48 @@ public final class ChaosDispatcher {
             path,
             null,
             InvocationContext.UNKNOWN,
-            null);
-    applyPreDecision(evaluate(context));
+            null,
+            InvocationContext.UNKNOWN);
+    return readCount(evaluate(context), byteCount);
+  }
+
+  /**
+   * Applies a read's decision and returns the byte count to read, flagging a corrupting read. Delay
+   * and gate run first; a throwing terminal throws; {@code TrickleEffect} lowers the count.
+   */
+  private int readCount(final RuntimeDecision decision, final int requested) throws Throwable {
+    applyDelayAndGate(decision);
+    final TerminalAction terminal = decision.terminalAction();
+    if (terminal == null) {
+      return requested;
+    }
+    switch (terminal.kind()) {
+      case THROW -> throw terminal.throwable();
+      case TIMEOUT -> {
+        sleep((Long) terminal.returnValue());
+        throw terminal.throwable();
+      }
+      case CAP_LENGTH -> {
+        return requested <= 0 ? requested : Math.min(requested, (Integer) terminal.returnValue());
+      }
+      case CORRUPT_READ -> {
+        return corruptFlag(Math.max(requested, 0));
+      }
+      default -> {
+        return requested;
+      }
+    }
+  }
+
+  /**
+   * Encodes a byte count whose read must be corrupted: {@code -(count) - 1}, always negative. The
+   * advice decodes it and flips one bit in the bytes the read returned.
+   *
+   * @param count the byte count, {@code >= 0}
+   * @return the encoded count
+   */
+  static int corruptFlag(final int count) {
+    return -count - 1;
   }
 
   private static OperationType resolveFileIoOperationType(final String operationTag) {
@@ -1893,6 +1967,10 @@ public final class ChaosDispatcher {
         }
         final TerminalAction candidate =
             terminalActionFor(context, contribution.effect(), contribution.scenario());
+        if (candidate != null && candidate.kind() == TerminalKind.NOT_APPLICABLE) {
+          // Neither takes effect nor counts: the contribution is released below.
+          continue;
+        }
         if (candidate == null) {
           // A delay (or an effect without a terminal action for this operation) always takes
           // effect: delays of all matching scenarios are summed.
@@ -1929,6 +2007,30 @@ public final class ChaosDispatcher {
   private TerminalAction terminalActionFor(
       final InvocationContext context, final ChaosEffect effect, final ChaosScenario scenario) {
     final OperationType operationType = context.operationType();
+    if (effect instanceof ChaosEffect.ConnectionResetEffect) {
+      return new TerminalAction(TerminalKind.ABORTIVE_CLOSE, null, null, scenario.id());
+    }
+    if (effect instanceof ChaosEffect.TrickleEffect trickleEffect) {
+      return new TerminalAction(
+          TerminalKind.CAP_LENGTH, trickleEffect.maxBytes(), null, scenario.id());
+    }
+    if (effect instanceof ChaosEffect.CorruptReadEffect) {
+      return new TerminalAction(TerminalKind.CORRUPT_READ, null, null, scenario.id());
+    }
+    if (effect instanceof ChaosEffect.TimeoutEffect) {
+      // Like the native library, a timeout never fires on a call without one (infinite).
+      if (context.timeoutMillis() <= 0) {
+        return new TerminalAction(TerminalKind.NOT_APPLICABLE, null, null, scenario.id());
+      }
+      return new TerminalAction(
+          TerminalKind.TIMEOUT,
+          (long) context.timeoutMillis(),
+          new java.net.SocketTimeoutException(
+              operationType == OperationType.SOCKET_CONNECT
+                  ? "Connect timed out"
+                  : "Read timed out"),
+          scenario.id());
+    }
     if (effect instanceof ChaosEffect.ErrnoEffect errnoEffect) {
       return new TerminalAction(
           TerminalKind.THROW,

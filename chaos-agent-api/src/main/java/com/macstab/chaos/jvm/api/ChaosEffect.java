@@ -28,6 +28,10 @@ public sealed interface ChaosEffect
         ChaosEffect.ClockSkewEffect,
         ChaosEffect.SpuriousWakeupEffect,
         ChaosEffect.ErrnoEffect,
+        ChaosEffect.ConnectionResetEffect,
+        ChaosEffect.TrickleEffect,
+        ChaosEffect.CorruptReadEffect,
+        ChaosEffect.TimeoutEffect,
         ChaosEffect.HeapPressureEffect,
         ChaosEffect.KeepAliveEffect,
         ChaosEffect.MetaspacePressureEffect,
@@ -89,6 +93,51 @@ public sealed interface ChaosEffect
    */
   static ErrnoEffect errno(final Errno errno) {
     return new ErrnoEffect(errno);
+  }
+
+  /**
+   * Returns an effect that closes the socket abortively ({@code SO_LINGER} 0), so the peer sees a
+   * connection reset instead of an orderly close: the native library's {@code RESET}. Valid for
+   * {@link OperationType#SOCKET_CLOSE}.
+   *
+   * @return a new {@link ConnectionResetEffect}
+   */
+  static ConnectionResetEffect connectionReset() {
+    return new ConnectionResetEffect();
+  }
+
+  /**
+   * Returns an effect that lets each socket read return at most {@code maxBytes} bytes: the native
+   * library's {@code TRICKLE}. Valid for {@link OperationType#SOCKET_READ}.
+   *
+   * @param maxBytes the most bytes a read returns; {@code >= 1}
+   * @return a new {@link TrickleEffect}
+   */
+  static TrickleEffect trickle(final int maxBytes) {
+    return new TrickleEffect(maxBytes);
+  }
+
+  /**
+   * Returns an effect that flips one bit in the bytes a read returned: the native library's {@code
+   * CORRUPT}. Valid for {@link OperationType#SOCKET_READ} and {@link OperationType#FILE_IO_READ}.
+   *
+   * @return a new {@link CorruptReadEffect}
+   */
+  static CorruptReadEffect corruptRead() {
+    return new CorruptReadEffect();
+  }
+
+  /**
+   * Returns an effect that lets the call time out: it waits for the socket's own timeout ({@code
+   * SO_TIMEOUT} on a read, the connect timeout on a connect) and then throws {@link
+   * java.net.SocketTimeoutException}. It never fires when the timeout is infinite (0), like the
+   * native library's {@code TIMEOUT}. Valid for {@link OperationType#SOCKET_READ} and {@link
+   * OperationType#SOCKET_CONNECT}.
+   *
+   * @return a new {@link TimeoutEffect}
+   */
+  static TimeoutEffect timeout() {
+    return new TimeoutEffect();
   }
 
   /**
@@ -636,6 +685,32 @@ public sealed interface ChaosEffect
       }
     }
   }
+
+  /** Closes the socket abortively ({@code SO_LINGER} 0): the peer sees a connection reset. */
+  record ConnectionResetEffect() implements ChaosEffect {}
+
+  /**
+   * Lets each socket read return at most {@code maxBytes} bytes.
+   *
+   * @param maxBytes the most bytes a read returns; {@code >= 1}
+   */
+  record TrickleEffect(int maxBytes) implements ChaosEffect {
+    /** Validates the TrickleEffect parameters. */
+    public TrickleEffect {
+      if (maxBytes < 1) {
+        throw new IllegalArgumentException("maxBytes must be >= 1, got " + maxBytes);
+      }
+    }
+  }
+
+  /** Flips exactly one bit in the bytes a successful read returned. */
+  record CorruptReadEffect() implements ChaosEffect {}
+
+  /**
+   * Waits for the socket's own timeout, then throws {@link java.net.SocketTimeoutException}; never
+   * fires when the timeout is infinite.
+   */
+  record TimeoutEffect() implements ChaosEffect {}
 
   /** The errors an {@link ErrnoEffect} can raise, with the Java exception each becomes. */
   enum Errno {

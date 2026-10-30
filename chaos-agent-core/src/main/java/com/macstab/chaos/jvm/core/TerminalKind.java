@@ -28,4 +28,23 @@ enum TerminalKind {
    * ChaosEffect.ReturnValueCorruptionEffect}.
    */
   CORRUPT_RETURN,
+  /**
+   * Cap the byte count of a read at {@link TerminalAction#returnValue()} (an {@link Integer}):
+   * {@code TrickleEffect}.
+   */
+  CAP_LENGTH,
+  /** Flip one bit in the bytes the read returns: {@code CorruptReadEffect}. */
+  CORRUPT_READ,
+  /** Close the socket abortively ({@code SO_LINGER} 0): {@code ConnectionResetEffect}. */
+  ABORTIVE_CLOSE,
+  /**
+   * Wait {@link TerminalAction#returnValue()} milliseconds (a {@link Long}), then throw {@link
+   * TerminalAction#throwable()}: {@code TimeoutEffect}.
+   */
+  TIMEOUT,
+  /**
+   * The effect does not apply to this call (a {@code TimeoutEffect} on a socket without a timeout):
+   * the scenario neither takes effect nor counts an application.
+   */
+  NOT_APPLICABLE,
 }

@@ -1370,6 +1370,28 @@ File errors carry the path the stream was opened with; without one they are a pl
 
 ---
 
+#### Data-delivery effects — `trickle`, `corruptRead`, `timeout`, `connectionReset`
+
+The native library's network delivery effects, applied to the real socket and file calls:
+
+| JSON type         | Effect                  | Operations                      | Behaviour                                                                                                                                                       |
+|-------------------|-------------------------|---------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `trickle`         | `TrickleEffect`         | `SOCKET_READ`                   | A read returns at most `maxBytes` bytes (`TRICKLE`); callers that loop until they have all they need see the data arrive in small pieces                       |
+| `corruptRead`     | `CorruptReadEffect`     | `SOCKET_READ`, `FILE_IO_READ`   | After a read that returned bytes, exactly one bit of one returned byte is flipped (`CORRUPT`)                                                                   |
+| `timeout`         | `TimeoutEffect`         | `SOCKET_READ`, `SOCKET_CONNECT` | Waits for the call's own timeout (`SO_TIMEOUT`, or the connect timeout) and throws `SocketTimeoutException` (`Read timed out` / `Connect timed out`). On a call without a timeout (infinite) it does not fire and counts no application (`TIMEOUT`) |
+| `connectionReset` | `ConnectionResetEffect` | `SOCKET_CLOSE`                  | Closes with `SO_LINGER` 0: unsent data is discarded and the peer receives a reset — its next read fails with `SocketException: Connection reset` (`RESET`)      |
+
+```json
+{ "type": "trickle", "maxBytes": 16 }
+{ "type": "corruptRead" }
+{ "type": "timeout" }
+{ "type": "connectionReset" }
+```
+
+**Scope `corruptRead` on files with a `pathPattern`.** Without one it corrupts every `FileInputStream` read in the JVM — including the class files the JVM itself reads from directories on the class path, which then fail to load with `ClassFormatError`.
+
+---
+
 #### `suppress` — SuppressEffect
 
 **JSON type:** `"suppress"`  
