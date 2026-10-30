@@ -1457,7 +1457,7 @@ If `strategy` is inapplicable to the actual return type (e.g., `EMPTY` on a prim
 | Field        | Type                | Constraint                                | Description                        |
 |--------------|---------------------|-------------------------------------------|------------------------------------|
 | `skewAmount` | Duration (ISO-8601) | non-zero; fits in Long nanos (±292 years) | Positive = future; negative = past |
-| `mode`       | ClockSkewMode       | required                                  | `FIXED` \| `DRIFT` \| `FREEZE`     |
+| `mode`       | ClockSkewMode       | required                                  | `FIXED` \| `DRIFT` \| `FREEZE` \| `REGRESS` |
 
 **ClockSkewMode values:**
 
@@ -1466,6 +1466,7 @@ If `strategy` is inapplicable to the actual return type (e.g., `EMPTY` on a prim
 | `FIXED`  | Constant offset added to every clock read: `real + skewAmount`                                |
 | `DRIFT`  | Accumulating offset: each read adds `skewAmount` to the running total (simulates clock drift) |
 | `FREEZE` | Clock is frozen at the timestamp captured at activation; every read returns the same value    |
+| `REGRESS` | The clock steps back once by `skewAmount` (positive) and stays there: the first read is real and arms the scenario, the next read jumps back, every later read stays shifted (the native library's `REGRESS`) |
 
 **JSON example — 1-hour future jump:**
 ```json

@@ -394,4 +394,36 @@ class ClockSkewRuntimeTest {
       }
     }
   }
+
+  @Nested
+  @DisplayName("REGRESS mode")
+  class RegressMode {
+
+    @Test
+    @DisplayName("the first read is real, the next steps back once, later reads stay shifted")
+    void stepsBackOnce() {
+      final ChaosRuntime runtime =
+          runtimeWithClockSkew(Duration.ofMillis(SKEW_MS), ChaosEffect.ClockSkewMode.REGRESS);
+
+      assertThat(runtime.applyClockSkew(REAL_MILLIS, OperationType.SYSTEM_CLOCK_MILLIS))
+          .as("arming read")
+          .isEqualTo(REAL_MILLIS);
+      assertThat(runtime.applyClockSkew(REAL_MILLIS + 10, OperationType.SYSTEM_CLOCK_MILLIS))
+          .as("the jump")
+          .isEqualTo(REAL_MILLIS + 10 - SKEW_MS);
+      assertThat(runtime.applyClockSkew(REAL_MILLIS + 20, OperationType.SYSTEM_CLOCK_MILLIS))
+          .as("stays shifted, does not jump again")
+          .isEqualTo(REAL_MILLIS + 20 - SKEW_MS);
+    }
+
+    @Test
+    @DisplayName("requires a positive amount")
+    void requiresPositiveAmount() {
+      org.assertj.core.api.Assertions.assertThatThrownBy(
+              () ->
+                  new ChaosEffect.ClockSkewEffect(
+                      Duration.ofMillis(-5), ChaosEffect.ClockSkewMode.REGRESS))
+          .isInstanceOf(IllegalArgumentException.class);
+    }
+  }
 }

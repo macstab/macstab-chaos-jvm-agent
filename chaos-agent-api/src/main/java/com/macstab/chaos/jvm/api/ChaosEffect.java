@@ -525,6 +525,14 @@ public sealed interface ChaosEffect
      * hung NTP daemon or failed clock source.
      */
     FREEZE,
+    /**
+     * Step the clock back once by {@code skewAmount} and keep it there, the native library's {@code
+     * REGRESS}. The first read after activation (inside the policy's time bounds) is returned
+     * unchanged and arms the scenario; the next read jumps back by {@code skewAmount}, and every
+     * later read stays shifted. Time visibly runs backwards once: what deadline, lease and ordering
+     * logic must survive after an NTP step. {@code skewAmount} must be positive.
+     */
+    REGRESS,
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -733,6 +741,10 @@ public sealed interface ChaosEffect
       }
       if (mode == null) {
         throw new IllegalArgumentException("mode must not be null");
+      }
+      if (mode == ClockSkewMode.REGRESS && skewAmount.isNegative()) {
+        throw new IllegalArgumentException(
+            "REGRESS steps the clock back by skewAmount; skewAmount must be positive");
       }
       // Duration.toNanos() overflows (ArithmeticException) past ~±292 years. Letting that escape
       // at scenario-start time leaves the controller half-initialised — started=true is written
