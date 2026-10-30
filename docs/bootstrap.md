@@ -71,25 +71,35 @@ Out of scope:
   ↓
 JVM calls: ChaosAgentBootstrap.premain(agentArgs, instrumentation)
   ↓
-if (singleton ChaosRuntime already set) → return (idempotent guard)
+initialize(agentArgs, instrumentation, System.getenv(), premainMode=true)
+  ↓
+claim the INITIALIZATION slot (AtomicReference<CompletableFuture<ChaosRuntime>>)
+  — already completed  → return the existing runtime (idempotent)
+  — in progress        → wait for the other initializer's outcome
   ↓
 ChaosRuntime runtime = new ChaosRuntime()
   ↓
 JdkInstrumentationInstaller.install(instrumentation, runtime, premainMode=true)
+  — refuses to install if a copy of the agent loaded by another class loader
+    already owns the bridge delegate (one copy per JVM)
   — Phase 1 + Phase 2 instrumentation
+  ↓
+registerMBean(runtime)            // skipped with a warning if the name is taken
+  ↓
+JfrIntegration.installIfAvailable(runtime)
   ↓
 Optional<StartupConfigLoader.LoadedPlan> plan =
     StartupConfigLoader.load(agentArgs, System.getenv())
   if plan present:
-    runtime.activate(plan.get().plan())
+    file source + configWatchInterval → StartupConfigPoller.startWithInitialPlan(...)
+    otherwise                         → runtime.activate(plan.get().plan())
     if plan.get().debugDumpOnStart():
-      System.out.println(runtime.diagnostics().debugDump())
+      System.err.println(runtime.diagnostics().debugDump())
   ↓
-registerMBean(runtime.diagnostics())
-  ↓
-runtime.setInstrumentation(instrumentation)
-  ↓
-RUNTIME_REF.set(runtime)   // AtomicReference; last write; visible to all threads
+complete the INITIALIZATION future   // publishes the runtime to current()
+
+on any failure: transformers and bridge delegate removed (uninstall), MBean
+unregistered, runtime closed, slot freed — a later call can retry cleanly
 ```
 
 ## Agentmain (dynamic attach)
@@ -97,8 +107,8 @@ RUNTIME_REF.set(runtime)   // AtomicReference; last write; visible to all thread
 ```
 VirtualMachine.attach(pid).loadAgent("chaos-agent-bootstrap.jar", agentArgs)
   ↓
-Opt-in check: System.getProperty("macstab.chaos.agentmain.enable") /
-              MACSTAB_CHAOS_AGENTMAIN_ENABLE env var must be "true".
+Opt-in check: System.getProperty("macstab.chaos.allow-dynamic-attach") /
+              MACSTAB_CHAOS_ALLOW_DYNAMIC_ATTACH env var must be "true".
 Without the opt-in, agentmain is a no-op (security: prevents drive-by injection
 from any process with jcmd/attach permission).
   ↓
@@ -106,9 +116,9 @@ JVM calls: ChaosAgentBootstrap.agentmain(agentArgs, instrumentation)
   ↓
 initialize(agentArgs, instrumentation, env, premainMode=false)
   ↓
-Phase 1 only: ThreadPoolExecutor, Thread, ScheduledThreadPoolExecutor,
-              BlockingQueue, CompletableFuture, ForkJoin, ClassLoader, ShutdownHook.
-Phase 2 (Socket/NIO/HTTP/JDBC/TLS/DNS/clock/GC/JNDI/JMX/Serialization/...) is
+Thread start, ThreadPoolExecutor and ScheduledThreadPoolExecutor only.
+BlockingQueue, CompletableFuture, ForkJoin, ClassLoader, ShutdownHook and all of
+Phase 2 (Socket/NIO/HTTP/JDBC/TLS/DNS/clock/GC/JNDI/JMX/Serialization/...) are
 NOT installed via agentmain. Those JDK classes are already loaded and would
 require retransformation; agentmain intentionally skips them so that runtime
 attach to a live production JVM cannot silently rewrite low-level networking.
@@ -118,9 +128,9 @@ attach to a live production JVM cannot silently rewrite low-level networking.
 
 ## Idempotency
 
-`premain`/`agentmain` first checks `RUNTIME_REF.get() != null`. If the runtime is already installed, the method returns immediately. This prevents double-installation in test environments where multiple classes call `ChaosTestKit.install()` concurrently before the first install completes.
+`initialize()` claims a single `INITIALIZATION` slot with a compare-and-exchange before doing any work. Exactly one caller performs the installation; concurrent callers wait for its outcome and receive the same runtime (or the same failure). A completed initialization is returned as-is. If the installation fails, everything it installed is rolled back and the slot is freed, so a later call starts from a clean JVM. `installForLocalTests()` additionally serialises the self-attach under a lock so the attach work is not done twice.
 
-**Race condition**: Two threads calling `installLocally()` concurrently could both observe `RUNTIME_REF.get() == null` and both attempt installation. The `AtomicReference.compareAndSet()` in the final step ensures only one succeeds; the loser's `ChaosRuntime` is discarded. However, `JdkInstrumentationInstaller.install()` may run twice in this race, attempting to register ByteBuddy transformations twice. ByteBuddy handles duplicate registrations gracefully (no-op for already-woven methods), but this is a latent inefficiency. In practice, concurrent `installLocally()` calls are rare.
+**One copy per JVM**: if a second copy of the agent, loaded by a different class loader (for example an agent jar on the system class path plus a starter bundled child-first in a web application), tries to install, it is refused with an `IllegalStateException` — installing would silently cut the first copy off from every intercepted call.
 
 ---
 
@@ -154,14 +164,14 @@ initialize("", instrumentation, Map.of(), true)              // premainMode=true
 
 The MBean is registered at `com.macstab.chaos.jvm:type=ChaosDiagnostics`.
 
-**Interface**: The MBean exposes `ChaosDiagnostics`:
-- `snapshot()` → `Snapshot` (serialized as JMX composite data)
+**Interface**: `ChaosDiagnosticsMXBean` exposes a single operation:
 - `debugDump()` → `String` (full human-readable diagnostic text)
-- `scenario(String id)` → `Optional<ScenarioReport>` (may not be directly JMX-composable; use `debugDump()` for operator inspection)
 
-**Registration**: Uses `ManagementFactory.getPlatformMBeanServer()`. If the MBean is already registered (e.g., from a prior `installLocally()` call in the same JVM), the existing registration is reused.
+There are no attributes; structured data (`snapshot()`, `scenario(id)`) is available only through the `ChaosDiagnostics` API in code.
 
-**Deregistration**: Not performed automatically. The MBean persists for the JVM lifetime. This is consistent with the agent's design principle that instrumentation is permanent.
+**Registration**: Uses `ManagementFactory.getPlatformMBeanServer()`. If an MBean with that name is already registered, registration is skipped with a warning on stderr and the agent continues without its own MBean.
+
+**Deregistration**: Not performed on a successful start; the MBean persists for the JVM lifetime. If initialization fails, the MBean registered by that attempt is unregistered as part of the rollback.
 
 ---
 
@@ -177,7 +187,7 @@ public static ChaosControlPlane current() {
 }
 ```
 
-`RUNTIME_REF` is the authoritative reference. Once set, it is never cleared or replaced. `ChaosControlPlane.close()` stops all active scenarios but does not null out `RUNTIME_REF`.
+The `INITIALIZATION` future is the authoritative reference. Once completed successfully, it is never cleared or replaced. `ChaosControlPlane.close()` stops all scenarios and makes the control plane reject further `activate`/`openSession`/`addEventListener` calls, but does not clear the published reference.
 
 ---
 

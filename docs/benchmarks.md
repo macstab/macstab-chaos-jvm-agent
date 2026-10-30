@@ -75,7 +75,7 @@ Both `ChaosRuntimeBenchmark` and `HttpClientBenchmark` declare their state class
 - `Scope.Benchmark` — a single instance shared across all threads of a benchmark fork; appropriate when the state is thread-safe and you want multiple threads competing on the same registry (realistic for a production scenario)
 - `Scope.Group` — used with `@Group` benchmarks (not used here)
 
-`Scope.Benchmark` is the correct choice because `ScenarioRegistry` — the data structure being read on every hot-path call — is a shared, thread-safe structure backed by `CopyOnWriteArrayList`. In production, multiple application threads concurrently call `registry.match()`. Using `Scope.Benchmark` reproduces this contention pattern accurately even in the single-thread JMH fork used here.
+`Scope.Benchmark` is the correct choice because `ScenarioRegistry` — the data structure being read on every hot-path call — is a shared, thread-safe structure backed by a `ConcurrentHashMap`. In production, multiple application threads concurrently call `registry.match()`. Using `Scope.Benchmark` reproduces this contention pattern accurately even in the single-thread JMH fork used here.
 
 ### 2.3 `@Setup(Level.Trial)` — Scenario Activation Outside Measurement
 
@@ -90,7 +90,7 @@ public void setup() {
 }
 ```
 
-`Level.Trial` runs once per benchmark fork, before any warmup or measurement iterations begin. The alternatives — `Level.Iteration` (once per iteration) and `Level.Invocation` (once per benchmark method call) — would both include scenario activation cost in the measurement. Scenario activation modifies `ScenarioRegistry` via a CAS on a `CopyOnWriteArrayList`, which involves an array copy: a few hundred nanoseconds. Including that cost would make the benchmark measure scenario management overhead rather than dispatch overhead, which is not the intent.
+`Level.Trial` runs once per benchmark fork, before any warmup or measurement iterations begin. The alternatives — `Level.Iteration` (once per iteration) and `Level.Invocation` (once per benchmark method call) — would both include scenario activation cost in the measurement. Scenario activation modifies `ScenarioRegistry` via an atomic `ConcurrentHashMap.compute()` plus validation and controller construction: a few hundred nanoseconds or more. Including that cost would make the benchmark measure scenario management overhead rather than dispatch overhead, which is not the intent.
 
 With `Level.Trial` setup, by the time JMH begins the warmup iterations, all scenarios are fully activated and the `ScenarioRegistry` snapshot is in its final stable state. The measurement iterations see exactly the runtime cost of traversing and matching against a static scenario list.
 
@@ -271,8 +271,8 @@ At these scales, the agent overhead in the zero-scenario path is below the preci
 
 The benchmarks measure the **dispatch fast path only**. They do not measure:
 
-- **Scenario activation cost**: `ChaosRuntime.activate()` performs a `CopyOnWriteArrayList` copy. This is a one-time cost per activation, not a per-call cost.
-- **Session open/close cost**: `ChaosRuntime.openSession()` and `ChaosSession.close()` touch `ScopeContext`, which uses `InheritableThreadLocal`. These are test-lifecycle operations.
+- **Scenario activation cost**: `ChaosRuntime.activate()` validates the scenario and inserts its controller into the registry's `ConcurrentHashMap`. This is a one-time cost per activation, not a per-call cost.
+- **Session open/close cost**: `ChaosRuntime.openSession()` and `ChaosSession.close()` touch `ScopeContext`, which uses a plain (non-inheritable) `ThreadLocal` holding a per-thread `ConcurrentLinkedDeque` of session ids. These are test-lifecycle operations.
 - **Effect execution cost**: When a `DelayEffect` fires, the benchmark measures `Thread.sleep()` latency which dominates everything else. These are intentional delays, not overhead.
 - **`BootstrapDispatcher` bridge overhead**: The `MethodHandle.invoke()` through `ChaosBridge` to `ChaosDispatcher` adds ~5–15 ns at JIT saturation. This is not included in the benchmark measurements but is included in any production callsite.
 - **ByteBuddy advice bytecode cost**: The inlined advice method (`@Advice.OnMethodEnter`) adds a few bytecode instructions to the instrumented method's prolog. This is a single-digit-nanosecond cost for the null-check and call. It is not measured by these benchmarks.
@@ -566,9 +566,9 @@ macOS's ARM memory model. On x86 Linux (production target), variance is expected
 
 **Remove exhausted scenarios.** The most actionable result from this benchmark is that an exhausted
 scenario sitting in the registry costs 250 ns more per matching call than a scenario that was never
-there. `ChaosActivationHandle.stop()` removes a scenario from the live registry in O(n) time with a
-single `CopyOnWriteArrayList` copy. Call it as soon as `maxApplications` has been reached and the
-scenario is no longer needed.
+there. `ChaosActivationHandle.close()` stops the scenario and removes it from the live registry
+with a single `ConcurrentHashMap` removal (`stop()` alone leaves it registered). Call it as soon as
+`maxApplications` has been reached and the scenario is no longer needed.
 
 **Keep selector types narrow.** A `FileIoSelector(READ_ONLY)` scenario adds ~35 ns to write calls
 (type-mismatch reject) but 0 ns overhead beyond that to DNS, SSL, and thread operations (they fail

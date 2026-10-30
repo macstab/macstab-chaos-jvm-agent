@@ -33,7 +33,7 @@ Key properties:
 - **Per-session isolation** — concurrent tests share a JVM; chaos is thread-local unless explicitly JVM-scoped
 - **Runtime control** — scenarios start, stop, fire, and expire without JVM restart
 - **Activation policy composition** — probability, rate limit, warm-up, time window, max-applications, random seed
-- **57 interception handles** covering the full JDK surface relevant to enterprise backend workloads
+- **58 interception handles** covering the full JDK surface relevant to enterprise backend workloads
 
 ## Scope
 
@@ -48,7 +48,7 @@ In scope:
 Out of scope:
 - Remote control plane (no HTTP/gRPC/JMX remote activation protocol)
 - Distributed or multi-process coordination
-- Agent uninstallation (instrumentation is permanent for the JVM lifetime)
+- Agent uninstallation as a user-facing feature. Internally `JdkInstrumentationInstaller.uninstall(Instrumentation)` resets the transformations and the bridge delegate (used to roll back a failed initialization); classes already loaded through the bootstrap bridge jar stay on the bootstrap class path
 - Arbitrary user-defined instrumentation points beyond the built-in 42
 - Kernel-level or network-layer fault injection
 
@@ -76,7 +76,7 @@ Out of scope:
 chaos-agent-api           — stable public contract; the only module application code directly depends on
 chaos-agent-bootstrap     — agent entry point (premain/agentmain), singleton init, JMX MBean
 chaos-agent-core          — matching engine, scenario controllers, activation policies, session scoping, stressors
-chaos-agent-instrumentation-jdk — ByteBuddy advice, bootstrap bridge, 57 interception handles
+chaos-agent-instrumentation-jdk — ByteBuddy advice, bootstrap bridge, 58 interception handles
 chaos-agent-startup-config — config resolution: JSON/base64/file; Jackson mapping
 chaos-agent-testkit       — JUnit 5 extension, ChaosPlatform.installLocally() for self-attach
 chaos-agent-examples      — runnable examples
@@ -154,7 +154,7 @@ ChaosRuntime created (Clock.systemUTC, NOOP metrics sink)
 JdkInstrumentationInstaller.install(instrumentation, runtime, premainMode=true)
     ├── injectBridge(): package BootstrapDispatcher into temp JAR,
     │                   appendToBootstrapClassLoaderSearch
-    ├── installDelegate(): build 57-slot MethodHandle[], wire into BootstrapDispatcher.install()
+    ├── installDelegate(): build 58-slot MethodHandle[], wire into BootstrapDispatcher.install()
     └── AgentBuilder: Phase 1 + Phase 2 ByteBuddy transformations installed via retransformation
   ↓
 Optional<LoadedPlan> plan = StartupConfigLoader.load(agentArgs, System.getenv())
@@ -193,15 +193,17 @@ BootstrapDispatcher.decorateExecutorRunnable("execute", executor, task)
       3. SelectorMatcher.matches(selector, context)? (pattern/operation check)
       4. activationWindow passes? (activeFor duration)
       5. warmUp passes? (matchedCount > activateAfterMatches)
-      6. rateLimit passes? (synchronized sliding window)
-      7. probability passes? (SplittableRandom draw)
-      8. maxApplications CAS succeeds?
+      6. probability passes? (SplittableRandom draw)
+      7. rateLimit passes? (synchronized fixed window anchored at start)
+      8. maxApplications reservation succeeds?
     Returns ScenarioContribution or null
   ↓
-  RuntimeDecision merge:
+  RuntimeDecision merge (applied in the order delay → gate → terminal action):
     - delayMillis: SUM of all contributions' sampled delays
-    - gateAction:  last GateEffect contribution's gate + timeout
+    - gateAction:  highest-precedence GateEffect contribution's gate + timeout
     - terminalAction: highest-precedence non-null terminal action
+    - commit (appliedCount++, APPLIED event) for every delay, the winning gate and the
+      winning terminal action; losing contributions release their maxApplications reservation
   ↓
   Decision execution in decorateExecutorRunnable:
     if SUPPRESS → return NO_OP_RUNNABLE
@@ -213,7 +215,7 @@ BootstrapDispatcher.decorateExecutorRunnable("execute", executor, task)
     sleep(delayMillis)
     return sessionId != null ? scopeContext.wrap(sessionId, task) : task
   ↓
-  DEPTH decremented; if 0 → DEPTH.remove() (ThreadLocal cleanup)
+  DEPTH decremented (the per-thread int[] is kept; it also holds call-depth scope counters)
   ↓
   Advice returns wrapped task to ThreadPoolExecutor
     → ThreadPoolExecutor runs wrapped task, which restores session context on the worker thread
@@ -340,7 +342,7 @@ end note
 @enduml
 ```
 
-**Takeaway**: State transitions to INACTIVE happen lazily inside `evaluate()` on the calling thread — there is no background expiry sweeper. STOPPED is terminal; a stopped controller cannot be restarted; a new controller must be registered for a new scenario activation.
+**Takeaway**: State transitions to INACTIVE happen lazily inside `evaluate()` on the calling thread — there is no background expiry sweeper for interceptor scenarios (a stressor's `activeFor` is enforced by a scheduled expiry). STOPPED is terminal; a stopped controller cannot be restarted. Activating the same id again registers a new controller that replaces the STOPPED or INACTIVE one; a duplicate id while the old one is REGISTERED or ACTIVE throws `ChaosActivationException`.
 
 ## Deployment Diagram — classloader structure at runtime
 
@@ -406,7 +408,7 @@ node "JVM Process" {
 **Misuse risks**:
 - Calling `evaluate()` before any scenario is started returns `RuntimeDecision.none()` (safe fallback)
 - Injecting a delay effect on `MONITOR_ENTER` or `THREAD_PARK` can cause secondary AQS activity inside `Thread.sleep()` — protected by the BootstrapDispatcher DEPTH guard
-- Calling `close()` destroys all controllers; does not uninstall ByteBuddy advice
+- Calling `close()` destroys and unregisters all controllers and makes the control plane reject further `activate`/`openSession`/`addEventListener` calls; it does not uninstall ByteBuddy advice
 
 ## ScenarioController (`chaos-agent-core`)
 
@@ -418,11 +420,11 @@ node "JVM Process" {
 3. `SelectorMatcher.matches(selector, context)` — stateless switch over sealed selector hierarchy
 4. `passesActivationWindow()` — `clock.instant().isBefore(startedAt.plus(activeFor))`; transitions state to INACTIVE
 5. `matchedCount > activateAfterMatches` — `AtomicLong.incrementAndGet()` runs regardless
-6. `passesRateLimit()` — sliding window, `synchronized(this)` on `rateWindowStartMillis` + `rateWindowPermits`
-7. `passesProbability(matched)` — `new SplittableRandom(baseSeed ^ matched ^ scenarioId.hashCode()).nextDouble()`
-8. `maxApplications` CAS loop — `appliedCount.compareAndSet(current, current+1)` to prevent overshoot under concurrency
+6. `passesProbability(matched)` — `new SplittableRandom(baseSeed ^ matched ^ scenarioId.hashCode()).nextDouble()`
+7. `passesRateLimit()` — fixed window anchored at `start()` and advanced in whole windows, `synchronized(this)` on `rateWindowStartMillis` + `rateWindowPermits` (a burst across a boundary can see up to 2× permits)
+8. `reserveApplication()` — reserves one unit of `maxApplications` budget under a lock
 
-**Why CAS loop for maxApplications**: A naive `incrementAndGet()` then check would allow the count to exceed the cap when multiple threads race through step 8 simultaneously. The CAS loop ensures the count never exceeds `maxApplications`.
+**Why a reservation for maxApplications**: committed applications plus outstanding reservations never exceed the cap, so concurrent threads cannot overshoot it. The dispatcher commits the reservation (incrementing `appliedCount` and publishing `APPLIED`) only for contributions that take effect; a scenario that loses on precedence releases it and keeps its budget.
 
 **Why new `SplittableRandom` per call**: `SplittableRandom` is not thread-safe. The per-call seed (`baseSeed ^ matched ^ scenarioId.hashCode()`) is deterministic given the same inputs, enabling reproducible sampling with a fixed `randomSeed` while still varying across successive invocations.
 
@@ -452,7 +454,7 @@ node "JVM Process" {
 
 **Two-field volatile publication**: `handles` is written before `delegate` so that any thread that snapshot-reads a non-null `delegate` is guaranteed to also see a non-null `handles` array. Both fields are `volatile`. This is the minimal safe publication protocol for a two-field pair without synchronization.
 
-**Reentrancy guard**: `ThreadLocal<int[]> DEPTH` (a one-element `int[]` is held instead of `Integer` so the counter is read once per call and mutated in place, avoiding a second `ThreadLocal.get()` and autoboxing on every intercepted JDK call). Incremented at the start of every `invoke()`, decremented in `finally`. When `DEPTH > 0`, any nested dispatch (e.g., chaos code calling `Thread.sleep()`, which is instrumented for `THREAD_PARK`) returns the fallback immediately. The `ThreadLocal` is `.remove()`d when DEPTH returns to zero to prevent memory leaks in pooled threads.
+**Reentrancy guard**: `ThreadLocal<int[]> DEPTH` (a one-element `int[]` is held instead of `Integer` so the counter is read once per call and mutated in place, avoiding a second `ThreadLocal.get()` and autoboxing on every intercepted JDK call). Incremented at the start of every `invoke()`, decremented in `finally`. When `DEPTH > 0`, any nested dispatch (e.g., chaos code calling `Thread.sleep()`, which is instrumented for `THREAD_PARK`) returns the fallback immediately. The `int[]` is kept when DEPTH returns to zero: it also holds the call-depth scope counters that make nested or delegating instrumented calls evaluate once, at the outermost call. Its footprint is one small array per thread, released with the thread.
 
 **Special case — ThreadLocal advice**: `ThreadLocalGetAdvice` and `ThreadLocalSetAdvice` include an identity check: `if (threadLocal == BootstrapDispatcher.depthThreadLocal()) return false`. Without this check, the advice on `ThreadLocal.get()` would fire when `DEPTH.get()` is called inside `invoke()`, creating an infinite recursion that the DEPTH guard cannot prevent (the DEPTH read is itself a `ThreadLocal.get()`).
 
@@ -462,9 +464,9 @@ node "JVM Process" {
 
 **Responsibility**: Assembles and installs all ByteBuddy transformations. Manages the bridge injection lifecycle.
 
-**Bootstrap bridge injection**: Reads `BootstrapDispatcher.class` and `BootstrapDispatcher$ThrowingSupplier.class` from the agent JAR's resources and writes them into a temp JAR. The temp JAR is appended to the bootstrap classpath via `Instrumentation.appendToBootstrapClassLoaderSearch`. The temp file is registered for deletion on JVM exit.
+**Bootstrap bridge injection**: Reads `BootstrapDispatcher.class` and `BootstrapDispatcher$ThrowingSupplier.class` from the agent JAR's resources and writes them into a temp JAR. The temp JAR (created with mode 0600 on POSIX) is appended to the bootstrap classpath via `Instrumentation.appendToBootstrapClassLoaderSearch`. On POSIX the file is unlinked immediately afterwards (the class path entry keeps its own handle), so nothing is left in the temp directory even after `kill -9`; on Windows it is deleted on exit and stale jars from earlier JVMs are swept on the next start. Injection happens once per JVM.
 
-**MethodHandle array construction** (`buildMethodHandles`): Uses `MethodHandles.publicLookup()` against `BridgeDelegate.class` to build `BootstrapDispatcher.HANDLE_COUNT` handles (currently 57). All handles are unbound virtual handles resolved against the interface, not the implementation, so the bootstrap classloader can invoke them without visibility into `ChaosBridge`; each dispatch call supplies the delegate instance as the first argument. The handle array is passed to `BootstrapDispatcher.install()` via reflection (`Class.forName(..., null)` with bootstrap classloader).
+**MethodHandle array construction** (`buildMethodHandles`): Uses `MethodHandles.publicLookup()` against `BridgeDelegate.class` to build `BootstrapDispatcher.HANDLE_COUNT` handles (currently 58). All handles are unbound virtual handles resolved against the interface, not the implementation, so the bootstrap classloader can invoke them without visibility into `ChaosBridge`; each dispatch call supplies the delegate instance as the first argument. The handle array is passed to `BootstrapDispatcher.install()` via reflection (`Class.forName(..., null)` with bootstrap classloader).
 
 **Phase 1 vs Phase 2 distinction**:
 - Phase 1: `ThreadPoolExecutor`, `ScheduledThreadPoolExecutor`, `Thread` — can be instrumented in both premain and agentmain because these are application-level classes or JDK classes loaded after the agent
@@ -478,22 +480,23 @@ node "JVM Process" {
 
 Stressors implement `ManagedStressor extends AutoCloseable`. Each starts one or more background threads or performs background JVM operations for the duration of the scenario.
 
-| Stressor                       | Mechanism                                                                | Close behavior                                                                                                          |
-|--------------------------------|--------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------|
-| `HeapPressureStressor`         | Retains `byte[]` allocations in a list                                   | Clears list, GC hint                                                                                                    |
-| `KeepAliveStressor`            | Starts N non-daemon threads in a wait loop                               | Interrupts all threads                                                                                                  |
-| `MetaspacePressureStressor`    | Defines synthetic classes via `ClassWriter` + `ClassLoader.defineClass`  | Drops classloader; GC eventually reclaims metaspace                                                                     |
-| `DirectBufferPressureStressor` | Allocates `ByteBuffer.allocateDirect` slabs                              | Sets references to null; `Cleaner` reclaims off-heap on GC                                                              |
-| `GcPressureStressor`           | Continuously allocates short-lived `byte[]` in a background thread       | Interrupts thread                                                                                                       |
-| `FinalizerBacklogStressor`     | Creates `Object` subclasses with `finalize()` methods                    | Interrupts producer thread                                                                                              |
-| `DeadlockStressor`             | Two threads each acquire lock A then B vs B then A                       | Cannot interrupt (threads are deadlocked); JVM process must terminate to recover                                        |
-| `ThreadLeakStressor`           | Starts N threads that park indefinitely                                  | Cannot recover (threads are parked); requires JVM restart                                                               |
-| `ThreadLocalLeakStressor`      | Sets N `ThreadLocal` entries on a pooled thread that is never cleaned up | Interrupts carrier thread                                                                                               |
-| `MonitorContentionStressor`    | N background threads repeatedly `synchronized(sharedLock)`               | Interrupts all contenders                                                                                               |
-| `CodeCachePressureStressor`    | Generates ByteBuddy classes via `ClassWriter` at high rate               | Interrupts generator thread                                                                                             |
-| `SafepointStormStressor`       | Calls `System.gc()` + `Instrumentation.retransformClasses()` on a timer  | Interrupts timer thread                                                                                                 |
-| `StringInternPressureStressor` | Interns unique strings in a background loop                              | Interrupts intern thread (interned strings are GC roots; memory is not recovered unless the pool is explicitly cleared) |
-| `ReferenceQueueFloodStressor`  | Enqueues `PhantomReference` objects targeting the JVM's reference queue  | Interrupts flood thread                                                                                                 |
+| Stressor                              | Mechanism                                                                                                            | Close behavior                                                                                                          |
+|---------------------------------------|----------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------|
+| `HeapPressureStressor`                | Retains `byte[]` allocations in a list                                                                               | Clears list, GC hint                                                                                                    |
+| `KeepAliveStressor`                   | Starts N non-daemon threads in a wait loop                                                                           | Interrupts all threads                                                                                                  |
+| `MetaspacePressureStressor`           | Defines synthetic classes via `ClassWriter` + `ClassLoader.defineClass`                                              | Drops classloader; GC eventually reclaims metaspace (with `retain=false` the loader is dropped right after definition)  |
+| `DirectBufferPressureStressor`        | Allocates `ByteBuffer.allocateDirect` slabs                                                                          | Sets references to null; `Cleaner` reclaims off-heap on GC                                                              |
+| `GcPressureStressor`                  | Continuously allocates short-lived `byte[]` in a background thread                                                   | Interrupts thread                                                                                                       |
+| `FinalizerBacklogStressor`            | Creates `Object` subclasses with `finalize()` methods                                                                | Interrupts producer thread                                                                                              |
+| `DeadlockStressor`                    | Two threads each acquire lock A then B vs B then A                                                                   | Cannot interrupt (threads are deadlocked); JVM process must terminate to recover                                        |
+| `ThreadLeakStressor`                  | Starts N threads that park indefinitely                                                                              | Cannot recover (threads are parked); requires JVM restart                                                               |
+| `ThreadLocalLeakStressor`             | Sets N `ThreadLocal` entries on a pooled thread that is never cleaned up                                             | Interrupts carrier thread                                                                                               |
+| `MonitorContentionStressor`           | N background threads repeatedly `synchronized(sharedLock)`                                                           | Interrupts all contenders                                                                                               |
+| `CodeCachePressureStressor`           | Generates ByteBuddy classes via `ClassWriter` at high rate                                                           | Interrupts generator thread                                                                                             |
+| `SafepointStormStressor`              | Calls `System.gc()` + `Instrumentation.retransformClasses()` on a timer                                              | Interrupts timer thread                                                                                                 |
+| `StringInternPressureStressor`        | Interns unique strings in a background loop                                                                          | Interrupts intern thread (interned strings are GC roots; memory is not recovered unless the pool is explicitly cleared) |
+| `ReferenceQueueFloodStressor`         | Enqueues `PhantomReference` objects targeting the JVM's reference queue                                              | Interrupts flood thread                                                                                                 |
+| `VirtualThreadCarrierPinningStressor` | N virtual threads hold their carriers: monitor pinning on JDK 21–23, spin-wait on JDK 24+ (one CPU per held carrier) | Stops and joins the virtual threads                                                                                     |
 
 **Critical operational note**: `DeadlockStressor` and `ThreadLeakStressor` are **non-recoverable within the JVM process**. `stop()`/`close()` cannot terminate deadlocked or permanently-parked threads. These stressors are intended only for short-lived test processes or scenarios where the test verifies deadlock-detection behavior.
 
@@ -563,12 +566,13 @@ This per-operation specialization is necessary because operations have different
 
 ## Scenario State Transitions
 
-| Transition                | Trigger                                         | Thread that executes it                                                   |
-|---------------------------|-------------------------------------------------|---------------------------------------------------------------------------|
-| REGISTERED → ACTIVE       | `ScenarioController.start()`                    | Thread calling `handle.start()` or `activate()` with AUTOMATIC start mode |
-| ACTIVE → INACTIVE         | `activeFor` exceeded inside `evaluate()`        | Application thread triggering the interception                            |
-| ACTIVE → INACTIVE         | `maxApplications` CAS fails inside `evaluate()` | Application thread triggering the interception                            |
-| ACTIVE/INACTIVE → STOPPED | `stop()` or `destroy()`                         | Thread calling `handle.close()` or `controlPlane.close()`                 |
+| Transition                | Trigger                                       | Thread that executes it                                                                             |
+|---------------------------|-----------------------------------------------|-----------------------------------------------------------------------------------------------------|
+| REGISTERED → ACTIVE       | `ScenarioController.start()`                  | Thread calling `handle.start()` or `activate()` with AUTOMATIC start mode                           |
+| ACTIVE → INACTIVE         | `activeFor` exceeded inside `evaluate()`      | Application thread triggering the interception                                                      |
+| ACTIVE → INACTIVE         | `maxApplications` reached (commit or reserve) | Application thread triggering the interception                                                      |
+| ACTIVE → INACTIVE         | stressor `activeFor` expiry                   | Agent expiry scheduler thread                                                                       |
+| ACTIVE/INACTIVE → STOPPED | `stop()` or `destroy()`                       | Thread calling `handle.stop()`, `handle.close()` or `controlPlane.close()` (close also unregisters) |
 
 **There is no background state-transition sweeper.** All ACTIVE→INACTIVE transitions happen lazily on the first application thread that calls `evaluate()` after the condition is met.
 
@@ -640,12 +644,13 @@ All activation failures are surfaced in `ChaosDiagnostics.snapshot().failures()`
 ## Registry Cleanup
 
 - `session.close()` unregisters all session-scoped controllers from `ScenarioRegistry` and stops them.
-- JVM-scoped scenarios persist until `controlPlane.close()` or `handle.close()` is called.
+- JVM-scoped scenarios stay registered until `handle.close()` (stop + unregister) or `controlPlane.close()` is called. `handle.stop()` alone leaves a `STOPPED` entry, which a later activation of the same id replaces.
 - **JVM-scoped scenarios survive `session.close()`**: this is by design.
 
 ## Stressor Failure Modes
 
-- `MetaspacePressureStressor` failure to define classes is silently swallowed (class definition may fail if metaspace is already exhausted).
+- Stressor creation failures are not swallowed: they propagate out of `activate()`. `MetaspacePressureStressor` closes its partially-filled loader and rethrows if class definition fails (e.g. metaspace already exhausted).
+- `activeFor` ends a stressor: it is closed and the scenario becomes `INACTIVE` with reason `"expired"`. `maxApplications`, `rateLimit`, `activateAfterMatches` and `probability < 1` are rejected for stress scenarios.
 - `CodeCachePressureStressor` generates classes without a target application method; classes are immediately eligible for GC if the code cache does not retain them.
 - `SafepointStormStressor` calls `Instrumentation.retransformClasses()` on the current thread; if `Instrumentation` was not provided (e.g., agentmain mode), the stressor is a no-op for the retransformation step but still triggers `System.gc()`.
 
@@ -694,7 +699,7 @@ The agent does not transmit or log sensitive data. `InvocationContext` fields ar
 
 ## Input Validation
 
-- Agent arg parsing (`AgentArgsParser`): comma-separated `key=value` pairs; duplicate keys resolved as last-wins. No shell injection risk (parsing is pure Java string splitting, not shell evaluation).
+- Agent arg parsing (`AgentArgsParser`): semicolon-separated `key=value` pairs (max 8192 characters); duplicate keys resolved as last-wins. No shell injection risk (parsing is pure Java string splitting, not shell evaluation).
 - JSON config (`ChaosPlanMapper`): Jackson with strict unknown-fields policy. Unknown fields in the JSON cause `ConfigLoadException`. This prevents silent partial config application.
 - Selector patterns: `ChaosSelector.*Pattern` fields are applied via substring match or regex; malformed patterns throw at construction time, failing fast before scenarios are activated.
 
@@ -727,7 +732,7 @@ When `DEPTH > 0` in `BootstrapDispatcher.invoke()`, the fallback is returned bef
 - `ScenarioController`: ~200 bytes per instance (fields, AtomicLong, AtomicBoolean, volatile pointers)
 - `ScenarioRegistry`: `ConcurrentHashMap` overhead proportional to N registered controllers
 - `BootstrapDispatcher.handles`: 42 `MethodHandle` references, one array — ~400 bytes
-- `DEPTH ThreadLocal`: removed when depth returns to 0; no leak under normal operation
+- `DEPTH ThreadLocal`: one small `int[]` per thread that reached an instrumented call, kept for the thread's lifetime (it also holds call-depth scope counters)
 
 ## Bottlenecks
 
@@ -762,7 +767,9 @@ The agent uses `java.util.logging` (`java.util.logging.Logger`). Log output goes
 - `STARTED`: scenario started
 - `STOPPED`: scenario stopped
 - `RELEASED`: gate manually released
-- `APPLIED`: scenario effect applied (on the hot path — listeners must be non-blocking)
+- `APPLIED`: a contribution took effect — every matching delay, the winning gate, the winning terminal action (on the hot path — listeners must be non-blocking)
+
+`REGISTERED`, `SKIPPED` and `FAILED` exist in `ChaosEvent.Type` but are not published.
 
 Register via `controlPlane.addEventListener(listener)`. Listeners execute synchronously on the calling thread inside `ObservabilityBus.publish()`. **Do not perform I/O or blocking operations in listeners.**
 
@@ -814,28 +821,30 @@ Exposes `debugDump()` as a JMX operation. Allows operators to inspect agent stat
 ## Agent Argument Syntax
 
 ```
--javaagent:chaos-agent-bootstrap.jar[=key1=value1,key2=value2,...]
+-javaagent:chaos-agent-bootstrap.jar[=key1=value1;key2=value2;...]
 ```
 
-Comma-separated `key=value` pairs. Values containing commas must be escaped with `\,`. Duplicate keys: last value wins.
+Semicolon-separated `key=value` pairs (quote the argument in a shell). `\;`, `\=` and `\\` are escapes; any other backslash is kept as written, so Windows paths and JSON escapes work. A key without `=` is a boolean flag set to `true`. Duplicate keys: last value wins.
 
 ## Startup Arguments
 
-| Key                | Default | Description                                                                  |
-|--------------------|---------|------------------------------------------------------------------------------|
-| `configFile`       | none    | Absolute or relative path to a JSON plan file. Symlinks rejected. Max 1 MiB. |
-| `configJson`       | none    | Inline JSON string of the plan.                                              |
-| `configBase64`     | none    | Base64-encoded JSON plan. Standard Base64 encoding (not URL-safe).           |
-| `debugDumpOnStart` | `false` | Print diagnostic dump to stdout after plan activation.                       |
+| Key                   | Default   | Description                                                                  |
+|-----------------------|-----------|------------------------------------------------------------------------------|
+| `configFile`          | none      | Absolute or relative path to a JSON plan file. Symlinks rejected. Max 1 MiB. |
+| `configJson`          | none      | Inline JSON string of the plan.                                              |
+| `configBase64`        | none      | Base64-encoded JSON plan. Standard or URL-safe Base64; whitespace ignored.   |
+| `debugDumpOnStart`    | `false`   | Print diagnostic dump to stderr after plan activation. Alias: `debugDump`.   |
+| `configWatchInterval` | `0` (off) | Poll `configFile` every N ms and reload it atomically. Minimum 50 ms.        |
 
 ## Environment Variables
 
-| Variable                            | Equivalent arg     | Description                                         |
-|-------------------------------------|--------------------|-----------------------------------------------------|
-| `MACSTAB_CHAOS_CONFIG_FILE`         | `configFile`       | Path to JSON plan file. Agent arg takes precedence. |
-| `MACSTAB_CHAOS_CONFIG_JSON`         | `configJson`       | Inline JSON. Agent arg takes precedence.            |
-| `MACSTAB_CHAOS_CONFIG_BASE64`       | `configBase64`     | Base64 JSON. Agent arg takes precedence.            |
-| `MACSTAB_CHAOS_DEBUG_DUMP_ON_START` | `debugDumpOnStart` | `"true"` to enable. Agent arg takes precedence.     |
+| Variable                            | Equivalent arg        | Description                                                |
+|-------------------------------------|-----------------------|------------------------------------------------------------|
+| `MACSTAB_CHAOS_CONFIG_FILE`         | `configFile`          | Path to JSON plan file. Agent arg takes precedence.        |
+| `MACSTAB_CHAOS_CONFIG_JSON`         | `configJson`          | Inline JSON. Agent arg takes precedence.                   |
+| `MACSTAB_CHAOS_CONFIG_BASE64`       | `configBase64`        | Base64 JSON. Agent arg takes precedence.                   |
+| `MACSTAB_CHAOS_DEBUG_DUMP_ON_START` | `debugDumpOnStart`    | `true`/`1`/`yes`/`on` to enable. Either source enables it. |
+| `MACSTAB_CHAOS_WATCH_INTERVAL`      | `configWatchInterval` | Poll interval in ms. Agent arg takes precedence.           |
 
 ## Priority Order
 
@@ -845,8 +854,7 @@ Agent arg `configJson` > env `MACSTAB_CHAOS_CONFIG_JSON` > agent arg `configBase
 
 ```json
 {
-  "name": "plan-name",
-  "metadata": { "description": "optional" },
+  "metadata": { "name": "plan-name", "description": "optional" },
   "scenarios": [
     {
       "id": "unique-scenario-id",
@@ -939,7 +947,7 @@ None at this time (pre-1.0).
 
 ## Infrastructure Interactions
 
-The agent has no direct infrastructure dependencies at runtime. It does not perform network calls, file I/O (beyond the startup temp-JAR creation), or external service lookups. The startup-time temp JAR (bootstrap bridge) is written to `java.io.tmpdir` and registered for `deleteOnExit()`.
+The agent has no direct infrastructure dependencies at runtime. It does not perform network calls, file I/O (beyond the startup temp-JAR creation), or external service lookups. The startup-time temp JAR (bootstrap bridge) is written to `java.io.tmpdir` and, on POSIX, unlinked right after it is appended to the bootstrap class path (on Windows: deleted on exit, stale copies swept on the next start).
 
 ---
 
