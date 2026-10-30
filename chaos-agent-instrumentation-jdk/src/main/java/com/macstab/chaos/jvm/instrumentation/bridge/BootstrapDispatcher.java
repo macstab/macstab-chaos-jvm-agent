@@ -2156,6 +2156,38 @@ public final class BootstrapDispatcher {
   }
 
   /**
+   * Whether {@code path} is an archive the JVM reads classes from ({@code .jar}, {@code .zip},
+   * {@code .jmod}). {@code ZipFile} reads such archives through a shared {@code RandomAccessFile}:
+   * it seeks, then reads. A dispatch between the two can load classes from the same archive, which
+   * moves the file pointer and makes the outer read return the wrong bytes. Archive reads are class
+   * loading, so they are not evaluated at all.
+   *
+   * @param path the file path, or {@code null}
+   * @return {@code true} for an archive
+   */
+  public static boolean isArchive(final String path) {
+    return path != null
+        && (path.endsWith(".jar") || path.endsWith(".zip") || path.endsWith(".jmod"));
+  }
+
+  /**
+   * Flips one random bit in the {@code count} bytes a channel read just put into {@code buffer}
+   * (the bytes before its position).
+   *
+   * @param buffer the buffer the read filled
+   * @param count the number of bytes the read returned; nothing happens when {@code <= 0}
+   */
+  public static void corruptBuffer(final java.nio.ByteBuffer buffer, final int count) {
+    if (buffer == null || count <= 0 || buffer.isReadOnly() || count > buffer.position()) {
+      return;
+    }
+    final java.util.concurrent.ThreadLocalRandom random =
+        java.util.concurrent.ThreadLocalRandom.current();
+    final int index = buffer.position() - count + random.nextInt(count);
+    buffer.put(index, (byte) (buffer.get(index) ^ (1 << random.nextInt(8))));
+  }
+
+  /**
    * Flips one random bit of a byte returned by a single-byte {@code read()}.
    *
    * @param value the value the read returned

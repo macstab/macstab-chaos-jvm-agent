@@ -32,6 +32,7 @@ public sealed interface ChaosEffect
         ChaosEffect.TrickleEffect,
         ChaosEffect.CorruptReadEffect,
         ChaosEffect.TimeoutEffect,
+        ChaosEffect.TornWriteEffect,
         ChaosEffect.HeapPressureEffect,
         ChaosEffect.KeepAliveEffect,
         ChaosEffect.MetaspacePressureEffect,
@@ -138,6 +139,19 @@ public sealed interface ChaosEffect
    */
   static TimeoutEffect timeout() {
     return new TimeoutEffect();
+  }
+
+  /**
+   * Returns an effect that makes a channel write succeed short: it writes a random 1 to n-1 of the
+   * n bytes and returns that count, which callers of {@code FileChannel.write} must handle. The
+   * native library's {@code TORN}. Valid for {@link OperationType#FILE_IO_WRITE} on file channels;
+   * a stream write ({@code FileOutputStream}, {@code RandomAccessFile}) either completes or throws,
+   * so a match there does nothing and counts no application.
+   *
+   * @return a new {@link TornWriteEffect}
+   */
+  static TornWriteEffect tornWrite() {
+    return new TornWriteEffect();
   }
 
   /**
@@ -711,6 +725,9 @@ public sealed interface ChaosEffect
    * fires when the timeout is infinite.
    */
   record TimeoutEffect() implements ChaosEffect {}
+
+  /** Makes a file-channel write succeed short: 1 to n-1 of the n bytes are written. */
+  record TornWriteEffect() implements ChaosEffect {}
 
   /** The errors an {@link ErrnoEffect} can raise, with the Java exception each becomes. */
   enum Errno {

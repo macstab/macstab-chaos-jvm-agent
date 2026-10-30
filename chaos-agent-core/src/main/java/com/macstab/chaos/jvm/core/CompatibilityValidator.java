@@ -552,7 +552,9 @@ final class CompatibilityValidator {
               ChaosEffect.CorruptReadEffect.class,
               EnumSet.of(OperationType.SOCKET_READ, OperationType.FILE_IO_READ),
               ChaosEffect.TimeoutEffect.class,
-              EnumSet.of(OperationType.SOCKET_READ, OperationType.SOCKET_CONNECT));
+              EnumSet.of(OperationType.SOCKET_READ, OperationType.SOCKET_CONNECT),
+              ChaosEffect.TornWriteEffect.class,
+              EnumSet.of(OperationType.FILE_IO_WRITE));
 
   /** Operations a network {@link ChaosEffect.Errno} applies to. */
   private static final Set<OperationType> ERRNO_NETWORK_OPS =
@@ -569,7 +571,8 @@ final class CompatibilityValidator {
 
   /** Operations a file {@link ChaosEffect.Errno} applies to. */
   private static final Set<OperationType> ERRNO_FILE_OPS =
-      EnumSet.of(OperationType.FILE_IO_READ, OperationType.FILE_IO_WRITE);
+      EnumSet.of(
+          OperationType.FILE_IO_READ, OperationType.FILE_IO_WRITE, OperationType.FILE_IO_SYNC);
 
   /**
    * Operations whose interception point can carry out a {@link ChaosEffect.SuppressEffect}: it

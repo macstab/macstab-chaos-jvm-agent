@@ -90,6 +90,8 @@ public final class DefectProbeMain {
           socketReadEffects(System.getProperty("chaos.test.soTimeout", "200"));
       case "socket-reset" -> socketReset();
       case "file-corrupt-read" -> fileCorruptRead();
+      case "file-channel-write" -> fileChannelWrite();
+      case "random-access-write" -> randomAccessWrite();
       case "file-writes-by-path" -> fileWritesByPath();
       case "method-weaving" -> methodWeaving();
       case "woven-groups" -> printWovenGroups();
@@ -514,6 +516,44 @@ public final class DefectProbeMain {
       } catch (final java.net.SocketException reset) {
         System.out.println("clientSaw=" + reset.getMessage());
       }
+    }
+  }
+
+  /**
+   * Writes 100 bytes through a FileChannel: reports the first write's count, writes the rest,
+   * forces the channel and reports the file's final size or the sync failure.
+   */
+  private static void fileChannelWrite() throws Exception {
+    final java.nio.file.Path file = java.nio.file.Files.createTempFile("chaos-channel", ".bin");
+    try (java.nio.channels.FileChannel channel =
+        java.nio.channels.FileChannel.open(file, java.nio.file.StandardOpenOption.WRITE)) {
+      final java.nio.ByteBuffer buffer = java.nio.ByteBuffer.allocate(100);
+      System.out.println("firstWrite=" + channel.write(buffer));
+      while (buffer.hasRemaining()) {
+        channel.write(buffer);
+      }
+      try {
+        channel.force(true);
+        System.out.println("force=ok");
+      } catch (final java.io.IOException failed) {
+        System.out.println("force=" + failed.getClass().getName() + ": " + failed.getMessage());
+      }
+    }
+    System.out.println("size=" + java.nio.file.Files.size(file));
+    java.nio.file.Files.deleteIfExists(file);
+  }
+
+  /** Writes through a RandomAccessFile and reports the failure, if any. */
+  private static void randomAccessWrite() throws Exception {
+    final java.nio.file.Path file = java.nio.file.Files.createTempFile("chaos-raf", ".bin");
+    try (java.io.RandomAccessFile raf = new java.io.RandomAccessFile(file.toFile(), "rw")) {
+      raf.write(new byte[] {1, 2, 3});
+      System.out.println("raf=ok");
+    } catch (final java.io.IOException failed) {
+      System.out.println("raf.type=" + failed.getClass().getName());
+      System.out.println("raf.message=" + failed.getMessage());
+    } finally {
+      java.nio.file.Files.deleteIfExists(file);
     }
   }
 

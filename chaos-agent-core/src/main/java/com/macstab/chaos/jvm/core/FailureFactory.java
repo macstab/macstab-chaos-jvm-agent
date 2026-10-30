@@ -98,6 +98,9 @@ final class FailureFactory {
       case HTTP_CLIENT_SEND, HTTP_CLIENT_SEND_ASYNC -> new java.io.IOException(message);
       // Netty surfaces transport failures as IOException through the pipeline.
       case NETTY_CHANNEL_WRITE, NETTY_CHANNEL_READ -> new java.io.IOException(message);
+      // FileDescriptor.sync() declares only SyncFailedException; FileChannel.force any
+      // IOException. SyncFailedException satisfies both.
+      case FILE_IO_SYNC -> new java.io.SyncFailedException(message);
       default -> new IllegalStateException(message);
     };
   }
@@ -133,9 +136,11 @@ final class FailureFactory {
               ? new java.io.FileNotFoundException(reason)
               : new java.nio.file.NoSuchFileException(path);
       case ENOSPC, EDQUOT, EROFS, EIO, EMFILE ->
-          path == null
-              ? new java.io.IOException(reason)
-              : new java.nio.file.FileSystemException(path, null, reason);
+          operationType == OperationType.FILE_IO_SYNC
+              ? new java.io.SyncFailedException(reason)
+              : path == null
+                  ? new java.io.IOException(reason)
+                  : new java.nio.file.FileSystemException(path, null, reason);
     };
   }
 

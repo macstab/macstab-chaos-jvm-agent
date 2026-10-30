@@ -971,4 +971,131 @@ final class JvmRuntimeAdvice {
       BootstrapDispatcher.beforeFileIo("FILE_IO_WRITE", stream, path, len);
     }
   }
+
+  /**
+   * Intercepts {@code FileChannelImpl.read(ByteBuffer[, long])}: one channel read, reporting the
+   * bytes requested ({@code remaining()}) and the channel's path, and corrupting the bytes read
+   * under a {@code CorruptReadEffect}.
+   */
+  static final class FileChannelReadAdvice {
+    @Advice.OnMethodEnter
+    static boolean enter(
+        @Advice.This final Object channel,
+        @Advice.Argument(0) final java.nio.ByteBuffer buffer,
+        @Advice.FieldValue("path") final String path)
+        throws Throwable {
+      return BootstrapDispatcher.beforeFileIo(
+              "FILE_IO_READ", channel, path, buffer == null ? -1 : buffer.remaining())
+          < 0;
+    }
+
+    @Advice.OnMethodExit
+    static void exit(
+        @Advice.Enter final boolean corrupt,
+        @Advice.Argument(0) final java.nio.ByteBuffer buffer,
+        @Advice.Return final int read) {
+      if (corrupt) {
+        BootstrapDispatcher.corruptBuffer(buffer, read);
+      }
+    }
+  }
+
+  /**
+   * Intercepts {@code FileChannelImpl.write(ByteBuffer[, long])}. Under a {@code TornWriteEffect}
+   * the buffer's limit is lowered for the call, so the channel writes fewer bytes and returns that
+   * count, and restored afterwards.
+   */
+  static final class FileChannelWriteAdvice {
+    @Advice.OnMethodEnter
+    static int enter(
+        @Advice.This final Object channel,
+        @Advice.Argument(0) final java.nio.ByteBuffer buffer,
+        @Advice.FieldValue("path") final String path)
+        throws Throwable {
+      final int requested = buffer == null ? -1 : buffer.remaining();
+      final int count = BootstrapDispatcher.beforeFileIo("FILE_IO_WRITE", channel, path, requested);
+      if (buffer != null && count >= 0 && count < requested) {
+        final int originalLimit = buffer.limit();
+        buffer.limit(buffer.position() + count);
+        return originalLimit;
+      }
+      return -1;
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit(
+        @Advice.Enter final int originalLimit,
+        @Advice.Argument(0) final java.nio.ByteBuffer buffer) {
+      if (originalLimit >= 0) {
+        buffer.limit(originalLimit);
+      }
+    }
+  }
+
+  /** Intercepts {@code FileChannelImpl.force(boolean)}: fsync of a channel. */
+  static final class FileChannelForceAdvice {
+    @Advice.OnMethodEnter
+    static void enter(
+        @Advice.This final Object channel, @Advice.FieldValue("path") final String path)
+        throws Throwable {
+      BootstrapDispatcher.beforeFileIo("FILE_IO_SYNC", channel, path, -1);
+    }
+  }
+
+  /** Intercepts {@link java.io.FileDescriptor#sync()}: fsync of a stream's descriptor. */
+  static final class FileDescriptorSyncAdvice {
+    @Advice.OnMethodEnter
+    static void enter(@Advice.This final Object descriptor) throws Throwable {
+      BootstrapDispatcher.beforeFileIo("FILE_IO_SYNC", descriptor, null, -1);
+    }
+  }
+
+  /**
+   * Intercepts {@code RandomAccessFile.read()}. Reads of archives are skipped: see {@link
+   * BootstrapDispatcher#isArchive(String)}.
+   */
+  static final class RandomAccessReadByteAdvice {
+    @Advice.OnMethodEnter
+    static boolean enter(
+        @Advice.This final Object file, @Advice.FieldValue("path") final String path)
+        throws Throwable {
+      return !BootstrapDispatcher.isArchive(path)
+          && BootstrapDispatcher.beforeFileIo("FILE_IO_READ", file, path, 1) < 0;
+    }
+
+    @Advice.OnMethodExit
+    static void exit(
+        @Advice.Enter final boolean corrupt, @Advice.Return(readOnly = false) int value) {
+      if (corrupt) {
+        value = BootstrapDispatcher.corruptByte(value);
+      }
+    }
+  }
+
+  /**
+   * Intercepts {@code RandomAccessFile.readBytes(byte[], int, int)}, the funnel of every array
+   * read. Reads of archives are skipped: see {@link BootstrapDispatcher#isArchive(String)}.
+   */
+  static final class RandomAccessReadRangeAdvice {
+    @Advice.OnMethodEnter
+    static boolean enter(
+        @Advice.This final Object file,
+        @Advice.Argument(2) final int len,
+        @Advice.FieldValue("path") final String path)
+        throws Throwable {
+      return !BootstrapDispatcher.isArchive(path)
+          && BootstrapDispatcher.beforeFileIo("FILE_IO_READ", file, path, len) < 0;
+    }
+
+    @Advice.OnMethodExit
+    static void exit(
+        @Advice.Enter final boolean corrupt,
+        @Advice.Argument(0) final byte[] buffer,
+        @Advice.Argument(1) final int offset,
+        @Advice.Return final int read) {
+      if (corrupt) {
+        BootstrapDispatcher.corruptBytes(buffer, offset, read);
+      }
+    }
+  }
 }

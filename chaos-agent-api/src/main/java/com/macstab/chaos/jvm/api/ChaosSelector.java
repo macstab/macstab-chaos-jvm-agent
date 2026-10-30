@@ -1089,12 +1089,16 @@ public sealed interface ChaosSelector
       Set<OperationType> operations, PathPattern pathPattern, Long minBytes, Long maxBytes)
       implements ChaosSelector {
     static final Set<OperationType> VALID_OPS =
+        EnumSet.of(
+            OperationType.FILE_IO_READ, OperationType.FILE_IO_WRITE, OperationType.FILE_IO_SYNC);
+
+    private static final Set<OperationType> SIZED_OPS =
         EnumSet.of(OperationType.FILE_IO_READ, OperationType.FILE_IO_WRITE);
 
     /** Validates the FileIoSelector parameters. */
     public FileIoSelector {
       operations = validatedOperations(operations, VALID_OPS, "FileIoSelector");
-      validateSizeRange(minBytes, maxBytes, operations, VALID_OPS, "FileIoSelector");
+      validateSizeRange(minBytes, maxBytes, operations, SIZED_OPS, "FileIoSelector");
     }
 
     /**

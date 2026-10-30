@@ -911,6 +911,66 @@ class DefectRegressionIntegrationTest {
       assertThat(result.longValue("differingBits")).isEqualTo(1L);
     }
 
+    private ChildJvmProbe.ProbeResult runInTmp(
+        final String directory,
+        final Set<OperationType> operations,
+        final ChaosEffect effect,
+        final String mode)
+        throws Exception {
+      final Path tmp = Files.createDirectories(tempDir.resolve(directory));
+      return probe.run(
+          plan(
+              scenario(
+                  "effect",
+                  new ChaosSelector.FileIoSelector(
+                      operations, PathPattern.under(tmp.toString()), null, null),
+                  effect)),
+          DefectProbeMain.class,
+          mode,
+          null,
+          "-Djava.io.tmpdir=" + tmp);
+    }
+
+    @Test
+    @DisplayName("tornWrite makes a FileChannel write succeed short; the caller writes the rest")
+    void tornChannelWrite() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          runInTmp(
+              "torn",
+              Set.of(OperationType.FILE_IO_WRITE),
+              ChaosEffect.tornWrite(),
+              "file-channel-write");
+      assertThat(result.longValue("firstWrite")).isBetween(1L, 99L);
+      assertThat(result.longValue("size")).isEqualTo(100L);
+    }
+
+    @Test
+    @DisplayName("EIO on FileChannel.force is a SyncFailedException")
+    void syncFailure() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          runInTmp(
+              "sync",
+              Set.of(OperationType.FILE_IO_SYNC),
+              ChaosEffect.errno(ChaosEffect.Errno.EIO),
+              "file-channel-write");
+      assertThat(result.value("force"))
+          .isEqualTo("java.io.SyncFailedException: Input/output error");
+      assertThat(result.longValue("size")).isEqualTo(100L);
+    }
+
+    @Test
+    @DisplayName("ENOSPC on a RandomAccessFile write is a FileSystemException with the path")
+    void randomAccessFileNoSpace() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          runInTmp(
+              "raf",
+              Set.of(OperationType.FILE_IO_WRITE),
+              ChaosEffect.errno(ChaosEffect.Errno.ENOSPC),
+              "random-access-write");
+      assertThat(result.value("raf.type")).isEqualTo("java.nio.file.FileSystemException");
+      assertThat(result.value("raf.message")).endsWith(": No space left on device");
+    }
+
     @Test
     @DisplayName("timeout waits for SO_TIMEOUT, then throws SocketTimeoutException")
     void timeout() throws Exception {

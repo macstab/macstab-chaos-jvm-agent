@@ -1165,8 +1165,8 @@ Once the hook is wired, the matcher, effect, and activation policy behave like e
 ### `fileIo` — FileIoSelector
 
 **JSON type:** `"fileIo"`  
-**Operations:** `FILE_IO_READ`, `FILE_IO_WRITE`  
-**Purpose:** Intercept `FileInputStream.read()` and `FileOutputStream.write()` calls.
+**Operations:** `FILE_IO_READ`, `FILE_IO_WRITE`, `FILE_IO_SYNC`  
+**Purpose:** Intercept file reads, writes and fsyncs: `FileInputStream` / `FileOutputStream` reads and writes, `RandomAccessFile` reads and writes, `FileChannel` reads and writes (single-buffer, positional or not), and `FileChannel.force` / `FileDescriptor.sync` (`FILE_IO_SYNC`). Reads of `.jar`, `.zip` and `.jmod` archives through `RandomAccessFile` are never evaluated: they are the JVM's class loading.
 
 **Fields:**
 
@@ -1380,13 +1380,17 @@ The native library's network delivery effects, applied to the real socket and fi
 | `corruptRead`     | `CorruptReadEffect`     | `SOCKET_READ`, `FILE_IO_READ`   | After a read that returned bytes, exactly one bit of one returned byte is flipped (`CORRUPT`)                                                                   |
 | `timeout`         | `TimeoutEffect`         | `SOCKET_READ`, `SOCKET_CONNECT` | Waits for the call's own timeout (`SO_TIMEOUT`, or the connect timeout) and throws `SocketTimeoutException` (`Read timed out` / `Connect timed out`). On a call without a timeout (infinite) it does not fire and counts no application (`TIMEOUT`) |
 | `connectionReset` | `ConnectionResetEffect` | `SOCKET_CLOSE`                  | Closes with `SO_LINGER` 0: unsent data is discarded and the peer receives a reset — its next read fails with `SocketException: Connection reset` (`RESET`)      |
+| `tornWrite`       | `TornWriteEffect`       | `FILE_IO_WRITE`                 | A `FileChannel` write succeeds short: a random 1 to n-1 of the n bytes are written and that count returned, which callers must loop on (`TORN`). Stream writes (`FileOutputStream`, `RandomAccessFile`) complete or throw, so a match there does nothing and counts no application |
 
 ```json
 { "type": "trickle", "maxBytes": 16 }
 { "type": "corruptRead" }
 { "type": "timeout" }
 { "type": "connectionReset" }
+{ "type": "tornWrite" }
 ```
+
+A failing fsync (`FILE_IO_SYNC` with `reject` or an `errno`) throws `SyncFailedException`, the one exception `FileDescriptor.sync()` declares and an `IOException` for `FileChannel.force`.
 
 **Scope `corruptRead` on files with a `pathPattern`.** Without one it corrupts every `FileInputStream` read in the JVM — including the class files the JVM itself reads from directories on the class path, which then fail to load with `ClassFormatError`.
 

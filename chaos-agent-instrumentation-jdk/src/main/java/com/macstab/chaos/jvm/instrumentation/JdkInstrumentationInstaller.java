@@ -334,7 +334,8 @@ public final class JdkInstrumentationInstaller {
     FILE_IO(
         JdkInstrumentationInstaller::applyPhase2FileIoInterception,
         OperationType.FILE_IO_READ,
-        OperationType.FILE_IO_WRITE);
+        OperationType.FILE_IO_WRITE,
+        OperationType.FILE_IO_SYNC);
 
     private final java.util.function.UnaryOperator<AgentBuilder> transformations;
     private final Set<OperationType> operations;
@@ -2325,7 +2326,7 @@ public final class JdkInstrumentationInstaller {
    * java.io.FileOutputStream#write(int)} overloads).
    */
   private static AgentBuilder applyPhase2FileIoInterception(final AgentBuilder agentBuilder) {
-    return agentBuilder
+    return applyFileChannelInterception(agentBuilder)
         .type(ElementMatchers.named("java.io.FileInputStream"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
@@ -2505,6 +2506,72 @@ public final class JdkInstrumentationInstaller {
                 typeBuilder.visit(
                     Advice.to(ClientCallAdvice.NettyRead.class)
                         .on(ElementMatchers.named("readReady"))));
+  }
+
+  /**
+   * File channels, {@code RandomAccessFile} and fsync. Only the private funnels are hooked ({@code
+   * implRead}/{@code implWrite}, {@code readBytes}/{@code writeBytes}), so a public overload
+   * delegating to them is one call.
+   */
+  private static AgentBuilder applyFileChannelInterception(final AgentBuilder agentBuilder) {
+    return agentBuilder
+        .type(ElementMatchers.named("sun.nio.ch.FileChannelImpl"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.FileChannelReadAdvice.class)
+                            .on(
+                                ElementMatchers.named("read")
+                                    .and(
+                                        ElementMatchers.takesArgument(
+                                            0, java.nio.ByteBuffer.class))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.FileChannelWriteAdvice.class)
+                            .on(
+                                ElementMatchers.named("write")
+                                    .and(
+                                        ElementMatchers.takesArgument(
+                                            0, java.nio.ByteBuffer.class))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.FileChannelForceAdvice.class)
+                            .on(
+                                ElementMatchers.named("force")
+                                    .and(ElementMatchers.takesArguments(boolean.class)))))
+        .type(ElementMatchers.named("java.io.RandomAccessFile"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.RandomAccessReadByteAdvice.class)
+                            .on(
+                                ElementMatchers.named("read")
+                                    .and(ElementMatchers.takesArguments(0))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.RandomAccessReadRangeAdvice.class)
+                            .on(
+                                ElementMatchers.named("readBytes")
+                                    .and(
+                                        ElementMatchers.takesArguments(
+                                            byte[].class, int.class, int.class))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.FileWriteByteAdvice.class)
+                            .on(
+                                ElementMatchers.named("write")
+                                    .and(ElementMatchers.takesArguments(int.class))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.FileWriteRangeAdvice.class)
+                            .on(
+                                ElementMatchers.named("writeBytes")
+                                    .and(
+                                        ElementMatchers.takesArguments(
+                                            byte[].class, int.class, int.class)))))
+        .type(ElementMatchers.named("java.io.FileDescriptor"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(JvmRuntimeAdvice.FileDescriptorSyncAdvice.class)
+                        .on(ElementMatchers.named("sync").and(ElementMatchers.takesArguments(0)))));
   }
 
   /** Bridge jars older than this are left over from earlier JVMs and are removed. */

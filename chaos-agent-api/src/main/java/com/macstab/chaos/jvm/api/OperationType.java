@@ -711,6 +711,16 @@ public enum OperationType {
    */
   FILE_IO_WRITE,
 
+  /**
+   * Fires before data is forced to the storage device: {@code FileChannel.force(boolean)} and
+   * {@code FileDescriptor.sync()} (fsync). A reject or an {@code ErrnoEffect} throws {@link
+   * java.io.SyncFailedException}: the durability failure write-ahead logs and databases must
+   * survive.
+   *
+   * <p>Use with {@link ChaosSelector.FileIoSelector}.
+   */
+  FILE_IO_SYNC,
+
   // ── Client libraries ───────────────────────────────────────────────────────────
 
   /**

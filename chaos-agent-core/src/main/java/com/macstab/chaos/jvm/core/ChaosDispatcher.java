@@ -1866,6 +1866,11 @@ public final class ChaosDispatcher {
     }
   }
 
+  /** Whether the subject of a file operation is a {@code FileChannel}, which can write short. */
+  static boolean isFileChannel(final String className) {
+    return className != null && className.endsWith("FileChannelImpl");
+  }
+
   /**
    * Encodes a byte count whose read must be corrupted: {@code -(count) - 1}, always negative. The
    * advice decodes it and flips one bit in the bytes the read returned.
@@ -1884,10 +1889,13 @@ public final class ChaosDispatcher {
     if ("FILE_IO_WRITE".equals(operationTag)) {
       return OperationType.FILE_IO_WRITE;
     }
+    if ("FILE_IO_SYNC".equals(operationTag)) {
+      return OperationType.FILE_IO_SYNC;
+    }
     throw new IllegalArgumentException(
         "Unknown file I/O operation tag '"
             + operationTag
-            + "'; expected FILE_IO_READ or FILE_IO_WRITE");
+            + "'; expected FILE_IO_READ, FILE_IO_WRITE or FILE_IO_SYNC");
   }
 
   private boolean evaluateJdbc(
@@ -2013,6 +2021,17 @@ public final class ChaosDispatcher {
     if (effect instanceof ChaosEffect.TrickleEffect trickleEffect) {
       return new TerminalAction(
           TerminalKind.CAP_LENGTH, trickleEffect.maxBytes(), null, scenario.id());
+    }
+    if (effect instanceof ChaosEffect.TornWriteEffect) {
+      // Only a channel write can succeed short; a stream write completes or throws. A single
+      // byte cannot be torn either. Neither counts an application.
+      final long requested = context.byteCount();
+      if (requested < 2 || !isFileChannel(context.targetClassName())) {
+        return new TerminalAction(TerminalKind.NOT_APPLICABLE, null, null, scenario.id());
+      }
+      final int torn =
+          1 + java.util.concurrent.ThreadLocalRandom.current().nextInt((int) requested - 1);
+      return new TerminalAction(TerminalKind.CAP_LENGTH, torn, null, scenario.id());
     }
     if (effect instanceof ChaosEffect.CorruptReadEffect) {
       return new TerminalAction(TerminalKind.CORRUPT_READ, null, null, scenario.id());
