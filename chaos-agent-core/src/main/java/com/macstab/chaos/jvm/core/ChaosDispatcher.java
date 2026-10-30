@@ -1923,9 +1923,21 @@ public final class ChaosDispatcher {
     applyGate(decision.gateAction());
   }
 
-  private void applyGate(final GateAction gateAction) throws InterruptedException {
-    if (gateAction != null) {
+  /**
+   * Holds the caller at the gate. An interrupt ends the wait: the interrupt flag is restored and
+   * the call proceeds, so the intercepted JDK method observes the interrupt exactly as it would
+   * have without chaos (sleep and wait throw, park returns, interruptible channels close). An
+   * earlier version let the checked {@link InterruptedException} escape into methods that do not
+   * declare it, with the flag already cleared.
+   */
+  private void applyGate(final GateAction gateAction) {
+    if (gateAction == null) {
+      return;
+    }
+    try {
       gateAction.gate().await(gateAction.maxBlock());
+    } catch (final InterruptedException interrupted) {
+      Thread.currentThread().interrupt();
     }
   }
 

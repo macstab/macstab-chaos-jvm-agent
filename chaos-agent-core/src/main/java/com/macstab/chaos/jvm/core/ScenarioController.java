@@ -358,11 +358,22 @@ final class ScenarioController {
    * inside a gate-effect hold without stopping the scenario. Subsequent invocations that pass the
    * full evaluation pipeline will re-enter the gate and wait again until the next release.
    *
-   * <p>Publishes a {@link com.macstab.chaos.jvm.api.ChaosEvent.Type#RELEASED} event to the {@link
+   * <p>The gate closes again in the same step: an earlier version only counted the latch down, so
+   * after the first release the gate stayed open and no later call was ever held. Publishes a
+   * {@link com.macstab.chaos.jvm.api.ChaosEvent.Type#RELEASED} event to the {@link
    * ObservabilityBus}.
+   *
+   * <p>A no-op, without an event, for a scenario that has no gate effect or is not active, as
+   * {@link com.macstab.chaos.jvm.api.ChaosActivationHandle#release()} documents.
    */
   void release() {
-    gate.release();
+    synchronized (this) {
+      if (!(scenario.effect() instanceof ChaosEffect.GateEffect)
+          || state != ChaosDiagnostics.ScenarioState.ACTIVE) {
+        return;
+      }
+      gate.releaseAndReset();
+    }
     observabilityBus.publish(
         ChaosEvent.Type.RELEASED, scenario.id(), "manual gate released", Map.of("scope", scopeKey));
   }
