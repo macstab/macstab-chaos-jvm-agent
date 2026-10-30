@@ -86,6 +86,16 @@ public final class DefaultChaosActivationHandle implements ChaosActivationHandle
     return controller.state();
   }
 
+  @Override
+  public long matchedCount() {
+    return controller.matchedCount();
+  }
+
+  @Override
+  public long appliedCount() {
+    return controller.appliedCount();
+  }
+
   /**
    * Stops the scenario and removes it from the registry, so its id can be activated again and it no
    * longer appears in diagnostics. Equivalent to {@link #destroy()}.

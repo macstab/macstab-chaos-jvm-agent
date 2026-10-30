@@ -36,4 +36,49 @@ public interface ChaosDiagnosticsMXBean {
    * @return a non-null, non-empty diagnostics string; formatting may include newlines
    */
   String debugDump();
+
+  /**
+   * Lists every registered scenario as {@code <id> state=<state> matched=<n> applied=<n>}.
+   *
+   * @return one line per scenario
+   */
+  String[] listScenarios();
+
+  /**
+   * Whether the control operations ({@link #activatePlan}, {@link #stopScenario}, {@link #stopAll})
+   * are enabled: agent argument {@code jmxControl=true}, system property {@code
+   * macstab.chaos.jmx.control=true} or environment variable {@code MACSTAB_CHAOS_JMX_CONTROL=true}.
+   * Off by default — anyone who can reach the MBean server could otherwise inject faults into the
+   * JVM.
+   *
+   * @return {@code true} when control operations are allowed
+   */
+  boolean isControlEnabled();
+
+  /**
+   * Activates a plan given as JSON (the startup-config format).
+   *
+   * @param planJson the plan
+   * @return the ids of the scenarios activated, comma-separated
+   * @throws IllegalStateException if control operations are disabled
+   * @throws IllegalArgumentException if the plan is invalid
+   */
+  String activatePlan(String planJson);
+
+  /**
+   * Stops a scenario that was activated through {@link #activatePlan}.
+   *
+   * @param scenarioId the scenario id
+   * @return {@code true} if a scenario with that id was stopped
+   * @throws IllegalStateException if control operations are disabled
+   */
+  boolean stopScenario(String scenarioId);
+
+  /**
+   * Stops every scenario activated through {@link #activatePlan}.
+   *
+   * @return how many scenarios were stopped
+   * @throws IllegalStateException if control operations are disabled
+   */
+  int stopAll();
 }

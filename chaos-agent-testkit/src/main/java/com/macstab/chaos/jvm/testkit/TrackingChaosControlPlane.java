@@ -77,6 +77,11 @@ public final class TrackingChaosControlPlane implements ChaosControlPlane {
   }
 
   @Override
+  public boolean removeEventListener(final ChaosEventListener listener) {
+    return delegate.removeEventListener(listener);
+  }
+
+  @Override
   public void close() {
     // See class javadoc: delegate is JVM-wide; closing it would affect other tests. The extension
     // relies exclusively on stopTracked() to release handles issued during this test.

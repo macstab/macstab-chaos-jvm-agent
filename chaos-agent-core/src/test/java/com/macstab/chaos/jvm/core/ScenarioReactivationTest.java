@@ -132,7 +132,10 @@ class ScenarioReactivationTest {
           .isInstanceOf(ChaosActivationException.class);
 
       // Assert
-      assertThat(events).as("no STARTED/STOPPED for the rejected duplicate").isEmpty();
+      assertThat(events)
+          .as("no STARTED/STOPPED for the rejected duplicate; only its FAILED report")
+          .extracting(ChaosEvent::type)
+          .containsExactly(ChaosEvent.Type.FAILED);
       assertThat(runtime.diagnostics().scenario("dup"))
           .get()
           .extracting(ChaosDiagnostics.ScenarioReport::state)

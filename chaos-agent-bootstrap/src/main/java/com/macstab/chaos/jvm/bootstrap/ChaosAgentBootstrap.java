@@ -5,6 +5,7 @@ import com.macstab.chaos.jvm.bootstrap.jfr.JfrIntegration;
 import com.macstab.chaos.jvm.core.ChaosRuntime;
 import com.macstab.chaos.jvm.instrumentation.JdkInstrumentationInstaller;
 import com.macstab.chaos.jvm.startup.AgentArgsParser;
+import com.macstab.chaos.jvm.startup.ConfigLoadException;
 import com.macstab.chaos.jvm.startup.StartupConfigLoader;
 import java.lang.instrument.Instrumentation;
 import java.lang.management.ManagementFactory;
@@ -345,17 +346,44 @@ public final class ChaosAgentBootstrap {
     final ChaosRuntime runtime = new ChaosRuntime();
     boolean instrumentationInstalled = false;
     ObjectName registeredMBean = null;
+    Optional<ChaosReports> reports = Optional.empty();
     try {
       JdkInstrumentationInstaller.install(
           instrumentation, runtime, eagerInstrumentation(agentArgs, environment));
       instrumentationInstalled = true;
-      registeredMBean = registerMBean(runtime);
+      registeredMBean = registerMBean(runtime, jmxControl(agentArgs, environment));
       installJfrIntegration(runtime);
-      final Optional<StartupConfigLoader.LoadedPlan> loadedPlan =
-          StartupConfigLoader.load(agentArgs, environment);
-      loadedPlan.ifPresent(loaded -> activateLoadedPlan(loaded, agentArgs, environment, runtime));
+      reports = ChaosReports.createIfEnabled(agentArgs, environment, runtime);
+      final Optional<ChaosReports> report = reports;
+      final Optional<StartupConfigLoader.LoadedPlan> loadedPlan;
+      try {
+        loadedPlan = StartupConfigLoader.load(agentArgs, environment);
+      } catch (final ConfigLoadException loadFailure) {
+        report.ifPresent(
+            r ->
+                r.statusError(
+                    loadFailure.getSource(),
+                    loadFailure.line(),
+                    loadFailure.column(),
+                    loadFailure.reason()));
+        throw loadFailure;
+      }
+      loadedPlan.ifPresent(
+          loaded -> {
+            try {
+              activateLoadedPlan(loaded, agentArgs, environment, runtime);
+            } catch (final RuntimeException activationFailure) {
+              report.ifPresent(
+                  r ->
+                      r.statusError(
+                          loaded.source(), 0, 0, String.valueOf(activationFailure.getMessage())));
+              throw activationFailure;
+            }
+            report.ifPresent(r -> r.statusOk(loaded.plan().scenarios().size(), loaded.source()));
+          });
       return runtime;
     } catch (final Throwable installFailure) {
+      reports.ifPresent(ChaosReports::close);
       rollBack(instrumentation, runtime, instrumentationInstalled, registeredMBean, installFailure);
       throw installFailure;
     }
@@ -459,15 +487,32 @@ public final class ChaosAgentBootstrap {
   }
 
   /**
+   * Whether the MBean's control operations are enabled: agent argument {@code jmxControl=true},
+   * system property {@code macstab.chaos.jmx.control=true} or environment variable {@code
+   * MACSTAB_CHAOS_JMX_CONTROL=true}. Off by default.
+   */
+  static boolean jmxControl(final String agentArgs, final Map<String, String> environment) {
+    final String fromArgs = AgentArgsParser.parse(agentArgs).get("jmxControl");
+    final String value =
+        fromArgs != null
+            ? fromArgs
+            : System.getProperty(
+                "macstab.chaos.jmx.control",
+                environment.getOrDefault("MACSTAB_CHAOS_JMX_CONTROL", ""));
+    return "true".equalsIgnoreCase(value.strip());
+  }
+
+  /**
    * Registers the diagnostics MBean.
    *
    * @return the registered name, or {@code null} when nothing was registered
    */
-  private static ObjectName registerMBean(final ChaosRuntime runtime) {
+  private static ObjectName registerMBean(final ChaosRuntime runtime, final boolean control) {
     try {
       final ObjectName objectName = new ObjectName(MBEAN_NAME);
       ManagementFactory.getPlatformMBeanServer()
-          .registerMBean(new ChaosDiagnosticsMBean(runtime.diagnostics()), objectName);
+          .registerMBean(
+              new ChaosDiagnosticsMBean(runtime.diagnostics(), runtime, control), objectName);
       return objectName;
     } catch (final javax.management.InstanceAlreadyExistsException alreadyRegistered) {
       System.err.println(

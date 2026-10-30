@@ -14,6 +14,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -1039,6 +1040,84 @@ class DefectRegressionIntegrationTest {
               ChaosEffect.connectionReset(),
               "socket-reset");
       assertThat(result.value("clientSaw")).isEqualTo("Connection reset");
+    }
+  }
+
+  @Nested
+  @DisplayName("status and hits files")
+  class Reports {
+
+    private Map<String, String> readKeyValues(final Path file) throws Exception {
+      final Map<String, String> values = new java.util.LinkedHashMap<>();
+      for (final String line : Files.readAllLines(file)) {
+        final int separator = line.indexOf('=');
+        if (separator > 0) {
+          values.put(line.substring(0, separator), line.substring(separator + 1));
+        }
+      }
+      return values;
+    }
+
+    @Test
+    @DisplayName("a loaded plan is reported as state=ok and applications land in the hits file")
+    void statusOkAndHits() throws Exception {
+      final Path reports = Files.createDirectories(tempDir.resolve("reports-ok"));
+      final Path root = Files.createDirectories(tempDir.resolve("hits-files"));
+      probe.run(
+          plan(
+              scenario(
+                  "slow-writes",
+                  new ChaosSelector.FileIoSelector(
+                      Set.of(OperationType.FILE_IO_WRITE),
+                      PathPattern.under(root.toString()),
+                      null,
+                      null),
+                  ChaosEffect.delay(Duration.ofMillis(1)))),
+          DefectProbeMain.class,
+          "file-writes-by-path",
+          null,
+          "-Dchaos.test.dir=" + root,
+          "-Dmacstab.chaos.reportsDir=" + reports);
+
+      final Map<String, String> status = readKeyValues(reports.resolve(".chaos-jvm.status"));
+      assertThat(status).containsEntry("state", "ok").containsEntry("scenarios", "1");
+      assertThat(status.get("source")).startsWith("file:");
+      assertThat(status.get("pid")).isNotBlank();
+
+      final Path hits = reports.resolve(".chaos-jvm.hits." + status.get("pid"));
+      assertThat(Files.readAllLines(hits)).containsExactly("2\tslow-writes");
+    }
+
+    @Test
+    @DisplayName("a malformed plan is reported as state=error with line, column and reason")
+    void statusError() throws Exception {
+      final Path reports = Files.createDirectories(tempDir.resolve("reports-error"));
+      final Path planFile = tempDir.resolve("broken-plan.json");
+      Files.writeString(
+          planFile,
+          "{\n  \"metadata\": {\"name\": \"p\"},\n  \"scenarios\": [ { \"idd\": 1 } ]\n}\n");
+      final Process process =
+          new ProcessBuilder(
+                  Path.of(System.getProperty("java.home"), "bin", "java").toString(),
+                  "-javaagent:"
+                      + System.getProperty("chaos.bootstrap.agentJar")
+                      + "=configFile="
+                      + planFile,
+                  "-Dmacstab.chaos.reportsDir=" + reports,
+                  "-cp",
+                  System.getProperty("java.class.path"),
+                  DefectProbeMain.class.getName(),
+                  "woven-groups")
+              .redirectErrorStream(true)
+              .start();
+      process.getInputStream().readAllBytes();
+      assertThat(process.waitFor(60, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+      assertThat(process.exitValue()).as("the agent refuses a malformed plan").isNotZero();
+
+      final Map<String, String> status = readKeyValues(reports.resolve(".chaos-jvm.status"));
+      assertThat(status).containsEntry("state", "error").containsEntry("line", "3");
+      assertThat(status.get("reason")).contains("scenarios[0]");
+      assertThat(status.get("source")).isEqualTo("file:" + planFile);
     }
   }
 

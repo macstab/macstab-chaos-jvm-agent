@@ -3,6 +3,7 @@
 
 ### BREAKING CHANGES
 
+* **api:** `ChaosControlPlane.removeEventListener` and `ChaosActivationHandle.matchedCount()` / `appliedCount()` are new abstract methods; custom implementations must add them.
 * **core:** a clock-skew scenario whose policy sets `maxApplications`, `rateLimit`, `activateAfterMatches` or `probability < 1.0` is rejected with `ChaosValidationException`; 1.x ignored those fields for clock skew. `ActivationPolicy.fromJson` takes `activeFrom` and `activeUntil`.
 * **instrumentation:** hooks are woven on demand. The agent no longer weaves every hook at start: each interception point belongs to a hook group (`JdkInstrumentationInstaller.HookGroup`) that is retransformed the first time an activated scenario (or an opened session) needs one of its operation types, and stays woven until uninstall. A JVM without scenarios runs unmodified JDK classes; the first activation of a hook group pays its one-time weaving cost, and a weaving failure fails that activation with failure category `INSTRUMENTATION_FAILURE`. The agent argument `instrumentation=eager`, the system property `-Dmacstab.chaos.instrumentation=eager` or the environment variable `MACSTAB_CHAOS_INSTRUMENTATION=eager` restores the 1.x behaviour (every group woven at start).
 * **instrumentation:** the premain / agentmain split is gone. Dynamic attach (`agentmain`, still behind its opt-in) and `installForLocalTests()` get exactly the same hook set as `-javaagent:` — sockets, NIO, HTTP, JDBC, clock and the rest are no longer premain-only. `ChaosAgentBootstrap.initialize(agentArgs, instrumentation, environment)` lost its `premainMode` parameter, and `JdkInstrumentationInstaller.install` takes an `eager` flag instead.
@@ -27,6 +28,10 @@
 * **core:** clock-skew scenarios honour `activeFor`, `activeFrom` and `activeUntil`, and stressors end at `activeUntil`.
 * **diagnostics:** `ChaosDiagnostics.snapshot().runtimeDetails()` contains `wovenHookGroups` — the comma-separated, sorted names of the hook groups woven so far (empty when none).
 
+
+* **observability:** status and hits files in the native library's format (`<tmpdir>/.chaos-jvm.status` after every load and reload, with `line`/`column`/`reason` for a rejected plan; `<tmpdir>/.chaos-jvm.hits.<pid>` with each scenario's applied count), switchable with `reports=off` and relocatable with `reportsDir`.
+* **events:** `REGISTERED`, `SKIPPED` (with the policy check as `reason`, published while a listener is registered) and `FAILED` (activation failures with their `category`) are now published; `ChaosEventListener.async(listener)` delivers on an agent-owned thread through a bounded queue (`droppedEvents` in the diagnostics); `ChaosControlPlane.removeEventListener`.
+* **observability:** `ChaosActivationHandle.matchedCount()` / `appliedCount()`; the MBean gains `listScenarios`, and — behind the opt-in `jmxControl=true` — `activatePlan(json)`, `stopScenario(id)` and `stopAll()`; new optional module `chaos-agent-micrometer` (`ChaosMeterBinder`).
 
 ### Performance Improvements
 

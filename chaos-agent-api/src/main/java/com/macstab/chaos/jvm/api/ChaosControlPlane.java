@@ -105,6 +105,16 @@ public interface ChaosControlPlane extends AutoCloseable {
   void addEventListener(ChaosEventListener listener);
 
   /**
+   * Removes a listener registered with {@link #addEventListener}; a listener registered more than
+   * once is removed once. Removing an {@link ChaosEventListener#async asynchronous} listener stops
+   * its delivery thread; events still queued for it are discarded.
+   *
+   * @param listener the listener to remove, as it was registered
+   * @return {@code true} if it was registered
+   */
+  boolean removeEventListener(ChaosEventListener listener);
+
+  /**
    * Stops all active scenarios, closes all open sessions, and cleans up stressor resources.
    *
    * <p>After this call the control plane is inert; all selector evaluations return no-match.

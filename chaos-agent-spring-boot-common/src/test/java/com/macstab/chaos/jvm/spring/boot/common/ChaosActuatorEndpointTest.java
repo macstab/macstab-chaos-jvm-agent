@@ -149,6 +149,12 @@ class ChaosActuatorEndpointTest {
     public void addEventListener(final ChaosEventListener listener) {}
 
     @Override
+    public boolean removeEventListener(final ChaosEventListener listener) {
+
+      return false;
+    }
+
+    @Override
     public void close() {}
   }
 }

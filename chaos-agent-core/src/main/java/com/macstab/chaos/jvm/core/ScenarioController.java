@@ -443,21 +443,21 @@ final class ScenarioController {
       return null;
     }
     if (window == Window.NOT_YET) {
-      return null;
+      return skipped("notYetActive", context);
     }
     final long matchCount = matchedCount.incrementAndGet();
     if (matchCount <= scenario.activationPolicy().activateAfterMatches()) {
-      return null;
+      return skipped("warmUp", context);
     }
     // Probability is checked before rate-limit so that rate-limit permits are only consumed when
     // the effect will actually be applied. Checking rate-limit first would burn permits on
     // invocations that probability then rejects, making the effective throughput
     // `rate_limit * probability` instead of the operator-configured `rate_limit`.
     if (!passesProbability(matchCount)) {
-      return null;
+      return skipped("probability", context);
     }
     if (!passesRateLimit()) {
-      return null;
+      return skipped("rateLimit", context);
     }
     // Re-check the started flag before we commit to applying the effect. stop() can flip
     // started.get() to false while we were in the rate-limit / probability / CAS branches
@@ -469,7 +469,7 @@ final class ScenarioController {
       return null;
     }
     if (!reserveApplication()) {
-      return null;
+      return skipped("maxApplications", context);
     }
     return new ScenarioContribution(
         this, scenario, scenario.effect(), sampleDelayMillis(matchCount), gateTimeout(), context);
@@ -719,6 +719,21 @@ final class ScenarioController {
     if (expiry != null) {
       expiry.interrupt();
     }
+  }
+
+  /**
+   * Publishes SKIPPED for a call the policy kept the effect from, when anyone listens; returns
+   * {@code null} so the caller can return it.
+   */
+  private ScenarioContribution skipped(final String reason, final InvocationContext context) {
+    if (observabilityBus.hasListeners()) {
+      observabilityBus.publish(
+          ChaosEvent.Type.SKIPPED,
+          scenario.id(),
+          "skipped: " + reason,
+          Map.of("reason", reason, "operation", context.operationType().name(), "scope", scopeKey));
+    }
+    return null;
   }
 
   /** Where the current instant lies relative to the policy's time bounds. */

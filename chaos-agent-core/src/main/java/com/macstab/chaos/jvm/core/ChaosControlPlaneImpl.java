@@ -5,6 +5,7 @@ import com.macstab.chaos.jvm.api.ChaosActivationException;
 import com.macstab.chaos.jvm.api.ChaosActivationHandle;
 import com.macstab.chaos.jvm.api.ChaosControlPlane;
 import com.macstab.chaos.jvm.api.ChaosDiagnostics;
+import com.macstab.chaos.jvm.api.ChaosEvent;
 import com.macstab.chaos.jvm.api.ChaosEventListener;
 import com.macstab.chaos.jvm.api.ChaosMetricsSink;
 import com.macstab.chaos.jvm.api.ChaosPlan;
@@ -145,6 +146,12 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
   }
 
   @Override
+  public boolean removeEventListener(final ChaosEventListener listener) {
+    Objects.requireNonNull(listener, "listener");
+    return observabilityBus.removeListener(listener);
+  }
+
+  @Override
   public void close() {
     // Idempotent close: a second call must not re-traverse the controllers and re-publish
     // STOPPED lifecycle events. Framework integrations (Spring ApplicationContext teardown +
@@ -256,6 +263,11 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
       // dispatch path, because evaluate() returns null until start() has set the started flag.
       final ScenarioController replaced = registry.register(controller);
       registeredInRegistry = true;
+      observabilityBus.publish(
+          ChaosEvent.Type.REGISTERED,
+          scenario.id(),
+          "scenario registered",
+          Map.of("scope", scopeKey));
       if (replaced != null) {
         destroyQuietly(replaced);
       }
@@ -265,7 +277,7 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
       return handle;
     } catch (final ChaosUnsupportedFeatureException unsupported) {
       unregisterAndDestroyQuietly(controller, registeredInRegistry);
-      registry.recordFailure(
+      recordFailure(
           scenario.id(),
           ChaosDiagnostics.FailureCategory.UNSUPPORTED_RUNTIME,
           unsupported.getMessage());
@@ -275,7 +287,7 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
       // duplicate id; only the latter is an activation conflict.
       final boolean conflict = validated && !registeredInRegistry;
       unregisterAndDestroyQuietly(controller, registeredInRegistry);
-      registry.recordFailure(
+      recordFailure(
           scenario.id(),
           conflict
               ? ChaosDiagnostics.FailureCategory.ACTIVATION_CONFLICT
@@ -284,7 +296,7 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
       throw activationFailure;
     } catch (final RuntimeException runtimeException) {
       unregisterAndDestroyQuietly(controller, registeredInRegistry);
-      registry.recordFailure(
+      recordFailure(
           scenario.id(),
           weavingFailed
               ? ChaosDiagnostics.FailureCategory.INSTRUMENTATION_FAILURE
@@ -303,6 +315,19 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
       java.util.logging.Logger.getLogger("com.macstab.chaos.jvm")
           .warning(() -> "chaos-agent: could not update method hooks: " + failure);
     }
+  }
+
+  /** Records an activation failure in the diagnostics and publishes it as a FAILED event. */
+  private void recordFailure(
+      final String scenarioId,
+      final ChaosDiagnostics.FailureCategory category,
+      final String message) {
+    registry.recordFailure(scenarioId, category, message);
+    observabilityBus.publish(
+        ChaosEvent.Type.FAILED,
+        scenarioId,
+        String.valueOf(message),
+        Map.of("category", category.name()));
   }
 
   private void ensureOpen() {
@@ -348,6 +373,7 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
     details.put("virtualThreadsSupported", Boolean.toString(featureSet.supportsVirtualThreads()));
     details.put("jfrSupported", Boolean.toString(featureSet.jfrSupported()));
     details.put("currentSessionId", String.valueOf(scopeContext.currentSessionId()));
+    details.put("droppedEvents", String.valueOf(observabilityBus.droppedEvents()));
     details.put("wovenHookGroups", String.join(",", new java.util.TreeSet<>(hookDemand.woven())));
     return details;
   }

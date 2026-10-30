@@ -97,6 +97,11 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   @Override
+  public boolean removeEventListener(final ChaosEventListener listener) {
+    return controlPlane.removeEventListener(listener);
+  }
+
+  @Override
   public void close() {
     controlPlane.close();
   }

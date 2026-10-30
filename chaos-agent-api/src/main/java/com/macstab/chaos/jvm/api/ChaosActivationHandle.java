@@ -85,6 +85,22 @@ public interface ChaosActivationHandle extends AutoCloseable {
   ChaosDiagnostics.ScenarioState state();
 
   /**
+   * Returns how many calls matched the scenario's selector (and passed its time bounds) so far: the
+   * {@code matchedCount} of the diagnostics. For a plan handle, the sum over its scenarios.
+   *
+   * @return the match count
+   */
+  long matchedCount();
+
+  /**
+   * Returns how many times the scenario's effect took effect so far: the {@code appliedCount} of
+   * the diagnostics. For a plan handle, the sum over its scenarios.
+   *
+   * @return the application count
+   */
+  long appliedCount();
+
+  /**
    * Delegates to {@link #stop()}. Enables use in try-with-resources.
    *
    * <pre>{@code

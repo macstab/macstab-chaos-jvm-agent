@@ -35,4 +35,18 @@ public interface ChaosEventListener {
    *     lifecycle events from application events.
    */
   void onEvent(ChaosEvent event);
+
+  /**
+   * Wraps {@code delegate} so that it receives events on an agent-owned thread instead of the
+   * thread that triggered them: the control plane queues each event (a bounded queue; events beyond
+   * its capacity are dropped and counted in the diagnostics' {@code droppedEvents}) and returns
+   * immediately. Use it for listeners that log, export or block, so their latency never reaches an
+   * intercepted application call. Events are delivered in order.
+   *
+   * @param delegate the listener to call off the triggering thread
+   * @return a listener to register with {@link ChaosControlPlane#addEventListener}
+   */
+  static ChaosEventListener async(final ChaosEventListener delegate) {
+    return new AsyncChaosEventListener(delegate);
+  }
 }

@@ -116,6 +116,24 @@ final class CompositeActivationHandle implements ChaosActivationHandle {
    * @return the aggregated state across all delegates
    */
   @Override
+  public long matchedCount() {
+    long total = 0L;
+    for (final ChaosActivationHandle handle : delegates) {
+      total += handle.matchedCount();
+    }
+    return total;
+  }
+
+  @Override
+  public long appliedCount() {
+    long total = 0L;
+    for (final ChaosActivationHandle handle : delegates) {
+      total += handle.appliedCount();
+    }
+    return total;
+  }
+
+  @Override
   public ChaosDiagnostics.ScenarioState state() {
     boolean anyActive = false;
     boolean allStopped = !delegates.isEmpty();

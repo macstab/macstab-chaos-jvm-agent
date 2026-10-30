@@ -871,6 +871,7 @@ end note
 | `chaos-agent-core`                      | Scenario registry, evaluation pipeline, session scoping, stressors        |
 | `chaos-agent-instrumentation-jdk`       | ByteBuddy advice, bootstrap bridge (61 interception handles)              |
 | `chaos-agent-startup-config`            | JSON/base64/file config resolution and Jackson mapping                    |
+| `chaos-agent-micrometer`                | Optional Micrometer binder: `chaos.events` counters and `chaos.scenarios` gauges          |
 | `chaos-agent-testkit`                   | JUnit 5 extension, `ChaosPlatform.installLocally()` for self-attach       |
 | `chaos-agent-spring-boot3-test-starter` | `@ChaosTest` + `ChaosAgentExtension` for Spring Boot 3 tests              |
 | `chaos-agent-spring-boot4-test-starter` | `@ChaosTest` + `ChaosAgentExtension` for Spring Boot 4 tests              |
@@ -1055,6 +1056,7 @@ Internal Architecture documentation lives in [`docs/`](docs/):
 | [`api.md`](docs/api.md)                               | Stable API contract: builders, selectors, effects, diagnostics                                                            |
 | [`core.md`](docs/core.md)                             | Evaluation pipeline, session scoping, stressor lifecycle, JMM analysis                                                    |
 | [`semantics.md`](docs/semantics.md)                   | Evaluation laws: matching, policy order, composition of scenarios, clock skew, stressors, lifecycle                       |
+| [`observability.md`](docs/observability.md)           | Status and hits files, events, Micrometer metrics, JMX operations, handle counters                                         |
 | [`instrumentation.md`](docs/instrumentation.md)       | ByteBuddy advice, bootstrap bridge, reentrancy guard, 61-handle table                                                     |
 | [`bootstrap.md`](docs/bootstrap.md)                   | Agent initialization, self-attach, MBean registration                                                                     |
 | [`startup-config.md`](docs/startup-config.md)         | Config source resolution, JSON schema, path safety                                                                        |
