@@ -40,6 +40,28 @@ val nonPublishableModules = setOf(
     "sb4-virtual-thread-pinning",
 )
 
+// Coverage floor per module: (line, branch) covered ratio enforced by `check`. A ratchet: set a
+// little below the measured value and raised as tests are added, never lowered to make a change
+// pass. chaos-agent-instrumentation-jdk is low because most of its advice runs inside the child
+// JVMs of the -javaagent tests, whose coverage is not collected.
+val coverageFloors = mapOf(
+    "chaos-agent-api" to (0.65 to 0.63),
+    "chaos-agent-bootstrap" to (0.63 to 0.48),
+    "chaos-agent-core" to (0.73 to 0.65),
+    "chaos-agent-instrumentation-jdk" to (0.14 to 0.10),
+    "chaos-agent-micrometer" to (0.89 to 0.60),
+    "chaos-agent-micronaut-integration" to (0.85 to 0.70),
+    "chaos-agent-quarkus-extension" to (0.70 to 0.60),
+    "chaos-agent-quarkus-extension-deployment" to (0.38 to 0.0),
+    "chaos-agent-spring-boot-common" to (0.60 to 0.50),
+    "chaos-agent-spring-boot3-starter" to (0.68 to 0.73),
+    "chaos-agent-spring-boot3-test-starter" to (0.84 to 0.53),
+    "chaos-agent-spring-boot4-starter" to (0.68 to 0.73),
+    "chaos-agent-spring-boot4-test-starter" to (0.84 to 0.53),
+    "chaos-agent-startup-config" to (0.75 to 0.62),
+    "chaos-agent-testkit" to (0.84 to 0.79),
+)
+
 subprojects {
     apply(plugin = "java-library")
     apply(plugin = "jacoco")
@@ -112,6 +134,25 @@ subprojects {
             html.required.set(true)
             csv.required.set(false)
         }
+    }
+
+    coverageFloors[name]?.let { (line, branch) ->
+        val verification = tasks.named<JacocoCoverageVerification>("jacocoTestCoverageVerification") {
+            dependsOn(tasks.named("test"))
+            violationRules {
+                rule {
+                    limit {
+                        counter = "LINE"
+                        minimum = line.toBigDecimal()
+                    }
+                    limit {
+                        counter = "BRANCH"
+                        minimum = branch.toBigDecimal()
+                    }
+                }
+            }
+        }
+        tasks.named("check") { dependsOn(verification) }
     }
 
     tasks.withType<Jar>().configureEach {

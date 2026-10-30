@@ -61,3 +61,48 @@ jobs:
         with:
           name: build-artifacts
           path: '**/build/libs/*.jar'
+
+  # The agent rewrites JDK classes whose internals differ between releases (Thread.sleep,
+  # LockSupport, virtual-thread mounting, FileChannelImpl) and between CPU architectures, so the
+  # tests run on every supported JDK on amd64 and arm64. Compilation stays on the JDK 25 toolchain
+  # (--release 21); -PtestJavaVersion only switches the JVM the tests run on.
+  jdk-matrix:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    if: |
+      github.event_name != 'pull_request' && github.event.pull_request == null
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm]
+        java: [21, 25]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK ${{ matrix.java }} and the JDK 25 toolchain
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: |
+            ${{ matrix.java }}
+            25
+          cache: 'gradle'
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Test on JDK ${{ matrix.java }}
+        run: >
+          ./gradlew test --no-daemon --stacktrace
+          -PtestJavaVersion=${{ matrix.java }}
+          -Porg.gradle.java.installations.auto-download=false
+          -Porg.gradle.java.installations.fromEnv=JAVA_HOME_21_X64,JAVA_HOME_25_X64,JAVA_HOME_21_ARM64,JAVA_HOME_25_ARM64
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.os }}-jdk${{ matrix.java }}
+          path: '**/build/test-results/**/*.xml'

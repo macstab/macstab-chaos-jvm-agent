@@ -534,6 +534,23 @@ public final class JdkInstrumentationInstaller {
   }
 
   /**
+   * Connects {@code runtime} to the {@link
+   * com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher} without weaving any class, so
+   * benchmarks and tests can drive the dispatch methods exactly as woven advice does. Closing the
+   * result disconnects it again.
+   *
+   * @param runtime the runtime that receives the dispatches
+   * @return a handle that uninstalls the dispatcher's delegate when closed
+   * @throws Exception if the method handles cannot be built
+   */
+  public static AutoCloseable connectDispatcher(final ChaosRuntime runtime) throws Exception {
+    com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher.install(
+        new ChaosBridge(runtime), buildMethodHandles());
+    return () ->
+        com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher.install(null, null);
+  }
+
+  /**
    * Builds the fixed-size {@link MethodHandle} array that backs {@link
    * com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher}.
    *

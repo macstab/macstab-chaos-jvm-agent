@@ -8,7 +8,8 @@
 ## Build & test
 
 ```bash
-./gradlew build                        # compile, format-check, test, Jacoco
+./gradlew build                        # compile, format-check, test, Jacoco and coverage floors
+./gradlew test -PtestJavaVersion=21    # run the tests on another installed JDK (CI: 21 and 25, amd64 and arm64)
 ./gradlew spotlessApply                # auto-fix formatting before committing
 ./gradlew aggregatedJavadoc            # build API docs at build/docs/aggregated-javadoc/
 ./gradlew :chaos-agent-core:test       # run tests for a single module
@@ -118,7 +119,7 @@ Phase 1 points (always installed) go before the `if (premainMode)` check. Phase 
 
 ### 6. Handle the dispatch in `ChaosDispatcher`
 
-Add the corresponding `beforeMyOperation(...)` method that receives the call from `ChaosBridge` and routes it through `ScenarioRegistry` → `ScenarioController` evaluation. Follow the pattern of any existing `before*` method in `ChaosDispatcher`.
+Add the corresponding `beforeMyOperation(...)` method that receives the call from `ChaosBridge` and routes it through `ScenarioRegistry` → `ScenarioController` evaluation. Follow the pattern of any existing `before*` method in `ChaosDispatcher`, including its `idle(operation)` check: return the unmodified result before building the `InvocationContext`, so a call without a scenario for its operation allocates nothing.
 
 ### 7. Test it
 
@@ -148,5 +149,6 @@ Stressors are simpler — they live entirely in `chaos-agent-core` and have no B
 
 - One logical change per PR
 - Tests required for new interception points and stressors
-- `./gradlew build` must pass locally before opening a PR
+- `./gradlew build` must pass locally before opening a PR. It enforces a line and branch coverage floor per module (`coverageFloors` in `build.gradle.kts`); raise a floor when your tests raise coverage, never lower one to make a change pass
+- Pull requests into `main` run the benchmark gate (`docs/benchmarks.md` §8): a dispatch benchmark more than 15 % and 25 ns slower than `main` (p < 0.01) fails it
 - For breaking API changes, add a `BREAKING CHANGE:` footer to the commit message

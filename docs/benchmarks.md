@@ -32,6 +32,8 @@ The two benchmark classes cover the two hot-path entry points added in roadmap 2
 
 Both measure `ChaosDispatcher` method calls directly, bypassing the `BootstrapDispatcher` → `ChaosBridge` indirection. This isolates the dispatch logic (scenario registry match, selector evaluation, decision building) from the fixed overhead of the classloader bridge.
 
+`BridgeDispatchBenchmark` (§8) measures the full path woven advice takes, through `BootstrapDispatcher`, and is the one the CI benchmark gate compares release over release.
+
 ### Module and Execution
 
 Module: `chaos-agent-benchmarks`
@@ -578,6 +580,51 @@ operation types increase the per-call cost across more code paths.
 **Benchmark with `-f 1` for publication.** The results above use `-f 0` (no fork) for speed. For
 published benchmarks, use `-f 1 -wi 3 -i 5` to isolate JIT state across classes and collect tighter
 confidence intervals.
+
+---
+
+## 8. `BridgeDispatchBenchmark` — the woven path, and the release gate
+
+### 8.1 What It Measures
+
+Each benchmark method calls a `BootstrapDispatcher` dispatch method exactly as woven advice does: the inline reentrancy guard, the method-handle hop into `ChaosBridge`, the operation index in `ChaosDispatcher` and, when a scenario's selector matches, the policy checks. `JdkInstrumentationInstaller.connectDispatcher(runtime)` connects a runtime to the dispatcher without weaving any class. Methods: `clockMillis`, `threadSleep`, `fileRead`, `socketRead`, `executorSubmit`.
+
+| `scenarios`           | Active scenarios                                                                       |
+|-----------------------|----------------------------------------------------------------------------------------|
+| `none`                | none: what every call pays once its hook group is woven                                |
+| `otherOperation`      | one JDBC scenario: the operation index rejects every benchmarked call                  |
+| `matchedNotYetActive` | one per benchmarked operation, `activeFrom` a day ahead: full evaluation up to the wall-clock window, no effect |
+
+### 8.2 Measured Results
+
+Apple M-series, JDK 25, `-f 1 -wi 1 -i 2 -prof gc` (indicative; CI measures its own baseline):
+
+| Method           | `none`        | `otherOperation` | `matchedNotYetActive` |
+|------------------|---------------|------------------|-----------------------|
+| `clockMillis`    | 7.1 ns, 0 B   | 7.1 ns, 0 B      | 28 ns, 0 B            |
+| `threadSleep`    | 7.5 ns, 0 B   | 7.5 ns, 0 B      | 63 ns, 104 B          |
+| `fileRead`       | 7.2 ns, 0 B   | 7.4 ns, 0 B      | 56 ns, 104 B          |
+| `socketRead`     | 7.7 ns, 0 B   | 7.5 ns, 0 B      | 98 ns, 104 B          |
+| `executorSubmit` | 11.7 ns, 0 B  | 11.7 ns, 0 B     | 82 ns, 200 B          |
+
+A call whose operation has no scenario allocates nothing: the dispatcher checks the operation index before it builds the `InvocationContext`. Before 2.0 every one of these calls built the context first (23–54 ns and 104–200 B per call with no scenario at all). A call that reaches a matching selector allocates its context, which escape analysis cannot remove across the registry's megamorphic controller loop.
+
+### 8.3 The Gate
+
+`.github/workflows/benchmark-gate.yml` runs on every pull request into `main`. It builds the benchmarks of the target branch and of the pull request, runs `BridgeDispatchBenchmark` for both on the same runner (`-f 3 -wi 3 -i 5`, 15 samples each), and compares them with `scripts/jmh-gate.py`. A benchmark fails the gate only when all three hold:
+
+- its median is more than **15 %** slower,
+- **and** more than **25 ns** slower (nanosecond-scale noise does not count),
+- **and** a one-sided Mann-Whitney U test over the raw iteration scores gives **p < 0.01**.
+
+Benchmarks that exist on only one side are listed and skipped; a target branch without the benchmark passes. Run the same comparison locally:
+
+```
+./gradlew :chaos-agent-benchmarks:installDist
+chaos-agent-benchmarks/build/install/chaos-agent-benchmarks/bin/chaos-agent-benchmarks \
+    BridgeDispatchBenchmark -f 3 -wi 3 -i 5 -rf json -rff candidate.json
+python3 scripts/jmh-gate.py base.json candidate.json
+```
 
 ---
 

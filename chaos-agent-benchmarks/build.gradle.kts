@@ -5,6 +5,7 @@ plugins {
 dependencies {
     implementation(project(":chaos-agent-api"))
     implementation(project(":chaos-agent-core"))
+    implementation(project(":chaos-agent-instrumentation-jdk"))
     implementation(libs.jmh.core)
     annotationProcessor(libs.jmh.generator.annprocess)
 }
