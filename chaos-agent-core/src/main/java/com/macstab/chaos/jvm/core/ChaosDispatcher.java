@@ -154,17 +154,20 @@ public final class ChaosDispatcher {
     Objects.requireNonNull(task, "task");
     final String sessionId = scopeContext.currentSessionId();
     final Runnable scoped = sessionId == null ? task : scopeContext.wrap(sessionId, task);
-    final InvocationContext context =
-        new InvocationContext(
-            OperationType.valueOf(operation),
-            executor == null ? "unknown" : executor.getClass().getName(),
-            taskClassName(task),
-            null,
-            false,
-            null,
-            null,
-            sessionId);
-    final RuntimeDecision decision = evaluate(context);
+    final OperationType indexedOp = OperationType.valueOf(operation);
+    final RuntimeDecision decision =
+        (idle(indexedOp)
+            ? RuntimeDecision.none()
+            : evaluate(
+                new InvocationContext(
+                    indexedOp,
+                    executor == null ? "unknown" : executor.getClass().getName(),
+                    taskClassName(task),
+                    null,
+                    false,
+                    null,
+                    null,
+                    sessionId)));
     if (decision.terminalAction() != null
         && decision.terminalAction().kind() == TerminalKind.SUPPRESS) {
       // Honour composed "gate + delay + suppress" scenarios before substituting the no-op, so
@@ -204,17 +207,20 @@ public final class ChaosDispatcher {
     Objects.requireNonNull(task, "task");
     final String sessionId = scopeContext.currentSessionId();
     final Callable<T> scoped = sessionId == null ? task : scopeContext.wrap(sessionId, task);
-    final InvocationContext context =
-        new InvocationContext(
-            OperationType.valueOf(operation),
-            executor == null ? "unknown" : executor.getClass().getName(),
-            taskClassName(task),
-            null,
-            false,
-            null,
-            null,
-            sessionId);
-    final RuntimeDecision decision = evaluate(context);
+    final OperationType indexedOp = OperationType.valueOf(operation);
+    final RuntimeDecision decision =
+        (idle(indexedOp)
+            ? RuntimeDecision.none()
+            : evaluate(
+                new InvocationContext(
+                    indexedOp,
+                    executor == null ? "unknown" : executor.getClass().getName(),
+                    taskClassName(task),
+                    null,
+                    false,
+                    null,
+                    null,
+                    sessionId)));
     if (decision.terminalAction() != null
         && decision.terminalAction().kind() == TerminalKind.SUPPRESS) {
       // See decorateExecutorRunnable — apply gate + delay before returning the no-op Callable
@@ -243,21 +249,26 @@ public final class ChaosDispatcher {
    * @throws Throwable if a matching scenario's terminal action mandates it
    */
   public void beforeThreadStart(final Thread thread) throws Throwable {
-    final InvocationContext context =
-        new InvocationContext(
-            featureSet.isVirtualThread(thread)
-                ? OperationType.VIRTUAL_THREAD_START
-                : OperationType.THREAD_START,
-            Thread.class.getName(),
-            null,
-            thread == null ? null : thread.getName(),
-            false,
-            thread == null ? null : thread.isDaemon(),
-            thread == null ? null : featureSet.isVirtualThread(thread),
-            scopeContext.currentSessionId());
-    applyPreDecision(evaluate(context));
+    final OperationType operation =
+        featureSet.isVirtualThread(thread)
+            ? OperationType.VIRTUAL_THREAD_START
+            : OperationType.THREAD_START;
+    final String sessionId = scopeContext.currentSessionId();
+    if (!idle(operation)) {
+      applyPreDecision(
+          evaluate(
+              new InvocationContext(
+                  operation,
+                  Thread.class.getName(),
+                  null,
+                  thread == null ? null : thread.getName(),
+                  false,
+                  thread == null ? null : thread.isDaemon(),
+                  thread == null ? null : featureSet.isVirtualThread(thread),
+                  sessionId)));
+    }
     // The started thread runs in the starting thread's session (see enterSession).
-    sessionHandoff.capture(thread, context.sessionId());
+    sessionHandoff.capture(thread, sessionId);
   }
 
   /**
@@ -298,17 +309,19 @@ public final class ChaosDispatcher {
    */
   public void beforeWorkerRun(final Object executor, final Thread worker, final Runnable task)
       throws Throwable {
-    final InvocationContext context =
-        new InvocationContext(
-            OperationType.EXECUTOR_WORKER_RUN,
-            executor.getClass().getName(),
-            taskClassName(ScopeContext.unwrap(task)),
-            worker == null ? null : worker.getName(),
-            false,
-            worker == null ? null : worker.isDaemon(),
-            worker == null ? null : featureSet.isVirtualThread(worker),
-            taskSession(task));
-    applyPreDecision(evaluate(context));
+    applyPreDecision(
+        (idle(OperationType.EXECUTOR_WORKER_RUN)
+            ? RuntimeDecision.none()
+            : evaluate(
+                new InvocationContext(
+                    OperationType.EXECUTOR_WORKER_RUN,
+                    executor.getClass().getName(),
+                    taskClassName(ScopeContext.unwrap(task)),
+                    worker == null ? null : worker.getName(),
+                    false,
+                    worker == null ? null : worker.isDaemon(),
+                    worker == null ? null : featureSet.isVirtualThread(worker),
+                    taskSession(task)))));
   }
 
   /**
@@ -319,17 +332,19 @@ public final class ChaosDispatcher {
    */
   public void beforeForkJoinTaskRun(final java.util.concurrent.ForkJoinTask<?> task)
       throws Throwable {
-    final InvocationContext context =
-        new InvocationContext(
-            OperationType.FORK_JOIN_TASK_RUN,
-            "java.util.concurrent.ForkJoinPool",
-            taskClassName(task),
-            null,
-            false,
-            null,
-            null,
-            scopeContext.currentSessionId());
-    applyPreDecision(evaluate(context));
+    applyPreDecision(
+        (idle(OperationType.FORK_JOIN_TASK_RUN)
+            ? RuntimeDecision.none()
+            : evaluate(
+                new InvocationContext(
+                    OperationType.FORK_JOIN_TASK_RUN,
+                    "java.util.concurrent.ForkJoinPool",
+                    taskClassName(task),
+                    null,
+                    false,
+                    null,
+                    null,
+                    scopeContext.currentSessionId()))));
   }
 
   /**
@@ -340,17 +355,20 @@ public final class ChaosDispatcher {
    * @throws Throwable if a matching scenario's terminal action mandates it
    */
   public void beforeQueueOperation(final String operation, final Object queue) throws Throwable {
-    final InvocationContext context =
-        new InvocationContext(
-            OperationType.valueOf(operation),
-            queue == null ? "unknown" : queue.getClass().getName(),
-            null,
-            null,
-            false,
-            null,
-            null,
-            scopeContext.currentSessionId());
-    applyPreDecision(evaluate(context));
+    final OperationType indexedOp = OperationType.valueOf(operation);
+    applyPreDecision(
+        (idle(indexedOp)
+            ? RuntimeDecision.none()
+            : evaluate(
+                new InvocationContext(
+                    indexedOp,
+                    queue == null ? "unknown" : queue.getClass().getName(),
+                    null,
+                    null,
+                    false,
+                    null,
+                    null,
+                    scopeContext.currentSessionId()))));
   }
 
   /**
@@ -365,17 +383,20 @@ public final class ChaosDispatcher {
    */
   public Boolean beforeBooleanQueueOperation(final String operation, final Object queue)
       throws Throwable {
-    final InvocationContext context =
-        new InvocationContext(
-            OperationType.valueOf(operation),
-            queue == null ? "unknown" : queue.getClass().getName(),
-            null,
-            null,
-            false,
-            null,
-            null,
-            scopeContext.currentSessionId());
-    final RuntimeDecision decision = evaluate(context);
+    final OperationType indexedOp = OperationType.valueOf(operation);
+    final RuntimeDecision decision =
+        (idle(indexedOp)
+            ? RuntimeDecision.none()
+            : evaluate(
+                new InvocationContext(
+                    indexedOp,
+                    queue == null ? "unknown" : queue.getClass().getName(),
+                    null,
+                    null,
+                    false,
+                    null,
+                    null,
+                    scopeContext.currentSessionId())));
     applyDelayAndGate(decision);
     if (decision.terminalAction() != null) {
       if (decision.terminalAction().kind() == TerminalKind.THROW) {
@@ -402,17 +423,20 @@ public final class ChaosDispatcher {
   public Boolean beforeCompletableFutureComplete(
       final String operation, final CompletableFuture<?> future, final Object payload)
       throws Throwable {
-    final InvocationContext context =
-        new InvocationContext(
-            OperationType.valueOf(operation),
-            CompletableFuture.class.getName(),
-            payload == null ? null : payload.getClass().getName(),
-            null,
-            false,
-            null,
-            null,
-            scopeContext.currentSessionId());
-    final RuntimeDecision decision = evaluate(context);
+    final OperationType indexedOp = OperationType.valueOf(operation);
+    final RuntimeDecision decision =
+        (idle(indexedOp)
+            ? RuntimeDecision.none()
+            : evaluate(
+                new InvocationContext(
+                    indexedOp,
+                    CompletableFuture.class.getName(),
+                    payload == null ? null : payload.getClass().getName(),
+                    null,
+                    false,
+                    null,
+                    null,
+                    scopeContext.currentSessionId())));
     applyDelayAndGate(decision);
     if (decision.terminalAction() != null) {
       final TerminalAction terminalAction = decision.terminalAction();
@@ -441,17 +465,19 @@ public final class ChaosDispatcher {
    * @throws Throwable if a matching scenario's terminal action mandates it
    */
   public void beforeClassLoad(final ClassLoader loader, final String className) throws Throwable {
-    final InvocationContext context =
-        new InvocationContext(
-            OperationType.CLASS_LOAD,
-            loader == null ? "bootstrap" : loader.getClass().getName(),
-            null,
-            className,
-            false,
-            null,
-            null,
-            null);
-    applyPreDecision(evaluate(context));
+    applyPreDecision(
+        (idle(OperationType.CLASS_LOAD)
+            ? RuntimeDecision.none()
+            : evaluate(
+                new InvocationContext(
+                    OperationType.CLASS_LOAD,
+                    loader == null ? "bootstrap" : loader.getClass().getName(),
+                    null,
+                    className,
+                    false,
+                    null,
+                    null,
+                    null))));
   }
 
   /**
@@ -465,17 +491,19 @@ public final class ChaosDispatcher {
    */
   public URL afterResourceLookup(
       final ClassLoader loader, final String name, final URL currentValue) throws Throwable {
-    final InvocationContext context =
-        new InvocationContext(
-            OperationType.RESOURCE_LOAD,
-            loader == null ? "bootstrap" : loader.getClass().getName(),
-            null,
-            name,
-            false,
-            null,
-            null,
-            null);
-    final RuntimeDecision decision = evaluate(context);
+    final RuntimeDecision decision =
+        (idle(OperationType.RESOURCE_LOAD)
+            ? RuntimeDecision.none()
+            : evaluate(
+                new InvocationContext(
+                    OperationType.RESOURCE_LOAD,
+                    loader == null ? "bootstrap" : loader.getClass().getName(),
+                    null,
+                    name,
+                    false,
+                    null,
+                    null,
+                    null)));
     applyDelayAndGate(decision);
     if (decision.terminalAction() != null) {
       if (decision.terminalAction().kind() == TerminalKind.THROW) {
@@ -496,17 +524,19 @@ public final class ChaosDispatcher {
    * @throws Throwable if a matching scenario's terminal action mandates it
    */
   public Thread decorateShutdownHook(final Thread hook) throws Throwable {
-    final InvocationContext context =
-        new InvocationContext(
-            OperationType.SHUTDOWN_HOOK_REGISTER,
-            hook == null ? Thread.class.getName() : hook.getClass().getName(),
-            null,
-            hook == null ? null : hook.getName(),
-            false,
-            hook == null ? null : hook.isDaemon(),
-            hook == null ? null : featureSet.isVirtualThread(hook),
-            null);
-    final RuntimeDecision decision = evaluate(context);
+    final RuntimeDecision decision =
+        (idle(OperationType.SHUTDOWN_HOOK_REGISTER)
+            ? RuntimeDecision.none()
+            : evaluate(
+                new InvocationContext(
+                    OperationType.SHUTDOWN_HOOK_REGISTER,
+                    hook == null ? Thread.class.getName() : hook.getClass().getName(),
+                    null,
+                    hook == null ? null : hook.getName(),
+                    false,
+                    hook == null ? null : hook.isDaemon(),
+                    hook == null ? null : featureSet.isVirtualThread(hook),
+                    null)));
     applyPreDecision(decision);
     // SUPPRESS: `applyPreDecision` returns normally for SUPPRESS (unlike THROW, which unwinds)
     // but the hook should not reach Runtime.addShutdownHook if the operator asked for the
@@ -570,17 +600,20 @@ public final class ChaosDispatcher {
    */
   public void beforeExecutorShutdown(
       final String operation, final Object executor, final long timeoutMillis) throws Throwable {
-    final InvocationContext context =
-        new InvocationContext(
-            OperationType.valueOf(operation),
-            executor == null ? "unknown" : executor.getClass().getName(),
-            null,
-            Long.toString(timeoutMillis),
-            false,
-            null,
-            null,
-            scopeContext.currentSessionId());
-    applyPreDecision(evaluate(context));
+    final OperationType indexedOp = OperationType.valueOf(operation);
+    applyPreDecision(
+        (idle(indexedOp)
+            ? RuntimeDecision.none()
+            : evaluate(
+                new InvocationContext(
+                    indexedOp,
+                    executor == null ? "unknown" : executor.getClass().getName(),
+                    null,
+                    Long.toString(timeoutMillis),
+                    false,
+                    null,
+                    null,
+                    scopeContext.currentSessionId()))));
   }
 
   /**
@@ -594,17 +627,19 @@ public final class ChaosDispatcher {
    */
   public boolean beforeScheduledTick(
       final Object executor, final Object task, final boolean periodic) throws Throwable {
-    final InvocationContext context =
-        new InvocationContext(
-            OperationType.SCHEDULE_TICK,
-            executor == null ? "unknown" : executor.getClass().getName(),
-            taskClassName(ScopeContext.unwrap(task)),
-            null,
-            periodic,
-            null,
-            null,
-            taskSession(task));
-    final RuntimeDecision decision = evaluate(context);
+    final RuntimeDecision decision =
+        (idle(OperationType.SCHEDULE_TICK)
+            ? RuntimeDecision.none()
+            : evaluate(
+                new InvocationContext(
+                    OperationType.SCHEDULE_TICK,
+                    executor == null ? "unknown" : executor.getClass().getName(),
+                    taskClassName(ScopeContext.unwrap(task)),
+                    null,
+                    periodic,
+                    null,
+                    null,
+                    taskSession(task))));
     applyDelayAndGate(decision);
     if (decision.terminalAction() != null) {
       if (decision.terminalAction().kind() == TerminalKind.THROW) {
@@ -629,6 +664,9 @@ public final class ChaosDispatcher {
   public void beforeMethodEnter(
       final Class<?> declaringType, final String methodName, final String descriptor)
       throws Throwable {
+    if (idle(OperationType.METHOD_ENTER)) {
+      return;
+    }
     final String className = declaringType.getName();
     applyPreDecision(
         evaluate(
@@ -666,6 +704,9 @@ public final class ChaosDispatcher {
       final String descriptor,
       final Object actualValue)
       throws Throwable {
+    if (idle(OperationType.METHOD_EXIT)) {
+      return actualValue;
+    }
     final String className = declaringType.getName();
     return afterMethodExit(
         new InvocationContext(
@@ -695,17 +736,19 @@ public final class ChaosDispatcher {
    * @throws Throwable if a matching scenario's terminal action mandates it
    */
   public void beforeMethodEnter(final String className, final String methodName) throws Throwable {
-    final InvocationContext context =
-        new InvocationContext(
-            OperationType.METHOD_ENTER,
-            className,
-            className,
-            methodName,
-            false,
-            null,
-            null,
-            scopeContext.currentSessionId());
-    applyPreDecision(evaluate(context));
+    applyPreDecision(
+        (idle(OperationType.METHOD_ENTER)
+            ? RuntimeDecision.none()
+            : evaluate(
+                new InvocationContext(
+                    OperationType.METHOD_ENTER,
+                    className,
+                    className,
+                    methodName,
+                    false,
+                    null,
+                    null,
+                    scopeContext.currentSessionId()))));
   }
 
   /**
@@ -724,6 +767,9 @@ public final class ChaosDispatcher {
       final Class<?> returnType,
       final Object actualValue)
       throws Throwable {
+    if (idle(OperationType.METHOD_EXIT)) {
+      return actualValue;
+    }
     return afterMethodExit(
         new InvocationContext(
             OperationType.METHOD_EXIT,
@@ -932,17 +978,19 @@ public final class ChaosDispatcher {
    * @throws Throwable if a matching scenario's terminal action mandates it
    */
   public boolean beforeGcRequest() throws Throwable {
-    final InvocationContext context =
-        new InvocationContext(
-            OperationType.SYSTEM_GC_REQUEST,
-            "java.lang.System",
-            null,
-            null,
-            false,
-            null,
-            null,
-            scopeContext.currentSessionId());
-    final RuntimeDecision decision = evaluate(context);
+    final RuntimeDecision decision =
+        (idle(OperationType.SYSTEM_GC_REQUEST)
+            ? RuntimeDecision.none()
+            : evaluate(
+                new InvocationContext(
+                    OperationType.SYSTEM_GC_REQUEST,
+                    "java.lang.System",
+                    null,
+                    null,
+                    false,
+                    null,
+                    null,
+                    scopeContext.currentSessionId())));
     applyDelayAndGate(decision);
     if (decision.terminalAction() != null) {
       final TerminalAction terminalAction = decision.terminalAction();
@@ -964,17 +1012,19 @@ public final class ChaosDispatcher {
    * @throws Throwable if a matching scenario's terminal action mandates it
    */
   public void beforeExitRequest(final int status) throws Throwable {
-    final InvocationContext context =
-        new InvocationContext(
-            OperationType.SYSTEM_EXIT_REQUEST,
-            "java.lang.System",
-            null,
-            Integer.toString(status),
-            false,
-            null,
-            null,
-            scopeContext.currentSessionId());
-    applyPreDecision(evaluate(context));
+    applyPreDecision(
+        (idle(OperationType.SYSTEM_EXIT_REQUEST)
+            ? RuntimeDecision.none()
+            : evaluate(
+                new InvocationContext(
+                    OperationType.SYSTEM_EXIT_REQUEST,
+                    "java.lang.System",
+                    null,
+                    Integer.toString(status),
+                    false,
+                    null,
+                    null,
+                    scopeContext.currentSessionId()))));
   }
 
   /**
@@ -999,17 +1049,19 @@ public final class ChaosDispatcher {
       methodName = null;
       declaringClass = method == null ? "java.lang.reflect.Method" : method.getClass().getName();
     }
-    final InvocationContext context =
-        new InvocationContext(
-            OperationType.REFLECTION_INVOKE,
-            declaringClass,
-            target == null ? null : target.getClass().getName(),
-            methodName,
-            false,
-            null,
-            null,
-            scopeContext.currentSessionId());
-    applyPreDecision(evaluate(context));
+    applyPreDecision(
+        (idle(OperationType.REFLECTION_INVOKE)
+            ? RuntimeDecision.none()
+            : evaluate(
+                new InvocationContext(
+                    OperationType.REFLECTION_INVOKE,
+                    declaringClass,
+                    target == null ? null : target.getClass().getName(),
+                    methodName,
+                    false,
+                    null,
+                    null,
+                    scopeContext.currentSessionId()))));
   }
 
   /**
@@ -1019,17 +1071,19 @@ public final class ChaosDispatcher {
    * @throws Throwable if a matching scenario's terminal action mandates it
    */
   public void beforeDirectBufferAllocate(final int capacity) throws Throwable {
-    final InvocationContext context =
-        new InvocationContext(
-            OperationType.DIRECT_BUFFER_ALLOCATE,
-            "java.nio.ByteBuffer",
-            null,
-            null,
-            false,
-            null,
-            null,
-            scopeContext.currentSessionId());
-    applyPreDecision(evaluate(context));
+    applyPreDecision(
+        (idle(OperationType.DIRECT_BUFFER_ALLOCATE)
+            ? RuntimeDecision.none()
+            : evaluate(
+                new InvocationContext(
+                    OperationType.DIRECT_BUFFER_ALLOCATE,
+                    "java.nio.ByteBuffer",
+                    null,
+                    null,
+                    false,
+                    null,
+                    null,
+                    scopeContext.currentSessionId()))));
   }
 
   /**
@@ -1041,17 +1095,19 @@ public final class ChaosDispatcher {
    * @throws Throwable if a matching scenario's terminal action mandates it
    */
   public void beforeObjectDeserialize(final Object stream) throws Throwable {
-    final InvocationContext context =
-        new InvocationContext(
-            OperationType.OBJECT_DESERIALIZE,
-            stream == null ? "java.io.ObjectInputStream" : stream.getClass().getName(),
-            null,
-            null,
-            false,
-            null,
-            null,
-            scopeContext.currentSessionId());
-    applyPreDecision(evaluate(context));
+    applyPreDecision(
+        (idle(OperationType.OBJECT_DESERIALIZE)
+            ? RuntimeDecision.none()
+            : evaluate(
+                new InvocationContext(
+                    OperationType.OBJECT_DESERIALIZE,
+                    stream == null ? "java.io.ObjectInputStream" : stream.getClass().getName(),
+                    null,
+                    null,
+                    false,
+                    null,
+                    null,
+                    scopeContext.currentSessionId()))));
   }
 
   /**
@@ -1062,17 +1118,19 @@ public final class ChaosDispatcher {
    * @throws Throwable if a matching scenario's terminal action mandates it
    */
   public void beforeClassDefine(final Object loader, final String className) throws Throwable {
-    final InvocationContext context =
-        new InvocationContext(
-            OperationType.CLASS_DEFINE,
-            loader == null ? "bootstrap" : loader.getClass().getName(),
-            null,
-            className,
-            false,
-            null,
-            null,
-            null);
-    applyPreDecision(evaluate(context));
+    applyPreDecision(
+        (idle(OperationType.CLASS_DEFINE)
+            ? RuntimeDecision.none()
+            : evaluate(
+                new InvocationContext(
+                    OperationType.CLASS_DEFINE,
+                    loader == null ? "bootstrap" : loader.getClass().getName(),
+                    null,
+                    className,
+                    false,
+                    null,
+                    null,
+                    null))));
   }
 
   /**
@@ -1091,17 +1149,19 @@ public final class ChaosDispatcher {
         lock == null
             ? "java.util.concurrent.locks.AbstractQueuedSynchronizer"
             : lock.getClass().getName();
-    final InvocationContext context =
-        new InvocationContext(
-            OperationType.MONITOR_ENTER,
-            targetClassName,
-            null,
-            null,
-            false,
-            null,
-            null,
-            scopeContext.currentSessionId());
-    applyPreDecision(evaluate(context));
+    applyPreDecision(
+        (idle(OperationType.MONITOR_ENTER)
+            ? RuntimeDecision.none()
+            : evaluate(
+                new InvocationContext(
+                    OperationType.MONITOR_ENTER,
+                    targetClassName,
+                    null,
+                    null,
+                    false,
+                    null,
+                    null,
+                    scopeContext.currentSessionId()))));
   }
 
   /**
@@ -1111,17 +1171,19 @@ public final class ChaosDispatcher {
    * @throws Throwable if a matching scenario's terminal action mandates it
    */
   public void beforeThreadPark() throws Throwable {
-    final InvocationContext context =
-        new InvocationContext(
-            OperationType.THREAD_PARK,
-            "java.util.concurrent.locks.LockSupport",
-            null,
-            null,
-            false,
-            null,
-            null,
-            scopeContext.currentSessionId());
-    applyPreDecision(evaluate(context));
+    applyPreDecision(
+        (idle(OperationType.THREAD_PARK)
+            ? RuntimeDecision.none()
+            : evaluate(
+                new InvocationContext(
+                    OperationType.THREAD_PARK,
+                    "java.util.concurrent.locks.LockSupport",
+                    null,
+                    null,
+                    false,
+                    null,
+                    null,
+                    scopeContext.currentSessionId()))));
   }
 
   /**
@@ -1134,17 +1196,19 @@ public final class ChaosDispatcher {
    * @throws Throwable if an active scenario throws to simulate a failure
    */
   public boolean beforeNioSelect(final Object selector, final long timeoutMillis) throws Throwable {
-    final InvocationContext context =
-        new InvocationContext(
-            OperationType.NIO_SELECTOR_SELECT,
-            selector == null ? "java.nio.channels.Selector" : selector.getClass().getName(),
-            null,
-            null,
-            false,
-            null,
-            null,
-            scopeContext.currentSessionId());
-    final RuntimeDecision decision = evaluate(context);
+    final RuntimeDecision decision =
+        (idle(OperationType.NIO_SELECTOR_SELECT)
+            ? RuntimeDecision.none()
+            : evaluate(
+                new InvocationContext(
+                    OperationType.NIO_SELECTOR_SELECT,
+                    selector == null ? "java.nio.channels.Selector" : selector.getClass().getName(),
+                    null,
+                    null,
+                    false,
+                    null,
+                    null,
+                    scopeContext.currentSessionId())));
     applyDelayAndGate(decision);
     if (decision.terminalAction() != null) {
       final TerminalAction terminalAction = decision.terminalAction();
@@ -1167,17 +1231,20 @@ public final class ChaosDispatcher {
    * @throws Throwable if an active scenario throws to simulate a failure
    */
   public void beforeNioChannelOp(final String operation, final Object channel) throws Throwable {
-    final InvocationContext context =
-        new InvocationContext(
-            OperationType.valueOf(operation),
-            channel == null ? "java.nio.channels.Channel" : channel.getClass().getName(),
-            null,
-            null,
-            false,
-            null,
-            null,
-            scopeContext.currentSessionId());
-    applyPreDecision(evaluate(context));
+    final OperationType indexedOp = OperationType.valueOf(operation);
+    applyPreDecision(
+        (idle(indexedOp)
+            ? RuntimeDecision.none()
+            : evaluate(
+                new InvocationContext(
+                    indexedOp,
+                    channel == null ? "java.nio.channels.Channel" : channel.getClass().getName(),
+                    null,
+                    null,
+                    false,
+                    null,
+                    null,
+                    scopeContext.currentSessionId()))));
   }
 
   /**
@@ -1194,23 +1261,27 @@ public final class ChaosDispatcher {
     final String remoteHost = extractRemoteHost(socketAddress);
     final InetSocketAddress inetSocketAddress =
         socketAddress instanceof InetSocketAddress address ? address : null;
-    final InvocationContext context =
-        new InvocationContext(
-            OperationType.SOCKET_CONNECT,
-            socket == null ? "java.net.Socket" : socket.getClass().getName(),
-            null,
-            remoteHost,
-            false,
-            null,
-            null,
-            scopeContext.currentSessionId(),
-            InvocationContext.UNKNOWN,
-            null,
-            inetSocketAddress == null ? null : inetSocketAddress.getAddress(),
-            inetSocketAddress == null ? InvocationContext.UNKNOWN : inetSocketAddress.getPort(),
-            null,
-            timeoutMillis);
-    applyPreDecision(evaluate(context));
+    applyPreDecision(
+        (idle(OperationType.SOCKET_CONNECT)
+            ? RuntimeDecision.none()
+            : evaluate(
+                new InvocationContext(
+                    OperationType.SOCKET_CONNECT,
+                    socket == null ? "java.net.Socket" : socket.getClass().getName(),
+                    null,
+                    remoteHost,
+                    false,
+                    null,
+                    null,
+                    scopeContext.currentSessionId(),
+                    InvocationContext.UNKNOWN,
+                    null,
+                    inetSocketAddress == null ? null : inetSocketAddress.getAddress(),
+                    inetSocketAddress == null
+                        ? InvocationContext.UNKNOWN
+                        : inetSocketAddress.getPort(),
+                    null,
+                    timeoutMillis))));
   }
 
   /**
@@ -1220,17 +1291,21 @@ public final class ChaosDispatcher {
    * @throws Throwable if an active scenario throws to simulate a failure
    */
   public void beforeSocketAccept(final Object serverSocket) throws Throwable {
-    final InvocationContext context =
-        new InvocationContext(
-            OperationType.SOCKET_ACCEPT,
-            serverSocket == null ? "java.net.ServerSocket" : serverSocket.getClass().getName(),
-            null,
-            null,
-            false,
-            null,
-            null,
-            scopeContext.currentSessionId());
-    applyPreDecision(evaluate(context));
+    applyPreDecision(
+        (idle(OperationType.SOCKET_ACCEPT)
+            ? RuntimeDecision.none()
+            : evaluate(
+                new InvocationContext(
+                    OperationType.SOCKET_ACCEPT,
+                    serverSocket == null
+                        ? "java.net.ServerSocket"
+                        : serverSocket.getClass().getName(),
+                    null,
+                    null,
+                    false,
+                    null,
+                    null,
+                    scopeContext.currentSessionId()))));
   }
 
   /**
@@ -1252,23 +1327,26 @@ public final class ChaosDispatcher {
       final int remotePort,
       final int soTimeoutMillis)
       throws Throwable {
-    final InvocationContext context =
-        new InvocationContext(
-            OperationType.SOCKET_READ,
-            stream == null ? "java.net.SocketInputStream" : stream.getClass().getName(),
-            null,
-            remoteHost(remoteAddress),
-            false,
-            null,
-            null,
-            scopeContext.currentSessionId(),
-            len,
-            null,
-            remoteAddress instanceof java.net.InetAddress address ? address : null,
-            remoteAddress == null ? InvocationContext.UNKNOWN : remotePort,
-            null,
-            soTimeoutMillis);
-    return readCount(evaluate(context), len);
+    return readCount(
+        (idle(OperationType.SOCKET_READ)
+            ? RuntimeDecision.none()
+            : evaluate(
+                new InvocationContext(
+                    OperationType.SOCKET_READ,
+                    stream == null ? "java.net.SocketInputStream" : stream.getClass().getName(),
+                    null,
+                    remoteHost(remoteAddress),
+                    false,
+                    null,
+                    null,
+                    scopeContext.currentSessionId(),
+                    len,
+                    null,
+                    remoteAddress instanceof java.net.InetAddress address ? address : null,
+                    remoteAddress == null ? InvocationContext.UNKNOWN : remotePort,
+                    null,
+                    soTimeoutMillis))),
+        len);
   }
 
   /**
@@ -1283,23 +1361,25 @@ public final class ChaosDispatcher {
   public void beforeSocketWrite(
       final Object stream, final int len, final Object remoteAddress, final int remotePort)
       throws Throwable {
-    final InvocationContext context =
-        new InvocationContext(
-            OperationType.SOCKET_WRITE,
-            stream == null ? "java.net.SocketOutputStream" : stream.getClass().getName(),
-            null,
-            remoteHost(remoteAddress),
-            false,
-            null,
-            null,
-            scopeContext.currentSessionId(),
-            len,
-            null,
-            remoteAddress instanceof java.net.InetAddress address ? address : null,
-            remoteAddress == null ? InvocationContext.UNKNOWN : remotePort,
-            null,
-            InvocationContext.UNKNOWN);
-    applyPreDecision(evaluate(context));
+    applyPreDecision(
+        (idle(OperationType.SOCKET_WRITE)
+            ? RuntimeDecision.none()
+            : evaluate(
+                new InvocationContext(
+                    OperationType.SOCKET_WRITE,
+                    stream == null ? "java.net.SocketOutputStream" : stream.getClass().getName(),
+                    null,
+                    remoteHost(remoteAddress),
+                    false,
+                    null,
+                    null,
+                    scopeContext.currentSessionId(),
+                    len,
+                    null,
+                    remoteAddress instanceof java.net.InetAddress address ? address : null,
+                    remoteAddress == null ? InvocationContext.UNKNOWN : remotePort,
+                    null,
+                    InvocationContext.UNKNOWN))));
   }
 
   /**
@@ -1309,25 +1389,27 @@ public final class ChaosDispatcher {
    * @throws Throwable if an active scenario throws to simulate a failure
    */
   public void beforeSocketClose(final Object socket) throws Throwable {
-    final InvocationContext context =
-        new InvocationContext(
-            OperationType.SOCKET_CLOSE,
-            socket == null ? "java.net.Socket" : socket.getClass().getName(),
-            null,
-            socket instanceof java.net.Socket s ? remoteHost(s.getInetAddress()) : null,
-            false,
-            null,
-            null,
-            scopeContext.currentSessionId(),
-            InvocationContext.UNKNOWN,
-            null,
-            socket instanceof java.net.Socket s ? s.getInetAddress() : null,
-            socket instanceof java.net.Socket s && s.getInetAddress() != null
-                ? s.getPort()
-                : InvocationContext.UNKNOWN,
-            null,
-            InvocationContext.UNKNOWN);
-    final RuntimeDecision decision = evaluate(context);
+    final RuntimeDecision decision =
+        (idle(OperationType.SOCKET_CLOSE)
+            ? RuntimeDecision.none()
+            : evaluate(
+                new InvocationContext(
+                    OperationType.SOCKET_CLOSE,
+                    socket == null ? "java.net.Socket" : socket.getClass().getName(),
+                    null,
+                    socket instanceof java.net.Socket s ? remoteHost(s.getInetAddress()) : null,
+                    false,
+                    null,
+                    null,
+                    scopeContext.currentSessionId(),
+                    InvocationContext.UNKNOWN,
+                    null,
+                    socket instanceof java.net.Socket s ? s.getInetAddress() : null,
+                    socket instanceof java.net.Socket s && s.getInetAddress() != null
+                        ? s.getPort()
+                        : InvocationContext.UNKNOWN,
+                    null,
+                    InvocationContext.UNKNOWN)));
     if (decision.terminalAction() != null
         && decision.terminalAction().kind() == TerminalKind.ABORTIVE_CLOSE) {
       applyDelayAndGate(decision);
@@ -1382,6 +1464,9 @@ public final class ChaosDispatcher {
       final Object remoteAddress)
       throws Throwable {
     final OperationType operationType = OperationType.valueOf(operation);
+    if (idle(operationType)) {
+      return;
+    }
     final InetSocketAddress peer =
         remoteAddress instanceof InetSocketAddress address ? address : null;
     final RuntimeDecision decision =
@@ -1418,6 +1503,9 @@ public final class ChaosDispatcher {
    * @throws Throwable if an active scenario throws to simulate a failure
    */
   public void beforeJndiLookup(final Object context, final String name) throws Throwable {
+    if (idle(OperationType.JNDI_LOOKUP)) {
+      return;
+    }
     final InvocationContext invocationContext =
         new InvocationContext(
             OperationType.JNDI_LOOKUP,
@@ -1440,17 +1528,19 @@ public final class ChaosDispatcher {
    * @throws Throwable if an active scenario throws to simulate a failure
    */
   public void beforeObjectSerialize(final Object stream, final Object obj) throws Throwable {
-    final InvocationContext context =
-        new InvocationContext(
-            OperationType.OBJECT_SERIALIZE,
-            stream == null ? "java.io.ObjectOutputStream" : stream.getClass().getName(),
-            obj == null ? null : obj.getClass().getName(),
-            null,
-            false,
-            null,
-            null,
-            scopeContext.currentSessionId());
-    applyPreDecision(evaluate(context));
+    applyPreDecision(
+        (idle(OperationType.OBJECT_SERIALIZE)
+            ? RuntimeDecision.none()
+            : evaluate(
+                new InvocationContext(
+                    OperationType.OBJECT_SERIALIZE,
+                    stream == null ? "java.io.ObjectOutputStream" : stream.getClass().getName(),
+                    obj == null ? null : obj.getClass().getName(),
+                    null,
+                    false,
+                    null,
+                    null,
+                    scopeContext.currentSessionId()))));
   }
 
   /**
@@ -1461,17 +1551,19 @@ public final class ChaosDispatcher {
    * @throws Throwable if an active scenario throws to simulate a failure
    */
   public void beforeNativeLibraryLoad(final String libraryName) throws Throwable {
-    final InvocationContext context =
-        new InvocationContext(
-            OperationType.NATIVE_LIBRARY_LOAD,
-            "java.lang.System",
-            null,
-            libraryName,
-            false,
-            null,
-            null,
-            scopeContext.currentSessionId());
-    applyPreDecision(evaluate(context));
+    applyPreDecision(
+        (idle(OperationType.NATIVE_LIBRARY_LOAD)
+            ? RuntimeDecision.none()
+            : evaluate(
+                new InvocationContext(
+                    OperationType.NATIVE_LIBRARY_LOAD,
+                    "java.lang.System",
+                    null,
+                    libraryName,
+                    false,
+                    null,
+                    null,
+                    scopeContext.currentSessionId()))));
   }
 
   /**
@@ -1486,17 +1578,19 @@ public final class ChaosDispatcher {
    */
   public boolean beforeAsyncCancel(final Object future, final boolean mayInterruptIfRunning)
       throws Throwable {
-    final InvocationContext context =
-        new InvocationContext(
-            OperationType.ASYNC_CANCEL,
-            CompletableFuture.class.getName(),
-            null,
-            null,
-            false,
-            null,
-            null,
-            scopeContext.currentSessionId());
-    final RuntimeDecision decision = evaluate(context);
+    final RuntimeDecision decision =
+        (idle(OperationType.ASYNC_CANCEL)
+            ? RuntimeDecision.none()
+            : evaluate(
+                new InvocationContext(
+                    OperationType.ASYNC_CANCEL,
+                    CompletableFuture.class.getName(),
+                    null,
+                    null,
+                    false,
+                    null,
+                    null,
+                    scopeContext.currentSessionId())));
     applyDelayAndGate(decision);
     if (decision.terminalAction() != null) {
       final TerminalAction terminalAction = decision.terminalAction();
@@ -1527,17 +1621,19 @@ public final class ChaosDispatcher {
    * @throws Throwable if an active scenario throws to simulate a failure
    */
   public void beforeZipInflate() throws Throwable {
-    final InvocationContext context =
-        new InvocationContext(
-            OperationType.ZIP_INFLATE,
-            "java.util.zip.Inflater",
-            null,
-            null,
-            false,
-            null,
-            null,
-            scopeContext.currentSessionId());
-    applyPreDecision(evaluate(context));
+    applyPreDecision(
+        (idle(OperationType.ZIP_INFLATE)
+            ? RuntimeDecision.none()
+            : evaluate(
+                new InvocationContext(
+                    OperationType.ZIP_INFLATE,
+                    "java.util.zip.Inflater",
+                    null,
+                    null,
+                    false,
+                    null,
+                    null,
+                    scopeContext.currentSessionId()))));
   }
 
   /**
@@ -1546,17 +1642,19 @@ public final class ChaosDispatcher {
    * @throws Throwable if an active scenario throws to simulate a failure
    */
   public void beforeZipDeflate() throws Throwable {
-    final InvocationContext context =
-        new InvocationContext(
-            OperationType.ZIP_DEFLATE,
-            "java.util.zip.Deflater",
-            null,
-            null,
-            false,
-            null,
-            null,
-            scopeContext.currentSessionId());
-    applyPreDecision(evaluate(context));
+    applyPreDecision(
+        (idle(OperationType.ZIP_DEFLATE)
+            ? RuntimeDecision.none()
+            : evaluate(
+                new InvocationContext(
+                    OperationType.ZIP_DEFLATE,
+                    "java.util.zip.Deflater",
+                    null,
+                    null,
+                    false,
+                    null,
+                    null,
+                    scopeContext.currentSessionId()))));
   }
 
   /**
@@ -1569,17 +1667,21 @@ public final class ChaosDispatcher {
    * @throws Throwable if an active scenario throws to simulate a failure
    */
   public boolean beforeThreadLocalGet(final Object threadLocal) throws Throwable {
-    final InvocationContext context =
-        new InvocationContext(
-            OperationType.THREAD_LOCAL_GET,
-            threadLocal == null ? "java.lang.ThreadLocal" : threadLocal.getClass().getName(),
-            null,
-            null,
-            false,
-            null,
-            null,
-            scopeContext.currentSessionId());
-    final RuntimeDecision decision = evaluate(context);
+    final RuntimeDecision decision =
+        (idle(OperationType.THREAD_LOCAL_GET)
+            ? RuntimeDecision.none()
+            : evaluate(
+                new InvocationContext(
+                    OperationType.THREAD_LOCAL_GET,
+                    threadLocal == null
+                        ? "java.lang.ThreadLocal"
+                        : threadLocal.getClass().getName(),
+                    null,
+                    null,
+                    false,
+                    null,
+                    null,
+                    scopeContext.currentSessionId())));
     applyDelayAndGate(decision);
     if (decision.terminalAction() != null) {
       final TerminalAction terminalAction = decision.terminalAction();
@@ -1603,17 +1705,21 @@ public final class ChaosDispatcher {
    */
   public boolean beforeThreadLocalSet(final Object threadLocal, final Object value)
       throws Throwable {
-    final InvocationContext context =
-        new InvocationContext(
-            OperationType.THREAD_LOCAL_SET,
-            threadLocal == null ? "java.lang.ThreadLocal" : threadLocal.getClass().getName(),
-            null,
-            null,
-            false,
-            null,
-            null,
-            scopeContext.currentSessionId());
-    final RuntimeDecision decision = evaluate(context);
+    final RuntimeDecision decision =
+        (idle(OperationType.THREAD_LOCAL_SET)
+            ? RuntimeDecision.none()
+            : evaluate(
+                new InvocationContext(
+                    OperationType.THREAD_LOCAL_SET,
+                    threadLocal == null
+                        ? "java.lang.ThreadLocal"
+                        : threadLocal.getClass().getName(),
+                    null,
+                    null,
+                    false,
+                    null,
+                    null,
+                    scopeContext.currentSessionId())));
     applyDelayAndGate(decision);
     if (decision.terminalAction() != null) {
       final TerminalAction terminalAction = decision.terminalAction();
@@ -1637,17 +1743,19 @@ public final class ChaosDispatcher {
    */
   public void beforeJmxInvoke(
       final Object server, final Object objectName, final String operationName) throws Throwable {
-    final InvocationContext context =
-        new InvocationContext(
-            OperationType.JMX_INVOKE,
-            server == null ? "javax.management.MBeanServer" : server.getClass().getName(),
-            null,
-            operationName,
-            false,
-            null,
-            null,
-            scopeContext.currentSessionId());
-    applyPreDecision(evaluate(context));
+    applyPreDecision(
+        (idle(OperationType.JMX_INVOKE)
+            ? RuntimeDecision.none()
+            : evaluate(
+                new InvocationContext(
+                    OperationType.JMX_INVOKE,
+                    server == null ? "javax.management.MBeanServer" : server.getClass().getName(),
+                    null,
+                    operationName,
+                    false,
+                    null,
+                    null,
+                    scopeContext.currentSessionId()))));
   }
 
   /**
@@ -1660,17 +1768,19 @@ public final class ChaosDispatcher {
    */
   public void beforeJmxGetAttr(final Object server, final Object objectName, final String attribute)
       throws Throwable {
-    final InvocationContext context =
-        new InvocationContext(
-            OperationType.JMX_GET_ATTR,
-            server == null ? "javax.management.MBeanServer" : server.getClass().getName(),
-            null,
-            attribute,
-            false,
-            null,
-            null,
-            scopeContext.currentSessionId());
-    applyPreDecision(evaluate(context));
+    applyPreDecision(
+        (idle(OperationType.JMX_GET_ATTR)
+            ? RuntimeDecision.none()
+            : evaluate(
+                new InvocationContext(
+                    OperationType.JMX_GET_ATTR,
+                    server == null ? "javax.management.MBeanServer" : server.getClass().getName(),
+                    null,
+                    attribute,
+                    false,
+                    null,
+                    null,
+                    scopeContext.currentSessionId()))));
   }
 
   /**
@@ -1682,10 +1792,19 @@ public final class ChaosDispatcher {
    * @throws Throwable if an active scenario throws to simulate a failure
    */
   public boolean beforeHttpSend(final String url, final OperationType opType) throws Throwable {
-    final InvocationContext context =
-        new InvocationContext(
-            opType, "http.client", null, url, false, null, null, scopeContext.currentSessionId());
-    final RuntimeDecision decision = evaluate(context);
+    final RuntimeDecision decision =
+        (idle(opType)
+            ? RuntimeDecision.none()
+            : evaluate(
+                new InvocationContext(
+                    opType,
+                    "http.client",
+                    null,
+                    url,
+                    false,
+                    null,
+                    null,
+                    scopeContext.currentSessionId())));
     applyDelayAndGate(decision);
     if (decision.terminalAction() != null) {
       final TerminalAction terminalAction = decision.terminalAction();
@@ -1768,17 +1887,19 @@ public final class ChaosDispatcher {
     // ThreadSelector filters (threadNamePattern, daemon, kind) apply to THREAD_SLEEP; they were
     // left null, so a non-ANY filter never matched and kind=PLATFORM also matched virtual threads.
     final Thread current = Thread.currentThread();
-    final InvocationContext context =
-        new InvocationContext(
-            OperationType.THREAD_SLEEP,
-            "java.lang.Thread",
-            null,
-            current.getName(),
-            false,
-            current.isDaemon(),
-            featureSet.isVirtualThread(current),
-            scopeContext.currentSessionId());
-    final RuntimeDecision decision = evaluate(context);
+    final RuntimeDecision decision =
+        (idle(OperationType.THREAD_SLEEP)
+            ? RuntimeDecision.none()
+            : evaluate(
+                new InvocationContext(
+                    OperationType.THREAD_SLEEP,
+                    "java.lang.Thread",
+                    null,
+                    current.getName(),
+                    false,
+                    current.isDaemon(),
+                    featureSet.isVirtualThread(current),
+                    scopeContext.currentSessionId())));
     applyDelayAndGate(decision);
     if (decision.terminalAction() != null) {
       final TerminalAction terminalAction = decision.terminalAction();
@@ -1801,17 +1922,19 @@ public final class ChaosDispatcher {
    * @throws Throwable if an active scenario throws to simulate a DNS failure
    */
   public String beforeDnsResolve(final String hostname) throws Throwable {
-    final InvocationContext context =
-        new InvocationContext(
-            OperationType.DNS_RESOLVE,
-            "java.net.InetAddress",
-            null,
-            hostname,
-            false,
-            null,
-            null,
-            scopeContext.currentSessionId());
-    final RuntimeDecision decision = evaluate(context);
+    final RuntimeDecision decision =
+        (idle(OperationType.DNS_RESOLVE)
+            ? RuntimeDecision.none()
+            : evaluate(
+                new InvocationContext(
+                    OperationType.DNS_RESOLVE,
+                    "java.net.InetAddress",
+                    null,
+                    hostname,
+                    false,
+                    null,
+                    null,
+                    scopeContext.currentSessionId())));
     if (decision.terminalAction() != null
         && decision.terminalAction().kind() == TerminalKind.REWRITE) {
       applyDelayAndGate(decision);
@@ -1834,6 +1957,9 @@ public final class ChaosDispatcher {
   public java.net.InetAddress[] afterDnsAnswer(
       final String hostname, final java.net.InetAddress[] answer, final Throwable failure)
       throws Throwable {
+    if (idle(OperationType.DNS_ANSWER)) {
+      return null;
+    }
     final RuntimeDecision decision =
         evaluate(
             new InvocationContext(
@@ -1868,17 +1994,19 @@ public final class ChaosDispatcher {
    * @throws Throwable if an active scenario throws to simulate a TLS handshake failure
    */
   public void beforeSslHandshake(final Object socket) throws Throwable {
-    final InvocationContext context =
-        new InvocationContext(
-            OperationType.SSL_HANDSHAKE,
-            socket == null ? "javax.net.ssl.SSLSocket" : socket.getClass().getName(),
-            null,
-            null,
-            false,
-            null,
-            null,
-            scopeContext.currentSessionId());
-    applyPreDecision(evaluate(context));
+    applyPreDecision(
+        (idle(OperationType.SSL_HANDSHAKE)
+            ? RuntimeDecision.none()
+            : evaluate(
+                new InvocationContext(
+                    OperationType.SSL_HANDSHAKE,
+                    socket == null ? "javax.net.ssl.SSLSocket" : socket.getClass().getName(),
+                    null,
+                    null,
+                    false,
+                    null,
+                    null,
+                    scopeContext.currentSessionId()))));
   }
 
   /**
@@ -1897,23 +2025,26 @@ public final class ChaosDispatcher {
       final String operation, final Object stream, final String path, final int byteCount)
       throws Throwable {
     final OperationType fileIoOpType = resolveFileIoOperationType(operation);
-    final InvocationContext context =
-        new InvocationContext(
-            fileIoOpType,
-            stream == null ? "java.io.FileInputStream" : stream.getClass().getName(),
-            null,
-            null,
-            false,
-            null,
-            null,
-            scopeContext.currentSessionId(),
-            byteCount,
-            path,
-            null,
-            InvocationContext.UNKNOWN,
-            null,
-            InvocationContext.UNKNOWN);
-    return readCount(evaluate(context), byteCount);
+    return readCount(
+        (idle(fileIoOpType)
+            ? RuntimeDecision.none()
+            : evaluate(
+                new InvocationContext(
+                    fileIoOpType,
+                    stream == null ? "java.io.FileInputStream" : stream.getClass().getName(),
+                    null,
+                    null,
+                    false,
+                    null,
+                    null,
+                    scopeContext.currentSessionId(),
+                    byteCount,
+                    path,
+                    null,
+                    InvocationContext.UNKNOWN,
+                    null,
+                    InvocationContext.UNKNOWN))),
+        byteCount);
   }
 
   /**
@@ -1979,17 +2110,19 @@ public final class ChaosDispatcher {
   private boolean evaluateJdbc(
       final OperationType opType, final String targetClassName, final String targetName)
       throws Throwable {
-    final InvocationContext context =
-        new InvocationContext(
-            opType,
-            targetClassName,
-            null,
-            targetName,
-            false,
-            null,
-            null,
-            scopeContext.currentSessionId());
-    final RuntimeDecision decision = evaluate(context);
+    final RuntimeDecision decision =
+        (idle(opType)
+            ? RuntimeDecision.none()
+            : evaluate(
+                new InvocationContext(
+                    opType,
+                    targetClassName,
+                    null,
+                    targetName,
+                    false,
+                    null,
+                    null,
+                    scopeContext.currentSessionId())));
     applyDelayAndGate(decision);
     if (decision.terminalAction() != null) {
       final TerminalAction terminalAction = decision.terminalAction();
@@ -2008,6 +2141,15 @@ public final class ChaosDispatcher {
       return null;
     }
     return sql.length() <= 200 ? sql : sql.substring(0, 200);
+  }
+
+  /**
+   * Returns whether no scenario is indexed for {@code operation}: the dispatch can return the
+   * unmodified result without building an {@link InvocationContext} (no allocation, no session or
+   * class-name lookup).
+   */
+  private boolean idle(final OperationType operation) {
+    return registry.candidates(operation).length == 0;
   }
 
   private RuntimeDecision evaluate(final InvocationContext context) {
