@@ -171,8 +171,7 @@ public final class ChaosDispatcher {
       // already fire the gate and delay around their terminal. Previously the early return
       // silently dropped both, turning "pause 5 s then suppress" into instant suppression.
       try {
-        applyGate(decision.gateAction());
-        sleep(decision.delayMillis());
+        applyDelayAndGate(decision);
       } catch (final Throwable throwable) {
         throw propagate(throwable);
       }
@@ -216,8 +215,7 @@ public final class ChaosDispatcher {
       // See decorateExecutorRunnable — apply gate + delay before returning the no-op Callable
       // so composed scenarios preserve the pre-terminal observables.
       try {
-        applyGate(decision.gateAction());
-        sleep(decision.delayMillis());
+        applyDelayAndGate(decision);
       } catch (final Throwable throwable) {
         throw propagate(throwable);
       }
@@ -397,7 +395,7 @@ public final class ChaosDispatcher {
             null,
             scopeContext.currentSessionId());
     final RuntimeDecision decision = evaluate(context);
-    applyGate(decision.gateAction());
+    applyDelayAndGate(decision);
     if (decision.terminalAction() != null) {
       if (decision.terminalAction().kind() == TerminalKind.THROW) {
         throw decision.terminalAction().throwable();
@@ -407,7 +405,6 @@ public final class ChaosDispatcher {
         return (Boolean) decision.terminalAction().returnValue();
       }
     }
-    sleep(decision.delayMillis());
     return null;
   }
 
@@ -435,7 +432,7 @@ public final class ChaosDispatcher {
             null,
             scopeContext.currentSessionId());
     final RuntimeDecision decision = evaluate(context);
-    applyGate(decision.gateAction());
+    applyDelayAndGate(decision);
     if (decision.terminalAction() != null) {
       final TerminalAction terminalAction = decision.terminalAction();
       if (terminalAction.kind() == TerminalKind.THROW) {
@@ -448,7 +445,6 @@ public final class ChaosDispatcher {
         return future.completeExceptionally(terminalAction.throwable());
       }
     }
-    sleep(decision.delayMillis());
     return null;
   }
 
@@ -495,14 +491,13 @@ public final class ChaosDispatcher {
             null,
             null);
     final RuntimeDecision decision = evaluate(context);
-    applyGate(decision.gateAction());
+    applyDelayAndGate(decision);
     if (decision.terminalAction() != null) {
       if (decision.terminalAction().kind() == TerminalKind.THROW) {
         throw decision.terminalAction().throwable();
       }
       return (URL) decision.terminalAction().returnValue();
     }
-    sleep(decision.delayMillis());
     return currentValue;
   }
 
@@ -625,7 +620,7 @@ public final class ChaosDispatcher {
             null,
             scopeContext.currentSessionId());
     final RuntimeDecision decision = evaluate(context);
-    applyGate(decision.gateAction());
+    applyDelayAndGate(decision);
     if (decision.terminalAction() != null) {
       if (decision.terminalAction().kind() == TerminalKind.THROW) {
         throw decision.terminalAction().throwable();
@@ -635,7 +630,6 @@ public final class ChaosDispatcher {
         return false;
       }
     }
-    sleep(decision.delayMillis());
     return true;
   }
 
@@ -687,7 +681,7 @@ public final class ChaosDispatcher {
             null,
             scopeContext.currentSessionId());
     final RuntimeDecision decision = evaluate(context);
-    applyGate(decision.gateAction());
+    applyDelayAndGate(decision);
     if (decision.terminalAction() != null
         && decision.terminalAction().kind() == TerminalKind.CORRUPT_RETURN) {
       // Sleep BEFORE substituting the corrupted return. RuntimeDecision documents "delay first,
@@ -695,7 +689,6 @@ public final class ChaosDispatcher {
       // THROW), so a composed "delay + corrupt" scenario must deliver both effects. Previously
       // the early return skipped sleep(), silently dropping the timing signal operators were
       // testing for.
-      sleep(decision.delayMillis());
       final ChaosEffect.ReturnValueCorruptionEffect corruptEffect =
           (ChaosEffect.ReturnValueCorruptionEffect) decision.terminalAction().returnValue();
       // Propagate the scenario id (stored on the TerminalAction at construction time in
@@ -708,7 +701,6 @@ public final class ChaosDispatcher {
           actualValue,
           scenarioId != null ? scenarioId : "method-exit");
     }
-    sleep(decision.delayMillis());
     return actualValue;
   }
 
@@ -861,7 +853,7 @@ public final class ChaosDispatcher {
             null,
             null);
     final RuntimeDecision decision = evaluate(context);
-    applyGate(decision.gateAction());
+    applyDelayAndGate(decision);
     if (decision.terminalAction() != null) {
       final TerminalAction terminalAction = decision.terminalAction();
       if (terminalAction.kind() == TerminalKind.THROW) {
@@ -871,7 +863,6 @@ public final class ChaosDispatcher {
         return true;
       }
     }
-    sleep(decision.delayMillis());
     return false;
   }
 
@@ -1064,7 +1055,7 @@ public final class ChaosDispatcher {
             null,
             scopeContext.currentSessionId());
     final RuntimeDecision decision = evaluate(context);
-    applyGate(decision.gateAction());
+    applyDelayAndGate(decision);
     if (decision.terminalAction() != null) {
       final TerminalAction terminalAction = decision.terminalAction();
       if (terminalAction.kind() == TerminalKind.THROW) {
@@ -1074,7 +1065,6 @@ public final class ChaosDispatcher {
         return true;
       }
     }
-    sleep(decision.delayMillis());
     return false;
   }
 
@@ -1293,7 +1283,7 @@ public final class ChaosDispatcher {
             null,
             scopeContext.currentSessionId());
     final RuntimeDecision decision = evaluate(context);
-    applyGate(decision.gateAction());
+    applyDelayAndGate(decision);
     if (decision.terminalAction() != null) {
       final TerminalAction terminalAction = decision.terminalAction();
       if (terminalAction.kind() == TerminalKind.THROW) {
@@ -1314,7 +1304,6 @@ public final class ChaosDispatcher {
         return true;
       }
     }
-    sleep(decision.delayMillis());
     return false;
   }
 
@@ -1377,7 +1366,7 @@ public final class ChaosDispatcher {
             null,
             scopeContext.currentSessionId());
     final RuntimeDecision decision = evaluate(context);
-    applyGate(decision.gateAction());
+    applyDelayAndGate(decision);
     if (decision.terminalAction() != null) {
       final TerminalAction terminalAction = decision.terminalAction();
       if (terminalAction.kind() == TerminalKind.THROW) {
@@ -1387,7 +1376,6 @@ public final class ChaosDispatcher {
         return true;
       }
     }
-    sleep(decision.delayMillis());
     return false;
   }
 
@@ -1412,7 +1400,7 @@ public final class ChaosDispatcher {
             null,
             scopeContext.currentSessionId());
     final RuntimeDecision decision = evaluate(context);
-    applyGate(decision.gateAction());
+    applyDelayAndGate(decision);
     if (decision.terminalAction() != null) {
       final TerminalAction terminalAction = decision.terminalAction();
       if (terminalAction.kind() == TerminalKind.THROW) {
@@ -1422,7 +1410,6 @@ public final class ChaosDispatcher {
         return true;
       }
     }
-    sleep(decision.delayMillis());
     return false;
   }
 
@@ -1485,18 +1472,16 @@ public final class ChaosDispatcher {
         new InvocationContext(
             opType, "http.client", null, url, false, null, null, scopeContext.currentSessionId());
     final RuntimeDecision decision = evaluate(context);
-    applyGate(decision.gateAction());
+    applyDelayAndGate(decision);
     if (decision.terminalAction() != null) {
       final TerminalAction terminalAction = decision.terminalAction();
       if (terminalAction.kind() == TerminalKind.THROW) {
         throw terminalAction.throwable();
       }
       if (terminalAction.kind() == TerminalKind.SUPPRESS) {
-        sleep(decision.delayMillis());
         return true;
       }
     }
-    sleep(decision.delayMillis());
     return false;
   }
 
@@ -1576,7 +1561,7 @@ public final class ChaosDispatcher {
             null,
             scopeContext.currentSessionId());
     final RuntimeDecision decision = evaluate(context);
-    applyGate(decision.gateAction());
+    applyDelayAndGate(decision);
     if (decision.terminalAction() != null) {
       final TerminalAction terminalAction = decision.terminalAction();
       if (terminalAction.kind() == TerminalKind.THROW) {
@@ -1586,7 +1571,6 @@ public final class ChaosDispatcher {
         return true;
       }
     }
-    sleep(decision.delayMillis());
     return false;
   }
 
@@ -1682,18 +1666,16 @@ public final class ChaosDispatcher {
             null,
             scopeContext.currentSessionId());
     final RuntimeDecision decision = evaluate(context);
-    applyGate(decision.gateAction());
+    applyDelayAndGate(decision);
     if (decision.terminalAction() != null) {
       final TerminalAction terminalAction = decision.terminalAction();
       if (terminalAction.kind() == TerminalKind.THROW) {
         throw terminalAction.throwable();
       }
       if (terminalAction.kind() == TerminalKind.SUPPRESS) {
-        sleep(decision.delayMillis());
         return true;
       }
     }
-    sleep(decision.delayMillis());
     return false;
   }
 
@@ -1905,7 +1887,7 @@ public final class ChaosDispatcher {
   }
 
   private void applyPreDecision(final RuntimeDecision decision) throws Throwable {
-    applyGate(decision.gateAction());
+    applyDelayAndGate(decision);
     if (decision.terminalAction() != null) {
       final TerminalAction terminalAction = decision.terminalAction();
       if (terminalAction.kind() == TerminalKind.THROW) {
@@ -1915,10 +1897,6 @@ public final class ChaosDispatcher {
         if (Boolean.FALSE.equals(terminalAction.returnValue())) {
           throw new RejectedExecutionException("operation suppressed by chaos agent");
         }
-        return;
-      }
-      if (terminalAction.kind() == TerminalKind.SUPPRESS) {
-        sleep(decision.delayMillis());
         return;
       }
       if (terminalAction.kind() == TerminalKind.CORRUPT_RETURN) {
@@ -1932,7 +1910,17 @@ public final class ChaosDispatcher {
             "CORRUPT_RETURN terminal reached applyPreDecision — only valid from afterMethodExit");
       }
     }
+  }
+
+  /**
+   * Applies the delay and then the gate of a decision, in the order {@link RuntimeDecision}
+   * documents (delay, gate, terminal action). The delay of every matching scenario is applied even
+   * when a terminal action then throws or returns early; an earlier version ran the gate first and
+   * skipped the delay whenever a THROW or RETURN terminal won.
+   */
+  private void applyDelayAndGate(final RuntimeDecision decision) throws Throwable {
     sleep(decision.delayMillis());
+    applyGate(decision.gateAction());
   }
 
   private void applyGate(final GateAction gateAction) throws InterruptedException {
