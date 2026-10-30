@@ -496,7 +496,7 @@ final class CompatibilityValidator {
 
   private static boolean selectorContainsAny(
       final ChaosSelector selector, final Set<OperationType> needles) {
-    return containsAny(selectorOperations(selector), needles);
+    return containsAny(SelectorOperations.of(selector), needles);
   }
 
   /**
@@ -513,31 +513,6 @@ final class CompatibilityValidator {
           "NetworkSelector remoteHostPattern cannot apply to SOCKET_ACCEPT: the peer is unknown"
               + " until accept() returns; use a separate scenario without a host filter for accepts");
     }
-  }
-
-  /** Returns the operations a selector matches; a stress selector matches no call. */
-  private static Set<OperationType> selectorOperations(final ChaosSelector selector) {
-    return switch (selector) {
-      case ChaosSelector.ThreadSelector threadSel -> threadSel.operations();
-      case ChaosSelector.ExecutorSelector executorSel -> executorSel.operations();
-      case ChaosSelector.QueueSelector queueSel -> queueSel.operations();
-      case ChaosSelector.AsyncSelector asyncSel -> asyncSel.operations();
-      case ChaosSelector.SchedulingSelector schedulingSel -> schedulingSel.operations();
-      case ChaosSelector.ShutdownSelector shutdownSel -> shutdownSel.operations();
-      case ChaosSelector.ClassLoadingSelector classLoadingSel -> classLoadingSel.operations();
-      case ChaosSelector.MethodSelector methodSel -> methodSel.operations();
-      case ChaosSelector.MonitorSelector monitorSel -> monitorSel.operations();
-      case ChaosSelector.JvmRuntimeSelector jvmRuntimeSel -> jvmRuntimeSel.operations();
-      case ChaosSelector.NioSelector nioSel -> nioSel.operations();
-      case ChaosSelector.NetworkSelector networkSel -> networkSel.operations();
-      case ChaosSelector.ThreadLocalSelector threadLocalSel -> threadLocalSel.operations();
-      case ChaosSelector.HttpClientSelector httpClientSel -> httpClientSel.operations();
-      case ChaosSelector.JdbcSelector jdbcSel -> jdbcSel.operations();
-      case ChaosSelector.DnsSelector dnsSel -> dnsSel.operations();
-      case ChaosSelector.SslSelector sslSel -> sslSel.operations();
-      case ChaosSelector.FileIoSelector fileIoSel -> fileIoSel.operations();
-      case ChaosSelector.StressSelector ignored -> Set.of();
-    };
   }
 
   /**
@@ -590,7 +565,7 @@ final class CompatibilityValidator {
    */
   private static void validateEffectOperationSupport(
       final ChaosEffect effect, final ChaosSelector selector) {
-    final Set<OperationType> operations = selectorOperations(selector);
+    final Set<OperationType> operations = SelectorOperations.of(selector);
     if (effect instanceof ChaosEffect.SuppressEffect) {
       for (final OperationType operation : operations) {
         if (!SUPPRESS_OPS.contains(operation)) {

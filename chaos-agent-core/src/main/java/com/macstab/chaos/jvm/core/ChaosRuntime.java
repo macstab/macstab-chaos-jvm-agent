@@ -388,6 +388,16 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
+   * Installs the callback that weaves hooks on demand. Called by the agent bootstrap once the
+   * instrumentation is installed; without it (plain unit tests) activation weaves nothing.
+   *
+   * @param demand the hook demand; never {@code null}
+   */
+  public void setHookDemand(final HookDemand demand) {
+    controlPlane.setHookDemand(demand);
+  }
+
+  /**
    * Delegates to {@link ChaosControlPlaneImpl#setInstrumentation(Instrumentation)}.
    *
    * @param inst the Instrumentation instance to install

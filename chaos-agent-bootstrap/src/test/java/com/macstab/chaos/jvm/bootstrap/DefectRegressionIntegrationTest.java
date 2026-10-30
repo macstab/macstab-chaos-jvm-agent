@@ -579,6 +579,37 @@ class DefectRegressionIntegrationTest {
     }
   }
 
+  @Nested
+  @DisplayName("on-demand weaving")
+  class OnDemandWeaving {
+
+    @Test
+    @DisplayName("an agent without scenarios weaves no hooks")
+    void idleAgentWeavesNothing() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.runWithoutPlan(DefectProbeMain.class, "woven-groups");
+      assertThat(result.value("woven")).isEmpty();
+    }
+
+    @Test
+    @DisplayName("activating a scenario weaves only the group it needs")
+    void activationWeavesItsGroup() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.runWithoutPlan(DefectProbeMain.class, "woven-groups-after-thread-local");
+      assertThat(result.value("before")).isEmpty();
+      assertThat(result.value("woven")).isEqualTo("THREAD_LOCAL");
+    }
+
+    @Test
+    @DisplayName("instrumentation=eager weaves every group at start")
+    void eagerWeavesEverything() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.runWithoutPlan(
+              DefectProbeMain.class, "woven-groups", "-Dmacstab.chaos.instrumentation=eager");
+      assertThat(result.value("woven").split(",")).hasSizeGreaterThan(25).contains("TIME_API");
+    }
+  }
+
   private static ChaosPlan plan(final ChaosScenario... scenarios) {
     return new ChaosPlan(new ChaosPlan.Metadata("defect-regression", ""), null, List.of(scenarios));
   }

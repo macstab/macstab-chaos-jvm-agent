@@ -83,6 +83,8 @@ public final class DefectProbeMain {
       case "socket-read-loopback" -> socketReadLoopback();
       case "direct-buffer-release" -> directBufferRelease();
       case "bridge-jars-on-disk" -> bridgeJarsOnDisk();
+      case "woven-groups" -> printWovenGroups();
+      case "woven-groups-after-thread-local" -> wovenGroupsAfterThreadLocal();
       case "virtual-thread-start" -> Thread.ofVirtual().start(() -> {}).join();
       case "runtime-exit" -> runtimeExit();
       case "select-consumer" -> selectConsumer();
@@ -238,7 +240,7 @@ public final class DefectProbeMain {
             + "\"scope\":\"JVM\",\"selector\":{\"type\":\"stress\",\"target\":\"DEADLOCK\"},"
             + "\"effect\":{\"type\":\"deadlock\",\"participantCount\":2}}]}";
     try {
-      ChaosAgentBootstrap.initialize("configJson=" + failingPlan, instrumentation, Map.of(), true);
+      ChaosAgentBootstrap.initialize("configJson=" + failingPlan, instrumentation, Map.of());
       System.out.println("firstFailed=false");
     } catch (final RuntimeException expected) {
       System.out.println("firstFailed=true");
@@ -248,7 +250,7 @@ public final class DefectProbeMain {
             + "\"scope\":\"JVM\",\"selector\":{\"type\":\"thread\","
             + "\"operations\":[\"THREAD_SLEEP\"],\"kind\":\"ANY\"},"
             + "\"effect\":{\"type\":\"delay\",\"minDelay\":\"PT0.3S\",\"maxDelay\":\"PT0.3S\"}}]}";
-    ChaosAgentBootstrap.initialize("configJson=" + sleepPlan, instrumentation, Map.of(), true);
+    ChaosAgentBootstrap.initialize("configJson=" + sleepPlan, instrumentation, Map.of());
     final long start = System.nanoTime();
     Thread.sleep(1L);
     System.out.println("sleepMillis=" + TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start));
@@ -336,6 +338,39 @@ public final class DefectProbeMain {
     final long after = direct.getMemoryUsed();
     System.out.println("directDuringMiB=" + (during - before) / (1024 * 1024));
     System.out.println("directAfterMiB=" + (after - before) / (1024 * 1024));
+  }
+
+  /** Prints the hook groups the agent has woven so far. */
+  private static void printWovenGroups() {
+    System.out.println(
+        "woven="
+            + ChaosPlatform.current()
+                .diagnostics()
+                .snapshot()
+                .runtimeDetails()
+                .get("wovenHookGroups"));
+  }
+
+  /** Activates a ThreadLocal scenario at runtime and prints the woven groups before and after. */
+  private static void wovenGroupsAfterThreadLocal() {
+    System.out.println(
+        "before="
+            + ChaosPlatform.current()
+                .diagnostics()
+                .snapshot()
+                .runtimeDetails()
+                .get("wovenHookGroups"));
+    ChaosPlatform.current()
+        .activate(
+            ChaosScenario.builder("thread-local")
+                .scope(ChaosScenario.ScenarioScope.JVM)
+                .selector(
+                    new ChaosSelector.ThreadLocalSelector(
+                        Set.of(OperationType.THREAD_LOCAL_GET), null))
+                .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+                .activationPolicy(ActivationPolicy.always())
+                .build());
+    printWovenGroups();
   }
 
   /** Prints how many bridge jars are left in java.io.tmpdir while the agent is running. */

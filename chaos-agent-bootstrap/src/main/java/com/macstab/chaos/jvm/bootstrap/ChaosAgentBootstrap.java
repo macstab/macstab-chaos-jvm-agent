@@ -4,6 +4,7 @@ import com.macstab.chaos.jvm.api.ChaosControlPlane;
 import com.macstab.chaos.jvm.bootstrap.jfr.JfrIntegration;
 import com.macstab.chaos.jvm.core.ChaosRuntime;
 import com.macstab.chaos.jvm.instrumentation.JdkInstrumentationInstaller;
+import com.macstab.chaos.jvm.startup.AgentArgsParser;
 import com.macstab.chaos.jvm.startup.StartupConfigLoader;
 import java.lang.instrument.Instrumentation;
 import java.lang.management.ManagementFactory;
@@ -104,6 +105,15 @@ public final class ChaosAgentBootstrap {
    */
   static final String ALLOW_DYNAMIC_ATTACH_ENV = "MACSTAB_CHAOS_ALLOW_DYNAMIC_ATTACH";
 
+  /** Agent arg selecting the weaving mode ({@code eager} or the default on-demand weaving). */
+  static final String INSTRUMENTATION_ARG = "instrumentation";
+
+  /** System property equivalent of {@link #INSTRUMENTATION_ARG}. */
+  static final String INSTRUMENTATION_PROPERTY = "macstab.chaos.instrumentation";
+
+  /** Environment variable equivalent of {@link #INSTRUMENTATION_ARG}. */
+  static final String INSTRUMENTATION_ENV = "MACSTAB_CHAOS_INSTRUMENTATION";
+
   private ChaosAgentBootstrap() {}
 
   /**
@@ -120,7 +130,7 @@ public final class ChaosAgentBootstrap {
    *     install class-file transformers for all interception points
    */
   public static void premain(final String agentArgs, final Instrumentation instrumentation) {
-    initialize(agentArgs, instrumentation, System.getenv(), true);
+    initialize(agentArgs, instrumentation, System.getenv());
   }
 
   /**
@@ -154,7 +164,7 @@ public final class ChaosAgentBootstrap {
               + "=true to opt in");
       return;
     }
-    initialize(agentArgs, instrumentation, System.getenv(), false);
+    initialize(agentArgs, instrumentation, System.getenv());
   }
 
   private static boolean dynamicAttachAllowed(
@@ -201,7 +211,7 @@ public final class ChaosAgentBootstrap {
       }
       try {
         final Instrumentation instrumentation = ByteBuddyAgent.install();
-        return initialize("", instrumentation, Map.of(), true);
+        return initialize("", instrumentation, Map.of());
       } catch (final RuntimeException runtimeException) {
         throw runtimeException;
       } catch (final Exception exception) {
@@ -267,17 +277,12 @@ public final class ChaosAgentBootstrap {
    * @param instrumentation the JVM {@link Instrumentation} handle used to install transformers
    * @param environment a snapshot of the process environment variables (typically {@link
    *     System#getenv()}); used to resolve config sources such as {@code MACSTAB_CHAOS_CONFIG_FILE}
-   * @param premainMode {@code true} when called from {@link #premain} (static attach, before
-   *     application main); {@code false} when called from {@link #agentmain} or {@link
-   *     #installForLocalTests} (dynamic attach or test self-attach). The instrumentation installer
-   *     uses this flag to decide which retransformation strategies are safe.
    * @return the initialized (or already-initialized) {@link ChaosRuntime}; never null
    */
   static ChaosRuntime initialize(
       final String agentArgs,
       final Instrumentation instrumentation,
-      final Map<String, String> environment,
-      final boolean premainMode) {
+      final Map<String, String> environment) {
     final CompletableFuture<ChaosRuntime> claim = new CompletableFuture<>();
     final CompletableFuture<ChaosRuntime> existing = INITIALIZATION.compareAndExchange(null, claim);
     if (existing != null) {
@@ -288,8 +293,7 @@ public final class ChaosAgentBootstrap {
     // the outcome above instead of seeing a half-installed runtime.
     initializingThread = Thread.currentThread();
     try {
-      final ChaosRuntime runtime =
-          installRuntime(agentArgs, instrumentation, environment, premainMode);
+      final ChaosRuntime runtime = installRuntime(agentArgs, instrumentation, environment);
       claim.complete(runtime);
       return runtime;
     } catch (final Throwable installFailure) {
@@ -337,13 +341,13 @@ public final class ChaosAgentBootstrap {
   private static ChaosRuntime installRuntime(
       final String agentArgs,
       final Instrumentation instrumentation,
-      final Map<String, String> environment,
-      final boolean premainMode) {
+      final Map<String, String> environment) {
     final ChaosRuntime runtime = new ChaosRuntime();
     boolean instrumentationInstalled = false;
     ObjectName registeredMBean = null;
     try {
-      JdkInstrumentationInstaller.install(instrumentation, runtime, premainMode);
+      JdkInstrumentationInstaller.install(
+          instrumentation, runtime, eagerInstrumentation(agentArgs, environment));
       instrumentationInstalled = true;
       registeredMBean = registerMBean(runtime);
       installJfrIntegration(runtime);
@@ -355,6 +359,22 @@ public final class ChaosAgentBootstrap {
       rollBack(instrumentation, runtime, instrumentationInstalled, registeredMBean, installFailure);
       throw installFailure;
     }
+  }
+
+  /**
+   * Whether every hook group is woven at start instead of on demand: agent arg {@code
+   * instrumentation=eager}, system property {@value #INSTRUMENTATION_PROPERTY}{@code =eager} or
+   * environment variable {@value #INSTRUMENTATION_ENV}{@code =eager}. On demand is the default.
+   */
+  static boolean eagerInstrumentation(
+      final String agentArgs, final Map<String, String> environment) {
+    final String fromArgs = AgentArgsParser.parse(agentArgs).get(INSTRUMENTATION_ARG);
+    final String mode =
+        fromArgs != null
+            ? fromArgs
+            : System.getProperty(
+                INSTRUMENTATION_PROPERTY, environment.getOrDefault(INSTRUMENTATION_ENV, ""));
+    return "eager".equalsIgnoreCase(mode.strip());
   }
 
   private static void rollBack(

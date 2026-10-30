@@ -1,6 +1,8 @@
 package com.macstab.chaos.jvm.instrumentation;
 
+import com.macstab.chaos.jvm.api.OperationType;
 import com.macstab.chaos.jvm.core.ChaosRuntime;
+import com.macstab.chaos.jvm.core.HookDemand;
 import com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher;
 import com.macstab.chaos.jvm.instrumentation.bridge.BridgeDelegate;
 import java.io.IOException;
@@ -13,6 +15,7 @@ import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Collections;
+import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -53,19 +56,16 @@ import net.bytebuddy.utility.JavaModule;
  *       net.bytebuddy.agent.builder.AgentBuilder#installOn(java.lang.instrument.Instrumentation)}.
  * </ol>
  *
- * <h2>Phase 1 vs Phase 2</h2>
+ * <h2>On-demand weaving</h2>
  *
- * <p><b>Phase 1</b> interception points (thread pool, scheduling, queues, shutdown hooks, class
- * loading) are always installed.
- *
- * <p><b>Phase 2</b> interception points (clock, GC, exit, NIO, sockets, JNDI, serialization, native
- * libraries, JMX, ThreadLocal, etc.) are gated behind the {@code premainMode} flag. The flag is set
- * to {@code true} both when the agent is attached at JVM startup via {@code -javaagent:} and when
- * it is self-attached at runtime via {@code ChaosAgentBootstrap#installForLocalTests()}. In both
- * modes the installer relies on ByteBuddy's {@code RedefinitionStrategy.RETRANSFORMATION} combined
- * with {@code disableClassFormatChanges()} to rewrite already-loaded JDK classes such as {@code
- * java.net.Socket}, so the same interception points fire regardless of whether the agent was on the
- * command line or attached programmatically.
+ * <p>Every interception point belongs to a {@link HookGroup} tagged with the operations it serves.
+ * A group is woven the first time a scenario for one of its operations is activated (or, for the
+ * executor groups, when a session is opened) and stays woven until {@link #uninstall}. A JVM with
+ * the agent attached but no scenario carries no advice in its JDK classes. {@code eager} weaves
+ * every group at install time. The same path serves static attach ({@code -javaagent:}), dynamic
+ * attach and self-attach: the installer relies on ByteBuddy's {@code
+ * RedefinitionStrategy.RETRANSFORMATION} combined with {@code disableClassFormatChanges()} to
+ * rewrite already-loaded JDK classes such as {@code java.net.Socket}.
  *
  * <h2>Retransformation</h2>
  *
@@ -91,39 +91,52 @@ public final class JdkInstrumentationInstaller {
    * reset applied class transformations. {@code volatile} so the latest reference is visible to
    * {@link #uninstall} on any thread.
    */
-  private static volatile ResettableClassFileTransformer installedTransformer;
+  private static final Map<HookGroup, ResettableClassFileTransformer> WOVEN_GROUPS =
+      new java.util.EnumMap<>(HookGroup.class);
 
   private JdkInstrumentationInstaller() {}
 
   /**
-   * Entry point called once at agent startup to install all ByteBuddy transformations.
+   * Installs the agent into the JVM: grants the module opens the advice needs, injects the
+   * bootstrap bridge and wires the {@link ChaosBridge} delegate to {@code runtime}.
    *
-   * <p>The method first injects the bootstrap bridge JAR, then wires the {@link ChaosBridge}
-   * delegate, and finally assembles and installs the {@code AgentBuilder}. Phase 1 transformations
-   * are always applied. Phase 2 transformations (JVM runtime interception points such as clock, GC,
-   * NIO, and sockets) are applied only when {@code premainMode} is {@code true} because those
-   * points require retransformation of already-loaded JDK classes.
+   * <p>Hooks are woven on demand: the runtime calls back into {@link #weave} before a scenario that
+   * needs a hook group starts (and when a session opens, for executor task decoration), so a JVM
+   * without scenarios carries no advice in its JDK classes. The same path serves {@code premain},
+   * {@code agentmain} and self-attach; dynamic attach is no longer limited to a subset of hooks.
    *
    * @param instrumentation the {@link Instrumentation} handle provided by the JVM at agent
-   *     attachment; used both for bootstrap classpath injection and for installing transformations
-   * @param runtime the live {@link ChaosRuntime} instance that supplies the active scenario
-   *     configuration to the bridge
-   * @param premainMode {@code true} to enable Phase 2 JVM-level interception. Set by both {@code
-   *     premain}/{@code agentmain} and by self-attach test helpers so that Socket/NIO/HTTP chaos
-   *     fires in every supported attach path. Pass {@code false} only from callers that cannot rely
-   *     on retransformation (legacy attach flows that pre-date JVMTI class retransformation
-   *     support).
+   *     attachment
+   * @param runtime the runtime the bridge dispatches to
+   * @param eager {@code true} to weave every hook group immediately instead of on demand (the 1.x
+   *     behaviour; useful when activation must not pay the one-time weaving cost)
    */
   public static void install(
-      final Instrumentation instrumentation,
-      final ChaosRuntime runtime,
-      final boolean premainMode) {
+      final Instrumentation instrumentation, final ChaosRuntime runtime, final boolean eager) {
     grantInternalModuleOpens(instrumentation);
     injectBridge(instrumentation);
     rejectForeignDelegate();
     installDelegate(new ChaosBridge(runtime));
     try {
-      installTransformations(instrumentation, premainMode);
+      runtime.setHookDemand(
+          new HookDemand() {
+            @Override
+            public void require(final Set<OperationType> operations) {
+              weave(instrumentation, operations);
+            }
+
+            @Override
+            public Set<String> woven() {
+              final Set<String> names = new java.util.TreeSet<>();
+              for (final HookGroup group : wovenGroups()) {
+                names.add(group.name());
+              }
+              return names;
+            }
+          });
+      if (eager) {
+        weave(instrumentation, EnumSet.allOf(OperationType.class));
+      }
     } catch (final RuntimeException | Error failure) {
       // Leave nothing bound to this runtime: a later install attempt must start from a clean
       // dispatcher, and the instrumented JDK classes must not call into a runtime that never
@@ -133,70 +146,200 @@ public final class JdkInstrumentationInstaller {
     }
   }
 
-  private static void installTransformations(
-      final Instrumentation instrumentation, final boolean premainMode) {
-    AgentBuilder agentBuilder = buildBaseAgentBuilder();
-    agentBuilder = applyPhase1ThreadAndExecutorTransformations(agentBuilder);
+  /**
+   * Weaves the hook groups serving {@code operations} that are not woven yet. Each group is its own
+   * {@link AgentBuilder} installation, so it retransforms only the classes it targets and can be
+   * reset on its own. Groups stay woven until {@link #uninstall}: re-weaving on every activation
+   * and stop would retransform core JDK classes over and over in test suites.
+   *
+   * @param instrumentation the instrumentation handle
+   * @param operations the operations about to be evaluated
+   * @throws IllegalStateException if a group cannot be woven
+   */
+  static void weave(final Instrumentation instrumentation, final Set<OperationType> operations) {
+    synchronized (WOVEN_GROUPS) {
+      boolean wovenNow = false;
+      for (final HookGroup group : HookGroup.values()) {
+        if (WOVEN_GROUPS.containsKey(group) || !group.serves(operations)) {
+          continue;
+        }
+        final ResettableClassFileTransformer transformer;
+        try {
+          transformer = group.apply(buildBaseAgentBuilder()).installOn(instrumentation);
+        } catch (final RuntimeException failure) {
+          throw new IllegalStateException(
+              "failed to instrument " + group + " for " + group.operations(), failure);
+        }
+        WOVEN_GROUPS.put(group, transformer);
+        wovenNow = true;
+        LOGGER.fine(() -> "chaos hooks woven: " + group);
+      }
+      // Some JDK classes (java.io.ObjectOutputStream / ObjectInputStream) can be loaded as a side
+      // effect of an installOn() while it is inside a JVMTI ClassFileLoadHook for another class;
+      // the JVMTI re-entrancy rule then suppresses the hook for those loads, so they escape every
+      // transformer. Outside any hook, an explicit retransformation applies the missing advice.
+      if (wovenNow && WOVEN_GROUPS.containsKey(HookGroup.SERIALIZATION)) {
+        retransformPostInstallEscapees(instrumentation);
+      }
+    }
+  }
 
-    if (premainMode) {
-      agentBuilder = applyPhase1ConcurrencyTransformations(agentBuilder);
-      agentBuilder = applyPhase2CoreJvmTransformations(agentBuilder);
-      agentBuilder = applyPhase2NetworkTransformations(agentBuilder);
-      agentBuilder = applyPhase2OptionalTransformations(agentBuilder);
+  /** Returns the hook groups woven so far; for diagnostics and tests. */
+  static Set<HookGroup> wovenGroups() {
+    synchronized (WOVEN_GROUPS) {
+      return WOVEN_GROUPS.isEmpty() ? Set.of() : EnumSet.copyOf(WOVEN_GROUPS.keySet());
+    }
+  }
+
+  /**
+   * The groups of JDK and library hooks, each with the operations it serves. A group is woven the
+   * first time a scenario for one of its operations is activated.
+   */
+  enum HookGroup {
+    THREAD_START(
+        JdkInstrumentationInstaller::applyThreadStartTransformations,
+        OperationType.THREAD_START,
+        OperationType.VIRTUAL_THREAD_START),
+    THREAD_POOL_EXECUTOR(
+        JdkInstrumentationInstaller::applyThreadPoolExecutorTransformations,
+        OperationType.EXECUTOR_SUBMIT,
+        OperationType.EXECUTOR_WORKER_RUN,
+        OperationType.EXECUTOR_SHUTDOWN,
+        OperationType.EXECUTOR_AWAIT_TERMINATION),
+    SCHEDULED_EXECUTOR(
+        JdkInstrumentationInstaller::applyScheduledExecutorTransformations,
+        OperationType.SCHEDULE_SUBMIT,
+        OperationType.SCHEDULE_TICK),
+    FORK_JOIN(
+        JdkInstrumentationInstaller::applyForkJoinTransformations,
+        OperationType.FORK_JOIN_TASK_RUN),
+    BLOCKING_QUEUE(
+        JdkInstrumentationInstaller::applyBlockingQueueTransformations,
+        OperationType.QUEUE_PUT,
+        OperationType.QUEUE_OFFER,
+        OperationType.QUEUE_TAKE,
+        OperationType.QUEUE_POLL),
+    COMPLETABLE_FUTURE(
+        JdkInstrumentationInstaller::applyCompletableFutureTransformations,
+        OperationType.ASYNC_COMPLETE,
+        OperationType.ASYNC_COMPLETE_EXCEPTIONALLY),
+    COMPLETABLE_FUTURE_CANCEL(
+        JdkInstrumentationInstaller::applyCompletableFutureCancelTransformations,
+        OperationType.ASYNC_CANCEL),
+    SHUTDOWN_HOOK(
+        JdkInstrumentationInstaller::applyShutdownHookTransformations,
+        OperationType.SHUTDOWN_HOOK_REGISTER),
+    CLASS_LOADER(
+        JdkInstrumentationInstaller::applyClassLoaderTransformations,
+        OperationType.CLASS_LOAD,
+        OperationType.RESOURCE_LOAD),
+    CLASS_DEFINE(
+        JdkInstrumentationInstaller::applyClassDefineTransformations, OperationType.CLASS_DEFINE),
+    RUNTIME_LIFECYCLE(
+        JdkInstrumentationInstaller::applyRuntimeLifecycleTransformations,
+        OperationType.SYSTEM_GC_REQUEST,
+        OperationType.SYSTEM_EXIT_REQUEST),
+    REFLECTION_INVOKE(
+        JdkInstrumentationInstaller::applyReflectionInvokeTransformations,
+        OperationType.REFLECTION_INVOKE),
+    DIRECT_BUFFER(
+        JdkInstrumentationInstaller::applyDirectBufferTransformations,
+        OperationType.DIRECT_BUFFER_ALLOCATE),
+    SERIALIZATION(
+        JdkInstrumentationInstaller::applySerializationTransformations,
+        OperationType.OBJECT_SERIALIZE,
+        OperationType.OBJECT_DESERIALIZE),
+    THREAD_PARK(
+        JdkInstrumentationInstaller::applyLockSupportTransformations, OperationType.THREAD_PARK),
+    MONITOR_ENTER(
+        JdkInstrumentationInstaller::applyAqsMonitorTransformations, OperationType.MONITOR_ENTER),
+    NIO(
+        JdkInstrumentationInstaller::applyNioChannelTransformations,
+        OperationType.NIO_SELECTOR_SELECT,
+        OperationType.NIO_CHANNEL_READ,
+        OperationType.NIO_CHANNEL_WRITE,
+        OperationType.NIO_CHANNEL_CONNECT,
+        OperationType.NIO_CHANNEL_ACCEPT),
+    SOCKET(
+        JdkInstrumentationInstaller::applySocketAndStreamTransformations,
+        OperationType.SOCKET_CONNECT,
+        OperationType.SOCKET_ACCEPT,
+        OperationType.SOCKET_READ,
+        OperationType.SOCKET_WRITE,
+        OperationType.SOCKET_CLOSE),
+    ZIP(
+        JdkInstrumentationInstaller::applyZipTransformations,
+        OperationType.ZIP_INFLATE,
+        OperationType.ZIP_DEFLATE),
+    THREAD_LOCAL(
+        JdkInstrumentationInstaller::applyThreadLocalTransformations,
+        OperationType.THREAD_LOCAL_GET,
+        OperationType.THREAD_LOCAL_SET),
+    TIME_API(
+        JdkInstrumentationInstaller::applyTimeApiTransformations,
+        OperationType.INSTANT_NOW,
+        OperationType.LOCAL_DATE_TIME_NOW,
+        OperationType.ZONED_DATE_TIME_NOW,
+        OperationType.DATE_NEW),
+    SSL_HANDSHAKE(
+        JdkInstrumentationInstaller::applySslHandshakeTransformations, OperationType.SSL_HANDSHAKE),
+    HTTP_CLIENT(
+        JdkInstrumentationInstaller::applyPhase2HttpClientInterception,
+        OperationType.HTTP_CLIENT_SEND,
+        OperationType.HTTP_CLIENT_SEND_ASYNC),
+    JDBC(
+        JdkInstrumentationInstaller::applyPhase2JdbcInterception,
+        OperationType.JDBC_CONNECTION_ACQUIRE,
+        OperationType.JDBC_STATEMENT_EXECUTE,
+        OperationType.JDBC_PREPARED_STATEMENT,
+        OperationType.JDBC_TRANSACTION_COMMIT,
+        OperationType.JDBC_TRANSACTION_ROLLBACK),
+    JNDI_JMX(
+        JdkInstrumentationInstaller::applyPhase2JndiAndJmxInterception,
+        OperationType.JNDI_LOOKUP,
+        OperationType.JMX_INVOKE,
+        OperationType.JMX_GET_ATTR),
+    NATIVE_LIBRARY(
+        JdkInstrumentationInstaller::applyPhase2NativeLibraryLoadInterception,
+        OperationType.NATIVE_LIBRARY_LOAD),
+    THREAD_SLEEP(
+        JdkInstrumentationInstaller::applyPhase2ThreadSleepInterception,
+        OperationType.THREAD_SLEEP),
+    DNS(
+        JdkInstrumentationInstaller::applyPhase2DnsResolutionInterception,
+        OperationType.DNS_RESOLVE),
+    FILE_IO(
+        JdkInstrumentationInstaller::applyPhase2FileIoInterception,
+        OperationType.FILE_IO_READ,
+        OperationType.FILE_IO_WRITE);
+
+    private final java.util.function.UnaryOperator<AgentBuilder> transformations;
+    private final Set<OperationType> operations;
+
+    HookGroup(
+        final java.util.function.UnaryOperator<AgentBuilder> transformations,
+        final OperationType first,
+        final OperationType... rest) {
+      this.transformations = transformations;
+      this.operations = Collections.unmodifiableSet(EnumSet.of(first, rest));
     }
 
-    // Retain the transformer returned by installOn so uninstall() can reset class transformations.
-    // Without this, once ByteBuddy has rewritten bootstrap-loaded JDK classes there is no handle
-    // to undo the transformation — dynamic-attach test runners that want to detach the agent
-    // between suites have no way back. Last-writer-wins is acceptable because ChaosAgentBootstrap's
-    // RUNTIME CAS serialises install() calls JVM-wide to at most one.
-    installedTransformer = agentBuilder.installOn(instrumentation);
-
-    // Some JDK classes (e.g. java.io.ObjectOutputStream / ObjectInputStream) get loaded as a
-    // side-effect of ByteBuddy's installOn() while it is already inside a JVMTI
-    // ClassFileLoadHook callback for another class. The JVMTI re-entrancy rule then suppresses
-    // the hook for those side-effect loads, so they escape our transformer entirely. After
-    // installOn() returns we are no longer inside any hook, so we can request an explicit
-    // retransformation that fires the hook normally and applies the missing advice.
-    if (premainMode) {
-      retransformPostInstallEscapees(instrumentation);
+    AgentBuilder apply(final AgentBuilder builder) {
+      return transformations.apply(builder);
     }
 
-    // ── Clock skew limitation: direct System.currentTimeMillis() cannot be intercepted ────────
-    //
-    // System.currentTimeMillis() and System.nanoTime() are @IntrinsicCandidate native methods
-    // in java.lang.System (java.base module). Two independent JVM constraints prevent advice
-    // from reaching them:
-    //
-    // Constraint 1 — Retransformation cannot add methods or change native modifiers.
-    //   JVMTI SetNativeMethodPrefix works by transforming a native method to a Java wrapper that
-    //   calls the renamed native ($chaos$currentTimeMillis). This requires (a) adding the renamed
-    //   native method and (b) changing currentTimeMillis() from native to non-native. Both
-    //   operations are prohibited by the JVM spec for retransformation of already-loaded classes.
-    //   java.lang.System is loaded before premain runs, so this approach is unavailable.
-    //
-    // Constraint 2 — @IntrinsicCandidate JIT bypass (secondary; moot given constraint 1).
-    //   Even if a Java wrapper existed, HotSpot C2 JIT recognises
-    // java.lang.System.currentTimeMillis
-    //   by class+method name and replaces the call with a direct RDTSC / MRS CNTVCT_EL0 hardware
-    //   read, bypassing the wrapper entirely after ~10 000 invocations.
-    //
-    // Investigation: a second AgentBuilder with enableNativeMethodPrefix("$chaos$") and
-    // RETRANSFORMATION was tested. ByteBuddy fires a TRANSFORM event for java.lang.System but
-    // the JVM silently retains the original native binding. currentTimeMillis() remains native
-    // with its original hardware-clock implementation. No error is reported.
-    //
-    // Consequence: ClockSkewEffect cannot intercept direct System.currentTimeMillis() or
-    // System.nanoTime() calls. Clock skew IS applied through two supported paths:
-    //   1. Code explicitly calls BootstrapDispatcher.adjustClockMillis / adjustClockNanos
-    //      (the hot path wired by this agent for custom instrumentation points).
-    //   2. Application code uses java.time.Instant.now(), java.time.LocalDateTime.now(),
-    //      java.time.ZonedDateTime.now(), or new java.util.Date() — these are non-native Java
-    //      members that are woven above in the Phase 2 block when the agent is attached via
-    //      -javaagent: at JVM startup.
-    //
-    // This is a hard JVM limitation for any standard -javaagent: Java instrumentation agent.
-    // Workarounds (e.g. -Xpatch:java.base, a C-level JVMTI agent) are out of scope.
+    Set<OperationType> operations() {
+      return operations;
+    }
+
+    boolean serves(final Set<OperationType> requested) {
+      for (final OperationType operation : operations) {
+        if (requested.contains(operation)) {
+          return true;
+        }
+      }
+      return false;
+    }
   }
 
   /**
@@ -294,12 +437,15 @@ public final class JdkInstrumentationInstaller {
    */
   public static boolean uninstall(final Instrumentation instrumentation) {
     final boolean delegateCleared = clearOwnDelegate();
-    final ResettableClassFileTransformer current = installedTransformer;
-    if (current == null) {
-      return delegateCleared;
+    synchronized (WOVEN_GROUPS) {
+      if (WOVEN_GROUPS.isEmpty()) {
+        return delegateCleared;
+      }
+      for (final ResettableClassFileTransformer transformer : WOVEN_GROUPS.values()) {
+        transformer.reset(instrumentation, AgentBuilder.RedefinitionStrategy.RETRANSFORMATION);
+      }
+      WOVEN_GROUPS.clear();
     }
-    installedTransformer = null;
-    current.reset(instrumentation, AgentBuilder.RedefinitionStrategy.RETRANSFORMATION);
     return true;
   }
 
@@ -1014,19 +1160,6 @@ public final class JdkInstrumentationInstaller {
   }
 
   /**
-   * Applies Phase 1 thread, executor, and scheduler transformations that are always installed
-   * regardless of the {@code premainMode} flag.
-   */
-  private static AgentBuilder applyPhase1ThreadAndExecutorTransformations(
-      final AgentBuilder builder) {
-    AgentBuilder b = builder;
-    b = applyThreadStartTransformations(b);
-    b = applyThreadPoolExecutorTransformations(b);
-    b = applyScheduledExecutorTransformations(b);
-    return b;
-  }
-
-  /**
    * Thread.start instrumentation.
    *
    * <p>Targets {@code java.lang.Thread.start()} for platform threads <i>and</i> {@code
@@ -1162,20 +1295,6 @@ public final class JdkInstrumentationInstaller {
                                             java.util.concurrent.TimeUnit.class)))));
   }
 
-  /**
-   * Applies Phase 1 concurrency transformations (queues, CompletableFuture, ClassLoader, shutdown
-   * hooks, ForkJoin). Gated behind {@code premainMode}.
-   */
-  private static AgentBuilder applyPhase1ConcurrencyTransformations(final AgentBuilder builder) {
-    AgentBuilder b = builder;
-    b = applyBlockingQueueTransformations(b);
-    b = applyCompletableFutureTransformations(b);
-    b = applyClassLoaderTransformations(b);
-    b = applyShutdownHookTransformations(b);
-    b = applyForkJoinTransformations(b);
-    return b;
-  }
-
   /** BlockingQueue put/take/poll/offer instrumentation. */
   private static AgentBuilder applyBlockingQueueTransformations(final AgentBuilder builder) {
     return builder
@@ -1278,23 +1397,6 @@ public final class JdkInstrumentationInstaller {
                                 .and(ElementMatchers.takesArguments(0)))));
   }
 
-  /**
-   * Applies Phase 2 core JVM transformations: System.exit, Runtime gc/halt, reflection, NIO
-   * buffers, serialization, ClassLoader.defineClass, LockSupport, AQS, NIO channels, and sockets.
-   * Gated behind {@code premainMode}.
-   */
-  private static AgentBuilder applyPhase2CoreJvmTransformations(final AgentBuilder builder) {
-    AgentBuilder b = builder;
-    b = applyRuntimeLifecycleTransformations(b);
-    b = applyReflectionAndSerializationTransformations(b);
-    b = applyLockSupportTransformations(b);
-    b = applyAqsMonitorTransformations(b);
-    b = applyNioChannelTransformations(b);
-    b = applySocketAndStreamTransformations(b);
-    b = applyZipTransformations(b);
-    return b;
-  }
-
   /** System.exit, System.gc, Runtime.gc, Runtime.halt instrumentation. */
   private static AgentBuilder applyRuntimeLifecycleTransformations(final AgentBuilder builder) {
     return builder
@@ -1318,12 +1420,8 @@ public final class JdkInstrumentationInstaller {
                                 .and(ElementMatchers.takesArguments(int.class)))));
   }
 
-  /**
-   * Reflection (Method.invoke), direct-buffer allocation, object (de)serialization, and
-   * ClassLoader.defineClass instrumentation.
-   */
-  private static AgentBuilder applyReflectionAndSerializationTransformations(
-      final AgentBuilder builder) {
+  /** {@code Method.invoke} interception (REFLECTION_INVOKE). */
+  private static AgentBuilder applyReflectionInvokeTransformations(final AgentBuilder builder) {
     return builder
         .type(ElementMatchers.named("java.lang.reflect.Method"))
         .transform(
@@ -1333,7 +1431,13 @@ public final class JdkInstrumentationInstaller {
                         .on(
                             ElementMatchers.named("invoke")
                                 .and(
-                                    ElementMatchers.takesArguments(Object.class, Object[].class)))))
+                                    ElementMatchers.takesArguments(
+                                        Object.class, Object[].class)))));
+  }
+
+  /** {@code ByteBuffer.allocateDirect} interception (DIRECT_BUFFER_ALLOCATE). */
+  private static AgentBuilder applyDirectBufferTransformations(final AgentBuilder builder) {
+    return builder
         .type(ElementMatchers.named("java.nio.ByteBuffer"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
@@ -1341,7 +1445,12 @@ public final class JdkInstrumentationInstaller {
                     Advice.to(JvmRuntimeAdvice.DirectBufferAllocateAdvice.class)
                         .on(
                             ElementMatchers.named("allocateDirect")
-                                .and(ElementMatchers.takesArguments(int.class)))))
+                                .and(ElementMatchers.takesArguments(int.class)))));
+  }
+
+  /** {@code ObjectInputStream.readObject} / {@code ObjectOutputStream.writeObject} interception. */
+  private static AgentBuilder applySerializationTransformations(final AgentBuilder builder) {
+    return builder
         .type(ElementMatchers.named("java.io.ObjectInputStream"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
@@ -1357,7 +1466,12 @@ public final class JdkInstrumentationInstaller {
                     Advice.to(JvmRuntimeAdvice.ObjectSerializeAdvice.class)
                         .on(
                             ElementMatchers.named("writeObject")
-                                .and(ElementMatchers.takesArguments(Object.class)))))
+                                .and(ElementMatchers.takesArguments(Object.class)))));
+  }
+
+  /** {@code ClassLoader.defineClass} interception (CLASS_DEFINE). */
+  private static AgentBuilder applyClassDefineTransformations(final AgentBuilder builder) {
+    return builder
         .type(ElementMatchers.named("java.lang.ClassLoader"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
@@ -1637,19 +1751,6 @@ public final class JdkInstrumentationInstaller {
   }
 
   /**
-   * Applies Phase 2 network-adjacent transformations: ThreadLocal, clock APIs, CompletableFuture
-   * cancel, and SSL/TLS handshake. Gated behind {@code premainMode}.
-   */
-  private static AgentBuilder applyPhase2NetworkTransformations(final AgentBuilder builder) {
-    AgentBuilder agentBuilder = builder;
-    agentBuilder = applyThreadLocalTransformations(agentBuilder);
-    agentBuilder = applyTimeApiTransformations(agentBuilder);
-    agentBuilder = applyCompletableFutureCancelTransformations(agentBuilder);
-    agentBuilder = applySslHandshakeTransformations(agentBuilder);
-    return agentBuilder;
-  }
-
-  /**
    * ThreadLocal.get() / set() (THREAD_LOCAL_GET / THREAD_LOCAL_SET). Previously excluded due to
    * reentrancy with BootstrapDispatcher.DEPTH (also a ThreadLocal). Now safe: ThreadLocalGetAdvice
    * and ThreadLocalSetAdvice include an identity check (threadLocal == BootstrapDispatcher.DEPTH)
@@ -1792,22 +1893,6 @@ public final class JdkInstrumentationInstaller {
                                 ElementMatchers.named("beginHandshake")
                                     .and(ElementMatchers.takesArguments(0)))));
 
-    return agentBuilder;
-  }
-
-  /**
-   * Applies Phase 2 optional transformations (HTTP clients, JDBC, Thread.sleep, DNS, file I/O).
-   * Each optional target is guarded by a class-presence check so missing dependencies are silently
-   * skipped. Gated behind {@code premainMode}.
-   */
-  private static AgentBuilder applyPhase2OptionalTransformations(AgentBuilder agentBuilder) {
-    agentBuilder = applyPhase2HttpClientInterception(agentBuilder);
-    agentBuilder = applyPhase2JdbcInterception(agentBuilder);
-    agentBuilder = applyPhase2JndiAndJmxInterception(agentBuilder);
-    agentBuilder = applyPhase2NativeLibraryLoadInterception(agentBuilder);
-    agentBuilder = applyPhase2ThreadSleepInterception(agentBuilder);
-    agentBuilder = applyPhase2DnsResolutionInterception(agentBuilder);
-    agentBuilder = applyPhase2FileIoInterception(agentBuilder);
     return agentBuilder;
   }
 

@@ -54,6 +54,27 @@ final class ChildJvmProbe {
   }
 
   /**
+   * Runs {@code mainClass mode} in a child JVM with the agent attached and no startup plan.
+   *
+   * @param mainClass the probe main class
+   * @param mode the probe mode passed as the first program argument
+   * @param jvmArgs additional JVM arguments placed before the classpath
+   * @return the probe's {@code key=value} output lines
+   */
+  ProbeResult runWithoutPlan(final Class<?> mainClass, final String mode, final String... jvmArgs)
+      throws Exception {
+    final List<String> command = new ArrayList<>();
+    command.add(Path.of(System.getProperty("java.home"), "bin", "java").toString());
+    command.add("-javaagent:" + System.getProperty("chaos.bootstrap.agentJar"));
+    command.addAll(List.of(jvmArgs));
+    command.add("-cp");
+    command.add(System.getProperty("java.class.path"));
+    command.add(mainClass.getName());
+    command.add(mode);
+    return execute(command);
+  }
+
+  /**
    * Runs {@code mainClass mode} in a child JVM with the agent attached and {@code plan} loaded.
    *
    * @param plan the plan written to the child's config file

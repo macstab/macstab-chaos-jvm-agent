@@ -11,14 +11,17 @@ import com.macstab.chaos.jvm.api.ChaosPlan;
 import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.ChaosSession;
 import com.macstab.chaos.jvm.api.ChaosUnsupportedFeatureException;
+import com.macstab.chaos.jvm.api.OperationType;
 import java.lang.instrument.Instrumentation;
 import java.time.Clock;
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -41,6 +44,18 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
   private final Map<Thread, Thread> shutdownHooks = new ConcurrentHashMap<>();
   private final AtomicBoolean closed = new AtomicBoolean(false);
   private volatile Optional<Instrumentation> instrumentation = Optional.empty();
+
+  /**
+   * Weaves the hooks a scenario needs before it starts; {@link HookDemand#NONE} without an agent.
+   */
+  private volatile HookDemand hookDemand = HookDemand.NONE;
+
+  /**
+   * Operations whose hooks carry a session to pool threads (task decoration on submit). Woven when
+   * a session is opened, so session-scoped scenarios of any operation see work handed to executors.
+   */
+  private static final Set<OperationType> SESSION_PROPAGATION_OPERATIONS =
+      EnumSet.of(OperationType.EXECUTOR_SUBMIT, OperationType.SCHEDULE_SUBMIT);
 
   ChaosControlPlaneImpl(final Clock clock, final ChaosMetricsSink metricsSink) {
     this.clock = clock;
@@ -104,6 +119,7 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
     // trap that used to sit here for any caller who got to the control plane without going
     // through ChaosRuntime.
     ensureOpen();
+    hookDemand.require(SESSION_PROPAGATION_OPERATIONS);
     return new DefaultChaosSession(displayName, scopeContext, this);
   }
 
@@ -155,6 +171,10 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
     observabilityBus.close();
   }
 
+  void setHookDemand(final HookDemand demand) {
+    this.hookDemand = Objects.requireNonNull(demand, "demand");
+  }
+
   void setInstrumentation(final Instrumentation inst) {
     this.instrumentation = Optional.of(Objects.requireNonNull(inst, "inst"));
   }
@@ -201,10 +221,17 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
     ensureOpen();
     ScenarioController controller = null;
     boolean validated = false;
+    boolean weavingFailed = false;
     boolean registeredInRegistry = false;
     try {
       CompatibilityValidator.validate(scenario, featureSet);
       validated = true;
+      try {
+        hookDemand.require(SelectorOperations.of(scenario.selector()));
+      } catch (final RuntimeException weavingFailure) {
+        weavingFailed = true;
+        throw weavingFailure;
+      }
       controller =
           new ScenarioController(
               scenario, scopeKey, sessionId, clock, observabilityBus, () -> instrumentation);
@@ -247,7 +274,9 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
       unregisterAndDestroyQuietly(controller, registeredInRegistry);
       registry.recordFailure(
           scenario.id(),
-          ChaosDiagnostics.FailureCategory.INVALID_CONFIGURATION,
+          weavingFailed
+              ? ChaosDiagnostics.FailureCategory.INSTRUMENTATION_FAILURE
+              : ChaosDiagnostics.FailureCategory.INVALID_CONFIGURATION,
           runtimeException.getMessage());
       throw runtimeException;
     }
@@ -296,6 +325,7 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
     details.put("virtualThreadsSupported", Boolean.toString(featureSet.supportsVirtualThreads()));
     details.put("jfrSupported", Boolean.toString(featureSet.jfrSupported()));
     details.put("currentSessionId", String.valueOf(scopeContext.currentSessionId()));
+    details.put("wovenHookGroups", String.join(",", new java.util.TreeSet<>(hookDemand.woven())));
     return details;
   }
 }
