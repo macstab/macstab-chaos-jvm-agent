@@ -782,7 +782,8 @@ The weaving mode can also be set with the system property `-Dmacstab.chaos.instr
 ```
 
 - `probability` omitted → defaults to `1.0`. Explicit `0.0` is rejected.
-- `activeFor` and `rateLimit.window` use ISO-8601 duration strings (`PT30S` = 30 seconds).
+- `activeFor` and `rateLimit.window` use ISO-8601 duration strings (`PT30S` = 30 seconds); `activeFrom` / `activeUntil` are ISO-8601 instants.
+- `replayMatches` (e.g. `[3, 17, 18]`) replays a recorded run: the scenario fires on exactly these 1-based match numbers instead of drawing. Requires `probability` 1.0 and no `rateLimit`; not valid for clock skew or stressors. Record the numbers with `ChaosDecisionRecorder`.
 - All fields are optional except the implicit defaults.
 
 ### NamePattern JSON

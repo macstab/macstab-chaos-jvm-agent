@@ -142,7 +142,8 @@ final class ApiJsonMixins {
         @JsonProperty("randomSeed") final Long randomSeed,
         @JsonProperty("allowDestructiveEffects") final boolean allowDestructiveEffects,
         @JsonProperty("activeFrom") final Instant activeFrom,
-        @JsonProperty("activeUntil") final Instant activeUntil) {
+        @JsonProperty("activeUntil") final Instant activeUntil,
+        @JsonProperty("replayMatches") final java.util.List<Long> replayMatches) {
       throw new UnsupportedOperationException("mix-in");
     }
   }

@@ -22,8 +22,9 @@ import java.time.Duration;
  * @param gateTimeout the maximum time to block on a {@link ManualGate}, or {@code null} if no gate
  *     applies to this contribution
  * @param context the invocation the contribution was evaluated for; passed back to {@link
- *     ScenarioController#commitApplication(InvocationContext, long)} when the contribution takes
- *     effect
+ *     ScenarioController#commitApplication(InvocationContext, long, long)} when the contribution
+ *     takes effect
+ * @param matchNumber the scenario's 1-based match number for this call
  */
 record ScenarioContribution(
     ScenarioController controller,
@@ -31,11 +32,12 @@ record ScenarioContribution(
     ChaosEffect effect,
     long delayMillis,
     Duration gateTimeout,
-    InvocationContext context) {
+    InvocationContext context,
+    long matchNumber) {
 
   /** Records this contribution as applied. */
   void commit() {
-    controller.commitApplication(context, delayMillis);
+    controller.commitApplication(context, delayMillis, matchNumber);
   }
 
   /** Returns this contribution's reservation without applying it. */

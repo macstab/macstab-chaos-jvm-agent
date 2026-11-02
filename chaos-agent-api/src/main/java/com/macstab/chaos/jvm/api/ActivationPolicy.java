@@ -59,6 +59,10 @@ import java.time.Instant;
  *     move it
  * @param activeUntil wall-clock instant from which on the scenario no longer fires and becomes
  *     {@code INACTIVE}; {@code null} means no upper bound. Read from the real system clock
+ * @param replayMatches the 1-based match numbers on which the scenario fires, in place of the
+ *     probability draw: a decision log recorded by {@link ChaosDecisionRecorder} replayed exactly.
+ *     {@code null} means no replay. Sorted, distinct and positive; requires probability {@code 1.0}
+ *     and no rate limit, which would change the decisions
  */
 public record ActivationPolicy(
     StartMode startMode,
@@ -70,7 +74,8 @@ public record ActivationPolicy(
     Long randomSeed,
     boolean allowDestructiveEffects,
     Instant activeFrom,
-    Instant activeUntil) {
+    Instant activeUntil,
+    java.util.List<Long> replayMatches) {
 
   /**
    * Compact canonical constructor — normalises defaults and validates all field invariants.
@@ -111,6 +116,56 @@ public record ActivationPolicy(
       throw new IllegalArgumentException(
           "activeFrom must be before activeUntil, got " + activeFrom + " and " + activeUntil);
     }
+    if (replayMatches != null) {
+      if (replayMatches.stream().anyMatch(match -> match == null || match <= 0)) {
+        throw new IllegalArgumentException("replayMatches must hold positive match numbers");
+      }
+      if (probability < 1.0d || rateLimit != null) {
+        throw new IllegalArgumentException(
+            "replayMatches replaces the probability draw: it requires probability 1.0 and no"
+                + " rateLimit");
+      }
+      replayMatches = replayMatches.stream().distinct().sorted().toList();
+    }
+  }
+
+  /**
+   * Creates a policy without replay.
+   *
+   * @param startMode when the scenario begins accepting matches
+   * @param probability fraction of matches that fire
+   * @param activateAfterMatches initial matches to skip
+   * @param maxApplications cap on applications; {@code null} for none
+   * @param activeFor how long the scenario stays active; {@code null} for no bound
+   * @param rateLimit rate cap; {@code null} for none
+   * @param randomSeed PRNG seed; {@code null} for a random one
+   * @param allowDestructiveEffects whether non-recoverable effects may be activated
+   * @param activeFrom wall-clock start; {@code null} for none
+   * @param activeUntil wall-clock end; {@code null} for none
+   */
+  public ActivationPolicy(
+      final StartMode startMode,
+      final double probability,
+      final long activateAfterMatches,
+      final Long maxApplications,
+      final Duration activeFor,
+      final RateLimit rateLimit,
+      final Long randomSeed,
+      final boolean allowDestructiveEffects,
+      final Instant activeFrom,
+      final Instant activeUntil) {
+    this(
+        startMode,
+        probability,
+        activateAfterMatches,
+        maxApplications,
+        activeFor,
+        rateLimit,
+        randomSeed,
+        allowDestructiveEffects,
+        activeFrom,
+        activeUntil,
+        null);
   }
 
   /**
@@ -175,6 +230,8 @@ public record ActivationPolicy(
    *     null}
    * @param activeUntil wall-clock instant from which on the scenario no longer fires; may be {@code
    *     null}
+   * @param replayMatches the match numbers to fire on in place of the probability draw; may be
+   *     {@code null}
    * @return a new {@link ActivationPolicy} built from the parsed JSON values
    */
   public static ActivationPolicy fromJson(
@@ -187,7 +244,8 @@ public record ActivationPolicy(
       final Long randomSeed,
       final boolean allowDestructiveEffects,
       final Instant activeFrom,
-      final Instant activeUntil) {
+      final Instant activeUntil,
+      final java.util.List<Long> replayMatches) {
     return new ActivationPolicy(
         startMode,
         probability == null ? 1.0d : probability,
@@ -198,7 +256,8 @@ public record ActivationPolicy(
         randomSeed,
         allowDestructiveEffects,
         activeFrom,
-        activeUntil);
+        activeUntil,
+        replayMatches);
   }
 
   /**
@@ -296,6 +355,7 @@ public record ActivationPolicy(
     private boolean allowDestructiveEffects;
     private Instant activeFrom;
     private Instant activeUntil;
+    private java.util.List<Long> replayMatches;
 
     private Builder() {}
 
@@ -437,6 +497,17 @@ public record ActivationPolicy(
     }
 
     /**
+     * Replays a recorded decision log: the scenario fires on exactly these 1-based match numbers.
+     *
+     * @param value the match numbers, from {@link ChaosDecisionRecorder#matches(String)}
+     * @return this builder
+     */
+    public Builder replayMatches(final java.util.Collection<Long> value) {
+      this.replayMatches = value == null ? null : java.util.List.copyOf(value);
+      return this;
+    }
+
+    /**
      * Builds the policy.
      *
      * @return the policy
@@ -453,7 +524,8 @@ public record ActivationPolicy(
           randomSeed,
           allowDestructiveEffects,
           activeFrom,
-          activeUntil);
+          activeUntil,
+          replayMatches);
     }
   }
 

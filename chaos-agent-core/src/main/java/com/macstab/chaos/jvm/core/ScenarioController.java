@@ -71,6 +71,9 @@ import java.util.function.Supplier;
  * them would stall every concurrent {@code evaluate()} caller and risk listener-induced deadlock.
  */
 final class ScenarioController {
+  /** The policy's replay log as a sorted array, or {@code null} without replay. */
+  private final long[] replayMatches;
+
   private final ChaosScenario scenario;
   private final String scopeKey;
   private final String sessionId;
@@ -111,6 +114,12 @@ final class ScenarioController {
       final Clock clock,
       final ObservabilityBus observabilityBus,
       final Supplier<Optional<Instrumentation>> instrumentationSupplier) {
+    this.replayMatches =
+        scenario.activationPolicy().replayMatches() == null
+            ? null
+            : scenario.activationPolicy().replayMatches().stream()
+                .mapToLong(Long::longValue)
+                .toArray();
     this.scenario = scenario;
     this.scopeKey = scopeKey;
     this.sessionId = sessionId;
@@ -472,15 +481,21 @@ final class ScenarioController {
       return skipped("maxApplications", context);
     }
     return new ScenarioContribution(
-        this, scenario, scenario.effect(), sampleDelayMillis(matchCount), gateTimeout(), context);
+        this,
+        scenario,
+        scenario.effect(),
+        sampleDelayMillis(matchCount),
+        gateTimeout(),
+        context,
+        matchCount);
   }
 
   /**
    * Reserves one application against {@code maxApplications} for a contribution that has not yet
    * been chosen. The dispatcher decides afterwards which contributions take effect (every delay,
    * the winning gate and the winning terminal action by precedence) and calls {@link
-   * #commitApplication(InvocationContext, long)} for those and {@link #releaseApplication()} for
-   * the rest. An earlier version counted and published {@code APPLIED} here, so a scenario that
+   * #commitApplication(InvocationContext, long, long)} for those and {@link #releaseApplication()}
+   * for the rest. An earlier version counted and published {@code APPLIED} here, so a scenario that
    * lost on precedence still reported itself as applied and used up its budget.
    *
    * <p>Committed applications plus outstanding reservations never exceed the cap. The scenario is
@@ -514,7 +529,8 @@ final class ScenarioController {
    *
    * @param context the invocation the contribution was evaluated for
    */
-  void commitApplication(final InvocationContext context, final long delayMillis) {
+  void commitApplication(
+      final InvocationContext context, final long delayMillis, final long matchNumber) {
     final Long maxApplications = scenario.activationPolicy().maxApplications();
     if (maxApplications == null) {
       appliedCount.incrementAndGet();
@@ -528,7 +544,7 @@ final class ScenarioController {
         markInactive("max applications reached");
       }
     }
-    publishAppliedEvent(context, delayMillis);
+    publishAppliedEvent(context, delayMillis, matchNumber);
   }
 
   /** Returns a reservation taken by {@link #reserveApplication()} that was not applied. */
@@ -541,9 +557,12 @@ final class ScenarioController {
     }
   }
 
-  private void publishAppliedEvent(final InvocationContext context, final long delayMillis) {
+  private void publishAppliedEvent(
+      final InvocationContext context, final long delayMillis, final long matchNumber) {
     final Map<String, String> eventAttributes = new LinkedHashMap<>();
     eventAttributes.put("operation", context.operationType().name());
+    // The scenario's 1-based match number: what ChaosDecisionRecorder records for replay.
+    eventAttributes.put("match", Long.toString(matchNumber));
     eventAttributes.put("scope", scopeKey);
     eventAttributes.put("effectType", scenario.effect().getClass().getSimpleName());
     if (delayMillis > 0L) {
@@ -843,6 +862,10 @@ final class ScenarioController {
   }
 
   private boolean passesProbability(final long matched) {
+    if (replayMatches != null) {
+      // A recorded decision log replaces the draw: fire on exactly these match numbers.
+      return java.util.Arrays.binarySearch(replayMatches, matched) >= 0;
+    }
     final double probability = scenario.activationPolicy().probability();
     if (probability >= 1.0d) {
       return true;

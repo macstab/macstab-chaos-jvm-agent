@@ -340,4 +340,20 @@ class ChaosPlanMapperTest {
           .hasMessageNotContaining("s3cr3t-token");
     }
   }
+
+  @org.junit.jupiter.api.Test
+  @org.junit.jupiter.api.DisplayName("reads and writes replayMatches")
+  void replayMatchesRoundTrip() {
+    final String json =
+        """
+        {"metadata":{"name":"replay"},"scenarios":[{"id":"r","scope":"JVM",
+         "selector":{"type":"executor","operations":["EXECUTOR_SUBMIT"]},
+         "effect":{"type":"reject","message":"x"},
+         "activationPolicy":{"replayMatches":[17,3,9]}}]}
+        """;
+    final com.macstab.chaos.jvm.api.ChaosPlan plan = ChaosPlanMapper.read(json);
+    assertThat(plan.scenarios().get(0).activationPolicy().replayMatches())
+        .containsExactly(3L, 9L, 17L);
+    assertThat(ChaosPlanMapper.read(ChaosPlanMapper.write(plan))).isEqualTo(plan);
+  }
 }

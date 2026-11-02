@@ -194,6 +194,25 @@ Failures are `org.opentest4j.AssertionFailedError`, which every JUnit and IDE re
 
 ---
 
+# 5a. Replaying a flaky run
+
+A probabilistic scenario without a seed fails differently on every run. Record which matches took effect and replay exactly those:
+
+```java
+ChaosDecisionRecorder recorder = new ChaosDecisionRecorder();
+chaos.addEventListener(recorder);
+// ... the run that failed ...
+System.out.println(recorder.decisions());          // {flaky-db=[3, 17, 18]}
+
+// the next run fires on the same matches:
+chaos.activate(recorder.replay(flakyDbScenario));
+// or by hand / in a plan: "activationPolicy": {"replayMatches": [3, 17, 18]}
+```
+
+Match numbers count the scenario's selector matches since it started; replay reproduces the run when the calls arrive in the same order (single-threaded paths, or a deterministic test). See law L9a in [semantics.md](semantics.md).
+
+---
+
 # 6. Self-Attach Requirements
 
 `ChaosPlatform.installLocally()` uses the JDK Attach API to self-attach the agent. Requirements:

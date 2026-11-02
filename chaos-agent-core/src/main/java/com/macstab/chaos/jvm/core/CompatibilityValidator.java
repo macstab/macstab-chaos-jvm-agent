@@ -113,11 +113,12 @@ final class CompatibilityValidator {
         || policy.rateLimit() != null
         || policy.activateAfterMatches() > 0
         || policy.probability() < 1.0d
-        || policy.activeFrom() != null) {
+        || policy.activeFrom() != null
+        || policy.replayMatches() != null) {
       throw new ChaosValidationException(
           "stress scenarios run from start until stop, activeFor or activeUntil ends;"
-              + " maxApplications, rateLimit, activateAfterMatches, probability and activeFrom"
-              + " do not apply to them");
+              + " maxApplications, rateLimit, activateAfterMatches, probability, activeFrom and"
+              + " replayMatches do not apply to them");
     }
   }
 
@@ -130,11 +131,12 @@ final class CompatibilityValidator {
     if (policy.maxApplications() != null
         || policy.rateLimit() != null
         || policy.activateAfterMatches() > 0
-        || policy.probability() < 1.0d) {
+        || policy.probability() < 1.0d
+        || policy.replayMatches() != null) {
       throw new ChaosValidationException(
           "a clock skew applies to every clock read while active (bounded by activeFor,"
-              + " activeFrom and activeUntil); maxApplications, rateLimit, activateAfterMatches"
-              + " and probability do not apply to it");
+              + " activeFrom and activeUntil); maxApplications, rateLimit, activateAfterMatches,"
+              + " probability and replayMatches do not apply to it");
     }
   }
 
