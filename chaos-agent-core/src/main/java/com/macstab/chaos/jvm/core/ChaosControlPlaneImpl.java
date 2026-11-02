@@ -85,6 +85,18 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
   }
 
   /**
+   * Runs the checks {@link #activate(ChaosScenario)} runs before registering, without registering
+   * anything: lets a caller validate a whole plan before it changes the active set.
+   *
+   * @param scenario the scenario
+   * @throws com.macstab.chaos.jvm.api.ChaosActivationException if the scenario is invalid
+   * @throws ChaosUnsupportedFeatureException if the runtime cannot run it
+   */
+  void validate(final ChaosScenario scenario) {
+    CompatibilityValidator.validate(scenario, featureSet);
+  }
+
+  /**
    * Applies a plan's {@link ChaosPlan.Observability} to its scenarios: {@code
    * structuredLoggingEnabled=false} stops logging their events, {@code jmxEnabled=false} hides them
    * from JMX. Settings for the same ids are replaced.

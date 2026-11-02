@@ -24,6 +24,7 @@ include(
     "chaos-agent-examples:sb4-virtual-thread-pinning",
     "chaos-agent-examples:sb3-retry-resilience-test",
     "chaos-agent-examples:sb4-sla-validation-test",
+    "chaos-agent-examples:sb3-fat-jar-probe",
     "chaos-agent-instrumentation-jdk",
     "chaos-agent-micrometer",
     "chaos-agent-opentelemetry",

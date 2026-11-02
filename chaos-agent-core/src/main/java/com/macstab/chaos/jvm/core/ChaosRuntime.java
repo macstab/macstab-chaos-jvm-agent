@@ -77,6 +77,17 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
+   * Validates a scenario as {@link #activate(ChaosScenario)} would, without activating it.
+   *
+   * @param scenario the scenario
+   * @throws com.macstab.chaos.jvm.api.ChaosActivationException if the scenario is invalid
+   * @throws com.macstab.chaos.jvm.api.ChaosUnsupportedFeatureException if the runtime cannot run it
+   */
+  public void validate(final ChaosScenario scenario) {
+    controlPlane.validate(scenario);
+  }
+
+  /**
    * Applies a plan's observability settings to scenarios activated one by one (the plan-file
    * reloader does this); {@link #activate(ChaosPlan)} applies them itself.
    *

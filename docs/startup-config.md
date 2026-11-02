@@ -352,7 +352,7 @@ Equality is record equality across all eight `ChaosScenario` fields. A single fi
 
 **A removed file** stops every scenario it activated and removes the status file; when the file comes back it is loaded as a change. A file that cannot be read or parsed keeps the current plan and is reported in the status file (see [`observability.md`](observability.md)).
 
-The reload is applied atomically: removed and changed scenarios are stopped first, then every new or changed scenario is activated. If any activation fails (or the plan contains duplicate ids), the scenarios activated by this reload are removed again and the previous versions are restored; the failure is logged to stderr and the next file change is retried. A file that fails to parse leaves the active set untouched.
+The reload is applied atomically. Every new or changed scenario is validated first; an invalid one (or duplicate ids) rejects the whole plan before anything changes, so the running scenarios keep running without a gap. Then removed and changed scenarios are stopped and every new or changed scenario is activated. If an activation still fails (an id taken by a scenario activated elsewhere, a weaving failure), the scenarios activated by this reload are removed again and the previous versions are restored. Every failure is logged to stderr and reported in the status file, and the next file change is retried. A file that fails to parse leaves the active set untouched. `ConfigReloadTortureTest` checks these rules under concurrent ConfigMap swaps, in-place rewrites and invalid plans.
 
 ## Isolation guarantee
 

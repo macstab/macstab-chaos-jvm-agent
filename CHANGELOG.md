@@ -61,6 +61,7 @@
 
 ### Bug Fixes
 
+* **startup-config:** a reloaded plan with an invalid scenario stopped the changed scenarios, activated part of the new plan and then rolled back, so for a moment neither plan was fully active and part of the invalid one was. Every new or changed scenario is now validated before the active set is touched.
 * **micrometer:** `chaos.events` was registered with different tag keys per event type (`reason` on skipped, `category` on failed), which Prometheus registries reject; those tags moved to `chaos.skips` and `chaos.activation.failures`, so every meter has one tag key set.
 * resolve ThreadLocal reentrancy - re-enable ThreadLocal/park/AQS instrumentation ([738d4ed](https://github.com/macstab/macstab-chaos-jvm-agent/commit/738d4ed3613f0f67483bc4323febdc77201a57b3))
 

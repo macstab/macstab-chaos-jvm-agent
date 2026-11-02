@@ -35,6 +35,7 @@ val nonPublishableModules = setOf(
     "chaos-agent-benchmarks",
     "chaos-agent-examples",
     "sb3-actuator-live-chaos",
+    "sb3-fat-jar-probe",
     "sb3-retry-resilience-test",
     "sb4-sla-validation-test",
     "sb4-virtual-thread-pinning",

@@ -376,10 +376,12 @@ public final class StartupConfigPoller implements AutoCloseable {
    * Applies a reloaded plan atomically: either every new and changed scenario is active afterwards,
    * or the previously active set is restored.
    *
-   * <p>Scenarios that were removed or changed are stopped first (their ids must be free for the new
-   * versions), then every new or changed scenario is activated. If any activation fails, the
-   * scenarios activated by this call are closed and the previous versions are re-activated; they
-   * passed validation when they were first activated. An earlier version activated each scenario
+   * <p>Every new or changed scenario is validated first; an invalid one rejects the plan before
+   * anything changes. Then scenarios that were removed or changed are stopped (their ids must be
+   * free for the new versions), and every new or changed scenario is activated. If an activation
+   * still fails (a conflict with a scenario activated elsewhere, a weaving failure), the scenarios
+   * activated by this call are closed and the previous versions are re-activated; they passed
+   * validation when they were first activated. An earlier version activated each scenario
    * independently and logged failures, so a changed scenario that failed validation was left
    * stopped and the plan was partially applied.
    *
@@ -399,6 +401,20 @@ public final class StartupConfigPoller implements AutoCloseable {
       if (newById.putIfAbsent(scenario.id(), scenario) != null) {
         throw new IllegalStateException(
             "duplicate scenario id '" + sanitiseForLog(scenario.id()) + "' in plan");
+      }
+    }
+
+    // Validate every new or changed scenario before touching the active set: an invalid plan then
+    // leaves the running scenarios running, instead of stopping the changed ones, activating part
+    // of the new plan and rolling back.
+    for (final ChaosScenario scenario : newById.values()) {
+      if (!scenario.equals(activeScenarios.get(scenario.id()))) {
+        try {
+          runtime.validate(scenario);
+        } catch (final RuntimeException invalid) {
+          throw new IllegalStateException(
+              "plan not applied, previous scenarios kept: " + invalid.getMessage(), invalid);
+        }
       }
     }
 
