@@ -132,6 +132,9 @@ final class SelectorMatcher {
                   || CidrBlock.cached(nettySelector.remoteCidr()).contains(context.remoteAddress()))
               && (nettySelector.remotePort() == null
                   || nettySelector.remotePort() == context.remotePort());
+      case ChaosSelector.ProcessSelector processSelector ->
+          processSelector.operations().contains(context.operationType())
+              && processSelector.commandPattern().matches(context.targetName());
       case ChaosSelector.StressSelector stressSelector ->
           context.operationType() == OperationType.LIFECYCLE && stressSelector.target() != null;
     };

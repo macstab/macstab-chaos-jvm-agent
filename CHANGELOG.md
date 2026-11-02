@@ -15,6 +15,7 @@
 
 ### Features
 
+* **instrumentation:** process starts: `ProcessBuilder.start`, `startPipeline` and `Runtime.exec` are `PROCESS_START` events, selected with `ChaosSelector.process(commandPattern)` (JSON `"process"`) by program. A reject throws `IOException`; an `errno` throws the JDK's own `Cannot run program "x": error=N, reason`. `ChaosEffect.Errno` gains `EAGAIN` and `ENOMEM` (process family) and `code()`, the Linux error number.
 * **quarkus:** `@ChaosScenario` (and its container `@ChaosScenarios`) is deprecated for removal in 3.0 in favour of the testkit's `@WithChaos`, which `ChaosQuarkusExtension` honours with the full plan JSON model.
 * **observability:** new optional module `chaos-agent-opentelemetry`: `ChaosOpenTelemetry.metrics(controlPlane, openTelemetry)` publishes the chaos metrics through the OpenTelemetry API, and `ChaosOpenTelemetry.spanEvents(controlPlane)` adds a `chaos.applied` event to the current span whenever chaos applies to a traced call.
 * **observability:** new metrics `chaos.applications` (by operation and effect), `chaos.injected.delay` (the latency chaos added), `chaos.skips`, `chaos.activation.failures`, `chaos.events.dropped` and `chaos.hooks.woven`; `APPLIED` events carry `delayMillis`. `ChaosMeterBinder` is `AutoCloseable`.

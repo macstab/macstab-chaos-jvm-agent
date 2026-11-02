@@ -101,7 +101,8 @@ final class FailureFactory {
       // FileDescriptor.sync() declares only SyncFailedException; FileChannel.force any
       // IOException. SyncFailedException satisfies both.
       case FILE_IO_SYNC -> new java.io.SyncFailedException(message);
-      case FILE_IO_TRUNCATE, FILE_IO_DELETE, FILE_IO_MOVE -> new java.io.IOException(message);
+      case FILE_IO_TRUNCATE, FILE_IO_DELETE, FILE_IO_MOVE, PROCESS_START ->
+          new java.io.IOException(message);
       default -> new IllegalStateException(message);
     };
   }
@@ -118,6 +119,11 @@ final class FailureFactory {
   static Throwable errno(
       final ChaosEffect.Errno errno, final OperationType operationType, final String path) {
     final String reason = errno.reason();
+    if (operationType == OperationType.PROCESS_START) {
+      // The JDK's own failure for a process that could not be started; path is the program.
+      return new java.io.IOException(
+          "Cannot run program \"" + path + "\": error=" + errno.code() + ", " + reason);
+    }
     return switch (errno) {
       case ECONNREFUSED -> new java.net.ConnectException(reason);
       case ETIMEDOUT ->
@@ -136,6 +142,7 @@ final class FailureFactory {
           path == null
               ? new java.io.FileNotFoundException(reason)
               : new java.nio.file.NoSuchFileException(path);
+      case EAGAIN, ENOMEM -> new java.io.IOException(reason);
       case ENOSPC, EDQUOT, EROFS, EIO, EMFILE ->
           operationType == OperationType.FILE_IO_SYNC
               ? new java.io.SyncFailedException(reason)

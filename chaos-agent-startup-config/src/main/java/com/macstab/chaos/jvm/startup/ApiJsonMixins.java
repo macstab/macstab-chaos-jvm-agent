@@ -65,6 +65,7 @@ final class ApiJsonMixins {
     @JsonSubTypes.Type(value = ChaosSelector.RedisSelector.class, name = "redis"),
     @JsonSubTypes.Type(value = ChaosSelector.AwsSdkSelector.class, name = "awsSdk"),
     @JsonSubTypes.Type(value = ChaosSelector.NettySelector.class, name = "netty"),
+    @JsonSubTypes.Type(value = ChaosSelector.ProcessSelector.class, name = "process"),
     @JsonSubTypes.Type(value = ChaosSelector.StressSelector.class, name = "stress"),
   })
   private interface SelectorMixin {}

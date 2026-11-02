@@ -1386,6 +1386,29 @@ public final class ChaosDispatcher {
   }
 
   /**
+   * Called before a child process is started.
+   *
+   * @param command the program, the first element of the command; {@code null} if empty
+   * @throws Throwable if an active scenario fails the start
+   */
+  public void beforeProcessStart(final String command) throws Throwable {
+    if (idle(OperationType.PROCESS_START)) {
+      return;
+    }
+    applyPreDecision(
+        evaluate(
+            new InvocationContext(
+                OperationType.PROCESS_START,
+                "java.lang.ProcessBuilder",
+                null,
+                command,
+                false,
+                null,
+                null,
+                scopeContext.currentSessionId())));
+  }
+
+  /**
    * Called before {@link java.nio.channels.SocketChannel#write(java.nio.ByteBuffer)}.
    *
    * @param channel the channel being written to
@@ -2319,7 +2342,12 @@ public final class ChaosDispatcher {
       return new TerminalAction(
           TerminalKind.THROW,
           null,
-          FailureFactory.errno(errnoEffect.errno(), operationType, context.path()));
+          FailureFactory.errno(
+              errnoEffect.errno(),
+              operationType,
+              operationType == OperationType.PROCESS_START
+                  ? context.targetName()
+                  : context.path()));
     }
     if (effect instanceof ChaosEffect.RejectEffect rejectEffect) {
       return rejectTerminal(operationType, rejectEffect.message());

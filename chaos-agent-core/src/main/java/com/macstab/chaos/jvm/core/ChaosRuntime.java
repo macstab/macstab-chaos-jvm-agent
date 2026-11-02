@@ -756,6 +756,16 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
+   * Delegates to {@link ChaosDispatcher#beforeProcessStart(String)}.
+   *
+   * @param command the program
+   * @throws Throwable if an active scenario fails the start
+   */
+  public void beforeProcessStart(final String command) throws Throwable {
+    dispatcher.beforeProcessStart(command);
+  }
+
+  /**
    * Delegates to {@link ChaosDispatcher#beforeNioChannelWrite(Object, int)}.
    *
    * @param channel the channel being written to

@@ -96,6 +96,7 @@ public final class DefectProbeMain {
       case "random-access-write" -> randomAccessWrite();
       case "file-writes-by-path" -> fileWritesByPath();
       case "file-ops" -> fileOps();
+      case "process-start" -> processStart();
       case "socket-torn-write" -> socketTornWrite();
       case "method-weaving" -> methodWeaving();
       case "woven-groups" -> printWovenGroups();
@@ -790,6 +791,37 @@ public final class DefectProbeMain {
       if (accepted != null) {
         accepted.close();
       }
+    }
+  }
+
+  /**
+   * Starts this JVM's java launcher with ProcessBuilder and with Runtime.exec, and a missing
+   * program; prints "ok" or the failure message of each.
+   */
+  private static void processStart() throws Exception {
+    final String launcher =
+        java.nio.file.Path.of(System.getProperty("java.home"), "bin", "java").toString();
+    try {
+      System.out.println(
+          "builder="
+              + (new ProcessBuilder(launcher, "-version").start().waitFor() == 0 ? "ok" : "exit"));
+    } catch (final java.io.IOException failed) {
+      System.out.println("builder=" + failed.getMessage());
+    }
+    try {
+      System.out.println(
+          "exec="
+              + (Runtime.getRuntime().exec(new String[] {launcher, "-version"}).waitFor() == 0
+                  ? "ok"
+                  : "exit"));
+    } catch (final java.io.IOException failed) {
+      System.out.println("exec=" + failed.getMessage());
+    }
+    try {
+      new ProcessBuilder("definitely-not-a-program-xyz").start();
+      System.out.println("other=started");
+    } catch (final java.io.IOException failed) {
+      System.out.println("other=" + failed.getMessage());
     }
   }
 

@@ -506,6 +506,17 @@ final class ChaosBridge implements BridgeDelegate {
   }
 
   /**
+   * Invoked before a child process is started.
+   *
+   * @param command the program
+   * @throws Throwable if the runtime fails the start
+   */
+  @Override
+  public void beforeProcessStart(final String command) throws Throwable {
+    runtime.beforeProcessStart(command);
+  }
+
+  /**
    * Invoked before a {@code SocketChannel} write.
    *
    * @param channel the channel being written to

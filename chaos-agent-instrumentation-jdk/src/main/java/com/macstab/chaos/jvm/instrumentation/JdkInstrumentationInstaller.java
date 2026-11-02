@@ -332,6 +332,7 @@ public final class JdkInstrumentationInstaller {
         JdkInstrumentationInstaller::applyPhase2DnsResolutionInterception,
         OperationType.DNS_RESOLVE,
         OperationType.DNS_ANSWER),
+    PROCESS(JdkInstrumentationInstaller::applyProcessInterception, OperationType.PROCESS_START),
     FILE_IO(
         JdkInstrumentationInstaller::applyPhase2FileIoInterception,
         OperationType.FILE_IO_READ,
@@ -779,6 +780,11 @@ public final class JdkInstrumentationInstaller {
             delegateInterface,
             "beforeSocketWrite",
             MethodType.methodType(int.class, Object.class, int.class, Object.class, int.class));
+    methodHandles[BootstrapDispatcher.BEFORE_PROCESS_START] =
+        lookup.findVirtual(
+            delegateInterface,
+            "beforeProcessStart",
+            MethodType.methodType(void.class, String.class));
     methodHandles[BootstrapDispatcher.BEFORE_NIO_CHANNEL_WRITE] =
         lookup.findVirtual(
             delegateInterface,
@@ -2707,6 +2713,25 @@ public final class JdkInstrumentationInstaller {
                 typeBuilder.visit(
                     Advice.to(JvmRuntimeAdvice.FileDescriptorSyncAdvice.class)
                         .on(ElementMatchers.named("sync").and(ElementMatchers.takesArguments(0)))));
+  }
+
+  /**
+   * Process starts: {@code ProcessBuilder.start(Redirect[])}, the private funnel of {@code
+   * start()}, {@code startPipeline} and {@code Runtime.exec}.
+   */
+  private static AgentBuilder applyProcessInterception(final AgentBuilder agentBuilder) {
+    return agentBuilder
+        .type(ElementMatchers.named("java.lang.ProcessBuilder"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(JvmRuntimeAdvice.ProcessStartAdvice.class)
+                        // By arity, not by parameter type: resolving ProcessBuilder$Redirect
+                        // while ProcessBuilder is being transformed is a ClassCircularityError.
+                        // start() has no other one-argument overload.
+                        .on(
+                            ElementMatchers.named("start")
+                                .and(ElementMatchers.takesArguments(1)))));
   }
 
   /** Bridge jars older than this are left over from earlier JVMs and are removed. */

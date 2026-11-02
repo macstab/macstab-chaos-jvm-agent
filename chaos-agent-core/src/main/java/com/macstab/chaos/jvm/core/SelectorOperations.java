@@ -40,6 +40,7 @@ public final class SelectorOperations {
       case ChaosSelector.RedisSelector redisSel -> redisSel.operations();
       case ChaosSelector.AwsSdkSelector awsSdkSel -> awsSdkSel.operations();
       case ChaosSelector.NettySelector nettySel -> nettySel.operations();
+      case ChaosSelector.ProcessSelector processSel -> processSel.operations();
       case ChaosSelector.StressSelector ignored -> Set.of();
     };
   }

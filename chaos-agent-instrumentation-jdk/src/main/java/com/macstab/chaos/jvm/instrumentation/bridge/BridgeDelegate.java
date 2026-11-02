@@ -444,6 +444,14 @@ public interface BridgeDelegate {
   int beforeNioChannelWrite(Object channel, int remaining) throws Throwable;
 
   /**
+   * Called before a child process is started ({@code ProcessBuilder.start}, {@code Runtime.exec}).
+   *
+   * @param command the program, the first element of the command
+   * @throws Throwable if an active scenario fails the start
+   */
+  void beforeProcessStart(String command) throws Throwable;
+
+  /**
    * Called before {@link java.net.Socket#close()}.
    *
    * @param socket the socket being closed; never {@code null}

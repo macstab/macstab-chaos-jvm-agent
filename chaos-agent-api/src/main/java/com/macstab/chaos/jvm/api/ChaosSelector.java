@@ -42,6 +42,7 @@ public sealed interface ChaosSelector
         ChaosSelector.RedisSelector,
         ChaosSelector.AwsSdkSelector,
         ChaosSelector.NettySelector,
+        ChaosSelector.ProcessSelector,
         ChaosSelector.StressSelector {
 
   // ── Factory methods ────────────────────────────────────────────────────────
@@ -453,6 +454,19 @@ public sealed interface ChaosSelector
   static AwsSdkSelector awsSdk(
       final NamePattern servicePattern, final NamePattern operationPattern) {
     return new AwsSdkSelector(Set.of(OperationType.AWS_SDK_CALL), servicePattern, operationPattern);
+  }
+
+  /**
+   * Returns a selector that matches the start of child processes whose program matches {@code
+   * commandPattern}.
+   *
+   * @param commandPattern pattern matched against the program, the first element of the command
+   *     (for example {@code NamePattern.exact("git")} or {@code
+   *     NamePattern.exact("/usr/bin/ffmpeg")})
+   * @return a new {@link ProcessSelector}
+   */
+  static ProcessSelector process(final NamePattern commandPattern) {
+    return new ProcessSelector(Set.of(OperationType.PROCESS_START), commandPattern);
   }
 
   /**
@@ -1231,6 +1245,26 @@ public sealed interface ChaosSelector
       if (remotePort != null && (remotePort < 0 || remotePort > 65_535)) {
         throw new IllegalArgumentException("remotePort must be in [0, 65535], got " + remotePort);
       }
+    }
+  }
+
+  /**
+   * Matches the start of child processes, optionally by program.
+   *
+   * <p><b>Valid operations:</b> {@link OperationType#PROCESS_START}.
+   *
+   * @param operations operation types this selector matches
+   * @param commandPattern pattern matched against the program, the first element of the command as
+   *     the application passed it; {@code null} for any
+   */
+  record ProcessSelector(Set<OperationType> operations, NamePattern commandPattern)
+      implements ChaosSelector {
+    static final Set<OperationType> VALID_OPS = EnumSet.of(OperationType.PROCESS_START);
+
+    /** Validates the ProcessSelector parameters. */
+    public ProcessSelector {
+      operations = validatedOperations(operations, VALID_OPS, "ProcessSelector");
+      commandPattern = commandPattern == null ? NamePattern.any() : commandPattern;
     }
   }
 

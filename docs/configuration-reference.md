@@ -275,7 +275,7 @@ package "chaos-agent-core" {
 }
 
 package "chaos-agent-bootstrap" {
-  [BootstrapDispatcher\n(65 slots)] as BD
+  [BootstrapDispatcher\n(66 slots)] as BD
 }
 
 AgentArgs --> AAP
@@ -1205,6 +1205,23 @@ The client libraries below are hooked by class name and never loaded by the agen
 
 ---
 
+### `process` — ProcessSelector
+
+**JSON type:** `"process"`  
+**Operations:** `PROCESS_START`  
+**Purpose:** Intercept starting a child process: `ProcessBuilder.start()`, `ProcessBuilder.startPipeline` and `Runtime.exec`, which all reach the private `ProcessBuilder.start(Redirect[])`. Valid effects: delay, gate, `reject` (`IOException`) and `errno` (the JDK's `Cannot run program` failure, above). Waiting for a process (`Process.waitFor`) is not intercepted.
+
+| Field            | Type                 | Default  | Description                                                                 |
+|------------------|----------------------|----------|-----------------------------------------------------------------------------|
+| `operations`     | Set\<OperationType\> | required | `PROCESS_START`                                                             |
+| `commandPattern` | NamePattern          | `ANY`    | Matched against the program: the first element of the command, as passed   |
+
+```json
+{ "type": "process", "operations": ["PROCESS_START"], "commandPattern": { "mode": "EXACT", "value": "git" } }
+```
+
+---
+
 ### `stress` — StressSelector
 
 **JSON type:** `"stress"`  
@@ -1343,7 +1360,7 @@ ChaosEffect.delay(Duration.ofSeconds(2))  // deterministic
 #### `errno` — ErrnoEffect
 
 **JSON type:** `"errno"`  
-**Purpose:** Fail the operation the way the operating system reports an `errno`, as the Java exception code actually catches for it — the native library's `ERRNO` effect. Network errors apply to `SOCKET_*` and `NIO_CHANNEL_*` operations, file errors to `FILE_IO_*`; a mismatch is rejected at activation.
+**Purpose:** Fail the operation the way the operating system reports an `errno`, as the Java exception code actually catches for it — the native library's `ERRNO` effect. Network errors apply to `SOCKET_*` and `NIO_CHANNEL_*` operations, file errors to `FILE_IO_*` and `PROCESS_START`, process errors to `PROCESS_START`; a mismatch is rejected at activation.
 
 | `errno`        | Family  | Exception                                                                 |
 |----------------|---------|---------------------------------------------------------------------------|
@@ -1361,6 +1378,10 @@ ChaosEffect.delay(Duration.ofSeconds(2))  // deterministic
 | `ENOENT`       | file    | `NoSuchFileException(path)`                                               |
 | `EIO`          | file    | `FileSystemException(path, null, "Input/output error")`                   |
 | `EMFILE`       | file    | `FileSystemException(path, null, "Too many open files")`                  |
+| `EAGAIN`       | process | on `PROCESS_START`, see below                                              |
+| `ENOMEM`       | process | on `PROCESS_START`, see below                                              |
+
+On `PROCESS_START` every error is the JDK's own failure for a program that could not be started: `IOException("Cannot run program \"<program>\": error=<n>, <reason>")`, with Linux error numbers (`ENOENT` 2, `EACCES` 13, `EAGAIN` 11, `ENOMEM` 12, …; `ChaosEffect.Errno.code()`).
 
 File errors carry the path the stream was opened with; without one they are a plain `IOException` (`FileNotFoundException` for `ENOENT`) with the same text.
 

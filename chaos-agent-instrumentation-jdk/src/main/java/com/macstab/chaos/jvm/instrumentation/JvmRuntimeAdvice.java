@@ -1167,6 +1167,19 @@ final class JvmRuntimeAdvice {
     }
   }
 
+  /**
+   * Intercepts {@code ProcessBuilder.start(Redirect[])}: every process start. The receiver is
+   * declared as {@code Object}: an advice signature naming {@code ProcessBuilder} makes ByteBuddy
+   * resolve that class while it is being loaded and transformed (ClassCircularityError).
+   */
+  static final class ProcessStartAdvice {
+    @Advice.OnMethodEnter
+    static void enter(@Advice.This final Object builder) throws Throwable {
+      final java.util.List<String> command = ((ProcessBuilder) builder).command();
+      BootstrapDispatcher.beforeProcessStart(command.isEmpty() ? null : command.get(0));
+    }
+  }
+
   /** Intercepts {@link java.io.FileDescriptor#sync()}: fsync of a stream's descriptor. */
   static final class FileDescriptorSyncAdvice {
     @Advice.OnMethodEnter

@@ -43,8 +43,10 @@ val nonPublishableModules = setOf(
 
 // Coverage floor per module: (line, branch) covered ratio enforced by `check`. A ratchet: set a
 // little below the measured value and raised as tests are added, never lowered to make a change
-// pass. chaos-agent-instrumentation-jdk is low because most of its advice runs inside the child
-// JVMs of the -javaagent tests, whose coverage is not collected.
+// pass. chaos-agent-instrumentation-jdk is low by construction: advice bodies are inlined into the
+// JDK and library classes they instrument and never execute as the advice classes JaCoCo measures,
+// and the -javaagent child JVMs run the shaded agent jar, whose class bytes differ from these. The
+// advice is covered behaviourally by the child-JVM tests in chaos-agent-bootstrap.
 val coverageFloors = mapOf(
     "chaos-agent-api" to (0.65 to 0.63),
     "chaos-agent-bootstrap" to (0.63 to 0.48),

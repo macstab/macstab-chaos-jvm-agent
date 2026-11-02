@@ -584,7 +584,9 @@ final class CompatibilityValidator {
           OperationType.FILE_IO_SYNC,
           OperationType.FILE_IO_TRUNCATE,
           OperationType.FILE_IO_DELETE,
-          OperationType.FILE_IO_MOVE);
+          OperationType.FILE_IO_MOVE,
+          // A process start fails on the program file: ENOENT, EACCES and the like.
+          OperationType.PROCESS_START);
 
   /**
    * Operations whose interception point can carry out a {@link ChaosEffect.SuppressEffect}: it
@@ -660,9 +662,11 @@ final class CompatibilityValidator {
     }
     if (effect instanceof ChaosEffect.ErrnoEffect errnoEffect) {
       final Set<OperationType> allowed =
-          errnoEffect.errno().family() == ChaosEffect.Errno.Family.NETWORK
-              ? ERRNO_NETWORK_OPS
-              : ERRNO_FILE_OPS;
+          switch (errnoEffect.errno().family()) {
+            case NETWORK -> ERRNO_NETWORK_OPS;
+            case FILE -> ERRNO_FILE_OPS;
+            case PROCESS -> EnumSet.of(OperationType.PROCESS_START);
+          };
       for (final OperationType operation : operations) {
         if (!allowed.contains(operation)) {
           throw new ChaosValidationException(

@@ -54,6 +54,7 @@ package com.macstab.chaos.jvm.api;
  *   <li>{@link ChaosSelector.RpcSelector} — {@link #RPC_CALL}
  *   <li>{@link ChaosSelector.RedisSelector} — {@link #REDIS_COMMAND}
  *   <li>{@link ChaosSelector.AwsSdkSelector} — {@link #AWS_SDK_CALL}
+ *   <li>{@link ChaosSelector.ProcessSelector} — {@link #PROCESS_START}
  *   <li>{@link ChaosSelector.NettySelector} — {@link #NETTY_CHANNEL_WRITE}, {@link
  *       #NETTY_CHANNEL_READ}
  *   <li>{@link ChaosSelector.JdbcSelector} — also {@link #R2DBC_STATEMENT_EXECUTE}
@@ -840,6 +841,19 @@ public enum OperationType {
    * <p>Use with {@link ChaosSelector.NettySelector}.
    */
   NETTY_CHANNEL_READ,
+
+  // ── Processes ─────────────────────────────────────────────────────────────────
+
+  /**
+   * Fires before a child process is started: {@link ProcessBuilder#start()}, {@code
+   * ProcessBuilder.startPipeline} and {@link Runtime#exec(String[])}, which all reach the same
+   * funnel. The target name is the program (the first element of the command). A reject throws
+   * {@link java.io.IOException}; an {@code ErrnoEffect} throws the JDK's own failure, {@code
+   * IOException: Cannot run program "x": error=N, reason}.
+   *
+   * <p>Use with {@link ChaosSelector.ProcessSelector}.
+   */
+  PROCESS_START,
 
   // ── Agent lifecycle ─────────────────────────────────────────────────────────
 

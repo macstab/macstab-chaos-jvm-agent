@@ -698,6 +698,30 @@ class DefectRegressionIntegrationTest {
     }
 
     @Test
+    @DisplayName("a process start fails with the JDK's own message, only for the selected program")
+    void processStart() throws Exception {
+      final String java = Path.of(System.getProperty("java.home"), "bin", "java").toString();
+      final ChildJvmProbe.ProbeResult result =
+          probe.run(
+              plan(
+                  scenario(
+                      "fork-limit",
+                      ChaosSelector.process(com.macstab.chaos.jvm.api.NamePattern.exact(java)),
+                      ChaosEffect.errno(ChaosEffect.Errno.EAGAIN))),
+              DefectProbeMain.class,
+              "process-start",
+              null);
+      final String failure =
+          "Cannot run program \"" + java + "\": error=11, Resource temporarily unavailable";
+      assertThat(result.value("builder")).isEqualTo(failure);
+      assertThat(result.value("exec")).isEqualTo(failure);
+      assertThat(result.value("other"))
+          .as("not selected: the real start fails on its own")
+          .startsWith("Cannot run program \"definitely-not-a-program-xyz\"");
+      assertThat(result.longValue("applied.fork-limit")).isEqualTo(2L);
+    }
+
+    @Test
     @DisplayName("truncate, move and delete fail only under the selected directory")
     void fileOperationsByPath() throws Exception {
       final Path root = Files.createDirectories(tempDir.resolve("ops"));

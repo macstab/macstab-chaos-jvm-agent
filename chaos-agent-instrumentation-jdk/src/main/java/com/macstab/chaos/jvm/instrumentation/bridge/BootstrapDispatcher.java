@@ -431,8 +431,11 @@ public final class BootstrapDispatcher {
   /** Handle index for {@link #beforeNioChannelWrite(Object, int)}. */
   public static final int BEFORE_NIO_CHANNEL_WRITE = 64;
 
+  /** Handle index for {@link #beforeProcessStart(String)}. */
+  public static final int BEFORE_PROCESS_START = 65;
+
   /** Total number of method-handle slots; equals the highest index plus one. */
-  public static final int HANDLE_COUNT = 65;
+  public static final int HANDLE_COUNT = 66;
 
   /** Utility class; do not instantiate. */
   private BootstrapDispatcher() {}
@@ -1557,6 +1560,31 @@ public final class BootstrapDispatcher {
     } catch (final Throwable throwable) {
       sneakyThrow(throwable);
       return remaining;
+    } finally {
+      depth[0]--;
+    }
+  }
+
+  /**
+   * Called before a child process is started.
+   *
+   * @param command the program, the first element of the command
+   * @throws Throwable if an active scenario fails the start
+   */
+  public static void beforeProcessStart(final String command) throws Throwable {
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      if (d != null && h != null) {
+        h[BEFORE_PROCESS_START].invoke(d, command);
+      }
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
     } finally {
       depth[0]--;
     }
