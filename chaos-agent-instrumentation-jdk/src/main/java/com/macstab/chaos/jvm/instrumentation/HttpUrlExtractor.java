@@ -55,25 +55,6 @@ public final class HttpUrlExtractor {
   private HttpUrlExtractor() {}
 
   /**
-   * Extracts the URL from a {@code java.net.http.HttpRequest} by calling {@code uri().toString()}
-   * reflectively.
-   *
-   * @param request the {@code HttpRequest} instance; may be {@code null}
-   * @return the URL string, or {@code null} if extraction fails
-   */
-  public static String fromJavaHttpRequest(final Object request) {
-    if (request == null) {
-      return null;
-    }
-    try {
-      final Object uri = invoke(request, "uri");
-      return uri == null ? null : uri.toString();
-    } catch (final Throwable ignored) {
-      return null;
-    }
-  }
-
-  /**
    * Extracts the URL from an {@code okhttp3.Call} by calling {@code request().url().toString()}.
    *
    * @param call the {@code okhttp3.Call} instance; may be {@code null}
