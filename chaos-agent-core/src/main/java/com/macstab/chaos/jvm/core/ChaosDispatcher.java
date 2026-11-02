@@ -1356,12 +1356,14 @@ public final class ChaosDispatcher {
    * @param len the number of bytes being written
    * @param remoteAddress the peer {@link java.net.InetAddress}, or {@code null} if not connected
    * @param remotePort the peer port, or {@code 0} if not connected
+   * @return the bytes to write: {@code len}, or a shorter prefix under a torn write, after which
+   *     the advice fails the write as a reset connection
    * @throws Throwable if an active scenario throws to simulate a failure
    */
-  public void beforeSocketWrite(
+  public int beforeSocketWrite(
       final Object stream, final int len, final Object remoteAddress, final int remotePort)
       throws Throwable {
-    applyPreDecision(
+    return readCount(
         (idle(OperationType.SOCKET_WRITE)
             ? RuntimeDecision.none()
             : evaluate(
@@ -1379,7 +1381,41 @@ public final class ChaosDispatcher {
                     remoteAddress instanceof java.net.InetAddress address ? address : null,
                     remoteAddress == null ? InvocationContext.UNKNOWN : remotePort,
                     null,
-                    InvocationContext.UNKNOWN))));
+                    InvocationContext.UNKNOWN))),
+        len);
+  }
+
+  /**
+   * Called before {@link java.nio.channels.SocketChannel#write(java.nio.ByteBuffer)}.
+   *
+   * @param channel the channel being written to
+   * @param remaining the bytes the buffer holds
+   * @return the bytes to write: {@code remaining}, or fewer under a torn write
+   * @throws Throwable if an active scenario throws to simulate a failure
+   */
+  public int beforeNioChannelWrite(final Object channel, final int remaining) throws Throwable {
+    return readCount(
+        idle(OperationType.NIO_CHANNEL_WRITE)
+            ? RuntimeDecision.none()
+            : evaluate(
+                new InvocationContext(
+                    OperationType.NIO_CHANNEL_WRITE,
+                    channel == null
+                        ? "java.nio.channels.SocketChannel"
+                        : channel.getClass().getName(),
+                    null,
+                    null,
+                    false,
+                    null,
+                    null,
+                    scopeContext.currentSessionId(),
+                    remaining,
+                    null,
+                    null,
+                    InvocationContext.UNKNOWN,
+                    null,
+                    InvocationContext.UNKNOWN)),
+        remaining);
   }
 
   /**
@@ -2092,19 +2128,17 @@ public final class ChaosDispatcher {
   }
 
   private static OperationType resolveFileIoOperationType(final String operationTag) {
-    if ("FILE_IO_READ".equals(operationTag)) {
-      return OperationType.FILE_IO_READ;
-    }
-    if ("FILE_IO_WRITE".equals(operationTag)) {
-      return OperationType.FILE_IO_WRITE;
-    }
-    if ("FILE_IO_SYNC".equals(operationTag)) {
-      return OperationType.FILE_IO_SYNC;
-    }
-    throw new IllegalArgumentException(
-        "Unknown file I/O operation tag '"
-            + operationTag
-            + "'; expected FILE_IO_READ, FILE_IO_WRITE or FILE_IO_SYNC");
+    return switch (operationTag) {
+      case "FILE_IO_READ" -> OperationType.FILE_IO_READ;
+      case "FILE_IO_WRITE" -> OperationType.FILE_IO_WRITE;
+      case "FILE_IO_SYNC" -> OperationType.FILE_IO_SYNC;
+      case "FILE_IO_TRUNCATE" -> OperationType.FILE_IO_TRUNCATE;
+      case "FILE_IO_DELETE" -> OperationType.FILE_IO_DELETE;
+      case "FILE_IO_MOVE" -> OperationType.FILE_IO_MOVE;
+      default ->
+          throw new IllegalArgumentException(
+              "Unknown file I/O operation tag '" + operationTag + "'");
+    };
   }
 
   private boolean evaluateJdbc(
@@ -2249,10 +2283,15 @@ public final class ChaosDispatcher {
       return new TerminalAction(TerminalKind.REWRITE, rewriteEffect.host(), null, scenario.id());
     }
     if (effect instanceof ChaosEffect.TornWriteEffect) {
-      // Only a channel write can succeed short; a stream write completes or throws. A single
-      // byte cannot be torn either. Neither counts an application.
+      // A channel write succeeds short; a socket stream write sends the prefix, then the advice
+      // fails it as a reset (a stream write completes or throws). File streams and single bytes
+      // cannot be torn; neither counts an application.
       final long requested = context.byteCount();
-      if (requested < 2 || !isFileChannel(context.targetClassName())) {
+      final boolean tearable =
+          context.operationType() == OperationType.SOCKET_WRITE
+              || context.operationType() == OperationType.NIO_CHANNEL_WRITE
+              || isFileChannel(context.targetClassName());
+      if (requested < 2 || !tearable) {
         return new TerminalAction(TerminalKind.NOT_APPLICABLE, null, null, scenario.id());
       }
       final int torn =

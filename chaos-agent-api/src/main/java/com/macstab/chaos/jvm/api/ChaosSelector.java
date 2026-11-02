@@ -1069,11 +1069,13 @@ public sealed interface ChaosSelector
   }
 
   /**
-   * Matches file I/O read and write operations on {@link java.io.FileInputStream} and {@link
-   * java.io.FileOutputStream}.
+   * Matches file operations: reads and writes of streams, {@code RandomAccessFile} and {@code
+   * FileChannel}, fsync, truncation, deletion and moves.
    *
    * <p><b>Valid operations:</b> {@link OperationType#FILE_IO_READ}, {@link
-   * OperationType#FILE_IO_WRITE}.
+   * OperationType#FILE_IO_WRITE}, {@link OperationType#FILE_IO_SYNC}, {@link
+   * OperationType#FILE_IO_TRUNCATE}, {@link OperationType#FILE_IO_DELETE}, {@link
+   * OperationType#FILE_IO_MOVE}. Only reads and writes carry a byte count.
    *
    * <p>The optional filters narrow the match further; a {@code null} filter does not restrict:
    * {@code pathPattern} matches the path the stream was opened with (a stream created from a {@link
@@ -1091,7 +1093,12 @@ public sealed interface ChaosSelector
       implements ChaosSelector {
     static final Set<OperationType> VALID_OPS =
         EnumSet.of(
-            OperationType.FILE_IO_READ, OperationType.FILE_IO_WRITE, OperationType.FILE_IO_SYNC);
+            OperationType.FILE_IO_READ,
+            OperationType.FILE_IO_WRITE,
+            OperationType.FILE_IO_SYNC,
+            OperationType.FILE_IO_TRUNCATE,
+            OperationType.FILE_IO_DELETE,
+            OperationType.FILE_IO_MOVE);
 
     private static final Set<OperationType> SIZED_OPS =
         EnumSet.of(OperationType.FILE_IO_READ, OperationType.FILE_IO_WRITE);

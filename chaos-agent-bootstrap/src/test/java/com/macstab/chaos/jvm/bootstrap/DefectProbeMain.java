@@ -95,6 +95,8 @@ public final class DefectProbeMain {
       case "session-handoff" -> sessionHandoff();
       case "random-access-write" -> randomAccessWrite();
       case "file-writes-by-path" -> fileWritesByPath();
+      case "file-ops" -> fileOps();
+      case "socket-torn-write" -> socketTornWrite();
       case "method-weaving" -> methodWeaving();
       case "woven-groups" -> printWovenGroups();
       case "woven-groups-after-thread-local" -> wovenGroupsAfterThreadLocal();
@@ -681,6 +683,112 @@ public final class DefectProbeMain {
         System.out.println(directory + "=rejected");
         System.out.println(directory + ".type=" + rejected.getClass().getName());
         System.out.println(directory + ".message=" + rejected.getMessage());
+      }
+    }
+  }
+
+  /**
+   * In directories a and b of chaos.test.dir: truncates through a FileChannel and a
+   * RandomAccessFile, moves with Files.move and File.renameTo, deletes with Files.delete and
+   * File.delete; prints each outcome ("ok", "true"/"false" or the exception class).
+   */
+  private static void fileOps() throws Exception {
+    final java.nio.file.Path root = java.nio.file.Path.of(System.getProperty("chaos.test.dir"));
+    for (final String directory : new String[] {"a", "b"}) {
+      final java.nio.file.Path dir = java.nio.file.Files.createDirectories(root.resolve(directory));
+      java.nio.file.Path current = dir.resolve("f");
+      java.nio.file.Files.write(current, new byte[10]);
+      try (java.nio.channels.FileChannel channel =
+          java.nio.channels.FileChannel.open(current, java.nio.file.StandardOpenOption.WRITE)) {
+        channel.truncate(5);
+        System.out.println(directory + ".truncate=ok");
+      } catch (final java.io.IOException failed) {
+        System.out.println(directory + ".truncate=" + failed.getClass().getName());
+      }
+      try (java.io.RandomAccessFile file = new java.io.RandomAccessFile(current.toFile(), "rw")) {
+        file.setLength(3);
+        System.out.println(directory + ".setLength=ok");
+      } catch (final java.io.IOException failed) {
+        System.out.println(directory + ".setLength=" + failed.getClass().getName());
+      }
+      try {
+        current = java.nio.file.Files.move(current, dir.resolve("g"));
+        System.out.println(directory + ".move=ok");
+      } catch (final java.io.IOException failed) {
+        System.out.println(directory + ".move=" + failed.getClass().getName());
+      }
+      final java.io.File renamed = dir.resolve("h").toFile();
+      final boolean renameResult = current.toFile().renameTo(renamed);
+      System.out.println(directory + ".renameTo=" + renameResult);
+      if (renameResult) {
+        current = renamed.toPath();
+      }
+      try {
+        java.nio.file.Files.delete(current);
+        System.out.println(directory + ".delete=ok");
+      } catch (final java.io.IOException failed) {
+        System.out.println(directory + ".delete=" + failed.getClass().getName());
+      }
+      final java.io.File other = dir.resolve("k").toFile();
+      java.nio.file.Files.write(other.toPath(), new byte[1]);
+      System.out.println(directory + ".fileDelete=" + other.delete());
+      System.out.println(directory + ".exists=" + java.nio.file.Files.exists(current));
+    }
+  }
+
+  /**
+   * Writes 1000 bytes through a socket stream and 1000 through a SocketChannel to a loopback server
+   * that counts what it receives; prints the stream write's failure, the channel's first write
+   * count and the bytes the server received from the stream.
+   */
+  private static void socketTornWrite() throws Exception {
+    try (java.net.ServerSocket server =
+        new java.net.ServerSocket(0, 2, InetAddress.getByName("127.0.0.1"))) {
+      final java.util.concurrent.CompletableFuture<Long> received =
+          java.util.concurrent.CompletableFuture.supplyAsync(
+              () -> {
+                try (java.net.Socket accepted = server.accept()) {
+                  final byte[] buffer = new byte[4096];
+                  long total = 0;
+                  try {
+                    for (int n; (n = accepted.getInputStream().read(buffer)) > 0; ) {
+                      total += n;
+                    }
+                  } catch (final java.io.IOException reset) {
+                    // the writer's connection ended; what arrived is counted
+                  }
+                  return total;
+                } catch (final java.io.IOException failed) {
+                  return -1L;
+                }
+              });
+      try (java.net.Socket client = new java.net.Socket("127.0.0.1", server.getLocalPort())) {
+        try {
+          client.getOutputStream().write(new byte[1000]);
+          System.out.println("streamWrite=ok");
+        } catch (final java.net.SocketException torn) {
+          System.out.println("streamWrite=" + torn.getMessage());
+        }
+      }
+      System.out.println("received=" + received.get(5, TimeUnit.SECONDS));
+      final java.util.concurrent.CompletableFuture<java.net.Socket> sink =
+          java.util.concurrent.CompletableFuture.supplyAsync(
+              () -> {
+                try {
+                  return server.accept();
+                } catch (final java.io.IOException failed) {
+                  return null;
+                }
+              });
+      try (java.nio.channels.SocketChannel channel =
+          java.nio.channels.SocketChannel.open(
+              new java.net.InetSocketAddress("127.0.0.1", server.getLocalPort()))) {
+        System.out.println(
+            "channelFirstWrite=" + channel.write(java.nio.ByteBuffer.allocate(1000)));
+      }
+      final java.net.Socket accepted = sink.get(5, TimeUnit.SECONDS);
+      if (accepted != null) {
+        accepted.close();
       }
     }
   }

@@ -428,8 +428,11 @@ public final class BootstrapDispatcher {
   /** Handle index for {@link #exitSession(Object)}. */
   public static final int EXIT_SESSION = 63;
 
+  /** Handle index for {@link #beforeNioChannelWrite(Object, int)}. */
+  public static final int BEFORE_NIO_CHANNEL_WRITE = 64;
+
   /** Total number of method-handle slots; equals the highest index plus one. */
-  public static final int HANDLE_COUNT = 64;
+  public static final int HANDLE_COUNT = 65;
 
   /** Utility class; do not instantiate. */
   private BootstrapDispatcher() {}
@@ -1504,27 +1507,72 @@ public final class BootstrapDispatcher {
    * @param remoteAddress the peer address ({@code java.net.InetAddress}); {@code null} when the
    *     socket is not connected
    * @param remotePort the peer port
+   * @return the bytes to write: {@code len}, or a shorter prefix under a torn write, after which
+   *     the advice throws {@link #tornWriteFailure(int, int)}
    * @throws Throwable if an active scenario injects a failure to simulate a write error
    */
-  public static void beforeSocketWrite(
+  public static int beforeSocketWrite(
       final Object stream, final int len, final Object remoteAddress, final int remotePort)
       throws Throwable {
     final int[] depth = DEPTH.get();
     if (depth[0] > 0) {
-      return;
+      return len;
     }
     depth[0]++;
     try {
       final MethodHandle[] h = handles;
       final Object d = delegate;
-      if (d != null && h != null) {
-        h[BEFORE_SOCKET_WRITE].invoke(d, stream, len, remoteAddress, remotePort);
-      }
+      return (d == null || h == null)
+          ? len
+          : (int) h[BEFORE_SOCKET_WRITE].invoke(d, stream, len, remoteAddress, remotePort);
     } catch (final Throwable throwable) {
       sneakyThrow(throwable);
+      return len;
     } finally {
       depth[0]--;
     }
+  }
+
+  /**
+   * Called before {@link java.nio.channels.SocketChannel#write(java.nio.ByteBuffer)}.
+   *
+   * @param channel the channel being written to
+   * @param remaining the bytes the buffer holds
+   * @return the bytes to write: {@code remaining}, or fewer under a torn write
+   * @throws Throwable if an active scenario injects a failure to simulate a write error
+   */
+  public static int beforeNioChannelWrite(final Object channel, final int remaining)
+      throws Throwable {
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return remaining;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      return (d == null || h == null)
+          ? remaining
+          : (int) h[BEFORE_NIO_CHANNEL_WRITE].invoke(d, channel, remaining);
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+      return remaining;
+    } finally {
+      depth[0]--;
+    }
+  }
+
+  /**
+   * The failure of a torn socket-stream write: the prefix was sent, then the connection was reset.
+   * A stream write cannot return short, so this is how the peer and the writer see it.
+   *
+   * @param written the bytes sent before the failure
+   * @param requested the bytes the caller asked to write
+   * @return the exception for the advice to throw
+   */
+  public static java.net.SocketException tornWriteFailure(final int written, final int requested) {
+    return new java.net.SocketException(
+        "Connection reset (chaos: torn write, " + written + " of " + requested + " bytes sent)");
   }
 
   /**

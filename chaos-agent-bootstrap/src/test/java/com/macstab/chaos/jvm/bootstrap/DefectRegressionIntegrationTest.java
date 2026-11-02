@@ -696,6 +696,47 @@ class DefectRegressionIntegrationTest {
           .isEqualTo(root.resolve("a").resolve("f") + ": No space left on device");
       assertThat(result.value("b")).isEqualTo("ok");
     }
+
+    @Test
+    @DisplayName("truncate, move and delete fail only under the selected directory")
+    void fileOperationsByPath() throws Exception {
+      final Path root = Files.createDirectories(tempDir.resolve("ops"));
+      final ChildJvmProbe.ProbeResult result =
+          probe.run(
+              plan(
+                  scenario(
+                      "read-only-under-a",
+                      new ChaosSelector.FileIoSelector(
+                          Set.of(
+                              OperationType.FILE_IO_TRUNCATE,
+                              OperationType.FILE_IO_DELETE,
+                              OperationType.FILE_IO_MOVE),
+                          PathPattern.under(root.resolve("a").toString()),
+                          null,
+                          null),
+                      ChaosEffect.errno(ChaosEffect.Errno.EROFS))),
+              DefectProbeMain.class,
+              "file-ops",
+              null,
+              "-Dchaos.test.dir=" + root);
+      final String failure = "java.nio.file.FileSystemException";
+      assertThat(result.value("a.truncate")).isEqualTo(failure);
+      assertThat(result.value("a.setLength")).isEqualTo(failure);
+      assertThat(result.value("a.move")).isEqualTo(failure);
+      assertThat(result.value("a.renameTo"))
+          .as("java.io reports failure as false")
+          .isEqualTo("false");
+      assertThat(result.value("a.delete")).isEqualTo(failure);
+      assertThat(result.value("a.fileDelete")).isEqualTo("false");
+      assertThat(result.value("a.exists")).isEqualTo("true");
+      assertThat(result.value("b.truncate")).isEqualTo("ok");
+      assertThat(result.value("b.setLength")).isEqualTo("ok");
+      assertThat(result.value("b.move")).isEqualTo("ok");
+      assertThat(result.value("b.renameTo")).isEqualTo("true");
+      assertThat(result.value("b.delete")).isEqualTo("ok");
+      assertThat(result.value("b.fileDelete")).isEqualTo("true");
+      assertThat(result.value("b.exists")).isEqualTo("false");
+    }
   }
 
   @Nested
@@ -1040,6 +1081,32 @@ class DefectRegressionIntegrationTest {
               ChaosEffect.connectionReset(),
               "socket-reset");
       assertThat(result.value("clientSaw")).isEqualTo("Connection reset");
+    }
+
+    @Test
+    @DisplayName("tornWrite sends a prefix then resets a stream, and shortens a channel write")
+    void tornSocketWrites() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.run(
+              plan(
+                  scenario(
+                      "torn-stream",
+                      ChaosSelector.network(Set.of(OperationType.SOCKET_WRITE)),
+                      ChaosEffect.tornWrite()),
+                  scenario(
+                      "torn-channel",
+                      ChaosSelector.nio(Set.of(OperationType.NIO_CHANNEL_WRITE)),
+                      ChaosEffect.tornWrite())),
+              DefectProbeMain.class,
+              "socket-torn-write",
+              null);
+      assertThat(result.value("streamWrite")).startsWith("Connection reset (chaos: torn write, ");
+      final long received = result.longValue("received");
+      assertThat(received).isBetween(1L, 999L);
+      assertThat(result.value("streamWrite")).contains(received + " of 1000 bytes sent");
+      assertThat(result.longValue("channelFirstWrite")).isBetween(1L, 999L);
+      assertThat(result.longValue("applied.torn-stream")).isEqualTo(1L);
+      assertThat(result.longValue("applied.torn-channel")).isEqualTo(1L);
     }
   }
 

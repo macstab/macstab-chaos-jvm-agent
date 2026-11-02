@@ -47,7 +47,9 @@ package com.macstab.chaos.jvm.api;
  *       operations)
  *   <li>{@link ChaosSelector.DnsSelector} — {@link #DNS_RESOLVE}
  *   <li>{@link ChaosSelector.SslSelector} — {@link #SSL_HANDSHAKE}
- *   <li>{@link ChaosSelector.FileIoSelector} — {@link #FILE_IO_READ}, {@link #FILE_IO_WRITE}
+ *   <li>{@link ChaosSelector.FileIoSelector} — {@link #FILE_IO_READ}, {@link #FILE_IO_WRITE},
+ *       {@link #FILE_IO_SYNC}, {@link #FILE_IO_TRUNCATE}, {@link #FILE_IO_DELETE}, {@link
+ *       #FILE_IO_MOVE}
  *   <li>{@link ChaosSelector.MessagingSelector} — {@link #MESSAGE_SEND}, {@link #MESSAGE_RECEIVE}
  *   <li>{@link ChaosSelector.RpcSelector} — {@link #RPC_CALL}
  *   <li>{@link ChaosSelector.RedisSelector} — {@link #REDIS_COMMAND}
@@ -730,6 +732,36 @@ public enum OperationType {
    * <p>Use with {@link ChaosSelector.FileIoSelector}.
    */
   FILE_IO_SYNC,
+
+  /**
+   * Fires before a file is shortened or extended: {@code FileChannel.truncate(long)} and {@code
+   * RandomAccessFile.setLength(long)}. A reject throws {@link java.io.IOException}; an {@code
+   * ErrnoEffect} the matching {@link java.nio.file.FileSystemException} (for example {@code
+   * ENOSPC}, {@code EROFS}).
+   *
+   * <p>Use with {@link ChaosSelector.FileIoSelector}; the path is the file's.
+   */
+  FILE_IO_TRUNCATE,
+
+  /**
+   * Fires before a file or empty directory is deleted: {@code Files.delete}, {@code
+   * Files.deleteIfExists} and {@link java.io.File#delete()}. A reject or an {@code ErrnoEffect}
+   * fails the delete: the {@code Files} methods throw ({@link java.io.IOException} or the matching
+   * {@link java.nio.file.FileSystemException}), {@code File.delete()} returns {@code false}, which
+   * is how {@code java.io} reports a failed delete.
+   *
+   * <p>Use with {@link ChaosSelector.FileIoSelector}; the path is the file being deleted.
+   */
+  FILE_IO_DELETE,
+
+  /**
+   * Fires before a file is moved or renamed: {@code Files.move} and {@link
+   * java.io.File#renameTo(java.io.File)}. Failures behave as for {@link #FILE_IO_DELETE}: the
+   * {@code Files} method throws, {@code File.renameTo} returns {@code false}.
+   *
+   * <p>Use with {@link ChaosSelector.FileIoSelector}; the path is the source.
+   */
+  FILE_IO_MOVE,
 
   // ── Client libraries ───────────────────────────────────────────────────────────
 

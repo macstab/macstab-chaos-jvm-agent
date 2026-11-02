@@ -348,8 +348,26 @@ final class JvmRuntimeAdvice {
   /** Intercepts {@code WritableByteChannel.write(ByteBuffer)} (NIO_CHANNEL_WRITE). */
   static final class NioChannelWriteAdvice {
     @Advice.OnMethodEnter
-    static void enter(@Advice.This final Object channel) throws Throwable {
-      BootstrapDispatcher.beforeNioChannelOp("NIO_CHANNEL_WRITE", channel);
+    static int enter(
+        @Advice.This final Object channel, @Advice.Argument(0) final java.nio.ByteBuffer buffer)
+        throws Throwable {
+      final int requested = buffer == null ? -1 : buffer.remaining();
+      final int count = BootstrapDispatcher.beforeNioChannelWrite(channel, requested);
+      if (buffer != null && count >= 0 && count < requested) {
+        final int originalLimit = buffer.limit();
+        buffer.limit(buffer.position() + count);
+        return originalLimit;
+      }
+      return -1;
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit(
+        @Advice.Enter final int originalLimit,
+        @Advice.Argument(0) final java.nio.ByteBuffer buffer) {
+      if (originalLimit >= 0) {
+        buffer.limit(originalLimit);
+      }
     }
   }
 
@@ -434,14 +452,31 @@ final class JvmRuntimeAdvice {
    * address (see {@link SocketReadAdvice}).
    */
   static final class SocketWriteBulkAdvice {
+    /** Returns the requested length when the write is torn, else {@code -1}. */
     @Advice.OnMethodEnter
-    static void enter(
+    static int enter(
         @Advice.This final Object stream,
-        @Advice.Argument(2) final int len,
+        @Advice.Argument(value = 2, readOnly = false) int len,
         @Advice.FieldValue("address") final java.net.InetAddress remoteAddress,
         @Advice.FieldValue("port") final int remotePort)
         throws Throwable {
-      BootstrapDispatcher.beforeSocketWrite(stream, len, remoteAddress, remotePort);
+      final int count =
+          BootstrapDispatcher.beforeSocketWrite(stream, len, remoteAddress, remotePort);
+      if (count >= 0 && count < len) {
+        final int requested = len;
+        len = count;
+        return requested;
+      }
+      return -1;
+    }
+
+    /** A torn write sent its prefix; it now fails as a reset connection. */
+    @Advice.OnMethodExit
+    static void exit(@Advice.Enter final int requested, @Advice.Argument(2) final int len)
+        throws Throwable {
+      if (requested >= 0) {
+        throw BootstrapDispatcher.tornWriteFailure(len, requested);
+      }
     }
   }
 
@@ -1040,6 +1075,95 @@ final class JvmRuntimeAdvice {
         @Advice.This final Object channel, @Advice.FieldValue("path") final String path)
         throws Throwable {
       BootstrapDispatcher.beforeFileIo("FILE_IO_SYNC", channel, path, -1);
+    }
+  }
+
+  /**
+   * Intercepts {@code FileChannelImpl.truncate(long)} and {@code RandomAccessFile.setLength(long)}:
+   * both hold the file's path in a {@code path} field.
+   */
+  static final class FileTruncateAdvice {
+    @Advice.OnMethodEnter
+    static void enter(@Advice.This final Object file, @Advice.FieldValue("path") final String path)
+        throws Throwable {
+      BootstrapDispatcher.beforeFileIo("FILE_IO_TRUNCATE", file, path, -1);
+    }
+  }
+
+  /**
+   * Intercepts {@code AbstractFileSystemProvider.delete(Path)} and {@code deleteIfExists(Path)},
+   * which {@code Files.delete} and {@code Files.deleteIfExists} reach.
+   */
+  static final class FilesDeleteAdvice {
+    @Advice.OnMethodEnter
+    static void enter(
+        @Advice.This final Object provider, @Advice.Argument(0) final java.nio.file.Path file)
+        throws Throwable {
+      BootstrapDispatcher.beforeFileIo(
+          "FILE_IO_DELETE", provider, file == null ? null : file.toString(), -1);
+    }
+  }
+
+  /** Intercepts a file system provider's {@code move(Path, Path, CopyOption...)}. */
+  static final class FilesMoveAdvice {
+    @Advice.OnMethodEnter
+    static void enter(
+        @Advice.This final Object provider, @Advice.Argument(0) final java.nio.file.Path source)
+        throws Throwable {
+      BootstrapDispatcher.beforeFileIo(
+          "FILE_IO_MOVE", provider, source == null ? null : source.toString(), -1);
+    }
+  }
+
+  /**
+   * Intercepts {@link java.io.File#delete()}. {@code java.io} reports a failed delete by returning
+   * {@code false}, so an injected I/O failure skips the delete and returns {@code false}.
+   */
+  static final class FileDeleteAdvice {
+    @Advice.OnMethodEnter(skipOn = Advice.OnNonDefaultValue.class)
+    static boolean enter(
+        @Advice.This final Object file, @Advice.FieldValue("path") final String path)
+        throws Throwable {
+      try {
+        BootstrapDispatcher.beforeFileIo("FILE_IO_DELETE", file, path, -1);
+        return false;
+      } catch (final java.io.IOException failed) {
+        return true;
+      }
+    }
+
+    @Advice.OnMethodExit
+    static void exit(
+        @Advice.Enter final boolean failed, @Advice.Return(readOnly = false) boolean deleted) {
+      if (failed) {
+        deleted = false;
+      }
+    }
+  }
+
+  /**
+   * Intercepts {@link java.io.File#renameTo(java.io.File)}; an injected I/O failure skips the
+   * rename and returns {@code false}, as {@link FileDeleteAdvice} does for deletes.
+   */
+  static final class FileRenameAdvice {
+    @Advice.OnMethodEnter(skipOn = Advice.OnNonDefaultValue.class)
+    static boolean enter(
+        @Advice.This final Object file, @Advice.FieldValue("path") final String path)
+        throws Throwable {
+      try {
+        BootstrapDispatcher.beforeFileIo("FILE_IO_MOVE", file, path, -1);
+        return false;
+      } catch (final java.io.IOException failed) {
+        return true;
+      }
+    }
+
+    @Advice.OnMethodExit
+    static void exit(
+        @Advice.Enter final boolean failed, @Advice.Return(readOnly = false) boolean renamed) {
+      if (failed) {
+        renamed = false;
+      }
     }
   }
 

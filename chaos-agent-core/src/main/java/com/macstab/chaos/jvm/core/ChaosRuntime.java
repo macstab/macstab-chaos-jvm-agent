@@ -694,12 +694,25 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @param len the number of bytes about to be written
    * @param remoteAddress the peer {@link java.net.InetAddress}, or {@code null} if not connected
    * @param remotePort the peer port
+   * @return the bytes to write: {@code len}, or a shorter prefix under a torn write
    * @throws Throwable if an active scenario throws to simulate a failure
    */
-  public void beforeSocketWrite(
+  public int beforeSocketWrite(
       final Object stream, final int len, final Object remoteAddress, final int remotePort)
       throws Throwable {
-    dispatcher.beforeSocketWrite(stream, len, remoteAddress, remotePort);
+    return dispatcher.beforeSocketWrite(stream, len, remoteAddress, remotePort);
+  }
+
+  /**
+   * Delegates to {@link ChaosDispatcher#beforeNioChannelWrite(Object, int)}.
+   *
+   * @param channel the channel being written to
+   * @param remaining the bytes the buffer holds
+   * @return the bytes to write: {@code remaining}, or fewer under a torn write
+   * @throws Throwable if an active scenario throws to simulate a failure
+   */
+  public int beforeNioChannelWrite(final Object channel, final int remaining) throws Throwable {
+    return dispatcher.beforeNioChannelWrite(channel, remaining);
   }
 
   /**

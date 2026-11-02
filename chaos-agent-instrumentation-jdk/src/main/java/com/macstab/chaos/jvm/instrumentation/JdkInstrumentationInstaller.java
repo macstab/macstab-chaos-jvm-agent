@@ -336,7 +336,10 @@ public final class JdkInstrumentationInstaller {
         JdkInstrumentationInstaller::applyPhase2FileIoInterception,
         OperationType.FILE_IO_READ,
         OperationType.FILE_IO_WRITE,
-        OperationType.FILE_IO_SYNC);
+        OperationType.FILE_IO_SYNC,
+        OperationType.FILE_IO_TRUNCATE,
+        OperationType.FILE_IO_DELETE,
+        OperationType.FILE_IO_MOVE);
 
     private final java.util.function.UnaryOperator<AgentBuilder> transformations;
     private final Set<OperationType> operations;
@@ -775,7 +778,12 @@ public final class JdkInstrumentationInstaller {
         lookup.findVirtual(
             delegateInterface,
             "beforeSocketWrite",
-            MethodType.methodType(void.class, Object.class, int.class, Object.class, int.class));
+            MethodType.methodType(int.class, Object.class, int.class, Object.class, int.class));
+    methodHandles[BootstrapDispatcher.BEFORE_NIO_CHANNEL_WRITE] =
+        lookup.findVirtual(
+            delegateInterface,
+            "beforeNioChannelWrite",
+            MethodType.methodType(int.class, Object.class, int.class));
     methodHandles[BootstrapDispatcher.BEFORE_SOCKET_CLOSE] =
         lookup.findVirtual(
             delegateInterface,
@@ -2617,7 +2625,12 @@ public final class JdkInstrumentationInstaller {
                         Advice.to(JvmRuntimeAdvice.FileChannelForceAdvice.class)
                             .on(
                                 ElementMatchers.named("force")
-                                    .and(ElementMatchers.takesArguments(boolean.class)))))
+                                    .and(ElementMatchers.takesArguments(boolean.class))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.FileTruncateAdvice.class)
+                            .on(
+                                ElementMatchers.named("truncate")
+                                    .and(ElementMatchers.takesArguments(long.class)))))
         .type(ElementMatchers.named("java.io.RandomAccessFile"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
@@ -2645,7 +2658,49 @@ public final class JdkInstrumentationInstaller {
                                 ElementMatchers.named("writeBytes")
                                     .and(
                                         ElementMatchers.takesArguments(
-                                            byte[].class, int.class, int.class)))))
+                                            byte[].class, int.class, int.class))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.FileTruncateAdvice.class)
+                            .on(
+                                ElementMatchers.named("setLength")
+                                    .and(ElementMatchers.takesArguments(long.class)))))
+        // Files.delete / deleteIfExists: the platform providers inherit both from
+        // AbstractFileSystemProvider, which funnels them to implDelete.
+        .type(ElementMatchers.named("sun.nio.fs.AbstractFileSystemProvider"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(JvmRuntimeAdvice.FilesDeleteAdvice.class)
+                        .on(
+                            ElementMatchers.namedOneOf("delete", "deleteIfExists")
+                                .and(ElementMatchers.takesArguments(java.nio.file.Path.class)))))
+        // Files.move: each platform provider implements move itself (UnixFileSystemProvider,
+        // WindowsFileSystemProvider); other providers (zip file systems) are not hooked.
+        .type(
+            ElementMatchers.nameStartsWith("sun.nio.fs.")
+                .and(ElementMatchers.isSubTypeOf(java.nio.file.spi.FileSystemProvider.class)))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(JvmRuntimeAdvice.FilesMoveAdvice.class)
+                        .on(
+                            ElementMatchers.named("move")
+                                .and(ElementMatchers.takesArguments(3))
+                                .and(ElementMatchers.not(ElementMatchers.isAbstract())))))
+        .type(ElementMatchers.named("java.io.File"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.FileDeleteAdvice.class)
+                            .on(
+                                ElementMatchers.named("delete")
+                                    .and(ElementMatchers.takesArguments(0))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.FileRenameAdvice.class)
+                            .on(
+                                ElementMatchers.named("renameTo")
+                                    .and(ElementMatchers.takesArguments(java.io.File.class)))))
         .type(ElementMatchers.named("java.io.FileDescriptor"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->

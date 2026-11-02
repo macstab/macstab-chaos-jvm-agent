@@ -427,10 +427,21 @@ public interface BridgeDelegate {
    * @param len the number of bytes about to be written
    * @param remoteAddress the peer {@code java.net.InetAddress}, or {@code null} if not connected
    * @param remotePort the peer port
+   * @return the bytes to write: {@code len}, or a shorter prefix under a torn write
    * @throws Throwable if an active scenario injects a failure to simulate a write error
    */
-  void beforeSocketWrite(Object stream, int len, Object remoteAddress, int remotePort)
+  int beforeSocketWrite(Object stream, int len, Object remoteAddress, int remotePort)
       throws Throwable;
+
+  /**
+   * Called before {@link java.nio.channels.SocketChannel#write(java.nio.ByteBuffer)}.
+   *
+   * @param channel the channel being written to
+   * @param remaining the bytes the buffer holds
+   * @return the bytes to write: {@code remaining}, or fewer under a torn write
+   * @throws Throwable if an active scenario injects a failure to simulate a write error
+   */
+  int beforeNioChannelWrite(Object channel, int remaining) throws Throwable;
 
   /**
    * Called before {@link java.net.Socket#close()}.

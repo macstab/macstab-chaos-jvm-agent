@@ -275,7 +275,7 @@ package "chaos-agent-core" {
 }
 
 package "chaos-agent-bootstrap" {
-  [BootstrapDispatcher\n(64 slots)] as BD
+  [BootstrapDispatcher\n(65 slots)] as BD
 }
 
 AgentArgs --> AAP
@@ -1165,14 +1165,14 @@ Once the hook is wired, the matcher, effect, and activation policy behave like e
 ### `fileIo` — FileIoSelector
 
 **JSON type:** `"fileIo"`  
-**Operations:** `FILE_IO_READ`, `FILE_IO_WRITE`, `FILE_IO_SYNC`  
-**Purpose:** Intercept file reads, writes and fsyncs: `FileInputStream` / `FileOutputStream` reads and writes, `RandomAccessFile` reads and writes, `FileChannel` reads and writes (single-buffer, positional or not), and `FileChannel.force` / `FileDescriptor.sync` (`FILE_IO_SYNC`). Reads of `.jar`, `.zip` and `.jmod` archives through `RandomAccessFile` are never evaluated: they are the JVM's class loading.
+**Operations:** `FILE_IO_READ`, `FILE_IO_WRITE`, `FILE_IO_SYNC`, `FILE_IO_TRUNCATE`, `FILE_IO_DELETE`, `FILE_IO_MOVE`  
+**Purpose:** Intercept file reads, writes and fsyncs: `FileInputStream` / `FileOutputStream` reads and writes, `RandomAccessFile` reads and writes, `FileChannel` reads and writes (single-buffer, positional or not), and `FileChannel.force` / `FileDescriptor.sync` (`FILE_IO_SYNC`); `FileChannel.truncate` and `RandomAccessFile.setLength` (`FILE_IO_TRUNCATE`); `Files.delete`, `Files.deleteIfExists` and `File.delete` (`FILE_IO_DELETE`); `Files.move` and `File.renameTo` (`FILE_IO_MOVE`, matched by the source path). A failed `File.delete` or `File.renameTo` returns `false` instead of throwing, as `java.io` reports those failures; the `Files` methods throw. Reads of `.jar`, `.zip` and `.jmod` archives through `RandomAccessFile` are never evaluated: they are the JVM's class loading.
 
 **Fields:**
 
 | Field         | Type                 | Default   | Description                                                                                                                                                                                                                                       |
 |---------------|----------------------|-----------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `operations`  | Set\<OperationType\> | required  | `FILE_IO_READ` and/or `FILE_IO_WRITE`                                                                                                                                                                                                             |
+| `operations`  | Set\<OperationType\> | required  | any of the six `FILE_IO_*` operations                                                                                                                                                                                                             |
 | `pathPattern` | PathPattern          | `null`    | `{"prefix": "/var/lib/app"}` matches that path and everything below it on a `/` boundary (`/var/lib/application` does not match). Paths are normalised lexically (`.`, `..`, repeated `/`; `\` counts as `/`); symbolic links are not resolved. A stream opened from a `FileDescriptor` has no path and never matches. |
 | `minBytes`    | Long                 | `null`    | The byte count of the call must be at least this (inclusive): 1 for `read()`/`write(int)`, the array length for `read(byte[])`/`write(byte[])`, otherwise `len`. For a read it is the number requested.                                        |
 | `maxBytes`    | Long                 | `null`    | The byte count of the call must be at most this (inclusive).                                                                                                                                                                                      |
@@ -1380,7 +1380,7 @@ The native library's network delivery effects, applied to the real socket and fi
 | `corruptRead`     | `CorruptReadEffect`     | `SOCKET_READ`, `FILE_IO_READ`   | After a read that returned bytes, exactly one bit of one returned byte is flipped (`CORRUPT`)                                                                   |
 | `timeout`         | `TimeoutEffect`         | `SOCKET_READ`, `SOCKET_CONNECT` | Waits for the call's own timeout (`SO_TIMEOUT`, or the connect timeout) and throws `SocketTimeoutException` (`Read timed out` / `Connect timed out`). On a call without a timeout (infinite) it does not fire and counts no application (`TIMEOUT`) |
 | `connectionReset` | `ConnectionResetEffect` | `SOCKET_CLOSE`                  | Closes with `SO_LINGER` 0: unsent data is discarded and the peer receives a reset — its next read fails with `SocketException: Connection reset` (`RESET`)      |
-| `tornWrite`       | `TornWriteEffect`       | `FILE_IO_WRITE`                 | A `FileChannel` write succeeds short: a random 1 to n-1 of the n bytes are written and that count returned, which callers must loop on (`TORN`). Stream writes (`FileOutputStream`, `RandomAccessFile`) complete or throw, so a match there does nothing and counts no application |
+| `tornWrite`       | `TornWriteEffect`       | `FILE_IO_WRITE`, `SOCKET_WRITE`, `NIO_CHANNEL_WRITE` | A `FileChannel` or `SocketChannel` write succeeds short: a random 1 to n-1 of the n bytes are written and that count returned, which callers must loop on (`TORN`). A socket stream write sends that prefix, then throws `SocketException` ("Connection reset …"): the peer sees a truncated message. File stream writes (`FileOutputStream`, `RandomAccessFile`) complete or throw, so a match there does nothing and counts no application |
 
 ```json
 { "type": "trickle", "maxBytes": 16 }

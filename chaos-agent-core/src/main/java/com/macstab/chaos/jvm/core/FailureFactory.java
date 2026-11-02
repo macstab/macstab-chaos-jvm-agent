@@ -101,6 +101,7 @@ final class FailureFactory {
       // FileDescriptor.sync() declares only SyncFailedException; FileChannel.force any
       // IOException. SyncFailedException satisfies both.
       case FILE_IO_SYNC -> new java.io.SyncFailedException(message);
+      case FILE_IO_TRUNCATE, FILE_IO_DELETE, FILE_IO_MOVE -> new java.io.IOException(message);
       default -> new IllegalStateException(message);
     };
   }

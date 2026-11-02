@@ -495,13 +495,27 @@ final class ChaosBridge implements BridgeDelegate {
    * @param len the number of bytes about to be written
    * @param remoteAddress the peer address, or {@code null}
    * @param remotePort the peer port
+   * @return the bytes to write: {@code len}, or a shorter prefix under a torn write
    * @throws Throwable if the runtime decides to abort or delay the write
    */
   @Override
-  public void beforeSocketWrite(
+  public int beforeSocketWrite(
       final Object stream, final int len, final Object remoteAddress, final int remotePort)
       throws Throwable {
-    runtime.beforeSocketWrite(stream, len, remoteAddress, remotePort);
+    return runtime.beforeSocketWrite(stream, len, remoteAddress, remotePort);
+  }
+
+  /**
+   * Invoked before a {@code SocketChannel} write.
+   *
+   * @param channel the channel being written to
+   * @param remaining the bytes the buffer holds
+   * @return the bytes to write: {@code remaining}, or fewer under a torn write
+   * @throws Throwable if the runtime decides to abort or delay the write
+   */
+  @Override
+  public int beforeNioChannelWrite(final Object channel, final int remaining) throws Throwable {
+    return runtime.beforeNioChannelWrite(channel, remaining);
   }
 
   /**
