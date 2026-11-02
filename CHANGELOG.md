@@ -15,6 +15,7 @@
 
 ### Features
 
+* **quarkus:** `@ChaosScenario` (and its container `@ChaosScenarios`) is deprecated for removal in 3.0 in favour of the testkit's `@WithChaos`, which `ChaosQuarkusExtension` honours with the full plan JSON model.
 * **observability:** new optional module `chaos-agent-opentelemetry`: `ChaosOpenTelemetry.metrics(controlPlane, openTelemetry)` publishes the chaos metrics through the OpenTelemetry API, and `ChaosOpenTelemetry.spanEvents(controlPlane)` adds a `chaos.applied` event to the current span whenever chaos applies to a traced call.
 * **observability:** new metrics `chaos.applications` (by operation and effect), `chaos.injected.delay` (the latency chaos added), `chaos.skips`, `chaos.activation.failures`, `chaos.events.dropped` and `chaos.hooks.woven`; `APPLIED` events carry `delayMillis`. `ChaosMeterBinder` is `AutoCloseable`.
 * **startup-config:** a plan's `observability` block now takes effect for its scenarios: `jmxEnabled=false` leaves them out of the JMX `listScenarios` and `debugDump`, `structuredLoggingEnabled=false` stops logging their events, `debugDumpOnStart=true` prints the diagnostics once the plan is active. It applies to programmatic plans, plan files (also across reloads) and JMX `activatePlan`; before, the block was parsed and ignored.

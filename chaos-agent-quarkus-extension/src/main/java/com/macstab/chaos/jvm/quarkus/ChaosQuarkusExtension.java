@@ -52,6 +52,8 @@ import org.junit.jupiter.api.extension.ParameterResolver;
  * <p>The extension injects {@link ChaosSession} and {@link ChaosControlPlane} parameters on test
  * methods and lifecycle methods.
  */
+// Still honours the deprecated @ChaosScenario until it is removed.
+@SuppressWarnings("removal")
 public final class ChaosQuarkusExtension
     implements BeforeAllCallback,
         BeforeEachCallback,

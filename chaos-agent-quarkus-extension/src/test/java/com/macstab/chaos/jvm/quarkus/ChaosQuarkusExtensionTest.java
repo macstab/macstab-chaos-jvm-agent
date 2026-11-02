@@ -21,6 +21,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
  */
 @ExtendWith(ChaosQuarkusExtension.class)
 @DisplayName("ChaosQuarkusExtension")
+@SuppressWarnings("removal")
 class ChaosQuarkusExtensionTest {
 
   @Nested
