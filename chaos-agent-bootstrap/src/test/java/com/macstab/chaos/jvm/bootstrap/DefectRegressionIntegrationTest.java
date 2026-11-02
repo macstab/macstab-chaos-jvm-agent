@@ -698,6 +698,27 @@ class DefectRegressionIntegrationTest {
     }
 
     @Test
+    @DisplayName(
+        "clockCallSites skews System.currentTimeMillis and nanoTime in the selected package")
+    void clockCallSites() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.run(
+              plan(
+                  scenario(
+                      "skew-intrinsics",
+                      ChaosSelector.jvmRuntime(
+                          Set.of(
+                              OperationType.SYSTEM_CLOCK_MILLIS, OperationType.SYSTEM_CLOCK_NANOS)),
+                      ChaosEffect.skewClock(Duration.ofHours(1), ChaosEffect.ClockSkewMode.FIXED))),
+              DefectProbeMain.class,
+              "clock-call-sites",
+              null,
+              "-Dmacstab.chaos.clockCallSites=com.example.chaostarget.");
+      assertThat(result.longValue("millisSkewSeconds")).isEqualTo(3600L);
+      assertThat(result.longValue("nanosSkewSeconds")).isEqualTo(3600L);
+    }
+
+    @Test
     @DisplayName("a process start fails with the JDK's own message, only for the selected program")
     void processStart() throws Exception {
       final String java = Path.of(System.getProperty("java.home"), "bin", "java").toString();

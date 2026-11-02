@@ -789,9 +789,9 @@ The agent is designed to be permanently installed in production. With zero activ
 
 ## 11. Limitations and Known Constraints
 
-### `System.currentTimeMillis()` and `System.nanoTime()` Are Not Directly Interceptable
+### `System.currentTimeMillis()` and `System.nanoTime()` Are Skewed Only at Opted-In Call Sites
 
-Both methods are JVM intrinsics with `@IntrinsicCandidate` annotations. The JIT replaces their call sites with CPU instructions — no method body is executed, so advice cannot be woven. The clock skew effect targets the higher-level `java.time` APIs (`Instant.now()`, `LocalDateTime.now()`, `ZonedDateTime.now()`) and `new Date()` instead. Application code reading the clock through `System.currentTimeMillis()` directly is not skewed.
+Both methods are JVM intrinsics with `@IntrinsicCandidate` annotations. The JIT replaces their call sites with CPU instructions — no method body is executed, so advice cannot be woven into them. The clock skew effect targets the higher-level `java.time` APIs (`Instant.now()`, `LocalDateTime.now()`, `ZonedDateTime.now()`) and `new Date()` out of the box. Direct `System.currentTimeMillis()` / `nanoTime()` calls are skewed when their callers are named with `clockCallSites=com.example.,org.acme.` (agent arg; `-Dmacstab.chaos.clockCallSites` or `MACSTAB_CHAOS_CLOCK_CALL_SITES`) and a `SYSTEM_CLOCK_MILLIS` / `SYSTEM_CLOCK_NANOS` scenario is active: the agent rewrites the call sites in those packages (see [configuration-reference.md](configuration-reference.md)). JDK and library code outside the prefixes keeps the real clock.
 
 ### `java.net.http.HttpClient` Is Intercepted Out of the Box
 

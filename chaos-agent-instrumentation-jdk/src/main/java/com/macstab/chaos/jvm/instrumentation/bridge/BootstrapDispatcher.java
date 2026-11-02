@@ -947,6 +947,28 @@ public final class BootstrapDispatcher {
   }
 
   /**
+   * {@link System#currentTimeMillis()} through the clock-skew dispatch: the replacement woven into
+   * application call sites when clock call-site weaving is on ({@code clockCallSites}). The JIT
+   * intrinsic cannot be advised itself; its callers can.
+   *
+   * @return the possibly skewed wall-clock time
+   * @throws Throwable if the delegate throws
+   */
+  public static long currentTimeMillis() throws Throwable {
+    return adjustClockMillis(System.currentTimeMillis());
+  }
+
+  /**
+   * {@link System#nanoTime()} through the clock-skew dispatch; see {@link #currentTimeMillis()}.
+   *
+   * @return the possibly skewed monotonic time
+   * @throws Throwable if the delegate throws
+   */
+  public static long nanoTime() throws Throwable {
+    return adjustClockNanos(System.nanoTime());
+  }
+
+  /**
    * Returns the chaos-adjusted monotonic time in nanoseconds.
    *
    * <p>Called by {@code ClockNanosAdvice} to rewrite the return value of {@code System.nanoTime()}.

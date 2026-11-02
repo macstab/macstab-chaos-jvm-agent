@@ -105,8 +105,8 @@ Different rules: the native `FAIL_AFTER` counter is per operation and resets on 
 
 | Native                                        | Why the JVM has no equivalent                                                                                     |
 |-----------------------------------------------|-------------------------------------------------------------------------------------------------------------------|
-| `OFFSET`/`REGRESS` seen by `System.currentTimeMillis()` and `System.nanoTime()` | both are JIT intrinsics; the agent skews `java.time` and `java.util.Date` reads only. Use the native time rule to move the clock beneath the JVM. |
-| `clock_gettime/monotonic`                     | `System.nanoTime()` is an intrinsic (as above)                                                                    |
+| `OFFSET`/`REGRESS` seen by every `System.currentTimeMillis()` and `System.nanoTime()` read, JDK and libraries included | both are JIT intrinsics; the agent skews `java.time` and `java.util.Date` reads, and direct calls only at the call sites in the packages named with `clockCallSites` (`OperationType.SYSTEM_CLOCK_MILLIS`, `OperationType.SYSTEM_CLOCK_NANOS`). Use the native time rule to move the clock beneath everything in the JVM. |
+| `clock_gettime/monotonic` beneath the JDK     | `System.nanoTime()` is an intrinsic (as above); only opted-in call sites are skewed |
 | `DUP`, `SERVICE`                              | no JVM effect duplicates received data or rewrites a resolved service port                                        |
 | `unix://` endpoints                           | Unix-domain sockets are not intercepted                                                                           |
 | `mmap`, `munmap`, `mprotect`, `madvise`       | the JVM does not expose memory mapping calls; the pressure stressors (`ChaosEffect.heapPressure(...)`, `ChaosEffect.directBufferPressure(...)`) are the JVM-level analogue |

@@ -97,6 +97,7 @@ public final class DefectProbeMain {
       case "file-writes-by-path" -> fileWritesByPath();
       case "file-ops" -> fileOps();
       case "process-start" -> processStart();
+      case "clock-call-sites" -> clockCallSites();
       case "socket-torn-write" -> socketTornWrite();
       case "method-weaving" -> methodWeaving();
       case "woven-groups" -> printWovenGroups();
@@ -823,6 +824,25 @@ public final class DefectProbeMain {
     } catch (final java.io.IOException failed) {
       System.out.println("other=" + failed.getMessage());
     }
+  }
+
+  /**
+   * Prints how far the clocks read by ClockReader (a selected package) are from those read here
+   * (not selected), in seconds; read after JIT compilation of ClockReader too.
+   */
+  private static void clockCallSites() {
+    for (int i = 0; i < 20_000; i++) {
+      com.example.chaostarget.ClockReader.millis();
+      com.example.chaostarget.ClockReader.nanos();
+    }
+    System.out.println(
+        "millisSkewSeconds="
+            + Math.round(
+                (com.example.chaostarget.ClockReader.millis() - System.currentTimeMillis())
+                    / 1000.0));
+    System.out.println(
+        "nanosSkewSeconds="
+            + Math.round((com.example.chaostarget.ClockReader.nanos() - System.nanoTime()) / 1e9));
   }
 
   /** Prints how far now(ZoneId) is from the unskewed Instant.now(), in seconds. */

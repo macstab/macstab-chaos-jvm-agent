@@ -290,11 +290,13 @@ public enum OperationType {
    * agent's public clock-skew hook. Used with {@link ChaosEffect.ClockSkewEffect} to apply fixed,
    * drifting, or frozen offsets and test time-dependent logic.
    *
-   * <p><b>Manual hook required.</b> The agent does <i>not</i> auto-instrument {@link
-   * System#currentTimeMillis()} — that method is {@code public static native} and marked
-   * {@code @IntrinsicCandidate}, and HotSpot's JIT replaces the call with a direct hardware-clock
-   * instruction (RDTSC / MRS CNTVCT_EL0) that bypasses any bytecode wrapper, so retransformation
-   * has no effect. Apply this operation type by routing real time through the agent yourself:
+   * <p><b>Call sites, not the method.</b> {@link System#currentTimeMillis()} is {@code public
+   * static native} and marked {@code @IntrinsicCandidate}, and HotSpot's JIT replaces the call with
+   * a direct hardware-clock instruction (RDTSC / MRS CNTVCT_EL0) that bypasses any bytecode
+   * wrapper, so the method itself cannot be advised. Its call sites can: with the agent setting
+   * {@code clockCallSites=<package prefixes>}, calls in those packages are rewritten to read the
+   * clock through this operation while a scenario needs it. Without the setting, route real time
+   * through the agent yourself:
    *
    * <pre>{@code
    * long real = System.currentTimeMillis();
@@ -302,9 +304,8 @@ public enum OperationType {
    * }</pre>
    *
    * <p>Typical wiring point: an application-level {@code TimeProvider} / {@code Clock} wrapper
-   * already used in place of {@code System.currentTimeMillis()}. For zero-config skew of plain
-   * {@code System.currentTimeMillis()} call sites this operation type is unsupported; use {@link
-   * #INSTANT_NOW} instead, which the agent <i>does</i> auto-wire.
+   * already used in place of {@code System.currentTimeMillis()}. For skew without any setting, use
+   * {@link #INSTANT_NOW}, which the agent always wires.
    *
    * <p>Used exclusively with {@link ChaosSelector.JvmRuntimeSelector}.
    */
@@ -315,10 +316,10 @@ public enum OperationType {
    * clock-skew hook. A backward skew intentionally violates the monotonicity contract to expose
    * assumptions in timing loops and profiling code.
    *
-   * <p><b>Manual hook required.</b> Same JVM constraint as {@link #SYSTEM_CLOCK_MILLIS}: {@link
-   * System#nanoTime()} is {@code native @IntrinsicCandidate} and is JIT-replaced with a direct
-   * hardware counter read; bytecode advice on it does not take effect. Apply this operation type by
-   * routing real time through the agent yourself:
+   * <p><b>Call sites, not the method.</b> Same JVM constraint as {@link #SYSTEM_CLOCK_MILLIS}:
+   * {@link System#nanoTime()} is {@code native @IntrinsicCandidate} and is JIT-replaced with a
+   * direct hardware counter read. With {@code clockCallSites} its call sites in the named packages
+   * are rewritten; otherwise route real time through the agent yourself:
    *
    * <pre>{@code
    * long real = System.nanoTime();

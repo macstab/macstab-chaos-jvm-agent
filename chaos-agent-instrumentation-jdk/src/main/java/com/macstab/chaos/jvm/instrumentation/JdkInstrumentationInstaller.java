@@ -31,6 +31,8 @@ import java.util.logging.Logger;
 import net.bytebuddy.agent.builder.AgentBuilder;
 import net.bytebuddy.agent.builder.ResettableClassFileTransformer;
 import net.bytebuddy.asm.Advice;
+import net.bytebuddy.description.type.TypeDescription;
+import net.bytebuddy.matcher.ElementMatcher;
 import net.bytebuddy.matcher.ElementMatchers;
 import net.bytebuddy.utility.JavaModule;
 
@@ -113,6 +115,30 @@ public final class JdkInstrumentationInstaller {
    */
   public static void install(
       final Instrumentation instrumentation, final ChaosRuntime runtime, final boolean eager) {
+    install(instrumentation, runtime, eager, List.of());
+  }
+
+  /**
+   * Installs the agent, with clock call-site weaving for the classes under {@code
+   * clockCallSitePackages}: there, calls to {@link System#currentTimeMillis()} and {@link
+   * System#nanoTime()} are rewritten to go through the clock-skew dispatch once a {@code
+   * SYSTEM_CLOCK_MILLIS} or {@code SYSTEM_CLOCK_NANOS} scenario is activated. The methods
+   * themselves are JIT intrinsics no advice can reach; their call sites can be rewritten.
+   *
+   * @param instrumentation the {@link Instrumentation} handle
+   * @param runtime the runtime the bridge dispatches to
+   * @param eager {@code true} to weave every hook group immediately
+   * @param clockCallSitePackages package (or class-name) prefixes whose clock calls are rewritten,
+   *     e.g. {@code com.example.}; {@code java.}, {@code javax.}, {@code jdk.}, {@code sun.} and
+   *     {@code com.sun.} prefixes are refused
+   * @throws IllegalArgumentException if a prefix names JDK classes
+   */
+  public static void install(
+      final Instrumentation instrumentation,
+      final ChaosRuntime runtime,
+      final boolean eager,
+      final List<String> clockCallSitePackages) {
+    CLOCK_CALL_SITE_PACKAGES = validatedClockPackages(clockCallSitePackages);
     grantInternalModuleOpens(instrumentation);
     injectBridge(instrumentation);
     rejectForeignDelegate();
@@ -284,6 +310,10 @@ public final class JdkInstrumentationInstaller {
         JdkInstrumentationInstaller::applyThreadLocalTransformations,
         OperationType.THREAD_LOCAL_GET,
         OperationType.THREAD_LOCAL_SET),
+    CLOCK_CALL_SITES(
+        JdkInstrumentationInstaller::applyClockCallSiteTransformations,
+        OperationType.SYSTEM_CLOCK_MILLIS,
+        OperationType.SYSTEM_CLOCK_NANOS),
     TIME_API(
         JdkInstrumentationInstaller::applyTimeApiTransformations,
         OperationType.INSTANT_NOW,
@@ -2732,6 +2762,81 @@ public final class JdkInstrumentationInstaller {
                         .on(
                             ElementMatchers.named("start")
                                 .and(ElementMatchers.takesArguments(1)))));
+  }
+
+  /** Prefixes whose clock call sites are rewritten; empty when the feature is off. */
+  private static volatile List<String> CLOCK_CALL_SITE_PACKAGES = List.of();
+
+  private static final List<String> JDK_PREFIXES =
+      List.of("java.", "javax.", "jdk.", "sun.", "com.sun.");
+
+  static List<String> validatedClockPackages(final List<String> packages) {
+    final List<String> cleaned = new java.util.ArrayList<>();
+    for (final String raw : packages) {
+      final String prefix = raw == null ? "" : raw.strip();
+      if (prefix.isEmpty()) {
+        continue;
+      }
+      for (final String jdk : JDK_PREFIXES) {
+        if (prefix.startsWith(jdk) || jdk.startsWith(prefix)) {
+          throw new IllegalArgumentException("clockCallSites must not name JDK classes: " + prefix);
+        }
+      }
+      cleaned.add(prefix);
+    }
+    return List.copyOf(cleaned);
+  }
+
+  /**
+   * Returns the prefixes whose clock call sites are rewritten.
+   *
+   * @return the prefixes; empty when clock call-site weaving is off
+   */
+  static List<String> clockCallSitePackages() {
+    return CLOCK_CALL_SITE_PACKAGES;
+  }
+
+  /**
+   * Clock call sites: in classes under the configured prefixes, every {@code invokestatic} of
+   * {@link System#currentTimeMillis()} and {@link System#nanoTime()} becomes a call of {@link
+   * BootstrapDispatcher#currentTimeMillis()} / {@link BootstrapDispatcher#nanoTime()}, which return
+   * the real value through the clock-skew dispatch. Loaded classes are retransformed; method bodies
+   * change, nothing else.
+   */
+  private static AgentBuilder applyClockCallSiteTransformations(final AgentBuilder agentBuilder) {
+    final List<String> packages = CLOCK_CALL_SITE_PACKAGES;
+    if (packages.isEmpty()) {
+      return agentBuilder;
+    }
+    ElementMatcher.Junction<TypeDescription> types = ElementMatchers.none();
+    for (final String prefix : packages) {
+      types = types.or(ElementMatchers.nameStartsWith(prefix));
+    }
+    final TypeDescription dispatcher = TypeDescription.ForLoadedType.of(BootstrapDispatcher.class);
+    final net.bytebuddy.description.method.MethodDescription skewedMillis =
+        dispatcher
+            .getDeclaredMethods()
+            .filter(ElementMatchers.named("currentTimeMillis"))
+            .getOnly();
+    final net.bytebuddy.description.method.MethodDescription skewedNanos =
+        dispatcher.getDeclaredMethods().filter(ElementMatchers.named("nanoTime")).getOnly();
+    return agentBuilder
+        .type(types.and(ElementMatchers.not(ElementMatchers.isInterface())))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    net.bytebuddy.asm.MemberSubstitution.relaxed()
+                        .method(
+                            ElementMatchers.named("currentTimeMillis")
+                                .and(ElementMatchers.isDeclaredBy(System.class))
+                                .and(ElementMatchers.takesArguments(0)))
+                        .replaceWith(skewedMillis)
+                        .method(
+                            ElementMatchers.named("nanoTime")
+                                .and(ElementMatchers.isDeclaredBy(System.class))
+                                .and(ElementMatchers.takesArguments(0)))
+                        .replaceWith(skewedNanos)
+                        .on(ElementMatchers.any())));
   }
 
   /** Bridge jars older than this are left over from earlier JVMs and are removed. */

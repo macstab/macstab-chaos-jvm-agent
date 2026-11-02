@@ -1009,9 +1009,17 @@ Object out = chaosRuntime.afterMethodExit(
 
 `INSTANT_NOW`, `LOCAL_DATE_TIME_NOW`, `ZONED_DATE_TIME_NOW`, and `DATE_NEW` are **auto-wired** — the agent intercepts the corresponding `java.time` / `java.util.Date` calls at runtime and applies skew transparently. This is the recommended path for clock skew on modern code.
 
-`SYSTEM_CLOCK_MILLIS` and `SYSTEM_CLOCK_NANOS` are **not auto-wired and cannot be**. `System.currentTimeMillis()` and `System.nanoTime()` are `public static native @IntrinsicCandidate` methods on `java.lang.System`: retransformation cannot un-`native` them, and HotSpot's C2 JIT replaces the call with a direct hardware-clock instruction (`RDTSC` on x86, `MRS CNTVCT_EL0` on ARM) that bypasses any bytecode wrapper. This is a hard limitation of `-javaagent:` Java instrumentation.
+`SYSTEM_CLOCK_MILLIS` and `SYSTEM_CLOCK_NANOS` cannot be hooked at the method. `System.currentTimeMillis()` and `System.nanoTime()` are `public static native @IntrinsicCandidate` methods on `java.lang.System`: retransformation cannot un-`native` them, and HotSpot's C2 JIT replaces the call with a direct hardware-clock instruction (`RDTSC` on x86, `MRS CNTVCT_EL0` on ARM) that bypasses any bytecode wrapper.
 
-To skew a millisecond / nanosecond timestamp, route real time through the agent's public hook from your own code (typically an application-level `TimeProvider` or `Clock` wrapper):
+Their **call sites** can be rewritten instead. With `clockCallSites=com.example.,org.acme.` (agent arg; `-Dmacstab.chaos.clockCallSites` or `MACSTAB_CHAOS_CLOCK_CALL_SITES`), every call to either method in classes whose names start with one of those prefixes is rewritten — once a `SYSTEM_CLOCK_MILLIS` or `SYSTEM_CLOCK_NANOS` scenario is activated — into a call that reads the real clock and returns it through the clock-skew dispatch. Classes already loaded are retransformed. Prefixes naming JDK classes (`java.`, `javax.`, `jdk.`, `sun.`, `com.sun.`, or a shorter prefix covering them) are refused: rewriting the JDK's own clock reads would skew timeouts, schedulers and the agent itself. Calls inside libraries outside the prefixes keep the real clock.
+
+```json
+{ "id": "skew-intrinsics", "scope": "JVM",
+  "selector": { "type": "jvmRuntime", "operations": ["SYSTEM_CLOCK_MILLIS", "SYSTEM_CLOCK_NANOS"] },
+  "effect": { "type": "clockSkew", "skewAmount": "PT1H", "mode": "FIXED" } }
+```
+
+Without `clockCallSites`, route real time through the agent's public hook from your own code (typically an application-level `TimeProvider` or `Clock` wrapper):
 
 ```java
 long real = System.currentTimeMillis();

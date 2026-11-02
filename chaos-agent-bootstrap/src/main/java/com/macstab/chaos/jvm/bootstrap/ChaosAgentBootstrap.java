@@ -9,6 +9,7 @@ import com.macstab.chaos.jvm.startup.ConfigLoadException;
 import com.macstab.chaos.jvm.startup.StartupConfigLoader;
 import java.lang.instrument.Instrumentation;
 import java.lang.management.ManagementFactory;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
@@ -114,6 +115,18 @@ public final class ChaosAgentBootstrap {
 
   /** Environment variable equivalent of {@link #INSTRUMENTATION_ARG}. */
   static final String INSTRUMENTATION_ENV = "MACSTAB_CHAOS_INSTRUMENTATION";
+
+  /**
+   * Agent arg naming the package prefixes whose {@code System.currentTimeMillis()} and {@code
+   * nanoTime()} call sites are rewritten for clock skew, comma-separated.
+   */
+  static final String CLOCK_CALL_SITES_ARG = "clockCallSites";
+
+  /** System property equivalent of {@link #CLOCK_CALL_SITES_ARG}. */
+  static final String CLOCK_CALL_SITES_PROPERTY = "macstab.chaos.clockCallSites";
+
+  /** Environment variable equivalent of {@link #CLOCK_CALL_SITES_ARG}. */
+  static final String CLOCK_CALL_SITES_ENV = "MACSTAB_CHAOS_CLOCK_CALL_SITES";
 
   private ChaosAgentBootstrap() {}
 
@@ -349,7 +362,10 @@ public final class ChaosAgentBootstrap {
     Optional<ChaosReports> reports = Optional.empty();
     try {
       JdkInstrumentationInstaller.install(
-          instrumentation, runtime, eagerInstrumentation(agentArgs, environment));
+          instrumentation,
+          runtime,
+          eagerInstrumentation(agentArgs, environment),
+          clockCallSites(agentArgs, environment));
       instrumentationInstalled = true;
       registeredMBean = registerMBean(runtime, jmxControl(agentArgs, environment));
       installJfrIntegration(runtime);
@@ -403,6 +419,25 @@ public final class ChaosAgentBootstrap {
             : System.getProperty(
                 INSTRUMENTATION_PROPERTY, environment.getOrDefault(INSTRUMENTATION_ENV, ""));
     return "eager".equalsIgnoreCase(mode.strip());
+  }
+
+  /**
+   * The package prefixes for clock call-site weaving: agent arg {@code clockCallSites}, system
+   * property {@value #CLOCK_CALL_SITES_PROPERTY} or environment variable {@value
+   * #CLOCK_CALL_SITES_ENV}, comma-separated. Off (empty) by default.
+   */
+  static List<String> clockCallSites(
+      final String agentArgs, final Map<String, String> environment) {
+    final String fromArgs = AgentArgsParser.parse(agentArgs).get(CLOCK_CALL_SITES_ARG);
+    final String value =
+        fromArgs != null
+            ? fromArgs
+            : System.getProperty(
+                CLOCK_CALL_SITES_PROPERTY, environment.getOrDefault(CLOCK_CALL_SITES_ENV, ""));
+    return java.util.Arrays.stream(value.split(","))
+        .map(String::strip)
+        .filter(prefix -> !prefix.isEmpty())
+        .toList();
   }
 
   private static void rollBack(

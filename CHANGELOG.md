@@ -15,6 +15,7 @@
 
 ### Features
 
+* **instrumentation:** clock skew for direct `System.currentTimeMillis()` / `System.nanoTime()` calls. With the agent setting `clockCallSites=<package prefixes>` (also `-Dmacstab.chaos.clockCallSites`, `MACSTAB_CHAOS_CLOCK_CALL_SITES`), the agent rewrites those calls in the named packages to read the clock through `SYSTEM_CLOCK_MILLIS` / `SYSTEM_CLOCK_NANOS` once such a scenario is activated; the intrinsics themselves cannot be advised. JDK prefixes are refused.
 * **instrumentation:** process starts: `ProcessBuilder.start`, `startPipeline` and `Runtime.exec` are `PROCESS_START` events, selected with `ChaosSelector.process(commandPattern)` (JSON `"process"`) by program. A reject throws `IOException`; an `errno` throws the JDK's own `Cannot run program "x": error=N, reason`. `ChaosEffect.Errno` gains `EAGAIN` and `ENOMEM` (process family) and `code()`, the Linux error number.
 * **quarkus:** `@ChaosScenario` (and its container `@ChaosScenarios`) is deprecated for removal in 3.0 in favour of the testkit's `@WithChaos`, which `ChaosQuarkusExtension` honours with the full plan JSON model.
 * **observability:** new optional module `chaos-agent-opentelemetry`: `ChaosOpenTelemetry.metrics(controlPlane, openTelemetry)` publishes the chaos metrics through the OpenTelemetry API, and `ChaosOpenTelemetry.spanEvents(controlPlane)` adds a `chaos.applied` event to the current span whenever chaos applies to a traced call.
