@@ -46,6 +46,10 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
   private final ScenarioRegistry registry;
   private final Map<Thread, Thread> shutdownHooks = new ConcurrentHashMap<>();
   private final AtomicBoolean closed = new AtomicBoolean(false);
+
+  /** Scenarios whose plan set {@code jmxEnabled=false}: JMX does not list or dump them. */
+  private final Set<String> jmxHidden = ConcurrentHashMap.newKeySet();
+
   private volatile Optional<Instrumentation> instrumentation = Optional.empty();
 
   /**
@@ -80,6 +84,58 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
     return registerScenario(scenario, "jvm", null);
   }
 
+  /**
+   * Applies a plan's {@link ChaosPlan.Observability} to its scenarios: {@code
+   * structuredLoggingEnabled=false} stops logging their events, {@code jmxEnabled=false} hides them
+   * from JMX. Settings for the same ids are replaced.
+   *
+   * @param scenarioIds the plan's scenario ids
+   * @param observability the plan's settings
+   */
+  void applyPlanObservability(
+      final java.util.Collection<String> scenarioIds, final ChaosPlan.Observability observability) {
+    for (final String id : scenarioIds) {
+      observabilityBus.muteLogging(id, !observability.structuredLoggingEnabled());
+      if (observability.jmxEnabled()) {
+        jmxHidden.remove(id);
+      } else {
+        jmxHidden.add(id);
+      }
+    }
+  }
+
+  /**
+   * Removes plan observability settings from scenarios, restoring the defaults.
+   *
+   * @param scenarioIds the scenario ids
+   */
+  void clearPlanObservability(final java.util.Collection<String> scenarioIds) {
+    for (final String id : scenarioIds) {
+      observabilityBus.muteLogging(id, false);
+      jmxHidden.remove(id);
+    }
+  }
+
+  /**
+   * Returns whether JMX may list and dump the scenario.
+   *
+   * @param scenarioId the scenario id
+   * @return {@code false} when its plan set {@code jmxEnabled=false}
+   */
+  boolean jmxVisible(final String scenarioId) {
+    return !jmxHidden.contains(scenarioId);
+  }
+
+  /**
+   * Returns the debug dump restricted to scenarios {@code include} accepts.
+   *
+   * @param include whether a scenario id is part of the dump
+   * @return the dump
+   */
+  String debugDump(final java.util.function.Predicate<String> include) {
+    return registry.debugDump(include);
+  }
+
   @Override
   public ChaosActivationHandle activate(final ChaosPlan plan) {
     // A plan is atomic: either every scenario is registered or none are. If the 4th of 5
@@ -88,6 +144,8 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
     // "part of this plan is active". Roll back by stopping and destroying every successfully
     // registered handle before propagating the original exception.
     ensureOpen();
+    final List<String> ids = plan.scenarios().stream().map(ChaosScenario::id).toList();
+    applyPlanObservability(ids, plan.observability());
     final List<ChaosActivationHandle> handles = new ArrayList<>();
     try {
       for (final ChaosScenario scenario : plan.scenarios()) {
@@ -97,8 +155,15 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
         }
         handles.add(activate(scenario));
       }
-      return new CompositeActivationHandle("plan:" + plan.metadata().name(), handles);
+      final ChaosActivationHandle planHandle =
+          new CompositeActivationHandle(
+              "plan:" + plan.metadata().name(), handles, () -> clearPlanObservability(ids));
+      if (plan.observability().debugDumpOnStart()) {
+        System.err.println(registry.debugDump());
+      }
+      return planHandle;
     } catch (final RuntimeException failure) {
+      clearPlanObservability(ids);
       for (final ChaosActivationHandle handle : handles) {
         try {
           // activate(ChaosScenario) on this class returns a DefaultChaosActivationHandle, and the

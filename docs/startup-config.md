@@ -132,7 +132,11 @@ Malformed base64 input throws `ConfigLoadException` with category `base64`.
     "name": "string",
     "description": "string (optional)"
   },
-  "observability": { ... },           // optional; parsed but not read by the runtime
+  "observability": {                  // optional; all three default as shown
+    "jmxEnabled": true,               // false: JMX listScenarios/debugDump leave the plan out
+    "structuredLoggingEnabled": true, // false: the plan's events are not logged
+    "debugDumpOnStart": false         // true: print the diagnostics once the plan is active
+  },
   "scenarios": [
     {
       "id": "string (required, unique per plan)",
@@ -298,7 +302,15 @@ JSON parse failures report line, column, the kind of failure and the JSON path, 
 
 # 8. Observability
 
-No logs are emitted by this module during normal operation. Errors throw `ConfigLoadException` with descriptive messages. The `debugDumpOnStart` flag causes `ChaosRuntime.diagnostics().debugDump()` to be printed to `System.err` immediately after plan activation — useful for startup verification.
+No logs are emitted by this module during normal operation. Errors throw `ConfigLoadException` with descriptive messages. The `debugDumpOnStart` agent argument causes `ChaosRuntime.diagnostics().debugDump()` to be printed to `System.err` immediately after plan activation — useful for startup verification.
+
+A plan's `observability` block applies to that plan's scenarios for as long as the plan is active (until its handle is closed or, for a watched file, until a reload drops the scenario):
+
+| Field                      | Default | `false` / `true` means                                                                                 |
+|----------------------------|---------|--------------------------------------------------------------------------------------------------------|
+| `jmxEnabled`               | `true`  | `false`: the JMX `listScenarios` and `debugDump` operations leave the plan's scenarios out              |
+| `structuredLoggingEnabled` | `true`  | `false`: the plan's events are not written to `java.util.logging` (listeners and metrics still get them) |
+| `debugDumpOnStart`         | `false` | `true`: the diagnostics dump is printed to `System.err` once the plan is active (same as the agent argument) |
 
 ---
 

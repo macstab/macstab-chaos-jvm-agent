@@ -354,6 +354,16 @@ final class ScenarioRegistry implements ChaosDiagnostics {
    */
   @Override
   public String debugDump() {
+    return debugDump(id -> true);
+  }
+
+  /**
+   * Returns the debug dump restricted to the scenarios {@code include} accepts.
+   *
+   * @param include whether a scenario id is part of the dump
+   * @return the dump
+   */
+  String debugDump(final java.util.function.Predicate<String> include) {
     final Snapshot snapshot = snapshot();
     final StringBuilder builder = new StringBuilder();
     builder.append("macstab-chaos diagnostics").append(System.lineSeparator());
@@ -364,6 +374,9 @@ final class ScenarioRegistry implements ChaosDiagnostics {
             (key, value) ->
                 builder.append(key).append('=').append(value).append(System.lineSeparator()));
     for (final ScenarioReport report : snapshot.scenarios()) {
+      if (!include.test(report.id())) {
+        continue;
+      }
       builder
           .append(report.id())
           .append(" state=")

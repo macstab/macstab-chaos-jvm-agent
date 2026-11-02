@@ -18,6 +18,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -63,6 +64,9 @@ public final class StartupConfigPoller implements AutoCloseable {
 
   /** Agent arg key that sets the poll interval in milliseconds, overrides the env var. */
   public static final String ARG_WATCH_INTERVAL = "configWatchInterval";
+
+  /** The scenario ids the current plan's observability settings apply to. */
+  private Set<String> observedIds = Set.of();
 
   private final Path configPath;
   private final ChaosRuntime runtime;
@@ -130,6 +134,16 @@ public final class StartupConfigPoller implements AutoCloseable {
       return Optional.empty();
     }
     return Optional.of(new StartupConfigPoller(configPath, runtime, intervalMs));
+  }
+
+  /**
+   * Applies the initial plan, with its observability settings, and starts polling.
+   *
+   * @param initialPlan the plan from the first file read, already parsed by the caller
+   */
+  public void startWithInitialPlan(final com.macstab.chaos.jvm.api.ChaosPlan initialPlan) {
+    startWithInitialPlan(initialPlan.scenarios());
+    applyObservability(initialPlan);
   }
 
   /**
@@ -272,6 +286,7 @@ public final class StartupConfigPoller implements AutoCloseable {
     try {
       newPlan = ChaosPlanMapper.read(file.json());
       applyDiff(newPlan.scenarios());
+      applyObservability(newPlan);
     } catch (final RuntimeException failure) {
       failedDigest = digest;
       throw failure;
@@ -309,6 +324,8 @@ public final class StartupConfigPoller implements AutoCloseable {
       stopped = activeScenarios.size();
     }
     applyDiff(List.of());
+    runtime.clearPlanObservability(observedIds);
+    observedIds = Set.of();
     lastStamp = null;
     lastDigest = null;
     failedDigest = null;
@@ -337,6 +354,22 @@ public final class StartupConfigPoller implements AutoCloseable {
       // Every JDK provides SHA-256; fall back to the content itself.
       return json.getBytes(StandardCharsets.UTF_8);
     }
+  }
+
+  /**
+   * Applies the plan's observability settings to its scenarios and restores the defaults of
+   * scenarios that left the plan.
+   */
+  private synchronized void applyObservability(final com.macstab.chaos.jvm.api.ChaosPlan plan) {
+    final Set<String> ids =
+        plan.scenarios().stream()
+            .map(ChaosScenario::id)
+            .collect(java.util.stream.Collectors.toUnmodifiableSet());
+    final Set<String> gone = new java.util.HashSet<>(observedIds);
+    gone.removeAll(ids);
+    runtime.clearPlanObservability(gone);
+    runtime.applyPlanObservability(ids, plan.observability());
+    observedIds = ids;
   }
 
   /**

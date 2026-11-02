@@ -448,7 +448,10 @@ public final class ChaosAgentBootstrap {
     } else {
       runtime.activate(loaded.plan());
     }
-    if (loaded.debugDumpOnStart()) {
+    // runtime.activate(plan) prints the plan's own debugDumpOnStart; the poller path does not.
+    final boolean planDumps = loaded.plan().observability().debugDumpOnStart();
+    final boolean pollerActivated = POLLER.get() != null;
+    if ((loaded.debugDumpOnStart() && !planDumps) || (planDumps && pollerActivated)) {
       System.err.println(runtime.diagnostics().debugDump());
     }
   }
@@ -459,7 +462,7 @@ public final class ChaosAgentBootstrap {
       final ChaosRuntime runtime) {
     POLLER.set(poller);
     try {
-      poller.startWithInitialPlan(loaded.plan().scenarios());
+      poller.startWithInitialPlan(loaded.plan());
     } catch (final RuntimeException startFailure) {
       // startWithInitialPlan can throw after POLLER has been populated — e.g. an
       // activation failure on the initial plan, a scheduler rejection, or an I/O
@@ -511,8 +514,7 @@ public final class ChaosAgentBootstrap {
     try {
       final ObjectName objectName = new ObjectName(MBEAN_NAME);
       ManagementFactory.getPlatformMBeanServer()
-          .registerMBean(
-              new ChaosDiagnosticsMBean(runtime.diagnostics(), runtime, control), objectName);
+          .registerMBean(new ChaosDiagnosticsMBean(runtime, control), objectName);
       return objectName;
     } catch (final javax.management.InstanceAlreadyExistsException alreadyRegistered) {
       System.err.println(

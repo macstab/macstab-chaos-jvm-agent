@@ -49,7 +49,7 @@ Both files are written to a staging file and renamed, so a reader never sees a p
 |--------------|------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------|
 | `REGISTERED` | a scenario was registered, before it starts                                                                                  | `scope`                                      |
 | `STARTED`    | the scenario became `ACTIVE`                                                                                                 | `scope`                                      |
-| `APPLIED`    | an effect took effect                                                                                                        | `operation`, `scope`, `effectType`, …        |
+| `APPLIED`    | an effect took effect                                                                                                        | `operation`, `scope`, `effectType`, `delayMillis` (when it added a delay), `sessionId` (session scenarios) |
 | `SKIPPED`    | the selector matched but the policy kept the effect from applying — published only while a listener is registered           | `reason` (`notYetActive`, `warmUp`, `probability`, `rateLimit`, `maxApplications`), `operation`, `scope` |
 | `RELEASED`   | a gate was released                                                                                                          | `scope`                                      |
 | `STOPPED`    | the scenario stopped                                                                                                         | `scope`                                      |
@@ -57,16 +57,36 @@ Both files are written to a staging file and renamed, so a reader never sees a p
 
 ## 3. Metrics
 
-The optional module `chaos-agent-micrometer` binds chaos activity to a Micrometer `MeterRegistry`:
+Two optional modules turn events into metrics. Each instrument has one fixed set of tags (Prometheus rejects a name registered with differing tag keys).
+
+| Metric                      | Type                  | Tags (Micrometer)                    | Measures                                                          |
+|-----------------------------|-----------------------|--------------------------------------|-------------------------------------------------------------------|
+| `chaos.events`              | counter               | `type`, `scenario`                   | every event                                                       |
+| `chaos.applications`        | counter               | `scenario`, `operation`, `effect`    | effects that took effect                                          |
+| `chaos.injected.delay`      | timer / histogram (ms) | `scenario`, `operation`             | latency the agent added to calls (from the `APPLIED` event's `delayMillis`) |
+| `chaos.skips`               | counter               | `scenario`, `reason`                 | matches the policy kept from applying (while a listener is registered) |
+| `chaos.activation.failures` | counter               | `scenario`, `category`               | failed activations                                                |
+| `chaos.scenarios`           | gauge                 | `state`                              | registered scenarios per state                                    |
+| `chaos.events.dropped`      | counter               | —                                    | events dropped by full asynchronous listener queues               |
+| `chaos.hooks.woven`         | gauge                 | —                                    | hook groups woven into JDK and library classes                    |
+
+**Micrometer** (`chaos-agent-micrometer`):
 
 ```java
-new ChaosMeterBinder(ChaosPlatform.current()).bindTo(meterRegistry);
+ChaosMeterBinder binder = new ChaosMeterBinder(ChaosPlatform.current());
+binder.bindTo(meterRegistry);   // binder.close() stops counting
 ```
 
-- `chaos.events` — counter per event, tagged `type` and `scenario`; `skipped` adds `reason`, `failed` adds `category`.
-- `chaos.scenarios` — gauge of registered scenarios per `state`.
+**OpenTelemetry** (`chaos-agent-opentelemetry`), the same instruments with attributes `chaos.event.type`, `chaos.scenario.id`, `chaos.operation`, `chaos.effect`, `chaos.skip.reason`, `chaos.failure.category`, `chaos.scenario.state`, scope `com.macstab.chaos.jvm`:
 
-Events are counted asynchronously. Export to OpenTelemetry through Micrometer's OTLP registry.
+```java
+AutoCloseable metrics = ChaosOpenTelemetry.metrics(ChaosPlatform.current(), openTelemetry);
+AutoCloseable spans = ChaosOpenTelemetry.spanEvents(ChaosPlatform.current());
+```
+
+`spanEvents` adds a `chaos.applied` event (scenario, operation, effect, `chaos.delay_ms`) to the current span each time chaos applies to a call made inside it, so a trace shows which request was slowed or failed and by which scenario. It runs on the application thread, where the span is current; the counters are fed asynchronously.
+
+Both modules declare their library as `compileOnly`: the application brings Micrometer or OpenTelemetry.
 
 ## 4. JMX
 

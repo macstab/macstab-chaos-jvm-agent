@@ -479,9 +479,9 @@ final class ScenarioController {
    * Reserves one application against {@code maxApplications} for a contribution that has not yet
    * been chosen. The dispatcher decides afterwards which contributions take effect (every delay,
    * the winning gate and the winning terminal action by precedence) and calls {@link
-   * #commitApplication(InvocationContext)} for those and {@link #releaseApplication()} for the
-   * rest. An earlier version counted and published {@code APPLIED} here, so a scenario that lost on
-   * precedence still reported itself as applied and used up its budget.
+   * #commitApplication(InvocationContext, long)} for those and {@link #releaseApplication()} for
+   * the rest. An earlier version counted and published {@code APPLIED} here, so a scenario that
+   * lost on precedence still reported itself as applied and used up its budget.
    *
    * <p>Committed applications plus outstanding reservations never exceed the cap. The scenario is
    * marked {@code INACTIVE} only once committed applications reach the cap, so a reservation that
@@ -514,7 +514,7 @@ final class ScenarioController {
    *
    * @param context the invocation the contribution was evaluated for
    */
-  void commitApplication(final InvocationContext context) {
+  void commitApplication(final InvocationContext context, final long delayMillis) {
     final Long maxApplications = scenario.activationPolicy().maxApplications();
     if (maxApplications == null) {
       appliedCount.incrementAndGet();
@@ -528,7 +528,7 @@ final class ScenarioController {
         markInactive("max applications reached");
       }
     }
-    publishAppliedEvent(context);
+    publishAppliedEvent(context, delayMillis);
   }
 
   /** Returns a reservation taken by {@link #reserveApplication()} that was not applied. */
@@ -541,11 +541,15 @@ final class ScenarioController {
     }
   }
 
-  private void publishAppliedEvent(final InvocationContext context) {
+  private void publishAppliedEvent(final InvocationContext context, final long delayMillis) {
     final Map<String, String> eventAttributes = new LinkedHashMap<>();
     eventAttributes.put("operation", context.operationType().name());
     eventAttributes.put("scope", scopeKey);
     eventAttributes.put("effectType", scenario.effect().getClass().getSimpleName());
+    if (delayMillis > 0L) {
+      // The delay this application adds to the call: the source of injected-latency metrics.
+      eventAttributes.put("delayMillis", Long.toString(delayMillis));
+    }
     if (sessionId != null) {
       eventAttributes.put("sessionId", sessionId);
     }

@@ -24,6 +24,7 @@ springBoot4 = "4.0.5"
 
 awsSdk = "2.57.7"
 micrometer = "1.17.2"
+opentelemetry = "1.67.0"
 grpc = "1.85.1"
 jedis = "8.0.2"
 kafka = "4.4.0"
@@ -33,6 +34,9 @@ r2dbcH2 = "1.1.0.RELEASE"
 
 [libraries]
 micrometer-core = { module = "io.micrometer:micrometer-core", version.ref = "micrometer" }
+opentelemetry-api = { module = "io.opentelemetry:opentelemetry-api", version.ref = "opentelemetry" }
+opentelemetry-sdk = { module = "io.opentelemetry:opentelemetry-sdk", version.ref = "opentelemetry" }
+opentelemetry-sdk-testing = { module = "io.opentelemetry:opentelemetry-sdk-testing", version.ref = "opentelemetry" }
 aws-sdk-s3 = { module = "software.amazon.awssdk:s3", version.ref = "awsSdk" }
 aws-sdk-url-connection-client = { module = "software.amazon.awssdk:url-connection-client", version.ref = "awsSdk" }
 grpc-core = { module = "io.grpc:grpc-core", version.ref = "grpc" }

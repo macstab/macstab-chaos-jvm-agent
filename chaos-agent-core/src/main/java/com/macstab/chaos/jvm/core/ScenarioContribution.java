@@ -22,7 +22,8 @@ import java.time.Duration;
  * @param gateTimeout the maximum time to block on a {@link ManualGate}, or {@code null} if no gate
  *     applies to this contribution
  * @param context the invocation the contribution was evaluated for; passed back to {@link
- *     ScenarioController#commitApplication(InvocationContext)} when the contribution takes effect
+ *     ScenarioController#commitApplication(InvocationContext, long)} when the contribution takes
+ *     effect
  */
 record ScenarioContribution(
     ScenarioController controller,
@@ -34,7 +35,7 @@ record ScenarioContribution(
 
   /** Records this contribution as applied. */
   void commit() {
-    controller.commitApplication(context);
+    controller.commitApplication(context, delayMillis);
   }
 
   /** Returns this contribution's reservation without applying it. */

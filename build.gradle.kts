@@ -50,6 +50,7 @@ val coverageFloors = mapOf(
     "chaos-agent-core" to (0.73 to 0.65),
     "chaos-agent-instrumentation-jdk" to (0.14 to 0.10),
     "chaos-agent-micrometer" to (0.89 to 0.60),
+    "chaos-agent-opentelemetry" to (0.85 to 0.60),
     "chaos-agent-micronaut-integration" to (0.85 to 0.70),
     "chaos-agent-quarkus-extension" to (0.70 to 0.60),
     "chaos-agent-quarkus-extension-deployment" to (0.38 to 0.0),

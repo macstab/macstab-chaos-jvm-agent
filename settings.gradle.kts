@@ -26,6 +26,7 @@ include(
     "chaos-agent-examples:sb4-sla-validation-test",
     "chaos-agent-instrumentation-jdk",
     "chaos-agent-micrometer",
+    "chaos-agent-opentelemetry",
     "chaos-agent-micronaut-integration",
     "chaos-agent-quarkus-extension",
     "chaos-agent-quarkus-extension-deployment",

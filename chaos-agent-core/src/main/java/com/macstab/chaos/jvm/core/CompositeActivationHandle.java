@@ -27,6 +27,7 @@ import java.util.List;
 final class CompositeActivationHandle implements ChaosActivationHandle {
   private final String id;
   private final List<ChaosActivationHandle> delegates;
+  private final Runnable onClose;
 
   /**
    * Creates a composite handle with the given logical ID and delegate handles.
@@ -39,8 +40,21 @@ final class CompositeActivationHandle implements ChaosActivationHandle {
    *     {@code null} or contain {@code null} elements
    */
   CompositeActivationHandle(final String id, final List<ChaosActivationHandle> delegates) {
+    this(id, delegates, () -> {});
+  }
+
+  /**
+   * Creates a composite handle that runs {@code onClose} after closing its delegates.
+   *
+   * @param id the logical identifier
+   * @param delegates the individual handles
+   * @param onClose run once the delegates are closed, even if one of them failed
+   */
+  CompositeActivationHandle(
+      final String id, final List<ChaosActivationHandle> delegates, final Runnable onClose) {
     this.id = id;
     this.delegates = List.copyOf(delegates);
+    this.onClose = onClose;
   }
 
   /**
@@ -68,7 +82,11 @@ final class CompositeActivationHandle implements ChaosActivationHandle {
   /** Closes every scenario of the plan, removing each from the registry. */
   @Override
   public void close() {
-    broadcast("close", ChaosActivationHandle::close);
+    try {
+      broadcast("close", ChaosActivationHandle::close);
+    } finally {
+      onClose.run();
+    }
   }
 
   /** Broadcasts {@link ChaosActivationHandle#release()} to all delegate handles. */

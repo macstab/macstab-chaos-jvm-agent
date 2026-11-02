@@ -15,6 +15,9 @@
 
 ### Features
 
+* **observability:** new optional module `chaos-agent-opentelemetry`: `ChaosOpenTelemetry.metrics(controlPlane, openTelemetry)` publishes the chaos metrics through the OpenTelemetry API, and `ChaosOpenTelemetry.spanEvents(controlPlane)` adds a `chaos.applied` event to the current span whenever chaos applies to a traced call.
+* **observability:** new metrics `chaos.applications` (by operation and effect), `chaos.injected.delay` (the latency chaos added), `chaos.skips`, `chaos.activation.failures`, `chaos.events.dropped` and `chaos.hooks.woven`; `APPLIED` events carry `delayMillis`. `ChaosMeterBinder` is `AutoCloseable`.
+* **startup-config:** a plan's `observability` block now takes effect for its scenarios: `jmxEnabled=false` leaves them out of the JMX `listScenarios` and `debugDump`, `structuredLoggingEnabled=false` stops logging their events, `debugDumpOnStart=true` prints the diagnostics once the plan is active. It applies to programmatic plans, plan files (also across reloads) and JMX `activatePlan`; before, the block was parsed and ignored.
 * **instrumentation:** file truncation, deletion and moves: `FILE_IO_TRUNCATE` (`FileChannel.truncate`, `RandomAccessFile.setLength`), `FILE_IO_DELETE` (`Files.delete`, `Files.deleteIfExists`, `File.delete`) and `FILE_IO_MOVE` (`Files.move`, `File.renameTo`, by source path), with path filters and the file `errno` values. `File.delete` and `File.renameTo` report an injected failure by returning `false`, as `java.io` does.
 * **api:** `tornWrite()` also tears socket writes: a `SocketChannel` write returns a short count, a socket stream write sends a random prefix and then throws `SocketException` ("Connection reset …"), so the peer sees a truncated message. `SocketChannel` writes now report their byte count.
 * **docs:** `docs/cross-layer.md` maps every rule of the native chaos libraries to the agent's Java API and plan JSON, and lists what does not translate in either direction. `CrossLayerDocSyncTest` checks every API name, enum constant and plan JSON `type` in `README.md`, `docs/*.md` and the native library's `docs/DSL.md` against the code, and parses every plan and scenario JSON example; a CI job runs it against the library's `develop` branch. Fixed on the way: a README plan whose selector had no operations, and wrong factory names and arities in the user guide's effect list.
@@ -57,6 +60,7 @@
 
 ### Bug Fixes
 
+* **micrometer:** `chaos.events` was registered with different tag keys per event type (`reason` on skipped, `category` on failed), which Prometheus registries reject; those tags moved to `chaos.skips` and `chaos.activation.failures`, so every meter has one tag key set.
 * resolve ThreadLocal reentrancy - re-enable ThreadLocal/park/AQS instrumentation ([738d4ed](https://github.com/macstab/macstab-chaos-jvm-agent/commit/738d4ed3613f0f67483bc4323febdc77201a57b3))
 
 

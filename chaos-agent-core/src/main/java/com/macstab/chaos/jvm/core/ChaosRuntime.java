@@ -76,6 +76,47 @@ public final class ChaosRuntime implements ChaosControlPlane {
     return controlPlane.activate(scenario);
   }
 
+  /**
+   * Applies a plan's observability settings to scenarios activated one by one (the plan-file
+   * reloader does this); {@link #activate(ChaosPlan)} applies them itself.
+   *
+   * @param scenarioIds the plan's scenario ids
+   * @param observability the plan's settings
+   */
+  public void applyPlanObservability(
+      final java.util.Collection<String> scenarioIds, final ChaosPlan.Observability observability) {
+    controlPlane.applyPlanObservability(scenarioIds, observability);
+  }
+
+  /**
+   * Restores the default observability of scenarios that left a plan.
+   *
+   * @param scenarioIds the scenario ids
+   */
+  public void clearPlanObservability(final java.util.Collection<String> scenarioIds) {
+    controlPlane.clearPlanObservability(scenarioIds);
+  }
+
+  /**
+   * Returns whether JMX may list and dump the scenario.
+   *
+   * @param scenarioId the scenario id
+   * @return {@code false} when its plan set {@code jmxEnabled=false}
+   */
+  public boolean jmxVisible(final String scenarioId) {
+    return controlPlane.jmxVisible(scenarioId);
+  }
+
+  /**
+   * Returns the diagnostics dump restricted to scenarios {@code include} accepts.
+   *
+   * @param include whether a scenario id is part of the dump
+   * @return the dump
+   */
+  public String debugDump(final java.util.function.Predicate<String> include) {
+    return controlPlane.debugDump(include);
+  }
+
   @Override
   public ChaosActivationHandle activate(final ChaosPlan plan) {
     return controlPlane.activate(plan);

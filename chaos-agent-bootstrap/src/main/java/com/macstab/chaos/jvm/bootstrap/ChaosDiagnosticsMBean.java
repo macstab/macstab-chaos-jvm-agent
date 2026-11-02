@@ -25,6 +25,8 @@ final class ChaosDiagnosticsMBean implements ChaosDiagnosticsMXBean {
   private final ChaosDiagnostics diagnostics;
   private final ChaosControlPlane controlPlane;
   private final boolean controlEnabled;
+  private final java.util.function.Predicate<String> visible;
+  private final java.util.function.Function<java.util.function.Predicate<String>, String> dump;
 
   /** Handles of scenarios activated through JMX, by scenario id. */
   private final Map<String, ChaosActivationHandle> activated = new ConcurrentHashMap<>();
@@ -52,11 +54,30 @@ final class ChaosDiagnosticsMBean implements ChaosDiagnosticsMXBean {
     this.diagnostics = diagnostics;
     this.controlPlane = controlPlane;
     this.controlEnabled = controlEnabled && controlPlane != null;
+    this.visible = id -> true;
+    this.dump = include -> diagnostics.debugDump();
+  }
+
+  /**
+   * Constructs the MBean for the agent's runtime: scenarios whose plan set {@code jmxEnabled=false}
+   * are left out of {@link #listScenarios()} and {@link #debugDump()}.
+   *
+   * @param runtime the runtime
+   * @param controlEnabled whether the control operations are allowed
+   */
+  ChaosDiagnosticsMBean(
+      final com.macstab.chaos.jvm.core.ChaosRuntime runtime, final boolean controlEnabled) {
+    this.diagnostics = runtime.diagnostics();
+    this.controlPlane = runtime;
+    this.controlEnabled = controlEnabled;
+    this.visible = runtime::jmxVisible;
+    this.dump = runtime::debugDump;
   }
 
   @Override
   public String[] listScenarios() {
     return diagnostics.snapshot().scenarios().stream()
+        .filter(report -> visible.test(report.id()))
         .map(
             report ->
                 report.id()
@@ -87,6 +108,9 @@ final class ChaosDiagnosticsMBean implements ChaosDiagnosticsMXBean {
     for (final ChaosScenario scenario : plan.scenarios()) {
       activated.put(scenario.id(), controlPlane.activate(scenario));
       ids.add(scenario.id());
+    }
+    if (controlPlane instanceof com.macstab.chaos.jvm.core.ChaosRuntime runtime) {
+      runtime.applyPlanObservability(ids, plan.observability());
     }
     return String.join(",", ids);
   }
@@ -125,10 +149,10 @@ final class ChaosDiagnosticsMBean implements ChaosDiagnosticsMXBean {
   /**
    * {@inheritDoc}
    *
-   * <p>Delegates directly to {@link ChaosDiagnostics#debugDump()}.
+   * <p>Leaves out scenarios whose plan set {@code jmxEnabled=false}.
    */
   @Override
   public String debugDump() {
-    return diagnostics.debugDump();
+    return dump.apply(visible);
   }
 }

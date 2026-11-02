@@ -36,6 +36,12 @@ import java.util.logging.Logger;
 final class ObservabilityBus {
   private static final Logger LOGGER = Logger.getLogger("com.macstab.chaos.jvm");
 
+  /**
+   * Scenarios whose plan set {@code structuredLoggingEnabled=false}: their events are not logged.
+   */
+  private final java.util.Set<String> loggingMuted =
+      java.util.concurrent.ConcurrentHashMap.newKeySet();
+
   private final List<ChaosEventListener> listeners = new CopyOnWriteArrayList<>();
 
   /** What each registered listener was registered as: itself, or its asynchronous delivery. */
@@ -226,6 +232,20 @@ final class ObservabilityBus {
   }
 
   /**
+   * Turns the structured logging of one scenario's events off or back on.
+   *
+   * @param scenarioId the scenario id
+   * @param muted {@code true} to stop logging its events
+   */
+  void muteLogging(final String scenarioId, final boolean muted) {
+    if (muted) {
+      loggingMuted.add(scenarioId);
+    } else {
+      loggingMuted.remove(scenarioId);
+    }
+  }
+
+  /**
    * Constructs a {@link ChaosEvent} and dispatches it synchronously to every registered listener.
    *
    * <p>The event timestamp is captured as the first action of this method via {@link
@@ -326,6 +346,9 @@ final class ObservabilityBus {
    * @param event the event to log; must not be {@code null}
    */
   private void log(final ChaosEvent event) {
+    if (event.scenarioId() != null && loggingMuted.contains(event.scenarioId())) {
+      return;
+    }
     final String formatted =
         "type="
             + event.type()

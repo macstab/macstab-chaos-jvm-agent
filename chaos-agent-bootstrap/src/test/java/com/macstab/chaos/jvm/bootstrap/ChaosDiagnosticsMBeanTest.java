@@ -76,4 +76,30 @@ class ChaosDiagnosticsMBeanTest {
         .isTrue();
     assertThat(ChaosAgentBootstrap.jmxControl("", Map.of())).isFalse();
   }
+
+  @Test
+  @DisplayName("hides scenarios of a plan with jmxEnabled=false from listScenarios and debugDump")
+  void hidesPlanScenarios() {
+    final ChaosDiagnosticsMBean bean = new ChaosDiagnosticsMBean(runtime, true);
+    bean.activatePlan(
+        """
+        {"metadata": {"name": "secret"},
+         "observability": {"jmxEnabled": false, "structuredLoggingEnabled": true,
+                           "debugDumpOnStart": false},
+         "scenarios": [{"id": "jmx-hidden", "scope": "JVM",
+           "selector": {"type": "executor", "operations": ["EXECUTOR_SUBMIT"]},
+           "effect": {"type": "delay", "minDelay": "PT0.001S", "maxDelay": "PT0.001S"}}]}
+        """);
+    bean.activatePlan(
+        """
+        {"scenarios": [{"id": "jmx-shown", "scope": "JVM",
+           "selector": {"type": "executor", "operations": ["EXECUTOR_SUBMIT"]},
+           "effect": {"type": "delay", "minDelay": "PT0.001S", "maxDelay": "PT0.001S"}}]}
+        """);
+
+    assertThat(bean.listScenarios())
+        .anyMatch(line -> line.startsWith("jmx-shown "))
+        .noneMatch(line -> line.startsWith("jmx-hidden "));
+    assertThat(bean.debugDump()).contains("jmx-shown state=").doesNotContain("jmx-hidden");
+  }
 }
