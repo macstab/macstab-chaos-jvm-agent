@@ -149,6 +149,31 @@ JVM:
 
 `FileChannel.force` and `FileDescriptor.sync` then throw a `FileSystemException` naming the file, with the reason `Input/output error`.
 
+The same scenario through the Java API (this block is compiled by the documentation test):
+
+```java verified
+import com.macstab.chaos.jvm.api.ActivationPolicy;
+import com.macstab.chaos.jvm.api.ChaosEffect;
+import com.macstab.chaos.jvm.api.ChaosScenario;
+import com.macstab.chaos.jvm.api.ChaosSelector;
+import com.macstab.chaos.jvm.api.OperationType;
+import com.macstab.chaos.jvm.api.PathPattern;
+import java.util.Set;
+
+public final class FsyncEio {
+  public static ChaosScenario scenario() {
+    return ChaosScenario.builder("fsync-eio-5pct")
+        .scope(ChaosScenario.ScenarioScope.JVM)
+        .selector(
+            new ChaosSelector.FileIoSelector(
+                Set.of(OperationType.FILE_IO_SYNC), PathPattern.under("/var/lib/app"), null, null))
+        .effect(ChaosEffect.errno(ChaosEffect.Errno.EIO))
+        .activationPolicy(ActivationPolicy.builder().probability(0.05).build())
+        .build();
+  }
+}
+```
+
 ### 6.2 Large writes to a broker are slow during an incident window
 
 Native (`/tmp/.chaos-net.conf`):

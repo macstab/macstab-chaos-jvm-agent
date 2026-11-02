@@ -80,7 +80,7 @@ class CrossLayerDocSyncTest {
   private static final Pattern CHAINED_CALL = Pattern.compile("\\.(\\w+)\\(");
   private static final Pattern JSON_TYPE = Pattern.compile("\"type\"\\s*:\\s*\"(\\w+)\"");
   private static final Pattern FENCED =
-      Pattern.compile("^```(\\w*)[^\\n]*\\n(.*?)^```", Pattern.MULTILINE | Pattern.DOTALL);
+      Pattern.compile("^```(\\w*)([^\\n]*)\\n(.*?)^```", Pattern.MULTILINE | Pattern.DOTALL);
   private static final Pattern SCENARIO_KEYS = Pattern.compile("\"(id|selector|effect)\"\\s*:");
   private static final Pattern INLINE = Pattern.compile("`([^`\\n]+)`");
 
@@ -120,6 +120,10 @@ class CrossLayerDocSyncTest {
   void reportsUnknownNames() {
     final String stale =
         """
+        ```java verified
+        public class Broken { void f() { com.macstab.chaos.jvm.api.ChaosEffect.delay(1); } }
+        ```
+
         Use `ActivationPolicy.timeWindow(a, b)`, `ChaosEffect.throwException(x)`,
         `ChaosSelector.fileIO(OperationType.FSYNC)`, `ChaosEffect.Errno.EWHATEVER`,
         `ActivationPolicy.builder().probability(0.5).session("x").build()` and
@@ -138,7 +142,8 @@ class CrossLayerDocSyncTest {
         .anySatisfy(v -> assertThat(v).contains("ChaosEffect.Errno.EWHATEVER"))
         .anySatisfy(v -> assertThat(v).contains("ActivationPolicy.Builder.session"))
         .anySatisfy(v -> assertThat(v).contains("byteCorruption"))
-        .anySatisfy(v -> assertThat(v).contains("json block"));
+        .anySatisfy(v -> assertThat(v).contains("json block"))
+        .anySatisfy(v -> assertThat(v).contains("does not compile"));
   }
 
   static List<String> violations(final String markdown) {
@@ -150,10 +155,14 @@ class CrossLayerDocSyncTest {
     while (fenced.find()) {
       prose.append(markdown, last, fenced.start());
       last = fenced.end();
-      code.add(fenced.group(2));
+      code.add(fenced.group(3));
+      if (fenced.group(1).equals("java") && fenced.group(2).strip().equals("verified")) {
+        checkCompiles(
+            fenced.group(3), markdown.substring(0, fenced.start()).lines().count() + 1, violations);
+      }
       if (fenced.group(1).equals("json")) {
         final long line = markdown.substring(0, fenced.start()).lines().count() + 1;
-        checkJsonBlock(fenced.group(2), line, violations);
+        checkJsonBlock(fenced.group(3), line, violations);
       }
     }
     prose.append(markdown.substring(last));
@@ -227,6 +236,56 @@ class CrossLayerDocSyncTest {
           violations.add(chain.group(1) + ".Builder." + method + "(...) does not exist");
         }
       }
+    }
+  }
+
+  private static final Pattern PUBLIC_TYPE =
+      Pattern.compile("public\\s+(?:final\\s+)?(?:class|record|interface)\\s+(\\w+)");
+
+  /**
+   * Compiles a {@code java verified} block: a complete compilation unit with a public top-level
+   * type, against this test's class path, so documented examples cannot rot.
+   */
+  private static void checkCompiles(
+      final String source, final long line, final List<String> violations) {
+    final Matcher type = PUBLIC_TYPE.matcher(source);
+    if (!type.find()) {
+      violations.add("java verified block at line " + line + " declares no public type");
+      return;
+    }
+    final javax.tools.JavaCompiler compiler = javax.tools.ToolProvider.getSystemJavaCompiler();
+    final javax.tools.DiagnosticCollector<javax.tools.JavaFileObject> diagnostics =
+        new javax.tools.DiagnosticCollector<>();
+    final javax.tools.JavaFileObject unit =
+        new javax.tools.SimpleJavaFileObject(
+            java.net.URI.create("string:///" + type.group(1) + ".java"),
+            javax.tools.JavaFileObject.Kind.SOURCE) {
+          @Override
+          public CharSequence getCharContent(final boolean ignoreEncodingErrors) {
+            return source;
+          }
+        };
+    try {
+      final Path out = Files.createTempDirectory("doc-snippet");
+      final List<String> options =
+          List.of("-d", out.toString(), "-cp", System.getProperty("java.class.path"), "-proc:none");
+      if (!compiler.getTask(null, null, diagnostics, options, null, List.of(unit)).call()) {
+        violations.add(
+            "java verified block at line "
+                + line
+                + " does not compile: "
+                + diagnostics.getDiagnostics().stream()
+                    .filter(d -> d.getKind() == javax.tools.Diagnostic.Kind.ERROR)
+                    .map(
+                        d ->
+                            "line "
+                                + d.getLineNumber()
+                                + ": "
+                                + d.getMessage(java.util.Locale.ROOT))
+                    .collect(Collectors.joining("; ")));
+      }
+    } catch (final IOException failed) {
+      violations.add("java verified block at line " + line + ": " + failed);
     }
   }
 

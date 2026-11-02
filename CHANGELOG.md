@@ -15,6 +15,7 @@
 
 ### Features
 
+* **docs:** Java examples fenced as `java verified` are compiled by `CrossLayerDocSyncTest` against the API, so they cannot drift from it; `docs/api.md` and `docs/cross-layer.md` carry the first ones.
 * **demos:** `demo/` holds one-fault demos (connect refused, trickle, disk full by path, DNS override, clock skew, process limit, HTTP reject, slow executor), each a single-file program with its plan and expected output; `demo/run-all.sh` runs and checks them, and CI runs it.
 * **micronaut, quarkus:** management endpoints matching the Spring actuator: Micronaut `@Endpoint("chaos")` (`ChaosManagementEndpoint`, with `micronaut-management`) and the Quarkus route `/q/chaos`, both off unless `macstab.chaos.management.enabled=true`; snapshot, activate a plan, stop one, stop all. The shared logic is `ChaosManagement` in the agent. The Quarkus extension now depends on `quarkus-vertx-http`.
 * **sessions across HTTP:** requests the JDK `HttpClient` and `HttpURLConnection` send from a thread in a session carry `X-Chaos-Session` (`ChaosSession.HEADER`); `ChaosControlPlane.bindSession(id)` binds a server thread to that session for a request, and the Spring Boot runtime and test starters register `ChaosSessionFilter` (switch: `macstab.chaos.session-propagation.enabled`). The id decides per request: an unknown or closed id runs the request outside any session, even on a worker thread that inherited one. Session-scoped scenarios thereby reach the server side of `@SpringBootTest` HTTP calls.

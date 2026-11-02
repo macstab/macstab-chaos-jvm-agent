@@ -17,6 +17,49 @@
 
 # 1. Overview
 
+
+### A complete example
+
+Compiled by the documentation test, so it always matches the API: a session-scoped slow database for one test, a plan-wide cap, and a replay of a recorded run.
+
+```java verified
+import com.macstab.chaos.jvm.api.ActivationPolicy;
+import com.macstab.chaos.jvm.api.ChaosControlPlane;
+import com.macstab.chaos.jvm.api.ChaosDecisionRecorder;
+import com.macstab.chaos.jvm.api.ChaosEffect;
+import com.macstab.chaos.jvm.api.ChaosScenario;
+import com.macstab.chaos.jvm.api.ChaosSelector;
+import com.macstab.chaos.jvm.api.ChaosSession;
+import com.macstab.chaos.jvm.api.OperationType;
+import java.time.Duration;
+
+public final class SlowDatabaseExample {
+  public static void run(final ChaosControlPlane chaos, final Runnable callTheService) {
+    final ChaosScenario slowDb =
+        ChaosScenario.builder("slow-db")
+            .scope(ChaosScenario.ScenarioScope.SESSION)
+            .selector(ChaosSelector.jdbc(OperationType.JDBC_STATEMENT_EXECUTE))
+            .effect(ChaosEffect.delay(Duration.ofMillis(200)))
+            .activationPolicy(ActivationPolicy.builder().probability(0.3).maxApplications(10L).build())
+            .build();
+
+    final ChaosDecisionRecorder recorder = new ChaosDecisionRecorder();
+    chaos.addEventListener(recorder);
+    try (ChaosSession session = chaos.openSession("slow-db test")) {
+      session.activate(slowDb);
+      callTheService.run();
+    }
+    chaos.removeEventListener(recorder);
+
+    // The same decisions again, without drawing:
+    try (ChaosSession replay = chaos.openSession("slow-db replay")) {
+      replay.activate(recorder.replay(slowDb));
+      callTheService.run();
+    }
+  }
+}
+```
+
 ## Purpose
 
 `chaos-agent-api` defines the stable public contract for controlling the chaos agent. It contains:
