@@ -140,3 +140,29 @@ jobs:
         run: |
           chmod +x gradlew
           ./gradlew :chaos-agent-startup-config:test --tests '*CrossLayerDocSyncTest*' --no-daemon
+
+  # One-fault demos (demo/NN-*/): each runs under the agent and must print its expected output.
+  demos:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: |
+      github.event_name != 'pull_request' && github.event.pull_request == null
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '25'
+          cache: 'gradle'
+
+      - name: Build the agent jar
+        run: |
+          chmod +x gradlew
+          ./gradlew :chaos-agent-bootstrap:shadowJar --no-daemon
+
+      - name: Run the demos
+        run: demo/run-all.sh

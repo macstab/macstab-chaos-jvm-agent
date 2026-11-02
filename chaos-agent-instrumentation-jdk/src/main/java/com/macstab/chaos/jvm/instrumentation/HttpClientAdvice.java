@@ -52,15 +52,15 @@ final class HttpClientAdvice {
       if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_HTTP)) {
         return;
       }
-      final String url;
+      // Inlined into HttpClientImpl (java.net.http), the advice calls HttpRequest.uri() directly.
+      // Reflection through the request's class (jdk.internal.net.http, not open to the agent)
+      // failed, so the URL was always null and URL filters never matched this client.
+      final String url =
+          request instanceof java.net.http.HttpRequest httpRequest
+              ? String.valueOf(httpRequest.uri())
+              : null;
       final boolean suppressed;
       try {
-        BootstrapDispatcher.beginInternalCall();
-        try {
-          url = HttpUrlExtractor.fromJavaHttpRequest(request);
-        } finally {
-          BootstrapDispatcher.endInternalCall();
-        }
         suppressed = BootstrapDispatcher.beforeHttpSend(url);
       } catch (final Throwable throwable) {
         BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
@@ -103,15 +103,15 @@ final class HttpClientAdvice {
       if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_HTTP)) {
         return;
       }
-      final String url;
+      // Inlined into HttpClientImpl (java.net.http), the advice calls HttpRequest.uri() directly.
+      // Reflection through the request's class (jdk.internal.net.http, not open to the agent)
+      // failed, so the URL was always null and URL filters never matched this client.
+      final String url =
+          request instanceof java.net.http.HttpRequest httpRequest
+              ? String.valueOf(httpRequest.uri())
+              : null;
       final boolean suppressed;
       try {
-        BootstrapDispatcher.beginInternalCall();
-        try {
-          url = HttpUrlExtractor.fromJavaHttpRequest(request);
-        } finally {
-          BootstrapDispatcher.endInternalCall();
-        }
         suppressed = BootstrapDispatcher.beforeHttpSendAsync(url);
       } catch (final Throwable throwable) {
         BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);

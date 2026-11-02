@@ -15,6 +15,7 @@
 
 ### Features
 
+* **demos:** `demo/` holds one-fault demos (connect refused, trickle, disk full by path, DNS override, clock skew, process limit, HTTP reject, slow executor), each a single-file program with its plan and expected output; `demo/run-all.sh` runs and checks them, and CI runs it.
 * **micronaut, quarkus:** management endpoints matching the Spring actuator: Micronaut `@Endpoint("chaos")` (`ChaosManagementEndpoint`, with `micronaut-management`) and the Quarkus route `/q/chaos`, both off unless `macstab.chaos.management.enabled=true`; snapshot, activate a plan, stop one, stop all. The shared logic is `ChaosManagement` in the agent. The Quarkus extension now depends on `quarkus-vertx-http`.
 * **sessions across HTTP:** requests the JDK `HttpClient` and `HttpURLConnection` send from a thread in a session carry `X-Chaos-Session` (`ChaosSession.HEADER`); `ChaosControlPlane.bindSession(id)` binds a server thread to that session for a request, and the Spring Boot runtime and test starters register `ChaosSessionFilter` (switch: `macstab.chaos.session-propagation.enabled`). The id decides per request: an unknown or closed id runs the request outside any session, even on a worker thread that inherited one. Session-scoped scenarios thereby reach the server side of `@SpringBootTest` HTTP calls.
 * **api:** decision replay: `ChaosDecisionRecorder` records which match numbers of each scenario took effect (from the new `match` attribute of `APPLIED` events), and `ActivationPolicy.replayMatches` (JSON `replayMatches`) makes a scenario fire on exactly those matches instead of drawing, so an unseeded flaky run replays decision by decision. `recorder.replay(scenario)` builds the replaying scenario. The policy record gains the trailing `replayMatches` component; the 10-argument constructor is kept.
@@ -66,6 +67,7 @@
 
 ### Bug Fixes
 
+* **instrumentation:** a URL filter (`urlPattern`) never matched the JDK `HttpClient`: the URL was read reflectively through the request's internal class, which is not open to the agent, and came out `null`. The advice, inlined into `HttpClientImpl`, now calls `HttpRequest.uri()` directly.
 * **startup-config:** a reloaded plan with an invalid scenario stopped the changed scenarios, activated part of the new plan and then rolled back, so for a moment neither plan was fully active and part of the invalid one was. Every new or changed scenario is now validated before the active set is touched.
 * **micrometer:** `chaos.events` was registered with different tag keys per event type (`reason` on skipped, `category` on failed), which Prometheus registries reject; those tags moved to `chaos.skips` and `chaos.activation.failures`, so every meter has one tag key set.
 * resolve ThreadLocal reentrancy - re-enable ThreadLocal/park/AQS instrumentation ([738d4ed](https://github.com/macstab/macstab-chaos-jvm-agent/commit/738d4ed3613f0f67483bc4323febdc77201a57b3))

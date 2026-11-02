@@ -1,0 +1,3 @@
+{"scenarios": [{"id": "slow-submit", "scope": "JVM",
+  "selector": {"type": "executor", "operations": ["EXECUTOR_SUBMIT"]},
+  "effect": {"type": "delay", "minDelay": "PT0.2S", "maxDelay": "PT0.2S"}}]}

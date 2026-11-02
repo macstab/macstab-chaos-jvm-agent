@@ -416,6 +416,31 @@ class DefectRegressionIntegrationTest {
     }
 
     @Test
+    @DisplayName("a URL filter matches JDK HttpClient requests (the URL used to be read as null)")
+    void jdkHttpClientUrlFilter() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.run(
+              plan(
+                  scenario(
+                      "probe-url",
+                      ChaosSelector.httpClient(
+                          Set.of(OperationType.HTTP_CLIENT_SEND_ASYNC),
+                          com.macstab.chaos.jvm.api.NamePattern.glob("http://127.0.0.1:*/probe")),
+                      ChaosEffect.delay(Duration.ofMillis(1))),
+                  scenario(
+                      "other-url",
+                      ChaosSelector.httpClient(
+                          Set.of(OperationType.HTTP_CLIENT_SEND_ASYNC),
+                          com.macstab.chaos.jvm.api.NamePattern.prefix("http://elsewhere/")),
+                      ChaosEffect.delay(Duration.ofMillis(1)))),
+              DefectProbeMain.class,
+              "jdk-send-async",
+              null);
+      assertThat(result.longValue("matched.probe-url")).isEqualTo(1L);
+      assertThat(result.longValue("matched.other-url")).isZero();
+    }
+
+    @Test
     @DisplayName("OkHttp 4 Call.execute() is intercepted")
     void okHttp4Execute() throws Exception {
       final ChildJvmProbe.ProbeResult result =
