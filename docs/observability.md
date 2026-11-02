@@ -103,6 +103,20 @@ The MBean `com.macstab.chaos:type=ChaosDiagnostics` offers:
 
 The control operations are off by default — anyone who can reach the MBean server could otherwise inject faults. Enable them with the agent argument `jmxControl=true`, `-Dmacstab.chaos.jmx.control=true` or `MACSTAB_CHAOS_JMX_CONTROL=true`, and secure the JMX connector.
 
+## 4a. Management endpoints
+
+The same four operations over HTTP in each framework, all off by default and to be secured — anyone who reaches them can inject faults:
+
+| Operation                              | Spring Boot (actuator)                         | Micronaut (management)               | Quarkus                     |
+|----------------------------------------|------------------------------------------------|--------------------------------------|-----------------------------|
+| Diagnostics snapshot                   | `GET /actuator/chaos`                          | `GET /chaos`                         | `GET /q/chaos`              |
+| Activate a plan                        | `POST /actuator/chaos`, body `{"planJson": "<plan>"}` | `POST /chaos`, body `{"planJson": "<plan>"}` | `POST /q/chaos`, body: the plan |
+| Stop a plan activated here             | `DELETE /actuator/chaos/{id}`                  | `DELETE /chaos/{id}`                 | `DELETE /q/chaos/{id}`      |
+| Stop every plan activated here         | `DELETE /actuator/chaos`                       | `DELETE /chaos`                      | `DELETE /q/chaos`           |
+| Switch                                 | `macstab.chaos.actuator.enabled=true`          | `macstab.chaos.management.enabled=true` (needs `micronaut-management`) | `macstab.chaos.management.enabled=true` at build time |
+
+`{id}` is a plan's handle id (`plan:<name>`) or its name. Only plans activated through the endpoint can be stopped through it. Micronaut and Quarkus share `ChaosManagement` (in the agent) and answer with JSON: `{"status": "activated", "handleId": "plan:<name>"}`, `{"status": "stopped" | "unmanaged" | "not-found", ...}`, `{"stoppedCount": n}`; Quarkus maps them to 200, 400 (rejected plan), 404 (unknown id) and 405. The Micronaut endpoint is `defaultSensitive`; the Quarkus route runs on a worker thread under Quarkus' non-application root (`/q` by default), and the extension depends on `quarkus-vertx-http` for it.
+
 ## 5. Handle counters
 
 `ChaosActivationHandle.matchedCount()` and `appliedCount()` return the scenario's counters (the sum over its scenarios for a plan handle), so a test can assert on the handle it activated:

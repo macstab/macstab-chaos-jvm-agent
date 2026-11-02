@@ -74,6 +74,8 @@ lombok = { module = "org.projectlombok:lombok", version = "1.18.38" }
 micronaut-bom = { module = "io.micronaut.platform:micronaut-platform", version.ref = "micronautBom" }
 okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }
 quarkus-bom = { module = "io.quarkus:quarkus-bom", version.ref = "quarkusBom" }
+quarkus-vertx-http = { module = "io.quarkus:quarkus-vertx-http", version.ref = "quarkusBom" }
+quarkus-vertx-http-deployment = { module = "io.quarkus:quarkus-vertx-http-deployment", version.ref = "quarkusBom" }
 reactor-netty-http = { module = "io.projectreactor.netty:reactor-netty-http", version.ref = "reactorNetty" }
 spring-boot3-dependencies = { module = "org.springframework.boot:spring-boot-dependencies", version.ref = "springBoot3" }
 spring-boot4-dependencies = { module = "org.springframework.boot:spring-boot-dependencies", version.ref = "springBoot4" }

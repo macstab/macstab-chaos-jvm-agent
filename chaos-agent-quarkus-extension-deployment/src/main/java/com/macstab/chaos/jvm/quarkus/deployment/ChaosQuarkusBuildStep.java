@@ -78,4 +78,47 @@ public final class ChaosQuarkusBuildStep {
   public void installChaosAgent(final ChaosQuarkusRecorder recorder) {
     recorder.installAgent();
   }
+
+  /**
+   * Registers the {@code /q/chaos} management route when {@code macstab.chaos.management.enabled}
+   * is {@code true} at build time and the application serves HTTP. Off by default: anyone who
+   * reaches the route can inject faults.
+   *
+   * @param recorder the recorder providing the handler
+   * @param nonApplicationRootPath where Quarkus serves its own endpoints ({@code /q})
+   * @param routes the route producer
+   */
+  @BuildStep
+  @Record(ExecutionTime.RUNTIME_INIT)
+  public void managementRoute(
+      final ChaosQuarkusRecorder recorder,
+      final io.quarkus.vertx.http.deployment.NonApplicationRootPathBuildItem nonApplicationRootPath,
+      final io.quarkus.deployment.annotations.BuildProducer<
+              io.quarkus.vertx.http.deployment.RouteBuildItem>
+          routes) {
+    final boolean enabled =
+        org.eclipse.microprofile.config.ConfigProvider.getConfig()
+            .getOptionalValue("macstab.chaos.management.enabled", Boolean.class)
+            .orElse(Boolean.FALSE);
+    if (!enabled) {
+      return;
+    }
+    final String root = nonApplicationRootPath.resolvePath("chaos");
+    final io.vertx.core.Handler<io.vertx.ext.web.RoutingContext> handler =
+        recorder.managementHandler(root);
+    routes.produce(
+        nonApplicationRootPath
+            .routeBuilder()
+            .route("chaos")
+            .handler(handler)
+            .blockingRoute()
+            .build());
+    routes.produce(
+        nonApplicationRootPath
+            .routeBuilder()
+            .route("chaos/*")
+            .handler(handler)
+            .blockingRoute()
+            .build());
+  }
 }

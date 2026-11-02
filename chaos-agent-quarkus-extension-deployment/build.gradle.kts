@@ -9,6 +9,7 @@ dependencies {
     compileOnly("io.quarkus:quarkus-core")
     compileOnly("io.quarkus:quarkus-core-deployment")
     compileOnly("io.quarkus:quarkus-arc-deployment")
+    api(libs.quarkus.vertx.http.deployment)
 
     testImplementation(platform(libs.quarkus.bom))
     testImplementation(platform(libs.junit.bom))

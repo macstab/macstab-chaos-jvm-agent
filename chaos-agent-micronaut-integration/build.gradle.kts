@@ -6,6 +6,8 @@ dependencies {
     compileOnly(platform(libs.micronaut.bom))
     compileOnly("io.micronaut:micronaut-inject")
     compileOnly("io.micronaut:micronaut-context")
+    // The /chaos management endpoint; the application brings micronaut-management to use it.
+    compileOnly("io.micronaut:micronaut-management")
     compileOnly("io.micronaut.test:micronaut-test-junit5")
     compileOnly(libs.junit.jupiter.api)
 
@@ -19,6 +21,7 @@ dependencies {
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.assertj)
     testImplementation("io.micronaut.test:micronaut-test-junit5")
+    testImplementation("io.micronaut:micronaut-management")
     testAnnotationProcessor(platform(libs.micronaut.bom))
     testAnnotationProcessor("io.micronaut:micronaut-inject-java")
 }

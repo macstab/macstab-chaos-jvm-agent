@@ -244,4 +244,21 @@ public final class ChaosPlanMapper {
       throw new IllegalStateException("failed to serialize chaos plan", exception);
     }
   }
+
+  /**
+   * Serialises any value the plan model and diagnostics consist of (records, enums, durations,
+   * instants) to compact JSON, with the same conventions as plans.
+   *
+   * @param value the value
+   * @return JSON
+   * @throws IllegalStateException if serialisation fails (indicates a bug)
+   */
+  public static String toJson(final Object value) {
+    try {
+      return OBJECT_MAPPER.writeValueAsString(value);
+    } catch (JsonProcessingException exception) {
+      throw new IllegalStateException(
+          "failed to serialize " + value.getClass().getName(), exception);
+    }
+  }
 }
