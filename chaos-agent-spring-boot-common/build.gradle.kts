@@ -18,6 +18,7 @@ dependencies {
     compileOnly("org.springframework.boot:spring-boot-actuator")
     compileOnly("org.springframework.boot:spring-boot-actuator-autoconfigure")
     compileOnly("org.springframework:spring-context")
+    compileOnly("jakarta.servlet:jakarta.servlet-api")
 
     testImplementation(platform(libs.spring.boot3.dependencies))
     testImplementation(platform(libs.junit.bom))
@@ -28,6 +29,9 @@ dependencies {
     testImplementation("org.springframework.boot:spring-boot-actuator")
     testImplementation("org.springframework.boot:spring-boot-actuator-autoconfigure")
     testImplementation("org.springframework:spring-context")
+    testImplementation("org.springframework:spring-test")
+    testImplementation("org.springframework:spring-web")
+    testImplementation("jakarta.servlet:jakarta.servlet-api")
 }
 
 tasks.jar {

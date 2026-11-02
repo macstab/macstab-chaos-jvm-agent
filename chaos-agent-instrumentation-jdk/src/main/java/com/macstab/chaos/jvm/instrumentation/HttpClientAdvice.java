@@ -32,7 +32,23 @@ final class HttpClientAdvice {
    */
   static final class JavaHttpClientSendAdvice {
     @Advice.OnMethodEnter
-    static void enter(@Advice.Argument(0) final Object request) throws Throwable {
+    static void enter(
+        @Advice.Argument(
+                value = 0,
+                readOnly = false,
+                typing = net.bytebuddy.implementation.bytecode.assign.Assigner.Typing.DYNAMIC)
+            Object request)
+        throws Throwable {
+      // Inside a session, the request carries its id to the next service (X-Chaos-Session).
+      final String session = BootstrapDispatcher.currentSessionId();
+      if (session != null
+          && request instanceof java.net.http.HttpRequest httpRequest
+          && httpRequest.headers().firstValue(BootstrapDispatcher.SESSION_HEADER).isEmpty()) {
+        request =
+            java.net.http.HttpRequest.newBuilder(httpRequest, BootstrapDispatcher.ALL_HEADERS)
+                .header(BootstrapDispatcher.SESSION_HEADER, session)
+                .build();
+      }
       if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_HTTP)) {
         return;
       }
@@ -67,7 +83,23 @@ final class HttpClientAdvice {
    */
   static final class JavaHttpClientSendAsyncAdvice {
     @Advice.OnMethodEnter
-    static void enter(@Advice.Argument(0) final Object request) throws Throwable {
+    static void enter(
+        @Advice.Argument(
+                value = 0,
+                readOnly = false,
+                typing = net.bytebuddy.implementation.bytecode.assign.Assigner.Typing.DYNAMIC)
+            Object request)
+        throws Throwable {
+      // Inside a session, the request carries its id to the next service (X-Chaos-Session).
+      final String session = BootstrapDispatcher.currentSessionId();
+      if (session != null
+          && request instanceof java.net.http.HttpRequest httpRequest
+          && httpRequest.headers().firstValue(BootstrapDispatcher.SESSION_HEADER).isEmpty()) {
+        request =
+            java.net.http.HttpRequest.newBuilder(httpRequest, BootstrapDispatcher.ALL_HEADERS)
+                .header(BootstrapDispatcher.SESSION_HEADER, session)
+                .build();
+      }
       if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_HTTP)) {
         return;
       }
@@ -134,6 +166,30 @@ final class HttpClientAdvice {
     @Advice.OnMethodExit(onThrowable = Throwable.class)
     static void exit() {
       BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
+    }
+  }
+
+  /**
+   * Adds {@code X-Chaos-Session} to a {@code sun.net.www.protocol.http.HttpURLConnection} request
+   * made inside a session, on {@code connect()}, {@code getInputStream()} and {@code
+   * getOutputStream()} while the request headers can still change. A connection that already
+   * connected, or that set the header itself, is left alone.
+   */
+  static final class HttpUrlConnectionSessionHeaderAdvice {
+    @Advice.OnMethodEnter
+    static void enter(@Advice.This final Object connection) {
+      final String session = BootstrapDispatcher.currentSessionId();
+      if (session == null) {
+        return;
+      }
+      final java.net.URLConnection urlConnection = (java.net.URLConnection) connection;
+      try {
+        if (urlConnection.getRequestProperty(BootstrapDispatcher.SESSION_HEADER) == null) {
+          urlConnection.setRequestProperty(BootstrapDispatcher.SESSION_HEADER, session);
+        }
+      } catch (final IllegalStateException alreadyConnected) {
+        // headers are fixed once connected; the request went out without the session
+      }
     }
   }
 

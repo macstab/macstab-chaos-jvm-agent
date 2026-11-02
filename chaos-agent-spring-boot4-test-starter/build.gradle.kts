@@ -2,6 +2,7 @@ dependencies {
     api(project(":chaos-agent-api"))
     api(project(":chaos-agent-testkit"))
     implementation(project(":chaos-agent-bootstrap"))
+    implementation(project(":chaos-agent-spring-boot-common"))
 
     compileOnly(platform(libs.spring.boot4.dependencies))
     compileOnly("org.springframework.boot:spring-boot-test")

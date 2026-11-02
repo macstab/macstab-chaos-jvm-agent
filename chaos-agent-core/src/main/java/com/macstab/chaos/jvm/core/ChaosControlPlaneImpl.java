@@ -66,7 +66,12 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
           OperationType.EXECUTOR_SUBMIT,
           OperationType.SCHEDULE_SUBMIT,
           OperationType.THREAD_START,
-          OperationType.FORK_JOIN_TASK_RUN);
+          OperationType.FORK_JOIN_TASK_RUN,
+          // The HTTP client hooks carry the session id to other services (ChaosSession.HEADER).
+          OperationType.HTTP_CLIENT_SEND);
+
+  /** Open sessions by id, for {@link #bindSession(String)}. */
+  private final Map<String, DefaultChaosSession> openSessions = new ConcurrentHashMap<>();
 
   ChaosControlPlaneImpl(final Clock clock, final ChaosMetricsSink metricsSink) {
     this.clock = clock;
@@ -207,7 +212,26 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
     // through ChaosRuntime.
     ensureOpen();
     hookDemand.require(SESSION_PROPAGATION_OPERATIONS);
-    return new DefaultChaosSession(displayName, scopeContext, this);
+    final DefaultChaosSession session = new DefaultChaosSession(displayName, scopeContext, this);
+    openSessions.put(session.id(), session);
+    return session;
+  }
+
+  @Override
+  public ChaosSession.ScopeBinding bindSession(final String sessionId) {
+    final DefaultChaosSession session = sessionId == null ? null : openSessions.get(sessionId);
+    // An id naming no open session still decides: the thread runs outside any session, even if it
+    // inherited one (a server worker thread started while a test's session was bound).
+    return session == null ? scopeContext.bindNone() : session.bind();
+  }
+
+  /**
+   * Forgets a closed session.
+   *
+   * @param sessionId the session's id
+   */
+  void sessionClosed(final String sessionId) {
+    openSessions.remove(sessionId);
   }
 
   ChaosSession openSession(final String displayName, final ChaosRuntime runtime) {

@@ -194,6 +194,17 @@ Failures are `org.opentest4j.AssertionFailedError`, which every JUnit and IDE re
 
 ---
 
+# 5b. Sessions across HTTP
+
+A session follows the test's own threads and the work they hand off. To reach the server side of an HTTP call — the app under test in `@SpringBootTest(webEnvironment = RANDOM_PORT)`, or another service — the request carries the session:
+
+- the JDK `HttpClient` and `HttpURLConnection` (and so `TestRestTemplate`, `RestTemplate`, `RestClient` on those transports) add `X-Chaos-Session: <id>` to requests sent from a thread in a session;
+- the Spring Boot starters' `ChaosSessionFilter` binds the request thread to that session; elsewhere call `controlPlane.bindSession(header)` in your own filter.
+
+The header decides per request, so a server whose worker threads inherited a session (started while one was bound) still runs a request from another session — or with an unknown id, from none — accordingly. `SessionAcrossHttpTest` in the `sb3-retry-resilience-test` example shows a session-scoped downstream failure that hits only the requests from the test's session.
+
+---
+
 # 5a. Replaying a flaky run
 
 A probabilistic scenario without a seed fails differently on every run. Record which matches took effect and replay exactly those:

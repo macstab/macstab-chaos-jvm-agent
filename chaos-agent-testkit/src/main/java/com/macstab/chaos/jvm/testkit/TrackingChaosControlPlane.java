@@ -136,4 +136,9 @@ public final class TrackingChaosControlPlane implements ChaosControlPlane {
           () -> "chaos-agent: failed to stop JVM-scoped handle during test teardown");
     }
   }
+
+  @Override
+  public ChaosSession.ScopeBinding bindSession(final String sessionId) {
+    return delegate.bindSession(sessionId);
+  }
 }

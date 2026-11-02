@@ -434,8 +434,18 @@ public final class BootstrapDispatcher {
   /** Handle index for {@link #beforeProcessStart(String)}. */
   public static final int BEFORE_PROCESS_START = 65;
 
+  /** Handle index for {@link #currentSessionId()}. */
+  public static final int CURRENT_SESSION_ID = 66;
+
   /** Total number of method-handle slots; equals the highest index plus one. */
-  public static final int HANDLE_COUNT = 66;
+  public static final int HANDLE_COUNT = 67;
+
+  /** The header that carries a session id between services; {@code ChaosSession.HEADER}. */
+  public static final String SESSION_HEADER = "X-Chaos-Session";
+
+  /** Keeps every header when the HTTP client advice copies a request to add the session header. */
+  public static final java.util.function.BiPredicate<String, String> ALL_HEADERS =
+      (name, value) -> true;
 
   /** Utility class; do not instantiate. */
   private BootstrapDispatcher() {}
@@ -1607,6 +1617,30 @@ public final class BootstrapDispatcher {
       }
     } catch (final Throwable throwable) {
       sneakyThrow(throwable);
+    } finally {
+      depth[0]--;
+    }
+  }
+
+  /**
+   * Returns the id of the session the calling thread is bound to: the HTTP client advice sends it
+   * as {@link #SESSION_HEADER}.
+   *
+   * @return the session id, or {@code null} outside any session, inside the agent or before the
+   *     agent is installed
+   */
+  public static String currentSessionId() {
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return null;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      return (d == null || h == null) ? null : (String) h[CURRENT_SESSION_ID].invoke(d);
+    } catch (final Throwable throwable) {
+      return null;
     } finally {
       depth[0]--;
     }

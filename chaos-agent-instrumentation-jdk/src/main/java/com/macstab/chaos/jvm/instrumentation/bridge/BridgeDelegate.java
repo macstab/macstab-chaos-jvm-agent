@@ -452,6 +452,14 @@ public interface BridgeDelegate {
   void beforeProcessStart(String command) throws Throwable;
 
   /**
+   * Returns the id of the session the calling thread is bound to, for the HTTP client hooks that
+   * forward it as the {@code X-Chaos-Session} header.
+   *
+   * @return the session id, or {@code null} outside any session
+   */
+  String currentSessionId();
+
+  /**
    * Called before {@link java.net.Socket#close()}.
    *
    * @param socket the socket being closed; never {@code null}

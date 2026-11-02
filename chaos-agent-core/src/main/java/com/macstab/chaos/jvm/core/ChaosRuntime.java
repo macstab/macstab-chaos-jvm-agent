@@ -76,6 +76,11 @@ public final class ChaosRuntime implements ChaosControlPlane {
     return controlPlane.activate(scenario);
   }
 
+  @Override
+  public ChaosSession.ScopeBinding bindSession(final String sessionId) {
+    return controlPlane.bindSession(sessionId);
+  }
+
   /**
    * Validates a scenario as {@link #activate(ChaosScenario)} would, without activating it.
    *

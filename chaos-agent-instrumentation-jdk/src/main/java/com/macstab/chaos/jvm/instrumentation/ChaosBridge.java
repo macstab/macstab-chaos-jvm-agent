@@ -517,6 +517,16 @@ final class ChaosBridge implements BridgeDelegate {
   }
 
   /**
+   * Returns the calling thread's session id.
+   *
+   * @return the session id, or {@code null}
+   */
+  @Override
+  public String currentSessionId() {
+    return runtime.currentSessionId();
+  }
+
+  /**
    * Invoked before a {@code SocketChannel} write.
    *
    * @param channel the channel being written to

@@ -122,4 +122,18 @@ public interface ChaosControlPlane extends AutoCloseable {
    */
   @Override
   void close();
+
+  /**
+   * Binds the calling thread to the open session with {@code sessionId}, as {@link
+   * ChaosSession#bind()} would: how a server joins the session a request came from ({@link
+   * ChaosSession#HEADER}). The id decides for the binding's lifetime: an unknown or closed id runs
+   * the thread outside any session, even one it inherited (a pooled server thread started while a
+   * test's session was bound).
+   *
+   * @param sessionId the session id, e.g. the value of the {@link ChaosSession#HEADER} header
+   * @return the binding to close when the work is done
+   */
+  default ChaosSession.ScopeBinding bindSession(final String sessionId) {
+    return () -> {};
+  }
 }

@@ -275,7 +275,7 @@ package "chaos-agent-core" {
 }
 
 package "chaos-agent-bootstrap" {
-  [BootstrapDispatcher\n(66 slots)] as BD
+  [BootstrapDispatcher\n(67 slots)] as BD
 }
 
 AgentArgs --> AAP

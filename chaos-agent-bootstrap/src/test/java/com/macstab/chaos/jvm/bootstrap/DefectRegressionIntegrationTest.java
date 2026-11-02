@@ -719,6 +719,16 @@ class DefectRegressionIntegrationTest {
     }
 
     @Test
+    @DisplayName("X-Chaos-Session carries a session to the server handling the request")
+    void sessionHeader() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.runWithoutPlan(DefectProbeMain.class, "session-header");
+      assertThat(result.value("httpClient")).isEqualTo("session|injected");
+      assertThat(result.value("urlConnection")).isEqualTo("session|injected");
+      assertThat(result.value("afterClose")).as("no session: no header").isEqualTo("null|ok");
+    }
+
+    @Test
     @DisplayName("a process start fails with the JDK's own message, only for the selected program")
     void processStart() throws Exception {
       final String java = Path.of(System.getProperty("java.home"), "bin", "java").toString();

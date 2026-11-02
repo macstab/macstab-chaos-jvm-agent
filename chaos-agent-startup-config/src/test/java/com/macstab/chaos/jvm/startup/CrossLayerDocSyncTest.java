@@ -197,7 +197,9 @@ class CrossLayerDocSyncTest {
               .findFirst();
       final String name = nested.group(1) + "." + nested.group(2);
       if (type.isEmpty()) {
-        violations.add(name + " does not exist");
+        if (!hasConstantField(owner, nested.group(2))) {
+          violations.add(name + " does not exist");
+        }
       } else if (nested.group(3) != null && !hasConstant(type.get(), nested.group(3))) {
         violations.add(name + "." + nested.group(3) + " does not exist");
       }
@@ -274,6 +276,14 @@ class CrossLayerDocSyncTest {
 
   private static boolean hasMethod(final Class<?> type, final String name) {
     return Arrays.stream(type.getMethods()).map(Method::getName).anyMatch(name::equals);
+  }
+
+  private static boolean hasConstantField(final Class<?> type, final String name) {
+    return Arrays.stream(type.getFields())
+        .anyMatch(
+            field ->
+                field.getName().equals(name)
+                    && java.lang.reflect.Modifier.isStatic(field.getModifiers()));
   }
 
   private static boolean hasConstant(final Class<?> type, final String name) {

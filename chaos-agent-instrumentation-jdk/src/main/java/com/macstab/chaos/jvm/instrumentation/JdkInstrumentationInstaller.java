@@ -810,6 +810,9 @@ public final class JdkInstrumentationInstaller {
             delegateInterface,
             "beforeSocketWrite",
             MethodType.methodType(int.class, Object.class, int.class, Object.class, int.class));
+    methodHandles[BootstrapDispatcher.CURRENT_SESSION_ID] =
+        lookup.findVirtual(
+            delegateInterface, "currentSessionId", MethodType.methodType(String.class));
     methodHandles[BootstrapDispatcher.BEFORE_PROCESS_START] =
         lookup.findVirtual(
             delegateInterface,
@@ -2178,11 +2181,18 @@ public final class JdkInstrumentationInstaller {
             .type(ElementMatchers.named("sun.net.www.protocol.http.HttpURLConnection"))
             .transform(
                 (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
-                    typeBuilder.visit(
-                        Advice.to(HttpClientAdvice.HttpUrlConnectionConnectAdvice.class)
-                            .on(
-                                ElementMatchers.named("plainConnect0")
-                                    .and(ElementMatchers.takesArguments(0)))));
+                    typeBuilder
+                        .visit(
+                            Advice.to(HttpClientAdvice.HttpUrlConnectionConnectAdvice.class)
+                                .on(
+                                    ElementMatchers.named("plainConnect0")
+                                        .and(ElementMatchers.takesArguments(0))))
+                        .visit(
+                            Advice.to(HttpClientAdvice.HttpUrlConnectionSessionHeaderAdvice.class)
+                                .on(
+                                    ElementMatchers.namedOneOf(
+                                            "connect", "getInputStream", "getOutputStream")
+                                        .and(ElementMatchers.takesArguments(0)))));
     return instrumentOptional(
         agentBuilder,
         typeBuilder ->

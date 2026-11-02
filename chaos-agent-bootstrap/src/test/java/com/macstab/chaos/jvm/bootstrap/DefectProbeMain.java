@@ -98,6 +98,7 @@ public final class DefectProbeMain {
       case "file-ops" -> fileOps();
       case "process-start" -> processStart();
       case "clock-call-sites" -> clockCallSites();
+      case "session-header" -> sessionHeader();
       case "socket-torn-write" -> socketTornWrite();
       case "method-weaving" -> methodWeaving();
       case "woven-groups" -> printWovenGroups();
@@ -843,6 +844,85 @@ public final class DefectProbeMain {
     System.out.println(
         "nanosSkewSeconds="
             + Math.round((com.example.chaostarget.ClockReader.nanos() - System.nanoTime()) / 1e9));
+  }
+
+  /**
+   * A loopback server that joins the session named by the request's X-Chaos-Session header and
+   * calls Greeter.greet, which a session-scoped scenario fails. Requests are sent through the JDK
+   * HttpClient and HttpURLConnection inside the session, then once more after it closed; prints the
+   * header each request carried and what the server saw.
+   */
+  private static void sessionHeader() throws Exception {
+    final com.sun.net.httpserver.HttpServer server =
+        com.sun.net.httpserver.HttpServer.create(
+            new java.net.InetSocketAddress(InetAddress.getByName("127.0.0.1"), 0), 0);
+    server.createContext(
+        "/",
+        exchange -> {
+          final String header = exchange.getRequestHeaders().getFirst(ChaosSession.HEADER);
+          String outcome;
+          try (ChaosSession.ScopeBinding joined = ChaosPlatform.current().bindSession(header)) {
+            new com.example.chaostarget.Greeter().greet("x");
+            outcome = "ok";
+          } catch (final IllegalStateException injected) {
+            outcome = "injected";
+          }
+          final byte[] body = (header + "|" + outcome).getBytes(StandardCharsets.UTF_8);
+          exchange.sendResponseHeaders(200, body.length);
+          exchange.getResponseBody().write(body);
+          exchange.close();
+        });
+    server.start();
+    final String url = "http://127.0.0.1:" + server.getAddress().getPort() + "/";
+    try {
+      final String sessionId;
+      try (ChaosSession session = ChaosPlatform.current().openSession("header")) {
+        sessionId = session.id();
+        session.activate(
+            ChaosScenario.builder("inject-via-header")
+                .scope(ChaosScenario.ScenarioScope.SESSION)
+                .selector(
+                    new ChaosSelector.MethodSelector(
+                        Set.of(OperationType.METHOD_ENTER),
+                        NamePattern.exact("com.example.chaostarget.Greeter"),
+                        NamePattern.exact("greet"),
+                        null))
+                .effect(
+                    new ChaosEffect.ExceptionInjectionEffect(
+                        "java.lang.IllegalStateException", "injected", false))
+                .activationPolicy(ActivationPolicy.always())
+                .build());
+        System.out.println("httpClient=" + viaHttpClient(url, sessionId));
+        System.out.println("urlConnection=" + viaUrlConnection(url, sessionId));
+      }
+      System.out.println("afterClose=" + viaHttpClient(url, sessionId));
+    } finally {
+      server.stop(0);
+    }
+  }
+
+  /** Returns the server's answer with the session id replaced by "session". */
+  private static String viaHttpClient(final String url, final String sessionId) throws Exception {
+    try (java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient()) {
+      final String body =
+          client
+              .send(
+                  java.net.http.HttpRequest.newBuilder(java.net.URI.create(url)).build(),
+                  java.net.http.HttpResponse.BodyHandlers.ofString())
+              .body();
+      return body.replace(sessionId, "session");
+    }
+  }
+
+  private static String viaUrlConnection(final String url, final String sessionId)
+      throws Exception {
+    final java.net.HttpURLConnection connection =
+        (java.net.HttpURLConnection) java.net.URI.create(url).toURL().openConnection();
+    try (java.io.InputStream in = connection.getInputStream()) {
+      return new String(in.readAllBytes(), StandardCharsets.UTF_8).replace(sessionId, "session");
+    } finally {
+      connection.disconnect();
+    }
   }
 
   /** Prints how far now(ZoneId) is from the unskewed Instant.now(), in seconds. */

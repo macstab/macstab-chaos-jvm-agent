@@ -217,6 +217,7 @@ final class DefaultChaosSession implements ChaosSession {
     if (!closed.compareAndSet(false, true)) {
       return;
     }
+    controlPlane.sessionClosed(id);
     // Aggregate failures across destroy() calls and always close the root binding. Without the
     // try/finally, the first handle that throws during destroy skips every remaining handle AND
     // leaks the thread's scope binding — leaving session IDs stuck on the scope stack for the
