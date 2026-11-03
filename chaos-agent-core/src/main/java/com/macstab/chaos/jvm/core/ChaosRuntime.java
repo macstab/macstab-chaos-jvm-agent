@@ -818,6 +818,17 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
+   * Delegates to {@link ChaosDispatcher#beforeSocketBind(Object, int)}.
+   *
+   * @param address the local address being bound
+   * @param port the local port being bound
+   * @throws Throwable if an active scenario fails the bind
+   */
+  public void beforeSocketBind(final Object address, final int port) throws Throwable {
+    dispatcher.beforeSocketBind(address, port);
+  }
+
+  /**
    * Delegates to {@link ChaosDispatcher#beforeSocketChannelRead(Object, int)}.
    *
    * @param channel the channel being read from

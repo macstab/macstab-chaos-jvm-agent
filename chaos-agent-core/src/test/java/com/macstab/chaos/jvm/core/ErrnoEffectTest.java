@@ -43,9 +43,9 @@ class ErrnoEffectTest {
   @Test
   @DisplayName("ETIMEDOUT is a ConnectException on connect")
   void timeoutOnConnect() {
-    assertThat(FailureFactory.errno(Errno.ETIMEDOUT, OperationType.SOCKET_CONNECT, null))
+    assertThat(FailureFactory.errno(Errno.ETIMEDOUT, OperationType.SOCKET_CONNECT, null, false))
         .isExactlyInstanceOf(java.net.ConnectException.class);
-    assertThat(FailureFactory.errno(Errno.ETIMEDOUT, OperationType.SOCKET_READ, null))
+    assertThat(FailureFactory.errno(Errno.ETIMEDOUT, OperationType.SOCKET_READ, null, false))
         .isExactlyInstanceOf(java.net.SocketTimeoutException.class);
   }
 
@@ -69,9 +69,9 @@ class ErrnoEffectTest {
   @Test
   @DisplayName("EACCES and ENOENT use the specific java.nio.file exceptions")
   void specificFileExceptions() {
-    assertThat(FailureFactory.errno(Errno.EACCES, OperationType.FILE_IO_READ, "/x"))
+    assertThat(FailureFactory.errno(Errno.EACCES, OperationType.FILE_IO_READ, "/x", false))
         .isExactlyInstanceOf(AccessDeniedException.class);
-    assertThat(FailureFactory.errno(Errno.ENOENT, OperationType.FILE_IO_READ, "/x"))
+    assertThat(FailureFactory.errno(Errno.ENOENT, OperationType.FILE_IO_READ, "/x", false))
         .isExactlyInstanceOf(NoSuchFileException.class);
   }
 
@@ -92,5 +92,33 @@ class ErrnoEffectTest {
             .effect(ChaosEffect.errno(errno))
             .activationPolicy(ActivationPolicy.always())
             .build());
+  }
+
+  @Test
+  @DisplayName("opens, binds, accepts and thread starts fail as the JDK does")
+  void newOperations() {
+    assertThat(FailureFactory.errno(Errno.EMFILE, OperationType.FILE_IO_OPEN, "/x", true))
+        .isInstanceOf(java.io.FileNotFoundException.class)
+        .hasMessage("/x (Too many open files)");
+    assertThat(FailureFactory.errno(Errno.ENOENT, OperationType.FILE_IO_OPEN, "/x", false))
+        .isInstanceOf(java.nio.file.NoSuchFileException.class);
+    assertThat(FailureFactory.errno(Errno.ENFILE, OperationType.FILE_IO_OPEN, "/x", false))
+        .isInstanceOf(java.nio.file.FileSystemException.class)
+        .hasMessage("/x: Too many open files in system");
+    assertThat(FailureFactory.errno(Errno.EADDRNOTAVAIL, OperationType.SOCKET_BIND, null, false))
+        .isInstanceOf(java.net.BindException.class);
+    assertThat(FailureFactory.errno(Errno.EACCES, OperationType.SOCKET_BIND, null, false))
+        .isInstanceOf(java.net.BindException.class)
+        .hasMessage("Permission denied");
+    assertThat(FailureFactory.errno(Errno.EMFILE, OperationType.SOCKET_ACCEPT, null, false))
+        .isExactlyInstanceOf(java.io.IOException.class);
+    assertThat(FailureFactory.errno(Errno.ENFILE, OperationType.SOCKET_CONNECT, null, false))
+        .isExactlyInstanceOf(java.net.SocketException.class);
+    assertThat(FailureFactory.errno(Errno.ENOBUFS, OperationType.SOCKET_WRITE, null, false))
+        .isExactlyInstanceOf(java.net.SocketException.class)
+        .hasMessage("No buffer space available");
+    assertThat(FailureFactory.errno(Errno.EAGAIN, OperationType.THREAD_START, null, false))
+        .isInstanceOf(OutOfMemoryError.class)
+        .hasMessageStartingWith("unable to create native thread");
   }
 }

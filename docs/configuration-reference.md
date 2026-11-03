@@ -1052,7 +1052,7 @@ Once the hook is wired, the matcher, effect, and activation policy behave like e
 ### `network` — NetworkSelector
 
 **JSON type:** `"network"`  
-**Operations:** `SOCKET_CONNECT`, `SOCKET_ACCEPT`, `SOCKET_READ`, `SOCKET_WRITE`, `SOCKET_CLOSE`  
+**Operations:** `SOCKET_CONNECT`, `SOCKET_ACCEPT`, `SOCKET_READ`, `SOCKET_WRITE`, `SOCKET_CLOSE`, `SOCKET_BIND`  
 **Purpose:** Intercept socket operations: `java.net.Socket` / `ServerSocket`, and `SocketChannel` / `ServerSocketChannel` (TCP and Unix-domain), whose connect, accept, reads and writes (single, scattering and gathering) and close raise the same events with the channel's peer and byte count. A channel has no `SO_TIMEOUT`, so `timeout()` never fires on a channel read or connect; a torn channel write is a short count rather than a reset.
 
 **Fields:**
@@ -1066,7 +1066,7 @@ Once the hook is wired, the matcher, effect, and activation policy behave like e
 | `minBytes`          | Long                 | `null`   | The byte count of the call must be at least this (inclusive). For a read it is the number of bytes requested. Requires `operations` ⊆ {`SOCKET_READ`, `SOCKET_WRITE`}: other operations carry no byte count. |
 | `maxBytes`          | Long                 | `null`   | The byte count of the call must be at most this (inclusive). Same restriction as `minBytes`. |
 
-`remoteCidr` and `remotePort` are rejected together with `SOCKET_ACCEPT`, like `remoteHostPattern`; a Unix-domain peer has no address or port, so it never matches them. All filters must hold for a call to match. The channel operations of `NioSelector` (`NIO_CHANNEL_*`) still fire for the same channel calls: they select by channel, without peer or byte filters.
+For `SOCKET_BIND` (every bind of a socket or socket channel, explicit or implicit), `remoteHostPattern`, `remoteCidr` and `remotePort` match the local address and port being bound. `remoteCidr` and `remotePort` are rejected together with `SOCKET_ACCEPT`, like `remoteHostPattern`; a Unix-domain peer has no address or port, so it never matches them. All filters must hold for a call to match. The channel operations of `NioSelector` (`NIO_CHANNEL_*`) still fire for the same channel calls: they select by channel, without peer or byte filters.
 
 ```json
 { "type": "network", "operations": ["SOCKET_WRITE"],
@@ -1174,8 +1174,8 @@ Once the hook is wired, the matcher, effect, and activation policy behave like e
 ### `fileIo` — FileIoSelector
 
 **JSON type:** `"fileIo"`  
-**Operations:** `FILE_IO_READ`, `FILE_IO_WRITE`, `FILE_IO_SYNC`, `FILE_IO_TRUNCATE`, `FILE_IO_DELETE`, `FILE_IO_MOVE`  
-**Purpose:** Intercept file reads, writes and fsyncs: `FileInputStream` / `FileOutputStream` reads and writes, `RandomAccessFile` reads and writes, `FileChannel` reads and writes (single-buffer, positional or not), and `FileChannel.force` / `FileDescriptor.sync` (`FILE_IO_SYNC`); `FileChannel.truncate` and `RandomAccessFile.setLength` (`FILE_IO_TRUNCATE`); `Files.delete`, `Files.deleteIfExists` and `File.delete` (`FILE_IO_DELETE`); `Files.move` and `File.renameTo` (`FILE_IO_MOVE`, matched by the source path). A failed `File.delete` or `File.renameTo` returns `false` instead of throwing, as `java.io` reports those failures; the `Files` methods throw. Reads of `.jar`, `.zip` and `.jmod` archives through `RandomAccessFile` are never evaluated: they are the JVM's class loading.
+**Operations:** `FILE_IO_READ`, `FILE_IO_WRITE`, `FILE_IO_SYNC`, `FILE_IO_TRUNCATE`, `FILE_IO_DELETE`, `FILE_IO_MOVE`, `FILE_IO_OPEN`  
+**Purpose:** Intercept file reads, writes and fsyncs: `FileInputStream` / `FileOutputStream` reads and writes, `RandomAccessFile` reads and writes, `FileChannel` reads and writes (single-buffer, positional or not), and `FileChannel.force` / `FileDescriptor.sync` (`FILE_IO_SYNC`); `FileChannel.truncate` and `RandomAccessFile.setLength` (`FILE_IO_TRUNCATE`); `Files.delete`, `Files.deleteIfExists` and `File.delete` (`FILE_IO_DELETE`); `Files.move` and `File.renameTo` (`FILE_IO_MOVE`, matched by the source path); opens (`FILE_IO_OPEN`): the `FileInputStream`, `FileOutputStream` and `RandomAccessFile` constructors and the platform file system's `newByteChannel` / `newFileChannel` (`Files.newInputStream`, `Files.newOutputStream`, `Files.newBufferedReader`, `FileChannel.open`, …). Scattering and gathering `FileChannel` reads and writes are one event over all their buffers. A failed `File.delete` or `File.renameTo` returns `false` instead of throwing, as `java.io` reports those failures; the `Files` methods throw. Reads of `.jar`, `.zip` and `.jmod` archives through `RandomAccessFile` are never evaluated: they are the JVM's class loading.
 
 **Fields:**
 
@@ -1369,7 +1369,7 @@ ChaosEffect.delay(Duration.ofSeconds(2))  // deterministic
 #### `errno` — ErrnoEffect
 
 **JSON type:** `"errno"`  
-**Purpose:** Fail the operation the way the operating system reports an `errno`, as the Java exception code actually catches for it — the native library's `ERRNO` effect. Network errors apply to `SOCKET_*` and `NIO_CHANNEL_*` operations, file errors to `FILE_IO_*` and `PROCESS_START`, process errors to `PROCESS_START`; a mismatch is rejected at activation.
+**Purpose:** Fail the operation the way the operating system reports an `errno`, as the Java exception code actually catches for it — the native library's `ERRNO` effect. Network errors apply to `SOCKET_*` and `NIO_CHANNEL_*` operations, file errors to `FILE_IO_*` and `PROCESS_START`, process errors to `PROCESS_START`. A few errors also apply beyond their family, where the kernel reports them: `EACCES` on `SOCKET_BIND` (a privileged port), `EMFILE` and `ENFILE` on socket connects and accepts (which open a descriptor), `EAGAIN` and `ENOMEM` on a platform `THREAD_START`. Any other mismatch is rejected at activation.
 
 | `errno`        | Family  | Exception                                                                 |
 |----------------|---------|---------------------------------------------------------------------------|
@@ -1380,19 +1380,23 @@ ChaosEffect.delay(Duration.ofSeconds(2))  // deterministic
 | `ENETUNREACH`  | network | `SocketException("Network is unreachable")`                               |
 | `EPIPE`        | network | `SocketException("Broken pipe")`                                          |
 | `EADDRINUSE`   | network | `BindException("Address already in use")`                                 |
+| `EADDRNOTAVAIL`| network | `BindException("Cannot assign requested address")`                        |
+| `ENOTCONN`     | network | `SocketException("Transport endpoint is not connected")`                  |
+| `ENOBUFS`      | network | `SocketException("No buffer space available")`                            |
 | `ENOSPC`       | file    | `FileSystemException(path, null, "No space left on device")`              |
 | `EDQUOT`       | file    | `FileSystemException(path, null, "Disk quota exceeded")`                  |
 | `EROFS`        | file    | `FileSystemException(path, null, "Read-only file system")`                |
 | `EACCES`       | file    | `AccessDeniedException(path)`                                             |
 | `ENOENT`       | file    | `NoSuchFileException(path)`                                               |
 | `EIO`          | file    | `FileSystemException(path, null, "Input/output error")`                   |
-| `EMFILE`       | file    | `FileSystemException(path, null, "Too many open files")`                  |
+| `EMFILE`       | file    | `FileSystemException(path, null, "Too many open files")`; on an accept `IOException`, on a connect `SocketException` |
+| `ENFILE`       | file    | as `EMFILE`, with `"Too many open files in system"`                        |
 | `EAGAIN`       | process | on `PROCESS_START`, see below                                              |
 | `ENOMEM`       | process | on `PROCESS_START`, see below                                              |
 
 On `PROCESS_START` every error is the JDK's own failure for a program that could not be started: `IOException("Cannot run program \"<program>\": error=<n>, <reason>")`, with Linux error numbers (`ENOENT` 2, `EACCES` 13, `EAGAIN` 11, `ENOMEM` 12, …; `ChaosEffect.Errno.code()`).
 
-File errors carry the path the stream was opened with; without one they are a plain `IOException` (`FileNotFoundException` for `ENOENT`) with the same text.
+File errors carry the path the stream was opened with; without one they are a plain `IOException` (`FileNotFoundException` for `ENOENT`) with the same text. A `FILE_IO_OPEN` through a `java.io` constructor (`FileInputStream`, `FileOutputStream`, `RandomAccessFile`) fails as the JDK does, with `FileNotFoundException("<path> (<reason>)")`. On `SOCKET_BIND` the errors are `BindException`; on a platform `THREAD_START`, `EAGAIN` and `ENOMEM` are the JDK's `OutOfMemoryError("unable to create native thread: possibly out of memory or process/resource limits reached")`.
 
 ```json
 { "type": "errno", "errno": "ENOSPC" }

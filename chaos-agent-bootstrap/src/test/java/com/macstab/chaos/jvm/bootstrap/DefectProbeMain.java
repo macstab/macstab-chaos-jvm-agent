@@ -102,6 +102,9 @@ public final class DefectProbeMain {
       case "pool-worker-session" -> poolWorkerSession();
       case "socket-torn-write" -> socketTornWrite();
       case "socket-channel" -> socketChannel();
+      case "file-open" -> fileOpen();
+      case "socket-bind" -> socketBind();
+      case "thread-eagain" -> threadEagain();
       case "method-weaving" -> methodWeaving();
       case "woven-groups" -> printWovenGroups();
       case "woven-groups-after-thread-local" -> wovenGroupsAfterThreadLocal();
@@ -813,6 +816,111 @@ public final class DefectProbeMain {
         accepted.close();
       }
     }
+  }
+
+  /**
+   * Opens a file under directories {@code a} and {@code b} of {@code chaos.test.dir} in every way
+   * the JDK offers; prints "ok" or the failure's class and message for each.
+   */
+  private static void fileOpen() throws Exception {
+    final java.nio.file.Path root = java.nio.file.Path.of(System.getProperty("chaos.test.dir"));
+    for (final String directory : new String[] {"a", "b"}) {
+      final java.nio.file.Path file =
+          java.nio.file.Files.createDirectories(root.resolve(directory)).resolve("f");
+      // Created through File.createNewFile, which is not an open.
+      file.toFile().createNewFile();
+      final Map<String, java.util.concurrent.Callable<java.io.Closeable>> opens =
+          new java.util.LinkedHashMap<>();
+      opens.put("fileInputStream", () -> new java.io.FileInputStream(file.toFile()));
+      opens.put("fileOutputStream", () -> new java.io.FileOutputStream(file.toFile(), true));
+      opens.put("randomAccessFile", () -> new java.io.RandomAccessFile(file.toFile(), "r"));
+      opens.put("newInputStream", () -> java.nio.file.Files.newInputStream(file));
+      opens.put("newBufferedReader", () -> java.nio.file.Files.newBufferedReader(file));
+      opens.put("fileChannel", () -> java.nio.channels.FileChannel.open(file));
+      for (final Map.Entry<String, java.util.concurrent.Callable<java.io.Closeable>> open :
+          opens.entrySet()) {
+        try (java.io.Closeable opened = open.getValue().call()) {
+          System.out.println(directory + "." + open.getKey() + "=ok");
+        } catch (final java.io.IOException failed) {
+          System.out.println(
+              directory
+                  + "."
+                  + open.getKey()
+                  + "="
+                  + failed.getClass().getName()
+                  + ": "
+                  + failed.getMessage());
+        }
+      }
+    }
+  }
+
+  /**
+   * Binds a server socket and a server socket channel to 127.0.0.1 and to ::1, then accepts on a
+   * ::1 server; prints "ok" or the failure for each.
+   */
+  private static void socketBind() throws Exception {
+    for (final String host : new String[] {"127.0.0.1", "::1"}) {
+      try (java.net.ServerSocket server = new java.net.ServerSocket()) {
+        server.bind(new InetSocketAddress(host, 0));
+        System.out.println("serverSocket." + host + "=ok");
+      } catch (final java.io.IOException failed) {
+        System.out.println(
+            "serverSocket."
+                + host
+                + "="
+                + failed.getClass().getName()
+                + ": "
+                + failed.getMessage());
+      }
+      try (java.nio.channels.ServerSocketChannel channel =
+          java.nio.channels.ServerSocketChannel.open()) {
+        channel.bind(new InetSocketAddress(host, 0));
+        System.out.println("serverChannel." + host + "=ok");
+      } catch (final java.io.IOException failed) {
+        System.out.println(
+            "serverChannel."
+                + host
+                + "="
+                + failed.getClass().getName()
+                + ": "
+                + failed.getMessage());
+      }
+    }
+    try (java.net.ServerSocket server =
+        new java.net.ServerSocket(0, 1, InetAddress.getByName("::1"))) {
+      server.accept().close();
+      System.out.println("accept=ok");
+    } catch (final java.io.IOException failed) {
+      System.out.println("accept=" + failed.getClass().getName() + ": " + failed.getMessage());
+    }
+  }
+
+  /** Starts one platform thread under an EAGAIN scenario, then one after it is closed. */
+  private static void threadEagain() throws Exception {
+    final ChaosActivationHandle eagain =
+        ChaosPlatform.current()
+            .activate(
+                ChaosScenario.builder("thread-eagain")
+                    .selector(
+                        new ChaosSelector.ThreadSelector(
+                            Set.of(OperationType.THREAD_START),
+                            ChaosSelector.ThreadKind.PLATFORM,
+                            NamePattern.exact("probe-worker"),
+                            null))
+                    .effect(ChaosEffect.errno(ChaosEffect.Errno.EAGAIN))
+                    .build());
+    try {
+      new Thread(() -> {}, "probe-worker").start();
+      System.out.println("during=started");
+    } catch (final OutOfMemoryError failed) {
+      System.out.println("during=" + failed.getMessage());
+    }
+    eagain.close();
+    final Thread after = new Thread(() -> {}, "probe-worker");
+    after.start();
+    after.join();
+    System.out.println("after=started");
   }
 
   /**

@@ -452,8 +452,11 @@ public final class BootstrapDispatcher {
   /** Handle index for {@link #beforeSocketChannelWrite(Object, java.nio.ByteBuffer)}. */
   public static final int BEFORE_SOCKET_CHANNEL_WRITE = 69;
 
+  /** Handle index for {@link #beforeSocketBind(Object, int)}. */
+  public static final int BEFORE_SOCKET_BIND = 70;
+
   /** Total number of method-handle slots; equals the highest index plus one. */
-  public static final int HANDLE_COUNT = 70;
+  public static final int HANDLE_COUNT = 71;
 
   /** The header that carries a session id between services; {@code ChaosSession.HEADER}. */
   public static final String SESSION_HEADER = "X-Chaos-Session";
@@ -2359,6 +2362,31 @@ public final class BootstrapDispatcher {
     final java.util.SplittableRandom random = new java.util.SplittableRandom(corruptionSeed());
     final int index = offset + random.nextInt(count);
     buffer[index] = (byte) (buffer[index] ^ (1 << random.nextInt(8)));
+  }
+
+  /**
+   * Called before {@code sun.nio.ch.Net.bind}, through which every socket and socket channel bind
+   * of the JDK goes.
+   *
+   * @param address the local {@code InetAddress} being bound
+   * @param port the local port being bound
+   * @throws Throwable if an active scenario fails the bind
+   */
+  public static void beforeSocketBind(final Object address, final int port) throws Throwable {
+    final int[] depth = DEPTH.get();
+    final MethodHandle[] h = handles;
+    final Object d = delegate;
+    if (depth[0] > 0 || d == null || h == null) {
+      return;
+    }
+    depth[0]++;
+    try {
+      h[BEFORE_SOCKET_BIND].invoke(d, address, port);
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+    } finally {
+      depth[0]--;
+    }
   }
 
   /**

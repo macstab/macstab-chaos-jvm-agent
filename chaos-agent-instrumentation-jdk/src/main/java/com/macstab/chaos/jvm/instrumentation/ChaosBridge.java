@@ -571,6 +571,11 @@ final class ChaosBridge implements BridgeDelegate {
     return runtime.beforeSocketChannelWrite(channel, remaining);
   }
 
+  @Override
+  public void beforeSocketBind(final Object address, final int port) throws Throwable {
+    runtime.beforeSocketBind(address, port);
+  }
+
   /**
    * Invoked before a JNDI {@code lookup} call.
    *

@@ -833,6 +833,41 @@ class DefectRegressionIntegrationTest {
     }
 
     @Test
+    @DisplayName("FILE_IO_OPEN fails every open by path: java.io as FileNotFoundException")
+    void fileOpens() throws Exception {
+      final Path root = Files.createDirectories(tempDir.resolve("opens"));
+      final ChildJvmProbe.ProbeResult result =
+          probe.run(
+              plan(
+                  scenario(
+                      "emfile-under-a",
+                      new ChaosSelector.FileIoSelector(
+                          Set.of(OperationType.FILE_IO_OPEN),
+                          PathPattern.under(root.resolve("a").toString()),
+                          null,
+                          null),
+                      ChaosEffect.errno(ChaosEffect.Errno.EMFILE))),
+              DefectProbeMain.class,
+              "file-open",
+              null,
+              "-Dchaos.test.dir=" + root);
+      final String file = root.resolve("a").resolve("f").toString();
+      for (final String javaIo :
+          List.of("fileInputStream", "fileOutputStream", "randomAccessFile")) {
+        assertThat(result.value("a." + javaIo))
+            .isEqualTo("java.io.FileNotFoundException: " + file + " (Too many open files)");
+      }
+      for (final String nio : List.of("newInputStream", "newBufferedReader", "fileChannel")) {
+        assertThat(result.value("a." + nio))
+            .isEqualTo("java.nio.file.FileSystemException: " + file + ": Too many open files");
+        assertThat(result.value("b." + nio)).isEqualTo("ok");
+      }
+      assertThat(result.value("b.fileInputStream")).isEqualTo("ok");
+      // each open is one event: six under a
+      assertThat(result.longValue("applied.emfile-under-a")).isEqualTo(6L);
+    }
+
+    @Test
     @DisplayName("ENOENT on Files.deleteIfExists returns false, as for a missing file")
     void deleteIfExistsMissing() throws Exception {
       final Path root = Files.createDirectories(tempDir.resolve("missing"));
@@ -1229,6 +1264,46 @@ class DefectRegressionIntegrationTest {
       // SOCKET_WRITE matches the stream write and, a socket write too, the channel write
       assertThat(result.longValue("applied.torn-stream")).isEqualTo(2L);
       assertThat(result.longValue("applied.torn-channel")).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("SOCKET_BIND fails binds by local address; EMFILE fails an accept")
+    void bindsAndAccepts() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.run(
+              plan(
+                  scenario(
+                      "bind-in-use",
+                      new ChaosSelector.NetworkSelector(
+                          Set.of(OperationType.SOCKET_BIND),
+                          NamePattern.any(),
+                          "127.0.0.1",
+                          null,
+                          null,
+                          null),
+                      ChaosEffect.errno(ChaosEffect.Errno.EADDRINUSE)),
+                  scenario(
+                      "accept-emfile",
+                      ChaosSelector.network(Set.of(OperationType.SOCKET_ACCEPT)),
+                      ChaosEffect.errno(ChaosEffect.Errno.EMFILE))),
+              DefectProbeMain.class,
+              "socket-bind",
+              null);
+      final String inUse = "java.net.BindException: Address already in use";
+      assertThat(result.value("serverSocket.127.0.0.1")).isEqualTo(inUse);
+      assertThat(result.value("serverChannel.127.0.0.1")).isEqualTo(inUse);
+      assertThat(result.value("serverSocket.::1")).isEqualTo("ok");
+      assertThat(result.value("serverChannel.::1")).isEqualTo("ok");
+      assertThat(result.value("accept")).isEqualTo("java.io.IOException: Too many open files");
+    }
+
+    @Test
+    @DisplayName("EAGAIN on a platform thread start is the JDK's native-thread OutOfMemoryError")
+    void threadStartEagain() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.runWithoutPlan(DefectProbeMain.class, "thread-eagain");
+      assertThat(result.value("during")).startsWith("unable to create native thread");
+      assertThat(result.value("after")).isEqualTo("started");
     }
 
     @Test

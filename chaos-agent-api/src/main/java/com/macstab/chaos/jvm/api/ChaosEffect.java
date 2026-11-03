@@ -862,6 +862,12 @@ public sealed interface ChaosEffect
     EPIPE(Family.NETWORK, 32, 32, "Broken pipe"),
     /** Address already in use: {@link java.net.BindException}. */
     EADDRINUSE(Family.NETWORK, 98, 48, "Address already in use"),
+    /** Cannot assign the requested (local) address: {@link java.net.BindException}. */
+    EADDRNOTAVAIL(Family.NETWORK, 99, 49, "Cannot assign requested address"),
+    /** The socket is not connected: {@link java.net.SocketException}. */
+    ENOTCONN(Family.NETWORK, 107, 57, "Transport endpoint is not connected"),
+    /** No buffer space available (kernel socket buffers): {@link java.net.SocketException}. */
+    ENOBUFS(Family.NETWORK, 105, 55, "No buffer space available"),
     /** No space left on device: {@link java.nio.file.FileSystemException}. */
     ENOSPC(Family.FILE, 28, 28, "No space left on device"),
     /** Disk quota exceeded: {@link java.nio.file.FileSystemException}. */
@@ -874,11 +880,18 @@ public sealed interface ChaosEffect
     ENOENT(Family.FILE, 2, 2, "No such file or directory"),
     /** Input/output error (a failing disk): {@link java.nio.file.FileSystemException}. */
     EIO(Family.FILE, 5, 5, "Input/output error"),
-    /** Too many open files: {@link java.nio.file.FileSystemException}. */
+    /**
+     * Too many open files (the process limit): {@link java.nio.file.FileSystemException}; also on
+     * socket connects and accepts, which open a descriptor.
+     */
     EMFILE(Family.FILE, 24, 24, "Too many open files"),
+    /** Too many open files in the system (the system limit): as {@link #EMFILE}. */
+    ENFILE(Family.FILE, 23, 23, "Too many open files in system"),
     /**
      * Resource temporarily unavailable (the process or thread limit): on {@link
-     * OperationType#PROCESS_START}, {@code IOException: Cannot run program}.
+     * OperationType#PROCESS_START}, {@code IOException: Cannot run program}; on {@link
+     * OperationType#THREAD_START}, the JDK's {@code OutOfMemoryError: unable to create native
+     * thread}.
      */
     EAGAIN(Family.PROCESS, 11, 35, "Resource temporarily unavailable"),
     /** Cannot allocate memory: on {@link OperationType#PROCESS_START}, as {@link #EAGAIN}. */

@@ -497,6 +497,15 @@ public interface BridgeDelegate {
   int beforeSocketChannelWrite(Object channel, int remaining) throws Throwable;
 
   /**
+   * Called before a socket is bound to a local address.
+   *
+   * @param address the local {@code InetAddress}
+   * @param port the local port
+   * @throws Throwable if an active scenario fails the bind
+   */
+  void beforeSocketBind(Object address, int port) throws Throwable;
+
+  /**
    * Called before {@link javax.naming.InitialContext#lookup(String)}.
    *
    * @param context the {@code InitialContext} performing the lookup; never {@code null}

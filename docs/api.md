@@ -472,14 +472,14 @@ The `OperationType` enum defines all intercepted JDK operations. Full list:
 | Class                           | `CLASS_LOAD`, `CLASS_DEFINE`, `RESOURCE_LOAD`                                                                                          |
 | Synchronization                 | `MONITOR_ENTER`, `THREAD_PARK`                                                                                                         |
 | NIO                             | `NIO_SELECTOR_SELECT`, `NIO_CHANNEL_READ`, `NIO_CHANNEL_WRITE`, `NIO_CHANNEL_CONNECT`, `NIO_CHANNEL_ACCEPT`                            |
-| Network                         | `SOCKET_CONNECT`, `SOCKET_ACCEPT`, `SOCKET_READ`, `SOCKET_WRITE`, `SOCKET_CLOSE`                                                       |
+| Network                         | `SOCKET_CONNECT`, `SOCKET_ACCEPT`, `SOCKET_READ`, `SOCKET_WRITE`, `SOCKET_CLOSE`, `SOCKET_BIND`                                                     |
 | Infrastructure                  | `JNDI_LOOKUP`, `JMX_INVOKE`, `JMX_GET_ATTR`, `NATIVE_LIBRARY_LOAD`                                                                     |
 | Compression                     | `ZIP_INFLATE`, `ZIP_DEFLATE`                                                                                                           |
 | ThreadLocal                     | `THREAD_LOCAL_GET`, `THREAD_LOCAL_SET`                                                                                                 |
 | HTTP client                     | `HTTP_CLIENT_SEND`, `HTTP_CLIENT_SEND_ASYNC`                                                                                           |
 | JDBC                            | `JDBC_CONNECTION_ACQUIRE`, `JDBC_STATEMENT_EXECUTE`, `JDBC_PREPARED_STATEMENT`, `JDBC_TRANSACTION_COMMIT`, `JDBC_TRANSACTION_ROLLBACK` |
 | DNS / TLS                       | `DNS_RESOLVE`, `SSL_HANDSHAKE`                                                                                                         |
-| File I/O                        | `FILE_IO_READ`, `FILE_IO_WRITE`, `FILE_IO_SYNC`, `FILE_IO_TRUNCATE`, `FILE_IO_DELETE`, `FILE_IO_MOVE`                                                                                                        |
+| File I/O                        | `FILE_IO_READ`, `FILE_IO_WRITE`, `FILE_IO_SYNC`, `FILE_IO_TRUNCATE`, `FILE_IO_DELETE`, `FILE_IO_MOVE`, `FILE_IO_OPEN`                                                                                                      |
 | Processes                       | `PROCESS_START` |
 | Messaging (Kafka)               | `MESSAGE_SEND`, `MESSAGE_RECEIVE`                                                                                                      |
 | RPC (gRPC)                      | `RPC_CALL`                                                                                                                             |

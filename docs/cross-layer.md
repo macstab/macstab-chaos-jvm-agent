@@ -38,15 +38,17 @@ The evaluation order of a JVM scenario is in [semantics.md](semantics.md); the n
 |-----------------------------------------|------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------|
 | `/data` (io path prefix, `/` boundaries) | `new ChaosSelector.FileIoSelector(ops, PathPattern.under("/data"), null, null)`                    | `{"type": "fileIo", "operations": [...], "pathPattern": {"prefix": "/data"}}` |
 | `read`/`pread`, `write`/`pwrite`, `fsync`/`fdatasync` (io operations) | `OperationType.FILE_IO_READ`, `OperationType.FILE_IO_WRITE`, `OperationType.FILE_IO_SYNC` | `"operations": ["FILE_IO_SYNC"]`                              |
+| `open`/`openat` (io operation) | `OperationType.FILE_IO_OPEN`: the `java.io` stream and `RandomAccessFile` constructors, `Files.newInputStream`/`newOutputStream`/`newByteChannel`, `FileChannel.open` | `"operations": ["FILE_IO_OPEN"]` |
 | `truncate`, `unlink`, `rename_from` (io operations) | `OperationType.FILE_IO_TRUNCATE`, `OperationType.FILE_IO_DELETE`, `OperationType.FILE_IO_MOVE` (by source path; there is no destination match) | `"operations": ["FILE_IO_DELETE"]` |
 | `tcp4://10.0.0.5:5432` (net endpoint)   | `remoteCidr` `"10.0.0.5"` (or `"10.0.0.0/24"`, parsed by `CidrBlock.parse`) and `remotePort` `5432` on a `ChaosSelector.NetworkSelector` | `{"type": "network", "operations": [...], "remoteCidr": "10.0.0.5", "remotePort": 5432}` |
 | `tcp6://[::1]:6379`                     | `remoteCidr` `"::1"`                                                                                  | `"remoteCidr": "::1"`                                                     |
 | `connect`, `recv`, `send`, `close` (net operation) | `OperationType.SOCKET_CONNECT`, `OperationType.SOCKET_READ`, `OperationType.SOCKET_WRITE`, `OperationType.SOCKET_CLOSE` | `"operations": ["SOCKET_READ"]`               |
+| `accept`, `bind` (net operation)        | `OperationType.SOCKET_ACCEPT`, `OperationType.SOCKET_BIND` (`remoteCidr` and `remotePort` match the local address being bound) | `"operations": ["SOCKET_BIND"]` |
 | `dns://db.internal` (exact)             | `ChaosSelector.dns(ops, NamePattern.exact("db.internal"))`                                            | `"hostnamePattern": {"mode": "EXACT", "value": "db.internal"}`            |
 | `dns://*.example.internal` (suffix)     | `NamePattern.glob("*.example.internal")`                                                             | `"hostnamePattern": {"mode": "GLOB", "value": "*.example.internal"}`      |
 | `*` (any)                               | `NamePattern.any()`, or leave the filter out                                                         | omit the pattern                                                          |
 | `clock_gettime/realtime`                | `ChaosSelector.jvmRuntime(Set.of(OperationType.INSTANT_NOW, OperationType.LOCAL_DATE_TIME_NOW, OperationType.ZONED_DATE_TIME_NOW, OperationType.DATE_NEW))` | `{"type": "jvmRuntime", "operations": ["INSTANT_NOW", ...]}` |
-| `pthread_create`                        | `ChaosSelector.thread(Set.of(OperationType.THREAD_START), ChaosSelector.ThreadKind.PLATFORM)`        | `{"type": "thread", "operations": ["THREAD_START"], "kind": "PLATFORM"}`  |
+| `pthread_create`                        | `ChaosSelector.thread(Set.of(OperationType.THREAD_START), ChaosSelector.ThreadKind.PLATFORM)`; `ChaosEffect.errno(ChaosEffect.Errno.EAGAIN)` there is the JDK's `OutOfMemoryError: unable to create native thread` | `{"type": "thread", "operations": ["THREAD_START"], "kind": "PLATFORM"}`  |
 | `posix_spawn`, `fork`, `execve` (process) | `ChaosSelector.process(NamePattern.exact("git"))`: `ProcessBuilder.start` and `Runtime.exec` (`OperationType.PROCESS_START`) | `{"type": "process", "operations": ["PROCESS_START"], "commandPattern": {"mode": "EXACT", "value": "git"}}` |
 
 A `unix:///run/app.sock` endpoint is `ChaosSelector.network(ops, NamePattern.exact("/run/app.sock"))`: the peer of a Unix-domain `SocketChannel` is its path. Socket events cover `java.net.Socket` and `SocketChannel` alike (single, scattering and gathering reads and writes), so the filters and data effects below reach NIO clients too.
@@ -60,8 +62,9 @@ The JVM matches on what the Java call carries: a socket call matches by peer add
 | Native effect                                   | JVM effect                                                         | Plan JSON                                                   | Applies to (JVM operations)                     |
 |-------------------------------------------------|--------------------------------------------------------------------|-------------------------------------------------------------|-------------------------------------------------|
 | `LATENCY:200`                                   | `ChaosEffect.delay(Duration.ofMillis(200))`                        | `{"type": "delay", "minDelay": "PT0.2S", "maxDelay": "PT0.2S"}` | every interceptor operation                 |
-| `ERRNO` with `EIO`, `ENOSPC`, `EDQUOT`, `EROFS`, `EACCES`, `ENOENT`, `EMFILE` | `ChaosEffect.errno(ChaosEffect.Errno.EIO)` and the other `ChaosEffect.Errno` file constants: a `FileSystemException` subclass with the path and the system's reason text | `{"type": "errno", "errno": "EIO"}` | `FILE_IO_*`               |
-| `ERRNO` with `ECONNREFUSED`, `ETIMEDOUT`, `ECONNRESET`, `EHOSTUNREACH`, `ENETUNREACH`, `EPIPE`, `EADDRINUSE` | `ChaosEffect.errno(ChaosEffect.Errno.ECONNREFUSED)` and the other network constants: the matching `java.net` exception | `{"type": "errno", "errno": "ECONNREFUSED"}` | `SOCKET_*` |
+| `ERRNO` with `EIO`, `ENOSPC`, `EDQUOT`, `EROFS`, `EACCES`, `ENOENT`, `EMFILE`, `ENFILE` | `ChaosEffect.errno(ChaosEffect.Errno.EIO)` and the other `ChaosEffect.Errno` file constants: a `FileSystemException` subclass with the path and the system's reason text; a `java.io` open fails with `FileNotFoundException("<path> (<reason>)")`. fsync failures are `SyncFailedException` | `{"type": "errno", "errno": "EIO"}` | `FILE_IO_*`               |
+| `ERRNO` with `ECONNREFUSED`, `ETIMEDOUT`, `ECONNRESET`, `EHOSTUNREACH`, `ENETUNREACH`, `EPIPE`, `EADDRINUSE`, `EADDRNOTAVAIL`, `ENOTCONN`, `ENOBUFS` | `ChaosEffect.errno(ChaosEffect.Errno.ECONNREFUSED)` and the other network constants: the matching `java.net` exception (`BindException` for bind errors) | `{"type": "errno", "errno": "ECONNREFUSED"}` | `SOCKET_*` |
+| `ERRNO` with `EMFILE`, `ENFILE` on `accept`/`connect`, `EACCES` on `bind` | the same constants on `SOCKET_ACCEPT`, `SOCKET_CONNECT`, `SOCKET_BIND`: `IOException("Too many open files")` from an accept, as the JDK throws | `{"type": "errno", "errno": "EMFILE"}` | `SOCKET_ACCEPT`, `SOCKET_CONNECT`, `SOCKET_BIND` |
 | `ERRNO` with `EAGAIN`, `ENOMEM`, `ENOENT`, `EACCES` on process starts | `ChaosEffect.errno(ChaosEffect.Errno.EAGAIN)` on `OperationType.PROCESS_START`: `IOException: Cannot run program "x": error=11, Resource temporarily unavailable`, the JDK's own failure | `{"type": "errno", "errno": "EAGAIN"}` | `PROCESS_START` |
 | any other `ERRNO`                               | `ChaosEffect.reject("...")`: the operation's natural exception (`UnknownHostException` for DNS, `SQLException` for JDBC, …) | `{"type": "reject", "message": "..."}` | every interceptor operation |
 | `GAI` (`EAI_NONAME`, `EAI_AGAIN`)               | `ChaosEffect.reject("...")` on `OperationType.DNS_RESOLVE`: `UnknownHostException` | `{"type": "reject", "message": "..."}`          | `DNS_RESOLVE`                                   |
@@ -112,7 +115,6 @@ Different rules: the native `FAIL_AFTER` counter is per operation and resets on 
 | `DUP`, `SERVICE`                              | no JVM effect duplicates received data or rewrites a resolved service port                                        |
 | `mmap`, `munmap`, `mprotect`, `madvise`       | the JVM does not expose memory mapping calls; the pressure stressors (`ChaosEffect.heapPressure(...)`, `ChaosEffect.directBufferPressure(...)`) are the JVM-level analogue |
 | `fork`, `waitpid`, failing `execve` of the child | the agent fails the start itself (`PROCESS_START`, below); waiting for a process is not intercepted, and a JVM child process reaches the native process rules |
-| `pthread_create:ERRNO:EAGAIN`                 | `ChaosEffect.reject("...")` on `OperationType.THREAD_START` throws `RejectedExecutionException`, not the `OutOfMemoryError: unable to create native thread` the JDK throws; use the native rule for the exact error |
 | SECCOMP supervision (`chaos-init`)            | the agent intercepts in-process; static binaries and Go programs are reached by the native supervisor only         |
 
 ### 5.2 JVM only
@@ -148,7 +150,7 @@ JVM:
  "activationPolicy": {"probability": 0.05}}
 ```
 
-`FileChannel.force` and `FileDescriptor.sync` then throw a `FileSystemException` naming the file, with the reason `Input/output error`.
+`FileChannel.force` and `FileDescriptor.sync` then throw a `SyncFailedException` with the reason `Input/output error` (`FileDescriptor.sync` declares no other exception).
 
 The same scenario through the Java API (this block is compiled by the documentation test):
 

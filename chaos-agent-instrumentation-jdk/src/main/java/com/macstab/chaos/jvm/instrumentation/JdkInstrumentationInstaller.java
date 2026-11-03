@@ -324,7 +324,8 @@ public final class JdkInstrumentationInstaller {
         OperationType.SOCKET_ACCEPT,
         OperationType.SOCKET_READ,
         OperationType.SOCKET_WRITE,
-        OperationType.SOCKET_CLOSE),
+        OperationType.SOCKET_CLOSE,
+        OperationType.SOCKET_BIND),
     /** The same socket events, raised by {@code SocketChannel} and {@code ServerSocketChannel}. */
     SOCKET_CHANNEL(
         JdkInstrumentationInstaller::applySocketChannelTransformations,
@@ -401,7 +402,8 @@ public final class JdkInstrumentationInstaller {
         OperationType.FILE_IO_SYNC,
         OperationType.FILE_IO_TRUNCATE,
         OperationType.FILE_IO_DELETE,
-        OperationType.FILE_IO_MOVE);
+        OperationType.FILE_IO_MOVE,
+        OperationType.FILE_IO_OPEN);
 
     private final java.util.function.UnaryOperator<AgentBuilder> transformations;
     private final Set<OperationType> operations;
@@ -861,6 +863,11 @@ public final class JdkInstrumentationInstaller {
             delegateInterface,
             "beforeSocketClose",
             MethodType.methodType(void.class, Object.class));
+    methodHandles[BootstrapDispatcher.BEFORE_SOCKET_BIND] =
+        lookup.findVirtual(
+            delegateInterface,
+            "beforeSocketBind",
+            MethodType.methodType(void.class, Object.class, int.class));
     methodHandles[BootstrapDispatcher.BEFORE_SOCKET_CHANNEL_READ] =
         lookup.findVirtual(
             delegateInterface,
@@ -1982,6 +1989,20 @@ public final class JdkInstrumentationInstaller {
    */
   private static AgentBuilder applySocketAndStreamTransformations(final AgentBuilder builder) {
     return builder
+        // Every bind of a socket or socket channel, explicit or implicit, funnels into this one.
+        .type(ElementMatchers.named("sun.nio.ch.Net"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(JvmRuntimeAdvice.SocketBindAdvice.class)
+                        .on(
+                            ElementMatchers.named("bind")
+                                .and(
+                                    ElementMatchers.takesArguments(
+                                        java.net.ProtocolFamily.class,
+                                        java.io.FileDescriptor.class,
+                                        java.net.InetAddress.class,
+                                        int.class)))))
         .type(ElementMatchers.named("java.net.Socket"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
@@ -2892,6 +2913,32 @@ public final class JdkInstrumentationInstaller {
                                 ElementMatchers.named("deleteIfExists")
                                     .and(
                                         ElementMatchers.takesArguments(java.nio.file.Path.class)))))
+        // Opens of java.io: the private open funnels of the constructors.
+        .type(
+            ElementMatchers.namedOneOf(
+                "java.io.FileInputStream", "java.io.FileOutputStream", "java.io.RandomAccessFile"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(JvmRuntimeAdvice.FileOpenAdvice.class)
+                        .on(
+                            ElementMatchers.named("open")
+                                .and(ElementMatchers.takesArgument(0, String.class))
+                                .and(ElementMatchers.not(ElementMatchers.isNative())))))
+        // Opens of java.nio: Files.newInputStream / newOutputStream / newByteChannel and
+        // FileChannel.open reach the platform provider's newByteChannel or newFileChannel.
+        .type(
+            ElementMatchers.nameStartsWith("sun.nio.fs.")
+                .and(ElementMatchers.isSubTypeOf(java.nio.file.spi.FileSystemProvider.class)))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(JvmRuntimeAdvice.FilesOpenAdvice.class)
+                        .on(
+                            ElementMatchers.namedOneOf("newByteChannel", "newFileChannel")
+                                .and(ElementMatchers.takesArguments(3))
+                                .and(ElementMatchers.takesArgument(0, java.nio.file.Path.class))
+                                .and(ElementMatchers.not(ElementMatchers.isAbstract())))))
         // Files.move: each platform provider implements move itself (UnixFileSystemProvider,
         // WindowsFileSystemProvider); other providers (zip file systems) are not hooked.
         .type(

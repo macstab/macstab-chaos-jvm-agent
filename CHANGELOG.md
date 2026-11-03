@@ -15,6 +15,10 @@
 
 ### Features
 
+* **instrumentation:** file opens are the new `FILE_IO_OPEN`: the `FileInputStream`, `FileOutputStream` and `RandomAccessFile` constructors (failing with the JDK's `FileNotFoundException("<path> (<reason>)")`) and the platform file system's `newByteChannel` / `newFileChannel` behind `Files.newInputStream`, `newOutputStream`, `newBufferedReader` and `FileChannel.open`. Opens of class-path archives are never evaluated.
+* **instrumentation:** binds are the new `SOCKET_BIND` (every socket and socket-channel bind, through `sun.nio.ch.Net.bind`); `NetworkSelector` address filters match the local address being bound, errors are `BindException`.
+* **api:** `ChaosEffect.Errno` gains `EADDRNOTAVAIL`, `ENOTCONN`, `ENOBUFS` and `ENFILE`. `EMFILE` and `ENFILE` also apply to socket connects and accepts (an accept fails with `IOException("Too many open files")`), `EACCES` to binds, and `EAGAIN` / `ENOMEM` to a platform `THREAD_START`, which then fails with the JDK's `OutOfMemoryError: unable to create native thread`.
+
 * **instrumentation:** socket channels are sockets. `SocketChannel` connect, reads and writes (also scattering and gathering) and close, and `ServerSocketChannel.accept`, raise the `SOCKET_*` events with the channel's peer and byte count, so `NetworkSelector` peer and size filters and the data effects reach NIO clients: `trickle` limits the buffers, `corruptRead` flips one bit of what the read returned, `tornWrite` is a short count, `connectionReset` closes with `SO_LINGER` 0. A Unix-domain channel's peer is its path, matched by the host pattern (the native `unix://` endpoint). The `NIO_CHANNEL_*` events still fire as before. New hook group `SOCKET_CHANNEL`; `BootstrapDispatcher.HANDLE_COUNT` is 70.
 * **instrumentation:** scattering and gathering `FileChannel` reads and writes (`ByteBuffer[]`) are `FILE_IO_READ` / `FILE_IO_WRITE` events over all their bytes, with `tornWrite` and `corruptRead`; gathering socket-channel writes are torn by `NIO_CHANNEL_WRITE` as single ones are.
 

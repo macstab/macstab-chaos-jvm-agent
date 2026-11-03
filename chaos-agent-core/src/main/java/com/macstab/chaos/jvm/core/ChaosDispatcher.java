@@ -1438,6 +1438,30 @@ public final class ChaosDispatcher {
   }
 
   /**
+   * Called before a socket is bound ({@code sun.nio.ch.Net.bind}): the {@code SOCKET_BIND} event,
+   * whose address and port are the local ones being bound.
+   *
+   * @param address the local address
+   * @param port the local port; {@code 0} for an ephemeral one
+   * @throws Throwable if an active scenario fails the bind
+   */
+  public void beforeSocketBind(final Object address, final int port) throws Throwable {
+    if (idle(OperationType.SOCKET_BIND)) {
+      return;
+    }
+    applyPreDecision(
+        evaluate(
+            socketContext(
+                OperationType.SOCKET_BIND,
+                null,
+                InvocationContext.UNKNOWN,
+                address instanceof java.net.InetAddress inet
+                    ? new InetSocketAddress(inet, port)
+                    : null,
+                InvocationContext.UNKNOWN)));
+  }
+
+  /**
    * The context of a socket event on {@code endpoint} with peer {@code peer}: an IP peer matches by
    * address, port and host name, a Unix-domain peer by its path as the host.
    */
@@ -1450,7 +1474,7 @@ public final class ChaosDispatcher {
     final InetSocketAddress inet = peer instanceof InetSocketAddress address ? address : null;
     return new InvocationContext(
         operation,
-        endpoint == null ? "java.nio.channels.SocketChannel" : endpoint.getClass().getName(),
+        endpoint == null ? "sun.nio.ch.Net" : endpoint.getClass().getName(),
         null,
         inet != null ? remoteHost(inet.getAddress()) : peer == null ? null : peer.toString(),
         false,
@@ -2286,6 +2310,7 @@ public final class ChaosDispatcher {
       case "FILE_IO_TRUNCATE" -> OperationType.FILE_IO_TRUNCATE;
       case "FILE_IO_DELETE" -> OperationType.FILE_IO_DELETE;
       case "FILE_IO_MOVE" -> OperationType.FILE_IO_MOVE;
+      case "FILE_IO_OPEN" -> OperationType.FILE_IO_OPEN;
       default ->
           throw new IllegalArgumentException(
               "Unknown file I/O operation tag '" + operationTag + "'");
@@ -2499,7 +2524,9 @@ public final class ChaosDispatcher {
           FailureFactory.errno(
               errnoEffect.errno(),
               operationType,
-              operationType == OperationType.PROCESS_START ? context.targetName() : context.path()),
+              operationType == OperationType.PROCESS_START ? context.targetName() : context.path(),
+              context.targetClassName() != null
+                  && context.targetClassName().startsWith("java.io.")),
           scenario.id());
     }
     if (effect instanceof ChaosEffect.RejectEffect rejectEffect) {

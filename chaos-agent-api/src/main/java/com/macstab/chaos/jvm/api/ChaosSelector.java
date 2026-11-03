@@ -914,7 +914,8 @@ public sealed interface ChaosSelector
             OperationType.SOCKET_ACCEPT,
             OperationType.SOCKET_READ,
             OperationType.SOCKET_WRITE,
-            OperationType.SOCKET_CLOSE);
+            OperationType.SOCKET_CLOSE,
+            OperationType.SOCKET_BIND);
 
     private static final Set<OperationType> SIZED_OPS =
         EnumSet.of(OperationType.SOCKET_READ, OperationType.SOCKET_WRITE);
@@ -1089,7 +1090,8 @@ public sealed interface ChaosSelector
    * <p><b>Valid operations:</b> {@link OperationType#FILE_IO_READ}, {@link
    * OperationType#FILE_IO_WRITE}, {@link OperationType#FILE_IO_SYNC}, {@link
    * OperationType#FILE_IO_TRUNCATE}, {@link OperationType#FILE_IO_DELETE}, {@link
-   * OperationType#FILE_IO_MOVE}. Only reads and writes carry a byte count.
+   * OperationType#FILE_IO_MOVE}, {@link OperationType#FILE_IO_OPEN}. Only reads and writes carry a
+   * byte count.
    *
    * <p>The optional filters narrow the match further; a {@code null} filter does not restrict:
    * {@code pathPattern} matches the path the stream was opened with (a stream created from a {@link
@@ -1112,7 +1114,8 @@ public sealed interface ChaosSelector
             OperationType.FILE_IO_SYNC,
             OperationType.FILE_IO_TRUNCATE,
             OperationType.FILE_IO_DELETE,
-            OperationType.FILE_IO_MOVE);
+            OperationType.FILE_IO_MOVE,
+            OperationType.FILE_IO_OPEN);
 
     private static final Set<OperationType> SIZED_OPS =
         EnumSet.of(OperationType.FILE_IO_READ, OperationType.FILE_IO_WRITE);

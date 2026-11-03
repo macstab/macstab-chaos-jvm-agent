@@ -1341,6 +1341,46 @@ final class JvmRuntimeAdvice {
     }
   }
 
+  /**
+   * Intercepts the private {@code open(String, ...)} of {@code FileInputStream}, {@code
+   * FileOutputStream} and {@code RandomAccessFile}: the file a constructor opens. Opens of archives
+   * are skipped: they are class loading (see {@link BootstrapDispatcher#isArchive(String)}).
+   */
+  static final class FileOpenAdvice {
+    @Advice.OnMethodEnter
+    static void enter(@Advice.This final Object stream, @Advice.Argument(0) final String name)
+        throws Throwable {
+      if (!BootstrapDispatcher.isArchive(name)) {
+        BootstrapDispatcher.beforeFileIo("FILE_IO_OPEN", stream, name, -1);
+      }
+    }
+  }
+
+  /**
+   * Intercepts a platform file system provider's {@code newByteChannel} / {@code newFileChannel}.
+   */
+  static final class FilesOpenAdvice {
+    @Advice.OnMethodEnter
+    static void enter(
+        @Advice.This final Object provider, @Advice.Argument(0) final java.nio.file.Path path)
+        throws Throwable {
+      BootstrapDispatcher.beforeFileIo(
+          "FILE_IO_OPEN", provider, path == null ? null : path.toString(), -1);
+    }
+  }
+
+  /**
+   * Intercepts {@code sun.nio.ch.Net.bind(ProtocolFamily, FileDescriptor, InetAddress, int)}
+   * (SOCKET_BIND). Static: no {@code @Advice.This}.
+   */
+  static final class SocketBindAdvice {
+    @Advice.OnMethodEnter
+    static void enter(@Advice.Argument(2) final Object address, @Advice.Argument(3) final int port)
+        throws Throwable {
+      BootstrapDispatcher.beforeSocketBind(address, port);
+    }
+  }
+
   /** Intercepts a file system provider's {@code move(Path, Path, CopyOption...)}. */
   static final class FilesMoveAdvice {
     @Advice.OnMethodEnter

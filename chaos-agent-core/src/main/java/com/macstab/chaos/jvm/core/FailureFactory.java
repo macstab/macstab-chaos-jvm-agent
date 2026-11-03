@@ -103,6 +103,9 @@ final class FailureFactory {
       case FILE_IO_SYNC -> new java.io.SyncFailedException(message);
       case FILE_IO_TRUNCATE, FILE_IO_DELETE, FILE_IO_MOVE, PROCESS_START ->
           new java.io.IOException(message);
+      // FileNotFoundException is what java.io constructors declare, and an IOException for nio.
+      case FILE_IO_OPEN -> new java.io.FileNotFoundException(message);
+      case SOCKET_BIND -> new java.net.BindException(message);
       default -> new IllegalStateException(message);
     };
   }
@@ -114,16 +117,45 @@ final class FailureFactory {
    * @param errno the error
    * @param operationType the failing operation
    * @param path the file of a file operation, or {@code null}
+   * @param javaIo whether the call is a {@code java.io} one ({@code FileInputStream} and the like),
+   *     whose open fails with {@link java.io.FileNotFoundException} rather than the {@code
+   *     java.nio} exceptions
    * @return the exception
    */
   static Throwable errno(
-      final ChaosEffect.Errno errno, final OperationType operationType, final String path) {
+      final ChaosEffect.Errno errno,
+      final OperationType operationType,
+      final String path,
+      final boolean javaIo) {
     final String reason = errno.reason();
-    if (operationType == OperationType.PROCESS_START) {
+    return switch (operationType) {
       // The JDK's own failure for a process that could not be started; path is the program.
-      return new java.io.IOException(
-          "Cannot run program \"" + path + "\": error=" + errno.code() + ", " + reason);
-    }
+      case PROCESS_START ->
+          new java.io.IOException(
+              "Cannot run program \"" + path + "\": error=" + errno.code() + ", " + reason);
+      // What Thread.start throws when pthread_create fails.
+      case THREAD_START ->
+          new OutOfMemoryError(
+              "unable to create native thread: possibly out of memory or process/resource limits"
+                  + " reached");
+      case SOCKET_CONNECT,
+          SOCKET_ACCEPT,
+          SOCKET_READ,
+          SOCKET_WRITE,
+          SOCKET_CLOSE,
+          SOCKET_BIND,
+          NIO_CHANNEL_CONNECT,
+          NIO_CHANNEL_ACCEPT,
+          NIO_CHANNEL_READ,
+          NIO_CHANNEL_WRITE ->
+          networkErrno(errno, operationType, reason);
+      default -> fileErrno(errno, operationType, path, javaIo, reason);
+    };
+  }
+
+  /** The {@code java.net} failure of a socket call, as the JDK's {@code Net.c} maps errors. */
+  private static Throwable networkErrno(
+      final ChaosEffect.Errno errno, final OperationType operationType, final String reason) {
     return switch (errno) {
       case ECONNREFUSED -> new java.net.ConnectException(reason);
       case ETIMEDOUT ->
@@ -134,24 +166,43 @@ final class FailureFactory {
             // A write or close that times out reports the errno text, as the JDK does.
             default -> new java.net.SocketException(reason);
           };
-      case ECONNRESET, ENETUNREACH, EPIPE -> new java.net.SocketException(reason);
       case EHOSTUNREACH -> new java.net.NoRouteToHostException(reason);
-      case EADDRINUSE -> new java.net.BindException(reason);
-      case EACCES ->
-          path == null
+      case EADDRINUSE, EADDRNOTAVAIL, EACCES -> new java.net.BindException(reason);
+      // An accept that cannot get a descriptor fails with a plain IOException in the JDK.
+      case EMFILE, ENFILE ->
+          operationType == OperationType.SOCKET_ACCEPT
+                  || operationType == OperationType.NIO_CHANNEL_ACCEPT
               ? new java.io.IOException(reason)
-              : new java.nio.file.AccessDeniedException(path);
-      case ENOENT ->
-          path == null
-              ? new java.io.FileNotFoundException(reason)
-              : new java.nio.file.NoSuchFileException(path);
-      case EAGAIN, ENOMEM -> new java.io.IOException(reason);
-      case ENOSPC, EDQUOT, EROFS, EIO, EMFILE ->
-          operationType == OperationType.FILE_IO_SYNC
-              ? new java.io.SyncFailedException(reason)
-              : path == null
-                  ? new java.io.IOException(reason)
-                  : new java.nio.file.FileSystemException(path, null, reason);
+              : new java.net.SocketException(reason);
+      default -> new java.net.SocketException(reason);
+    };
+  }
+
+  /** The failure of a file call: {@code java.nio.file} exceptions naming the path. */
+  private static Throwable fileErrno(
+      final ChaosEffect.Errno errno,
+      final OperationType operationType,
+      final String path,
+      final boolean javaIo,
+      final String reason) {
+    if (operationType == OperationType.FILE_IO_SYNC) {
+      // FileDescriptor.sync() declares only SyncFailedException; FileChannel.force any
+      // IOException. SyncFailedException satisfies both.
+      return new java.io.SyncFailedException(reason);
+    }
+    if (operationType == OperationType.FILE_IO_OPEN && javaIo) {
+      // FileInputStream, FileOutputStream and RandomAccessFile constructors: "path (reason)".
+      return new java.io.FileNotFoundException(path == null ? reason : path + " (" + reason + ")");
+    }
+    if (path == null) {
+      return errno == ChaosEffect.Errno.ENOENT
+          ? new java.io.FileNotFoundException(reason)
+          : new java.io.IOException(reason);
+    }
+    return switch (errno) {
+      case EACCES -> new java.nio.file.AccessDeniedException(path);
+      case ENOENT -> new java.nio.file.NoSuchFileException(path);
+      default -> new java.nio.file.FileSystemException(path, null, reason);
     };
   }
 

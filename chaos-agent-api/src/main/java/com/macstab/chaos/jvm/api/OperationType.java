@@ -35,7 +35,7 @@ package com.macstab.chaos.jvm.api;
  *       #NIO_CHANNEL_READ}, {@link #NIO_CHANNEL_WRITE}, {@link #NIO_CHANNEL_CONNECT}, {@link
  *       #NIO_CHANNEL_ACCEPT}
  *   <li>{@link ChaosSelector.NetworkSelector} — {@link #SOCKET_CONNECT}, {@link #SOCKET_ACCEPT},
- *       {@link #SOCKET_READ}, {@link #SOCKET_WRITE}, {@link #SOCKET_CLOSE}
+ *       {@link #SOCKET_READ}, {@link #SOCKET_WRITE}, {@link #SOCKET_CLOSE}, {@link #SOCKET_BIND}
  *   <li>{@link ChaosSelector.ThreadLocalSelector} — {@link #THREAD_LOCAL_GET}, {@link
  *       #THREAD_LOCAL_SET}
  *   <li>{@link ChaosSelector.HttpClientSelector} — {@link #HTTP_CLIENT_SEND}, {@link
@@ -49,7 +49,7 @@ package com.macstab.chaos.jvm.api;
  *   <li>{@link ChaosSelector.SslSelector} — {@link #SSL_HANDSHAKE}
  *   <li>{@link ChaosSelector.FileIoSelector} — {@link #FILE_IO_READ}, {@link #FILE_IO_WRITE},
  *       {@link #FILE_IO_SYNC}, {@link #FILE_IO_TRUNCATE}, {@link #FILE_IO_DELETE}, {@link
- *       #FILE_IO_MOVE}
+ *       #FILE_IO_MOVE}, {@link #FILE_IO_OPEN}
  *   <li>{@link ChaosSelector.MessagingSelector} — {@link #MESSAGE_SEND}, {@link #MESSAGE_RECEIVE}
  *   <li>{@link ChaosSelector.RpcSelector} — {@link #RPC_CALL}
  *   <li>{@link ChaosSelector.RedisSelector} — {@link #REDIS_COMMAND}
@@ -497,6 +497,17 @@ public enum OperationType {
    */
   SOCKET_CLOSE,
 
+  /**
+   * Fires before a socket is bound to a local address: {@code Socket.bind}, {@code
+   * ServerSocket.bind}, {@code SocketChannel.bind}, {@code ServerSocketChannel.bind} and the
+   * implicit binds before them, through the JDK's {@code sun.nio.ch.Net.bind}. An {@code errno}
+   * such as {@code EADDRINUSE} fails with {@link java.net.BindException}.
+   *
+   * <p>Use with {@link ChaosSelector.NetworkSelector}: for a bind, {@code remoteCidr} and {@code
+   * remotePort} match the local address and port being bound.
+   */
+  SOCKET_BIND,
+
   // ── Extended JVM runtime services ───────────────────────────────────────────
 
   /**
@@ -764,6 +775,19 @@ public enum OperationType {
    * <p>Use with {@link ChaosSelector.FileIoSelector}; the path is the source.
    */
   FILE_IO_MOVE,
+
+  /**
+   * Fires before a file is opened: the {@code FileInputStream}, {@code FileOutputStream} and {@code
+   * RandomAccessFile} constructors, and the platform file system's {@code newByteChannel} and
+   * {@code newFileChannel} ({@code Files.newInputStream}, {@code Files.newOutputStream}, {@code
+   * Files.newByteChannel}, {@code FileChannel.open} and the readers and writers built on them). A
+   * {@code java.io} constructor fails with {@link java.io.FileNotFoundException} ({@code "path
+   * (reason)"}), as the JDK does; a {@code java.nio} open with the matching {@link
+   * java.nio.file.FileSystemException}.
+   *
+   * <p>Use with {@link ChaosSelector.FileIoSelector}; the path is the file opened.
+   */
+  FILE_IO_OPEN,
 
   // ── Client libraries ───────────────────────────────────────────────────────────
 

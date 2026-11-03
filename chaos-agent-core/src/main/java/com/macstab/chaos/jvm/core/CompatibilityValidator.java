@@ -514,7 +514,8 @@ final class CompatibilityValidator {
           OperationType.SOCKET_ACCEPT,
           OperationType.SOCKET_READ,
           OperationType.SOCKET_WRITE,
-          OperationType.SOCKET_CLOSE);
+          OperationType.SOCKET_CLOSE,
+          OperationType.SOCKET_BIND);
 
   private static final Set<OperationType> THREAD_LOCAL_OPS =
       Set.of(OperationType.THREAD_LOCAL_GET, OperationType.THREAD_LOCAL_SET);
@@ -573,6 +574,7 @@ final class CompatibilityValidator {
           OperationType.SOCKET_READ,
           OperationType.SOCKET_WRITE,
           OperationType.SOCKET_CLOSE,
+          OperationType.SOCKET_BIND,
           OperationType.NIO_CHANNEL_CONNECT,
           OperationType.NIO_CHANNEL_ACCEPT,
           OperationType.NIO_CHANNEL_READ,
@@ -587,8 +589,37 @@ final class CompatibilityValidator {
           OperationType.FILE_IO_TRUNCATE,
           OperationType.FILE_IO_DELETE,
           OperationType.FILE_IO_MOVE,
+          OperationType.FILE_IO_OPEN,
           // A process start fails on the program file: ENOENT, EACCES and the like.
           OperationType.PROCESS_START);
+
+  /**
+   * Operations an {@link ChaosEffect.Errno} applies to beyond its family's: errors the kernel
+   * reports for more than one kind of call.
+   */
+  private static final java.util.Map<ChaosEffect.Errno, Set<OperationType>> ERRNO_EXTRA_OPS =
+      java.util.Map.of(
+          // binding a privileged port
+          ChaosEffect.Errno.EACCES,
+          EnumSet.of(OperationType.SOCKET_BIND),
+          // connects and accepts open a descriptor
+          ChaosEffect.Errno.EMFILE,
+          EnumSet.of(
+              OperationType.SOCKET_CONNECT,
+              OperationType.SOCKET_ACCEPT,
+              OperationType.NIO_CHANNEL_CONNECT,
+              OperationType.NIO_CHANNEL_ACCEPT),
+          ChaosEffect.Errno.ENFILE,
+          EnumSet.of(
+              OperationType.SOCKET_CONNECT,
+              OperationType.SOCKET_ACCEPT,
+              OperationType.NIO_CHANNEL_CONNECT,
+              OperationType.NIO_CHANNEL_ACCEPT),
+          // pthread_create of a platform thread
+          ChaosEffect.Errno.EAGAIN,
+          EnumSet.of(OperationType.THREAD_START),
+          ChaosEffect.Errno.ENOMEM,
+          EnumSet.of(OperationType.THREAD_START));
 
   /**
    * Operations whose interception point can carry out a {@link ChaosEffect.SuppressEffect}: it
@@ -664,11 +695,13 @@ final class CompatibilityValidator {
     }
     if (effect instanceof ChaosEffect.ErrnoEffect errnoEffect) {
       final Set<OperationType> allowed =
-          switch (errnoEffect.errno().family()) {
-            case NETWORK -> ERRNO_NETWORK_OPS;
-            case FILE -> ERRNO_FILE_OPS;
-            case PROCESS -> EnumSet.of(OperationType.PROCESS_START);
-          };
+          EnumSet.copyOf(
+              switch (errnoEffect.errno().family()) {
+                case NETWORK -> ERRNO_NETWORK_OPS;
+                case FILE -> ERRNO_FILE_OPS;
+                case PROCESS -> EnumSet.of(OperationType.PROCESS_START);
+              });
+      allowed.addAll(ERRNO_EXTRA_OPS.getOrDefault(errnoEffect.errno(), Set.of()));
       for (final OperationType operation : operations) {
         if (!allowed.contains(operation)) {
           throw new ChaosValidationException(
