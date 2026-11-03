@@ -855,6 +855,32 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
+   * Delegates to {@link ChaosDispatcher#beforeProcessWait(Object, long)}.
+   *
+   * @param process the process waited for
+   * @param timeoutMillis the wait's timeout, {@code 0} for none
+   * @return {@code true} when the wait must report that the child has not exited
+   * @throws Throwable if an active scenario rejects the wait
+   */
+  public boolean beforeProcessWait(final Object process, final long timeoutMillis)
+      throws Throwable {
+    return dispatcher.beforeProcessWait(process, timeoutMillis);
+  }
+
+  /**
+   * Delegates to {@link ChaosDispatcher#beforeSocketShutdown(Object, Object, int)}.
+   *
+   * @param endpoint the socket implementation or channel
+   * @param remoteAddress the peer address, or {@code null}
+   * @param remotePort the peer port
+   * @throws Throwable if an active scenario fails the shutdown
+   */
+  public void beforeSocketShutdown(
+      final Object endpoint, final Object remoteAddress, final int remotePort) throws Throwable {
+    dispatcher.beforeSocketShutdown(endpoint, remoteAddress, remotePort);
+  }
+
+  /**
    * Delegates to {@link ChaosDispatcher#beforeDnsReverse(String)}.
    *
    * @param address the IP literal looked up

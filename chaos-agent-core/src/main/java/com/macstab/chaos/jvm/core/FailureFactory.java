@@ -105,7 +105,9 @@ final class FailureFactory {
           new java.io.IOException(message);
       // FileNotFoundException is what java.io constructors declare, and an IOException for nio.
       case FILE_IO_OPEN -> new java.io.FileNotFoundException(message);
-      case FILE_IO_MAP -> new java.io.IOException(message);
+      case FILE_IO_MAP, FILE_IO_CLOSE, FILE_IO_MOVE_TARGET -> new java.io.IOException(message);
+      case SOCKET_SHUTDOWN -> new java.net.SocketException(message);
+      case PROCESS_WAIT -> new InterruptedException(message);
       case SOCKET_BIND -> new java.net.BindException(message);
       case DATAGRAM_SEND, DATAGRAM_RECEIVE -> new java.io.IOException(message);
       case DNS_REVERSE -> new java.net.UnknownHostException(message);
@@ -147,6 +149,7 @@ final class FailureFactory {
           SOCKET_WRITE,
           SOCKET_CLOSE,
           SOCKET_BIND,
+          SOCKET_SHUTDOWN,
           DATAGRAM_SEND,
           DATAGRAM_RECEIVE,
           NIO_CHANNEL_CONNECT,
@@ -203,6 +206,10 @@ final class FailureFactory {
     if (operationType == OperationType.FILE_IO_MAP && errno == ChaosEffect.Errno.ENOMEM) {
       // FileChannelImpl.map: an mmap that fails for lack of memory.
       return new java.io.IOException("Map failed", new OutOfMemoryError("Map failed"));
+    }
+    if (operationType == OperationType.FILE_IO_CLOSE && javaIo) {
+      // FileInputStream.close and the like report the error text, without the path.
+      return new java.io.IOException(reason);
     }
     if (operationType == OperationType.FILE_IO_OPEN && javaIo) {
       // FileInputStream, FileOutputStream and RandomAccessFile constructors: "path (reason)".

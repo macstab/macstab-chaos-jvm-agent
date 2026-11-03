@@ -1225,19 +1225,27 @@ public final class ChaosDispatcher {
    * @throws Throwable if an active scenario throws to simulate a failure
    */
   public boolean beforeNioSelect(final Object selector, final long timeoutMillis) throws Throwable {
+    if (idle(OperationType.NIO_SELECTOR_SELECT)) {
+      return false;
+    }
     final RuntimeDecision decision =
-        (idle(OperationType.NIO_SELECTOR_SELECT)
-            ? RuntimeDecision.none()
-            : evaluate(
-                new InvocationContext(
-                    OperationType.NIO_SELECTOR_SELECT,
-                    selector == null ? "java.nio.channels.Selector" : selector.getClass().getName(),
-                    null,
-                    null,
-                    false,
-                    null,
-                    null,
-                    scopeContext.currentSessionId())));
+        evaluate(
+            new InvocationContext(
+                OperationType.NIO_SELECTOR_SELECT,
+                selector == null ? "java.nio.channels.Selector" : selector.getClass().getName(),
+                null,
+                null,
+                false,
+                null,
+                null,
+                scopeContext.currentSessionId(),
+                InvocationContext.UNKNOWN,
+                null,
+                null,
+                InvocationContext.UNKNOWN,
+                null,
+                // select() is infinite (0), selectNow() has none (-1): a timeout cannot fire there.
+                (int) Math.min(timeoutMillis, Integer.MAX_VALUE)));
     applyDelayAndGate(decision);
     if (decision.terminalAction() != null) {
       final TerminalAction terminalAction = decision.terminalAction();
@@ -1247,8 +1255,92 @@ public final class ChaosDispatcher {
       if (terminalAction.kind() == TerminalKind.SUPPRESS) {
         return true;
       }
+      if (terminalAction.kind() == TerminalKind.TIMEOUT) {
+        // A stalled peer: the select waits out its own timeout and reports no ready channel.
+        sleep((Long) terminalAction.returnValue());
+        return true;
+      }
     }
     return false;
+  }
+
+  /**
+   * Called before a thread waits for a child process.
+   *
+   * @param process the process waited for
+   * @param timeoutMillis the wait's timeout; {@code 0} for {@code waitFor()} without one
+   * @return {@code true} when a {@code TimeoutEffect} waited the timeout out: the wait reports that
+   *     the child has not exited
+   * @throws Throwable an {@link InterruptedException} when a scenario rejects the wait
+   */
+  public boolean beforeProcessWait(final Object process, final long timeoutMillis)
+      throws Throwable {
+    if (idle(OperationType.PROCESS_WAIT)) {
+      return false;
+    }
+    final RuntimeDecision decision =
+        evaluate(
+            new InvocationContext(
+                OperationType.PROCESS_WAIT,
+                "java.lang.Process",
+                null,
+                programName(process),
+                false,
+                null,
+                null,
+                scopeContext.currentSessionId(),
+                InvocationContext.UNKNOWN,
+                null,
+                null,
+                InvocationContext.UNKNOWN,
+                null,
+                (int) Math.min(timeoutMillis, Integer.MAX_VALUE)));
+    if (decision.terminalAction() != null
+        && decision.terminalAction().kind() == TerminalKind.TIMEOUT) {
+      applyDelayAndGate(decision);
+      sleep((Long) decision.terminalAction().returnValue());
+      return true;
+    }
+    applyPreDecision(decision);
+    return false;
+  }
+
+  /** The file name of the program {@code process} runs, or {@code null} when unknown. */
+  private static String programName(final Object process) {
+    if (!(process instanceof Process running)) {
+      return null;
+    }
+    return running
+        .info()
+        .command()
+        .map(command -> java.nio.file.Path.of(command).getFileName().toString())
+        .orElse(null);
+  }
+
+  /**
+   * Called before a connection is half-closed.
+   *
+   * @param endpoint the socket implementation or socket channel
+   * @param remoteAddress the peer address of a socket implementation, or {@code null} to take the
+   *     peer of a channel
+   * @param remotePort the peer port that goes with {@code remoteAddress}
+   * @throws Throwable if an active scenario fails the shutdown
+   */
+  public void beforeSocketShutdown(
+      final Object endpoint, final Object remoteAddress, final int remotePort) throws Throwable {
+    if (idle(OperationType.SOCKET_SHUTDOWN)) {
+      return;
+    }
+    applyPreDecision(
+        evaluate(
+            socketContext(
+                OperationType.SOCKET_SHUTDOWN,
+                endpoint,
+                InvocationContext.UNKNOWN,
+                remoteAddress instanceof java.net.InetAddress inet
+                    ? new InetSocketAddress(inet, remotePort)
+                    : peerOf(endpoint),
+                InvocationContext.UNKNOWN)));
   }
 
   /**
@@ -2429,6 +2521,8 @@ public final class ChaosDispatcher {
       case "FILE_IO_MOVE" -> OperationType.FILE_IO_MOVE;
       case "FILE_IO_OPEN" -> OperationType.FILE_IO_OPEN;
       case "FILE_IO_MAP" -> OperationType.FILE_IO_MAP;
+      case "FILE_IO_CLOSE" -> OperationType.FILE_IO_CLOSE;
+      case "FILE_IO_MOVE_TARGET" -> OperationType.FILE_IO_MOVE_TARGET;
       // FileChannel.transferTo reads the channel's file, transferFrom writes it.
       case TRANSFER_TO -> OperationType.FILE_IO_READ;
       case TRANSFER_FROM -> OperationType.FILE_IO_WRITE;

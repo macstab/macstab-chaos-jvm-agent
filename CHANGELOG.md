@@ -15,6 +15,8 @@
 
 ### Features
 
+* **instrumentation:** the rest of the native io and net operations: `FILE_IO_CLOSE` (evaluated after a stream, `RandomAccessFile` or `FileChannel` closed, so a failing close still releases the descriptor; one event for a stream and its channel), `FILE_IO_MOVE_TARGET` (a move or rename by its destination), `SOCKET_SHUTDOWN` (`shutdownInput` / `shutdownOutput`), and `PROCESS_WAIT` (`Process.waitFor`). `ChaosEffect.timeout()` also applies to `select(timeout)`, which then waits it out and reports no ready channel, and to a timed `waitFor`, which reports a child that has not exited. `ChaosEffect.Errno` gains `EINVAL`, `EOPNOTSUPP`, `EAFNOSUPPORT` and `EPROTONOSUPPORT`.
+
 * **api:** `ChaosPresets`: ready-made scenarios for common faults — `diskFull`, `failingDisk`, `fsyncFailure`, `slowDisk`, `tooManyOpenFiles`, `connectionRefused`, `connectionResets`, `slowNetwork`, `trickledResponses`, `packetLoss`, `failover`, `dnsOutage`, `clockJump`, `threadExhaustion` — each a prefilled `ChaosScenario.Builder` tagged `preset=<name>`, so scope and policy stay the caller's.
 
 * **api:** `ChaosEffect.redirect(host[, port])` (JSON `redirect`) sends a `SOCKET_CONNECT` of a `Socket` or `SocketChannel` to another endpoint: a failover target, a black hole, a slow proxy. Without a port the requested one is kept.

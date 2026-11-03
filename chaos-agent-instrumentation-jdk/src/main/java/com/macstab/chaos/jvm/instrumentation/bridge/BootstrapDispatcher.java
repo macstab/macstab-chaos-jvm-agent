@@ -159,8 +159,14 @@ public final class BootstrapDispatcher {
    */
   public static final int SCOPE_FILE_TRANSFER = 21;
 
+  /**
+   * Scope of a file close: a stream closes its channel and a channel its parent stream, which is
+   * one close.
+   */
+  public static final int SCOPE_FILE_CLOSE = 22;
+
   /** Size of the per-thread counter array: index 0 is the reentrancy depth, then the scopes. */
-  static final int SCOPE_COUNT = 22;
+  static final int SCOPE_COUNT = 23;
 
   /**
    * Enters a call-depth scope on the current thread.
@@ -480,8 +486,14 @@ public final class BootstrapDispatcher {
   /** Handle index for {@link #reverseLookupFails(java.net.InetAddress)}. */
   public static final int BEFORE_DNS_REVERSE = 74;
 
+  /** Handle index for {@link #beforeProcessWait(Object, long)}. */
+  public static final int BEFORE_PROCESS_WAIT = 75;
+
+  /** Handle index for {@link #beforeSocketShutdown(Object, Object, int)}. */
+  public static final int BEFORE_SOCKET_SHUTDOWN = 76;
+
   /** Total number of method-handle slots; equals the highest index plus one. */
-  public static final int HANDLE_COUNT = 75;
+  public static final int HANDLE_COUNT = 77;
 
   /** The header that carries a session id between services; {@code ChaosSession.HEADER}. */
   public static final String SESSION_HEADER = "X-Chaos-Session";
@@ -2565,6 +2577,59 @@ public final class BootstrapDispatcher {
     } catch (final Throwable throwable) {
       sneakyThrow(throwable);
       return false;
+    } finally {
+      depth[0]--;
+    }
+  }
+
+  /**
+   * Called before {@code Process.waitFor()} / {@code waitFor(long, TimeUnit)}.
+   *
+   * @param process the process waited for
+   * @param timeoutMillis the wait's timeout, {@code 0} for none
+   * @return {@code true} when the wait must report that the child has not exited
+   * @throws Throwable an {@link InterruptedException} when a scenario rejects the wait
+   */
+  public static boolean beforeProcessWait(final Object process, final long timeoutMillis)
+      throws Throwable {
+    final int[] depth = DEPTH.get();
+    final MethodHandle[] h = handles;
+    final Object d = delegate;
+    if (depth[0] > 0 || d == null || h == null) {
+      return false;
+    }
+    depth[0]++;
+    try {
+      return (boolean) h[BEFORE_PROCESS_WAIT].invoke(d, process, timeoutMillis);
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+      return false;
+    } finally {
+      depth[0]--;
+    }
+  }
+
+  /**
+   * Called before {@code shutdownInput} / {@code shutdownOutput} of a socket or socket channel.
+   *
+   * @param endpoint the socket implementation or channel
+   * @param remoteAddress the peer address of a socket implementation, or {@code null}
+   * @param remotePort the peer port
+   * @throws Throwable if an active scenario fails the shutdown
+   */
+  public static void beforeSocketShutdown(
+      final Object endpoint, final Object remoteAddress, final int remotePort) throws Throwable {
+    final int[] depth = DEPTH.get();
+    final MethodHandle[] h = handles;
+    final Object d = delegate;
+    if (depth[0] > 0 || d == null || h == null) {
+      return;
+    }
+    depth[0]++;
+    try {
+      h[BEFORE_SOCKET_SHUTDOWN].invoke(d, endpoint, remoteAddress, remotePort);
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
     } finally {
       depth[0]--;
     }

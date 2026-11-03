@@ -590,6 +590,18 @@ final class ChaosBridge implements BridgeDelegate {
   }
 
   @Override
+  public boolean beforeProcessWait(final Object process, final long timeoutMillis)
+      throws Throwable {
+    return runtime.beforeProcessWait(process, timeoutMillis);
+  }
+
+  @Override
+  public void beforeSocketShutdown(
+      final Object endpoint, final Object remoteAddress, final int remotePort) throws Throwable {
+    runtime.beforeSocketShutdown(endpoint, remoteAddress, remotePort);
+  }
+
+  @Override
   public java.time.Instant adjustClockInstant(final java.time.Instant realInstant) {
     return runtime.adjustClockInstant(realInstant);
   }

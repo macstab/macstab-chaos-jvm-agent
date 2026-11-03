@@ -104,6 +104,7 @@ public final class DefectProbeMain {
       case "socket-torn-write" -> socketTornWrite();
       case "socket-channel" -> socketChannel();
       case "file-open" -> fileOpen();
+      case "close-shutdown-wait" -> closeShutdownAndWait();
       case "redirect" -> redirect();
       case "udp-dns" -> udpAndReverseDns();
       case "file-map-transfer" -> fileMapAndTransfer();
@@ -1059,6 +1060,160 @@ public final class DefectProbeMain {
       }
       printApplied(redirect);
     }
+  }
+
+  /**
+   * File closes and moves under {@code chaos.test.dir}, socket half-closes, a timed select and a
+   * timed process wait, each under a scenario activated here. Prints what the application saw.
+   */
+  private static void closeShutdownAndWait() throws Exception {
+    final ChaosControlPlane plane = ChaosPlatform.current();
+    final java.nio.file.Path root = java.nio.file.Path.of(System.getProperty("chaos.test.dir"));
+    final java.nio.file.Path failing = java.nio.file.Files.createDirectories(root.resolve("nfs"));
+    final java.nio.file.Path locked = java.nio.file.Files.createDirectories(root.resolve("locked"));
+    final java.nio.file.Path plain = java.nio.file.Files.createDirectories(root.resolve("plain"));
+    final ChaosActivationHandle closeEio =
+        plane.activate(
+            ChaosScenario.builder("close-eio")
+                .selector(
+                    new ChaosSelector.FileIoSelector(
+                        Set.of(OperationType.FILE_IO_CLOSE),
+                        com.macstab.chaos.jvm.api.PathPattern.under(failing.toString()),
+                        null,
+                        null))
+                .effect(ChaosEffect.errno(ChaosEffect.Errno.EIO))
+                .build());
+    final java.io.FileOutputStream stream =
+        new java.io.FileOutputStream(failing.resolve("a").toFile());
+    try {
+      stream.close();
+      System.out.println("streamClose=ok");
+    } catch (final java.io.IOException failed) {
+      System.out.println("streamClose=" + failed.getClass().getName() + ": " + failed.getMessage());
+    }
+    // the descriptor is released all the same
+    System.out.println("streamFdValid=" + stream.getFD().valid());
+    final java.nio.channels.FileChannel channel =
+        java.nio.channels.FileChannel.open(
+            failing.resolve("b"),
+            java.nio.file.StandardOpenOption.CREATE,
+            java.nio.file.StandardOpenOption.WRITE);
+    try {
+      channel.close();
+      System.out.println("channelClose=ok");
+    } catch (final java.io.IOException failed) {
+      System.out.println("channelClose=" + failed.getClass().getName());
+    }
+    System.out.println("channelOpen=" + channel.isOpen());
+    try (java.io.FileOutputStream other =
+        new java.io.FileOutputStream(plain.resolve("c").toFile())) {
+      other.getChannel().write(java.nio.ByteBuffer.allocate(1));
+    }
+    System.out.println("plainClose=ok");
+    printApplied(closeEio);
+
+    final ChaosActivationHandle moveDenied =
+        plane.activate(
+            ChaosScenario.builder("move-into-locked")
+                .selector(
+                    new ChaosSelector.FileIoSelector(
+                        Set.of(OperationType.FILE_IO_MOVE_TARGET),
+                        com.macstab.chaos.jvm.api.PathPattern.under(locked.toString()),
+                        null,
+                        null))
+                .effect(ChaosEffect.errno(ChaosEffect.Errno.EACCES))
+                .build());
+    try {
+      java.nio.file.Files.move(plain.resolve("c"), locked.resolve("c"));
+      System.out.println("moveInto=ok");
+    } catch (final java.io.IOException failed) {
+      System.out.println("moveInto=" + failed.getClass().getName());
+    }
+    System.out.println(
+        "renameInto=" + plain.resolve("c").toFile().renameTo(locked.resolve("d").toFile()));
+    System.out.println(
+        "renameElsewhere=" + plain.resolve("c").toFile().renameTo(plain.resolve("e").toFile()));
+    printApplied(moveDenied);
+
+    try (java.net.ServerSocket server =
+        new java.net.ServerSocket(0, 2, InetAddress.getByName("127.0.0.1"))) {
+      final ChaosActivationHandle notConnected =
+          plane.activate(
+              ChaosScenario.builder("shutdown-enotconn")
+                  .selector(
+                      new ChaosSelector.NetworkSelector(
+                          Set.of(OperationType.SOCKET_SHUTDOWN),
+                          NamePattern.any(),
+                          "127.0.0.1",
+                          server.getLocalPort(),
+                          null,
+                          null))
+                  .effect(ChaosEffect.errno(ChaosEffect.Errno.ENOTCONN))
+                  .build());
+      try (java.net.Socket socket = new java.net.Socket("127.0.0.1", server.getLocalPort());
+          java.net.Socket accepted = server.accept()) {
+        socket.shutdownOutput();
+        System.out.println("socketShutdown=ok");
+      } catch (final java.net.SocketException failed) {
+        System.out.println("socketShutdown=" + failed.getMessage());
+      }
+      try (java.nio.channels.SocketChannel socketChannel =
+              java.nio.channels.SocketChannel.open(
+                  new InetSocketAddress("127.0.0.1", server.getLocalPort()));
+          java.net.Socket accepted = server.accept()) {
+        socketChannel.shutdownOutput();
+        System.out.println("channelShutdown=ok");
+      } catch (final java.net.SocketException failed) {
+        System.out.println("channelShutdown=" + failed.getMessage());
+      }
+      printApplied(notConnected);
+    }
+
+    final ChaosActivationHandle stalled =
+        plane.activate(
+            ChaosScenario.builder("select-stalls")
+                .selector(
+                    new ChaosSelector.NioSelector(
+                        Set.of(OperationType.NIO_SELECTOR_SELECT), NamePattern.any()))
+                .effect(ChaosEffect.timeout())
+                .build());
+    final java.nio.channels.Pipe pipe = java.nio.channels.Pipe.open();
+    try (Selector selector = Selector.open()) {
+      pipe.source().configureBlocking(false);
+      pipe.source().register(selector, java.nio.channels.SelectionKey.OP_READ);
+      pipe.sink().write(java.nio.ByteBuffer.wrap(new byte[] {1}));
+      final long start = System.nanoTime();
+      final int ready = selector.select(300);
+      System.out.println("selectReady=" + ready);
+      System.out.println(
+          "selectMillis=" + TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start));
+      System.out.println("selectNowReady=" + selector.selectNow());
+    } finally {
+      pipe.sink().close();
+      pipe.source().close();
+    }
+    printApplied(stalled);
+
+    final ChaosActivationHandle hangs =
+        plane.activate(
+            ChaosScenario.builder("child-hangs")
+                .selector(
+                    new ChaosSelector.ProcessSelector(
+                        Set.of(OperationType.PROCESS_WAIT), NamePattern.exact("java")))
+                .effect(ChaosEffect.timeout())
+                .build());
+    final Process child =
+        new ProcessBuilder(
+                java.nio.file.Path.of(System.getProperty("java.home"), "bin", "java").toString(),
+                "-version")
+            .redirectErrorStream(true)
+            .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+            .start();
+    final long start = System.nanoTime();
+    System.out.println("waitExited=" + child.waitFor(300, TimeUnit.MILLISECONDS));
+    System.out.println("waitMillis=" + TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start));
+    printApplied(hangs);
+    System.out.println("exitCode=" + child.waitFor());
   }
 
   /**

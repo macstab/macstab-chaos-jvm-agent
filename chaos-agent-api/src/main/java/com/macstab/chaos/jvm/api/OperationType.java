@@ -36,7 +36,7 @@ package com.macstab.chaos.jvm.api;
  *       #NIO_CHANNEL_ACCEPT}
  *   <li>{@link ChaosSelector.NetworkSelector} — {@link #SOCKET_CONNECT}, {@link #SOCKET_ACCEPT},
  *       {@link #SOCKET_READ}, {@link #SOCKET_WRITE}, {@link #SOCKET_CLOSE}, {@link #SOCKET_BIND},
- *       {@link #DATAGRAM_SEND}, {@link #DATAGRAM_RECEIVE}
+ *       {@link #SOCKET_SHUTDOWN}, {@link #DATAGRAM_SEND}, {@link #DATAGRAM_RECEIVE}
  *   <li>{@link ChaosSelector.ThreadLocalSelector} — {@link #THREAD_LOCAL_GET}, {@link
  *       #THREAD_LOCAL_SET}
  *   <li>{@link ChaosSelector.HttpClientSelector} — {@link #HTTP_CLIENT_SEND}, {@link
@@ -51,12 +51,13 @@ package com.macstab.chaos.jvm.api;
  *   <li>{@link ChaosSelector.SslSelector} — {@link #SSL_HANDSHAKE}
  *   <li>{@link ChaosSelector.FileIoSelector} — {@link #FILE_IO_READ}, {@link #FILE_IO_WRITE},
  *       {@link #FILE_IO_SYNC}, {@link #FILE_IO_TRUNCATE}, {@link #FILE_IO_DELETE}, {@link
- *       #FILE_IO_MOVE}, {@link #FILE_IO_OPEN}, {@link #FILE_IO_MAP}
+ *       #FILE_IO_MOVE}, {@link #FILE_IO_MOVE_TARGET}, {@link #FILE_IO_OPEN}, {@link #FILE_IO_MAP},
+ *       {@link #FILE_IO_CLOSE}
  *   <li>{@link ChaosSelector.MessagingSelector} — {@link #MESSAGE_SEND}, {@link #MESSAGE_RECEIVE}
  *   <li>{@link ChaosSelector.RpcSelector} — {@link #RPC_CALL}
  *   <li>{@link ChaosSelector.RedisSelector} — {@link #REDIS_COMMAND}
  *   <li>{@link ChaosSelector.AwsSdkSelector} — {@link #AWS_SDK_CALL}
- *   <li>{@link ChaosSelector.ProcessSelector} — {@link #PROCESS_START}
+ *   <li>{@link ChaosSelector.ProcessSelector} — {@link #PROCESS_START}, {@link #PROCESS_WAIT}
  *   <li>{@link ChaosSelector.NettySelector} — {@link #NETTY_CHANNEL_WRITE}, {@link
  *       #NETTY_CHANNEL_READ}
  *   <li>{@link ChaosSelector.JdbcSelector} — also {@link #R2DBC_STATEMENT_EXECUTE}
@@ -525,6 +526,15 @@ public enum OperationType {
   SOCKET_BIND,
 
   /**
+   * Fires before a connection is half-closed: {@code Socket.shutdownInput} / {@code shutdownOutput}
+   * and those of {@code SocketChannel}. An {@code errno} such as {@code ENOTCONN} fails it with
+   * {@link java.net.SocketException}.
+   *
+   * <p>Use with {@link ChaosSelector.NetworkSelector}; the peer is the connection's.
+   */
+  SOCKET_SHUTDOWN,
+
+  /**
    * Fires before a UDP datagram is sent: {@code DatagramSocket.send}, {@code DatagramChannel.send}
    * and {@code DatagramChannel.write}. The peer is the destination, the byte count the datagram's
    * length. {@code ChaosEffect.suppress()} drops the datagram silently: the send reports success
@@ -844,6 +854,25 @@ public enum OperationType {
    */
   FILE_IO_MAP,
 
+  /**
+   * Fires after a file is closed: the {@code FileInputStream}, {@code FileOutputStream} and {@code
+   * RandomAccessFile} {@code close()}, and a {@code FileChannel}'s. Evaluated once the descriptor
+   * is released, as a real {@code close} that reports an error ({@code EIO}, {@code ENOSPC} on a
+   * network file system) still releases it; a stream and its channel are one close.
+   *
+   * <p>Use with {@link ChaosSelector.FileIoSelector}; the path is the file closed.
+   */
+  FILE_IO_CLOSE,
+
+  /**
+   * Fires before a file is moved or renamed, by its destination: {@code Files.move} and {@link
+   * java.io.File#renameTo(java.io.File)}, as {@link #FILE_IO_MOVE} is by its source. Failures
+   * behave as for {@link #FILE_IO_MOVE}.
+   *
+   * <p>Use with {@link ChaosSelector.FileIoSelector}; the path is the destination.
+   */
+  FILE_IO_MOVE_TARGET,
+
   // ── Client libraries ───────────────────────────────────────────────────────────
 
   /**
@@ -934,6 +963,16 @@ public enum OperationType {
    * <p>Use with {@link ChaosSelector.ProcessSelector}.
    */
   PROCESS_START,
+
+  /**
+   * Fires before a thread waits for a child process: {@code Process.waitFor()} and {@code
+   * waitFor(long, TimeUnit)}. A delay makes the child seem slower; {@code ChaosEffect.timeout()} on
+   * a timed wait waits it out and returns {@code false}, as for a child that hangs; a rejection
+   * throws {@link InterruptedException}. The pattern matches the program's file name.
+   *
+   * <p>Use with {@link ChaosSelector.ProcessSelector}.
+   */
+  PROCESS_WAIT,
 
   // ── Agent lifecycle ─────────────────────────────────────────────────────────
 

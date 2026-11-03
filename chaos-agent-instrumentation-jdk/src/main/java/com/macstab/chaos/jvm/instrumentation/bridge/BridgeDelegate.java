@@ -528,6 +528,26 @@ public interface BridgeDelegate {
   void beforeDnsReverse(String address) throws Throwable;
 
   /**
+   * Called before a thread waits for a child process.
+   *
+   * @param process the process
+   * @param timeoutMillis the wait's timeout, {@code 0} for none
+   * @return {@code true} when the wait must report that the child has not exited
+   * @throws Throwable if an active scenario rejects the wait
+   */
+  boolean beforeProcessWait(Object process, long timeoutMillis) throws Throwable;
+
+  /**
+   * Called before a connection is half-closed.
+   *
+   * @param endpoint the socket implementation or channel
+   * @param remoteAddress the peer address, or {@code null}
+   * @param remotePort the peer port
+   * @throws Throwable if an active scenario fails the shutdown
+   */
+  void beforeSocketShutdown(Object endpoint, Object remoteAddress, int remotePort) throws Throwable;
+
+  /**
    * Rewrites an instant read from the system {@code java.time.Clock} for clock skew.
    *
    * @param realInstant the instant read

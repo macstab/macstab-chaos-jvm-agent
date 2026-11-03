@@ -453,6 +453,59 @@ final class JvmRuntimeAdvice {
     }
   }
 
+  /** Intercepts {@code NioSocketImpl.shutdownInput} / {@code shutdownOutput} (SOCKET_SHUTDOWN). */
+  static final class SocketShutdownAdvice {
+    @Advice.OnMethodEnter
+    static void enter(
+        @Advice.This final Object impl,
+        @Advice.FieldValue("address") final java.net.InetAddress remoteAddress,
+        @Advice.FieldValue("port") final int remotePort)
+        throws Throwable {
+      BootstrapDispatcher.beforeSocketShutdown(impl, remoteAddress, remotePort);
+    }
+  }
+
+  /** Intercepts {@code SocketChannel.shutdownInput} / {@code shutdownOutput} (SOCKET_SHUTDOWN). */
+  static final class SocketChannelShutdownAdvice {
+    @Advice.OnMethodEnter
+    static void enter(@Advice.This final Object channel) throws Throwable {
+      BootstrapDispatcher.beforeSocketShutdown(channel, null, 0);
+    }
+  }
+
+  /** Intercepts {@code ProcessImpl.waitFor()} (PROCESS_WAIT): delays or rejects the wait. */
+  static final class ProcessWaitAdvice {
+    @Advice.OnMethodEnter
+    static void enter(@Advice.This final Object process) throws Throwable {
+      BootstrapDispatcher.beforeProcessWait(process, 0L);
+    }
+  }
+
+  /**
+   * Intercepts {@code ProcessImpl.waitFor(long, TimeUnit)} (PROCESS_WAIT): a timeout waits the
+   * timeout out and reports that the child has not exited.
+   */
+  static final class ProcessTimedWaitAdvice {
+    @Advice.OnMethodEnter(skipOn = Advice.OnNonDefaultValue.class)
+    static boolean enter(
+        @Advice.This final Object process,
+        @Advice.Argument(0) final long timeout,
+        @Advice.Argument(1) final java.util.concurrent.TimeUnit unit)
+        throws Throwable {
+      // waitFor(0, unit) does not wait: no timeout to wait out (-1).
+      return BootstrapDispatcher.beforeProcessWait(
+          process, unit == null || timeout <= 0 ? -1L : Math.max(1L, unit.toMillis(timeout)));
+    }
+
+    @Advice.OnMethodExit
+    static void exit(
+        @Advice.Enter final boolean timedOut, @Advice.Return(readOnly = false) boolean exited) {
+      if (timedOut) {
+        exited = false;
+      }
+    }
+  }
+
   // ── UDP (DATAGRAM_*) ─────────────────────────────────────────────────────
 
   /**
@@ -1667,10 +1720,62 @@ final class JvmRuntimeAdvice {
   static final class FilesMoveAdvice {
     @Advice.OnMethodEnter
     static void enter(
-        @Advice.This final Object provider, @Advice.Argument(0) final java.nio.file.Path source)
+        @Advice.This final Object provider,
+        @Advice.Argument(0) final java.nio.file.Path source,
+        @Advice.Argument(1) final java.nio.file.Path target)
         throws Throwable {
       BootstrapDispatcher.beforeFileIo(
           "FILE_IO_MOVE", provider, source == null ? null : source.toString(), -1);
+      BootstrapDispatcher.beforeFileIo(
+          "FILE_IO_MOVE_TARGET", provider, target == null ? null : target.toString(), -1);
+    }
+  }
+
+  /**
+   * Intercepts {@code close()} of {@code FileInputStream}, {@code FileOutputStream} and {@code
+   * RandomAccessFile}: evaluated after the close, once for the stream and its channel together.
+   * Archives are skipped: they are class loading.
+   */
+  static final class FileStreamCloseAdvice {
+    @Advice.OnMethodEnter
+    static boolean enter(@Advice.FieldValue("closed") final boolean closed) {
+      final boolean outermost =
+          BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_FILE_CLOSE);
+      return outermost && !closed;
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit(
+        @Advice.This final Object stream,
+        @Advice.Enter final boolean closing,
+        @Advice.Thrown final Throwable thrown,
+        @Advice.FieldValue("path") final String path)
+        throws Throwable {
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_FILE_CLOSE);
+      if (closing && thrown == null && !BootstrapDispatcher.isArchive(path)) {
+        BootstrapDispatcher.beforeFileIo("FILE_IO_CLOSE", stream, path, -1);
+      }
+    }
+  }
+
+  /** Intercepts {@code FileChannelImpl.implCloseChannel()}, as {@link FileStreamCloseAdvice}. */
+  static final class FileChannelCloseAdvice {
+    @Advice.OnMethodEnter
+    static boolean enter() {
+      return BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_FILE_CLOSE);
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit(
+        @Advice.This final Object channel,
+        @Advice.Enter final boolean outermost,
+        @Advice.Thrown final Throwable thrown,
+        @Advice.FieldValue("path") final String path)
+        throws Throwable {
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_FILE_CLOSE);
+      if (outermost && thrown == null && !BootstrapDispatcher.isArchive(path)) {
+        BootstrapDispatcher.beforeFileIo("FILE_IO_CLOSE", channel, path, -1);
+      }
     }
   }
 
@@ -1707,10 +1812,14 @@ final class JvmRuntimeAdvice {
   static final class FileRenameAdvice {
     @Advice.OnMethodEnter(skipOn = Advice.OnNonDefaultValue.class)
     static boolean enter(
-        @Advice.This final Object file, @Advice.FieldValue("path") final String path)
+        @Advice.This final Object file,
+        @Advice.Argument(0) final java.io.File destination,
+        @Advice.FieldValue("path") final String path)
         throws Throwable {
       try {
         BootstrapDispatcher.beforeFileIo("FILE_IO_MOVE", file, path, -1);
+        BootstrapDispatcher.beforeFileIo(
+            "FILE_IO_MOVE_TARGET", file, destination == null ? null : destination.getPath(), -1);
         return false;
       } catch (final java.io.IOException failed) {
         return true;

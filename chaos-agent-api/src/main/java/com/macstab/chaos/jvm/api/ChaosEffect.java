@@ -911,6 +911,14 @@ public sealed interface ChaosEffect
     ENOTCONN(Family.NETWORK, 107, 57, "Transport endpoint is not connected"),
     /** No buffer space available (kernel socket buffers): {@link java.net.SocketException}. */
     ENOBUFS(Family.NETWORK, 105, 55, "No buffer space available"),
+    /** Invalid argument: {@link java.net.SocketException}. */
+    EINVAL(Family.NETWORK, 22, 22, "Invalid argument"),
+    /** Operation not supported on the socket: {@link java.net.SocketException}. */
+    EOPNOTSUPP(Family.NETWORK, 95, 102, "Operation not supported"),
+    /** Address family not supported: {@link java.net.SocketException}. */
+    EAFNOSUPPORT(Family.NETWORK, 97, 47, "Address family not supported by protocol"),
+    /** Protocol not supported: {@link java.net.SocketException}. */
+    EPROTONOSUPPORT(Family.NETWORK, 93, 43, "Protocol not supported"),
     /** No space left on device: {@link java.nio.file.FileSystemException}. */
     ENOSPC(Family.FILE, 28, 28, "No space left on device"),
     /** Disk quota exceeded: {@link java.nio.file.FileSystemException}. */

@@ -917,6 +917,7 @@ public sealed interface ChaosSelector
             OperationType.SOCKET_WRITE,
             OperationType.SOCKET_CLOSE,
             OperationType.SOCKET_BIND,
+            OperationType.SOCKET_SHUTDOWN,
             OperationType.DATAGRAM_SEND,
             OperationType.DATAGRAM_RECEIVE);
 
@@ -1125,7 +1126,9 @@ public sealed interface ChaosSelector
             OperationType.FILE_IO_DELETE,
             OperationType.FILE_IO_MOVE,
             OperationType.FILE_IO_OPEN,
-            OperationType.FILE_IO_MAP);
+            OperationType.FILE_IO_MAP,
+            OperationType.FILE_IO_CLOSE,
+            OperationType.FILE_IO_MOVE_TARGET);
 
     private static final Set<OperationType> SIZED_OPS =
         EnumSet.of(
@@ -1273,7 +1276,8 @@ public sealed interface ChaosSelector
    */
   record ProcessSelector(Set<OperationType> operations, NamePattern commandPattern)
       implements ChaosSelector {
-    static final Set<OperationType> VALID_OPS = EnumSet.of(OperationType.PROCESS_START);
+    static final Set<OperationType> VALID_OPS =
+        EnumSet.of(OperationType.PROCESS_START, OperationType.PROCESS_WAIT);
 
     /** Validates the ProcessSelector parameters. */
     public ProcessSelector {

@@ -325,7 +325,8 @@ public final class JdkInstrumentationInstaller {
         OperationType.SOCKET_READ,
         OperationType.SOCKET_WRITE,
         OperationType.SOCKET_CLOSE,
-        OperationType.SOCKET_BIND),
+        OperationType.SOCKET_BIND,
+        OperationType.SOCKET_SHUTDOWN),
     /** UDP: datagram sends and receives of {@code DatagramSocket} and {@code DatagramChannel}. */
     DATAGRAM(
         JdkInstrumentationInstaller::applyDatagramTransformations,
@@ -338,7 +339,8 @@ public final class JdkInstrumentationInstaller {
         OperationType.SOCKET_ACCEPT,
         OperationType.SOCKET_READ,
         OperationType.SOCKET_WRITE,
-        OperationType.SOCKET_CLOSE),
+        OperationType.SOCKET_CLOSE,
+        OperationType.SOCKET_SHUTDOWN),
     ZIP(
         JdkInstrumentationInstaller::applyZipTransformations,
         OperationType.ZIP_INFLATE,
@@ -401,7 +403,10 @@ public final class JdkInstrumentationInstaller {
         OperationType.DNS_RESOLVE,
         OperationType.DNS_ANSWER,
         OperationType.DNS_REVERSE),
-    PROCESS(JdkInstrumentationInstaller::applyProcessInterception, OperationType.PROCESS_START),
+    PROCESS(
+        JdkInstrumentationInstaller::applyProcessInterception,
+        OperationType.PROCESS_START,
+        OperationType.PROCESS_WAIT),
     FILE_IO(
         JdkInstrumentationInstaller::applyPhase2FileIoInterception,
         OperationType.FILE_IO_READ,
@@ -411,7 +416,9 @@ public final class JdkInstrumentationInstaller {
         OperationType.FILE_IO_DELETE,
         OperationType.FILE_IO_MOVE,
         OperationType.FILE_IO_OPEN,
-        OperationType.FILE_IO_MAP);
+        OperationType.FILE_IO_MAP,
+        OperationType.FILE_IO_CLOSE,
+        OperationType.FILE_IO_MOVE_TARGET);
 
     private final java.util.function.UnaryOperator<AgentBuilder> transformations;
     private final Set<OperationType> operations;
@@ -871,6 +878,16 @@ public final class JdkInstrumentationInstaller {
             delegateInterface,
             "beforeSocketClose",
             MethodType.methodType(void.class, Object.class));
+    methodHandles[BootstrapDispatcher.BEFORE_PROCESS_WAIT] =
+        lookup.findVirtual(
+            delegateInterface,
+            "beforeProcessWait",
+            MethodType.methodType(boolean.class, Object.class, long.class));
+    methodHandles[BootstrapDispatcher.BEFORE_SOCKET_SHUTDOWN] =
+        lookup.findVirtual(
+            delegateInterface,
+            "beforeSocketShutdown",
+            MethodType.methodType(void.class, Object.class, Object.class, int.class));
     methodHandles[BootstrapDispatcher.BEFORE_DATAGRAM] =
         lookup.findVirtual(
             delegateInterface,
@@ -2013,6 +2030,11 @@ public final class JdkInstrumentationInstaller {
                                         ElementMatchers.takesArguments(
                                             java.net.SocketAddress.class))))
                     .visit(
+                        Advice.to(JvmRuntimeAdvice.SocketChannelShutdownAdvice.class)
+                            .on(
+                                ElementMatchers.namedOneOf("shutdownInput", "shutdownOutput")
+                                    .and(ElementMatchers.takesArguments(0))))
+                    .visit(
                         Advice.to(JvmRuntimeAdvice.SocketChannelReadAdvice.class)
                             .on(
                                 ElementMatchers.named("read")
@@ -2117,6 +2139,11 @@ public final class JdkInstrumentationInstaller {
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.SocketShutdownAdvice.class)
+                            .on(
+                                ElementMatchers.namedOneOf("shutdownInput", "shutdownOutput")
+                                    .and(ElementMatchers.takesArguments(0))))
                     .visit(
                         Advice.to(JvmRuntimeAdvice.SocketReadAdvice.class)
                             .on(
@@ -2986,6 +3013,11 @@ public final class JdkInstrumentationInstaller {
                                             long.class,
                                             long.class))))
                     .visit(
+                        Advice.to(JvmRuntimeAdvice.FileChannelCloseAdvice.class)
+                            .on(
+                                ElementMatchers.named("implCloseChannel")
+                                    .and(ElementMatchers.takesArguments(0))))
+                    .visit(
                         Advice.to(JvmRuntimeAdvice.FileChannelForceAdvice.class)
                             .on(
                                 ElementMatchers.named("force")
@@ -3045,18 +3077,24 @@ public final class JdkInstrumentationInstaller {
                                 ElementMatchers.named("deleteIfExists")
                                     .and(
                                         ElementMatchers.takesArguments(java.nio.file.Path.class)))))
-        // Opens of java.io: the private open funnels of the constructors.
+        // Opens and closes of java.io: the private open funnels of the constructors, close().
         .type(
             ElementMatchers.namedOneOf(
                 "java.io.FileInputStream", "java.io.FileOutputStream", "java.io.RandomAccessFile"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
-                typeBuilder.visit(
-                    Advice.to(JvmRuntimeAdvice.FileOpenAdvice.class)
-                        .on(
-                            ElementMatchers.named("open")
-                                .and(ElementMatchers.takesArgument(0, String.class))
-                                .and(ElementMatchers.not(ElementMatchers.isNative())))))
+                typeBuilder
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.FileOpenAdvice.class)
+                            .on(
+                                ElementMatchers.named("open")
+                                    .and(ElementMatchers.takesArgument(0, String.class))
+                                    .and(ElementMatchers.not(ElementMatchers.isNative()))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.FileStreamCloseAdvice.class)
+                            .on(
+                                ElementMatchers.named("close")
+                                    .and(ElementMatchers.takesArguments(0)))))
         // Opens of java.nio: Files.newInputStream / newOutputStream / newByteChannel and
         // FileChannel.open reach the platform provider's newByteChannel or newFileChannel.
         .type(
@@ -3138,9 +3176,23 @@ public final class JdkInstrumentationInstaller {
                         // By arity, not by parameter type: resolving ProcessBuilder$Redirect
                         // while ProcessBuilder is being transformed is a ClassCircularityError.
                         // start() has no other one-argument overload.
-                        .on(
-                            ElementMatchers.named("start")
-                                .and(ElementMatchers.takesArguments(1)))));
+                        .on(ElementMatchers.named("start").and(ElementMatchers.takesArguments(1)))))
+        .type(ElementMatchers.named("java.lang.ProcessImpl"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.ProcessWaitAdvice.class)
+                            .on(
+                                ElementMatchers.named("waitFor")
+                                    .and(ElementMatchers.takesArguments(0))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.ProcessTimedWaitAdvice.class)
+                            .on(
+                                ElementMatchers.named("waitFor")
+                                    .and(
+                                        ElementMatchers.takesArguments(
+                                            long.class, java.util.concurrent.TimeUnit.class)))));
   }
 
   /** Host globs that receive the session header besides internal hosts; set before injection. */

@@ -955,6 +955,38 @@ class DefectRegressionIntegrationTest {
     }
 
     @Test
+    @DisplayName("closes, move targets, half-closes, select and process-wait timeouts")
+    void closesShutdownsAndWaits() throws Exception {
+      final Path root = Files.createDirectories(tempDir.resolve("lifecycle"));
+      final ChildJvmProbe.ProbeResult result =
+          probe.runWithoutPlan(
+              DefectProbeMain.class, "close-shutdown-wait", "-Dchaos.test.dir=" + root);
+      // a failing close still releases the descriptor, as close(2) does
+      assertThat(result.value("streamClose")).isEqualTo("java.io.IOException: Input/output error");
+      assertThat(result.value("streamFdValid")).isEqualTo("false");
+      assertThat(result.value("channelClose")).isEqualTo("java.nio.file.FileSystemException");
+      assertThat(result.value("channelOpen")).isEqualTo("false");
+      assertThat(result.value("plainClose")).isEqualTo("ok");
+      // a stream and its channel are one close
+      assertThat(result.longValue("applied.jvm::close-eio")).isEqualTo(2L);
+      assertThat(result.value("moveInto")).isEqualTo("java.nio.file.AccessDeniedException");
+      assertThat(result.value("renameInto")).isEqualTo("false");
+      assertThat(result.value("renameElsewhere")).isEqualTo("true");
+      assertThat(result.longValue("applied.jvm::move-into-locked")).isEqualTo(2L);
+      assertThat(result.value("socketShutdown")).isEqualTo("Transport endpoint is not connected");
+      assertThat(result.value("channelShutdown")).isEqualTo("Transport endpoint is not connected");
+      // a stalled peer: the ready channel is not reported until the select timed out
+      assertThat(result.longValue("selectReady")).isZero();
+      assertThat(result.longValue("selectMillis")).isGreaterThanOrEqualTo(250L);
+      assertThat(result.longValue("selectNowReady")).isEqualTo(1L);
+      assertThat(result.longValue("applied.jvm::select-stalls")).isEqualTo(1L);
+      // a child that hangs: the timed wait reports it has not exited
+      assertThat(result.value("waitExited")).isEqualTo("false");
+      assertThat(result.longValue("waitMillis")).isGreaterThanOrEqualTo(250L);
+      assertThat(result.longValue("exitCode")).isZero();
+    }
+
+    @Test
     @DisplayName("ENOENT on Files.deleteIfExists returns false, as for a missing file")
     void deleteIfExistsMissing() throws Exception {
       final Path root = Files.createDirectories(tempDir.resolve("missing"));

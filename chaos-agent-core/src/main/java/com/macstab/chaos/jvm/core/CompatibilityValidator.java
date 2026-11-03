@@ -516,6 +516,7 @@ final class CompatibilityValidator {
           OperationType.SOCKET_WRITE,
           OperationType.SOCKET_CLOSE,
           OperationType.SOCKET_BIND,
+          OperationType.SOCKET_SHUTDOWN,
           OperationType.DATAGRAM_SEND,
           OperationType.DATAGRAM_RECEIVE);
 
@@ -560,7 +561,11 @@ final class CompatibilityValidator {
                   OperationType.FILE_IO_READ,
                   OperationType.DATAGRAM_RECEIVE),
               ChaosEffect.TimeoutEffect.class,
-              EnumSet.of(OperationType.SOCKET_READ, OperationType.SOCKET_CONNECT),
+              EnumSet.of(
+                  OperationType.SOCKET_READ,
+                  OperationType.SOCKET_CONNECT,
+                  OperationType.NIO_SELECTOR_SELECT,
+                  OperationType.PROCESS_WAIT),
               ChaosEffect.TornWriteEffect.class,
               EnumSet.of(
                   OperationType.FILE_IO_WRITE,
@@ -582,6 +587,7 @@ final class CompatibilityValidator {
           OperationType.SOCKET_WRITE,
           OperationType.SOCKET_CLOSE,
           OperationType.SOCKET_BIND,
+          OperationType.SOCKET_SHUTDOWN,
           OperationType.DATAGRAM_SEND,
           OperationType.DATAGRAM_RECEIVE,
           OperationType.NIO_CHANNEL_CONNECT,
@@ -600,6 +606,8 @@ final class CompatibilityValidator {
           OperationType.FILE_IO_MOVE,
           OperationType.FILE_IO_OPEN,
           OperationType.FILE_IO_MAP,
+          OperationType.FILE_IO_CLOSE,
+          OperationType.FILE_IO_MOVE_TARGET,
           // A process start fails on the program file: ENOENT, EACCES and the like.
           OperationType.PROCESS_START);
 
