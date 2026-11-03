@@ -59,25 +59,34 @@ public final class ChaosManagement implements AutoCloseable {
    * Activates a plan.
    *
    * @param planJson the plan, in the startup-config JSON format
-   * @return {@code activated} with the plan's handle id, or {@code error} with the reason
+   * @return {@code activated} with the plan's handle id; otherwise {@code invalid} (malformed or
+   *     failing validation), {@code conflict} (a scenario id is already active) or {@code rejected}
+   *     (the runtime could not run it), with the reason
    */
   public ActivationResponse activate(final String planJson) {
     if (planJson == null || planJson.isBlank()) {
-      return new ActivationResponse("error", null, "plan JSON must not be blank");
+      return new ActivationResponse("invalid", null, "plan JSON must not be blank");
     }
     final ChaosPlan plan;
     try {
       plan = ChaosPlanMapper.read(planJson);
     } catch (final ConfigLoadException | IllegalArgumentException invalid) {
       LOGGER.log(Level.WARNING, invalid, () -> "chaos-agent: rejecting malformed plan JSON");
-      return new ActivationResponse("error", null, "invalid plan: " + invalid.getMessage());
+      return new ActivationResponse("invalid", null, "invalid plan: " + invalid.getMessage());
     }
     final ChaosActivationHandle handle;
     try {
       handle = controlPlane.activate(plan);
+    } catch (final com.macstab.chaos.jvm.api.ChaosValidationException invalid) {
+      return new ActivationResponse("invalid", null, "invalid plan: " + invalid.getMessage());
+    } catch (final com.macstab.chaos.jvm.api.ChaosActivationException failed) {
+      final boolean conflict =
+          failed.getMessage() != null && failed.getMessage().contains("already active");
+      return new ActivationResponse(
+          conflict ? "conflict" : "invalid", null, "plan rejected: " + failed.getMessage());
     } catch (final RuntimeException rejected) {
       LOGGER.log(Level.WARNING, rejected, () -> "chaos-agent: plan activation rejected");
-      return new ActivationResponse("error", null, "plan rejected: " + rejected.getMessage());
+      return new ActivationResponse("rejected", null, "plan rejected: " + rejected.getMessage());
     }
     final ChaosActivationHandle previous = handles.put(handle.id(), handle);
     if (previous != null && previous != handle) {
@@ -131,7 +140,7 @@ public final class ChaosManagement implements AutoCloseable {
    * {@code DELETE /<id>}: stop).
    *
    * @param method the HTTP method
-   * @param subPath the path below the endpoint's root: empty or {@code /<id>}
+   * @param subPath the path below the endpoint's root: empty or {@code /<id>}, the id URL-encoded
    * @param body the request body; {@code null} without one
    * @return the status code and JSON body to answer with
    */
@@ -148,21 +157,34 @@ public final class ChaosManagement implements AutoCloseable {
           return new HttpResult(404, error("unknown path"));
         }
         final ActivationResponse response = activate(body);
-        return new HttpResult(
-            "activated".equals(response.status()) ? 200 : 400, ChaosPlanMapper.toJson(response));
+        return new HttpResult(statusOf(response.status()), ChaosPlanMapper.toJson(response));
       }
       case "DELETE" -> {
         if (path.isEmpty()) {
           return new HttpResult(200, ChaosPlanMapper.toJson(stopAll()));
         }
-        final StopResponse response = stop(path);
-        return new HttpResult(
-            "not-found".equals(response.status()) ? 404 : 200, ChaosPlanMapper.toJson(response));
+        final StopResponse response =
+            stop(java.net.URLDecoder.decode(path, java.nio.charset.StandardCharsets.UTF_8));
+        return new HttpResult(statusOf(response.status()), ChaosPlanMapper.toJson(response));
       }
       default -> {
         return new HttpResult(405, error("use GET, POST or DELETE"));
       }
     }
+  }
+
+  /**
+   * The HTTP status of an outcome: 200 done, 400 invalid, 404 not found, 409 conflict (an id
+   * already active, or a scenario not activated here), 422 rejected by the runtime.
+   */
+  private static int statusOf(final String outcome) {
+    return switch (outcome) {
+      case "activated", "stopped" -> 200;
+      case "invalid" -> 400;
+      case "not-found" -> 404;
+      case "conflict", "unmanaged" -> 409;
+      default -> 422;
+    };
   }
 
   private static String error(final String message) {
@@ -178,7 +200,7 @@ public final class ChaosManagement implements AutoCloseable {
   /**
    * The outcome of {@link #activate(String)}.
    *
-   * @param status {@code activated} or {@code error}
+   * @param status {@code activated}, {@code invalid}, {@code conflict} or {@code rejected}
    * @param handleId the plan's handle id when activated
    * @param message the reason when not
    */

@@ -79,15 +79,4 @@ public class ChaosQuarkusRecorder {
         .getOptionalValue(ENABLED_PROPERTY, Boolean.class)
         .orElse(Boolean.FALSE);
   }
-
-  /**
-   * Returns the handler of the {@code /q/chaos} management route.
-   *
-   * @param root the route's full path
-   * @return the handler
-   */
-  public io.vertx.core.Handler<io.vertx.ext.web.RoutingContext> managementHandler(
-      final String root) {
-    return new ChaosManagementHandler(root);
-  }
 }

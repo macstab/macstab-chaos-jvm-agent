@@ -57,6 +57,8 @@ val coverageFloors = mapOf(
     "chaos-agent-micronaut-integration" to (0.85 to 0.70),
     "chaos-agent-quarkus-extension" to (0.70 to 0.60),
     "chaos-agent-quarkus-extension-deployment" to (0.38 to 0.0),
+    "chaos-agent-quarkus-management" to (0.80 to 0.60),
+    "chaos-agent-quarkus-management-deployment" to (0.80 to 0.0),
     "chaos-agent-spring-boot-common" to (0.60 to 0.50),
     "chaos-agent-spring-boot3-starter" to (0.68 to 0.73),
     "chaos-agent-spring-boot3-test-starter" to (0.84 to 0.53),

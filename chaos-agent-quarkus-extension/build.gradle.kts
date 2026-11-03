@@ -6,10 +6,6 @@ dependencies {
     compileOnly(platform(libs.quarkus.bom))
     compileOnly("io.quarkus:quarkus-core")
     compileOnly("io.quarkus:quarkus-arc")
-    // The /q/chaos management route. A real dependency: Quarkus loads every build step of the
-    // deployment module reflectively, so the route's build items must always be present (as for
-    // the health and metrics extensions); the application's Quarkus BOM decides the version.
-    api(libs.quarkus.vertx.http)
     compileOnly("io.quarkus:quarkus-junit5")
     compileOnly(libs.junit.jupiter.api)
     // NOTE: quarkus-core-deployment is deliberately NOT depended on here — it

@@ -60,11 +60,13 @@ class ChaosManagementTest {
   @Test
   @DisplayName("rejects blank, malformed and invalid plans with a reason")
   void rejects() {
-    assertThat(management.activate(" ").status()).isEqualTo("error");
+    assertThat(management.activate(" ").status()).isEqualTo("invalid");
     assertThat(management.activate("{ broken").message()).startsWith("invalid plan");
     management.activate(PLAN);
-    assertThat(management.activate(PLAN.replace("mgmt\"}", "other\"}")).message())
-        .startsWith("plan rejected");
+    final ChaosManagement.ActivationResponse conflict =
+        management.activate(PLAN.replace("mgmt\"}", "other\"}"));
+    assertThat(conflict.status()).isEqualTo("conflict");
+    assertThat(conflict.message()).contains("already active");
   }
 
   @Test
@@ -96,7 +98,12 @@ class ChaosManagementTest {
 
     assertThat(management.handle("POST", "", "{ broken").status()).isEqualTo(400);
     assertThat(management.handle("DELETE", "/nope", null).status()).isEqualTo(404);
-    assertThat(management.handle("DELETE", "/plan:mgmt", null).status()).isEqualTo(200);
+    assertThat(management.handle("POST", "", PLAN.replace("mgmt\"}", "again\"}")).status())
+        .as("conflict")
+        .isEqualTo(409);
+    assertThat(management.handle("DELETE", "/plan%3Amgmt", null).status())
+        .as("decoded")
+        .isEqualTo(200);
     assertThat(management.handle("DELETE", "", null).json()).contains("\"stoppedCount\":0");
     assertThat(management.handle("PUT", "", null).status()).isEqualTo(405);
     assertThat(management.handle("GET", "/x", null).status()).isEqualTo(404);

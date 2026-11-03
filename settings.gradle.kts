@@ -31,6 +31,8 @@ include(
     "chaos-agent-micronaut-integration",
     "chaos-agent-quarkus-extension",
     "chaos-agent-quarkus-extension-deployment",
+    "chaos-agent-quarkus-management",
+    "chaos-agent-quarkus-management-deployment",
     "chaos-agent-spring-boot-common",
     "chaos-agent-spring-boot3-starter",
     "chaos-agent-spring-boot3-test-starter",

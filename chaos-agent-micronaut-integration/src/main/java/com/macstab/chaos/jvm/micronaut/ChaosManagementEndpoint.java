@@ -2,7 +2,10 @@ package com.macstab.chaos.jvm.micronaut;
 
 import com.macstab.chaos.jvm.api.ChaosControlPlane;
 import com.macstab.chaos.jvm.bootstrap.ChaosManagement;
+import com.macstab.chaos.jvm.bootstrap.ChaosPlatform;
 import io.micronaut.context.annotation.Requires;
+import io.micronaut.http.HttpResponse;
+import io.micronaut.http.HttpStatus;
 import io.micronaut.http.MediaType;
 import io.micronaut.management.endpoint.annotation.Delete;
 import io.micronaut.management.endpoint.annotation.Endpoint;
@@ -10,6 +13,7 @@ import io.micronaut.management.endpoint.annotation.Read;
 import io.micronaut.management.endpoint.annotation.Selector;
 import io.micronaut.management.endpoint.annotation.Write;
 import jakarta.annotation.PreDestroy;
+import java.util.function.Supplier;
 
 /**
  * The {@code /chaos} management endpoint for Micronaut, matching the Spring Boot actuator's {@code
@@ -23,22 +27,31 @@ import jakarta.annotation.PreDestroy;
  * </ul>
  *
  * <p>Off unless {@code macstab.chaos.management.enabled=true}, and sensitive by default: anyone who
- * reaches it can inject faults. Responses are JSON strings, so no serde introspection is needed.
+ * reaches it can inject faults. It uses the agent if one is installed and never installs it (503
+ * otherwise); answers carry the operation's status (400 invalid, 404 not found, 409 conflict, 422
+ * rejected) and a JSON body.
  */
 @Endpoint(id = "chaos", defaultSensitive = true)
 @Requires(classes = Endpoint.class)
 @Requires(property = "macstab.chaos.management.enabled", value = "true")
 public class ChaosManagementEndpoint {
 
-  private final ChaosManagement management;
+  private final Supplier<ChaosControlPlane> controlPlane;
+  private volatile ChaosManagement management;
+
+  /** Creates the endpoint for the installed agent. */
+  public ChaosManagementEndpoint() {
+    this(ChaosPlatform::current);
+  }
 
   /**
-   * Creates the endpoint.
+   * Creates the endpoint for a control plane.
    *
-   * @param controlPlane the control plane it acts on
+   * @param controlPlane supplies the control plane; throws {@link IllegalStateException} when no
+   *     agent is installed
    */
-  public ChaosManagementEndpoint(final ChaosControlPlane controlPlane) {
-    this.management = new ChaosManagement(controlPlane);
+  ChaosManagementEndpoint(final Supplier<ChaosControlPlane> controlPlane) {
+    this.controlPlane = controlPlane;
   }
 
   /**
@@ -47,45 +60,73 @@ public class ChaosManagementEndpoint {
    * @return the snapshot as JSON
    */
   @Read(produces = MediaType.APPLICATION_JSON)
-  public String snapshot() {
-    return management.handle("GET", "", null).json();
+  public HttpResponse<String> snapshot() {
+    return answer("GET", "", null);
   }
 
   /**
    * Activates a plan.
    *
    * @param planJson the plan, in the startup-config JSON format
-   * @return the outcome as JSON: {@code status}, {@code handleId}, {@code message}
+   * @return the outcome: {@code status}, {@code handleId}, {@code message}
    */
   @Write(consumes = MediaType.APPLICATION_JSON, produces = MediaType.APPLICATION_JSON)
-  public String activate(final String planJson) {
-    return management.handle("POST", "", planJson).json();
+  public HttpResponse<String> activate(final String planJson) {
+    return answer("POST", "", planJson);
   }
 
   /**
    * Stops a plan activated through this endpoint.
    *
    * @param id the plan's handle id ({@code plan:<name>}) or its name
-   * @return the outcome as JSON
+   * @return the outcome
    */
   @Delete(produces = MediaType.APPLICATION_JSON)
-  public String stop(@Selector final String id) {
-    return management.handle("DELETE", "/" + id, null).json();
+  public HttpResponse<String> stop(@Selector final String id) {
+    return answer("DELETE", "/" + id, null);
   }
 
   /**
    * Stops every plan activated through this endpoint.
    *
-   * @return the number stopped, as JSON
+   * @return the number stopped
    */
   @Delete(produces = MediaType.APPLICATION_JSON)
-  public String stopAll() {
-    return management.handle("DELETE", "", null).json();
+  public HttpResponse<String> stopAll() {
+    return answer("DELETE", "", null);
+  }
+
+  private HttpResponse<String> answer(final String method, final String path, final String body) {
+    final ChaosManagement.HttpResult result;
+    try {
+      result = management().handle(method, path, body);
+    } catch (final IllegalStateException notInstalled) {
+      return HttpResponse.<String>status(HttpStatus.SERVICE_UNAVAILABLE)
+          .body("{\"status\":\"error\",\"message\":\"the chaos agent is not installed\"}");
+    }
+    return HttpResponse.<String>status(HttpStatus.valueOf(result.status())).body(result.json());
+  }
+
+  private ChaosManagement management() {
+    ChaosManagement current = management;
+    if (current == null) {
+      synchronized (this) {
+        current = management;
+        if (current == null) {
+          current = new ChaosManagement(controlPlane.get());
+          management = current;
+        }
+      }
+    }
+    return current;
   }
 
   /** Stops the plans activated here when the context closes. */
   @PreDestroy
   public void close() {
-    management.close();
+    final ChaosManagement current = management;
+    if (current != null) {
+      current.close();
+    }
   }
 }

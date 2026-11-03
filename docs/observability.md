@@ -107,15 +107,15 @@ The control operations are off by default — anyone who can reach the MBean ser
 
 The same four operations over HTTP in each framework, all off by default and to be secured — anyone who reaches them can inject faults:
 
-| Operation                              | Spring Boot (actuator)                         | Micronaut (management)               | Quarkus                     |
-|----------------------------------------|------------------------------------------------|--------------------------------------|-----------------------------|
-| Diagnostics snapshot                   | `GET /actuator/chaos`                          | `GET /chaos`                         | `GET /q/chaos`              |
-| Activate a plan                        | `POST /actuator/chaos`, body `{"planJson": "<plan>"}` | `POST /chaos`, body `{"planJson": "<plan>"}` | `POST /q/chaos`, body: the plan |
-| Stop a plan activated here             | `DELETE /actuator/chaos/{id}`                  | `DELETE /chaos/{id}`                 | `DELETE /q/chaos/{id}`      |
-| Stop every plan activated here         | `DELETE /actuator/chaos`                       | `DELETE /chaos`                      | `DELETE /q/chaos`           |
-| Switch                                 | `macstab.chaos.actuator.enabled=true`          | `macstab.chaos.management.enabled=true` (needs `micronaut-management`) | `macstab.chaos.management.enabled=true` at build time |
+| Operation                      | Spring Boot (actuator)                                | Micronaut (management)                       | Quarkus (`chaos-agent-quarkus-management`) |
+|--------------------------------|-------------------------------------------------------|----------------------------------------------|--------------------------------------------|
+| Diagnostics snapshot           | `GET /actuator/chaos`                                 | `GET /chaos`                                 | `GET /q/chaos`                             |
+| Activate a plan                | `POST /actuator/chaos`, body `{"planJson": "<plan>"}` | `POST /chaos`, body `{"planJson": "<plan>"}` | `POST /q/chaos`, body: the plan            |
+| Stop a plan activated here     | `DELETE /actuator/chaos/{id}`                         | `DELETE /chaos/{id}`                         | `DELETE /q/chaos/{id}`                     |
+| Stop every plan activated here | `DELETE /actuator/chaos`                              | `DELETE /chaos`                              | `DELETE /q/chaos`                          |
+| Switch                         | `macstab.chaos.actuator.enabled=true`                 | `macstab.chaos.management.enabled=true` (needs `micronaut-management`) | add the extension; `macstab.chaos.management.enabled=true` at runtime |
 
-`{id}` is a plan's handle id (`plan:<name>`) or its name. Only plans activated through the endpoint can be stopped through it. Micronaut and Quarkus share `ChaosManagement` (in the agent) and answer with JSON: `{"status": "activated", "handleId": "plan:<name>"}`, `{"status": "stopped" | "unmanaged" | "not-found", ...}`, `{"stoppedCount": n}`; Quarkus maps them to 200, 400 (rejected plan), 404 (unknown id) and 405. The Micronaut endpoint is `defaultSensitive`; the Quarkus route runs on a worker thread under Quarkus' non-application root (`/q` by default), and the extension depends on `quarkus-vertx-http` for it.
+`{id}` is a plan's handle id (`plan:<name>`, URL-encoded) or its name. Only plans activated through the endpoint can be stopped through it, and they are stopped when the application context (or Quarkus application, including a dev-mode reload) shuts down. Micronaut and Quarkus share `ChaosManagement` (in the agent) and answer with JSON and the operation's status: 200 done; 400 `invalid` (malformed, failing validation); 404 `not-found`; 409 `conflict` (a scenario id is already active) or `unmanaged` (a scenario not activated here); 422 `rejected` (the runtime could not run it); 503 when no agent is installed — neither endpoint installs one. The Micronaut endpoint is `defaultSensitive`. The Quarkus route lives in its own extension, so only applications that add it depend on `quarkus-vertx-http`; it runs on a worker thread under Quarkus' non-application root (`/q` by default) and reads its switch on every request.
 
 ## 5. Handle counters
 

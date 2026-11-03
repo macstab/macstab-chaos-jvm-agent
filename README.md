@@ -882,6 +882,7 @@ end note
 | `chaos-agent-instrumentation-jdk`       | ByteBuddy advice, bootstrap bridge (67 interception handles)              |
 | `chaos-agent-startup-config`            | JSON/base64/file config resolution and Jackson mapping                    |
 | `chaos-agent-micrometer`                | Optional Micrometer binder: event, application and skip counters, injected-delay timer, scenario gauges |
+| `chaos-agent-quarkus-management`        | Optional Quarkus extension serving `/q/chaos` (snapshot, activate, stop), with its deployment module |
 | `chaos-agent-opentelemetry`             | Optional OpenTelemetry metrics and `chaos.applied` span events on the traced calls chaos hit |
 | `chaos-agent-testkit`                   | JUnit 5 extension, `ChaosPlatform.installLocally()` for self-attach       |
 | `chaos-agent-spring-boot3-test-starter` | `@ChaosTest` + `ChaosAgentExtension` for Spring Boot 3 tests              |
