@@ -1064,6 +1064,7 @@ Internal Architecture documentation lives in [`docs/`](docs/):
 
 | Document                                              | What it covers                                                                                                            |
 |-------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------|
+| [`plan-schema.md`](docs/plan-schema.md)               | The plan format: grammar, values, strictness, and the published JSON Schema it is derived from                         |
 | [`migration-2.0.md`](docs/migration-2.0.md)           | Upgrading from 1.x: every breaking change, who it affects, before/after code                                             |
 | [`overall-agent.md`](docs/overall-agent.md)           | System Architecture, all analysis dimensions, stack walkdown, PlantUML diagrams                                           |
 | [`api.md`](docs/api.md)                               | Stable API contract: builders, selectors, effects, diagnostics                                                            |

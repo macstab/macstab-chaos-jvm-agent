@@ -1,0 +1,1379 @@
+{
+  "$schema" : "https://json-schema.org/draft/2020-12/schema",
+  "$id" : "https://macstab.com/schemas/chaos-plan.schema.json",
+  "title" : "Chaos plan",
+  "description" : "A plan of the macstab chaos agent: the scenarios to activate, each a selector, an effect and an activation policy. Generated from the plan mapper; see docs/plan-schema.md.",
+  "$ref" : "#/$defs/ChaosPlan",
+  "$defs" : {
+    "ActivationPolicy" : {
+      "type" : "object",
+      "properties" : {
+        "activateAfterMatches" : {
+          "type" : "integer"
+        },
+        "activeFor" : {
+          "type" : "string",
+          "format" : "duration"
+        },
+        "activeFrom" : {
+          "type" : "string",
+          "format" : "date-time"
+        },
+        "activeUntil" : {
+          "type" : "string",
+          "format" : "date-time"
+        },
+        "allowDestructiveEffects" : {
+          "type" : "boolean"
+        },
+        "maxApplications" : {
+          "type" : "integer"
+        },
+        "probability" : {
+          "type" : "number"
+        },
+        "randomSeed" : {
+          "type" : "integer"
+        },
+        "rateLimit" : {
+          "$ref" : "#/$defs/RateLimit"
+        },
+        "replayMatches" : {
+          "type" : "array",
+          "items" : {
+            "type" : "integer"
+          }
+        },
+        "startMode" : {
+          "type" : "string",
+          "enum" : [ "AUTOMATIC", "MANUAL" ]
+        }
+      },
+      "additionalProperties" : false
+    },
+    "AsyncSelector" : {
+      "type" : "object",
+      "properties" : {
+        "type" : {
+          "const" : "async"
+        },
+        "operations" : {
+          "type" : "array",
+          "uniqueItems" : true,
+          "items" : {
+            "type" : "string",
+            "enum" : [ "THREAD_START", "VIRTUAL_THREAD_START", "EXECUTOR_SUBMIT", "EXECUTOR_WORKER_RUN", "EXECUTOR_SHUTDOWN", "EXECUTOR_AWAIT_TERMINATION", "FORK_JOIN_TASK_RUN", "SCHEDULE_SUBMIT", "SCHEDULE_TICK", "QUEUE_PUT", "QUEUE_OFFER", "QUEUE_TAKE", "QUEUE_POLL", "ASYNC_COMPLETE", "ASYNC_COMPLETE_EXCEPTIONALLY", "SHUTDOWN_HOOK_REGISTER", "CLASS_LOAD", "CLASS_DEFINE", "RESOURCE_LOAD", "METHOD_ENTER", "METHOD_EXIT", "MONITOR_ENTER", "THREAD_PARK", "SYSTEM_CLOCK_MILLIS", "SYSTEM_CLOCK_NANOS", "INSTANT_NOW", "CLOCK_READ", "LOCAL_DATE_TIME_NOW", "ZONED_DATE_TIME_NOW", "DATE_NEW", "SYSTEM_GC_REQUEST", "SYSTEM_EXIT_REQUEST", "REFLECTION_INVOKE", "DIRECT_BUFFER_ALLOCATE", "OBJECT_DESERIALIZE", "NIO_SELECTOR_SELECT", "NIO_CHANNEL_READ", "NIO_CHANNEL_WRITE", "NIO_CHANNEL_CONNECT", "NIO_CHANNEL_ACCEPT", "SOCKET_CONNECT", "SOCKET_ACCEPT", "SOCKET_READ", "SOCKET_WRITE", "SOCKET_CLOSE", "SOCKET_BIND", "SOCKET_SHUTDOWN", "DATAGRAM_SEND", "DATAGRAM_RECEIVE", "OBJECT_SERIALIZE", "NATIVE_LIBRARY_LOAD", "JNDI_LOOKUP", "JMX_INVOKE", "JMX_GET_ATTR", "ZIP_INFLATE", "ZIP_DEFLATE", "ASYNC_CANCEL", "THREAD_LOCAL_GET", "THREAD_LOCAL_SET", "HTTP_CLIENT_SEND", "HTTP_CLIENT_SEND_ASYNC", "JDBC_CONNECTION_ACQUIRE", "JDBC_STATEMENT_EXECUTE", "JDBC_PREPARED_STATEMENT", "JDBC_TRANSACTION_COMMIT", "JDBC_TRANSACTION_ROLLBACK", "THREAD_SLEEP", "DNS_RESOLVE", "DNS_ANSWER", "DNS_REVERSE", "SSL_HANDSHAKE", "FILE_IO_READ", "FILE_IO_WRITE", "FILE_IO_SYNC", "FILE_IO_TRUNCATE", "FILE_IO_DELETE", "FILE_IO_MOVE", "FILE_IO_OPEN", "FILE_IO_MAP", "FILE_IO_CLOSE", "FILE_IO_MOVE_TARGET", "MESSAGE_SEND", "MESSAGE_RECEIVE", "RPC_CALL", "REDIS_COMMAND", "R2DBC_STATEMENT_EXECUTE", "AWS_SDK_CALL", "NETTY_CHANNEL_WRITE", "NETTY_CHANNEL_READ", "PROCESS_START", "PROCESS_WAIT", "LIFECYCLE" ]
+          }
+        }
+      },
+      "required" : [ "type" ],
+      "additionalProperties" : false
+    },
+    "AwsSdkSelector" : {
+      "type" : "object",
+      "properties" : {
+        "type" : {
+          "const" : "awsSdk"
+        },
+        "operationPattern" : {
+          "$ref" : "#/$defs/NamePattern"
+        },
+        "operations" : {
+          "type" : "array",
+          "uniqueItems" : true,
+          "items" : {
+            "type" : "string",
+            "enum" : [ "THREAD_START", "VIRTUAL_THREAD_START", "EXECUTOR_SUBMIT", "EXECUTOR_WORKER_RUN", "EXECUTOR_SHUTDOWN", "EXECUTOR_AWAIT_TERMINATION", "FORK_JOIN_TASK_RUN", "SCHEDULE_SUBMIT", "SCHEDULE_TICK", "QUEUE_PUT", "QUEUE_OFFER", "QUEUE_TAKE", "QUEUE_POLL", "ASYNC_COMPLETE", "ASYNC_COMPLETE_EXCEPTIONALLY", "SHUTDOWN_HOOK_REGISTER", "CLASS_LOAD", "CLASS_DEFINE", "RESOURCE_LOAD", "METHOD_ENTER", "METHOD_EXIT", "MONITOR_ENTER", "THREAD_PARK", "SYSTEM_CLOCK_MILLIS", "SYSTEM_CLOCK_NANOS", "INSTANT_NOW", "CLOCK_READ", "LOCAL_DATE_TIME_NOW", "ZONED_DATE_TIME_NOW", "DATE_NEW", "SYSTEM_GC_REQUEST", "SYSTEM_EXIT_REQUEST", "REFLECTION_INVOKE", "DIRECT_BUFFER_ALLOCATE", "OBJECT_DESERIALIZE", "NIO_SELECTOR_SELECT", "NIO_CHANNEL_READ", "NIO_CHANNEL_WRITE", "NIO_CHANNEL_CONNECT", "NIO_CHANNEL_ACCEPT", "SOCKET_CONNECT", "SOCKET_ACCEPT", "SOCKET_READ", "SOCKET_WRITE", "SOCKET_CLOSE", "SOCKET_BIND", "SOCKET_SHUTDOWN", "DATAGRAM_SEND", "DATAGRAM_RECEIVE", "OBJECT_SERIALIZE", "NATIVE_LIBRARY_LOAD", "JNDI_LOOKUP", "JMX_INVOKE", "JMX_GET_ATTR", "ZIP_INFLATE", "ZIP_DEFLATE", "ASYNC_CANCEL", "THREAD_LOCAL_GET", "THREAD_LOCAL_SET", "HTTP_CLIENT_SEND", "HTTP_CLIENT_SEND_ASYNC", "JDBC_CONNECTION_ACQUIRE", "JDBC_STATEMENT_EXECUTE", "JDBC_PREPARED_STATEMENT", "JDBC_TRANSACTION_COMMIT", "JDBC_TRANSACTION_ROLLBACK", "THREAD_SLEEP", "DNS_RESOLVE", "DNS_ANSWER", "DNS_REVERSE", "SSL_HANDSHAKE", "FILE_IO_READ", "FILE_IO_WRITE", "FILE_IO_SYNC", "FILE_IO_TRUNCATE", "FILE_IO_DELETE", "FILE_IO_MOVE", "FILE_IO_OPEN", "FILE_IO_MAP", "FILE_IO_CLOSE", "FILE_IO_MOVE_TARGET", "MESSAGE_SEND", "MESSAGE_RECEIVE", "RPC_CALL", "REDIS_COMMAND", "R2DBC_STATEMENT_EXECUTE", "AWS_SDK_CALL", "NETTY_CHANNEL_WRITE", "NETTY_CHANNEL_READ", "PROCESS_START", "PROCESS_WAIT", "LIFECYCLE" ]
+          }
+        },
+        "servicePattern" : {
+          "$ref" : "#/$defs/NamePattern"
+        }
+      },
+      "required" : [ "type" ],
+      "additionalProperties" : false
+    },
+    "ChaosEffect" : {
+      "oneOf" : [ {
+        "$ref" : "#/$defs/ClockSkewEffect"
+      }, {
+        "$ref" : "#/$defs/CodeCachePressureEffect"
+      }, {
+        "$ref" : "#/$defs/ConnectionResetEffect"
+      }, {
+        "$ref" : "#/$defs/CorruptReadEffect"
+      }, {
+        "$ref" : "#/$defs/DeadlockEffect"
+      }, {
+        "$ref" : "#/$defs/DelayEffect"
+      }, {
+        "$ref" : "#/$defs/DirectBufferPressureEffect"
+      }, {
+        "$ref" : "#/$defs/DnsAnswerEffect"
+      }, {
+        "$ref" : "#/$defs/DnsRewriteEffect"
+      }, {
+        "$ref" : "#/$defs/ErrnoEffect"
+      }, {
+        "$ref" : "#/$defs/ExceptionInjectionEffect"
+      }, {
+        "$ref" : "#/$defs/ExceptionalCompletionEffect"
+      }, {
+        "$ref" : "#/$defs/FinalizerBacklogEffect"
+      }, {
+        "$ref" : "#/$defs/GateEffect"
+      }, {
+        "$ref" : "#/$defs/GcPressureEffect"
+      }, {
+        "$ref" : "#/$defs/HeapPressureEffect"
+      }, {
+        "$ref" : "#/$defs/KeepAliveEffect"
+      }, {
+        "$ref" : "#/$defs/MetaspacePressureEffect"
+      }, {
+        "$ref" : "#/$defs/MonitorContentionEffect"
+      }, {
+        "$ref" : "#/$defs/RedirectEffect"
+      }, {
+        "$ref" : "#/$defs/ReferenceQueueFloodEffect"
+      }, {
+        "$ref" : "#/$defs/RejectEffect"
+      }, {
+        "$ref" : "#/$defs/ReturnValueCorruptionEffect"
+      }, {
+        "$ref" : "#/$defs/SafepointStormEffect"
+      }, {
+        "$ref" : "#/$defs/SpuriousWakeupEffect"
+      }, {
+        "$ref" : "#/$defs/StringInternPressureEffect"
+      }, {
+        "$ref" : "#/$defs/SuppressEffect"
+      }, {
+        "$ref" : "#/$defs/ThreadLeakEffect"
+      }, {
+        "$ref" : "#/$defs/ThreadLocalLeakEffect"
+      }, {
+        "$ref" : "#/$defs/TimeoutEffect"
+      }, {
+        "$ref" : "#/$defs/TornWriteEffect"
+      }, {
+        "$ref" : "#/$defs/TrickleEffect"
+      }, {
+        "$ref" : "#/$defs/VirtualThreadCarrierPinningEffect"
+      } ]
+    },
+    "ChaosPlan" : {
+      "type" : "object",
+      "properties" : {
+        "metadata" : {
+          "$ref" : "#/$defs/Metadata"
+        },
+        "observability" : {
+          "$ref" : "#/$defs/Observability"
+        },
+        "scenarios" : {
+          "type" : "array",
+          "items" : {
+            "$ref" : "#/$defs/ChaosScenario"
+          }
+        }
+      },
+      "required" : [ "scenarios" ],
+      "additionalProperties" : false
+    },
+    "ChaosScenario" : {
+      "type" : "object",
+      "properties" : {
+        "activationPolicy" : {
+          "$ref" : "#/$defs/ActivationPolicy"
+        },
+        "description" : {
+          "type" : "string"
+        },
+        "effect" : {
+          "$ref" : "#/$defs/ChaosEffect"
+        },
+        "id" : {
+          "type" : "string"
+        },
+        "precedence" : {
+          "type" : "integer"
+        },
+        "scope" : {
+          "type" : "string",
+          "enum" : [ "JVM", "SESSION" ]
+        },
+        "selector" : {
+          "$ref" : "#/$defs/ChaosSelector"
+        },
+        "tags" : {
+          "type" : "object",
+          "additionalProperties" : {
+            "type" : "string"
+          }
+        }
+      },
+      "required" : [ "id", "selector", "effect" ],
+      "additionalProperties" : false
+    },
+    "ChaosSelector" : {
+      "oneOf" : [ {
+        "$ref" : "#/$defs/AsyncSelector"
+      }, {
+        "$ref" : "#/$defs/AwsSdkSelector"
+      }, {
+        "$ref" : "#/$defs/ClassLoadingSelector"
+      }, {
+        "$ref" : "#/$defs/DnsSelector"
+      }, {
+        "$ref" : "#/$defs/ExecutorSelector"
+      }, {
+        "$ref" : "#/$defs/FileIoSelector"
+      }, {
+        "$ref" : "#/$defs/HttpClientSelector"
+      }, {
+        "$ref" : "#/$defs/JdbcSelector"
+      }, {
+        "$ref" : "#/$defs/JvmRuntimeSelector"
+      }, {
+        "$ref" : "#/$defs/MessagingSelector"
+      }, {
+        "$ref" : "#/$defs/MethodSelector"
+      }, {
+        "$ref" : "#/$defs/MonitorSelector"
+      }, {
+        "$ref" : "#/$defs/NettySelector"
+      }, {
+        "$ref" : "#/$defs/NetworkSelector"
+      }, {
+        "$ref" : "#/$defs/NioSelector"
+      }, {
+        "$ref" : "#/$defs/ProcessSelector"
+      }, {
+        "$ref" : "#/$defs/QueueSelector"
+      }, {
+        "$ref" : "#/$defs/RedisSelector"
+      }, {
+        "$ref" : "#/$defs/RpcSelector"
+      }, {
+        "$ref" : "#/$defs/SchedulingSelector"
+      }, {
+        "$ref" : "#/$defs/ShutdownSelector"
+      }, {
+        "$ref" : "#/$defs/SslSelector"
+      }, {
+        "$ref" : "#/$defs/StressSelector"
+      }, {
+        "$ref" : "#/$defs/ThreadSelector"
+      }, {
+        "$ref" : "#/$defs/ThreadLocalSelector"
+      } ]
+    },
+    "ClassLoadingSelector" : {
+      "type" : "object",
+      "properties" : {
+        "type" : {
+          "const" : "classLoading"
+        },
+        "loaderClassPattern" : {
+          "$ref" : "#/$defs/NamePattern"
+        },
+        "operations" : {
+          "type" : "array",
+          "uniqueItems" : true,
+          "items" : {
+            "type" : "string",
+            "enum" : [ "THREAD_START", "VIRTUAL_THREAD_START", "EXECUTOR_SUBMIT", "EXECUTOR_WORKER_RUN", "EXECUTOR_SHUTDOWN", "EXECUTOR_AWAIT_TERMINATION", "FORK_JOIN_TASK_RUN", "SCHEDULE_SUBMIT", "SCHEDULE_TICK", "QUEUE_PUT", "QUEUE_OFFER", "QUEUE_TAKE", "QUEUE_POLL", "ASYNC_COMPLETE", "ASYNC_COMPLETE_EXCEPTIONALLY", "SHUTDOWN_HOOK_REGISTER", "CLASS_LOAD", "CLASS_DEFINE", "RESOURCE_LOAD", "METHOD_ENTER", "METHOD_EXIT", "MONITOR_ENTER", "THREAD_PARK", "SYSTEM_CLOCK_MILLIS", "SYSTEM_CLOCK_NANOS", "INSTANT_NOW", "CLOCK_READ", "LOCAL_DATE_TIME_NOW", "ZONED_DATE_TIME_NOW", "DATE_NEW", "SYSTEM_GC_REQUEST", "SYSTEM_EXIT_REQUEST", "REFLECTION_INVOKE", "DIRECT_BUFFER_ALLOCATE", "OBJECT_DESERIALIZE", "NIO_SELECTOR_SELECT", "NIO_CHANNEL_READ", "NIO_CHANNEL_WRITE", "NIO_CHANNEL_CONNECT", "NIO_CHANNEL_ACCEPT", "SOCKET_CONNECT", "SOCKET_ACCEPT", "SOCKET_READ", "SOCKET_WRITE", "SOCKET_CLOSE", "SOCKET_BIND", "SOCKET_SHUTDOWN", "DATAGRAM_SEND", "DATAGRAM_RECEIVE", "OBJECT_SERIALIZE", "NATIVE_LIBRARY_LOAD", "JNDI_LOOKUP", "JMX_INVOKE", "JMX_GET_ATTR", "ZIP_INFLATE", "ZIP_DEFLATE", "ASYNC_CANCEL", "THREAD_LOCAL_GET", "THREAD_LOCAL_SET", "HTTP_CLIENT_SEND", "HTTP_CLIENT_SEND_ASYNC", "JDBC_CONNECTION_ACQUIRE", "JDBC_STATEMENT_EXECUTE", "JDBC_PREPARED_STATEMENT", "JDBC_TRANSACTION_COMMIT", "JDBC_TRANSACTION_ROLLBACK", "THREAD_SLEEP", "DNS_RESOLVE", "DNS_ANSWER", "DNS_REVERSE", "SSL_HANDSHAKE", "FILE_IO_READ", "FILE_IO_WRITE", "FILE_IO_SYNC", "FILE_IO_TRUNCATE", "FILE_IO_DELETE", "FILE_IO_MOVE", "FILE_IO_OPEN", "FILE_IO_MAP", "FILE_IO_CLOSE", "FILE_IO_MOVE_TARGET", "MESSAGE_SEND", "MESSAGE_RECEIVE", "RPC_CALL", "REDIS_COMMAND", "R2DBC_STATEMENT_EXECUTE", "AWS_SDK_CALL", "NETTY_CHANNEL_WRITE", "NETTY_CHANNEL_READ", "PROCESS_START", "PROCESS_WAIT", "LIFECYCLE" ]
+          }
+        },
+        "targetNamePattern" : {
+          "$ref" : "#/$defs/NamePattern"
+        }
+      },
+      "required" : [ "type" ],
+      "additionalProperties" : false
+    },
+    "ClockSkewEffect" : {
+      "type" : "object",
+      "properties" : {
+        "type" : {
+          "const" : "clockSkew"
+        },
+        "mode" : {
+          "type" : "string",
+          "enum" : [ "FIXED", "DRIFT", "FREEZE", "REGRESS" ]
+        },
+        "skewAmount" : {
+          "type" : "string",
+          "format" : "duration"
+        }
+      },
+      "required" : [ "type" ],
+      "additionalProperties" : false
+    },
+    "CodeCachePressureEffect" : {
+      "type" : "object",
+      "properties" : {
+        "type" : {
+          "const" : "codeCachePressure"
+        },
+        "classCount" : {
+          "type" : "integer"
+        },
+        "methodsPerClass" : {
+          "type" : "integer"
+        }
+      },
+      "required" : [ "type" ],
+      "additionalProperties" : false
+    },
+    "ConnectionResetEffect" : {
+      "type" : "object",
+      "properties" : {
+        "type" : {
+          "const" : "connectionReset"
+        }
+      },
+      "required" : [ "type" ],
+      "additionalProperties" : false
+    },
+    "CorruptReadEffect" : {
+      "type" : "object",
+      "properties" : {
+        "type" : {
+          "const" : "corruptRead"
+        }
+      },
+      "required" : [ "type" ],
+      "additionalProperties" : false
+    },
+    "DeadlockEffect" : {
+      "type" : "object",
+      "properties" : {
+        "type" : {
+          "const" : "deadlock"
+        },
+        "acquisitionDelay" : {
+          "type" : "string",
+          "format" : "duration"
+        },
+        "participantCount" : {
+          "type" : "integer"
+        }
+      },
+      "required" : [ "type" ],
+      "additionalProperties" : false
+    },
+    "DelayEffect" : {
+      "type" : "object",
+      "properties" : {
+        "type" : {
+          "const" : "delay"
+        },
+        "maxDelay" : {
+          "type" : "string",
+          "format" : "duration"
+        },
+        "minDelay" : {
+          "type" : "string",
+          "format" : "duration"
+        }
+      },
+      "required" : [ "type" ],
+      "additionalProperties" : false
+    },
+    "DirectBufferPressureEffect" : {
+      "type" : "object",
+      "properties" : {
+        "type" : {
+          "const" : "directBufferPressure"
+        },
+        "bufferSizeBytes" : {
+          "type" : "integer"
+        },
+        "registerCleaner" : {
+          "type" : "boolean"
+        },
+        "totalBytes" : {
+          "type" : "integer"
+        }
+      },
+      "required" : [ "type" ],
+      "additionalProperties" : false
+    },
+    "DnsAnswerEffect" : {
+      "type" : "object",
+      "properties" : {
+        "type" : {
+          "const" : "dnsAnswer"
+        },
+        "family" : {
+          "type" : "string",
+          "enum" : [ "IPV4", "IPV6" ]
+        },
+        "limit" : {
+          "type" : "integer"
+        },
+        "override" : {
+          "type" : "array",
+          "items" : {
+            "type" : "string"
+          }
+        },
+        "shuffle" : {
+          "type" : "boolean"
+        }
+      },
+      "required" : [ "type" ],
+      "additionalProperties" : false
+    },
+    "DnsRewriteEffect" : {
+      "type" : "object",
+      "properties" : {
+        "type" : {
+          "const" : "dnsRewrite"
+        },
+        "host" : {
+          "type" : "string"
+        }
+      },
+      "required" : [ "type" ],
+      "additionalProperties" : false
+    },
+    "DnsSelector" : {
+      "type" : "object",
+      "properties" : {
+        "type" : {
+          "const" : "dns"
+        },
+        "hostnamePattern" : {
+          "$ref" : "#/$defs/NamePattern"
+        },
+        "operations" : {
+          "type" : "array",
+          "uniqueItems" : true,
+          "items" : {
+            "type" : "string",
+            "enum" : [ "THREAD_START", "VIRTUAL_THREAD_START", "EXECUTOR_SUBMIT", "EXECUTOR_WORKER_RUN", "EXECUTOR_SHUTDOWN", "EXECUTOR_AWAIT_TERMINATION", "FORK_JOIN_TASK_RUN", "SCHEDULE_SUBMIT", "SCHEDULE_TICK", "QUEUE_PUT", "QUEUE_OFFER", "QUEUE_TAKE", "QUEUE_POLL", "ASYNC_COMPLETE", "ASYNC_COMPLETE_EXCEPTIONALLY", "SHUTDOWN_HOOK_REGISTER", "CLASS_LOAD", "CLASS_DEFINE", "RESOURCE_LOAD", "METHOD_ENTER", "METHOD_EXIT", "MONITOR_ENTER", "THREAD_PARK", "SYSTEM_CLOCK_MILLIS", "SYSTEM_CLOCK_NANOS", "INSTANT_NOW", "CLOCK_READ", "LOCAL_DATE_TIME_NOW", "ZONED_DATE_TIME_NOW", "DATE_NEW", "SYSTEM_GC_REQUEST", "SYSTEM_EXIT_REQUEST", "REFLECTION_INVOKE", "DIRECT_BUFFER_ALLOCATE", "OBJECT_DESERIALIZE", "NIO_SELECTOR_SELECT", "NIO_CHANNEL_READ", "NIO_CHANNEL_WRITE", "NIO_CHANNEL_CONNECT", "NIO_CHANNEL_ACCEPT", "SOCKET_CONNECT", "SOCKET_ACCEPT", "SOCKET_READ", "SOCKET_WRITE", "SOCKET_CLOSE", "SOCKET_BIND", "SOCKET_SHUTDOWN", "DATAGRAM_SEND", "DATAGRAM_RECEIVE", "OBJECT_SERIALIZE", "NATIVE_LIBRARY_LOAD", "JNDI_LOOKUP", "JMX_INVOKE", "JMX_GET_ATTR", "ZIP_INFLATE", "ZIP_DEFLATE", "ASYNC_CANCEL", "THREAD_LOCAL_GET", "THREAD_LOCAL_SET", "HTTP_CLIENT_SEND", "HTTP_CLIENT_SEND_ASYNC", "JDBC_CONNECTION_ACQUIRE", "JDBC_STATEMENT_EXECUTE", "JDBC_PREPARED_STATEMENT", "JDBC_TRANSACTION_COMMIT", "JDBC_TRANSACTION_ROLLBACK", "THREAD_SLEEP", "DNS_RESOLVE", "DNS_ANSWER", "DNS_REVERSE", "SSL_HANDSHAKE", "FILE_IO_READ", "FILE_IO_WRITE", "FILE_IO_SYNC", "FILE_IO_TRUNCATE", "FILE_IO_DELETE", "FILE_IO_MOVE", "FILE_IO_OPEN", "FILE_IO_MAP", "FILE_IO_CLOSE", "FILE_IO_MOVE_TARGET", "MESSAGE_SEND", "MESSAGE_RECEIVE", "RPC_CALL", "REDIS_COMMAND", "R2DBC_STATEMENT_EXECUTE", "AWS_SDK_CALL", "NETTY_CHANNEL_WRITE", "NETTY_CHANNEL_READ", "PROCESS_START", "PROCESS_WAIT", "LIFECYCLE" ]
+          }
+        }
+      },
+      "required" : [ "type" ],
+      "additionalProperties" : false
+    },
+    "ErrnoEffect" : {
+      "type" : "object",
+      "properties" : {
+        "type" : {
+          "const" : "errno"
+        },
+        "errno" : {
+          "type" : "string",
+          "enum" : [ "ECONNREFUSED", "ETIMEDOUT", "ECONNRESET", "EHOSTUNREACH", "ENETUNREACH", "EPIPE", "EADDRINUSE", "EADDRNOTAVAIL", "ENOTCONN", "ENOBUFS", "EINVAL", "EOPNOTSUPP", "EAFNOSUPPORT", "EPROTONOSUPPORT", "ENOSPC", "EDQUOT", "EROFS", "EACCES", "ENOENT", "EIO", "EMFILE", "ENFILE", "EAGAIN", "ENOMEM" ]
+        }
+      },
+      "required" : [ "type" ],
+      "additionalProperties" : false
+    },
+    "ExceptionInjectionEffect" : {
+      "type" : "object",
+      "properties" : {
+        "type" : {
+          "const" : "exceptionInjection"
+        },
+        "exceptionClassName" : {
+          "type" : "string"
+        },
+        "message" : {
+          "type" : "string"
+        },
+        "withStackTrace" : {
+          "type" : "boolean"
+        }
+      },
+      "required" : [ "type" ],
+      "additionalProperties" : false
+    },
+    "ExceptionalCompletionEffect" : {
+      "type" : "object",
+      "properties" : {
+        "type" : {
+          "const" : "exceptionalCompletion"
+        },
+        "failureKind" : {
+          "type" : "string",
+          "enum" : [ "REJECTED", "TIMEOUT", "ILLEGAL_STATE", "CLASS_NOT_FOUND", "IO", "INTERRUPTED", "RUNTIME", "SECURITY" ]
+        },
+        "message" : {
+          "type" : "string"
+        }
+      },
+      "required" : [ "type" ],
+      "additionalProperties" : false
+    },
+    "ExecutorSelector" : {
+      "type" : "object",
+      "properties" : {
+        "type" : {
+          "const" : "executor"
+        },
+        "executorClassPattern" : {
+          "$ref" : "#/$defs/NamePattern"
+        },
+        "operations" : {
+          "type" : "array",
+          "uniqueItems" : true,
+          "items" : {
+            "type" : "string",
+            "enum" : [ "THREAD_START", "VIRTUAL_THREAD_START", "EXECUTOR_SUBMIT", "EXECUTOR_WORKER_RUN", "EXECUTOR_SHUTDOWN", "EXECUTOR_AWAIT_TERMINATION", "FORK_JOIN_TASK_RUN", "SCHEDULE_SUBMIT", "SCHEDULE_TICK", "QUEUE_PUT", "QUEUE_OFFER", "QUEUE_TAKE", "QUEUE_POLL", "ASYNC_COMPLETE", "ASYNC_COMPLETE_EXCEPTIONALLY", "SHUTDOWN_HOOK_REGISTER", "CLASS_LOAD", "CLASS_DEFINE", "RESOURCE_LOAD", "METHOD_ENTER", "METHOD_EXIT", "MONITOR_ENTER", "THREAD_PARK", "SYSTEM_CLOCK_MILLIS", "SYSTEM_CLOCK_NANOS", "INSTANT_NOW", "CLOCK_READ", "LOCAL_DATE_TIME_NOW", "ZONED_DATE_TIME_NOW", "DATE_NEW", "SYSTEM_GC_REQUEST", "SYSTEM_EXIT_REQUEST", "REFLECTION_INVOKE", "DIRECT_BUFFER_ALLOCATE", "OBJECT_DESERIALIZE", "NIO_SELECTOR_SELECT", "NIO_CHANNEL_READ", "NIO_CHANNEL_WRITE", "NIO_CHANNEL_CONNECT", "NIO_CHANNEL_ACCEPT", "SOCKET_CONNECT", "SOCKET_ACCEPT", "SOCKET_READ", "SOCKET_WRITE", "SOCKET_CLOSE", "SOCKET_BIND", "SOCKET_SHUTDOWN", "DATAGRAM_SEND", "DATAGRAM_RECEIVE", "OBJECT_SERIALIZE", "NATIVE_LIBRARY_LOAD", "JNDI_LOOKUP", "JMX_INVOKE", "JMX_GET_ATTR", "ZIP_INFLATE", "ZIP_DEFLATE", "ASYNC_CANCEL", "THREAD_LOCAL_GET", "THREAD_LOCAL_SET", "HTTP_CLIENT_SEND", "HTTP_CLIENT_SEND_ASYNC", "JDBC_CONNECTION_ACQUIRE", "JDBC_STATEMENT_EXECUTE", "JDBC_PREPARED_STATEMENT", "JDBC_TRANSACTION_COMMIT", "JDBC_TRANSACTION_ROLLBACK", "THREAD_SLEEP", "DNS_RESOLVE", "DNS_ANSWER", "DNS_REVERSE", "SSL_HANDSHAKE", "FILE_IO_READ", "FILE_IO_WRITE", "FILE_IO_SYNC", "FILE_IO_TRUNCATE", "FILE_IO_DELETE", "FILE_IO_MOVE", "FILE_IO_OPEN", "FILE_IO_MAP", "FILE_IO_CLOSE", "FILE_IO_MOVE_TARGET", "MESSAGE_SEND", "MESSAGE_RECEIVE", "RPC_CALL", "REDIS_COMMAND", "R2DBC_STATEMENT_EXECUTE", "AWS_SDK_CALL", "NETTY_CHANNEL_WRITE", "NETTY_CHANNEL_READ", "PROCESS_START", "PROCESS_WAIT", "LIFECYCLE" ]
+          }
+        },
+        "scheduledOnly" : {
+          "type" : "boolean"
+        },
+        "taskClassPattern" : {
+          "$ref" : "#/$defs/NamePattern"
+        }
+      },
+      "required" : [ "type" ],
+      "additionalProperties" : false
+    },
+    "FileIoSelector" : {
+      "type" : "object",
+      "properties" : {
+        "type" : {
+          "const" : "fileIo"
+        },
+        "maxBytes" : {
+          "type" : "integer"
+        },
+        "minBytes" : {
+          "type" : "integer"
+        },
+        "operations" : {
+          "type" : "array",
+          "uniqueItems" : true,
+          "items" : {
+            "type" : "string",
+            "enum" : [ "THREAD_START", "VIRTUAL_THREAD_START", "EXECUTOR_SUBMIT", "EXECUTOR_WORKER_RUN", "EXECUTOR_SHUTDOWN", "EXECUTOR_AWAIT_TERMINATION", "FORK_JOIN_TASK_RUN", "SCHEDULE_SUBMIT", "SCHEDULE_TICK", "QUEUE_PUT", "QUEUE_OFFER", "QUEUE_TAKE", "QUEUE_POLL", "ASYNC_COMPLETE", "ASYNC_COMPLETE_EXCEPTIONALLY", "SHUTDOWN_HOOK_REGISTER", "CLASS_LOAD", "CLASS_DEFINE", "RESOURCE_LOAD", "METHOD_ENTER", "METHOD_EXIT", "MONITOR_ENTER", "THREAD_PARK", "SYSTEM_CLOCK_MILLIS", "SYSTEM_CLOCK_NANOS", "INSTANT_NOW", "CLOCK_READ", "LOCAL_DATE_TIME_NOW", "ZONED_DATE_TIME_NOW", "DATE_NEW", "SYSTEM_GC_REQUEST", "SYSTEM_EXIT_REQUEST", "REFLECTION_INVOKE", "DIRECT_BUFFER_ALLOCATE", "OBJECT_DESERIALIZE", "NIO_SELECTOR_SELECT", "NIO_CHANNEL_READ", "NIO_CHANNEL_WRITE", "NIO_CHANNEL_CONNECT", "NIO_CHANNEL_ACCEPT", "SOCKET_CONNECT", "SOCKET_ACCEPT", "SOCKET_READ", "SOCKET_WRITE", "SOCKET_CLOSE", "SOCKET_BIND", "SOCKET_SHUTDOWN", "DATAGRAM_SEND", "DATAGRAM_RECEIVE", "OBJECT_SERIALIZE", "NATIVE_LIBRARY_LOAD", "JNDI_LOOKUP", "JMX_INVOKE", "JMX_GET_ATTR", "ZIP_INFLATE", "ZIP_DEFLATE", "ASYNC_CANCEL", "THREAD_LOCAL_GET", "THREAD_LOCAL_SET", "HTTP_CLIENT_SEND", "HTTP_CLIENT_SEND_ASYNC", "JDBC_CONNECTION_ACQUIRE", "JDBC_STATEMENT_EXECUTE", "JDBC_PREPARED_STATEMENT", "JDBC_TRANSACTION_COMMIT", "JDBC_TRANSACTION_ROLLBACK", "THREAD_SLEEP", "DNS_RESOLVE", "DNS_ANSWER", "DNS_REVERSE", "SSL_HANDSHAKE", "FILE_IO_READ", "FILE_IO_WRITE", "FILE_IO_SYNC", "FILE_IO_TRUNCATE", "FILE_IO_DELETE", "FILE_IO_MOVE", "FILE_IO_OPEN", "FILE_IO_MAP", "FILE_IO_CLOSE", "FILE_IO_MOVE_TARGET", "MESSAGE_SEND", "MESSAGE_RECEIVE", "RPC_CALL", "REDIS_COMMAND", "R2DBC_STATEMENT_EXECUTE", "AWS_SDK_CALL", "NETTY_CHANNEL_WRITE", "NETTY_CHANNEL_READ", "PROCESS_START", "PROCESS_WAIT", "LIFECYCLE" ]
+          }
+        },
+        "pathPattern" : {
+          "$ref" : "#/$defs/PathPattern"
+        }
+      },
+      "required" : [ "type" ],
+      "additionalProperties" : false
+    },
+    "FinalizerBacklogEffect" : {
+      "type" : "object",
+      "properties" : {
+        "type" : {
+          "const" : "finalizerBacklog"
+        },
+        "finalizerDelay" : {
+          "type" : "string",
+          "format" : "duration"
+        },
+        "objectCount" : {
+          "type" : "integer"
+        }
+      },
+      "required" : [ "type" ],
+      "additionalProperties" : false
+    },
+    "GateEffect" : {
+      "type" : "object",
+      "properties" : {
+        "type" : {
+          "const" : "gate"
+        },
+        "maxBlock" : {
+          "type" : "string",
+          "format" : "duration"
+        }
+      },
+      "required" : [ "type" ],
+      "additionalProperties" : false
+    },
+    "GcPressureEffect" : {
+      "type" : "object",
+      "properties" : {
+        "type" : {
+          "const" : "gcPressure"
+        },
+        "allocationRateBytesPerSecond" : {
+          "type" : "integer"
+        },
+        "duration" : {
+          "type" : "string",
+          "format" : "duration"
+        },
+        "objectSizeBytes" : {
+          "type" : "integer"
+        },
+        "promoteToOldGen" : {
+          "type" : "boolean"
+        }
+      },
+      "required" : [ "type" ],
+      "additionalProperties" : false
+    },
+    "HeapPressureEffect" : {
+      "type" : "object",
+      "properties" : {
+        "type" : {
+          "const" : "heapPressure"
+        },
+        "bytes" : {
+          "type" : "integer"
+        },
+        "chunkSizeBytes" : {
+          "type" : "integer"
+        }
+      },
+      "required" : [ "type" ],
+      "additionalProperties" : false
+    },
+    "HttpClientSelector" : {
+      "type" : "object",
+      "properties" : {
+        "type" : {
+          "const" : "httpClient"
+        },
+        "operations" : {
+          "type" : "array",
+          "uniqueItems" : true,
+          "items" : {
+            "type" : "string",
+            "enum" : [ "THREAD_START", "VIRTUAL_THREAD_START", "EXECUTOR_SUBMIT", "EXECUTOR_WORKER_RUN", "EXECUTOR_SHUTDOWN", "EXECUTOR_AWAIT_TERMINATION", "FORK_JOIN_TASK_RUN", "SCHEDULE_SUBMIT", "SCHEDULE_TICK", "QUEUE_PUT", "QUEUE_OFFER", "QUEUE_TAKE", "QUEUE_POLL", "ASYNC_COMPLETE", "ASYNC_COMPLETE_EXCEPTIONALLY", "SHUTDOWN_HOOK_REGISTER", "CLASS_LOAD", "CLASS_DEFINE", "RESOURCE_LOAD", "METHOD_ENTER", "METHOD_EXIT", "MONITOR_ENTER", "THREAD_PARK", "SYSTEM_CLOCK_MILLIS", "SYSTEM_CLOCK_NANOS", "INSTANT_NOW", "CLOCK_READ", "LOCAL_DATE_TIME_NOW", "ZONED_DATE_TIME_NOW", "DATE_NEW", "SYSTEM_GC_REQUEST", "SYSTEM_EXIT_REQUEST", "REFLECTION_INVOKE", "DIRECT_BUFFER_ALLOCATE", "OBJECT_DESERIALIZE", "NIO_SELECTOR_SELECT", "NIO_CHANNEL_READ", "NIO_CHANNEL_WRITE", "NIO_CHANNEL_CONNECT", "NIO_CHANNEL_ACCEPT", "SOCKET_CONNECT", "SOCKET_ACCEPT", "SOCKET_READ", "SOCKET_WRITE", "SOCKET_CLOSE", "SOCKET_BIND", "SOCKET_SHUTDOWN", "DATAGRAM_SEND", "DATAGRAM_RECEIVE", "OBJECT_SERIALIZE", "NATIVE_LIBRARY_LOAD", "JNDI_LOOKUP", "JMX_INVOKE", "JMX_GET_ATTR", "ZIP_INFLATE", "ZIP_DEFLATE", "ASYNC_CANCEL", "THREAD_LOCAL_GET", "THREAD_LOCAL_SET", "HTTP_CLIENT_SEND", "HTTP_CLIENT_SEND_ASYNC", "JDBC_CONNECTION_ACQUIRE", "JDBC_STATEMENT_EXECUTE", "JDBC_PREPARED_STATEMENT", "JDBC_TRANSACTION_COMMIT", "JDBC_TRANSACTION_ROLLBACK", "THREAD_SLEEP", "DNS_RESOLVE", "DNS_ANSWER", "DNS_REVERSE", "SSL_HANDSHAKE", "FILE_IO_READ", "FILE_IO_WRITE", "FILE_IO_SYNC", "FILE_IO_TRUNCATE", "FILE_IO_DELETE", "FILE_IO_MOVE", "FILE_IO_OPEN", "FILE_IO_MAP", "FILE_IO_CLOSE", "FILE_IO_MOVE_TARGET", "MESSAGE_SEND", "MESSAGE_RECEIVE", "RPC_CALL", "REDIS_COMMAND", "R2DBC_STATEMENT_EXECUTE", "AWS_SDK_CALL", "NETTY_CHANNEL_WRITE", "NETTY_CHANNEL_READ", "PROCESS_START", "PROCESS_WAIT", "LIFECYCLE" ]
+          }
+        },
+        "urlPattern" : {
+          "$ref" : "#/$defs/NamePattern"
+        }
+      },
+      "required" : [ "type" ],
+      "additionalProperties" : false
+    },
+    "JdbcSelector" : {
+      "type" : "object",
+      "properties" : {
+        "type" : {
+          "const" : "jdbc"
+        },
+        "operations" : {
+          "type" : "array",
+          "uniqueItems" : true,
+          "items" : {
+            "type" : "string",
+            "enum" : [ "THREAD_START", "VIRTUAL_THREAD_START", "EXECUTOR_SUBMIT", "EXECUTOR_WORKER_RUN", "EXECUTOR_SHUTDOWN", "EXECUTOR_AWAIT_TERMINATION", "FORK_JOIN_TASK_RUN", "SCHEDULE_SUBMIT", "SCHEDULE_TICK", "QUEUE_PUT", "QUEUE_OFFER", "QUEUE_TAKE", "QUEUE_POLL", "ASYNC_COMPLETE", "ASYNC_COMPLETE_EXCEPTIONALLY", "SHUTDOWN_HOOK_REGISTER", "CLASS_LOAD", "CLASS_DEFINE", "RESOURCE_LOAD", "METHOD_ENTER", "METHOD_EXIT", "MONITOR_ENTER", "THREAD_PARK", "SYSTEM_CLOCK_MILLIS", "SYSTEM_CLOCK_NANOS", "INSTANT_NOW", "CLOCK_READ", "LOCAL_DATE_TIME_NOW", "ZONED_DATE_TIME_NOW", "DATE_NEW", "SYSTEM_GC_REQUEST", "SYSTEM_EXIT_REQUEST", "REFLECTION_INVOKE", "DIRECT_BUFFER_ALLOCATE", "OBJECT_DESERIALIZE", "NIO_SELECTOR_SELECT", "NIO_CHANNEL_READ", "NIO_CHANNEL_WRITE", "NIO_CHANNEL_CONNECT", "NIO_CHANNEL_ACCEPT", "SOCKET_CONNECT", "SOCKET_ACCEPT", "SOCKET_READ", "SOCKET_WRITE", "SOCKET_CLOSE", "SOCKET_BIND", "SOCKET_SHUTDOWN", "DATAGRAM_SEND", "DATAGRAM_RECEIVE", "OBJECT_SERIALIZE", "NATIVE_LIBRARY_LOAD", "JNDI_LOOKUP", "JMX_INVOKE", "JMX_GET_ATTR", "ZIP_INFLATE", "ZIP_DEFLATE", "ASYNC_CANCEL", "THREAD_LOCAL_GET", "THREAD_LOCAL_SET", "HTTP_CLIENT_SEND", "HTTP_CLIENT_SEND_ASYNC", "JDBC_CONNECTION_ACQUIRE", "JDBC_STATEMENT_EXECUTE", "JDBC_PREPARED_STATEMENT", "JDBC_TRANSACTION_COMMIT", "JDBC_TRANSACTION_ROLLBACK", "THREAD_SLEEP", "DNS_RESOLVE", "DNS_ANSWER", "DNS_REVERSE", "SSL_HANDSHAKE", "FILE_IO_READ", "FILE_IO_WRITE", "FILE_IO_SYNC", "FILE_IO_TRUNCATE", "FILE_IO_DELETE", "FILE_IO_MOVE", "FILE_IO_OPEN", "FILE_IO_MAP", "FILE_IO_CLOSE", "FILE_IO_MOVE_TARGET", "MESSAGE_SEND", "MESSAGE_RECEIVE", "RPC_CALL", "REDIS_COMMAND", "R2DBC_STATEMENT_EXECUTE", "AWS_SDK_CALL", "NETTY_CHANNEL_WRITE", "NETTY_CHANNEL_READ", "PROCESS_START", "PROCESS_WAIT", "LIFECYCLE" ]
+          }
+        },
+        "targetPattern" : {
+          "$ref" : "#/$defs/NamePattern"
+        }
+      },
+      "required" : [ "type" ],
+      "additionalProperties" : false
+    },
+    "JvmRuntimeSelector" : {
+      "type" : "object",
+      "properties" : {
+        "type" : {
+          "const" : "jvmRuntime"
+        },
+        "operations" : {
+          "type" : "array",
+          "uniqueItems" : true,
+          "items" : {
+            "type" : "string",
+            "enum" : [ "THREAD_START", "VIRTUAL_THREAD_START", "EXECUTOR_SUBMIT", "EXECUTOR_WORKER_RUN", "EXECUTOR_SHUTDOWN", "EXECUTOR_AWAIT_TERMINATION", "FORK_JOIN_TASK_RUN", "SCHEDULE_SUBMIT", "SCHEDULE_TICK", "QUEUE_PUT", "QUEUE_OFFER", "QUEUE_TAKE", "QUEUE_POLL", "ASYNC_COMPLETE", "ASYNC_COMPLETE_EXCEPTIONALLY", "SHUTDOWN_HOOK_REGISTER", "CLASS_LOAD", "CLASS_DEFINE", "RESOURCE_LOAD", "METHOD_ENTER", "METHOD_EXIT", "MONITOR_ENTER", "THREAD_PARK", "SYSTEM_CLOCK_MILLIS", "SYSTEM_CLOCK_NANOS", "INSTANT_NOW", "CLOCK_READ", "LOCAL_DATE_TIME_NOW", "ZONED_DATE_TIME_NOW", "DATE_NEW", "SYSTEM_GC_REQUEST", "SYSTEM_EXIT_REQUEST", "REFLECTION_INVOKE", "DIRECT_BUFFER_ALLOCATE", "OBJECT_DESERIALIZE", "NIO_SELECTOR_SELECT", "NIO_CHANNEL_READ", "NIO_CHANNEL_WRITE", "NIO_CHANNEL_CONNECT", "NIO_CHANNEL_ACCEPT", "SOCKET_CONNECT", "SOCKET_ACCEPT", "SOCKET_READ", "SOCKET_WRITE", "SOCKET_CLOSE", "SOCKET_BIND", "SOCKET_SHUTDOWN", "DATAGRAM_SEND", "DATAGRAM_RECEIVE", "OBJECT_SERIALIZE", "NATIVE_LIBRARY_LOAD", "JNDI_LOOKUP", "JMX_INVOKE", "JMX_GET_ATTR", "ZIP_INFLATE", "ZIP_DEFLATE", "ASYNC_CANCEL", "THREAD_LOCAL_GET", "THREAD_LOCAL_SET", "HTTP_CLIENT_SEND", "HTTP_CLIENT_SEND_ASYNC", "JDBC_CONNECTION_ACQUIRE", "JDBC_STATEMENT_EXECUTE", "JDBC_PREPARED_STATEMENT", "JDBC_TRANSACTION_COMMIT", "JDBC_TRANSACTION_ROLLBACK", "THREAD_SLEEP", "DNS_RESOLVE", "DNS_ANSWER", "DNS_REVERSE", "SSL_HANDSHAKE", "FILE_IO_READ", "FILE_IO_WRITE", "FILE_IO_SYNC", "FILE_IO_TRUNCATE", "FILE_IO_DELETE", "FILE_IO_MOVE", "FILE_IO_OPEN", "FILE_IO_MAP", "FILE_IO_CLOSE", "FILE_IO_MOVE_TARGET", "MESSAGE_SEND", "MESSAGE_RECEIVE", "RPC_CALL", "REDIS_COMMAND", "R2DBC_STATEMENT_EXECUTE", "AWS_SDK_CALL", "NETTY_CHANNEL_WRITE", "NETTY_CHANNEL_READ", "PROCESS_START", "PROCESS_WAIT", "LIFECYCLE" ]
+          }
+        }
+      },
+      "required" : [ "type" ],
+      "additionalProperties" : false
+    },
+    "KeepAliveEffect" : {
+      "type" : "object",
+      "properties" : {
+        "type" : {
+          "const" : "keepAlive"
+        },
+        "daemon" : {
+          "type" : "boolean"
+        },
+        "heartbeat" : {
+          "type" : "string",
+          "format" : "duration"
+        },
+        "threadName" : {
+          "type" : "string"
+        }
+      },
+      "required" : [ "type" ],
+      "additionalProperties" : false
+    },
+    "MessagingSelector" : {
+      "type" : "object",
+      "properties" : {
+        "type" : {
+          "const" : "messaging"
+        },
+        "destinationPattern" : {
+          "$ref" : "#/$defs/NamePattern"
+        },
+        "operations" : {
+          "type" : "array",
+          "uniqueItems" : true,
+          "items" : {
+            "type" : "string",
+            "enum" : [ "THREAD_START", "VIRTUAL_THREAD_START", "EXECUTOR_SUBMIT", "EXECUTOR_WORKER_RUN", "EXECUTOR_SHUTDOWN", "EXECUTOR_AWAIT_TERMINATION", "FORK_JOIN_TASK_RUN", "SCHEDULE_SUBMIT", "SCHEDULE_TICK", "QUEUE_PUT", "QUEUE_OFFER", "QUEUE_TAKE", "QUEUE_POLL", "ASYNC_COMPLETE", "ASYNC_COMPLETE_EXCEPTIONALLY", "SHUTDOWN_HOOK_REGISTER", "CLASS_LOAD", "CLASS_DEFINE", "RESOURCE_LOAD", "METHOD_ENTER", "METHOD_EXIT", "MONITOR_ENTER", "THREAD_PARK", "SYSTEM_CLOCK_MILLIS", "SYSTEM_CLOCK_NANOS", "INSTANT_NOW", "CLOCK_READ", "LOCAL_DATE_TIME_NOW", "ZONED_DATE_TIME_NOW", "DATE_NEW", "SYSTEM_GC_REQUEST", "SYSTEM_EXIT_REQUEST", "REFLECTION_INVOKE", "DIRECT_BUFFER_ALLOCATE", "OBJECT_DESERIALIZE", "NIO_SELECTOR_SELECT", "NIO_CHANNEL_READ", "NIO_CHANNEL_WRITE", "NIO_CHANNEL_CONNECT", "NIO_CHANNEL_ACCEPT", "SOCKET_CONNECT", "SOCKET_ACCEPT", "SOCKET_READ", "SOCKET_WRITE", "SOCKET_CLOSE", "SOCKET_BIND", "SOCKET_SHUTDOWN", "DATAGRAM_SEND", "DATAGRAM_RECEIVE", "OBJECT_SERIALIZE", "NATIVE_LIBRARY_LOAD", "JNDI_LOOKUP", "JMX_INVOKE", "JMX_GET_ATTR", "ZIP_INFLATE", "ZIP_DEFLATE", "ASYNC_CANCEL", "THREAD_LOCAL_GET", "THREAD_LOCAL_SET", "HTTP_CLIENT_SEND", "HTTP_CLIENT_SEND_ASYNC", "JDBC_CONNECTION_ACQUIRE", "JDBC_STATEMENT_EXECUTE", "JDBC_PREPARED_STATEMENT", "JDBC_TRANSACTION_COMMIT", "JDBC_TRANSACTION_ROLLBACK", "THREAD_SLEEP", "DNS_RESOLVE", "DNS_ANSWER", "DNS_REVERSE", "SSL_HANDSHAKE", "FILE_IO_READ", "FILE_IO_WRITE", "FILE_IO_SYNC", "FILE_IO_TRUNCATE", "FILE_IO_DELETE", "FILE_IO_MOVE", "FILE_IO_OPEN", "FILE_IO_MAP", "FILE_IO_CLOSE", "FILE_IO_MOVE_TARGET", "MESSAGE_SEND", "MESSAGE_RECEIVE", "RPC_CALL", "REDIS_COMMAND", "R2DBC_STATEMENT_EXECUTE", "AWS_SDK_CALL", "NETTY_CHANNEL_WRITE", "NETTY_CHANNEL_READ", "PROCESS_START", "PROCESS_WAIT", "LIFECYCLE" ]
+          }
+        }
+      },
+      "required" : [ "type" ],
+      "additionalProperties" : false
+    },
+    "Metadata" : {
+      "type" : "object",
+      "properties" : {
+        "description" : {
+          "type" : "string"
+        },
+        "name" : {
+          "type" : "string"
+        }
+      },
+      "additionalProperties" : false
+    },
+    "MetaspacePressureEffect" : {
+      "type" : "object",
+      "properties" : {
+        "type" : {
+          "const" : "metaspacePressure"
+        },
+        "fieldsPerClass" : {
+          "type" : "integer"
+        },
+        "generatedClassCount" : {
+          "type" : "integer"
+        },
+        "retain" : {
+          "type" : "boolean"
+        }
+      },
+      "required" : [ "type" ],
+      "additionalProperties" : false
+    },
+    "MethodSelector" : {
+      "type" : "object",
+      "properties" : {
+        "type" : {
+          "const" : "method"
+        },
+        "classPattern" : {
+          "$ref" : "#/$defs/NamePattern"
+        },
+        "methodNamePattern" : {
+          "$ref" : "#/$defs/NamePattern"
+        },
+        "operations" : {
+          "type" : "array",
+          "uniqueItems" : true,
+          "items" : {
+            "type" : "string",
+            "enum" : [ "THREAD_START", "VIRTUAL_THREAD_START", "EXECUTOR_SUBMIT", "EXECUTOR_WORKER_RUN", "EXECUTOR_SHUTDOWN", "EXECUTOR_AWAIT_TERMINATION", "FORK_JOIN_TASK_RUN", "SCHEDULE_SUBMIT", "SCHEDULE_TICK", "QUEUE_PUT", "QUEUE_OFFER", "QUEUE_TAKE", "QUEUE_POLL", "ASYNC_COMPLETE", "ASYNC_COMPLETE_EXCEPTIONALLY", "SHUTDOWN_HOOK_REGISTER", "CLASS_LOAD", "CLASS_DEFINE", "RESOURCE_LOAD", "METHOD_ENTER", "METHOD_EXIT", "MONITOR_ENTER", "THREAD_PARK", "SYSTEM_CLOCK_MILLIS", "SYSTEM_CLOCK_NANOS", "INSTANT_NOW", "CLOCK_READ", "LOCAL_DATE_TIME_NOW", "ZONED_DATE_TIME_NOW", "DATE_NEW", "SYSTEM_GC_REQUEST", "SYSTEM_EXIT_REQUEST", "REFLECTION_INVOKE", "DIRECT_BUFFER_ALLOCATE", "OBJECT_DESERIALIZE", "NIO_SELECTOR_SELECT", "NIO_CHANNEL_READ", "NIO_CHANNEL_WRITE", "NIO_CHANNEL_CONNECT", "NIO_CHANNEL_ACCEPT", "SOCKET_CONNECT", "SOCKET_ACCEPT", "SOCKET_READ", "SOCKET_WRITE", "SOCKET_CLOSE", "SOCKET_BIND", "SOCKET_SHUTDOWN", "DATAGRAM_SEND", "DATAGRAM_RECEIVE", "OBJECT_SERIALIZE", "NATIVE_LIBRARY_LOAD", "JNDI_LOOKUP", "JMX_INVOKE", "JMX_GET_ATTR", "ZIP_INFLATE", "ZIP_DEFLATE", "ASYNC_CANCEL", "THREAD_LOCAL_GET", "THREAD_LOCAL_SET", "HTTP_CLIENT_SEND", "HTTP_CLIENT_SEND_ASYNC", "JDBC_CONNECTION_ACQUIRE", "JDBC_STATEMENT_EXECUTE", "JDBC_PREPARED_STATEMENT", "JDBC_TRANSACTION_COMMIT", "JDBC_TRANSACTION_ROLLBACK", "THREAD_SLEEP", "DNS_RESOLVE", "DNS_ANSWER", "DNS_REVERSE", "SSL_HANDSHAKE", "FILE_IO_READ", "FILE_IO_WRITE", "FILE_IO_SYNC", "FILE_IO_TRUNCATE", "FILE_IO_DELETE", "FILE_IO_MOVE", "FILE_IO_OPEN", "FILE_IO_MAP", "FILE_IO_CLOSE", "FILE_IO_MOVE_TARGET", "MESSAGE_SEND", "MESSAGE_RECEIVE", "RPC_CALL", "REDIS_COMMAND", "R2DBC_STATEMENT_EXECUTE", "AWS_SDK_CALL", "NETTY_CHANNEL_WRITE", "NETTY_CHANNEL_READ", "PROCESS_START", "PROCESS_WAIT", "LIFECYCLE" ]
+          }
+        },
+        "signaturePattern" : {
+          "$ref" : "#/$defs/NamePattern"
+        }
+      },
+      "required" : [ "type" ],
+      "additionalProperties" : false
+    },
+    "MonitorContentionEffect" : {
+      "type" : "object",
+      "properties" : {
+        "type" : {
+          "const" : "monitorContention"
+        },
+        "contendingThreadCount" : {
+          "type" : "integer"
+        },
+        "lockHoldDuration" : {
+          "type" : "string",
+          "format" : "duration"
+        },
+        "unfair" : {
+          "type" : "boolean"
+        }
+      },
+      "required" : [ "type" ],
+      "additionalProperties" : false
+    },
+    "MonitorSelector" : {
+      "type" : "object",
+      "properties" : {
+        "type" : {
+          "const" : "monitor"
+        },
+        "monitorClassPattern" : {
+          "$ref" : "#/$defs/NamePattern"
+        },
+        "operations" : {
+          "type" : "array",
+          "uniqueItems" : true,
+          "items" : {
+            "type" : "string",
+            "enum" : [ "THREAD_START", "VIRTUAL_THREAD_START", "EXECUTOR_SUBMIT", "EXECUTOR_WORKER_RUN", "EXECUTOR_SHUTDOWN", "EXECUTOR_AWAIT_TERMINATION", "FORK_JOIN_TASK_RUN", "SCHEDULE_SUBMIT", "SCHEDULE_TICK", "QUEUE_PUT", "QUEUE_OFFER", "QUEUE_TAKE", "QUEUE_POLL", "ASYNC_COMPLETE", "ASYNC_COMPLETE_EXCEPTIONALLY", "SHUTDOWN_HOOK_REGISTER", "CLASS_LOAD", "CLASS_DEFINE", "RESOURCE_LOAD", "METHOD_ENTER", "METHOD_EXIT", "MONITOR_ENTER", "THREAD_PARK", "SYSTEM_CLOCK_MILLIS", "SYSTEM_CLOCK_NANOS", "INSTANT_NOW", "CLOCK_READ", "LOCAL_DATE_TIME_NOW", "ZONED_DATE_TIME_NOW", "DATE_NEW", "SYSTEM_GC_REQUEST", "SYSTEM_EXIT_REQUEST", "REFLECTION_INVOKE", "DIRECT_BUFFER_ALLOCATE", "OBJECT_DESERIALIZE", "NIO_SELECTOR_SELECT", "NIO_CHANNEL_READ", "NIO_CHANNEL_WRITE", "NIO_CHANNEL_CONNECT", "NIO_CHANNEL_ACCEPT", "SOCKET_CONNECT", "SOCKET_ACCEPT", "SOCKET_READ", "SOCKET_WRITE", "SOCKET_CLOSE", "SOCKET_BIND", "SOCKET_SHUTDOWN", "DATAGRAM_SEND", "DATAGRAM_RECEIVE", "OBJECT_SERIALIZE", "NATIVE_LIBRARY_LOAD", "JNDI_LOOKUP", "JMX_INVOKE", "JMX_GET_ATTR", "ZIP_INFLATE", "ZIP_DEFLATE", "ASYNC_CANCEL", "THREAD_LOCAL_GET", "THREAD_LOCAL_SET", "HTTP_CLIENT_SEND", "HTTP_CLIENT_SEND_ASYNC", "JDBC_CONNECTION_ACQUIRE", "JDBC_STATEMENT_EXECUTE", "JDBC_PREPARED_STATEMENT", "JDBC_TRANSACTION_COMMIT", "JDBC_TRANSACTION_ROLLBACK", "THREAD_SLEEP", "DNS_RESOLVE", "DNS_ANSWER", "DNS_REVERSE", "SSL_HANDSHAKE", "FILE_IO_READ", "FILE_IO_WRITE", "FILE_IO_SYNC", "FILE_IO_TRUNCATE", "FILE_IO_DELETE", "FILE_IO_MOVE", "FILE_IO_OPEN", "FILE_IO_MAP", "FILE_IO_CLOSE", "FILE_IO_MOVE_TARGET", "MESSAGE_SEND", "MESSAGE_RECEIVE", "RPC_CALL", "REDIS_COMMAND", "R2DBC_STATEMENT_EXECUTE", "AWS_SDK_CALL", "NETTY_CHANNEL_WRITE", "NETTY_CHANNEL_READ", "PROCESS_START", "PROCESS_WAIT", "LIFECYCLE" ]
+          }
+        }
+      },
+      "required" : [ "type" ],
+      "additionalProperties" : false
+    },
+    "NamePattern" : {
+      "type" : "object",
+      "properties" : {
+        "mode" : {
+          "type" : "string",
+          "enum" : [ "ANY", "EXACT", "PREFIX", "GLOB", "REGEX" ]
+        },
+        "value" : {
+          "type" : "string"
+        }
+      },
+      "additionalProperties" : false
+    },
+    "NettySelector" : {
+      "type" : "object",
+      "properties" : {
+        "type" : {
+          "const" : "netty"
+        },
+        "operations" : {
+          "type" : "array",
+          "uniqueItems" : true,
+          "items" : {
+            "type" : "string",
+            "enum" : [ "THREAD_START", "VIRTUAL_THREAD_START", "EXECUTOR_SUBMIT", "EXECUTOR_WORKER_RUN", "EXECUTOR_SHUTDOWN", "EXECUTOR_AWAIT_TERMINATION", "FORK_JOIN_TASK_RUN", "SCHEDULE_SUBMIT", "SCHEDULE_TICK", "QUEUE_PUT", "QUEUE_OFFER", "QUEUE_TAKE", "QUEUE_POLL", "ASYNC_COMPLETE", "ASYNC_COMPLETE_EXCEPTIONALLY", "SHUTDOWN_HOOK_REGISTER", "CLASS_LOAD", "CLASS_DEFINE", "RESOURCE_LOAD", "METHOD_ENTER", "METHOD_EXIT", "MONITOR_ENTER", "THREAD_PARK", "SYSTEM_CLOCK_MILLIS", "SYSTEM_CLOCK_NANOS", "INSTANT_NOW", "CLOCK_READ", "LOCAL_DATE_TIME_NOW", "ZONED_DATE_TIME_NOW", "DATE_NEW", "SYSTEM_GC_REQUEST", "SYSTEM_EXIT_REQUEST", "REFLECTION_INVOKE", "DIRECT_BUFFER_ALLOCATE", "OBJECT_DESERIALIZE", "NIO_SELECTOR_SELECT", "NIO_CHANNEL_READ", "NIO_CHANNEL_WRITE", "NIO_CHANNEL_CONNECT", "NIO_CHANNEL_ACCEPT", "SOCKET_CONNECT", "SOCKET_ACCEPT", "SOCKET_READ", "SOCKET_WRITE", "SOCKET_CLOSE", "SOCKET_BIND", "SOCKET_SHUTDOWN", "DATAGRAM_SEND", "DATAGRAM_RECEIVE", "OBJECT_SERIALIZE", "NATIVE_LIBRARY_LOAD", "JNDI_LOOKUP", "JMX_INVOKE", "JMX_GET_ATTR", "ZIP_INFLATE", "ZIP_DEFLATE", "ASYNC_CANCEL", "THREAD_LOCAL_GET", "THREAD_LOCAL_SET", "HTTP_CLIENT_SEND", "HTTP_CLIENT_SEND_ASYNC", "JDBC_CONNECTION_ACQUIRE", "JDBC_STATEMENT_EXECUTE", "JDBC_PREPARED_STATEMENT", "JDBC_TRANSACTION_COMMIT", "JDBC_TRANSACTION_ROLLBACK", "THREAD_SLEEP", "DNS_RESOLVE", "DNS_ANSWER", "DNS_REVERSE", "SSL_HANDSHAKE", "FILE_IO_READ", "FILE_IO_WRITE", "FILE_IO_SYNC", "FILE_IO_TRUNCATE", "FILE_IO_DELETE", "FILE_IO_MOVE", "FILE_IO_OPEN", "FILE_IO_MAP", "FILE_IO_CLOSE", "FILE_IO_MOVE_TARGET", "MESSAGE_SEND", "MESSAGE_RECEIVE", "RPC_CALL", "REDIS_COMMAND", "R2DBC_STATEMENT_EXECUTE", "AWS_SDK_CALL", "NETTY_CHANNEL_WRITE", "NETTY_CHANNEL_READ", "PROCESS_START", "PROCESS_WAIT", "LIFECYCLE" ]
+          }
+        },
+        "remoteCidr" : {
+          "type" : "string"
+        },
+        "remotePort" : {
+          "type" : "integer"
+        }
+      },
+      "required" : [ "type" ],
+      "additionalProperties" : false
+    },
+    "NetworkSelector" : {
+      "type" : "object",
+      "properties" : {
+        "type" : {
+          "const" : "network"
+        },
+        "maxBytes" : {
+          "type" : "integer"
+        },
+        "minBytes" : {
+          "type" : "integer"
+        },
+        "operations" : {
+          "type" : "array",
+          "uniqueItems" : true,
+          "items" : {
+            "type" : "string",
+            "enum" : [ "THREAD_START", "VIRTUAL_THREAD_START", "EXECUTOR_SUBMIT", "EXECUTOR_WORKER_RUN", "EXECUTOR_SHUTDOWN", "EXECUTOR_AWAIT_TERMINATION", "FORK_JOIN_TASK_RUN", "SCHEDULE_SUBMIT", "SCHEDULE_TICK", "QUEUE_PUT", "QUEUE_OFFER", "QUEUE_TAKE", "QUEUE_POLL", "ASYNC_COMPLETE", "ASYNC_COMPLETE_EXCEPTIONALLY", "SHUTDOWN_HOOK_REGISTER", "CLASS_LOAD", "CLASS_DEFINE", "RESOURCE_LOAD", "METHOD_ENTER", "METHOD_EXIT", "MONITOR_ENTER", "THREAD_PARK", "SYSTEM_CLOCK_MILLIS", "SYSTEM_CLOCK_NANOS", "INSTANT_NOW", "CLOCK_READ", "LOCAL_DATE_TIME_NOW", "ZONED_DATE_TIME_NOW", "DATE_NEW", "SYSTEM_GC_REQUEST", "SYSTEM_EXIT_REQUEST", "REFLECTION_INVOKE", "DIRECT_BUFFER_ALLOCATE", "OBJECT_DESERIALIZE", "NIO_SELECTOR_SELECT", "NIO_CHANNEL_READ", "NIO_CHANNEL_WRITE", "NIO_CHANNEL_CONNECT", "NIO_CHANNEL_ACCEPT", "SOCKET_CONNECT", "SOCKET_ACCEPT", "SOCKET_READ", "SOCKET_WRITE", "SOCKET_CLOSE", "SOCKET_BIND", "SOCKET_SHUTDOWN", "DATAGRAM_SEND", "DATAGRAM_RECEIVE", "OBJECT_SERIALIZE", "NATIVE_LIBRARY_LOAD", "JNDI_LOOKUP", "JMX_INVOKE", "JMX_GET_ATTR", "ZIP_INFLATE", "ZIP_DEFLATE", "ASYNC_CANCEL", "THREAD_LOCAL_GET", "THREAD_LOCAL_SET", "HTTP_CLIENT_SEND", "HTTP_CLIENT_SEND_ASYNC", "JDBC_CONNECTION_ACQUIRE", "JDBC_STATEMENT_EXECUTE", "JDBC_PREPARED_STATEMENT", "JDBC_TRANSACTION_COMMIT", "JDBC_TRANSACTION_ROLLBACK", "THREAD_SLEEP", "DNS_RESOLVE", "DNS_ANSWER", "DNS_REVERSE", "SSL_HANDSHAKE", "FILE_IO_READ", "FILE_IO_WRITE", "FILE_IO_SYNC", "FILE_IO_TRUNCATE", "FILE_IO_DELETE", "FILE_IO_MOVE", "FILE_IO_OPEN", "FILE_IO_MAP", "FILE_IO_CLOSE", "FILE_IO_MOVE_TARGET", "MESSAGE_SEND", "MESSAGE_RECEIVE", "RPC_CALL", "REDIS_COMMAND", "R2DBC_STATEMENT_EXECUTE", "AWS_SDK_CALL", "NETTY_CHANNEL_WRITE", "NETTY_CHANNEL_READ", "PROCESS_START", "PROCESS_WAIT", "LIFECYCLE" ]
+          }
+        },
+        "remoteCidr" : {
+          "type" : "string"
+        },
+        "remoteHostPattern" : {
+          "$ref" : "#/$defs/NamePattern"
+        },
+        "remotePort" : {
+          "type" : "integer"
+        }
+      },
+      "required" : [ "type" ],
+      "additionalProperties" : false
+    },
+    "NioSelector" : {
+      "type" : "object",
+      "properties" : {
+        "type" : {
+          "const" : "nio"
+        },
+        "channelClassPattern" : {
+          "$ref" : "#/$defs/NamePattern"
+        },
+        "operations" : {
+          "type" : "array",
+          "uniqueItems" : true,
+          "items" : {
+            "type" : "string",
+            "enum" : [ "THREAD_START", "VIRTUAL_THREAD_START", "EXECUTOR_SUBMIT", "EXECUTOR_WORKER_RUN", "EXECUTOR_SHUTDOWN", "EXECUTOR_AWAIT_TERMINATION", "FORK_JOIN_TASK_RUN", "SCHEDULE_SUBMIT", "SCHEDULE_TICK", "QUEUE_PUT", "QUEUE_OFFER", "QUEUE_TAKE", "QUEUE_POLL", "ASYNC_COMPLETE", "ASYNC_COMPLETE_EXCEPTIONALLY", "SHUTDOWN_HOOK_REGISTER", "CLASS_LOAD", "CLASS_DEFINE", "RESOURCE_LOAD", "METHOD_ENTER", "METHOD_EXIT", "MONITOR_ENTER", "THREAD_PARK", "SYSTEM_CLOCK_MILLIS", "SYSTEM_CLOCK_NANOS", "INSTANT_NOW", "CLOCK_READ", "LOCAL_DATE_TIME_NOW", "ZONED_DATE_TIME_NOW", "DATE_NEW", "SYSTEM_GC_REQUEST", "SYSTEM_EXIT_REQUEST", "REFLECTION_INVOKE", "DIRECT_BUFFER_ALLOCATE", "OBJECT_DESERIALIZE", "NIO_SELECTOR_SELECT", "NIO_CHANNEL_READ", "NIO_CHANNEL_WRITE", "NIO_CHANNEL_CONNECT", "NIO_CHANNEL_ACCEPT", "SOCKET_CONNECT", "SOCKET_ACCEPT", "SOCKET_READ", "SOCKET_WRITE", "SOCKET_CLOSE", "SOCKET_BIND", "SOCKET_SHUTDOWN", "DATAGRAM_SEND", "DATAGRAM_RECEIVE", "OBJECT_SERIALIZE", "NATIVE_LIBRARY_LOAD", "JNDI_LOOKUP", "JMX_INVOKE", "JMX_GET_ATTR", "ZIP_INFLATE", "ZIP_DEFLATE", "ASYNC_CANCEL", "THREAD_LOCAL_GET", "THREAD_LOCAL_SET", "HTTP_CLIENT_SEND", "HTTP_CLIENT_SEND_ASYNC", "JDBC_CONNECTION_ACQUIRE", "JDBC_STATEMENT_EXECUTE", "JDBC_PREPARED_STATEMENT", "JDBC_TRANSACTION_COMMIT", "JDBC_TRANSACTION_ROLLBACK", "THREAD_SLEEP", "DNS_RESOLVE", "DNS_ANSWER", "DNS_REVERSE", "SSL_HANDSHAKE", "FILE_IO_READ", "FILE_IO_WRITE", "FILE_IO_SYNC", "FILE_IO_TRUNCATE", "FILE_IO_DELETE", "FILE_IO_MOVE", "FILE_IO_OPEN", "FILE_IO_MAP", "FILE_IO_CLOSE", "FILE_IO_MOVE_TARGET", "MESSAGE_SEND", "MESSAGE_RECEIVE", "RPC_CALL", "REDIS_COMMAND", "R2DBC_STATEMENT_EXECUTE", "AWS_SDK_CALL", "NETTY_CHANNEL_WRITE", "NETTY_CHANNEL_READ", "PROCESS_START", "PROCESS_WAIT", "LIFECYCLE" ]
+          }
+        }
+      },
+      "required" : [ "type" ],
+      "additionalProperties" : false
+    },
+    "Observability" : {
+      "type" : "object",
+      "properties" : {
+        "debugDumpOnStart" : {
+          "type" : "boolean"
+        },
+        "jmxEnabled" : {
+          "type" : "boolean"
+        },
+        "structuredLoggingEnabled" : {
+          "type" : "boolean"
+        }
+      },
+      "additionalProperties" : false
+    },
+    "PathPattern" : {
+      "type" : "object",
+      "properties" : {
+        "prefix" : {
+          "type" : "string"
+        }
+      },
+      "additionalProperties" : false
+    },
+    "ProcessSelector" : {
+      "type" : "object",
+      "properties" : {
+        "type" : {
+          "const" : "process"
+        },
+        "commandPattern" : {
+          "$ref" : "#/$defs/NamePattern"
+        },
+        "operations" : {
+          "type" : "array",
+          "uniqueItems" : true,
+          "items" : {
+            "type" : "string",
+            "enum" : [ "THREAD_START", "VIRTUAL_THREAD_START", "EXECUTOR_SUBMIT", "EXECUTOR_WORKER_RUN", "EXECUTOR_SHUTDOWN", "EXECUTOR_AWAIT_TERMINATION", "FORK_JOIN_TASK_RUN", "SCHEDULE_SUBMIT", "SCHEDULE_TICK", "QUEUE_PUT", "QUEUE_OFFER", "QUEUE_TAKE", "QUEUE_POLL", "ASYNC_COMPLETE", "ASYNC_COMPLETE_EXCEPTIONALLY", "SHUTDOWN_HOOK_REGISTER", "CLASS_LOAD", "CLASS_DEFINE", "RESOURCE_LOAD", "METHOD_ENTER", "METHOD_EXIT", "MONITOR_ENTER", "THREAD_PARK", "SYSTEM_CLOCK_MILLIS", "SYSTEM_CLOCK_NANOS", "INSTANT_NOW", "CLOCK_READ", "LOCAL_DATE_TIME_NOW", "ZONED_DATE_TIME_NOW", "DATE_NEW", "SYSTEM_GC_REQUEST", "SYSTEM_EXIT_REQUEST", "REFLECTION_INVOKE", "DIRECT_BUFFER_ALLOCATE", "OBJECT_DESERIALIZE", "NIO_SELECTOR_SELECT", "NIO_CHANNEL_READ", "NIO_CHANNEL_WRITE", "NIO_CHANNEL_CONNECT", "NIO_CHANNEL_ACCEPT", "SOCKET_CONNECT", "SOCKET_ACCEPT", "SOCKET_READ", "SOCKET_WRITE", "SOCKET_CLOSE", "SOCKET_BIND", "SOCKET_SHUTDOWN", "DATAGRAM_SEND", "DATAGRAM_RECEIVE", "OBJECT_SERIALIZE", "NATIVE_LIBRARY_LOAD", "JNDI_LOOKUP", "JMX_INVOKE", "JMX_GET_ATTR", "ZIP_INFLATE", "ZIP_DEFLATE", "ASYNC_CANCEL", "THREAD_LOCAL_GET", "THREAD_LOCAL_SET", "HTTP_CLIENT_SEND", "HTTP_CLIENT_SEND_ASYNC", "JDBC_CONNECTION_ACQUIRE", "JDBC_STATEMENT_EXECUTE", "JDBC_PREPARED_STATEMENT", "JDBC_TRANSACTION_COMMIT", "JDBC_TRANSACTION_ROLLBACK", "THREAD_SLEEP", "DNS_RESOLVE", "DNS_ANSWER", "DNS_REVERSE", "SSL_HANDSHAKE", "FILE_IO_READ", "FILE_IO_WRITE", "FILE_IO_SYNC", "FILE_IO_TRUNCATE", "FILE_IO_DELETE", "FILE_IO_MOVE", "FILE_IO_OPEN", "FILE_IO_MAP", "FILE_IO_CLOSE", "FILE_IO_MOVE_TARGET", "MESSAGE_SEND", "MESSAGE_RECEIVE", "RPC_CALL", "REDIS_COMMAND", "R2DBC_STATEMENT_EXECUTE", "AWS_SDK_CALL", "NETTY_CHANNEL_WRITE", "NETTY_CHANNEL_READ", "PROCESS_START", "PROCESS_WAIT", "LIFECYCLE" ]
+          }
+        }
+      },
+      "required" : [ "type" ],
+      "additionalProperties" : false
+    },
+    "QueueSelector" : {
+      "type" : "object",
+      "properties" : {
+        "type" : {
+          "const" : "queue"
+        },
+        "operations" : {
+          "type" : "array",
+          "uniqueItems" : true,
+          "items" : {
+            "type" : "string",
+            "enum" : [ "THREAD_START", "VIRTUAL_THREAD_START", "EXECUTOR_SUBMIT", "EXECUTOR_WORKER_RUN", "EXECUTOR_SHUTDOWN", "EXECUTOR_AWAIT_TERMINATION", "FORK_JOIN_TASK_RUN", "SCHEDULE_SUBMIT", "SCHEDULE_TICK", "QUEUE_PUT", "QUEUE_OFFER", "QUEUE_TAKE", "QUEUE_POLL", "ASYNC_COMPLETE", "ASYNC_COMPLETE_EXCEPTIONALLY", "SHUTDOWN_HOOK_REGISTER", "CLASS_LOAD", "CLASS_DEFINE", "RESOURCE_LOAD", "METHOD_ENTER", "METHOD_EXIT", "MONITOR_ENTER", "THREAD_PARK", "SYSTEM_CLOCK_MILLIS", "SYSTEM_CLOCK_NANOS", "INSTANT_NOW", "CLOCK_READ", "LOCAL_DATE_TIME_NOW", "ZONED_DATE_TIME_NOW", "DATE_NEW", "SYSTEM_GC_REQUEST", "SYSTEM_EXIT_REQUEST", "REFLECTION_INVOKE", "DIRECT_BUFFER_ALLOCATE", "OBJECT_DESERIALIZE", "NIO_SELECTOR_SELECT", "NIO_CHANNEL_READ", "NIO_CHANNEL_WRITE", "NIO_CHANNEL_CONNECT", "NIO_CHANNEL_ACCEPT", "SOCKET_CONNECT", "SOCKET_ACCEPT", "SOCKET_READ", "SOCKET_WRITE", "SOCKET_CLOSE", "SOCKET_BIND", "SOCKET_SHUTDOWN", "DATAGRAM_SEND", "DATAGRAM_RECEIVE", "OBJECT_SERIALIZE", "NATIVE_LIBRARY_LOAD", "JNDI_LOOKUP", "JMX_INVOKE", "JMX_GET_ATTR", "ZIP_INFLATE", "ZIP_DEFLATE", "ASYNC_CANCEL", "THREAD_LOCAL_GET", "THREAD_LOCAL_SET", "HTTP_CLIENT_SEND", "HTTP_CLIENT_SEND_ASYNC", "JDBC_CONNECTION_ACQUIRE", "JDBC_STATEMENT_EXECUTE", "JDBC_PREPARED_STATEMENT", "JDBC_TRANSACTION_COMMIT", "JDBC_TRANSACTION_ROLLBACK", "THREAD_SLEEP", "DNS_RESOLVE", "DNS_ANSWER", "DNS_REVERSE", "SSL_HANDSHAKE", "FILE_IO_READ", "FILE_IO_WRITE", "FILE_IO_SYNC", "FILE_IO_TRUNCATE", "FILE_IO_DELETE", "FILE_IO_MOVE", "FILE_IO_OPEN", "FILE_IO_MAP", "FILE_IO_CLOSE", "FILE_IO_MOVE_TARGET", "MESSAGE_SEND", "MESSAGE_RECEIVE", "RPC_CALL", "REDIS_COMMAND", "R2DBC_STATEMENT_EXECUTE", "AWS_SDK_CALL", "NETTY_CHANNEL_WRITE", "NETTY_CHANNEL_READ", "PROCESS_START", "PROCESS_WAIT", "LIFECYCLE" ]
+          }
+        },
+        "queueClassPattern" : {
+          "$ref" : "#/$defs/NamePattern"
+        }
+      },
+      "required" : [ "type" ],
+      "additionalProperties" : false
+    },
+    "RateLimit" : {
+      "type" : "object",
+      "properties" : {
+        "permits" : {
+          "type" : "integer"
+        },
+        "window" : {
+          "type" : "string",
+          "format" : "duration"
+        }
+      },
+      "additionalProperties" : false
+    },
+    "RedirectEffect" : {
+      "type" : "object",
+      "properties" : {
+        "type" : {
+          "const" : "redirect"
+        },
+        "host" : {
+          "type" : "string"
+        },
+        "port" : {
+          "type" : "integer"
+        }
+      },
+      "required" : [ "type" ],
+      "additionalProperties" : false
+    },
+    "RedisSelector" : {
+      "type" : "object",
+      "properties" : {
+        "type" : {
+          "const" : "redis"
+        },
+        "commandPattern" : {
+          "$ref" : "#/$defs/NamePattern"
+        },
+        "operations" : {
+          "type" : "array",
+          "uniqueItems" : true,
+          "items" : {
+            "type" : "string",
+            "enum" : [ "THREAD_START", "VIRTUAL_THREAD_START", "EXECUTOR_SUBMIT", "EXECUTOR_WORKER_RUN", "EXECUTOR_SHUTDOWN", "EXECUTOR_AWAIT_TERMINATION", "FORK_JOIN_TASK_RUN", "SCHEDULE_SUBMIT", "SCHEDULE_TICK", "QUEUE_PUT", "QUEUE_OFFER", "QUEUE_TAKE", "QUEUE_POLL", "ASYNC_COMPLETE", "ASYNC_COMPLETE_EXCEPTIONALLY", "SHUTDOWN_HOOK_REGISTER", "CLASS_LOAD", "CLASS_DEFINE", "RESOURCE_LOAD", "METHOD_ENTER", "METHOD_EXIT", "MONITOR_ENTER", "THREAD_PARK", "SYSTEM_CLOCK_MILLIS", "SYSTEM_CLOCK_NANOS", "INSTANT_NOW", "CLOCK_READ", "LOCAL_DATE_TIME_NOW", "ZONED_DATE_TIME_NOW", "DATE_NEW", "SYSTEM_GC_REQUEST", "SYSTEM_EXIT_REQUEST", "REFLECTION_INVOKE", "DIRECT_BUFFER_ALLOCATE", "OBJECT_DESERIALIZE", "NIO_SELECTOR_SELECT", "NIO_CHANNEL_READ", "NIO_CHANNEL_WRITE", "NIO_CHANNEL_CONNECT", "NIO_CHANNEL_ACCEPT", "SOCKET_CONNECT", "SOCKET_ACCEPT", "SOCKET_READ", "SOCKET_WRITE", "SOCKET_CLOSE", "SOCKET_BIND", "SOCKET_SHUTDOWN", "DATAGRAM_SEND", "DATAGRAM_RECEIVE", "OBJECT_SERIALIZE", "NATIVE_LIBRARY_LOAD", "JNDI_LOOKUP", "JMX_INVOKE", "JMX_GET_ATTR", "ZIP_INFLATE", "ZIP_DEFLATE", "ASYNC_CANCEL", "THREAD_LOCAL_GET", "THREAD_LOCAL_SET", "HTTP_CLIENT_SEND", "HTTP_CLIENT_SEND_ASYNC", "JDBC_CONNECTION_ACQUIRE", "JDBC_STATEMENT_EXECUTE", "JDBC_PREPARED_STATEMENT", "JDBC_TRANSACTION_COMMIT", "JDBC_TRANSACTION_ROLLBACK", "THREAD_SLEEP", "DNS_RESOLVE", "DNS_ANSWER", "DNS_REVERSE", "SSL_HANDSHAKE", "FILE_IO_READ", "FILE_IO_WRITE", "FILE_IO_SYNC", "FILE_IO_TRUNCATE", "FILE_IO_DELETE", "FILE_IO_MOVE", "FILE_IO_OPEN", "FILE_IO_MAP", "FILE_IO_CLOSE", "FILE_IO_MOVE_TARGET", "MESSAGE_SEND", "MESSAGE_RECEIVE", "RPC_CALL", "REDIS_COMMAND", "R2DBC_STATEMENT_EXECUTE", "AWS_SDK_CALL", "NETTY_CHANNEL_WRITE", "NETTY_CHANNEL_READ", "PROCESS_START", "PROCESS_WAIT", "LIFECYCLE" ]
+          }
+        }
+      },
+      "required" : [ "type" ],
+      "additionalProperties" : false
+    },
+    "ReferenceQueueFloodEffect" : {
+      "type" : "object",
+      "properties" : {
+        "type" : {
+          "const" : "referenceQueueFlood"
+        },
+        "floodInterval" : {
+          "type" : "string",
+          "format" : "duration"
+        },
+        "referenceCount" : {
+          "type" : "integer"
+        }
+      },
+      "required" : [ "type" ],
+      "additionalProperties" : false
+    },
+    "RejectEffect" : {
+      "type" : "object",
+      "properties" : {
+        "type" : {
+          "const" : "reject"
+        },
+        "message" : {
+          "type" : "string"
+        }
+      },
+      "required" : [ "type" ],
+      "additionalProperties" : false
+    },
+    "ReturnValueCorruptionEffect" : {
+      "type" : "object",
+      "properties" : {
+        "type" : {
+          "const" : "returnValueCorruption"
+        },
+        "strategy" : {
+          "type" : "string",
+          "enum" : [ "NULL", "ZERO", "EMPTY", "BOUNDARY_MAX", "BOUNDARY_MIN" ]
+        }
+      },
+      "required" : [ "type" ],
+      "additionalProperties" : false
+    },
+    "RpcSelector" : {
+      "type" : "object",
+      "properties" : {
+        "type" : {
+          "const" : "rpc"
+        },
+        "methodPattern" : {
+          "$ref" : "#/$defs/NamePattern"
+        },
+        "operations" : {
+          "type" : "array",
+          "uniqueItems" : true,
+          "items" : {
+            "type" : "string",
+            "enum" : [ "THREAD_START", "VIRTUAL_THREAD_START", "EXECUTOR_SUBMIT", "EXECUTOR_WORKER_RUN", "EXECUTOR_SHUTDOWN", "EXECUTOR_AWAIT_TERMINATION", "FORK_JOIN_TASK_RUN", "SCHEDULE_SUBMIT", "SCHEDULE_TICK", "QUEUE_PUT", "QUEUE_OFFER", "QUEUE_TAKE", "QUEUE_POLL", "ASYNC_COMPLETE", "ASYNC_COMPLETE_EXCEPTIONALLY", "SHUTDOWN_HOOK_REGISTER", "CLASS_LOAD", "CLASS_DEFINE", "RESOURCE_LOAD", "METHOD_ENTER", "METHOD_EXIT", "MONITOR_ENTER", "THREAD_PARK", "SYSTEM_CLOCK_MILLIS", "SYSTEM_CLOCK_NANOS", "INSTANT_NOW", "CLOCK_READ", "LOCAL_DATE_TIME_NOW", "ZONED_DATE_TIME_NOW", "DATE_NEW", "SYSTEM_GC_REQUEST", "SYSTEM_EXIT_REQUEST", "REFLECTION_INVOKE", "DIRECT_BUFFER_ALLOCATE", "OBJECT_DESERIALIZE", "NIO_SELECTOR_SELECT", "NIO_CHANNEL_READ", "NIO_CHANNEL_WRITE", "NIO_CHANNEL_CONNECT", "NIO_CHANNEL_ACCEPT", "SOCKET_CONNECT", "SOCKET_ACCEPT", "SOCKET_READ", "SOCKET_WRITE", "SOCKET_CLOSE", "SOCKET_BIND", "SOCKET_SHUTDOWN", "DATAGRAM_SEND", "DATAGRAM_RECEIVE", "OBJECT_SERIALIZE", "NATIVE_LIBRARY_LOAD", "JNDI_LOOKUP", "JMX_INVOKE", "JMX_GET_ATTR", "ZIP_INFLATE", "ZIP_DEFLATE", "ASYNC_CANCEL", "THREAD_LOCAL_GET", "THREAD_LOCAL_SET", "HTTP_CLIENT_SEND", "HTTP_CLIENT_SEND_ASYNC", "JDBC_CONNECTION_ACQUIRE", "JDBC_STATEMENT_EXECUTE", "JDBC_PREPARED_STATEMENT", "JDBC_TRANSACTION_COMMIT", "JDBC_TRANSACTION_ROLLBACK", "THREAD_SLEEP", "DNS_RESOLVE", "DNS_ANSWER", "DNS_REVERSE", "SSL_HANDSHAKE", "FILE_IO_READ", "FILE_IO_WRITE", "FILE_IO_SYNC", "FILE_IO_TRUNCATE", "FILE_IO_DELETE", "FILE_IO_MOVE", "FILE_IO_OPEN", "FILE_IO_MAP", "FILE_IO_CLOSE", "FILE_IO_MOVE_TARGET", "MESSAGE_SEND", "MESSAGE_RECEIVE", "RPC_CALL", "REDIS_COMMAND", "R2DBC_STATEMENT_EXECUTE", "AWS_SDK_CALL", "NETTY_CHANNEL_WRITE", "NETTY_CHANNEL_READ", "PROCESS_START", "PROCESS_WAIT", "LIFECYCLE" ]
+          }
+        }
+      },
+      "required" : [ "type" ],
+      "additionalProperties" : false
+    },
+    "SafepointStormEffect" : {
+      "type" : "object",
+      "properties" : {
+        "type" : {
+          "const" : "safepointStorm"
+        },
+        "gcInterval" : {
+          "type" : "string",
+          "format" : "duration"
+        },
+        "retransformClassCount" : {
+          "type" : "integer"
+        }
+      },
+      "required" : [ "type" ],
+      "additionalProperties" : false
+    },
+    "SchedulingSelector" : {
+      "type" : "object",
+      "properties" : {
+        "type" : {
+          "const" : "scheduling"
+        },
+        "executorClassPattern" : {
+          "$ref" : "#/$defs/NamePattern"
+        },
+        "operations" : {
+          "type" : "array",
+          "uniqueItems" : true,
+          "items" : {
+            "type" : "string",
+            "enum" : [ "THREAD_START", "VIRTUAL_THREAD_START", "EXECUTOR_SUBMIT", "EXECUTOR_WORKER_RUN", "EXECUTOR_SHUTDOWN", "EXECUTOR_AWAIT_TERMINATION", "FORK_JOIN_TASK_RUN", "SCHEDULE_SUBMIT", "SCHEDULE_TICK", "QUEUE_PUT", "QUEUE_OFFER", "QUEUE_TAKE", "QUEUE_POLL", "ASYNC_COMPLETE", "ASYNC_COMPLETE_EXCEPTIONALLY", "SHUTDOWN_HOOK_REGISTER", "CLASS_LOAD", "CLASS_DEFINE", "RESOURCE_LOAD", "METHOD_ENTER", "METHOD_EXIT", "MONITOR_ENTER", "THREAD_PARK", "SYSTEM_CLOCK_MILLIS", "SYSTEM_CLOCK_NANOS", "INSTANT_NOW", "CLOCK_READ", "LOCAL_DATE_TIME_NOW", "ZONED_DATE_TIME_NOW", "DATE_NEW", "SYSTEM_GC_REQUEST", "SYSTEM_EXIT_REQUEST", "REFLECTION_INVOKE", "DIRECT_BUFFER_ALLOCATE", "OBJECT_DESERIALIZE", "NIO_SELECTOR_SELECT", "NIO_CHANNEL_READ", "NIO_CHANNEL_WRITE", "NIO_CHANNEL_CONNECT", "NIO_CHANNEL_ACCEPT", "SOCKET_CONNECT", "SOCKET_ACCEPT", "SOCKET_READ", "SOCKET_WRITE", "SOCKET_CLOSE", "SOCKET_BIND", "SOCKET_SHUTDOWN", "DATAGRAM_SEND", "DATAGRAM_RECEIVE", "OBJECT_SERIALIZE", "NATIVE_LIBRARY_LOAD", "JNDI_LOOKUP", "JMX_INVOKE", "JMX_GET_ATTR", "ZIP_INFLATE", "ZIP_DEFLATE", "ASYNC_CANCEL", "THREAD_LOCAL_GET", "THREAD_LOCAL_SET", "HTTP_CLIENT_SEND", "HTTP_CLIENT_SEND_ASYNC", "JDBC_CONNECTION_ACQUIRE", "JDBC_STATEMENT_EXECUTE", "JDBC_PREPARED_STATEMENT", "JDBC_TRANSACTION_COMMIT", "JDBC_TRANSACTION_ROLLBACK", "THREAD_SLEEP", "DNS_RESOLVE", "DNS_ANSWER", "DNS_REVERSE", "SSL_HANDSHAKE", "FILE_IO_READ", "FILE_IO_WRITE", "FILE_IO_SYNC", "FILE_IO_TRUNCATE", "FILE_IO_DELETE", "FILE_IO_MOVE", "FILE_IO_OPEN", "FILE_IO_MAP", "FILE_IO_CLOSE", "FILE_IO_MOVE_TARGET", "MESSAGE_SEND", "MESSAGE_RECEIVE", "RPC_CALL", "REDIS_COMMAND", "R2DBC_STATEMENT_EXECUTE", "AWS_SDK_CALL", "NETTY_CHANNEL_WRITE", "NETTY_CHANNEL_READ", "PROCESS_START", "PROCESS_WAIT", "LIFECYCLE" ]
+          }
+        },
+        "periodicOnly" : {
+          "type" : "boolean"
+        }
+      },
+      "required" : [ "type" ],
+      "additionalProperties" : false
+    },
+    "ShutdownSelector" : {
+      "type" : "object",
+      "properties" : {
+        "type" : {
+          "const" : "shutdown"
+        },
+        "operations" : {
+          "type" : "array",
+          "uniqueItems" : true,
+          "items" : {
+            "type" : "string",
+            "enum" : [ "THREAD_START", "VIRTUAL_THREAD_START", "EXECUTOR_SUBMIT", "EXECUTOR_WORKER_RUN", "EXECUTOR_SHUTDOWN", "EXECUTOR_AWAIT_TERMINATION", "FORK_JOIN_TASK_RUN", "SCHEDULE_SUBMIT", "SCHEDULE_TICK", "QUEUE_PUT", "QUEUE_OFFER", "QUEUE_TAKE", "QUEUE_POLL", "ASYNC_COMPLETE", "ASYNC_COMPLETE_EXCEPTIONALLY", "SHUTDOWN_HOOK_REGISTER", "CLASS_LOAD", "CLASS_DEFINE", "RESOURCE_LOAD", "METHOD_ENTER", "METHOD_EXIT", "MONITOR_ENTER", "THREAD_PARK", "SYSTEM_CLOCK_MILLIS", "SYSTEM_CLOCK_NANOS", "INSTANT_NOW", "CLOCK_READ", "LOCAL_DATE_TIME_NOW", "ZONED_DATE_TIME_NOW", "DATE_NEW", "SYSTEM_GC_REQUEST", "SYSTEM_EXIT_REQUEST", "REFLECTION_INVOKE", "DIRECT_BUFFER_ALLOCATE", "OBJECT_DESERIALIZE", "NIO_SELECTOR_SELECT", "NIO_CHANNEL_READ", "NIO_CHANNEL_WRITE", "NIO_CHANNEL_CONNECT", "NIO_CHANNEL_ACCEPT", "SOCKET_CONNECT", "SOCKET_ACCEPT", "SOCKET_READ", "SOCKET_WRITE", "SOCKET_CLOSE", "SOCKET_BIND", "SOCKET_SHUTDOWN", "DATAGRAM_SEND", "DATAGRAM_RECEIVE", "OBJECT_SERIALIZE", "NATIVE_LIBRARY_LOAD", "JNDI_LOOKUP", "JMX_INVOKE", "JMX_GET_ATTR", "ZIP_INFLATE", "ZIP_DEFLATE", "ASYNC_CANCEL", "THREAD_LOCAL_GET", "THREAD_LOCAL_SET", "HTTP_CLIENT_SEND", "HTTP_CLIENT_SEND_ASYNC", "JDBC_CONNECTION_ACQUIRE", "JDBC_STATEMENT_EXECUTE", "JDBC_PREPARED_STATEMENT", "JDBC_TRANSACTION_COMMIT", "JDBC_TRANSACTION_ROLLBACK", "THREAD_SLEEP", "DNS_RESOLVE", "DNS_ANSWER", "DNS_REVERSE", "SSL_HANDSHAKE", "FILE_IO_READ", "FILE_IO_WRITE", "FILE_IO_SYNC", "FILE_IO_TRUNCATE", "FILE_IO_DELETE", "FILE_IO_MOVE", "FILE_IO_OPEN", "FILE_IO_MAP", "FILE_IO_CLOSE", "FILE_IO_MOVE_TARGET", "MESSAGE_SEND", "MESSAGE_RECEIVE", "RPC_CALL", "REDIS_COMMAND", "R2DBC_STATEMENT_EXECUTE", "AWS_SDK_CALL", "NETTY_CHANNEL_WRITE", "NETTY_CHANNEL_READ", "PROCESS_START", "PROCESS_WAIT", "LIFECYCLE" ]
+          }
+        },
+        "targetClassPattern" : {
+          "$ref" : "#/$defs/NamePattern"
+        }
+      },
+      "required" : [ "type" ],
+      "additionalProperties" : false
+    },
+    "SpuriousWakeupEffect" : {
+      "type" : "object",
+      "properties" : {
+        "type" : {
+          "const" : "spuriousWakeup"
+        }
+      },
+      "required" : [ "type" ],
+      "additionalProperties" : false
+    },
+    "SslSelector" : {
+      "type" : "object",
+      "properties" : {
+        "type" : {
+          "const" : "ssl"
+        },
+        "operations" : {
+          "type" : "array",
+          "uniqueItems" : true,
+          "items" : {
+            "type" : "string",
+            "enum" : [ "THREAD_START", "VIRTUAL_THREAD_START", "EXECUTOR_SUBMIT", "EXECUTOR_WORKER_RUN", "EXECUTOR_SHUTDOWN", "EXECUTOR_AWAIT_TERMINATION", "FORK_JOIN_TASK_RUN", "SCHEDULE_SUBMIT", "SCHEDULE_TICK", "QUEUE_PUT", "QUEUE_OFFER", "QUEUE_TAKE", "QUEUE_POLL", "ASYNC_COMPLETE", "ASYNC_COMPLETE_EXCEPTIONALLY", "SHUTDOWN_HOOK_REGISTER", "CLASS_LOAD", "CLASS_DEFINE", "RESOURCE_LOAD", "METHOD_ENTER", "METHOD_EXIT", "MONITOR_ENTER", "THREAD_PARK", "SYSTEM_CLOCK_MILLIS", "SYSTEM_CLOCK_NANOS", "INSTANT_NOW", "CLOCK_READ", "LOCAL_DATE_TIME_NOW", "ZONED_DATE_TIME_NOW", "DATE_NEW", "SYSTEM_GC_REQUEST", "SYSTEM_EXIT_REQUEST", "REFLECTION_INVOKE", "DIRECT_BUFFER_ALLOCATE", "OBJECT_DESERIALIZE", "NIO_SELECTOR_SELECT", "NIO_CHANNEL_READ", "NIO_CHANNEL_WRITE", "NIO_CHANNEL_CONNECT", "NIO_CHANNEL_ACCEPT", "SOCKET_CONNECT", "SOCKET_ACCEPT", "SOCKET_READ", "SOCKET_WRITE", "SOCKET_CLOSE", "SOCKET_BIND", "SOCKET_SHUTDOWN", "DATAGRAM_SEND", "DATAGRAM_RECEIVE", "OBJECT_SERIALIZE", "NATIVE_LIBRARY_LOAD", "JNDI_LOOKUP", "JMX_INVOKE", "JMX_GET_ATTR", "ZIP_INFLATE", "ZIP_DEFLATE", "ASYNC_CANCEL", "THREAD_LOCAL_GET", "THREAD_LOCAL_SET", "HTTP_CLIENT_SEND", "HTTP_CLIENT_SEND_ASYNC", "JDBC_CONNECTION_ACQUIRE", "JDBC_STATEMENT_EXECUTE", "JDBC_PREPARED_STATEMENT", "JDBC_TRANSACTION_COMMIT", "JDBC_TRANSACTION_ROLLBACK", "THREAD_SLEEP", "DNS_RESOLVE", "DNS_ANSWER", "DNS_REVERSE", "SSL_HANDSHAKE", "FILE_IO_READ", "FILE_IO_WRITE", "FILE_IO_SYNC", "FILE_IO_TRUNCATE", "FILE_IO_DELETE", "FILE_IO_MOVE", "FILE_IO_OPEN", "FILE_IO_MAP", "FILE_IO_CLOSE", "FILE_IO_MOVE_TARGET", "MESSAGE_SEND", "MESSAGE_RECEIVE", "RPC_CALL", "REDIS_COMMAND", "R2DBC_STATEMENT_EXECUTE", "AWS_SDK_CALL", "NETTY_CHANNEL_WRITE", "NETTY_CHANNEL_READ", "PROCESS_START", "PROCESS_WAIT", "LIFECYCLE" ]
+          }
+        }
+      },
+      "required" : [ "type" ],
+      "additionalProperties" : false
+    },
+    "StressSelector" : {
+      "type" : "object",
+      "properties" : {
+        "type" : {
+          "const" : "stress"
+        },
+        "target" : {
+          "type" : "string",
+          "enum" : [ "HEAP", "METASPACE", "DIRECT_BUFFER", "GC_PRESSURE", "FINALIZER_BACKLOG", "KEEPALIVE", "THREAD_LEAK", "THREAD_LOCAL_LEAK", "DEADLOCK", "MONITOR_CONTENTION", "VIRTUAL_THREAD_CARRIER_PINNING", "CODE_CACHE_PRESSURE", "SAFEPOINT_STORM", "STRING_INTERN_PRESSURE", "REFERENCE_QUEUE_FLOOD" ]
+        }
+      },
+      "required" : [ "type" ],
+      "additionalProperties" : false
+    },
+    "StringInternPressureEffect" : {
+      "type" : "object",
+      "properties" : {
+        "type" : {
+          "const" : "stringInternPressure"
+        },
+        "internCount" : {
+          "type" : "integer"
+        },
+        "stringLengthBytes" : {
+          "type" : "integer"
+        }
+      },
+      "required" : [ "type" ],
+      "additionalProperties" : false
+    },
+    "SuppressEffect" : {
+      "type" : "object",
+      "properties" : {
+        "type" : {
+          "const" : "suppress"
+        }
+      },
+      "required" : [ "type" ],
+      "additionalProperties" : false
+    },
+    "ThreadLeakEffect" : {
+      "type" : "object",
+      "properties" : {
+        "type" : {
+          "const" : "threadLeak"
+        },
+        "daemon" : {
+          "type" : "boolean"
+        },
+        "lifespan" : {
+          "type" : "string",
+          "format" : "duration"
+        },
+        "namePrefix" : {
+          "type" : "string"
+        },
+        "threadCount" : {
+          "type" : "integer"
+        }
+      },
+      "required" : [ "type" ],
+      "additionalProperties" : false
+    },
+    "ThreadLocalLeakEffect" : {
+      "type" : "object",
+      "properties" : {
+        "type" : {
+          "const" : "threadLocalLeak"
+        },
+        "entriesPerThread" : {
+          "type" : "integer"
+        },
+        "valueSizeBytes" : {
+          "type" : "integer"
+        }
+      },
+      "required" : [ "type" ],
+      "additionalProperties" : false
+    },
+    "ThreadLocalSelector" : {
+      "type" : "object",
+      "properties" : {
+        "type" : {
+          "const" : "threadLocal"
+        },
+        "operations" : {
+          "type" : "array",
+          "uniqueItems" : true,
+          "items" : {
+            "type" : "string",
+            "enum" : [ "THREAD_START", "VIRTUAL_THREAD_START", "EXECUTOR_SUBMIT", "EXECUTOR_WORKER_RUN", "EXECUTOR_SHUTDOWN", "EXECUTOR_AWAIT_TERMINATION", "FORK_JOIN_TASK_RUN", "SCHEDULE_SUBMIT", "SCHEDULE_TICK", "QUEUE_PUT", "QUEUE_OFFER", "QUEUE_TAKE", "QUEUE_POLL", "ASYNC_COMPLETE", "ASYNC_COMPLETE_EXCEPTIONALLY", "SHUTDOWN_HOOK_REGISTER", "CLASS_LOAD", "CLASS_DEFINE", "RESOURCE_LOAD", "METHOD_ENTER", "METHOD_EXIT", "MONITOR_ENTER", "THREAD_PARK", "SYSTEM_CLOCK_MILLIS", "SYSTEM_CLOCK_NANOS", "INSTANT_NOW", "CLOCK_READ", "LOCAL_DATE_TIME_NOW", "ZONED_DATE_TIME_NOW", "DATE_NEW", "SYSTEM_GC_REQUEST", "SYSTEM_EXIT_REQUEST", "REFLECTION_INVOKE", "DIRECT_BUFFER_ALLOCATE", "OBJECT_DESERIALIZE", "NIO_SELECTOR_SELECT", "NIO_CHANNEL_READ", "NIO_CHANNEL_WRITE", "NIO_CHANNEL_CONNECT", "NIO_CHANNEL_ACCEPT", "SOCKET_CONNECT", "SOCKET_ACCEPT", "SOCKET_READ", "SOCKET_WRITE", "SOCKET_CLOSE", "SOCKET_BIND", "SOCKET_SHUTDOWN", "DATAGRAM_SEND", "DATAGRAM_RECEIVE", "OBJECT_SERIALIZE", "NATIVE_LIBRARY_LOAD", "JNDI_LOOKUP", "JMX_INVOKE", "JMX_GET_ATTR", "ZIP_INFLATE", "ZIP_DEFLATE", "ASYNC_CANCEL", "THREAD_LOCAL_GET", "THREAD_LOCAL_SET", "HTTP_CLIENT_SEND", "HTTP_CLIENT_SEND_ASYNC", "JDBC_CONNECTION_ACQUIRE", "JDBC_STATEMENT_EXECUTE", "JDBC_PREPARED_STATEMENT", "JDBC_TRANSACTION_COMMIT", "JDBC_TRANSACTION_ROLLBACK", "THREAD_SLEEP", "DNS_RESOLVE", "DNS_ANSWER", "DNS_REVERSE", "SSL_HANDSHAKE", "FILE_IO_READ", "FILE_IO_WRITE", "FILE_IO_SYNC", "FILE_IO_TRUNCATE", "FILE_IO_DELETE", "FILE_IO_MOVE", "FILE_IO_OPEN", "FILE_IO_MAP", "FILE_IO_CLOSE", "FILE_IO_MOVE_TARGET", "MESSAGE_SEND", "MESSAGE_RECEIVE", "RPC_CALL", "REDIS_COMMAND", "R2DBC_STATEMENT_EXECUTE", "AWS_SDK_CALL", "NETTY_CHANNEL_WRITE", "NETTY_CHANNEL_READ", "PROCESS_START", "PROCESS_WAIT", "LIFECYCLE" ]
+          }
+        },
+        "threadLocalClassPattern" : {
+          "$ref" : "#/$defs/NamePattern"
+        }
+      },
+      "required" : [ "type" ],
+      "additionalProperties" : false
+    },
+    "ThreadSelector" : {
+      "type" : "object",
+      "properties" : {
+        "type" : {
+          "const" : "thread"
+        },
+        "daemon" : {
+          "type" : "boolean"
+        },
+        "kind" : {
+          "type" : "string",
+          "enum" : [ "ANY", "PLATFORM", "VIRTUAL" ]
+        },
+        "operations" : {
+          "type" : "array",
+          "uniqueItems" : true,
+          "items" : {
+            "type" : "string",
+            "enum" : [ "THREAD_START", "VIRTUAL_THREAD_START", "EXECUTOR_SUBMIT", "EXECUTOR_WORKER_RUN", "EXECUTOR_SHUTDOWN", "EXECUTOR_AWAIT_TERMINATION", "FORK_JOIN_TASK_RUN", "SCHEDULE_SUBMIT", "SCHEDULE_TICK", "QUEUE_PUT", "QUEUE_OFFER", "QUEUE_TAKE", "QUEUE_POLL", "ASYNC_COMPLETE", "ASYNC_COMPLETE_EXCEPTIONALLY", "SHUTDOWN_HOOK_REGISTER", "CLASS_LOAD", "CLASS_DEFINE", "RESOURCE_LOAD", "METHOD_ENTER", "METHOD_EXIT", "MONITOR_ENTER", "THREAD_PARK", "SYSTEM_CLOCK_MILLIS", "SYSTEM_CLOCK_NANOS", "INSTANT_NOW", "CLOCK_READ", "LOCAL_DATE_TIME_NOW", "ZONED_DATE_TIME_NOW", "DATE_NEW", "SYSTEM_GC_REQUEST", "SYSTEM_EXIT_REQUEST", "REFLECTION_INVOKE", "DIRECT_BUFFER_ALLOCATE", "OBJECT_DESERIALIZE", "NIO_SELECTOR_SELECT", "NIO_CHANNEL_READ", "NIO_CHANNEL_WRITE", "NIO_CHANNEL_CONNECT", "NIO_CHANNEL_ACCEPT", "SOCKET_CONNECT", "SOCKET_ACCEPT", "SOCKET_READ", "SOCKET_WRITE", "SOCKET_CLOSE", "SOCKET_BIND", "SOCKET_SHUTDOWN", "DATAGRAM_SEND", "DATAGRAM_RECEIVE", "OBJECT_SERIALIZE", "NATIVE_LIBRARY_LOAD", "JNDI_LOOKUP", "JMX_INVOKE", "JMX_GET_ATTR", "ZIP_INFLATE", "ZIP_DEFLATE", "ASYNC_CANCEL", "THREAD_LOCAL_GET", "THREAD_LOCAL_SET", "HTTP_CLIENT_SEND", "HTTP_CLIENT_SEND_ASYNC", "JDBC_CONNECTION_ACQUIRE", "JDBC_STATEMENT_EXECUTE", "JDBC_PREPARED_STATEMENT", "JDBC_TRANSACTION_COMMIT", "JDBC_TRANSACTION_ROLLBACK", "THREAD_SLEEP", "DNS_RESOLVE", "DNS_ANSWER", "DNS_REVERSE", "SSL_HANDSHAKE", "FILE_IO_READ", "FILE_IO_WRITE", "FILE_IO_SYNC", "FILE_IO_TRUNCATE", "FILE_IO_DELETE", "FILE_IO_MOVE", "FILE_IO_OPEN", "FILE_IO_MAP", "FILE_IO_CLOSE", "FILE_IO_MOVE_TARGET", "MESSAGE_SEND", "MESSAGE_RECEIVE", "RPC_CALL", "REDIS_COMMAND", "R2DBC_STATEMENT_EXECUTE", "AWS_SDK_CALL", "NETTY_CHANNEL_WRITE", "NETTY_CHANNEL_READ", "PROCESS_START", "PROCESS_WAIT", "LIFECYCLE" ]
+          }
+        },
+        "threadNamePattern" : {
+          "$ref" : "#/$defs/NamePattern"
+        }
+      },
+      "required" : [ "type" ],
+      "additionalProperties" : false
+    },
+    "TimeoutEffect" : {
+      "type" : "object",
+      "properties" : {
+        "type" : {
+          "const" : "timeout"
+        }
+      },
+      "required" : [ "type" ],
+      "additionalProperties" : false
+    },
+    "TornWriteEffect" : {
+      "type" : "object",
+      "properties" : {
+        "type" : {
+          "const" : "tornWrite"
+        }
+      },
+      "required" : [ "type" ],
+      "additionalProperties" : false
+    },
+    "TrickleEffect" : {
+      "type" : "object",
+      "properties" : {
+        "type" : {
+          "const" : "trickle"
+        },
+        "maxBytes" : {
+          "type" : "integer"
+        }
+      },
+      "required" : [ "type" ],
+      "additionalProperties" : false
+    },
+    "VirtualThreadCarrierPinningEffect" : {
+      "type" : "object",
+      "properties" : {
+        "type" : {
+          "const" : "virtualThreadCarrierPinning"
+        },
+        "pinDuration" : {
+          "type" : "string",
+          "format" : "duration"
+        },
+        "pinnedThreadCount" : {
+          "type" : "integer"
+        }
+      },
+      "required" : [ "type" ],
+      "additionalProperties" : false
+    }
+  }
+}

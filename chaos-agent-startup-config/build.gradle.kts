@@ -14,3 +14,9 @@ tasks.jar {
         attributes["Automatic-Module-Name"] = "com.macstab.chaos.jvm.agent.startup"
     }
 }
+
+// ./gradlew :chaos-agent-startup-config:test -PupdatePlanSchema rewrites the published plan schema
+// from the plan mapper (PlanSchemaTest); without it the test fails when the schema is stale.
+tasks.test {
+    systemProperty("chaos.schema.update", providers.gradleProperty("updatePlanSchema").isPresent)
+}

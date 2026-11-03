@@ -56,6 +56,11 @@ public final class ChaosPlanMapper {
 
   private ChaosPlanMapper() {}
 
+  /** The configured mapper: the plan schema is derived from it ({@code PlanSchemaTest}). */
+  static ObjectMapper objectMapper() {
+    return OBJECT_MAPPER;
+  }
+
   private static ObjectMapper buildObjectMapper() {
     final JsonFactory factory =
         JsonFactory.builder()
