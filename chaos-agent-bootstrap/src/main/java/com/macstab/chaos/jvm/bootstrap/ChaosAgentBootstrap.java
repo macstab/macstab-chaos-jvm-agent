@@ -128,6 +128,18 @@ public final class ChaosAgentBootstrap {
   /** Environment variable equivalent of {@link #CLOCK_CALL_SITES_ARG}. */
   static final String CLOCK_CALL_SITES_ENV = "MACSTAB_CHAOS_CLOCK_CALL_SITES";
 
+  /**
+   * Agent arg adding host globs that receive the {@code X-Chaos-Session} header besides internal
+   * hosts, comma-separated; {@code *} for every host.
+   */
+  static final String SESSION_HEADER_HOSTS_ARG = "sessionHeaderHosts";
+
+  /** System property equivalent of {@link #SESSION_HEADER_HOSTS_ARG}. */
+  static final String SESSION_HEADER_HOSTS_PROPERTY = "macstab.chaos.sessionHeaderHosts";
+
+  /** Environment variable equivalent of {@link #SESSION_HEADER_HOSTS_ARG}. */
+  static final String SESSION_HEADER_HOSTS_ENV = "MACSTAB_CHAOS_SESSION_HEADER_HOSTS";
+
   private ChaosAgentBootstrap() {}
 
   /**
@@ -367,7 +379,13 @@ public final class ChaosAgentBootstrap {
           instrumentation,
           runtime,
           eagerInstrumentation(agentArgs, environment),
-          clockCallSites(agentArgs, environment));
+          clockCallSites(agentArgs, environment),
+          listSetting(
+              agentArgs,
+              environment,
+              SESSION_HEADER_HOSTS_ARG,
+              SESSION_HEADER_HOSTS_PROPERTY,
+              SESSION_HEADER_HOSTS_ENV));
       instrumentationInstalled = true;
       registeredMBean = registerMBean(runtime, jmxControl(agentArgs, environment));
       installJfrIntegration(runtime);
@@ -430,15 +448,29 @@ public final class ChaosAgentBootstrap {
    */
   static List<String> clockCallSites(
       final String agentArgs, final Map<String, String> environment) {
-    final String fromArgs = AgentArgsParser.parse(agentArgs).get(CLOCK_CALL_SITES_ARG);
+    return listSetting(
+        agentArgs,
+        environment,
+        CLOCK_CALL_SITES_ARG,
+        CLOCK_CALL_SITES_PROPERTY,
+        CLOCK_CALL_SITES_ENV);
+  }
+
+  /** A comma-separated list setting: agent argument, then system property, then environment. */
+  static List<String> listSetting(
+      final String agentArgs,
+      final Map<String, String> environment,
+      final String arg,
+      final String property,
+      final String env) {
+    final String fromArgs = AgentArgsParser.parse(agentArgs).get(arg);
     final String value =
         fromArgs != null
             ? fromArgs
-            : System.getProperty(
-                CLOCK_CALL_SITES_PROPERTY, environment.getOrDefault(CLOCK_CALL_SITES_ENV, ""));
+            : System.getProperty(property, environment.getOrDefault(env, ""));
     return java.util.Arrays.stream(value.split(","))
         .map(String::strip)
-        .filter(prefix -> !prefix.isEmpty())
+        .filter(entry -> !entry.isEmpty())
         .toList();
   }
 

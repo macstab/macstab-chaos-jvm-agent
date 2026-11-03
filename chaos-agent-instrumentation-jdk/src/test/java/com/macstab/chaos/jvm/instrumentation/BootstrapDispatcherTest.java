@@ -526,10 +526,16 @@ class BootstrapDispatcherTest {
   private static void installThreadStartBridge(final ThreadStartBehavior behavior)
       throws Exception {
     final MethodHandle[] handles = new MethodHandle[BootstrapDispatcher.HANDLE_COUNT];
+    // The dispatcher passes (thread, poolWorker); the behaviour only looks at the thread.
     handles[BootstrapDispatcher.BEFORE_THREAD_START] =
-        MethodHandles.lookup()
-            .findVirtual(
-                ThreadStartBehavior.class, "act", MethodType.methodType(void.class, Thread.class));
+        MethodHandles.dropArguments(
+            MethodHandles.lookup()
+                .findVirtual(
+                    ThreadStartBehavior.class,
+                    "act",
+                    MethodType.methodType(void.class, Thread.class)),
+            2,
+            boolean.class);
     BootstrapDispatcher.install(behavior, handles);
   }
 

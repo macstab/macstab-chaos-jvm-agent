@@ -65,6 +65,11 @@ final class SessionHandoff {
     }
     final String sessionId = captured.remove(carrier);
     if (sessionId == null) {
+      // Captures whose carrier never ran (a Thread subclass overriding run(), a cancelled task)
+      // are dropped by the weak map without decrementing; resync, so the fast path returns.
+      if (captured.isEmpty()) {
+        pending.set(0);
+      }
       return;
     }
     pending.decrementAndGet();
@@ -91,5 +96,14 @@ final class SessionHandoff {
     } catch (final RuntimeException closeFailure) {
       LOGGER.log(Level.FINE, "chaos session hand-off release failed", closeFailure);
     }
+  }
+
+  /**
+   * Returns how many captures are waiting for their carrier to run; for tests.
+   *
+   * @return the pending count
+   */
+  int pendingCount() {
+    return pending.get();
   }
 }

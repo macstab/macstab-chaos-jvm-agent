@@ -75,11 +75,12 @@ final class ChaosBridge implements BridgeDelegate {
    * Invoked immediately before {@link Thread#start()} is called on the given thread.
    *
    * @param thread the thread about to be started
+   * @param poolWorker whether a thread pool is starting one of its workers
    * @throws Throwable if the runtime decides to abort the start
    */
   @Override
-  public void beforeThreadStart(final Thread thread) throws Throwable {
-    runtime.beforeThreadStart(thread);
+  public void beforeThreadStart(final Thread thread, final boolean poolWorker) throws Throwable {
+    runtime.beforeThreadStart(thread, poolWorker);
   }
 
   /**

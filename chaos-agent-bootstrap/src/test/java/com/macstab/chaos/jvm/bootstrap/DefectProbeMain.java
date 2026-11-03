@@ -99,6 +99,7 @@ public final class DefectProbeMain {
       case "process-start" -> processStart();
       case "clock-call-sites" -> clockCallSites();
       case "session-header" -> sessionHeader();
+      case "pool-worker-session" -> poolWorkerSession();
       case "socket-torn-write" -> socketTornWrite();
       case "method-weaving" -> methodWeaving();
       case "woven-groups" -> printWovenGroups();
@@ -930,6 +931,63 @@ public final class DefectProbeMain {
       return new String(in.readAllBytes(), StandardCharsets.UTF_8).replace(sessionId, "session");
     } finally {
       connection.disconnect();
+    }
+  }
+
+  /**
+   * A pool whose worker is created by a submission from inside a session: the task submitted in the
+   * session runs in it, a later task submitted from outside any session must not.
+   */
+  private static void poolWorkerSession() throws Exception {
+    final com.example.chaostarget.Greeter greeter = new com.example.chaostarget.Greeter();
+    final java.util.concurrent.Callable<String> attempt =
+        () -> {
+          try {
+            greeter.greet("x");
+            return "ok";
+          } catch (final IllegalStateException injected) {
+            return "injected";
+          }
+        };
+    final ExecutorService pool = Executors.newSingleThreadExecutor();
+    try {
+      final java.util.concurrent.atomic.AtomicReference<String> later =
+          new java.util.concurrent.atomic.AtomicReference<>();
+      try (ChaosSession session = ChaosPlatform.current().openSession("pool")) {
+        session.activate(
+            ChaosScenario.builder("inject-in-pool-session")
+                .scope(ChaosScenario.ScenarioScope.SESSION)
+                .selector(
+                    new ChaosSelector.MethodSelector(
+                        Set.of(OperationType.METHOD_ENTER),
+                        NamePattern.exact("com.example.chaostarget.Greeter"),
+                        NamePattern.exact("greet"),
+                        null))
+                .effect(
+                    new ChaosEffect.ExceptionInjectionEffect(
+                        "java.lang.IllegalStateException", "injected", false))
+                .activationPolicy(ActivationPolicy.always())
+                .build());
+        System.out.println("inSession=" + pool.submit(attempt).get(5, TimeUnit.SECONDS));
+        // A thread outside the session submits to the same worker while the session is open.
+        final Thread outsider =
+            Thread.ofPlatform()
+                .unstarted(
+                    () -> {
+                      try {
+                        later.set(pool.submit(attempt).get(5, TimeUnit.SECONDS));
+                      } catch (final Exception failed) {
+                        later.set(failed.toString());
+                      }
+                    });
+        try (ChaosSession.ScopeBinding none = ChaosPlatform.current().bindSession(null)) {
+          outsider.start();
+        }
+        outsider.join();
+      }
+      System.out.println("outsideSession=" + later.get());
+    } finally {
+      pool.shutdownNow();
     }
   }
 

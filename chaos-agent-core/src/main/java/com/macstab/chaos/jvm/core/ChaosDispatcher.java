@@ -246,9 +246,11 @@ public final class ChaosDispatcher {
    * Called before {@link Thread#start()} to apply any active chaos scenario matching the thread.
    *
    * @param thread the thread about to be started; may be {@code null}
+   * @param poolWorker whether a thread pool is starting one of its workers: such a thread serves
+   *     many tasks, each carrying its submitter's session, so it does not inherit the starter's
    * @throws Throwable if a matching scenario's terminal action mandates it
    */
-  public void beforeThreadStart(final Thread thread) throws Throwable {
+  public void beforeThreadStart(final Thread thread, final boolean poolWorker) throws Throwable {
     final OperationType operation =
         featureSet.isVirtualThread(thread)
             ? OperationType.VIRTUAL_THREAD_START
@@ -267,8 +269,12 @@ public final class ChaosDispatcher {
                   thread == null ? null : featureSet.isVirtualThread(thread),
                   sessionId)));
     }
-    // The started thread runs in the starting thread's session (see enterSession).
-    sessionHandoff.capture(thread, sessionId);
+    // The started thread runs in the starting thread's session (see enterSession), unless it is
+    // a pool worker: a worker grown by a submission inside a session served every later task in
+    // that session, leaking it to other tests and to requests without a session.
+    if (!poolWorker) {
+      sessionHandoff.capture(thread, sessionId);
+    }
   }
 
   /**

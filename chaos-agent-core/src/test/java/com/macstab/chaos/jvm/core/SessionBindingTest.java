@@ -51,4 +51,22 @@ class SessionBindingTest {
       assertThat(runtime.currentSessionId()).isEqualTo(inherited.id());
     }
   }
+
+  @Test
+  @DisplayName("hand-off captures that never run do not leave the fast path disabled")
+  void handoffCounterResyncs() throws Exception {
+    final SessionHandoff handoff = new SessionHandoff();
+    final ScopeContext scopes = new ScopeContext();
+    Object carrier = new Object();
+    handoff.capture(carrier, "s1");
+    carrier = null;
+    final java.lang.ref.WeakReference<Object> probe =
+        new java.lang.ref.WeakReference<>(new Object());
+    for (int i = 0; i < 50 && probe.get() != null; i++) {
+      System.gc();
+      Thread.sleep(10L);
+    }
+    handoff.enter(new Object(), scopes);
+    assertThat(handoff.pendingCount()).isZero();
+  }
 }

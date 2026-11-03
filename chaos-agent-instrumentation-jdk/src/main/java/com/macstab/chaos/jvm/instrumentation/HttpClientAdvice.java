@@ -39,15 +39,20 @@ final class HttpClientAdvice {
                 typing = net.bytebuddy.implementation.bytecode.assign.Assigner.Typing.DYNAMIC)
             Object request)
         throws Throwable {
-      // Inside a session, the request carries its id to the next service (X-Chaos-Session).
-      final String session = BootstrapDispatcher.currentSessionId();
-      if (session != null
-          && request instanceof java.net.http.HttpRequest httpRequest
+      // Inside a session, a request to an internal host carries its id to the next service.
+      if (request instanceof java.net.http.HttpRequest httpRequest
           && httpRequest.headers().firstValue(BootstrapDispatcher.SESSION_HEADER).isEmpty()) {
-        request =
-            java.net.http.HttpRequest.newBuilder(httpRequest, BootstrapDispatcher.ALL_HEADERS)
-                .header(BootstrapDispatcher.SESSION_HEADER, session)
-                .build();
+        final String session = BootstrapDispatcher.sessionHeaderFor(httpRequest.uri().getHost());
+        if (session != null) {
+          try {
+            request =
+                java.net.http.HttpRequest.newBuilder(httpRequest, BootstrapDispatcher.ALL_HEADERS)
+                    .header(BootstrapDispatcher.SESSION_HEADER, session)
+                    .build();
+          } catch (final RuntimeException uncopyable) {
+            // a custom HttpRequest the builder cannot copy goes out as it is
+          }
+        }
       }
       if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_HTTP)) {
         return;
@@ -90,15 +95,20 @@ final class HttpClientAdvice {
                 typing = net.bytebuddy.implementation.bytecode.assign.Assigner.Typing.DYNAMIC)
             Object request)
         throws Throwable {
-      // Inside a session, the request carries its id to the next service (X-Chaos-Session).
-      final String session = BootstrapDispatcher.currentSessionId();
-      if (session != null
-          && request instanceof java.net.http.HttpRequest httpRequest
+      // Inside a session, a request to an internal host carries its id to the next service.
+      if (request instanceof java.net.http.HttpRequest httpRequest
           && httpRequest.headers().firstValue(BootstrapDispatcher.SESSION_HEADER).isEmpty()) {
-        request =
-            java.net.http.HttpRequest.newBuilder(httpRequest, BootstrapDispatcher.ALL_HEADERS)
-                .header(BootstrapDispatcher.SESSION_HEADER, session)
-                .build();
+        final String session = BootstrapDispatcher.sessionHeaderFor(httpRequest.uri().getHost());
+        if (session != null) {
+          try {
+            request =
+                java.net.http.HttpRequest.newBuilder(httpRequest, BootstrapDispatcher.ALL_HEADERS)
+                    .header(BootstrapDispatcher.SESSION_HEADER, session)
+                    .build();
+          } catch (final RuntimeException uncopyable) {
+            // a custom HttpRequest the builder cannot copy goes out as it is
+          }
+        }
       }
       if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_HTTP)) {
         return;
@@ -178,11 +188,11 @@ final class HttpClientAdvice {
   static final class HttpUrlConnectionSessionHeaderAdvice {
     @Advice.OnMethodEnter
     static void enter(@Advice.This final Object connection) {
-      final String session = BootstrapDispatcher.currentSessionId();
+      final java.net.URLConnection urlConnection = (java.net.URLConnection) connection;
+      final String session = BootstrapDispatcher.sessionHeaderFor(urlConnection.getURL().getHost());
       if (session == null) {
         return;
       }
-      final java.net.URLConnection urlConnection = (java.net.URLConnection) connection;
       try {
         if (urlConnection.getRequestProperty(BootstrapDispatcher.SESSION_HEADER) == null) {
           urlConnection.setRequestProperty(BootstrapDispatcher.SESSION_HEADER, session);

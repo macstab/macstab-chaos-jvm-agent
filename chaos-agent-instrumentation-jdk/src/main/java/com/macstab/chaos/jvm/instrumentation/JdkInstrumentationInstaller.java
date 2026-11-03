@@ -138,11 +138,33 @@ public final class JdkInstrumentationInstaller {
       final ChaosRuntime runtime,
       final boolean eager,
       final List<String> clockCallSitePackages) {
+    install(instrumentation, runtime, eager, clockCallSitePackages, List.of());
+  }
+
+  /**
+   * Installs the agent with clock call-site weaving and additional session-header hosts.
+   *
+   * @param instrumentation the {@link Instrumentation} handle
+   * @param runtime the runtime the bridge dispatches to
+   * @param eager {@code true} to weave every hook group immediately
+   * @param clockCallSitePackages package prefixes whose clock calls are rewritten
+   * @param sessionHeaderHosts host globs that receive {@code X-Chaos-Session} besides the internal
+   *     hosts ({@code *} for all)
+   */
+  public static void install(
+      final Instrumentation instrumentation,
+      final ChaosRuntime runtime,
+      final boolean eager,
+      final List<String> clockCallSitePackages,
+      final List<String> sessionHeaderHosts) {
     CLOCK_CALL_SITE_PACKAGES = validatedClockPackages(clockCallSitePackages);
+    SESSION_HEADER_HOSTS = List.copyOf(sessionHeaderHosts);
     grantInternalModuleOpens(instrumentation);
     injectBridge(instrumentation);
     rejectForeignDelegate();
     installDelegate(new ChaosBridge(runtime));
+    com.macstab.chaos.jvm.instrumentation.bridge.SessionHeaderPolicy.setExtraHosts(
+        SESSION_HEADER_HOSTS);
     try {
       runtime.setHookDemand(
           new HookDemand() {
@@ -642,7 +664,7 @@ public final class JdkInstrumentationInstaller {
         lookup.findVirtual(
             delegateInterface,
             "beforeThreadStart",
-            MethodType.methodType(void.class, Thread.class));
+            MethodType.methodType(void.class, Thread.class, boolean.class));
     methodHandles[BootstrapDispatcher.BEFORE_WORKER_RUN] =
         lookup.findVirtual(
             delegateInterface,
@@ -1140,6 +1162,9 @@ public final class JdkInstrumentationInstaller {
             "com/macstab/chaos/jvm/instrumentation/bridge/BootstrapDispatcher.class");
         writeClass(
             jarOutputStream,
+            "com/macstab/chaos/jvm/instrumentation/bridge/SessionHeaderPolicy.class");
+        writeClass(
+            jarOutputStream,
             "com/macstab/chaos/jvm/instrumentation/ScheduledRunnableWrapper.class");
         writeClass(
             jarOutputStream,
@@ -1288,6 +1313,19 @@ public final class JdkInstrumentationInstaller {
    */
   private static AgentBuilder applyThreadStartTransformations(final AgentBuilder builder) {
     return builder
+        // Worker creation: a thread started inside addWorker is a pool worker (see
+        // BootstrapDispatcher.SCOPE_POOL_WORKER). Tomcat ships its own copy of the class.
+        .type(
+            ElementMatchers.namedOneOf(
+                "java.util.concurrent.ThreadPoolExecutor",
+                "org.apache.tomcat.util.threads.ThreadPoolExecutor"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(ThreadAdvice.PoolWorkerScopeAdvice.class)
+                        .on(
+                            ElementMatchers.named("addWorker")
+                                .and(ElementMatchers.takesArguments(2)))))
         .type(ElementMatchers.named("java.lang.Thread"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
@@ -2780,6 +2818,9 @@ public final class JdkInstrumentationInstaller {
                             ElementMatchers.named("start")
                                 .and(ElementMatchers.takesArguments(1)))));
   }
+
+  /** Host globs that receive the session header besides internal hosts; set before injection. */
+  private static volatile List<String> SESSION_HEADER_HOSTS = List.of();
 
   /** Prefixes whose clock call sites are rewritten; empty when the feature is off. */
   private static volatile List<String> CLOCK_CALL_SITE_PACKAGES = List.of();

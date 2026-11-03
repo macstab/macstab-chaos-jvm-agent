@@ -68,4 +68,14 @@ class ChaosSessionFilterTest {
     assertThat(sessionSeenBy(new ChaosSessionFilter(() -> null), "anything")).isNull();
     assertThat(new ChaosSessionFilter(() -> runtime).getOrder()).isEqualTo(Integer.MIN_VALUE);
   }
+
+  @Test
+  @DisplayName("a request without the header runs outside the session its thread inherited")
+  void headerlessRequestMasksInheritedSession() throws Exception {
+    final ChaosSessionFilter filter = new ChaosSessionFilter(() -> runtime);
+    try (ChaosSession inherited = runtime.openSession("inherited")) {
+      assertThat(sessionSeenBy(filter, null)).isNull();
+      assertThat(runtime.currentSessionId()).isEqualTo(inherited.id());
+    }
+  }
 }

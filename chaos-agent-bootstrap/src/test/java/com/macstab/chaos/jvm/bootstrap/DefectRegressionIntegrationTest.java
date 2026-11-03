@@ -744,6 +744,15 @@ class DefectRegressionIntegrationTest {
     }
 
     @Test
+    @DisplayName("a pool worker created inside a session does not run later tasks in it")
+    void poolWorkerDoesNotInheritSession() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.runWithoutPlan(DefectProbeMain.class, "pool-worker-session");
+      assertThat(result.value("inSession")).isEqualTo("injected");
+      assertThat(result.value("outsideSession")).isEqualTo("ok");
+    }
+
+    @Test
     @DisplayName("X-Chaos-Session carries a session to the server handling the request")
     void sessionHeader() throws Exception {
       final ChildJvmProbe.ProbeResult result =

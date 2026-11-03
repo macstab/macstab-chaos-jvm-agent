@@ -140,8 +140,14 @@ public final class BootstrapDispatcher {
   /** Scope index for client-library calls that delegate to a wrapped client (R2DBC, AWS SDK). */
   public static final int SCOPE_CLIENT = 18;
 
+  /**
+   * Scope index held while a thread pool creates a worker ({@code ThreadPoolExecutor.addWorker}): a
+   * thread started there serves many tasks and must not inherit the starter's session.
+   */
+  public static final int SCOPE_POOL_WORKER = 19;
+
   /** Size of the per-thread counter array: index 0 is the reentrancy depth, then the scopes. */
-  static final int SCOPE_COUNT = 19;
+  static final int SCOPE_COUNT = 20;
 
   /**
    * Enters a call-depth scope on the current thread.
@@ -582,7 +588,12 @@ public final class BootstrapDispatcher {
       final MethodHandle[] h = handles;
       final Object d = delegate;
       if (d != null && h != null) {
-        h[BEFORE_THREAD_START].invoke(d, thread);
+        // Pool workers (created inside addWorker, or fork-join workers) serve many tasks, each
+        // carrying its submitter's session; the worker itself must not inherit the starter's.
+        final boolean poolWorker =
+            depth[SCOPE_POOL_WORKER] > 0
+                || thread instanceof java.util.concurrent.ForkJoinWorkerThread;
+        h[BEFORE_THREAD_START].invoke(d, thread, poolWorker);
       }
     } catch (final Throwable throwable) {
       sneakyThrow(throwable);
@@ -1623,8 +1634,18 @@ public final class BootstrapDispatcher {
   }
 
   /**
-   * Returns the id of the session the calling thread is bound to: the HTTP client advice sends it
-   * as {@link #SESSION_HEADER}.
+   * Returns the session id to send as {@link #SESSION_HEADER} on a request to {@code host}: the
+   * calling thread's session when {@link SessionHeaderPolicy} allows the host, else {@code null}.
+   *
+   * @param host the request's host
+   * @return the session id, or {@code null} when nothing must be sent
+   */
+  public static String sessionHeaderFor(final String host) {
+    return SessionHeaderPolicy.allows(host) ? currentSessionId() : null;
+  }
+
+  /**
+   * Returns the id of the session the calling thread is bound to.
    *
    * @return the session id, or {@code null} outside any session, inside the agent or before the
    *     agent is installed

@@ -57,7 +57,7 @@ class ChaosBridgeTest {
     @Test
     @DisplayName("beforeThreadStart completes without throwing when no scenarios are active")
     void beforeThreadStartCompletes() {
-      assertThatCode(() -> bridge.beforeThreadStart(new Thread(() -> {})))
+      assertThatCode(() -> bridge.beforeThreadStart(new Thread(() -> {}), false))
           .doesNotThrowAnyException();
     }
 

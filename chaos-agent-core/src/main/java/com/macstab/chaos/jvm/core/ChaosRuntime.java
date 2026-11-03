@@ -211,7 +211,18 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @throws Throwable if an active scenario throws to simulate a failure
    */
   public void beforeThreadStart(final Thread thread) throws Throwable {
-    dispatcher.beforeThreadStart(thread);
+    dispatcher.beforeThreadStart(thread, false);
+  }
+
+  /**
+   * Delegates to {@link ChaosDispatcher#beforeThreadStart(Thread, boolean)}.
+   *
+   * @param thread the thread being started
+   * @param poolWorker whether a thread pool is starting one of its workers
+   * @throws Throwable if an active scenario throws to simulate a failure
+   */
+  public void beforeThreadStart(final Thread thread, final boolean poolWorker) throws Throwable {
+    dispatcher.beforeThreadStart(thread, poolWorker);
   }
 
   /**

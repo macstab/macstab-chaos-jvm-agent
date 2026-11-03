@@ -76,9 +76,11 @@ public interface BridgeDelegate {
    * observability.
    *
    * @param thread the thread about to be started; never {@code null}
+   * @param poolWorker whether a thread pool is starting one of its workers, which must not inherit
+   *     the starter's session
    * @throws Throwable if an active scenario injects an exception to suppress the start
    */
-  void beforeThreadStart(Thread thread) throws Throwable;
+  void beforeThreadStart(Thread thread, boolean poolWorker) throws Throwable;
 
   /**
    * Called at the top of a thread-pool worker's run loop, before the next task is dequeued.

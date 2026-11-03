@@ -68,6 +68,8 @@
 
 ### Bug Fixes
 
+* **sessions:** a pool worker created by a submission inside a session (a `ThreadPoolExecutor` or Tomcat worker, every fork-join worker) inherited the session for life and ran later, unrelated tasks in it; pool workers now inherit none — tasks keep carrying their submitter's session. A capture whose thread never ran no longer disables the session hand-off fast path for good (every fork-join task took a global lock).
+* **sessions:** `ChaosSessionFilter` now lets the header decide every request: without `X-Chaos-Session` a request runs outside any session. The JDK HTTP clients send the header to internal hosts only; the agent setting `sessionHeaderHosts` adds globs (`*` for all). A request the builder cannot copy is sent unchanged.
 * **core:** a session-scoped scenario activated outside a session (through the plan-file reloader or JMX) was registered JVM-wide and fired for every thread; it is now refused.
 * **core:** `activate(ChaosPlan)` validates every scenario and checks every id before starting any; an invalid later scenario used to roll back earlier ones that had already injected faults.
 * **core:** a plan's observability settings belong to that plan: a rejected plan with the same ids, a re-posted plan or a second `close()` no longer strip the settings of the running plan. Plan handles close idempotently.

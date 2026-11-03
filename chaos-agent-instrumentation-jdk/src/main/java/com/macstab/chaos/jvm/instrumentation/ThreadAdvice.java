@@ -6,6 +6,19 @@ import net.bytebuddy.asm.Advice;
 final class ThreadAdvice {
   private ThreadAdvice() {}
 
+  /** Marks {@code ThreadPoolExecutor.addWorker}: threads started inside it are pool workers. */
+  static final class PoolWorkerScopeAdvice {
+    @Advice.OnMethodEnter
+    static void enter() {
+      BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_POOL_WORKER);
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit() {
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_POOL_WORKER);
+    }
+  }
+
   /**
    * Advice for {@code Thread.start()}, {@code Thread.start(ThreadContainer)} and {@code
    * VirtualThread.start(ThreadContainer)}. Thread-per-task executors ({@code
