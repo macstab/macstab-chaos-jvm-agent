@@ -119,171 +119,59 @@ Malformed base64 input throws `ConfigLoadException` with category `base64`.
 
 # 6. JSON Plan Format
 
-`ChaosPlanMapper` uses Jackson with:
-- `FAIL_ON_UNKNOWN_PROPERTIES = true`: unknown fields in the JSON cause a `ConfigLoadException`. This prevents silent partial configuration from misconfigured JSON.
-- Duration fields: ISO-8601 strings via Jackson's JavaTimeModule (e.g., `"PT0.1S"` = 100 ms, `"PT30S"` = 30 seconds, `"PT1M"` = 1 minute)
-- Enums: case-insensitive string matching
+The format is specified in [plan-schema.md](plan-schema.md) and defined by the JSON Schema the agent publishes (`chaos-plan.schema.json`, generated from `ChaosPlanMapper` and checked against it by the build). The fields of every selector and effect are explained in [configuration-reference.md](configuration-reference.md). `ChaosPlanMapper` reads it strictly:
 
-## Full Plan Schema
+- Unknown fields and trailing content cause a `ConfigLoadException` (`FAIL_ON_UNKNOWN_PROPERTIES`, `FAIL_ON_TRAILING_TOKENS`): a misspelled field is an error, not a silently ignored setting.
+- Durations are ISO-8601 strings (`"PT0.1S"` = 100 ms, `"PT30S"`, `"PT1M"`); instants are ISO-8601 UTC (`"2026-11-01T08:00:00Z"`).
+- Enum constants are written exactly as declared (`"EXECUTOR_SUBMIT"`, `"SESSION"`); `"executor_submit"` is rejected.
+- Name and path patterns are objects: `{"mode": "EXACT" | "PREFIX" | "GLOB" | "REGEX" | "ANY", "value": "..."}`, and for file paths `{"prefix": "/var/lib/app"}`.
+- Every selector except `stress` requires a non-empty `operations` set, drawn from that selector's operations (the schema lists them per selector).
 
-```jsonc
+## A plan
+
+```json
 {
-  "metadata": {                       // optional; default name "default"
-    "name": "string",
-    "description": "string (optional)"
-  },
-  "observability": {                  // optional; all three default as shown
-    "jmxEnabled": true,               // false: JMX listScenarios/debugDump leave the plan out
-    "structuredLoggingEnabled": true, // false: the plan's events are not logged
-    "debugDumpOnStart": false         // true: print the diagnostics once the plan is active
-  },
+  "metadata": { "name": "checkout-soak", "description": "optional" },
+  "observability": { "jmxEnabled": true, "structuredLoggingEnabled": true, "debugDumpOnStart": false },
   "scenarios": [
     {
-      "id": "string (required, unique per plan)",
-      "description": "string (optional)",
-      "scope": "JVM | SESSION",
+      "id": "slow-pool-submit",
+      "description": "optional",
+      "scope": "JVM",
       "precedence": 0,
-      "selector": { ...selector object... },
-      "effect": { ...effect object... },
-      "activationPolicy": { ...policy object... }
+      "selector": {
+        "type": "executor",
+        "operations": ["EXECUTOR_SUBMIT"],
+        "executorClassPattern": { "mode": "GLOB", "value": "*ThreadPool*" }
+      },
+      "effect": { "type": "delay", "minDelay": "PT0.1S", "maxDelay": "PT0.5S" },
+      "activationPolicy": {
+        "probability": 0.5,
+        "rateLimit": { "permits": 10, "window": "PT1S" },
+        "activeFor": "PT30S",
+        "maxApplications": 100,
+        "randomSeed": 42
+      }
     }
   ]
 }
 ```
 
-## Selector Object Formats
+`metadata` may be omitted (the plan is then named `default`); when present, its `name` is required. `observability` may be omitted; its three fields default as shown. A file may also hold a single scenario or a JSON array of scenarios.
 
-```json
-{ "type": "executor",
-  "operations": ["EXECUTOR_SUBMIT"],          // optional; defaults to all executor ops
-  "executorClassPattern": ".*ThreadPool.*",   // optional; null = wildcard
-  "taskClassPattern": null }
+## Activation policy defaults
 
-{ "type": "thread",
-  "operations": ["THREAD_START"],
-  "threadNamePattern": "worker-.*",
-  "kind": "ANY | PLATFORM | VIRTUAL",
-  "daemon": true }                            // optional; null = wildcard
+Every policy field is optional:
 
-{ "type": "network",
-  "operations": ["SOCKET_CONNECT", "SOCKET_READ", "SOCKET_WRITE"],
-  "remoteHostPattern": "db.internal.*" }
-
-{ "type": "method",
-  "operations": ["METHOD_ENTER"],
-  "classPattern": "com.example.MyService",
-  "methodNamePattern": "processOrder",
-  "signaturePattern": null }                  // optional; matches the JVM descriptor, e.g. "(Ljava/lang/String;)V"
-
-{ "type": "jvmRuntime",
-  "operations": ["SYSTEM_CLOCK_MILLIS", "SYSTEM_CLOCK_NANOS"] }
-
-{ "type": "stress",
-  "target": "HEAP | THREADS | GC | METASPACE | DIRECT_BUFFER | FINALIZER |
-             DEADLOCK | THREAD_LEAK | THREAD_LOCAL_LEAK | MONITOR_CONTENTION |
-             CODE_CACHE | SAFEPOINT | STRING_INTERN | REFERENCE_QUEUE" }
-```
-
-## Effect Object Formats
-
-```json
-{ "type": "delay",
-  "minDelay": "PT0.1S",       // ISO-8601 duration
-  "maxDelay": "PT0.5S" }      // equal to minDelay for fixed delay
-
-{ "type": "reject",
-  "message": "synthetic failure" }
-
-{ "type": "suppress" }
-
-{ "type": "gate",
-  "maxBlock": "PT30S" }       // null = block indefinitely until release()
-
-{ "type": "exceptionalCompletion",
-  "failureKind": "TIMEOUT | CANCELLATION | EXECUTION | IO",
-  "message": "simulated timeout" }
-
-{ "type": "exceptionInjection",
-  "exceptionClassName": "java.io.IOException",
-  "message": "chaos injected",
-  "withStackTrace": true }
-
-{ "type": "returnValueCorruption",
-  "strategy": "NULL | ZERO | EMPTY | BOUNDARY_MAX | BOUNDARY_MIN" }
-
-{ "type": "clockSkew",
-  "mode": "FIXED | DRIFT | FREEZE",
-  "offsetMillis": 5000 }      // irrelevant for FREEZE
-
-{ "type": "spuriousWakeup" }
-
-{ "type": "heapPressure",
-  "bytes": 67108864 }         // 64 MiB
-
-{ "type": "keepAlive",
-  "threads": 4 }
-
-{ "type": "metaspacePressure",
-  "classCount": 200 }
-
-{ "type": "directBufferPressure",
-  "bytes": 33554432 }         // 32 MiB
-
-{ "type": "gcPressure",
-  "allocationRatePerSecond": 104857600 }  // 100 MiB/s
-
-{ "type": "finalizerBacklog",
-  "objectCount": 1000 }
-
-{ "type": "deadlock" }
-
-{ "type": "threadLeak",
-  "count": 5 }
-
-{ "type": "threadLocalLeak",
-  "entryCount": 50 }
-
-{ "type": "monitorContention",
-  "threads": 8 }
-
-{ "type": "codeCachePressure",
-  "classCount": 500 }
-
-{ "type": "safepointStorm",
-  "intervalMillis": 100 }
-
-{ "type": "stringInternPressure",
-  "count": 100000 }
-
-{ "type": "referenceQueueFlood",
-  "count": 50000 }
-```
-
-## Activation Policy Object Format
-
-```json
-{
-  "startMode": "AUTOMATIC | MANUAL",
-  "probability": 1.0,
-  "rateLimit": {
-    "permits": 10,
-    "window": "PT1S"
-  },
-  "activateAfterMatches": 0,
-  "activeFor": "PT30S",
-  "maxApplications": 100,
-  "randomSeed": 42
-}
-```
-
-All fields are optional. Absent fields use defaults:
-- `startMode`: `AUTOMATIC`
-- `probability`: `1.0`
-- `rateLimit`: null (no limit)
+- `startMode`: `AUTOMATIC` (`MANUAL` waits for `start()` on the handle)
+- `probability`: `1.0`; must be in (0, 1]
+- `rateLimit`: none; when present, `permits` > 0 and a positive `window` are required
 - `activateAfterMatches`: `0`
-- `activeFor`: null (no expiry)
-- `maxApplications`: null (unlimited)
-- `randomSeed`: null (equivalent to `0`)
+- `activeFor`, `activeFrom`, `activeUntil`: no time window
+- `maxApplications`: unlimited
+- `randomSeed`: a random seed per activation; set it for reproducible draws
+- `allowDestructiveEffects`: `false`; must be `true` for `deadlock` and `threadLeak`, which leave non-recoverable JVM state (without it, `virtualThreadCarrierPinning` leaves one carrier free)
+- `replayMatches`: none; when present, it replaces the probability draw and requires probability `1.0` and no `rateLimit`
 
 ---
 

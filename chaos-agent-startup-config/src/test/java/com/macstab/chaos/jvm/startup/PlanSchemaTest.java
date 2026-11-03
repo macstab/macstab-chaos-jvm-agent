@@ -12,17 +12,21 @@ import com.fasterxml.jackson.databind.introspect.BeanPropertyDefinition;
 import com.fasterxml.jackson.databind.jsontype.NamedType;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.macstab.chaos.jvm.api.ActivationPolicy;
 import com.macstab.chaos.jvm.api.ChaosEffect;
 import com.macstab.chaos.jvm.api.ChaosPlan;
 import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.ChaosSelector;
+import com.macstab.chaos.jvm.api.OperationType;
 import java.io.IOException;
 import java.io.InputStream;
+import java.lang.reflect.Field;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
@@ -50,8 +54,12 @@ class PlanSchemaTest {
       Map.of(
           ChaosPlan.class,
           List.of("scenarios"),
+          ChaosPlan.Metadata.class,
+          List.of("name"),
           ChaosScenario.class,
-          List.of("id", "selector", "effect"));
+          List.of("id", "selector", "effect"),
+          ActivationPolicy.RateLimit.class,
+          List.of("permits", "window"));
 
   private final ObjectMapper mapper = ChaosPlanMapper.objectMapper();
   private final DeserializationConfig config = mapper.getDeserializationConfig();
@@ -97,6 +105,64 @@ class PlanSchemaTest {
                 ChaosPlanMapper.read(
                     "{\"scenarios\": [" + scenario.replace("\"type\": \"delay\", ", "") + "]}"))
         .as("an effect without its type");
+    assertThatThrownBy(
+            () ->
+                ChaosPlanMapper.read(
+                    "{\"metadata\": {\"description\": \"d\"}, \"scenarios\": [" + scenario + "]}"))
+        .as("metadata without a name")
+        .hasMessageContaining("name");
+    for (final String rateLimit : List.of("{\"window\": \"PT1S\"}", "{\"permits\": 1}")) {
+      final String limited =
+          scenario.replace("}}", "}, \"activationPolicy\": {\"rateLimit\": " + rateLimit + "}}");
+      assertThatThrownBy(() -> ChaosPlanMapper.read("{\"scenarios\": [" + limited + "]}"))
+          .as("a rate limit %s", rateLimit)
+          .isInstanceOf(ConfigLoadException.class);
+    }
+  }
+
+  @Test
+  @DisplayName("each selector requires operations, and only the ones its schema lists")
+  void selectorOperationsAreTheDeclaredOnes() {
+    final String effect =
+        "\"effect\": {\"type\": \"delay\", \"minDelay\": \"PT0.001S\", \"maxDelay\": \"PT0.001S\"}";
+    final List<NamedType> selectors = List.copyOf(subtypes(ChaosSelector.class));
+    int checked = 0;
+    for (final NamedType selector : selectors) {
+      final Set<OperationType> valid = validOperations(selector.getType());
+      if (valid == null) {
+        continue;
+      }
+      checked++;
+      final String type = "\"type\": \"" + selector.getName() + "\"";
+      assertThatThrownBy(
+              () ->
+                  ChaosPlanMapper.read(
+                      "{\"scenarios\": [{\"id\": \"s\", \"selector\": {"
+                          + type
+                          + "}, "
+                          + effect
+                          + "}]}"))
+          .as("%s without operations", selector.getName())
+          .hasMessageContaining("operations");
+      final OperationType foreign =
+          Arrays.stream(OperationType.values())
+              .filter(operation -> !valid.contains(operation))
+              .findFirst()
+              .orElseThrow();
+      assertThatThrownBy(
+              () ->
+                  ChaosPlanMapper.read(
+                      "{\"scenarios\": [{\"id\": \"s\", \"selector\": {"
+                          + type
+                          + ", \"operations\": [\""
+                          + foreign
+                          + "\"]}, "
+                          + effect
+                          + "}]}"))
+          .as("%s with %s", selector.getName(), foreign)
+          .hasMessageContaining("does not support operation");
+    }
+    assertThat(checked).as("selectors with an operation set").isEqualTo(selectors.size() - 1);
   }
 
   @Test
@@ -218,6 +284,14 @@ class PlanSchemaTest {
         .sorted(Comparator.comparing(BeanPropertyDefinition::getName))
         .forEach(
             property -> properties.set(property.getName(), schemaOf(property.getPrimaryType())));
+    final Set<OperationType> operations = validOperations(type.getRawClass());
+    if (operations != null) {
+      final ObjectNode schema = properties.putObject("operations");
+      schema.put("type", "array").put("minItems", 1).put("uniqueItems", true);
+      final ArrayNode values = schema.putObject("items").put("type", "string").putArray("enum");
+      operations.stream().sorted().forEach(operation -> values.add(operation.name()));
+      required.add("operations");
+    }
     for (final String name : REQUIRED.getOrDefault(type.getRawClass(), List.of())) {
       required.add(name);
     }
@@ -225,6 +299,26 @@ class PlanSchemaTest {
       definition.set("required", required);
     }
     definition.put("additionalProperties", false);
+  }
+
+  /**
+   * The operations a selector accepts: its {@code VALID_OPS}, the set its constructor checks {@code
+   * operations} against; {@code null} for a type that has none.
+   */
+  @SuppressWarnings("unchecked")
+  static Set<OperationType> validOperations(final Class<?> raw) {
+    if (!ChaosSelector.class.isAssignableFrom(raw)) {
+      return null;
+    }
+    try {
+      final Field field = raw.getDeclaredField("VALID_OPS");
+      field.setAccessible(true);
+      return (Set<OperationType>) field.get(null);
+    } catch (final NoSuchFieldException none) {
+      return null;
+    } catch (final ReflectiveOperationException unreadable) {
+      throw new IllegalStateException(raw.getName() + ".VALID_OPS", unreadable);
+    }
   }
 
   private Collection<NamedType> subtypes(final Class<?> raw) {

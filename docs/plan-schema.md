@@ -37,7 +37,7 @@ The schema is not written by hand: `PlanSchemaTest` derives it from the plan map
 plan          = { "scenarios": [ scenario, … ]    ; required, at least one
                   [, "metadata": metadata ]
                   [, "observability": observability ] }
-metadata      = { "name": string [, "description": string] }
+metadata      = { "name": string [, "description": string] }   ; name required, non-blank
 observability = { "jmxEnabled": boolean, "structuredLoggingEnabled": boolean,
                   "debugDumpOnStart": boolean }       ; each optional
 scenario      = { "id": string, "selector": selector, "effect": effect   ; required
@@ -46,11 +46,14 @@ scenario      = { "id": string, "selector": selector, "effect": effect   ; requi
                   [, "description": string]
                   [, "precedence": integer]
                   [, "tags": { string: string, … }] }
-selector      = { "type": selector-type, … }           ; the fields of that selector
+selector      = { "type": selector-type, "operations": [ operation, … ], … }
+                                                       ; operations required (not for stress), at least one,
+                                                       ; each one that selector supports; then its own fields
 effect        = { "type": effect-type, … }             ; the fields of that effect
 policy        = { "probability", "activateAfterMatches", "maxApplications", "activeFor",
                   "activeFrom", "activeUntil", "rateLimit", "randomSeed",
                   "allowDestructiveEffects", "startMode", "replayMatches" }  ; each optional
+rateLimit     = { "permits": integer, "window": duration }        ; both required
 ```
 
 A file may also hold a single scenario or a JSON array of scenarios; the agent wraps them in a plan (`ChaosPlanMapper.readPlanOrScenarios`). The schema describes the plan form.

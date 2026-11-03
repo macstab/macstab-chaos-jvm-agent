@@ -28,6 +28,8 @@ dependencies {
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.assertj)
+    // PlanFuzzTest reads the plan schema and generates plans from it.
+    testImplementation(libs.jackson.databind)
     testImplementation(libs.mockito.core)
     // Compile-only: these JARs must not appear on the general fork-probe classpath because the
     // agent's JDBC retransformation of their Statement subtypes interferes with other instrumentation

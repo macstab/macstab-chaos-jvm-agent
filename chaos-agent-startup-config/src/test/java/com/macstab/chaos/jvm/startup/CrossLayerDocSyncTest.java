@@ -4,10 +4,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.fasterxml.jackson.annotation.JsonSubTypes;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.MappingIterator;
 import com.macstab.chaos.jvm.api.ActivationPolicy;
 import com.macstab.chaos.jvm.api.ChaosControlPlane;
 import com.macstab.chaos.jvm.api.ChaosDiagnostics;
 import com.macstab.chaos.jvm.api.ChaosEffect;
+import com.macstab.chaos.jvm.api.ChaosPlan;
 import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.ChaosSelector;
 import com.macstab.chaos.jvm.api.ChaosSession;
@@ -132,6 +135,10 @@ class CrossLayerDocSyncTest {
         ```json
         {"id": "broken", "selector": {"type": "fileIo"}}
         ```
+
+        ```json
+        { "type": "clockSkew", "offsetMillis": 5000 }
+        ```
         """;
 
     assertThat(violations(stale))
@@ -142,7 +149,8 @@ class CrossLayerDocSyncTest {
         .anySatisfy(v -> assertThat(v).contains("ChaosEffect.Errno.EWHATEVER"))
         .anySatisfy(v -> assertThat(v).contains("ActivationPolicy.Builder.session"))
         .anySatisfy(v -> assertThat(v).contains("byteCorruption"))
-        .anySatisfy(v -> assertThat(v).contains("json block"))
+        .anySatisfy(v -> assertThat(v).contains("does not parse as a plan"))
+        .anySatisfy(v -> assertThat(v).contains("offsetMillis"))
         .anySatisfy(v -> assertThat(v).contains("does not compile"));
   }
 
@@ -314,8 +322,7 @@ class CrossLayerDocSyncTest {
     final String trimmed = json.strip();
     final boolean plan = trimmed.contains("\"scenarios\"");
     if (!plan && !SCENARIO_KEYS.matcher(trimmed).find()) {
-      // A fragment (one selector, effect or policy object): its type names are checked with the
-      // code spans; it cannot be parsed on its own.
+      checkFragments(trimmed, line, violations);
       return;
     }
     final String document =
@@ -330,6 +337,80 @@ class CrossLayerDocSyncTest {
               + invalid.getMessage()
               + "\n"
               + trimmed.lines().limit(3).collect(Collectors.joining("\n")));
+    }
+  }
+
+  /**
+   * A block of fragments: one or more selector, effect or policy objects. Each must parse as what
+   * it is; a selector or an effect is read inside a scenario with a fixed counterpart. Other
+   * objects (patterns, status payloads) are not plan parts and are left to the name checks.
+   */
+  private static void checkFragments(
+      final String json, final long line, final List<String> violations) {
+    final List<JsonNode> fragments = new ArrayList<>();
+    try (MappingIterator<JsonNode> values =
+        ChaosPlanMapper.objectMapper().readerFor(JsonNode.class).readValues(json)) {
+      while (values.hasNext()) {
+        fragments.add(values.next());
+      }
+    } catch (final IOException | RuntimeException notJson) {
+      violations.add(
+          "json block at line " + line + " is not JSON (fence a sketch as jsonc): " + notJson);
+      return;
+    }
+    for (final JsonNode fragment : fragments) {
+      final String text = fragment.toString();
+      final String problem;
+      if (fragment.has("type")) {
+        problem = selectorOrEffectProblem(text);
+      } else if (POLICY_KEYS.matcher(text).find()) {
+        problem = parseProblem(text, ActivationPolicy.class);
+      } else {
+        continue;
+      }
+      if (problem != null) {
+        violations.add("json block at line " + line + " has an invalid fragment: " + problem);
+      }
+    }
+  }
+
+  private static final Pattern POLICY_KEYS =
+      Pattern.compile("\"(startMode|probability|rateLimit|maxApplications|activeFor)\"\\s*:");
+
+  private static String selectorOrEffectProblem(final String fragment) {
+    final String asSelector =
+        parseProblem(
+            "{\"scenarios\":[{\"id\":\"doc\",\"selector\":"
+                + fragment
+                + ",\"effect\":{\"type\":\"suppress\"}}]}",
+            ChaosPlan.class);
+    if (asSelector == null) {
+      return null;
+    }
+    final String asEffect =
+        parseProblem(
+            "{\"scenarios\":[{\"id\":\"doc\",\"selector\":{\"type\":\"thread\","
+                + "\"operations\":[\"THREAD_START\"]},\"effect\":"
+                + fragment
+                + "}]}",
+            ChaosPlan.class);
+    if (asEffect == null) {
+      return null;
+    }
+    // Report the reading whose type name was known.
+    return (asSelector.contains("type id") ? asEffect : asSelector) + ": " + fragment;
+  }
+
+  private static String parseProblem(final String json, final Class<?> type) {
+    try {
+      if (type == ChaosPlan.class) {
+        ChaosPlanMapper.read(json);
+      } else {
+        ChaosPlanMapper.objectMapper().readValue(json, type);
+      }
+      return null;
+    } catch (final IOException | RuntimeException invalid) {
+      return invalid.getMessage();
     }
   }
 
