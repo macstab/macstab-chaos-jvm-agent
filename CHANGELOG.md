@@ -15,6 +15,8 @@
 
 ### Features
 
+* **api:** `ChaosPresets`: ready-made scenarios for common faults — `diskFull`, `failingDisk`, `fsyncFailure`, `slowDisk`, `tooManyOpenFiles`, `connectionRefused`, `connectionResets`, `slowNetwork`, `trickledResponses`, `packetLoss`, `failover`, `dnsOutage`, `clockJump`, `threadExhaustion` — each a prefilled `ChaosScenario.Builder` tagged `preset=<name>`, so scope and policy stay the caller's.
+
 * **api:** `ChaosEffect.redirect(host[, port])` (JSON `redirect`) sends a `SOCKET_CONNECT` of a `Socket` or `SocketChannel` to another endpoint: a failover target, a black hole, a slow proxy. Without a port the requested one is kept.
 
 * **instrumentation:** UDP: `DATAGRAM_SEND` and `DATAGRAM_RECEIVE` cover `DatagramSocket` and `DatagramChannel` by destination or connected peer and datagram length. `suppress()` drops a datagram silently (packet loss), `corruptRead()` flips one bit of a datagram received, `ECONNREFUSED` is `PortUnreachableException`. New hook group `DATAGRAM`.

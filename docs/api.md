@@ -312,6 +312,47 @@ ChaosSelector.stress(StressTarget.HEAP);
 
 Sealed hierarchy. Divided into interceptor effects (applied inline on the calling thread) and stressor effects (run as background threads for the scenario lifetime).
 
+## Presets
+
+`ChaosPresets` holds ready-made scenarios for the faults production systems meet, each the JVM counterpart of a native rule. A preset returns a prefilled `ChaosScenario.Builder` (id, description, selector, effect, tag `preset=<name>`), so scope, activation policy and id stay yours.
+
+| Preset | Fault | Native rule |
+|--------|-------|-------------|
+| `ChaosPresets.diskFull(dir)` | writes fail with `ENOSPC` | `/dir:write:ENOSPC` |
+| `ChaosPresets.failingDisk(dir)` | reads, writes, fsyncs fail with `EIO` | `/dir:*:EIO` |
+| `ChaosPresets.fsyncFailure(dir)` | fsyncs fail with `EIO` | `/dir:fsync:EIO` |
+| `ChaosPresets.slowDisk(dir, latency)` | file I/O is slower | `/dir:*:LATENCY` |
+| `ChaosPresets.tooManyOpenFiles(dir)` | opens fail with `EMFILE` | `/dir:open:EMFILE` |
+| `ChaosPresets.connectionRefused(cidr, port)` | connects are refused | `tcp4://…:connect:ECONNREFUSED` |
+| `ChaosPresets.connectionResets(cidr, port)` | reads fail with `ECONNRESET` | `tcp4://…:recv:ECONNRESET` |
+| `ChaosPresets.slowNetwork(cidr, port, latency)` | socket reads and writes are slower | `tcp4://…:*:LATENCY` |
+| `ChaosPresets.trickledResponses(cidr, port, maxBytes)` | reads return few bytes | `tcp4://…:recv:TRICKLE` |
+| `ChaosPresets.packetLoss(cidr, port)` | datagrams are dropped | `udp4://…:sendto:…` |
+| `ChaosPresets.failover(cidr, port, host, targetPort)` | connects go elsewhere | endpoint redirect |
+| `ChaosPresets.dnsOutage(names)` | lookups fail | `dns://…:GAI:EAI_NONAME` |
+| `ChaosPresets.clockJump(offset)` | every wall-clock read is off | `clock_gettime/realtime:OFFSET` |
+| `ChaosPresets.threadExhaustion()` | platform thread starts fail | `pthread_create:ERRNO:EAGAIN` |
+
+```java verified
+import com.macstab.chaos.jvm.api.ActivationPolicy;
+import com.macstab.chaos.jvm.api.ChaosControlPlane;
+import com.macstab.chaos.jvm.api.ChaosPresets;
+import java.time.Duration;
+
+public final class PresetExample {
+  public static void run(final ChaosControlPlane chaos) {
+    // One write in ten under /var/lib/app hits a full disk.
+    chaos.activate(
+        ChaosPresets.diskFull("/var/lib/app")
+            .activationPolicy(ActivationPolicy.builder().probability(0.1).build())
+            .build());
+    // The database replica answers 200 ms late.
+    chaos.activate(
+        ChaosPresets.slowNetwork("10.0.0.7", 5432, Duration.ofMillis(200)).build());
+  }
+}
+```
+
 ## Interceptor Effects
 
 ```java
