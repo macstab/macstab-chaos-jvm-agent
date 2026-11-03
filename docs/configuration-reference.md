@@ -1053,20 +1053,20 @@ Once the hook is wired, the matcher, effect, and activation policy behave like e
 
 **JSON type:** `"network"`  
 **Operations:** `SOCKET_CONNECT`, `SOCKET_ACCEPT`, `SOCKET_READ`, `SOCKET_WRITE`, `SOCKET_CLOSE`  
-**Purpose:** Intercept `java.net.Socket` / `ServerSocket` operations.
+**Purpose:** Intercept socket operations: `java.net.Socket` / `ServerSocket`, and `SocketChannel` / `ServerSocketChannel` (TCP and Unix-domain), whose connect, accept, reads and writes (single, scattering and gathering) and close raise the same events with the channel's peer and byte count. A channel has no `SO_TIMEOUT`, so `timeout()` never fires on a channel read or connect; a torn channel write is a short count rather than a reset.
 
 **Fields:**
 
 | Field               | Type                 | Default  | Description                                                                                                                                                                                                                                                                                                                            |
 |---------------------|----------------------|----------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `operations`        | Set\<OperationType\> | required | Subset of valid operations                                                                                                                                                                                                                                                                                                             |
-| `remoteHostPattern` | NamePattern          | `ANY`    | For `SOCKET_CONNECT`: matched against `InetSocketAddress` host string. For `SOCKET_READ`/`SOCKET_WRITE`/`SOCKET_CLOSE`: matched against the connected peer — its host name if known, otherwise its IP literal. A non-`ANY` pattern is rejected when `SOCKET_ACCEPT` is in `operations` (the peer is unknown until `accept()` returns). |
+| `remoteHostPattern` | NamePattern          | `ANY`    | For `SOCKET_CONNECT`: matched against `InetSocketAddress` host string. For `SOCKET_READ`/`SOCKET_WRITE`/`SOCKET_CLOSE`: matched against the connected peer — its host name if known, otherwise its IP literal; for a Unix-domain channel, the socket's path. A non-`ANY` pattern is rejected when `SOCKET_ACCEPT` is in `operations` (the peer is unknown until `accept()` returns). |
 | `remoteCidr`        | String               | `null`   | The peer address must lie in this CIDR block (`"10.0.0.0/8"`, `"2001:db8::/32"`, or one address). IPv4 and IPv6 literals only — no names are resolved. An unresolved peer never matches. |
 | `remotePort`        | Integer              | `null`   | The peer port must equal this value. |
 | `minBytes`          | Long                 | `null`   | The byte count of the call must be at least this (inclusive). For a read it is the number of bytes requested. Requires `operations` ⊆ {`SOCKET_READ`, `SOCKET_WRITE`}: other operations carry no byte count. |
 | `maxBytes`          | Long                 | `null`   | The byte count of the call must be at most this (inclusive). Same restriction as `minBytes`. |
 
-`remoteCidr` and `remotePort` are rejected together with `SOCKET_ACCEPT`, like `remoteHostPattern`. All filters must hold for a call to match.
+`remoteCidr` and `remotePort` are rejected together with `SOCKET_ACCEPT`, like `remoteHostPattern`; a Unix-domain peer has no address or port, so it never matches them. All filters must hold for a call to match. The channel operations of `NioSelector` (`NIO_CHANNEL_*`) still fire for the same channel calls: they select by channel, without peer or byte filters.
 
 ```json
 { "type": "network", "operations": ["SOCKET_WRITE"],
@@ -1409,7 +1409,7 @@ The native library's network delivery effects, applied to the real socket and fi
 | `trickle`         | `TrickleEffect`         | `SOCKET_READ`                   | A read returns at most `maxBytes` bytes (`TRICKLE`); callers that loop until they have all they need see the data arrive in small pieces                       |
 | `corruptRead`     | `CorruptReadEffect`     | `SOCKET_READ`, `FILE_IO_READ`   | After a read that returned bytes, exactly one bit of one returned byte is flipped (`CORRUPT`)                                                                   |
 | `timeout`         | `TimeoutEffect`         | `SOCKET_READ`, `SOCKET_CONNECT` | Waits for the call's own timeout (`SO_TIMEOUT`, or the connect timeout) and throws `SocketTimeoutException` (`Read timed out` / `Connect timed out`). On a call without a timeout (infinite) it does not fire and counts no application (`TIMEOUT`) |
-| `connectionReset` | `ConnectionResetEffect` | `SOCKET_CLOSE`                  | Closes with `SO_LINGER` 0: unsent data is discarded and the peer receives a reset — its next read fails with `SocketException: Connection reset` (`RESET`)      |
+| `connectionReset` | `ConnectionResetEffect` | `SOCKET_CLOSE`                  | Closes a socket or socket channel with `SO_LINGER` 0: unsent data is discarded and the peer receives a reset — its next read fails with `SocketException: Connection reset` (`RESET`)      |
 | `tornWrite`       | `TornWriteEffect`       | `FILE_IO_WRITE`, `SOCKET_WRITE`, `NIO_CHANNEL_WRITE` | A `FileChannel` or `SocketChannel` write succeeds short: a random 1 to n-1 of the n bytes are written and that count returned, which callers must loop on (`TORN`). A socket stream write sends that prefix, then resets the connection (`SO_LINGER` 0 and close) and throws `SocketException` ("Connection reset …"): the peer reads the truncated message and then a reset, and the writer's socket is closed. File stream writes (`FileOutputStream`, `RandomAccessFile`) complete or throw, so a match there does nothing and counts no application |
 
 ```json

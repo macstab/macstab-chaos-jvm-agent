@@ -231,11 +231,12 @@ public final class JdkInstrumentationInstaller {
         wovenNow = true;
         LOGGER.fine(() -> "chaos hooks woven: " + group);
       }
-      // Some JDK classes (java.io.ObjectOutputStream / ObjectInputStream) can be loaded as a side
-      // effect of an installOn() while it is inside a JVMTI ClassFileLoadHook for another class;
-      // the JVMTI re-entrancy rule then suppresses the hook for those loads, so they escape every
-      // transformer. Outside any hook, an explicit retransformation applies the missing advice.
-      if (wovenNow && WOVEN_GROUPS.containsKey(HookGroup.SERIALIZATION)) {
+      // Some JDK classes (the object streams, the socket classes) can be loaded as a side effect
+      // of an installOn() while it is inside a JVMTI ClassFileLoadHook for another class; the
+      // JVMTI re-entrancy rule then suppresses the hook for those loads, so they escape every
+      // transformer, also those of groups woven earlier. Outside any hook, an explicit
+      // retransformation applies the missing advice; for a class no group targets it is a no-op.
+      if (wovenNow) {
         retransformPostInstallEscapees(instrumentation);
       }
     }
@@ -319,6 +320,14 @@ public final class JdkInstrumentationInstaller {
         OperationType.NIO_CHANNEL_ACCEPT),
     SOCKET(
         JdkInstrumentationInstaller::applySocketAndStreamTransformations,
+        OperationType.SOCKET_CONNECT,
+        OperationType.SOCKET_ACCEPT,
+        OperationType.SOCKET_READ,
+        OperationType.SOCKET_WRITE,
+        OperationType.SOCKET_CLOSE),
+    /** The same socket events, raised by {@code SocketChannel} and {@code ServerSocketChannel}. */
+    SOCKET_CHANNEL(
+        JdkInstrumentationInstaller::applySocketChannelTransformations,
         OperationType.SOCKET_CONNECT,
         OperationType.SOCKET_ACCEPT,
         OperationType.SOCKET_READ,
@@ -852,6 +861,16 @@ public final class JdkInstrumentationInstaller {
             delegateInterface,
             "beforeSocketClose",
             MethodType.methodType(void.class, Object.class));
+    methodHandles[BootstrapDispatcher.BEFORE_SOCKET_CHANNEL_READ] =
+        lookup.findVirtual(
+            delegateInterface,
+            "beforeSocketChannelRead",
+            MethodType.methodType(int.class, Object.class, int.class));
+    methodHandles[BootstrapDispatcher.BEFORE_SOCKET_CHANNEL_WRITE] =
+        lookup.findVirtual(
+            delegateInterface,
+            "beforeSocketChannelWrite",
+            MethodType.methodType(int.class, Object.class, int.class));
   }
 
   /** Wires handles for JNDI, serialization, native libs, async cancel, zip, thread-locals, JMX. */
@@ -1166,6 +1185,8 @@ public final class JdkInstrumentationInstaller {
             jarOutputStream,
             "com/macstab/chaos/jvm/instrumentation/bridge/SessionHeaderPolicy.class");
         writeClass(
+            jarOutputStream, "com/macstab/chaos/jvm/instrumentation/bridge/ChannelBuffers.class");
+        writeClass(
             jarOutputStream,
             "com/macstab/chaos/jvm/instrumentation/ScheduledRunnableWrapper.class");
         writeClass(
@@ -1254,6 +1275,11 @@ public final class JdkInstrumentationInstaller {
     // but the class is loaded as a side-effect of retransforming java.lang.Thread, so the
     // ClassFileTransformer is suppressed by the JVMTI re-entrancy rule.
     "java.lang.VirtualThread",
+    // Loaded while the socket-channel group retransforms the channel classes (their matchers and
+    // advice resolve the socket types), so they can escape the socket group's transformer.
+    "java.net.Socket",
+    "java.net.ServerSocket",
+    "sun.nio.ch.NioSocketImpl",
   };
 
   /**
@@ -1845,8 +1871,21 @@ public final class JdkInstrumentationInstaller {
                             .on(
                                 ElementMatchers.named("write")
                                     .and(
+                                        ElementMatchers.takesArguments(java.nio.ByteBuffer.class))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.NioChannelScatterReadAdvice.class)
+                            .on(
+                                ElementMatchers.named("read")
+                                    .and(
                                         ElementMatchers.takesArguments(
-                                            java.nio.ByteBuffer.class)))))
+                                            java.nio.ByteBuffer[].class, int.class, int.class))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.NioChannelGatherWriteAdvice.class)
+                            .on(
+                                ElementMatchers.named("write")
+                                    .and(
+                                        ElementMatchers.takesArguments(
+                                            java.nio.ByteBuffer[].class, int.class, int.class)))))
         // NIO ServerSocketChannel — same abstract-base issue as SocketChannel above.
         .type(
             ElementMatchers.isSubTypeOf(java.nio.channels.ServerSocketChannel.class)
@@ -1859,6 +1898,78 @@ public final class JdkInstrumentationInstaller {
                     Advice.to(JvmRuntimeAdvice.NioChannelAcceptAdvice.class)
                         .on(
                             ElementMatchers.named("accept")
+                                .and(ElementMatchers.takesArguments(0)))));
+  }
+
+  /**
+   * {@code SocketChannel} and {@code ServerSocketChannel} as sockets: connect, accept, reads and
+   * writes (single, scattering, gathering) raise the {@code SOCKET_*} events with the channel's
+   * peer and byte count, and a socket channel's close raises {@code SOCKET_CLOSE}. Matched on the
+   * concrete subtypes, where the I/O lives; the close on {@code AbstractInterruptibleChannel}, the
+   * only class declaring it, while the channel is still open.
+   */
+  private static AgentBuilder applySocketChannelTransformations(final AgentBuilder builder) {
+    return builder
+        .type(
+            ElementMatchers.isSubTypeOf(java.nio.channels.SocketChannel.class)
+                .and(ElementMatchers.not(ElementMatchers.isAbstract()))
+                .and(ElementMatchers.not(ElementMatchers.isInterface()))
+                .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.SocketChannelConnectAdvice.class)
+                            .on(
+                                ElementMatchers.named("connect")
+                                    .and(
+                                        ElementMatchers.takesArguments(
+                                            java.net.SocketAddress.class))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.SocketChannelReadAdvice.class)
+                            .on(
+                                ElementMatchers.named("read")
+                                    .and(
+                                        ElementMatchers.takesArguments(java.nio.ByteBuffer.class))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.SocketChannelScatterReadAdvice.class)
+                            .on(
+                                ElementMatchers.named("read")
+                                    .and(
+                                        ElementMatchers.takesArguments(
+                                            java.nio.ByteBuffer[].class, int.class, int.class))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.SocketChannelWriteAdvice.class)
+                            .on(
+                                ElementMatchers.named("write")
+                                    .and(
+                                        ElementMatchers.takesArguments(java.nio.ByteBuffer.class))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.SocketChannelGatherWriteAdvice.class)
+                            .on(
+                                ElementMatchers.named("write")
+                                    .and(
+                                        ElementMatchers.takesArguments(
+                                            java.nio.ByteBuffer[].class, int.class, int.class)))))
+        .type(
+            ElementMatchers.isSubTypeOf(java.nio.channels.ServerSocketChannel.class)
+                .and(ElementMatchers.not(ElementMatchers.isAbstract()))
+                .and(ElementMatchers.not(ElementMatchers.isInterface()))
+                .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(JvmRuntimeAdvice.SocketChannelAcceptAdvice.class)
+                        .on(
+                            ElementMatchers.named("accept")
+                                .and(ElementMatchers.takesArguments(0)))))
+        .type(ElementMatchers.named("java.nio.channels.spi.AbstractInterruptibleChannel"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(JvmRuntimeAdvice.SocketChannelCloseAdvice.class)
+                        .on(
+                            ElementMatchers.named("close")
                                 .and(ElementMatchers.takesArguments(0)))));
   }
 
@@ -2707,6 +2818,20 @@ public final class JdkInstrumentationInstaller {
                                     .and(
                                         ElementMatchers.takesArgument(
                                             0, java.nio.ByteBuffer.class))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.FileChannelScatterReadAdvice.class)
+                            .on(
+                                ElementMatchers.named("read")
+                                    .and(
+                                        ElementMatchers.takesArguments(
+                                            java.nio.ByteBuffer[].class, int.class, int.class))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.FileChannelGatherWriteAdvice.class)
+                            .on(
+                                ElementMatchers.named("write")
+                                    .and(
+                                        ElementMatchers.takesArguments(
+                                            java.nio.ByteBuffer[].class, int.class, int.class))))
                     .visit(
                         Advice.to(JvmRuntimeAdvice.FileChannelForceAdvice.class)
                             .on(

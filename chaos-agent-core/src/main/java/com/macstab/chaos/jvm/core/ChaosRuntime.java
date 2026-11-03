@@ -818,6 +818,30 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
+   * Delegates to {@link ChaosDispatcher#beforeSocketChannelRead(Object, int)}.
+   *
+   * @param channel the channel being read from
+   * @param remaining the bytes the buffers can take
+   * @return the byte count to read
+   * @throws Throwable if an active scenario injects a failure
+   */
+  public int beforeSocketChannelRead(final Object channel, final int remaining) throws Throwable {
+    return dispatcher.beforeSocketChannelRead(channel, remaining);
+  }
+
+  /**
+   * Delegates to {@link ChaosDispatcher#beforeSocketChannelWrite(Object, int)}.
+   *
+   * @param channel the channel being written to
+   * @param remaining the bytes the buffers hold
+   * @return the bytes to write
+   * @throws Throwable if an active scenario injects a failure
+   */
+  public int beforeSocketChannelWrite(final Object channel, final int remaining) throws Throwable {
+    return dispatcher.beforeSocketChannelWrite(channel, remaining);
+  }
+
+  /**
    * Delegates to {@link ChaosDispatcher#beforeJndiLookup}.
    *
    * @param context the JNDI context

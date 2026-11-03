@@ -446,8 +446,14 @@ public final class BootstrapDispatcher {
   /** Handle index for {@link #corruptionSeed()}. */
   public static final int CORRUPTION_SEED = 67;
 
+  /** Handle index for {@link #beforeSocketChannelRead(Object, java.nio.ByteBuffer)}. */
+  public static final int BEFORE_SOCKET_CHANNEL_READ = 68;
+
+  /** Handle index for {@link #beforeSocketChannelWrite(Object, java.nio.ByteBuffer)}. */
+  public static final int BEFORE_SOCKET_CHANNEL_WRITE = 69;
+
   /** Total number of method-handle slots; equals the highest index plus one. */
-  public static final int HANDLE_COUNT = 68;
+  public static final int HANDLE_COUNT = 70;
 
   /** The header that carries a session id between services; {@code ChaosSession.HEADER}. */
   public static final String SESSION_HEADER = "X-Chaos-Session";
@@ -2353,6 +2359,167 @@ public final class BootstrapDispatcher {
     final java.util.SplittableRandom random = new java.util.SplittableRandom(corruptionSeed());
     final int index = offset + random.nextInt(count);
     buffer[index] = (byte) (buffer[index] ^ (1 << random.nextInt(8)));
+  }
+
+  /**
+   * Called before {@code SocketChannel.read(ByteBuffer)}: the {@code SOCKET_READ} event of a
+   * channel.
+   *
+   * @param channel the channel being read from
+   * @param buffer the buffer read into
+   * @return the shaping of the read (trickled, corrupted), or {@code null} when it runs unchanged
+   * @throws Throwable if an active scenario injects a failure
+   */
+  public static ChannelBuffers beforeSocketChannelRead(
+      final Object channel, final java.nio.ByteBuffer buffer) throws Throwable {
+    return buffer == null
+        ? null
+        : shapeOne(BEFORE_SOCKET_CHANNEL_READ, channel, buffer, buffer.remaining());
+  }
+
+  /**
+   * Called before {@code SocketChannel.read(ByteBuffer[], int, int)}, a scattering read.
+   *
+   * @param channel the channel being read from
+   * @param buffers the buffers read into
+   * @param offset the first buffer
+   * @param length the number of buffers
+   * @return the shaping of the read, or {@code null} when it runs unchanged
+   * @throws Throwable if an active scenario injects a failure
+   */
+  public static ChannelBuffers beforeSocketChannelRead(
+      final Object channel, final java.nio.ByteBuffer[] buffers, final int offset, final int length)
+      throws Throwable {
+    return shapeMany(BEFORE_SOCKET_CHANNEL_READ, channel, buffers, offset, length);
+  }
+
+  /**
+   * Called before {@code SocketChannel.write(ByteBuffer)}: the {@code SOCKET_WRITE} event of a
+   * channel.
+   *
+   * @param channel the channel being written to
+   * @param buffer the buffer written from
+   * @return the shaping of the write (torn), or {@code null} when it runs unchanged
+   * @throws Throwable if an active scenario injects a failure
+   */
+  public static ChannelBuffers beforeSocketChannelWrite(
+      final Object channel, final java.nio.ByteBuffer buffer) throws Throwable {
+    return buffer == null
+        ? null
+        : shapeOne(BEFORE_SOCKET_CHANNEL_WRITE, channel, buffer, buffer.remaining());
+  }
+
+  /**
+   * Called before {@code SocketChannel.write(ByteBuffer[], int, int)}, a gathering write.
+   *
+   * @param channel the channel being written to
+   * @param buffers the buffers written from
+   * @param offset the first buffer
+   * @param length the number of buffers
+   * @return the shaping of the write, or {@code null} when it runs unchanged
+   * @throws Throwable if an active scenario injects a failure
+   */
+  public static ChannelBuffers beforeSocketChannelWrite(
+      final Object channel, final java.nio.ByteBuffer[] buffers, final int offset, final int length)
+      throws Throwable {
+    return shapeMany(BEFORE_SOCKET_CHANNEL_WRITE, channel, buffers, offset, length);
+  }
+
+  /**
+   * Called before a gathering {@code SocketChannel.write(ByteBuffer[], int, int)}: its {@code
+   * NIO_CHANNEL_WRITE} event, as {@link #beforeNioChannelWrite(Object, int)} for one buffer.
+   *
+   * @param channel the channel being written to
+   * @param buffers the buffers written from
+   * @param offset the first buffer
+   * @param length the number of buffers
+   * @return the shaping of the write, or {@code null} when it runs unchanged
+   * @throws Throwable if an active scenario injects a failure
+   */
+  public static ChannelBuffers beforeNioChannelWrite(
+      final Object channel, final java.nio.ByteBuffer[] buffers, final int offset, final int length)
+      throws Throwable {
+    return shapeMany(BEFORE_NIO_CHANNEL_WRITE, channel, buffers, offset, length);
+  }
+
+  /**
+   * Called before a scattering read or gathering write of a {@code FileChannel}: its {@code
+   * FILE_IO_READ} or {@code FILE_IO_WRITE} event over the bytes of all the buffers.
+   *
+   * @param operation {@code "FILE_IO_READ"} or {@code "FILE_IO_WRITE"}
+   * @param channel the channel
+   * @param path the channel's path, or {@code null}
+   * @param buffers the buffers
+   * @param offset the first buffer
+   * @param length the number of buffers
+   * @return the shaping of the call (torn, corrupted), or {@code null} when it runs unchanged
+   * @throws Throwable if an active scenario injects a failure
+   */
+  public static ChannelBuffers beforeFileChannelIo(
+      final String operation,
+      final Object channel,
+      final String path,
+      final java.nio.ByteBuffer[] buffers,
+      final int offset,
+      final int length)
+      throws Throwable {
+    final int requested = ChannelBuffers.remaining(buffers, offset, length);
+    if (requested < 0) {
+      return null;
+    }
+    final int count = beforeFileIo(operation, channel, path, requested);
+    return count == requested
+        ? null
+        : ChannelBuffers.shape(buffers, offset, length, requested, count);
+  }
+
+  private static ChannelBuffers shapeOne(
+      final int slot, final Object channel, final java.nio.ByteBuffer buffer, final int requested)
+      throws Throwable {
+    final int count = countFor(slot, channel, requested);
+    return count == requested
+        ? null
+        : ChannelBuffers.shape(new java.nio.ByteBuffer[] {buffer}, 0, 1, requested, count);
+  }
+
+  private static ChannelBuffers shapeMany(
+      final int slot,
+      final Object channel,
+      final java.nio.ByteBuffer[] buffers,
+      final int offset,
+      final int length)
+      throws Throwable {
+    final int requested = ChannelBuffers.remaining(buffers, offset, length);
+    if (requested < 0) {
+      return null;
+    }
+    final int count = countFor(slot, channel, requested);
+    return count == requested
+        ? null
+        : ChannelBuffers.shape(buffers, offset, length, requested, count);
+  }
+
+  /**
+   * Invokes a {@code (Object channel, int requested) -> int count} handle: the bytes a channel call
+   * may transfer, {@code -(n) - 1} when the bytes read must be corrupted.
+   */
+  private static int countFor(final int slot, final Object channel, final int requested)
+      throws Throwable {
+    final int[] depth = DEPTH.get();
+    final MethodHandle[] h = handles;
+    final Object d = delegate;
+    if (depth[0] > 0 || d == null || h == null) {
+      return requested;
+    }
+    depth[0]++;
+    try {
+      return (int) h[slot].invoke(d, channel, requested);
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+      return requested;
+    } finally {
+      depth[0]--;
+    }
   }
 
   /**

@@ -15,6 +15,9 @@
 
 ### Features
 
+* **instrumentation:** socket channels are sockets. `SocketChannel` connect, reads and writes (also scattering and gathering) and close, and `ServerSocketChannel.accept`, raise the `SOCKET_*` events with the channel's peer and byte count, so `NetworkSelector` peer and size filters and the data effects reach NIO clients: `trickle` limits the buffers, `corruptRead` flips one bit of what the read returned, `tornWrite` is a short count, `connectionReset` closes with `SO_LINGER` 0. A Unix-domain channel's peer is its path, matched by the host pattern (the native `unix://` endpoint). The `NIO_CHANNEL_*` events still fire as before. New hook group `SOCKET_CHANNEL`; `BootstrapDispatcher.HANDLE_COUNT` is 70.
+* **instrumentation:** scattering and gathering `FileChannel` reads and writes (`ByteBuffer[]`) are `FILE_IO_READ` / `FILE_IO_WRITE` events over all their bytes, with `tornWrite` and `corruptRead`; gathering socket-channel writes are torn by `NIO_CHANNEL_WRITE` as single ones are.
+
 * **docs:** Java examples fenced as `java verified` are compiled by `CrossLayerDocSyncTest` against the API, so they cannot drift from it; `docs/api.md` and `docs/cross-layer.md` carry the first ones.
 * **demos:** `demo/` holds one-fault demos (connect refused, trickle, disk full by path, DNS override, clock skew, process limit, HTTP reject, slow executor), each a single-file program with its plan and expected output; `demo/run-all.sh` runs and checks them, and CI runs it.
 * **micronaut, quarkus:** management endpoints matching the Spring actuator: Micronaut `@Endpoint("chaos")` (`ChaosManagementEndpoint`, with `micronaut-management`) and the Quarkus route `/q/chaos`, both off unless `macstab.chaos.management.enabled=true`; snapshot, activate a plan, stop one, stop all. The shared logic is `ChaosManagement` in the agent. The Quarkus extension now depends on `quarkus-vertx-http`.
@@ -67,6 +70,8 @@
 
 
 ### Bug Fixes
+
+* **instrumentation:** a class loaded as a side effect of weaving one hook group (inside another class's load hook) escaped the transformers of groups woven before it; the post-install retransformation that repaired this for the object streams now runs after every weave and covers the socket classes.
 
 * **instrumentation:** a torn socket stream write now really resets the connection (`SO_LINGER` 0, then close) after sending its prefix; before, the socket stayed open, so the peer saw neither a reset nor an end of stream and the writer could keep writing.
 * **core:** `randomSeed` now also fixes the effects' own random choices: the torn-write length, the bit `corruptRead()` flips and the `SHUFFLE` order of a DNS answer, each derived from the match's seed. They were drawn from `ThreadLocalRandom`, so a seeded run could not reproduce them.

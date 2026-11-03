@@ -561,6 +561,16 @@ final class ChaosBridge implements BridgeDelegate {
     runtime.beforeSocketClose(socket);
   }
 
+  @Override
+  public int beforeSocketChannelRead(final Object channel, final int remaining) throws Throwable {
+    return runtime.beforeSocketChannelRead(channel, remaining);
+  }
+
+  @Override
+  public int beforeSocketChannelWrite(final Object channel, final int remaining) throws Throwable {
+    return runtime.beforeSocketChannelWrite(channel, remaining);
+  }
+
   /**
    * Invoked before a JNDI {@code lookup} call.
    *

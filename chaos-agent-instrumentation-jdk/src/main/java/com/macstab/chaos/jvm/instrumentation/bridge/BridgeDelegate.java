@@ -477,6 +477,26 @@ public interface BridgeDelegate {
   void beforeSocketClose(Object socket) throws Throwable;
 
   /**
+   * Called before a {@code SocketChannel} read: its {@code SOCKET_READ} event.
+   *
+   * @param channel the channel being read from
+   * @param remaining the bytes the buffers can take
+   * @return the bytes to read, or {@code -(n) - 1} when the bytes read must be corrupted
+   * @throws Throwable if an active scenario injects a failure
+   */
+  int beforeSocketChannelRead(Object channel, int remaining) throws Throwable;
+
+  /**
+   * Called before a {@code SocketChannel} write: its {@code SOCKET_WRITE} event.
+   *
+   * @param channel the channel being written to
+   * @param remaining the bytes the buffers hold
+   * @return the bytes to write: {@code remaining}, or fewer under a torn write
+   * @throws Throwable if an active scenario injects a failure
+   */
+  int beforeSocketChannelWrite(Object channel, int remaining) throws Throwable;
+
+  /**
    * Called before {@link javax.naming.InitialContext#lookup(String)}.
    *
    * @param context the {@code InitialContext} performing the lookup; never {@code null}

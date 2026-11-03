@@ -1226,8 +1226,32 @@ class DefectRegressionIntegrationTest {
       assertThat(result.value("peerEnd")).isEqualTo("reset");
       assertThat(result.value("afterTorn")).isEqualTo("Socket closed");
       assertThat(result.longValue("channelFirstWrite")).isBetween(1L, 999L);
-      assertThat(result.longValue("applied.torn-stream")).isEqualTo(1L);
+      // SOCKET_WRITE matches the stream write and, a socket write too, the channel write
+      assertThat(result.longValue("applied.torn-stream")).isEqualTo(2L);
       assertThat(result.longValue("applied.torn-channel")).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("socket channels are sockets: peer filters, trickle, corrupt, torn, reset")
+    void socketChannels() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.runWithoutPlan(DefectProbeMain.class, "socket-channel");
+      // trickle(16) on a 1000-byte read, matched by the channel's peer address and port
+      assertThat(result.longValue("trickledRead")).isEqualTo(16L);
+      // connectionReset on the channel's close: the peer reads a reset
+      assertThat(result.value("closePeer")).isEqualTo("reset");
+      // corruptRead flips one bit per scattering read across both buffers
+      assertThat(result.longValue("bitsFlipped")).isEqualTo(result.longValue("scatterReads"));
+      assertThat(result.longValue("tornWrite")).isBetween(1L, 599L);
+      assertThat(result.longValue("tornGather")).isBetween(1L, 1199L);
+      assertThat(result.value("secondPeer")).isEqualTo("eof");
+      // only the client's side matched: the server's stream calls have another peer port
+      assertThat(result.longValue("applied.jvm::channel-trickle")).isEqualTo(1L);
+      assertThat(result.longValue("applied.jvm::channel-reset")).isEqualTo(1L);
+      assertThat(result.longValue("applied.jvm::channel-torn")).isEqualTo(2L);
+      // a Unix-domain channel's peer is its path: the host pattern matches the client's read only
+      assertThat(result.longValue("unixRead")).isEqualTo(4L);
+      assertThat(result.longValue("applied.jvm::unix-trickle")).isEqualTo(1L);
     }
   }
 

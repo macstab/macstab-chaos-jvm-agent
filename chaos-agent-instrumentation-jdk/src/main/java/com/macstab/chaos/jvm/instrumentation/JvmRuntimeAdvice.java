@@ -1,6 +1,7 @@
 package com.macstab.chaos.jvm.instrumentation;
 
 import com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher;
+import com.macstab.chaos.jvm.instrumentation.bridge.ChannelBuffers;
 import net.bytebuddy.asm.Advice;
 
 /**
@@ -367,6 +368,153 @@ final class JvmRuntimeAdvice {
         @Advice.Argument(0) final java.nio.ByteBuffer buffer) {
       if (originalLimit >= 0) {
         buffer.limit(originalLimit);
+      }
+    }
+  }
+
+  /**
+   * Intercepts {@code ScatteringByteChannel.read(ByteBuffer[], int, int)} of a socket channel
+   * (NIO_CHANNEL_READ).
+   */
+  static final class NioChannelScatterReadAdvice {
+    @Advice.OnMethodEnter
+    static void enter(@Advice.This final Object channel) throws Throwable {
+      BootstrapDispatcher.beforeNioChannelOp("NIO_CHANNEL_READ", channel);
+    }
+  }
+
+  /**
+   * Intercepts {@code GatheringByteChannel.write(ByteBuffer[], int, int)} of a socket channel
+   * (NIO_CHANNEL_WRITE): a torn write limits the buffers, so the channel writes fewer bytes.
+   */
+  static final class NioChannelGatherWriteAdvice {
+    @Advice.OnMethodEnter
+    static ChannelBuffers enter(
+        @Advice.This final Object channel,
+        @Advice.Argument(0) final java.nio.ByteBuffer[] buffers,
+        @Advice.Argument(1) final int offset,
+        @Advice.Argument(2) final int length)
+        throws Throwable {
+      return BootstrapDispatcher.beforeNioChannelWrite(channel, buffers, offset, length);
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit(
+        @Advice.Enter final ChannelBuffers shaping, @Advice.Return final long written) {
+      if (shaping != null) {
+        shaping.finish(written);
+      }
+    }
+  }
+
+  // ── Socket channels as sockets (SOCKET_*) ────────────────────────────────
+
+  /** Intercepts {@code SocketChannel.connect(SocketAddress)} (SOCKET_CONNECT, no timeout). */
+  static final class SocketChannelConnectAdvice {
+    @Advice.OnMethodEnter
+    static void enter(
+        @Advice.This final Object channel, @Advice.Argument(0) final Object socketAddress)
+        throws Throwable {
+      BootstrapDispatcher.beforeSocketConnect(channel, socketAddress, 0);
+    }
+  }
+
+  /** Intercepts {@code ServerSocketChannel.accept()} (SOCKET_ACCEPT). */
+  static final class SocketChannelAcceptAdvice {
+    @Advice.OnMethodEnter
+    static void enter(@Advice.This final Object channel) throws Throwable {
+      BootstrapDispatcher.beforeSocketAccept(channel);
+    }
+  }
+
+  /**
+   * Intercepts {@code SocketChannel.read(ByteBuffer)} (SOCKET_READ): a trickle limits the buffer, a
+   * corruption flips one bit of the bytes read.
+   */
+  static final class SocketChannelReadAdvice {
+    @Advice.OnMethodEnter
+    static ChannelBuffers enter(
+        @Advice.This final Object channel, @Advice.Argument(0) final java.nio.ByteBuffer buffer)
+        throws Throwable {
+      return BootstrapDispatcher.beforeSocketChannelRead(channel, buffer);
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit(@Advice.Enter final ChannelBuffers shaping, @Advice.Return final int read) {
+      if (shaping != null) {
+        shaping.finish(read);
+      }
+    }
+  }
+
+  /** Intercepts {@code SocketChannel.read(ByteBuffer[], int, int)} (SOCKET_READ, scattering). */
+  static final class SocketChannelScatterReadAdvice {
+    @Advice.OnMethodEnter
+    static ChannelBuffers enter(
+        @Advice.This final Object channel,
+        @Advice.Argument(0) final java.nio.ByteBuffer[] buffers,
+        @Advice.Argument(1) final int offset,
+        @Advice.Argument(2) final int length)
+        throws Throwable {
+      return BootstrapDispatcher.beforeSocketChannelRead(channel, buffers, offset, length);
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit(@Advice.Enter final ChannelBuffers shaping, @Advice.Return final long read) {
+      if (shaping != null) {
+        shaping.finish(read);
+      }
+    }
+  }
+
+  /** Intercepts {@code SocketChannel.write(ByteBuffer)} (SOCKET_WRITE): torn is a short count. */
+  static final class SocketChannelWriteAdvice {
+    @Advice.OnMethodEnter
+    static ChannelBuffers enter(
+        @Advice.This final Object channel, @Advice.Argument(0) final java.nio.ByteBuffer buffer)
+        throws Throwable {
+      return BootstrapDispatcher.beforeSocketChannelWrite(channel, buffer);
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit(@Advice.Enter final ChannelBuffers shaping, @Advice.Return final int written) {
+      if (shaping != null) {
+        shaping.finish(written);
+      }
+    }
+  }
+
+  /** Intercepts {@code SocketChannel.write(ByteBuffer[], int, int)} (SOCKET_WRITE, gathering). */
+  static final class SocketChannelGatherWriteAdvice {
+    @Advice.OnMethodEnter
+    static ChannelBuffers enter(
+        @Advice.This final Object channel,
+        @Advice.Argument(0) final java.nio.ByteBuffer[] buffers,
+        @Advice.Argument(1) final int offset,
+        @Advice.Argument(2) final int length)
+        throws Throwable {
+      return BootstrapDispatcher.beforeSocketChannelWrite(channel, buffers, offset, length);
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit(
+        @Advice.Enter final ChannelBuffers shaping, @Advice.Return final long written) {
+      if (shaping != null) {
+        shaping.finish(written);
+      }
+    }
+  }
+
+  /**
+   * Intercepts {@code AbstractInterruptibleChannel.close()} of a socket channel (SOCKET_CLOSE),
+   * while it is still open, so a {@code connectionReset()} can set linger 0 before it closes.
+   */
+  static final class SocketChannelCloseAdvice {
+    @Advice.OnMethodEnter
+    static void enter(@Advice.This final Object channel) throws Throwable {
+      if (channel instanceof java.nio.channels.SocketChannel
+          && ((java.nio.channels.Channel) channel).isOpen()) {
+        BootstrapDispatcher.beforeSocketClose(channel);
       }
     }
   }
@@ -1081,6 +1229,51 @@ final class JvmRuntimeAdvice {
         @Advice.Argument(0) final java.nio.ByteBuffer buffer) {
       if (originalLimit >= 0) {
         buffer.limit(originalLimit);
+      }
+    }
+  }
+
+  /** Intercepts {@code FileChannelImpl.read(ByteBuffer[], int, int)}, a scattering read. */
+  static final class FileChannelScatterReadAdvice {
+    @Advice.OnMethodEnter
+    static ChannelBuffers enter(
+        @Advice.This final Object channel,
+        @Advice.Argument(0) final java.nio.ByteBuffer[] buffers,
+        @Advice.Argument(1) final int offset,
+        @Advice.Argument(2) final int length,
+        @Advice.FieldValue("path") final String path)
+        throws Throwable {
+      return BootstrapDispatcher.beforeFileChannelIo(
+          "FILE_IO_READ", channel, path, buffers, offset, length);
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit(@Advice.Enter final ChannelBuffers shaping, @Advice.Return final long read) {
+      if (shaping != null) {
+        shaping.finish(read);
+      }
+    }
+  }
+
+  /** Intercepts {@code FileChannelImpl.write(ByteBuffer[], int, int)}, a gathering write. */
+  static final class FileChannelGatherWriteAdvice {
+    @Advice.OnMethodEnter
+    static ChannelBuffers enter(
+        @Advice.This final Object channel,
+        @Advice.Argument(0) final java.nio.ByteBuffer[] buffers,
+        @Advice.Argument(1) final int offset,
+        @Advice.Argument(2) final int length,
+        @Advice.FieldValue("path") final String path)
+        throws Throwable {
+      return BootstrapDispatcher.beforeFileChannelIo(
+          "FILE_IO_WRITE", channel, path, buffers, offset, length);
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit(
+        @Advice.Enter final ChannelBuffers shaping, @Advice.Return final long written) {
+      if (shaping != null) {
+        shaping.finish(written);
       }
     }
   }

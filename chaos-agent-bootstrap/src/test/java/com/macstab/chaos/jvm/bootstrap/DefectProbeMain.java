@@ -101,6 +101,7 @@ public final class DefectProbeMain {
       case "session-header" -> sessionHeader();
       case "pool-worker-session" -> poolWorkerSession();
       case "socket-torn-write" -> socketTornWrite();
+      case "socket-channel" -> socketChannel();
       case "method-weaving" -> methodWeaving();
       case "woven-groups" -> printWovenGroups();
       case "woven-groups-after-thread-local" -> wovenGroupsAfterThreadLocal();
@@ -812,6 +813,160 @@ public final class DefectProbeMain {
         accepted.close();
       }
     }
+  }
+
+  /**
+   * Socket channels as sockets, filtered on the server's port so only the client's side matches.
+   * Phase one trickles the client's reads and resets its close; phase two corrupts its reads and
+   * tears its writes, single and gathered. Prints what the client and the server saw.
+   */
+  private static void socketChannel() throws Exception {
+    final byte[] payload = new byte[1000];
+    for (int i = 0; i < payload.length; i++) {
+      payload[i] = (byte) i;
+    }
+    final ChaosControlPlane plane = ChaosPlatform.current();
+    try (java.net.ServerSocket server =
+        new java.net.ServerSocket(0, 2, InetAddress.getByName("127.0.0.1"))) {
+      final int port = server.getLocalPort();
+      final java.util.function.Function<String, ChaosSelector> clientSide =
+          operation ->
+              new ChaosSelector.NetworkSelector(
+                  Set.of(OperationType.valueOf(operation)),
+                  NamePattern.any(),
+                  "127.0.0.1",
+                  port,
+                  null,
+                  null);
+
+      final ChaosActivationHandle trickle =
+          plane.activate(
+              ChaosScenario.builder("channel-trickle")
+                  .selector(clientSide.apply("SOCKET_READ"))
+                  .effect(ChaosEffect.trickle(16))
+                  .build());
+      final ChaosActivationHandle reset =
+          plane.activate(
+              ChaosScenario.builder("channel-reset")
+                  .selector(clientSide.apply("SOCKET_CLOSE"))
+                  .effect(ChaosEffect.connectionReset())
+                  .build());
+      final java.util.concurrent.CompletableFuture<String> firstPeer = serve(server, payload);
+      try (java.nio.channels.SocketChannel channel =
+          java.nio.channels.SocketChannel.open(new InetSocketAddress("127.0.0.1", port))) {
+        final java.nio.ByteBuffer buffer = java.nio.ByteBuffer.allocate(payload.length);
+        System.out.println("trickledRead=" + channel.read(buffer));
+      }
+      System.out.println("closePeer=" + firstPeer.get(5, TimeUnit.SECONDS));
+      printApplied(trickle, reset);
+
+      final ChaosActivationHandle corrupt =
+          plane.activate(
+              ChaosScenario.builder("channel-corrupt")
+                  .selector(clientSide.apply("SOCKET_READ"))
+                  .effect(ChaosEffect.corruptRead())
+                  .build());
+      final ChaosActivationHandle torn =
+          plane.activate(
+              ChaosScenario.builder("channel-torn")
+                  .selector(clientSide.apply("SOCKET_WRITE"))
+                  .effect(ChaosEffect.tornWrite())
+                  .build());
+      final java.util.concurrent.CompletableFuture<String> secondPeer = serve(server, payload);
+      try (java.nio.channels.SocketChannel channel =
+          java.nio.channels.SocketChannel.open(new InetSocketAddress("127.0.0.1", port))) {
+        final java.nio.ByteBuffer first = java.nio.ByteBuffer.allocate(400);
+        final java.nio.ByteBuffer second = java.nio.ByteBuffer.allocate(payload.length - 400);
+        int reads = 0;
+        while (second.hasRemaining()
+            && channel.read(new java.nio.ByteBuffer[] {first, second}, 0, 2) > 0) {
+          reads++;
+        }
+        int flipped = 0;
+        for (int i = 0; i < payload.length; i++) {
+          final byte got = i < 400 ? first.get(i) : second.get(i - 400);
+          flipped += Integer.bitCount((got ^ payload[i]) & 0xFF);
+        }
+        System.out.println("scatterReads=" + reads);
+        System.out.println("bitsFlipped=" + flipped);
+        System.out.println("tornWrite=" + channel.write(java.nio.ByteBuffer.allocate(600)));
+        System.out.println(
+            "tornGather="
+                + channel.write(
+                    new java.nio.ByteBuffer[] {
+                      java.nio.ByteBuffer.allocate(600), java.nio.ByteBuffer.allocate(600)
+                    }));
+      }
+      System.out.println("secondPeer=" + secondPeer.get(5, TimeUnit.SECONDS));
+      printApplied(corrupt, torn);
+    }
+    unixSocketChannel();
+  }
+
+  /**
+   * A Unix-domain socket channel: its peer is the socket's path, which a {@code NetworkSelector}
+   * host pattern matches. Trickles the client's read of the server's 100 bytes to 4.
+   */
+  private static void unixSocketChannel() throws Exception {
+    final java.nio.file.Path dir = java.nio.file.Files.createTempDirectory("chaos-unix");
+    final java.nio.file.Path path = dir.resolve("app.sock");
+    final ChaosActivationHandle trickle =
+        ChaosPlatform.current()
+            .activate(
+                ChaosScenario.builder("unix-trickle")
+                    .selector(
+                        ChaosSelector.network(
+                            Set.of(OperationType.SOCKET_READ), NamePattern.exact(path.toString())))
+                    .effect(ChaosEffect.trickle(4))
+                    .build());
+    try (java.nio.channels.ServerSocketChannel server =
+        java.nio.channels.ServerSocketChannel.open(java.net.StandardProtocolFamily.UNIX)) {
+      server.bind(java.net.UnixDomainSocketAddress.of(path));
+      try (java.nio.channels.SocketChannel client =
+              java.nio.channels.SocketChannel.open(java.net.UnixDomainSocketAddress.of(path));
+          java.nio.channels.SocketChannel accepted = server.accept()) {
+        accepted.write(java.nio.ByteBuffer.allocate(100));
+        System.out.println("unixRead=" + client.read(java.nio.ByteBuffer.allocate(100)));
+      }
+    } finally {
+      printApplied(trickle);
+      java.nio.file.Files.deleteIfExists(path);
+      java.nio.file.Files.deleteIfExists(dir);
+    }
+  }
+
+  /** Prints each handle's applied count, then closes it. */
+  private static void printApplied(final ChaosActivationHandle... handles) {
+    for (final ChaosActivationHandle handle : handles) {
+      System.out.println("applied." + handle.id() + "=" + handle.appliedCount());
+      handle.close();
+    }
+  }
+
+  /**
+   * Accepts one connection, sends {@code payload}, then reads until the client goes away; completes
+   * with {@code "reset"} or {@code "eof"}.
+   */
+  private static java.util.concurrent.CompletableFuture<String> serve(
+      final java.net.ServerSocket server, final byte[] payload) {
+    return java.util.concurrent.CompletableFuture.supplyAsync(
+        () -> {
+          try (java.net.Socket accepted = server.accept()) {
+            accepted.getOutputStream().write(payload);
+            accepted.getOutputStream().flush();
+            final byte[] buffer = new byte[4096];
+            try {
+              while (accepted.getInputStream().read(buffer) > 0) {
+                // drain what the client writes
+              }
+              return "eof";
+            } catch (final java.io.IOException reset) {
+              return "reset";
+            }
+          } catch (final java.io.IOException failed) {
+            return "failed: " + failed.getMessage();
+          }
+        });
   }
 
   /**

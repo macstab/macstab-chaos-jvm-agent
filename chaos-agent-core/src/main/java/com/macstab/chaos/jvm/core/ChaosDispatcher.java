@@ -1392,6 +1392,100 @@ public final class ChaosDispatcher {
   }
 
   /**
+   * Called before {@link java.nio.channels.SocketChannel#read(java.nio.ByteBuffer)} (and its
+   * scattering variant): the same {@code SOCKET_READ} event as a socket stream read, with the
+   * channel's peer and the bytes the buffers can take. A channel has no {@code SO_TIMEOUT}, so a
+   * {@code TimeoutEffect} never fires on it.
+   *
+   * @param channel the channel being read from
+   * @param remaining the bytes the buffers can take
+   * @return the byte count to read, as {@link #beforeSocketRead}
+   * @throws Throwable if an active scenario throws to simulate a failure
+   */
+  public int beforeSocketChannelRead(final Object channel, final int remaining) throws Throwable {
+    if (idle(OperationType.SOCKET_READ)) {
+      return remaining;
+    }
+    return readCount(
+        evaluate(socketContext(OperationType.SOCKET_READ, channel, remaining, peerOf(channel), 0)),
+        remaining);
+  }
+
+  /**
+   * Called before {@link java.nio.channels.SocketChannel#write(java.nio.ByteBuffer)} (and its
+   * gathering variant): the same {@code SOCKET_WRITE} event as a socket stream write, with the
+   * channel's peer and the bytes the buffers hold. A torn write is a short count, which channel
+   * callers loop on.
+   *
+   * @param channel the channel being written to
+   * @param remaining the bytes the buffers hold
+   * @return the bytes to write: {@code remaining}, or fewer under a torn write
+   * @throws Throwable if an active scenario throws to simulate a failure
+   */
+  public int beforeSocketChannelWrite(final Object channel, final int remaining) throws Throwable {
+    if (idle(OperationType.SOCKET_WRITE)) {
+      return remaining;
+    }
+    return readCount(
+        evaluate(
+            socketContext(
+                OperationType.SOCKET_WRITE,
+                channel,
+                remaining,
+                peerOf(channel),
+                InvocationContext.UNKNOWN)),
+        remaining);
+  }
+
+  /**
+   * The context of a socket event on {@code endpoint} with peer {@code peer}: an IP peer matches by
+   * address, port and host name, a Unix-domain peer by its path as the host.
+   */
+  private InvocationContext socketContext(
+      final OperationType operation,
+      final Object endpoint,
+      final int byteCount,
+      final java.net.SocketAddress peer,
+      final int timeoutMillis) {
+    final InetSocketAddress inet = peer instanceof InetSocketAddress address ? address : null;
+    return new InvocationContext(
+        operation,
+        endpoint == null ? "java.nio.channels.SocketChannel" : endpoint.getClass().getName(),
+        null,
+        inet != null ? remoteHost(inet.getAddress()) : peer == null ? null : peer.toString(),
+        false,
+        null,
+        null,
+        scopeContext.currentSessionId(),
+        byteCount,
+        null,
+        inet == null ? null : inet.getAddress(),
+        inet == null ? InvocationContext.UNKNOWN : inet.getPort(),
+        null,
+        timeoutMillis);
+  }
+
+  /**
+   * The peer of a connected socket or socket channel, or {@code null} when it has none (not
+   * connected, closed, or another kind of endpoint).
+   */
+  static java.net.SocketAddress peerOf(final Object endpoint) {
+    if (endpoint instanceof java.net.Socket socket) {
+      return socket.getInetAddress() == null
+          ? null
+          : new InetSocketAddress(socket.getInetAddress(), socket.getPort());
+    }
+    if (endpoint instanceof java.nio.channels.SocketChannel channel) {
+      try {
+        return channel.getRemoteAddress();
+      } catch (final java.io.IOException closed) {
+        return null;
+      }
+    }
+    return null;
+  }
+
+  /**
    * Called before a child process is started.
    *
    * @param command the program, the first element of the command; {@code null} if empty
@@ -1454,41 +1548,42 @@ public final class ChaosDispatcher {
    * @throws Throwable if an active scenario throws to simulate a failure
    */
   public void beforeSocketClose(final Object socket) throws Throwable {
+    if (idle(OperationType.SOCKET_CLOSE)) {
+      return;
+    }
     final RuntimeDecision decision =
-        (idle(OperationType.SOCKET_CLOSE)
-            ? RuntimeDecision.none()
-            : evaluate(
-                new InvocationContext(
-                    OperationType.SOCKET_CLOSE,
-                    socket == null ? "java.net.Socket" : socket.getClass().getName(),
-                    null,
-                    socket instanceof java.net.Socket s ? remoteHost(s.getInetAddress()) : null,
-                    false,
-                    null,
-                    null,
-                    scopeContext.currentSessionId(),
-                    InvocationContext.UNKNOWN,
-                    null,
-                    socket instanceof java.net.Socket s ? s.getInetAddress() : null,
-                    socket instanceof java.net.Socket s && s.getInetAddress() != null
-                        ? s.getPort()
-                        : InvocationContext.UNKNOWN,
-                    null,
-                    InvocationContext.UNKNOWN)));
+        evaluate(
+            socketContext(
+                OperationType.SOCKET_CLOSE,
+                socket,
+                InvocationContext.UNKNOWN,
+                peerOf(socket),
+                InvocationContext.UNKNOWN));
     if (decision.terminalAction() != null
         && decision.terminalAction().kind() == TerminalKind.ABORTIVE_CLOSE) {
       applyDelayAndGate(decision);
-      if (socket instanceof java.net.Socket closing && !closing.isClosed()) {
-        try {
-          // Linger 0: close() discards unsent data and sends RST instead of FIN.
-          closing.setSoLinger(true, 0);
-        } catch (final java.net.SocketException alreadyBroken) {
-          // the connection is already gone; close normally
-        }
-      }
+      lingerZero(socket);
       return;
     }
     applyPreDecision(decision);
+  }
+
+  /**
+   * Sets linger 0 on an open socket or socket channel, so its close discards unsent data and sends
+   * RST instead of FIN.
+   */
+  private static void lingerZero(final Object endpoint) {
+    try {
+      if (endpoint instanceof java.net.Socket socket && !socket.isClosed()) {
+        socket.setSoLinger(true, 0);
+      } else if (endpoint instanceof java.nio.channels.NetworkChannel channel
+          && channel.isOpen()
+          && channel.supportedOptions().contains(java.net.StandardSocketOptions.SO_LINGER)) {
+        channel.setOption(java.net.StandardSocketOptions.SO_LINGER, 0);
+      }
+    } catch (final java.io.IOException alreadyBroken) {
+      // the connection is already gone; close normally
+    }
   }
 
   /**

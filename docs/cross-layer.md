@@ -49,6 +49,8 @@ The evaluation order of a JVM scenario is in [semantics.md](semantics.md); the n
 | `pthread_create`                        | `ChaosSelector.thread(Set.of(OperationType.THREAD_START), ChaosSelector.ThreadKind.PLATFORM)`        | `{"type": "thread", "operations": ["THREAD_START"], "kind": "PLATFORM"}`  |
 | `posix_spawn`, `fork`, `execve` (process) | `ChaosSelector.process(NamePattern.exact("git"))`: `ProcessBuilder.start` and `Runtime.exec` (`OperationType.PROCESS_START`) | `{"type": "process", "operations": ["PROCESS_START"], "commandPattern": {"mode": "EXACT", "value": "git"}}` |
 
+A `unix:///run/app.sock` endpoint is `ChaosSelector.network(ops, NamePattern.exact("/run/app.sock"))`: the peer of a Unix-domain `SocketChannel` is its path. Socket events cover `java.net.Socket` and `SocketChannel` alike (single, scattering and gathering reads and writes), so the filters and data effects below reach NIO clients too.
+
 The JVM matches on what the Java call carries: a socket call matches by peer address and port (`remoteCidr`, `remotePort`) and also by the host name the application used (`ChaosSelector.network(ops, NamePattern.exact("db.internal"))`), which the native layer never sees. Path filters are lexical on both layers; neither resolves symbolic links.
 
 ---
@@ -108,7 +110,6 @@ Different rules: the native `FAIL_AFTER` counter is per operation and resets on 
 | `OFFSET`/`REGRESS` seen by every `System.currentTimeMillis()` and `System.nanoTime()` read, JDK and libraries included | both are JIT intrinsics; the agent skews `java.time` and `java.util.Date` reads, and direct calls only at the call sites in the packages named with `clockCallSites` (`OperationType.SYSTEM_CLOCK_MILLIS`, `OperationType.SYSTEM_CLOCK_NANOS`). Use the native time rule to move the clock beneath everything in the JVM. |
 | `clock_gettime/monotonic` beneath the JDK     | `System.nanoTime()` is an intrinsic (as above); only opted-in call sites are skewed |
 | `DUP`, `SERVICE`                              | no JVM effect duplicates received data or rewrites a resolved service port                                        |
-| `unix://` endpoints                           | Unix-domain sockets are not intercepted                                                                           |
 | `mmap`, `munmap`, `mprotect`, `madvise`       | the JVM does not expose memory mapping calls; the pressure stressors (`ChaosEffect.heapPressure(...)`, `ChaosEffect.directBufferPressure(...)`) are the JVM-level analogue |
 | `fork`, `waitpid`, failing `execve` of the child | the agent fails the start itself (`PROCESS_START`, below); waiting for a process is not intercepted, and a JVM child process reaches the native process rules |
 | `pthread_create:ERRNO:EAGAIN`                 | `ChaosEffect.reject("...")` on `OperationType.THREAD_START` throws `RejectedExecutionException`, not the `OutOfMemoryError: unable to create native thread` the JDK throws; use the native rule for the exact error |
