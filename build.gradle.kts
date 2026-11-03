@@ -9,6 +9,7 @@ buildscript {
     }
     dependencies {
         classpath("com.diffplug.spotless:spotless-plugin-gradle:8.2.1")
+        classpath("org.jacoco:org.jacoco.core:0.8.12")
     }
 }
 
@@ -41,17 +42,34 @@ val nonPublishableModules = setOf(
     "sb4-virtual-thread-pinning",
 )
 
+// The modules whose classes run in the child JVMs of chaos-agent-bootstrap's tests, inside the
+// shaded agent jar. Their coverage includes what those JVMs executed (see childJvmCoverage).
+val agentModules =
+    listOf(
+        "chaos-agent-api",
+        "chaos-agent-core",
+        "chaos-agent-instrumentation-jdk",
+        "chaos-agent-startup-config",
+        "chaos-agent-bootstrap",
+    )
+
+// Advice bodies are inlined into the JDK and library classes they instrument and never run as the
+// advice classes JaCoCo measures; HookCoverageIntegrationTest requires every one of them to match
+// a method, and the child-JVM tests exercise what they do. Left out of the coverage denominator.
+val inlinedAdvice =
+    listOf(
+        "**/instrumentation/*Advice.class",
+        "**/instrumentation/*Advice$*.class",
+    )
+
 // Coverage floor per module: (line, branch) covered ratio enforced by `check`. A ratchet: set a
 // little below the measured value and raised as tests are added, never lowered to make a change
-// pass. chaos-agent-instrumentation-jdk is low by construction: advice bodies are inlined into the
-// JDK and library classes they instrument and never execute as the advice classes JaCoCo measures,
-// and the -javaagent child JVMs run the shaded agent jar, whose class bytes differ from these. The
-// advice is covered behaviourally by the child-JVM tests in chaos-agent-bootstrap.
+// pass. The agent modules count what their unit tests and the child JVMs executed (agentModules).
 val coverageFloors = mapOf(
-    "chaos-agent-api" to (0.65 to 0.63),
-    "chaos-agent-bootstrap" to (0.63 to 0.48),
-    "chaos-agent-core" to (0.73 to 0.65),
-    "chaos-agent-instrumentation-jdk" to (0.14 to 0.10),
+    "chaos-agent-api" to (0.81 to 0.73),
+    "chaos-agent-bootstrap" to (0.79 to 0.64),
+    "chaos-agent-core" to (0.83 to 0.75),
+    "chaos-agent-instrumentation-jdk" to (0.81 to 0.59),
     "chaos-agent-micrometer" to (0.89 to 0.60),
     "chaos-agent-opentelemetry" to (0.85 to 0.60),
     "chaos-agent-micronaut-integration" to (0.85 to 0.70),
@@ -64,7 +82,7 @@ val coverageFloors = mapOf(
     "chaos-agent-spring-boot3-test-starter" to (0.84 to 0.53),
     "chaos-agent-spring-boot4-starter" to (0.68 to 0.73),
     "chaos-agent-spring-boot4-test-starter" to (0.84 to 0.53),
-    "chaos-agent-startup-config" to (0.75 to 0.62),
+    "chaos-agent-startup-config" to (0.81 to 0.66),
     "chaos-agent-testkit" to (0.84 to 0.79),
 )
 
@@ -139,6 +157,19 @@ subprojects {
             xml.required.set(true)
             html.required.set(true)
             csv.required.set(false)
+        }
+    }
+
+    if (name in agentModules) {
+        val childCoverage = rootProject.layout.buildDirectory.file("jacoco/child-jvms-remapped.exec")
+        tasks.withType<JacocoReportBase>().configureEach {
+            dependsOn(":childJvmCoverage")
+            executionData(childCoverage)
+            if (project.name == "chaos-agent-instrumentation-jdk") {
+                classDirectories.setFrom(
+                    classDirectories.files.map { fileTree(it) { exclude(inlinedAdvice) } },
+                )
+            }
         }
     }
 
@@ -404,6 +435,50 @@ tasks.register("releaseToCentral") {
             logger.error("  2. Find ${project.group}")
             logger.error("  3. Click Publish")
             throw GradleException("Failed to publish to Maven Central (exit code: $exitCode)")
+        }
+    }
+}
+
+// The child JVMs run the shaded agent jar. Shading re-encodes every class (the constant pool is
+// reordered, the bytecode is the same), so JaCoCo's class ids differ from the module classes' and
+// their execution data would be ignored. This task keys each class's execution data to the id of
+// the module class of the same name. JaCoCo checks the probe layout when it analyses a class and
+// fails the report if the data does not fit, so a class whose bytecode differed cannot slip through.
+tasks.register("childJvmCoverage") {
+    description = "Remaps the child JVMs' coverage of the shaded agent jar onto the module classes."
+    dependsOn(":chaos-agent-bootstrap:test")
+    val source = project(":chaos-agent-bootstrap").layout.buildDirectory.file("jacoco/child-jvms.exec")
+    val target = layout.buildDirectory.file("jacoco/child-jvms-remapped.exec")
+    val classDirs = agentModules.map { project(":$it").layout.buildDirectory.dir("classes/java/main") }
+    outputs.file(target)
+    doLast {
+        val out = target.get().asFile
+        out.parentFile.mkdirs()
+        val loader = org.jacoco.core.tools.ExecFileLoader()
+        val src = source.get().asFile
+        if (src.exists()) {
+            loader.load(src)
+        }
+        val classes = mutableMapOf<String, ByteArray>()
+        classDirs.map { it.get().asFile }.filter { it.isDirectory }.forEach { dir ->
+            dir.walkTopDown().filter { it.extension == "class" }.forEach { file ->
+                classes[file.relativeTo(dir).invariantSeparatorsPath.removeSuffix(".class")] = file.readBytes()
+            }
+        }
+        val remapped = org.jacoco.core.data.ExecutionDataStore()
+        loader.executionDataStore.contents.forEach { data ->
+            classes[data.name]?.let { bytes ->
+                remapped.put(
+                    org.jacoco.core.data.ExecutionData(
+                        org.jacoco.core.internal.data.CRC64.classId(bytes), data.name, data.probes.clone(),
+                    ),
+                )
+            }
+        }
+        out.outputStream().use { stream ->
+            val writer = org.jacoco.core.data.ExecutionDataWriter(stream)
+            loader.sessionInfoStore.accept(writer)
+            remapped.accept(writer)
         }
     }
 }

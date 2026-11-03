@@ -1558,16 +1558,18 @@ class DefectRegressionIntegrationTest {
           "{\n  \"metadata\": {\"name\": \"p\"},\n  \"scenarios\": [ { \"idd\": 1 } ]\n}\n");
       final Process process =
           new ProcessBuilder(
-                  Path.of(System.getProperty("java.home"), "bin", "java").toString(),
-                  "-javaagent:"
-                      + System.getProperty("chaos.bootstrap.agentJar")
-                      + "=configFile="
-                      + planFile,
-                  "-Dmacstab.chaos.reportsDir=" + reports,
-                  "-cp",
-                  System.getProperty("java.class.path"),
-                  DefectProbeMain.class.getName(),
-                  "woven-groups")
+                  withCoverage(
+                      java.util.List.of(
+                          Path.of(System.getProperty("java.home"), "bin", "java").toString(),
+                          "-javaagent:"
+                              + System.getProperty("chaos.bootstrap.agentJar")
+                              + "=configFile="
+                              + planFile,
+                          "-Dmacstab.chaos.reportsDir=" + reports,
+                          "-cp",
+                          System.getProperty("java.class.path"),
+                          DefectProbeMain.class.getName(),
+                          "woven-groups")))
               .redirectErrorStream(true)
               .start();
       process.getInputStream().readAllBytes();
@@ -1649,5 +1651,14 @@ class DefectRegressionIntegrationTest {
         .effect(effect)
         .activationPolicy(ActivationPolicy.always())
         .build();
+  }
+
+  /**
+   * {@code command} with the coverage agent after the java launcher (see {@link ChildJvmProbe}).
+   */
+  private static java.util.List<String> withCoverage(final java.util.List<String> command) {
+    final java.util.List<String> withAgent = new java.util.ArrayList<>(command);
+    withAgent.addAll(1, ChildJvmProbe.coverageAgent());
+    return withAgent;
   }
 }

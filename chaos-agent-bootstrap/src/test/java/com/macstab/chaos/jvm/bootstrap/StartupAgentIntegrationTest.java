@@ -202,16 +202,16 @@ class StartupAgentIntegrationTest {
     final Path configFile = tempDir.resolve(mode + "-plan.json");
     Files.writeString(configFile, ChaosPlanMapper.write(plan));
     final String agentJar = System.getProperty("chaos.bootstrap.agentJar");
-    final Process process =
-        new ProcessBuilder(
-                Path.of(System.getProperty("java.home"), "bin", "java").toString(),
-                "-javaagent:" + agentJar + "=configFile=" + configFile,
-                "-cp",
-                System.getProperty("java.class.path"),
-                AgentProcessProbeMain.class.getName(),
-                mode)
-            .redirectErrorStream(true)
-            .start();
+    final java.util.List<String> command = new java.util.ArrayList<>();
+    command.add(Path.of(System.getProperty("java.home"), "bin", "java").toString());
+    // No coverage agent here: these plans reach every file write, thread start, class load, gc and
+    // exit of the JVM, the coverage agent's own dump at shutdown included.
+    command.add("-javaagent:" + agentJar + "=configFile=" + configFile);
+    command.add("-cp");
+    command.add(System.getProperty("java.class.path"));
+    command.add(AgentProcessProbeMain.class.getName());
+    command.add(mode);
+    final Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
     final boolean finished = process.waitFor(30, TimeUnit.SECONDS);
     assertThat(finished).as("probe JVM should finish").isTrue();
     try (final BufferedReader reader =

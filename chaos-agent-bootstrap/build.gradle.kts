@@ -14,6 +14,10 @@ val clientLibraryProbe: Configuration by configurations.creating
 // uses them.
 val coverageProbe: Configuration by configurations.creating
 
+// The JaCoCo runtime agent for the child JVMs, whose execution data the build remaps onto the
+// module classes (see the root build's childJvmCoverage).
+val jacocoChildAgent: Configuration by configurations.creating
+
 dependencies {
     api(project(":chaos-agent-api"))
     implementation(project(":chaos-agent-core"))
@@ -36,6 +40,7 @@ dependencies {
     testCompileOnly(libs.apache.httpclient5)
     testCompileOnly(libs.reactor.netty.http)
     testCompileOnly(libs.apache.httpclient4)
+    jacocoChildAgent("org.jacoco:org.jacoco.agent:0.8.12:runtime")
     coverageProbe(libs.apache.httpclient4)
     coverageProbe(libs.c3p0)
     httpClientProbe(libs.okhttp)
@@ -136,4 +141,11 @@ tasks.test {
     systemProperty("chaos.test.httpClasspath", httpClientProbe.asPath)
     systemProperty("chaos.test.clientClasspath", clientLibraryProbe.asPath)
     systemProperty("chaos.test.coverageClasspath", coverageProbe.asPath)
+
+    // Every child JVM records its coverage of the agent's classes into one file, started afresh.
+    val childExec = layout.buildDirectory.file("jacoco/child-jvms.exec").get().asFile
+    systemProperty("chaos.test.jacocoAgent", jacocoChildAgent.singleFile.absolutePath)
+    systemProperty("chaos.test.jacocoExec", childExec.absolutePath)
+    outputs.file(childExec)
+    doFirst { childExec.delete() }
 }

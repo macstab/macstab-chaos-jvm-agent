@@ -1286,6 +1286,8 @@ class Phase4InstrumentationIntegrationTest {
     cmd.add(AgentProcessProbeMain.class.getName());
     cmd.add(mode);
 
+    // No coverage agent here: these plans reach every file write, thread start, class load, gc and
+    // exit of the JVM, the coverage agent's own dump at shutdown included.
     final Process process = new ProcessBuilder(cmd).redirectErrorStream(true).start();
     final boolean finished = process.waitFor(30, TimeUnit.SECONDS);
     assertThat(finished).as("probe JVM should finish within 30 s").isTrue();

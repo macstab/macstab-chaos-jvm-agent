@@ -134,7 +134,32 @@ final class ChildJvmProbe {
     return execute(command);
   }
 
-  private static ProbeResult execute(final List<String> command) throws Exception {
+  /**
+   * The JVM options that record the child's coverage, placed before every other agent: the JaCoCo
+   * agent named by {@code chaos.test.jacocoAgent}, appending to {@code chaos.test.jacocoExec}, for
+   * the agent's own classes (the bootstrap-loaded bridge included, the shaded libraries not). Empty
+   * when the build does not ask for coverage.
+   *
+   * @return the options, or an empty list
+   */
+  static List<String> coverageAgent() {
+    final String agent = System.getProperty("chaos.test.jacocoAgent");
+    final String exec = System.getProperty("chaos.test.jacocoExec");
+    if (agent == null || agent.isBlank() || exec == null || exec.isBlank()) {
+      return List.of();
+    }
+    return List.of(
+        "-javaagent:"
+            + agent
+            + "=destfile="
+            + exec
+            + ",append=true,inclbootstrapclasses=true"
+            + ",includes=com.macstab.chaos.jvm.*,excludes=com.macstab.chaos.jvm.shaded.*");
+  }
+
+  private static ProbeResult execute(final List<String> base) throws Exception {
+    final List<String> command = new ArrayList<>(base);
+    command.addAll(1, coverageAgent());
     final Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
     final List<String> lines = new java.util.concurrent.CopyOnWriteArrayList<>();
     // Read on another thread: reading to the end first would block until the child exits, so a
