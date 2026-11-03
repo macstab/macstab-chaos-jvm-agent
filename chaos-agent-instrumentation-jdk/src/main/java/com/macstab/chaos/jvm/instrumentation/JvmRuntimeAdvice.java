@@ -16,22 +16,6 @@ final class JvmRuntimeAdvice {
 
   // ── A1: Clock ─────────────────────────────────────────────────────────────
 
-  /** Rewrites the return value of {@code System.currentTimeMillis()} for clock-skew injection. */
-  static final class ClockMillisAdvice {
-    @Advice.OnMethodExit
-    static void exit(@Advice.Return(readOnly = false) long returned) throws Throwable {
-      returned = BootstrapDispatcher.adjustClockMillis(returned);
-    }
-  }
-
-  /** Rewrites the return value of {@code System.nanoTime()} for clock-skew injection. */
-  static final class ClockNanosAdvice {
-    @Advice.OnMethodExit
-    static void exit(@Advice.Return(readOnly = false) long returned) throws Throwable {
-      returned = BootstrapDispatcher.adjustClockNanos(returned);
-    }
-  }
-
   /**
    * Rewrites the return value of {@link java.time.Instant#now()} for clock-skew injection.
    *
@@ -922,20 +906,6 @@ final class JvmRuntimeAdvice {
     /**
      * {@code Runtime.loadLibrary0(Class caller, String libname)} — argument 0 is the calling {@code
      * Class}, argument 1 is the library name string.
-     */
-    @Advice.OnMethodEnter
-    static void enter(@Advice.Argument(1) final String libraryName) throws Throwable {
-      BootstrapDispatcher.beforeNativeLibraryLoad(libraryName);
-    }
-  }
-
-  static final class NativeLibrariesLoadAdvice {
-    /**
-     * {@code jdk.internal.loader.NativeLibraries.load(NativeLibraryImpl impl, String name, boolean
-     * isBuiltin, boolean isJNI)} — argument 0 is the {@code NativeLibraryImpl} instance, argument 1
-     * is the library name string. Kept as a separate class from {@link NativeLibraryLoadAdvice} so
-     * that if the JDK signature changes the wrong index is caught at instrumentation time rather
-     * than silently reading a non-name argument.
      */
     @Advice.OnMethodEnter
     static void enter(@Advice.Argument(1) final String libraryName) throws Throwable {

@@ -351,7 +351,7 @@ public static class ExecuteAdvice {
 
 **Exception-injecting advice** (e.g., `ExitRequestAdvice`): Does NOT use `suppress = Throwable.class` because it intentionally allows injected exceptions to propagate.
 
-**Return-value rewriting advice** (e.g., `ClockMillisAdvice`): Uses `@Advice.OnMethodExit` with `@Advice.Return(readOnly = false)` to overwrite the return value. `ClockMillisAdvice` and `ClockNanosAdvice` are defined but cannot be woven into `java.lang.System.currentTimeMillis()` / `nanoTime()` due to the JVM limitation documented in §14 Known Limitations (item 1). They remain available for instrumentation of non-bootstrap native methods in future releases.
+**Return-value rewriting advice** (e.g., `SystemClockMillisAdvice`): Uses `@Advice.OnMethodExit` with `@Advice.Return(readOnly = false)` to overwrite the return value. `System.currentTimeMillis()` / `nanoTime()` themselves cannot be woven (§14 Known Limitations, item 1); calls to them in the packages named by `clockCallSites` are rewritten to `BootstrapDispatcher.currentTimeMillis()` / `nanoTime()` with `MemberSubstitution` instead.
 
 **Skip-on advice** (e.g., `GcRequestAdvice`, `NioSelectNoArgAdvice`): Uses `@Advice.OnMethodEnter(skipOn = Advice.OnNonDefaultValue.class)` — if the advice method returns a non-default value (non-zero, non-null, non-false), ByteBuddy skips the actual method body. This is the mechanism for suppressing `System.gc()` and `Selector.select()`.
 

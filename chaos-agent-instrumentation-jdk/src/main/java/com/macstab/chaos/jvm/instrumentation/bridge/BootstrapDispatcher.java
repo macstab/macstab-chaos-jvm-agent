@@ -988,8 +988,8 @@ public final class BootstrapDispatcher {
   /**
    * Returns the chaos-adjusted wall-clock time in milliseconds.
    *
-   * <p>Called by {@code ClockMillisAdvice} to rewrite the return value of {@code
-   * System.currentTimeMillis()}.
+   * <p>Called by {@link #currentTimeMillis()}, which rewritten clock call sites invoke instead of
+   * {@code System.currentTimeMillis()}.
    *
    * @param realMillis the value returned by the real {@code System.currentTimeMillis()} call
    * @return the (possibly skewed) millisecond timestamp; equals {@code realMillis} when no active
@@ -1041,7 +1041,8 @@ public final class BootstrapDispatcher {
   /**
    * Returns the chaos-adjusted monotonic time in nanoseconds.
    *
-   * <p>Called by {@code ClockNanosAdvice} to rewrite the return value of {@code System.nanoTime()}.
+   * <p>Called by {@link #nanoTime()}, which rewritten clock call sites invoke instead of {@code
+   * System.nanoTime()}.
    *
    * @param realNanos the value returned by the real {@code System.nanoTime()} call
    * @return the (possibly skewed) nanosecond timestamp; equals {@code realNanos} as the fallback

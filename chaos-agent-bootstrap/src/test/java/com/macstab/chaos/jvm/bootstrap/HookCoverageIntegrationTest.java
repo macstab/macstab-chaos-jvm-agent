@@ -7,7 +7,6 @@ import java.lang.reflect.Method;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.stream.Collectors;
@@ -39,17 +38,6 @@ class HookCoverageIntegrationTest {
           "ScheduledExecutorAdvice",
           "ShutdownAdvice",
           "ThreadAdvice");
-
-  /** Advice classes the installer never weaves, and why (dead code to review). */
-  private static final Map<String, String> NOT_COVERED =
-      Map.of(
-          "JvmRuntimeAdvice.NativeLibrariesLoadAdvice",
-          "not woven anywhere: NativeLibraries.load is native since JDK 17; Runtime.load0 and"
-              + " loadLibrary0 are hooked instead (NativeLibraryLoadAdvice)",
-          "JvmRuntimeAdvice.ClockMillisAdvice",
-          "not woven anywhere: clock call sites are rewritten with MemberSubstitution",
-          "JvmRuntimeAdvice.ClockNanosAdvice",
-          "not woven anywhere: clock call sites are rewritten with MemberSubstitution");
 
   @TempDir Path tempDir;
 
@@ -88,7 +76,6 @@ class HookCoverageIntegrationTest {
             .collect(Collectors.toCollection(TreeSet::new));
     final Set<String> missing = new TreeSet<>(adviceClasses());
     missing.removeAll(matched);
-    missing.removeAll(NOT_COVERED.keySet());
     assertThat(missing).as("advice that matched no method on JDK %s", runtime).isEmpty();
   }
 
