@@ -68,6 +68,7 @@
 
 ### Bug Fixes
 
+* **reload:** a plan file changed between the agent's startup read and the reloader's start was never applied (the baseline came from a second read; the loader now hands its read to the reloader). A transient activation failure (an id taken elsewhere, a weaving failure) is retried instead of being skipped until the file changes. A ConfigMap swap during a read no longer reports a spurious error. A file missing for a single tick no longer stops and restarts every scenario. A plan file or ConfigMap link owned by another user (root excepted) is refused, so another local user cannot plant one in a shared directory such as `/tmp`.
 * **quarkus:** the `/q/chaos` route moved into its own extension, `chaos-agent-quarkus-management` (+ `-deployment`); the main extension no longer pulls in `quarkus-vertx-http` (which started an HTTP server in command-mode applications). The route now always answers (503 without the agent instead of hanging), works off the event loop, uses a body another extension already read, URL-decodes ids, answers 404 outside its root instead of stopping everything, reads `macstab.chaos.management.enabled` at runtime, and stops its plans on shutdown and dev-mode reload.
 * **micronaut:** the `/chaos` endpoint answers with the operation's status code (it always answered 200) and no longer installs the agent when it is enabled; 503 when no agent is installed.
 * **management:** precise outcomes and codes in `ChaosManagement`: `invalid` 400, `conflict` and `unmanaged` 409, `rejected` 422, `not-found` 404.

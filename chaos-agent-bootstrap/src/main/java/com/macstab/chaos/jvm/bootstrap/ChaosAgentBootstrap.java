@@ -531,7 +531,7 @@ public final class ChaosAgentBootstrap {
       final ChaosRuntime runtime) {
     POLLER.set(poller);
     try {
-      poller.startWithInitialPlan(loaded.plan());
+      poller.startWithInitialPlan(loaded.plan(), loaded.planFile());
     } catch (final RuntimeException startFailure) {
       // startWithInitialPlan can throw after POLLER has been populated — e.g. an
       // activation failure on the initial plan, a scheduler rejection, or an I/O

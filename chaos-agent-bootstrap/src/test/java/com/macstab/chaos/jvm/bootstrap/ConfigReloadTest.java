@@ -132,6 +132,7 @@ class ConfigReloadTest {
 
     Files.delete(file);
     poller.pollOnce();
+    poller.pollOnce(); // missing on two ticks in a row
     assertThat(state("a")).isNotEqualTo(ChaosDiagnostics.ScenarioState.ACTIVE);
 
     Files.writeString(file, plan("a"));
@@ -175,5 +176,83 @@ class ConfigReloadTest {
     assertThatThrownBy(() -> StartupConfigLoader.readPlanFile(link.toString()))
         .isInstanceOf(ConfigLoadException.class)
         .hasMessageContaining("symbolic link");
+  }
+
+  private StartupConfigPoller poller(final Path configured) {
+    return StartupConfigPoller.createIfEnabled(
+            "configWatchInterval=3600000", Map.of(), configured, runtime)
+        .orElseThrow();
+  }
+
+  @Test
+  @DisplayName("a change between the startup read and the poller start is applied on the next tick")
+  void changeDuringStartup() throws Exception {
+    final Path file = tempDir.resolve("plan.json");
+    Files.writeString(file, plan("startup"));
+    backdate(file);
+    final StartupConfigLoader.PlanFile read =
+        StartupConfigLoader.readPlanFile(file.toString()).orElseThrow();
+    Files.writeString(file, plan("changed"));
+    Files.setLastModifiedTime(file, FileTime.fromMillis(System.currentTimeMillis() - 30_000));
+    poller = poller(file);
+    poller.startWithInitialPlan(ChaosPlanMapper.read(read.json()), read);
+    assertThat(state("startup")).isEqualTo(ChaosDiagnostics.ScenarioState.ACTIVE);
+
+    poller.pollOnce();
+
+    assertThat(state("changed")).isEqualTo(ChaosDiagnostics.ScenarioState.ACTIVE);
+    assertThat(state("startup")).isNull();
+  }
+
+  @Test
+  @DisplayName("a conflict is retried with the same content once the conflicting scenario stopped")
+  void transientConflictRetried() throws Exception {
+    final Path file = tempDir.resolve("plan.json");
+    Files.writeString(file, plan("a"));
+    backdate(file);
+    start(file);
+    final com.macstab.chaos.jvm.api.ChaosActivationHandle elsewhere =
+        runtime.activate(ChaosPlanMapper.read(plan("taken")).scenarios().get(0));
+
+    Files.writeString(file, plan("taken"));
+    poller.pollOnce();
+    assertThat(state("a"))
+        .as("the old plan stays")
+        .isEqualTo(ChaosDiagnostics.ScenarioState.ACTIVE);
+
+    elsewhere.close();
+    poller.pollOnce();
+    assertThat(state("taken")).isEqualTo(ChaosDiagnostics.ScenarioState.ACTIVE);
+  }
+
+  @Test
+  @DisplayName("a file missing for one tick keeps its scenarios; missing for two stops them")
+  void missingGracePeriod() throws Exception {
+    final Path file = tempDir.resolve("plan.json");
+    Files.writeString(file, plan("a"));
+    backdate(file);
+    start(file);
+
+    Files.delete(file);
+    poller.pollOnce();
+    assertThat(state("a")).isEqualTo(ChaosDiagnostics.ScenarioState.ACTIVE);
+    poller.pollOnce();
+    assertThat(state("a")).isNull();
+  }
+
+  @Test
+  @DisplayName("a plan file owned by another user is refused")
+  void foreignOwnerRefused() throws Exception {
+    final Path file = tempDir.resolve("plan.json");
+    Files.writeString(file, plan("a"));
+    final String self = System.getProperty("user.name");
+    System.setProperty("user.name", "chaos-test-someone-else");
+    try {
+      assertThatThrownBy(() -> StartupConfigLoader.readPlanFile(file.toString()))
+          .isInstanceOf(ConfigLoadException.class)
+          .hasMessageContaining("is owned by");
+    } finally {
+      System.setProperty("user.name", self);
+    }
   }
 }

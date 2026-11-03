@@ -156,9 +156,23 @@ public final class StartupConfigLoader {
   }
 
   private static LoadedPlan loadFromFile(final String filePath, final boolean debugDumpOnStart) {
-    final ValidatedRead read = readValidatedPlanFile(filePath);
+    // One read for both the plan and the reloader's baseline: a second read could see a newer
+    // file, which the reloader would then treat as already applied.
+    final PlanFile file =
+        readPlanFile(filePath)
+            .orElseThrow(
+                () ->
+                    new ConfigLoadException(
+                        "config file does not exist: " + filePath, SOURCE_FILE_PREFIX + filePath));
+    final ChaosPlan plan = parse(file.json(), SOURCE_FILE_PREFIX + filePath);
+    // The configured path, not the resolved target: a reloading poller must keep watching the
+    // ConfigMap link, whose target directory is replaced on every update.
     return new LoadedPlan(
-        read.plan(), SOURCE_FILE_PREFIX + filePath, debugDumpOnStart, read.path());
+        plan,
+        SOURCE_FILE_PREFIX + filePath,
+        debugDumpOnStart,
+        Path.of(filePath).toAbsolutePath().normalize(),
+        file);
   }
 
   /**
@@ -174,16 +188,12 @@ public final class StartupConfigLoader {
    * @throws ConfigLoadException if the path is unsafe, unreadable, oversize, or the JSON is invalid
    */
   public static ChaosPlan loadPlanFromFile(final String filePath) {
-    return readValidatedPlanFile(filePath).plan();
+    return readValidatedPlanFile(filePath);
   }
 
-  private static ValidatedRead readValidatedPlanFile(final String filePath) {
+  private static ChaosPlan readValidatedPlanFile(final String filePath) {
     final Path target = validateAndResolvePath(filePath);
-    final String json = readFileContents(target, filePath);
-    final ChaosPlan plan = parse(json, SOURCE_FILE_PREFIX + filePath);
-    // The configured path, not the resolved target: a reloading poller must keep watching the
-    // ConfigMap link, whose target directory is replaced on every update.
-    return new ValidatedRead(plan, Path.of(filePath).toAbsolutePath().normalize());
+    return parse(readFileContents(target, filePath), SOURCE_FILE_PREFIX + filePath);
   }
 
   /**
@@ -238,7 +248,35 @@ public final class StartupConfigLoader {
     }
   }
 
-  private record ValidatedRead(ChaosPlan plan, Path path) {}
+  /**
+   * Rejects a plan file (or ConfigMap link) owned by another user than the JVM's, root excepted: in
+   * a shared world-writable directory such as {@code /tmp}, another local user could otherwise
+   * plant the plan while it is missing and inject their faults. Skipped where file ownership is not
+   * available or the user name is unknown (containers running an unnamed uid).
+   */
+  private static void rejectForeignOwner(final Path path, final String filePath) {
+    final String self = System.getProperty("user.name", "");
+    if (self.isBlank() || self.equals("?")) {
+      return;
+    }
+    final String owner;
+    try {
+      owner = Files.getOwner(path, LinkOption.NOFOLLOW_LINKS).getName();
+    } catch (final IOException | UnsupportedOperationException unavailable) {
+      return;
+    }
+    if (!owner.equals(self) && !owner.equals("root")) {
+      throw new ConfigLoadException(
+          "config file "
+              + path
+              + " is owned by "
+              + owner
+              + ", not by the JVM's user "
+              + self
+              + " or root",
+          SOURCE_FILE_PREFIX + filePath);
+    }
+  }
 
   /**
    * Validates the file path against basic safety constraints.
@@ -264,6 +302,10 @@ public final class StartupConfigLoader {
     }
     rejectIfOversize(target, filePath);
     rejectWorldWritable(target, filePath);
+    rejectForeignOwner(path, filePath);
+    if (!target.equals(path)) {
+      rejectForeignOwner(target, filePath);
+    }
     return target;
   }
 
@@ -481,7 +523,26 @@ public final class StartupConfigLoader {
    * @param debugDumpOnStart whether to print a diagnostic dump at startup
    * @param filePath the resolved file path when the source was a config file, {@code null}
    *     otherwise; used by the bootstrap poller to set up file watching
+   * @param planFile the file read the plan came from, {@code null} for other sources: the
+   *     reloader's baseline
    */
   public record LoadedPlan(
-      ChaosPlan plan, String source, boolean debugDumpOnStart, Path filePath) {}
+      ChaosPlan plan, String source, boolean debugDumpOnStart, Path filePath, PlanFile planFile) {
+
+    /**
+     * Creates a loaded plan without a file read.
+     *
+     * @param plan the parsed plan
+     * @param source where it came from
+     * @param debugDumpOnStart whether to print a diagnostic dump at startup
+     * @param filePath the config file path, or {@code null}
+     */
+    public LoadedPlan(
+        final ChaosPlan plan,
+        final String source,
+        final boolean debugDumpOnStart,
+        final Path filePath) {
+      this(plan, source, debugDumpOnStart, filePath, null);
+    }
+  }
 }

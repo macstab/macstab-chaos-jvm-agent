@@ -142,8 +142,27 @@ public final class StartupConfigPoller implements AutoCloseable {
    * @param initialPlan the plan from the first file read, already parsed by the caller
    */
   public void startWithInitialPlan(final com.macstab.chaos.jvm.api.ChaosPlan initialPlan) {
-    startWithInitialPlan(initialPlan.scenarios());
+    startWithInitialPlan(initialPlan, null);
+  }
+
+  /**
+   * Applies the initial plan and starts polling, with the file read it came from as the baseline: a
+   * change after that read is applied on the next tick.
+   *
+   * @param initialPlan the plan from the first file read
+   * @param baseline that read; {@code null} to let the first tick reconcile with the file
+   */
+  public void startWithInitialPlan(
+      final com.macstab.chaos.jvm.api.ChaosPlan initialPlan,
+      final StartupConfigLoader.PlanFile baseline) {
+    if (baseline != null) {
+      lastStamp = stampOf(baseline);
+      lastDigest = digest(baseline.json());
+      provisional = isRecent(baseline.lastModified());
+    }
+    applyDiff(initialPlan.scenarios());
     applyObservability(initialPlan);
+    scheduler.scheduleAtFixedRate(this::pollOnce, intervalMs, intervalMs, TimeUnit.MILLISECONDS);
   }
 
   /**
@@ -156,15 +175,8 @@ public final class StartupConfigPoller implements AutoCloseable {
    * @param initialScenarios scenarios from the first file read, already parsed by the caller
    */
   public void startWithInitialPlan(final List<ChaosScenario> initialScenarios) {
-    // Capture the file's stamp BEFORE applying the initial plan, so the baseline is anchored to
-    // the file the caller already read; a later change then shows as a different stamp.
-    readCurrentFile()
-        .ifPresent(
-            file -> {
-              lastStamp = stampOf(file);
-              lastDigest = digest(file.json());
-              provisional = isRecent(file.lastModified());
-            });
+    // No baseline: the first tick reads the file and reconciles (a no-op when it is unchanged).
+    // A second read here could have seen a newer file and taken it for applied.
     applyDiff(initialScenarios);
     scheduler.scheduleAtFixedRate(this::pollOnce, intervalMs, intervalMs, TimeUnit.MILLISECONDS);
   }
@@ -230,6 +242,7 @@ public final class StartupConfigPoller implements AutoCloseable {
         handleMissingFile();
         return;
       }
+      missingOnce = false;
       reloadIfChanged(file.get());
     } catch (final Throwable throwable) {
       // Catch Throwable, not Exception: ScheduledExecutorService.scheduleAtFixedRate silently
@@ -274,11 +287,17 @@ public final class StartupConfigPoller implements AutoCloseable {
     }
     // Re-stat after the read: if the file changed while it was being read, the bytes may be
     // torn. Skip and retry on the next tick, which sees the settled file.
-    final java.nio.file.attribute.BasicFileAttributes after =
-        Files.readAttributes(
-            file.target(),
-            java.nio.file.attribute.BasicFileAttributes.class,
-            LinkOption.NOFOLLOW_LINKS);
+    final java.nio.file.attribute.BasicFileAttributes after;
+    try {
+      after =
+          Files.readAttributes(
+              file.target(),
+              java.nio.file.attribute.BasicFileAttributes.class,
+              LinkOption.NOFOLLOW_LINKS);
+    } catch (final java.nio.file.NoSuchFileException swappedAway) {
+      // A ConfigMap swap removed the directory just read: the next tick reads the new one.
+      return;
+    }
     if (!after.lastModifiedTime().equals(file.lastModified()) || after.size() != file.size()) {
       return;
     }
@@ -288,7 +307,11 @@ public final class StartupConfigPoller implements AutoCloseable {
       applyDiff(newPlan.scenarios());
       applyObservability(newPlan);
     } catch (final RuntimeException failure) {
-      failedDigest = digest;
+      // Remember content that can never apply (malformed, invalid) so it is not parsed again;
+      // a conflict with a scenario activated elsewhere or a weaving failure is retried.
+      if (isDeterministic(failure)) {
+        failedDigest = digest;
+      }
       throw failure;
     }
     lastStamp = stamp;
@@ -309,6 +332,28 @@ public final class StartupConfigPoller implements AutoCloseable {
   /** Whether a missing file has been reported since it disappeared. */
   private boolean missingReported;
 
+  /** The previous tick found the file missing; a second one in a row stops its scenarios. */
+  private boolean missingOnce;
+
+  /** Whether a reload failure would recur for the same file content. */
+  private static boolean isDeterministic(final Throwable failure) {
+    for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
+      if (cause instanceof com.macstab.chaos.jvm.startup.ConfigLoadException
+          || cause instanceof com.macstab.chaos.jvm.api.ChaosValidationException
+          || cause instanceof IllegalArgumentException) {
+        return true;
+      }
+      if (cause instanceof com.macstab.chaos.jvm.api.ChaosActivationException activation) {
+        return activation.getMessage() == null
+            || !activation.getMessage().contains("already active");
+      }
+      if (cause.getCause() == cause) {
+        break;
+      }
+    }
+    return false;
+  }
+
   /**
    * The configured file is gone: every scenario it activated is stopped, and the status file is
    * removed, like the native library does without a rule file. When the file comes back it is
@@ -316,6 +361,13 @@ public final class StartupConfigPoller implements AutoCloseable {
    */
   private void handleMissingFile() {
     if (missingReported) {
+      return;
+    }
+    // An editor saving by rename-then-write, or rm followed by cp, leaves the path missing for a
+    // moment; stopping every scenario then (and re-activating them) would reset their counters,
+    // budgets and windows. Act only when the file is still missing on the next tick.
+    if (!missingOnce) {
+      missingOnce = true;
       return;
     }
     missingReported = true;
