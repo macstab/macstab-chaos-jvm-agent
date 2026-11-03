@@ -15,6 +15,8 @@
 
 ### Features
 
+* **instrumentation:** memory-mapped files and transfers: `FileChannel.map` is the new `FILE_IO_MAP` (sized by the region; `ENOMEM` fails with `IOException("Map failed")`), `MappedByteBuffer.force` is a `FILE_IO_SYNC` failing with `UncheckedIOException`, `FileChannel.transferTo` / `transferFrom` are one `FILE_IO_READ` / `FILE_IO_WRITE` each (a torn `transferFrom` is short; the JDK's internal reads and writes of a transfer are not evaluated again), and `Files.copy(Path, Path)` opens its source and target (`FILE_IO_OPEN`).
+
 * **instrumentation:** clock skew reaches every `java.time` read: the new `CLOCK_READ` is a read of the system `Clock` (`Clock.systemUTC()`, `systemDefaultZone()`, `InstantSource.system()`), and so of every `now()` without an operation of its own (`LocalDate`, `LocalTime`, `OffsetDateTime`, `OffsetTime`, `Year`, `YearMonth`, `MonthDay`) and of clocks derived from the system clock. Before, those reads were never skewed. The read inside `LocalDateTime.now()` and `ZonedDateTime.now()` stays theirs, so selecting both never skews twice.
 
 * **instrumentation:** file opens are the new `FILE_IO_OPEN`: the `FileInputStream`, `FileOutputStream` and `RandomAccessFile` constructors (failing with the JDK's `FileNotFoundException("<path> (<reason>)")`) and the platform file system's `newByteChannel` / `newFileChannel` behind `Files.newInputStream`, `newOutputStream`, `newBufferedReader` and `FileChannel.open`. Opens of class-path archives are never evaluated.

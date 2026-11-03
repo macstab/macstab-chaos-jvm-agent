@@ -2241,7 +2241,7 @@ public final class ChaosDispatcher {
                     fileIoOpType,
                     stream == null ? "java.io.FileInputStream" : stream.getClass().getName(),
                     null,
-                    null,
+                    transferTag(operation),
                     false,
                     null,
                     null,
@@ -2325,6 +2325,21 @@ public final class ChaosDispatcher {
     return -count - 1;
   }
 
+  /** Tag of {@code FileChannel.transferTo}: a read whose bytes never reach a buffer. */
+  static final String TRANSFER_TO = "FILE_IO_TRANSFER_TO";
+
+  /** Tag of {@code FileChannel.transferFrom}: a write, torn as a short count. */
+  static final String TRANSFER_FROM = "FILE_IO_TRANSFER_FROM";
+
+  /** The method a transfer tag stands for, as the context's target name; {@code null} otherwise. */
+  private static String transferTag(final String operationTag) {
+    return switch (operationTag) {
+      case TRANSFER_TO -> "transferTo";
+      case TRANSFER_FROM -> "transferFrom";
+      default -> null;
+    };
+  }
+
   private static OperationType resolveFileIoOperationType(final String operationTag) {
     return switch (operationTag) {
       case "FILE_IO_READ" -> OperationType.FILE_IO_READ;
@@ -2334,6 +2349,10 @@ public final class ChaosDispatcher {
       case "FILE_IO_DELETE" -> OperationType.FILE_IO_DELETE;
       case "FILE_IO_MOVE" -> OperationType.FILE_IO_MOVE;
       case "FILE_IO_OPEN" -> OperationType.FILE_IO_OPEN;
+      case "FILE_IO_MAP" -> OperationType.FILE_IO_MAP;
+      // FileChannel.transferTo reads the channel's file, transferFrom writes it.
+      case TRANSFER_TO -> OperationType.FILE_IO_READ;
+      case TRANSFER_FROM -> OperationType.FILE_IO_WRITE;
       default ->
           throw new IllegalArgumentException(
               "Unknown file I/O operation tag '" + operationTag + "'");
@@ -2520,6 +2539,10 @@ public final class ChaosDispatcher {
       return new TerminalAction(TerminalKind.CAP_LENGTH, torn, null, scenario.id());
     }
     if (effect instanceof ChaosEffect.CorruptReadEffect) {
+      if ("transferTo".equals(context.targetName())) {
+        // The bytes go from file to channel inside the kernel: there is nothing to flip.
+        return new TerminalAction(TerminalKind.NOT_APPLICABLE, null, null, scenario.id());
+      }
       return new TerminalAction(
           TerminalKind.CORRUPT_READ,
           controller.effectSeed(matchNumber, CORRUPT_SALT),

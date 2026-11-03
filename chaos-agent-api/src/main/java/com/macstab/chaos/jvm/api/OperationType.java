@@ -49,7 +49,7 @@ package com.macstab.chaos.jvm.api;
  *   <li>{@link ChaosSelector.SslSelector} — {@link #SSL_HANDSHAKE}
  *   <li>{@link ChaosSelector.FileIoSelector} — {@link #FILE_IO_READ}, {@link #FILE_IO_WRITE},
  *       {@link #FILE_IO_SYNC}, {@link #FILE_IO_TRUNCATE}, {@link #FILE_IO_DELETE}, {@link
- *       #FILE_IO_MOVE}, {@link #FILE_IO_OPEN}
+ *       #FILE_IO_MOVE}, {@link #FILE_IO_OPEN}, {@link #FILE_IO_MAP}
  *   <li>{@link ChaosSelector.MessagingSelector} — {@link #MESSAGE_SEND}, {@link #MESSAGE_RECEIVE}
  *   <li>{@link ChaosSelector.RpcSelector} — {@link #RPC_CALL}
  *   <li>{@link ChaosSelector.RedisSelector} — {@link #REDIS_COMMAND}
@@ -802,6 +802,15 @@ public enum OperationType {
    * <p>Use with {@link ChaosSelector.FileIoSelector}; the path is the file opened.
    */
   FILE_IO_OPEN,
+
+  /**
+   * Fires before a file region is memory-mapped: {@code FileChannel.map}, also to a {@code
+   * MemorySegment}. The byte count is the size of the region. {@code ENOMEM} fails with the JDK's
+   * {@code IOException("Map failed")}.
+   *
+   * <p>Use with {@link ChaosSelector.FileIoSelector}; the path is the channel's file.
+   */
+  FILE_IO_MAP,
 
   // ── Client libraries ───────────────────────────────────────────────────────────
 

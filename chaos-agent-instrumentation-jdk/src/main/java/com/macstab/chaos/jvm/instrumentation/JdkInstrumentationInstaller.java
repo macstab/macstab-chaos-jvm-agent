@@ -404,7 +404,8 @@ public final class JdkInstrumentationInstaller {
         OperationType.FILE_IO_TRUNCATE,
         OperationType.FILE_IO_DELETE,
         OperationType.FILE_IO_MOVE,
-        OperationType.FILE_IO_OPEN);
+        OperationType.FILE_IO_OPEN,
+        OperationType.FILE_IO_MAP);
 
     private final java.util.function.UnaryOperator<AgentBuilder> transformations;
     private final Set<OperationType> operations;
@@ -2882,6 +2883,31 @@ public final class JdkInstrumentationInstaller {
                                         ElementMatchers.takesArguments(
                                             java.nio.ByteBuffer[].class, int.class, int.class))))
                     .visit(
+                        Advice.to(JvmRuntimeAdvice.FileChannelMapAdvice.class)
+                            .on(
+                                ElementMatchers.named("map")
+                                    .and(
+                                        ElementMatchers.takesArgument(
+                                            0, java.nio.channels.FileChannel.MapMode.class))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.FileChannelTransferToAdvice.class)
+                            .on(
+                                ElementMatchers.named("transferTo")
+                                    .and(
+                                        ElementMatchers.takesArguments(
+                                            long.class,
+                                            long.class,
+                                            java.nio.channels.WritableByteChannel.class))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.FileChannelTransferFromAdvice.class)
+                            .on(
+                                ElementMatchers.named("transferFrom")
+                                    .and(
+                                        ElementMatchers.takesArguments(
+                                            java.nio.channels.ReadableByteChannel.class,
+                                            long.class,
+                                            long.class))))
+                    .visit(
                         Advice.to(JvmRuntimeAdvice.FileChannelForceAdvice.class)
                             .on(
                                 ElementMatchers.named("force")
@@ -2974,12 +3000,21 @@ public final class JdkInstrumentationInstaller {
                 .and(ElementMatchers.isSubTypeOf(java.nio.file.spi.FileSystemProvider.class)))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
-                typeBuilder.visit(
-                    Advice.to(JvmRuntimeAdvice.FilesMoveAdvice.class)
-                        .on(
-                            ElementMatchers.named("move")
-                                .and(ElementMatchers.takesArguments(3))
-                                .and(ElementMatchers.not(ElementMatchers.isAbstract())))))
+                typeBuilder
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.FilesMoveAdvice.class)
+                            .on(
+                                ElementMatchers.named("move")
+                                    .and(ElementMatchers.takesArguments(3))
+                                    .and(ElementMatchers.not(ElementMatchers.isAbstract()))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.FilesCopyAdvice.class)
+                            .on(
+                                ElementMatchers.named("copy")
+                                    .and(ElementMatchers.takesArguments(3))
+                                    .and(ElementMatchers.takesArgument(0, java.nio.file.Path.class))
+                                    .and(ElementMatchers.takesArgument(1, java.nio.file.Path.class))
+                                    .and(ElementMatchers.not(ElementMatchers.isAbstract())))))
         .type(ElementMatchers.named("java.io.File"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
@@ -2994,6 +3029,15 @@ public final class JdkInstrumentationInstaller {
                             .on(
                                 ElementMatchers.named("renameTo")
                                     .and(ElementMatchers.takesArguments(java.io.File.class)))))
+        // msync of a mapped file region.
+        .type(ElementMatchers.named("java.nio.MappedByteBuffer"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    Advice.to(JvmRuntimeAdvice.MappedBufferForceAdvice.class)
+                        .on(
+                            ElementMatchers.named("force")
+                                .and(ElementMatchers.takesArguments(int.class, int.class)))))
         .type(ElementMatchers.named("java.io.FileDescriptor"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->

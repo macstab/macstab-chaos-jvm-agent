@@ -104,6 +104,7 @@ public final class DefectProbeMain {
       case "socket-torn-write" -> socketTornWrite();
       case "socket-channel" -> socketChannel();
       case "file-open" -> fileOpen();
+      case "file-map-transfer" -> fileMapAndTransfer();
       case "socket-bind" -> socketBind();
       case "thread-eagain" -> threadEagain();
       case "method-weaving" -> methodWeaving();
@@ -853,6 +854,74 @@ public final class DefectProbeMain {
                   + failed.getMessage());
         }
       }
+    }
+  }
+
+  /**
+   * Under {@code chaos.test.dir}: maps a file in {@code map}, forces a mapping in {@code plain},
+   * transfers into a file in {@code torn} and out of one in {@code corrupt}, and copies into {@code
+   * denied}. Prints what each call returned or threw.
+   */
+  private static void fileMapAndTransfer() throws Exception {
+    final java.nio.file.Path root = java.nio.file.Path.of(System.getProperty("chaos.test.dir"));
+    final byte[] pattern = new byte[1024];
+    for (int i = 0; i < pattern.length; i++) {
+      pattern[i] = (byte) i;
+    }
+    final java.util.function.Function<String, java.nio.file.Path> file =
+        directory -> {
+          try {
+            final java.nio.file.Path created =
+                java.nio.file.Files.createDirectories(root.resolve(directory)).resolve("f");
+            java.nio.file.Files.write(created, pattern);
+            return created;
+          } catch (final java.io.IOException failed) {
+            throw new java.io.UncheckedIOException(failed);
+          }
+        };
+    final java.nio.file.Path mapped = file.apply("map");
+    try (java.nio.channels.FileChannel channel = java.nio.channels.FileChannel.open(mapped)) {
+      channel.map(java.nio.channels.FileChannel.MapMode.READ_ONLY, 0, pattern.length);
+      System.out.println("map=ok");
+    } catch (final java.io.IOException failed) {
+      System.out.println(
+          "map=" + failed.getMessage() + " / " + failed.getCause().getClass().getName());
+    }
+    final java.nio.file.Path plain = file.apply("plain");
+    try (java.nio.channels.FileChannel channel =
+        java.nio.channels.FileChannel.open(
+            plain, java.nio.file.StandardOpenOption.READ, java.nio.file.StandardOpenOption.WRITE)) {
+      final java.nio.MappedByteBuffer buffer =
+          channel.map(java.nio.channels.FileChannel.MapMode.READ_WRITE, 0, pattern.length);
+      buffer.force();
+      System.out.println("force=ok");
+    } catch (final java.io.UncheckedIOException failed) {
+      System.out.println("force=" + failed.getCause().getClass().getName());
+    }
+    // Created empty: a write of the pattern would itself be torn.
+    final java.nio.file.Path torn =
+        java.nio.file.Files.createDirectories(root.resolve("torn")).resolve("f");
+    torn.toFile().createNewFile();
+    try (java.nio.channels.FileChannel out =
+            java.nio.channels.FileChannel.open(torn, java.nio.file.StandardOpenOption.WRITE);
+        java.nio.channels.ReadableByteChannel in =
+            java.nio.channels.Channels.newChannel(new java.io.ByteArrayInputStream(pattern))) {
+      System.out.println("transferFrom=" + out.transferFrom(in, 0, pattern.length));
+    }
+    final java.nio.file.Path corrupt = file.apply("corrupt");
+    final ByteArrayOutputStream sink = new ByteArrayOutputStream();
+    try (java.nio.channels.FileChannel channel = java.nio.channels.FileChannel.open(corrupt)) {
+      System.out.println(
+          "transferTo="
+              + channel.transferTo(0, pattern.length, java.nio.channels.Channels.newChannel(sink)));
+    }
+    System.out.println("transferIntact=" + Arrays.equals(sink.toByteArray(), pattern));
+    java.nio.file.Files.createDirectories(root.resolve("denied"));
+    try {
+      java.nio.file.Files.copy(plain, root.resolve("denied").resolve("copy"));
+      System.out.println("copy=ok");
+    } catch (final java.io.IOException failed) {
+      System.out.println("copy=" + failed.getClass().getName() + ": " + failed.getMessage());
     }
   }
 

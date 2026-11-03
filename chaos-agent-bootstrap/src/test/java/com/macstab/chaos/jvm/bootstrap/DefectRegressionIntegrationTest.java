@@ -903,6 +903,58 @@ class DefectRegressionIntegrationTest {
     }
 
     @Test
+    @DisplayName("maps, msync, transfers and Files.copy are file operations")
+    void mapsTransfersAndCopies() throws Exception {
+      final Path root = Files.createDirectories(tempDir.resolve("mapped"));
+      final ChildJvmProbe.ProbeResult result =
+          probe.run(
+              plan(
+                  scenario(
+                      "map-enomem",
+                      fileOps(OperationType.FILE_IO_MAP, root, "map"),
+                      ChaosEffect.errno(ChaosEffect.Errno.ENOMEM)),
+                  scenario(
+                      "msync-eio",
+                      new ChaosSelector.FileIoSelector(
+                          Set.of(OperationType.FILE_IO_SYNC), null, null, null),
+                      ChaosEffect.errno(ChaosEffect.Errno.EIO)),
+                  scenario(
+                      "torn-transfer",
+                      fileOps(OperationType.FILE_IO_WRITE, root, "torn"),
+                      ChaosEffect.tornWrite()),
+                  scenario(
+                      "corrupt-transfer",
+                      fileOps(OperationType.FILE_IO_READ, root, "corrupt"),
+                      ChaosEffect.corruptRead()),
+                  scenario(
+                      "copy-denied",
+                      fileOps(OperationType.FILE_IO_OPEN, root, "denied"),
+                      ChaosEffect.errno(ChaosEffect.Errno.EACCES))),
+              DefectProbeMain.class,
+              "file-map-transfer",
+              null,
+              "-Dchaos.test.dir=" + root);
+      assertThat(result.value("map")).isEqualTo("Map failed / java.lang.OutOfMemoryError");
+      assertThat(result.value("force")).isEqualTo("java.io.SyncFailedException");
+      assertThat(result.longValue("transferFrom")).isBetween(1L, 1023L);
+      // a transfer's bytes never reach a buffer: corruptRead does not apply and counts nothing
+      assertThat(result.longValue("transferTo")).isEqualTo(1024L);
+      assertThat(result.value("transferIntact")).isEqualTo("true");
+      assertThat(result.longValue("applied.corrupt-transfer")).isZero();
+      // one transfer is one event, however the JDK carries it out
+      assertThat(result.longValue("applied.torn-transfer")).isEqualTo(1L);
+      assertThat(result.value("copy"))
+          .startsWith("java.nio.file.AccessDeniedException: ")
+          .endsWith("copy");
+    }
+
+    private ChaosSelector fileOps(
+        final OperationType operation, final Path root, final String directory) {
+      return new ChaosSelector.FileIoSelector(
+          Set.of(operation), PathPattern.under(root.resolve(directory).toString()), null, null);
+    }
+
+    @Test
     @DisplayName("ENOENT on Files.deleteIfExists returns false, as for a missing file")
     void deleteIfExistsMissing() throws Exception {
       final Path root = Files.createDirectories(tempDir.resolve("missing"));

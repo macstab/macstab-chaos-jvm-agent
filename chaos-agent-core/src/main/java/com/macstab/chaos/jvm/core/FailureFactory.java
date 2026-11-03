@@ -105,6 +105,7 @@ final class FailureFactory {
           new java.io.IOException(message);
       // FileNotFoundException is what java.io constructors declare, and an IOException for nio.
       case FILE_IO_OPEN -> new java.io.FileNotFoundException(message);
+      case FILE_IO_MAP -> new java.io.IOException(message);
       case SOCKET_BIND -> new java.net.BindException(message);
       default -> new IllegalStateException(message);
     };
@@ -189,6 +190,10 @@ final class FailureFactory {
       // FileDescriptor.sync() declares only SyncFailedException; FileChannel.force any
       // IOException. SyncFailedException satisfies both.
       return new java.io.SyncFailedException(reason);
+    }
+    if (operationType == OperationType.FILE_IO_MAP && errno == ChaosEffect.Errno.ENOMEM) {
+      // FileChannelImpl.map: an mmap that fails for lack of memory.
+      return new java.io.IOException("Map failed", new OutOfMemoryError("Map failed"));
     }
     if (operationType == OperationType.FILE_IO_OPEN && javaIo) {
       // FileInputStream, FileOutputStream and RandomAccessFile constructors: "path (reason)".

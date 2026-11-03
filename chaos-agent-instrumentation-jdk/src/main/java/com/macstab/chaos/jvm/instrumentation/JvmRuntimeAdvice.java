@@ -1323,6 +1323,105 @@ final class JvmRuntimeAdvice {
     }
   }
 
+  /** Intercepts {@code FileChannelImpl.map(MapMode, long, long[, Arena])}: the region's size. */
+  static final class FileChannelMapAdvice {
+    @Advice.OnMethodEnter
+    static void enter(
+        @Advice.This final Object channel,
+        @Advice.Argument(2) final long size,
+        @Advice.FieldValue("path") final String path)
+        throws Throwable {
+      BootstrapDispatcher.beforeFileIo(
+          "FILE_IO_MAP", channel, path, (int) Math.min(size, Integer.MAX_VALUE));
+    }
+  }
+
+  /**
+   * Intercepts {@code FileChannelImpl.transferTo(long, long, WritableByteChannel)}: one read, also
+   * when the JDK copies through the channel's own reads ({@link
+   * BootstrapDispatcher#SCOPE_FILE_TRANSFER}).
+   */
+  static final class FileChannelTransferToAdvice {
+    @Advice.OnMethodEnter
+    static void enter(
+        @Advice.This final Object channel,
+        @Advice.Argument(1) final long count,
+        @Advice.FieldValue("path") final String path)
+        throws Throwable {
+      BootstrapDispatcher.beforeFileIo(
+          "FILE_IO_TRANSFER_TO", channel, path, (int) Math.min(count, Integer.MAX_VALUE));
+      // Entered after the dispatch: when it throws, no exit advice runs to leave the scope.
+      BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_FILE_TRANSFER);
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit() {
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_FILE_TRANSFER);
+    }
+  }
+
+  /**
+   * Intercepts {@code FileChannelImpl.transferFrom(ReadableByteChannel, long, long)}: a write,
+   * whose count a torn write lowers.
+   */
+  static final class FileChannelTransferFromAdvice {
+    @Advice.OnMethodEnter
+    static void enter(
+        @Advice.This final Object channel,
+        @Advice.Argument(value = 2, readOnly = false) long count,
+        @Advice.FieldValue("path") final String path)
+        throws Throwable {
+      final int requested = (int) Math.min(count, Integer.MAX_VALUE);
+      final int allowed =
+          BootstrapDispatcher.beforeFileIo("FILE_IO_TRANSFER_FROM", channel, path, requested);
+      if (allowed >= 0 && allowed < requested) {
+        count = allowed;
+      }
+      BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_FILE_TRANSFER);
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit() {
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_FILE_TRANSFER);
+    }
+  }
+
+  /**
+   * Intercepts {@code MappedByteBuffer.force(int, int)} of a file mapping (msync), which {@code
+   * force()} delegates to. The JDK reports a failed msync as {@link java.io.UncheckedIOException}.
+   */
+  static final class MappedBufferForceAdvice {
+    @Advice.OnMethodEnter
+    static void enter(@Advice.This final Object buffer, @Advice.FieldValue("fd") final Object fd)
+        throws Throwable {
+      if (fd != null) {
+        try {
+          BootstrapDispatcher.beforeFileIo("FILE_IO_SYNC", buffer, null, -1);
+        } catch (final java.io.IOException failed) {
+          throw new java.io.UncheckedIOException(failed);
+        }
+      }
+    }
+  }
+
+  /**
+   * Intercepts a platform provider's {@code copy(Path, Path, CopyOption...)}: it opens the source
+   * and the target ({@code FILE_IO_OPEN} of each).
+   */
+  static final class FilesCopyAdvice {
+    @Advice.OnMethodEnter
+    static void enter(
+        @Advice.This final Object provider,
+        @Advice.Argument(0) final java.nio.file.Path source,
+        @Advice.Argument(1) final java.nio.file.Path target)
+        throws Throwable {
+      BootstrapDispatcher.beforeFileIo(
+          "FILE_IO_OPEN", provider, source == null ? null : source.toString(), -1);
+      BootstrapDispatcher.beforeFileIo(
+          "FILE_IO_OPEN", provider, target == null ? null : target.toString(), -1);
+    }
+  }
+
   /** Intercepts {@code FileChannelImpl.force(boolean)}: fsync of a channel. */
   static final class FileChannelForceAdvice {
     @Advice.OnMethodEnter

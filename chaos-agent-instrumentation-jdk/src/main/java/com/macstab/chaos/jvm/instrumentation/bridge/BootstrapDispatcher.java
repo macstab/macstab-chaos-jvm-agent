@@ -153,8 +153,14 @@ public final class BootstrapDispatcher {
    */
   public static final int SCOPE_CLOCK_API = 20;
 
+  /**
+   * Scope of a {@code FileChannel.transferTo} / {@code transferFrom}: one file event, also when the
+   * JDK carries it out through the channel's own reads and writes.
+   */
+  public static final int SCOPE_FILE_TRANSFER = 21;
+
   /** Size of the per-thread counter array: index 0 is the reentrancy depth, then the scopes. */
-  static final int SCOPE_COUNT = 21;
+  static final int SCOPE_COUNT = 22;
 
   /**
    * Enters a call-depth scope on the current thread.
@@ -2393,7 +2399,7 @@ public final class BootstrapDispatcher {
       final String operation, final Object stream, final String path, final int byteCount)
       throws Throwable {
     final int[] depth = DEPTH.get();
-    if (depth[0] > 0) {
+    if (depth[0] > 0 || depth[SCOPE_FILE_TRANSFER] > 0) {
       return byteCount;
     }
     depth[0]++;

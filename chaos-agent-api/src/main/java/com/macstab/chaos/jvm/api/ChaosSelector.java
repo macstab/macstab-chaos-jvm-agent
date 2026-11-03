@@ -1091,8 +1091,8 @@ public sealed interface ChaosSelector
    * <p><b>Valid operations:</b> {@link OperationType#FILE_IO_READ}, {@link
    * OperationType#FILE_IO_WRITE}, {@link OperationType#FILE_IO_SYNC}, {@link
    * OperationType#FILE_IO_TRUNCATE}, {@link OperationType#FILE_IO_DELETE}, {@link
-   * OperationType#FILE_IO_MOVE}, {@link OperationType#FILE_IO_OPEN}. Only reads and writes carry a
-   * byte count.
+   * OperationType#FILE_IO_MOVE}, {@link OperationType#FILE_IO_OPEN}, {@link
+   * OperationType#FILE_IO_MAP}. Only reads, writes and maps carry a byte count.
    *
    * <p>The optional filters narrow the match further; a {@code null} filter does not restrict:
    * {@code pathPattern} matches the path the stream was opened with (a stream created from a {@link
@@ -1116,10 +1116,12 @@ public sealed interface ChaosSelector
             OperationType.FILE_IO_TRUNCATE,
             OperationType.FILE_IO_DELETE,
             OperationType.FILE_IO_MOVE,
-            OperationType.FILE_IO_OPEN);
+            OperationType.FILE_IO_OPEN,
+            OperationType.FILE_IO_MAP);
 
     private static final Set<OperationType> SIZED_OPS =
-        EnumSet.of(OperationType.FILE_IO_READ, OperationType.FILE_IO_WRITE);
+        EnumSet.of(
+            OperationType.FILE_IO_READ, OperationType.FILE_IO_WRITE, OperationType.FILE_IO_MAP);
 
     /** Validates the FileIoSelector parameters. */
     public FileIoSelector {

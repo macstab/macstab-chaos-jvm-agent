@@ -590,6 +590,7 @@ final class CompatibilityValidator {
           OperationType.FILE_IO_DELETE,
           OperationType.FILE_IO_MOVE,
           OperationType.FILE_IO_OPEN,
+          OperationType.FILE_IO_MAP,
           // A process start fails on the program file: ENOENT, EACCES and the like.
           OperationType.PROCESS_START);
 
@@ -618,8 +619,9 @@ final class CompatibilityValidator {
           // pthread_create of a platform thread
           ChaosEffect.Errno.EAGAIN,
           EnumSet.of(OperationType.THREAD_START),
+          // pthread_create, and mmap of a file region
           ChaosEffect.Errno.ENOMEM,
-          EnumSet.of(OperationType.THREAD_START));
+          EnumSet.of(OperationType.THREAD_START, OperationType.FILE_IO_MAP));
 
   /**
    * Operations whose interception point can carry out a {@link ChaosEffect.SuppressEffect}: it
