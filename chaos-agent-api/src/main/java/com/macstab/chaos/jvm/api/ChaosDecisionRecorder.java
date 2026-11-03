@@ -27,7 +27,9 @@ import java.util.concurrent.ConcurrentSkipListSet;
  */
 public final class ChaosDecisionRecorder implements ChaosEventListener {
 
-  private final Map<String, ConcurrentSkipListSet<Long>> fired = new ConcurrentHashMap<>();
+  /** Match numbers by scenario id, then by session id ({@code ""} for JVM-scoped scenarios). */
+  private final Map<String, Map<String, ConcurrentSkipListSet<Long>>> fired =
+      new ConcurrentHashMap<>();
 
   /** Creates an empty recorder. */
   public ChaosDecisionRecorder() {}
@@ -40,7 +42,10 @@ public final class ChaosDecisionRecorder implements ChaosEventListener {
     final String match = event.attributes().get("match");
     if (match != null) {
       fired
-          .computeIfAbsent(event.scenarioId(), id -> new ConcurrentSkipListSet<>())
+          .computeIfAbsent(event.scenarioId(), id -> new ConcurrentHashMap<>())
+          .computeIfAbsent(
+              event.attributes().getOrDefault("sessionId", ""),
+              session -> new ConcurrentSkipListSet<>())
           .add(Long.parseLong(match));
     }
   }
@@ -52,7 +57,27 @@ public final class ChaosDecisionRecorder implements ChaosEventListener {
    * @return the match numbers; empty when it never took effect
    */
   public List<Long> matches(final String scenarioId) {
-    final ConcurrentSkipListSet<Long> matches = fired.get(scenarioId);
+    final Map<String, ConcurrentSkipListSet<Long>> bySession = fired.get(scenarioId);
+    if (bySession == null) {
+      return List.of();
+    }
+    final java.util.TreeSet<Long> all = new java.util.TreeSet<>();
+    bySession.values().forEach(all::addAll);
+    return List.copyOf(all);
+  }
+
+  /**
+   * Returns the match numbers on which the scenario took effect in one session, ascending: the log
+   * to replay when several sessions ran a scenario with the same id.
+   *
+   * @param scenarioId the scenario id
+   * @param sessionId the session id; {@code null} for a JVM-scoped scenario
+   * @return the match numbers; empty when it never took effect there
+   */
+  public List<Long> matches(final String scenarioId, final String sessionId) {
+    final Map<String, ConcurrentSkipListSet<Long>> bySession = fired.get(scenarioId);
+    final ConcurrentSkipListSet<Long> matches =
+        bySession == null ? null : bySession.get(sessionId == null ? "" : sessionId);
     return matches == null ? List.of() : List.copyOf(matches);
   }
 
@@ -63,7 +88,7 @@ public final class ChaosDecisionRecorder implements ChaosEventListener {
    */
   public Map<String, List<Long>> decisions() {
     final Map<String, List<Long>> decisions = new TreeMap<>();
-    fired.forEach((id, matches) -> decisions.put(id, List.copyOf(matches)));
+    fired.keySet().forEach(id -> decisions.put(id, matches(id)));
     return decisions;
   }
 

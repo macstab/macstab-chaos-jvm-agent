@@ -34,7 +34,19 @@ def load(path):
         if unit not in ("ns/op", "us/op", "ms/op"):
             raise SystemExit(f"{key}: unsupported unit {unit} (use AverageTime or SampleTime)")
         scale = {"ns/op": 1.0, "us/op": 1e3, "ms/op": 1e6}[unit]
-        raw = [value * scale for fork in metric["rawData"] for value in fork]
+        if "rawData" in metric:
+            raw = [value * scale for fork in metric["rawData"] for value in fork]
+        else:
+            # SampleTime results: per fork, per iteration, a histogram of [value, count] pairs.
+            raw = [
+                value * scale
+                for fork in metric.get("rawDataHistogram", [])
+                for iteration in fork
+                for value, count in iteration
+                for _ in range(min(int(count), 1000))
+            ]
+        if not raw:
+            raise SystemExit(f"{key}: no raw samples in the result")
         samples[key] = raw
     return samples
 

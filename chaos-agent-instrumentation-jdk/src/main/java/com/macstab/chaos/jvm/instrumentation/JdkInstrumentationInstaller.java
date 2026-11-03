@@ -2715,11 +2715,18 @@ public final class JdkInstrumentationInstaller {
         .type(ElementMatchers.named("sun.nio.fs.AbstractFileSystemProvider"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
-                typeBuilder.visit(
-                    Advice.to(JvmRuntimeAdvice.FilesDeleteAdvice.class)
-                        .on(
-                            ElementMatchers.namedOneOf("delete", "deleteIfExists")
-                                .and(ElementMatchers.takesArguments(java.nio.file.Path.class)))))
+                typeBuilder
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.FilesDeleteAdvice.class)
+                            .on(
+                                ElementMatchers.named("delete")
+                                    .and(ElementMatchers.takesArguments(java.nio.file.Path.class))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.FilesDeleteIfExistsAdvice.class)
+                            .on(
+                                ElementMatchers.named("deleteIfExists")
+                                    .and(
+                                        ElementMatchers.takesArguments(java.nio.file.Path.class)))))
         // Files.move: each platform provider implements move itself (UnixFileSystemProvider,
         // WindowsFileSystemProvider); other providers (zip file systems) are not hooked.
         .type(
@@ -2816,6 +2823,12 @@ public final class JdkInstrumentationInstaller {
   private static AgentBuilder applyClockCallSiteTransformations(final AgentBuilder agentBuilder) {
     final List<String> packages = CLOCK_CALL_SITE_PACKAGES;
     if (packages.isEmpty()) {
+      // A SYSTEM_CLOCK_* scenario is valid without the setting (manual adjustClockMillis hooks),
+      // but direct System.currentTimeMillis() calls stay unskewed: say so instead of doing
+      // nothing silently.
+      LOGGER.warning(
+          "chaos: a SYSTEM_CLOCK_MILLIS/NANOS scenario is active but clockCallSites is not set;"
+              + " direct System.currentTimeMillis()/nanoTime() calls are not skewed");
       return agentBuilder;
     }
     ElementMatcher.Junction<TypeDescription> types = ElementMatchers.none();
@@ -2831,7 +2844,9 @@ public final class JdkInstrumentationInstaller {
     final net.bytebuddy.description.method.MethodDescription skewedNanos =
         dispatcher.getDeclaredMethods().filter(ElementMatchers.named("nanoTime")).getOnly();
     return agentBuilder
-        .type(types.and(ElementMatchers.not(ElementMatchers.isInterface())))
+        // Interfaces too: their default and static methods and the lambdas declared in them hold
+        // clock calls as well.
+        .type(types)
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder.visit(

@@ -94,8 +94,8 @@ class ChaosDecisionRecorderTest {
     assertThatThrownBy(
             () -> new ChaosSelector.ProcessSelector(Set.of(OperationType.SOCKET_READ), null))
         .isInstanceOf(IllegalArgumentException.class);
-    assertThat(ChaosEffect.Errno.EAGAIN.code()).isEqualTo(11);
+    assertThat(ChaosEffect.Errno.EAGAIN.linuxCode()).isEqualTo(11);
     assertThat(ChaosEffect.Errno.EAGAIN.family()).isEqualTo(ChaosEffect.Errno.Family.PROCESS);
-    assertThat(ChaosEffect.Errno.ENOENT.code()).isEqualTo(2);
+    assertThat(ChaosEffect.Errno.ENOENT.linuxCode()).isEqualTo(2);
   }
 }

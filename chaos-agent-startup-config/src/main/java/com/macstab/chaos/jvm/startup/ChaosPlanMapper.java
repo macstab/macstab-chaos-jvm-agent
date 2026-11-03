@@ -261,4 +261,34 @@ public final class ChaosPlanMapper {
           "failed to serialize " + value.getClass().getName(), exception);
     }
   }
+
+  /**
+   * Reads a plan, a single scenario or an array of scenarios, recognised by the JSON's structure
+   * (an object with a {@code scenarios} member is a plan). Scenarios are wrapped in a plan named
+   * {@code planName}.
+   *
+   * @param json the JSON
+   * @param planName the name of the plan wrapping bare scenarios
+   * @return the plan
+   * @throws ConfigLoadException if the JSON is malformed or invalid
+   */
+  public static ChaosPlan readPlanOrScenarios(final String json, final String planName) {
+    final com.fasterxml.jackson.databind.JsonNode tree;
+    try {
+      tree = OBJECT_MAPPER.readTree(json);
+    } catch (JsonProcessingException exception) {
+      return read(json); // reports the syntax error with its position
+    }
+    if (tree != null && tree.isObject() && tree.has("scenarios")) {
+      return read(json);
+    }
+    final com.fasterxml.jackson.databind.node.ObjectNode plan = OBJECT_MAPPER.createObjectNode();
+    plan.putObject("metadata").put("name", planName);
+    if (tree != null && tree.isArray()) {
+      plan.set("scenarios", tree);
+    } else {
+      plan.putArray("scenarios").add(tree);
+    }
+    return read(plan.toString());
+  }
 }

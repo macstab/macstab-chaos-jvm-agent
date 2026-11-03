@@ -122,6 +122,18 @@ final class ScenarioRegistry implements ChaosDiagnostics {
     return replaced[0];
   }
 
+  /**
+   * Returns whether a controller registered under {@code key} is still {@code REGISTERED} or {@code
+   * ACTIVE}, so registering another one under the key would fail.
+   *
+   * @param key the registry key ({@code scope::id})
+   * @return {@code true} when the key is taken by a live controller
+   */
+  boolean isLive(final String key) {
+    final ScenarioController existing = controllers.get(key);
+    return existing != null && !isFinished(existing);
+  }
+
   private static boolean isFinished(final ScenarioController controller) {
     final ChaosDiagnostics.ScenarioState state = controller.state();
     return state == ChaosDiagnostics.ScenarioState.STOPPED

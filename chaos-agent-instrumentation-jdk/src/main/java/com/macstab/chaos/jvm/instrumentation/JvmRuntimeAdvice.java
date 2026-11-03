@@ -1104,6 +1104,33 @@ final class JvmRuntimeAdvice {
     }
   }
 
+  /**
+   * Intercepts {@code AbstractFileSystemProvider.deleteIfExists(Path)}. An injected {@code ENOENT}
+   * returns {@code false}, as the real method does for a missing file; other failures throw.
+   */
+  static final class FilesDeleteIfExistsAdvice {
+    @Advice.OnMethodEnter(skipOn = Advice.OnNonDefaultValue.class)
+    static boolean enter(
+        @Advice.This final Object provider, @Advice.Argument(0) final java.nio.file.Path file)
+        throws Throwable {
+      try {
+        BootstrapDispatcher.beforeFileIo(
+            "FILE_IO_DELETE", provider, file == null ? null : file.toString(), -1);
+        return false;
+      } catch (final java.nio.file.NoSuchFileException missing) {
+        return true;
+      }
+    }
+
+    @Advice.OnMethodExit
+    static void exit(
+        @Advice.Enter final boolean missing, @Advice.Return(readOnly = false) boolean deleted) {
+      if (missing) {
+        deleted = false;
+      }
+    }
+  }
+
   /** Intercepts a file system provider's {@code move(Path, Path, CopyOption...)}. */
   static final class FilesMoveAdvice {
     @Advice.OnMethodEnter

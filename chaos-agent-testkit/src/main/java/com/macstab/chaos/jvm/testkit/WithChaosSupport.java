@@ -89,11 +89,8 @@ public final class WithChaosSupport {
           "@WithChaos on " + element + " needs exactly one of value (JSON) and resource");
     }
     final String json = inline ? annotation.value() : readResource(annotation.resource(), element);
-    final String trimmed = json.strip();
-    return ChaosPlanMapper.read(
-        trimmed.contains("\"scenarios\"")
-            ? trimmed
-            : "{\"metadata\":{\"name\":\"@WithChaos\"},\"scenarios\":[" + trimmed + "]}");
+    // By structure, not substring: a scenario whose id mentioned "scenarios" was read as a plan.
+    return ChaosPlanMapper.readPlanOrScenarios(json, "@WithChaos");
   }
 
   private static String readResource(final String resource, final AnnotatedElement element) {

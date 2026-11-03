@@ -2345,9 +2345,8 @@ public final class ChaosDispatcher {
           FailureFactory.errno(
               errnoEffect.errno(),
               operationType,
-              operationType == OperationType.PROCESS_START
-                  ? context.targetName()
-                  : context.path()));
+              operationType == OperationType.PROCESS_START ? context.targetName() : context.path()),
+          scenario.id());
     }
     if (effect instanceof ChaosEffect.RejectEffect rejectEffect) {
       return rejectTerminal(operationType, rejectEffect.message());

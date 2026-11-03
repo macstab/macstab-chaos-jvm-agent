@@ -104,13 +104,19 @@ final class ChaosDiagnosticsMBean implements ChaosDiagnosticsMXBean {
     } catch (final ConfigLoadException invalid) {
       throw new IllegalArgumentException(invalid.getMessage());
     }
+    // As one plan: validated whole before anything starts, with its observability settings, and
+    // rolled back as a unit. Scenario by scenario, a failing third scenario left the first two
+    // active and a session-scoped one ran JVM-wide.
+    final ChaosActivationHandle planHandle;
+    try {
+      planHandle = controlPlane.activate(plan);
+    } catch (final RuntimeException rejected) {
+      throw new IllegalArgumentException(rejected.getMessage());
+    }
     final java.util.List<String> ids = new java.util.ArrayList<>();
     for (final ChaosScenario scenario : plan.scenarios()) {
-      activated.put(scenario.id(), controlPlane.activate(scenario));
+      activated.put(scenario.id(), planHandle);
       ids.add(scenario.id());
-    }
-    if (controlPlane instanceof com.macstab.chaos.jvm.core.ChaosRuntime runtime) {
-      runtime.applyPlanObservability(ids, plan.observability());
     }
     return String.join(",", ids);
   }
@@ -122,6 +128,8 @@ final class ChaosDiagnosticsMBean implements ChaosDiagnosticsMXBean {
     if (handle == null) {
       return false;
     }
+    // A scenario stops with the plan it was activated in.
+    activated.values().removeIf(other -> other == handle);
     handle.close();
     return true;
   }

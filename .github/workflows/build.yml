@@ -16,8 +16,10 @@ jobs:
     runs-on: ubuntu-latest
     # A hung test otherwise holds the runner for GitHub's 6-hour default.
     timeout-minutes: 30
+    # Branches of this repository are built on push; pull requests from forks, which get no push
+    # build here, are built on pull_request. Before, pull requests ran no checks at all.
     if: |
-      github.event_name != 'pull_request' && github.event.pull_request == null
+      github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
 
     steps:
       - name: Checkout code
@@ -69,8 +71,10 @@ jobs:
   jdk-matrix:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
+    # Branches of this repository are built on push; pull requests from forks, which get no push
+    # build here, are built on pull_request. Before, pull requests ran no checks at all.
     if: |
-      github.event_name != 'pull_request' && github.event.pull_request == null
+      github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     strategy:
       fail-fast: false
       matrix:
@@ -112,8 +116,10 @@ jobs:
   cross-layer-docs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # Branches of this repository are built on push; pull requests from forks, which get no push
+    # build here, are built on pull_request. Before, pull requests ran no checks at all.
     if: |
-      github.event_name != 'pull_request' && github.event.pull_request == null
+      github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
 
     steps:
       - name: Checkout code
@@ -124,6 +130,8 @@ jobs:
         with:
           repository: macstab/macstab-chaos-testing-libraries
           ref: develop
+          # A read token for the library repository when it is private; the default otherwise.
+          token: ${{ secrets.NATIVE_LIBS_TOKEN || github.token }}
           path: native-library
           sparse-checkout: docs
 
@@ -145,8 +153,10 @@ jobs:
   demos:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # Branches of this repository are built on push; pull requests from forks, which get no push
+    # build here, are built on pull_request. Before, pull requests ran no checks at all.
     if: |
-      github.event_name != 'pull_request' && github.event.pull_request == null
+      github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
 
     steps:
       - name: Checkout code

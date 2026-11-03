@@ -98,19 +98,24 @@ public final class ChaosRuntime implements ChaosControlPlane {
    *
    * @param scenarioIds the plan's scenario ids
    * @param observability the plan's settings
+   * @param owner the plan the settings belong to; only it can clear them
    */
   public void applyPlanObservability(
-      final java.util.Collection<String> scenarioIds, final ChaosPlan.Observability observability) {
-    controlPlane.applyPlanObservability(scenarioIds, observability);
+      final java.util.Collection<String> scenarioIds,
+      final ChaosPlan.Observability observability,
+      final Object owner) {
+    controlPlane.applyPlanObservability(scenarioIds, observability, owner);
   }
 
   /**
-   * Restores the default observability of scenarios that left a plan.
+   * Restores the default observability of scenarios that left {@code owner}'s plan.
    *
    * @param scenarioIds the scenario ids
+   * @param owner the owner that applied the settings
    */
-  public void clearPlanObservability(final java.util.Collection<String> scenarioIds) {
-    controlPlane.clearPlanObservability(scenarioIds);
+  public void clearPlanObservability(
+      final java.util.Collection<String> scenarioIds, final Object owner) {
+    controlPlane.clearPlanObservability(scenarioIds, owner);
   }
 
   /**

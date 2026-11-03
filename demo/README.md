@@ -15,7 +15,7 @@ cd demo/03-disk-full && java -javaagent:../../chaos-agent-bootstrap/build/libs/c
 | `03-disk-full`        | writes under `data/` fail with `ENOSPC`, `logs/` is fine (`pathPattern`) |
 | `04-dns-override`     | `localhost` resolves to `10.9.8.7` (`dnsAnswer` override)             |
 | `05-clock-skew`       | `java.time` runs one hour ahead (`clockSkew`)                         |
-| `06-process-limit`    | starting a process fails with `EAGAIN`, in the JDK's own words        |
+| `06-process-limit`    | starting a process fails with `ENOENT`, in the JDK's own words        |
 | `07-http-reject`      | requests to one URL prefix fail before they are sent (`reject`)      |
 | `08-slow-executor`    | every executor submission starts 200 ms late (`delay`)                |
 

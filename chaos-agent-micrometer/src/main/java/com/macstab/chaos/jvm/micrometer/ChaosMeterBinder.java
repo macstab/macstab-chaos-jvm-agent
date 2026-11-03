@@ -51,7 +51,8 @@ import java.util.Objects;
 public final class ChaosMeterBinder implements MeterBinder, AutoCloseable {
 
   private final ChaosControlPlane controlPlane;
-  private volatile ChaosEventListener listener;
+  private final java.util.List<ChaosEventListener> listeners =
+      new java.util.concurrent.CopyOnWriteArrayList<>();
 
   /**
    * Creates a binder for {@code controlPlane}.
@@ -83,17 +84,19 @@ public final class ChaosMeterBinder implements MeterBinder, AutoCloseable {
         .description("Hook groups woven into JDK and library classes")
         .register(registry);
     final ChaosEventListener counting = ChaosEventListener.async(event -> count(registry, event));
-    listener = counting;
+    listeners.add(counting);
     controlPlane.addEventListener(counting);
   }
 
-  /** Stops counting events; meters already registered stay in their registry. */
+  /**
+   * Stops counting events for every registry this binder was bound to; meters already registered
+   * stay in their registry.
+   */
   @Override
   public void close() {
-    final ChaosEventListener registered = listener;
-    if (registered != null) {
+    for (final ChaosEventListener registered : listeners) {
       controlPlane.removeEventListener(registered);
-      listener = null;
+      listeners.remove(registered);
     }
   }
 

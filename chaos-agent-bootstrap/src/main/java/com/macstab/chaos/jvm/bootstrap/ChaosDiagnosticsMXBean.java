@@ -66,18 +66,19 @@ public interface ChaosDiagnosticsMXBean {
   String activatePlan(String planJson);
 
   /**
-   * Stops a scenario that was activated through {@link #activatePlan}.
+   * Stops a scenario that was activated through {@link #activatePlan}, together with the rest of
+   * its plan: a plan is activated and stopped as a unit.
    *
    * @param scenarioId the scenario id
-   * @return {@code true} if a scenario with that id was stopped
+   * @return {@code true} if a plan holding that scenario was stopped
    * @throws IllegalStateException if control operations are disabled
    */
   boolean stopScenario(String scenarioId);
 
   /**
-   * Stops every scenario activated through {@link #activatePlan}.
+   * Stops every plan activated through {@link #activatePlan}.
    *
-   * @return how many scenarios were stopped
+   * @return how many plans were stopped
    * @throws IllegalStateException if control operations are disabled
    */
   int stopAll();

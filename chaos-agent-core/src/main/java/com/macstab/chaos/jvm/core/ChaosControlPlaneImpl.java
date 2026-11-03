@@ -47,6 +47,12 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
   private final Map<Thread, Thread> shutdownHooks = new ConcurrentHashMap<>();
   private final AtomicBoolean closed = new AtomicBoolean(false);
 
+  /**
+   * Which plan's observability settings a scenario id carries: only that owner may clear them, so a
+   * rejected or later plan with the same ids cannot strip the settings of the running one.
+   */
+  private final Map<String, Object> observabilityOwners = new ConcurrentHashMap<>();
+
   /** Scenarios whose plan set {@code jmxEnabled=false}: JMX does not list or dump them. */
   private final Set<String> jmxHidden = ConcurrentHashMap.newKeySet();
 
@@ -86,7 +92,28 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
 
   @Override
   public ChaosActivationHandle activate(final ChaosScenario scenario) {
+    rejectSessionScope(scenario);
     return registerScenario(scenario, "jvm", null);
+  }
+
+  /**
+   * A session-scoped scenario activated outside a session had no session to match and fired for
+   * every thread in the JVM (the plan-file reloader and JMX activated scenarios this way).
+   */
+  private void rejectSessionScope(final ChaosScenario scenario) {
+    if (scenario.scope() == ChaosScenario.ScenarioScope.SESSION) {
+      final ChaosActivationException failure =
+          new ChaosActivationException(
+              "session-scoped scenario "
+                  + scenario.id()
+                  + " must be activated on a session (ChaosSession.activate); outside one it"
+                  + " would apply to every thread");
+      recordFailure(
+          scenario.id(),
+          ChaosDiagnostics.FailureCategory.INVALID_CONFIGURATION,
+          failure.getMessage());
+      throw failure;
+    }
   }
 
   /**
@@ -98,20 +125,28 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
    * @throws ChaosUnsupportedFeatureException if the runtime cannot run it
    */
   void validate(final ChaosScenario scenario) {
+    if (scenario.scope() == ChaosScenario.ScenarioScope.SESSION) {
+      throw new ChaosActivationException(
+          "session-scoped scenario " + scenario.id() + " cannot be activated outside a session");
+    }
     CompatibilityValidator.validate(scenario, featureSet);
   }
 
   /**
    * Applies a plan's {@link ChaosPlan.Observability} to its scenarios: {@code
    * structuredLoggingEnabled=false} stops logging their events, {@code jmxEnabled=false} hides them
-   * from JMX. Settings for the same ids are replaced.
+   * from JMX. The settings then belong to {@code owner}, replacing an earlier owner's.
    *
    * @param scenarioIds the plan's scenario ids
    * @param observability the plan's settings
+   * @param owner the plan (handle, poller) the settings belong to
    */
   void applyPlanObservability(
-      final java.util.Collection<String> scenarioIds, final ChaosPlan.Observability observability) {
+      final java.util.Collection<String> scenarioIds,
+      final ChaosPlan.Observability observability,
+      final Object owner) {
     for (final String id : scenarioIds) {
+      observabilityOwners.put(id, owner);
       observabilityBus.muteLogging(id, !observability.structuredLoggingEnabled());
       if (observability.jmxEnabled()) {
         jmxHidden.remove(id);
@@ -122,14 +157,18 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
   }
 
   /**
-   * Removes plan observability settings from scenarios, restoring the defaults.
+   * Restores the default observability of scenarios whose settings {@code owner} set; settings of
+   * another owner are left alone.
    *
    * @param scenarioIds the scenario ids
+   * @param owner the owner that applied them
    */
-  void clearPlanObservability(final java.util.Collection<String> scenarioIds) {
+  void clearPlanObservability(final java.util.Collection<String> scenarioIds, final Object owner) {
     for (final String id : scenarioIds) {
-      observabilityBus.muteLogging(id, false);
-      jmxHidden.remove(id);
+      if (observabilityOwners.remove(id, owner)) {
+        observabilityBus.muteLogging(id, false);
+        jmxHidden.remove(id);
+      }
     }
   }
 
@@ -161,26 +200,45 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
     // "part of this plan is active". Roll back by stopping and destroying every successfully
     // registered handle before propagating the original exception.
     ensureOpen();
+    // Validate every scenario and check every id before anything is registered or started: an
+    // invalid fifth scenario used to roll back four that had already injected faults.
+    for (final ChaosScenario scenario : plan.scenarios()) {
+      try {
+        validate(scenario);
+      } catch (final RuntimeException invalid) {
+        recordFailure(
+            scenario.id(),
+            ChaosDiagnostics.FailureCategory.INVALID_CONFIGURATION,
+            invalid.getMessage());
+        throw invalid;
+      }
+      if (registry.isLive("jvm::" + scenario.id())) {
+        final ChaosActivationException conflict =
+            new ChaosActivationException("scenario key already active: jvm::" + scenario.id());
+        recordFailure(
+            scenario.id(),
+            ChaosDiagnostics.FailureCategory.ACTIVATION_CONFLICT,
+            conflict.getMessage());
+        throw conflict;
+      }
+    }
     final List<String> ids = plan.scenarios().stream().map(ChaosScenario::id).toList();
-    applyPlanObservability(ids, plan.observability());
+    final Object owner = new Object();
+    applyPlanObservability(ids, plan.observability(), owner);
     final List<ChaosActivationHandle> handles = new ArrayList<>();
     try {
       for (final ChaosScenario scenario : plan.scenarios()) {
-        if (scenario.scope() != ChaosScenario.ScenarioScope.JVM) {
-          throw new ChaosActivationException(
-              "startup/global activation cannot register session-scoped scenario " + scenario.id());
-        }
         handles.add(activate(scenario));
       }
       final ChaosActivationHandle planHandle =
           new CompositeActivationHandle(
-              "plan:" + plan.metadata().name(), handles, () -> clearPlanObservability(ids));
+              "plan:" + plan.metadata().name(), handles, () -> clearPlanObservability(ids, owner));
       if (plan.observability().debugDumpOnStart()) {
         System.err.println(registry.debugDump());
       }
       return planHandle;
     } catch (final RuntimeException failure) {
-      clearPlanObservability(ids);
+      clearPlanObservability(ids, owner);
       for (final ChaosActivationHandle handle : handles) {
         try {
           // activate(ChaosScenario) on this class returns a DefaultChaosActivationHandle, and the

@@ -127,10 +127,13 @@ final class FailureFactory {
     return switch (errno) {
       case ECONNREFUSED -> new java.net.ConnectException(reason);
       case ETIMEDOUT ->
-          operationType == OperationType.SOCKET_CONNECT
-                  || operationType == OperationType.NIO_CHANNEL_CONNECT
-              ? new java.net.ConnectException(reason)
-              : new java.net.SocketTimeoutException("Read timed out");
+          switch (operationType) {
+            case SOCKET_CONNECT, NIO_CHANNEL_CONNECT -> new java.net.ConnectException(reason);
+            case SOCKET_READ, NIO_CHANNEL_READ ->
+                new java.net.SocketTimeoutException("Read timed out");
+            // A write or close that times out reports the errno text, as the JDK does.
+            default -> new java.net.SocketException(reason);
+          };
       case ECONNRESET, ENETUNREACH, EPIPE -> new java.net.SocketException(reason);
       case EHOSTUNREACH -> new java.net.NoRouteToHostException(reason);
       case EADDRINUSE -> new java.net.BindException(reason);

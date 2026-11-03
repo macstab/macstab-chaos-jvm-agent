@@ -28,6 +28,8 @@ final class CompositeActivationHandle implements ChaosActivationHandle {
   private final String id;
   private final List<ChaosActivationHandle> delegates;
   private final Runnable onClose;
+  private final java.util.concurrent.atomic.AtomicBoolean closed =
+      new java.util.concurrent.atomic.AtomicBoolean();
 
   /**
    * Creates a composite handle with the given logical ID and delegate handles.
@@ -82,6 +84,11 @@ final class CompositeActivationHandle implements ChaosActivationHandle {
   /** Closes every scenario of the plan, removing each from the registry. */
   @Override
   public void close() {
+    // Idempotent: a second close (try-with-resources plus framework teardown) must not run
+    // onClose again after another plan took over the same ids.
+    if (!closed.compareAndSet(false, true)) {
+      return;
+    }
     try {
       broadcast("close", ChaosActivationHandle::close);
     } finally {

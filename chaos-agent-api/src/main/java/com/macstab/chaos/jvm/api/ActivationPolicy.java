@@ -126,6 +126,14 @@ public record ActivationPolicy(
                 + " rateLimit");
       }
       replayMatches = replayMatches.stream().distinct().sorted().toList();
+      if (!replayMatches.isEmpty() && replayMatches.get(0) <= activateAfterMatches) {
+        throw new IllegalArgumentException(
+            "replayMatches "
+                + replayMatches.get(0)
+                + " lies inside the warm-up of "
+                + activateAfterMatches
+                + " matches and could never fire");
+      }
     }
   }
 

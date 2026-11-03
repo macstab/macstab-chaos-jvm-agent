@@ -768,7 +768,11 @@ class DefectRegressionIntegrationTest {
               "process-start",
               null);
       final String failure =
-          "Cannot run program \"" + java + "\": error=11, Resource temporarily unavailable";
+          "Cannot run program \""
+              + java
+              + "\": error="
+              + ChaosEffect.Errno.EAGAIN.code()
+              + ", Resource temporarily unavailable";
       assertThat(result.value("builder")).isEqualTo(failure);
       assertThat(result.value("exec")).isEqualTo(failure);
       assertThat(result.value("other"))
@@ -816,6 +820,30 @@ class DefectRegressionIntegrationTest {
       assertThat(result.value("b.delete")).isEqualTo("ok");
       assertThat(result.value("b.fileDelete")).isEqualTo("true");
       assertThat(result.value("b.exists")).isEqualTo("false");
+      assertThat(result.value("b.deleteIfExists")).isEqualTo("false");
+    }
+
+    @Test
+    @DisplayName("ENOENT on Files.deleteIfExists returns false, as for a missing file")
+    void deleteIfExistsMissing() throws Exception {
+      final Path root = Files.createDirectories(tempDir.resolve("missing"));
+      final ChildJvmProbe.ProbeResult result =
+          probe.run(
+              plan(
+                  scenario(
+                      "gone-under-a",
+                      new ChaosSelector.FileIoSelector(
+                          Set.of(OperationType.FILE_IO_DELETE),
+                          PathPattern.under(root.resolve("a").toString()),
+                          null,
+                          null),
+                      ChaosEffect.errno(ChaosEffect.Errno.ENOENT))),
+              DefectProbeMain.class,
+              "file-ops",
+              null,
+              "-Dchaos.test.dir=" + root);
+      assertThat(result.value("a.deleteIfExists")).isEqualTo("false");
+      assertThat(result.value("a.delete")).isEqualTo("java.nio.file.NoSuchFileException");
     }
   }
 

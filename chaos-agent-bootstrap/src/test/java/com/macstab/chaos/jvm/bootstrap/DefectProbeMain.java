@@ -736,6 +736,14 @@ public final class DefectProbeMain {
       java.nio.file.Files.write(other.toPath(), new byte[1]);
       System.out.println(directory + ".fileDelete=" + other.delete());
       System.out.println(directory + ".exists=" + java.nio.file.Files.exists(current));
+      try {
+        System.out.println(
+            directory
+                + ".deleteIfExists="
+                + java.nio.file.Files.deleteIfExists(dir.resolve("absent")));
+      } catch (final java.io.IOException failed) {
+        System.out.println(directory + ".deleteIfExists=" + failed.getClass().getName());
+      }
     }
   }
 

@@ -55,14 +55,14 @@ class DecisionReplayTest {
             .activationPolicy(
                 ActivationPolicy.builder()
                     .activateAfterMatches(5)
-                    .replayMatches(List.of(3L, 6L, 9L))
+                    .replayMatches(List.of(6L, 9L))
                     .build())
             .build();
     final ChaosDecisionRecorder recorder = new ChaosDecisionRecorder();
 
     run(scenario, recorder);
 
-    assertThat(recorder.matches("warm")).as("3 is inside the warm-up").containsExactly(6L, 9L);
+    assertThat(recorder.matches("warm")).as("matches 1-5 are the warm-up").containsExactly(6L, 9L);
   }
 
   @Test

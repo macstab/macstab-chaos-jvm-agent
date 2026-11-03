@@ -124,6 +124,11 @@ class WithChaosTest {
                 Fixtures.class.getDeclaredMethod("repeated"), controlPlane, session);
         assertThat(handles).hasSize(2);
         WithChaosSupport.close(handles);
+        final List<ChaosActivationHandle> fromArray =
+            WithChaosSupport.activate(
+                Fixtures.class.getDeclaredMethod("arrayOfScenarios"), controlPlane, session);
+        assertThat(fromArray).hasSize(1);
+        WithChaosSupport.close(fromArray);
         assertThat(handles).isEmpty();
       }
     }
@@ -155,6 +160,15 @@ class WithChaosTest {
         """)
     @WithChaos("{\"id\": \"wc-broken\"}")
     void secondInvalid() {}
+
+    @WithChaos(
+        """
+        [{"id": "wc-array-scenarios-1", "scope": "SESSION",
+          "description": "an id or text that mentions \\"scenarios\\" is still one scenario",
+          "selector": {"type": "executor", "operations": ["EXECUTOR_SHUTDOWN"]},
+          "effect": {"type": "delay", "minDelay": "PT0.001S", "maxDelay": "PT0.001S"}}]
+        """)
+    void arrayOfScenarios() {}
 
     @WithChaos(
         """

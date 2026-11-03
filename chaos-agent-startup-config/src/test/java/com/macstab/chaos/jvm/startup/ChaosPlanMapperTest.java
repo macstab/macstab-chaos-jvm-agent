@@ -356,4 +356,30 @@ class ChaosPlanMapperTest {
         .containsExactly(3L, 9L, 17L);
     assertThat(ChaosPlanMapper.read(ChaosPlanMapper.write(plan))).isEqualTo(plan);
   }
+
+  @org.junit.jupiter.api.Test
+  @org.junit.jupiter.api.DisplayName(
+      "readPlanOrScenarios recognises plans, single scenarios and arrays")
+  void readPlanOrScenarios() {
+    final String scenario =
+        """
+        {"id": "mentions-scenarios", "description": "has a \\"scenarios\\" word", "scope": "JVM",
+         "selector": {"type": "executor", "operations": ["EXECUTOR_SUBMIT"]},
+         "effect": {"type": "delay", "minDelay": "PT0.001S", "maxDelay": "PT0.001S"}}
+        """;
+    assertThat(ChaosPlanMapper.readPlanOrScenarios(scenario, "w").scenarios())
+        .singleElement()
+        .satisfies(s -> assertThat(s.id()).isEqualTo("mentions-scenarios"));
+    assertThat(ChaosPlanMapper.readPlanOrScenarios("[" + scenario + "]", "w").metadata().name())
+        .isEqualTo("w");
+    assertThat(
+            ChaosPlanMapper.readPlanOrScenarios(
+                    "{\"metadata\":{\"name\":\"p\"},\"scenarios\":[" + scenario + "]}", "w")
+                .metadata()
+                .name())
+        .isEqualTo("p");
+    org.assertj.core.api.Assertions.assertThatThrownBy(
+            () -> ChaosPlanMapper.readPlanOrScenarios("{ broken", "w"))
+        .isInstanceOf(ConfigLoadException.class);
+  }
 }

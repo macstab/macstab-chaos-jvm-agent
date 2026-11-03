@@ -62,6 +62,8 @@ jobs:
             $BENCHMARKS $JMH_ARGS -rff "$PWD/candidate.json"
 
       - name: Compare
+        # bash -o pipefail: without it the step exits with tee's status and never fails.
+        shell: bash
         run: python3 candidate/scripts/jmh-gate.py base.json candidate.json | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Upload results

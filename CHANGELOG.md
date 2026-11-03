@@ -68,6 +68,17 @@
 
 ### Bug Fixes
 
+* **core:** a session-scoped scenario activated outside a session (through the plan-file reloader or JMX) was registered JVM-wide and fired for every thread; it is now refused.
+* **core:** `activate(ChaosPlan)` validates every scenario and checks every id before starting any; an invalid later scenario used to roll back earlier ones that had already injected faults.
+* **core:** a plan's observability settings belong to that plan: a rejected plan with the same ids, a re-posted plan or a second `close()` no longer strip the settings of the running plan. Plan handles close idempotently.
+* **jmx:** `activatePlan` activates the plan as one unit (validated first, observability applied, rolled back together); `stopScenario` stops the scenario's plan.
+* **micrometer:** a binder bound to several registries removed only the last listener on `close()`.
+* **bootstrap:** self-attached installs (the framework starters, `installLocally`) ignored every `MACSTAB_CHAOS_*` environment variable.
+* **testkit:** `@WithChaos` told plans from scenarios by the substring `"scenarios"`; it now reads the JSON's structure (plan, scenario or array of scenarios; `ChaosPlanMapper.readPlanOrScenarios`).
+* **api:** `Errno.code()` is the current operating system's number (`EAGAIN` is 35 on macOS); `linuxCode()` keeps the Linux value. `ETIMEDOUT` on a write no longer reports "Read timed out"; an injected `ENOENT` on `Files.deleteIfExists` returns `false` as the real method does.
+* **api:** `replayMatches` inside the warm-up is rejected; `ChaosDecisionRecorder.matches(id, sessionId)` keeps sessions apart.
+* **instrumentation:** clock call sites in interfaces (default and static methods, lambdas) are rewritten too; a `SYSTEM_CLOCK_*` scenario without `clockCallSites` logs a warning.
+* **build:** the benchmark gate step ran without `pipefail` and could never fail; pull requests from forks now run the checks; the gate reads SampleTime results.
 * **instrumentation:** a URL filter (`urlPattern`) never matched the JDK `HttpClient`: the URL was read reflectively through the request's internal class, which is not open to the agent, and came out `null`. The advice, inlined into `HttpClientImpl`, now calls `HttpRequest.uri()` directly.
 * **startup-config:** a reloaded plan with an invalid scenario stopped the changed scenarios, activated part of the new plan and then rolled back, so for a moment neither plan was fully active and part of the invalid one was. Every new or changed scenario is now validated before the active set is touched.
 * **micrometer:** `chaos.events` was registered with different tag keys per event type (`reason` on skipped, `category` on failed), which Prometheus registries reject; those tags moved to `chaos.skips` and `chaos.activation.failures`, so every meter has one tag key set.

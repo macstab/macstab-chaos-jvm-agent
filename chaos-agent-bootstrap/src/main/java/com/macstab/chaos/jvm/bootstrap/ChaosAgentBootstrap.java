@@ -225,7 +225,9 @@ public final class ChaosAgentBootstrap {
       }
       try {
         final Instrumentation instrumentation = ByteBuddyAgent.install();
-        return initialize("", instrumentation, Map.of());
+        // The process environment, as for -javaagent: the framework starters self-attach in
+        // production too, and the documented MACSTAB_CHAOS_* switches must apply there.
+        return initialize("", instrumentation, System.getenv());
       } catch (final RuntimeException runtimeException) {
         throw runtimeException;
       } catch (final Exception exception) {

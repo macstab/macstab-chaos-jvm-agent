@@ -324,7 +324,7 @@ public final class StartupConfigPoller implements AutoCloseable {
       stopped = activeScenarios.size();
     }
     applyDiff(List.of());
-    runtime.clearPlanObservability(observedIds);
+    runtime.clearPlanObservability(observedIds, this);
     observedIds = Set.of();
     lastStamp = null;
     lastDigest = null;
@@ -367,8 +367,8 @@ public final class StartupConfigPoller implements AutoCloseable {
             .collect(java.util.stream.Collectors.toUnmodifiableSet());
     final Set<String> gone = new java.util.HashSet<>(observedIds);
     gone.removeAll(ids);
-    runtime.clearPlanObservability(gone);
-    runtime.applyPlanObservability(ids, plan.observability());
+    runtime.clearPlanObservability(gone, this);
+    runtime.applyPlanObservability(ids, plan.observability(), this);
     observedIds = ids;
   }
 

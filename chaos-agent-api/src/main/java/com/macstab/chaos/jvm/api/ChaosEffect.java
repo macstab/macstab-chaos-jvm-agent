@@ -846,43 +846,43 @@ public sealed interface ChaosEffect
   /** The errors an {@link ErrnoEffect} can raise, with the Java exception each becomes. */
   enum Errno {
     /** Connection refused: {@link java.net.ConnectException}. */
-    ECONNREFUSED(Family.NETWORK, 111, "Connection refused"),
+    ECONNREFUSED(Family.NETWORK, 111, 61, "Connection refused"),
     /**
      * Timed out: {@link java.net.SocketTimeoutException} on a read, {@link
      * java.net.ConnectException} on a connect.
      */
-    ETIMEDOUT(Family.NETWORK, 110, "Connection timed out"),
+    ETIMEDOUT(Family.NETWORK, 110, 60, "Connection timed out"),
     /** Connection reset by peer: {@link java.net.SocketException}. */
-    ECONNRESET(Family.NETWORK, 104, "Connection reset"),
+    ECONNRESET(Family.NETWORK, 104, 54, "Connection reset"),
     /** No route to host: {@link java.net.NoRouteToHostException}. */
-    EHOSTUNREACH(Family.NETWORK, 113, "No route to host"),
+    EHOSTUNREACH(Family.NETWORK, 113, 65, "No route to host"),
     /** Network is unreachable: {@link java.net.SocketException}. */
-    ENETUNREACH(Family.NETWORK, 101, "Network is unreachable"),
+    ENETUNREACH(Family.NETWORK, 101, 51, "Network is unreachable"),
     /** Broken pipe (write to a closed connection): {@link java.net.SocketException}. */
-    EPIPE(Family.NETWORK, 32, "Broken pipe"),
+    EPIPE(Family.NETWORK, 32, 32, "Broken pipe"),
     /** Address already in use: {@link java.net.BindException}. */
-    EADDRINUSE(Family.NETWORK, 98, "Address already in use"),
+    EADDRINUSE(Family.NETWORK, 98, 48, "Address already in use"),
     /** No space left on device: {@link java.nio.file.FileSystemException}. */
-    ENOSPC(Family.FILE, 28, "No space left on device"),
+    ENOSPC(Family.FILE, 28, 28, "No space left on device"),
     /** Disk quota exceeded: {@link java.nio.file.FileSystemException}. */
-    EDQUOT(Family.FILE, 122, "Disk quota exceeded"),
+    EDQUOT(Family.FILE, 122, 69, "Disk quota exceeded"),
     /** Read-only file system: {@link java.nio.file.FileSystemException}. */
-    EROFS(Family.FILE, 30, "Read-only file system"),
+    EROFS(Family.FILE, 30, 30, "Read-only file system"),
     /** Permission denied: {@link java.nio.file.AccessDeniedException}. */
-    EACCES(Family.FILE, 13, "Permission denied"),
+    EACCES(Family.FILE, 13, 13, "Permission denied"),
     /** No such file or directory: {@link java.nio.file.NoSuchFileException}. */
-    ENOENT(Family.FILE, 2, "No such file or directory"),
+    ENOENT(Family.FILE, 2, 2, "No such file or directory"),
     /** Input/output error (a failing disk): {@link java.nio.file.FileSystemException}. */
-    EIO(Family.FILE, 5, "Input/output error"),
+    EIO(Family.FILE, 5, 5, "Input/output error"),
     /** Too many open files: {@link java.nio.file.FileSystemException}. */
-    EMFILE(Family.FILE, 24, "Too many open files"),
+    EMFILE(Family.FILE, 24, 24, "Too many open files"),
     /**
      * Resource temporarily unavailable (the process or thread limit): on {@link
      * OperationType#PROCESS_START}, {@code IOException: Cannot run program}.
      */
-    EAGAIN(Family.PROCESS, 11, "Resource temporarily unavailable"),
+    EAGAIN(Family.PROCESS, 11, 35, "Resource temporarily unavailable"),
     /** Cannot allocate memory: on {@link OperationType#PROCESS_START}, as {@link #EAGAIN}. */
-    ENOMEM(Family.PROCESS, 12, "Cannot allocate memory");
+    ENOMEM(Family.PROCESS, 12, 12, "Cannot allocate memory");
 
     /** Which operations an error belongs to. */
     public enum Family {
@@ -894,23 +894,38 @@ public sealed interface ChaosEffect
       PROCESS
     }
 
+    private static final boolean MACOS =
+        System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).startsWith("mac");
+
     private final Family family;
-    private final int code;
+    private final int linuxCode;
+    private final int macosCode;
     private final String reason;
 
-    Errno(final Family family, final int code, final String reason) {
+    Errno(final Family family, final int linuxCode, final int macosCode, final String reason) {
       this.family = family;
-      this.code = code;
+      this.linuxCode = linuxCode;
+      this.macosCode = macosCode;
       this.reason = reason;
     }
 
     /**
-     * Returns the error's number on Linux, as the JDK prints it in {@code error=N}.
+     * Returns the error's number on this operating system (Linux numbering elsewhere), as the JDK
+     * prints it in {@code error=N}: {@code EAGAIN} is 11 on Linux and 35 on macOS.
+     *
+     * @return the errno value
+     */
+    public int code() {
+      return MACOS ? macosCode : linuxCode;
+    }
+
+    /**
+     * Returns the error's number on Linux, whatever the current operating system.
      *
      * @return the Linux errno value
      */
-    public int code() {
-      return code;
+    public int linuxCode() {
+      return linuxCode;
     }
 
     /**
