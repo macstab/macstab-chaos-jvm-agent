@@ -206,7 +206,8 @@ public final class NetworkDispatch {
    * @param remotePort the peer port, or {@code 0} if not connected
    * @param soTimeoutMillis the socket's {@code SO_TIMEOUT}; {@code 0} for infinite
    * @return the byte count to read: {@code len}, or less under a {@code TrickleEffect}; encoded as
-   *     {@code -(count) - 1} when the bytes read must be corrupted ({@link #corruptFlag})
+   *     {@code -(count) - 1} when the bytes read must be corrupted (see {@code
+   *     DispatchEngine.corruptFlag})
    * @throws Throwable if an active scenario throws to simulate a failure
    */
   public int beforeSocketRead(
@@ -355,8 +356,8 @@ public final class NetworkDispatch {
    * @param peer the destination of a send ({@code null}: the channel's connected peer); ignored for
    *     a receive, whose peer is the connected one if any
    * @param length the datagram's length (send) or the space for it (receive)
-   * @return {@code length}; {@link #ChaosDispatcher.DATAGRAM_DROPPED} when a send is suppressed;
-   *     {@link #corruptFlag} encoded when the datagram received must be corrupted
+   * @return {@code length}; {@link ChaosDispatcher#DATAGRAM_DROPPED} when a send is suppressed; the
+   *     {@code DispatchEngine.corruptFlag} encoding when the datagram received must be corrupted
    * @throws Throwable if an active scenario fails the call
    */
   public int beforeDatagram(

@@ -93,7 +93,10 @@ public final class ChaosDispatcher {
     }
   }
 
-  /** What {@link #beforeDatagram} returns for a send a scenario suppresses: drop the datagram. */
+  /**
+   * What {@link NetworkDispatch#beforeDatagram} returns for a send a scenario suppresses: drop the
+   * datagram.
+   */
   public static final int DATAGRAM_DROPPED = Integer.MIN_VALUE;
 
   /** Tag of {@code FileChannel.transferTo}: a read whose bytes never reach a buffer. */

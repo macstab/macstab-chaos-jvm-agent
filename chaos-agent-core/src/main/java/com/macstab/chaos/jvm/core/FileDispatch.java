@@ -29,7 +29,7 @@ public final class FileDispatch {
    * @param path the path the stream was opened with, or {@code null}
    * @param byteCount the bytes read (requested) or written by the call
    * @return {@code byteCount}, encoded as {@code -(byteCount) - 1} when a read's bytes must be
-   *     corrupted ({@link #corruptFlag})
+   *     corrupted (see {@code DispatchEngine.corruptFlag})
    * @throws Throwable if an active scenario throws to simulate an I/O failure
    */
   public int beforeFileIo(

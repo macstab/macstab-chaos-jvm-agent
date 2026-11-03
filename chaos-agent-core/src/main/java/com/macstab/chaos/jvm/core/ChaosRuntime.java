@@ -200,7 +200,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#decorateExecutorRunnable}.
+   * Delegates to {@link ExecutorDispatch#decorateExecutorRunnable}.
    *
    * @param operation the {@link OperationType} name for the submission
    * @param executor the executor receiving the submission
@@ -213,7 +213,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#decorateExecutorCallable}.
+   * Delegates to {@link ExecutorDispatch#decorateExecutorCallable}.
    *
    * @param <T> the callable's result type
    * @param operation the {@link OperationType} name for the submission
@@ -227,7 +227,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeThreadStart}.
+   * Delegates to {@link ThreadDispatch#beforeThreadStart}.
    *
    * @param thread the thread being started
    * @throws Throwable if an active scenario throws to simulate a failure
@@ -237,7 +237,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeThreadStart(Thread, boolean)}.
+   * Delegates to {@link ThreadDispatch#beforeThreadStart(Thread, boolean)}.
    *
    * @param thread the thread being started
    * @param poolWorker whether a thread pool is starting one of its workers
@@ -248,7 +248,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeWorkerRun}.
+   * Delegates to {@link ExecutorDispatch#beforeWorkerRun}.
    *
    * @param executor the executor owning the worker
    * @param worker the worker thread about to run the task
@@ -261,7 +261,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeForkJoinTaskRun}.
+   * Delegates to {@link ExecutorDispatch#beforeForkJoinTaskRun}.
    *
    * @param task the fork-join task about to execute
    * @throws Throwable if an active scenario throws to simulate a failure
@@ -272,7 +272,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeQueueOperation}.
+   * Delegates to {@link ExecutorDispatch#beforeQueueOperation}.
    *
    * @param operation the {@link OperationType} name for the queue operation
    * @param queue the queue being operated on
@@ -283,7 +283,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeBooleanQueueOperation}.
+   * Delegates to {@link ExecutorDispatch#beforeBooleanQueueOperation}.
    *
    * @param operation the {@link OperationType} name for the queue operation
    * @param queue the queue being operated on
@@ -296,7 +296,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeCompletableFutureComplete}.
+   * Delegates to {@link ExecutorDispatch#beforeCompletableFutureComplete}.
    *
    * @param operation the {@link OperationType} name for the completion operation
    * @param future the future being completed
@@ -312,7 +312,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeClassLoad}.
+   * Delegates to {@link RuntimeDispatch#beforeClassLoad}.
    *
    * @param loader the class loader performing the load (may be {@code null} for bootstrap)
    * @param className the binary class name being loaded
@@ -323,7 +323,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#afterResourceLookup}.
+   * Delegates to {@link RuntimeDispatch#afterResourceLookup}.
    *
    * @param loader the class loader performing the lookup (may be {@code null} for bootstrap)
    * @param name the resource name being looked up
@@ -337,7 +337,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#decorateShutdownHook}.
+   * Delegates to {@link ExecutorDispatch#decorateShutdownHook}.
    *
    * @param hook the original shutdown hook being registered
    * @return the wrapper thread that should actually be registered with the runtime
@@ -348,7 +348,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#resolveShutdownHook}.
+   * Delegates to {@link ExecutorDispatch#resolveShutdownHook}.
    *
    * @param original the original shutdown hook that was registered
    * @return the wrapper thread, or {@code original} if no wrapper is registered
@@ -358,7 +358,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeExecutorShutdown}.
+   * Delegates to {@link ExecutorDispatch#beforeExecutorShutdown}.
    *
    * @param operation the {@link OperationType} name for the shutdown operation
    * @param executor the executor being shut down
@@ -371,7 +371,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeScheduledTick}.
+   * Delegates to {@link ExecutorDispatch#beforeScheduledTick}.
    *
    * @param executor the scheduling executor running the tick
    * @param task the task being ticked
@@ -415,7 +415,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeMethodEnter(Class, String, String)}: the entry of a
+   * Delegates to {@link MethodDispatch#beforeMethodEnter(Class, String, String)}: the entry of a
    * method woven for a {@code MethodSelector}.
    *
    * @param declaringType the class declaring the method
@@ -430,7 +430,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#afterMethodExit(Class, String, String, Object)}: the normal
+   * Delegates to {@link MethodDispatch#afterMethodExit(Class, String, String, Object)}: the normal
    * exit of a method woven for a {@code MethodSelector}.
    *
    * @param declaringType the class declaring the method
@@ -489,7 +489,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#applyClockSkew}.
+   * Delegates to {@link ClockDispatch#applyClockSkew}.
    *
    * @param realValue the raw clock value as read from the OS
    * @param clockType {@link OperationType#SYSTEM_CLOCK_MILLIS} or {@link
@@ -562,7 +562,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#adjustInstantNow}.
+   * Delegates to {@link ClockDispatch#adjustInstantNow}.
    *
    * @param realInstant the real current instant
    * @return adjusted instant
@@ -572,7 +572,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#adjustClockInstant}.
+   * Delegates to {@link ClockDispatch#adjustClockInstant}.
    *
    * @param realInstant the instant the system clock read
    * @return the (possibly skewed) instant
@@ -582,7 +582,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#adjustClockReadMillis}.
+   * Delegates to {@link ClockDispatch#adjustClockReadMillis}.
    *
    * @param realMillis the milliseconds the system clock read
    * @return the (possibly skewed) milliseconds
@@ -592,7 +592,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#adjustLocalDateTimeNowInZone}.
+   * Delegates to {@link ClockDispatch#adjustLocalDateTimeNowInZone}.
    *
    * @param realValue the real local date-time
    * @param zone the zone {@code LocalDateTime.now(ZoneId)} was called with
@@ -604,7 +604,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#adjustLocalDateTimeNow}.
+   * Delegates to {@link ClockDispatch#adjustLocalDateTimeNow}.
    *
    * @param realValue the real current local date-time
    * @return adjusted local date-time
@@ -614,7 +614,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#adjustZonedDateTimeNow}.
+   * Delegates to {@link ClockDispatch#adjustZonedDateTimeNow}.
    *
    * @param realValue the real current zoned date-time
    * @return adjusted zoned date-time
@@ -624,7 +624,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#adjustDateNew}.
+   * Delegates to {@link ClockDispatch#adjustDateNew}.
    *
    * @param realMillis real wall-clock time in milliseconds
    * @return adjusted time in milliseconds
@@ -634,7 +634,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeGcRequest}.
+   * Delegates to {@link RuntimeDispatch#beforeGcRequest}.
    *
    * @return {@code true} if the GC request should proceed
    * @throws Throwable if a chaos effect injects an exception
@@ -644,7 +644,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeExitRequest}.
+   * Delegates to {@link RuntimeDispatch#beforeExitRequest}.
    *
    * @param status the requested exit status code
    * @throws Throwable if a chaos effect injects an exception
@@ -654,7 +654,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeReflectionInvoke}.
+   * Delegates to {@link RuntimeDispatch#beforeReflectionInvoke}.
    *
    * @param method the reflective method being invoked
    * @param target the target object
@@ -665,7 +665,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeDirectBufferAllocate}.
+   * Delegates to {@link RuntimeDispatch#beforeDirectBufferAllocate}.
    *
    * @param capacity requested buffer capacity in bytes
    * @throws Throwable if a chaos effect injects an exception
@@ -675,7 +675,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeObjectDeserialize}.
+   * Delegates to {@link RuntimeDispatch#beforeObjectDeserialize}.
    *
    * @param stream the ObjectInputStream being read
    * @throws Throwable if a chaos effect injects an exception
@@ -685,7 +685,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeClassDefine}.
+   * Delegates to {@link RuntimeDispatch#beforeClassDefine}.
    *
    * @param loader the class loader defining the class
    * @param className the binary name of the class being defined
@@ -696,7 +696,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeMonitorEnter}.
+   * Delegates to {@link ThreadDispatch#beforeMonitorEnter}.
    *
    * @param lock the monitor object
    * @throws Throwable if a chaos effect injects an exception
@@ -706,7 +706,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeThreadPark}.
+   * Delegates to {@link ThreadDispatch#beforeThreadPark}.
    *
    * @throws Throwable if a chaos effect injects an exception
    */
@@ -715,7 +715,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeNioSelect}.
+   * Delegates to {@link NetworkDispatch#beforeNioSelect}.
    *
    * @param selector the NIO Selector
    * @param timeoutMillis the select timeout
@@ -727,7 +727,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeNioChannelOp}.
+   * Delegates to {@link NetworkDispatch#beforeNioChannelOp}.
    *
    * @param operation the channel operation name
    * @param channel the NIO channel
@@ -738,7 +738,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeSocketConnect}.
+   * Delegates to {@link NetworkDispatch#beforeSocketConnect}.
    *
    * @param socket the socket
    * @param socketAddress the target address
@@ -752,7 +752,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeSocketAccept}.
+   * Delegates to {@link NetworkDispatch#beforeSocketAccept}.
    *
    * @param serverSocket the server socket
    * @throws Throwable if a chaos effect injects an exception
@@ -762,7 +762,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeSocketRead}.
+   * Delegates to {@link NetworkDispatch#beforeSocketRead}.
    *
    * @param stream the socket input stream
    * @throws Throwable if a chaos effect injects an exception
@@ -772,7 +772,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeSocketRead(Object, int, Object, int, int)}.
+   * Delegates to {@link NetworkDispatch#beforeSocketRead(Object, int, Object, int, int)}.
    *
    * @param stream the socket implementation being read from
    * @param len the number of bytes requested
@@ -795,7 +795,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeSocketWrite}.
+   * Delegates to {@link NetworkDispatch#beforeSocketWrite}.
    *
    * @param stream the socket output stream
    * @param len number of bytes to write
@@ -806,7 +806,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeSocketWrite(Object, int, Object, int)}.
+   * Delegates to {@link NetworkDispatch#beforeSocketWrite(Object, int, Object, int)}.
    *
    * @param stream the socket implementation being written to
    * @param len the number of bytes about to be written
@@ -831,7 +831,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeProcessStart(String)}.
+   * Delegates to {@link ProcessDispatch#beforeProcessStart(String)}.
    *
    * @param command the program
    * @throws Throwable if an active scenario fails the start
@@ -841,7 +841,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeNioChannelWrite(Object, int)}.
+   * Delegates to {@link NetworkDispatch#beforeNioChannelWrite(Object, int)}.
    *
    * @param channel the channel being written to
    * @param remaining the bytes the buffer holds
@@ -853,7 +853,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeSocketClose}.
+   * Delegates to {@link NetworkDispatch#beforeSocketClose}.
    *
    * @param socket the socket being closed
    * @throws Throwable if a chaos effect injects an exception
@@ -863,7 +863,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeDatagram(String, Object, Object, int)}.
+   * Delegates to {@link NetworkDispatch#beforeDatagram(String, Object, Object, int)}.
    *
    * @param operation {@code "DATAGRAM_SEND"} or {@code "DATAGRAM_RECEIVE"}
    * @param channel the datagram channel
@@ -879,7 +879,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeProcessWait(Object, long)}.
+   * Delegates to {@link ProcessDispatch#beforeProcessWait(Object, long)}.
    *
    * @param process the process waited for
    * @param timeoutMillis the wait's timeout, {@code 0} for none
@@ -892,7 +892,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeSocketShutdown(Object, Object, int)}.
+   * Delegates to {@link NetworkDispatch#beforeSocketShutdown(Object, Object, int)}.
    *
    * @param endpoint the socket implementation or channel
    * @param remoteAddress the peer address, or {@code null}
@@ -905,7 +905,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeDnsReverse(String)}.
+   * Delegates to {@link DnsDispatch#beforeDnsReverse(String)}.
    *
    * @param address the IP literal looked up
    * @throws Throwable if an active scenario fails the lookup
@@ -915,7 +915,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeSocketBind(Object, int)}.
+   * Delegates to {@link NetworkDispatch#beforeSocketBind(Object, int)}.
    *
    * @param address the local address being bound
    * @param port the local port being bound
@@ -926,7 +926,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeSocketChannelRead(Object, int)}.
+   * Delegates to {@link NetworkDispatch#beforeSocketChannelRead(Object, int)}.
    *
    * @param channel the channel being read from
    * @param remaining the bytes the buffers can take
@@ -938,7 +938,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeSocketChannelWrite(Object, int)}.
+   * Delegates to {@link NetworkDispatch#beforeSocketChannelWrite(Object, int)}.
    *
    * @param channel the channel being written to
    * @param remaining the bytes the buffers hold
@@ -950,7 +950,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeJndiLookup}.
+   * Delegates to {@link RuntimeDispatch#beforeJndiLookup}.
    *
    * @param context the JNDI context
    * @param name the name to look up
@@ -961,7 +961,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeObjectSerialize}.
+   * Delegates to {@link RuntimeDispatch#beforeObjectSerialize}.
    *
    * @param stream the ObjectOutputStream
    * @param obj the object being serialized
@@ -972,7 +972,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeNativeLibraryLoad}.
+   * Delegates to {@link RuntimeDispatch#beforeNativeLibraryLoad}.
    *
    * @param libraryName the native library name
    * @throws Throwable if a chaos effect injects an exception
@@ -982,7 +982,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeAsyncCancel}.
+   * Delegates to {@link ExecutorDispatch#beforeAsyncCancel}.
    *
    * @param future the Future being cancelled
    * @param mayInterruptIfRunning whether to interrupt if running
@@ -995,7 +995,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeZipInflate}.
+   * Delegates to {@link RuntimeDispatch#beforeZipInflate}.
    *
    * @throws Throwable if a chaos effect injects an exception
    */
@@ -1004,7 +1004,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeZipDeflate}.
+   * Delegates to {@link RuntimeDispatch#beforeZipDeflate}.
    *
    * @throws Throwable if a chaos effect injects an exception
    */
@@ -1013,7 +1013,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeThreadLocalGet}.
+   * Delegates to {@link ThreadDispatch#beforeThreadLocalGet}.
    *
    * @param threadLocal the ThreadLocal being accessed
    * @return {@code true} if the get should proceed
@@ -1024,7 +1024,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeThreadLocalSet}.
+   * Delegates to {@link ThreadDispatch#beforeThreadLocalSet}.
    *
    * @param threadLocal the ThreadLocal being set
    * @param value the value being stored
@@ -1037,7 +1037,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeJmxInvoke}.
+   * Delegates to {@link RuntimeDispatch#beforeJmxInvoke}.
    *
    * @param server the MBeanServer
    * @param objectName the target MBean ObjectName
@@ -1050,7 +1050,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeJmxGetAttr}.
+   * Delegates to {@link RuntimeDispatch#beforeJmxGetAttr}.
    *
    * @param server the MBeanServer
    * @param objectName the target MBean ObjectName
@@ -1063,7 +1063,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeHttpSend}.
+   * Delegates to {@link ClientDispatch#beforeHttpSend}.
    *
    * @param url the request URL
    * @param opType the HTTP operation type
@@ -1075,7 +1075,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeJdbcConnectionAcquire}.
+   * Delegates to {@link ClientDispatch#beforeJdbcConnectionAcquire}.
    *
    * @param poolName the connection pool name
    * @return {@code true} if connection acquisition should proceed
@@ -1086,7 +1086,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeJdbcStatementExecute}.
+   * Delegates to {@link ClientDispatch#beforeJdbcStatementExecute}.
    *
    * @param sql the SQL statement
    * @return {@code true} if execution should proceed
@@ -1097,7 +1097,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeJdbcPreparedStatement}.
+   * Delegates to {@link ClientDispatch#beforeJdbcPreparedStatement}.
    *
    * @param sql the SQL statement being prepared
    * @return {@code true} if preparation should proceed
@@ -1108,7 +1108,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeJdbcTransactionCommit}.
+   * Delegates to {@link ClientDispatch#beforeJdbcTransactionCommit}.
    *
    * @return {@code true} if the commit should proceed
    * @throws Throwable if a chaos effect injects an exception
@@ -1118,7 +1118,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeJdbcTransactionRollback}.
+   * Delegates to {@link ClientDispatch#beforeJdbcTransactionRollback}.
    *
    * @return {@code true} if the rollback should proceed
    * @throws Throwable if a chaos effect injects an exception
@@ -1128,7 +1128,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeThreadSleep}.
+   * Delegates to {@link ThreadDispatch#beforeThreadSleep}.
    *
    * @param millis the requested sleep duration in milliseconds
    * @return {@code true} if the sleep should proceed
@@ -1139,7 +1139,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeDnsResolve}.
+   * Delegates to {@link DnsDispatch#beforeDnsResolve}.
    *
    * @param hostname the hostname being resolved
    * @return the name to resolve: {@code hostname}, or another under a {@code DnsRewriteEffect}
@@ -1150,7 +1150,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#afterDnsAnswer}.
+   * Delegates to {@link DnsDispatch#afterDnsAnswer}.
    *
    * @param hostname the name that was looked up
    * @param answer the resolver's answer, or {@code null}
@@ -1165,7 +1165,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeSslHandshake}.
+   * Delegates to {@link NetworkDispatch#beforeSslHandshake}.
    *
    * @param socket the SSL socket
    * @throws Throwable if a chaos effect injects an exception
@@ -1175,7 +1175,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeClientCall}: a call through a client library.
+   * Delegates to {@link ClientDispatch#beforeClientCall}: a call through a client library.
    *
    * @param operation the {@link com.macstab.chaos.jvm.api.OperationType} name of the call
    * @param client the client object
@@ -1195,7 +1195,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#captureSession}.
+   * Delegates to {@link ThreadDispatch#captureSession}.
    *
    * @param carrier the fork-join task being submitted or forked
    */
@@ -1204,7 +1204,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#enterSession}.
+   * Delegates to {@link ThreadDispatch#enterSession}.
    *
    * @param carrier the task or thread starting to run
    */
@@ -1213,7 +1213,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#exitSession}.
+   * Delegates to {@link ThreadDispatch#exitSession}.
    *
    * @param carrier the task or thread that finished
    */
@@ -1222,7 +1222,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeFileIo}.
+   * Delegates to {@link FileDispatch#beforeFileIo}.
    *
    * @param operation the file I/O operation name
    * @param stream the file stream
@@ -1233,7 +1233,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ChaosDispatcher#beforeFileIo(String, Object, String, int)}.
+   * Delegates to {@link FileDispatch#beforeFileIo(String, Object, String, int)}.
    *
    * @param operation the file I/O operation name
    * @param stream the file stream

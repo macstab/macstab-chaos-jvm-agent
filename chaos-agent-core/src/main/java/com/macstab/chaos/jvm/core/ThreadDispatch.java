@@ -213,7 +213,7 @@ public final class ThreadDispatch {
   }
 
   /**
-   * Called before {@link Thread#engine.sleep(long)}.
+   * Called before {@link Thread#sleep(long)}.
    *
    * @param millis the requested sleep duration
    * @return {@code true} if the sleep should be suppressed (caller returns immediately); {@code
