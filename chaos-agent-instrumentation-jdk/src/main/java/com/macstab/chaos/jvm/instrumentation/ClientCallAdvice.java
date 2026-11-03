@@ -1,6 +1,7 @@
 package com.macstab.chaos.jvm.instrumentation;
 
 import com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher;
+import com.macstab.chaos.jvm.instrumentation.bridge.OperationTags;
 import net.bytebuddy.asm.Advice;
 
 /**
@@ -24,7 +25,7 @@ final class ClientCallAdvice {
       } finally {
         BootstrapDispatcher.endInternalCall();
       }
-      BootstrapDispatcher.beforeClientCall("MESSAGE_SEND", producer, topic, null, null);
+      BootstrapDispatcher.beforeClientCall(OperationTags.MESSAGE_SEND, producer, topic, null, null);
     }
   }
 
@@ -39,7 +40,8 @@ final class ClientCallAdvice {
       } finally {
         BootstrapDispatcher.endInternalCall();
       }
-      BootstrapDispatcher.beforeClientCall("MESSAGE_RECEIVE", consumer, topics, null, null);
+      BootstrapDispatcher.beforeClientCall(
+          OperationTags.MESSAGE_RECEIVE, consumer, topics, null, null);
     }
   }
 
@@ -56,7 +58,8 @@ final class ClientCallAdvice {
       } finally {
         BootstrapDispatcher.endInternalCall();
       }
-      BootstrapDispatcher.beforeClientCall("RPC_CALL", call, fullMethodName, null, null);
+      BootstrapDispatcher.beforeClientCall(
+          OperationTags.RPC_CALL, call, fullMethodName, null, null);
     }
   }
 
@@ -73,7 +76,8 @@ final class ClientCallAdvice {
       } finally {
         BootstrapDispatcher.endInternalCall();
       }
-      BootstrapDispatcher.beforeClientCall("REDIS_COMMAND", connection, command, null, null);
+      BootstrapDispatcher.beforeClientCall(
+          OperationTags.REDIS_COMMAND, connection, command, null, null);
     }
   }
 
@@ -90,7 +94,8 @@ final class ClientCallAdvice {
       } finally {
         BootstrapDispatcher.endInternalCall();
       }
-      BootstrapDispatcher.beforeClientCall("REDIS_COMMAND", connection, command, null, null);
+      BootstrapDispatcher.beforeClientCall(
+          OperationTags.REDIS_COMMAND, connection, command, null, null);
     }
   }
 
@@ -106,7 +111,7 @@ final class ClientCallAdvice {
       }
       try {
         BootstrapDispatcher.beforeClientCall(
-            "R2DBC_STATEMENT_EXECUTE", statement, null, null, null);
+            OperationTags.R2DBC_STATEMENT_EXECUTE, statement, null, null, null);
       } catch (final Throwable throwable) {
         BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_CLIENT);
         throw throwable;
@@ -140,7 +145,8 @@ final class ClientCallAdvice {
         } finally {
           BootstrapDispatcher.endInternalCall();
         }
-        BootstrapDispatcher.beforeClientCall("AWS_SDK_CALL", handler, operation, service, null);
+        BootstrapDispatcher.beforeClientCall(
+            OperationTags.AWS_SDK_CALL, handler, operation, service, null);
       } catch (final Throwable throwable) {
         BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_CLIENT);
         throw throwable;
@@ -164,7 +170,8 @@ final class ClientCallAdvice {
       } finally {
         BootstrapDispatcher.endInternalCall();
       }
-      BootstrapDispatcher.beforeClientCall("NETTY_CHANNEL_WRITE", unsafe, null, null, remote);
+      BootstrapDispatcher.beforeClientCall(
+          OperationTags.NETTY_CHANNEL_WRITE, unsafe, null, null, remote);
     }
   }
 
@@ -179,7 +186,8 @@ final class ClientCallAdvice {
       } finally {
         BootstrapDispatcher.endInternalCall();
       }
-      BootstrapDispatcher.beforeClientCall("NETTY_CHANNEL_READ", unsafe, null, null, remote);
+      BootstrapDispatcher.beforeClientCall(
+          OperationTags.NETTY_CHANNEL_READ, unsafe, null, null, remote);
     }
   }
 }

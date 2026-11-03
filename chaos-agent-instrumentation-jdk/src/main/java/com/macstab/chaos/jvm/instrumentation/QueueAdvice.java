@@ -1,6 +1,7 @@
 package com.macstab.chaos.jvm.instrumentation;
 
 import com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher;
+import com.macstab.chaos.jvm.instrumentation.bridge.OperationTags;
 import net.bytebuddy.asm.Advice;
 
 /**
@@ -23,7 +24,7 @@ final class QueueAdvice {
     static void enter(@Advice.This final Object queue) throws Throwable {
       if (BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_QUEUE)) {
         try {
-          BootstrapDispatcher.beforeQueueOperation("QUEUE_PUT", queue);
+          BootstrapDispatcher.beforeQueueOperation(OperationTags.QUEUE_PUT, queue);
         } catch (final Throwable throwable) {
           BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_QUEUE);
           throw throwable;
@@ -42,7 +43,7 @@ final class QueueAdvice {
     static void enter(@Advice.This final Object queue) throws Throwable {
       if (BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_QUEUE)) {
         try {
-          BootstrapDispatcher.beforeQueueOperation("QUEUE_TAKE", queue);
+          BootstrapDispatcher.beforeQueueOperation(OperationTags.QUEUE_TAKE, queue);
         } catch (final Throwable throwable) {
           BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_QUEUE);
           throw throwable;
@@ -66,7 +67,7 @@ final class QueueAdvice {
         return null;
       }
       try {
-        return BootstrapDispatcher.beforeBooleanQueueOperation("QUEUE_POLL", queue);
+        return BootstrapDispatcher.beforeBooleanQueueOperation(OperationTags.QUEUE_POLL, queue);
       } catch (final Throwable throwable) {
         BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_QUEUE);
         throw throwable;
@@ -90,7 +91,7 @@ final class QueueAdvice {
         return null;
       }
       try {
-        return BootstrapDispatcher.beforeBooleanQueueOperation("QUEUE_OFFER", queue);
+        return BootstrapDispatcher.beforeBooleanQueueOperation(OperationTags.QUEUE_OFFER, queue);
       } catch (final Throwable throwable) {
         BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_QUEUE);
         throw throwable;

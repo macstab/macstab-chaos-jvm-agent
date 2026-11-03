@@ -2,6 +2,7 @@ package com.macstab.chaos.jvm.instrumentation;
 
 import com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher;
 import com.macstab.chaos.jvm.instrumentation.bridge.ChannelBuffers;
+import com.macstab.chaos.jvm.instrumentation.bridge.OperationTags;
 import net.bytebuddy.asm.Advice;
 import net.bytebuddy.implementation.bytecode.assign.Assigner;
 
@@ -372,7 +373,7 @@ final class JvmRuntimeAdvice {
   static final class NioChannelReadAdvice {
     @Advice.OnMethodEnter
     static void enter(@Advice.This final Object channel) throws Throwable {
-      BootstrapDispatcher.beforeNioChannelOp("NIO_CHANNEL_READ", channel);
+      BootstrapDispatcher.beforeNioChannelOp(OperationTags.NIO_CHANNEL_READ, channel);
     }
   }
 
@@ -409,7 +410,7 @@ final class JvmRuntimeAdvice {
   static final class NioChannelScatterReadAdvice {
     @Advice.OnMethodEnter
     static void enter(@Advice.This final Object channel) throws Throwable {
-      BootstrapDispatcher.beforeNioChannelOp("NIO_CHANNEL_READ", channel);
+      BootstrapDispatcher.beforeNioChannelOp(OperationTags.NIO_CHANNEL_READ, channel);
     }
   }
 
@@ -741,7 +742,7 @@ final class JvmRuntimeAdvice {
   static final class NioChannelConnectAdvice {
     @Advice.OnMethodEnter
     static void enter(@Advice.This final Object channel) throws Throwable {
-      BootstrapDispatcher.beforeNioChannelOp("NIO_CHANNEL_CONNECT", channel);
+      BootstrapDispatcher.beforeNioChannelOp(OperationTags.NIO_CHANNEL_CONNECT, channel);
     }
   }
 
@@ -749,7 +750,7 @@ final class JvmRuntimeAdvice {
   static final class NioChannelAcceptAdvice {
     @Advice.OnMethodEnter
     static void enter(@Advice.This final Object channel) throws Throwable {
-      BootstrapDispatcher.beforeNioChannelOp("NIO_CHANNEL_ACCEPT", channel);
+      BootstrapDispatcher.beforeNioChannelOp(OperationTags.NIO_CHANNEL_ACCEPT, channel);
     }
   }
 
@@ -1280,7 +1281,7 @@ final class JvmRuntimeAdvice {
     static boolean enter(
         @Advice.This final Object stream, @Advice.FieldValue("path") final String path)
         throws Throwable {
-      return BootstrapDispatcher.beforeFileIo("FILE_IO_READ", stream, path, 1) < 0;
+      return BootstrapDispatcher.beforeFileIo(OperationTags.FILE_IO_READ, stream, path, 1) < 0;
     }
 
     @Advice.OnMethodExit
@@ -1301,7 +1302,7 @@ final class JvmRuntimeAdvice {
         @Advice.FieldValue("path") final String path)
         throws Throwable {
       return BootstrapDispatcher.beforeFileIo(
-              "FILE_IO_READ", stream, path, buffer == null ? -1 : buffer.length)
+              OperationTags.FILE_IO_READ, stream, path, buffer == null ? -1 : buffer.length)
           < 0;
     }
 
@@ -1324,7 +1325,7 @@ final class JvmRuntimeAdvice {
         @Advice.Argument(2) final int len,
         @Advice.FieldValue("path") final String path)
         throws Throwable {
-      return BootstrapDispatcher.beforeFileIo("FILE_IO_READ", stream, path, len) < 0;
+      return BootstrapDispatcher.beforeFileIo(OperationTags.FILE_IO_READ, stream, path, len) < 0;
     }
 
     @Advice.OnMethodExit
@@ -1350,7 +1351,7 @@ final class JvmRuntimeAdvice {
     static void enter(
         @Advice.This final Object stream, @Advice.FieldValue("path") final String path)
         throws Throwable {
-      BootstrapDispatcher.beforeFileIo("FILE_IO_WRITE", stream, path, 1);
+      BootstrapDispatcher.beforeFileIo(OperationTags.FILE_IO_WRITE, stream, path, 1);
     }
   }
 
@@ -1363,7 +1364,7 @@ final class JvmRuntimeAdvice {
         @Advice.FieldValue("path") final String path)
         throws Throwable {
       BootstrapDispatcher.beforeFileIo(
-          "FILE_IO_WRITE", stream, path, buffer == null ? -1 : buffer.length);
+          OperationTags.FILE_IO_WRITE, stream, path, buffer == null ? -1 : buffer.length);
     }
   }
 
@@ -1375,7 +1376,7 @@ final class JvmRuntimeAdvice {
         @Advice.Argument(2) final int len,
         @Advice.FieldValue("path") final String path)
         throws Throwable {
-      BootstrapDispatcher.beforeFileIo("FILE_IO_WRITE", stream, path, len);
+      BootstrapDispatcher.beforeFileIo(OperationTags.FILE_IO_WRITE, stream, path, len);
     }
   }
 
@@ -1392,7 +1393,7 @@ final class JvmRuntimeAdvice {
         @Advice.FieldValue("path") final String path)
         throws Throwable {
       return BootstrapDispatcher.beforeFileIo(
-              "FILE_IO_READ", channel, path, buffer == null ? -1 : buffer.remaining())
+              OperationTags.FILE_IO_READ, channel, path, buffer == null ? -1 : buffer.remaining())
           < 0;
     }
 
@@ -1420,7 +1421,8 @@ final class JvmRuntimeAdvice {
         @Advice.FieldValue("path") final String path)
         throws Throwable {
       final int requested = buffer == null ? -1 : buffer.remaining();
-      final int count = BootstrapDispatcher.beforeFileIo("FILE_IO_WRITE", channel, path, requested);
+      final int count =
+          BootstrapDispatcher.beforeFileIo(OperationTags.FILE_IO_WRITE, channel, path, requested);
       if (buffer != null && count >= 0 && count < requested) {
         final int originalLimit = buffer.limit();
         buffer.limit(buffer.position() + count);
@@ -1450,7 +1452,7 @@ final class JvmRuntimeAdvice {
         @Advice.FieldValue("path") final String path)
         throws Throwable {
       return BootstrapDispatcher.beforeFileChannelIo(
-          "FILE_IO_READ", channel, path, buffers, offset, length);
+          OperationTags.FILE_IO_READ, channel, path, buffers, offset, length);
     }
 
     @Advice.OnMethodExit(onThrowable = Throwable.class)
@@ -1472,7 +1474,7 @@ final class JvmRuntimeAdvice {
         @Advice.FieldValue("path") final String path)
         throws Throwable {
       return BootstrapDispatcher.beforeFileChannelIo(
-          "FILE_IO_WRITE", channel, path, buffers, offset, length);
+          OperationTags.FILE_IO_WRITE, channel, path, buffers, offset, length);
     }
 
     @Advice.OnMethodExit(onThrowable = Throwable.class)
@@ -1493,7 +1495,7 @@ final class JvmRuntimeAdvice {
         @Advice.FieldValue("path") final String path)
         throws Throwable {
       BootstrapDispatcher.beforeFileIo(
-          "FILE_IO_MAP", channel, path, (int) Math.min(size, Integer.MAX_VALUE));
+          OperationTags.FILE_IO_MAP, channel, path, (int) Math.min(size, Integer.MAX_VALUE));
     }
   }
 
@@ -1510,7 +1512,10 @@ final class JvmRuntimeAdvice {
         @Advice.FieldValue("path") final String path)
         throws Throwable {
       BootstrapDispatcher.beforeFileIo(
-          "FILE_IO_TRANSFER_TO", channel, path, (int) Math.min(count, Integer.MAX_VALUE));
+          OperationTags.FILE_IO_TRANSFER_TO,
+          channel,
+          path,
+          (int) Math.min(count, Integer.MAX_VALUE));
       // Entered after the dispatch: when it throws, no exit advice runs to leave the scope.
       BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_FILE_TRANSFER);
     }
@@ -1534,7 +1539,8 @@ final class JvmRuntimeAdvice {
         throws Throwable {
       final int requested = (int) Math.min(count, Integer.MAX_VALUE);
       final int allowed =
-          BootstrapDispatcher.beforeFileIo("FILE_IO_TRANSFER_FROM", channel, path, requested);
+          BootstrapDispatcher.beforeFileIo(
+              OperationTags.FILE_IO_TRANSFER_FROM, channel, path, requested);
       if (allowed >= 0 && allowed < requested) {
         count = allowed;
       }
@@ -1557,7 +1563,7 @@ final class JvmRuntimeAdvice {
         throws Throwable {
       if (fd != null) {
         try {
-          BootstrapDispatcher.beforeFileIo("FILE_IO_SYNC", buffer, null, -1);
+          BootstrapDispatcher.beforeFileIo(OperationTags.FILE_IO_SYNC, buffer, null, -1);
         } catch (final java.io.IOException failed) {
           throw new java.io.UncheckedIOException(failed);
         }
@@ -1577,9 +1583,9 @@ final class JvmRuntimeAdvice {
         @Advice.Argument(1) final java.nio.file.Path target)
         throws Throwable {
       BootstrapDispatcher.beforeFileIo(
-          "FILE_IO_OPEN", provider, source == null ? null : source.toString(), -1);
+          OperationTags.FILE_IO_OPEN, provider, source == null ? null : source.toString(), -1);
       BootstrapDispatcher.beforeFileIo(
-          "FILE_IO_OPEN", provider, target == null ? null : target.toString(), -1);
+          OperationTags.FILE_IO_OPEN, provider, target == null ? null : target.toString(), -1);
     }
   }
 
@@ -1589,7 +1595,7 @@ final class JvmRuntimeAdvice {
     static void enter(
         @Advice.This final Object channel, @Advice.FieldValue("path") final String path)
         throws Throwable {
-      BootstrapDispatcher.beforeFileIo("FILE_IO_SYNC", channel, path, -1);
+      BootstrapDispatcher.beforeFileIo(OperationTags.FILE_IO_SYNC, channel, path, -1);
     }
   }
 
@@ -1601,7 +1607,7 @@ final class JvmRuntimeAdvice {
     @Advice.OnMethodEnter
     static void enter(@Advice.This final Object file, @Advice.FieldValue("path") final String path)
         throws Throwable {
-      BootstrapDispatcher.beforeFileIo("FILE_IO_TRUNCATE", file, path, -1);
+      BootstrapDispatcher.beforeFileIo(OperationTags.FILE_IO_TRUNCATE, file, path, -1);
     }
   }
 
@@ -1615,7 +1621,7 @@ final class JvmRuntimeAdvice {
         @Advice.This final Object provider, @Advice.Argument(0) final java.nio.file.Path file)
         throws Throwable {
       BootstrapDispatcher.beforeFileIo(
-          "FILE_IO_DELETE", provider, file == null ? null : file.toString(), -1);
+          OperationTags.FILE_IO_DELETE, provider, file == null ? null : file.toString(), -1);
     }
   }
 
@@ -1630,7 +1636,7 @@ final class JvmRuntimeAdvice {
         throws Throwable {
       try {
         BootstrapDispatcher.beforeFileIo(
-            "FILE_IO_DELETE", provider, file == null ? null : file.toString(), -1);
+            OperationTags.FILE_IO_DELETE, provider, file == null ? null : file.toString(), -1);
         return false;
       } catch (final java.nio.file.NoSuchFileException missing) {
         return true;
@@ -1656,7 +1662,7 @@ final class JvmRuntimeAdvice {
     static void enter(@Advice.This final Object stream, @Advice.Argument(0) final String name)
         throws Throwable {
       if (!BootstrapDispatcher.isArchive(name)) {
-        BootstrapDispatcher.beforeFileIo("FILE_IO_OPEN", stream, name, -1);
+        BootstrapDispatcher.beforeFileIo(OperationTags.FILE_IO_OPEN, stream, name, -1);
       }
     }
   }
@@ -1670,7 +1676,7 @@ final class JvmRuntimeAdvice {
         @Advice.This final Object provider, @Advice.Argument(0) final java.nio.file.Path path)
         throws Throwable {
       BootstrapDispatcher.beforeFileIo(
-          "FILE_IO_OPEN", provider, path == null ? null : path.toString(), -1);
+          OperationTags.FILE_IO_OPEN, provider, path == null ? null : path.toString(), -1);
     }
   }
 
@@ -1695,9 +1701,12 @@ final class JvmRuntimeAdvice {
         @Advice.Argument(1) final java.nio.file.Path target)
         throws Throwable {
       BootstrapDispatcher.beforeFileIo(
-          "FILE_IO_MOVE", provider, source == null ? null : source.toString(), -1);
+          OperationTags.FILE_IO_MOVE, provider, source == null ? null : source.toString(), -1);
       BootstrapDispatcher.beforeFileIo(
-          "FILE_IO_MOVE_TARGET", provider, target == null ? null : target.toString(), -1);
+          OperationTags.FILE_IO_MOVE_TARGET,
+          provider,
+          target == null ? null : target.toString(),
+          -1);
     }
   }
 
@@ -1723,7 +1732,7 @@ final class JvmRuntimeAdvice {
         throws Throwable {
       BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_FILE_CLOSE);
       if (closing && thrown == null && !BootstrapDispatcher.isArchive(path)) {
-        BootstrapDispatcher.beforeFileIo("FILE_IO_CLOSE", stream, path, -1);
+        BootstrapDispatcher.beforeFileIo(OperationTags.FILE_IO_CLOSE, stream, path, -1);
       }
     }
   }
@@ -1744,7 +1753,7 @@ final class JvmRuntimeAdvice {
         throws Throwable {
       BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_FILE_CLOSE);
       if (outermost && thrown == null && !BootstrapDispatcher.isArchive(path)) {
-        BootstrapDispatcher.beforeFileIo("FILE_IO_CLOSE", channel, path, -1);
+        BootstrapDispatcher.beforeFileIo(OperationTags.FILE_IO_CLOSE, channel, path, -1);
       }
     }
   }
@@ -1759,7 +1768,7 @@ final class JvmRuntimeAdvice {
         @Advice.This final Object file, @Advice.FieldValue("path") final String path)
         throws Throwable {
       try {
-        BootstrapDispatcher.beforeFileIo("FILE_IO_DELETE", file, path, -1);
+        BootstrapDispatcher.beforeFileIo(OperationTags.FILE_IO_DELETE, file, path, -1);
         return false;
       } catch (final java.io.IOException failed) {
         return true;
@@ -1787,9 +1796,12 @@ final class JvmRuntimeAdvice {
         @Advice.FieldValue("path") final String path)
         throws Throwable {
       try {
-        BootstrapDispatcher.beforeFileIo("FILE_IO_MOVE", file, path, -1);
+        BootstrapDispatcher.beforeFileIo(OperationTags.FILE_IO_MOVE, file, path, -1);
         BootstrapDispatcher.beforeFileIo(
-            "FILE_IO_MOVE_TARGET", file, destination == null ? null : destination.getPath(), -1);
+            OperationTags.FILE_IO_MOVE_TARGET,
+            file,
+            destination == null ? null : destination.getPath(),
+            -1);
         return false;
       } catch (final java.io.IOException failed) {
         return true;
@@ -1822,7 +1834,7 @@ final class JvmRuntimeAdvice {
   static final class FileDescriptorSyncAdvice {
     @Advice.OnMethodEnter
     static void enter(@Advice.This final Object descriptor) throws Throwable {
-      BootstrapDispatcher.beforeFileIo("FILE_IO_SYNC", descriptor, null, -1);
+      BootstrapDispatcher.beforeFileIo(OperationTags.FILE_IO_SYNC, descriptor, null, -1);
     }
   }
 
@@ -1836,7 +1848,7 @@ final class JvmRuntimeAdvice {
         @Advice.This final Object file, @Advice.FieldValue("path") final String path)
         throws Throwable {
       return !BootstrapDispatcher.isArchive(path)
-          && BootstrapDispatcher.beforeFileIo("FILE_IO_READ", file, path, 1) < 0;
+          && BootstrapDispatcher.beforeFileIo(OperationTags.FILE_IO_READ, file, path, 1) < 0;
     }
 
     @Advice.OnMethodExit
@@ -1860,7 +1872,7 @@ final class JvmRuntimeAdvice {
         @Advice.FieldValue("path") final String path)
         throws Throwable {
       return !BootstrapDispatcher.isArchive(path)
-          && BootstrapDispatcher.beforeFileIo("FILE_IO_READ", file, path, len) < 0;
+          && BootstrapDispatcher.beforeFileIo(OperationTags.FILE_IO_READ, file, path, len) < 0;
     }
 
     @Advice.OnMethodExit

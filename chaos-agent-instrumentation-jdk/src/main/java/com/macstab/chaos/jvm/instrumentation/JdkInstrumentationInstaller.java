@@ -851,6 +851,8 @@ public final class JdkInstrumentationInstaller {
         writeClass(
             jarOutputStream, "com/macstab/chaos/jvm/instrumentation/bridge/ChannelBuffers.class");
         writeClass(
+            jarOutputStream, "com/macstab/chaos/jvm/instrumentation/bridge/OperationTags.class");
+        writeClass(
             jarOutputStream,
             "com/macstab/chaos/jvm/instrumentation/ScheduledRunnableWrapper.class");
         writeClass(

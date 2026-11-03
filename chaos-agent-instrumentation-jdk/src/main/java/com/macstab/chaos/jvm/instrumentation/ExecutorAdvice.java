@@ -1,6 +1,7 @@
 package com.macstab.chaos.jvm.instrumentation;
 
 import com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher;
+import com.macstab.chaos.jvm.instrumentation.bridge.OperationTags;
 import java.util.concurrent.TimeUnit;
 import net.bytebuddy.asm.Advice;
 
@@ -13,7 +14,9 @@ final class ExecutorAdvice {
         @Advice.This final Object executor,
         @Advice.Argument(value = 0, readOnly = false) Runnable task)
         throws Throwable {
-      task = BootstrapDispatcher.decorateExecutorRunnable("EXECUTOR_SUBMIT", executor, task);
+      task =
+          BootstrapDispatcher.decorateExecutorRunnable(
+              OperationTags.EXECUTOR_SUBMIT, executor, task);
     }
   }
 
@@ -31,7 +34,7 @@ final class ExecutorAdvice {
   static final class ShutdownAdvice {
     @Advice.OnMethodEnter
     static void enter(@Advice.This final Object executor) throws Throwable {
-      BootstrapDispatcher.beforeExecutorShutdown("EXECUTOR_SHUTDOWN", executor, 0L);
+      BootstrapDispatcher.beforeExecutorShutdown(OperationTags.EXECUTOR_SHUTDOWN, executor, 0L);
     }
   }
 
@@ -47,7 +50,7 @@ final class ExecutorAdvice {
   static final class ShutdownNowAdvice {
     @Advice.OnMethodEnter
     static void enter(@Advice.This final Object executor) throws Throwable {
-      BootstrapDispatcher.beforeExecutorShutdown("EXECUTOR_SHUTDOWN", executor, 0L);
+      BootstrapDispatcher.beforeExecutorShutdown(OperationTags.EXECUTOR_SHUTDOWN, executor, 0L);
     }
   }
 
@@ -62,7 +65,7 @@ final class ExecutorAdvice {
       // Reading the raw long argument without converting via the TimeUnit silently reports a
       // timeout that's off by 10^3/10^6/10^9 whenever the caller used SECONDS / MICROS / NANOS.
       BootstrapDispatcher.beforeExecutorShutdown(
-          "EXECUTOR_AWAIT_TERMINATION", executor, unit.toMillis(timeout));
+          OperationTags.EXECUTOR_AWAIT_TERMINATION, executor, unit.toMillis(timeout));
     }
   }
 }

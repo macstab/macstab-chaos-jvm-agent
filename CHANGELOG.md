@@ -96,7 +96,7 @@ Migration steps for each change: [docs/migration-2.0.md](docs/migration-2.0.md).
 
 ### Bug Fixes
 
-* **core:** `RuntimeDecision.none()` allocated a new decision on every call although documented as shared; on the executor-submit path escape analysis did not remove it, so every submission paid 32 B with no scenario active.
+* **core:** idle dispatches could allocate: executor submissions always (32 B, the no-op decision escaped), file I/O and thread sleeps in some JVMs, depending on the JIT. The hot paths (executor decoration, file I/O, thread sleep, socket reads and writes, NIO channel writes) now return before building a decision when no scenario is indexed for the operation: 0 B in every fork, 7–12 ns.
 
 * **instrumentation:** Apache HttpClient 4 chaos never applied: its class files are Java 6, and the advice's string concatenation compiled to `invokedynamic`, which cannot be woven into them, so every transformation of `CloseableHttpClient` failed. Found by the new hook-coverage test.
 

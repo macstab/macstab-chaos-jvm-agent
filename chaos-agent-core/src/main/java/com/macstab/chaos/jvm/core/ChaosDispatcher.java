@@ -155,6 +155,10 @@ public final class ChaosDispatcher {
     final String sessionId = scopeContext.currentSessionId();
     final Runnable scoped = sessionId == null ? task : scopeContext.wrap(sessionId, task);
     final OperationType indexedOp = OperationType.valueOf(operation);
+    if (idle(indexedOp)) {
+      // Before any decision: escape analysis does not remove one on this path (32 B per call).
+      return scoped;
+    }
     final RuntimeDecision decision =
         (idle(indexedOp)
             ? RuntimeDecision.none()
@@ -208,6 +212,9 @@ public final class ChaosDispatcher {
     final String sessionId = scopeContext.currentSessionId();
     final Callable<T> scoped = sessionId == null ? task : scopeContext.wrap(sessionId, task);
     final OperationType indexedOp = OperationType.valueOf(operation);
+    if (idle(indexedOp)) {
+      return scoped;
+    }
     final RuntimeDecision decision =
         (idle(indexedOp)
             ? RuntimeDecision.none()
@@ -1462,25 +1469,26 @@ public final class ChaosDispatcher {
       final int remotePort,
       final int soTimeoutMillis)
       throws Throwable {
+    if (idle(OperationType.SOCKET_READ)) {
+      return len;
+    }
     return readCount(
-        (idle(OperationType.SOCKET_READ)
-            ? RuntimeDecision.none()
-            : evaluate(
-                new InvocationContext(
-                    OperationType.SOCKET_READ,
-                    stream == null ? "java.net.SocketInputStream" : stream.getClass().getName(),
-                    null,
-                    remoteHost(remoteAddress),
-                    false,
-                    null,
-                    null,
-                    scopeContext.currentSessionId(),
-                    len,
-                    null,
-                    remoteAddress instanceof java.net.InetAddress address ? address : null,
-                    remoteAddress == null ? InvocationContext.UNKNOWN : remotePort,
-                    null,
-                    soTimeoutMillis))),
+        (evaluate(
+            new InvocationContext(
+                OperationType.SOCKET_READ,
+                stream == null ? "java.net.SocketInputStream" : stream.getClass().getName(),
+                null,
+                remoteHost(remoteAddress),
+                false,
+                null,
+                null,
+                scopeContext.currentSessionId(),
+                len,
+                null,
+                remoteAddress instanceof java.net.InetAddress address ? address : null,
+                remoteAddress == null ? InvocationContext.UNKNOWN : remotePort,
+                null,
+                soTimeoutMillis))),
         len);
   }
 
@@ -1498,25 +1506,26 @@ public final class ChaosDispatcher {
   public int beforeSocketWrite(
       final Object stream, final int len, final Object remoteAddress, final int remotePort)
       throws Throwable {
+    if (idle(OperationType.SOCKET_WRITE)) {
+      return len;
+    }
     return readCount(
-        (idle(OperationType.SOCKET_WRITE)
-            ? RuntimeDecision.none()
-            : evaluate(
-                new InvocationContext(
-                    OperationType.SOCKET_WRITE,
-                    stream == null ? "java.net.SocketOutputStream" : stream.getClass().getName(),
-                    null,
-                    remoteHost(remoteAddress),
-                    false,
-                    null,
-                    null,
-                    scopeContext.currentSessionId(),
-                    len,
-                    null,
-                    remoteAddress instanceof java.net.InetAddress address ? address : null,
-                    remoteAddress == null ? InvocationContext.UNKNOWN : remotePort,
-                    null,
-                    InvocationContext.UNKNOWN))),
+        (evaluate(
+            new InvocationContext(
+                OperationType.SOCKET_WRITE,
+                stream == null ? "java.net.SocketOutputStream" : stream.getClass().getName(),
+                null,
+                remoteHost(remoteAddress),
+                false,
+                null,
+                null,
+                scopeContext.currentSessionId(),
+                len,
+                null,
+                remoteAddress instanceof java.net.InetAddress address ? address : null,
+                remoteAddress == null ? InvocationContext.UNKNOWN : remotePort,
+                null,
+                InvocationContext.UNKNOWN))),
         len);
   }
 
@@ -1735,27 +1744,26 @@ public final class ChaosDispatcher {
    * @throws Throwable if an active scenario throws to simulate a failure
    */
   public int beforeNioChannelWrite(final Object channel, final int remaining) throws Throwable {
+    if (idle(OperationType.NIO_CHANNEL_WRITE)) {
+      return remaining;
+    }
     return readCount(
-        idle(OperationType.NIO_CHANNEL_WRITE)
-            ? RuntimeDecision.none()
-            : evaluate(
-                new InvocationContext(
-                    OperationType.NIO_CHANNEL_WRITE,
-                    channel == null
-                        ? "java.nio.channels.SocketChannel"
-                        : channel.getClass().getName(),
-                    null,
-                    null,
-                    false,
-                    null,
-                    null,
-                    scopeContext.currentSessionId(),
-                    remaining,
-                    null,
-                    null,
-                    InvocationContext.UNKNOWN,
-                    null,
-                    InvocationContext.UNKNOWN)),
+        evaluate(
+            new InvocationContext(
+                OperationType.NIO_CHANNEL_WRITE,
+                channel == null ? "java.nio.channels.SocketChannel" : channel.getClass().getName(),
+                null,
+                null,
+                false,
+                null,
+                null,
+                scopeContext.currentSessionId(),
+                remaining,
+                null,
+                null,
+                InvocationContext.UNKNOWN,
+                null,
+                InvocationContext.UNKNOWN)),
         remaining);
   }
 
@@ -2264,20 +2272,21 @@ public final class ChaosDispatcher {
     // The sleeping thread is the current thread. Its name, daemon flag and kind are reported so
     // ThreadSelector filters (threadNamePattern, daemon, kind) apply to THREAD_SLEEP; they were
     // left null, so a non-ANY filter never matched and kind=PLATFORM also matched virtual threads.
+    if (idle(OperationType.THREAD_SLEEP)) {
+      return false;
+    }
     final Thread current = Thread.currentThread();
     final RuntimeDecision decision =
-        (idle(OperationType.THREAD_SLEEP)
-            ? RuntimeDecision.none()
-            : evaluate(
-                new InvocationContext(
-                    OperationType.THREAD_SLEEP,
-                    "java.lang.Thread",
-                    null,
-                    current.getName(),
-                    false,
-                    current.isDaemon(),
-                    featureSet.isVirtualThread(current),
-                    scopeContext.currentSessionId())));
+        (evaluate(
+            new InvocationContext(
+                OperationType.THREAD_SLEEP,
+                "java.lang.Thread",
+                null,
+                current.getName(),
+                false,
+                current.isDaemon(),
+                featureSet.isVirtualThread(current),
+                scopeContext.currentSessionId())));
     applyDelayAndGate(decision);
     if (decision.terminalAction() != null) {
       final TerminalAction terminalAction = decision.terminalAction();
@@ -2404,25 +2413,26 @@ public final class ChaosDispatcher {
       final String operation, final Object stream, final String path, final int byteCount)
       throws Throwable {
     final OperationType fileIoOpType = resolveFileIoOperationType(operation);
+    if (idle(fileIoOpType)) {
+      return byteCount;
+    }
     return readCount(
-        (idle(fileIoOpType)
-            ? RuntimeDecision.none()
-            : evaluate(
-                new InvocationContext(
-                    fileIoOpType,
-                    stream == null ? "java.io.FileInputStream" : stream.getClass().getName(),
-                    null,
-                    transferTag(operation),
-                    false,
-                    null,
-                    null,
-                    scopeContext.currentSessionId(),
-                    byteCount,
-                    path,
-                    null,
-                    InvocationContext.UNKNOWN,
-                    null,
-                    InvocationContext.UNKNOWN))),
+        (evaluate(
+            new InvocationContext(
+                fileIoOpType,
+                stream == null ? "java.io.FileInputStream" : stream.getClass().getName(),
+                null,
+                transferTag(operation),
+                false,
+                null,
+                null,
+                scopeContext.currentSessionId(),
+                byteCount,
+                path,
+                null,
+                InvocationContext.UNKNOWN,
+                null,
+                InvocationContext.UNKNOWN))),
         byteCount);
   }
 
@@ -2497,10 +2507,10 @@ public final class ChaosDispatcher {
   }
 
   /** Tag of {@code FileChannel.transferTo}: a read whose bytes never reach a buffer. */
-  static final String TRANSFER_TO = "FILE_IO_TRANSFER_TO";
+  public static final String TRANSFER_TO = "FILE_IO_TRANSFER_TO";
 
   /** Tag of {@code FileChannel.transferFrom}: a write, torn as a short count. */
-  static final String TRANSFER_FROM = "FILE_IO_TRANSFER_FROM";
+  public static final String TRANSFER_FROM = "FILE_IO_TRANSFER_FROM";
 
   /** The method a transfer tag stands for, as the context's target name; {@code null} otherwise. */
   private static String transferTag(final String operationTag) {

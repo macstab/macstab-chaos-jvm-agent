@@ -2473,7 +2473,7 @@ public final class BootstrapDispatcher {
       final Object channel, final java.nio.ByteBuffer source, final Object target)
       throws Throwable {
     final int length = source == null ? 0 : source.remaining();
-    if (datagram("DATAGRAM_SEND", channel, target, length) != Integer.MIN_VALUE) {
+    if (datagram(OperationTags.DATAGRAM_SEND, channel, target, length) != Integer.MIN_VALUE) {
       return 0;
     }
     if (source != null) {
@@ -2493,7 +2493,7 @@ public final class BootstrapDispatcher {
   public static boolean dropDatagramPacket(
       final Object channel, final java.net.DatagramPacket packet) throws Throwable {
     return datagram(
-            "DATAGRAM_SEND",
+            OperationTags.DATAGRAM_SEND,
             channel,
             packet == null || packet.getAddress() == null ? null : packet.getSocketAddress(),
             packet == null ? 0 : packet.getLength())
@@ -2515,7 +2515,7 @@ public final class BootstrapDispatcher {
       return null;
     }
     final int requested = target.remaining();
-    final int count = datagram("DATAGRAM_RECEIVE", channel, null, requested);
+    final int count = datagram(OperationTags.DATAGRAM_RECEIVE, channel, null, requested);
     return count >= 0
         ? null
         : ChannelBuffers.shape(new java.nio.ByteBuffer[] {target}, 0, 1, requested, count);
@@ -2531,7 +2531,11 @@ public final class BootstrapDispatcher {
    */
   public static boolean corruptDatagramPacket(
       final Object channel, final java.net.DatagramPacket packet) throws Throwable {
-    return datagram("DATAGRAM_RECEIVE", channel, null, packet == null ? 0 : packet.getData().length)
+    return datagram(
+            OperationTags.DATAGRAM_RECEIVE,
+            channel,
+            null,
+            packet == null ? 0 : packet.getData().length)
         < 0;
   }
 

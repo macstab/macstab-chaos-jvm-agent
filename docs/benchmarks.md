@@ -597,22 +597,22 @@ Each benchmark method calls a `BootstrapDispatcher` dispatch method exactly as w
 
 ### 8.2 Measured Results
 
-Apple M-series, JDK 25, `-f 1 -wi 3 -i 5 -prof gc` (indicative; CI measures its own baseline):
+Apple M-series, JDK 25, `-f 3 -wi 3 -i 5 -prof gc` (indicative; CI measures its own baseline):
 
 | Method              | `none`        | `otherOperation` | `matchedNotYetActive` |
 |---------------------|---------------|------------------|-----------------------|
-| `clockMillis`       | 7.2 ns, 0 B   | 7.1 ns, 0 B      | 28 ns, 0 B            |
-| `clockRead`         | 7.7 ns, 0 B   | 7.7 ns, 0 B      | 28 ns, 0 B            |
-| `clockReadMillis`   | 7.4 ns, 0 B   | 7.3 ns, 0 B      | 28 ns, 0 B            |
-| `threadSleep`       | 7.5 ns, 0 B   | 7.6 ns, 0 B      | 51 ns, 104 B          |
-| `fileRead`          | 8.7 ns, 0 B   | 8.8 ns, 0 B      | 46 ns, 104 B          |
-| `fileClose`         | 8.7 ns, 0 B   | 8.8 ns, 0 B      | 45 ns, 104 B          |
-| `socketRead`        | 7.3 ns, 0 B   | 7.3 ns, 0 B      | 50 ns, 104 B          |
-| `socketChannelRead` | 8.7 ns, 0 B   | 7.8 ns, 0 B      | 48 ns, 104 B          |
-| `datagramSend`      | 8.2 ns, 0 B   | 7.7 ns, 0 B      | 45 ns, 104 B          |
-| `executorSubmit`    | 13.5 ns, 0 B  | 15.6 ns, 0 B     | 65 ns, 168 B          |
+| `clockMillis`       | 7.1 ns, 0 B   | 7.1 ns, 0 B      | 27 ns, 0 B            |
+| `clockRead`         | 7.7 ns, 0 B   | 7.6 ns, 0 B      | 28 ns, 0 B            |
+| `clockReadMillis`   | 7.3 ns, 0 B   | 7.4 ns, 0 B      | 28 ns, 0 B            |
+| `threadSleep`       | 7.1 ns, 0 B   | 7.1 ns, 0 B      | 50 ns, 104 B          |
+| `fileRead`          | 8.8 ns, 0 B   | 8.7 ns, 0 B      | 46 ns, 104 B          |
+| `fileClose`         | 8.7 ns, 0 B   | 8.7 ns, 0 B      | 47 ns, 104 B          |
+| `socketRead`        | 7.2 ns, 0 B   | 7.3 ns, 0 B      | 49 ns, 104 B          |
+| `socketChannelRead` | 8.5 ns, 0 B   | 7.7 ns, 0 B      | 47 ns, 104 B          |
+| `datagramSend`      | 8.1 ns, 0 B   | 7.5 ns, 0 B      | 45 ns, 104 B          |
+| `executorSubmit`    | 11.7 ns, 0 B  | 11.8 ns, 0 B     | 69 ns, 200 B          |
 
-`clockRead` / `clockReadMillis` are the system-clock reads behind every `java.time` `now()` (`CLOCK_READ`), `fileClose` every stream and channel close: hot paths once their groups are woven, and as cheap as the older hooks. A socket-channel read pays `socketChannelRead` and the channel-level `NIO_CHANNEL_READ` check. `executorSubmit` allocated a no-op decision per call (32 B with no scenario) until `RuntimeDecision.none()` returned a shared instance.
+`clockRead` / `clockReadMillis` are the system-clock reads behind every `java.time` `now()` (`CLOCK_READ`), `fileClose` every stream and channel close: hot paths once their groups are woven, and as cheap as the older hooks. A socket-channel read pays `socketChannelRead` and the channel-level `NIO_CHANNEL_READ` check. An idle operation returns before any decision object exists. When the dispatch built a no-op decision and relied on escape analysis to remove it, the JIT did so in most forks but not all (32 B per call in one fork of three on `fileClose` and `threadSleep`; on every call on `executorSubmit`), and a shared no-op instance measured about 1 ns slower than a removed one. Returning first is both deterministic and fastest.
 
 A call whose operation has no scenario allocates nothing: the dispatcher checks the operation index before it builds the `InvocationContext`. Before 2.0 every one of these calls built the context first (23–54 ns and 104–200 B per call with no scenario at all). A call that reaches a matching selector allocates its context, which escape analysis cannot remove across the registry's megamorphic controller loop.
 
