@@ -15,6 +15,7 @@ import java.util.concurrent.RejectedExecutionException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -37,6 +38,7 @@ class ScenarioIndexTest {
   }
 
   @Test
+  @Tag("law-L2")
   @DisplayName("a scenario for another operation is not evaluated")
   void otherOperationIsNotEvaluated() {
     runtime.activate(
@@ -49,6 +51,7 @@ class ScenarioIndexTest {
   }
 
   @Test
+  @Tag("law-L13")
   @DisplayName("the higher-precedence scenario wins regardless of activation order")
   void precedenceOrderWithoutSorting() {
     runtime.activate(

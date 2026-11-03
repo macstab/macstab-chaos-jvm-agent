@@ -16,6 +16,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 @DisplayName("BootstrapDispatcher")
@@ -200,6 +201,7 @@ class BootstrapDispatcherTest {
   class ReentrancyGuard {
 
     @Test
+    @Tag("law-L3")
     @DisplayName(
         "nested dispatch during bridge execution returns fallback without re-entering bridge")
     void nestedCallReturnsFallbackWithoutReenteringBridge() throws Throwable {

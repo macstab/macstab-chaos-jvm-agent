@@ -14,6 +14,7 @@ import java.util.Set;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /** Selector filters on the call context: peer CIDR and port, byte count, file path. */
@@ -32,6 +33,8 @@ class IoContextFilterTest {
   class Network {
 
     @Test
+    @Tag("law-L6")
+    @Tag("law-L5")
     @DisplayName("a CIDR, port and size filter match only calls that satisfy all of them")
     void cidrPortAndSize() throws Throwable {
       runtime.activate(
@@ -71,6 +74,8 @@ class IoContextFilterTest {
   class FileIo {
 
     @Test
+    @Tag("law-L6")
+    @Tag("law-L5")
     @DisplayName("a path and size filter match only calls under the path within the range")
     void pathAndSize() throws Throwable {
       runtime.activate(

@@ -20,6 +20,7 @@ import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 @DisplayName("ChaosRuntime — ActivationPolicy")
@@ -270,6 +271,7 @@ class ChaosRuntimeActivationPolicyTest {
   class ProbabilitySampling {
 
     @Test
+    @Tag("law-L8")
     @DisplayName("probability=1.0 fires on every match")
     void probabilityOneFiresOnEveryMatch() {
       ChaosRuntime runtime = new ChaosRuntime();

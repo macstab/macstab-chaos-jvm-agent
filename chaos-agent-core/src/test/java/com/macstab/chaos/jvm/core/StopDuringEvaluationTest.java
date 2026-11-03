@@ -17,6 +17,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -65,6 +66,7 @@ class StopDuringEvaluationTest {
     }
 
     @Test
+    @Tag("law-L19")
     @DisplayName("evaluate() after stop() returns null contribution — no effect applied")
     void evaluateAfterStopReturnsNoContribution() {
       final ChaosRuntime runtime = new ChaosRuntime();

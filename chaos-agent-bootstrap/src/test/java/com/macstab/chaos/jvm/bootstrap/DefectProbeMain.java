@@ -83,6 +83,7 @@ public final class DefectProbeMain {
       case "second-agent-copy" -> secondAgentCopy();
       case "clock-now-in-zone" -> clockNowInZone();
       case "clock-reads" -> clockReads();
+      case "skewed-time-bounds" -> skewedTimeBounds();
       case "socket-read-loopback" -> socketReadLoopback();
       case "direct-buffer-release" -> directBufferRelease();
       case "bridge-jars-on-disk" -> bridgeJarsOnDisk();
@@ -1776,6 +1777,20 @@ public final class DefectProbeMain {
               ? Math.floorMod(read.getValue() - Math.floorMod(real, 86_400L), 86_400L)
               : read.getValue() - real;
       System.out.println(read.getKey() + "=" + ahead);
+    }
+  }
+
+  /** Reads the skewed clock, then submits one task to an executor. */
+  private static void skewedTimeBounds() throws Exception {
+    final long real =
+        java.time.Instant.ofEpochMilli(java.lang.System.currentTimeMillis()).getEpochSecond();
+    System.out.println(
+        "clockAhead=" + (java.time.Clock.systemUTC().instant().getEpochSecond() - real));
+    final ExecutorService executor = Executors.newSingleThreadExecutor();
+    try {
+      executor.submit(() -> {}).get(5L, TimeUnit.SECONDS);
+    } finally {
+      executor.shutdownNow();
     }
   }
 

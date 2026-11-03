@@ -17,6 +17,7 @@ import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /** Activation that cannot leak: scope, plan atomicity and observability ownership. */
@@ -62,6 +63,7 @@ class ActivationIntegrityTest {
   }
 
   @Test
+  @Tag("law-L21")
   @DisplayName("a plan with an invalid scenario starts none of its scenarios")
   void planValidatedFirst() {
     final List<ChaosEvent> started = new CopyOnWriteArrayList<>();

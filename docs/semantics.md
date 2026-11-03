@@ -1,6 +1,6 @@
 # Evaluation Semantics
 
-> The rules the agent follows when an intercepted call meets the active scenarios, stated as laws. Every law here is enforced by code and covered by a test; where a law names a class, that class is where it is enforced.
+> The rules the agent follows when an intercepted call meets the active scenarios, stated as laws. Every law here is enforced by code and verified by the tests tagged with its id (`@Tag("law-L14")`; `SemanticsLawTraceabilityTest` fails the build for a law without one); where a law names a class, that class is where it is enforced.
 
 ---
 
@@ -8,7 +8,7 @@
 
 **L1 — No scenario, no change.** With no active scenario the agent weaves no JDK class (hooks are woven per hook group on the first activation that needs them, `JdkInstrumentationInstaller.HookGroup`) and alters no call. With `instrumentation=eager` the hooks are woven at start, and each intercepted call returns its unmodified result after one index lookup.
 
-**L2 — An empty plan is no plan.** A plan whose scenarios all fail to match behaves exactly like no plan for every call they do not match. Woven hook groups stay woven until the agent is uninstalled, but a woven hook with no matching scenario returns the call unmodified.
+**L2 — An empty plan is no plan.** A plan whose scenarios all fail to match behaves exactly like no plan for every call they do not match. Woven hook groups stay woven until the agent is uninstalled, but a woven hook with no matching scenario returns the call unmodified. Method hooks (`METHODS`) are the exception: removing the last method scenario restores the original bytecode.
 
 **L3 — The agent never evaluates itself.** Calls made by the agent's own code (evaluation, stressor threads, expiry threads, reflective URL extraction) are never matched: the reentrancy depth is raised while they run (`BootstrapDispatcher`).
 
@@ -52,7 +52,7 @@ For a matching call, the scenario's `ActivationPolicy` is checked in this order;
 
 All scenarios that pass §3 for a call contribute. They are ordered by descending `precedence`, then ascending scenario id (`ScenarioRegistry`).
 
-**L11 — Delays add up.** The delays of every contribution are summed (saturating at `Long.MAX_VALUE` ms) and applied first.
+**L11 — Delays add up.** The delays of every contribution are summed and applied first. A single delay is at most 720 hours, so the sum stays far from overflow (it saturates at `Long.MAX_VALUE` ms regardless).
 
 **L12 — One gate.** Of the gate contributions, the one with the highest precedence (first in order on a tie) holds the caller, after the delay.
 
@@ -76,4 +76,4 @@ All scenarios that pass §3 for a call contribute. They are ordered by descendin
 
 **L20 — A finished scenario can be replaced.** Activating an id whose scenario is `STOPPED` or `INACTIVE` replaces it atomically; activating an id whose scenario is still `REGISTERED` or `ACTIVE` throws `ChaosActivationException` and changes nothing.
 
-**L21 — A failed activation leaves no trace.** If validation or weaving fails, the scenario is not registered, no event for its id is published, and the failure is recorded in diagnostics with its category (`INVALID_CONFIGURATION`, `UNSUPPORTED_RUNTIME`, `ACTIVATION_CONFLICT`, `INSTRUMENTATION_FAILURE`).
+**L21 — A failed activation leaves no trace.** If validation or weaving fails, the scenario is not registered, the only event published for its id is `FAILED`, and the failure is recorded in diagnostics and on that event with its category (`INVALID_CONFIGURATION`, `UNSUPPORTED_RUNTIME`, `ACTIVATION_CONFLICT`, `INSTRUMENTATION_FAILURE`).

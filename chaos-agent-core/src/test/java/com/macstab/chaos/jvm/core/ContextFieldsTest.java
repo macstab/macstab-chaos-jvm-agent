@@ -18,6 +18,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /** Selector fields that the dispatcher used to leave empty, so non-ANY filters never matched. */
@@ -114,6 +115,7 @@ class ContextFieldsTest {
     }
 
     @Test
+    @Tag("law-L6")
     @DisplayName("a host filter on SOCKET_ACCEPT is rejected because the peer is unknown")
     void hostFilterOnAcceptIsRejected() {
       assertThatThrownBy(
@@ -133,6 +135,7 @@ class ContextFieldsTest {
     }
 
     @Test
+    @Tag("law-L6")
     @DisplayName("a CIDR or port filter on SOCKET_ACCEPT is rejected for the same reason")
     void peerFiltersOnAcceptAreRejected() {
       for (final ChaosSelector selector :

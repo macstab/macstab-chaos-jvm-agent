@@ -7,6 +7,7 @@ import java.net.InetAddress;
 import java.util.Set;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -65,6 +66,7 @@ class IoFilterTypesTest {
     }
 
     @Test
+    @Tag("law-L6")
     @DisplayName("never matches a null address")
     void nullAddress() {
       assertThat(CidrBlock.parse("0.0.0.0/0").contains(null)).isFalse();
@@ -93,6 +95,7 @@ class IoFilterTypesTest {
     }
 
     @Test
+    @Tag("law-L6")
     @DisplayName("never matches a null path")
     void nullPath() {
       assertThat(PathPattern.under("/").matches(null)).isFalse();
@@ -104,6 +107,7 @@ class IoFilterTypesTest {
   class SelectorValidation {
 
     @Test
+    @Tag("law-L6")
     @DisplayName("a size filter needs operations that carry a byte count")
     void sizeFilterNeedsSizedOperations() {
       assertThatThrownBy(

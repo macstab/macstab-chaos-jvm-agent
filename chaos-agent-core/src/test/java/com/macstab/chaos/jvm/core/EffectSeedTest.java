@@ -14,6 +14,7 @@ import java.util.Arrays;
 import java.util.Random;
 import java.util.Set;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 @DisplayName("Seeded effect choices")
@@ -37,6 +38,7 @@ class EffectSeedTest {
   }
 
   @Test
+  @Tag("law-L9")
   @DisplayName("a fixed randomSeed reproduces every choice of every match")
   void reproducible() {
     final ScenarioController first = controller("torn", 42L);
@@ -47,6 +49,7 @@ class EffectSeedTest {
   }
 
   @Test
+  @Tag("law-L9")
   @DisplayName("matches, kinds of choice and seeds give independent choices")
   void independent() {
     final ScenarioController controller = controller("torn", 42L);
@@ -57,6 +60,7 @@ class EffectSeedTest {
   }
 
   @Test
+  @Tag("law-L9")
   @DisplayName("the same shuffle seed gives the same DNS order")
   void shuffleReproducible() throws Exception {
     final InetAddress[] answer = new InetAddress[16];

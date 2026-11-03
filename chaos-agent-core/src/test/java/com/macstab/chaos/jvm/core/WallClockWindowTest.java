@@ -21,6 +21,7 @@ import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /** The absolute wall-clock window of a policy: {@code activeFrom} and {@code activeUntil}. */
@@ -92,6 +93,7 @@ class WallClockWindowTest {
     private static final long REAL = 1_700_000_000_000L;
 
     @Test
+    @Tag("law-L16")
     @DisplayName("honours activeFrom and activeUntil, which it used to ignore")
     void honoursWindow() {
       runtime.activate(clockSkew(ActivationPolicy.window(T0.plusSeconds(10), T0.plusSeconds(20))));
@@ -106,6 +108,7 @@ class WallClockWindowTest {
     }
 
     @Test
+    @Tag("law-L16")
     @DisplayName("honours activeFor")
     void honoursActiveFor() {
       runtime.activate(
@@ -117,6 +120,7 @@ class WallClockWindowTest {
     }
 
     @Test
+    @Tag("law-L16")
     @DisplayName("rejects counting and sampling policy fields instead of ignoring them")
     void rejectsCountingFields() {
       assertThatThrownBy(() -> runtime.activate(clockSkew(ActivationPolicy.count(3))))
@@ -125,6 +129,17 @@ class WallClockWindowTest {
       assertThatThrownBy(
               () ->
                   runtime.activate(clockSkew(ActivationPolicy.builder().probability(0.5).build())))
+          .isInstanceOf(ChaosValidationException.class);
+      assertThatThrownBy(
+              () ->
+                  runtime.activate(
+                      clockSkew(
+                          ActivationPolicy.builder().rateLimit(5, Duration.ofSeconds(1)).build())))
+          .isInstanceOf(ChaosValidationException.class);
+      assertThatThrownBy(
+              () ->
+                  runtime.activate(
+                      clockSkew(ActivationPolicy.builder().activateAfterMatches(2).build())))
           .isInstanceOf(ChaosValidationException.class);
     }
 
@@ -149,6 +164,7 @@ class WallClockWindowTest {
   class Stressors {
 
     @Test
+    @Tag("law-L17")
     @DisplayName("end at activeUntil")
     void endAtActiveUntil() throws InterruptedException {
       runtime.activate(keepAlive(ActivationPolicy.window(null, T0.plusMillis(200))));
@@ -162,6 +178,7 @@ class WallClockWindowTest {
     }
 
     @Test
+    @Tag("law-L17")
     @DisplayName("reject activeFrom: a stressor starts when it is activated")
     void rejectActiveFrom() {
       assertThatThrownBy(

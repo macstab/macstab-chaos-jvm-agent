@@ -12,6 +12,7 @@ import com.macstab.chaos.jvm.api.ChaosSelector;
 import java.time.Duration;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -85,6 +86,7 @@ class DestructiveEffectSafeguardTest {
   class DeadlockEffectTests {
 
     @Test
+    @Tag("law-L18")
     @DisplayName("throws ChaosActivationException without allowDestructiveEffects flag")
     void deadlockWithoutFlagThrows() {
       final ChaosScenario scenario = deadlockScenario(ActivationPolicy.always());
@@ -124,6 +126,7 @@ class DestructiveEffectSafeguardTest {
   class ThreadLeakEffectTests {
 
     @Test
+    @Tag("law-L18")
     @DisplayName("throws ChaosActivationException without allowDestructiveEffects flag")
     void threadLeakWithoutFlagThrows() {
       final ChaosScenario scenario = threadLeakScenario(ActivationPolicy.always());
@@ -245,6 +248,7 @@ class DestructiveEffectSafeguardTest {
     }
 
     @Test
+    @Tag("law-L21")
     @DisplayName("failed activation leaves no scenario registered in the runtime")
     void failedActivationLeavesNoScenarioRegistered() {
       final ChaosRuntime runtime = new ChaosRuntime();

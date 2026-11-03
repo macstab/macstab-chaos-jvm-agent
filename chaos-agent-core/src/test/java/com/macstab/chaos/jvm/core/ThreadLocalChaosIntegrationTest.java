@@ -14,6 +14,7 @@ import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -163,6 +164,7 @@ class ThreadLocalChaosIntegrationTest {
   class DispatcherDepthNotAffected {
 
     @Test
+    @Tag("law-L3")
     @DisplayName("plain java.lang.ThreadLocal not suppressed by test-class prefix pattern")
     void plainThreadLocalNotSuppressedByNarrowPattern() throws Throwable {
       final ChaosRuntime runtime = new ChaosRuntime();

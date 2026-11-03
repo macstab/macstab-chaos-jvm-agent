@@ -88,6 +88,8 @@ Migration steps for each change: [docs/migration-2.0.md](docs/migration-2.0.md).
 * **docs:** `CrossLayerDocSyncTest` also parses every selector, effect and policy example; `docs/startup-config.md` §6 described a format the parser rejects (string patterns, optional operations, case-insensitive enums, field names such as `offsetMillis`) and now shows the real one.
 * **build:** coverage counts what the child JVMs of the integration tests execute (agent premain, bootstrap bridge, inlined advice paths), remapped onto the module classes; the coverage floors were raised accordingly.
 * **core:** `ChaosDispatcher` is a composition root over one `DispatchEngine` and ten domain dispatchers (thread, executor, method, clock, runtime, network, DNS, file, process, client); behaviour and the idle cost per call are unchanged.
+* **tests:** every law of `docs/semantics.md` is traced to its tests: they carry `@Tag("law-L<n>")`, and `SemanticsLawTraceabilityTest` fails the build for a law without a test or a tag naming no law. New tests close the gaps: clock skew cannot move time bounds (child JVM, L7), the one gate (L12), the terminal tie-break by scenario id (L13), stop is final (L19), REGISTERED and INACTIVE ids (L20), stressors ending on `close()` (L17). Corrected on the way: L2 (method hooks are restored when their last scenario goes), L11 (a single delay is bounded at 720 h, so the sum cannot overflow), L21 (a failed activation publishes `FAILED`).
+* **build:** the documentation tests declare the docs and the law-tagged test sources as inputs; a change to a document alone used to leave them up to date, so a broken example passed.
 
 ### Performance Improvements
 
