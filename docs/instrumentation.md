@@ -126,7 +126,7 @@ JdkInstrumentationInstaller.install(instrumentation, runtime, eager)
      only one copy of the agent can be active per JVM
 
 2. installDelegate(new ChaosBridge(runtime))
-   — buildMethodHandles(): 57 MethodHandle[] via MethodHandles.publicLookup() against BridgeDelegate
+   — buildMethodHandles(): 77 MethodHandle[] via MethodHandles.publicLookup() against BridgeDelegate
    — Class.forName("...BootstrapDispatcher", true, null)  // null CL = bootstrap CL
    — bootstrapDispatcherClass.getMethod("install", Object.class, MethodHandle[].class)
                               .invoke(null, bridgeDelegate, mh)
@@ -286,7 +286,9 @@ rectangle "JDK and library hook groups" {
 
 **`injectBridge()`**: Reads class bytecode from the agent JAR's own classloader resources (the `.class` files are in the same JAR). Writes verbatim into a temp JAR. This ensures the bootstrap-injected class is byte-for-byte identical to the agent-classloader version — there is no separate bootstrap-dispatcher source; it is one class compiled once and loaded twice into different classloaders.
 
-**`buildMethodHandles()`**: Uses `MethodHandles.publicLookup()` against `BridgeDelegate.class`. Public lookup is required because the bootstrap classloader must be able to invoke the handles; a full-access lookup with the agent classloader's module system would not be reachable from the bootstrap context. Each handle is a virtual method handle; when invoked with `delegate` as the first argument, it dispatches to the `ChaosBridge` implementation. The array has exactly 60 slots (indices 0–56); see §7 for the full slot table.
+**`buildMethodHandles()`**: Uses `MethodHandles.publicLookup()` against `BridgeDelegate.class`. Public lookup is required because the bootstrap classloader must be able to invoke the handles; a full-access lookup with the agent classloader's module system would not be reachable from the bootstrap context. Each handle is a virtual method handle; when invoked with `delegate` as the first argument, it dispatches to the `ChaosBridge` implementation. The array has `HANDLE_COUNT` (77) slots; see §7 for the full slot table.
+
+The wiring is derived, not written per slot: each `public static final int` slot constant `FOO_BAR` on `BootstrapDispatcher` (other than `SCOPE_*` and `HANDLE_COUNT`) is served by the `BridgeDelegate` method `fooBar`. Adding a dispatch entry point is therefore a constant, a delegate method and its `ChaosBridge` implementation; `buildMethodHandles()` checks the table in full and fails the install naming the mismatch — a slot without a method, a method without a slot, an index used twice or left unset, an overloaded delegate method.
 
 **`installDelegate()`**: Uses `Class.forName("...BootstrapDispatcher", true, null)` — the `null` classloader argument requests loading from the bootstrap classloader, ensuring the instance obtained is the bootstrap-classloader version, not the agent-classloader version. Reflective invocation of `install()` crosses the classloader boundary without sharing type references.
 
@@ -545,7 +547,7 @@ This is a fatal startup failure; the agent cannot operate without the bootstrap 
 
 ## MethodHandle Construction Failure
 
-`buildMethodHandles()` throws `Exception` if any method is not found on `BridgeDelegate`. This would indicate a mismatch between the handle index constants in `BootstrapDispatcher` and the methods on `BridgeDelegate`. This should never happen in a correctly built artifact but would be caught immediately at startup.
+`buildMethodHandles()` throws `IllegalStateException` naming the mismatch when the slot constants of `BootstrapDispatcher` and the methods of `BridgeDelegate` do not correspond one to one. `JdkInstrumentationInstallerTest` builds the handles, so a mismatch fails the build long before an install.
 
 ## Missing Optional Classes
 

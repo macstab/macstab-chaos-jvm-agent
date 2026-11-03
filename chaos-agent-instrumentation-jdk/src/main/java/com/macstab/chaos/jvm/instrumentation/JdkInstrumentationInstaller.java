@@ -11,8 +11,6 @@ import java.io.InputStream;
 import java.lang.instrument.Instrumentation;
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
-import java.lang.invoke.MethodType;
-import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Collections;
@@ -22,8 +20,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Callable;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ForkJoinTask;
 import java.util.jar.JarEntry;
 import java.util.jar.JarOutputStream;
 import java.util.logging.Level;
@@ -676,467 +672,63 @@ public final class JdkInstrumentationInstaller {
    *     fails for any reason
    */
   static MethodHandle[] buildMethodHandles() throws Exception {
+    // Slot FOO_BAR on BootstrapDispatcher is served by BridgeDelegate.fooBar: one table, checked
+    // in full here, instead of a hand-written assignment per slot.
+    final java.util.Map<String, java.lang.reflect.Method> methods = new java.util.HashMap<>();
+    for (final java.lang.reflect.Method method : BridgeDelegate.class.getMethods()) {
+      if (methods.put(method.getName(), method) != null) {
+        throw new IllegalStateException("BridgeDelegate." + method.getName() + " is overloaded");
+      }
+    }
     final MethodHandles.Lookup lookup = MethodHandles.publicLookup();
-    final Class<?> delegateInterface = BridgeDelegate.class;
     final MethodHandle[] methodHandles = new MethodHandle[BootstrapDispatcher.HANDLE_COUNT];
-    wireExecutorHandles(lookup, delegateInterface, methodHandles);
-    wireSchedulingHandles(lookup, delegateInterface, methodHandles);
-    wireClassLoadingAndShutdownHandles(lookup, delegateInterface, methodHandles);
-    wireClockGcAndExitHandles(lookup, delegateInterface, methodHandles);
-    wireReflectionAndMemoryHandles(lookup, delegateInterface, methodHandles);
-    wireNetworkHandles(lookup, delegateInterface, methodHandles);
-    wireMiscRuntimeHandles(lookup, delegateInterface, methodHandles);
-    wireTimeApiHandles(lookup, delegateInterface, methodHandles);
-    wireHttpAndJdbcHandles(lookup, delegateInterface, methodHandles);
-    wireMiscIoHandles(lookup, delegateInterface, methodHandles);
+    for (final java.lang.reflect.Field field : BootstrapDispatcher.class.getFields()) {
+      if (!isHandleSlot(field)) {
+        continue;
+      }
+      final String name = delegateMethodName(field.getName());
+      final java.lang.reflect.Method method = methods.remove(name);
+      if (method == null) {
+        throw new IllegalStateException(
+            "handle slot " + field.getName() + " has no BridgeDelegate." + name);
+      }
+      final int index = field.getInt(null);
+      if (methodHandles[index] != null) {
+        throw new IllegalStateException(
+            "handle slot " + field.getName() + " reuses index " + index);
+      }
+      methodHandles[index] = lookup.unreflect(method);
+    }
+    if (!methods.isEmpty()) {
+      throw new IllegalStateException(
+          "BridgeDelegate methods without a handle slot: " + methods.keySet());
+    }
+    for (int index = 0; index < methodHandles.length; index++) {
+      if (methodHandles[index] == null) {
+        throw new IllegalStateException("no handle slot has index " + index);
+      }
+    }
     return methodHandles;
   }
 
-  /** Wires handles for executor and raw thread lifecycle instrumentation. */
-  private static void wireExecutorHandles(
-      final MethodHandles.Lookup lookup,
-      final Class<?> delegateInterface,
-      final MethodHandle[] methodHandles)
-      throws ReflectiveOperationException {
-    methodHandles[BootstrapDispatcher.DECORATE_EXECUTOR_RUNNABLE] =
-        lookup.findVirtual(
-            delegateInterface,
-            "decorateExecutorRunnable",
-            MethodType.methodType(Runnable.class, String.class, Object.class, Runnable.class));
-    methodHandles[BootstrapDispatcher.DECORATE_EXECUTOR_CALLABLE] =
-        lookup.findVirtual(
-            delegateInterface,
-            "decorateExecutorCallable",
-            MethodType.methodType(Callable.class, String.class, Object.class, Callable.class));
-    methodHandles[BootstrapDispatcher.BEFORE_THREAD_START] =
-        lookup.findVirtual(
-            delegateInterface,
-            "beforeThreadStart",
-            MethodType.methodType(void.class, Thread.class, boolean.class));
-    methodHandles[BootstrapDispatcher.BEFORE_WORKER_RUN] =
-        lookup.findVirtual(
-            delegateInterface,
-            "beforeWorkerRun",
-            MethodType.methodType(void.class, Object.class, Thread.class, Runnable.class));
-    methodHandles[BootstrapDispatcher.BEFORE_FORK_JOIN_TASK_RUN] =
-        lookup.findVirtual(
-            delegateInterface,
-            "beforeForkJoinTaskRun",
-            MethodType.methodType(void.class, ForkJoinTask.class));
+  /** A {@code public static final int} slot constant: not a call-depth scope, not the count. */
+  private static boolean isHandleSlot(final java.lang.reflect.Field field) {
+    final int modifiers = field.getModifiers();
+    return field.getType() == int.class
+        && java.lang.reflect.Modifier.isStatic(modifiers)
+        && java.lang.reflect.Modifier.isFinal(modifiers)
+        && !field.getName().startsWith("SCOPE_")
+        && !field.getName().equals("HANDLE_COUNT");
   }
 
-  /** Wires handles for scheduling, queue, and CompletableFuture instrumentation. */
-  private static void wireSchedulingHandles(
-      final MethodHandles.Lookup lookup,
-      final Class<?> delegateInterface,
-      final MethodHandle[] methodHandles)
-      throws ReflectiveOperationException {
-    methodHandles[BootstrapDispatcher.BEFORE_SCHEDULED_TICK] =
-        lookup.findVirtual(
-            delegateInterface,
-            "beforeScheduledTick",
-            MethodType.methodType(boolean.class, Object.class, Object.class, boolean.class));
-    methodHandles[BootstrapDispatcher.BEFORE_QUEUE_OPERATION] =
-        lookup.findVirtual(
-            delegateInterface,
-            "beforeQueueOperation",
-            MethodType.methodType(void.class, String.class, Object.class));
-    methodHandles[BootstrapDispatcher.BEFORE_BOOLEAN_QUEUE_OPERATION] =
-        lookup.findVirtual(
-            delegateInterface,
-            "beforeBooleanQueueOperation",
-            MethodType.methodType(Boolean.class, String.class, Object.class));
-    methodHandles[BootstrapDispatcher.BEFORE_COMPLETABLE_FUTURE_COMPLETE] =
-        lookup.findVirtual(
-            delegateInterface,
-            "beforeCompletableFutureComplete",
-            MethodType.methodType(
-                Boolean.class, String.class, CompletableFuture.class, Object.class));
-  }
-
-  /** Wires handles for class loading, resource lookup, and shutdown hook instrumentation. */
-  private static void wireClassLoadingAndShutdownHandles(
-      final MethodHandles.Lookup lookup,
-      final Class<?> delegateInterface,
-      final MethodHandle[] methodHandles)
-      throws ReflectiveOperationException {
-    methodHandles[BootstrapDispatcher.BEFORE_CLASS_LOAD] =
-        lookup.findVirtual(
-            delegateInterface,
-            "beforeClassLoad",
-            MethodType.methodType(void.class, ClassLoader.class, String.class));
-    methodHandles[BootstrapDispatcher.AFTER_RESOURCE_LOOKUP] =
-        lookup.findVirtual(
-            delegateInterface,
-            "afterResourceLookup",
-            MethodType.methodType(URL.class, ClassLoader.class, String.class, URL.class));
-    methodHandles[BootstrapDispatcher.DECORATE_SHUTDOWN_HOOK] =
-        lookup.findVirtual(
-            delegateInterface,
-            "decorateShutdownHook",
-            MethodType.methodType(Thread.class, Thread.class));
-    methodHandles[BootstrapDispatcher.RESOLVE_SHUTDOWN_HOOK] =
-        lookup.findVirtual(
-            delegateInterface,
-            "resolveShutdownHook",
-            MethodType.methodType(Thread.class, Thread.class));
-    methodHandles[BootstrapDispatcher.BEFORE_EXECUTOR_SHUTDOWN] =
-        lookup.findVirtual(
-            delegateInterface,
-            "beforeExecutorShutdown",
-            MethodType.methodType(void.class, String.class, Object.class, long.class));
-  }
-
-  /** Wires handles for clock adjustment, GC requests, and VM exit interception. */
-  private static void wireClockGcAndExitHandles(
-      final MethodHandles.Lookup lookup,
-      final Class<?> delegateInterface,
-      final MethodHandle[] methodHandles)
-      throws ReflectiveOperationException {
-    methodHandles[BootstrapDispatcher.ADJUST_CLOCK_MILLIS] =
-        lookup.findVirtual(
-            delegateInterface, "adjustClockMillis", MethodType.methodType(long.class, long.class));
-    methodHandles[BootstrapDispatcher.ADJUST_CLOCK_NANOS] =
-        lookup.findVirtual(
-            delegateInterface, "adjustClockNanos", MethodType.methodType(long.class, long.class));
-    methodHandles[BootstrapDispatcher.BEFORE_GC_REQUEST] =
-        lookup.findVirtual(
-            delegateInterface, "beforeGcRequest", MethodType.methodType(boolean.class));
-    methodHandles[BootstrapDispatcher.BEFORE_EXIT_REQUEST] =
-        lookup.findVirtual(
-            delegateInterface, "beforeExitRequest", MethodType.methodType(void.class, int.class));
-  }
-
-  /** Wires handles for reflection, direct buffers, class redefinition, monitors, and parking. */
-  private static void wireReflectionAndMemoryHandles(
-      final MethodHandles.Lookup lookup,
-      final Class<?> delegateInterface,
-      final MethodHandle[] methodHandles)
-      throws ReflectiveOperationException {
-    methodHandles[BootstrapDispatcher.BEFORE_REFLECTION_INVOKE] =
-        lookup.findVirtual(
-            delegateInterface,
-            "beforeReflectionInvoke",
-            MethodType.methodType(void.class, Object.class, Object.class));
-    methodHandles[BootstrapDispatcher.BEFORE_DIRECT_BUFFER_ALLOCATE] =
-        lookup.findVirtual(
-            delegateInterface,
-            "beforeDirectBufferAllocate",
-            MethodType.methodType(void.class, int.class));
-    methodHandles[BootstrapDispatcher.BEFORE_OBJECT_DESERIALIZE] =
-        lookup.findVirtual(
-            delegateInterface,
-            "beforeObjectDeserialize",
-            MethodType.methodType(void.class, Object.class));
-    methodHandles[BootstrapDispatcher.BEFORE_CLASS_DEFINE] =
-        lookup.findVirtual(
-            delegateInterface,
-            "beforeClassDefine",
-            MethodType.methodType(void.class, Object.class, String.class));
-    methodHandles[BootstrapDispatcher.BEFORE_MONITOR_ENTER] =
-        lookup.findVirtual(
-            delegateInterface,
-            "beforeMonitorEnter",
-            MethodType.methodType(void.class, Object.class));
-    methodHandles[BootstrapDispatcher.BEFORE_THREAD_PARK] =
-        lookup.findVirtual(
-            delegateInterface, "beforeThreadPark", MethodType.methodType(void.class));
-  }
-
-  /** Wires handles for NIO and socket I/O instrumentation. */
-  private static void wireNetworkHandles(
-      final MethodHandles.Lookup lookup,
-      final Class<?> delegateInterface,
-      final MethodHandle[] methodHandles)
-      throws ReflectiveOperationException {
-    methodHandles[BootstrapDispatcher.BEFORE_NIO_SELECT] =
-        lookup.findVirtual(
-            delegateInterface,
-            "beforeNioSelect",
-            MethodType.methodType(boolean.class, Object.class, long.class));
-    methodHandles[BootstrapDispatcher.BEFORE_NIO_CHANNEL_OP] =
-        lookup.findVirtual(
-            delegateInterface,
-            "beforeNioChannelOp",
-            MethodType.methodType(void.class, String.class, Object.class));
-    methodHandles[BootstrapDispatcher.BEFORE_SOCKET_CONNECT] =
-        lookup.findVirtual(
-            delegateInterface,
-            "beforeSocketConnect",
-            MethodType.methodType(Object.class, Object.class, Object.class, int.class));
-    methodHandles[BootstrapDispatcher.BEFORE_SOCKET_ACCEPT] =
-        lookup.findVirtual(
-            delegateInterface,
-            "beforeSocketAccept",
-            MethodType.methodType(void.class, Object.class));
-    methodHandles[BootstrapDispatcher.BEFORE_SOCKET_READ] =
-        lookup.findVirtual(
-            delegateInterface,
-            "beforeSocketRead",
-            MethodType.methodType(
-                int.class, Object.class, int.class, Object.class, int.class, int.class));
-    methodHandles[BootstrapDispatcher.BEFORE_SOCKET_WRITE] =
-        lookup.findVirtual(
-            delegateInterface,
-            "beforeSocketWrite",
-            MethodType.methodType(int.class, Object.class, int.class, Object.class, int.class));
-    methodHandles[BootstrapDispatcher.CORRUPTION_SEED] =
-        lookup.findVirtual(delegateInterface, "corruptionSeed", MethodType.methodType(long.class));
-    methodHandles[BootstrapDispatcher.CURRENT_SESSION_ID] =
-        lookup.findVirtual(
-            delegateInterface, "currentSessionId", MethodType.methodType(String.class));
-    methodHandles[BootstrapDispatcher.BEFORE_PROCESS_START] =
-        lookup.findVirtual(
-            delegateInterface,
-            "beforeProcessStart",
-            MethodType.methodType(void.class, String.class));
-    methodHandles[BootstrapDispatcher.BEFORE_NIO_CHANNEL_WRITE] =
-        lookup.findVirtual(
-            delegateInterface,
-            "beforeNioChannelWrite",
-            MethodType.methodType(int.class, Object.class, int.class));
-    methodHandles[BootstrapDispatcher.BEFORE_SOCKET_CLOSE] =
-        lookup.findVirtual(
-            delegateInterface,
-            "beforeSocketClose",
-            MethodType.methodType(void.class, Object.class));
-    methodHandles[BootstrapDispatcher.BEFORE_PROCESS_WAIT] =
-        lookup.findVirtual(
-            delegateInterface,
-            "beforeProcessWait",
-            MethodType.methodType(boolean.class, Object.class, long.class));
-    methodHandles[BootstrapDispatcher.BEFORE_SOCKET_SHUTDOWN] =
-        lookup.findVirtual(
-            delegateInterface,
-            "beforeSocketShutdown",
-            MethodType.methodType(void.class, Object.class, Object.class, int.class));
-    methodHandles[BootstrapDispatcher.BEFORE_DATAGRAM] =
-        lookup.findVirtual(
-            delegateInterface,
-            "beforeDatagram",
-            MethodType.methodType(int.class, String.class, Object.class, Object.class, int.class));
-    methodHandles[BootstrapDispatcher.BEFORE_DNS_REVERSE] =
-        lookup.findVirtual(
-            delegateInterface, "beforeDnsReverse", MethodType.methodType(void.class, String.class));
-    methodHandles[BootstrapDispatcher.BEFORE_SOCKET_BIND] =
-        lookup.findVirtual(
-            delegateInterface,
-            "beforeSocketBind",
-            MethodType.methodType(void.class, Object.class, int.class));
-    methodHandles[BootstrapDispatcher.BEFORE_SOCKET_CHANNEL_READ] =
-        lookup.findVirtual(
-            delegateInterface,
-            "beforeSocketChannelRead",
-            MethodType.methodType(int.class, Object.class, int.class));
-    methodHandles[BootstrapDispatcher.BEFORE_SOCKET_CHANNEL_WRITE] =
-        lookup.findVirtual(
-            delegateInterface,
-            "beforeSocketChannelWrite",
-            MethodType.methodType(int.class, Object.class, int.class));
-  }
-
-  /** Wires handles for JNDI, serialization, native libs, async cancel, zip, thread-locals, JMX. */
-  private static void wireMiscRuntimeHandles(
-      final MethodHandles.Lookup lookup,
-      final Class<?> delegateInterface,
-      final MethodHandle[] methodHandles)
-      throws ReflectiveOperationException {
-    methodHandles[BootstrapDispatcher.BEFORE_JNDI_LOOKUP] =
-        lookup.findVirtual(
-            delegateInterface,
-            "beforeJndiLookup",
-            MethodType.methodType(void.class, Object.class, String.class));
-    methodHandles[BootstrapDispatcher.BEFORE_OBJECT_SERIALIZE] =
-        lookup.findVirtual(
-            delegateInterface,
-            "beforeObjectSerialize",
-            MethodType.methodType(void.class, Object.class, Object.class));
-    methodHandles[BootstrapDispatcher.BEFORE_NATIVE_LIBRARY_LOAD] =
-        lookup.findVirtual(
-            delegateInterface,
-            "beforeNativeLibraryLoad",
-            MethodType.methodType(void.class, String.class));
-    methodHandles[BootstrapDispatcher.BEFORE_ASYNC_CANCEL] =
-        lookup.findVirtual(
-            delegateInterface,
-            "beforeAsyncCancel",
-            MethodType.methodType(boolean.class, Object.class, boolean.class));
-    methodHandles[BootstrapDispatcher.BEFORE_ZIP_INFLATE] =
-        lookup.findVirtual(
-            delegateInterface, "beforeZipInflate", MethodType.methodType(void.class));
-    methodHandles[BootstrapDispatcher.BEFORE_ZIP_DEFLATE] =
-        lookup.findVirtual(
-            delegateInterface, "beforeZipDeflate", MethodType.methodType(void.class));
-    methodHandles[BootstrapDispatcher.BEFORE_THREAD_LOCAL_GET] =
-        lookup.findVirtual(
-            delegateInterface,
-            "beforeThreadLocalGet",
-            MethodType.methodType(boolean.class, Object.class));
-    methodHandles[BootstrapDispatcher.BEFORE_THREAD_LOCAL_SET] =
-        lookup.findVirtual(
-            delegateInterface,
-            "beforeThreadLocalSet",
-            MethodType.methodType(boolean.class, Object.class, Object.class));
-    methodHandles[BootstrapDispatcher.BEFORE_JMX_INVOKE] =
-        lookup.findVirtual(
-            delegateInterface,
-            "beforeJmxInvoke",
-            MethodType.methodType(void.class, Object.class, Object.class, String.class));
-    methodHandles[BootstrapDispatcher.BEFORE_JMX_GET_ATTR] =
-        lookup.findVirtual(
-            delegateInterface,
-            "beforeJmxGetAttr",
-            MethodType.methodType(void.class, Object.class, Object.class, String.class));
-  }
-
-  /** Wires handles for java.time API now() adjustments and java.util.Date construction. */
-  private static void wireTimeApiHandles(
-      final MethodHandles.Lookup lookup,
-      final Class<?> delegateInterface,
-      final MethodHandle[] methodHandles)
-      throws ReflectiveOperationException {
-    methodHandles[BootstrapDispatcher.ADJUST_CLOCK_INSTANT] =
-        lookup.findVirtual(
-            delegateInterface,
-            "adjustClockInstant",
-            MethodType.methodType(java.time.Instant.class, java.time.Instant.class));
-    methodHandles[BootstrapDispatcher.ADJUST_CLOCK_READ_MILLIS] =
-        lookup.findVirtual(
-            delegateInterface,
-            "adjustClockReadMillis",
-            MethodType.methodType(long.class, long.class));
-    methodHandles[BootstrapDispatcher.ADJUST_INSTANT_NOW] =
-        lookup.findVirtual(
-            delegateInterface,
-            "adjustInstantNow",
-            MethodType.methodType(java.time.Instant.class, java.time.Instant.class));
-    methodHandles[BootstrapDispatcher.ADJUST_LOCAL_DATE_TIME_NOW] =
-        lookup.findVirtual(
-            delegateInterface,
-            "adjustLocalDateTimeNow",
-            MethodType.methodType(java.time.LocalDateTime.class, java.time.LocalDateTime.class));
-    methodHandles[BootstrapDispatcher.ADJUST_ZONED_DATE_TIME_NOW] =
-        lookup.findVirtual(
-            delegateInterface,
-            "adjustZonedDateTimeNow",
-            MethodType.methodType(java.time.ZonedDateTime.class, java.time.ZonedDateTime.class));
-    methodHandles[BootstrapDispatcher.ADJUST_DATE_NEW] =
-        lookup.findVirtual(
-            delegateInterface, "adjustDateNew", MethodType.methodType(long.class, long.class));
-  }
-
-  /** Wires handles for HTTP client and JDBC instrumentation. */
-  private static void wireHttpAndJdbcHandles(
-      final MethodHandles.Lookup lookup,
-      final Class<?> delegateInterface,
-      final MethodHandle[] methodHandles)
-      throws ReflectiveOperationException {
-    methodHandles[BootstrapDispatcher.BEFORE_HTTP_SEND] =
-        lookup.findVirtual(
-            delegateInterface,
-            "beforeHttpSend",
-            MethodType.methodType(boolean.class, String.class));
-    methodHandles[BootstrapDispatcher.BEFORE_HTTP_SEND_ASYNC] =
-        lookup.findVirtual(
-            delegateInterface,
-            "beforeHttpSendAsync",
-            MethodType.methodType(boolean.class, String.class));
-    methodHandles[BootstrapDispatcher.BEFORE_JDBC_CONNECTION_ACQUIRE] =
-        lookup.findVirtual(
-            delegateInterface,
-            "beforeJdbcConnectionAcquire",
-            MethodType.methodType(boolean.class, String.class));
-    methodHandles[BootstrapDispatcher.BEFORE_JDBC_STATEMENT_EXECUTE] =
-        lookup.findVirtual(
-            delegateInterface,
-            "beforeJdbcStatementExecute",
-            MethodType.methodType(boolean.class, String.class));
-    methodHandles[BootstrapDispatcher.BEFORE_JDBC_PREPARED_STATEMENT] =
-        lookup.findVirtual(
-            delegateInterface,
-            "beforeJdbcPreparedStatement",
-            MethodType.methodType(boolean.class, String.class));
-    methodHandles[BootstrapDispatcher.BEFORE_JDBC_TRANSACTION_COMMIT] =
-        lookup.findVirtual(
-            delegateInterface, "beforeJdbcTransactionCommit", MethodType.methodType(boolean.class));
-    methodHandles[BootstrapDispatcher.BEFORE_JDBC_TRANSACTION_ROLLBACK] =
-        lookup.findVirtual(
-            delegateInterface,
-            "beforeJdbcTransactionRollback",
-            MethodType.methodType(boolean.class));
-  }
-
-  /** Wires handles for thread sleep, DNS, SSL handshake, and file I/O instrumentation. */
-  private static void wireMiscIoHandles(
-      final MethodHandles.Lookup lookup,
-      final Class<?> delegateInterface,
-      final MethodHandle[] methodHandles)
-      throws ReflectiveOperationException {
-    methodHandles[BootstrapDispatcher.BEFORE_THREAD_SLEEP] =
-        lookup.findVirtual(
-            delegateInterface,
-            "beforeThreadSleep",
-            MethodType.methodType(boolean.class, long.class));
-    methodHandles[BootstrapDispatcher.BEFORE_DNS_RESOLVE] =
-        lookup.findVirtual(
-            delegateInterface,
-            "beforeDnsResolve",
-            MethodType.methodType(String.class, String.class));
-    for (final String sessionMethod :
-        new String[] {"captureSession", "enterSession", "exitSession"}) {
-      methodHandles[
-              switch (sessionMethod) {
-                case "captureSession" -> BootstrapDispatcher.CAPTURE_SESSION;
-                case "enterSession" -> BootstrapDispatcher.ENTER_SESSION;
-                default -> BootstrapDispatcher.EXIT_SESSION;
-              }] =
-          lookup.findVirtual(
-              delegateInterface, sessionMethod, MethodType.methodType(void.class, Object.class));
+  /** {@code BEFORE_SOCKET_READ} → {@code beforeSocketRead}. */
+  static String delegateMethodName(final String slot) {
+    final StringBuilder name = new StringBuilder();
+    for (final String word : slot.toLowerCase(java.util.Locale.ROOT).split("_")) {
+      name.append(
+          name.length() == 0 ? word : Character.toUpperCase(word.charAt(0)) + word.substring(1));
     }
-    methodHandles[BootstrapDispatcher.AFTER_DNS_ANSWER] =
-        lookup.findVirtual(
-            delegateInterface,
-            "afterDnsAnswer",
-            MethodType.methodType(
-                java.net.InetAddress[].class,
-                String.class,
-                java.net.InetAddress[].class,
-                Throwable.class));
-    methodHandles[BootstrapDispatcher.BEFORE_SSL_HANDSHAKE] =
-        lookup.findVirtual(
-            delegateInterface,
-            "beforeSslHandshake",
-            MethodType.methodType(void.class, Object.class));
-    methodHandles[BootstrapDispatcher.ADJUST_LOCAL_DATE_TIME_NOW_IN_ZONE] =
-        lookup.findVirtual(
-            delegateInterface,
-            "adjustLocalDateTimeNowInZone",
-            MethodType.methodType(
-                java.time.LocalDateTime.class,
-                java.time.LocalDateTime.class,
-                java.time.ZoneId.class));
-    methodHandles[BootstrapDispatcher.BEFORE_FILE_IO] =
-        lookup.findVirtual(
-            delegateInterface,
-            "beforeFileIo",
-            MethodType.methodType(int.class, String.class, Object.class, String.class, int.class));
-    methodHandles[BootstrapDispatcher.BEFORE_METHOD_ENTER] =
-        lookup.findVirtual(
-            delegateInterface,
-            "beforeMethodEnter",
-            MethodType.methodType(void.class, Class.class, String.class, String.class));
-    methodHandles[BootstrapDispatcher.BEFORE_CLIENT_CALL] =
-        lookup.findVirtual(
-            delegateInterface,
-            "beforeClientCall",
-            MethodType.methodType(
-                void.class, String.class, Object.class, String.class, String.class, Object.class));
-    methodHandles[BootstrapDispatcher.AFTER_METHOD_EXIT] =
-        lookup.findVirtual(
-            delegateInterface,
-            "afterMethodExit",
-            MethodType.methodType(
-                Object.class, Class.class, String.class, String.class, Object.class));
+    return name.toString();
   }
 
   @FunctionalInterface
