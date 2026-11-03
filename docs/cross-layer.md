@@ -11,7 +11,7 @@
 
 > How a rule of the native chaos libraries (`macstab-chaos-testing-libraries`, `libchaos-<lib>` preloaded into a process) translates into a scenario of this agent, and back. Both layers express a fault as the same triple — selector × effect × activation policy — over different interception points: the native libraries intercept libc calls beneath any runtime, the agent intercepts JVM and library calls above it.
 >
-> Every JVM name on this page (API methods, enum constants, plan JSON `type` names) and every JSON example is checked against the code by `CrossLayerDocSyncTest`; the same test checks the native library's `docs/DSL.md` when that repository is checked out next to this one.
+> Every JVM name on this page (API methods, enum constants, plan JSON `type` names) and every JSON example is checked against the code by `CrossLayerDocSyncTest`; the same test checks the native library's `docs/DSL.md` when the `CHAOS_DSL_PATH` environment variable or the `chaos.dsl.path` system property names it, as the `cross-layer-docs` CI job does; without it that part is skipped, so a stale neighbouring checkout cannot fail the build.
 >
 > *Engineered by* **[Christian Schnapka](https://macstab.com)** — Embedded Principal+ Engineer · [Macstab GmbH](https://macstab.com) · Hamburg, Germany
 
@@ -26,7 +26,7 @@
 | Policy   | probability, `@first`, `@from`/`@until`, `@size`, `FAIL_AFTER` counter   | `ActivationPolicy.builder()...build()` plus selector filters | `"activationPolicy": {...}`                 |
 | Scope    | the process the library is preloaded into                                | the JVM (`ChaosScenario.ScenarioScope.JVM`) or one session (`ChaosScenario.ScenarioScope.SESSION`) | `"scope": "JVM"` / `"SESSION"` |
 | Source   | a text file, re-read when it changes                                     | the API, or a plan file re-read when it changes ([startup-config.md](startup-config.md)) | the plan file                               |
-| Status   | `/tmp/.chaos-<lib>.status`, `/tmp/.chaos-<lib>.hits.<n>`               | `/tmp/.chaos-jvm.status`, `/tmp/.chaos-jvm.hits.<pid>` in the same key and line format ([observability.md](observability.md)) | |
+| Status   | `/tmp/.chaos-<lib>.status` (`state`, `rules`, `line`, `reason`, `text`, `pid`), `/tmp/.chaos-<lib>.hits.<n>` | `/tmp/.chaos-jvm.status`, `/tmp/.chaos-jvm.hits.<pid>`: the same `key=value` line format, with `scenarios` for `rules`, `column` beside `line`, `source` (the plan) and no `text` ([observability.md](observability.md)) | |
 
 The evaluation order of a JVM scenario is in [semantics.md](semantics.md); the native order is in the library's `DSL.md` §7–§8.
 
@@ -72,7 +72,7 @@ The JVM matches on what the Java call carries: a socket call matches by peer add
 | `ERRNO` with `EMFILE`, `ENFILE` on `accept`/`connect`, `EACCES` on `bind` | the same constants on `SOCKET_ACCEPT`, `SOCKET_CONNECT`, `SOCKET_BIND`: `IOException("Too many open files")` from an accept, as the JDK throws | `{"type": "errno", "errno": "EMFILE"}` | `SOCKET_ACCEPT`, `SOCKET_CONNECT`, `SOCKET_BIND` |
 | `ERRNO` with `EAGAIN`, `ENOMEM`, `ENOENT`, `EACCES` on process starts | `ChaosEffect.errno(ChaosEffect.Errno.EAGAIN)` on `OperationType.PROCESS_START`: `IOException: Cannot run program "x": error=11, Resource temporarily unavailable`, the JDK's own failure | `{"type": "errno", "errno": "EAGAIN"}` | `PROCESS_START` |
 | any other `ERRNO`                               | `ChaosEffect.reject("...")`: the operation's natural exception (`UnknownHostException` for DNS, `SQLException` for JDBC, …) | `{"type": "reject", "message": "..."}` | every interceptor operation |
-| `GAI` (`EAI_NONAME`, `EAI_AGAIN`)               | `ChaosEffect.reject("...")` on `OperationType.DNS_RESOLVE`: `UnknownHostException` | `{"type": "reject", "message": "..."}`          | `DNS_RESOLVE`                                   |
+| `GAI` (`EAI_NONAME`, `EAI_AGAIN`)               | `ChaosEffect.reject("...")` on `OperationType.DNS_RESOLVE`: `UnknownHostException`. The agent sees every lookup, before the JDK's own `InetAddress` cache; the native layer sees only the lookups that miss it (positive answers are cached 30 s by default, `networkaddress.cache.ttl`), so a native GAI rule may not reach a JVM for a name it resolved recently | `{"type": "reject", "message": "..."}`          | `DNS_RESOLVE`                                   |
 | `TORN`                                          | `ChaosEffect.tornWrite()`                                          | `{"type": "tornWrite"}`                                     | `FILE_IO_WRITE` through `FileChannel`; also `NIO_CHANNEL_WRITE` (short count) and `SOCKET_WRITE` (prefix sent, then a real reset: `SO_LINGER` 0 and close), which the native layer does not tear |
 | `CORRUPT`                                       | `ChaosEffect.corruptRead()`                                        | `{"type": "corruptRead"}`                                   | `SOCKET_READ`, `FILE_IO_READ`                   |
 | `TRICKLE:16`                                    | `ChaosEffect.trickle(16)`                                          | `{"type": "trickle", "maxBytes": 16}`                       | `SOCKET_READ`                                   |
@@ -121,6 +121,8 @@ Different rules: the native `FAIL_AFTER` counter is per operation and resets on 
 | `DUP`                                         | no JVM effect duplicates received data; a changed service endpoint is `ChaosEffect.redirect(...)` on the connect (§3) |
 | `munmap`, `mprotect`, `madvise`, and `mmap` of anonymous memory | the JVM exposes only file mappings (`FileChannel.map`, `OperationType.FILE_IO_MAP`); the pressure stressors (`ChaosEffect.heapPressure(...)`, `ChaosEffect.directBufferPressure(...)`) are the JVM-level analogue for memory |
 | `fork`, failing `execve` of the child         | the agent fails the start itself (`PROCESS_START`) and the wait (`PROCESS_WAIT`); what the child does reaches the native process rules |
+| net `EINTR`, `EAGAIN`, `ENOMEM`               | the JDK retries an interrupted call itself and reports a would-block non-blocking call as `0`, not as an error; there is no Java failure to raise |
+| distinct GAI codes (`EAI_AGAIN`, `EAI_FAIL`, `EAI_MEMORY`, `EAI_SYSTEM`) | Java reports every failed lookup as `UnknownHostException`; `ChaosEffect.reject(...)` on `DNS_RESOLVE` is all of them |
 | `socket`, `listen`, `allocate` (fallocate)    | the JDK opens sockets and listens inside `bind`/`connect`/`accept`, which the agent intercepts; Java has no `fallocate` |
 | SECCOMP supervision (`chaos-init`)            | the agent intercepts in-process; static binaries and Go programs are reached by the native supervisor only         |
 
