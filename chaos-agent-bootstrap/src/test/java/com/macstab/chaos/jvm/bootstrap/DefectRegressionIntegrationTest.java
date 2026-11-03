@@ -544,6 +544,41 @@ class DefectRegressionIntegrationTest {
     }
 
     @Test
+    @DisplayName("CLOCK_READ skews the system Clock and every now() without an operation")
+    void clockReadsAreSkewed() throws Exception {
+      final ChildJvmProbe.ProbeResult result = runClockReads(Set.of(OperationType.CLOCK_READ));
+      for (final String read :
+          List.of("clockInstant", "clockMillis", "instantSource", "offsetDateTime", "localTime")) {
+        assertThat(result.longValue(read)).as(read).isBetween(3590L, 3610L);
+      }
+      // These have operations of their own, which the scenario does not select.
+      assertThat(result.longValue("instantNow")).isBetween(-5L, 5L);
+      assertThat(result.longValue("localDateTime")).isBetween(-5L, 5L);
+    }
+
+    @Test
+    @DisplayName("a now() with its own operation is skewed once, not again by CLOCK_READ")
+    void clockReadsAreNotSkewedTwice() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          runClockReads(Set.of(OperationType.CLOCK_READ, OperationType.LOCAL_DATE_TIME_NOW));
+      assertThat(result.longValue("localDateTime")).isBetween(3590L, 3610L);
+      assertThat(result.longValue("offsetDateTime")).isBetween(3590L, 3610L);
+    }
+
+    private ChildJvmProbe.ProbeResult runClockReads(final Set<OperationType> operations)
+        throws Exception {
+      return probe.run(
+          plan(
+              scenario(
+                  "skew",
+                  ChaosSelector.jvmRuntime(operations),
+                  ChaosEffect.skewClock(Duration.ofHours(1), ChaosEffect.ClockSkewMode.FIXED))),
+          DefectProbeMain.class,
+          "clock-reads",
+          null);
+    }
+
+    @Test
     @DisplayName("LocalDateTime.now(ZoneId) and ZonedDateTime.now(ZoneId) are clock-skewed")
     void nowWithZoneIsSkewed() throws Exception {
       final ChildJvmProbe.ProbeResult result =

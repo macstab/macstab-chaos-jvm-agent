@@ -658,6 +658,7 @@ final class CompatibilityValidator {
   private static final Set<OperationType> CLOCK_READ_OPS =
       EnumSet.of(
           OperationType.INSTANT_NOW,
+          OperationType.CLOCK_READ,
           OperationType.LOCAL_DATE_TIME_NOW,
           OperationType.ZONED_DATE_TIME_NOW,
           OperationType.DATE_NEW,

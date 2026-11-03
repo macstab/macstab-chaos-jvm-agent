@@ -47,7 +47,7 @@ The evaluation order of a JVM scenario is in [semantics.md](semantics.md); the n
 | `dns://db.internal` (exact)             | `ChaosSelector.dns(ops, NamePattern.exact("db.internal"))`                                            | `"hostnamePattern": {"mode": "EXACT", "value": "db.internal"}`            |
 | `dns://*.example.internal` (suffix)     | `NamePattern.glob("*.example.internal")`                                                             | `"hostnamePattern": {"mode": "GLOB", "value": "*.example.internal"}`      |
 | `*` (any)                               | `NamePattern.any()`, or leave the filter out                                                         | omit the pattern                                                          |
-| `clock_gettime/realtime`                | `ChaosSelector.jvmRuntime(Set.of(OperationType.INSTANT_NOW, OperationType.LOCAL_DATE_TIME_NOW, OperationType.ZONED_DATE_TIME_NOW, OperationType.DATE_NEW))` | `{"type": "jvmRuntime", "operations": ["INSTANT_NOW", ...]}` |
+| `clock_gettime/realtime`                | `ChaosSelector.jvmRuntime(Set.of(OperationType.INSTANT_NOW, OperationType.CLOCK_READ, OperationType.LOCAL_DATE_TIME_NOW, OperationType.ZONED_DATE_TIME_NOW, OperationType.DATE_NEW))`: `CLOCK_READ` covers `Clock.systemUTC()` and every other `java.time` `now()` | `{"type": "jvmRuntime", "operations": ["INSTANT_NOW", ...]}` |
 | `pthread_create`                        | `ChaosSelector.thread(Set.of(OperationType.THREAD_START), ChaosSelector.ThreadKind.PLATFORM)`; `ChaosEffect.errno(ChaosEffect.Errno.EAGAIN)` there is the JDK's `OutOfMemoryError: unable to create native thread` | `{"type": "thread", "operations": ["THREAD_START"], "kind": "PLATFORM"}`  |
 | `posix_spawn`, `fork`, `execve` (process) | `ChaosSelector.process(NamePattern.exact("git"))`: `ProcessBuilder.start` and `Runtime.exec` (`OperationType.PROCESS_START`) | `{"type": "process", "operations": ["PROCESS_START"], "commandPattern": {"mode": "EXACT", "value": "git"}}` |
 
@@ -73,7 +73,7 @@ The JVM matches on what the Java call carries: a socket call matches by peer add
 | `TRICKLE:16`                                    | `ChaosEffect.trickle(16)`                                          | `{"type": "trickle", "maxBytes": 16}`                       | `SOCKET_READ`                                   |
 | `TIMEOUT` (net `poll`)                          | `ChaosEffect.timeout()`: waits out the socket's own `SO_TIMEOUT` or connect timeout, then `SocketTimeoutException`; never fires on an infinite timeout | `{"type": "timeout"}` | `SOCKET_READ`, `SOCKET_CONNECT` |
 | `RESET`                                         | `ChaosEffect.connectionReset()`                                    | `{"type": "connectionReset"}`                               | `SOCKET_CLOSE`                                  |
-| `OFFSET:500` (realtime)                         | `ChaosEffect.skewClock(Duration.ofMillis(500), ChaosEffect.ClockSkewMode.FIXED)` | `{"type": "clockSkew", "skewAmount": "PT0.5S", "mode": "FIXED"}` | `INSTANT_NOW`, `LOCAL_DATE_TIME_NOW`, `ZONED_DATE_TIME_NOW`, `DATE_NEW` |
+| `OFFSET:500` (realtime)                         | `ChaosEffect.skewClock(Duration.ofMillis(500), ChaosEffect.ClockSkewMode.FIXED)` | `{"type": "clockSkew", "skewAmount": "PT0.5S", "mode": "FIXED"}` | `INSTANT_NOW`, `CLOCK_READ`, `LOCAL_DATE_TIME_NOW`, `ZONED_DATE_TIME_NOW`, `DATE_NEW` |
 | `REGRESS:1000`                                  | `ChaosEffect.skewClock(Duration.ofSeconds(1), ChaosEffect.ClockSkewMode.REGRESS)` | `{"type": "clockSkew", "skewAmount": "PT1S", "mode": "REGRESS"}` | as `OFFSET`                        |
 | `OVERRIDE:127.0.0.1,[::1]`                      | `ChaosEffect.dnsOverride("127.0.0.1", "::1")`                      | `{"type": "dnsAnswer", "override": ["127.0.0.1", "::1"]}`   | `DNS_ANSWER`                                    |
 | `FILTER_FAMILY:inet6`                           | `ChaosEffect.dnsFamily(ChaosEffect.AddressFamily.IPV6)`            | `{"type": "dnsAnswer", "family": "IPV6"}`                   | `DNS_ANSWER`                                    |
@@ -228,12 +228,12 @@ Native (`/tmp/.chaos-time.conf`), seen by every clock read in the process, inclu
 clock_gettime/realtime:REGRESS:1000
 ```
 
-JVM, seen by `java.time` and `java.util.Date` reads only (§5.1):
+JVM, seen by every `java.time` and `java.util.Date` read, but not by `System.currentTimeMillis()` outside the opted-in call sites (§5.1):
 
 ```json
 {"id": "clock-regress", "scope": "JVM",
  "selector": {"type": "jvmRuntime",
-              "operations": ["INSTANT_NOW", "LOCAL_DATE_TIME_NOW", "ZONED_DATE_TIME_NOW", "DATE_NEW"]},
+              "operations": ["INSTANT_NOW", "CLOCK_READ", "LOCAL_DATE_TIME_NOW", "ZONED_DATE_TIME_NOW", "DATE_NEW"]},
  "effect": {"type": "clockSkew", "skewAmount": "PT1S", "mode": "REGRESS"}}
 ```
 

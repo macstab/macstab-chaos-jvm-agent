@@ -50,10 +50,20 @@ final class JvmRuntimeAdvice {
    * clock-skew injection.
    */
   static final class LocalDateTimeNowAdvice {
-    @Advice.OnMethodExit
-    static void exit(@Advice.Return(readOnly = false) java.time.LocalDateTime returned)
+    @Advice.OnMethodEnter
+    static void enter() {
+      BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_CLOCK_API);
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit(
+        @Advice.Thrown final Throwable thrown,
+        @Advice.Return(readOnly = false) java.time.LocalDateTime returned)
         throws Throwable {
-      returned = BootstrapDispatcher.adjustLocalDateTimeNow(returned);
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_CLOCK_API);
+      if (thrown == null) {
+        returned = BootstrapDispatcher.adjustLocalDateTimeNow(returned);
+      }
     }
   }
 
@@ -62,12 +72,21 @@ final class JvmRuntimeAdvice {
    * clock-skew injection, mapping through the zone it was called with.
    */
   static final class LocalDateTimeNowInZoneAdvice {
-    @Advice.OnMethodExit
+    @Advice.OnMethodEnter
+    static void enter() {
+      BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_CLOCK_API);
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
     static void exit(
         @Advice.Argument(0) final java.time.ZoneId zone,
+        @Advice.Thrown final Throwable thrown,
         @Advice.Return(readOnly = false) java.time.LocalDateTime returned)
         throws Throwable {
-      returned = BootstrapDispatcher.adjustLocalDateTimeNowInZone(returned, zone);
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_CLOCK_API);
+      if (thrown == null) {
+        returned = BootstrapDispatcher.adjustLocalDateTimeNowInZone(returned, zone);
+      }
     }
   }
 
@@ -76,10 +95,36 @@ final class JvmRuntimeAdvice {
    * java.time.ZonedDateTime#now(java.time.ZoneId)} for clock-skew injection.
    */
   static final class ZonedDateTimeNowAdvice {
-    @Advice.OnMethodExit
-    static void exit(@Advice.Return(readOnly = false) java.time.ZonedDateTime returned)
+    @Advice.OnMethodEnter
+    static void enter() {
+      BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_CLOCK_API);
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit(
+        @Advice.Thrown final Throwable thrown,
+        @Advice.Return(readOnly = false) java.time.ZonedDateTime returned)
         throws Throwable {
-      returned = BootstrapDispatcher.adjustZonedDateTimeNow(returned);
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_CLOCK_API);
+      if (thrown == null) {
+        returned = BootstrapDispatcher.adjustZonedDateTimeNow(returned);
+      }
+    }
+  }
+
+  /** Rewrites {@code instant()} of the system clock and instant source (CLOCK_READ). */
+  static final class SystemClockInstantAdvice {
+    @Advice.OnMethodExit
+    static void exit(@Advice.Return(readOnly = false) java.time.Instant returned) throws Throwable {
+      returned = BootstrapDispatcher.adjustClockInstant(returned);
+    }
+  }
+
+  /** Rewrites {@code millis()} of the system clock and instant source (CLOCK_READ). */
+  static final class SystemClockMillisAdvice {
+    @Advice.OnMethodExit
+    static void exit(@Advice.Return(readOnly = false) long returned) throws Throwable {
+      returned = BootstrapDispatcher.adjustClockReadMillis(returned);
     }
   }
 

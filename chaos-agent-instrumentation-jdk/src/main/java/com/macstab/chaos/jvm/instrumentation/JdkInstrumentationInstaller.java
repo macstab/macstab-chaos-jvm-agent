@@ -349,6 +349,7 @@ public final class JdkInstrumentationInstaller {
     TIME_API(
         JdkInstrumentationInstaller::applyTimeApiTransformations,
         OperationType.INSTANT_NOW,
+        OperationType.CLOCK_READ,
         OperationType.LOCAL_DATE_TIME_NOW,
         OperationType.ZONED_DATE_TIME_NOW,
         OperationType.DATE_NEW),
@@ -940,6 +941,16 @@ public final class JdkInstrumentationInstaller {
       final Class<?> delegateInterface,
       final MethodHandle[] methodHandles)
       throws ReflectiveOperationException {
+    methodHandles[BootstrapDispatcher.ADJUST_CLOCK_INSTANT] =
+        lookup.findVirtual(
+            delegateInterface,
+            "adjustClockInstant",
+            MethodType.methodType(java.time.Instant.class, java.time.Instant.class));
+    methodHandles[BootstrapDispatcher.ADJUST_CLOCK_READ_MILLIS] =
+        lookup.findVirtual(
+            delegateInterface,
+            "adjustClockReadMillis",
+            MethodType.methodType(long.class, long.class));
     methodHandles[BootstrapDispatcher.ADJUST_INSTANT_NOW] =
         lookup.findVirtual(
             delegateInterface,
@@ -2147,6 +2158,23 @@ public final class JdkInstrumentationInstaller {
                                         .or(
                                             ElementMatchers.takesArguments(
                                                 java.time.ZoneId.class))))))
+        // The system clock and instant source: every other java.time now() reads one of them.
+        .type(
+            ElementMatchers.namedOneOf(
+                "java.time.Clock$SystemClock", "java.time.Clock$SystemInstantSource"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.SystemClockInstantAdvice.class)
+                            .on(
+                                ElementMatchers.named("instant")
+                                    .and(ElementMatchers.takesArguments(0))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.SystemClockMillisAdvice.class)
+                            .on(
+                                ElementMatchers.named("millis")
+                                    .and(ElementMatchers.takesArguments(0)))))
         .type(ElementMatchers.named("java.util.Date"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->

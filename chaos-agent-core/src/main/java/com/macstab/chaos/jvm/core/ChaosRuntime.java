@@ -550,6 +550,26 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
+   * Delegates to {@link ChaosDispatcher#adjustClockInstant}.
+   *
+   * @param realInstant the instant the system clock read
+   * @return the (possibly skewed) instant
+   */
+  public java.time.Instant adjustClockInstant(final java.time.Instant realInstant) {
+    return dispatcher.adjustClockInstant(realInstant);
+  }
+
+  /**
+   * Delegates to {@link ChaosDispatcher#adjustClockReadMillis}.
+   *
+   * @param realMillis the milliseconds the system clock read
+   * @return the (possibly skewed) milliseconds
+   */
+  public long adjustClockReadMillis(final long realMillis) {
+    return dispatcher.adjustClockReadMillis(realMillis);
+  }
+
+  /**
    * Delegates to {@link ChaosDispatcher#adjustLocalDateTimeNowInZone}.
    *
    * @param realValue the real local date-time

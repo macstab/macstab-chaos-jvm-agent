@@ -918,6 +918,29 @@ public final class ChaosDispatcher {
   }
 
   /**
+   * Returns the (possibly skewed) instant a read of the system {@link java.time.Clock} returns.
+   *
+   * @param realInstant the instant the clock read
+   * @return the (possibly skewed) instant
+   */
+  public java.time.Instant adjustClockInstant(final java.time.Instant realInstant) {
+    final long realMillis = realInstant.toEpochMilli();
+    final long delta = applyClockSkew(realMillis, OperationType.CLOCK_READ) - realMillis;
+    return delta == 0L ? realInstant : realInstant.plusMillis(delta);
+  }
+
+  /**
+   * Returns the (possibly skewed) milliseconds a {@code millis()} read of the system {@link
+   * java.time.Clock} returns.
+   *
+   * @param realMillis the milliseconds the clock read
+   * @return the (possibly skewed) milliseconds
+   */
+  public long adjustClockReadMillis(final long realMillis) {
+    return applyClockSkew(realMillis, OperationType.CLOCK_READ);
+  }
+
+  /**
    * Returns the (possibly skewed) {@link java.time.LocalDateTime} for {@code LocalDateTime.now()}.
    *
    * @param realValue the real local-date-time produced by {@code LocalDateTime.now()}

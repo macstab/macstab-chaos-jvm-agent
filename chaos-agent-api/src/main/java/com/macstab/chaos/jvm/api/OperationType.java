@@ -25,12 +25,12 @@ package com.macstab.chaos.jvm.api;
  *   <li>{@link ChaosSelector.MethodSelector} — {@link #METHOD_ENTER}, {@link #METHOD_EXIT}
  *   <li>{@link ChaosSelector.MonitorSelector} — {@link #MONITOR_ENTER}, {@link #THREAD_PARK}
  *   <li>{@link ChaosSelector.JvmRuntimeSelector} — {@link #SYSTEM_CLOCK_MILLIS}, {@link
- *       #SYSTEM_CLOCK_NANOS}, {@link #INSTANT_NOW}, {@link #LOCAL_DATE_TIME_NOW}, {@link
- *       #ZONED_DATE_TIME_NOW}, {@link #DATE_NEW}, {@link #SYSTEM_GC_REQUEST}, {@link
- *       #SYSTEM_EXIT_REQUEST}, {@link #REFLECTION_INVOKE}, {@link #DIRECT_BUFFER_ALLOCATE}, {@link
- *       #OBJECT_DESERIALIZE}, {@link #OBJECT_SERIALIZE}, {@link #NATIVE_LIBRARY_LOAD}, {@link
- *       #JNDI_LOOKUP}, {@link #JMX_INVOKE}, {@link #JMX_GET_ATTR}, {@link #ZIP_INFLATE}, {@link
- *       #ZIP_DEFLATE}
+ *       #SYSTEM_CLOCK_NANOS}, {@link #INSTANT_NOW}, {@link #CLOCK_READ}, {@link
+ *       #LOCAL_DATE_TIME_NOW}, {@link #ZONED_DATE_TIME_NOW}, {@link #DATE_NEW}, {@link
+ *       #SYSTEM_GC_REQUEST}, {@link #SYSTEM_EXIT_REQUEST}, {@link #REFLECTION_INVOKE}, {@link
+ *       #DIRECT_BUFFER_ALLOCATE}, {@link #OBJECT_DESERIALIZE}, {@link #OBJECT_SERIALIZE}, {@link
+ *       #NATIVE_LIBRARY_LOAD}, {@link #JNDI_LOOKUP}, {@link #JMX_INVOKE}, {@link #JMX_GET_ATTR},
+ *       {@link #ZIP_INFLATE}, {@link #ZIP_DEFLATE}
  *   <li>{@link ChaosSelector.NioSelector} — {@link #NIO_SELECTOR_SELECT}, {@link
  *       #NIO_CHANNEL_READ}, {@link #NIO_CHANNEL_WRITE}, {@link #NIO_CHANNEL_CONNECT}, {@link
  *       #NIO_CHANNEL_ACCEPT}
@@ -342,6 +342,20 @@ public enum OperationType {
    * <p>Used exclusively with {@link ChaosSelector.JvmRuntimeSelector}.
    */
   INSTANT_NOW,
+
+  /**
+   * Fires when the system {@link java.time.Clock} is read: {@code instant()} and {@code millis()}
+   * of {@link java.time.Clock#systemUTC()}, {@link java.time.Clock#systemDefaultZone()}, {@link
+   * java.time.Clock#system(java.time.ZoneId)} and {@link java.time.InstantSource#system()}, and so
+   * every {@code java.time} {@code now()} without an operation of its own: {@code LocalDate},
+   * {@code LocalTime}, {@code OffsetDateTime}, {@code OffsetTime}, {@code Year}, {@code YearMonth},
+   * {@code MonthDay}, and clocks derived from the system clock ({@code Clock.offset}, {@code
+   * Clock.tick}). The reads inside {@link #INSTANT_NOW}, {@link #LOCAL_DATE_TIME_NOW} and {@link
+   * #ZONED_DATE_TIME_NOW} belong to those operations and are not skewed a second time.
+   *
+   * <p>Use with {@link ChaosSelector.JvmRuntimeSelector} and a clock-skew effect.
+   */
+  CLOCK_READ,
 
   /**
    * Fires on every call to {@link java.time.LocalDateTime#now()} (no-argument variant). Used with

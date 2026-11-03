@@ -462,7 +462,7 @@ The `OperationType` enum defines all intercepted JDK operations. Full list:
 | Thread                          | `THREAD_START`, `VIRTUAL_THREAD_START`, `THREAD_SLEEP`                                                                                 |
 | Queue                           | `QUEUE_PUT`, `QUEUE_TAKE`, `QUEUE_OFFER`, `QUEUE_POLL`                                                                                 |
 | Async                           | `ASYNC_COMPLETE`, `ASYNC_COMPLETE_EXCEPTIONALLY`, `ASYNC_CANCEL`                                                                       |
-| Clock (auto-wired)              | `INSTANT_NOW`, `LOCAL_DATE_TIME_NOW`, `ZONED_DATE_TIME_NOW`, `DATE_NEW`                                                                |
+| Clock (auto-wired)              | `INSTANT_NOW`, `CLOCK_READ`, `LOCAL_DATE_TIME_NOW`, `ZONED_DATE_TIME_NOW`, `DATE_NEW`                                                              |
 | Clock (manual hook — see §11)   | `SYSTEM_CLOCK_MILLIS`, `SYSTEM_CLOCK_NANOS`                                                                                            |
 | GC                              | `SYSTEM_GC_REQUEST`                                                                                                                    |
 | Exit                            | `SYSTEM_EXIT_REQUEST`                                                                                                                  |

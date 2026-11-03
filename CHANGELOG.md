@@ -15,6 +15,8 @@
 
 ### Features
 
+* **instrumentation:** clock skew reaches every `java.time` read: the new `CLOCK_READ` is a read of the system `Clock` (`Clock.systemUTC()`, `systemDefaultZone()`, `InstantSource.system()`), and so of every `now()` without an operation of its own (`LocalDate`, `LocalTime`, `OffsetDateTime`, `OffsetTime`, `Year`, `YearMonth`, `MonthDay`) and of clocks derived from the system clock. Before, those reads were never skewed. The read inside `LocalDateTime.now()` and `ZonedDateTime.now()` stays theirs, so selecting both never skews twice.
+
 * **instrumentation:** file opens are the new `FILE_IO_OPEN`: the `FileInputStream`, `FileOutputStream` and `RandomAccessFile` constructors (failing with the JDK's `FileNotFoundException("<path> (<reason>)")`) and the platform file system's `newByteChannel` / `newFileChannel` behind `Files.newInputStream`, `newOutputStream`, `newBufferedReader` and `FileChannel.open`. Opens of class-path archives are never evaluated.
 * **instrumentation:** binds are the new `SOCKET_BIND` (every socket and socket-channel bind, through `sun.nio.ch.Net.bind`); `NetworkSelector` address filters match the local address being bound, errors are `BindException`.
 * **api:** `ChaosEffect.Errno` gains `EADDRNOTAVAIL`, `ENOTCONN`, `ENOBUFS` and `ENFILE`. `EMFILE` and `ENFILE` also apply to socket connects and accepts (an accept fails with `IOException("Too many open files")`), `EACCES` to binds, and `EAGAIN` / `ENOMEM` to a platform `THREAD_START`, which then fails with the JDK's `OutOfMemoryError: unable to create native thread`.

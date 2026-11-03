@@ -506,6 +506,24 @@ public interface BridgeDelegate {
   void beforeSocketBind(Object address, int port) throws Throwable;
 
   /**
+   * Rewrites an instant read from the system {@code java.time.Clock} for clock skew.
+   *
+   * @param realInstant the instant read
+   * @return the (possibly skewed) instant
+   * @throws Throwable if the runtime throws
+   */
+  java.time.Instant adjustClockInstant(java.time.Instant realInstant) throws Throwable;
+
+  /**
+   * Rewrites the milliseconds read from the system {@code java.time.Clock} for clock skew.
+   *
+   * @param realMillis the milliseconds read
+   * @return the (possibly skewed) milliseconds
+   * @throws Throwable if the runtime throws
+   */
+  long adjustClockReadMillis(long realMillis) throws Throwable;
+
+  /**
    * Called before {@link javax.naming.InitialContext#lookup(String)}.
    *
    * @param context the {@code InitialContext} performing the lookup; never {@code null}

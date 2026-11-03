@@ -82,6 +82,7 @@ public final class DefectProbeMain {
       case "initialize-retry" -> initializeRetry();
       case "second-agent-copy" -> secondAgentCopy();
       case "clock-now-in-zone" -> clockNowInZone();
+      case "clock-reads" -> clockReads();
       case "socket-read-loopback" -> socketReadLoopback();
       case "direct-buffer-release" -> directBufferRelease();
       case "bridge-jars-on-disk" -> bridgeJarsOnDisk();
@@ -1276,6 +1277,32 @@ public final class DefectProbeMain {
     System.out.println(
         "zonedSkewSeconds="
             + Duration.between(real, java.time.ZonedDateTime.now(tokyo).toInstant()).toSeconds());
+  }
+
+  /**
+   * Prints how far each system-clock read is ahead of the real time, in seconds: the system clock's
+   * instant and millis, the system instant source, the java.time now() methods without an operation
+   * of their own, and Instant.now / LocalDateTime.now.
+   */
+  private static void clockReads() {
+    final long real =
+        java.time.Instant.ofEpochMilli(java.lang.System.currentTimeMillis()).getEpochSecond();
+    final java.time.ZoneOffset utc = java.time.ZoneOffset.UTC;
+    final Map<String, Long> reads = new java.util.LinkedHashMap<>();
+    reads.put("clockInstant", java.time.Clock.systemUTC().instant().getEpochSecond());
+    reads.put("clockMillis", java.time.Clock.systemDefaultZone().millis() / 1000L);
+    reads.put("instantSource", java.time.InstantSource.system().instant().getEpochSecond());
+    reads.put("offsetDateTime", java.time.OffsetDateTime.now(utc).toEpochSecond());
+    reads.put("localTime", (long) java.time.LocalTime.now(utc).toSecondOfDay());
+    reads.put("instantNow", java.time.Instant.now().getEpochSecond());
+    reads.put("localDateTime", java.time.LocalDateTime.now(utc).toEpochSecond(utc));
+    for (final Map.Entry<String, Long> read : reads.entrySet()) {
+      final long ahead =
+          read.getKey().equals("localTime")
+              ? Math.floorMod(read.getValue() - Math.floorMod(real, 86_400L), 86_400L)
+              : read.getValue() - real;
+      System.out.println(read.getKey() + "=" + ahead);
+    }
   }
 
   private static void virtualThreadExecutor() throws Exception {

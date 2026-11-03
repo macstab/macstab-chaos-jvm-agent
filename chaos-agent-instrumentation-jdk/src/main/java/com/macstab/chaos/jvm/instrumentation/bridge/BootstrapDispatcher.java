@@ -146,8 +146,15 @@ public final class BootstrapDispatcher {
    */
   public static final int SCOPE_POOL_WORKER = 19;
 
+  /**
+   * Scope of a {@code java.time} {@code now()} with an operation of its own ({@code
+   * LocalDateTime.now}, {@code ZonedDateTime.now}): the system-clock read inside it belongs to that
+   * operation, not to {@code CLOCK_READ}.
+   */
+  public static final int SCOPE_CLOCK_API = 20;
+
   /** Size of the per-thread counter array: index 0 is the reentrancy depth, then the scopes. */
-  static final int SCOPE_COUNT = 20;
+  static final int SCOPE_COUNT = 21;
 
   /**
    * Enters a call-depth scope on the current thread.
@@ -455,8 +462,14 @@ public final class BootstrapDispatcher {
   /** Handle index for {@link #beforeSocketBind(Object, int)}. */
   public static final int BEFORE_SOCKET_BIND = 70;
 
+  /** Handle index for {@link #adjustClockInstant(java.time.Instant)}. */
+  public static final int ADJUST_CLOCK_INSTANT = 71;
+
+  /** Handle index for {@link #adjustClockReadMillis(long)}. */
+  public static final int ADJUST_CLOCK_READ_MILLIS = 72;
+
   /** Total number of method-handle slots; equals the highest index plus one. */
-  public static final int HANDLE_COUNT = 71;
+  public static final int HANDLE_COUNT = 73;
 
   /** The header that carries a session id between services; {@code ChaosSession.HEADER}. */
   public static final String SESSION_HEADER = "X-Chaos-Session";
@@ -1054,6 +1067,58 @@ public final class BootstrapDispatcher {
     } catch (final Throwable throwable) {
       sneakyThrow(throwable);
       return realInstant;
+    } finally {
+      depth[0]--;
+    }
+  }
+
+  /**
+   * Rewrites an instant read from the system {@code java.time.Clock} ({@code CLOCK_READ}), unless
+   * the read is part of a {@code now()} that is skewed as its own operation.
+   *
+   * @param realInstant the instant read
+   * @return the (possibly skewed) instant; {@code realInstant} as the fallback
+   * @throws Throwable if the delegate throws
+   */
+  public static java.time.Instant adjustClockInstant(final java.time.Instant realInstant)
+      throws Throwable {
+    final int[] depth = DEPTH.get();
+    final MethodHandle[] h = handles;
+    final Object d = delegate;
+    if (depth[0] > 0 || depth[SCOPE_CLOCK_API] > 0 || d == null || h == null) {
+      return realInstant;
+    }
+    depth[0]++;
+    try {
+      return (java.time.Instant) h[ADJUST_CLOCK_INSTANT].invoke(d, realInstant);
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+      return realInstant;
+    } finally {
+      depth[0]--;
+    }
+  }
+
+  /**
+   * Rewrites the milliseconds read from the system {@code java.time.Clock} ({@code CLOCK_READ}).
+   *
+   * @param realMillis the milliseconds read
+   * @return the (possibly skewed) milliseconds; {@code realMillis} as the fallback
+   * @throws Throwable if the delegate throws
+   */
+  public static long adjustClockReadMillis(final long realMillis) throws Throwable {
+    final int[] depth = DEPTH.get();
+    final MethodHandle[] h = handles;
+    final Object d = delegate;
+    if (depth[0] > 0 || depth[SCOPE_CLOCK_API] > 0 || d == null || h == null) {
+      return realMillis;
+    }
+    depth[0]++;
+    try {
+      return (long) h[ADJUST_CLOCK_READ_MILLIS].invoke(d, realMillis);
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+      return realMillis;
     } finally {
       depth[0]--;
     }

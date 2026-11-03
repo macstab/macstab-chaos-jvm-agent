@@ -576,6 +576,16 @@ final class ChaosBridge implements BridgeDelegate {
     runtime.beforeSocketBind(address, port);
   }
 
+  @Override
+  public java.time.Instant adjustClockInstant(final java.time.Instant realInstant) {
+    return runtime.adjustClockInstant(realInstant);
+  }
+
+  @Override
+  public long adjustClockReadMillis(final long realMillis) {
+    return runtime.adjustClockReadMillis(realMillis);
+  }
+
   /**
    * Invoked before a JNDI {@code lookup} call.
    *

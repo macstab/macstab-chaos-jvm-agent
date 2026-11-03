@@ -997,7 +997,7 @@ Object out = chaosRuntime.afterMethodExit(
 ### `jvmRuntime` — JvmRuntimeSelector
 
 **JSON type:** `"jvmRuntime"`  
-**Operations:** `SYSTEM_CLOCK_MILLIS`, `SYSTEM_CLOCK_NANOS`, `INSTANT_NOW`, `LOCAL_DATE_TIME_NOW`, `ZONED_DATE_TIME_NOW`, `DATE_NEW`, `SYSTEM_GC_REQUEST`, `SYSTEM_EXIT_REQUEST`, `REFLECTION_INVOKE`, `DIRECT_BUFFER_ALLOCATE`, `OBJECT_DESERIALIZE`, `OBJECT_SERIALIZE`, `NATIVE_LIBRARY_LOAD`, `JNDI_LOOKUP`, `JMX_INVOKE`, `JMX_GET_ATTR`, `ZIP_INFLATE`, `ZIP_DEFLATE`  
+**Operations:** `SYSTEM_CLOCK_MILLIS`, `SYSTEM_CLOCK_NANOS`, `INSTANT_NOW`, `CLOCK_READ`, `LOCAL_DATE_TIME_NOW`, `ZONED_DATE_TIME_NOW`, `DATE_NEW`, `SYSTEM_GC_REQUEST`, `SYSTEM_EXIT_REQUEST`, `REFLECTION_INVOKE`, `DIRECT_BUFFER_ALLOCATE`, `OBJECT_DESERIALIZE`, `OBJECT_SERIALIZE`, `NATIVE_LIBRARY_LOAD`, `JNDI_LOOKUP`, `JMX_INVOKE`, `JMX_GET_ATTR`, `ZIP_INFLATE`, `ZIP_DEFLATE`  
 **Purpose:** Intercept JVM runtime services: clock reads, GC requests, process exit, reflection, direct memory, serialization, native libraries, JNDI, JMX, ZIP.
 
 **Fields:**
@@ -1008,7 +1008,7 @@ Object out = chaosRuntime.afterMethodExit(
 
 **Note on clock interception:**
 
-`INSTANT_NOW`, `LOCAL_DATE_TIME_NOW`, `ZONED_DATE_TIME_NOW`, and `DATE_NEW` are **auto-wired** — the agent intercepts the corresponding `java.time` / `java.util.Date` calls at runtime and applies skew transparently. This is the recommended path for clock skew on modern code.
+`INSTANT_NOW`, `CLOCK_READ`, `LOCAL_DATE_TIME_NOW`, `ZONED_DATE_TIME_NOW`, and `DATE_NEW` are **auto-wired** — the agent intercepts the corresponding `java.time` / `java.util.Date` calls at runtime and applies skew transparently. This is the recommended path for clock skew on modern code. `CLOCK_READ` is a read of the system `java.time.Clock` (`Clock.systemUTC()`, `Clock.systemDefaultZone()`, `InstantSource.system()`: `instant()` and `millis()`), and so every `now()` without an operation of its own — `LocalDate`, `LocalTime`, `OffsetDateTime`, `OffsetTime`, `Year`, `YearMonth`, `MonthDay` — and clocks derived from the system clock (`Clock.offset`, `Clock.tick`). The clock read inside `Instant.now()`, `LocalDateTime.now()` and `ZonedDateTime.now()` belongs to their own operations and is never skewed twice. Select all five for a skew that every `java.time` read sees.
 
 `SYSTEM_CLOCK_MILLIS` and `SYSTEM_CLOCK_NANOS` cannot be hooked at the method. `System.currentTimeMillis()` and `System.nanoTime()` are `public static native @IntrinsicCandidate` methods on `java.lang.System`: retransformation cannot un-`native` them, and HotSpot's C2 JIT replaces the call with a direct hardware-clock instruction (`RDTSC` on x86, `MRS CNTVCT_EL0` on ARM) that bypasses any bytecode wrapper.
 
@@ -1289,7 +1289,7 @@ The runtime validator enforces this at activation time. Mismatches throw `ChaosV
 
 \* `exceptionInjection` is only valid with `MethodSelector` + `METHOD_ENTER`.  
 \* `returnValueCorruption` is only valid with `MethodSelector` + `METHOD_EXIT`.  
-\*\* `clockSkew` is only valid with `JvmRuntimeSelector` and only for the clock reads `INSTANT_NOW`, `LOCAL_DATE_TIME_NOW`, `ZONED_DATE_TIME_NOW`, `DATE_NEW`, `SYSTEM_CLOCK_MILLIS`, `SYSTEM_CLOCK_NANOS`. Conversely, those clock reads accept **only** `clockSkew` — any other effect on them is rejected.  
+\*\* `clockSkew` is only valid with `JvmRuntimeSelector` and only for the clock reads `INSTANT_NOW`, `CLOCK_READ`, `LOCAL_DATE_TIME_NOW`, `ZONED_DATE_TIME_NOW`, `DATE_NEW`, `SYSTEM_CLOCK_MILLIS`, `SYSTEM_CLOCK_NANOS`. Conversely, those clock reads accept **only** `clockSkew` — any other effect on them is rejected.  
 \*\*\* `suppress` is only accepted when every operation in the selector is one of: `THREAD_START`, `VIRTUAL_THREAD_START`, `THREAD_SLEEP`, `EXECUTOR_SUBMIT`, `SCHEDULE_SUBMIT`, `SCHEDULE_TICK`, `QUEUE_OFFER`, `QUEUE_POLL`, `ASYNC_COMPLETE`, `ASYNC_COMPLETE_EXCEPTIONALLY`, `ASYNC_CANCEL`, `RESOURCE_LOAD`, `SYSTEM_GC_REQUEST`, `SYSTEM_EXIT_REQUEST`, `NIO_SELECTOR_SELECT`, `THREAD_LOCAL_GET`, `THREAD_LOCAL_SET`, `HTTP_CLIENT_SEND`, `HTTP_CLIENT_SEND_ASYNC`, `JDBC_CONNECTION_ACQUIRE`, `JDBC_STATEMENT_EXECUTE`, `JDBC_PREPARED_STATEMENT`, `JDBC_TRANSACTION_COMMIT`, `JDBC_TRANSACTION_ROLLBACK`. Other interception points can only delay or throw.
 
 ---
@@ -1581,7 +1581,7 @@ If `strategy` is inapplicable to the actual return type (e.g., `EMPTY` on a prim
 { "type": "clockSkew", "skewAmount": "PT3600S", "mode": "FIXED" }
 ```
 
-**Valid with:** `JvmRuntimeSelector` targeting `SYSTEM_CLOCK_MILLIS`, `SYSTEM_CLOCK_NANOS`, `INSTANT_NOW`, `LOCAL_DATE_TIME_NOW`, `ZONED_DATE_TIME_NOW`, `DATE_NEW`.
+**Valid with:** `JvmRuntimeSelector` targeting `SYSTEM_CLOCK_MILLIS`, `SYSTEM_CLOCK_NANOS`, `INSTANT_NOW`, `CLOCK_READ`, `LOCAL_DATE_TIME_NOW`, `ZONED_DATE_TIME_NOW`, `DATE_NEW`.
 
 ---
 

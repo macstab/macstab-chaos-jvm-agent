@@ -818,6 +818,7 @@ public sealed interface ChaosSelector
             OperationType.SYSTEM_CLOCK_MILLIS,
             OperationType.SYSTEM_CLOCK_NANOS,
             OperationType.INSTANT_NOW,
+            OperationType.CLOCK_READ,
             OperationType.LOCAL_DATE_TIME_NOW,
             OperationType.ZONED_DATE_TIME_NOW,
             OperationType.DATE_NEW,
