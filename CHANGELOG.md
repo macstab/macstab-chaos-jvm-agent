@@ -3,6 +3,8 @@
 
 ### BREAKING CHANGES
 
+* **instrumentation:** `SOCKET_*` scenarios also match `SocketChannel` and `ServerSocketChannel` calls: the JDK `HttpClient`, NIO clients and servers, and Spring's `TestRestTemplate` where it uses the JDK client. A `NetworkSelector` without peer filters now also reaches those connections; narrow it with `remoteCidr` / `remotePort` where only one peer is meant.
+
 * **api:** `ChaosControlPlane.removeEventListener` and `ChaosActivationHandle.matchedCount()` / `appliedCount()` are new abstract methods; custom implementations must add them.
 * **core:** a clock-skew scenario whose policy sets `maxApplications`, `rateLimit`, `activateAfterMatches` or `probability < 1.0` is rejected with `ChaosValidationException`; 1.x ignored those fields for clock skew. `ActivationPolicy.fromJson` takes `activeFrom` and `activeUntil`.
 * **instrumentation:** hooks are woven on demand. The agent no longer weaves every hook at start: each interception point belongs to a hook group (`JdkInstrumentationInstaller.HookGroup`) that is retransformed the first time an activated scenario (or an opened session) needs one of its operation types, and stays woven until uninstall. A JVM without scenarios runs unmodified JDK classes; the first activation of a hook group pays its one-time weaving cost, and a weaving failure fails that activation with failure category `INSTRUMENTATION_FAILURE`. The agent argument `instrumentation=eager`, the system property `-Dmacstab.chaos.instrumentation=eager` or the environment variable `MACSTAB_CHAOS_INSTRUMENTATION=eager` restores the 1.x behaviour (every group woven at start).

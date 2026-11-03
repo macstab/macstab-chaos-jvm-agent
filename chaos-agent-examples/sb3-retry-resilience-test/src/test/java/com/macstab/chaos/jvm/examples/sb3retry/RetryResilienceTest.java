@@ -14,6 +14,7 @@ import com.macstab.chaos.jvm.api.ChaosEffect;
 import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.ChaosScenario.ScenarioScope;
 import com.macstab.chaos.jvm.api.ChaosSelector;
+import com.macstab.chaos.jvm.api.NamePattern;
 import com.macstab.chaos.jvm.api.OperationType;
 import com.macstab.chaos.jvm.spring.boot3.test.ChaosTest;
 import java.util.Set;
@@ -61,11 +62,19 @@ class RetryResilienceTest {
     ChaosScenario transientConnectFailures =
         ChaosScenario.builder("transient-connect-failures")
             .description(
-                "Fail the first two SOCKET_CONNECT operations with a ConnectException; "
+                "Fail the first two SOCKET_CONNECT operations to the downstream with a ConnectException; "
                     + "third and subsequent connects fall through to the real backend. "
                     + "Proves Resilience4j @Retry absorbs a bounded burst of transient faults.")
             .scope(ScenarioScope.JVM)
-            .selector(ChaosSelector.network(Set.of(OperationType.SOCKET_CONNECT)))
+            // The downstream only: the test's own request to the application is a connect too.
+            .selector(
+                new ChaosSelector.NetworkSelector(
+                    Set.of(OperationType.SOCKET_CONNECT),
+                    NamePattern.any(),
+                    null,
+                    18080,
+                    null,
+                    null))
             .effect(ChaosEffect.reject("chaos: transient connect failure"))
             .activationPolicy(
                 new ActivationPolicy(
