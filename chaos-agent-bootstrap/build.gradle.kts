@@ -136,6 +136,9 @@ tasks.test {
     // the test JVM does not have; keep them out of test discovery, which would have to load and
     // verify them.
     exclude("**/*ProbeMain*")
+    // PlanFuzzTest replays a run with -PfuzzSeed=<seed> -PfuzzIterations=<n>.
+    providers.gradleProperty("fuzzSeed").orNull?.let { systemProperty("chaos.fuzz.seed", it) }
+    providers.gradleProperty("fuzzIterations").orNull?.let { systemProperty("chaos.fuzz.iterations", it) }
     systemProperty("chaos.bootstrap.agentJar", tasks.shadowJar.flatMap { it.archiveFile }.get().asFile.absolutePath)
 
     // Expose the H2 and HikariCP JAR paths so JDBC fork-probes can extend their child-JVM

@@ -37,8 +37,9 @@ import org.junit.jupiter.api.Test;
  * the published plan schema, which reach the record constructors and validators of every selector
  * and effect.
  *
- * <p>Seeded and replayable: {@code -Dchaos.fuzz.seed} and {@code -Dchaos.fuzz.iterations} (default
- * 4000 each); a failure names the seed, the iteration and the input.
+ * <p>Seeded and replayable: {@code ./gradlew :chaos-agent-bootstrap:test --tests '*PlanFuzzTest*'
+ * -PfuzzSeed=<seed> -PfuzzIterations=<n>} (defaults 20261103 and 4000); a failure names the seed,
+ * the iteration and the input.
  */
 @DisplayName("Plan parser and validator fuzzing")
 class PlanFuzzTest {
