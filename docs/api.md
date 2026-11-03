@@ -638,7 +638,7 @@ public interface ChaosDiagnostics {
 }
 ```
 
-**`runtimeDetails`**: key/value runtime metadata. Includes `wovenHookGroups` — the comma-separated, sorted names of the hook groups woven so far (empty when none; hooks are woven on demand).
+**`runtimeDetails`**: key/value runtime metadata. Includes `wovenHookGroups` — the comma-separated, sorted names of the hook groups woven so far (empty when none; hooks are woven on demand) — and two health keys, both empty when all is well: `unmatchedHooks`, the hooks woven into a type that matched none of its methods (the JDK changed the method and the hook is inactive), and `hookFailures`, the types whose weaving failed (none of their hooks applies).
 
 **`matchedCount`**: total invocations that matched the selector since `start()`. Incremented before activation policy checks.
 

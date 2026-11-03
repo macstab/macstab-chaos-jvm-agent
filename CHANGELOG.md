@@ -17,6 +17,8 @@
 
 ### Features
 
+* **instrumentation:** hook health in the diagnostics: `unmatchedHooks` lists hooks woven into a type that matched none of its methods (a JDK or library release changed the method, so the hook is inactive), `hookFailures` the types whose weaving failed. `HookCoverageIntegrationTest` requires every advice to match on the JDK under test, with the supported client libraries loaded.
+
 * **instrumentation:** the rest of the native io and net operations: `FILE_IO_CLOSE` (evaluated after a stream, `RandomAccessFile` or `FileChannel` closed, so a failing close still releases the descriptor; one event for a stream and its channel), `FILE_IO_MOVE_TARGET` (a move or rename by its destination), `SOCKET_SHUTDOWN` (`shutdownInput` / `shutdownOutput`), and `PROCESS_WAIT` (`Process.waitFor`). `ChaosEffect.timeout()` also applies to `select(timeout)`, which then waits it out and reports no ready channel, and to a timed `waitFor`, which reports a child that has not exited. `ChaosEffect.Errno` gains `EINVAL`, `EOPNOTSUPP`, `EAFNOSUPPORT` and `EPROTONOSUPPORT`.
 
 * **api:** `ChaosPresets`: ready-made scenarios for common faults — `diskFull`, `failingDisk`, `fsyncFailure`, `slowDisk`, `tooManyOpenFiles`, `connectionRefused`, `connectionResets`, `slowNetwork`, `trickledResponses`, `packetLoss`, `failover`, `dnsOutage`, `clockJump`, `threadExhaustion` — each a prefilled `ChaosScenario.Builder` tagged `preset=<name>`, so scope and policy stay the caller's.
@@ -89,6 +91,8 @@
 
 
 ### Bug Fixes
+
+* **instrumentation:** Apache HttpClient 4 chaos never applied: its class files are Java 6, and the advice's string concatenation compiled to `invokedynamic`, which cannot be woven into them, so every transformation of `CloseableHttpClient` failed. Found by the new hook-coverage test.
 
 * **instrumentation:** a class loaded as a side effect of weaving one hook group (inside another class's load hook) escaped the transformers of groups woven before it; the post-install retransformation that repaired this for the object streams now runs after every weave and covers the socket classes.
 

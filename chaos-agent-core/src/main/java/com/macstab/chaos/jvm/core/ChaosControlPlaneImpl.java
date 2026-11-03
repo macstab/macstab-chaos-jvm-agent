@@ -538,6 +538,9 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
     details.put("currentSessionId", String.valueOf(scopeContext.currentSessionId()));
     details.put("droppedEvents", String.valueOf(observabilityBus.droppedEvents()));
     details.put("wovenHookGroups", String.join(",", new java.util.TreeSet<>(hookDemand.woven())));
+    details.put(
+        "unmatchedHooks", String.join("; ", new java.util.TreeSet<>(hookDemand.unmatched())));
+    details.put("hookFailures", String.join("; ", new java.util.TreeSet<>(hookDemand.failures())));
     return details;
   }
 }

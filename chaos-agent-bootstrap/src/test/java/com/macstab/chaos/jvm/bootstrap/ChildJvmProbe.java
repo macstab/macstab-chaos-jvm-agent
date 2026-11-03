@@ -63,12 +63,35 @@ final class ChildJvmProbe {
    */
   ProbeResult runWithoutPlan(final Class<?> mainClass, final String mode, final String... jvmArgs)
       throws Exception {
+    return runWithoutPlanOnClasspath(mainClass, mode, null, jvmArgs);
+  }
+
+  /**
+   * As {@link #runWithoutPlan(Class, String, String...)}, with {@code extraClasspath} appended to
+   * the child's classpath.
+   *
+   * @param mainClass the probe main class
+   * @param mode the probe mode passed as the first program argument
+   * @param extraClasspath extra classpath entries, or {@code null}
+   * @param jvmArgs additional JVM arguments placed before the classpath
+   * @return the probe's {@code key=value} output lines
+   */
+  ProbeResult runWithoutPlanOnClasspath(
+      final Class<?> mainClass,
+      final String mode,
+      final String extraClasspath,
+      final String... jvmArgs)
+      throws Exception {
     final List<String> command = new ArrayList<>();
     command.add(Path.of(System.getProperty("java.home"), "bin", "java").toString());
     command.add("-javaagent:" + System.getProperty("chaos.bootstrap.agentJar"));
     command.addAll(List.of(jvmArgs));
     command.add("-cp");
-    command.add(System.getProperty("java.class.path"));
+    final String baseClasspath = System.getProperty("java.class.path");
+    command.add(
+        extraClasspath == null || extraClasspath.isEmpty()
+            ? baseClasspath
+            : baseClasspath + File.pathSeparator + extraClasspath);
     command.add(mainClass.getName());
     command.add(mode);
     return execute(command);

@@ -128,4 +128,4 @@ try (ChaosActivationHandle handle = chaos.activate(scenario)) {
 }
 ```
 
-The diagnostics' `runtimeDetails()` also report `wovenHookGroups` (see [`instrumentation.md`](instrumentation.md)) and `droppedEvents`.
+The diagnostics' `runtimeDetails()` also report `wovenHookGroups` (see [`instrumentation.md`](instrumentation.md)), `droppedEvents`, and the hook health: `unmatchedHooks` lists the hooks woven into a type that matched none of its methods — the JDK or library changed the method, so the hook is inactive — and `hookFailures` the types whose weaving failed; both are empty on a healthy agent. A failed transformation is also logged as a warning.

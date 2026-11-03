@@ -10,6 +10,9 @@ val httpClientProbe: Configuration by configurations.creating
 // Client libraries (Kafka, gRPC, Redis, R2DBC, AWS SDK, Netty) for the client-hook probes; kept
 // off the general probe classpath like the HTTP clients, exposed as chaos.test.clientClasspath.
 val clientLibraryProbe: Configuration by configurations.creating
+// Libraries only the hook-coverage probe loads: the hooks for them are verified, nothing else
+// uses them.
+val coverageProbe: Configuration by configurations.creating
 
 dependencies {
     api(project(":chaos-agent-api"))
@@ -32,6 +35,8 @@ dependencies {
     testCompileOnly(libs.okhttp)
     testCompileOnly(libs.apache.httpclient5)
     testCompileOnly(libs.reactor.netty.http)
+    coverageProbe(libs.apache.httpclient4)
+    coverageProbe(libs.c3p0)
     httpClientProbe(libs.okhttp)
     httpClientProbe(libs.apache.httpclient5)
     httpClientProbe(libs.reactor.netty.http)
@@ -129,4 +134,5 @@ tasks.test {
     systemProperty("chaos.test.jdbcClasspath", jdbcClasspath)
     systemProperty("chaos.test.httpClasspath", httpClientProbe.asPath)
     systemProperty("chaos.test.clientClasspath", clientLibraryProbe.asPath)
+    systemProperty("chaos.test.coverageClasspath", coverageProbe.asPath)
 }

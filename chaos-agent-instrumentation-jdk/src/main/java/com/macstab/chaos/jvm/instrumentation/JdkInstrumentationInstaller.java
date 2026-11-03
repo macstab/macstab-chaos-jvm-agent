@@ -31,6 +31,8 @@ import java.util.logging.Logger;
 import net.bytebuddy.agent.builder.AgentBuilder;
 import net.bytebuddy.agent.builder.ResettableClassFileTransformer;
 import net.bytebuddy.asm.Advice;
+import net.bytebuddy.asm.AsmVisitorWrapper;
+import net.bytebuddy.description.method.MethodDescription;
 import net.bytebuddy.description.type.TypeDescription;
 import net.bytebuddy.matcher.ElementMatcher;
 import net.bytebuddy.matcher.ElementMatchers;
@@ -186,6 +188,16 @@ public final class JdkInstrumentationInstaller {
             }
 
             @Override
+            public Set<String> unmatched() {
+              return HookCoverage.unmatched();
+            }
+
+            @Override
+            public Set<String> failures() {
+              return HookCoverage.failures();
+            }
+
+            @Override
             public void methods(final Set<ChaosSelector.MethodSelector> selectors) {
               MethodWeaver.weave(
                   instrumentation, selectors, JdkInstrumentationInstaller::buildBaseAgentBuilder);
@@ -240,6 +252,16 @@ public final class JdkInstrumentationInstaller {
         retransformPostInstallEscapees(instrumentation);
       }
     }
+  }
+
+  /**
+   * Returns the hooks that matched a method of their type, as {@code advice on matcher}: what the
+   * hook-coverage test checks against every advice class on the running JDK.
+   *
+   * @return the active hooks, sorted
+   */
+  public static Set<String> matchedHooks() {
+    return HookCoverage.matched();
   }
 
   /** Returns the hook groups woven so far; for diagnostics and tests. */
@@ -1353,6 +1375,15 @@ public final class JdkInstrumentationInstaller {
   }
 
   /**
+   * Applies {@code advice} to the methods {@code methods} matches, recording whether it matched any
+   * ({@link HookCoverage}): a hook whose JDK method changed is reported instead of going inert.
+   */
+  private static AsmVisitorWrapper advise(
+      final Class<?> advice, final ElementMatcher<? super MethodDescription> methods) {
+    return Advice.to(advice).on(HookCoverage.track(advice, methods));
+  }
+
+  /**
    * Builds the base {@link AgentBuilder} with retransformation strategy, error logging, and ignore
    * rules for ByteBuddy and chaos-agent internal packages.
    */
@@ -1366,6 +1397,7 @@ public final class JdkInstrumentationInstaller {
               final JavaModule module,
               final boolean loaded,
               final Throwable throwable) {
+            HookCoverage.failed(typeName, throwable);
             LOGGER.warning("chaos instrumentation failed for " + typeName + ": " + throwable);
           }
         };
@@ -1400,62 +1432,61 @@ public final class JdkInstrumentationInstaller {
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder.visit(
-                    Advice.to(ThreadAdvice.PoolWorkerScopeAdvice.class)
-                        .on(
-                            ElementMatchers.named("addWorker")
-                                .and(ElementMatchers.takesArguments(2)))))
+                    advise(
+                        ThreadAdvice.PoolWorkerScopeAdvice.class,
+                        ElementMatchers.named("addWorker").and(ElementMatchers.takesArguments(2)))))
         .type(ElementMatchers.named("java.lang.Thread"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder.visit(
-                    Advice.to(ThreadAdvice.StartAdvice.class)
-                        .on(
-                            ElementMatchers.named("start")
-                                .and(
-                                    ElementMatchers.takesArguments(0)
-                                        .or(
-                                            ElementMatchers.takesArguments(1)
-                                                .and(
-                                                    ElementMatchers.takesArgument(
-                                                        0,
-                                                        ElementMatchers.named(
-                                                            "jdk.internal.vm.ThreadContainer"))))))))
+                    advise(
+                        ThreadAdvice.StartAdvice.class,
+                        ElementMatchers.named("start")
+                            .and(
+                                ElementMatchers.takesArguments(0)
+                                    .or(
+                                        ElementMatchers.takesArguments(1)
+                                            .and(
+                                                ElementMatchers.takesArgument(
+                                                    0,
+                                                    ElementMatchers.named(
+                                                        "jdk.internal.vm.ThreadContainer"))))))))
         .type(ElementMatchers.named("java.lang.Thread"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder.visit(
-                    Advice.to(ThreadAdvice.RunSessionAdvice.class)
-                        .on(ElementMatchers.named("run").and(ElementMatchers.takesArguments(0)))))
+                    advise(
+                        ThreadAdvice.RunSessionAdvice.class,
+                        ElementMatchers.named("run").and(ElementMatchers.takesArguments(0)))))
         .type(ElementMatchers.named("java.lang.VirtualThread"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder
                     .visit(
-                        Advice.to(ThreadAdvice.RunSessionAdvice.class)
-                            .on(
-                                ElementMatchers.named("run")
-                                    .and(ElementMatchers.takesArguments(Runnable.class))))
+                        advise(
+                            ThreadAdvice.RunSessionAdvice.class,
+                            ElementMatchers.named("run")
+                                .and(ElementMatchers.takesArguments(Runnable.class))))
                     .visit(
-                        Advice.to(ThreadAdvice.MountSessionAdvice.class)
-                            .on(
-                                ElementMatchers.named("mount")
-                                    .and(ElementMatchers.takesArguments(0)))))
+                        advise(
+                            ThreadAdvice.MountSessionAdvice.class,
+                            ElementMatchers.named("mount").and(ElementMatchers.takesArguments(0)))))
         .type(ElementMatchers.named("java.lang.VirtualThread"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder.visit(
-                    Advice.to(ThreadAdvice.StartAdvice.class)
-                        .on(
-                            ElementMatchers.named("start")
-                                .and(
-                                    ElementMatchers.takesArguments(0)
-                                        .or(
-                                            ElementMatchers.takesArguments(1)
-                                                .and(
-                                                    ElementMatchers.takesArgument(
-                                                        0,
-                                                        ElementMatchers.named(
-                                                            "jdk.internal.vm.ThreadContainer"))))))));
+                    advise(
+                        ThreadAdvice.StartAdvice.class,
+                        ElementMatchers.named("start")
+                            .and(
+                                ElementMatchers.takesArguments(0)
+                                    .or(
+                                        ElementMatchers.takesArguments(1)
+                                            .and(
+                                                ElementMatchers.takesArgument(
+                                                    0,
+                                                    ElementMatchers.named(
+                                                        "jdk.internal.vm.ThreadContainer"))))))));
   }
 
   /** ThreadPoolExecutor execute/beforeExecute/shutdown/shutdownNow/awaitTermination. */
@@ -1466,38 +1497,36 @@ public final class JdkInstrumentationInstaller {
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder
                     .visit(
-                        Advice.to(ExecutorAdvice.ExecuteAdvice.class)
-                            .on(
-                                ElementMatchers.named("execute")
-                                    .and(ElementMatchers.takesArguments(Runnable.class))))
+                        advise(
+                            ExecutorAdvice.ExecuteAdvice.class,
+                            ElementMatchers.named("execute")
+                                .and(ElementMatchers.takesArguments(Runnable.class))))
                     .visit(
-                        Advice.to(ExecutorAdvice.BeforeExecuteAdvice.class)
-                            .on(
-                                ElementMatchers.named("beforeExecute")
-                                    .and(
-                                        ElementMatchers.takesArguments(
-                                            Thread.class, Runnable.class))))
+                        advise(
+                            ExecutorAdvice.BeforeExecuteAdvice.class,
+                            ElementMatchers.named("beforeExecute")
+                                .and(ElementMatchers.takesArguments(Thread.class, Runnable.class))))
                     .visit(
-                        Advice.to(ExecutorAdvice.ShutdownAdvice.class)
-                            .on(
-                                ElementMatchers.named("shutdown")
-                                    .and(ElementMatchers.takesArguments(0))))
+                        advise(
+                            ExecutorAdvice.ShutdownAdvice.class,
+                            ElementMatchers.named("shutdown")
+                                .and(ElementMatchers.takesArguments(0))))
                     // shutdownNow() intercepts the forced-shutdown variant that interrupts
                     // in-flight tasks and returns the undrained queue. Omitting it left any
                     // selector targeting EXECUTOR_SHUTDOWN silently missing shutdown paths
                     // that went through shutdownNow instead of shutdown.
                     .visit(
-                        Advice.to(ExecutorAdvice.ShutdownNowAdvice.class)
-                            .on(
-                                ElementMatchers.named("shutdownNow")
-                                    .and(ElementMatchers.takesArguments(0))))
+                        advise(
+                            ExecutorAdvice.ShutdownNowAdvice.class,
+                            ElementMatchers.named("shutdownNow")
+                                .and(ElementMatchers.takesArguments(0))))
                     .visit(
-                        Advice.to(ExecutorAdvice.AwaitTerminationAdvice.class)
-                            .on(
-                                ElementMatchers.named("awaitTermination")
-                                    .and(
-                                        ElementMatchers.takesArguments(
-                                            long.class, java.util.concurrent.TimeUnit.class)))));
+                        advise(
+                            ExecutorAdvice.AwaitTerminationAdvice.class,
+                            ElementMatchers.named("awaitTermination")
+                                .and(
+                                    ElementMatchers.takesArguments(
+                                        long.class, java.util.concurrent.TimeUnit.class)))));
   }
 
   /** ScheduledThreadPoolExecutor schedule / scheduleAtFixedRate / scheduleWithFixedDelay. */
@@ -1508,43 +1537,43 @@ public final class JdkInstrumentationInstaller {
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder
                     .visit(
-                        Advice.to(ScheduledExecutorAdvice.ScheduleRunnableAdvice.class)
-                            .on(
-                                ElementMatchers.named("schedule")
-                                    .and(
-                                        ElementMatchers.takesArguments(
-                                            Runnable.class,
-                                            long.class,
-                                            java.util.concurrent.TimeUnit.class))))
+                        advise(
+                            ScheduledExecutorAdvice.ScheduleRunnableAdvice.class,
+                            ElementMatchers.named("schedule")
+                                .and(
+                                    ElementMatchers.takesArguments(
+                                        Runnable.class,
+                                        long.class,
+                                        java.util.concurrent.TimeUnit.class))))
                     .visit(
-                        Advice.to(ScheduledExecutorAdvice.ScheduleCallableAdvice.class)
-                            .on(
-                                ElementMatchers.named("schedule")
-                                    .and(
-                                        ElementMatchers.takesArguments(
-                                            Callable.class,
-                                            long.class,
-                                            java.util.concurrent.TimeUnit.class))))
+                        advise(
+                            ScheduledExecutorAdvice.ScheduleCallableAdvice.class,
+                            ElementMatchers.named("schedule")
+                                .and(
+                                    ElementMatchers.takesArguments(
+                                        Callable.class,
+                                        long.class,
+                                        java.util.concurrent.TimeUnit.class))))
                     .visit(
-                        Advice.to(ScheduledExecutorAdvice.PeriodicAdvice.class)
-                            .on(
-                                ElementMatchers.named("scheduleAtFixedRate")
-                                    .and(
-                                        ElementMatchers.takesArguments(
-                                            Runnable.class,
-                                            long.class,
-                                            long.class,
-                                            java.util.concurrent.TimeUnit.class))))
+                        advise(
+                            ScheduledExecutorAdvice.PeriodicAdvice.class,
+                            ElementMatchers.named("scheduleAtFixedRate")
+                                .and(
+                                    ElementMatchers.takesArguments(
+                                        Runnable.class,
+                                        long.class,
+                                        long.class,
+                                        java.util.concurrent.TimeUnit.class))))
                     .visit(
-                        Advice.to(ScheduledExecutorAdvice.PeriodicAdvice.class)
-                            .on(
-                                ElementMatchers.named("scheduleWithFixedDelay")
-                                    .and(
-                                        ElementMatchers.takesArguments(
-                                            Runnable.class,
-                                            long.class,
-                                            long.class,
-                                            java.util.concurrent.TimeUnit.class)))));
+                        advise(
+                            ScheduledExecutorAdvice.PeriodicAdvice.class,
+                            ElementMatchers.named("scheduleWithFixedDelay")
+                                .and(
+                                    ElementMatchers.takesArguments(
+                                        Runnable.class,
+                                        long.class,
+                                        long.class,
+                                        java.util.concurrent.TimeUnit.class)))));
   }
 
   /** BlockingQueue put/take/poll/offer instrumentation. */
@@ -1557,16 +1586,14 @@ public final class JdkInstrumentationInstaller {
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder
-                    .visit(Advice.to(QueueAdvice.PutAdvice.class).on(ElementMatchers.named("put")))
+                    .visit(advise(QueueAdvice.PutAdvice.class, ElementMatchers.named("put")))
+                    .visit(advise(QueueAdvice.TakeAdvice.class, ElementMatchers.named("take")))
+                    .visit(advise(QueueAdvice.PollAdvice.class, ElementMatchers.named("poll")))
                     .visit(
-                        Advice.to(QueueAdvice.TakeAdvice.class).on(ElementMatchers.named("take")))
-                    .visit(
-                        Advice.to(QueueAdvice.PollAdvice.class).on(ElementMatchers.named("poll")))
-                    .visit(
-                        Advice.to(QueueAdvice.OfferAdvice.class)
-                            .on(
-                                ElementMatchers.named("offer")
-                                    .and(ElementMatchers.takesArguments(1)))));
+                        advise(
+                            QueueAdvice.OfferAdvice.class,
+                            ElementMatchers.named("offer")
+                                .and(ElementMatchers.takesArguments(1)))));
   }
 
   /** CompletableFuture complete / completeExceptionally instrumentation. */
@@ -1577,15 +1604,15 @@ public final class JdkInstrumentationInstaller {
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder
                     .visit(
-                        Advice.to(CompletableFutureAdvice.CompleteAdvice.class)
-                            .on(
-                                ElementMatchers.named("complete")
-                                    .and(ElementMatchers.takesArguments(1))))
+                        advise(
+                            CompletableFutureAdvice.CompleteAdvice.class,
+                            ElementMatchers.named("complete")
+                                .and(ElementMatchers.takesArguments(1))))
                     .visit(
-                        Advice.to(CompletableFutureAdvice.CompleteExceptionallyAdvice.class)
-                            .on(
-                                ElementMatchers.named("completeExceptionally")
-                                    .and(ElementMatchers.takesArguments(Throwable.class)))));
+                        advise(
+                            CompletableFutureAdvice.CompleteExceptionallyAdvice.class,
+                            ElementMatchers.named("completeExceptionally")
+                                .and(ElementMatchers.takesArguments(Throwable.class)))));
   }
 
   /** ClassLoader loadClass / getResource instrumentation. */
@@ -1604,17 +1631,17 @@ public final class JdkInstrumentationInstaller {
                         // inherit both overloads (URLClassLoader) and parent delegation reach
                         // the advice more than once per load; the SCOPE_CLASS_LOAD call-depth
                         // scope in LoadClassAdvice evaluates only the outermost call.
-                        Advice.to(ClassLoaderAdvice.LoadClassAdvice.class)
-                            .on(
-                                ElementMatchers.named("loadClass")
-                                    .and(
-                                        ElementMatchers.takesArguments(String.class, boolean.class)
-                                            .or(ElementMatchers.takesArguments(String.class)))))
+                        advise(
+                            ClassLoaderAdvice.LoadClassAdvice.class,
+                            ElementMatchers.named("loadClass")
+                                .and(
+                                    ElementMatchers.takesArguments(String.class, boolean.class)
+                                        .or(ElementMatchers.takesArguments(String.class)))))
                     .visit(
-                        Advice.to(ClassLoaderAdvice.GetResourceAdvice.class)
-                            .on(
-                                ElementMatchers.named("getResource")
-                                    .and(ElementMatchers.takesArguments(String.class)))));
+                        advise(
+                            ClassLoaderAdvice.GetResourceAdvice.class,
+                            ElementMatchers.named("getResource")
+                                .and(ElementMatchers.takesArguments(String.class)))));
   }
 
   /** Runtime addShutdownHook / removeShutdownHook instrumentation. */
@@ -1625,15 +1652,15 @@ public final class JdkInstrumentationInstaller {
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder
                     .visit(
-                        Advice.to(ShutdownAdvice.AddShutdownHookAdvice.class)
-                            .on(
-                                ElementMatchers.named("addShutdownHook")
-                                    .and(ElementMatchers.takesArguments(Thread.class))))
+                        advise(
+                            ShutdownAdvice.AddShutdownHookAdvice.class,
+                            ElementMatchers.named("addShutdownHook")
+                                .and(ElementMatchers.takesArguments(Thread.class))))
                     .visit(
-                        Advice.to(ShutdownAdvice.RemoveShutdownHookAdvice.class)
-                            .on(
-                                ElementMatchers.named("removeShutdownHook")
-                                    .and(ElementMatchers.takesArguments(Thread.class)))));
+                        advise(
+                            ShutdownAdvice.RemoveShutdownHookAdvice.class,
+                            ElementMatchers.named("removeShutdownHook")
+                                .and(ElementMatchers.takesArguments(Thread.class)))));
   }
 
   /** ForkJoinTask.doExec instrumentation. */
@@ -1644,23 +1671,21 @@ public final class JdkInstrumentationInstaller {
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder
                     .visit(
-                        Advice.to(ForkJoinAdvice.DoExecAdvice.class)
-                            .on(
-                                ElementMatchers.named("doExec")
-                                    .and(ElementMatchers.takesArguments(0))))
+                        advise(
+                            ForkJoinAdvice.DoExecAdvice.class,
+                            ElementMatchers.named("doExec").and(ElementMatchers.takesArguments(0))))
                     .visit(
-                        Advice.to(ForkJoinAdvice.ForkAdvice.class)
-                            .on(
-                                ElementMatchers.named("fork")
-                                    .and(ElementMatchers.takesArguments(0)))))
+                        advise(
+                            ForkJoinAdvice.ForkAdvice.class,
+                            ElementMatchers.named("fork").and(ElementMatchers.takesArguments(0)))))
         .type(ElementMatchers.named("java.util.concurrent.ForkJoinPool"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder.visit(
-                    Advice.to(ForkJoinAdvice.PoolSubmitAdvice.class)
-                        .on(
-                            ElementMatchers.named("poolSubmit")
-                                .and(ElementMatchers.takesArguments(2)))));
+                    advise(
+                        ForkJoinAdvice.PoolSubmitAdvice.class,
+                        ElementMatchers.named("poolSubmit")
+                            .and(ElementMatchers.takesArguments(2)))));
   }
 
   /** System.exit, System.gc, Runtime.gc, Runtime.halt instrumentation. */
@@ -1672,18 +1697,19 @@ public final class JdkInstrumentationInstaller {
                 // System.gc() is a non-native Java method that delegates to Runtime.gc().
                 // Runtime.gc() is native and cannot be instrumented; System.gc() can be.
                 typeBuilder.visit(
-                    Advice.to(JvmRuntimeAdvice.GcRequestAdvice.class)
-                        .on(ElementMatchers.named("gc").and(ElementMatchers.takesArguments(0)))))
+                    advise(
+                        JvmRuntimeAdvice.GcRequestAdvice.class,
+                        ElementMatchers.named("gc").and(ElementMatchers.takesArguments(0)))))
         // System.exit(int) delegates to Runtime.exit(int); hooking Runtime.exit covers both
         // entry points once. Runtime.halt does not go through Runtime.exit.
         .type(ElementMatchers.named("java.lang.Runtime"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder.visit(
-                    Advice.to(JvmRuntimeAdvice.ExitRequestAdvice.class)
-                        .on(
-                            ElementMatchers.namedOneOf("exit", "halt")
-                                .and(ElementMatchers.takesArguments(int.class)))));
+                    advise(
+                        JvmRuntimeAdvice.ExitRequestAdvice.class,
+                        ElementMatchers.namedOneOf("exit", "halt")
+                            .and(ElementMatchers.takesArguments(int.class)))));
   }
 
   /** {@code Method.invoke} interception (REFLECTION_INVOKE). */
@@ -1693,12 +1719,10 @@ public final class JdkInstrumentationInstaller {
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder.visit(
-                    Advice.to(JvmRuntimeAdvice.ReflectionInvokeAdvice.class)
-                        .on(
-                            ElementMatchers.named("invoke")
-                                .and(
-                                    ElementMatchers.takesArguments(
-                                        Object.class, Object[].class)))));
+                    advise(
+                        JvmRuntimeAdvice.ReflectionInvokeAdvice.class,
+                        ElementMatchers.named("invoke")
+                            .and(ElementMatchers.takesArguments(Object.class, Object[].class)))));
   }
 
   /** {@code ByteBuffer.allocateDirect} interception (DIRECT_BUFFER_ALLOCATE). */
@@ -1708,10 +1732,10 @@ public final class JdkInstrumentationInstaller {
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder.visit(
-                    Advice.to(JvmRuntimeAdvice.DirectBufferAllocateAdvice.class)
-                        .on(
-                            ElementMatchers.named("allocateDirect")
-                                .and(ElementMatchers.takesArguments(int.class)))));
+                    advise(
+                        JvmRuntimeAdvice.DirectBufferAllocateAdvice.class,
+                        ElementMatchers.named("allocateDirect")
+                            .and(ElementMatchers.takesArguments(int.class)))));
   }
 
   /** {@code ObjectInputStream.readObject} / {@code ObjectOutputStream.writeObject} interception. */
@@ -1721,18 +1745,18 @@ public final class JdkInstrumentationInstaller {
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder.visit(
-                    Advice.to(JvmRuntimeAdvice.ObjectDeserializeAdvice.class)
-                        .on(
-                            ElementMatchers.named("readObject")
-                                .and(ElementMatchers.takesArguments(0)))))
+                    advise(
+                        JvmRuntimeAdvice.ObjectDeserializeAdvice.class,
+                        ElementMatchers.named("readObject")
+                            .and(ElementMatchers.takesArguments(0)))))
         .type(ElementMatchers.named("java.io.ObjectOutputStream"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder.visit(
-                    Advice.to(JvmRuntimeAdvice.ObjectSerializeAdvice.class)
-                        .on(
-                            ElementMatchers.named("writeObject")
-                                .and(ElementMatchers.takesArguments(Object.class)))));
+                    advise(
+                        JvmRuntimeAdvice.ObjectSerializeAdvice.class,
+                        ElementMatchers.named("writeObject")
+                            .and(ElementMatchers.takesArguments(Object.class)))));
   }
 
   /** {@code ClassLoader.defineClass} interception (CLASS_DEFINE). */
@@ -1742,10 +1766,10 @@ public final class JdkInstrumentationInstaller {
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder.visit(
-                    Advice.to(JvmRuntimeAdvice.ClassDefineAdvice.class)
-                        .on(
-                            ElementMatchers.named("defineClass")
-                                .and(ElementMatchers.takesArgument(0, String.class)))));
+                    advise(
+                        JvmRuntimeAdvice.ClassDefineAdvice.class,
+                        ElementMatchers.named("defineClass")
+                            .and(ElementMatchers.takesArgument(0, String.class)))));
   }
 
   /**
@@ -1763,38 +1787,37 @@ public final class JdkInstrumentationInstaller {
                 typeBuilder
                     // park(Object blocker) — used by j.u.c. locks that set the blocker
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.ThreadParkAdvice.class)
-                            .on(
-                                ElementMatchers.named("park")
-                                    .and(ElementMatchers.takesArguments(Object.class))))
+                        advise(
+                            JvmRuntimeAdvice.ThreadParkAdvice.class,
+                            ElementMatchers.named("park")
+                                .and(ElementMatchers.takesArguments(Object.class))))
                     // park() — 0-arg variant used by direct LockSupport callers
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.ThreadParkAdvice.class)
-                            .on(
-                                ElementMatchers.named("park")
-                                    .and(ElementMatchers.takesArguments(0))))
+                        advise(
+                            JvmRuntimeAdvice.ThreadParkAdvice.class,
+                            ElementMatchers.named("park").and(ElementMatchers.takesArguments(0))))
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.ThreadParkAdvice.class)
-                            .on(
-                                ElementMatchers.named("parkNanos")
-                                    .and(ElementMatchers.takesArguments(Object.class, long.class))))
+                        advise(
+                            JvmRuntimeAdvice.ThreadParkAdvice.class,
+                            ElementMatchers.named("parkNanos")
+                                .and(ElementMatchers.takesArguments(Object.class, long.class))))
                     // parkNanos(long nanos) — 1-arg variant without blocker
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.ThreadParkAdvice.class)
-                            .on(
-                                ElementMatchers.named("parkNanos")
-                                    .and(ElementMatchers.takesArguments(long.class))))
+                        advise(
+                            JvmRuntimeAdvice.ThreadParkAdvice.class,
+                            ElementMatchers.named("parkNanos")
+                                .and(ElementMatchers.takesArguments(long.class))))
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.ThreadParkAdvice.class)
-                            .on(
-                                ElementMatchers.named("parkUntil")
-                                    .and(ElementMatchers.takesArguments(Object.class, long.class))))
+                        advise(
+                            JvmRuntimeAdvice.ThreadParkAdvice.class,
+                            ElementMatchers.named("parkUntil")
+                                .and(ElementMatchers.takesArguments(Object.class, long.class))))
                     // parkUntil(long deadline) — 1-arg variant without blocker
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.ThreadParkAdvice.class)
-                            .on(
-                                ElementMatchers.named("parkUntil")
-                                    .and(ElementMatchers.takesArguments(long.class)))));
+                        advise(
+                            JvmRuntimeAdvice.ThreadParkAdvice.class,
+                            ElementMatchers.named("parkUntil")
+                                .and(ElementMatchers.takesArguments(long.class)))));
   }
 
   /**
@@ -1809,10 +1832,10 @@ public final class JdkInstrumentationInstaller {
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder.visit(
-                    Advice.to(JvmRuntimeAdvice.MonitorEnterAdvice.class)
-                        .on(
-                            ElementMatchers.named("acquire")
-                                .and(ElementMatchers.takesArguments(int.class)))));
+                    advise(
+                        JvmRuntimeAdvice.MonitorEnterAdvice.class,
+                        ElementMatchers.named("acquire")
+                            .and(ElementMatchers.takesArguments(int.class)))));
   }
 
   /**
@@ -1831,43 +1854,42 @@ public final class JdkInstrumentationInstaller {
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.NioSelectNoArgAdvice.class)
-                            .on(
-                                ElementMatchers.named("select")
-                                    .and(ElementMatchers.takesArguments(0))))
+                        advise(
+                            JvmRuntimeAdvice.NioSelectNoArgAdvice.class,
+                            ElementMatchers.named("select").and(ElementMatchers.takesArguments(0))))
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.NioSelectTimeoutAdvice.class)
-                            .on(
-                                ElementMatchers.named("select")
-                                    .and(ElementMatchers.takesArguments(long.class))))
+                        advise(
+                            JvmRuntimeAdvice.NioSelectTimeoutAdvice.class,
+                            ElementMatchers.named("select")
+                                .and(ElementMatchers.takesArguments(long.class))))
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.NioSelectNowAdvice.class)
-                            .on(
-                                ElementMatchers.named("selectNow")
-                                    .and(ElementMatchers.takesArguments(0))))
+                        advise(
+                            JvmRuntimeAdvice.NioSelectNowAdvice.class,
+                            ElementMatchers.named("selectNow")
+                                .and(ElementMatchers.takesArguments(0))))
                     // JDK 11+ select(Consumer) / select(Consumer, long) / selectNow(Consumer)
                     // reach lockAndDoSelect without calling the overloads above.
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.NioSelectNoArgAdvice.class)
-                            .on(
-                                ElementMatchers.named("select")
-                                    .and(
-                                        ElementMatchers.takesArguments(
-                                            java.util.function.Consumer.class))))
+                        advise(
+                            JvmRuntimeAdvice.NioSelectNoArgAdvice.class,
+                            ElementMatchers.named("select")
+                                .and(
+                                    ElementMatchers.takesArguments(
+                                        java.util.function.Consumer.class))))
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.NioSelectConsumerTimeoutAdvice.class)
-                            .on(
-                                ElementMatchers.named("select")
-                                    .and(
-                                        ElementMatchers.takesArguments(
-                                            java.util.function.Consumer.class, long.class))))
+                        advise(
+                            JvmRuntimeAdvice.NioSelectConsumerTimeoutAdvice.class,
+                            ElementMatchers.named("select")
+                                .and(
+                                    ElementMatchers.takesArguments(
+                                        java.util.function.Consumer.class, long.class))))
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.NioSelectNowAdvice.class)
-                            .on(
-                                ElementMatchers.named("selectNow")
-                                    .and(
-                                        ElementMatchers.takesArguments(
-                                            java.util.function.Consumer.class)))))
+                        advise(
+                            JvmRuntimeAdvice.NioSelectNowAdvice.class,
+                            ElementMatchers.named("selectNow")
+                                .and(
+                                    ElementMatchers.takesArguments(
+                                        java.util.function.Consumer.class)))))
         .type(
             ElementMatchers.isSubTypeOf(java.nio.channels.spi.AbstractSelector.class)
                 .and(ElementMatchers.not(ElementMatchers.isAbstract()))
@@ -1877,20 +1899,19 @@ public final class JdkInstrumentationInstaller {
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.NioSelectNoArgAdvice.class)
-                            .on(
-                                ElementMatchers.named("select")
-                                    .and(ElementMatchers.takesArguments(0))))
+                        advise(
+                            JvmRuntimeAdvice.NioSelectNoArgAdvice.class,
+                            ElementMatchers.named("select").and(ElementMatchers.takesArguments(0))))
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.NioSelectTimeoutAdvice.class)
-                            .on(
-                                ElementMatchers.named("select")
-                                    .and(ElementMatchers.takesArguments(long.class))))
+                        advise(
+                            JvmRuntimeAdvice.NioSelectTimeoutAdvice.class,
+                            ElementMatchers.named("select")
+                                .and(ElementMatchers.takesArguments(long.class))))
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.NioSelectNowAdvice.class)
-                            .on(
-                                ElementMatchers.named("selectNow")
-                                    .and(ElementMatchers.takesArguments(0)))))
+                        advise(
+                            JvmRuntimeAdvice.NioSelectNowAdvice.class,
+                            ElementMatchers.named("selectNow")
+                                .and(ElementMatchers.takesArguments(0)))))
         // NIO SocketChannel — the public class is abstract, so name() would only match the
         // abstract copy; instrument concrete subtypes (sun.nio.ch.SocketChannelImpl,
         // possibly vendor variants) where the actual I/O code lives. Exclude abstract /
@@ -1904,38 +1925,34 @@ public final class JdkInstrumentationInstaller {
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.NioChannelConnectAdvice.class)
-                            .on(
-                                ElementMatchers.named("connect")
-                                    .and(
-                                        ElementMatchers.takesArguments(
-                                            java.net.SocketAddress.class))))
+                        advise(
+                            JvmRuntimeAdvice.NioChannelConnectAdvice.class,
+                            ElementMatchers.named("connect")
+                                .and(ElementMatchers.takesArguments(java.net.SocketAddress.class))))
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.NioChannelReadAdvice.class)
-                            .on(
-                                ElementMatchers.named("read")
-                                    .and(
-                                        ElementMatchers.takesArguments(java.nio.ByteBuffer.class))))
+                        advise(
+                            JvmRuntimeAdvice.NioChannelReadAdvice.class,
+                            ElementMatchers.named("read")
+                                .and(ElementMatchers.takesArguments(java.nio.ByteBuffer.class))))
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.NioChannelWriteAdvice.class)
-                            .on(
-                                ElementMatchers.named("write")
-                                    .and(
-                                        ElementMatchers.takesArguments(java.nio.ByteBuffer.class))))
+                        advise(
+                            JvmRuntimeAdvice.NioChannelWriteAdvice.class,
+                            ElementMatchers.named("write")
+                                .and(ElementMatchers.takesArguments(java.nio.ByteBuffer.class))))
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.NioChannelScatterReadAdvice.class)
-                            .on(
-                                ElementMatchers.named("read")
-                                    .and(
-                                        ElementMatchers.takesArguments(
-                                            java.nio.ByteBuffer[].class, int.class, int.class))))
+                        advise(
+                            JvmRuntimeAdvice.NioChannelScatterReadAdvice.class,
+                            ElementMatchers.named("read")
+                                .and(
+                                    ElementMatchers.takesArguments(
+                                        java.nio.ByteBuffer[].class, int.class, int.class))))
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.NioChannelGatherWriteAdvice.class)
-                            .on(
-                                ElementMatchers.named("write")
-                                    .and(
-                                        ElementMatchers.takesArguments(
-                                            java.nio.ByteBuffer[].class, int.class, int.class)))))
+                        advise(
+                            JvmRuntimeAdvice.NioChannelGatherWriteAdvice.class,
+                            ElementMatchers.named("write")
+                                .and(
+                                    ElementMatchers.takesArguments(
+                                        java.nio.ByteBuffer[].class, int.class, int.class)))))
         // NIO ServerSocketChannel — same abstract-base issue as SocketChannel above.
         .type(
             ElementMatchers.isSubTypeOf(java.nio.channels.ServerSocketChannel.class)
@@ -1945,10 +1962,9 @@ public final class JdkInstrumentationInstaller {
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder.visit(
-                    Advice.to(JvmRuntimeAdvice.NioChannelAcceptAdvice.class)
-                        .on(
-                            ElementMatchers.named("accept")
-                                .and(ElementMatchers.takesArguments(0)))));
+                    advise(
+                        JvmRuntimeAdvice.NioChannelAcceptAdvice.class,
+                        ElementMatchers.named("accept").and(ElementMatchers.takesArguments(0)))));
   }
 
   /**
@@ -1962,47 +1978,42 @@ public final class JdkInstrumentationInstaller {
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.DatagramSendAdvice.class)
-                            .on(
-                                ElementMatchers.named("send")
-                                    .and(ElementMatchers.isPublic())
-                                    .and(
-                                        ElementMatchers.takesArguments(
-                                            java.nio.ByteBuffer.class,
-                                            java.net.SocketAddress.class))))
+                        advise(
+                            JvmRuntimeAdvice.DatagramSendAdvice.class,
+                            ElementMatchers.named("send")
+                                .and(ElementMatchers.isPublic())
+                                .and(
+                                    ElementMatchers.takesArguments(
+                                        java.nio.ByteBuffer.class, java.net.SocketAddress.class))))
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.DatagramWriteAdvice.class)
-                            .on(
-                                ElementMatchers.named("write")
-                                    .and(
-                                        ElementMatchers.takesArguments(java.nio.ByteBuffer.class))))
+                        advise(
+                            JvmRuntimeAdvice.DatagramWriteAdvice.class,
+                            ElementMatchers.named("write")
+                                .and(ElementMatchers.takesArguments(java.nio.ByteBuffer.class))))
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.DatagramPacketSendAdvice.class)
-                            .on(
-                                ElementMatchers.named("blockingSend")
-                                    .and(
-                                        ElementMatchers.takesArguments(
-                                            java.net.DatagramPacket.class))))
+                        advise(
+                            JvmRuntimeAdvice.DatagramPacketSendAdvice.class,
+                            ElementMatchers.named("blockingSend")
+                                .and(
+                                    ElementMatchers.takesArguments(java.net.DatagramPacket.class))))
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.DatagramReceiveAdvice.class)
-                            .on(
-                                ElementMatchers.named("receive")
-                                    .and(ElementMatchers.isPublic())
-                                    .and(
-                                        ElementMatchers.takesArguments(java.nio.ByteBuffer.class))))
+                        advise(
+                            JvmRuntimeAdvice.DatagramReceiveAdvice.class,
+                            ElementMatchers.named("receive")
+                                .and(ElementMatchers.isPublic())
+                                .and(ElementMatchers.takesArguments(java.nio.ByteBuffer.class))))
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.DatagramReadAdvice.class)
-                            .on(
-                                ElementMatchers.named("read")
-                                    .and(
-                                        ElementMatchers.takesArguments(java.nio.ByteBuffer.class))))
+                        advise(
+                            JvmRuntimeAdvice.DatagramReadAdvice.class,
+                            ElementMatchers.named("read")
+                                .and(ElementMatchers.takesArguments(java.nio.ByteBuffer.class))))
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.DatagramPacketReceiveAdvice.class)
-                            .on(
-                                ElementMatchers.named("blockingReceive")
-                                    .and(
-                                        ElementMatchers.takesArguments(
-                                            java.net.DatagramPacket.class, long.class)))));
+                        advise(
+                            JvmRuntimeAdvice.DatagramPacketReceiveAdvice.class,
+                            ElementMatchers.named("blockingReceive")
+                                .and(
+                                    ElementMatchers.takesArguments(
+                                        java.net.DatagramPacket.class, long.class)))));
   }
 
   /**
@@ -2023,43 +2034,39 @@ public final class JdkInstrumentationInstaller {
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.SocketChannelConnectAdvice.class)
-                            .on(
-                                ElementMatchers.named("connect")
-                                    .and(
-                                        ElementMatchers.takesArguments(
-                                            java.net.SocketAddress.class))))
+                        advise(
+                            JvmRuntimeAdvice.SocketChannelConnectAdvice.class,
+                            ElementMatchers.named("connect")
+                                .and(ElementMatchers.takesArguments(java.net.SocketAddress.class))))
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.SocketChannelShutdownAdvice.class)
-                            .on(
-                                ElementMatchers.namedOneOf("shutdownInput", "shutdownOutput")
-                                    .and(ElementMatchers.takesArguments(0))))
+                        advise(
+                            JvmRuntimeAdvice.SocketChannelShutdownAdvice.class,
+                            ElementMatchers.namedOneOf("shutdownInput", "shutdownOutput")
+                                .and(ElementMatchers.takesArguments(0))))
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.SocketChannelReadAdvice.class)
-                            .on(
-                                ElementMatchers.named("read")
-                                    .and(
-                                        ElementMatchers.takesArguments(java.nio.ByteBuffer.class))))
+                        advise(
+                            JvmRuntimeAdvice.SocketChannelReadAdvice.class,
+                            ElementMatchers.named("read")
+                                .and(ElementMatchers.takesArguments(java.nio.ByteBuffer.class))))
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.SocketChannelScatterReadAdvice.class)
-                            .on(
-                                ElementMatchers.named("read")
-                                    .and(
-                                        ElementMatchers.takesArguments(
-                                            java.nio.ByteBuffer[].class, int.class, int.class))))
+                        advise(
+                            JvmRuntimeAdvice.SocketChannelScatterReadAdvice.class,
+                            ElementMatchers.named("read")
+                                .and(
+                                    ElementMatchers.takesArguments(
+                                        java.nio.ByteBuffer[].class, int.class, int.class))))
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.SocketChannelWriteAdvice.class)
-                            .on(
-                                ElementMatchers.named("write")
-                                    .and(
-                                        ElementMatchers.takesArguments(java.nio.ByteBuffer.class))))
+                        advise(
+                            JvmRuntimeAdvice.SocketChannelWriteAdvice.class,
+                            ElementMatchers.named("write")
+                                .and(ElementMatchers.takesArguments(java.nio.ByteBuffer.class))))
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.SocketChannelGatherWriteAdvice.class)
-                            .on(
-                                ElementMatchers.named("write")
-                                    .and(
-                                        ElementMatchers.takesArguments(
-                                            java.nio.ByteBuffer[].class, int.class, int.class)))))
+                        advise(
+                            JvmRuntimeAdvice.SocketChannelGatherWriteAdvice.class,
+                            ElementMatchers.named("write")
+                                .and(
+                                    ElementMatchers.takesArguments(
+                                        java.nio.ByteBuffer[].class, int.class, int.class)))))
         .type(
             ElementMatchers.isSubTypeOf(java.nio.channels.ServerSocketChannel.class)
                 .and(ElementMatchers.not(ElementMatchers.isAbstract()))
@@ -2068,18 +2075,16 @@ public final class JdkInstrumentationInstaller {
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder.visit(
-                    Advice.to(JvmRuntimeAdvice.SocketChannelAcceptAdvice.class)
-                        .on(
-                            ElementMatchers.named("accept")
-                                .and(ElementMatchers.takesArguments(0)))))
+                    advise(
+                        JvmRuntimeAdvice.SocketChannelAcceptAdvice.class,
+                        ElementMatchers.named("accept").and(ElementMatchers.takesArguments(0)))))
         .type(ElementMatchers.named("java.nio.channels.spi.AbstractInterruptibleChannel"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder.visit(
-                    Advice.to(JvmRuntimeAdvice.SocketChannelCloseAdvice.class)
-                        .on(
-                            ElementMatchers.named("close")
-                                .and(ElementMatchers.takesArguments(0)))));
+                    advise(
+                        JvmRuntimeAdvice.SocketChannelCloseAdvice.class,
+                        ElementMatchers.named("close").and(ElementMatchers.takesArguments(0)))));
   }
 
   /**
@@ -2096,39 +2101,37 @@ public final class JdkInstrumentationInstaller {
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder.visit(
-                    Advice.to(JvmRuntimeAdvice.SocketBindAdvice.class)
-                        .on(
-                            ElementMatchers.named("bind")
-                                .and(
-                                    ElementMatchers.takesArguments(
-                                        java.net.ProtocolFamily.class,
-                                        java.io.FileDescriptor.class,
-                                        java.net.InetAddress.class,
-                                        int.class)))))
+                    advise(
+                        JvmRuntimeAdvice.SocketBindAdvice.class,
+                        ElementMatchers.named("bind")
+                            .and(
+                                ElementMatchers.takesArguments(
+                                    java.net.ProtocolFamily.class,
+                                    java.io.FileDescriptor.class,
+                                    java.net.InetAddress.class,
+                                    int.class)))))
         .type(ElementMatchers.named("java.net.Socket"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.SocketConnectAdvice.class)
-                            .on(
-                                ElementMatchers.named("connect")
-                                    .and(
-                                        ElementMatchers.takesArguments(
-                                            java.net.SocketAddress.class, int.class))))
+                        advise(
+                            JvmRuntimeAdvice.SocketConnectAdvice.class,
+                            ElementMatchers.named("connect")
+                                .and(
+                                    ElementMatchers.takesArguments(
+                                        java.net.SocketAddress.class, int.class))))
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.SocketCloseAdvice.class)
-                            .on(
-                                ElementMatchers.named("close")
-                                    .and(ElementMatchers.takesArguments(0)))))
+                        advise(
+                            JvmRuntimeAdvice.SocketCloseAdvice.class,
+                            ElementMatchers.named("close").and(ElementMatchers.takesArguments(0)))))
         .type(ElementMatchers.named("java.net.ServerSocket"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder.visit(
-                    Advice.to(JvmRuntimeAdvice.SocketAcceptAdvice.class)
-                        .on(
-                            ElementMatchers.named("accept")
-                                .and(ElementMatchers.takesArguments(0)))))
+                    advise(
+                        JvmRuntimeAdvice.SocketAcceptAdvice.class,
+                        ElementMatchers.named("accept").and(ElementMatchers.takesArguments(0)))))
         // Socket$SocketInputStream / Socket$SocketOutputStream are private inner classes loaded
         // as a side-effect of ByteBuddy retransforming java.net.Socket (JVMTI ClassFileLoadHook
         // is not re-entrant, so the inner-class loads escape the transformer). Target
@@ -2140,26 +2143,26 @@ public final class JdkInstrumentationInstaller {
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.SocketShutdownAdvice.class)
-                            .on(
-                                ElementMatchers.namedOneOf("shutdownInput", "shutdownOutput")
-                                    .and(ElementMatchers.takesArguments(0))))
+                        advise(
+                            JvmRuntimeAdvice.SocketShutdownAdvice.class,
+                            ElementMatchers.namedOneOf("shutdownInput", "shutdownOutput")
+                                .and(ElementMatchers.takesArguments(0))))
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.SocketReadAdvice.class)
-                            .on(
-                                ElementMatchers.named("read")
-                                    .and(
-                                        ElementMatchers.takesArguments(
-                                            byte[].class, int.class, int.class))))
+                        advise(
+                            JvmRuntimeAdvice.SocketReadAdvice.class,
+                            ElementMatchers.named("read")
+                                .and(
+                                    ElementMatchers.takesArguments(
+                                        byte[].class, int.class, int.class))))
                     // NioSocketImpl declares no write(int): single-byte writes of its output
                     // stream go through write(byte[], int, int) with len 1.
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.SocketWriteBulkAdvice.class)
-                            .on(
-                                ElementMatchers.named("write")
-                                    .and(
-                                        ElementMatchers.takesArguments(
-                                            byte[].class, int.class, int.class)))));
+                        advise(
+                            JvmRuntimeAdvice.SocketWriteBulkAdvice.class,
+                            ElementMatchers.named("write")
+                                .and(
+                                    ElementMatchers.takesArguments(
+                                        byte[].class, int.class, int.class)))));
   }
 
   /** ZIP Inflater / Deflater instrumentation. */
@@ -2169,14 +2172,15 @@ public final class JdkInstrumentationInstaller {
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder.visit(
-                    Advice.to(JvmRuntimeAdvice.ZipInflateAdvice.class)
-                        .on(ElementMatchers.named("inflate"))))
+                    advise(
+                        JvmRuntimeAdvice.ZipInflateAdvice.class, ElementMatchers.named("inflate"))))
         .type(ElementMatchers.named("java.util.zip.Deflater"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder.visit(
-                    Advice.to(JvmRuntimeAdvice.ZipDeflateAdvice.class)
-                        .on(ElementMatchers.named("deflate"))));
+                    advise(
+                        JvmRuntimeAdvice.ZipDeflateAdvice.class,
+                        ElementMatchers.named("deflate"))));
   }
 
   /**
@@ -2193,15 +2197,13 @@ public final class JdkInstrumentationInstaller {
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.ThreadLocalGetAdvice.class)
-                            .on(
-                                ElementMatchers.named("get")
-                                    .and(ElementMatchers.takesArguments(0))))
+                        advise(
+                            JvmRuntimeAdvice.ThreadLocalGetAdvice.class,
+                            ElementMatchers.named("get").and(ElementMatchers.takesArguments(0))))
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.ThreadLocalSetAdvice.class)
-                            .on(
-                                ElementMatchers.named("set")
-                                    .and(ElementMatchers.takesArguments(1)))));
+                        advise(
+                            JvmRuntimeAdvice.ThreadLocalSetAdvice.class,
+                            ElementMatchers.named("set").and(ElementMatchers.takesArguments(1)))));
   }
 
   /**
@@ -2216,44 +2218,42 @@ public final class JdkInstrumentationInstaller {
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder.visit(
-                    Advice.to(JvmRuntimeAdvice.InstantNowAdvice.class)
-                        .on(
-                            ElementMatchers.named("now")
-                                .and(ElementMatchers.isStatic())
-                                .and(ElementMatchers.takesArguments(0)))))
+                    advise(
+                        JvmRuntimeAdvice.InstantNowAdvice.class,
+                        ElementMatchers.named("now")
+                            .and(ElementMatchers.isStatic())
+                            .and(ElementMatchers.takesArguments(0)))))
         .type(ElementMatchers.named("java.time.LocalDateTime"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.LocalDateTimeNowAdvice.class)
-                            .on(
-                                ElementMatchers.named("now")
-                                    .and(ElementMatchers.isStatic())
-                                    .and(ElementMatchers.takesArguments(0))))
+                        advise(
+                            JvmRuntimeAdvice.LocalDateTimeNowAdvice.class,
+                            ElementMatchers.named("now")
+                                .and(ElementMatchers.isStatic())
+                                .and(ElementMatchers.takesArguments(0))))
                     // now(ZoneId) goes to now(Clock) without calling now(); now(Clock) is not
                     // hooked because a caller-supplied clock (fixed, offset) must not be skewed.
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.LocalDateTimeNowInZoneAdvice.class)
-                            .on(
-                                ElementMatchers.named("now")
-                                    .and(ElementMatchers.isStatic())
-                                    .and(ElementMatchers.takesArguments(java.time.ZoneId.class)))))
+                        advise(
+                            JvmRuntimeAdvice.LocalDateTimeNowInZoneAdvice.class,
+                            ElementMatchers.named("now")
+                                .and(ElementMatchers.isStatic())
+                                .and(ElementMatchers.takesArguments(java.time.ZoneId.class)))))
         .type(ElementMatchers.named("java.time.ZonedDateTime"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 // The returned ZonedDateTime carries its zone, so one advice covers now() and
                 // now(ZoneId).
                 typeBuilder.visit(
-                    Advice.to(JvmRuntimeAdvice.ZonedDateTimeNowAdvice.class)
-                        .on(
-                            ElementMatchers.named("now")
-                                .and(ElementMatchers.isStatic())
-                                .and(
-                                    ElementMatchers.takesArguments(0)
-                                        .or(
-                                            ElementMatchers.takesArguments(
-                                                java.time.ZoneId.class))))))
+                    advise(
+                        JvmRuntimeAdvice.ZonedDateTimeNowAdvice.class,
+                        ElementMatchers.named("now")
+                            .and(ElementMatchers.isStatic())
+                            .and(
+                                ElementMatchers.takesArguments(0)
+                                    .or(ElementMatchers.takesArguments(java.time.ZoneId.class))))))
         // The system clock and instant source: every other java.time now() reads one of them.
         .type(
             ElementMatchers.namedOneOf(
@@ -2262,23 +2262,22 @@ public final class JdkInstrumentationInstaller {
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.SystemClockInstantAdvice.class)
-                            .on(
-                                ElementMatchers.named("instant")
-                                    .and(ElementMatchers.takesArguments(0))))
+                        advise(
+                            JvmRuntimeAdvice.SystemClockInstantAdvice.class,
+                            ElementMatchers.named("instant")
+                                .and(ElementMatchers.takesArguments(0))))
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.SystemClockMillisAdvice.class)
-                            .on(
-                                ElementMatchers.named("millis")
-                                    .and(ElementMatchers.takesArguments(0)))))
+                        advise(
+                            JvmRuntimeAdvice.SystemClockMillisAdvice.class,
+                            ElementMatchers.named("millis")
+                                .and(ElementMatchers.takesArguments(0)))))
         .type(ElementMatchers.named("java.util.Date"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder.visit(
-                    Advice.to(JvmRuntimeAdvice.DateNewAdvice.class)
-                        .on(
-                            ElementMatchers.isConstructor()
-                                .and(ElementMatchers.takesArguments(0)))));
+                    advise(
+                        JvmRuntimeAdvice.DateNewAdvice.class,
+                        ElementMatchers.isConstructor().and(ElementMatchers.takesArguments(0)))));
   }
 
   /** CompletableFuture.cancel instrumentation. */
@@ -2289,10 +2288,10 @@ public final class JdkInstrumentationInstaller {
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder.visit(
-                    Advice.to(JvmRuntimeAdvice.AsyncCancelAdvice.class)
-                        .on(
-                            ElementMatchers.named("cancel")
-                                .and(ElementMatchers.takesArguments(boolean.class)))));
+                    advise(
+                        JvmRuntimeAdvice.AsyncCancelAdvice.class,
+                        ElementMatchers.named("cancel")
+                            .and(ElementMatchers.takesArguments(boolean.class)))));
   }
 
   /**
@@ -2317,12 +2316,12 @@ public final class JdkInstrumentationInstaller {
                         // socket) go through the private startHandshake(boolean) without
                         // calling startHandshake(); the SCOPE_SSL_HANDSHAKE scope evaluates an
                         // explicit startHandshake() → startHandshake(true) chain once.
-                        Advice.to(JvmRuntimeAdvice.SslHandshakeAdvice.class)
-                            .on(
-                                ElementMatchers.named("startHandshake")
-                                    .and(
-                                        ElementMatchers.takesArguments(0)
-                                            .or(ElementMatchers.takesArguments(boolean.class))))));
+                        advise(
+                            JvmRuntimeAdvice.SslHandshakeAdvice.class,
+                            ElementMatchers.named("startHandshake")
+                                .and(
+                                    ElementMatchers.takesArguments(0)
+                                        .or(ElementMatchers.takesArguments(boolean.class))))));
 
     agentBuilder =
         agentBuilder
@@ -2334,10 +2333,10 @@ public final class JdkInstrumentationInstaller {
             .transform(
                 (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                     typeBuilder.visit(
-                        Advice.to(JvmRuntimeAdvice.SslHandshakeAdvice.class)
-                            .on(
-                                ElementMatchers.named("beginHandshake")
-                                    .and(ElementMatchers.takesArguments(0)))));
+                        advise(
+                            JvmRuntimeAdvice.SslHandshakeAdvice.class,
+                            ElementMatchers.named("beginHandshake")
+                                .and(ElementMatchers.takesArguments(0)))));
 
     return agentBuilder;
   }
@@ -2377,17 +2376,17 @@ public final class JdkInstrumentationInstaller {
                 (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                     typeBuilder
                         .visit(
-                            Advice.to(HttpClientAdvice.JavaHttpClientSendAdvice.class)
-                                .on(
-                                    ElementMatchers.named("send")
-                                        .and(ElementMatchers.takesArguments(2))))
+                            advise(
+                                HttpClientAdvice.JavaHttpClientSendAdvice.class,
+                                ElementMatchers.named("send")
+                                    .and(ElementMatchers.takesArguments(2))))
                         .visit(
-                            Advice.to(HttpClientAdvice.JavaHttpClientSendAsyncAdvice.class)
-                                .on(
-                                    ElementMatchers.named("sendAsync")
-                                        .and(
-                                            ElementMatchers.takesArguments(2)
-                                                .or(ElementMatchers.takesArguments(3))))));
+                            advise(
+                                HttpClientAdvice.JavaHttpClientSendAsyncAdvice.class,
+                                ElementMatchers.named("sendAsync")
+                                    .and(
+                                        ElementMatchers.takesArguments(2)
+                                            .or(ElementMatchers.takesArguments(3))))));
 
     agentBuilder =
         instrumentOptional(
@@ -2395,15 +2394,15 @@ public final class JdkInstrumentationInstaller {
             typeBuilder ->
                 typeBuilder
                     .visit(
-                        Advice.to(HttpClientAdvice.OkHttpExecuteAdvice.class)
-                            .on(
-                                ElementMatchers.named("execute")
-                                    .and(ElementMatchers.takesArguments(0))))
+                        advise(
+                            HttpClientAdvice.OkHttpExecuteAdvice.class,
+                            ElementMatchers.named("execute")
+                                .and(ElementMatchers.takesArguments(0))))
                     .visit(
-                        Advice.to(HttpClientAdvice.OkHttpEnqueueAdvice.class)
-                            .on(
-                                ElementMatchers.named("enqueue")
-                                    .and(ElementMatchers.takesArguments(1)))),
+                        advise(
+                            HttpClientAdvice.OkHttpEnqueueAdvice.class,
+                            ElementMatchers.named("enqueue")
+                                .and(ElementMatchers.takesArguments(1)))),
             "okhttp3.RealCall",
             "okhttp3.internal.connection.RealCall");
 
@@ -2423,21 +2422,21 @@ public final class JdkInstrumentationInstaller {
             typeBuilder ->
                 typeBuilder
                     .visit(
-                        Advice.to(HttpClientAdvice.ApacheHc4ExecuteAdvice.class)
-                            .on(
-                                ElementMatchers.named("execute")
-                                    .and(
-                                        ElementMatchers.takesArgument(
-                                            0, ElementMatchers.named("org.apache.http.HttpHost")))))
+                        advise(
+                            HttpClientAdvice.ApacheHc4ExecuteAdvice.class,
+                            ElementMatchers.named("execute")
+                                .and(
+                                    ElementMatchers.takesArgument(
+                                        0, ElementMatchers.named("org.apache.http.HttpHost")))))
                     .visit(
-                        Advice.to(HttpClientAdvice.ApacheHc4UriExecuteAdvice.class)
-                            .on(
-                                ElementMatchers.named("execute")
-                                    .and(
-                                        ElementMatchers.takesArgument(
-                                            0,
-                                            ElementMatchers.named(
-                                                "org.apache.http.client.methods.HttpUriRequest"))))),
+                        advise(
+                            HttpClientAdvice.ApacheHc4UriExecuteAdvice.class,
+                            ElementMatchers.named("execute")
+                                .and(
+                                    ElementMatchers.takesArgument(
+                                        0,
+                                        ElementMatchers.named(
+                                            "org.apache.http.client.methods.HttpUriRequest"))))),
             "org.apache.http.impl.client.CloseableHttpClient");
 
     agentBuilder =
@@ -2453,23 +2452,23 @@ public final class JdkInstrumentationInstaller {
                 // call once.
                 typeBuilder
                     .visit(
-                        Advice.to(HttpClientAdvice.ApacheHc5ExecuteAdvice.class)
-                            .on(
-                                ElementMatchers.named("execute")
-                                    .and(
-                                        ElementMatchers.takesArgument(
-                                            0,
-                                            ElementMatchers.named(
-                                                "org.apache.hc.core5.http.ClassicHttpRequest")))))
+                        advise(
+                            HttpClientAdvice.ApacheHc5ExecuteAdvice.class,
+                            ElementMatchers.named("execute")
+                                .and(
+                                    ElementMatchers.takesArgument(
+                                        0,
+                                        ElementMatchers.named(
+                                            "org.apache.hc.core5.http.ClassicHttpRequest")))))
                     .visit(
-                        Advice.to(HttpClientAdvice.ApacheHc5HostExecuteAdvice.class)
-                            .on(
-                                ElementMatchers.named("execute")
-                                    .and(
-                                        ElementMatchers.takesArgument(
-                                            0,
-                                            ElementMatchers.named(
-                                                "org.apache.hc.core5.http.HttpHost"))))),
+                        advise(
+                            HttpClientAdvice.ApacheHc5HostExecuteAdvice.class,
+                            ElementMatchers.named("execute")
+                                .and(
+                                    ElementMatchers.takesArgument(
+                                        0,
+                                        ElementMatchers.named(
+                                            "org.apache.hc.core5.http.HttpHost"))))),
             "org.apache.hc.client5.http.impl.classic.CloseableHttpClient");
 
     agentBuilder =
@@ -2479,16 +2478,16 @@ public final class JdkInstrumentationInstaller {
                 (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                     typeBuilder
                         .visit(
-                            Advice.to(HttpClientAdvice.HttpUrlConnectionConnectAdvice.class)
-                                .on(
-                                    ElementMatchers.named("plainConnect0")
-                                        .and(ElementMatchers.takesArguments(0))))
+                            advise(
+                                HttpClientAdvice.HttpUrlConnectionConnectAdvice.class,
+                                ElementMatchers.named("plainConnect0")
+                                    .and(ElementMatchers.takesArguments(0))))
                         .visit(
-                            Advice.to(HttpClientAdvice.HttpUrlConnectionSessionHeaderAdvice.class)
-                                .on(
-                                    ElementMatchers.namedOneOf(
-                                            "connect", "getInputStream", "getOutputStream")
-                                        .and(ElementMatchers.takesArguments(0)))));
+                            advise(
+                                HttpClientAdvice.HttpUrlConnectionSessionHeaderAdvice.class,
+                                ElementMatchers.namedOneOf(
+                                        "connect", "getInputStream", "getOutputStream")
+                                    .and(ElementMatchers.takesArguments(0)))));
     return instrumentOptional(
         agentBuilder,
         typeBuilder ->
@@ -2496,8 +2495,9 @@ public final class JdkInstrumentationInstaller {
                 // HttpClientConnect.connect() takes no arguments; the request URI comes from the
                 // client configuration. Matching named("connect") alone also hit the generated
                 // lambda$connect$N methods.
-                Advice.to(HttpClientAdvice.ReactorNettyConnectAdvice.class)
-                    .on(ElementMatchers.named("connect").and(ElementMatchers.takesArguments(0)))),
+                advise(
+                    HttpClientAdvice.ReactorNettyConnectAdvice.class,
+                    ElementMatchers.named("connect").and(ElementMatchers.takesArguments(0)))),
         "reactor.netty.http.client.HttpClientConnect");
   }
 
@@ -2518,10 +2518,10 @@ public final class JdkInstrumentationInstaller {
             agentBuilder,
             typeBuilder ->
                 typeBuilder.visit(
-                    Advice.to(JdbcAdvice.HikariGetConnectionAdvice.class)
-                        .on(
-                            ElementMatchers.named("getConnection")
-                                .and(ElementMatchers.takesArguments(long.class)))),
+                    advise(
+                        JdbcAdvice.HikariGetConnectionAdvice.class,
+                        ElementMatchers.named("getConnection")
+                            .and(ElementMatchers.takesArguments(long.class)))),
             "com.zaxxer.hikari.pool.HikariPool");
 
     agentBuilder =
@@ -2529,10 +2529,10 @@ public final class JdkInstrumentationInstaller {
             agentBuilder,
             typeBuilder ->
                 typeBuilder.visit(
-                    Advice.to(JdbcAdvice.C3p0CheckoutAdvice.class)
-                        .on(
-                            ElementMatchers.named("checkoutPooledConnection")
-                                .and(ElementMatchers.takesArguments(0)))),
+                    advise(
+                        JdbcAdvice.C3p0CheckoutAdvice.class,
+                        ElementMatchers.named("checkoutPooledConnection")
+                            .and(ElementMatchers.takesArguments(0)))),
             "com.mchange.v2.c3p0.impl.C3P0PooledConnectionPool");
 
     // Match every Statement.execute*/Connection.prepareStatement overload whose first
@@ -2554,25 +2554,25 @@ public final class JdkInstrumentationInstaller {
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder
                     .visit(
-                        Advice.to(JdbcAdvice.StatementExecuteAdvice.class)
-                            .on(
-                                ElementMatchers.named("execute")
-                                    .and(ElementMatchers.takesArgument(0, String.class))))
+                        advise(
+                            JdbcAdvice.StatementExecuteAdvice.class,
+                            ElementMatchers.named("execute")
+                                .and(ElementMatchers.takesArgument(0, String.class))))
                     .visit(
-                        Advice.to(JdbcAdvice.StatementExecuteAdvice.class)
-                            .on(
-                                ElementMatchers.named("executeQuery")
-                                    .and(ElementMatchers.takesArgument(0, String.class))))
+                        advise(
+                            JdbcAdvice.StatementExecuteAdvice.class,
+                            ElementMatchers.named("executeQuery")
+                                .and(ElementMatchers.takesArgument(0, String.class))))
                     .visit(
-                        Advice.to(JdbcAdvice.StatementExecuteAdvice.class)
-                            .on(
-                                ElementMatchers.named("executeUpdate")
-                                    .and(ElementMatchers.takesArgument(0, String.class))))
+                        advise(
+                            JdbcAdvice.StatementExecuteAdvice.class,
+                            ElementMatchers.named("executeUpdate")
+                                .and(ElementMatchers.takesArgument(0, String.class))))
                     .visit(
-                        Advice.to(JdbcAdvice.StatementExecuteAdvice.class)
-                            .on(
-                                ElementMatchers.named("executeLargeUpdate")
-                                    .and(ElementMatchers.takesArgument(0, String.class)))))
+                        advise(
+                            JdbcAdvice.StatementExecuteAdvice.class,
+                            ElementMatchers.named("executeLargeUpdate")
+                                .and(ElementMatchers.takesArgument(0, String.class)))))
         .type(
             ElementMatchers.isSubTypeOf(java.sql.PreparedStatement.class)
                 .and(ElementMatchers.not(ElementMatchers.isInterface()))
@@ -2580,15 +2580,12 @@ public final class JdkInstrumentationInstaller {
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder.visit(
-                    Advice.to(JdbcAdvice.PreparedStatementExecuteAdvice.class)
-                        .on(
-                            ElementMatchers.namedOneOf(
-                                    "execute",
-                                    "executeQuery",
-                                    "executeUpdate",
-                                    "executeLargeUpdate")
-                                .and(ElementMatchers.takesArguments(0))
-                                .and(ElementMatchers.not(ElementMatchers.isAbstract())))))
+                    advise(
+                        JdbcAdvice.PreparedStatementExecuteAdvice.class,
+                        ElementMatchers.namedOneOf(
+                                "execute", "executeQuery", "executeUpdate", "executeLargeUpdate")
+                            .and(ElementMatchers.takesArguments(0))
+                            .and(ElementMatchers.not(ElementMatchers.isAbstract())))))
         .type(
             ElementMatchers.isSubTypeOf(java.sql.Connection.class)
                 .and(ElementMatchers.not(ElementMatchers.isInterface()))
@@ -2597,25 +2594,24 @@ public final class JdkInstrumentationInstaller {
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder
                     .visit(
-                        Advice.to(JdbcAdvice.PrepareStatementAdvice.class)
-                            .on(
-                                ElementMatchers.named("prepareStatement")
-                                    .and(ElementMatchers.takesArgument(0, String.class))))
+                        advise(
+                            JdbcAdvice.PrepareStatementAdvice.class,
+                            ElementMatchers.named("prepareStatement")
+                                .and(ElementMatchers.takesArgument(0, String.class))))
                     .visit(
-                        Advice.to(JdbcAdvice.PrepareStatementAdvice.class)
-                            .on(
-                                ElementMatchers.named("prepareCall")
-                                    .and(ElementMatchers.takesArgument(0, String.class))))
+                        advise(
+                            JdbcAdvice.PrepareStatementAdvice.class,
+                            ElementMatchers.named("prepareCall")
+                                .and(ElementMatchers.takesArgument(0, String.class))))
                     .visit(
-                        Advice.to(JdbcAdvice.CommitAdvice.class)
-                            .on(
-                                ElementMatchers.named("commit")
-                                    .and(ElementMatchers.takesArguments(0))))
+                        advise(
+                            JdbcAdvice.CommitAdvice.class,
+                            ElementMatchers.named("commit").and(ElementMatchers.takesArguments(0))))
                     .visit(
-                        Advice.to(JdbcAdvice.RollbackAdvice.class)
-                            .on(
-                                ElementMatchers.named("rollback")
-                                    .and(ElementMatchers.takesArguments(0)))));
+                        advise(
+                            JdbcAdvice.RollbackAdvice.class,
+                            ElementMatchers.named("rollback")
+                                .and(ElementMatchers.takesArguments(0)))));
   }
 
   /**
@@ -2628,10 +2624,10 @@ public final class JdkInstrumentationInstaller {
             agentBuilder,
             typeBuilder ->
                 typeBuilder.visit(
-                    Advice.to(JvmRuntimeAdvice.JndiLookupAdvice.class)
-                        .on(
-                            ElementMatchers.named("lookup")
-                                .and(ElementMatchers.takesArguments(String.class)))),
+                    advise(
+                        JvmRuntimeAdvice.JndiLookupAdvice.class,
+                        ElementMatchers.named("lookup")
+                            .and(ElementMatchers.takesArguments(String.class)))),
             "javax.naming.InitialContext");
 
     // MBeanServer is an interface — ByteBuddy cannot inline advice into abstract interface
@@ -2645,15 +2641,14 @@ public final class JdkInstrumentationInstaller {
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.JmxInvokeAdvice.class)
-                            .on(
-                                ElementMatchers.named("invoke")
-                                    .and(ElementMatchers.takesArguments(4))))
+                        advise(
+                            JvmRuntimeAdvice.JmxInvokeAdvice.class,
+                            ElementMatchers.named("invoke").and(ElementMatchers.takesArguments(4))))
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.JmxGetAttrAdvice.class)
-                            .on(
-                                ElementMatchers.named("getAttribute")
-                                    .and(ElementMatchers.takesArguments(2)))));
+                        advise(
+                            JvmRuntimeAdvice.JmxGetAttrAdvice.class,
+                            ElementMatchers.named("getAttribute")
+                                .and(ElementMatchers.takesArguments(2)))));
   }
 
   /**
@@ -2672,11 +2667,13 @@ public final class JdkInstrumentationInstaller {
         typeBuilder ->
             typeBuilder
                 .visit(
-                    Advice.to(JvmRuntimeAdvice.NativeLibraryLoadAdvice.class)
-                        .on(ElementMatchers.named("loadLibrary0")))
+                    advise(
+                        JvmRuntimeAdvice.NativeLibraryLoadAdvice.class,
+                        ElementMatchers.named("loadLibrary0")))
                 .visit(
-                    Advice.to(JvmRuntimeAdvice.NativeLibraryLoadAdvice.class)
-                        .on(ElementMatchers.named("load0"))),
+                    advise(
+                        JvmRuntimeAdvice.NativeLibraryLoadAdvice.class,
+                        ElementMatchers.named("load0"))),
         "java.lang.Runtime");
   }
 
@@ -2689,27 +2686,25 @@ public final class JdkInstrumentationInstaller {
                 typeBuilder
                     // sleep(long millis)
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.ThreadSleepAdvice.class)
-                            .on(
-                                ElementMatchers.named("sleep")
-                                    .and(ElementMatchers.isStatic())
-                                    .and(ElementMatchers.takesArguments(long.class))))
+                        advise(
+                            JvmRuntimeAdvice.ThreadSleepAdvice.class,
+                            ElementMatchers.named("sleep")
+                                .and(ElementMatchers.isStatic())
+                                .and(ElementMatchers.takesArguments(long.class))))
                     // sleep(long millis, int nanos) — advice reads only arg 0 (millis)
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.ThreadSleepAdvice.class)
-                            .on(
-                                ElementMatchers.named("sleep")
-                                    .and(ElementMatchers.isStatic())
-                                    .and(ElementMatchers.takesArguments(long.class, int.class))))
+                        advise(
+                            JvmRuntimeAdvice.ThreadSleepAdvice.class,
+                            ElementMatchers.named("sleep")
+                                .and(ElementMatchers.isStatic())
+                                .and(ElementMatchers.takesArguments(long.class, int.class))))
                     // sleep(Duration) — converts to nanos itself instead of calling sleep(long)
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.ThreadSleepDurationAdvice.class)
-                            .on(
-                                ElementMatchers.named("sleep")
-                                    .and(ElementMatchers.isStatic())
-                                    .and(
-                                        ElementMatchers.takesArguments(
-                                            java.time.Duration.class)))));
+                        advise(
+                            JvmRuntimeAdvice.ThreadSleepDurationAdvice.class,
+                            ElementMatchers.named("sleep")
+                                .and(ElementMatchers.isStatic())
+                                .and(ElementMatchers.takesArguments(java.time.Duration.class)))));
   }
 
   /**
@@ -2726,39 +2721,39 @@ public final class JdkInstrumentationInstaller {
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.DnsResolveAdvice.class)
-                            .on(
-                                ElementMatchers.named("getByName")
-                                    .and(ElementMatchers.isStatic())
-                                    .and(ElementMatchers.takesArguments(String.class))))
+                        advise(
+                            JvmRuntimeAdvice.DnsResolveAdvice.class,
+                            ElementMatchers.named("getByName")
+                                .and(ElementMatchers.isStatic())
+                                .and(ElementMatchers.takesArguments(String.class))))
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.DnsResolveAdvice.class)
-                            .on(
-                                ElementMatchers.named("getAllByName")
-                                    .and(ElementMatchers.isStatic())
-                                    .and(ElementMatchers.takesArguments(String.class))))
+                        advise(
+                            JvmRuntimeAdvice.DnsResolveAdvice.class,
+                            ElementMatchers.named("getAllByName")
+                                .and(ElementMatchers.isStatic())
+                                .and(ElementMatchers.takesArguments(String.class))))
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.DnsAnswerAdvice.class)
-                            .on(
-                                ElementMatchers.named("getAllByName")
-                                    .and(ElementMatchers.isStatic())
-                                    .and(ElementMatchers.takesArguments(String.class))))
+                        advise(
+                            JvmRuntimeAdvice.DnsAnswerAdvice.class,
+                            ElementMatchers.named("getAllByName")
+                                .and(ElementMatchers.isStatic())
+                                .and(ElementMatchers.takesArguments(String.class))))
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.DnsLocalHostAdvice.class)
-                            .on(
-                                ElementMatchers.named("getLocalHost")
-                                    .and(ElementMatchers.isStatic())
-                                    .and(ElementMatchers.takesArguments(0))))
+                        advise(
+                            JvmRuntimeAdvice.DnsLocalHostAdvice.class,
+                            ElementMatchers.named("getLocalHost")
+                                .and(ElementMatchers.isStatic())
+                                .and(ElementMatchers.takesArguments(0))))
                     // getHostName and getCanonicalHostName both look the name up here.
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.DnsReverseAdvice.class)
-                            .on(
-                                // (InetAddress, boolean) up to JDK 24, (InetAddress) since
-                                ElementMatchers.named("getHostFromNameService")
-                                    .and(ElementMatchers.isStatic())
-                                    .and(
-                                        ElementMatchers.takesArgument(
-                                            0, java.net.InetAddress.class)))));
+                        advise(
+                            JvmRuntimeAdvice.DnsReverseAdvice.class,
+                            // (InetAddress, boolean) up to JDK 24, (InetAddress) since
+                            ElementMatchers.named("getHostFromNameService")
+                                .and(ElementMatchers.isStatic())
+                                .and(
+                                    ElementMatchers.takesArgument(
+                                        0, java.net.InetAddress.class)))));
   }
 
   /**
@@ -2772,43 +2767,42 @@ public final class JdkInstrumentationInstaller {
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.FileReadByteAdvice.class)
-                            .on(
-                                ElementMatchers.named("read")
-                                    .and(ElementMatchers.takesArguments(0))))
+                        advise(
+                            JvmRuntimeAdvice.FileReadByteAdvice.class,
+                            ElementMatchers.named("read").and(ElementMatchers.takesArguments(0))))
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.FileReadArrayAdvice.class)
-                            .on(
-                                ElementMatchers.named("read")
-                                    .and(ElementMatchers.takesArguments(byte[].class))))
+                        advise(
+                            JvmRuntimeAdvice.FileReadArrayAdvice.class,
+                            ElementMatchers.named("read")
+                                .and(ElementMatchers.takesArguments(byte[].class))))
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.FileReadRangeAdvice.class)
-                            .on(
-                                ElementMatchers.named("read")
-                                    .and(
-                                        ElementMatchers.takesArguments(
-                                            byte[].class, int.class, int.class)))))
+                        advise(
+                            JvmRuntimeAdvice.FileReadRangeAdvice.class,
+                            ElementMatchers.named("read")
+                                .and(
+                                    ElementMatchers.takesArguments(
+                                        byte[].class, int.class, int.class)))))
         .type(ElementMatchers.named("java.io.FileOutputStream"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.FileWriteByteAdvice.class)
-                            .on(
-                                ElementMatchers.named("write")
-                                    .and(ElementMatchers.takesArguments(int.class))))
+                        advise(
+                            JvmRuntimeAdvice.FileWriteByteAdvice.class,
+                            ElementMatchers.named("write")
+                                .and(ElementMatchers.takesArguments(int.class))))
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.FileWriteArrayAdvice.class)
-                            .on(
-                                ElementMatchers.named("write")
-                                    .and(ElementMatchers.takesArguments(byte[].class))))
+                        advise(
+                            JvmRuntimeAdvice.FileWriteArrayAdvice.class,
+                            ElementMatchers.named("write")
+                                .and(ElementMatchers.takesArguments(byte[].class))))
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.FileWriteRangeAdvice.class)
-                            .on(
-                                ElementMatchers.named("write")
-                                    .and(
-                                        ElementMatchers.takesArguments(
-                                            byte[].class, int.class, int.class)))));
+                        advise(
+                            JvmRuntimeAdvice.FileWriteRangeAdvice.class,
+                            ElementMatchers.named("write")
+                                .and(
+                                    ElementMatchers.takesArguments(
+                                        byte[].class, int.class, int.class)))));
   }
 
   /** Kafka producer send and consumer poll. */
@@ -2818,16 +2812,17 @@ public final class JdkInstrumentationInstaller {
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder.visit(
-                    Advice.to(ClientCallAdvice.KafkaSend.class)
-                        .on(ElementMatchers.named("send").and(ElementMatchers.takesArguments(2)))))
+                    advise(
+                        ClientCallAdvice.KafkaSend.class,
+                        ElementMatchers.named("send").and(ElementMatchers.takesArguments(2)))))
         .type(ElementMatchers.named("org.apache.kafka.clients.consumer.KafkaConsumer"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder.visit(
-                    Advice.to(ClientCallAdvice.KafkaPoll.class)
-                        .on(
-                            ElementMatchers.named("poll")
-                                .and(ElementMatchers.takesArguments(java.time.Duration.class)))));
+                    advise(
+                        ClientCallAdvice.KafkaPoll.class,
+                        ElementMatchers.named("poll")
+                            .and(ElementMatchers.takesArguments(java.time.Duration.class)))));
   }
 
   /** gRPC client call start, once per call for every stub flavour and transport. */
@@ -2837,10 +2832,9 @@ public final class JdkInstrumentationInstaller {
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder.visit(
-                    Advice.to(ClientCallAdvice.GrpcStart.class)
-                        .on(
-                            ElementMatchers.named("start")
-                                .and(ElementMatchers.takesArguments(2)))));
+                    advise(
+                        ClientCallAdvice.GrpcStart.class,
+                        ElementMatchers.named("start").and(ElementMatchers.takesArguments(2)))));
   }
 
   /** Jedis and Lettuce command dispatch. */
@@ -2850,28 +2844,28 @@ public final class JdkInstrumentationInstaller {
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder.visit(
-                    Advice.to(ClientCallAdvice.JedisSendCommand.class)
-                        .on(
-                            ElementMatchers.named("sendCommand")
-                                .and(
-                                    ElementMatchers.takesArguments(1)
-                                        .and(
-                                            ElementMatchers.takesArgument(
-                                                0,
-                                                ElementMatchers.named(
-                                                    "redis.clients.jedis.CommandArguments")))))))
+                    advise(
+                        ClientCallAdvice.JedisSendCommand.class,
+                        ElementMatchers.named("sendCommand")
+                            .and(
+                                ElementMatchers.takesArguments(1)
+                                    .and(
+                                        ElementMatchers.takesArgument(
+                                            0,
+                                            ElementMatchers.named(
+                                                "redis.clients.jedis.CommandArguments")))))))
         .type(ElementMatchers.named("io.lettuce.core.RedisChannelHandler"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder.visit(
-                    Advice.to(ClientCallAdvice.LettuceDispatch.class)
-                        .on(
-                            ElementMatchers.named("dispatch")
-                                .and(
-                                    ElementMatchers.takesArgument(
-                                        0,
-                                        ElementMatchers.named(
-                                            "io.lettuce.core.protocol.RedisCommand"))))));
+                    advise(
+                        ClientCallAdvice.LettuceDispatch.class,
+                        ElementMatchers.named("dispatch")
+                            .and(
+                                ElementMatchers.takesArgument(
+                                    0,
+                                    ElementMatchers.named(
+                                        "io.lettuce.core.protocol.RedisCommand"))))));
   }
 
   /** R2DBC {@code Statement.execute()} in any driver. */
@@ -2883,12 +2877,12 @@ public final class JdkInstrumentationInstaller {
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder.visit(
-                    Advice.to(ClientCallAdvice.R2dbcExecute.class)
-                        .on(
-                            ElementMatchers.named("execute")
-                                .and(ElementMatchers.takesArguments(0))
-                                .and(ElementMatchers.not(ElementMatchers.isAbstract()))
-                                .and(ElementMatchers.not(ElementMatchers.isBridge())))));
+                    advise(
+                        ClientCallAdvice.R2dbcExecute.class,
+                        ElementMatchers.named("execute")
+                            .and(ElementMatchers.takesArguments(0))
+                            .and(ElementMatchers.not(ElementMatchers.isAbstract()))
+                            .and(ElementMatchers.not(ElementMatchers.isBridge())))));
   }
 
   /** AWS SDK v2 sync and async client handlers. */
@@ -2901,16 +2895,16 @@ public final class JdkInstrumentationInstaller {
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder.visit(
-                    Advice.to(ClientCallAdvice.AwsExecute.class)
-                        .on(
-                            ElementMatchers.named("execute")
-                                .and(ElementMatchers.isPublic())
-                                .and(
-                                    ElementMatchers.takesArgument(
-                                        0,
-                                        ElementMatchers.named(
-                                            "software.amazon.awssdk.core.client.handler"
-                                                + ".ClientExecutionParams"))))));
+                    advise(
+                        ClientCallAdvice.AwsExecute.class,
+                        ElementMatchers.named("execute")
+                            .and(ElementMatchers.isPublic())
+                            .and(
+                                ElementMatchers.takesArgument(
+                                    0,
+                                    ElementMatchers.named(
+                                        "software.amazon.awssdk.core.client.handler"
+                                            + ".ClientExecutionParams"))))));
   }
 
   /** Netty channel flush (every transport) and stream-channel reads (NIO, epoll, kqueue). */
@@ -2920,32 +2914,31 @@ public final class JdkInstrumentationInstaller {
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder.visit(
-                    Advice.to(ClientCallAdvice.NettyFlush.class)
-                        .on(
-                            ElementMatchers.named("flush0")
-                                .and(ElementMatchers.takesArguments(0)))))
+                    advise(
+                        ClientCallAdvice.NettyFlush.class,
+                        ElementMatchers.named("flush0").and(ElementMatchers.takesArguments(0)))))
         .type(ElementMatchers.named("io.netty.channel.nio.AbstractNioByteChannel$NioByteUnsafe"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder.visit(
-                    Advice.to(ClientCallAdvice.NettyRead.class)
-                        .on(ElementMatchers.named("read").and(ElementMatchers.takesArguments(0)))))
+                    advise(
+                        ClientCallAdvice.NettyRead.class,
+                        ElementMatchers.named("read").and(ElementMatchers.takesArguments(0)))))
         .type(
             ElementMatchers.named(
                 "io.netty.channel.epoll.AbstractEpollStreamChannel$EpollStreamUnsafe"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder.visit(
-                    Advice.to(ClientCallAdvice.NettyRead.class)
-                        .on(ElementMatchers.named("epollInReady"))))
+                    advise(
+                        ClientCallAdvice.NettyRead.class, ElementMatchers.named("epollInReady"))))
         .type(
             ElementMatchers.named(
                 "io.netty.channel.kqueue.AbstractKQueueStreamChannel$KQueueStreamUnsafe"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder.visit(
-                    Advice.to(ClientCallAdvice.NettyRead.class)
-                        .on(ElementMatchers.named("readReady"))));
+                    advise(ClientCallAdvice.NettyRead.class, ElementMatchers.named("readReady"))));
   }
 
   /**
@@ -2960,106 +2953,101 @@ public final class JdkInstrumentationInstaller {
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.FileChannelReadAdvice.class)
-                            .on(
-                                ElementMatchers.named("read")
-                                    .and(
-                                        ElementMatchers.takesArgument(
-                                            0, java.nio.ByteBuffer.class))))
+                        advise(
+                            JvmRuntimeAdvice.FileChannelReadAdvice.class,
+                            ElementMatchers.named("read")
+                                .and(ElementMatchers.takesArgument(0, java.nio.ByteBuffer.class))))
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.FileChannelWriteAdvice.class)
-                            .on(
-                                ElementMatchers.named("write")
-                                    .and(
-                                        ElementMatchers.takesArgument(
-                                            0, java.nio.ByteBuffer.class))))
+                        advise(
+                            JvmRuntimeAdvice.FileChannelWriteAdvice.class,
+                            ElementMatchers.named("write")
+                                .and(ElementMatchers.takesArgument(0, java.nio.ByteBuffer.class))))
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.FileChannelScatterReadAdvice.class)
-                            .on(
-                                ElementMatchers.named("read")
-                                    .and(
-                                        ElementMatchers.takesArguments(
-                                            java.nio.ByteBuffer[].class, int.class, int.class))))
+                        advise(
+                            JvmRuntimeAdvice.FileChannelScatterReadAdvice.class,
+                            ElementMatchers.named("read")
+                                .and(
+                                    ElementMatchers.takesArguments(
+                                        java.nio.ByteBuffer[].class, int.class, int.class))))
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.FileChannelGatherWriteAdvice.class)
-                            .on(
-                                ElementMatchers.named("write")
-                                    .and(
-                                        ElementMatchers.takesArguments(
-                                            java.nio.ByteBuffer[].class, int.class, int.class))))
+                        advise(
+                            JvmRuntimeAdvice.FileChannelGatherWriteAdvice.class,
+                            ElementMatchers.named("write")
+                                .and(
+                                    ElementMatchers.takesArguments(
+                                        java.nio.ByteBuffer[].class, int.class, int.class))))
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.FileChannelMapAdvice.class)
-                            .on(
-                                ElementMatchers.named("map")
-                                    .and(
-                                        ElementMatchers.takesArgument(
-                                            0, java.nio.channels.FileChannel.MapMode.class))))
+                        advise(
+                            JvmRuntimeAdvice.FileChannelMapAdvice.class,
+                            ElementMatchers.named("map")
+                                .and(
+                                    ElementMatchers.takesArgument(
+                                        0, java.nio.channels.FileChannel.MapMode.class))))
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.FileChannelTransferToAdvice.class)
-                            .on(
-                                ElementMatchers.named("transferTo")
-                                    .and(
-                                        ElementMatchers.takesArguments(
-                                            long.class,
-                                            long.class,
-                                            java.nio.channels.WritableByteChannel.class))))
+                        advise(
+                            JvmRuntimeAdvice.FileChannelTransferToAdvice.class,
+                            ElementMatchers.named("transferTo")
+                                .and(
+                                    ElementMatchers.takesArguments(
+                                        long.class,
+                                        long.class,
+                                        java.nio.channels.WritableByteChannel.class))))
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.FileChannelTransferFromAdvice.class)
-                            .on(
-                                ElementMatchers.named("transferFrom")
-                                    .and(
-                                        ElementMatchers.takesArguments(
-                                            java.nio.channels.ReadableByteChannel.class,
-                                            long.class,
-                                            long.class))))
+                        advise(
+                            JvmRuntimeAdvice.FileChannelTransferFromAdvice.class,
+                            ElementMatchers.named("transferFrom")
+                                .and(
+                                    ElementMatchers.takesArguments(
+                                        java.nio.channels.ReadableByteChannel.class,
+                                        long.class,
+                                        long.class))))
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.FileChannelCloseAdvice.class)
-                            .on(
-                                ElementMatchers.named("implCloseChannel")
-                                    .and(ElementMatchers.takesArguments(0))))
+                        advise(
+                            JvmRuntimeAdvice.FileChannelCloseAdvice.class,
+                            ElementMatchers.named("implCloseChannel")
+                                .and(ElementMatchers.takesArguments(0))))
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.FileChannelForceAdvice.class)
-                            .on(
-                                ElementMatchers.named("force")
-                                    .and(ElementMatchers.takesArguments(boolean.class))))
+                        advise(
+                            JvmRuntimeAdvice.FileChannelForceAdvice.class,
+                            ElementMatchers.named("force")
+                                .and(ElementMatchers.takesArguments(boolean.class))))
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.FileTruncateAdvice.class)
-                            .on(
-                                ElementMatchers.named("truncate")
-                                    .and(ElementMatchers.takesArguments(long.class)))))
+                        advise(
+                            JvmRuntimeAdvice.FileTruncateAdvice.class,
+                            ElementMatchers.named("truncate")
+                                .and(ElementMatchers.takesArguments(long.class)))))
         .type(ElementMatchers.named("java.io.RandomAccessFile"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.RandomAccessReadByteAdvice.class)
-                            .on(
-                                ElementMatchers.named("read")
-                                    .and(ElementMatchers.takesArguments(0))))
+                        advise(
+                            JvmRuntimeAdvice.RandomAccessReadByteAdvice.class,
+                            ElementMatchers.named("read").and(ElementMatchers.takesArguments(0))))
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.RandomAccessReadRangeAdvice.class)
-                            .on(
-                                ElementMatchers.named("readBytes")
-                                    .and(
-                                        ElementMatchers.takesArguments(
-                                            byte[].class, int.class, int.class))))
+                        advise(
+                            JvmRuntimeAdvice.RandomAccessReadRangeAdvice.class,
+                            ElementMatchers.named("readBytes")
+                                .and(
+                                    ElementMatchers.takesArguments(
+                                        byte[].class, int.class, int.class))))
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.FileWriteByteAdvice.class)
-                            .on(
-                                ElementMatchers.named("write")
-                                    .and(ElementMatchers.takesArguments(int.class))))
+                        advise(
+                            JvmRuntimeAdvice.FileWriteByteAdvice.class,
+                            ElementMatchers.named("write")
+                                .and(ElementMatchers.takesArguments(int.class))))
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.FileWriteRangeAdvice.class)
-                            .on(
-                                ElementMatchers.named("writeBytes")
-                                    .and(
-                                        ElementMatchers.takesArguments(
-                                            byte[].class, int.class, int.class))))
+                        advise(
+                            JvmRuntimeAdvice.FileWriteRangeAdvice.class,
+                            ElementMatchers.named("writeBytes")
+                                .and(
+                                    ElementMatchers.takesArguments(
+                                        byte[].class, int.class, int.class))))
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.FileTruncateAdvice.class)
-                            .on(
-                                ElementMatchers.named("setLength")
-                                    .and(ElementMatchers.takesArguments(long.class)))))
+                        advise(
+                            JvmRuntimeAdvice.FileTruncateAdvice.class,
+                            ElementMatchers.named("setLength")
+                                .and(ElementMatchers.takesArguments(long.class)))))
         // Files.delete / deleteIfExists: the platform providers inherit both from
         // AbstractFileSystemProvider, which funnels them to implDelete.
         .type(ElementMatchers.named("sun.nio.fs.AbstractFileSystemProvider"))
@@ -3067,16 +3055,15 @@ public final class JdkInstrumentationInstaller {
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.FilesDeleteAdvice.class)
-                            .on(
-                                ElementMatchers.named("delete")
-                                    .and(ElementMatchers.takesArguments(java.nio.file.Path.class))))
+                        advise(
+                            JvmRuntimeAdvice.FilesDeleteAdvice.class,
+                            ElementMatchers.named("delete")
+                                .and(ElementMatchers.takesArguments(java.nio.file.Path.class))))
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.FilesDeleteIfExistsAdvice.class)
-                            .on(
-                                ElementMatchers.named("deleteIfExists")
-                                    .and(
-                                        ElementMatchers.takesArguments(java.nio.file.Path.class)))))
+                        advise(
+                            JvmRuntimeAdvice.FilesDeleteIfExistsAdvice.class,
+                            ElementMatchers.named("deleteIfExists")
+                                .and(ElementMatchers.takesArguments(java.nio.file.Path.class)))))
         // Opens and closes of java.io: the private open funnels of the constructors, close().
         .type(
             ElementMatchers.namedOneOf(
@@ -3085,16 +3072,15 @@ public final class JdkInstrumentationInstaller {
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.FileOpenAdvice.class)
-                            .on(
-                                ElementMatchers.named("open")
-                                    .and(ElementMatchers.takesArgument(0, String.class))
-                                    .and(ElementMatchers.not(ElementMatchers.isNative()))))
+                        advise(
+                            JvmRuntimeAdvice.FileOpenAdvice.class,
+                            ElementMatchers.named("open")
+                                .and(ElementMatchers.takesArgument(0, String.class))
+                                .and(ElementMatchers.not(ElementMatchers.isNative()))))
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.FileStreamCloseAdvice.class)
-                            .on(
-                                ElementMatchers.named("close")
-                                    .and(ElementMatchers.takesArguments(0)))))
+                        advise(
+                            JvmRuntimeAdvice.FileStreamCloseAdvice.class,
+                            ElementMatchers.named("close").and(ElementMatchers.takesArguments(0)))))
         // Opens of java.nio: Files.newInputStream / newOutputStream / newByteChannel and
         // FileChannel.open reach the platform provider's newByteChannel or newFileChannel.
         .type(
@@ -3103,12 +3089,12 @@ public final class JdkInstrumentationInstaller {
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder.visit(
-                    Advice.to(JvmRuntimeAdvice.FilesOpenAdvice.class)
-                        .on(
-                            ElementMatchers.namedOneOf("newByteChannel", "newFileChannel")
-                                .and(ElementMatchers.takesArguments(3))
-                                .and(ElementMatchers.takesArgument(0, java.nio.file.Path.class))
-                                .and(ElementMatchers.not(ElementMatchers.isAbstract())))))
+                    advise(
+                        JvmRuntimeAdvice.FilesOpenAdvice.class,
+                        ElementMatchers.namedOneOf("newByteChannel", "newFileChannel")
+                            .and(ElementMatchers.takesArguments(3))
+                            .and(ElementMatchers.takesArgument(0, java.nio.file.Path.class))
+                            .and(ElementMatchers.not(ElementMatchers.isAbstract())))))
         // Files.move: each platform provider implements move itself (UnixFileSystemProvider,
         // WindowsFileSystemProvider); other providers (zip file systems) are not hooked.
         .type(
@@ -3118,48 +3104,48 @@ public final class JdkInstrumentationInstaller {
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.FilesMoveAdvice.class)
-                            .on(
-                                ElementMatchers.named("move")
-                                    .and(ElementMatchers.takesArguments(3))
-                                    .and(ElementMatchers.not(ElementMatchers.isAbstract()))))
+                        advise(
+                            JvmRuntimeAdvice.FilesMoveAdvice.class,
+                            ElementMatchers.named("move")
+                                .and(ElementMatchers.takesArguments(3))
+                                .and(ElementMatchers.not(ElementMatchers.isAbstract()))))
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.FilesCopyAdvice.class)
-                            .on(
-                                ElementMatchers.named("copy")
-                                    .and(ElementMatchers.takesArguments(3))
-                                    .and(ElementMatchers.takesArgument(0, java.nio.file.Path.class))
-                                    .and(ElementMatchers.takesArgument(1, java.nio.file.Path.class))
-                                    .and(ElementMatchers.not(ElementMatchers.isAbstract())))))
+                        advise(
+                            JvmRuntimeAdvice.FilesCopyAdvice.class,
+                            ElementMatchers.named("copy")
+                                .and(ElementMatchers.takesArguments(3))
+                                .and(ElementMatchers.takesArgument(0, java.nio.file.Path.class))
+                                .and(ElementMatchers.takesArgument(1, java.nio.file.Path.class))
+                                .and(ElementMatchers.not(ElementMatchers.isAbstract())))))
         .type(ElementMatchers.named("java.io.File"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.FileDeleteAdvice.class)
-                            .on(
-                                ElementMatchers.named("delete")
-                                    .and(ElementMatchers.takesArguments(0))))
+                        advise(
+                            JvmRuntimeAdvice.FileDeleteAdvice.class,
+                            ElementMatchers.named("delete").and(ElementMatchers.takesArguments(0))))
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.FileRenameAdvice.class)
-                            .on(
-                                ElementMatchers.named("renameTo")
-                                    .and(ElementMatchers.takesArguments(java.io.File.class)))))
+                        advise(
+                            JvmRuntimeAdvice.FileRenameAdvice.class,
+                            ElementMatchers.named("renameTo")
+                                .and(ElementMatchers.takesArguments(java.io.File.class)))))
         // msync of a mapped file region.
         .type(ElementMatchers.named("java.nio.MappedByteBuffer"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder.visit(
-                    Advice.to(JvmRuntimeAdvice.MappedBufferForceAdvice.class)
-                        .on(
-                            ElementMatchers.named("force")
-                                .and(ElementMatchers.takesArguments(int.class, int.class)))))
+                    advise(
+                        JvmRuntimeAdvice.MappedBufferForceAdvice.class,
+                        ElementMatchers.named("force")
+                            .and(ElementMatchers.takesArguments(int.class, int.class)))))
         .type(ElementMatchers.named("java.io.FileDescriptor"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder.visit(
-                    Advice.to(JvmRuntimeAdvice.FileDescriptorSyncAdvice.class)
-                        .on(ElementMatchers.named("sync").and(ElementMatchers.takesArguments(0)))));
+                    advise(
+                        JvmRuntimeAdvice.FileDescriptorSyncAdvice.class,
+                        ElementMatchers.named("sync").and(ElementMatchers.takesArguments(0)))));
   }
 
   /**
@@ -3172,27 +3158,28 @@ public final class JdkInstrumentationInstaller {
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder.visit(
-                    Advice.to(JvmRuntimeAdvice.ProcessStartAdvice.class)
+                    advise(
+                        JvmRuntimeAdvice.ProcessStartAdvice.class,
                         // By arity, not by parameter type: resolving ProcessBuilder$Redirect
                         // while ProcessBuilder is being transformed is a ClassCircularityError.
                         // start() has no other one-argument overload.
-                        .on(ElementMatchers.named("start").and(ElementMatchers.takesArguments(1)))))
+                        ElementMatchers.named("start").and(ElementMatchers.takesArguments(1)))))
         .type(ElementMatchers.named("java.lang.ProcessImpl"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.ProcessWaitAdvice.class)
-                            .on(
-                                ElementMatchers.named("waitFor")
-                                    .and(ElementMatchers.takesArguments(0))))
+                        advise(
+                            JvmRuntimeAdvice.ProcessWaitAdvice.class,
+                            ElementMatchers.named("waitFor")
+                                .and(ElementMatchers.takesArguments(0))))
                     .visit(
-                        Advice.to(JvmRuntimeAdvice.ProcessTimedWaitAdvice.class)
-                            .on(
-                                ElementMatchers.named("waitFor")
-                                    .and(
-                                        ElementMatchers.takesArguments(
-                                            long.class, java.util.concurrent.TimeUnit.class)))));
+                        advise(
+                            JvmRuntimeAdvice.ProcessTimedWaitAdvice.class,
+                            ElementMatchers.named("waitFor")
+                                .and(
+                                    ElementMatchers.takesArguments(
+                                        long.class, java.util.concurrent.TimeUnit.class)))));
   }
 
   /** Host globs that receive the session header besides internal hosts; set before injection. */

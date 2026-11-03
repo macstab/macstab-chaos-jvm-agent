@@ -299,7 +299,10 @@ final class HttpClientAdvice {
       }
       if (suppressed) {
         BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
-        throw new ChaosHttpSuppressException("HTTP execute suppressed by chaos agent: " + url);
+        // HttpClient 4 class files are Java 6: inlined advice must not use invokedynamic, which
+        // string concatenation with + compiles to.
+        throw new ChaosHttpSuppressException(
+            "HTTP execute suppressed by chaos agent: ".concat(String.valueOf(url)));
       }
     }
 
@@ -339,7 +342,10 @@ final class HttpClientAdvice {
       }
       if (suppressed) {
         BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
-        throw new ChaosHttpSuppressException("HTTP execute suppressed by chaos agent: " + url);
+        // HttpClient 4 class files are Java 6: inlined advice must not use invokedynamic, which
+        // string concatenation with + compiles to.
+        throw new ChaosHttpSuppressException(
+            "HTTP execute suppressed by chaos agent: ".concat(String.valueOf(url)));
       }
     }
 

@@ -38,6 +38,27 @@ public interface HookDemand {
   }
 
   /**
+   * Returns the hooks that were woven into their type but matched none of its methods — the method
+   * changed in this JDK and the hook is inactive — reported in the diagnostics' runtime details as
+   * {@code unmatchedHooks}.
+   *
+   * @return {@code type: advice on matcher} of each inactive hook; empty when all are active
+   */
+  default Set<String> unmatched() {
+    return Set.of();
+  }
+
+  /**
+   * Returns the types whose weaving failed — none of their hooks is applied — reported in the
+   * diagnostics' runtime details as {@code hookFailures}.
+   *
+   * @return {@code type: error} of each failed type; empty when every woven type was transformed
+   */
+  default Set<String> failures() {
+    return Set.of();
+  }
+
+  /**
    * Weaves method entry and exit hooks into exactly the methods {@code selectors} name, removing
    * them from methods no selector names any more. Called with the method selectors of every
    * registered scenario: before a scenario with a {@link ChaosSelector.MethodSelector} is

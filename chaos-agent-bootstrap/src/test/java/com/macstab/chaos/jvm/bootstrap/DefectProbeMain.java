@@ -104,6 +104,7 @@ public final class DefectProbeMain {
       case "socket-torn-write" -> socketTornWrite();
       case "socket-channel" -> socketChannel();
       case "file-open" -> fileOpen();
+      case "hook-coverage" -> hookCoverage();
       case "close-shutdown-wait" -> closeShutdownAndWait();
       case "redirect" -> redirect();
       case "udp-dns" -> udpAndReverseDns();
@@ -1214,6 +1215,100 @@ public final class DefectProbeMain {
     System.out.println("waitMillis=" + TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start));
     printApplied(hangs);
     System.out.println("exitCode=" + child.waitFor());
+  }
+
+  /**
+   * With every hook group woven ({@code instrumentation=eager}), loads every JDK class a hook
+   * targets — by name, or by creating the platform's implementation of a JDK type — and prints the
+   * hooks that matched a method and those that matched none.
+   */
+  private static void hookCoverage() throws Exception {
+    final String[] targets = {
+      "java.lang.ProcessBuilder",
+      "java.lang.ProcessImpl",
+      "java.lang.VirtualThread",
+      "java.nio.MappedByteBuffer",
+      "java.time.Clock$SystemClock",
+      "java.time.Clock$SystemInstantSource",
+      "sun.nio.ch.DatagramChannelImpl",
+      "sun.nio.ch.FileChannelImpl",
+      "sun.nio.ch.Net",
+      "sun.nio.ch.NioSocketImpl",
+      "sun.nio.ch.ServerSocketChannelImpl",
+      "sun.nio.ch.SocketChannelImpl",
+      "sun.net.www.protocol.http.HttpURLConnection",
+      "jdk.internal.net.http.HttpClientImpl",
+      "java.util.concurrent.ArrayBlockingQueue",
+      "java.util.concurrent.LinkedBlockingQueue",
+      "java.util.concurrent.LinkedBlockingDeque",
+      "java.util.concurrent.PriorityBlockingQueue",
+      "java.util.concurrent.DelayQueue",
+      "java.util.concurrent.SynchronousQueue",
+      "java.util.concurrent.LinkedTransferQueue",
+      "javax.naming.InitialContext",
+      // client libraries, on the classpath of the coverage run
+      "com.zaxxer.hikari.pool.HikariPool",
+      "com.mchange.v2.c3p0.impl.C3P0PooledConnectionPool",
+      "io.grpc.internal.ClientCallImpl",
+      "io.lettuce.core.RedisChannelHandler",
+      "io.netty.channel.AbstractChannel$AbstractUnsafe",
+      "io.netty.channel.nio.AbstractNioByteChannel$NioByteUnsafe",
+      "io.netty.channel.epoll.AbstractEpollStreamChannel$EpollStreamUnsafe",
+      "io.netty.channel.kqueue.AbstractKQueueStreamChannel$KQueueStreamUnsafe",
+      "io.r2dbc.h2.H2Statement",
+      "okhttp3.internal.connection.RealCall",
+      "org.apache.hc.client5.http.impl.classic.CloseableHttpClient",
+      "org.apache.hc.client5.http.impl.classic.InternalHttpClient",
+      "org.apache.http.impl.client.CloseableHttpClient",
+      "org.apache.kafka.clients.consumer.KafkaConsumer",
+      "org.apache.kafka.clients.producer.KafkaProducer",
+      "org.apache.tomcat.util.threads.ThreadPoolExecutor",
+      "reactor.netty.http.client.HttpClientConnect",
+      "redis.clients.jedis.Connection",
+      "software.amazon.awssdk.core.internal.handler.BaseAsyncClientHandler",
+      "software.amazon.awssdk.core.internal.handler.BaseSyncClientHandler",
+    };
+    for (final String target : targets) {
+      try {
+        Class.forName(target, false, ClassLoader.getSystemClassLoader());
+      } catch (final ClassNotFoundException absent) {
+        System.out.println("absent." + target + "=true");
+      }
+    }
+    // Implementations chosen by the platform: create one of each.
+    Selector.open().close();
+    javax.net.ssl.SSLContext.getDefault().createSSLEngine();
+    javax.net.ssl.SSLSocketFactory.getDefault().createSocket().close();
+    ManagementFactory.getPlatformMBeanServer();
+    new java.util.zip.Inflater().end();
+    new java.util.zip.Deflater().end();
+    new java.util.concurrent.ScheduledThreadPoolExecutor(1).shutdownNow();
+    try (Connection connection = DriverManager.getConnection("jdbc:h2:mem:coverage");
+        Statement statement = connection.createStatement();
+        PreparedStatement prepared = connection.prepareStatement("select 1")) {
+      statement.execute("select 1");
+      prepared.execute();
+    }
+    System.out.println("runtime=" + Runtime.version());
+    System.out.println(
+        "matchedHooks="
+            + String.join(
+                "|",
+                com.macstab.chaos.jvm.instrumentation.JdkInstrumentationInstaller.matchedHooks()));
+    System.out.println(
+        "unmatchedHooks="
+            + ChaosPlatform.current()
+                .diagnostics()
+                .snapshot()
+                .runtimeDetails()
+                .get("unmatchedHooks"));
+    System.out.println(
+        "hookFailures="
+            + ChaosPlatform.current()
+                .diagnostics()
+                .snapshot()
+                .runtimeDetails()
+                .get("hookFailures"));
   }
 
   /**
