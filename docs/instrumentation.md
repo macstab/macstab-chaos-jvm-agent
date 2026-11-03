@@ -822,7 +822,7 @@ ByteBuddy's retransformation strategy handles the lazy loading of driver classes
 
 ## 13.4 SQL Truncation — The 200-Character Limit
 
-For `JDBC_STATEMENT_EXECUTE` and `JDBC_PREPARED_STATEMENT`, the `targetName` in `InvocationContext` is set to the SQL string truncated to 200 characters. The `snippet()` helper in `ChaosDispatcher`:
+For `JDBC_STATEMENT_EXECUTE` and `JDBC_PREPARED_STATEMENT`, the `targetName` in `InvocationContext` is set to the SQL string truncated to 200 characters. The `snippet()` helper in `ClientDispatch`:
 
 ```java
 private static String snippet(final String sql) {
@@ -865,7 +865,7 @@ The same propagation logic applies to all other JDBC advice methods: `Statement.
 
 ## 13.7 The `evaluateJdbc` Shared Pipeline
 
-All five JDBC dispatch methods in `ChaosDispatcher` funnel through a single private helper:
+All five JDBC dispatch methods in `ClientDispatch` funnel through a single private helper:
 
 ```java
 private boolean evaluateJdbc(

@@ -37,6 +37,18 @@ public final class ChaosRuntime implements ChaosControlPlane {
   private final ChaosControlPlaneImpl controlPlane;
   private final ChaosDispatcher dispatcher;
 
+  // The dispatch domains, held directly: one field load per dispatch instead of two.
+  private final ThreadDispatch threadDispatch;
+  private final ExecutorDispatch executorDispatch;
+  private final MethodDispatch methodDispatch;
+  private final ClockDispatch clockDispatch;
+  private final RuntimeDispatch runtimeDispatch;
+  private final NetworkDispatch networkDispatch;
+  private final DnsDispatch dnsDispatch;
+  private final FileDispatch fileDispatch;
+  private final ProcessDispatch processDispatch;
+  private final ClientDispatch clientDispatch;
+
   /** Creates a runtime using the system UTC clock and a no-op metrics sink. */
   public ChaosRuntime() {
     this(Clock.systemUTC(), ChaosMetricsSink.NOOP);
@@ -51,6 +63,16 @@ public final class ChaosRuntime implements ChaosControlPlane {
   public ChaosRuntime(final Clock clock, final ChaosMetricsSink metricsSink) {
     this.controlPlane = new ChaosControlPlaneImpl(clock, metricsSink);
     this.dispatcher = new ChaosDispatcher(controlPlane);
+    this.threadDispatch = dispatcher.thread();
+    this.executorDispatch = dispatcher.executor();
+    this.methodDispatch = dispatcher.method();
+    this.clockDispatch = dispatcher.clock();
+    this.runtimeDispatch = dispatcher.runtime();
+    this.networkDispatch = dispatcher.network();
+    this.dnsDispatch = dispatcher.dns();
+    this.fileDispatch = dispatcher.file();
+    this.processDispatch = dispatcher.process();
+    this.clientDispatch = dispatcher.client();
   }
 
   /**
@@ -187,7 +209,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    */
   public Runnable decorateExecutorRunnable(
       final String operation, final Object executor, final Runnable task) {
-    return dispatcher.decorateExecutorRunnable(operation, executor, task);
+    return executorDispatch.decorateExecutorRunnable(operation, executor, task);
   }
 
   /**
@@ -201,7 +223,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    */
   public <T> Callable<T> decorateExecutorCallable(
       final String operation, final Object executor, final Callable<T> task) {
-    return dispatcher.decorateExecutorCallable(operation, executor, task);
+    return executorDispatch.decorateExecutorCallable(operation, executor, task);
   }
 
   /**
@@ -211,7 +233,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @throws Throwable if an active scenario throws to simulate a failure
    */
   public void beforeThreadStart(final Thread thread) throws Throwable {
-    dispatcher.beforeThreadStart(thread, false);
+    threadDispatch.beforeThreadStart(thread, false);
   }
 
   /**
@@ -222,7 +244,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @throws Throwable if an active scenario throws to simulate a failure
    */
   public void beforeThreadStart(final Thread thread, final boolean poolWorker) throws Throwable {
-    dispatcher.beforeThreadStart(thread, poolWorker);
+    threadDispatch.beforeThreadStart(thread, poolWorker);
   }
 
   /**
@@ -235,7 +257,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    */
   public void beforeWorkerRun(final Object executor, final Thread worker, final Runnable task)
       throws Throwable {
-    dispatcher.beforeWorkerRun(executor, worker, task);
+    executorDispatch.beforeWorkerRun(executor, worker, task);
   }
 
   /**
@@ -246,7 +268,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    */
   public void beforeForkJoinTaskRun(final java.util.concurrent.ForkJoinTask<?> task)
       throws Throwable {
-    dispatcher.beforeForkJoinTaskRun(task);
+    executorDispatch.beforeForkJoinTaskRun(task);
   }
 
   /**
@@ -257,7 +279,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @throws Throwable if an active scenario throws to simulate a failure
    */
   public void beforeQueueOperation(final String operation, final Object queue) throws Throwable {
-    dispatcher.beforeQueueOperation(operation, queue);
+    executorDispatch.beforeQueueOperation(operation, queue);
   }
 
   /**
@@ -270,7 +292,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    */
   public Boolean beforeBooleanQueueOperation(final String operation, final Object queue)
       throws Throwable {
-    return dispatcher.beforeBooleanQueueOperation(operation, queue);
+    return executorDispatch.beforeBooleanQueueOperation(operation, queue);
   }
 
   /**
@@ -286,7 +308,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   public Boolean beforeCompletableFutureComplete(
       final String operation, final CompletableFuture<?> future, final Object payload)
       throws Throwable {
-    return dispatcher.beforeCompletableFutureComplete(operation, future, payload);
+    return executorDispatch.beforeCompletableFutureComplete(operation, future, payload);
   }
 
   /**
@@ -297,7 +319,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @throws Throwable if an active scenario throws to simulate a failure
    */
   public void beforeClassLoad(final ClassLoader loader, final String className) throws Throwable {
-    dispatcher.beforeClassLoad(loader, className);
+    runtimeDispatch.beforeClassLoad(loader, className);
   }
 
   /**
@@ -311,7 +333,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    */
   public URL afterResourceLookup(
       final ClassLoader loader, final String name, final URL currentValue) throws Throwable {
-    return dispatcher.afterResourceLookup(loader, name, currentValue);
+    return runtimeDispatch.afterResourceLookup(loader, name, currentValue);
   }
 
   /**
@@ -322,7 +344,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @throws Throwable if an active scenario throws to simulate a failure
    */
   public Thread decorateShutdownHook(final Thread hook) throws Throwable {
-    return dispatcher.decorateShutdownHook(hook);
+    return executorDispatch.decorateShutdownHook(hook);
   }
 
   /**
@@ -332,7 +354,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @return the wrapper thread, or {@code original} if no wrapper is registered
    */
   public Thread resolveShutdownHook(final Thread original) {
-    return dispatcher.resolveShutdownHook(original);
+    return executorDispatch.resolveShutdownHook(original);
   }
 
   /**
@@ -345,7 +367,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    */
   public void beforeExecutorShutdown(
       final String operation, final Object executor, final long timeoutMillis) throws Throwable {
-    dispatcher.beforeExecutorShutdown(operation, executor, timeoutMillis);
+    executorDispatch.beforeExecutorShutdown(operation, executor, timeoutMillis);
   }
 
   /**
@@ -359,7 +381,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    */
   public boolean beforeScheduledTick(
       final Object executor, final Object task, final boolean periodic) throws Throwable {
-    return dispatcher.beforeScheduledTick(executor, task, periodic);
+    return executorDispatch.beforeScheduledTick(executor, task, periodic);
   }
 
   /**
@@ -389,7 +411,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    *     no-op if no scenario matches
    */
   public void beforeMethodEnter(final String className, final String methodName) throws Throwable {
-    dispatcher.beforeMethodEnter(className, methodName);
+    methodDispatch.beforeMethodEnter(className, methodName);
   }
 
   /**
@@ -404,7 +426,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   public void beforeMethodEnter(
       final Class<?> declaringType, final String methodName, final String descriptor)
       throws Throwable {
-    dispatcher.beforeMethodEnter(declaringType, methodName, descriptor);
+    methodDispatch.beforeMethodEnter(declaringType, methodName, descriptor);
   }
 
   /**
@@ -424,7 +446,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
       final String descriptor,
       final Object actualValue)
       throws Throwable {
-    return dispatcher.afterMethodExit(declaringType, methodName, descriptor, actualValue);
+    return methodDispatch.afterMethodExit(declaringType, methodName, descriptor, actualValue);
   }
 
   /**
@@ -463,7 +485,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
       final Class<?> returnType,
       final Object actualValue)
       throws Throwable {
-    return dispatcher.afterMethodExit(className, methodName, returnType, actualValue);
+    return methodDispatch.afterMethodExit(className, methodName, returnType, actualValue);
   }
 
   /**
@@ -475,7 +497,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @return the skewed (or unchanged) clock value
    */
   public long applyClockSkew(final long realValue, final OperationType clockType) {
-    return dispatcher.applyClockSkew(realValue, clockType);
+    return clockDispatch.applyClockSkew(realValue, clockType);
   }
 
   /**
@@ -518,7 +540,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    *     {@code realMillis} unchanged otherwise
    */
   public long adjustClockMillis(final long realMillis) {
-    return dispatcher.adjustClockMillis(realMillis);
+    return clockDispatch.adjustClockMillis(realMillis);
   }
 
   /**
@@ -536,7 +558,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    *     {@code realNanos} unchanged otherwise
    */
   public long adjustClockNanos(final long realNanos) {
-    return dispatcher.adjustClockNanos(realNanos);
+    return clockDispatch.adjustClockNanos(realNanos);
   }
 
   /**
@@ -546,7 +568,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @return adjusted instant
    */
   public java.time.Instant adjustInstantNow(final java.time.Instant realInstant) {
-    return dispatcher.adjustInstantNow(realInstant);
+    return clockDispatch.adjustInstantNow(realInstant);
   }
 
   /**
@@ -556,7 +578,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @return the (possibly skewed) instant
    */
   public java.time.Instant adjustClockInstant(final java.time.Instant realInstant) {
-    return dispatcher.adjustClockInstant(realInstant);
+    return clockDispatch.adjustClockInstant(realInstant);
   }
 
   /**
@@ -566,7 +588,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @return the (possibly skewed) milliseconds
    */
   public long adjustClockReadMillis(final long realMillis) {
-    return dispatcher.adjustClockReadMillis(realMillis);
+    return clockDispatch.adjustClockReadMillis(realMillis);
   }
 
   /**
@@ -578,7 +600,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    */
   public java.time.LocalDateTime adjustLocalDateTimeNowInZone(
       final java.time.LocalDateTime realValue, final java.time.ZoneId zone) {
-    return dispatcher.adjustLocalDateTimeNowInZone(realValue, zone);
+    return clockDispatch.adjustLocalDateTimeNowInZone(realValue, zone);
   }
 
   /**
@@ -588,7 +610,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @return adjusted local date-time
    */
   public java.time.LocalDateTime adjustLocalDateTimeNow(final java.time.LocalDateTime realValue) {
-    return dispatcher.adjustLocalDateTimeNow(realValue);
+    return clockDispatch.adjustLocalDateTimeNow(realValue);
   }
 
   /**
@@ -598,7 +620,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @return adjusted zoned date-time
    */
   public java.time.ZonedDateTime adjustZonedDateTimeNow(final java.time.ZonedDateTime realValue) {
-    return dispatcher.adjustZonedDateTimeNow(realValue);
+    return clockDispatch.adjustZonedDateTimeNow(realValue);
   }
 
   /**
@@ -608,7 +630,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @return adjusted time in milliseconds
    */
   public long adjustDateNew(final long realMillis) {
-    return dispatcher.adjustDateNew(realMillis);
+    return clockDispatch.adjustDateNew(realMillis);
   }
 
   /**
@@ -618,7 +640,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @throws Throwable if a chaos effect injects an exception
    */
   public boolean beforeGcRequest() throws Throwable {
-    return dispatcher.beforeGcRequest();
+    return runtimeDispatch.beforeGcRequest();
   }
 
   /**
@@ -628,7 +650,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @throws Throwable if a chaos effect injects an exception
    */
   public void beforeExitRequest(final int status) throws Throwable {
-    dispatcher.beforeExitRequest(status);
+    runtimeDispatch.beforeExitRequest(status);
   }
 
   /**
@@ -639,7 +661,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @throws Throwable if a chaos effect injects an exception
    */
   public void beforeReflectionInvoke(final Object method, final Object target) throws Throwable {
-    dispatcher.beforeReflectionInvoke(method, target);
+    runtimeDispatch.beforeReflectionInvoke(method, target);
   }
 
   /**
@@ -649,7 +671,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @throws Throwable if a chaos effect injects an exception
    */
   public void beforeDirectBufferAllocate(final int capacity) throws Throwable {
-    dispatcher.beforeDirectBufferAllocate(capacity);
+    runtimeDispatch.beforeDirectBufferAllocate(capacity);
   }
 
   /**
@@ -659,7 +681,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @throws Throwable if a chaos effect injects an exception
    */
   public void beforeObjectDeserialize(final Object stream) throws Throwable {
-    dispatcher.beforeObjectDeserialize(stream);
+    runtimeDispatch.beforeObjectDeserialize(stream);
   }
 
   /**
@@ -670,7 +692,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @throws Throwable if a chaos effect injects an exception
    */
   public void beforeClassDefine(final Object loader, final String className) throws Throwable {
-    dispatcher.beforeClassDefine(loader, className);
+    runtimeDispatch.beforeClassDefine(loader, className);
   }
 
   /**
@@ -680,7 +702,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @throws Throwable if a chaos effect injects an exception
    */
   public void beforeMonitorEnter(final Object lock) throws Throwable {
-    dispatcher.beforeMonitorEnter(lock);
+    threadDispatch.beforeMonitorEnter(lock);
   }
 
   /**
@@ -689,7 +711,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @throws Throwable if a chaos effect injects an exception
    */
   public void beforeThreadPark() throws Throwable {
-    dispatcher.beforeThreadPark();
+    threadDispatch.beforeThreadPark();
   }
 
   /**
@@ -701,7 +723,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @throws Throwable if a chaos effect injects an exception
    */
   public boolean beforeNioSelect(final Object selector, final long timeoutMillis) throws Throwable {
-    return dispatcher.beforeNioSelect(selector, timeoutMillis);
+    return networkDispatch.beforeNioSelect(selector, timeoutMillis);
   }
 
   /**
@@ -712,7 +734,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @throws Throwable if a chaos effect injects an exception
    */
   public void beforeNioChannelOp(final String operation, final Object channel) throws Throwable {
-    dispatcher.beforeNioChannelOp(operation, channel);
+    networkDispatch.beforeNioChannelOp(operation, channel);
   }
 
   /**
@@ -726,7 +748,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    */
   public java.net.InetSocketAddress beforeSocketConnect(
       final Object socket, final Object socketAddress, final int timeoutMillis) throws Throwable {
-    return dispatcher.beforeSocketConnect(socket, socketAddress, timeoutMillis);
+    return networkDispatch.beforeSocketConnect(socket, socketAddress, timeoutMillis);
   }
 
   /**
@@ -736,7 +758,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @throws Throwable if a chaos effect injects an exception
    */
   public void beforeSocketAccept(final Object serverSocket) throws Throwable {
-    dispatcher.beforeSocketAccept(serverSocket);
+    networkDispatch.beforeSocketAccept(serverSocket);
   }
 
   /**
@@ -746,7 +768,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @throws Throwable if a chaos effect injects an exception
    */
   public void beforeSocketRead(final Object stream) throws Throwable {
-    dispatcher.beforeSocketRead(stream, InvocationContext.UNKNOWN, null, 0, 0);
+    networkDispatch.beforeSocketRead(stream, InvocationContext.UNKNOWN, null, 0, 0);
   }
 
   /**
@@ -767,7 +789,9 @@ public final class ChaosRuntime implements ChaosControlPlane {
       final int remotePort,
       final int soTimeoutMillis)
       throws Throwable {
-    return dispatcher.beforeSocketRead(stream, len, remoteAddress, remotePort, soTimeoutMillis);
+    return dispatcher
+        .network()
+        .beforeSocketRead(stream, len, remoteAddress, remotePort, soTimeoutMillis);
   }
 
   /**
@@ -778,7 +802,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @throws Throwable if a chaos effect injects an exception
    */
   public void beforeSocketWrite(final Object stream, final int len) throws Throwable {
-    dispatcher.beforeSocketWrite(stream, len, null, 0);
+    networkDispatch.beforeSocketWrite(stream, len, null, 0);
   }
 
   /**
@@ -794,7 +818,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   public int beforeSocketWrite(
       final Object stream, final int len, final Object remoteAddress, final int remotePort)
       throws Throwable {
-    return dispatcher.beforeSocketWrite(stream, len, remoteAddress, remotePort);
+    return networkDispatch.beforeSocketWrite(stream, len, remoteAddress, remotePort);
   }
 
   /**
@@ -813,7 +837,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @throws Throwable if an active scenario fails the start
    */
   public void beforeProcessStart(final String command) throws Throwable {
-    dispatcher.beforeProcessStart(command);
+    processDispatch.beforeProcessStart(command);
   }
 
   /**
@@ -825,7 +849,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @throws Throwable if an active scenario throws to simulate a failure
    */
   public int beforeNioChannelWrite(final Object channel, final int remaining) throws Throwable {
-    return dispatcher.beforeNioChannelWrite(channel, remaining);
+    return networkDispatch.beforeNioChannelWrite(channel, remaining);
   }
 
   /**
@@ -835,7 +859,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @throws Throwable if a chaos effect injects an exception
    */
   public void beforeSocketClose(final Object socket) throws Throwable {
-    dispatcher.beforeSocketClose(socket);
+    networkDispatch.beforeSocketClose(socket);
   }
 
   /**
@@ -851,7 +875,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   public int beforeDatagram(
       final String operation, final Object channel, final Object peer, final int length)
       throws Throwable {
-    return dispatcher.beforeDatagram(operation, channel, peer, length);
+    return networkDispatch.beforeDatagram(operation, channel, peer, length);
   }
 
   /**
@@ -864,7 +888,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    */
   public boolean beforeProcessWait(final Object process, final long timeoutMillis)
       throws Throwable {
-    return dispatcher.beforeProcessWait(process, timeoutMillis);
+    return processDispatch.beforeProcessWait(process, timeoutMillis);
   }
 
   /**
@@ -877,7 +901,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    */
   public void beforeSocketShutdown(
       final Object endpoint, final Object remoteAddress, final int remotePort) throws Throwable {
-    dispatcher.beforeSocketShutdown(endpoint, remoteAddress, remotePort);
+    networkDispatch.beforeSocketShutdown(endpoint, remoteAddress, remotePort);
   }
 
   /**
@@ -887,7 +911,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @throws Throwable if an active scenario fails the lookup
    */
   public void beforeDnsReverse(final String address) throws Throwable {
-    dispatcher.beforeDnsReverse(address);
+    dnsDispatch.beforeDnsReverse(address);
   }
 
   /**
@@ -898,7 +922,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @throws Throwable if an active scenario fails the bind
    */
   public void beforeSocketBind(final Object address, final int port) throws Throwable {
-    dispatcher.beforeSocketBind(address, port);
+    networkDispatch.beforeSocketBind(address, port);
   }
 
   /**
@@ -910,7 +934,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @throws Throwable if an active scenario injects a failure
    */
   public int beforeSocketChannelRead(final Object channel, final int remaining) throws Throwable {
-    return dispatcher.beforeSocketChannelRead(channel, remaining);
+    return networkDispatch.beforeSocketChannelRead(channel, remaining);
   }
 
   /**
@@ -922,7 +946,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @throws Throwable if an active scenario injects a failure
    */
   public int beforeSocketChannelWrite(final Object channel, final int remaining) throws Throwable {
-    return dispatcher.beforeSocketChannelWrite(channel, remaining);
+    return networkDispatch.beforeSocketChannelWrite(channel, remaining);
   }
 
   /**
@@ -933,7 +957,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @throws Throwable if a chaos effect injects an exception
    */
   public void beforeJndiLookup(final Object context, final String name) throws Throwable {
-    dispatcher.beforeJndiLookup(context, name);
+    runtimeDispatch.beforeJndiLookup(context, name);
   }
 
   /**
@@ -944,7 +968,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @throws Throwable if a chaos effect injects an exception
    */
   public void beforeObjectSerialize(final Object stream, final Object obj) throws Throwable {
-    dispatcher.beforeObjectSerialize(stream, obj);
+    runtimeDispatch.beforeObjectSerialize(stream, obj);
   }
 
   /**
@@ -954,7 +978,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @throws Throwable if a chaos effect injects an exception
    */
   public void beforeNativeLibraryLoad(final String libraryName) throws Throwable {
-    dispatcher.beforeNativeLibraryLoad(libraryName);
+    runtimeDispatch.beforeNativeLibraryLoad(libraryName);
   }
 
   /**
@@ -967,7 +991,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    */
   public boolean beforeAsyncCancel(final Object future, final boolean mayInterruptIfRunning)
       throws Throwable {
-    return dispatcher.beforeAsyncCancel(future, mayInterruptIfRunning);
+    return executorDispatch.beforeAsyncCancel(future, mayInterruptIfRunning);
   }
 
   /**
@@ -976,7 +1000,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @throws Throwable if a chaos effect injects an exception
    */
   public void beforeZipInflate() throws Throwable {
-    dispatcher.beforeZipInflate();
+    runtimeDispatch.beforeZipInflate();
   }
 
   /**
@@ -985,7 +1009,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @throws Throwable if a chaos effect injects an exception
    */
   public void beforeZipDeflate() throws Throwable {
-    dispatcher.beforeZipDeflate();
+    runtimeDispatch.beforeZipDeflate();
   }
 
   /**
@@ -996,7 +1020,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @throws Throwable if a chaos effect injects an exception
    */
   public boolean beforeThreadLocalGet(final Object threadLocal) throws Throwable {
-    return dispatcher.beforeThreadLocalGet(threadLocal);
+    return threadDispatch.beforeThreadLocalGet(threadLocal);
   }
 
   /**
@@ -1009,7 +1033,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    */
   public boolean beforeThreadLocalSet(final Object threadLocal, final Object value)
       throws Throwable {
-    return dispatcher.beforeThreadLocalSet(threadLocal, value);
+    return threadDispatch.beforeThreadLocalSet(threadLocal, value);
   }
 
   /**
@@ -1022,7 +1046,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    */
   public void beforeJmxInvoke(
       final Object server, final Object objectName, final String operationName) throws Throwable {
-    dispatcher.beforeJmxInvoke(server, objectName, operationName);
+    runtimeDispatch.beforeJmxInvoke(server, objectName, operationName);
   }
 
   /**
@@ -1035,7 +1059,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    */
   public void beforeJmxGetAttr(final Object server, final Object objectName, final String attribute)
       throws Throwable {
-    dispatcher.beforeJmxGetAttr(server, objectName, attribute);
+    runtimeDispatch.beforeJmxGetAttr(server, objectName, attribute);
   }
 
   /**
@@ -1047,7 +1071,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @throws Throwable if a chaos effect injects an exception
    */
   public boolean beforeHttpSend(final String url, final OperationType opType) throws Throwable {
-    return dispatcher.beforeHttpSend(url, opType);
+    return clientDispatch.beforeHttpSend(url, opType);
   }
 
   /**
@@ -1058,7 +1082,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @throws Throwable if a chaos effect injects an exception
    */
   public boolean beforeJdbcConnectionAcquire(final String poolName) throws Throwable {
-    return dispatcher.beforeJdbcConnectionAcquire(poolName);
+    return clientDispatch.beforeJdbcConnectionAcquire(poolName);
   }
 
   /**
@@ -1069,7 +1093,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @throws Throwable if a chaos effect injects an exception
    */
   public boolean beforeJdbcStatementExecute(final String sql) throws Throwable {
-    return dispatcher.beforeJdbcStatementExecute(sql);
+    return clientDispatch.beforeJdbcStatementExecute(sql);
   }
 
   /**
@@ -1080,7 +1104,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @throws Throwable if a chaos effect injects an exception
    */
   public boolean beforeJdbcPreparedStatement(final String sql) throws Throwable {
-    return dispatcher.beforeJdbcPreparedStatement(sql);
+    return clientDispatch.beforeJdbcPreparedStatement(sql);
   }
 
   /**
@@ -1090,7 +1114,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @throws Throwable if a chaos effect injects an exception
    */
   public boolean beforeJdbcTransactionCommit() throws Throwable {
-    return dispatcher.beforeJdbcTransactionCommit();
+    return clientDispatch.beforeJdbcTransactionCommit();
   }
 
   /**
@@ -1100,7 +1124,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @throws Throwable if a chaos effect injects an exception
    */
   public boolean beforeJdbcTransactionRollback() throws Throwable {
-    return dispatcher.beforeJdbcTransactionRollback();
+    return clientDispatch.beforeJdbcTransactionRollback();
   }
 
   /**
@@ -1111,7 +1135,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @throws Throwable if a chaos effect injects an exception
    */
   public boolean beforeThreadSleep(final long millis) throws Throwable {
-    return dispatcher.beforeThreadSleep(millis);
+    return threadDispatch.beforeThreadSleep(millis);
   }
 
   /**
@@ -1122,7 +1146,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @throws Throwable if a chaos effect injects an exception
    */
   public String beforeDnsResolve(final String hostname) throws Throwable {
-    return dispatcher.beforeDnsResolve(hostname);
+    return dnsDispatch.beforeDnsResolve(hostname);
   }
 
   /**
@@ -1137,7 +1161,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   public java.net.InetAddress[] afterDnsAnswer(
       final String hostname, final java.net.InetAddress[] answer, final Throwable failure)
       throws Throwable {
-    return dispatcher.afterDnsAnswer(hostname, answer, failure);
+    return dnsDispatch.afterDnsAnswer(hostname, answer, failure);
   }
 
   /**
@@ -1147,7 +1171,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @throws Throwable if a chaos effect injects an exception
    */
   public void beforeSslHandshake(final Object socket) throws Throwable {
-    dispatcher.beforeSslHandshake(socket);
+    networkDispatch.beforeSslHandshake(socket);
   }
 
   /**
@@ -1167,7 +1191,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
       final String detail,
       final Object remoteAddress)
       throws Throwable {
-    dispatcher.beforeClientCall(operation, client, target, detail, remoteAddress);
+    clientDispatch.beforeClientCall(operation, client, target, detail, remoteAddress);
   }
 
   /**
@@ -1176,7 +1200,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @param carrier the fork-join task being submitted or forked
    */
   public void captureSession(final Object carrier) {
-    dispatcher.captureSession(carrier);
+    threadDispatch.captureSession(carrier);
   }
 
   /**
@@ -1185,7 +1209,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @param carrier the task or thread starting to run
    */
   public void enterSession(final Object carrier) {
-    dispatcher.enterSession(carrier);
+    threadDispatch.enterSession(carrier);
   }
 
   /**
@@ -1194,7 +1218,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @param carrier the task or thread that finished
    */
   public void exitSession(final Object carrier) {
-    dispatcher.exitSession(carrier);
+    threadDispatch.exitSession(carrier);
   }
 
   /**
@@ -1205,7 +1229,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @throws Throwable if a chaos effect injects an exception
    */
   public void beforeFileIo(final String operation, final Object stream) throws Throwable {
-    dispatcher.beforeFileIo(operation, stream, null, InvocationContext.UNKNOWN);
+    fileDispatch.beforeFileIo(operation, stream, null, InvocationContext.UNKNOWN);
   }
 
   /**
@@ -1221,7 +1245,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   public int beforeFileIo(
       final String operation, final Object stream, final String path, final int byteCount)
       throws Throwable {
-    return dispatcher.beforeFileIo(operation, stream, path, byteCount);
+    return fileDispatch.beforeFileIo(operation, stream, path, byteCount);
   }
 
   Optional<Instrumentation> instrumentation() {

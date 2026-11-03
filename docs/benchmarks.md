@@ -27,10 +27,10 @@ The JMH suite in `chaos-agent-benchmarks` exists to verify that claim with numbe
 
 The two benchmark classes cover the two hot-path entry points added in roadmap 2.3 and 2.4:
 
-- `ChaosRuntimeBenchmark` — the JDBC dispatch path (`ChaosDispatcher.beforeJdbcStatementExecute()`)
-- `HttpClientBenchmark` — the HTTP dispatch path (`ChaosDispatcher.beforeHttpSend()`)
+- `ChaosRuntimeBenchmark` — the JDBC dispatch path (`ClientDispatch.beforeJdbcStatementExecute()`)
+- `HttpClientBenchmark` — the HTTP dispatch path (`ClientDispatch.beforeHttpSend()`)
 
-Both measure `ChaosDispatcher` method calls directly, bypassing the `BootstrapDispatcher` → `ChaosBridge` indirection. This isolates the dispatch logic (scenario registry match, selector evaluation, decision building) from the fixed overhead of the classloader bridge.
+Both measure the dispatch classes' method calls directly, bypassing the `BootstrapDispatcher` → `ChaosBridge` indirection. This isolates the dispatch logic (scenario registry match, selector evaluation, decision building) from the fixed overhead of the classloader bridge.
 
 `BridgeDispatchBenchmark` (§8) measures the full path woven advice takes, through `BootstrapDispatcher`, and is the one the CI benchmark gate compares release over release.
 
@@ -139,9 +139,9 @@ The five 1-second measurement iterations therefore capture pure C2-compiled perf
 
 ### 3.1 What It Measures
 
-`ChaosRuntimeBenchmark` calls `ChaosDispatcher.beforeJdbcStatementExecute("SELECT 1")` across six scenario configurations. This method is the entry point for all `Statement.execute(String)` interceptions. It calls `evaluateJdbc()`, which calls `registry.match()`, which scans the active scenario list and evaluates each `JdbcSelector` against the `InvocationContext` for `JDBC_STATEMENT_EXECUTE` with `targetName = "SELECT 1"`.
+`ChaosRuntimeBenchmark` calls `ClientDispatch.beforeJdbcStatementExecute("SELECT 1")` across six scenario configurations. This method is the entry point for all `Statement.execute(String)` interceptions. It calls `evaluateJdbc()`, which calls `registry.match()`, which scans the active scenario list and evaluates each `JdbcSelector` against the `InvocationContext` for `JDBC_STATEMENT_EXECUTE` with `targetName = "SELECT 1"`.
 
-The benchmark entry point bypasses `BootstrapDispatcher` and calls `ChaosDispatcher` directly via `state.dispatcher.beforeJdbcStatementExecute(...)`. This isolates the dispatch evaluation cost from the fixed bridge overhead. In production, the bridge overhead (one `MethodHandle.invoke()` through `ChaosBridge`) adds approximately 5–15 ns at JIT saturation.
+The benchmark entry point bypasses `BootstrapDispatcher` and calls the dispatch layer directly via `state.dispatcher.client().beforeJdbcStatementExecute(...)`. This isolates the dispatch evaluation cost from the fixed bridge overhead. In production, the bridge overhead (one `MethodHandle.invoke()` through `ChaosBridge`) adds approximately 5–15 ns at JIT saturation.
 
 ### 3.2 State Classes and Scenario Configuration
 
@@ -155,7 +155,7 @@ Each benchmark variant has its own `@State` inner class that pre-activates a spe
 
 **`OneMatchNoEffectState`**: One scenario is activated targeting `JDBC_STATEMENT_EXECUTE` with `NamePattern.any()`. The scenario uses `ONE_SHOT_POLICY` — `ActivationPolicy` constructed with `probability=1.0d` and `maxApplications=1L` — and a `ChaosEffect.delay(Duration.ofMillis(0))` (zero-delay). The scenario matches every call; on the very first application it fires a 0ms delay (no observable pause), then `maxApplications` is reached and the scenario transitions to INACTIVE. All warmup and measurement iterations after the first see the INACTIVE fast path. This measures the cost of a full selector match plus the INACTIVE state check once the quota is exhausted.
 
-**`SessionMissState`**: A session-scoped scenario is activated on a session that is never joined on the calling thread. `ChaosDispatcher.evaluateJdbc()` calls `scopeContext.currentSessionId()` to get the current thread's session ID. If the current thread is not inside a session (`currentSessionId()` returns `null`), session-scoped scenarios are filtered out by `registry.match()` at the session-scope check. The scenario exists in the registry but never contributes. This measures the additional cost of the session scope check: approximately one `ThreadLocal.get()` call.
+**`SessionMissState`**: A session-scoped scenario is activated on a session that is never joined on the calling thread. `ClientDispatch.evaluateJdbc()` calls `scopeContext.currentSessionId()` to get the current thread's session ID. If the current thread is not inside a session (`currentSessionId()` returns `null`), session-scoped scenarios are filtered out by `registry.match()` at the session-scope check. The scenario exists in the registry but never contributes. This measures the additional cost of the session scope check: approximately one `ThreadLocal.get()` call.
 
 **`TenScenariosState`**: Nine scenarios are activated targeting `JDBC_CONNECTION_ACQUIRE` (a different operation type) and one scenario targets `JDBC_STATEMENT_EXECUTE` with a zero-probability activation. `registry.match()` reads only the `JDBC_STATEMENT_EXECUTE` entry of the operation index: the nine `JDBC_CONNECTION_ACQUIRE` scenarios are never evaluated; one matches but produces no terminal effect. This measures that scenarios for other operations add no per-call cost. (The recorded results predate the operation index, when all ten entries were scanned and nine discarded at the `operationType` check.)
 
@@ -201,7 +201,7 @@ The `baseline_noAgent` result is the floor below which no agent measurement can 
 
 ### 4.1 What It Measures
 
-`HttpClientBenchmark` mirrors `ChaosRuntimeBenchmark` in structure but targets `ChaosDispatcher.beforeHttpSend(URL, OperationType.HTTP_CLIENT_SEND)`. This is the entry point for all synchronous HTTP client interceptions (OkHttp `execute()`, Apache HC 4/5 `execute()`).
+`HttpClientBenchmark` mirrors `ChaosRuntimeBenchmark` in structure but targets `ClientDispatch.beforeHttpSend(URL, OperationType.HTTP_CLIENT_SEND)`. This is the entry point for all synchronous HTTP client interceptions (OkHttp `execute()`, Apache HC 4/5 `execute()`).
 
 The HTTP dispatch path has slightly more overhead than the JDBC path for one reason: URL pattern matching. For a `JdbcSelector` without a SQL pattern, the target name match is a single `NamePattern.any()` fast path. For an `HttpClientSelector`, the `urlPattern` may be a glob or regex matched against the full URL string. Even for `NamePattern.any()`, the `SelectorMatcher` must read the URL string from `InvocationContext.targetName` and invoke `urlPattern.matches()`. The constant URL `"https://example.com/api/v1/orders"` used throughout the HTTP benchmark ensures the string is interned and does not allocate on each call.
 
@@ -298,7 +298,7 @@ Prior to the 3.2 refactor, `ChaosRuntime` was a monolithic class containing both
 The 3.2 refactor split `ChaosRuntime` into:
 
 - `ChaosControlPlaneImpl` — owns scenario lifecycle, session management, `ScenarioRegistry` construction, diagnostics, event listeners, and the `Instrumentation` handle
-- `ChaosDispatcher` — owns all `before*` / `after*` / `adjust*` / `decorate*` dispatch methods
+- `ChaosDispatcher` — composes the dispatch domains (`ThreadDispatch`, `ExecutorDispatch`, `MethodDispatch`, `ClockDispatch`, `RuntimeDispatch`, `NetworkDispatch`, `DnsDispatch`, `FileDispatch`, `ProcessDispatch`, `ClientDispatch`), which own the `before*` / `after*` / `adjust*` / `decorate*` methods, over one shared `DispatchEngine`
 
 `ChaosRuntime` is now a thin facade that delegates to both components. `ChaosBridge` (the bootstrap bridge delegate) calls `ChaosRuntime` methods, which forward to the appropriate component.
 
@@ -319,7 +319,7 @@ public void agentInstalled_zeroScenarios(ZeroScenariosState state, Blackhole bh)
 }
 ```
 
-Calling `state.dispatcher.beforeJdbcStatementExecute()` instead of `state.runtime.beforeJdbcStatementExecute()` removes the `ChaosRuntime` facade delegation layer from the measurement. The JIT no longer needs to inline through the facade; it can inline `ChaosDispatcher.beforeJdbcStatementExecute` → `evaluateJdbc` → `registry.match` in a single inlining chain without interference from control-plane methods.
+Calling `state.dispatcher.client().beforeJdbcStatementExecute()` instead of `state.runtime.beforeJdbcStatementExecute()` removes the `ChaosRuntime` facade delegation layer from the measurement. The JIT no longer needs to inline through the facade; it can inline `ClientDispatch.beforeJdbcStatementExecute` → `evaluateJdbc` → `registry.match` in a single inlining chain without interference from control-plane methods.
 
 This makes the benchmark results cleaner and more stable across JMH runs: the C2 inlining decisions for the hot path are no longer dependent on which control-plane methods happened to be compiled first in the same JVM fork.
 

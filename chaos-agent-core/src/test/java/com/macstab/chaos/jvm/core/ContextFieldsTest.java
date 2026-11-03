@@ -101,7 +101,7 @@ class ContextFieldsTest {
     @DisplayName("the host name of an address is used when known, without a lookup")
     void hostNameWhenKnown() throws Exception {
       assertThat(
-              ChaosDispatcher.remoteHost(
+              NetworkDispatch.remoteHost(
                   InetAddress.getByAddress("db.internal", new byte[] {10, 0, 0, 5})))
           .isEqualTo("db.internal");
     }
@@ -109,7 +109,7 @@ class ContextFieldsTest {
     @Test
     @DisplayName("the IP literal is used when no host name is known")
     void ipLiteralOtherwise() throws Exception {
-      assertThat(ChaosDispatcher.remoteHost(InetAddress.getByAddress(new byte[] {10, 0, 0, 5})))
+      assertThat(NetworkDispatch.remoteHost(InetAddress.getByAddress(new byte[] {10, 0, 0, 5})))
           .isEqualTo("10.0.0.5");
     }
 

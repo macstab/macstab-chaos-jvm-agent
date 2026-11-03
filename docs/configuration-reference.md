@@ -190,7 +190,7 @@ If no source is present, the agent starts with no active scenarios. Programmatic
 4. Reentrancy guard (ThreadLocal<int[]> DEPTH) checked:
    - If depth > 0, skip all chaos (prevents infinite recursion)
    - If depth == 0, increment depth and proceed
-5. ChaosDispatcher.evaluate(invocationContext):
+5. DispatchEngine.evaluate(invocationContext):
    a. For each active scenario:
       - If scenario is SESSION-scoped: check current thread is bound to the session
       - If scenario is JVM-scoped: always eligible

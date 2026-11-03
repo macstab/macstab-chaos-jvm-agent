@@ -136,6 +136,25 @@ return DefaultChaosActivationHandle
 // already registered are destroyed and the exception propagates (the plan is atomic).
 ```
 
+## Dispatch Structure
+
+The entry points the instrumentation layer calls (`before*`, `after*`, `adjust*`, `decorate*`) live in one class per domain, all over one shared evaluation engine:
+
+| Class | Domain |
+|-------|--------|
+| `ThreadDispatch` | thread starts, sleeps, parks, monitor entries, thread-locals; session hand-off between threads |
+| `ExecutorDispatch` | executor submission and worker runs, scheduling, fork-join, queues, futures, shutdown hooks |
+| `MethodDispatch` | entry and exit of the methods a `MethodSelector` names |
+| `ClockDispatch` | clock skew of `System` call sites, `java.time`, the system `Clock`, `java.util.Date` |
+| `RuntimeDispatch` | gc and exit requests, reflection, direct buffers, serialization, class loading, resources, native libraries, zip, JNDI, JMX |
+| `NetworkDispatch` | sockets, socket channels, datagrams, selectors, TLS — with each call's peer and byte count |
+| `DnsDispatch` | forward lookups, their answer, reverse lookups |
+| `FileDispatch` | file reads, writes, opens, closes, maps, transfers, fsync, truncation, deletion, moves |
+| `ProcessDispatch` | child process starts and waits |
+| `ClientDispatch` | HTTP clients, JDBC, messaging, RPC, cache and cloud clients |
+
+`DispatchEngine` holds what every domain shares: the operation index check (`idle`), matching scenarios against an `InvocationContext` (`evaluate`), resolving their contributions to one `RuntimeDecision` (`terminalActionFor`), and carrying it out (`applyPreDecision`, `applyDelayAndGate`, `readCount`). `ChaosDispatcher` composes them; `ChaosRuntime` delegates each entry point to its domain.
+
 ## Per-Invocation Evaluation
 
 `ScenarioController.evaluate(InvocationContext context)` runs 8 checks:
