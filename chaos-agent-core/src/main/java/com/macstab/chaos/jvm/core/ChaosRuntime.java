@@ -777,6 +777,15 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
+   * Delegates to {@link ChaosDispatcher#corruptionSeed()}.
+   *
+   * @return the seed of the bit flip the current thread's read was told to apply
+   */
+  public long corruptionSeed() {
+    return dispatcher.corruptionSeed();
+  }
+
+  /**
    * Delegates to {@link ChaosDispatcher#beforeProcessStart(String)}.
    *
    * @param command the program

@@ -1201,7 +1201,8 @@ class DefectRegressionIntegrationTest {
     }
 
     @Test
-    @DisplayName("tornWrite sends a prefix then resets a stream, and shortens a channel write")
+    @DisplayName(
+        "tornWrite sends a prefix then really resets a stream, and shortens a channel write")
     void tornSocketWrites() throws Exception {
       final ChildJvmProbe.ProbeResult result =
           probe.run(
@@ -1221,6 +1222,9 @@ class DefectRegressionIntegrationTest {
       final long received = result.longValue("received");
       assertThat(received).isBetween(1L, 999L);
       assertThat(result.value("streamWrite")).contains(received + " of 1000 bytes sent");
+      // A real reset: the peer reads a reset, not a clean end of stream, and the socket is closed.
+      assertThat(result.value("peerEnd")).isEqualTo("reset");
+      assertThat(result.value("afterTorn")).isEqualTo("Socket closed");
       assertThat(result.longValue("channelFirstWrite")).isBetween(1L, 999L);
       assertThat(result.longValue("applied.torn-stream")).isEqualTo(1L);
       assertThat(result.longValue("applied.torn-channel")).isEqualTo(1L);

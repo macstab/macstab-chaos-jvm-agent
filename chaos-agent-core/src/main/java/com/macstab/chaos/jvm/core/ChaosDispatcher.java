@@ -2047,8 +2047,9 @@ public final class ChaosDispatcher {
     if (terminal.kind() != TerminalKind.DNS_SHAPE) {
       return null;
     }
+    final DnsShape shape = (DnsShape) terminal.returnValue();
     return DnsAnswers.shape(
-        (ChaosEffect.DnsAnswerEffect) terminal.returnValue(), hostname, answer, failure);
+        shape.effect(), hostname, answer, failure, new java.util.Random(shape.seed()));
   }
 
   /**
@@ -2132,12 +2133,38 @@ public final class ChaosDispatcher {
         return requested <= 0 ? requested : Math.min(requested, (Integer) terminal.returnValue());
       }
       case CORRUPT_READ -> {
+        // The bit the advice flips after the read derives from this seed (corruptionSeed()).
+        final long[] seed = CORRUPTION_SEED.get();
+        seed[0] = (Long) terminal.returnValue();
+        seed[1] = 1L;
         return corruptFlag(Math.max(requested, 0));
       }
       default -> {
         return requested;
       }
     }
+  }
+
+  /**
+   * The seed of the corruption the current thread's read was just told to apply: {@code [seed,
+   * set]}. Read once by {@link #corruptionSeed()}.
+   */
+  private static final ThreadLocal<long[]> CORRUPTION_SEED =
+      ThreadLocal.withInitial(() -> new long[2]);
+
+  /**
+   * Returns the seed of the bit flip the current thread's read was just told to apply, so a fixed
+   * {@code randomSeed} flips the same bit; a fresh random seed when there is none.
+   *
+   * @return the seed
+   */
+  public long corruptionSeed() {
+    final long[] seed = CORRUPTION_SEED.get();
+    if (seed[1] == 0L) {
+      return java.util.concurrent.ThreadLocalRandom.current().nextLong();
+    }
+    seed[1] = 0L;
+    return seed[0];
   }
 
   /** Whether the subject of a file operation is a {@code FileChannel}, which can write short. */
@@ -2257,7 +2284,12 @@ public final class ChaosDispatcher {
           continue;
         }
         final TerminalAction candidate =
-            terminalActionFor(context, contribution.effect(), contribution.scenario());
+            terminalActionFor(
+                context,
+                contribution.effect(),
+                contribution.scenario(),
+                contribution.controller(),
+                contribution.matchNumber());
         if (candidate != null && candidate.kind() == TerminalKind.NOT_APPLICABLE) {
           // Neither takes effect nor counts: the contribution is released below.
           continue;
@@ -2295,8 +2327,19 @@ public final class ChaosDispatcher {
     }
   }
 
+  /** Salts of the effects' own random choices; see {@link ScenarioController#effectSeed}. */
+  private static final long TORN_SALT = 1L;
+
+  private static final long CORRUPT_SALT = 2L;
+
+  private static final long SHUFFLE_SALT = 3L;
+
   private TerminalAction terminalActionFor(
-      final InvocationContext context, final ChaosEffect effect, final ChaosScenario scenario) {
+      final InvocationContext context,
+      final ChaosEffect effect,
+      final ChaosScenario scenario,
+      final ScenarioController controller,
+      final long matchNumber) {
     final OperationType operationType = context.operationType();
     if (effect instanceof ChaosEffect.ConnectionResetEffect) {
       return new TerminalAction(TerminalKind.ABORTIVE_CLOSE, null, null, scenario.id());
@@ -2306,7 +2349,11 @@ public final class ChaosDispatcher {
           TerminalKind.CAP_LENGTH, trickleEffect.maxBytes(), null, scenario.id());
     }
     if (effect instanceof ChaosEffect.DnsAnswerEffect answerEffect) {
-      return new TerminalAction(TerminalKind.DNS_SHAPE, answerEffect, null, scenario.id());
+      return new TerminalAction(
+          TerminalKind.DNS_SHAPE,
+          new DnsShape(answerEffect, controller.effectSeed(matchNumber, SHUFFLE_SALT)),
+          null,
+          scenario.id());
     }
     if (effect instanceof ChaosEffect.DnsRewriteEffect rewriteEffect) {
       return new TerminalAction(TerminalKind.REWRITE, rewriteEffect.host(), null, scenario.id());
@@ -2324,11 +2371,17 @@ public final class ChaosDispatcher {
         return new TerminalAction(TerminalKind.NOT_APPLICABLE, null, null, scenario.id());
       }
       final int torn =
-          1 + java.util.concurrent.ThreadLocalRandom.current().nextInt((int) requested - 1);
+          1
+              + new java.util.SplittableRandom(controller.effectSeed(matchNumber, TORN_SALT))
+                  .nextInt((int) requested - 1);
       return new TerminalAction(TerminalKind.CAP_LENGTH, torn, null, scenario.id());
     }
     if (effect instanceof ChaosEffect.CorruptReadEffect) {
-      return new TerminalAction(TerminalKind.CORRUPT_READ, null, null, scenario.id());
+      return new TerminalAction(
+          TerminalKind.CORRUPT_READ,
+          controller.effectSeed(matchNumber, CORRUPT_SALT),
+          null,
+          scenario.id());
     }
     if (effect instanceof ChaosEffect.TimeoutEffect) {
       // Like the native library, a timeout never fires on a call without one (infinite).

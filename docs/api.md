@@ -446,7 +446,7 @@ ChaosScenario.builder("deadlock-test")
 
 **Clock-skew scenarios** apply to every clock read while active. They honour `activeFor`, `activeFrom` and `activeUntil`; `maxApplications`, `rateLimit`, `activateAfterMatches > 0` and `probability < 1.0` are rejected with `ChaosValidationException` (1.x ignored them silently).
 
-**`randomSeed`**: With the same seed, probability sampling is deterministic across runs given the same sequence of `matchedCount` values. Different scenarios with the same seed still produce different samples because the seed is XOR-ed with `scenario.id().hashCode()`.
+**`randomSeed`**: With the same seed, probability sampling is deterministic across runs given the same sequence of `matchedCount` values, and so are the sampled delay, the torn-write length, the corrupted bit and the DNS shuffle order of each match. Different scenarios with the same seed still produce different samples because the seed is XOR-ed with `scenario.id().hashCode()`.
 
 ---
 

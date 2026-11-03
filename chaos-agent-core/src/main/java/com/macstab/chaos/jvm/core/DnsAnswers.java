@@ -31,6 +31,28 @@ final class DnsAnswers {
       final InetAddress[] answer,
       final Throwable failure)
       throws UnknownHostException {
+    return shape(effect, hostname, answer, failure, ThreadLocalRandom.current());
+  }
+
+  /**
+   * Shapes {@code answer} as {@link #shape(ChaosEffect.DnsAnswerEffect, String, InetAddress[],
+   * Throwable)} does, shuffling with {@code random}.
+   *
+   * @param effect the shaping effect
+   * @param hostname the name looked up
+   * @param answer the real answer, or {@code null} when the lookup failed
+   * @param failure the lookup's failure, or {@code null}
+   * @param random the shuffle's source
+   * @return the shaped answer
+   * @throws UnknownHostException when nothing is left of the answer
+   */
+  static InetAddress[] shape(
+      final ChaosEffect.DnsAnswerEffect effect,
+      final String hostname,
+      final InetAddress[] answer,
+      final Throwable failure,
+      final java.util.Random random)
+      throws UnknownHostException {
     final List<InetAddress> addresses = new ArrayList<>();
     if (effect.override() != null) {
       for (final String literal : effect.override()) {
@@ -53,7 +75,7 @@ final class DnsAnswers {
       }
     }
     if (effect.shuffle()) {
-      Collections.shuffle(addresses, ThreadLocalRandom.current());
+      Collections.shuffle(addresses, random);
     }
     if (effect.limit() != null && addresses.size() > effect.limit()) {
       addresses.subList(effect.limit(), addresses.size()).clear();

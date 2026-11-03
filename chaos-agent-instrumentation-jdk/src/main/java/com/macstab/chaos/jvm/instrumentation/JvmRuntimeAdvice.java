@@ -470,11 +470,28 @@ final class JvmRuntimeAdvice {
       return -1;
     }
 
-    /** A torn write sent its prefix; it now fails as a reset connection. */
+    /**
+     * A torn write sent its prefix; the connection is now reset for real (linger 0, then close, so
+     * the peer reads a reset rather than a clean end of stream) and the write fails as reset.
+     *
+     * <p>Inlined into {@code NioSocketImpl}: the reflective calls of its own protected {@code
+     * setOption} and {@code close} pass the access check because the caller is that class.
+     */
     @Advice.OnMethodExit
-    static void exit(@Advice.Enter final int requested, @Advice.Argument(2) final int len)
+    static void exit(
+        @Advice.This final Object impl,
+        @Advice.Enter final int requested,
+        @Advice.Argument(2) final int len)
         throws Throwable {
       if (requested >= 0) {
+        try {
+          impl.getClass()
+              .getDeclaredMethod("setOption", java.net.SocketOption.class, Object.class)
+              .invoke(impl, java.net.StandardSocketOptions.SO_LINGER, 0);
+          impl.getClass().getDeclaredMethod("close").invoke(impl);
+        } catch (final Throwable ignored) {
+          // The failure below is still thrown; only the peer's view degrades to a plain close.
+        }
         throw BootstrapDispatcher.tornWriteFailure(len, requested);
       }
     }

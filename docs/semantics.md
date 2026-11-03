@@ -42,7 +42,7 @@ For a matching call, the scenario's `ActivationPolicy` is checked in this order;
 
 **L8 — The probability is in (0, 1].** `0.0` is rejected; a scenario that must never fire is not activated. `1.0` always passes step 7.
 
-**L9 — Draws are reproducible.** With a fixed `randomSeed`, the probability draw and the sampled delay of the *n*-th match are fixed: both derive from `seed ^ n ^ id.hashCode()`, the delay from an independent split stream, so they are not correlated.
+**L9 — Draws are reproducible.** With a fixed `randomSeed`, the probability draw and the sampled delay of the *n*-th match are fixed: both derive from `seed ^ n ^ id.hashCode()`, the delay from an independent split stream, so they are not correlated. So are the effects' own choices of that match: the length of a torn write, the bit a corrupted read flips and the order of a shuffled DNS answer each derive from the same seed, salted per kind of choice.
 
 **L9a — A replay log replaces the draw.** With `replayMatches`, step 7 passes exactly on the listed match numbers (counted from 1 over every match since the scenario started, warm-up included, as step 6 counts them). `ChaosDecisionRecorder` records the numbers from the `match` attribute of `APPLIED` events, so a run — seeded or not — replays decision by decision as long as the calls arrive in the same order.
 

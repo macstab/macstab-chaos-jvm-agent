@@ -443,8 +443,11 @@ public final class BootstrapDispatcher {
   /** Handle index for {@link #currentSessionId()}. */
   public static final int CURRENT_SESSION_ID = 66;
 
+  /** Handle index for {@link #corruptionSeed()}. */
+  public static final int CORRUPTION_SEED = 67;
+
   /** Total number of method-handle slots; equals the highest index plus one. */
-  public static final int HANDLE_COUNT = 67;
+  public static final int HANDLE_COUNT = 68;
 
   /** The header that carries a session id between services; {@code ChaosSession.HEADER}. */
   public static final String SESSION_HEADER = "X-Chaos-Session";
@@ -2347,10 +2350,32 @@ public final class BootstrapDispatcher {
     if (buffer == null || count <= 0) {
       return;
     }
-    final java.util.concurrent.ThreadLocalRandom random =
-        java.util.concurrent.ThreadLocalRandom.current();
+    final java.util.SplittableRandom random = new java.util.SplittableRandom(corruptionSeed());
     final int index = offset + random.nextInt(count);
     buffer[index] = (byte) (buffer[index] ^ (1 << random.nextInt(8)));
+  }
+
+  /**
+   * Returns the seed of the bit flip the scenario chose for the current thread's read, so a fixed
+   * {@code randomSeed} corrupts the same bit; random when the agent is not installed.
+   *
+   * @return the seed
+   */
+  public static long corruptionSeed() {
+    final int[] depth = DEPTH.get();
+    final MethodHandle[] h = handles;
+    final Object d = delegate;
+    if (depth[0] > 0 || d == null || h == null) {
+      return java.util.concurrent.ThreadLocalRandom.current().nextLong();
+    }
+    depth[0]++;
+    try {
+      return (long) h[CORRUPTION_SEED].invoke(d);
+    } catch (final Throwable throwable) {
+      return java.util.concurrent.ThreadLocalRandom.current().nextLong();
+    } finally {
+      depth[0]--;
+    }
   }
 
   /**
@@ -2379,8 +2404,7 @@ public final class BootstrapDispatcher {
     if (buffer == null || count <= 0 || buffer.isReadOnly() || count > buffer.position()) {
       return;
     }
-    final java.util.concurrent.ThreadLocalRandom random =
-        java.util.concurrent.ThreadLocalRandom.current();
+    final java.util.SplittableRandom random = new java.util.SplittableRandom(corruptionSeed());
     final int index = buffer.position() - count + random.nextInt(count);
     buffer.put(index, (byte) (buffer.get(index) ^ (1 << random.nextInt(8))));
   }
@@ -2394,7 +2418,7 @@ public final class BootstrapDispatcher {
   public static int corruptByte(final int value) {
     return value < 0
         ? value
-        : (value ^ (1 << java.util.concurrent.ThreadLocalRandom.current().nextInt(8))) & 0xFF;
+        : (value ^ (1 << new java.util.SplittableRandom(corruptionSeed()).nextInt(8))) & 0xFF;
   }
 
   /**

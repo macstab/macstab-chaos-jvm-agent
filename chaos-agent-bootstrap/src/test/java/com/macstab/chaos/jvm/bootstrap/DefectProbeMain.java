@@ -756,6 +756,7 @@ public final class DefectProbeMain {
   private static void socketTornWrite() throws Exception {
     try (java.net.ServerSocket server =
         new java.net.ServerSocket(0, 2, InetAddress.getByName("127.0.0.1"))) {
+      final String[] peerEnd = {"eof"};
       final java.util.concurrent.CompletableFuture<Long> received =
           java.util.concurrent.CompletableFuture.supplyAsync(
               () -> {
@@ -768,6 +769,7 @@ public final class DefectProbeMain {
                     }
                   } catch (final java.io.IOException reset) {
                     // the writer's connection ended; what arrived is counted
+                    peerEnd[0] = "reset";
                   }
                   return total;
                 } catch (final java.io.IOException failed) {
@@ -781,8 +783,15 @@ public final class DefectProbeMain {
         } catch (final java.net.SocketException torn) {
           System.out.println("streamWrite=" + torn.getMessage());
         }
+        try {
+          client.getOutputStream().write(1);
+          System.out.println("afterTorn=ok");
+        } catch (final java.io.IOException closed) {
+          System.out.println("afterTorn=" + closed.getMessage());
+        }
       }
       System.out.println("received=" + received.get(5, TimeUnit.SECONDS));
+      System.out.println("peerEnd=" + peerEnd[0]);
       final java.util.concurrent.CompletableFuture<java.net.Socket> sink =
           java.util.concurrent.CompletableFuture.supplyAsync(
               () -> {

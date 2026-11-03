@@ -528,6 +528,16 @@ final class ChaosBridge implements BridgeDelegate {
   }
 
   /**
+   * Returns the seed of the bit flip the current thread's read was told to apply.
+   *
+   * @return the seed
+   */
+  @Override
+  public long corruptionSeed() {
+    return runtime.corruptionSeed();
+  }
+
+  /**
    * Invoked before a {@code SocketChannel} write.
    *
    * @param channel the channel being written to

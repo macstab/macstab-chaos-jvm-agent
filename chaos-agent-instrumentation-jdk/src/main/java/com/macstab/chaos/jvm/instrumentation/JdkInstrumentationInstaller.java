@@ -832,6 +832,8 @@ public final class JdkInstrumentationInstaller {
             delegateInterface,
             "beforeSocketWrite",
             MethodType.methodType(int.class, Object.class, int.class, Object.class, int.class));
+    methodHandles[BootstrapDispatcher.CORRUPTION_SEED] =
+        lookup.findVirtual(delegateInterface, "corruptionSeed", MethodType.methodType(long.class));
     methodHandles[BootstrapDispatcher.CURRENT_SESSION_ID] =
         lookup.findVirtual(
             delegateInterface, "currentSessionId", MethodType.methodType(String.class));

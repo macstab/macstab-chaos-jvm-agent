@@ -462,6 +462,13 @@ public interface BridgeDelegate {
   String currentSessionId();
 
   /**
+   * Returns the seed of the bit flip the current thread's read was just told to apply.
+   *
+   * @return the seed
+   */
+  long corruptionSeed();
+
+  /**
    * Called before {@link java.net.Socket#close()}.
    *
    * @param socket the socket being closed; never {@code null}

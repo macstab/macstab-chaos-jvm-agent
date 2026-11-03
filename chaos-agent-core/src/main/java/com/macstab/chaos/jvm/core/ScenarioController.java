@@ -903,6 +903,19 @@ final class ScenarioController {
   }
 
   /**
+   * Returns the seed of an effect's own random choice (a torn length, a corrupted bit, a DNS
+   * shuffle) for the {@code matched}-th match: derived like the probability draw, so a fixed {@code
+   * randomSeed} reproduces it, and salted per choice so it is independent of the draw.
+   *
+   * @param matched the 1-based match number
+   * @param salt distinguishes the kinds of choice
+   * @return the seed
+   */
+  long effectSeed(final long matched, final long salt) {
+    return splittableRandom(matched).nextLong() ^ (salt * 0xbf58476d1ce4e5b9L);
+  }
+
+  /**
    * Returns a {@link SplittableRandom} seeded with {@code baseSeed ^ matched ^ scenarioIdHash}.
    *
    * <p>A new instance is constructed per call because {@link SplittableRandom} is not thread-safe.
