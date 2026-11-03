@@ -92,6 +92,8 @@
 
 ### Bug Fixes
 
+* **core:** `RuntimeDecision.none()` allocated a new decision on every call although documented as shared; on the executor-submit path escape analysis did not remove it, so every submission paid 32 B with no scenario active.
+
 * **instrumentation:** Apache HttpClient 4 chaos never applied: its class files are Java 6, and the advice's string concatenation compiled to `invokedynamic`, which cannot be woven into them, so every transformation of `CloseableHttpClient` failed. Found by the new hook-coverage test.
 
 * **instrumentation:** a class loaded as a side effect of weaving one hook group (inside another class's load hook) escaped the transformers of groups woven before it; the post-install retransformation that repaired this for the object streams now runs after every weave and covers the socket classes.

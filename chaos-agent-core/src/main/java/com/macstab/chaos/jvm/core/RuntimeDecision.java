@@ -17,12 +17,15 @@ package com.macstab.chaos.jvm.core;
  */
 record RuntimeDecision(long delayMillis, GateAction gateAction, TerminalAction terminalAction) {
 
+  /** The no-op decision; immutable, so one instance serves every call. */
+  private static final RuntimeDecision NONE = new RuntimeDecision(0L, null, null);
+
   /**
    * Returns a decision that has no effect: zero delay, no gate, and no terminal action.
    *
    * @return a {@code RuntimeDecision} that is a no-op; the same instance is returned each time
    */
   static RuntimeDecision none() {
-    return new RuntimeDecision(0L, null, null);
+    return NONE;
   }
 }

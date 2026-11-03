@@ -587,7 +587,7 @@ confidence intervals.
 
 ### 8.1 What It Measures
 
-Each benchmark method calls a `BootstrapDispatcher` dispatch method exactly as woven advice does: the inline reentrancy guard, the method-handle hop into `ChaosBridge`, the operation index in `ChaosDispatcher` and, when a scenario's selector matches, the policy checks. `JdkInstrumentationInstaller.connectDispatcher(runtime)` connects a runtime to the dispatcher without weaving any class. Methods: `clockMillis`, `threadSleep`, `fileRead`, `socketRead`, `executorSubmit`.
+Each benchmark method calls a `BootstrapDispatcher` dispatch method exactly as woven advice does: the inline reentrancy guard, the method-handle hop into `ChaosBridge`, the operation index in `ChaosDispatcher` and, when a scenario's selector matches, the policy checks. `JdkInstrumentationInstaller.connectDispatcher(runtime)` connects a runtime to the dispatcher without weaving any class. Methods: `clockMillis`, `clockRead`, `clockReadMillis`, `threadSleep`, `fileRead`, `fileClose`, `socketRead`, `socketChannelRead`, `datagramSend`, `executorSubmit`.
 
 | `scenarios`           | Active scenarios                                                                       |
 |-----------------------|----------------------------------------------------------------------------------------|
@@ -597,15 +597,22 @@ Each benchmark method calls a `BootstrapDispatcher` dispatch method exactly as w
 
 ### 8.2 Measured Results
 
-Apple M-series, JDK 25, `-f 1 -wi 1 -i 2 -prof gc` (indicative; CI measures its own baseline):
+Apple M-series, JDK 25, `-f 1 -wi 3 -i 5 -prof gc` (indicative; CI measures its own baseline):
 
-| Method           | `none`        | `otherOperation` | `matchedNotYetActive` |
-|------------------|---------------|------------------|-----------------------|
-| `clockMillis`    | 7.1 ns, 0 B   | 7.1 ns, 0 B      | 28 ns, 0 B            |
-| `threadSleep`    | 7.5 ns, 0 B   | 7.5 ns, 0 B      | 63 ns, 104 B          |
-| `fileRead`       | 7.2 ns, 0 B   | 7.4 ns, 0 B      | 56 ns, 104 B          |
-| `socketRead`     | 7.7 ns, 0 B   | 7.5 ns, 0 B      | 98 ns, 104 B          |
-| `executorSubmit` | 11.7 ns, 0 B  | 11.7 ns, 0 B     | 82 ns, 200 B          |
+| Method              | `none`        | `otherOperation` | `matchedNotYetActive` |
+|---------------------|---------------|------------------|-----------------------|
+| `clockMillis`       | 7.2 ns, 0 B   | 7.1 ns, 0 B      | 28 ns, 0 B            |
+| `clockRead`         | 7.7 ns, 0 B   | 7.7 ns, 0 B      | 28 ns, 0 B            |
+| `clockReadMillis`   | 7.4 ns, 0 B   | 7.3 ns, 0 B      | 28 ns, 0 B            |
+| `threadSleep`       | 7.5 ns, 0 B   | 7.6 ns, 0 B      | 51 ns, 104 B          |
+| `fileRead`          | 8.7 ns, 0 B   | 8.8 ns, 0 B      | 46 ns, 104 B          |
+| `fileClose`         | 8.7 ns, 0 B   | 8.8 ns, 0 B      | 45 ns, 104 B          |
+| `socketRead`        | 7.3 ns, 0 B   | 7.3 ns, 0 B      | 50 ns, 104 B          |
+| `socketChannelRead` | 8.7 ns, 0 B   | 7.8 ns, 0 B      | 48 ns, 104 B          |
+| `datagramSend`      | 8.2 ns, 0 B   | 7.7 ns, 0 B      | 45 ns, 104 B          |
+| `executorSubmit`    | 13.5 ns, 0 B  | 15.6 ns, 0 B     | 65 ns, 168 B          |
+
+`clockRead` / `clockReadMillis` are the system-clock reads behind every `java.time` `now()` (`CLOCK_READ`), `fileClose` every stream and channel close: hot paths once their groups are woven, and as cheap as the older hooks. A socket-channel read pays `socketChannelRead` and the channel-level `NIO_CHANNEL_READ` check. `executorSubmit` allocated a no-op decision per call (32 B with no scenario) until `RuntimeDecision.none()` returned a shared instance.
 
 A call whose operation has no scenario allocates nothing: the dispatcher checks the operation index before it builds the `InvocationContext`. Before 2.0 every one of these calls built the context first (23–54 ns and 104–200 B per call with no scenario at all). A call that reaches a matching selector allocates its context, which escape analysis cannot remove across the registry's megamorphic controller loop.
 

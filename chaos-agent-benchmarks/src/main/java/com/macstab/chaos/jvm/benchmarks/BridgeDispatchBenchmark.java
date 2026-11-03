@@ -62,6 +62,10 @@ public class BridgeDispatchBenchmark {
 
   private static final Runnable TASK = () -> {};
 
+  private static final Instant NOW = Instant.ofEpochSecond(1_700_000_000L);
+
+  private static final java.nio.ByteBuffer BUFFER = java.nio.ByteBuffer.allocate(8192);
+
   private ChaosRuntime runtime;
   private AutoCloseable connection;
 
@@ -109,6 +113,22 @@ public class BridgeDispatchBenchmark {
             scenario(
                 "submit",
                 ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)),
+                ChaosEffect.delay(Duration.ofMillis(1))));
+        runtime.activate(
+            scenario(
+                "clock-read",
+                ChaosSelector.jvmRuntime(Set.of(OperationType.CLOCK_READ)),
+                new ChaosEffect.ClockSkewEffect(
+                    Duration.ofSeconds(1), ChaosEffect.ClockSkewMode.FIXED)));
+        runtime.activate(
+            scenario(
+                "close",
+                ChaosSelector.fileIo(Set.of(OperationType.FILE_IO_CLOSE)),
+                ChaosEffect.delay(Duration.ofMillis(1))));
+        runtime.activate(
+            scenario(
+                "datagram",
+                ChaosSelector.network(Set.of(OperationType.DATAGRAM_SEND)),
                 ChaosEffect.delay(Duration.ofMillis(1))));
       }
       default -> throw new IllegalArgumentException("unknown scenarios: " + scenarios);
@@ -179,6 +199,62 @@ public class BridgeDispatchBenchmark {
   @Benchmark
   public Runnable executorSubmit() throws Throwable {
     return BootstrapDispatcher.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, TASK);
+  }
+
+  /**
+   * System {@code Clock.instant()} advice ({@code CLOCK_READ}): every {@code java.time} read
+   * without an operation of its own.
+   *
+   * @return the adjusted instant
+   * @throws Throwable never, with these scenarios
+   */
+  @Benchmark
+  public Instant clockRead() throws Throwable {
+    return BootstrapDispatcher.adjustClockInstant(NOW);
+  }
+
+  /**
+   * System {@code Clock.millis()} advice ({@code CLOCK_READ}).
+   *
+   * @return the adjusted milliseconds
+   * @throws Throwable never, with these scenarios
+   */
+  @Benchmark
+  public long clockReadMillis() throws Throwable {
+    return BootstrapDispatcher.adjustClockReadMillis(1_700_000_000_000L);
+  }
+
+  /**
+   * Stream and channel {@code close()} advice ({@code FILE_IO_CLOSE}).
+   *
+   * @return the byte-count code
+   * @throws Throwable never, with these scenarios
+   */
+  @Benchmark
+  public int fileClose() throws Throwable {
+    return BootstrapDispatcher.beforeFileIo("FILE_IO_CLOSE", this, "/tmp/bench.dat", -1);
+  }
+
+  /**
+   * {@code SocketChannel.read(ByteBuffer)} advice ({@code SOCKET_READ} of a channel).
+   *
+   * @return the buffer shaping, {@code null} when unchanged
+   * @throws Throwable never, with these scenarios
+   */
+  @Benchmark
+  public Object socketChannelRead() throws Throwable {
+    return BootstrapDispatcher.beforeSocketChannelRead(this, BUFFER);
+  }
+
+  /**
+   * {@code DatagramChannel.send} advice ({@code DATAGRAM_SEND}).
+   *
+   * @return {@code 0} to send
+   * @throws Throwable never, with these scenarios
+   */
+  @Benchmark
+  public int datagramSend() throws Throwable {
+    return BootstrapDispatcher.beforeDatagramSend(this, BUFFER, null);
   }
 
   private static ChaosScenario scenario(
