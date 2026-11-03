@@ -1277,20 +1277,30 @@ The client libraries below are hooked by class name and never loaded by the agen
 
 The runtime validator enforces this at activation time. Mismatches throw `ChaosValidationException`.
 
-| Selector type               | Compatible effect types                                                                                   |
-|-----------------------------|-----------------------------------------------------------------------------------------------------------|
-| Any interception selector   | `delay`, `reject`, `suppress`\*\*\*, `exceptionInjection`\*, `returnValueCorruption`\*, `gate`, `clockSkew`\*\* |
-| `async`                     | + `exceptionalCompletion`                                                                                 |
-| `nio` (NIO_SELECTOR_SELECT) | + `spuriousWakeup`                                                                                        |
-| `method` (METHOD_ENTER)     | `exceptionInjection` ✓                                                                                    |
-| `method` (METHOD_EXIT)      | `returnValueCorruption` ✓                                                                                 |
-| `jvmRuntime`                | `clockSkew` ✓                                                                                             |
-| `stress`                    | Stressor effects only (`heapPressure`, `deadlock`, etc.)                                                  |
+Each interceptor effect applies to the operations below, with any selector that selects them; any other operation is rejected. A stressor effect needs the `stress` selector with the matching `target`. Within an operation's list, `errno` depends on the code (see [`errno`](#errno--errnoeffect)) and `exceptionInjection` / `returnValueCorruption` need a `method` selector. The table is generated from `CompatibilityValidator` by `CompatibilityMatrixDocTest`; regenerate it with `./gradlew :chaos-agent-core:test --tests '*CompatibilityMatrixDocTest*' -PupdateDocs`.
 
-\* `exceptionInjection` is only valid with `MethodSelector` + `METHOD_ENTER`.  
-\* `returnValueCorruption` is only valid with `MethodSelector` + `METHOD_EXIT`.  
-\*\* `clockSkew` is only valid with `JvmRuntimeSelector` and only for the clock reads `INSTANT_NOW`, `CLOCK_READ`, `LOCAL_DATE_TIME_NOW`, `ZONED_DATE_TIME_NOW`, `DATE_NEW`, `SYSTEM_CLOCK_MILLIS`, `SYSTEM_CLOCK_NANOS`. Conversely, those clock reads accept **only** `clockSkew` — any other effect on them is rejected.  
-\*\*\* `suppress` is only accepted when every operation in the selector is one of: `THREAD_START`, `VIRTUAL_THREAD_START`, `THREAD_SLEEP`, `EXECUTOR_SUBMIT`, `SCHEDULE_SUBMIT`, `SCHEDULE_TICK`, `QUEUE_OFFER`, `QUEUE_POLL`, `ASYNC_COMPLETE`, `ASYNC_COMPLETE_EXCEPTIONALLY`, `ASYNC_CANCEL`, `RESOURCE_LOAD`, `SYSTEM_GC_REQUEST`, `SYSTEM_EXIT_REQUEST`, `NIO_SELECTOR_SELECT`, `THREAD_LOCAL_GET`, `THREAD_LOCAL_SET`, `HTTP_CLIENT_SEND`, `HTTP_CLIENT_SEND_ASYNC`, `JDBC_CONNECTION_ACQUIRE`, `JDBC_STATEMENT_EXECUTE`, `JDBC_PREPARED_STATEMENT`, `JDBC_TRANSACTION_COMMIT`, `JDBC_TRANSACTION_ROLLBACK`. Other interception points can only delay or throw.
+<!-- compatibility-table:begin (generated) -->
+| Effect | Operations it applies to |
+|--------|--------------------------|
+| `delay` | every operation except `SYSTEM_CLOCK_MILLIS`, `SYSTEM_CLOCK_NANOS`, `INSTANT_NOW`, `CLOCK_READ`, `LOCAL_DATE_TIME_NOW`, `ZONED_DATE_TIME_NOW`, `DATE_NEW` |
+| `gate` | every operation except `SYSTEM_CLOCK_MILLIS`, `SYSTEM_CLOCK_NANOS`, `INSTANT_NOW`, `CLOCK_READ`, `LOCAL_DATE_TIME_NOW`, `ZONED_DATE_TIME_NOW`, `DATE_NEW` |
+| `reject` | every operation except `SYSTEM_CLOCK_MILLIS`, `SYSTEM_CLOCK_NANOS`, `INSTANT_NOW`, `CLOCK_READ`, `LOCAL_DATE_TIME_NOW`, `ZONED_DATE_TIME_NOW`, `DATE_NEW`, `NETTY_CHANNEL_READ` |
+| `errno` | `THREAD_START`, `NIO_CHANNEL_READ`, `NIO_CHANNEL_WRITE`, `NIO_CHANNEL_CONNECT`, `NIO_CHANNEL_ACCEPT`, `SOCKET_CONNECT`, `SOCKET_ACCEPT`, `SOCKET_READ`, `SOCKET_WRITE`, `SOCKET_CLOSE`, `SOCKET_BIND`, `SOCKET_SHUTDOWN`, `DATAGRAM_SEND`, `DATAGRAM_RECEIVE`, `FILE_IO_READ`, `FILE_IO_WRITE`, `FILE_IO_SYNC`, `FILE_IO_TRUNCATE`, `FILE_IO_DELETE`, `FILE_IO_MOVE`, `FILE_IO_OPEN`, `FILE_IO_MAP`, `FILE_IO_CLOSE`, `FILE_IO_MOVE_TARGET`, `PROCESS_START` |
+| `trickle` | `SOCKET_READ` |
+| `corruptRead` | `SOCKET_READ`, `DATAGRAM_RECEIVE`, `FILE_IO_READ` |
+| `timeout` | `NIO_SELECTOR_SELECT`, `SOCKET_CONNECT`, `SOCKET_READ`, `PROCESS_WAIT` |
+| `connectionReset` | `SOCKET_CLOSE` |
+| `tornWrite` | `NIO_CHANNEL_WRITE`, `SOCKET_WRITE`, `FILE_IO_WRITE` |
+| `dnsAnswer` | `DNS_ANSWER` |
+| `dnsRewrite` | `DNS_RESOLVE` |
+| `redirect` | `SOCKET_CONNECT` |
+| `suppress` | `THREAD_START`, `VIRTUAL_THREAD_START`, `EXECUTOR_SUBMIT`, `SCHEDULE_SUBMIT`, `SCHEDULE_TICK`, `QUEUE_OFFER`, `QUEUE_POLL`, `ASYNC_COMPLETE`, `ASYNC_COMPLETE_EXCEPTIONALLY`, `RESOURCE_LOAD`, `SYSTEM_GC_REQUEST`, `SYSTEM_EXIT_REQUEST`, `NIO_SELECTOR_SELECT`, `DATAGRAM_SEND`, `ASYNC_CANCEL`, `THREAD_LOCAL_GET`, `THREAD_LOCAL_SET`, `HTTP_CLIENT_SEND`, `HTTP_CLIENT_SEND_ASYNC`, `JDBC_CONNECTION_ACQUIRE`, `JDBC_STATEMENT_EXECUTE`, `JDBC_PREPARED_STATEMENT`, `JDBC_TRANSACTION_COMMIT`, `JDBC_TRANSACTION_ROLLBACK`, `THREAD_SLEEP` |
+| `exceptionalCompletion` | `ASYNC_COMPLETE`, `ASYNC_COMPLETE_EXCEPTIONALLY`, `ASYNC_CANCEL` |
+| `exceptionInjection` | `METHOD_ENTER` |
+| `returnValueCorruption` | `METHOD_EXIT` |
+| `clockSkew` | `SYSTEM_CLOCK_MILLIS`, `SYSTEM_CLOCK_NANOS`, `INSTANT_NOW`, `CLOCK_READ`, `LOCAL_DATE_TIME_NOW`, `ZONED_DATE_TIME_NOW`, `DATE_NEW` |
+| `spuriousWakeup` | `NIO_SELECTOR_SELECT` |
+<!-- compatibility-table:end -->
 
 ---
 
