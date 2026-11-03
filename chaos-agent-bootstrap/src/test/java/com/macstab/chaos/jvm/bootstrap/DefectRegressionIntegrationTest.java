@@ -482,6 +482,30 @@ class DefectRegressionIntegrationTest {
     }
 
     @Test
+    @DisplayName("Apache HC4 execute(request) is one HTTP_CLIENT_SEND match on the full URL")
+    void hc4Execute() throws Exception {
+      assertSingleMatch(
+          "hc4",
+          ChaosSelector.httpClient(
+              Set.of(OperationType.HTTP_CLIENT_SEND), NamePattern.glob("http://127.0.0.1:*/probe")),
+          "hc4-execute",
+          System.getProperty("chaos.test.coverageClasspath"),
+          Hc4ProbeMain.class);
+    }
+
+    @Test
+    @DisplayName("Apache HC4 execute(HttpHost, request) matches on the full URL")
+    void hc4ExecuteWithHost() throws Exception {
+      assertSingleMatch(
+          "hc4-host",
+          ChaosSelector.httpClient(
+              Set.of(OperationType.HTTP_CLIENT_SEND), NamePattern.glob("http://127.0.0.1:*/probe")),
+          "hc4-execute-host",
+          System.getProperty("chaos.test.coverageClasspath"),
+          Hc4ProbeMain.class);
+    }
+
+    @Test
     @DisplayName("Reactor Netty requests are intercepted")
     void reactorNetty() throws Exception {
       final ChildJvmProbe.ProbeResult result =

@@ -35,6 +35,7 @@ dependencies {
     testCompileOnly(libs.okhttp)
     testCompileOnly(libs.apache.httpclient5)
     testCompileOnly(libs.reactor.netty.http)
+    testCompileOnly(libs.apache.httpclient4)
     coverageProbe(libs.apache.httpclient4)
     coverageProbe(libs.c3p0)
     httpClientProbe(libs.okhttp)
