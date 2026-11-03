@@ -3,6 +3,7 @@ package com.macstab.chaos.jvm.instrumentation;
 import com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher;
 import com.macstab.chaos.jvm.instrumentation.bridge.ChannelBuffers;
 import net.bytebuddy.asm.Advice;
+import net.bytebuddy.implementation.bytecode.assign.Assigner;
 
 /**
  * ByteBuddy {@link Advice} classes for JVM-level interception points wired in Phase 2.
@@ -591,9 +592,11 @@ final class JvmRuntimeAdvice {
   static final class SocketChannelConnectAdvice {
     @Advice.OnMethodEnter
     static void enter(
-        @Advice.This final Object channel, @Advice.Argument(0) final Object socketAddress)
+        @Advice.This final Object channel,
+        @Advice.Argument(value = 0, readOnly = false, typing = Assigner.Typing.DYNAMIC)
+            Object socketAddress)
         throws Throwable {
-      BootstrapDispatcher.beforeSocketConnect(channel, socketAddress, 0);
+      socketAddress = BootstrapDispatcher.beforeSocketConnect(channel, socketAddress, 0);
     }
   }
 
@@ -720,10 +723,12 @@ final class JvmRuntimeAdvice {
     @Advice.OnMethodEnter
     static void enter(
         @Advice.This final Object socket,
-        @Advice.Argument(0) final Object socketAddress,
+        @Advice.Argument(value = 0, readOnly = false, typing = Assigner.Typing.DYNAMIC)
+            Object socketAddress,
         @Advice.Argument(1) final int timeoutMillis)
         throws Throwable {
-      BootstrapDispatcher.beforeSocketConnect(socket, socketAddress, timeoutMillis);
+      // A RedirectEffect returns another endpoint to connect to.
+      socketAddress = BootstrapDispatcher.beforeSocketConnect(socket, socketAddress, timeoutMillis);
     }
   }
 

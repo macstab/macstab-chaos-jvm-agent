@@ -448,12 +448,13 @@ final class ChaosBridge implements BridgeDelegate {
    * @param socket the socket being connected
    * @param socketAddress the remote address to connect to
    * @param timeoutMillis the connect timeout in milliseconds ({@code 0} means no timeout)
+   * @return the endpoint to connect to instead, or {@code null}
    * @throws Throwable if the runtime decides to abort or delay the connection
    */
   @Override
-  public void beforeSocketConnect(
+  public Object beforeSocketConnect(
       final Object socket, final Object socketAddress, final int timeoutMillis) throws Throwable {
-    runtime.beforeSocketConnect(socket, socketAddress, timeoutMillis);
+    return runtime.beforeSocketConnect(socket, socketAddress, timeoutMillis);
   }
 
   /**

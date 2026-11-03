@@ -1283,34 +1283,48 @@ public final class ChaosDispatcher {
    * @param socket the socket being connected
    * @param socketAddress the remote socket address being targeted
    * @param timeoutMillis the connect timeout in milliseconds
+   * @return the endpoint to connect to instead under a {@code RedirectEffect}; {@code null} to
+   *     connect as asked
    * @throws Throwable if an active scenario throws to simulate a failure
    */
-  public void beforeSocketConnect(
+  public InetSocketAddress beforeSocketConnect(
       final Object socket, final Object socketAddress, final int timeoutMillis) throws Throwable {
+    if (idle(OperationType.SOCKET_CONNECT)) {
+      return null;
+    }
     final String remoteHost = extractRemoteHost(socketAddress);
     final InetSocketAddress inetSocketAddress =
         socketAddress instanceof InetSocketAddress address ? address : null;
-    applyPreDecision(
-        (idle(OperationType.SOCKET_CONNECT)
-            ? RuntimeDecision.none()
-            : evaluate(
-                new InvocationContext(
-                    OperationType.SOCKET_CONNECT,
-                    socket == null ? "java.net.Socket" : socket.getClass().getName(),
-                    null,
-                    remoteHost,
-                    false,
-                    null,
-                    null,
-                    scopeContext.currentSessionId(),
-                    InvocationContext.UNKNOWN,
-                    null,
-                    inetSocketAddress == null ? null : inetSocketAddress.getAddress(),
-                    inetSocketAddress == null
-                        ? InvocationContext.UNKNOWN
-                        : inetSocketAddress.getPort(),
-                    null,
-                    timeoutMillis))));
+    final RuntimeDecision decision =
+        evaluate(
+            new InvocationContext(
+                OperationType.SOCKET_CONNECT,
+                socket == null ? "java.net.Socket" : socket.getClass().getName(),
+                null,
+                remoteHost,
+                false,
+                null,
+                null,
+                scopeContext.currentSessionId(),
+                InvocationContext.UNKNOWN,
+                null,
+                inetSocketAddress == null ? null : inetSocketAddress.getAddress(),
+                inetSocketAddress == null ? InvocationContext.UNKNOWN : inetSocketAddress.getPort(),
+                null,
+                timeoutMillis));
+    if (decision.terminalAction() != null
+        && decision.terminalAction().kind() == TerminalKind.REWRITE
+        && decision.terminalAction().returnValue() instanceof ChaosEffect.RedirectEffect redirect) {
+      applyDelayAndGate(decision);
+      // Resolved here, where the agent's own lookup is not evaluated by the DNS hooks.
+      return new InetSocketAddress(
+          redirect.host(),
+          redirect.port() != null
+              ? redirect.port()
+              : inetSocketAddress == null ? 0 : inetSocketAddress.getPort());
+    }
+    applyPreDecision(decision);
+    return null;
   }
 
   /**
@@ -2584,6 +2598,9 @@ public final class ChaosDispatcher {
     }
     if (effect instanceof ChaosEffect.DnsRewriteEffect rewriteEffect) {
       return new TerminalAction(TerminalKind.REWRITE, rewriteEffect.host(), null, scenario.id());
+    }
+    if (effect instanceof ChaosEffect.RedirectEffect redirectEffect) {
+      return new TerminalAction(TerminalKind.REWRITE, redirectEffect, null, scenario.id());
     }
     if (effect instanceof ChaosEffect.TornWriteEffect) {
       // A channel write succeeds short; a socket stream write sends the prefix, then the advice

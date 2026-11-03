@@ -15,6 +15,8 @@
 
 ### Features
 
+* **api:** `ChaosEffect.redirect(host[, port])` (JSON `redirect`) sends a `SOCKET_CONNECT` of a `Socket` or `SocketChannel` to another endpoint: a failover target, a black hole, a slow proxy. Without a port the requested one is kept.
+
 * **instrumentation:** UDP: `DATAGRAM_SEND` and `DATAGRAM_RECEIVE` cover `DatagramSocket` and `DatagramChannel` by destination or connected peer and datagram length. `suppress()` drops a datagram silently (packet loss), `corruptRead()` flips one bit of a datagram received, `ECONNREFUSED` is `PortUnreachableException`. New hook group `DATAGRAM`.
 * **instrumentation:** reverse lookups are the new `DNS_REVERSE` (`InetAddress.getHostName`, `getCanonicalHostName`), matched by the IP literal; a rejection returns the literal, as the JDK reports a failed lookup.
 

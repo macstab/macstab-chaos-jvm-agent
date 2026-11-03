@@ -121,6 +121,55 @@ class NativeParityDispatchTest {
   }
 
   @Nested
+  @DisplayName("redirects")
+  class Redirects {
+
+    @Test
+    @DisplayName("a redirect returns the other endpoint, keeping the port when none is given")
+    void redirect() throws Throwable {
+      activate(
+          "failover",
+          network(OperationType.SOCKET_CONNECT, 5432),
+          ChaosEffect.redirect("127.0.0.1", 6543));
+      assertThat(runtime.beforeSocketConnect(null, new InetSocketAddress("127.0.0.1", 5432), 0))
+          .isEqualTo(new InetSocketAddress("127.0.0.1", 6543));
+      assertThat(runtime.beforeSocketConnect(null, new InetSocketAddress("127.0.0.1", 5433), 0))
+          .isNull();
+    }
+
+    @Test
+    @DisplayName("a redirect without a port keeps the requested one")
+    void keepsPort() throws Throwable {
+      activate(
+          "other-host",
+          network(OperationType.SOCKET_CONNECT, null),
+          ChaosEffect.redirect("localhost"));
+      assertThat(
+              runtime
+                  .beforeSocketConnect(null, new InetSocketAddress("127.0.0.1", 5432), 0)
+                  .getPort())
+          .isEqualTo(5432);
+    }
+
+    @Test
+    @DisplayName("a redirect applies to connects only, and rejects a bad port")
+    void validation() {
+      assertThatThrownBy(
+              () ->
+                  activate(
+                      "bad",
+                      network(OperationType.SOCKET_READ, null),
+                      ChaosEffect.redirect("localhost", 1)))
+          .isInstanceOf(com.macstab.chaos.jvm.api.ChaosValidationException.class)
+          .hasMessageContaining("RedirectEffect applies only to [SOCKET_CONNECT]");
+      assertThatThrownBy(() -> ChaosEffect.redirect("localhost", 70_000))
+          .isInstanceOf(IllegalArgumentException.class);
+      assertThatThrownBy(() -> ChaosEffect.redirect(" "))
+          .isInstanceOf(IllegalArgumentException.class);
+    }
+  }
+
+  @Nested
   @DisplayName("binds")
   class Binds {
 

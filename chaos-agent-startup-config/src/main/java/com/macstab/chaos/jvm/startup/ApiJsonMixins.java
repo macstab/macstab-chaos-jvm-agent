@@ -84,6 +84,7 @@ final class ApiJsonMixins {
     @JsonSubTypes.Type(value = ChaosEffect.TornWriteEffect.class, name = "tornWrite"),
     @JsonSubTypes.Type(value = ChaosEffect.DnsAnswerEffect.class, name = "dnsAnswer"),
     @JsonSubTypes.Type(value = ChaosEffect.DnsRewriteEffect.class, name = "dnsRewrite"),
+    @JsonSubTypes.Type(value = ChaosEffect.RedirectEffect.class, name = "redirect"),
     @JsonSubTypes.Type(value = ChaosEffect.SuppressEffect.class, name = "suppress"),
     @JsonSubTypes.Type(
         value = ChaosEffect.ExceptionalCompletionEffect.class,

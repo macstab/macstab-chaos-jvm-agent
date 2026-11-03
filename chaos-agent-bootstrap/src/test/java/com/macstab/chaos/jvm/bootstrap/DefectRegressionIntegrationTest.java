@@ -1411,6 +1411,16 @@ class DefectRegressionIntegrationTest {
     }
 
     @Test
+    @DisplayName("redirect sends a socket's and a channel's connect to another endpoint")
+    void redirectsConnects() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.runWithoutPlan(DefectProbeMain.class, "redirect");
+      assertThat(result.value("socketPeer")).isEqualTo("true");
+      assertThat(result.value("channelPeer")).isEqualTo("true");
+      assertThat(result.longValue("applied.jvm::failover")).isEqualTo(2L);
+    }
+
+    @Test
     @DisplayName("socket channels are sockets: peer filters, trickle, corrupt, torn, reset")
     void socketChannels() throws Exception {
       final ChildJvmProbe.ProbeResult result =

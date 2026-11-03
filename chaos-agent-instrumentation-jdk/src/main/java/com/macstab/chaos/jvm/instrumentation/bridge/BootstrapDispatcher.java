@@ -1544,24 +1544,29 @@ public final class BootstrapDispatcher {
    * @param socket the socket initiating the connection; never {@code null}
    * @param socketAddress the remote endpoint; never {@code null}
    * @param timeoutMillis the connection timeout; {@code 0} for infinite timeout
+   * @return the endpoint to connect to instead (a redirect), or {@code socketAddress}
    * @throws Throwable if an active scenario injects a failure to simulate a connection refusal or
    *     timeout
    */
-  public static void beforeSocketConnect(
+  public static Object beforeSocketConnect(
       final Object socket, final Object socketAddress, final int timeoutMillis) throws Throwable {
     final int[] depth = DEPTH.get();
     if (depth[0] > 0) {
-      return;
+      return socketAddress;
     }
     depth[0]++;
     try {
       final MethodHandle[] h = handles;
       final Object d = delegate;
       if (d != null && h != null) {
-        h[BEFORE_SOCKET_CONNECT].invoke(d, socket, socketAddress, timeoutMillis);
+        final Object redirected =
+            h[BEFORE_SOCKET_CONNECT].invoke(d, socket, socketAddress, timeoutMillis);
+        return redirected == null ? socketAddress : redirected;
       }
+      return socketAddress;
     } catch (final Throwable throwable) {
       sneakyThrow(throwable);
+      return socketAddress;
     } finally {
       depth[0]--;
     }

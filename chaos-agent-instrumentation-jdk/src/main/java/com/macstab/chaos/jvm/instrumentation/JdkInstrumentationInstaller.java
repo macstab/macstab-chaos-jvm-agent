@@ -834,7 +834,7 @@ public final class JdkInstrumentationInstaller {
         lookup.findVirtual(
             delegateInterface,
             "beforeSocketConnect",
-            MethodType.methodType(void.class, Object.class, Object.class, int.class));
+            MethodType.methodType(Object.class, Object.class, Object.class, int.class));
     methodHandles[BootstrapDispatcher.BEFORE_SOCKET_ACCEPT] =
         lookup.findVirtual(
             delegateInterface,

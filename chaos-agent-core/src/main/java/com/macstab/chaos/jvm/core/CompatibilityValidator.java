@@ -569,7 +569,9 @@ final class CompatibilityValidator {
               ChaosEffect.DnsAnswerEffect.class,
               EnumSet.of(OperationType.DNS_ANSWER),
               ChaosEffect.DnsRewriteEffect.class,
-              EnumSet.of(OperationType.DNS_RESOLVE));
+              EnumSet.of(OperationType.DNS_RESOLVE),
+              ChaosEffect.RedirectEffect.class,
+              EnumSet.of(OperationType.SOCKET_CONNECT));
 
   /** Operations a network {@link ChaosEffect.Errno} applies to. */
   private static final Set<OperationType> ERRNO_NETWORK_OPS =

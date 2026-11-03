@@ -83,6 +83,7 @@ The JVM matches on what the Java call carries: a socket call matches by peer add
 | `SHUFFLE`                                       | `ChaosEffect.dnsShuffle()`                                         | `{"type": "dnsAnswer", "shuffle": true}`                    | `DNS_ANSWER`                                    |
 | `LIMIT:1`                                       | `ChaosEffect.dnsLimit(1)`                                          | `{"type": "dnsAnswer", "limit": 1}`                         | `DNS_ANSWER`                                    |
 | `REWRITE:other.internal`                        | `ChaosEffect.dnsRewrite("other.internal")`                         | `{"type": "dnsRewrite", "host": "other.internal"}`          | `DNS_RESOLVE`                                   |
+| `SERVICE` (connect elsewhere), endpoint redirect | `ChaosEffect.redirect("standby.internal", 5432)`: the connect goes to that endpoint; without a port the requested one is kept | `{"type": "redirect", "host": "standby.internal", "port": 5432}` | `SOCKET_CONNECT`                       |
 
 A native rule's probability field is the policy's probability on the JVM (§4); `SHUFFLE:0.3` is `ChaosEffect.dnsShuffle()` with `probability` `0.3`.
 
@@ -115,7 +116,7 @@ Different rules: the native `FAIL_AFTER` counter is per operation and resets on 
 |-----------------------------------------------|-------------------------------------------------------------------------------------------------------------------|
 | `OFFSET`/`REGRESS` seen by every `System.currentTimeMillis()` and `System.nanoTime()` read, JDK and libraries included | both are JIT intrinsics; the agent skews `java.time` and `java.util.Date` reads, and direct calls only at the call sites in the packages named with `clockCallSites` (`OperationType.SYSTEM_CLOCK_MILLIS`, `OperationType.SYSTEM_CLOCK_NANOS`). Use the native time rule to move the clock beneath everything in the JVM. |
 | `clock_gettime/monotonic` beneath the JDK     | `System.nanoTime()` is an intrinsic (as above); only opted-in call sites are skewed |
-| `DUP`, `SERVICE`                              | no JVM effect duplicates received data or rewrites a resolved service port                                        |
+| `DUP`                                         | no JVM effect duplicates received data; a changed service endpoint is `ChaosEffect.redirect(...)` on the connect (§3) |
 | `munmap`, `mprotect`, `madvise`, and `mmap` of anonymous memory | the JVM exposes only file mappings (`FileChannel.map`, `OperationType.FILE_IO_MAP`); the pressure stressors (`ChaosEffect.heapPressure(...)`, `ChaosEffect.directBufferPressure(...)`) are the JVM-level analogue for memory |
 | `fork`, `waitpid`, failing `execve` of the child | the agent fails the start itself (`PROCESS_START`, below); waiting for a process is not intercepted, and a JVM child process reaches the native process rules |
 | SECCOMP supervision (`chaos-init`)            | the agent intercepts in-process; static binaries and Go programs are reached by the native supervisor only         |

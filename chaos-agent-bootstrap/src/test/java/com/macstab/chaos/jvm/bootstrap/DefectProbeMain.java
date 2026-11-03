@@ -104,6 +104,7 @@ public final class DefectProbeMain {
       case "socket-torn-write" -> socketTornWrite();
       case "socket-channel" -> socketChannel();
       case "file-open" -> fileOpen();
+      case "redirect" -> redirect();
       case "udp-dns" -> udpAndReverseDns();
       case "file-map-transfer" -> fileMapAndTransfer();
       case "socket-bind" -> socketBind();
@@ -1017,6 +1018,47 @@ public final class DefectProbeMain {
       flipped += Integer.bitCount((received[i] ^ expected[i]) & 0xFF);
     }
     return flipped;
+  }
+
+  /**
+   * Connects a socket and a socket channel to a port nothing listens on, under a scenario that
+   * redirects that port to a live server; prints what each connect reached.
+   */
+  private static void redirect() throws Exception {
+    final int deadPort;
+    try (java.net.ServerSocket probe = new java.net.ServerSocket(0)) {
+      deadPort = probe.getLocalPort();
+    }
+    try (java.net.ServerSocket server =
+        new java.net.ServerSocket(0, 2, InetAddress.getByName("127.0.0.1"))) {
+      final ChaosActivationHandle redirect =
+          ChaosPlatform.current()
+              .activate(
+                  ChaosScenario.builder("failover")
+                      .selector(
+                          new ChaosSelector.NetworkSelector(
+                              Set.of(OperationType.SOCKET_CONNECT),
+                              NamePattern.any(),
+                              "127.0.0.1",
+                              deadPort,
+                              null,
+                              null))
+                      .effect(ChaosEffect.redirect("127.0.0.1", server.getLocalPort()))
+                      .build());
+      try (java.net.Socket socket = new java.net.Socket("127.0.0.1", deadPort);
+          java.net.Socket accepted = server.accept()) {
+        System.out.println("socketPeer=" + (socket.getPort() == server.getLocalPort()));
+      }
+      try (java.nio.channels.SocketChannel channel =
+              java.nio.channels.SocketChannel.open(new InetSocketAddress("127.0.0.1", deadPort));
+          java.net.Socket accepted = server.accept()) {
+        System.out.println(
+            "channelPeer="
+                + (((InetSocketAddress) channel.getRemoteAddress()).getPort()
+                    == server.getLocalPort()));
+      }
+      printApplied(redirect);
+    }
   }
 
   /**

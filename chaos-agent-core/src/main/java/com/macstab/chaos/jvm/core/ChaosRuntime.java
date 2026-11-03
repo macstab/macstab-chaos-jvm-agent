@@ -721,11 +721,12 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @param socket the socket
    * @param socketAddress the target address
    * @param timeoutMillis connect timeout
+   * @return the endpoint to connect to instead, or {@code null}
    * @throws Throwable if a chaos effect injects an exception
    */
-  public void beforeSocketConnect(
+  public java.net.InetSocketAddress beforeSocketConnect(
       final Object socket, final Object socketAddress, final int timeoutMillis) throws Throwable {
-    dispatcher.beforeSocketConnect(socket, socketAddress, timeoutMillis);
+    return dispatcher.beforeSocketConnect(socket, socketAddress, timeoutMillis);
   }
 
   /**

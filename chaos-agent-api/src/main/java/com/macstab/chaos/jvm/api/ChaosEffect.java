@@ -35,6 +35,7 @@ public sealed interface ChaosEffect
         ChaosEffect.TornWriteEffect,
         ChaosEffect.DnsAnswerEffect,
         ChaosEffect.DnsRewriteEffect,
+        ChaosEffect.RedirectEffect,
         ChaosEffect.HeapPressureEffect,
         ChaosEffect.KeepAliveEffect,
         ChaosEffect.MetaspacePressureEffect,
@@ -210,6 +211,29 @@ public sealed interface ChaosEffect
    */
   static DnsRewriteEffect dnsRewrite(final String host) {
     return new DnsRewriteEffect(host);
+  }
+
+  /**
+   * Returns an effect that connects to {@code host:port} instead of the endpoint the application
+   * asked for: a failover target, a black hole, a slow proxy in front of the real service. Valid
+   * for {@link OperationType#SOCKET_CONNECT}.
+   *
+   * @param host the host to connect to instead; resolved when the connect is redirected
+   * @param port the port to connect to instead, {@code 1..65535}
+   * @return a new {@link RedirectEffect}
+   */
+  static RedirectEffect redirect(final String host, final int port) {
+    return new RedirectEffect(host, port);
+  }
+
+  /**
+   * Returns an effect that connects to {@code host} on the port the application asked for.
+   *
+   * @param host the host to connect to instead
+   * @return a new {@link RedirectEffect}
+   */
+  static RedirectEffect redirect(final String host) {
+    return new RedirectEffect(host, null);
   }
 
   /**
@@ -836,6 +860,25 @@ public sealed interface ChaosEffect
     public DnsRewriteEffect {
       if (host == null || host.isBlank()) {
         throw new IllegalArgumentException("host must be non-blank");
+      }
+    }
+  }
+
+  /**
+   * Connects to another endpoint than the one the application asked for.
+   *
+   * @param host the host to connect to instead; non-blank
+   * @param port the port to connect to instead, {@code 1..65535}; {@code null} keeps the requested
+   *     port
+   */
+  record RedirectEffect(String host, Integer port) implements ChaosEffect {
+    /** Validates the RedirectEffect parameters. */
+    public RedirectEffect {
+      if (host == null || host.isBlank()) {
+        throw new IllegalArgumentException("host must be non-blank");
+      }
+      if (port != null && (port < 1 || port > 65_535)) {
+        throw new IllegalArgumentException("port must be in 1..65535, got " + port);
       }
     }
   }

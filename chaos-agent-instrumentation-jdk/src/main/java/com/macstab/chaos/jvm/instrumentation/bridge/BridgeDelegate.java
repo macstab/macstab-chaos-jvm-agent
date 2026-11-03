@@ -393,10 +393,12 @@ public interface BridgeDelegate {
    * @param socket the socket initiating the connection; never {@code null}
    * @param socketAddress the remote endpoint; never {@code null}
    * @param timeoutMillis the connection timeout; {@code 0} for infinite timeout
+   * @return the {@code InetSocketAddress} to connect to instead, or {@code null}
    * @throws Throwable if an active scenario injects a failure to simulate a connection refusal or
    *     timeout
    */
-  void beforeSocketConnect(Object socket, Object socketAddress, int timeoutMillis) throws Throwable;
+  Object beforeSocketConnect(Object socket, Object socketAddress, int timeoutMillis)
+      throws Throwable;
 
   /**
    * Called before {@link java.net.ServerSocket#accept()}.
