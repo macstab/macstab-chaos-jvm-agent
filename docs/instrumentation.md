@@ -367,7 +367,7 @@ If the bridge is not installed (`BootstrapDispatcher.handles == null`), the wrap
 
 ---
 
-# 7. The 64 Interception Handles
+# 7. The 77 Interception Handles
 
 | Index | Constant                             | JDK method(s) intercepted                                                                                                                                                       | Direction                                    |
 |-------|--------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------|
@@ -626,7 +626,6 @@ For each client:
 
 | Client                            | Extraction chain                                                                 | Key method name                 |
 |-----------------------------------|----------------------------------------------------------------------------------|---------------------------------|
-| `java.net.http.HttpRequest`       | `request.uri().toString()`                                                       | `uri`                           |
 | OkHttp `RealCall` (3.x / 4.x)     | `call.request().url().toString()`                                                | `request`, then `url`           |
 | Apache HC 4.x host-first          | `host.toString() + requestLine.getUri().toString()`                              | `getRequestLine`, then `getUri` |
 | Apache HC 4.x request-first       | `request.getURI().toString()`, falling back to the request line                  | `getURI`                        |

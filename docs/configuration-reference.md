@@ -1121,7 +1121,7 @@ Once the hook is wired, the matcher, effect, and activation policy behave like e
 ### `jdbc` — JdbcSelector
 
 **JSON type:** `"jdbc"`  
-**Operations:** `JDBC_CONNECTION_ACQUIRE`, `JDBC_STATEMENT_EXECUTE`, `JDBC_PREPARED_STATEMENT`, `JDBC_TRANSACTION_COMMIT`, `JDBC_TRANSACTION_ROLLBACK`  
+**Operations:** `JDBC_CONNECTION_ACQUIRE`, `JDBC_STATEMENT_EXECUTE`, `JDBC_PREPARED_STATEMENT`, `JDBC_TRANSACTION_COMMIT`, `JDBC_TRANSACTION_ROLLBACK`, `R2DBC_STATEMENT_EXECUTE` (see the client-library selectors)  
 **Purpose:** Intercept JDBC operations across HikariCP, c3p0, and standard `java.sql.Connection`/`Statement` implementations.
 
 **Fields:**
@@ -1145,7 +1145,7 @@ Once the hook is wired, the matcher, effect, and activation policy behave like e
 ### `dns` — DnsSelector
 
 **JSON type:** `"dns"`  
-**Operations:** `DNS_RESOLVE`  
+**Operations:** `DNS_RESOLVE`, `DNS_ANSWER`, `DNS_REVERSE`  
 **Purpose:** Intercept `InetAddress.getByName()`, `getAllByName()`, `getLocalHost()`.
 
 **Fields:**
@@ -1217,7 +1217,7 @@ The client libraries below are hooked by class name and never loaded by the agen
 ### `process` — ProcessSelector
 
 **JSON type:** `"process"`  
-**Operations:** `PROCESS_START`  
+**Operations:** `PROCESS_START`, `PROCESS_WAIT`  
 **Purpose:** Intercept starting a child process: `ProcessBuilder.start()`, `ProcessBuilder.startPipeline` and `Runtime.exec`, which all reach the private `ProcessBuilder.start(Redirect[])`. Valid effects: delay, gate, `reject` (`IOException`) and `errno` (the JDK's `Cannot run program` failure, above). Waiting for a process (`Process.waitFor`) is not intercepted.
 
 | Field            | Type                 | Default  | Description                                                                 |
@@ -1234,7 +1234,7 @@ The client libraries below are hooked by class name and never loaded by the agen
 ### `stress` — StressSelector
 
 **JSON type:** `"stress"`  
-**Operations:** `LIFECYCLE` (internal sentinel; not set by callers)  
+**Operations:** none; a stressor is not matched against calls, and the JSON has no operations field  
 **Purpose:** Activate a standalone background stressor. Unlike all other selectors, `StressSelector` does not match in-flight JVM operations — it triggers the stressor immediately on activation.
 
 **Fields:**
@@ -1405,7 +1405,7 @@ File errors carry the path the stream was opened with; without one they are a pl
 
 ---
 
-#### Data-delivery effects — `trickle`, `corruptRead`, `timeout`, `connectionReset`
+#### Data-delivery effects — `trickle`, `corruptRead`, `timeout`, `connectionReset`, `tornWrite`
 
 The native library's network delivery effects, applied to the real socket and file calls:
 
@@ -1431,7 +1431,7 @@ A failing fsync (`FILE_IO_SYNC` with `reject` or an `errno`) throws `SyncFailedE
 
 ---
 
-#### DNS effects — `dnsAnswer`, `dnsRewrite`
+#### DNS and connect effects — `dnsAnswer`, `dnsRewrite`, `redirect`
 
 The native library's DNS answer effects. `DNS_RESOLVE` fires before a lookup (delay, reject, `dnsRewrite`); `DNS_ANSWER` fires when `InetAddress.getAllByName` returns or fails — `getByName` resolves through it — and is where `dnsAnswer` reshapes the answer. Both are `dns` selector operations, matched by `hostnamePattern`.
 

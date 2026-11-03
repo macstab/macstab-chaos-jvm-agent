@@ -10,10 +10,11 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Reflective URL-extraction helpers for intercepted HTTP client calls.
  *
- * <p>All client types ({@code java.net.http.HttpRequest}, {@code okhttp3.Call}, Apache
- * HttpComponents request classes, Reactor Netty {@code HttpClientRequest}) are {@code compileOnly}
- * dependencies in the agent. They may or may not be on the application classpath at runtime.
- * Accessing them via {@link Method#invoke} keeps the instrumentation module free of any hard link.
+ * <p>All client types ({@code okhttp3.Call}, Apache HttpComponents request classes, Reactor Netty
+ * {@code HttpClient}) are {@code compileOnly} dependencies in the agent. (The JDK {@code
+ * HttpClient} advice reads {@code HttpRequest.uri()} directly and needs no extraction.) They may or
+ * may not be on the application classpath at runtime. Accessing them via {@link Method#invoke}
+ * keeps the instrumentation module free of any hard link.
  *
  * <p>Failures are swallowed and returned as {@code null} — the caller treats a {@code null} URL as
  * "no URL filter will match" which matches the {@link com.macstab.chaos.jvm.api.NamePattern#any()}
@@ -235,10 +236,10 @@ public final class HttpUrlExtractor {
         // module has not opened the defining package for reflective access. Without catching
         // it specifically, the outer catch(Throwable) in every public entry point would hide
         // the concrete reason (module encapsulation) behind a silent null, leaking the real
-        // diagnostic. Swallow InaccessibleObjectException here because several of the HTTP
-        // client types (HttpRequest in java.net.http) ARE reachable without setAccessible
-        // when called from a module that reads java.net.http — we still cache the Method so
-        // invoke() can try it as-is. If the eventual invoke fails, the outer catch returns
+        // diagnostic. Swallow InaccessibleObjectException here because a public method of a
+        // client type can be reachable without setAccessible even when its module does not
+        // open the package — we still cache the Method so invoke() can try it as-is. If the
+        // eventual invoke fails, the outer catch returns
         // null and the extractor falls back to "no URL filter".
         try {
           method.setAccessible(true);

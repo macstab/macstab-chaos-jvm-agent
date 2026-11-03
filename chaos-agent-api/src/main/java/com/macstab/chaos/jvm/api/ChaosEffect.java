@@ -145,11 +145,13 @@ public sealed interface ChaosEffect
   }
 
   /**
-   * Returns an effect that makes a channel write succeed short: it writes a random 1 to n-1 of the
-   * n bytes and returns that count, which callers of {@code FileChannel.write} must handle. The
-   * native library's {@code TORN}. Valid for {@link OperationType#FILE_IO_WRITE} on file channels;
-   * a stream write ({@code FileOutputStream}, {@code RandomAccessFile}) either completes or throws,
-   * so a match there does nothing and counts no application.
+   * Returns an effect that tears a write: a {@code FileChannel} or {@code SocketChannel} write
+   * writes a random 1 to n-1 of the n bytes and returns that count, which callers must loop on; a
+   * socket stream write sends that prefix and then resets the connection. The native library's
+   * {@code TORN}. Valid for {@link OperationType#FILE_IO_WRITE}, {@link OperationType#SOCKET_WRITE}
+   * and {@link OperationType#NIO_CHANNEL_WRITE}; a file stream write ({@code FileOutputStream},
+   * {@code RandomAccessFile}) either completes or throws, so a match there does nothing and counts
+   * no application.
    *
    * @return a new {@link TornWriteEffect}
    */
@@ -883,7 +885,7 @@ public sealed interface ChaosEffect
     }
   }
 
-  /** Makes a file-channel write succeed short: 1 to n-1 of the n bytes are written. */
+  /** Tears a write: a channel write succeeds short, a socket stream write is cut and reset. */
   record TornWriteEffect() implements ChaosEffect {}
 
   /** The errors an {@link ErrnoEffect} can raise, with the Java exception each becomes. */

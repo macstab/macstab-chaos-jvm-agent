@@ -22,3 +22,10 @@ tasks.jar {
         attributes["Automatic-Module-Name"] = "com.macstab.chaos.jvm.agent.instrumentation.jdk"
     }
 }
+
+// HandleTableDocTest reads the docs and the README: a change to them must rerun it.
+tasks.test {
+    inputs.files(rootProject.fileTree("docs") { include("*.md") }, rootProject.file("README.md"))
+        .withPropertyName("documentation")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+}

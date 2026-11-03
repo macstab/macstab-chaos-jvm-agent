@@ -33,7 +33,7 @@ Key properties:
 - **Per-session isolation** — concurrent tests share a JVM; chaos is thread-local unless explicitly JVM-scoped
 - **Runtime control** — scenarios start, stop, fire, and expire without JVM restart
 - **Activation policy composition** — probability, rate limit, warm-up, time window, max-applications, random seed
-- **57 interception handles** covering the full JDK surface relevant to enterprise backend workloads
+- **77 interception handles** covering the full JDK surface relevant to enterprise backend workloads
 
 ## Scope
 
@@ -76,7 +76,7 @@ Out of scope:
 chaos-agent-api           — stable public contract; the only module application code directly depends on
 chaos-agent-bootstrap     — agent entry point (premain/agentmain), singleton init, JMX MBean
 chaos-agent-core          — matching engine, scenario controllers, activation policies, session scoping, stressors
-chaos-agent-instrumentation-jdk — ByteBuddy advice, bootstrap bridge, 57 interception handles
+chaos-agent-instrumentation-jdk — ByteBuddy advice, bootstrap bridge, 77 interception handles
 chaos-agent-startup-config — config resolution: JSON/base64/file; Jackson mapping
 chaos-agent-testkit       — JUnit 5 extension, ChaosPlatform.installLocally() for self-attach
 chaos-agent-examples      — runnable examples
@@ -472,7 +472,7 @@ node "JVM Process" {
 
 **Bootstrap bridge injection**: Reads `BootstrapDispatcher.class` and the types woven advice references (the scheduled-task wrappers, the API exceptions it throws) from the agent JAR's resources and writes them into a temp JAR. The temp JAR (created with mode 0600 on POSIX) is appended to the bootstrap classpath via `Instrumentation.appendToBootstrapClassLoaderSearch`. On POSIX the file is unlinked immediately afterwards (the class path entry keeps its own handle), so nothing is left in the temp directory even after `kill -9`; on Windows it is deleted on exit and stale jars from earlier JVMs are swept on the next start. Injection happens once per JVM.
 
-**MethodHandle array construction** (`buildMethodHandles`): Uses `MethodHandles.publicLookup()` against `BridgeDelegate.class` to build `BootstrapDispatcher.HANDLE_COUNT` handles (currently 67). All handles are unbound virtual handles resolved against the interface, not the implementation, so the bootstrap classloader can invoke them without visibility into `ChaosBridge`; each dispatch call supplies the delegate instance as the first argument. The handle array is passed to `BootstrapDispatcher.install()` via reflection (`Class.forName(..., null)` with bootstrap classloader).
+**MethodHandle array construction** (`buildMethodHandles`): Uses `MethodHandles.publicLookup()` against `BridgeDelegate.class` to build `BootstrapDispatcher.HANDLE_COUNT` handles (currently 77). All handles are unbound virtual handles resolved against the interface, not the implementation, so the bootstrap classloader can invoke them without visibility into `ChaosBridge`; each dispatch call supplies the delegate instance as the first argument. The handle array is passed to `BootstrapDispatcher.install()` via reflection (`Class.forName(..., null)` with bootstrap classloader).
 
 **Hook groups**: every interception point belongs to a `HookGroup` (`THREAD_START`, `THREAD_POOL_EXECUTOR`, `SCHEDULED_EXECUTOR`, `FORK_JOIN`, `BLOCKING_QUEUE`, `COMPLETABLE_FUTURE`, `COMPLETABLE_FUTURE_CANCEL`, `SHUTDOWN_HOOK`, `CLASS_LOADER`, `CLASS_DEFINE`, `RUNTIME_LIFECYCLE`, `REFLECTION_INVOKE`, `DIRECT_BUFFER`, `SERIALIZATION`, `THREAD_PARK`, `MONITOR_ENTER`, `NIO`, `SOCKET`, `ZIP`, `THREAD_LOCAL`, `TIME_API`, `SSL_HANDSHAKE`, `HTTP_CLIENT`, `JDBC`, `JNDI_JMX`, `NATIVE_LIBRARY`, `THREAD_SLEEP`, `DNS`, `FILE_IO`) listing the `OperationType`s it serves. When a scenario is activated (or a session opened, which needs `EXECUTOR_SUBMIT`/`SCHEDULE_SUBMIT`), the control plane calls `HookDemand.require(operations)` and the installer weaves the groups not yet woven, once each, each with its own `ResettableClassFileTransformer`. Woven groups stay woven until uninstall. A weaving failure fails the activation with failure category `INSTRUMENTATION_FAILURE`. Every group uses retransformation (`Can-Retransform-Classes: true`), so premain, agentmain and self-attach get the same hook set.
 
