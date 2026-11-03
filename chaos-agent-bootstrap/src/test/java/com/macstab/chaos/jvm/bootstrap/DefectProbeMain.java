@@ -125,29 +125,48 @@ public final class DefectProbeMain {
     printCounts();
   }
 
-  /** Prints the remaining delay of a 1900 µs schedule right after submission. */
+  /**
+   * Prints the remaining delay of a 1900 µs schedule right after submission, plus the time elapsed
+   * since the submission started: their sum is the delay the executor was given, however long the
+   * submission took on a loaded machine.
+   */
   private static void scheduleSubMillisecondDelay() throws Exception {
     final ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor();
     try {
       // Warm up the schedule path (class loading, dispatch) so the measured call is not dominated
       // by first-call overhead.
       executor.schedule(() -> {}, 0L, TimeUnit.MILLISECONDS).get(5L, TimeUnit.SECONDS);
+      final long submitted = System.nanoTime();
       final ScheduledFuture<?> future = executor.schedule(() -> {}, 1900L, TimeUnit.MICROSECONDS);
-      System.out.println("remainingNanos=" + future.getDelay(TimeUnit.NANOSECONDS));
+      final long remaining = future.getDelay(TimeUnit.NANOSECONDS);
+      System.out.println("scheduledDelayNanos=" + (remaining + System.nanoTime() - submitted));
       future.get(5L, TimeUnit.SECONDS);
     } finally {
       executor.shutdownNow();
     }
   }
 
-  /** Counts the ticks of a 300 µs fixed-rate schedule over 300 ms. */
+  /**
+   * Runs a 300 µs fixed-rate schedule and prints its ticks and the milliseconds elapsed. A
+   * fixed-rate executor catches up on runs it missed, so the ratio converges to the real rate
+   * (about 3.3 per ms; at most 1 if the period were rewritten to 1 ms) even on a starved machine:
+   * the probe waits, up to 5 s, until it has.
+   */
   private static void scheduleSubMillisecondPeriod() throws Exception {
     final ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor();
     final AtomicLong ticks = new AtomicLong();
     try {
+      final long start = System.nanoTime();
       executor.scheduleAtFixedRate(ticks::incrementAndGet, 0L, 300L, TimeUnit.MICROSECONDS);
-      Thread.sleep(300L);
-      System.out.println("ticks=" + ticks.get());
+      long elapsedMillis;
+      long count;
+      do {
+        Thread.sleep(50L);
+        count = ticks.get();
+        elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+      } while ((elapsedMillis < 300L || count < 2L * elapsedMillis) && elapsedMillis < 5_000L);
+      System.out.println("ticks=" + count);
+      System.out.println("elapsedMillis=" + elapsedMillis);
     } finally {
       executor.shutdownNow();
     }

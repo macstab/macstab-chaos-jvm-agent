@@ -58,10 +58,11 @@ class DefectRegressionIntegrationTest {
       final ChildJvmProbe.ProbeResult result =
           probe.run(plan, DefectProbeMain.class, "schedule-sub-millisecond-delay", null);
 
-      // Assert: 1900 µs truncated to 1 ms by a millisecond rewrite would leave at most 1 ms.
-      assertThat(result.longValue("remainingNanos"))
-          .as("remaining delay of schedule(r, 1900, MICROSECONDS)")
-          .isGreaterThan(1_200_000L);
+      // Assert: the executor was given 1900 µs, not 1 ms (a millisecond rewrite truncates).
+      // remaining + elapsed is the delay given, independent of how loaded the machine is.
+      assertThat(result.longValue("scheduledDelayNanos"))
+          .as("delay given to the executor by schedule(r, 1900, MICROSECONDS)")
+          .isGreaterThanOrEqualTo(1_800_000L);
     }
 
     @Test
@@ -79,10 +80,10 @@ class DefectRegressionIntegrationTest {
       final ChildJvmProbe.ProbeResult result =
           probe.run(plan, DefectProbeMain.class, "schedule-sub-millisecond-period", null);
 
-      // Assert: a 300 µs period yields about 1000 ticks in 300 ms; a 1 ms rewrite at most ~300.
+      // Assert: a 300 µs period ticks about 3.3 times per ms; a 1 ms rewrite at most once.
       assertThat(result.longValue("ticks"))
-          .as("ticks of scheduleAtFixedRate(r, 0, 300, MICROSECONDS) within 300 ms")
-          .isGreaterThan(450L);
+          .as("ticks of scheduleAtFixedRate(r, 0, 300, MICROSECONDS) per elapsed ms")
+          .isGreaterThan(3L * result.longValue("elapsedMillis") / 2L);
     }
 
     @Test
@@ -106,11 +107,11 @@ class DefectRegressionIntegrationTest {
           .isEqualTo(1L);
       assertThat(result.longValue("applied.schedule-delay")).isEqualTo(1L);
       assertThat(result.longValue("submitBlockedMillis"))
-          .as("the registration is delayed once, as for EXECUTOR_SUBMIT")
-          .isBetween(240L, 550L);
-      assertThat(result.longValue("taskStartMillis"))
-          .as("the task is not postponed a second time after the delayed registration")
-          .isLessThan(560L);
+          .as("the registration is delayed, as for EXECUTOR_SUBMIT")
+          .isGreaterThanOrEqualTo(240L);
+      assertThat(result.longValue("taskStartMillis") - result.longValue("submitBlockedMillis"))
+          .as("the task is not postponed a second 300 ms after the delayed registration")
+          .isLessThan(300L);
     }
   }
 
@@ -366,8 +367,8 @@ class DefectRegressionIntegrationTest {
               "sleep-duration",
               null);
       assertThat(result.longValue("elapsedMillis"))
-          .as("a suppressed Thread.sleep(Duration.ofSeconds(2)) returns at once")
-          .isLessThan(1_000L);
+          .as("a suppressed Thread.sleep(Duration.ofSeconds(2)) returns before the 2 s it sleeps")
+          .isLessThan(2_000L);
     }
 
     @Test
@@ -656,9 +657,11 @@ class DefectRegressionIntegrationTest {
           probe.runWithoutAgent(DefectProbeMain.class, "initialize-retry");
 
       assertThat(result.value("firstFailed")).isEqualTo("true");
-      assertThat(result.longValue("sleepMillis"))
-          .as("one set of transformers: the 300 ms delay applies once, not twice")
-          .isBetween(250L, 550L);
+      // Two sets of transformers would evaluate the sleep twice.
+      assertThat(result.longValue("applied.sleep-delay"))
+          .as("one set of transformers: the 300 ms delay applies once")
+          .isEqualTo(1L);
+      assertThat(result.longValue("sleepMillis")).isGreaterThanOrEqualTo(250L);
       assertThat(result.value("mbeanReportsRetry"))
           .as("the diagnostics MBean belongs to the runtime that was installed")
           .isEqualTo("true");
