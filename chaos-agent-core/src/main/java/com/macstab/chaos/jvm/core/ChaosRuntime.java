@@ -838,6 +838,32 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
+   * Delegates to {@link ChaosDispatcher#beforeDatagram(String, Object, Object, int)}.
+   *
+   * @param operation {@code "DATAGRAM_SEND"} or {@code "DATAGRAM_RECEIVE"}
+   * @param channel the datagram channel
+   * @param peer the destination of a send, or {@code null}
+   * @param length the datagram's length or the space for it
+   * @return the dispatcher's answer
+   * @throws Throwable if an active scenario fails the call
+   */
+  public int beforeDatagram(
+      final String operation, final Object channel, final Object peer, final int length)
+      throws Throwable {
+    return dispatcher.beforeDatagram(operation, channel, peer, length);
+  }
+
+  /**
+   * Delegates to {@link ChaosDispatcher#beforeDnsReverse(String)}.
+   *
+   * @param address the IP literal looked up
+   * @throws Throwable if an active scenario fails the lookup
+   */
+  public void beforeDnsReverse(final String address) throws Throwable {
+    dispatcher.beforeDnsReverse(address);
+  }
+
+  /**
    * Delegates to {@link ChaosDispatcher#beforeSocketBind(Object, int)}.
    *
    * @param address the local address being bound

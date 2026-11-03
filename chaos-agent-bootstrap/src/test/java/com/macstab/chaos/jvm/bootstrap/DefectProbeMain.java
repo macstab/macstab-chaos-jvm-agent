@@ -104,6 +104,7 @@ public final class DefectProbeMain {
       case "socket-torn-write" -> socketTornWrite();
       case "socket-channel" -> socketChannel();
       case "file-open" -> fileOpen();
+      case "udp-dns" -> udpAndReverseDns();
       case "file-map-transfer" -> fileMapAndTransfer();
       case "socket-bind" -> socketBind();
       case "thread-eagain" -> threadEagain();
@@ -923,6 +924,99 @@ public final class DefectProbeMain {
     } catch (final java.io.IOException failed) {
       System.out.println("copy=" + failed.getClass().getName() + ": " + failed.getMessage());
     }
+  }
+
+  /**
+   * UDP over loopback and a reverse lookup, each under a scenario activated here for the receiver's
+   * port: a dropped datagram, corrupted receives, a refused send and a failed reverse lookup.
+   * Prints what the application saw.
+   */
+  private static void udpAndReverseDns() throws Exception {
+    final ChaosControlPlane plane = ChaosPlatform.current();
+    final byte[] pattern = new byte[64];
+    for (int i = 0; i < pattern.length; i++) {
+      pattern[i] = (byte) i;
+    }
+    try (java.net.DatagramSocket receiver =
+            new java.net.DatagramSocket(new InetSocketAddress("127.0.0.1", 0));
+        java.net.DatagramSocket sender = new java.net.DatagramSocket()) {
+      receiver.setSoTimeout(2000);
+      final InetSocketAddress to = new InetSocketAddress("127.0.0.1", receiver.getLocalPort());
+      final java.util.function.Function<OperationType, ChaosSelector> toReceiver =
+          operation ->
+              new ChaosSelector.NetworkSelector(
+                  Set.of(operation), NamePattern.any(), "127.0.0.1", to.getPort(), null, null);
+
+      final ChaosActivationHandle drop =
+          plane.activate(
+              ChaosScenario.builder("udp-drop-first")
+                  .selector(toReceiver.apply(OperationType.DATAGRAM_SEND))
+                  .effect(ChaosEffect.suppress())
+                  .activationPolicy(ActivationPolicy.count(1))
+                  .build());
+      sender.send(new java.net.DatagramPacket("one".getBytes(StandardCharsets.UTF_8), 3, to));
+      sender.send(new java.net.DatagramPacket("two".getBytes(StandardCharsets.UTF_8), 3, to));
+      final java.net.DatagramPacket first = new java.net.DatagramPacket(new byte[16], 16);
+      receiver.receive(first);
+      System.out.println(
+          "udpFirst=" + new String(first.getData(), 0, first.getLength(), StandardCharsets.UTF_8));
+      printApplied(drop);
+
+      final ChaosActivationHandle corrupt =
+          plane.activate(
+              ChaosScenario.builder("udp-corrupt")
+                  .selector(ChaosSelector.network(Set.of(OperationType.DATAGRAM_RECEIVE)))
+                  .effect(ChaosEffect.corruptRead())
+                  .build());
+      sender.send(new java.net.DatagramPacket(pattern, pattern.length, to));
+      final java.net.DatagramPacket packet = new java.net.DatagramPacket(new byte[128], 128);
+      receiver.receive(packet);
+      System.out.println("udpSocketBits=" + flippedBits(packet.getData(), pattern));
+      try (java.nio.channels.DatagramChannel channel =
+          java.nio.channels.DatagramChannel.open().bind(new InetSocketAddress("127.0.0.1", 0))) {
+        sender.send(
+            new java.net.DatagramPacket(pattern, pattern.length, channel.getLocalAddress()));
+        final java.nio.ByteBuffer buffer = java.nio.ByteBuffer.allocate(128);
+        channel.receive(buffer);
+        System.out.println("udpChannelBits=" + flippedBits(buffer.array(), pattern));
+      }
+      printApplied(corrupt);
+
+      final ChaosActivationHandle refused =
+          plane.activate(
+              ChaosScenario.builder("udp-refused")
+                  .selector(toReceiver.apply(OperationType.DATAGRAM_SEND))
+                  .effect(ChaosEffect.errno(ChaosEffect.Errno.ECONNREFUSED))
+                  .build());
+      try {
+        sender.send(new java.net.DatagramPacket(pattern, pattern.length, to));
+        System.out.println("udpRefused=sent");
+      } catch (final java.io.IOException failed) {
+        System.out.println("udpRefused=" + failed.getClass().getName());
+      }
+      printApplied(refused);
+    }
+
+    final InetAddress loopback = InetAddress.getByAddress(new byte[] {127, 0, 0, 1});
+    final ChaosActivationHandle reverse =
+        plane.activate(
+            ChaosScenario.builder("reverse-fails")
+                .selector(
+                    ChaosSelector.dns(
+                        Set.of(OperationType.DNS_REVERSE), NamePattern.exact("127.0.0.1")))
+                .effect(ChaosEffect.reject("no PTR"))
+                .build());
+    System.out.println("reverseName=" + loopback.getCanonicalHostName());
+    printApplied(reverse);
+  }
+
+  /** Counts the bits in which {@code received} differs from {@code expected}. */
+  private static int flippedBits(final byte[] received, final byte[] expected) {
+    int flipped = 0;
+    for (int i = 0; i < expected.length; i++) {
+      flipped += Integer.bitCount((received[i] ^ expected[i]) & 0xFF);
+    }
+    return flipped;
   }
 
   /**

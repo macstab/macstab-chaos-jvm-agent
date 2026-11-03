@@ -472,7 +472,7 @@ The `OperationType` enum defines all intercepted JDK operations. Full list:
 | Class                           | `CLASS_LOAD`, `CLASS_DEFINE`, `RESOURCE_LOAD`                                                                                          |
 | Synchronization                 | `MONITOR_ENTER`, `THREAD_PARK`                                                                                                         |
 | NIO                             | `NIO_SELECTOR_SELECT`, `NIO_CHANNEL_READ`, `NIO_CHANNEL_WRITE`, `NIO_CHANNEL_CONNECT`, `NIO_CHANNEL_ACCEPT`                            |
-| Network                         | `SOCKET_CONNECT`, `SOCKET_ACCEPT`, `SOCKET_READ`, `SOCKET_WRITE`, `SOCKET_CLOSE`, `SOCKET_BIND`                                                     |
+| Network                         | `SOCKET_CONNECT`, `SOCKET_ACCEPT`, `SOCKET_READ`, `SOCKET_WRITE`, `SOCKET_CLOSE`, `SOCKET_BIND`, `DATAGRAM_SEND`, `DATAGRAM_RECEIVE`                                                     |
 | Infrastructure                  | `JNDI_LOOKUP`, `JMX_INVOKE`, `JMX_GET_ATTR`, `NATIVE_LIBRARY_LOAD`                                                                     |
 | Compression                     | `ZIP_INFLATE`, `ZIP_DEFLATE`                                                                                                           |
 | ThreadLocal                     | `THREAD_LOCAL_GET`, `THREAD_LOCAL_SET`                                                                                                 |

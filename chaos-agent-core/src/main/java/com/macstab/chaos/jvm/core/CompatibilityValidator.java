@@ -515,7 +515,9 @@ final class CompatibilityValidator {
           OperationType.SOCKET_READ,
           OperationType.SOCKET_WRITE,
           OperationType.SOCKET_CLOSE,
-          OperationType.SOCKET_BIND);
+          OperationType.SOCKET_BIND,
+          OperationType.DATAGRAM_SEND,
+          OperationType.DATAGRAM_RECEIVE);
 
   private static final Set<OperationType> THREAD_LOCAL_OPS =
       Set.of(OperationType.THREAD_LOCAL_GET, OperationType.THREAD_LOCAL_SET);
@@ -553,7 +555,10 @@ final class CompatibilityValidator {
               ChaosEffect.TrickleEffect.class,
               EnumSet.of(OperationType.SOCKET_READ),
               ChaosEffect.CorruptReadEffect.class,
-              EnumSet.of(OperationType.SOCKET_READ, OperationType.FILE_IO_READ),
+              EnumSet.of(
+                  OperationType.SOCKET_READ,
+                  OperationType.FILE_IO_READ,
+                  OperationType.DATAGRAM_RECEIVE),
               ChaosEffect.TimeoutEffect.class,
               EnumSet.of(OperationType.SOCKET_READ, OperationType.SOCKET_CONNECT),
               ChaosEffect.TornWriteEffect.class,
@@ -575,6 +580,8 @@ final class CompatibilityValidator {
           OperationType.SOCKET_WRITE,
           OperationType.SOCKET_CLOSE,
           OperationType.SOCKET_BIND,
+          OperationType.DATAGRAM_SEND,
+          OperationType.DATAGRAM_RECEIVE,
           OperationType.NIO_CHANNEL_CONNECT,
           OperationType.NIO_CHANNEL_ACCEPT,
           OperationType.NIO_CHANNEL_READ,
@@ -654,7 +661,9 @@ final class CompatibilityValidator {
           OperationType.JDBC_STATEMENT_EXECUTE,
           OperationType.JDBC_PREPARED_STATEMENT,
           OperationType.JDBC_TRANSACTION_COMMIT,
-          OperationType.JDBC_TRANSACTION_ROLLBACK);
+          OperationType.JDBC_TRANSACTION_ROLLBACK,
+          // a dropped datagram: the send reports success, nothing goes on the wire
+          OperationType.DATAGRAM_SEND);
 
   /** Clock reads: they only return a (possibly skewed) time and cannot be delayed or failed. */
   private static final Set<OperationType> CLOCK_READ_OPS =

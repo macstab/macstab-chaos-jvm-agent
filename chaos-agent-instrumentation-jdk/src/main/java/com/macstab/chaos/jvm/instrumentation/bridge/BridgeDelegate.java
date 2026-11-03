@@ -506,6 +506,26 @@ public interface BridgeDelegate {
   void beforeSocketBind(Object address, int port) throws Throwable;
 
   /**
+   * Called before a datagram is sent or received.
+   *
+   * @param operation {@code "DATAGRAM_SEND"} or {@code "DATAGRAM_RECEIVE"}
+   * @param channel the datagram channel
+   * @param peer the destination of a send, or {@code null}
+   * @param length the datagram's length or the space for it
+   * @return {@code length}, {@code Integer.MIN_VALUE} to drop a send, or the corrupt flag
+   * @throws Throwable if an active scenario fails the call
+   */
+  int beforeDatagram(String operation, Object channel, Object peer, int length) throws Throwable;
+
+  /**
+   * Called before a reverse lookup.
+   *
+   * @param address the IP literal looked up
+   * @throws Throwable an {@code UnknownHostException} when a scenario fails the lookup
+   */
+  void beforeDnsReverse(String address) throws Throwable;
+
+  /**
    * Rewrites an instant read from the system {@code java.time.Clock} for clock skew.
    *
    * @param realInstant the instant read

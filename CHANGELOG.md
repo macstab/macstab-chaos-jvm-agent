@@ -15,6 +15,9 @@
 
 ### Features
 
+* **instrumentation:** UDP: `DATAGRAM_SEND` and `DATAGRAM_RECEIVE` cover `DatagramSocket` and `DatagramChannel` by destination or connected peer and datagram length. `suppress()` drops a datagram silently (packet loss), `corruptRead()` flips one bit of a datagram received, `ECONNREFUSED` is `PortUnreachableException`. New hook group `DATAGRAM`.
+* **instrumentation:** reverse lookups are the new `DNS_REVERSE` (`InetAddress.getHostName`, `getCanonicalHostName`), matched by the IP literal; a rejection returns the literal, as the JDK reports a failed lookup.
+
 * **instrumentation:** memory-mapped files and transfers: `FileChannel.map` is the new `FILE_IO_MAP` (sized by the region; `ENOMEM` fails with `IOException("Map failed")`), `MappedByteBuffer.force` is a `FILE_IO_SYNC` failing with `UncheckedIOException`, `FileChannel.transferTo` / `transferFrom` are one `FILE_IO_READ` / `FILE_IO_WRITE` each (a torn `transferFrom` is short; the JDK's internal reads and writes of a transfer are not evaluated again), and `Files.copy(Path, Path)` opens its source and target (`FILE_IO_OPEN`).
 
 * **instrumentation:** clock skew reaches every `java.time` read: the new `CLOCK_READ` is a read of the system `Clock` (`Clock.systemUTC()`, `systemDefaultZone()`, `InstantSource.system()`), and so of every `now()` without an operation of its own (`LocalDate`, `LocalTime`, `OffsetDateTime`, `OffsetTime`, `Year`, `YearMonth`, `MonthDay`) and of clocks derived from the system clock. Before, those reads were never skewed. The read inside `LocalDateTime.now()` and `ZonedDateTime.now()` stays theirs, so selecting both never skews twice.

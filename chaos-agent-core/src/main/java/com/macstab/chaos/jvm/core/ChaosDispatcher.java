@@ -1484,6 +1484,68 @@ public final class ChaosDispatcher {
                 InvocationContext.UNKNOWN)));
   }
 
+  /** What {@link #beforeDatagram} returns for a send a scenario suppresses: drop the datagram. */
+  public static final int DATAGRAM_DROPPED = Integer.MIN_VALUE;
+
+  /**
+   * Called before a datagram is sent or received.
+   *
+   * @param operation {@code "DATAGRAM_SEND"} or {@code "DATAGRAM_RECEIVE"}
+   * @param channel the datagram channel
+   * @param peer the destination of a send ({@code null}: the channel's connected peer); ignored for
+   *     a receive, whose peer is the connected one if any
+   * @param length the datagram's length (send) or the space for it (receive)
+   * @return {@code length}; {@link #DATAGRAM_DROPPED} when a send is suppressed; {@link
+   *     #corruptFlag} encoded when the datagram received must be corrupted
+   * @throws Throwable if an active scenario fails the call
+   */
+  public int beforeDatagram(
+      final String operation, final Object channel, final Object peer, final int length)
+      throws Throwable {
+    final OperationType operationType =
+        "DATAGRAM_SEND".equals(operation)
+            ? OperationType.DATAGRAM_SEND
+            : OperationType.DATAGRAM_RECEIVE;
+    if (idle(operationType)) {
+      return length;
+    }
+    final java.net.SocketAddress target =
+        operationType == OperationType.DATAGRAM_SEND && peer instanceof java.net.SocketAddress a
+            ? a
+            : peerOf(channel);
+    final RuntimeDecision decision =
+        evaluate(socketContext(operationType, channel, length, target, InvocationContext.UNKNOWN));
+    if (decision.terminalAction() != null
+        && decision.terminalAction().kind() == TerminalKind.SUPPRESS) {
+      applyDelayAndGate(decision);
+      return DATAGRAM_DROPPED;
+    }
+    return readCount(decision, length);
+  }
+
+  /**
+   * Called before a reverse lookup of {@code address}.
+   *
+   * @param address the IP literal looked up
+   * @throws Throwable a {@link java.net.UnknownHostException} when a scenario fails the lookup
+   */
+  public void beforeDnsReverse(final String address) throws Throwable {
+    if (idle(OperationType.DNS_REVERSE)) {
+      return;
+    }
+    applyPreDecision(
+        evaluate(
+            new InvocationContext(
+                OperationType.DNS_REVERSE,
+                "java.net.InetAddress",
+                null,
+                address,
+                false,
+                null,
+                null,
+                scopeContext.currentSessionId())));
+  }
+
   /**
    * The context of a socket event on {@code endpoint} with peer {@code peer}: an IP peer matches by
    * address, port and host name, a Unix-domain peer by its path as the host.
@@ -1522,12 +1584,15 @@ public final class ChaosDispatcher {
           ? null
           : new InetSocketAddress(socket.getInetAddress(), socket.getPort());
     }
-    if (endpoint instanceof java.nio.channels.SocketChannel channel) {
-      try {
+    try {
+      if (endpoint instanceof java.nio.channels.SocketChannel channel) {
         return channel.getRemoteAddress();
-      } catch (final java.io.IOException closed) {
-        return null;
       }
+      if (endpoint instanceof java.nio.channels.DatagramChannel channel) {
+        return channel.getRemoteAddress();
+      }
+    } catch (final java.io.IOException closed) {
+      return null;
     }
     return null;
   }

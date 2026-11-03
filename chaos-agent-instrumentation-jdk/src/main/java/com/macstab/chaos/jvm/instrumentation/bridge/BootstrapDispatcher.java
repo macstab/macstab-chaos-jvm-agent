@@ -474,8 +474,14 @@ public final class BootstrapDispatcher {
   /** Handle index for {@link #adjustClockReadMillis(long)}. */
   public static final int ADJUST_CLOCK_READ_MILLIS = 72;
 
+  /** Handle index for {@link #beforeDatagramSend(Object, java.nio.ByteBuffer, Object)}. */
+  public static final int BEFORE_DATAGRAM = 73;
+
+  /** Handle index for {@link #reverseLookupFails(java.net.InetAddress)}. */
+  public static final int BEFORE_DNS_REVERSE = 74;
+
   /** Total number of method-handle slots; equals the highest index plus one. */
-  public static final int HANDLE_COUNT = 73;
+  public static final int HANDLE_COUNT = 75;
 
   /** The header that carries a session id between services; {@code ChaosSession.HEADER}. */
   public static final String SESSION_HEADER = "X-Chaos-Session";
@@ -2433,6 +2439,130 @@ public final class BootstrapDispatcher {
     final java.util.SplittableRandom random = new java.util.SplittableRandom(corruptionSeed());
     final int index = offset + random.nextInt(count);
     buffer[index] = (byte) (buffer[index] ^ (1 << random.nextInt(8)));
+  }
+
+  /**
+   * Called before a datagram is sent from {@code source} ({@code DatagramChannel.send}, {@code
+   * write}). A dropped datagram is consumed from the buffer, as a sent one is.
+   *
+   * @param channel the datagram channel
+   * @param source the datagram's bytes
+   * @param target the destination, or {@code null} for the connected peer
+   * @return {@code 0} to send; the byte count plus one to report without sending (dropped)
+   * @throws Throwable if an active scenario fails the send
+   */
+  public static int beforeDatagramSend(
+      final Object channel, final java.nio.ByteBuffer source, final Object target)
+      throws Throwable {
+    final int length = source == null ? 0 : source.remaining();
+    if (datagram("DATAGRAM_SEND", channel, target, length) != Integer.MIN_VALUE) {
+      return 0;
+    }
+    if (source != null) {
+      source.position(source.limit());
+    }
+    return length + 1;
+  }
+
+  /**
+   * Called before {@code DatagramSocket.send(DatagramPacket)}.
+   *
+   * @param channel the datagram channel behind the socket
+   * @param packet the datagram
+   * @return {@code true} to drop it
+   * @throws Throwable if an active scenario fails the send
+   */
+  public static boolean dropDatagramPacket(
+      final Object channel, final java.net.DatagramPacket packet) throws Throwable {
+    return datagram(
+            "DATAGRAM_SEND",
+            channel,
+            packet == null || packet.getAddress() == null ? null : packet.getSocketAddress(),
+            packet == null ? 0 : packet.getLength())
+        == Integer.MIN_VALUE;
+  }
+
+  /**
+   * Called before a datagram is received into {@code target} ({@code DatagramChannel.receive},
+   * {@code read}).
+   *
+   * @param channel the datagram channel
+   * @param target the buffer received into
+   * @return the shaping (corruption) of the datagram, or {@code null}
+   * @throws Throwable if an active scenario fails the receive
+   */
+  public static ChannelBuffers beforeDatagramReceive(
+      final Object channel, final java.nio.ByteBuffer target) throws Throwable {
+    if (target == null) {
+      return null;
+    }
+    final int requested = target.remaining();
+    final int count = datagram("DATAGRAM_RECEIVE", channel, null, requested);
+    return count >= 0
+        ? null
+        : ChannelBuffers.shape(new java.nio.ByteBuffer[] {target}, 0, 1, requested, count);
+  }
+
+  /**
+   * Called before {@code DatagramSocket.receive(DatagramPacket)}.
+   *
+   * @param channel the datagram channel behind the socket
+   * @param packet the packet received into
+   * @return {@code true} when the datagram received must be corrupted ({@link #corruptBytes})
+   * @throws Throwable if an active scenario fails the receive
+   */
+  public static boolean corruptDatagramPacket(
+      final Object channel, final java.net.DatagramPacket packet) throws Throwable {
+    return datagram("DATAGRAM_RECEIVE", channel, null, packet == null ? 0 : packet.getData().length)
+        < 0;
+  }
+
+  private static int datagram(
+      final String operation, final Object channel, final Object peer, final int length)
+      throws Throwable {
+    final int[] depth = DEPTH.get();
+    final MethodHandle[] h = handles;
+    final Object d = delegate;
+    if (depth[0] > 0 || d == null || h == null) {
+      return length;
+    }
+    depth[0]++;
+    try {
+      return (int) h[BEFORE_DATAGRAM].invoke(d, operation, channel, peer, length);
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+      return length;
+    } finally {
+      depth[0]--;
+    }
+  }
+
+  /**
+   * Called before a reverse lookup ({@code InetAddress.getHostName}, {@code getCanonicalHostName}).
+   *
+   * @param address the address looked up
+   * @return {@code true} when a scenario fails the lookup: the JDK then reports the IP literal
+   * @throws Throwable if a delay is interrupted
+   */
+  public static boolean reverseLookupFails(final java.net.InetAddress address) throws Throwable {
+    final int[] depth = DEPTH.get();
+    final MethodHandle[] h = handles;
+    final Object d = delegate;
+    if (depth[0] > 0 || d == null || h == null || address == null) {
+      return false;
+    }
+    depth[0]++;
+    try {
+      h[BEFORE_DNS_REVERSE].invoke(d, address.getHostAddress());
+      return false;
+    } catch (final java.net.UnknownHostException failed) {
+      return true;
+    } catch (final Throwable throwable) {
+      sneakyThrow(throwable);
+      return false;
+    } finally {
+      depth[0]--;
+    }
   }
 
   /**

@@ -452,6 +452,139 @@ final class JvmRuntimeAdvice {
     }
   }
 
+  // ── UDP (DATAGRAM_*) ─────────────────────────────────────────────────────
+
+  /**
+   * Intercepts {@code DatagramChannel.send(ByteBuffer, SocketAddress)}: a dropped datagram is not
+   * sent, and the call reports its length as sent.
+   */
+  static final class DatagramSendAdvice {
+    @Advice.OnMethodEnter(skipOn = Advice.OnNonDefaultValue.class)
+    static int enter(
+        @Advice.This final Object channel,
+        @Advice.Argument(0) final java.nio.ByteBuffer source,
+        @Advice.Argument(1) final Object target)
+        throws Throwable {
+      return BootstrapDispatcher.beforeDatagramSend(channel, source, target);
+    }
+
+    @Advice.OnMethodExit
+    static void exit(@Advice.Enter final int dropped, @Advice.Return(readOnly = false) int sent) {
+      if (dropped != 0) {
+        sent = dropped - 1;
+      }
+    }
+  }
+
+  /** Intercepts {@code DatagramChannel.write(ByteBuffer)} of a connected channel, as a send. */
+  static final class DatagramWriteAdvice {
+    @Advice.OnMethodEnter(skipOn = Advice.OnNonDefaultValue.class)
+    static int enter(
+        @Advice.This final Object channel, @Advice.Argument(0) final java.nio.ByteBuffer source)
+        throws Throwable {
+      return BootstrapDispatcher.beforeDatagramSend(channel, source, null);
+    }
+
+    @Advice.OnMethodExit
+    static void exit(@Advice.Enter final int dropped, @Advice.Return(readOnly = false) int sent) {
+      if (dropped != 0) {
+        sent = dropped - 1;
+      }
+    }
+  }
+
+  /**
+   * Intercepts {@code DatagramChannelImpl.blockingSend(DatagramPacket)}: {@code DatagramSocket}.
+   */
+  static final class DatagramPacketSendAdvice {
+    @Advice.OnMethodEnter(skipOn = Advice.OnNonDefaultValue.class)
+    static boolean enter(
+        @Advice.This final Object channel, @Advice.Argument(0) final java.net.DatagramPacket packet)
+        throws Throwable {
+      return BootstrapDispatcher.dropDatagramPacket(channel, packet);
+    }
+  }
+
+  /** Intercepts {@code DatagramChannel.receive(ByteBuffer)}: a corruption flips one bit. */
+  static final class DatagramReceiveAdvice {
+    @Advice.OnMethodEnter
+    static ChannelBuffers enter(
+        @Advice.This final Object channel, @Advice.Argument(0) final java.nio.ByteBuffer target)
+        throws Throwable {
+      return BootstrapDispatcher.beforeDatagramReceive(channel, target);
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit(
+        @Advice.Enter final ChannelBuffers shaping, @Advice.Return final Object sender) {
+      if (shaping != null) {
+        shaping.finish(sender == null ? 0L : ChannelBuffers.RECEIVED);
+      }
+    }
+  }
+
+  /** Intercepts {@code DatagramChannel.read(ByteBuffer)} of a connected channel, as a receive. */
+  static final class DatagramReadAdvice {
+    @Advice.OnMethodEnter
+    static ChannelBuffers enter(
+        @Advice.This final Object channel, @Advice.Argument(0) final java.nio.ByteBuffer target)
+        throws Throwable {
+      return BootstrapDispatcher.beforeDatagramReceive(channel, target);
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit(@Advice.Enter final ChannelBuffers shaping, @Advice.Return final int read) {
+      if (shaping != null) {
+        shaping.finish(read);
+      }
+    }
+  }
+
+  /**
+   * Intercepts {@code DatagramChannelImpl.blockingReceive(DatagramPacket, long)}: {@code
+   * DatagramSocket}. A corruption flips one bit of the packet's data.
+   */
+  static final class DatagramPacketReceiveAdvice {
+    @Advice.OnMethodEnter
+    static boolean enter(
+        @Advice.This final Object channel, @Advice.Argument(0) final java.net.DatagramPacket packet)
+        throws Throwable {
+      return BootstrapDispatcher.corruptDatagramPacket(channel, packet);
+    }
+
+    @Advice.OnMethodExit
+    static void exit(
+        @Advice.Enter final boolean corrupt,
+        @Advice.Argument(0) final java.net.DatagramPacket packet) {
+      if (corrupt) {
+        BootstrapDispatcher.corruptBytes(packet.getData(), packet.getOffset(), packet.getLength());
+      }
+    }
+  }
+
+  // ── Reverse DNS (DNS_REVERSE) ────────────────────────────────────────────
+
+  /**
+   * Intercepts {@code InetAddress.getHostFromNameService(InetAddress, boolean)}: a failed reverse
+   * lookup returns the IP literal, as the JDK reports one.
+   */
+  static final class DnsReverseAdvice {
+    @Advice.OnMethodEnter(skipOn = Advice.OnNonDefaultValue.class)
+    static boolean enter(@Advice.Argument(0) final java.net.InetAddress address) throws Throwable {
+      return BootstrapDispatcher.reverseLookupFails(address);
+    }
+
+    @Advice.OnMethodExit
+    static void exit(
+        @Advice.Enter final boolean failed,
+        @Advice.Argument(0) final java.net.InetAddress address,
+        @Advice.Return(readOnly = false) String name) {
+      if (failed) {
+        name = address.getHostAddress();
+      }
+    }
+  }
+
   // ── Socket channels as sockets (SOCKET_*) ────────────────────────────────
 
   /** Intercepts {@code SocketChannel.connect(SocketAddress)} (SOCKET_CONNECT, no timeout). */

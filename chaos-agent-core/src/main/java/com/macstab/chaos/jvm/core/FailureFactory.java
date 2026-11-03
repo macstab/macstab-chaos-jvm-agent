@@ -107,6 +107,8 @@ final class FailureFactory {
       case FILE_IO_OPEN -> new java.io.FileNotFoundException(message);
       case FILE_IO_MAP -> new java.io.IOException(message);
       case SOCKET_BIND -> new java.net.BindException(message);
+      case DATAGRAM_SEND, DATAGRAM_RECEIVE -> new java.io.IOException(message);
+      case DNS_REVERSE -> new java.net.UnknownHostException(message);
       default -> new IllegalStateException(message);
     };
   }
@@ -145,6 +147,8 @@ final class FailureFactory {
           SOCKET_WRITE,
           SOCKET_CLOSE,
           SOCKET_BIND,
+          DATAGRAM_SEND,
+          DATAGRAM_RECEIVE,
           NIO_CHANNEL_CONNECT,
           NIO_CHANNEL_ACCEPT,
           NIO_CHANNEL_READ,
@@ -158,7 +162,12 @@ final class FailureFactory {
   private static Throwable networkErrno(
       final ChaosEffect.Errno errno, final OperationType operationType, final String reason) {
     return switch (errno) {
-      case ECONNREFUSED -> new java.net.ConnectException(reason);
+      // A connected UDP socket reports an ICMP port unreachable as PortUnreachableException.
+      case ECONNREFUSED ->
+          operationType == OperationType.DATAGRAM_SEND
+                  || operationType == OperationType.DATAGRAM_RECEIVE
+              ? new java.net.PortUnreachableException(reason)
+              : new java.net.ConnectException(reason);
       case ETIMEDOUT ->
           switch (operationType) {
             case SOCKET_CONNECT, NIO_CHANNEL_CONNECT -> new java.net.ConnectException(reason);

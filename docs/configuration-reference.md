@@ -1052,7 +1052,7 @@ Once the hook is wired, the matcher, effect, and activation policy behave like e
 ### `network` — NetworkSelector
 
 **JSON type:** `"network"`  
-**Operations:** `SOCKET_CONNECT`, `SOCKET_ACCEPT`, `SOCKET_READ`, `SOCKET_WRITE`, `SOCKET_CLOSE`, `SOCKET_BIND`  
+**Operations:** `SOCKET_CONNECT`, `SOCKET_ACCEPT`, `SOCKET_READ`, `SOCKET_WRITE`, `SOCKET_CLOSE`, `SOCKET_BIND`, `DATAGRAM_SEND`, `DATAGRAM_RECEIVE`  
 **Purpose:** Intercept socket operations: `java.net.Socket` / `ServerSocket`, and `SocketChannel` / `ServerSocketChannel` (TCP and Unix-domain), whose connect, accept, reads and writes (single, scattering and gathering) and close raise the same events with the channel's peer and byte count. A channel has no `SO_TIMEOUT`, so `timeout()` never fires on a channel read or connect; a torn channel write is a short count rather than a reset.
 
 **Fields:**
@@ -1066,7 +1066,7 @@ Once the hook is wired, the matcher, effect, and activation policy behave like e
 | `minBytes`          | Long                 | `null`   | The byte count of the call must be at least this (inclusive). For a read it is the number of bytes requested. Requires `operations` ⊆ {`SOCKET_READ`, `SOCKET_WRITE`}: other operations carry no byte count. |
 | `maxBytes`          | Long                 | `null`   | The byte count of the call must be at most this (inclusive). Same restriction as `minBytes`. |
 
-For `SOCKET_BIND` (every bind of a socket or socket channel, explicit or implicit), `remoteHostPattern`, `remoteCidr` and `remotePort` match the local address and port being bound. `remoteCidr` and `remotePort` are rejected together with `SOCKET_ACCEPT`, like `remoteHostPattern`; a Unix-domain peer has no address or port, so it never matches them. All filters must hold for a call to match. The channel operations of `NioSelector` (`NIO_CHANNEL_*`) still fire for the same channel calls: they select by channel, without peer or byte filters.
+UDP is `DATAGRAM_SEND` / `DATAGRAM_RECEIVE` (`DatagramSocket` and `DatagramChannel`, by destination or connected peer, with the datagram's length as byte count): `suppress()` on a send drops the datagram silently — the send reports success, nothing goes on the wire — `corruptRead()` flips one bit of a datagram received, `ECONNREFUSED` is the JDK's `PortUnreachableException`. An unconnected receive has no peer, so peer filters never match it. For `SOCKET_BIND` (every bind of a socket or socket channel, explicit or implicit), `remoteHostPattern`, `remoteCidr` and `remotePort` match the local address and port being bound. `remoteCidr` and `remotePort` are rejected together with `SOCKET_ACCEPT`, like `remoteHostPattern`; a Unix-domain peer has no address or port, so it never matches them. All filters must hold for a call to match. The channel operations of `NioSelector` (`NIO_CHANNEL_*`) still fire for the same channel calls: they select by channel, without peer or byte filters.
 
 ```json
 { "type": "network", "operations": ["SOCKET_WRITE"],

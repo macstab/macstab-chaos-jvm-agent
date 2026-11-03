@@ -15,6 +15,12 @@ import java.nio.ByteBuffer;
  */
 public final class ChannelBuffers {
 
+  /**
+   * What {@link #finish(long)} takes for a call that reports no count (a datagram receive): the
+   * bytes received are the buffers' advance.
+   */
+  public static final long RECEIVED = Long.MAX_VALUE;
+
   private final ByteBuffer[] buffers;
   private final int offset;
   private final int length;
@@ -123,9 +129,16 @@ public final class ChannelBuffers {
     if (positions == null || transferred <= 0) {
       return;
     }
+    long advanced = 0;
+    for (int i = 0; i < length; i++) {
+      advanced += buffers[offset + i].position() - positions[i];
+    }
+    if (advanced <= 0) {
+      return;
+    }
     final java.util.SplittableRandom random =
         new java.util.SplittableRandom(BootstrapDispatcher.corruptionSeed());
-    long target = random.nextLong(transferred);
+    long target = random.nextLong(Math.min(transferred, advanced));
     for (int i = 0; i < length; i++) {
       final ByteBuffer buffer = buffers[offset + i];
       final int received = buffer.position() - positions[i];

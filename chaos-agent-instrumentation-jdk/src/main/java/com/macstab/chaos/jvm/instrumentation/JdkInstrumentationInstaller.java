@@ -326,6 +326,11 @@ public final class JdkInstrumentationInstaller {
         OperationType.SOCKET_WRITE,
         OperationType.SOCKET_CLOSE,
         OperationType.SOCKET_BIND),
+    /** UDP: datagram sends and receives of {@code DatagramSocket} and {@code DatagramChannel}. */
+    DATAGRAM(
+        JdkInstrumentationInstaller::applyDatagramTransformations,
+        OperationType.DATAGRAM_SEND,
+        OperationType.DATAGRAM_RECEIVE),
     /** The same socket events, raised by {@code SocketChannel} and {@code ServerSocketChannel}. */
     SOCKET_CHANNEL(
         JdkInstrumentationInstaller::applySocketChannelTransformations,
@@ -394,7 +399,8 @@ public final class JdkInstrumentationInstaller {
     DNS(
         JdkInstrumentationInstaller::applyPhase2DnsResolutionInterception,
         OperationType.DNS_RESOLVE,
-        OperationType.DNS_ANSWER),
+        OperationType.DNS_ANSWER,
+        OperationType.DNS_REVERSE),
     PROCESS(JdkInstrumentationInstaller::applyProcessInterception, OperationType.PROCESS_START),
     FILE_IO(
         JdkInstrumentationInstaller::applyPhase2FileIoInterception,
@@ -865,6 +871,14 @@ public final class JdkInstrumentationInstaller {
             delegateInterface,
             "beforeSocketClose",
             MethodType.methodType(void.class, Object.class));
+    methodHandles[BootstrapDispatcher.BEFORE_DATAGRAM] =
+        lookup.findVirtual(
+            delegateInterface,
+            "beforeDatagram",
+            MethodType.methodType(int.class, String.class, Object.class, Object.class, int.class));
+    methodHandles[BootstrapDispatcher.BEFORE_DNS_REVERSE] =
+        lookup.findVirtual(
+            delegateInterface, "beforeDnsReverse", MethodType.methodType(void.class, String.class));
     methodHandles[BootstrapDispatcher.BEFORE_SOCKET_BIND] =
         lookup.findVirtual(
             delegateInterface,
@@ -1921,6 +1935,60 @@ public final class JdkInstrumentationInstaller {
   }
 
   /**
+   * UDP: {@code DatagramChannelImpl}'s public sends and receives, and the funnels {@code
+   * DatagramSocket} goes through ({@code blockingSend}, {@code blockingReceive}).
+   */
+  private static AgentBuilder applyDatagramTransformations(final AgentBuilder builder) {
+    return builder
+        .type(ElementMatchers.named("sun.nio.ch.DatagramChannelImpl"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.DatagramSendAdvice.class)
+                            .on(
+                                ElementMatchers.named("send")
+                                    .and(ElementMatchers.isPublic())
+                                    .and(
+                                        ElementMatchers.takesArguments(
+                                            java.nio.ByteBuffer.class,
+                                            java.net.SocketAddress.class))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.DatagramWriteAdvice.class)
+                            .on(
+                                ElementMatchers.named("write")
+                                    .and(
+                                        ElementMatchers.takesArguments(java.nio.ByteBuffer.class))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.DatagramPacketSendAdvice.class)
+                            .on(
+                                ElementMatchers.named("blockingSend")
+                                    .and(
+                                        ElementMatchers.takesArguments(
+                                            java.net.DatagramPacket.class))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.DatagramReceiveAdvice.class)
+                            .on(
+                                ElementMatchers.named("receive")
+                                    .and(ElementMatchers.isPublic())
+                                    .and(
+                                        ElementMatchers.takesArguments(java.nio.ByteBuffer.class))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.DatagramReadAdvice.class)
+                            .on(
+                                ElementMatchers.named("read")
+                                    .and(
+                                        ElementMatchers.takesArguments(java.nio.ByteBuffer.class))))
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.DatagramPacketReceiveAdvice.class)
+                            .on(
+                                ElementMatchers.named("blockingReceive")
+                                    .and(
+                                        ElementMatchers.takesArguments(
+                                            java.net.DatagramPacket.class, long.class)))));
+  }
+
+  /**
    * {@code SocketChannel} and {@code ServerSocketChannel} as sockets: connect, accept, reads and
    * writes (single, scattering, gathering) raise the {@code SOCKET_*} events with the channel's
    * peer and byte count, and a socket channel's close raises {@code SOCKET_CLOSE}. Matched on the
@@ -2653,7 +2721,17 @@ public final class JdkInstrumentationInstaller {
                             .on(
                                 ElementMatchers.named("getLocalHost")
                                     .and(ElementMatchers.isStatic())
-                                    .and(ElementMatchers.takesArguments(0)))));
+                                    .and(ElementMatchers.takesArguments(0))))
+                    // getHostName and getCanonicalHostName both look the name up here.
+                    .visit(
+                        Advice.to(JvmRuntimeAdvice.DnsReverseAdvice.class)
+                            .on(
+                                // (InetAddress, boolean) up to JDK 24, (InetAddress) since
+                                ElementMatchers.named("getHostFromNameService")
+                                    .and(ElementMatchers.isStatic())
+                                    .and(
+                                        ElementMatchers.takesArgument(
+                                            0, java.net.InetAddress.class)))));
   }
 
   /**

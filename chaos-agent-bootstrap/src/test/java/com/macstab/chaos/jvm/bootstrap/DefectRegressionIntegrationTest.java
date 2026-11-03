@@ -1394,6 +1394,23 @@ class DefectRegressionIntegrationTest {
     }
 
     @Test
+    @DisplayName("UDP: dropped and corrupted datagrams, a refused send; a failed reverse lookup")
+    void datagramsAndReverseLookups() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.runWithoutPlan(DefectProbeMain.class, "udp-dns");
+      // the first datagram was dropped on the way, the second arrived
+      assertThat(result.value("udpFirst")).isEqualTo("two");
+      assertThat(result.longValue("applied.jvm::udp-drop-first")).isEqualTo(1L);
+      assertThat(result.longValue("udpSocketBits")).isEqualTo(1L);
+      assertThat(result.longValue("udpChannelBits")).isEqualTo(1L);
+      assertThat(result.longValue("applied.jvm::udp-corrupt")).isEqualTo(2L);
+      assertThat(result.value("udpRefused")).isEqualTo("java.net.PortUnreachableException");
+      // the JDK reports a failed reverse lookup by returning the IP literal
+      assertThat(result.value("reverseName")).isEqualTo("127.0.0.1");
+      assertThat(result.longValue("applied.jvm::reverse-fails")).isEqualTo(1L);
+    }
+
+    @Test
     @DisplayName("socket channels are sockets: peer filters, trickle, corrupt, torn, reset")
     void socketChannels() throws Exception {
       final ChildJvmProbe.ProbeResult result =

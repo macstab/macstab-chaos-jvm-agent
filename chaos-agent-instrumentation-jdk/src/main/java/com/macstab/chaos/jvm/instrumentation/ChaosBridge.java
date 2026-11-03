@@ -577,6 +577,18 @@ final class ChaosBridge implements BridgeDelegate {
   }
 
   @Override
+  public int beforeDatagram(
+      final String operation, final Object channel, final Object peer, final int length)
+      throws Throwable {
+    return runtime.beforeDatagram(operation, channel, peer, length);
+  }
+
+  @Override
+  public void beforeDnsReverse(final String address) throws Throwable {
+    runtime.beforeDnsReverse(address);
+  }
+
+  @Override
   public java.time.Instant adjustClockInstant(final java.time.Instant realInstant) {
     return runtime.adjustClockInstant(realInstant);
   }

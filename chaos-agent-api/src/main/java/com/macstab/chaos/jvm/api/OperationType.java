@@ -35,7 +35,8 @@ package com.macstab.chaos.jvm.api;
  *       #NIO_CHANNEL_READ}, {@link #NIO_CHANNEL_WRITE}, {@link #NIO_CHANNEL_CONNECT}, {@link
  *       #NIO_CHANNEL_ACCEPT}
  *   <li>{@link ChaosSelector.NetworkSelector} — {@link #SOCKET_CONNECT}, {@link #SOCKET_ACCEPT},
- *       {@link #SOCKET_READ}, {@link #SOCKET_WRITE}, {@link #SOCKET_CLOSE}, {@link #SOCKET_BIND}
+ *       {@link #SOCKET_READ}, {@link #SOCKET_WRITE}, {@link #SOCKET_CLOSE}, {@link #SOCKET_BIND},
+ *       {@link #DATAGRAM_SEND}, {@link #DATAGRAM_RECEIVE}
  *   <li>{@link ChaosSelector.ThreadLocalSelector} — {@link #THREAD_LOCAL_GET}, {@link
  *       #THREAD_LOCAL_SET}
  *   <li>{@link ChaosSelector.HttpClientSelector} — {@link #HTTP_CLIENT_SEND}, {@link
@@ -45,7 +46,8 @@ package com.macstab.chaos.jvm.api;
  *       #JDBC_TRANSACTION_COMMIT}, {@link #JDBC_TRANSACTION_ROLLBACK}
  *   <li>{@link ChaosSelector.ThreadSelector} — {@link #THREAD_SLEEP} (in addition to thread start
  *       operations)
- *   <li>{@link ChaosSelector.DnsSelector} — {@link #DNS_RESOLVE}
+ *   <li>{@link ChaosSelector.DnsSelector} — {@link #DNS_RESOLVE}, {@link #DNS_ANSWER}, {@link
+ *       #DNS_REVERSE}
  *   <li>{@link ChaosSelector.SslSelector} — {@link #SSL_HANDSHAKE}
  *   <li>{@link ChaosSelector.FileIoSelector} — {@link #FILE_IO_READ}, {@link #FILE_IO_WRITE},
  *       {@link #FILE_IO_SYNC}, {@link #FILE_IO_TRUNCATE}, {@link #FILE_IO_DELETE}, {@link
@@ -522,6 +524,26 @@ public enum OperationType {
    */
   SOCKET_BIND,
 
+  /**
+   * Fires before a UDP datagram is sent: {@code DatagramSocket.send}, {@code DatagramChannel.send}
+   * and {@code DatagramChannel.write}. The peer is the destination, the byte count the datagram's
+   * length. {@code ChaosEffect.suppress()} drops the datagram silently: the send reports success
+   * and nothing goes on the wire, as a lossy network does.
+   *
+   * <p>Use with {@link ChaosSelector.NetworkSelector}.
+   */
+  DATAGRAM_SEND,
+
+  /**
+   * Fires before a UDP datagram is received: {@code DatagramSocket.receive}, {@code
+   * DatagramChannel.receive} and {@code DatagramChannel.read}. The peer is known only for a
+   * connected socket or channel; the byte count is the space the buffer offers. {@code
+   * ChaosEffect.corruptRead()} flips one bit of the datagram received.
+   *
+   * <p>Use with {@link ChaosSelector.NetworkSelector}.
+   */
+  DATAGRAM_RECEIVE,
+
   // ── Extended JVM runtime services ───────────────────────────────────────────
 
   /**
@@ -719,6 +741,16 @@ public enum OperationType {
    * <p>Use with {@link ChaosSelector.DnsSelector}.
    */
   DNS_ANSWER,
+
+  /**
+   * Fires before a reverse lookup: {@link java.net.InetAddress#getHostName()} and {@link
+   * java.net.InetAddress#getCanonicalHostName()} of an address without a known name. The host
+   * pattern matches the address's IP literal. A rejection fails the lookup the way the JDK reports
+   * it: the IP literal is returned instead of a name.
+   *
+   * <p>Use with {@link ChaosSelector.DnsSelector}.
+   */
+  DNS_REVERSE,
 
   // ── SSL/TLS handshake ───────────────────────────────────────────────────────
 

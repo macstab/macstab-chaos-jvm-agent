@@ -916,10 +916,16 @@ public sealed interface ChaosSelector
             OperationType.SOCKET_READ,
             OperationType.SOCKET_WRITE,
             OperationType.SOCKET_CLOSE,
-            OperationType.SOCKET_BIND);
+            OperationType.SOCKET_BIND,
+            OperationType.DATAGRAM_SEND,
+            OperationType.DATAGRAM_RECEIVE);
 
     private static final Set<OperationType> SIZED_OPS =
-        EnumSet.of(OperationType.SOCKET_READ, OperationType.SOCKET_WRITE);
+        EnumSet.of(
+            OperationType.SOCKET_READ,
+            OperationType.SOCKET_WRITE,
+            OperationType.DATAGRAM_SEND,
+            OperationType.DATAGRAM_RECEIVE);
 
     /** Validates the NetworkSelector parameters. */
     public NetworkSelector {
@@ -1050,7 +1056,9 @@ public sealed interface ChaosSelector
    * For {@link java.net.InetAddress#getLocalHost()} the hostname is {@code null}; a {@link
    * NamePattern#any()} pattern matches all DNS calls including {@code getLocalHost()}.
    *
-   * <p><b>Valid operations:</b> {@link OperationType#DNS_RESOLVE}.
+   * <p><b>Valid operations:</b> {@link OperationType#DNS_RESOLVE}, {@link
+   * OperationType#DNS_ANSWER}, {@link OperationType#DNS_REVERSE} (whose pattern matches the IP
+   * literal looked up).
    *
    * @param operations operation types this selector matches
    * @param hostnamePattern pattern matched against the hostname being resolved
@@ -1058,7 +1066,7 @@ public sealed interface ChaosSelector
   record DnsSelector(Set<OperationType> operations, NamePattern hostnamePattern)
       implements ChaosSelector {
     static final Set<OperationType> VALID_OPS =
-        EnumSet.of(OperationType.DNS_RESOLVE, OperationType.DNS_ANSWER);
+        EnumSet.of(OperationType.DNS_RESOLVE, OperationType.DNS_ANSWER, OperationType.DNS_REVERSE);
 
     /** Validates the DnsSelector parameters. */
     public DnsSelector {
