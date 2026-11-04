@@ -174,7 +174,9 @@ public final class ChaosPlanMapper {
     if (exception instanceof com.fasterxml.jackson.databind.exc.MismatchedInputException) {
       return "value of the wrong type";
     }
-    if (exception instanceof com.fasterxml.jackson.core.JsonParseException) {
+    // A syntax error inside a value being bound arrives wrapped in a mapping exception.
+    if (exception instanceof com.fasterxml.jackson.core.JsonParseException
+        || exception.getCause() instanceof com.fasterxml.jackson.core.JsonParseException) {
       return "malformed JSON";
     }
     return exception.getClass().getSimpleName();
@@ -183,8 +185,16 @@ public final class ChaosPlanMapper {
   private static String jsonPath(
       final com.fasterxml.jackson.databind.JsonMappingException mapping) {
     final StringBuilder path = new StringBuilder();
+    java.util.List<com.fasterxml.jackson.databind.JsonMappingException.Reference> references =
+        mapping.getPath();
+    if (mapping instanceof com.fasterxml.jackson.databind.exc.UnrecognizedPropertyException
+        && !references.isEmpty()) {
+      // The last reference is the unknown property itself, which the kind already names: the
+      // path is the object that holds it.
+      references = references.subList(0, references.size() - 1);
+    }
     for (final com.fasterxml.jackson.databind.JsonMappingException.Reference reference :
-        mapping.getPath()) {
+        references) {
       if (reference.getFieldName() != null) {
         if (!path.isEmpty()) {
           path.append('.');
