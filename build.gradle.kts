@@ -674,6 +674,9 @@ subprojects {
             "errorprone"("com.google.errorprone:error_prone_core:2.52.0")
             "errorprone"("com.uber.nullaway:nullaway:0.14.3")
             "compileOnly"(jspecify)
+            // ByteBuddy's own nullness annotations refer to JSR-305's When; JSpecify mode reads
+            // them, so the compiler needs the class (compile time only).
+            "compileOnly"("com.google.code.findbugs:jsr305:3.0.2")
             "testCompileOnly"(jspecify)
         }
         tasks.withType<JavaCompile>().configureEach {
@@ -684,6 +687,8 @@ subprojects {
                 // otherwise (JSpecify), and the compiler proves it. Tests are not checked.
                 if (!name.contains("Test")) {
                     option("NullAway:AnnotatedPackages", "com.macstab.chaos.jvm")
+                    // JSpecify mode: nullness inside generics (Supplier<@Nullable T>) is checked too.
+                    option("NullAway:JSpecifyMode", "true")
                     // JMH state is initialised in @Setup methods, not in constructors.
                     option("NullAway:CustomInitializerAnnotations", "org.openjdk.jmh.annotations.Setup")
                     error("NullAway")

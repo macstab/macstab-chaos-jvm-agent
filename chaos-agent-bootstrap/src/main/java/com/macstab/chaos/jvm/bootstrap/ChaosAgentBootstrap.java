@@ -74,7 +74,7 @@ public final class ChaosAgentBootstrap {
    * rolled back after a failure — invisible to {@link #current()} and to concurrent initializers,
    * which wait for the outcome instead.
    */
-  private static final AtomicReference<CompletableFuture<ChaosRuntime>> INITIALIZATION =
+  private static final AtomicReference<@Nullable CompletableFuture<ChaosRuntime>> INITIALIZATION =
       new AtomicReference<>();
 
   /** Thread running the current initialization; detects re-entrant initialization. */
@@ -86,7 +86,7 @@ public final class ChaosAgentBootstrap {
    * The active config-file poller, or {@code null} when watch mode is disabled or the plan was
    * loaded from an inline / base64 source (which has no backing file to watch).
    */
-  static final AtomicReference<StartupConfigPoller> POLLER = new AtomicReference<>();
+  static final AtomicReference<@Nullable StartupConfigPoller> POLLER = new AtomicReference<>();
 
   /** Serialises concurrent {@link #installForLocalTests} calls; see that method for rationale. */
   private static final Object INSTALL_LOCK = new Object();

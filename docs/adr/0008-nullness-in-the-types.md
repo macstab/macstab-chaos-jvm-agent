@@ -17,7 +17,7 @@ Much of the agent's data is optional by design: a selector without a peer filter
 
 ## Decision
 
-Every reference in production code is non-null unless it is annotated `@Nullable` (JSpecify), and NullAway, running in every compilation as an error, proves each dereference safe. Optional record components, parameters and return values say so in their type. Values that must be present but are reached through an untyped carrier (the payload of a `TerminalAction`) are read through accessors that fail with a message naming the engine bug, not with a bare `NullPointerException`. `chaos-agent-api` publishes the JSpecify annotations as its one dependency, so the nullness reaches Java tools and Kotlin; the agent jar leaves them out, as no annotation is needed at runtime.
+Every reference in production code is non-null unless it is annotated `@Nullable` (JSpecify), and NullAway, running in every compilation as an error, proves each dereference safe, in JSpecify mode, so type arguments (`AtomicReference<@Nullable T>`) carry nullness as well. Optional record components, parameters and return values say so in their type. Values that must be present but are reached through an untyped carrier (the payload of a `TerminalAction`) are read through accessors that fail with a message naming the engine bug, not with a bare `NullPointerException`. `chaos-agent-api` publishes the JSpecify annotations as its one dependency, so the nullness reaches Java tools and Kotlin; the agent jar leaves them out, as no annotation is needed at runtime.
 
 ## Consequences
 

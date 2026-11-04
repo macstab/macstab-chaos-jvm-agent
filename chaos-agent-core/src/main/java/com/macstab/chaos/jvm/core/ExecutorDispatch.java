@@ -33,8 +33,8 @@ public final class ExecutorDispatch {
   @SuppressWarnings("UnnecessaryLambda")
   private static final Callable<?> NO_OP_CALLABLE = () -> null;
 
-  private final Map<Thread, java.util.concurrent.atomic.AtomicReference<Thread>> hookDelegateRefs =
-      new java.util.concurrent.ConcurrentHashMap<>();
+  private final Map<Thread, java.util.concurrent.atomic.AtomicReference<@Nullable Thread>>
+      hookDelegateRefs = new java.util.concurrent.ConcurrentHashMap<>();
 
   /**
    * Returns a (possibly session-scoped or suppressed) wrapper for an executor-submitted runnable.
@@ -326,7 +326,7 @@ public final class ExecutorDispatch {
     // A throwing terminal (reject) unwinds here; suppress is rejected for this operation at
     // activation (CompatibilityValidator), so every other decision registers the wrapper.
     engine.applyPreDecision(decision);
-    final java.util.concurrent.atomic.AtomicReference<Thread> hookRef =
+    final java.util.concurrent.atomic.AtomicReference<@Nullable Thread> hookRef =
         new java.util.concurrent.atomic.AtomicReference<>(hook);
     final Thread decorated =
         new Thread(
@@ -360,7 +360,7 @@ public final class ExecutorDispatch {
     // leak for long-running JVMs that churn shutdown-hook registrations (e.g. integration-test
     // suites that stop and restart embedded servers).
     final Thread decorated = shutdownHooks.remove(original);
-    final java.util.concurrent.atomic.AtomicReference<Thread> hookRef =
+    final java.util.concurrent.atomic.AtomicReference<@Nullable Thread> hookRef =
         hookDelegateRefs.remove(original);
     if (hookRef != null) {
       hookRef.set(null);
