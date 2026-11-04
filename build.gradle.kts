@@ -660,6 +660,25 @@ subprojects {
         tasks.withType<org.cyclonedx.gradle.CyclonedxDirectTask>().configureEach {
             includeConfigs.set(listOf("runtimeClasspath"))
         }
+        // The SBOM ships with the artifact it describes, under the classifier the CycloneDX Maven
+        // plugin uses, so a scanner reading the repository finds it next to the jar.
+        val bom = tasks.named<org.cyclonedx.gradle.CyclonedxDirectTask>("cyclonedxDirectBom")
+        plugins.withId("maven-publish") {
+            extensions.configure<PublishingExtension> {
+                publications.withType<MavenPublication>().matching { it.name == "maven" }.configureEach {
+                    artifact(bom.flatMap { it.jsonOutput }) {
+                        classifier = "cyclonedx"
+                        extension = "json"
+                        builtBy(bom)
+                    }
+                    artifact(bom.flatMap { it.xmlOutput }) {
+                        classifier = "cyclonedx"
+                        extension = "xml"
+                        builtBy(bom)
+                    }
+                }
+            }
+        }
     }
 }
 

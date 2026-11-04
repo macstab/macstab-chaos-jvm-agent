@@ -88,7 +88,7 @@ A chaos tool that is wrong about its own behaviour is worse than none. Every cla
 | No unchecked null in production code | NullAway proves every dereference; optional values are `@Nullable` in the types ([ADR 0008](docs/adr/0008-nullness-in-the-types.md)) |
 | The tests catch real bugs, not just run code | mutation testing (`./gradlew pitest`) with ratcheted thresholds; coverage floors that count the child JVMs |
 | An idle hook costs about 7 ns and allocates nothing | JMH benchmarks with a regression gate in CI ([benchmarks](docs/benchmarks.md)) |
-| What ships is what you can verify | reproducible jars (`scripts/check-reproducible.sh`), a CycloneDX SBOM per module, shaded dependencies listed |
+| What ships is what you can verify | reproducible jars (`scripts/check-reproducible.sh`), a CycloneDX SBOM published next to every jar (classifier `cyclonedx`), shaded dependencies listed |
 
 The decisions behind the design are recorded as [architecture decision records](docs/adr/README.md).
 
