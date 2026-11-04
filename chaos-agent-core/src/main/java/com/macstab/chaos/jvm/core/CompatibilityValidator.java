@@ -291,8 +291,6 @@ final class CompatibilityValidator {
     validateEffectSelectorAffinity(effect, selector);
     validateEffectOperationSupport(effect, selector);
     validateNetworkHostFilter(selector);
-    validateSelectorOperationSets(selector);
-    validateOperationTypeSelectorAffinity(selector);
   }
 
   /**
@@ -425,107 +423,6 @@ final class CompatibilityValidator {
       throw new ChaosValidationException(
           "SpuriousWakeupEffect requires NioSelector with NIO_SELECTOR_SELECT operation");
     }
-  }
-
-  /**
-   * Validates that each selector's declared operations are confined to the operation types that are
-   * legal for that selector kind.
-   */
-  private static void validateSelectorOperationSets(final ChaosSelector selector) {
-    if (selector instanceof ChaosSelector.NioSelector nioSelector) {
-      validateOperationSet(nioSelector.operations(), NIO_OPS, "NioSelector", "NIO operation");
-    }
-    if (selector instanceof ChaosSelector.NetworkSelector networkSelector) {
-      validateOperationSet(
-          networkSelector.operations(), NETWORK_OPS, "NetworkSelector", "socket operation");
-    }
-    if (selector instanceof ChaosSelector.ThreadLocalSelector threadLocalSelector) {
-      validateOperationSet(
-          threadLocalSelector.operations(), THREAD_LOCAL_OPS, "ThreadLocalSelector", "valid");
-    }
-    if (selector instanceof ChaosSelector.HttpClientSelector httpClientSelector) {
-      validateOperationSet(
-          httpClientSelector.operations(), HTTP_OPS, "HttpClientSelector", "valid");
-    }
-    if (selector instanceof ChaosSelector.JdbcSelector jdbcSelector) {
-      validateOperationSet(jdbcSelector.operations(), JDBC_OPS, "JdbcSelector", "valid");
-    }
-  }
-
-  private static void validateOperationSet(
-      final Set<OperationType> operations,
-      final Set<OperationType> allowedOps,
-      final String selectorName,
-      final String validDescription) {
-    for (final OperationType operation : operations) {
-      if (!allowedOps.contains(operation)) {
-        throw new ChaosValidationException(
-            selectorName
-                + " operation "
-                + operation
-                + " is not "
-                + validDescription
-                + "; valid ops: "
-                + allowedOps);
-      }
-    }
-  }
-
-  /**
-   * Validates that operation types requiring a specific selector kind are not used with the wrong
-   * selector (e.g. HTTP operations outside {@link ChaosSelector.HttpClientSelector}, JDBC
-   * operations outside {@link ChaosSelector.JdbcSelector}).
-   */
-  private static void validateOperationTypeSelectorAffinity(final ChaosSelector selector) {
-    if (!(selector instanceof ChaosSelector.HttpClientSelector)
-        && selectorContainsAny(selector, HTTP_OPS)) {
-      throw new ChaosValidationException(
-          "HTTP_CLIENT_SEND / HTTP_CLIENT_SEND_ASYNC operations require HttpClientSelector");
-    }
-    if (!(selector instanceof ChaosSelector.JdbcSelector)
-        && selectorContainsAny(selector, JDBC_OPS)) {
-      throw new ChaosValidationException("JDBC_* operations require JdbcSelector");
-    }
-  }
-
-  private static final Set<OperationType> HTTP_OPS =
-      Set.of(OperationType.HTTP_CLIENT_SEND, OperationType.HTTP_CLIENT_SEND_ASYNC);
-
-  private static final Set<OperationType> JDBC_OPS =
-      Set.of(
-          OperationType.JDBC_CONNECTION_ACQUIRE,
-          OperationType.JDBC_STATEMENT_EXECUTE,
-          OperationType.JDBC_PREPARED_STATEMENT,
-          OperationType.JDBC_TRANSACTION_COMMIT,
-          OperationType.JDBC_TRANSACTION_ROLLBACK,
-          OperationType.R2DBC_STATEMENT_EXECUTE);
-
-  private static final Set<OperationType> NIO_OPS =
-      Set.of(
-          OperationType.NIO_SELECTOR_SELECT,
-          OperationType.NIO_CHANNEL_READ,
-          OperationType.NIO_CHANNEL_WRITE,
-          OperationType.NIO_CHANNEL_CONNECT,
-          OperationType.NIO_CHANNEL_ACCEPT);
-
-  private static final Set<OperationType> NETWORK_OPS =
-      Set.of(
-          OperationType.SOCKET_CONNECT,
-          OperationType.SOCKET_ACCEPT,
-          OperationType.SOCKET_READ,
-          OperationType.SOCKET_WRITE,
-          OperationType.SOCKET_CLOSE,
-          OperationType.SOCKET_BIND,
-          OperationType.SOCKET_SHUTDOWN,
-          OperationType.DATAGRAM_SEND,
-          OperationType.DATAGRAM_RECEIVE);
-
-  private static final Set<OperationType> THREAD_LOCAL_OPS =
-      Set.of(OperationType.THREAD_LOCAL_GET, OperationType.THREAD_LOCAL_SET);
-
-  private static boolean selectorContainsAny(
-      final ChaosSelector selector, final Set<OperationType> needles) {
-    return containsAny(SelectorOperations.of(selector), needles);
   }
 
   /**
