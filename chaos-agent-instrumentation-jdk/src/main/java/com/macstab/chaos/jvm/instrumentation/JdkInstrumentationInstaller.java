@@ -842,39 +842,9 @@ public final class JdkInstrumentationInstaller {
       bridgeJar.toFile().deleteOnExit();
       try (JarOutputStream jarOutputStream =
           new JarOutputStream(Files.newOutputStream(bridgeJar))) {
-        writeClass(
-            jarOutputStream,
-            "com/macstab/chaos/jvm/instrumentation/bridge/BootstrapDispatcher.class");
-        writeClass(
-            jarOutputStream,
-            "com/macstab/chaos/jvm/instrumentation/bridge/SessionHeaderPolicy.class");
-        writeClass(
-            jarOutputStream, "com/macstab/chaos/jvm/instrumentation/bridge/ChannelBuffers.class");
-        writeClass(
-            jarOutputStream, "com/macstab/chaos/jvm/instrumentation/bridge/OperationTags.class");
-        writeClass(
-            jarOutputStream,
-            "com/macstab/chaos/jvm/instrumentation/ScheduledRunnableWrapper.class");
-        writeClass(
-            jarOutputStream,
-            "com/macstab/chaos/jvm/instrumentation/ScheduledCallableWrapper.class");
-        // Required on the bootstrap classpath because advice woven into JDK module classes
-        // (e.g. jdk.internal.net.http.HttpClientImpl in the platform classloader) references
-        // these types. Without injecting them here the JVM verifier raises NoClassDefFoundError
-        // when the JDK class is first used.
-        writeClass(jarOutputStream, "com/macstab/chaos/jvm/api/ChaosHttpSuppressException.class");
-        writeClass(jarOutputStream, "com/macstab/chaos/jvm/instrumentation/HttpUrlExtractor.class");
-        writeClass(
-            jarOutputStream, "com/macstab/chaos/jvm/instrumentation/HttpUrlExtractor$1.class");
-        // JDBC advice woven into HikariPool / c3p0 / java.sql types references these classes.
-        // HikariPool is loaded by the application classloader, but the inlined advice references
-        // must resolve through the bootstrap classpath, so the exception type and the reflective
-        // pool-name extractor both have to be visible there.
-        writeClass(jarOutputStream, "com/macstab/chaos/jvm/api/ChaosJdbcSuppressException.class");
-        writeClass(
-            jarOutputStream, "com/macstab/chaos/jvm/instrumentation/JdbcTargetExtractor.class");
-        writeClass(
-            jarOutputStream, "com/macstab/chaos/jvm/instrumentation/JdbcTargetExtractor$1.class");
+        for (final String bridgeClass : BRIDGE_CLASSES) {
+          writeClass(jarOutputStream, bridgeClass);
+        }
       }
       // Retain the JarFile in a static field. appendToBootstrapClassLoaderSearch does not
       // document whether the JVM keeps a strong reference to the Java-side JarFile; on
@@ -2904,6 +2874,31 @@ public final class JdkInstrumentationInstaller {
     }
     return Files.createTempFile(BRIDGE_JAR_PREFIX, BRIDGE_JAR_SUFFIX);
   }
+
+  /**
+   * The class files of the bootstrap bridge jar. JDK classes woven by the agent resolve the types
+   * their advice references through the bootstrap class loader, so every agent type the bridge
+   * references must be in this list; {@code ArchitectureTest} checks that it is closed.
+   */
+  static final java.util.List<String> BRIDGE_CLASSES =
+      java.util.List.of(
+          "com/macstab/chaos/jvm/instrumentation/bridge/BootstrapDispatcher.class",
+          "com/macstab/chaos/jvm/instrumentation/bridge/SessionHeaderPolicy.class",
+          "com/macstab/chaos/jvm/instrumentation/bridge/ChannelBuffers.class",
+          "com/macstab/chaos/jvm/instrumentation/bridge/OperationTags.class",
+          "com/macstab/chaos/jvm/instrumentation/ScheduledRunnableWrapper.class",
+          "com/macstab/chaos/jvm/instrumentation/ScheduledCallableWrapper.class",
+          // Advice woven into JDK module classes (e.g. jdk.internal.net.http.HttpClientImpl in
+          // the platform class loader) references these types; without them the verifier raises
+          // NoClassDefFoundError when the JDK class is first used.
+          "com/macstab/chaos/jvm/api/ChaosHttpSuppressException.class",
+          "com/macstab/chaos/jvm/instrumentation/HttpUrlExtractor.class",
+          "com/macstab/chaos/jvm/instrumentation/HttpUrlExtractor$1.class",
+          // JDBC advice woven into HikariPool, c3p0 and java.sql types references these: the
+          // inlined references resolve through the bootstrap class path.
+          "com/macstab/chaos/jvm/api/ChaosJdbcSuppressException.class",
+          "com/macstab/chaos/jvm/instrumentation/JdbcTargetExtractor.class",
+          "com/macstab/chaos/jvm/instrumentation/JdbcTargetExtractor$1.class");
 
   private static void writeClass(final JarOutputStream jarOutputStream, final String resourcePath)
       throws IOException {

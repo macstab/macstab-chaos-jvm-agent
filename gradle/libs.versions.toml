@@ -10,6 +10,7 @@ hikariCp = "5.1.0"
 jackson = "2.19.4"
 jmh = "1.37"
 jqwik = "1.9.3"
+archunit = "1.5.1"
 junit = "5.10.1"
 mockito = "5.14.2"
 resilience4j = "2.2.0"
@@ -33,6 +34,7 @@ nettyProbe = "4.2.19.Final"
 r2dbcH2 = "1.1.0.RELEASE"
 
 [libraries]
+archunit-junit5 = { module = "com.tngtech.archunit:archunit-junit5", version.ref = "archunit" }
 micrometer-core = { module = "io.micrometer:micrometer-core", version.ref = "micrometer" }
 opentelemetry-api = { module = "io.opentelemetry:opentelemetry-api", version.ref = "opentelemetry" }
 opentelemetry-sdk = { module = "io.opentelemetry:opentelemetry-sdk", version.ref = "opentelemetry" }

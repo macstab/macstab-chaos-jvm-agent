@@ -13,6 +13,7 @@ dependencies {
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.assertj)
+    testImplementation(libs.archunit.junit5)
     testImplementation(libs.h2)
     testImplementation(libs.hikari.cp)
 }
