@@ -1,0 +1,27 @@
+public class com/macstab/chaos/jvm/micronaut/ChaosContextConfigurer implements io/micronaut/context/ApplicationContextConfigurer
+  public method <init>()V
+  public method configure(Lio/micronaut/context/ApplicationContextBuilder;)V
+  public static final field ENABLED_PROPERTY Ljava/lang/String;
+
+public class com/macstab/chaos/jvm/micronaut/ChaosFactory
+  public method <init>()V
+  public method chaosControlPlane()Lcom/macstab/chaos/jvm/api/ChaosControlPlane;
+
+public class com/macstab/chaos/jvm/micronaut/ChaosManagementEndpoint
+  public method <init>()V
+  public method activate(Ljava/lang/String;)Lio/micronaut/http/HttpResponse;
+  public method close()V
+  public method snapshot()Lio/micronaut/http/HttpResponse;
+  public method stop(Ljava/lang/String;)Lio/micronaut/http/HttpResponse;
+  public method stopAll()Lio/micronaut/http/HttpResponse;
+
+public final class com/macstab/chaos/jvm/micronaut/ChaosMicronautExtension implements org/junit/jupiter/api/extension/AfterAllCallback, org/junit/jupiter/api/extension/AfterEachCallback, org/junit/jupiter/api/extension/BeforeAllCallback, org/junit/jupiter/api/extension/BeforeEachCallback, org/junit/jupiter/api/extension/ParameterResolver
+  public method <init>()V
+  public method afterAll(Lorg/junit/jupiter/api/extension/ExtensionContext;)V
+  public method afterEach(Lorg/junit/jupiter/api/extension/ExtensionContext;)V
+  public method beforeAll(Lorg/junit/jupiter/api/extension/ExtensionContext;)V
+  public method beforeEach(Lorg/junit/jupiter/api/extension/ExtensionContext;)V
+  public method resolveParameter(Lorg/junit/jupiter/api/extension/ParameterContext;Lorg/junit/jupiter/api/extension/ExtensionContext;)Ljava/lang/Object;
+  public method supportsParameter(Lorg/junit/jupiter/api/extension/ParameterContext;Lorg/junit/jupiter/api/extension/ExtensionContext;)Z
+
+public @interface com/macstab/chaos/jvm/micronaut/MicronautChaosTest implements java/lang/annotation/Annotation

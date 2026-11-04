@@ -1,0 +1,6 @@
+public class com/macstab/chaos/jvm/spring/boot4/ChaosAgentEnvironmentPostProcessor implements org/springframework/boot/EnvironmentPostProcessor, org/springframework/core/Ordered
+  public method <init>()V
+  public method getOrder()I
+  public method postProcessEnvironment(Lorg/springframework/core/env/ConfigurableEnvironment;Lorg/springframework/boot/SpringApplication;)V
+  public static final field ATTACH_MARKER_PROPERTY Ljava/lang/String;
+  public static final field ATTACH_MARKER_SOURCE Ljava/lang/String;

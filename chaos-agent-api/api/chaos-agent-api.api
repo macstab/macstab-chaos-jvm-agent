@@ -1,0 +1,1072 @@
+public final record com/macstab/chaos/jvm/api/ActivationPolicy
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(Lcom/macstab/chaos/jvm/api/ActivationPolicy$StartMode;DJLjava/lang/Long;Ljava/time/Duration;Lcom/macstab/chaos/jvm/api/ActivationPolicy$RateLimit;Ljava/lang/Long;Z)V
+  public method <init>(Lcom/macstab/chaos/jvm/api/ActivationPolicy$StartMode;DJLjava/lang/Long;Ljava/time/Duration;Lcom/macstab/chaos/jvm/api/ActivationPolicy$RateLimit;Ljava/lang/Long;ZLjava/time/Instant;Ljava/time/Instant;)V
+  public method <init>(Lcom/macstab/chaos/jvm/api/ActivationPolicy$StartMode;DJLjava/lang/Long;Ljava/time/Duration;Lcom/macstab/chaos/jvm/api/ActivationPolicy$RateLimit;Ljava/lang/Long;ZLjava/time/Instant;Ljava/time/Instant;Ljava/util/List;)V
+  public method activateAfterMatches()J
+  public method activeFor()Ljava/time/Duration;
+  public method activeFrom()Ljava/time/Instant;
+  public method activeUntil()Ljava/time/Instant;
+  public method allowDestructiveEffects()Z
+  public method maxApplications()Ljava/lang/Long;
+  public method probability()D
+  public method randomSeed()Ljava/lang/Long;
+  public method rateLimit()Lcom/macstab/chaos/jvm/api/ActivationPolicy$RateLimit;
+  public method replayMatches()Ljava/util/List;
+  public method startMode()Lcom/macstab/chaos/jvm/api/ActivationPolicy$StartMode;
+  public static method always()Lcom/macstab/chaos/jvm/api/ActivationPolicy;
+  public static method builder()Lcom/macstab/chaos/jvm/api/ActivationPolicy$Builder;
+  public static method count(J)Lcom/macstab/chaos/jvm/api/ActivationPolicy;
+  public static method fromJson(Lcom/macstab/chaos/jvm/api/ActivationPolicy$StartMode;Ljava/lang/Double;JLjava/lang/Long;Ljava/time/Duration;Lcom/macstab/chaos/jvm/api/ActivationPolicy$RateLimit;Ljava/lang/Long;ZLjava/time/Instant;Ljava/time/Instant;Ljava/util/List;)Lcom/macstab/chaos/jvm/api/ActivationPolicy;
+  public static method manual()Lcom/macstab/chaos/jvm/api/ActivationPolicy;
+  public static method window(Ljava/time/Instant;Ljava/time/Instant;)Lcom/macstab/chaos/jvm/api/ActivationPolicy;
+  public static method withDestructiveEffects()Lcom/macstab/chaos/jvm/api/ActivationPolicy;
+
+public static final class com/macstab/chaos/jvm/api/ActivationPolicy$Builder
+  public method activateAfterMatches(J)Lcom/macstab/chaos/jvm/api/ActivationPolicy$Builder;
+  public method activeFor(Ljava/time/Duration;)Lcom/macstab/chaos/jvm/api/ActivationPolicy$Builder;
+  public method activeFrom(Ljava/time/Instant;)Lcom/macstab/chaos/jvm/api/ActivationPolicy$Builder;
+  public method activeUntil(Ljava/time/Instant;)Lcom/macstab/chaos/jvm/api/ActivationPolicy$Builder;
+  public method allowDestructiveEffects(Z)Lcom/macstab/chaos/jvm/api/ActivationPolicy$Builder;
+  public method build()Lcom/macstab/chaos/jvm/api/ActivationPolicy;
+  public method maxApplications(Ljava/lang/Long;)Lcom/macstab/chaos/jvm/api/ActivationPolicy$Builder;
+  public method probability(D)Lcom/macstab/chaos/jvm/api/ActivationPolicy$Builder;
+  public method randomSeed(Ljava/lang/Long;)Lcom/macstab/chaos/jvm/api/ActivationPolicy$Builder;
+  public method rateLimit(JLjava/time/Duration;)Lcom/macstab/chaos/jvm/api/ActivationPolicy$Builder;
+  public method rateLimit(Lcom/macstab/chaos/jvm/api/ActivationPolicy$RateLimit;)Lcom/macstab/chaos/jvm/api/ActivationPolicy$Builder;
+  public method replayMatches(Ljava/util/Collection;)Lcom/macstab/chaos/jvm/api/ActivationPolicy$Builder;
+  public method startMode(Lcom/macstab/chaos/jvm/api/ActivationPolicy$StartMode;)Lcom/macstab/chaos/jvm/api/ActivationPolicy$Builder;
+  public method window(Ljava/time/Instant;Ljava/time/Instant;)Lcom/macstab/chaos/jvm/api/ActivationPolicy$Builder;
+
+public static final record com/macstab/chaos/jvm/api/ActivationPolicy$RateLimit
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(JLjava/time/Duration;)V
+  public method permits()J
+  public method window()Ljava/time/Duration;
+
+public static final enum com/macstab/chaos/jvm/api/ActivationPolicy$StartMode
+  public static final field AUTOMATIC Lcom/macstab/chaos/jvm/api/ActivationPolicy$StartMode;
+  public static final field MANUAL Lcom/macstab/chaos/jvm/api/ActivationPolicy$StartMode;
+  public static method valueOf(Ljava/lang/String;)Lcom/macstab/chaos/jvm/api/ActivationPolicy$StartMode;
+  public static method values()[Lcom/macstab/chaos/jvm/api/ActivationPolicy$StartMode;
+
+public final class com/macstab/chaos/jvm/api/AsyncChaosEventListener implements com/macstab/chaos/jvm/api/ChaosEventListener
+  public method delegate()Lcom/macstab/chaos/jvm/api/ChaosEventListener;
+  public method onEvent(Lcom/macstab/chaos/jvm/api/ChaosEvent;)V
+
+public class com/macstab/chaos/jvm/api/ChaosActivationException extends java/lang/RuntimeException
+  public method <init>(Ljava/lang/String;)V
+  public method <init>(Ljava/lang/String;Ljava/lang/Throwable;)V
+
+public interface com/macstab/chaos/jvm/api/ChaosActivationHandle implements java/lang/AutoCloseable
+  public abstract method appliedCount()J
+  public abstract method id()Ljava/lang/String;
+  public abstract method matchedCount()J
+  public abstract method release()V
+  public abstract method start()V
+  public abstract method state()Lcom/macstab/chaos/jvm/api/ChaosDiagnostics$ScenarioState;
+  public abstract method stop()V
+  public method close()V
+
+public interface com/macstab/chaos/jvm/api/ChaosControlPlane implements java/lang/AutoCloseable
+  public abstract method activate(Lcom/macstab/chaos/jvm/api/ChaosPlan;)Lcom/macstab/chaos/jvm/api/ChaosActivationHandle;
+  public abstract method activate(Lcom/macstab/chaos/jvm/api/ChaosScenario;)Lcom/macstab/chaos/jvm/api/ChaosActivationHandle;
+  public abstract method addEventListener(Lcom/macstab/chaos/jvm/api/ChaosEventListener;)V
+  public abstract method close()V
+  public abstract method diagnostics()Lcom/macstab/chaos/jvm/api/ChaosDiagnostics;
+  public abstract method openSession(Ljava/lang/String;)Lcom/macstab/chaos/jvm/api/ChaosSession;
+  public abstract method removeEventListener(Lcom/macstab/chaos/jvm/api/ChaosEventListener;)Z
+  public method bindSession(Ljava/lang/String;)Lcom/macstab/chaos/jvm/api/ChaosSession$ScopeBinding;
+
+public final class com/macstab/chaos/jvm/api/ChaosDecisionRecorder implements com/macstab/chaos/jvm/api/ChaosEventListener
+  public method <init>()V
+  public method clear()V
+  public method decisions()Ljava/util/Map;
+  public method matches(Ljava/lang/String;)Ljava/util/List;
+  public method matches(Ljava/lang/String;Ljava/lang/String;)Ljava/util/List;
+  public method onEvent(Lcom/macstab/chaos/jvm/api/ChaosEvent;)V
+  public method replay(Lcom/macstab/chaos/jvm/api/ChaosScenario;)Lcom/macstab/chaos/jvm/api/ChaosScenario;
+
+public interface com/macstab/chaos/jvm/api/ChaosDiagnostics
+  public abstract method debugDump()Ljava/lang/String;
+  public abstract method scenario(Ljava/lang/String;)Ljava/util/Optional;
+  public abstract method snapshot()Lcom/macstab/chaos/jvm/api/ChaosDiagnostics$Snapshot;
+
+public static final record com/macstab/chaos/jvm/api/ChaosDiagnostics$ActivationFailure
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(Ljava/lang/String;Lcom/macstab/chaos/jvm/api/ChaosDiagnostics$FailureCategory;Ljava/lang/String;)V
+  public method category()Lcom/macstab/chaos/jvm/api/ChaosDiagnostics$FailureCategory;
+  public method message()Ljava/lang/String;
+  public method scenarioId()Ljava/lang/String;
+
+public static final enum com/macstab/chaos/jvm/api/ChaosDiagnostics$FailureCategory
+  public static final field ACTIVATION_CONFLICT Lcom/macstab/chaos/jvm/api/ChaosDiagnostics$FailureCategory;
+  public static final field INSTRUMENTATION_FAILURE Lcom/macstab/chaos/jvm/api/ChaosDiagnostics$FailureCategory;
+  public static final field INTERNAL_ERROR Lcom/macstab/chaos/jvm/api/ChaosDiagnostics$FailureCategory;
+  public static final field INVALID_CONFIGURATION Lcom/macstab/chaos/jvm/api/ChaosDiagnostics$FailureCategory;
+  public static final field UNSUPPORTED_RUNTIME Lcom/macstab/chaos/jvm/api/ChaosDiagnostics$FailureCategory;
+  public static method valueOf(Ljava/lang/String;)Lcom/macstab/chaos/jvm/api/ChaosDiagnostics$FailureCategory;
+  public static method values()[Lcom/macstab/chaos/jvm/api/ChaosDiagnostics$FailureCategory;
+
+public static final record com/macstab/chaos/jvm/api/ChaosDiagnostics$ScenarioReport
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Lcom/macstab/chaos/jvm/api/ChaosScenario$ScenarioScope;Lcom/macstab/chaos/jvm/api/ChaosDiagnostics$ScenarioState;JJLjava/lang/String;)V
+  public method appliedCount()J
+  public method description()Ljava/lang/String;
+  public method id()Ljava/lang/String;
+  public method matchedCount()J
+  public method reason()Ljava/lang/String;
+  public method scope()Lcom/macstab/chaos/jvm/api/ChaosScenario$ScenarioScope;
+  public method scopeKey()Ljava/lang/String;
+  public method state()Lcom/macstab/chaos/jvm/api/ChaosDiagnostics$ScenarioState;
+
+public static final enum com/macstab/chaos/jvm/api/ChaosDiagnostics$ScenarioState
+  public static final field ACTIVE Lcom/macstab/chaos/jvm/api/ChaosDiagnostics$ScenarioState;
+  public static final field FAILED Lcom/macstab/chaos/jvm/api/ChaosDiagnostics$ScenarioState;
+  public static final field INACTIVE Lcom/macstab/chaos/jvm/api/ChaosDiagnostics$ScenarioState;
+  public static final field REGISTERED Lcom/macstab/chaos/jvm/api/ChaosDiagnostics$ScenarioState;
+  public static final field STOPPED Lcom/macstab/chaos/jvm/api/ChaosDiagnostics$ScenarioState;
+  public static method valueOf(Ljava/lang/String;)Lcom/macstab/chaos/jvm/api/ChaosDiagnostics$ScenarioState;
+  public static method values()[Lcom/macstab/chaos/jvm/api/ChaosDiagnostics$ScenarioState;
+
+public static final record com/macstab/chaos/jvm/api/ChaosDiagnostics$Snapshot
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(Ljava/time/Instant;Ljava/util/List;Ljava/util/List;Ljava/util/Map;)V
+  public method capturedAt()Ljava/time/Instant;
+  public method failures()Ljava/util/List;
+  public method runtimeDetails()Ljava/util/Map;
+  public method scenarios()Ljava/util/List;
+
+public interface com/macstab/chaos/jvm/api/ChaosEffect permits com/macstab/chaos/jvm/api/ChaosEffect$ClockSkewEffect, com/macstab/chaos/jvm/api/ChaosEffect$CodeCachePressureEffect, com/macstab/chaos/jvm/api/ChaosEffect$ConnectionResetEffect, com/macstab/chaos/jvm/api/ChaosEffect$CorruptReadEffect, com/macstab/chaos/jvm/api/ChaosEffect$DeadlockEffect, com/macstab/chaos/jvm/api/ChaosEffect$DelayEffect, com/macstab/chaos/jvm/api/ChaosEffect$DirectBufferPressureEffect, com/macstab/chaos/jvm/api/ChaosEffect$DnsAnswerEffect, com/macstab/chaos/jvm/api/ChaosEffect$DnsRewriteEffect, com/macstab/chaos/jvm/api/ChaosEffect$ErrnoEffect, com/macstab/chaos/jvm/api/ChaosEffect$ExceptionInjectionEffect, com/macstab/chaos/jvm/api/ChaosEffect$ExceptionalCompletionEffect, com/macstab/chaos/jvm/api/ChaosEffect$FinalizerBacklogEffect, com/macstab/chaos/jvm/api/ChaosEffect$GateEffect, com/macstab/chaos/jvm/api/ChaosEffect$GcPressureEffect, com/macstab/chaos/jvm/api/ChaosEffect$HeapPressureEffect, com/macstab/chaos/jvm/api/ChaosEffect$KeepAliveEffect, com/macstab/chaos/jvm/api/ChaosEffect$MetaspacePressureEffect, com/macstab/chaos/jvm/api/ChaosEffect$MonitorContentionEffect, com/macstab/chaos/jvm/api/ChaosEffect$RedirectEffect, com/macstab/chaos/jvm/api/ChaosEffect$ReferenceQueueFloodEffect, com/macstab/chaos/jvm/api/ChaosEffect$RejectEffect, com/macstab/chaos/jvm/api/ChaosEffect$ReturnValueCorruptionEffect, com/macstab/chaos/jvm/api/ChaosEffect$SafepointStormEffect, com/macstab/chaos/jvm/api/ChaosEffect$SpuriousWakeupEffect, com/macstab/chaos/jvm/api/ChaosEffect$StringInternPressureEffect, com/macstab/chaos/jvm/api/ChaosEffect$SuppressEffect, com/macstab/chaos/jvm/api/ChaosEffect$ThreadLeakEffect, com/macstab/chaos/jvm/api/ChaosEffect$ThreadLocalLeakEffect, com/macstab/chaos/jvm/api/ChaosEffect$TimeoutEffect, com/macstab/chaos/jvm/api/ChaosEffect$TornWriteEffect, com/macstab/chaos/jvm/api/ChaosEffect$TrickleEffect, com/macstab/chaos/jvm/api/ChaosEffect$VirtualThreadCarrierPinningEffect
+  public static method codeCachePressure(II)Lcom/macstab/chaos/jvm/api/ChaosEffect$CodeCachePressureEffect;
+  public static method connectionReset()Lcom/macstab/chaos/jvm/api/ChaosEffect$ConnectionResetEffect;
+  public static method corruptRead()Lcom/macstab/chaos/jvm/api/ChaosEffect$CorruptReadEffect;
+  public static method corruptReturnValue(Lcom/macstab/chaos/jvm/api/ChaosEffect$ReturnValueStrategy;)Lcom/macstab/chaos/jvm/api/ChaosEffect$ReturnValueCorruptionEffect;
+  public static method deadlock(I)Lcom/macstab/chaos/jvm/api/ChaosEffect$DeadlockEffect;
+  public static method delay(Ljava/time/Duration;)Lcom/macstab/chaos/jvm/api/ChaosEffect$DelayEffect;
+  public static method delay(Ljava/time/Duration;Ljava/time/Duration;)Lcom/macstab/chaos/jvm/api/ChaosEffect$DelayEffect;
+  public static method directBufferPressure(JI)Lcom/macstab/chaos/jvm/api/ChaosEffect$DirectBufferPressureEffect;
+  public static method dnsFamily(Lcom/macstab/chaos/jvm/api/ChaosEffect$AddressFamily;)Lcom/macstab/chaos/jvm/api/ChaosEffect$DnsAnswerEffect;
+  public static method dnsLimit(I)Lcom/macstab/chaos/jvm/api/ChaosEffect$DnsAnswerEffect;
+  public static method dnsOverride([Ljava/lang/String;)Lcom/macstab/chaos/jvm/api/ChaosEffect$DnsAnswerEffect;
+  public static method dnsRewrite(Ljava/lang/String;)Lcom/macstab/chaos/jvm/api/ChaosEffect$DnsRewriteEffect;
+  public static method dnsShuffle()Lcom/macstab/chaos/jvm/api/ChaosEffect$DnsAnswerEffect;
+  public static method errno(Lcom/macstab/chaos/jvm/api/ChaosEffect$Errno;)Lcom/macstab/chaos/jvm/api/ChaosEffect$ErrnoEffect;
+  public static method exceptionalCompletion(Lcom/macstab/chaos/jvm/api/ChaosEffect$FailureKind;Ljava/lang/String;)Lcom/macstab/chaos/jvm/api/ChaosEffect$ExceptionalCompletionEffect;
+  public static method finalizerBacklog(ILjava/time/Duration;)Lcom/macstab/chaos/jvm/api/ChaosEffect$FinalizerBacklogEffect;
+  public static method gate(Ljava/time/Duration;)Lcom/macstab/chaos/jvm/api/ChaosEffect$GateEffect;
+  public static method gcPressure(JLjava/time/Duration;)Lcom/macstab/chaos/jvm/api/ChaosEffect$GcPressureEffect;
+  public static method heapPressure(JI)Lcom/macstab/chaos/jvm/api/ChaosEffect$HeapPressureEffect;
+  public static method injectException(Ljava/lang/String;Ljava/lang/String;)Lcom/macstab/chaos/jvm/api/ChaosEffect$ExceptionInjectionEffect;
+  public static method keepAlive(Ljava/lang/String;ZLjava/time/Duration;)Lcom/macstab/chaos/jvm/api/ChaosEffect$KeepAliveEffect;
+  public static method metaspacePressure(II)Lcom/macstab/chaos/jvm/api/ChaosEffect$MetaspacePressureEffect;
+  public static method monitorContention(Ljava/time/Duration;I)Lcom/macstab/chaos/jvm/api/ChaosEffect$MonitorContentionEffect;
+  public static method redirect(Ljava/lang/String;)Lcom/macstab/chaos/jvm/api/ChaosEffect$RedirectEffect;
+  public static method redirect(Ljava/lang/String;I)Lcom/macstab/chaos/jvm/api/ChaosEffect$RedirectEffect;
+  public static method referenceQueueFlood(ILjava/time/Duration;)Lcom/macstab/chaos/jvm/api/ChaosEffect$ReferenceQueueFloodEffect;
+  public static method reject(Ljava/lang/String;)Lcom/macstab/chaos/jvm/api/ChaosEffect$RejectEffect;
+  public static method safepointStorm(Ljava/time/Duration;)Lcom/macstab/chaos/jvm/api/ChaosEffect$SafepointStormEffect;
+  public static method skewClock(Ljava/time/Duration;Lcom/macstab/chaos/jvm/api/ChaosEffect$ClockSkewMode;)Lcom/macstab/chaos/jvm/api/ChaosEffect$ClockSkewEffect;
+  public static method spuriousWakeup()Lcom/macstab/chaos/jvm/api/ChaosEffect$SpuriousWakeupEffect;
+  public static method stringInternPressure(II)Lcom/macstab/chaos/jvm/api/ChaosEffect$StringInternPressureEffect;
+  public static method suppress()Lcom/macstab/chaos/jvm/api/ChaosEffect$SuppressEffect;
+  public static method threadLeak(ILjava/lang/String;Z)Lcom/macstab/chaos/jvm/api/ChaosEffect$ThreadLeakEffect;
+  public static method threadLocalLeak(II)Lcom/macstab/chaos/jvm/api/ChaosEffect$ThreadLocalLeakEffect;
+  public static method timeout()Lcom/macstab/chaos/jvm/api/ChaosEffect$TimeoutEffect;
+  public static method tornWrite()Lcom/macstab/chaos/jvm/api/ChaosEffect$TornWriteEffect;
+  public static method trickle(I)Lcom/macstab/chaos/jvm/api/ChaosEffect$TrickleEffect;
+  public static method virtualThreadCarrierPinning(ILjava/time/Duration;)Lcom/macstab/chaos/jvm/api/ChaosEffect$VirtualThreadCarrierPinningEffect;
+
+public static final enum com/macstab/chaos/jvm/api/ChaosEffect$AddressFamily
+  public static final field IPV4 Lcom/macstab/chaos/jvm/api/ChaosEffect$AddressFamily;
+  public static final field IPV6 Lcom/macstab/chaos/jvm/api/ChaosEffect$AddressFamily;
+  public static method valueOf(Ljava/lang/String;)Lcom/macstab/chaos/jvm/api/ChaosEffect$AddressFamily;
+  public static method values()[Lcom/macstab/chaos/jvm/api/ChaosEffect$AddressFamily;
+
+public static final record com/macstab/chaos/jvm/api/ChaosEffect$ClockSkewEffect implements com/macstab/chaos/jvm/api/ChaosEffect
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(Ljava/time/Duration;Lcom/macstab/chaos/jvm/api/ChaosEffect$ClockSkewMode;)V
+  public method mode()Lcom/macstab/chaos/jvm/api/ChaosEffect$ClockSkewMode;
+  public method skewAmount()Ljava/time/Duration;
+
+public static final enum com/macstab/chaos/jvm/api/ChaosEffect$ClockSkewMode
+  public static final field DRIFT Lcom/macstab/chaos/jvm/api/ChaosEffect$ClockSkewMode;
+  public static final field FIXED Lcom/macstab/chaos/jvm/api/ChaosEffect$ClockSkewMode;
+  public static final field FREEZE Lcom/macstab/chaos/jvm/api/ChaosEffect$ClockSkewMode;
+  public static final field REGRESS Lcom/macstab/chaos/jvm/api/ChaosEffect$ClockSkewMode;
+  public static method valueOf(Ljava/lang/String;)Lcom/macstab/chaos/jvm/api/ChaosEffect$ClockSkewMode;
+  public static method values()[Lcom/macstab/chaos/jvm/api/ChaosEffect$ClockSkewMode;
+
+public static final record com/macstab/chaos/jvm/api/ChaosEffect$CodeCachePressureEffect implements com/macstab/chaos/jvm/api/ChaosEffect
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(II)V
+  public method classCount()I
+  public method methodsPerClass()I
+
+public static final record com/macstab/chaos/jvm/api/ChaosEffect$ConnectionResetEffect implements com/macstab/chaos/jvm/api/ChaosEffect
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>()V
+
+public static final record com/macstab/chaos/jvm/api/ChaosEffect$CorruptReadEffect implements com/macstab/chaos/jvm/api/ChaosEffect
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>()V
+
+public static final record com/macstab/chaos/jvm/api/ChaosEffect$DeadlockEffect implements com/macstab/chaos/jvm/api/ChaosEffect
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(ILjava/time/Duration;)V
+  public method acquisitionDelay()Ljava/time/Duration;
+  public method participantCount()I
+  public static final field DEFAULT_ACQUISITION_DELAY Ljava/time/Duration;
+  public static final field MAX_PARTICIPANT_COUNT I
+
+public static final record com/macstab/chaos/jvm/api/ChaosEffect$DelayEffect implements com/macstab/chaos/jvm/api/ChaosEffect
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(Ljava/time/Duration;Ljava/time/Duration;)V
+  public method maxDelay()Ljava/time/Duration;
+  public method minDelay()Ljava/time/Duration;
+  public static final field MAX_DELAY Ljava/time/Duration;
+
+public static final record com/macstab/chaos/jvm/api/ChaosEffect$DirectBufferPressureEffect implements com/macstab/chaos/jvm/api/ChaosEffect
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(JIZ)V
+  public method bufferSizeBytes()I
+  public method registerCleaner()Z
+  public method totalBytes()J
+
+public static final record com/macstab/chaos/jvm/api/ChaosEffect$DnsAnswerEffect implements com/macstab/chaos/jvm/api/ChaosEffect
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(Ljava/util/List;Lcom/macstab/chaos/jvm/api/ChaosEffect$AddressFamily;ZLjava/lang/Integer;)V
+  public method family()Lcom/macstab/chaos/jvm/api/ChaosEffect$AddressFamily;
+  public method limit()Ljava/lang/Integer;
+  public method override()Ljava/util/List;
+  public method shuffle()Z
+
+public static final record com/macstab/chaos/jvm/api/ChaosEffect$DnsRewriteEffect implements com/macstab/chaos/jvm/api/ChaosEffect
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(Ljava/lang/String;)V
+  public method host()Ljava/lang/String;
+
+public static final enum com/macstab/chaos/jvm/api/ChaosEffect$Errno
+  public method code()I
+  public method family()Lcom/macstab/chaos/jvm/api/ChaosEffect$Errno$Family;
+  public method linuxCode()I
+  public method reason()Ljava/lang/String;
+  public static final field EACCES Lcom/macstab/chaos/jvm/api/ChaosEffect$Errno;
+  public static final field EADDRINUSE Lcom/macstab/chaos/jvm/api/ChaosEffect$Errno;
+  public static final field EADDRNOTAVAIL Lcom/macstab/chaos/jvm/api/ChaosEffect$Errno;
+  public static final field EAFNOSUPPORT Lcom/macstab/chaos/jvm/api/ChaosEffect$Errno;
+  public static final field EAGAIN Lcom/macstab/chaos/jvm/api/ChaosEffect$Errno;
+  public static final field ECONNREFUSED Lcom/macstab/chaos/jvm/api/ChaosEffect$Errno;
+  public static final field ECONNRESET Lcom/macstab/chaos/jvm/api/ChaosEffect$Errno;
+  public static final field EDQUOT Lcom/macstab/chaos/jvm/api/ChaosEffect$Errno;
+  public static final field EHOSTUNREACH Lcom/macstab/chaos/jvm/api/ChaosEffect$Errno;
+  public static final field EINVAL Lcom/macstab/chaos/jvm/api/ChaosEffect$Errno;
+  public static final field EIO Lcom/macstab/chaos/jvm/api/ChaosEffect$Errno;
+  public static final field EMFILE Lcom/macstab/chaos/jvm/api/ChaosEffect$Errno;
+  public static final field ENETUNREACH Lcom/macstab/chaos/jvm/api/ChaosEffect$Errno;
+  public static final field ENFILE Lcom/macstab/chaos/jvm/api/ChaosEffect$Errno;
+  public static final field ENOBUFS Lcom/macstab/chaos/jvm/api/ChaosEffect$Errno;
+  public static final field ENOENT Lcom/macstab/chaos/jvm/api/ChaosEffect$Errno;
+  public static final field ENOMEM Lcom/macstab/chaos/jvm/api/ChaosEffect$Errno;
+  public static final field ENOSPC Lcom/macstab/chaos/jvm/api/ChaosEffect$Errno;
+  public static final field ENOTCONN Lcom/macstab/chaos/jvm/api/ChaosEffect$Errno;
+  public static final field EOPNOTSUPP Lcom/macstab/chaos/jvm/api/ChaosEffect$Errno;
+  public static final field EPIPE Lcom/macstab/chaos/jvm/api/ChaosEffect$Errno;
+  public static final field EPROTONOSUPPORT Lcom/macstab/chaos/jvm/api/ChaosEffect$Errno;
+  public static final field EROFS Lcom/macstab/chaos/jvm/api/ChaosEffect$Errno;
+  public static final field ETIMEDOUT Lcom/macstab/chaos/jvm/api/ChaosEffect$Errno;
+  public static method valueOf(Ljava/lang/String;)Lcom/macstab/chaos/jvm/api/ChaosEffect$Errno;
+  public static method values()[Lcom/macstab/chaos/jvm/api/ChaosEffect$Errno;
+
+public static final enum com/macstab/chaos/jvm/api/ChaosEffect$Errno$Family
+  public static final field FILE Lcom/macstab/chaos/jvm/api/ChaosEffect$Errno$Family;
+  public static final field NETWORK Lcom/macstab/chaos/jvm/api/ChaosEffect$Errno$Family;
+  public static final field PROCESS Lcom/macstab/chaos/jvm/api/ChaosEffect$Errno$Family;
+  public static method valueOf(Ljava/lang/String;)Lcom/macstab/chaos/jvm/api/ChaosEffect$Errno$Family;
+  public static method values()[Lcom/macstab/chaos/jvm/api/ChaosEffect$Errno$Family;
+
+public static final record com/macstab/chaos/jvm/api/ChaosEffect$ErrnoEffect implements com/macstab/chaos/jvm/api/ChaosEffect
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(Lcom/macstab/chaos/jvm/api/ChaosEffect$Errno;)V
+  public method errno()Lcom/macstab/chaos/jvm/api/ChaosEffect$Errno;
+
+public static final record com/macstab/chaos/jvm/api/ChaosEffect$ExceptionInjectionEffect implements com/macstab/chaos/jvm/api/ChaosEffect
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(Ljava/lang/String;Ljava/lang/String;Z)V
+  public method exceptionClassName()Ljava/lang/String;
+  public method message()Ljava/lang/String;
+  public method withStackTrace()Z
+
+public static final record com/macstab/chaos/jvm/api/ChaosEffect$ExceptionalCompletionEffect implements com/macstab/chaos/jvm/api/ChaosEffect
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(Lcom/macstab/chaos/jvm/api/ChaosEffect$FailureKind;Ljava/lang/String;)V
+  public method failureKind()Lcom/macstab/chaos/jvm/api/ChaosEffect$FailureKind;
+  public method message()Ljava/lang/String;
+
+public static final enum com/macstab/chaos/jvm/api/ChaosEffect$FailureKind
+  public static final field CLASS_NOT_FOUND Lcom/macstab/chaos/jvm/api/ChaosEffect$FailureKind;
+  public static final field ILLEGAL_STATE Lcom/macstab/chaos/jvm/api/ChaosEffect$FailureKind;
+  public static final field INTERRUPTED Lcom/macstab/chaos/jvm/api/ChaosEffect$FailureKind;
+  public static final field IO Lcom/macstab/chaos/jvm/api/ChaosEffect$FailureKind;
+  public static final field REJECTED Lcom/macstab/chaos/jvm/api/ChaosEffect$FailureKind;
+  public static final field RUNTIME Lcom/macstab/chaos/jvm/api/ChaosEffect$FailureKind;
+  public static final field SECURITY Lcom/macstab/chaos/jvm/api/ChaosEffect$FailureKind;
+  public static final field TIMEOUT Lcom/macstab/chaos/jvm/api/ChaosEffect$FailureKind;
+  public static method valueOf(Ljava/lang/String;)Lcom/macstab/chaos/jvm/api/ChaosEffect$FailureKind;
+  public static method values()[Lcom/macstab/chaos/jvm/api/ChaosEffect$FailureKind;
+
+public static final record com/macstab/chaos/jvm/api/ChaosEffect$FinalizerBacklogEffect implements com/macstab/chaos/jvm/api/ChaosEffect
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(ILjava/time/Duration;)V
+  public method finalizerDelay()Ljava/time/Duration;
+  public method objectCount()I
+  public static final field MAX_OBJECT_COUNT I
+
+public static final record com/macstab/chaos/jvm/api/ChaosEffect$GateEffect implements com/macstab/chaos/jvm/api/ChaosEffect
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(Ljava/time/Duration;)V
+  public method maxBlock()Ljava/time/Duration;
+
+public static final record com/macstab/chaos/jvm/api/ChaosEffect$GcPressureEffect implements com/macstab/chaos/jvm/api/ChaosEffect
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(JIZLjava/time/Duration;)V
+  public method allocationRateBytesPerSecond()J
+  public method duration()Ljava/time/Duration;
+  public method objectSizeBytes()I
+  public method promoteToOldGen()Z
+  public static final field DEFAULT_OBJECT_SIZE_BYTES I
+
+public static final record com/macstab/chaos/jvm/api/ChaosEffect$HeapPressureEffect implements com/macstab/chaos/jvm/api/ChaosEffect
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(JI)V
+  public method bytes()J
+  public method chunkSizeBytes()I
+  public static final field MAX_BYTES J
+  public static final field MAX_CHUNK_SIZE_BYTES I
+
+public static final record com/macstab/chaos/jvm/api/ChaosEffect$KeepAliveEffect implements com/macstab/chaos/jvm/api/ChaosEffect
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(Ljava/lang/String;ZLjava/time/Duration;)V
+  public method daemon()Z
+  public method heartbeat()Ljava/time/Duration;
+  public method threadName()Ljava/lang/String;
+
+public static final record com/macstab/chaos/jvm/api/ChaosEffect$MetaspacePressureEffect implements com/macstab/chaos/jvm/api/ChaosEffect
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(IIZ)V
+  public method fieldsPerClass()I
+  public method generatedClassCount()I
+  public method retain()Z
+
+public static final record com/macstab/chaos/jvm/api/ChaosEffect$MonitorContentionEffect implements com/macstab/chaos/jvm/api/ChaosEffect
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(Ljava/time/Duration;IZ)V
+  public method contendingThreadCount()I
+  public method lockHoldDuration()Ljava/time/Duration;
+  public method unfair()Z
+  public static final field MAX_CONTENDING_THREAD_COUNT I
+
+public static final record com/macstab/chaos/jvm/api/ChaosEffect$RedirectEffect implements com/macstab/chaos/jvm/api/ChaosEffect
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(Ljava/lang/String;Ljava/lang/Integer;)V
+  public method host()Ljava/lang/String;
+  public method port()Ljava/lang/Integer;
+
+public static final record com/macstab/chaos/jvm/api/ChaosEffect$ReferenceQueueFloodEffect implements com/macstab/chaos/jvm/api/ChaosEffect
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(ILjava/time/Duration;)V
+  public method floodInterval()Ljava/time/Duration;
+  public method referenceCount()I
+
+public static final record com/macstab/chaos/jvm/api/ChaosEffect$RejectEffect implements com/macstab/chaos/jvm/api/ChaosEffect
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(Ljava/lang/String;)V
+  public method message()Ljava/lang/String;
+
+public static final record com/macstab/chaos/jvm/api/ChaosEffect$ReturnValueCorruptionEffect implements com/macstab/chaos/jvm/api/ChaosEffect
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(Lcom/macstab/chaos/jvm/api/ChaosEffect$ReturnValueStrategy;)V
+  public method strategy()Lcom/macstab/chaos/jvm/api/ChaosEffect$ReturnValueStrategy;
+
+public static final enum com/macstab/chaos/jvm/api/ChaosEffect$ReturnValueStrategy
+  public static final field BOUNDARY_MAX Lcom/macstab/chaos/jvm/api/ChaosEffect$ReturnValueStrategy;
+  public static final field BOUNDARY_MIN Lcom/macstab/chaos/jvm/api/ChaosEffect$ReturnValueStrategy;
+  public static final field EMPTY Lcom/macstab/chaos/jvm/api/ChaosEffect$ReturnValueStrategy;
+  public static final field NULL Lcom/macstab/chaos/jvm/api/ChaosEffect$ReturnValueStrategy;
+  public static final field ZERO Lcom/macstab/chaos/jvm/api/ChaosEffect$ReturnValueStrategy;
+  public static method valueOf(Ljava/lang/String;)Lcom/macstab/chaos/jvm/api/ChaosEffect$ReturnValueStrategy;
+  public static method values()[Lcom/macstab/chaos/jvm/api/ChaosEffect$ReturnValueStrategy;
+
+public static final record com/macstab/chaos/jvm/api/ChaosEffect$SafepointStormEffect implements com/macstab/chaos/jvm/api/ChaosEffect
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(Ljava/time/Duration;I)V
+  public method gcInterval()Ljava/time/Duration;
+  public method retransformClassCount()I
+
+public static final record com/macstab/chaos/jvm/api/ChaosEffect$SpuriousWakeupEffect implements com/macstab/chaos/jvm/api/ChaosEffect
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>()V
+
+public static final record com/macstab/chaos/jvm/api/ChaosEffect$StringInternPressureEffect implements com/macstab/chaos/jvm/api/ChaosEffect
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(II)V
+  public method internCount()I
+  public method stringLengthBytes()I
+
+public static final record com/macstab/chaos/jvm/api/ChaosEffect$SuppressEffect implements com/macstab/chaos/jvm/api/ChaosEffect
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>()V
+
+public static final record com/macstab/chaos/jvm/api/ChaosEffect$ThreadLeakEffect implements com/macstab/chaos/jvm/api/ChaosEffect
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(ILjava/lang/String;ZLjava/time/Duration;)V
+  public method daemon()Z
+  public method lifespan()Ljava/time/Duration;
+  public method namePrefix()Ljava/lang/String;
+  public method threadCount()I
+  public static final field MAX_THREAD_COUNT I
+
+public static final record com/macstab/chaos/jvm/api/ChaosEffect$ThreadLocalLeakEffect implements com/macstab/chaos/jvm/api/ChaosEffect
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(II)V
+  public method entriesPerThread()I
+  public method valueSizeBytes()I
+
+public static final record com/macstab/chaos/jvm/api/ChaosEffect$TimeoutEffect implements com/macstab/chaos/jvm/api/ChaosEffect
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>()V
+
+public static final record com/macstab/chaos/jvm/api/ChaosEffect$TornWriteEffect implements com/macstab/chaos/jvm/api/ChaosEffect
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>()V
+
+public static final record com/macstab/chaos/jvm/api/ChaosEffect$TrickleEffect implements com/macstab/chaos/jvm/api/ChaosEffect
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(I)V
+  public method maxBytes()I
+
+public static final record com/macstab/chaos/jvm/api/ChaosEffect$VirtualThreadCarrierPinningEffect implements com/macstab/chaos/jvm/api/ChaosEffect
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(ILjava/time/Duration;)V
+  public method pinDuration()Ljava/time/Duration;
+  public method pinnedThreadCount()I
+
+public final record com/macstab/chaos/jvm/api/ChaosEvent
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(Ljava/time/Instant;Lcom/macstab/chaos/jvm/api/ChaosEvent$Type;Ljava/lang/String;Ljava/lang/String;Ljava/util/Map;)V
+  public method attributes()Ljava/util/Map;
+  public method message()Ljava/lang/String;
+  public method scenarioId()Ljava/lang/String;
+  public method timestamp()Ljava/time/Instant;
+  public method type()Lcom/macstab/chaos/jvm/api/ChaosEvent$Type;
+
+public static final enum com/macstab/chaos/jvm/api/ChaosEvent$Type
+  public static final field APPLIED Lcom/macstab/chaos/jvm/api/ChaosEvent$Type;
+  public static final field FAILED Lcom/macstab/chaos/jvm/api/ChaosEvent$Type;
+  public static final field REGISTERED Lcom/macstab/chaos/jvm/api/ChaosEvent$Type;
+  public static final field RELEASED Lcom/macstab/chaos/jvm/api/ChaosEvent$Type;
+  public static final field SKIPPED Lcom/macstab/chaos/jvm/api/ChaosEvent$Type;
+  public static final field STARTED Lcom/macstab/chaos/jvm/api/ChaosEvent$Type;
+  public static final field STOPPED Lcom/macstab/chaos/jvm/api/ChaosEvent$Type;
+  public static method valueOf(Ljava/lang/String;)Lcom/macstab/chaos/jvm/api/ChaosEvent$Type;
+  public static method values()[Lcom/macstab/chaos/jvm/api/ChaosEvent$Type;
+
+public interface com/macstab/chaos/jvm/api/ChaosEventListener
+  public abstract method onEvent(Lcom/macstab/chaos/jvm/api/ChaosEvent;)V
+  public static method async(Lcom/macstab/chaos/jvm/api/ChaosEventListener;)Lcom/macstab/chaos/jvm/api/ChaosEventListener;
+
+public class com/macstab/chaos/jvm/api/ChaosHttpSuppressException extends java/lang/RuntimeException
+  public method <init>(Ljava/lang/String;)V
+  public method <init>(Ljava/lang/String;Ljava/lang/Throwable;)V
+
+public class com/macstab/chaos/jvm/api/ChaosJdbcSuppressException extends java/lang/RuntimeException
+  public method <init>(Ljava/lang/String;)V
+  public method <init>(Ljava/lang/String;Ljava/lang/Throwable;)V
+
+public interface com/macstab/chaos/jvm/api/ChaosMetricsSink
+  public abstract method increment(Ljava/lang/String;Ljava/util/Map;)V
+  public abstract method recordDuration(Ljava/lang/String;Ljava/time/Duration;Ljava/util/Map;)V
+  public static final field NOOP Lcom/macstab/chaos/jvm/api/ChaosMetricsSink;
+
+public final record com/macstab/chaos/jvm/api/ChaosPlan
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(Lcom/macstab/chaos/jvm/api/ChaosPlan$Metadata;Lcom/macstab/chaos/jvm/api/ChaosPlan$Observability;Ljava/util/List;)V
+  public method metadata()Lcom/macstab/chaos/jvm/api/ChaosPlan$Metadata;
+  public method observability()Lcom/macstab/chaos/jvm/api/ChaosPlan$Observability;
+  public method scenarios()Ljava/util/List;
+
+public static final record com/macstab/chaos/jvm/api/ChaosPlan$Metadata
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(Ljava/lang/String;Ljava/lang/String;)V
+  public method description()Ljava/lang/String;
+  public method name()Ljava/lang/String;
+
+public static final record com/macstab/chaos/jvm/api/ChaosPlan$Observability
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(ZZZ)V
+  public method debugDumpOnStart()Z
+  public method jmxEnabled()Z
+  public method structuredLoggingEnabled()Z
+
+public final class com/macstab/chaos/jvm/api/ChaosPresets
+  public static method clockJump(Ljava/time/Duration;)Lcom/macstab/chaos/jvm/api/ChaosScenario$Builder;
+  public static method connectionRefused(Ljava/lang/String;Ljava/lang/Integer;)Lcom/macstab/chaos/jvm/api/ChaosScenario$Builder;
+  public static method connectionResets(Ljava/lang/String;Ljava/lang/Integer;)Lcom/macstab/chaos/jvm/api/ChaosScenario$Builder;
+  public static method diskFull(Ljava/lang/String;)Lcom/macstab/chaos/jvm/api/ChaosScenario$Builder;
+  public static method dnsOutage(Lcom/macstab/chaos/jvm/api/NamePattern;)Lcom/macstab/chaos/jvm/api/ChaosScenario$Builder;
+  public static method failingDisk(Ljava/lang/String;)Lcom/macstab/chaos/jvm/api/ChaosScenario$Builder;
+  public static method failover(Ljava/lang/String;ILjava/lang/String;I)Lcom/macstab/chaos/jvm/api/ChaosScenario$Builder;
+  public static method fsyncFailure(Ljava/lang/String;)Lcom/macstab/chaos/jvm/api/ChaosScenario$Builder;
+  public static method packetLoss(Ljava/lang/String;Ljava/lang/Integer;)Lcom/macstab/chaos/jvm/api/ChaosScenario$Builder;
+  public static method slowDisk(Ljava/lang/String;Ljava/time/Duration;)Lcom/macstab/chaos/jvm/api/ChaosScenario$Builder;
+  public static method slowNetwork(Ljava/lang/String;Ljava/lang/Integer;Ljava/time/Duration;)Lcom/macstab/chaos/jvm/api/ChaosScenario$Builder;
+  public static method threadExhaustion()Lcom/macstab/chaos/jvm/api/ChaosScenario$Builder;
+  public static method tooManyOpenFiles(Ljava/lang/String;)Lcom/macstab/chaos/jvm/api/ChaosScenario$Builder;
+  public static method trickledResponses(Ljava/lang/String;Ljava/lang/Integer;I)Lcom/macstab/chaos/jvm/api/ChaosScenario$Builder;
+
+public final record com/macstab/chaos/jvm/api/ChaosScenario
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(Ljava/lang/String;Ljava/lang/String;Lcom/macstab/chaos/jvm/api/ChaosScenario$ScenarioScope;Lcom/macstab/chaos/jvm/api/ChaosSelector;Lcom/macstab/chaos/jvm/api/ChaosEffect;Lcom/macstab/chaos/jvm/api/ActivationPolicy;ILjava/util/Map;)V
+  public method activationPolicy()Lcom/macstab/chaos/jvm/api/ActivationPolicy;
+  public method description()Ljava/lang/String;
+  public method effect()Lcom/macstab/chaos/jvm/api/ChaosEffect;
+  public method id()Ljava/lang/String;
+  public method precedence()I
+  public method scope()Lcom/macstab/chaos/jvm/api/ChaosScenario$ScenarioScope;
+  public method selector()Lcom/macstab/chaos/jvm/api/ChaosSelector;
+  public method tags()Ljava/util/Map;
+  public static method builder(Ljava/lang/String;)Lcom/macstab/chaos/jvm/api/ChaosScenario$Builder;
+
+public static final class com/macstab/chaos/jvm/api/ChaosScenario$Builder
+  public method activationPolicy(Lcom/macstab/chaos/jvm/api/ActivationPolicy;)Lcom/macstab/chaos/jvm/api/ChaosScenario$Builder;
+  public method build()Lcom/macstab/chaos/jvm/api/ChaosScenario;
+  public method description(Ljava/lang/String;)Lcom/macstab/chaos/jvm/api/ChaosScenario$Builder;
+  public method effect(Lcom/macstab/chaos/jvm/api/ChaosEffect;)Lcom/macstab/chaos/jvm/api/ChaosScenario$Builder;
+  public method precedence(I)Lcom/macstab/chaos/jvm/api/ChaosScenario$Builder;
+  public method scope(Lcom/macstab/chaos/jvm/api/ChaosScenario$ScenarioScope;)Lcom/macstab/chaos/jvm/api/ChaosScenario$Builder;
+  public method selector(Lcom/macstab/chaos/jvm/api/ChaosSelector;)Lcom/macstab/chaos/jvm/api/ChaosScenario$Builder;
+  public method tag(Ljava/lang/String;Ljava/lang/String;)Lcom/macstab/chaos/jvm/api/ChaosScenario$Builder;
+
+public static final enum com/macstab/chaos/jvm/api/ChaosScenario$ScenarioScope
+  public static final field JVM Lcom/macstab/chaos/jvm/api/ChaosScenario$ScenarioScope;
+  public static final field SESSION Lcom/macstab/chaos/jvm/api/ChaosScenario$ScenarioScope;
+  public static method valueOf(Ljava/lang/String;)Lcom/macstab/chaos/jvm/api/ChaosScenario$ScenarioScope;
+  public static method values()[Lcom/macstab/chaos/jvm/api/ChaosScenario$ScenarioScope;
+
+public interface com/macstab/chaos/jvm/api/ChaosSelector permits com/macstab/chaos/jvm/api/ChaosSelector$AsyncSelector, com/macstab/chaos/jvm/api/ChaosSelector$AwsSdkSelector, com/macstab/chaos/jvm/api/ChaosSelector$ClassLoadingSelector, com/macstab/chaos/jvm/api/ChaosSelector$DnsSelector, com/macstab/chaos/jvm/api/ChaosSelector$ExecutorSelector, com/macstab/chaos/jvm/api/ChaosSelector$FileIoSelector, com/macstab/chaos/jvm/api/ChaosSelector$HttpClientSelector, com/macstab/chaos/jvm/api/ChaosSelector$JdbcSelector, com/macstab/chaos/jvm/api/ChaosSelector$JvmRuntimeSelector, com/macstab/chaos/jvm/api/ChaosSelector$MessagingSelector, com/macstab/chaos/jvm/api/ChaosSelector$MethodSelector, com/macstab/chaos/jvm/api/ChaosSelector$MonitorSelector, com/macstab/chaos/jvm/api/ChaosSelector$NettySelector, com/macstab/chaos/jvm/api/ChaosSelector$NetworkSelector, com/macstab/chaos/jvm/api/ChaosSelector$NioSelector, com/macstab/chaos/jvm/api/ChaosSelector$ProcessSelector, com/macstab/chaos/jvm/api/ChaosSelector$QueueSelector, com/macstab/chaos/jvm/api/ChaosSelector$RedisSelector, com/macstab/chaos/jvm/api/ChaosSelector$RpcSelector, com/macstab/chaos/jvm/api/ChaosSelector$SchedulingSelector, com/macstab/chaos/jvm/api/ChaosSelector$ShutdownSelector, com/macstab/chaos/jvm/api/ChaosSelector$SslSelector, com/macstab/chaos/jvm/api/ChaosSelector$StressSelector, com/macstab/chaos/jvm/api/ChaosSelector$ThreadLocalSelector, com/macstab/chaos/jvm/api/ChaosSelector$ThreadSelector
+  public static method async(Ljava/util/Set;)Lcom/macstab/chaos/jvm/api/ChaosSelector$AsyncSelector;
+  public static method awsSdk(Lcom/macstab/chaos/jvm/api/NamePattern;Lcom/macstab/chaos/jvm/api/NamePattern;)Lcom/macstab/chaos/jvm/api/ChaosSelector$AwsSdkSelector;
+  public static method classLoading(Ljava/util/Set;Lcom/macstab/chaos/jvm/api/NamePattern;)Lcom/macstab/chaos/jvm/api/ChaosSelector$ClassLoadingSelector;
+  public static method dns(Ljava/util/Set;)Lcom/macstab/chaos/jvm/api/ChaosSelector$DnsSelector;
+  public static method dns(Ljava/util/Set;Lcom/macstab/chaos/jvm/api/NamePattern;)Lcom/macstab/chaos/jvm/api/ChaosSelector$DnsSelector;
+  public static method executor(Ljava/util/Set;)Lcom/macstab/chaos/jvm/api/ChaosSelector$ExecutorSelector;
+  public static method fileIo(Ljava/util/Set;)Lcom/macstab/chaos/jvm/api/ChaosSelector$FileIoSelector;
+  public static method httpClient(Ljava/util/Set;)Lcom/macstab/chaos/jvm/api/ChaosSelector$HttpClientSelector;
+  public static method httpClient(Ljava/util/Set;Lcom/macstab/chaos/jvm/api/NamePattern;)Lcom/macstab/chaos/jvm/api/ChaosSelector$HttpClientSelector;
+  public static method jdbc()Lcom/macstab/chaos/jvm/api/ChaosSelector$JdbcSelector;
+  public static method jdbc([Lcom/macstab/chaos/jvm/api/OperationType;)Lcom/macstab/chaos/jvm/api/ChaosSelector$JdbcSelector;
+  public static method jvmRuntime(Ljava/util/Set;)Lcom/macstab/chaos/jvm/api/ChaosSelector$JvmRuntimeSelector;
+  public static method messaging(Ljava/util/Set;Lcom/macstab/chaos/jvm/api/NamePattern;)Lcom/macstab/chaos/jvm/api/ChaosSelector$MessagingSelector;
+  public static method method(Ljava/util/Set;Lcom/macstab/chaos/jvm/api/NamePattern;Lcom/macstab/chaos/jvm/api/NamePattern;)Lcom/macstab/chaos/jvm/api/ChaosSelector$MethodSelector;
+  public static method monitor(Ljava/util/Set;)Lcom/macstab/chaos/jvm/api/ChaosSelector$MonitorSelector;
+  public static method network(Ljava/util/Set;)Lcom/macstab/chaos/jvm/api/ChaosSelector$NetworkSelector;
+  public static method network(Ljava/util/Set;Lcom/macstab/chaos/jvm/api/NamePattern;)Lcom/macstab/chaos/jvm/api/ChaosSelector$NetworkSelector;
+  public static method nio(Ljava/util/Set;)Lcom/macstab/chaos/jvm/api/ChaosSelector$NioSelector;
+  public static method nio(Ljava/util/Set;Lcom/macstab/chaos/jvm/api/NamePattern;)Lcom/macstab/chaos/jvm/api/ChaosSelector$NioSelector;
+  public static method process(Lcom/macstab/chaos/jvm/api/NamePattern;)Lcom/macstab/chaos/jvm/api/ChaosSelector$ProcessSelector;
+  public static method queue(Ljava/util/Set;)Lcom/macstab/chaos/jvm/api/ChaosSelector$QueueSelector;
+  public static method redis(Lcom/macstab/chaos/jvm/api/NamePattern;)Lcom/macstab/chaos/jvm/api/ChaosSelector$RedisSelector;
+  public static method rpc(Lcom/macstab/chaos/jvm/api/NamePattern;)Lcom/macstab/chaos/jvm/api/ChaosSelector$RpcSelector;
+  public static method scheduling(Ljava/util/Set;)Lcom/macstab/chaos/jvm/api/ChaosSelector$SchedulingSelector;
+  public static method shutdown(Ljava/util/Set;)Lcom/macstab/chaos/jvm/api/ChaosSelector$ShutdownSelector;
+  public static method ssl(Ljava/util/Set;)Lcom/macstab/chaos/jvm/api/ChaosSelector$SslSelector;
+  public static method stress(Lcom/macstab/chaos/jvm/api/ChaosSelector$StressTarget;)Lcom/macstab/chaos/jvm/api/ChaosSelector$StressSelector;
+  public static method thread(Ljava/util/Set;Lcom/macstab/chaos/jvm/api/ChaosSelector$ThreadKind;)Lcom/macstab/chaos/jvm/api/ChaosSelector$ThreadSelector;
+  public static method threadLocal(Ljava/util/Set;)Lcom/macstab/chaos/jvm/api/ChaosSelector$ThreadLocalSelector;
+  public static method threadLocal(Ljava/util/Set;Lcom/macstab/chaos/jvm/api/NamePattern;)Lcom/macstab/chaos/jvm/api/ChaosSelector$ThreadLocalSelector;
+
+public static final record com/macstab/chaos/jvm/api/ChaosSelector$AsyncSelector implements com/macstab/chaos/jvm/api/ChaosSelector
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(Ljava/util/Set;)V
+  public method operations()Ljava/util/Set;
+
+public static final record com/macstab/chaos/jvm/api/ChaosSelector$AwsSdkSelector implements com/macstab/chaos/jvm/api/ChaosSelector
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(Ljava/util/Set;Lcom/macstab/chaos/jvm/api/NamePattern;Lcom/macstab/chaos/jvm/api/NamePattern;)V
+  public method operationPattern()Lcom/macstab/chaos/jvm/api/NamePattern;
+  public method operations()Ljava/util/Set;
+  public method servicePattern()Lcom/macstab/chaos/jvm/api/NamePattern;
+
+public static final record com/macstab/chaos/jvm/api/ChaosSelector$ClassLoadingSelector implements com/macstab/chaos/jvm/api/ChaosSelector
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(Ljava/util/Set;Lcom/macstab/chaos/jvm/api/NamePattern;Lcom/macstab/chaos/jvm/api/NamePattern;)V
+  public method loaderClassPattern()Lcom/macstab/chaos/jvm/api/NamePattern;
+  public method operations()Ljava/util/Set;
+  public method targetNamePattern()Lcom/macstab/chaos/jvm/api/NamePattern;
+
+public static final record com/macstab/chaos/jvm/api/ChaosSelector$DnsSelector implements com/macstab/chaos/jvm/api/ChaosSelector
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(Ljava/util/Set;Lcom/macstab/chaos/jvm/api/NamePattern;)V
+  public method hostnamePattern()Lcom/macstab/chaos/jvm/api/NamePattern;
+  public method operations()Ljava/util/Set;
+
+public static final record com/macstab/chaos/jvm/api/ChaosSelector$ExecutorSelector implements com/macstab/chaos/jvm/api/ChaosSelector
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(Ljava/util/Set;Lcom/macstab/chaos/jvm/api/NamePattern;Lcom/macstab/chaos/jvm/api/NamePattern;Ljava/lang/Boolean;)V
+  public method executorClassPattern()Lcom/macstab/chaos/jvm/api/NamePattern;
+  public method operations()Ljava/util/Set;
+  public method scheduledOnly()Ljava/lang/Boolean;
+  public method taskClassPattern()Lcom/macstab/chaos/jvm/api/NamePattern;
+
+public static final record com/macstab/chaos/jvm/api/ChaosSelector$FileIoSelector implements com/macstab/chaos/jvm/api/ChaosSelector
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(Ljava/util/Set;)V
+  public method <init>(Ljava/util/Set;Lcom/macstab/chaos/jvm/api/PathPattern;Ljava/lang/Long;Ljava/lang/Long;)V
+  public method maxBytes()Ljava/lang/Long;
+  public method minBytes()Ljava/lang/Long;
+  public method operations()Ljava/util/Set;
+  public method pathPattern()Lcom/macstab/chaos/jvm/api/PathPattern;
+
+public static final record com/macstab/chaos/jvm/api/ChaosSelector$HttpClientSelector implements com/macstab/chaos/jvm/api/ChaosSelector
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(Ljava/util/Set;Lcom/macstab/chaos/jvm/api/NamePattern;)V
+  public method operations()Ljava/util/Set;
+  public method urlPattern()Lcom/macstab/chaos/jvm/api/NamePattern;
+
+public static final record com/macstab/chaos/jvm/api/ChaosSelector$JdbcSelector implements com/macstab/chaos/jvm/api/ChaosSelector
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(Ljava/util/Set;Lcom/macstab/chaos/jvm/api/NamePattern;)V
+  public method operations()Ljava/util/Set;
+  public method targetPattern()Lcom/macstab/chaos/jvm/api/NamePattern;
+
+public static final record com/macstab/chaos/jvm/api/ChaosSelector$JvmRuntimeSelector implements com/macstab/chaos/jvm/api/ChaosSelector
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(Ljava/util/Set;)V
+  public method operations()Ljava/util/Set;
+
+public static final record com/macstab/chaos/jvm/api/ChaosSelector$MessagingSelector implements com/macstab/chaos/jvm/api/ChaosSelector
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(Ljava/util/Set;Lcom/macstab/chaos/jvm/api/NamePattern;)V
+  public method destinationPattern()Lcom/macstab/chaos/jvm/api/NamePattern;
+  public method operations()Ljava/util/Set;
+
+public static final record com/macstab/chaos/jvm/api/ChaosSelector$MethodSelector implements com/macstab/chaos/jvm/api/ChaosSelector
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(Ljava/util/Set;Lcom/macstab/chaos/jvm/api/NamePattern;Lcom/macstab/chaos/jvm/api/NamePattern;Lcom/macstab/chaos/jvm/api/NamePattern;)V
+  public method classPattern()Lcom/macstab/chaos/jvm/api/NamePattern;
+  public method methodNamePattern()Lcom/macstab/chaos/jvm/api/NamePattern;
+  public method operations()Ljava/util/Set;
+  public method signaturePattern()Lcom/macstab/chaos/jvm/api/NamePattern;
+
+public static final record com/macstab/chaos/jvm/api/ChaosSelector$MonitorSelector implements com/macstab/chaos/jvm/api/ChaosSelector
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(Ljava/util/Set;Lcom/macstab/chaos/jvm/api/NamePattern;)V
+  public method monitorClassPattern()Lcom/macstab/chaos/jvm/api/NamePattern;
+  public method operations()Ljava/util/Set;
+
+public static final record com/macstab/chaos/jvm/api/ChaosSelector$NettySelector implements com/macstab/chaos/jvm/api/ChaosSelector
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(Ljava/util/Set;Ljava/lang/String;Ljava/lang/Integer;)V
+  public method operations()Ljava/util/Set;
+  public method remoteCidr()Ljava/lang/String;
+  public method remotePort()Ljava/lang/Integer;
+
+public static final record com/macstab/chaos/jvm/api/ChaosSelector$NetworkSelector implements com/macstab/chaos/jvm/api/ChaosSelector
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(Ljava/util/Set;Lcom/macstab/chaos/jvm/api/NamePattern;)V
+  public method <init>(Ljava/util/Set;Lcom/macstab/chaos/jvm/api/NamePattern;Ljava/lang/String;Ljava/lang/Integer;Ljava/lang/Long;Ljava/lang/Long;)V
+  public method maxBytes()Ljava/lang/Long;
+  public method minBytes()Ljava/lang/Long;
+  public method operations()Ljava/util/Set;
+  public method remoteCidr()Ljava/lang/String;
+  public method remoteHostPattern()Lcom/macstab/chaos/jvm/api/NamePattern;
+  public method remotePort()Ljava/lang/Integer;
+
+public static final record com/macstab/chaos/jvm/api/ChaosSelector$NioSelector implements com/macstab/chaos/jvm/api/ChaosSelector
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(Ljava/util/Set;Lcom/macstab/chaos/jvm/api/NamePattern;)V
+  public method channelClassPattern()Lcom/macstab/chaos/jvm/api/NamePattern;
+  public method operations()Ljava/util/Set;
+
+public static final record com/macstab/chaos/jvm/api/ChaosSelector$ProcessSelector implements com/macstab/chaos/jvm/api/ChaosSelector
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(Ljava/util/Set;Lcom/macstab/chaos/jvm/api/NamePattern;)V
+  public method commandPattern()Lcom/macstab/chaos/jvm/api/NamePattern;
+  public method operations()Ljava/util/Set;
+
+public static final record com/macstab/chaos/jvm/api/ChaosSelector$QueueSelector implements com/macstab/chaos/jvm/api/ChaosSelector
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(Ljava/util/Set;Lcom/macstab/chaos/jvm/api/NamePattern;)V
+  public method operations()Ljava/util/Set;
+  public method queueClassPattern()Lcom/macstab/chaos/jvm/api/NamePattern;
+
+public static final record com/macstab/chaos/jvm/api/ChaosSelector$RedisSelector implements com/macstab/chaos/jvm/api/ChaosSelector
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(Ljava/util/Set;Lcom/macstab/chaos/jvm/api/NamePattern;)V
+  public method commandPattern()Lcom/macstab/chaos/jvm/api/NamePattern;
+  public method operations()Ljava/util/Set;
+
+public static final record com/macstab/chaos/jvm/api/ChaosSelector$RpcSelector implements com/macstab/chaos/jvm/api/ChaosSelector
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(Ljava/util/Set;Lcom/macstab/chaos/jvm/api/NamePattern;)V
+  public method methodPattern()Lcom/macstab/chaos/jvm/api/NamePattern;
+  public method operations()Ljava/util/Set;
+
+public static final record com/macstab/chaos/jvm/api/ChaosSelector$SchedulingSelector implements com/macstab/chaos/jvm/api/ChaosSelector
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(Ljava/util/Set;Lcom/macstab/chaos/jvm/api/NamePattern;Ljava/lang/Boolean;)V
+  public method executorClassPattern()Lcom/macstab/chaos/jvm/api/NamePattern;
+  public method operations()Ljava/util/Set;
+  public method periodicOnly()Ljava/lang/Boolean;
+
+public static final record com/macstab/chaos/jvm/api/ChaosSelector$ShutdownSelector implements com/macstab/chaos/jvm/api/ChaosSelector
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(Ljava/util/Set;Lcom/macstab/chaos/jvm/api/NamePattern;)V
+  public method operations()Ljava/util/Set;
+  public method targetClassPattern()Lcom/macstab/chaos/jvm/api/NamePattern;
+
+public static final record com/macstab/chaos/jvm/api/ChaosSelector$SslSelector implements com/macstab/chaos/jvm/api/ChaosSelector
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(Ljava/util/Set;)V
+  public method operations()Ljava/util/Set;
+
+public static final record com/macstab/chaos/jvm/api/ChaosSelector$StressSelector implements com/macstab/chaos/jvm/api/ChaosSelector
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(Lcom/macstab/chaos/jvm/api/ChaosSelector$StressTarget;)V
+  public method target()Lcom/macstab/chaos/jvm/api/ChaosSelector$StressTarget;
+
+public static final enum com/macstab/chaos/jvm/api/ChaosSelector$StressTarget
+  public static final field CODE_CACHE_PRESSURE Lcom/macstab/chaos/jvm/api/ChaosSelector$StressTarget;
+  public static final field DEADLOCK Lcom/macstab/chaos/jvm/api/ChaosSelector$StressTarget;
+  public static final field DIRECT_BUFFER Lcom/macstab/chaos/jvm/api/ChaosSelector$StressTarget;
+  public static final field FINALIZER_BACKLOG Lcom/macstab/chaos/jvm/api/ChaosSelector$StressTarget;
+  public static final field GC_PRESSURE Lcom/macstab/chaos/jvm/api/ChaosSelector$StressTarget;
+  public static final field HEAP Lcom/macstab/chaos/jvm/api/ChaosSelector$StressTarget;
+  public static final field KEEPALIVE Lcom/macstab/chaos/jvm/api/ChaosSelector$StressTarget;
+  public static final field METASPACE Lcom/macstab/chaos/jvm/api/ChaosSelector$StressTarget;
+  public static final field MONITOR_CONTENTION Lcom/macstab/chaos/jvm/api/ChaosSelector$StressTarget;
+  public static final field REFERENCE_QUEUE_FLOOD Lcom/macstab/chaos/jvm/api/ChaosSelector$StressTarget;
+  public static final field SAFEPOINT_STORM Lcom/macstab/chaos/jvm/api/ChaosSelector$StressTarget;
+  public static final field STRING_INTERN_PRESSURE Lcom/macstab/chaos/jvm/api/ChaosSelector$StressTarget;
+  public static final field THREAD_LEAK Lcom/macstab/chaos/jvm/api/ChaosSelector$StressTarget;
+  public static final field THREAD_LOCAL_LEAK Lcom/macstab/chaos/jvm/api/ChaosSelector$StressTarget;
+  public static final field VIRTUAL_THREAD_CARRIER_PINNING Lcom/macstab/chaos/jvm/api/ChaosSelector$StressTarget;
+  public static method valueOf(Ljava/lang/String;)Lcom/macstab/chaos/jvm/api/ChaosSelector$StressTarget;
+  public static method values()[Lcom/macstab/chaos/jvm/api/ChaosSelector$StressTarget;
+
+public static final enum com/macstab/chaos/jvm/api/ChaosSelector$ThreadKind
+  public static final field ANY Lcom/macstab/chaos/jvm/api/ChaosSelector$ThreadKind;
+  public static final field PLATFORM Lcom/macstab/chaos/jvm/api/ChaosSelector$ThreadKind;
+  public static final field VIRTUAL Lcom/macstab/chaos/jvm/api/ChaosSelector$ThreadKind;
+  public static method valueOf(Ljava/lang/String;)Lcom/macstab/chaos/jvm/api/ChaosSelector$ThreadKind;
+  public static method values()[Lcom/macstab/chaos/jvm/api/ChaosSelector$ThreadKind;
+
+public static final record com/macstab/chaos/jvm/api/ChaosSelector$ThreadLocalSelector implements com/macstab/chaos/jvm/api/ChaosSelector
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(Ljava/util/Set;Lcom/macstab/chaos/jvm/api/NamePattern;)V
+  public method operations()Ljava/util/Set;
+  public method threadLocalClassPattern()Lcom/macstab/chaos/jvm/api/NamePattern;
+
+public static final record com/macstab/chaos/jvm/api/ChaosSelector$ThreadSelector implements com/macstab/chaos/jvm/api/ChaosSelector
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(Ljava/util/Set;Lcom/macstab/chaos/jvm/api/ChaosSelector$ThreadKind;Lcom/macstab/chaos/jvm/api/NamePattern;Ljava/lang/Boolean;)V
+  public method daemon()Ljava/lang/Boolean;
+  public method kind()Lcom/macstab/chaos/jvm/api/ChaosSelector$ThreadKind;
+  public method operations()Ljava/util/Set;
+  public method threadNamePattern()Lcom/macstab/chaos/jvm/api/NamePattern;
+
+public interface com/macstab/chaos/jvm/api/ChaosSession implements java/lang/AutoCloseable
+  public abstract method activate(Lcom/macstab/chaos/jvm/api/ChaosPlan;)Lcom/macstab/chaos/jvm/api/ChaosActivationHandle;
+  public abstract method activate(Lcom/macstab/chaos/jvm/api/ChaosScenario;)Lcom/macstab/chaos/jvm/api/ChaosActivationHandle;
+  public abstract method bind()Lcom/macstab/chaos/jvm/api/ChaosSession$ScopeBinding;
+  public abstract method close()V
+  public abstract method displayName()Ljava/lang/String;
+  public abstract method id()Ljava/lang/String;
+  public abstract method wrap(Ljava/lang/Runnable;)Ljava/lang/Runnable;
+  public abstract method wrap(Ljava/util/concurrent/Callable;)Ljava/util/concurrent/Callable;
+  public static final field HEADER Ljava/lang/String;
+
+public static interface com/macstab/chaos/jvm/api/ChaosSession$ScopeBinding implements java/lang/AutoCloseable
+  public abstract method close()V
+
+public class com/macstab/chaos/jvm/api/ChaosUnsupportedFeatureException extends java/lang/RuntimeException
+  public method <init>(Ljava/lang/String;)V
+
+public class com/macstab/chaos/jvm/api/ChaosValidationException extends java/lang/RuntimeException
+  public method <init>(Ljava/lang/String;)V
+
+public final class com/macstab/chaos/jvm/api/CidrBlock
+  public method contains(Ljava/net/InetAddress;)Z
+  public method equals(Ljava/lang/Object;)Z
+  public method hashCode()I
+  public method prefixLength()I
+  public method toString()Ljava/lang/String;
+  public static method cached(Ljava/lang/String;)Lcom/macstab/chaos/jvm/api/CidrBlock;
+  public static method parse(Ljava/lang/String;)Lcom/macstab/chaos/jvm/api/CidrBlock;
+  public static method parseAddress(Ljava/lang/String;)[B
+
+public @interface com/macstab/chaos/jvm/api/Internal implements java/lang/annotation/Annotation
+
+public final record com/macstab/chaos/jvm/api/NamePattern
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(Lcom/macstab/chaos/jvm/api/NamePattern$MatchMode;Ljava/lang/String;)V
+  public method matches(Ljava/lang/String;)Z
+  public method mode()Lcom/macstab/chaos/jvm/api/NamePattern$MatchMode;
+  public method value()Ljava/lang/String;
+  public static method any()Lcom/macstab/chaos/jvm/api/NamePattern;
+  public static method exact(Ljava/lang/String;)Lcom/macstab/chaos/jvm/api/NamePattern;
+  public static method glob(Ljava/lang/String;)Lcom/macstab/chaos/jvm/api/NamePattern;
+  public static method prefix(Ljava/lang/String;)Lcom/macstab/chaos/jvm/api/NamePattern;
+  public static method regex(Ljava/lang/String;)Lcom/macstab/chaos/jvm/api/NamePattern;
+
+public static final enum com/macstab/chaos/jvm/api/NamePattern$MatchMode
+  public static final field ANY Lcom/macstab/chaos/jvm/api/NamePattern$MatchMode;
+  public static final field EXACT Lcom/macstab/chaos/jvm/api/NamePattern$MatchMode;
+  public static final field GLOB Lcom/macstab/chaos/jvm/api/NamePattern$MatchMode;
+  public static final field PREFIX Lcom/macstab/chaos/jvm/api/NamePattern$MatchMode;
+  public static final field REGEX Lcom/macstab/chaos/jvm/api/NamePattern$MatchMode;
+  public static method valueOf(Ljava/lang/String;)Lcom/macstab/chaos/jvm/api/NamePattern$MatchMode;
+  public static method values()[Lcom/macstab/chaos/jvm/api/NamePattern$MatchMode;
+
+public final enum com/macstab/chaos/jvm/api/OperationType
+  public static final field ASYNC_CANCEL Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field ASYNC_COMPLETE Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field ASYNC_COMPLETE_EXCEPTIONALLY Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field AWS_SDK_CALL Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field CLASS_DEFINE Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field CLASS_LOAD Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field CLOCK_READ Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field DATAGRAM_RECEIVE Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field DATAGRAM_SEND Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field DATE_NEW Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field DIRECT_BUFFER_ALLOCATE Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field DNS_ANSWER Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field DNS_RESOLVE Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field DNS_REVERSE Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field EXECUTOR_AWAIT_TERMINATION Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field EXECUTOR_SHUTDOWN Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field EXECUTOR_SUBMIT Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field EXECUTOR_WORKER_RUN Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field FILE_IO_CLOSE Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field FILE_IO_DELETE Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field FILE_IO_MAP Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field FILE_IO_MOVE Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field FILE_IO_MOVE_TARGET Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field FILE_IO_OPEN Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field FILE_IO_READ Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field FILE_IO_SYNC Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field FILE_IO_TRUNCATE Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field FILE_IO_WRITE Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field FORK_JOIN_TASK_RUN Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field HTTP_CLIENT_SEND Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field HTTP_CLIENT_SEND_ASYNC Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field INSTANT_NOW Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field JDBC_CONNECTION_ACQUIRE Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field JDBC_PREPARED_STATEMENT Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field JDBC_STATEMENT_EXECUTE Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field JDBC_TRANSACTION_COMMIT Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field JDBC_TRANSACTION_ROLLBACK Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field JMX_GET_ATTR Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field JMX_INVOKE Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field JNDI_LOOKUP Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field LIFECYCLE Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field LOCAL_DATE_TIME_NOW Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field MESSAGE_RECEIVE Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field MESSAGE_SEND Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field METHOD_ENTER Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field METHOD_EXIT Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field MONITOR_ENTER Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field NATIVE_LIBRARY_LOAD Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field NETTY_CHANNEL_READ Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field NETTY_CHANNEL_WRITE Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field NIO_CHANNEL_ACCEPT Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field NIO_CHANNEL_CONNECT Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field NIO_CHANNEL_READ Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field NIO_CHANNEL_WRITE Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field NIO_SELECTOR_SELECT Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field OBJECT_DESERIALIZE Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field OBJECT_SERIALIZE Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field PROCESS_START Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field PROCESS_WAIT Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field QUEUE_OFFER Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field QUEUE_POLL Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field QUEUE_PUT Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field QUEUE_TAKE Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field R2DBC_STATEMENT_EXECUTE Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field REDIS_COMMAND Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field REFLECTION_INVOKE Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field RESOURCE_LOAD Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field RPC_CALL Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field SCHEDULE_SUBMIT Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field SCHEDULE_TICK Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field SHUTDOWN_HOOK_REGISTER Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field SOCKET_ACCEPT Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field SOCKET_BIND Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field SOCKET_CLOSE Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field SOCKET_CONNECT Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field SOCKET_READ Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field SOCKET_SHUTDOWN Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field SOCKET_WRITE Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field SSL_HANDSHAKE Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field SYSTEM_CLOCK_MILLIS Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field SYSTEM_CLOCK_NANOS Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field SYSTEM_EXIT_REQUEST Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field SYSTEM_GC_REQUEST Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field THREAD_LOCAL_GET Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field THREAD_LOCAL_SET Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field THREAD_PARK Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field THREAD_SLEEP Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field THREAD_START Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field VIRTUAL_THREAD_START Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field ZIP_DEFLATE Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field ZIP_INFLATE Lcom/macstab/chaos/jvm/api/OperationType;
+  public static final field ZONED_DATE_TIME_NOW Lcom/macstab/chaos/jvm/api/OperationType;
+  public static method valueOf(Ljava/lang/String;)Lcom/macstab/chaos/jvm/api/OperationType;
+  public static method values()[Lcom/macstab/chaos/jvm/api/OperationType;
+
+public final record com/macstab/chaos/jvm/api/PathPattern
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(Ljava/lang/String;)V
+  public method matches(Ljava/lang/String;)Z
+  public method prefix()Ljava/lang/String;
+  public static method under(Ljava/lang/String;)Lcom/macstab/chaos/jvm/api/PathPattern;

@@ -1,0 +1,4 @@
+public final class com/macstab/chaos/jvm/micrometer/ChaosMeterBinder implements io/micrometer/core/instrument/binder/MeterBinder, java/lang/AutoCloseable
+  public method <init>(Lcom/macstab/chaos/jvm/api/ChaosControlPlane;)V
+  public method bindTo(Lio/micrometer/core/instrument/MeterRegistry;)V
+  public method close()V

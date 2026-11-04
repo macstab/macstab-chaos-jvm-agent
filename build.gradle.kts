@@ -16,6 +16,8 @@ buildscript {
 plugins {
     base
     id("com.gradleup.shadow") version "8.3.9" apply false
+    id("info.solidsoft.pitest") version "1.19.0" apply false
+    id("org.cyclonedx.bom") version "3.5.1" apply false
 }
 
 apply(plugin = "com.diffplug.spotless")
@@ -483,6 +485,174 @@ tasks.register("childJvmCoverage") {
             val writer = org.jacoco.core.data.ExecutionDataWriter(stream)
             loader.sessionInfoStore.accept(writer)
             remapped.accept(writer)
+        }
+    }
+}
+
+// ── Public API signatures ────────────────────────────────────────────────────────────────────────
+// Each API module commits the signatures of its public API in api/<module>.api: every public or
+// protected class, field, constructor and method its class files expose, with JVM descriptors (so a
+// change of a parameter, return or field type shows), and the permitted subtypes of sealed types
+// (adding one breaks exhaustive switches). `check` runs `apiCheck`, which fails when the compiled
+// API differs from the file; `./gradlew apiDump` records an intended change, which then shows in
+// review. Types annotated @Internal are left out. The internal implementation modules (core,
+// instrumentation, the agent jar) are not API (docs/configuration-reference.md §14.2).
+val internalModules = setOf("chaos-agent-core", "chaos-agent-instrumentation-jdk", "chaos-agent-bootstrap")
+
+fun renderApi(classesDir: File): String {
+    val internal = "Lcom/macstab/chaos/jvm/api/Internal;"
+    val access = { flags: Int ->
+        buildList {
+            if (flags and org.objectweb.asm.Opcodes.ACC_PUBLIC != 0) add("public")
+            if (flags and org.objectweb.asm.Opcodes.ACC_PROTECTED != 0) add("protected")
+            if (flags and org.objectweb.asm.Opcodes.ACC_STATIC != 0) add("static")
+            if (flags and org.objectweb.asm.Opcodes.ACC_FINAL != 0) add("final")
+            if (flags and org.objectweb.asm.Opcodes.ACC_ABSTRACT != 0) add("abstract")
+        }.joinToString(" ")
+    }
+    val visible = { flags: Int ->
+        flags and (org.objectweb.asm.Opcodes.ACC_PUBLIC or org.objectweb.asm.Opcodes.ACC_PROTECTED) != 0 &&
+            flags and org.objectweb.asm.Opcodes.ACC_SYNTHETIC == 0
+    }
+    class Type(val name: String, val text: String, val outer: String?, var flags: Int, val internal: Boolean)
+    val types = mutableMapOf<String, Type>()
+    classesDir.walk().filter { it.isFile && it.name.endsWith(".class") && it.name != "module-info.class" }.forEach { file ->
+        val reader = org.objectweb.asm.ClassReader(file.readBytes())
+        val lines = mutableListOf<String>()
+        var flags = reader.access
+        var outer: String? = null
+        var isInternal = false
+        val permits = mutableListOf<String>()
+        reader.accept(object : org.objectweb.asm.ClassVisitor(org.objectweb.asm.Opcodes.ASM9) {
+            override fun visitAnnotation(descriptor: String, visible: Boolean): org.objectweb.asm.AnnotationVisitor? {
+                if (descriptor == internal) isInternal = true
+                return null
+            }
+            override fun visitInnerClass(name: String, outerName: String?, innerName: String?, innerAccess: Int) {
+                if (name == reader.className) {
+                    flags = innerAccess
+                    outer = outerName
+                }
+            }
+            override fun visitPermittedSubclass(permittedSubclass: String) {
+                permits += permittedSubclass
+            }
+            override fun visitField(fieldAccess: Int, name: String, descriptor: String, signature: String?, value: Any?): org.objectweb.asm.FieldVisitor? {
+                if (visible(fieldAccess)) lines += "  ${access(fieldAccess)} field $name $descriptor"
+                return null
+            }
+            override fun visitMethod(methodAccess: Int, name: String, descriptor: String, signature: String?, exceptions: Array<out String>?): org.objectweb.asm.MethodVisitor? {
+                if (visible(methodAccess) && methodAccess and org.objectweb.asm.Opcodes.ACC_BRIDGE == 0) {
+                    lines += "  ${access(methodAccess)} method $name$descriptor"
+                }
+                return null
+            }
+        }, org.objectweb.asm.ClassReader.SKIP_CODE)
+        val kind = when {
+            flags and org.objectweb.asm.Opcodes.ACC_ANNOTATION != 0 -> "@interface"
+            flags and org.objectweb.asm.Opcodes.ACC_INTERFACE != 0 -> "interface"
+            flags and org.objectweb.asm.Opcodes.ACC_ENUM != 0 -> "enum"
+            reader.superName == "java/lang/Record" -> "record"
+            else -> "class"
+        }
+        val header = buildString {
+            append(access(flags and org.objectweb.asm.Opcodes.ACC_INTERFACE.inv() and org.objectweb.asm.Opcodes.ACC_ABSTRACT.let { if (kind == "interface" || kind == "@interface") it.inv() else -1 }))
+            append(" ").append(kind).append(" ").append(reader.className)
+            if (reader.superName != null && reader.superName != "java/lang/Object" && kind == "class") append(" extends ").append(reader.superName)
+            if (reader.interfaces.isNotEmpty()) append(" implements ").append(reader.interfaces.sorted().joinToString(", "))
+            if (permits.isNotEmpty()) append(" permits ").append(permits.sorted().joinToString(", "))
+        }
+        types[reader.className] = Type(reader.className, (listOf(header) + lines.sorted()).joinToString("\n"), outer, flags, isInternal)
+    }
+    // A type is API when it and every type enclosing it are visible and not @Internal.
+    fun exported(type: Type): Boolean =
+        visible(type.flags) && !type.internal && (type.outer == null || types[type.outer]?.let(::exported) ?: false)
+    return types.values.filter(::exported).sortedBy { it.name }.joinToString("\n\n", postfix = "\n") { it.text }
+}
+
+subprojects {
+    if (name in nonPublishableModules || name in internalModules) return@subprojects
+    val module = name
+    plugins.withType<JavaPlugin> {
+        val classes = layout.buildDirectory.dir("classes/java/main")
+        val apiFile = layout.projectDirectory.file("api/$module.api")
+        tasks.register("apiDump") {
+            group = "verification"
+            description = "Records the public API signatures in api/$module.api."
+            dependsOn("classes")
+            inputs.dir(classes).withPropertyName("classes")
+            outputs.file(apiFile)
+            doLast {
+                apiFile.asFile.parentFile.mkdirs()
+                apiFile.asFile.writeText(renderApi(classes.get().asFile))
+            }
+        }
+        val apiCheck = tasks.register("apiCheck") {
+            group = "verification"
+            description = "Fails when the public API differs from api/$module.api."
+            dependsOn("classes")
+            inputs.dir(classes).withPropertyName("classes")
+            inputs.file(apiFile).withPropertyName("committedApi").optional()
+            val marker = layout.buildDirectory.file("api/checked")
+            outputs.file(marker)
+            doLast {
+                val committed = apiFile.asFile
+                val actual = renderApi(classes.get().asFile)
+                if (!committed.isFile || committed.readText() != actual) {
+                    val expectedLines = if (committed.isFile) committed.readLines().toSet() else emptySet()
+                    val actualLines = actual.lines().toSet()
+                    val removed = (expectedLines - actualLines).take(20).joinToString("\n") { "- $it" }
+                    val added = (actualLines - expectedLines).take(20).joinToString("\n") { "+ $it" }
+                    throw GradleException(
+                        "The public API of $module changed. If intended, record it with " +
+                            "./gradlew :$module:apiDump and review the diff of api/$module.api.\n$removed\n$added",
+                    )
+                }
+                marker.get().asFile.apply { parentFile.mkdirs(); writeText("ok") }
+            }
+        }
+        tasks.named("check") { dependsOn(apiCheck) }
+    }
+}
+
+// ── Mutation testing ─────────────────────────────────────────────────────────────────────────────
+// `./gradlew pitest` mutates the bytecode of the modules whose behaviour is decided in plain Java
+// (the API's validation, the core's evaluation, the plan parser) and runs their unit tests against
+// each mutant: a surviving mutant is a behaviour no test pins down. Too slow for every build, so it
+// is not part of `check`; the threshold is a ratchet like the coverage floors, set a little below
+// the measured score and only ever raised. Reports: <module>/build/reports/pitest/index.html.
+val mutationFloors = mapOf(
+    "chaos-agent-api" to 66,
+    "chaos-agent-core" to 59,
+    "chaos-agent-startup-config" to 70,
+)
+subprojects {
+    val floor = mutationFloors[name] ?: return@subprojects
+    apply(plugin = "info.solidsoft.pitest")
+    extensions.configure<info.solidsoft.gradle.pitest.PitestPluginExtension> {
+        pitestVersion.set("1.30.1")
+        junit5PluginVersion.set("1.2.3")
+        targetClasses.set(listOf("com.macstab.chaos.jvm.*"))
+        threads.set(Runtime.getRuntime().availableProcessors())
+        outputFormats.set(listOf("HTML", "XML"))
+        timestampedReports.set(false)
+        mutationThreshold.set(floor)
+        timeoutConstInMillis.set(10_000)
+        jvmArgs.set(listOf("-XX:+EnableDynamicAgentLoading"))
+    }
+}
+
+// ── Software bill of materials ───────────────────────────────────────────────────────────────────
+// Every published module gets a CycloneDX SBOM of its runtime dependencies. The agent jar's is the
+// one that matters most: ByteBuddy and Jackson are shaded into it, so no dependency scanner can
+// see them in its (empty) POM.
+subprojects {
+    if (name in nonPublishableModules) return@subprojects
+    plugins.withType<JavaPlugin> {
+        apply(plugin = "org.cyclonedx.bom")
+        // What ships, not what the tests and probes use.
+        tasks.withType<org.cyclonedx.gradle.CyclonedxDirectTask>().configureEach {
+            includeConfigs.set(listOf("runtimeClasspath"))
         }
     }
 }

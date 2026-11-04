@@ -1,0 +1,90 @@
+public class com/macstab/chaos/jvm/spring/boot/common/ChaosActuatorEndpoint
+  public method <init>(Lcom/macstab/chaos/jvm/api/ChaosControlPlane;Lcom/macstab/chaos/jvm/spring/boot/common/ChaosHandleRegistry;)V
+  public method activate(Ljava/lang/String;)Lcom/macstab/chaos/jvm/spring/boot/common/ChaosActuatorEndpoint$ActivationResponse;
+  public method snapshot()Lcom/macstab/chaos/jvm/api/ChaosDiagnostics$Snapshot;
+  public method stop(Ljava/lang/String;)Lcom/macstab/chaos/jvm/spring/boot/common/ChaosActuatorEndpoint$StopResponse;
+  public method stopAll()Lcom/macstab/chaos/jvm/spring/boot/common/ChaosActuatorEndpoint$StopAllResponse;
+
+public static final record com/macstab/chaos/jvm/spring/boot/common/ChaosActuatorEndpoint$ActivationResponse
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V
+  public method handleId()Ljava/lang/String;
+  public method message()Ljava/lang/String;
+  public method status()Ljava/lang/String;
+
+public static final record com/macstab/chaos/jvm/spring/boot/common/ChaosActuatorEndpoint$StopAllResponse
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(I)V
+  public method stoppedCount()I
+
+public static final record com/macstab/chaos/jvm/spring/boot/common/ChaosActuatorEndpoint$StopResponse
+  public final method equals(Ljava/lang/Object;)Z
+  public final method hashCode()I
+  public final method toString()Ljava/lang/String;
+  public method <init>(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V
+  public method message()Ljava/lang/String;
+  public method scenarioId()Ljava/lang/String;
+  public method status()Ljava/lang/String;
+
+public class com/macstab/chaos/jvm/spring/boot/common/ChaosAutoConfiguration
+  public method <init>()V
+  public method chaosControlPlane()Lcom/macstab/chaos/jvm/api/ChaosControlPlane;
+  public method chaosHandleRegistry()Lcom/macstab/chaos/jvm/spring/boot/common/ChaosHandleRegistry;
+  public method chaosStartupApplier(Lcom/macstab/chaos/jvm/api/ChaosControlPlane;Lcom/macstab/chaos/jvm/spring/boot/common/ChaosProperties;Lcom/macstab/chaos/jvm/spring/boot/common/ChaosHandleRegistry;)Lorg/springframework/context/ApplicationListener;
+
+public static class com/macstab/chaos/jvm/spring/boot/common/ChaosAutoConfiguration$ActuatorConfiguration
+  public method <init>()V
+  public method chaosActuatorEndpoint(Lcom/macstab/chaos/jvm/api/ChaosControlPlane;Lcom/macstab/chaos/jvm/spring/boot/common/ChaosHandleRegistry;)Lcom/macstab/chaos/jvm/spring/boot/common/ChaosActuatorEndpoint;
+
+public final class com/macstab/chaos/jvm/spring/boot/common/ChaosHandleRegistry implements org/springframework/beans/factory/DisposableBean
+  public method <init>()V
+  public method destroy()V
+  public method ids()Ljava/util/Collection;
+  public method register(Lcom/macstab/chaos/jvm/api/ChaosActivationHandle;)V
+  public method stop(Ljava/lang/String;)Z
+  public method stopAll()I
+
+public class com/macstab/chaos/jvm/spring/boot/common/ChaosProperties
+  public method <init>()V
+  public method getActuator()Lcom/macstab/chaos/jvm/spring/boot/common/ChaosProperties$Actuator;
+  public method getConfigFile()Ljava/lang/String;
+  public method isDebugDumpOnStart()Z
+  public method isEnabled()Z
+  public method setActuator(Lcom/macstab/chaos/jvm/spring/boot/common/ChaosProperties$Actuator;)V
+  public method setConfigFile(Ljava/lang/String;)V
+  public method setDebugDumpOnStart(Z)V
+  public method setEnabled(Z)V
+
+public static class com/macstab/chaos/jvm/spring/boot/common/ChaosProperties$Actuator
+  public method <init>()V
+  public method isEnabled()Z
+  public method setEnabled(Z)V
+
+public final class com/macstab/chaos/jvm/spring/boot/common/ChaosSessionFilter implements jakarta/servlet/Filter, org/springframework/core/Ordered
+  public method <init>(Ljava/util/function/Supplier;)V
+  public method doFilter(Ljakarta/servlet/ServletRequest;Ljakarta/servlet/ServletResponse;Ljakarta/servlet/FilterChain;)V
+  public method getOrder()I
+
+public class com/macstab/chaos/jvm/spring/boot/common/ChaosSessionPropagationAutoConfiguration
+  public method <init>()V
+  public method chaosSessionFilter()Lcom/macstab/chaos/jvm/spring/boot/common/ChaosSessionFilter;
+
+public final class com/macstab/chaos/jvm/spring/boot/common/OnTrustedChaosEnablementCondition extends org/springframework/boot/autoconfigure/condition/SpringBootCondition
+  public method <init>()V
+  public method getMatchOutcome(Lorg/springframework/context/annotation/ConditionContext;Lorg/springframework/core/type/AnnotatedTypeMetadata;)Lorg/springframework/boot/autoconfigure/condition/ConditionOutcome;
+
+public final class com/macstab/chaos/jvm/spring/boot/common/TrustedChaosEnablement
+  public static final field ALLOW_REMOTE_ENABLE_PROPERTY Ljava/lang/String;
+  public static final field ENABLED_PROPERTY Ljava/lang/String;
+  public static method evaluate(Lorg/springframework/core/env/ConfigurableEnvironment;)Lcom/macstab/chaos/jvm/spring/boot/common/TrustedChaosEnablement$Decision;
+
+public static final enum com/macstab/chaos/jvm/spring/boot/common/TrustedChaosEnablement$Decision
+  public static final field DISABLED Lcom/macstab/chaos/jvm/spring/boot/common/TrustedChaosEnablement$Decision;
+  public static final field ENABLED Lcom/macstab/chaos/jvm/spring/boot/common/TrustedChaosEnablement$Decision;
+  public static final field REJECTED_UNTRUSTED_SOURCE Lcom/macstab/chaos/jvm/spring/boot/common/TrustedChaosEnablement$Decision;
+  public static method valueOf(Ljava/lang/String;)Lcom/macstab/chaos/jvm/spring/boot/common/TrustedChaosEnablement$Decision;
+  public static method values()[Lcom/macstab/chaos/jvm/spring/boot/common/TrustedChaosEnablement$Decision;

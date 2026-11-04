@@ -1,0 +1,4 @@
+public final class com/macstab/chaos/jvm/quarkus/management/deployment/ChaosManagementBuildStep
+  public method <init>()V
+  public method feature()Lio/quarkus/deployment/builditem/FeatureBuildItem;
+  public method routes(Lcom/macstab/chaos/jvm/quarkus/management/ChaosManagementRecorder;Lio/quarkus/vertx/http/deployment/NonApplicationRootPathBuildItem;Lio/quarkus/deployment/builditem/ShutdownContextBuildItem;Lio/quarkus/deployment/annotations/BuildProducer;)V
