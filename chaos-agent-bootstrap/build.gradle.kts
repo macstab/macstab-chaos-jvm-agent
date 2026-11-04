@@ -101,8 +101,6 @@ tasks.shadowJar {
     relocate("net.bytebuddy", "com.macstab.chaos.jvm.shaded.net.bytebuddy")
     relocate("com.fasterxml.jackson", "com.macstab.chaos.jvm.shaded.com.fasterxml.jackson")
     mergeServiceFiles()
-    // Nullness annotations are for compilers; the running agent needs none of them.
-    dependencies { exclude(dependency("org.jspecify:jspecify")) }
     exclude(
         "META-INF/*.RSA",
         "META-INF/*.SF",
@@ -160,3 +158,7 @@ tasks.test {
     outputs.file(childExec)
     doFirst { childExec.delete() }
 }
+
+// Nullness annotations are for compilers; the running agent needs none of them. Excluded from the
+// runtime classpath rather than only from the shadow jar, so the SBOM lists what the jar contains.
+configurations.runtimeClasspath { exclude(group = "org.jspecify", module = "jspecify") }
