@@ -221,15 +221,28 @@ This library lets you **turn those scenarios on and off programmatically**, scop
 
 The agent loads via the standard Java Instrumentation API (`-javaagent:` or dynamic self-attach). ByteBuddy weaves `@Advice` hooks into selected JDK methods on demand — each hook group is retransformed the first time an activated scenario needs one of its operations (`instrumentation=eager` weaves everything at start, as in 1.x). Those hooks call a static dispatcher that routes to the live scenario registry, evaluates the scenarios indexed under the intercepted operation against an 8-check activation pipeline, and executes the decision inline on the calling thread.
 
+```mermaid
+flowchart LR
+  subgraph boot["bootstrap class loader"]
+    direction TB
+    JDK["JDK method<br/>e.g. SocketChannelImpl.write"] --> ADV["inlined @Advice"]
+    ADV --> BD["BootstrapDispatcher<br/>depth guard · 77 slots"]
+  end
+  subgraph agent["agent class loader"]
+    direction TB
+    BR["ChaosBridge"] --> RT["ChaosRuntime"]
+    RT --> DOM["domain dispatcher<br/>NetworkDispatch, FileDispatch, …"]
+    DOM --> IDLE{"any scenario<br/>for this operation?"}
+    IDLE -- no --> PASS["return unmodified<br/>≈7 ns · 0 B"]
+    IDLE -- yes --> ENG["DispatchEngine.evaluate<br/>ScenarioRegistry.match"]
+    ENG --> POL["each ScenarioController:<br/>policy steps 1–9"]
+    POL --> DEC["RuntimeDecision<br/>Σ delays → one gate → one terminal"]
+  end
+  BD -- "MethodHandle slot" --> BR
+  DEC -- "applied inside the real call" --> JDK
 ```
-Application Thread
-  └─► instrumented JDK method (e.g. ThreadPoolExecutor.execute)
-        └─► ByteBuddy @Advice (inlined bytecode)
-              └─► BootstrapDispatcher (bootstrap classloader)
-                    └─► ChaosBridge → ChaosRuntime (agent classloader)
-                          └─► ScenarioRegistry.match() → evaluate() × N
-                                └─► RuntimeDecision: delay + gate + terminal action
-```
+
+The JDK class reaches the agent only through the bridge's method-handle slots ([ADR 0001](docs/adr/0001-bootstrap-bridge.md)); the policy steps and the composition rules are the numbered laws of [docs/semantics.md](docs/semantics.md).
 
 **77 interception handles** span: thread lifecycle, executor submission, scheduled ticks, blocking queues, `CompletableFuture`, NIO selectors, TCP sockets, clock (`currentTimeMillis`/`nanoTime`), GC, `System.exit`, reflection, `ObjectInputStream`, class loading, `LockSupport.park`, AQS acquire, JNDI, JMX, ZIP compression, `ThreadLocal`, native library loading, HTTP client send, JDBC execute, DNS resolve, SSL handshake, `Thread.sleep`, file I/O, and arbitrary method entry/exit.
 
