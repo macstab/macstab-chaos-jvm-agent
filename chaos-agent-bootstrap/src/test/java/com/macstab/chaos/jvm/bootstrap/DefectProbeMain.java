@@ -91,6 +91,7 @@ public final class DefectProbeMain {
       case "socket-read-effects" ->
           socketReadEffects(System.getProperty("chaos.test.soTimeout", "200"));
       case "socket-reset" -> socketReset();
+      case "socket-connect-timeout" -> socketConnectTimeout();
       case "file-corrupt-read" -> fileCorruptRead();
       case "file-channel-write" -> fileChannelWrite();
       case "dns-lookups" -> dnsLookups();
@@ -534,6 +535,22 @@ public final class DefectProbeMain {
           differingBits += Integer.bitCount((received[i] ^ sent[i]) & 0xFF);
         }
         System.out.println("differingBits=" + differingBits);
+      } catch (final java.net.SocketTimeoutException timedOut) {
+        System.out.println("timeout=" + timedOut.getMessage());
+        System.out.println("waitedMillis=" + (System.nanoTime() - start) / 1_000_000L);
+      }
+    }
+  }
+
+  /** Connects to a listening loopback port with a 200 ms connect timeout. */
+  private static void socketConnectTimeout() throws Exception {
+    try (java.net.ServerSocket server =
+            new java.net.ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"));
+        java.net.Socket client = new java.net.Socket()) {
+      final long start = System.nanoTime();
+      try {
+        client.connect(new java.net.InetSocketAddress("127.0.0.1", server.getLocalPort()), 200);
+        System.out.println("connected=" + client.isConnected());
       } catch (final java.net.SocketTimeoutException timedOut) {
         System.out.println("timeout=" + timedOut.getMessage());
         System.out.println("waitedMillis=" + (System.nanoTime() - start) / 1_000_000L);

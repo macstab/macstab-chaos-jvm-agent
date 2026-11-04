@@ -195,6 +195,42 @@ class NetworkDispatchTest {
     }
 
     @Test
+    @DisplayName(
+        "a connect timeout waits out the connect timeout, then fails with \"Connect timed out\"")
+    void connectTimeoutWaitsOutTheTimeout() throws Throwable {
+      activate(
+          "syn-lost",
+          ChaosSelector.network(Set.of(OperationType.SOCKET_CONNECT)),
+          ChaosEffect.timeout());
+      final java.net.InetSocketAddress peer = new java.net.InetSocketAddress("127.0.0.1", 9);
+
+      final Duration elapsed =
+          timed(
+              () ->
+                  assertThatThrownBy(() -> runtime.beforeSocketConnect(this, peer, 60))
+                      .isInstanceOf(SocketTimeoutException.class)
+                      .hasMessage("Connect timed out"));
+
+      assertThat(elapsed).isGreaterThanOrEqualTo(Duration.ofMillis(60));
+      assertThat(runtime.diagnostics().scenario("syn-lost").orElseThrow().appliedCount())
+          .isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("a timeout never fires on a connect without a timeout")
+    void timeoutNeverFiresOnAnInfiniteConnect() throws Throwable {
+      activate(
+          "syn-lost",
+          ChaosSelector.network(Set.of(OperationType.SOCKET_CONNECT)),
+          ChaosEffect.timeout());
+
+      assertThat(
+              runtime.beforeSocketConnect(this, new java.net.InetSocketAddress("127.0.0.1", 9), 0))
+          .isNull();
+      assertThat(runtime.diagnostics().scenario("syn-lost").orElseThrow().appliedCount()).isZero();
+    }
+
+    @Test
     @DisplayName("a torn write of two bytes sends exactly one")
     void tornWriteOfTwoBytes() throws Throwable {
       activate("torn", ChaosSelector.network(Set.of(OperationType.SOCKET_WRITE)), tornWrite());

@@ -170,6 +170,13 @@ public final class NetworkDispatch {
               ? redirect.port()
               : inetSocketAddress == null ? 0 : inetSocketAddress.getPort());
     }
+    if (decision.terminalAction() != null
+        && decision.terminalAction().kind() == TerminalKind.TIMEOUT) {
+      // A peer that never answers the SYN: the connect waits out its own timeout, then fails.
+      engine.applyDelayAndGate(decision);
+      engine.sleep(decision.terminalAction().number());
+      throw decision.terminalAction().failure();
+    }
     engine.applyPreDecision(decision);
     return null;
   }

@@ -1414,6 +1414,19 @@ class DefectRegressionIntegrationTest {
     }
 
     @Test
+    @DisplayName("timeout on connect waits for the connect timeout, then throws")
+    void connectTimeout() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          run(
+              ChaosSelector.network(Set.of(OperationType.SOCKET_CONNECT)),
+              ChaosEffect.timeout(),
+              "socket-connect-timeout");
+      assertThat(result.value("timeout")).isEqualTo("Connect timed out");
+      assertThat(result.longValue("waitedMillis")).isGreaterThanOrEqualTo(190L);
+      assertThat(result.longValue("applied.effect")).isEqualTo(1L);
+    }
+
+    @Test
     @DisplayName("connectionReset makes the peer see a reset instead of end of stream")
     void connectionReset() throws Exception {
       final ChildJvmProbe.ProbeResult result =
