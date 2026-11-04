@@ -195,6 +195,129 @@ class ChaosManagementHandlerTest {
   }
 
   @Test
+  @DisplayName("the recorder's handler is off unless macstab.chaos.enabled is configured")
+  void recorderHandlerDisabledByDefault() {
+    final io.quarkus.runtime.ShutdownContext shutdown =
+        new io.quarkus.runtime.ShutdownContext() {
+          @Override
+          public void addShutdownTask(final Runnable task) {}
+
+          @Override
+          public void addLastShutdownTask(final Runnable task) {}
+        };
+    final ChaosManagementHandler recorded =
+        (ChaosManagementHandler) new ChaosManagementRecorder().handler("/q/chaos", shutdown);
+    final AtomicInteger status = new AtomicInteger();
+    final AtomicReference<String> sent = new AtomicReference<>();
+    final RoutingContext context =
+        (RoutingContext)
+            Proxy.newProxyInstance(
+                RoutingContext.class.getClassLoader(),
+                new Class<?>[] {RoutingContext.class},
+                (self, method, args) ->
+                    switch (method.getName()) {
+                      case "normalizedPath" -> "/q/chaos";
+                      case "response" ->
+                          Proxy.newProxyInstance(
+                              HttpServerResponse.class.getClassLoader(),
+                              new Class<?>[] {HttpServerResponse.class},
+                              (r, m, a) -> {
+                                if (m.getName().equals("setStatusCode")) {
+                                  status.set((Integer) a[0]);
+                                }
+                                if (m.getName().equals("end")) {
+                                  sent.set((String) a[0]);
+                                  return Future.succeededFuture();
+                                }
+                                return r;
+                              });
+                      default -> null;
+                    });
+
+    recorded.serve(context, null);
+
+    assertThat(status.get()).isEqualTo(404);
+    assertThat(sent.get()).contains("chaos management is disabled");
+    recorded.close();
+  }
+
+  @Test
+  @DisplayName(
+      "a body handler without a buffer, and an unreadable or empty body, reach the route as none")
+  void unreadableBodyIsNoBody() throws Exception {
+    final io.vertx.core.Vertx vertx = io.vertx.core.Vertx.vertx();
+    try {
+      final java.util.List<Future<Buffer>> bodies =
+          java.util.List.of(
+              Future.failedFuture(new IllegalStateException("connection reset")),
+              Future.succeededFuture());
+      for (final Future<Buffer> unread : bodies) {
+        final AtomicInteger status = new AtomicInteger();
+        final java.util.concurrent.CountDownLatch answered =
+            new java.util.concurrent.CountDownLatch(1);
+        final HttpServerResponse response =
+            (HttpServerResponse)
+                Proxy.newProxyInstance(
+                    HttpServerResponse.class.getClassLoader(),
+                    new Class<?>[] {HttpServerResponse.class},
+                    (self, method, args) -> {
+                      if (method.getName().equals("setStatusCode")) {
+                        status.set((Integer) args[0]);
+                      }
+                      if (method.getName().equals("end")) {
+                        answered.countDown();
+                        return Future.succeededFuture();
+                      }
+                      return self;
+                    });
+        final HttpServerRequest request =
+            (HttpServerRequest)
+                Proxy.newProxyInstance(
+                    HttpServerRequest.class.getClassLoader(),
+                    new Class<?>[] {HttpServerRequest.class},
+                    (self, method, args) ->
+                        switch (method.getName()) {
+                          case "method" -> HttpMethod.POST;
+                          case "body" -> unread;
+                          default -> throw new UnsupportedOperationException(method.getName());
+                        });
+        // A body handler ran but kept no buffer: the request body is read directly instead.
+        final RequestBody withoutBuffer =
+            (RequestBody)
+                Proxy.newProxyInstance(
+                    RequestBody.class.getClassLoader(),
+                    new Class<?>[] {RequestBody.class},
+                    (self, method, args) -> null);
+        final RoutingContext context =
+            (RoutingContext)
+                Proxy.newProxyInstance(
+                    RoutingContext.class.getClassLoader(),
+                    new Class<?>[] {RoutingContext.class},
+                    (self, method, args) ->
+                        switch (method.getName()) {
+                          case "normalizedPath" -> "/q/chaos";
+                          case "request" -> request;
+                          case "response" -> response;
+                          case "vertx" -> vertx;
+                          case "body" -> withoutBuffer;
+                          default -> throw new UnsupportedOperationException(method.getName());
+                        });
+
+        handler.handle(context);
+
+        assertThat(answered.await(30, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+        assertThat(status.get()).as("a POST without a plan is invalid").isEqualTo(400);
+      }
+    } finally {
+      vertx
+          .close()
+          .toCompletionStage()
+          .toCompletableFuture()
+          .get(10, java.util.concurrent.TimeUnit.SECONDS);
+    }
+  }
+
+  @Test
   @DisplayName("reads an unread body asynchronously and works off the event loop; failures are 500")
   void asynchronousBodyAndFailure() throws Exception {
     final io.vertx.core.Vertx vertx = io.vertx.core.Vertx.vertx();

@@ -92,9 +92,26 @@ class ChaosHandleRegistryTest {
     assertThat(replacement.closed).hasValue(1);
   }
 
+  @Test
+  @DisplayName("a registration overtaken by the shutdown stops its own handle, failing or not")
+  void registrationOvertakenByShutdown() {
+    // The shutdown runs after register() saw the registry open but before it stored the handle
+    // (here: while register() reads the handle's id), so the drain cannot have seen it.
+    for (final boolean failOnClose : new boolean[] {false, true}) {
+      final ChaosHandleRegistry racing = new ChaosHandleRegistry();
+      final FakeHandle handle = new FakeHandle("racing", failOnClose, racing::destroy);
+
+      racing.register(handle);
+
+      assertThat(handle.closed).hasValue(1);
+      assertThat(racing.ids()).isEmpty();
+    }
+  }
+
   private static final class FakeHandle implements ChaosActivationHandle {
     private final String id;
     private final boolean failOnClose;
+    private Runnable onFirstIdRead;
     final AtomicInteger closed = new AtomicInteger();
 
     FakeHandle(final String id) {
@@ -102,12 +119,22 @@ class ChaosHandleRegistryTest {
     }
 
     FakeHandle(final String id, final boolean failOnClose) {
+      this(id, failOnClose, null);
+    }
+
+    FakeHandle(final String id, final boolean failOnClose, final Runnable onFirstIdRead) {
       this.id = id;
       this.failOnClose = failOnClose;
+      this.onFirstIdRead = onFirstIdRead;
     }
 
     @Override
     public String id() {
+      final Runnable action = onFirstIdRead;
+      onFirstIdRead = null;
+      if (action != null) {
+        action.run();
+      }
       return id;
     }
 

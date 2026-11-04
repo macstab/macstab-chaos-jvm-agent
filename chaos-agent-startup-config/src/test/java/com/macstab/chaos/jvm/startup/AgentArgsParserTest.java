@@ -144,6 +144,14 @@ class AgentArgsParserTest {
     }
 
     @Test
+    @DisplayName("a key of only whitespace throws instead of being stored under no name")
+    void blankKey() {
+      assertThatThrownBy(() -> AgentArgsParser.parse("  =value"))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessage("invalid agent arg token '  =value': blank key before '='");
+    }
+
+    @Test
     @DisplayName("oversized input throws")
     void oversizedInput() {
       String huge = "k=" + "x".repeat(9000);

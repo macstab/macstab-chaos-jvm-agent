@@ -3,6 +3,9 @@ package com.macstab.chaos.jvm.api;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.lang.reflect.Method;
+import java.net.URL;
+import java.net.URLClassLoader;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -59,5 +62,58 @@ class CidrBlockTest {
     assertThatThrownBy(() -> CidrBlock.parse("::+1"))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessage("not an IPv4 or IPv6 literal: ::+1");
+  }
+
+  @Test
+  @DisplayName("a missing or blank block and a missing address literal are rejected")
+  void missingText() {
+    assertThatThrownBy(() -> CidrBlock.parse(null))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("CIDR block must be non-blank");
+    assertThatThrownBy(() -> CidrBlock.parse(" "))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("CIDR block must be non-blank");
+    assertThatThrownBy(() -> CidrBlock.parseAddress(null))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("not an IPv4 or IPv6 literal: null");
+  }
+
+  @Test
+  @DisplayName("an IPv6 literal with an empty group around '::' or too many groups is rejected")
+  void malformedCompressedIpv6() {
+    for (final String literal : new String[] {":1::2", "1::2:", "1:2:3:4:5:6:7::8"}) {
+      assertThatThrownBy(() -> CidrBlock.parseAddress(literal))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessage("not an IPv4 or IPv6 literal: " + literal);
+    }
+  }
+
+  @Test
+  @DisplayName("blocks of equal prefix but another network differ, and no block equals a string")
+  void inequality() {
+    assertThat(CidrBlock.parse("10.0.0.0/8")).isNotEqualTo(CidrBlock.parse("11.0.0.0/8"));
+    assertThat(CidrBlock.parse("10.0.0.0/8")).isNotEqualTo((Object) "10.0.0.0/8");
+  }
+
+  @Test
+  @DisplayName("past its capacity the cache parses each new block anew instead of keeping it")
+  void cacheStopsGrowingAtCapacity() throws Exception {
+    // A class loader of its own gives this test a fresh cache: filling the JVM-wide one would
+    // change what every later test in this JVM observes.
+    final URL classes = CidrBlock.class.getProtectionDomain().getCodeSource().getLocation();
+    try (URLClassLoader isolated =
+        new URLClassLoader(new URL[] {classes}, ClassLoader.getPlatformClassLoader())) {
+      final Method cached =
+          isolated.loadClass(CidrBlock.class.getName()).getMethod("cached", String.class);
+      for (int i = 0; i < 256; i++) {
+        cached.invoke(null, "10.0." + i + ".0/24");
+      }
+
+      final Object kept = cached.invoke(null, "10.0.0.0/24");
+      assertThat(cached.invoke(null, "10.0.0.0/24")).isSameAs(kept);
+      final Object first = cached.invoke(null, "10.1.0.0/16");
+      final Object second = cached.invoke(null, "10.1.0.0/16");
+      assertThat(second).isEqualTo(first).isNotSameAs(first);
+    }
   }
 }

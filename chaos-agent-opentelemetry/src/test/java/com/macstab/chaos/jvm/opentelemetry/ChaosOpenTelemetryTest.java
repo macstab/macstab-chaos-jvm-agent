@@ -56,7 +56,8 @@ class ChaosOpenTelemetryTest {
 
       final long deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
       Collection<MetricData> collected = reader.collectAllMetrics();
-      while (find(collected, "chaos.injected.delay").isEmpty() && System.nanoTime() < deadline) {
+      // Both applications, not only the first: the listener records them one by one.
+      while (delayCount(collected) < 2L && System.nanoTime() < deadline) {
         Thread.sleep(10L);
         collected = reader.collectAllMetrics();
       }
@@ -204,6 +205,16 @@ class ChaosOpenTelemetryTest {
       Thread.sleep(10L);
     }
     throw new AssertionError("no " + name + " metric recorded");
+  }
+
+  private static long delayCount(final Collection<MetricData> metrics) {
+    return find(metrics, "chaos.injected.delay")
+        .map(
+            delay ->
+                delay.getHistogramData().getPoints().stream()
+                    .mapToLong(point -> point.getCount())
+                    .sum())
+        .orElse(0L);
   }
 
   private void submit() {

@@ -41,9 +41,10 @@ class ChaosMeterBinderTest {
     runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
     runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
 
-    // Events are counted asynchronously; wait for both applications.
+    // Events are counted asynchronously; wait for both applications. The delay is the last meter
+    // an application updates, so once it holds both, every other meter does too.
     final long deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
-    while (appliedCount() < 2 && System.nanoTime() < deadline) {
+    while (delayCount() < 2 && System.nanoTime() < deadline) {
       Thread.sleep(10L);
     }
 
@@ -153,9 +154,9 @@ class ChaosMeterBinderTest {
     assertThat(registry.find("chaos.applications").counter()).isNull();
   }
 
-  private double appliedCount() {
-    final io.micrometer.core.instrument.Counter counter =
-        registry.find("chaos.events").tags("type", "applied", "scenario", "metered").counter();
-    return counter == null ? 0.0 : counter.count();
+  private long delayCount() {
+    final io.micrometer.core.instrument.Timer timer =
+        registry.find("chaos.injected.delay").tags("scenario", "metered").timer();
+    return timer == null ? 0L : timer.count();
   }
 }

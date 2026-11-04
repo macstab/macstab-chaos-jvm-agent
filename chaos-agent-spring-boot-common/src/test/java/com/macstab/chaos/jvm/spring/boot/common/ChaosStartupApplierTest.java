@@ -118,6 +118,20 @@ class ChaosStartupApplierTest {
   }
 
   @Test
+  @DisplayName("a blank config-file is no plan: nothing is loaded and nothing logged")
+  void blankConfigFileIsIgnored() {
+    runner
+        .withPropertyValues("macstab.chaos.config-file= ")
+        .run(
+            context -> {
+              ready(context);
+              assertThat(context.getBean(ChaosRuntime.class).diagnostics().snapshot().scenarios())
+                  .isEmpty();
+            });
+    assertThat(logged).isEmpty();
+  }
+
+  @Test
   @DisplayName("a plan the runtime rejects is logged and leaves the application running")
   void rejectedPlanIsLogged() throws IOException {
     final Path plan =
@@ -150,6 +164,7 @@ class ChaosStartupApplierTest {
     assertThat(ChaosAutoConfiguration.sanitizeForLog("/etc/plan.json\n2026 FORGED\r\u0000"))
         .isEqualTo("/etc/plan.json_2026 FORGED__");
     assertThat(ChaosAutoConfiguration.sanitizeForLog("a\tb")).isEqualTo("a\tb");
+    assertThat(ChaosAutoConfiguration.sanitizeForLog("a\u0001b\u001bc")).isEqualTo("a_b_c");
     assertThat(ChaosAutoConfiguration.sanitizeForLog("x".repeat(5_000))).hasSize(1_024);
     assertThat(ChaosAutoConfiguration.sanitizeForLog(null)).isEmpty();
   }

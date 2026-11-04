@@ -41,6 +41,25 @@ class ChaosAgentExtensionGuardsTest {
   }
 
   @Test
+  @DisplayName("before each test, a control plane without a session activates nothing")
+  void controlPlaneWithoutSession() {
+    final ChaosControlPlane plane =
+        (ChaosControlPlane)
+            Proxy.newProxyInstance(
+                ChaosControlPlane.class.getClassLoader(),
+                new Class<?>[] {ChaosControlPlane.class},
+                (self, method, args) -> {
+                  throw new AssertionError("used without a session: " + method.getName());
+                });
+    context.getStore(null).put(ChaosControlPlane.class, plane);
+
+    extension.beforeEach(context);
+
+    assertThat(context.getStore(null).get(com.macstab.chaos.jvm.testkit.WithChaosSupport.class))
+        .isNull();
+  }
+
+  @Test
   @DisplayName("resolves only sessions and control planes, and says when none is available")
   void parameters() throws Exception {
     assertThat(extension.supportsParameter(parameter(ChaosSession.class), context)).isTrue();

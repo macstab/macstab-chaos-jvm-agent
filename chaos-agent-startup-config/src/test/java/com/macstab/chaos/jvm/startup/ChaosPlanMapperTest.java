@@ -3,6 +3,10 @@ package com.macstab.chaos.jvm.startup;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.fasterxml.jackson.databind.JsonMappingException;
+import com.fasterxml.jackson.databind.exc.UnrecognizedPropertyException;
+import com.fasterxml.jackson.databind.exc.ValueInstantiationException;
+import com.fasterxml.jackson.databind.type.TypeFactory;
 import com.macstab.chaos.jvm.api.ActivationPolicy;
 import com.macstab.chaos.jvm.api.ChaosEffect;
 import com.macstab.chaos.jvm.api.ChaosPlan;
@@ -430,5 +434,78 @@ class ChaosPlanMapperTest {
     org.assertj.core.api.Assertions.assertThatThrownBy(
             () -> ChaosPlanMapper.readPlanOrScenarios("{ broken", "w"))
         .isInstanceOf(ConfigLoadException.class);
+  }
+
+  @Nested
+  @DisplayName("failure descriptions without a parser position")
+  class UnpositionedFailures {
+
+    @Test
+    @DisplayName("a failure without a location is described without a position")
+    void noLocation() {
+      final UnrecognizedPropertyException unknown =
+          new UnrecognizedPropertyException(null, "unknown", null, ChaosPlan.class, "delayy", null);
+
+      assertThat(ChaosPlanMapper.parseFailureMessage(unknown))
+          .isEqualTo("failed to parse chaos plan JSON: unknown property 'delayy'");
+      assertThat(ChaosPlanMapper.parseFailureReason(unknown))
+          .isEqualTo("unknown property 'delayy'");
+    }
+
+    @Test
+    @DisplayName("a location without a line number is described without a position")
+    void unknownLine() {
+      final JsonMappingException mapping =
+          new JsonMappingException(null, "failed", com.fasterxml.jackson.core.JsonLocation.NA);
+
+      assertThat(ChaosPlanMapper.parseFailureMessage(mapping))
+          .isEqualTo("failed to parse chaos plan JSON: JsonMappingException");
+    }
+
+    @Test
+    @DisplayName("an instantiation failure without a cause message is an invalid value")
+    void instantiationWithoutDetail() {
+      final com.fasterxml.jackson.databind.JavaType plan =
+          TypeFactory.defaultInstance().constructType(ChaosPlan.class);
+
+      assertThat(
+              ChaosPlanMapper.parseFailureReason(
+                  ValueInstantiationException.from(null, "failed", plan)))
+          .isEqualTo("invalid value");
+      assertThat(
+              ChaosPlanMapper.parseFailureReason(
+                  ValueInstantiationException.from(
+                      null, "failed", plan, new NullPointerException())))
+          .isEqualTo("invalid value");
+    }
+
+    @Test
+    @DisplayName("a path step that is neither a field nor an index adds nothing to the path")
+    void pathStepWithoutFieldOrIndex() {
+      final JsonMappingException mapping = new JsonMappingException(null, "failed");
+      mapping.prependPath(new JsonMappingException.Reference(null));
+
+      assertThat(ChaosPlanMapper.parseFailureReason(mapping)).isEqualTo("JsonMappingException");
+    }
+  }
+
+  @Test
+  @DisplayName("toJson names the type it cannot serialise")
+  void toJsonFailureNamesType() {
+    assertThatThrownBy(() -> ChaosPlanMapper.toJson(new Object()))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessage("failed to serialize java.lang.Object")
+        .hasCauseInstanceOf(com.fasterxml.jackson.core.JsonProcessingException.class);
+  }
+
+  @Test
+  @DisplayName("a load failure without a separate reason reports its message as the reason")
+  void reasonDefaultsToMessage() {
+    final ConfigLoadException failure =
+        new ConfigLoadException("broken", "inline-json", null, 0, 0, null);
+
+    assertThat(failure.reason()).isEqualTo("broken");
+    assertThat(failure.line()).isZero();
+    assertThat(failure.column()).isZero();
   }
 }

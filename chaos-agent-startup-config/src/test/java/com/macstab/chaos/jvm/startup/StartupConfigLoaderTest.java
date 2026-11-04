@@ -559,6 +559,91 @@ class StartupConfigLoaderTest {
     }
   }
 
+  @Nested
+  @DisplayName("source edge cases")
+  class SourceEdgeCases {
+
+    @Test
+    @DisplayName("the debugDump spelling turns on the start-up dump")
+    void debugDumpAlias() {
+      final StartupConfigLoader.LoadedPlan loaded =
+          StartupConfigLoader.load(
+                  "configJson=" + writeSampleJson("alias") + ";debugDump=true", Map.of())
+              .orElseThrow();
+
+      assertThat(loaded.debugDumpOnStart()).isTrue();
+    }
+
+    @Test
+    @DisplayName("a blank agent arg falls back to the environment; a blank variable is no source")
+    void blankSources() {
+      final String json = writeSampleJson("from-env");
+
+      assertThat(
+              StartupConfigLoader.load(
+                      "configJson=  ", Map.of(StartupConfigLoader.ENV_CONFIG_JSON, json))
+                  .orElseThrow()
+                  .plan()
+                  .metadata()
+                  .name())
+          .isEqualTo("from-env");
+      assertThat(StartupConfigLoader.load(null, Map.of(StartupConfigLoader.ENV_CONFIG_JSON, "  ")))
+          .isEmpty();
+    }
+  }
+
+  @Nested
+  @DisplayName("file access failures")
+  class FileAccessFailures {
+
+    @Test
+    @DisplayName("loadPlanFromFile reports a missing file")
+    void missingFile() {
+      final Path missing = tempDir.resolve("absent.json");
+
+      assertThatExceptionOfType(ConfigLoadException.class)
+          .isThrownBy(() -> StartupConfigLoader.loadPlanFromFile(missing.toString()))
+          .withMessage("config file does not exist: " + missing)
+          .satisfies(failure -> assertThat(failure.getSource()).isEqualTo("file:" + missing));
+    }
+
+    @Test
+    @DisplayName("a file that passes the checks but cannot be opened is reported with the cause")
+    void unreadableFile() throws Exception {
+      assumePosix();
+      final Path file = tempDir.resolve("plan.json");
+      Files.writeString(file, writeSampleJson("unreadable"));
+      Files.setPosixFilePermissions(file, PosixFilePermissions.fromString("---------"));
+      assumeTrue(!Files.isReadable(file), "the user reads every file (root)");
+
+      assertThatExceptionOfType(ConfigLoadException.class)
+          .isThrownBy(() -> StartupConfigLoader.loadPlanFromFile(file.toString()))
+          .withMessage("failed to read chaos plan config file: " + file)
+          .withCauseInstanceOf(java.io.IOException.class);
+    }
+
+    @Test
+    @DisplayName("a file owned by root passes the ownership check whoever runs the JVM")
+    void rootOwnedFileAccepted() throws Exception {
+      final Path hosts = Path.of("/etc/hosts");
+      assumeTrue(
+          Files.isRegularFile(hosts, java.nio.file.LinkOption.NOFOLLOW_LINKS)
+              && "root".equals(Files.getOwner(hosts).getName()),
+          "needs a root-owned /etc/hosts");
+      final String original = System.getProperty("user.name");
+      System.setProperty("user.name", "someone-else");
+      try {
+        // Not a plan: the read gets past the ownership check and fails on the content instead.
+        assertThatExceptionOfType(ConfigLoadException.class)
+            .isThrownBy(() -> StartupConfigLoader.loadPlanFromFile(hosts.toString()))
+            .withMessageStartingWith("failed to parse chaos plan JSON")
+            .withMessageNotContaining("owned by");
+      } finally {
+        System.setProperty("user.name", original);
+      }
+    }
+  }
+
   private static void assumePosix() {
     assumeTrue(FileSystems.getDefault().supportedFileAttributeViews().contains("posix"));
   }

@@ -64,6 +64,24 @@ class ChaosActuatorLifecycleTest {
   }
 
   @Test
+  @DisplayName("a missing, blank or malformed body is answered with an error, nothing activated")
+  void unusableBodies() {
+    assertThat(endpoint.activate(null))
+        .isEqualTo(
+            new ChaosActuatorEndpoint.ActivationResponse(
+                "error", null, "plan JSON must not be blank"));
+    assertThat(endpoint.activate("  "))
+        .isEqualTo(
+            new ChaosActuatorEndpoint.ActivationResponse(
+                "error", null, "plan JSON must not be blank"));
+    // The parser's detail stays in the server log; the response does not echo the input.
+    assertThat(endpoint.activate("{\"scenarios\": [secret"))
+        .isEqualTo(new ChaosActuatorEndpoint.ActivationResponse("error", null, "invalid plan"));
+    assertThat(runtime.diagnostics().snapshot().scenarios()).isEmpty();
+    assertThat(registry.ids()).isEmpty();
+  }
+
+  @Test
   @DisplayName("a stopped plan can be activated again")
   void planCanBeReactivatedAfterStop() {
     // Arrange

@@ -70,6 +70,28 @@ class ChaosSessionFilterTest {
   }
 
   @Test
+  @DisplayName("a blank header and a request that is not HTTP join no session")
+  void blankHeaderAndNonHttpRequest() throws Exception {
+    final ChaosSessionFilter filter = new ChaosSessionFilter(() -> runtime);
+    final String[] id = new String[1];
+    final Thread opener = new Thread(() -> id[0] = runtime.openSession("remote test").id());
+    opener.start();
+    opener.join();
+
+    assertThat(sessionSeenBy(filter, "  ")).isNull();
+
+    // The same header on a request seen only as a plain ServletRequest is not read.
+    final MockHttpServletRequest http = new MockHttpServletRequest();
+    http.addHeader(ChaosSession.HEADER, id[0]);
+    final AtomicReference<String> seen = new AtomicReference<>("unset");
+    filter.doFilter(
+        new jakarta.servlet.ServletRequestWrapper(http),
+        new MockHttpServletResponse(),
+        (req, res) -> seen.set(runtime.currentSessionId()));
+    assertThat(seen).hasValue(null);
+  }
+
+  @Test
   @DisplayName("a request without the header runs outside the session its thread inherited")
   void headerlessRequestMasksInheritedSession() throws Exception {
     final ChaosSessionFilter filter = new ChaosSessionFilter(() -> runtime);
