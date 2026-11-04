@@ -9,6 +9,9 @@ import com.macstab.chaos.jvm.api.ChaosSelector;
 import com.macstab.chaos.jvm.api.OperationType;
 import com.macstab.chaos.jvm.core.ChaosRuntime;
 import com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher;
+import java.lang.invoke.MethodHandle;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.MethodType;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
@@ -32,7 +35,9 @@ import org.junit.jupiter.api.Test;
 /**
  * The two guards every bridge entry point opens with, over every entry point: without an installed
  * agent, and inside the agent's own work (L3), a call passes through unchanged — it returns its own
- * input, the length it was given, or {@code false}/{@code null}, and throws nothing.
+ * input, the length it was given, or {@code false}/{@code null}, and throws nothing. The same holds
+ * with the agent connected but no scenario active, and before the delegate's handles are published;
+ * a failure of the delegate reaches the advice as it was thrown.
  */
 @DisplayName("Bridge entry-point guards")
 class BridgeGuardsTest {
@@ -54,7 +59,9 @@ class BridgeGuardsTest {
           "tornWriteFailure",
           "corruptBytes",
           "corruptByte",
+          "corruptBuffer",
           "corruptionSeed",
+          "isArchive",
           "currentTimeMillis",
           "nanoTime");
 
@@ -90,17 +97,131 @@ class BridgeGuardsTest {
     }
   }
 
+  @Test
+  @DisplayName("with the agent connected and no scenario every entry point passes the call through")
+  void passThroughWithoutScenario() throws Throwable {
+    final ChaosRuntime runtime = new ChaosRuntime();
+    try (AutoCloseable connected = JdkInstrumentationInstaller.connectDispatcher(runtime)) {
+      assertPassThrough("without a scenario", Set.of("decorateShutdownHook"));
+      // A registered hook is wrapped; removing the hook resolves to the wrapper registered.
+      final Thread hook = new Thread(() -> {});
+      final Thread registered = BootstrapDispatcher.decorateShutdownHook(hook);
+      assertThat(registered).isNotSameAs(hook);
+      assertThat(BootstrapDispatcher.resolveShutdownHook(hook)).isSameAs(registered);
+    } finally {
+      runtime.close();
+    }
+  }
+
+  @Test
+  @DisplayName("a delegate published before its method handles passes every call through")
+  void passThroughWithoutHandles() throws Exception {
+    BootstrapDispatcher.install(new Object(), null);
+    try {
+      assertPassThrough("without method handles");
+    } finally {
+      BootstrapDispatcher.install(null, null);
+    }
+  }
+
+  @Test
+  @DisplayName("a failure of the delegate reaches the advice as thrown, unwrapped")
+  void delegateFailureReachesAdvice() throws Exception {
+    final Exception failure = new Exception("delegate failure");
+    BootstrapDispatcher.install(new Object(), failingHandles(failure));
+    try {
+      final List<String> violations = new ArrayList<>();
+      for (final Method method : entryPoints()) {
+        final Object[] arguments = argumentsFor(method);
+        final boolean swallows = SWALLOW_FAILURE.contains(method.getName());
+        try {
+          final Object result = method.invoke(null, arguments);
+          if (!swallows) {
+            violations.add(method.getName() + " returned " + result);
+          } else if (!unchanged(method.getReturnType(), result, arguments)) {
+            violations.add(method.getName() + " swallowed the failure but returned " + result);
+          }
+        } catch (final InvocationTargetException thrown) {
+          if (swallows || thrown.getCause() != failure) {
+            violations.add(method.getName() + " threw " + thrown.getCause());
+          }
+        }
+      }
+      assertThat(violations).isEmpty();
+      // The corruption still flips one bit, on a seed of its own.
+      assertThat(Integer.bitCount(BootstrapDispatcher.corruptByte(0))).isEqualTo(1);
+    } finally {
+      BootstrapDispatcher.install(null, null);
+    }
+  }
+
+  /**
+   * Entry points that must never fail the call they intercept: a failure of the delegate makes them
+   * pass the call through.
+   */
+  private static final Set<String> SWALLOW_FAILURE =
+      Set.of("resolveShutdownHook", "currentSessionId", "sessionHeaderFor");
+
+  /** Arguments that make an entry point reach its delegate, where the samples do not. */
+  private static Object[] argumentsFor(final Method method) throws Exception {
+    final Object[] arguments = arguments(method.getParameterTypes());
+    final Class<?>[] types = method.getParameterTypes();
+    if (method.getName().startsWith("beforeFile")) {
+      arguments[0] = "FILE_IO_READ";
+    }
+    for (int i = 0; i < types.length; i++) {
+      if (types[i] == int.class
+          && i > 0
+          && types[i - 1] == ByteBuffer[].class) { // offset, then length, of a buffer array
+        arguments[i] = 0;
+        arguments[i + 1] = 1;
+        break;
+      }
+    }
+    return arguments;
+  }
+
+  /** Method handles of the delegate's shape that all throw {@code failure}. */
+  private static MethodHandle[] failingHandles(final Throwable failure) throws Exception {
+    final MethodHandle[] real = JdkInstrumentationInstaller.buildMethodHandles();
+    final MethodHandle[] failing = new MethodHandle[real.length];
+    for (int i = 0; i < real.length; i++) {
+      final MethodType type = real[i].type().changeParameterType(0, Object.class);
+      failing[i] =
+          MethodHandles.dropArguments(
+              MethodHandles.throwException(type.returnType(), Throwable.class).bindTo(failure),
+              0,
+              type.parameterList());
+    }
+    return failing;
+  }
+
+  private static List<Method> entryPoints() {
+    final List<Method> entryPoints = new ArrayList<>();
+    for (final Method method : BootstrapDispatcher.class.getDeclaredMethods()) {
+      if (Modifier.isPublic(method.getModifiers())
+          && Modifier.isStatic(method.getModifiers())
+          && !NOT_ENTRY_POINTS.contains(method.getName())) {
+        entryPoints.add(method);
+      }
+    }
+    return entryPoints;
+  }
+
   private static void assertPassThrough(final String situation) throws Exception {
+    assertPassThrough(situation, Set.of());
+  }
+
+  private static void assertPassThrough(final String situation, final Set<String> exempt)
+      throws Exception {
     final List<String> violations = new ArrayList<>();
     int checked = 0;
-    for (final Method method : BootstrapDispatcher.class.getDeclaredMethods()) {
-      if (!Modifier.isPublic(method.getModifiers())
-          || !Modifier.isStatic(method.getModifiers())
-          || NOT_ENTRY_POINTS.contains(method.getName())) {
+    for (final Method method : entryPoints()) {
+      if (exempt.contains(method.getName())) {
         continue;
       }
       checked++;
-      final Object[] arguments = arguments(method.getParameterTypes());
+      final Object[] arguments = argumentsFor(method);
       final Object result;
       try {
         result = method.invoke(null, arguments);

@@ -61,6 +61,10 @@ import javax.management.ObjectName;
  */
 public final class DefectProbeMain {
 
+  /** The agent's logger, held while probes that check what the agent logs configure it. */
+  private static final java.util.logging.Logger AGENT_LOGGER =
+      java.util.logging.Logger.getLogger("com.macstab.chaos.jvm");
+
   private DefectProbeMain() {}
 
   public static void main(final String[] args) throws Exception {
@@ -114,6 +118,7 @@ public final class DefectProbeMain {
       case "socket-bind" -> socketBind();
       case "thread-eagain" -> threadEagain();
       case "method-weaving" -> methodWeaving();
+      case "method-kinds" -> methodKinds();
       case "woven-groups" -> printWovenGroups();
       case "woven-groups-after-thread-local" -> wovenGroupsAfterThreadLocal();
       case "virtual-thread-start" -> Thread.ofVirtual().start(() -> {}).join();
@@ -355,6 +360,15 @@ public final class DefectProbeMain {
             "refusalMentionsClassLoader="
                 + String.valueOf(refused.getCause().getMessage()).contains("another class loader"));
       }
+      // The refused copy's uninstall must leave the first copy's delegate in place.
+      final Object uninstalled =
+          Class.forName(
+                  com.macstab.chaos.jvm.instrumentation.JdkInstrumentationInstaller.class.getName(),
+                  true,
+                  isolated)
+              .getMethod("uninstall", java.lang.instrument.Instrumentation.class)
+              .invoke(null, net.bytebuddy.agent.ByteBuddyAgent.install());
+      System.out.println("secondUninstalled=" + uninstalled);
     }
     final long start = System.nanoTime();
     Thread.sleep(1L);
@@ -505,6 +519,54 @@ public final class DefectProbeMain {
     System.out.println("after=" + greeter.greet("a") + "|" + greeter.count());
     System.out.println(
         "after.woven=" + plane.diagnostics().snapshot().runtimeDetails().get("wovenHookGroups"));
+  }
+
+  /**
+   * Activates a method scenario on every method of {@link com.example.chaostarget.Shape} and {@link
+   * com.example.chaostarget.Square}, then compares two squares through {@link Comparable} (its
+   * bridge method) and reads a label through a lambda. Only the methods with a body of their own
+   * may be evaluated: not the bridge, not the lambda's synthetic body. Also prints the agent's FINE
+   * report of the weaving.
+   */
+  private static void methodKinds() {
+    AGENT_LOGGER.setLevel(java.util.logging.Level.FINE);
+    AGENT_LOGGER.addHandler(
+        new java.util.logging.Handler() {
+          @Override
+          public void publish(final java.util.logging.LogRecord logRecord) {
+            final String message = String.valueOf(logRecord.getMessage());
+            if (message.startsWith("chaos method hooks woven")) {
+              System.out.println("wovenLog=" + message);
+            }
+          }
+
+          @Override
+          public void flush() {}
+
+          @Override
+          public void close() {}
+        });
+    try (ChaosActivationHandle ignored =
+        ChaosPlatform.current()
+            .activate(
+                ChaosScenario.builder("shape-methods")
+                    .scope(ChaosScenario.ScenarioScope.JVM)
+                    .selector(
+                        new ChaosSelector.MethodSelector(
+                            Set.of(OperationType.METHOD_ENTER),
+                            NamePattern.regex("com\\.example\\.chaostarget\\.(Shape|Square)"),
+                            NamePattern.any(),
+                            null))
+                    .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+                    .activationPolicy(ActivationPolicy.always())
+                    .build())) {
+      final Comparable<com.example.chaostarget.Shape> square =
+          new com.example.chaostarget.Square(2);
+      System.out.println(
+          "compared=" + Integer.signum(square.compareTo(new com.example.chaostarget.Square(3))));
+      System.out.println("label=" + new com.example.chaostarget.Square(2).label().get());
+      printCounts();
+    }
   }
 
   /**

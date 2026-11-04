@@ -55,4 +55,44 @@ class SessionHeaderPolicyTest {
     assertThat(SessionHeaderPolicy.allows("abcde.example.com")).isTrue();
     assertThat(SessionHeaderPolicy.allows("abcdx.example.com")).isFalse();
   }
+
+  @Test
+  @DisplayName("treats the private and link-local address ranges as internal, their edges not")
+  void addressRanges() {
+    for (final String internal :
+        List.of(
+            "172.16.0.1", "172.31.255.1", "fc00::1", "fe80::1", "fe90::1", "fea0::1", "feb0::1")) {
+      assertThat(SessionHeaderPolicy.allows(internal)).as(internal).isTrue();
+    }
+    for (final String external :
+        List.of(
+            "172.15.0.1",
+            "192.167.0.1",
+            "169.253.0.1",
+            "11.0.0.1",
+            "fec0::1",
+            "10.0.0.x",
+            "a.b.c.d",
+            "[::1",
+            "",
+            "  ")) {
+      assertThat(SessionHeaderPolicy.allows(external)).as("'%s'", external).isFalse();
+    }
+  }
+
+  @Test
+  @DisplayName("a glob without * is an exact name; each * part must appear in order")
+  void globMatching() {
+    SessionHeaderPolicy.setExtraHosts(List.of("api.partner.com"));
+    assertThat(SessionHeaderPolicy.allows("api.partner.com")).isTrue();
+    assertThat(SessionHeaderPolicy.allows("api.partner.com.evil.org")).isFalse();
+    assertThat(SessionHeaderPolicy.allows("www.partner.com")).isFalse();
+    SessionHeaderPolicy.setExtraHosts(List.of("a*q*e.example.com"));
+    assertThat(SessionHeaderPolicy.allows("abcde.example.com")).as("no q").isFalse();
+    SessionHeaderPolicy.setExtraHosts(List.of("ab*ba.example.com"));
+    assertThat(SessionHeaderPolicy.allows("aba.example.com"))
+        .as("the prefix and the suffix may not overlap")
+        .isFalse();
+    assertThat(SessionHeaderPolicy.allows("abba.example.com")).isTrue();
+  }
 }

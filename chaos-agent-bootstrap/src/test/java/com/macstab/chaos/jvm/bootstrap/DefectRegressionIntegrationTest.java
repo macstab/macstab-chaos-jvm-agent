@@ -731,6 +731,62 @@ class DefectRegressionIntegrationTest {
     }
 
     @Test
+    @DisplayName("bridge jars older than a day, left by earlier JVMs, are swept; others stay")
+    void staleBridgeJarsAreSwept() throws Exception {
+      final Path privateTmp = Files.createDirectories(tempDir.resolve("tmp"));
+      final Path stale =
+          Files.createFile(privateTmp.resolve("macstab-chaos-bootstrap-bridge-stale.jar"));
+      final Path recent =
+          Files.createFile(privateTmp.resolve("macstab-chaos-bootstrap-bridge-recent.jar"));
+      final Path directory =
+          Files.createDirectory(privateTmp.resolve("macstab-chaos-bootstrap-bridge-dir.jar"));
+      final java.nio.file.attribute.FileTime twoDaysAgo =
+          java.nio.file.attribute.FileTime.from(java.time.Instant.now().minus(Duration.ofDays(2)));
+      Files.setLastModifiedTime(stale, twoDaysAgo);
+      Files.setLastModifiedTime(directory, twoDaysAgo);
+
+      probe.run(
+          plan(
+              scenario(
+                  "sleep",
+                  ChaosSelector.thread(
+                      Set.of(OperationType.THREAD_SLEEP), ChaosSelector.ThreadKind.ANY),
+                  ChaosEffect.delay(Duration.ofMillis(1)))),
+          DefectProbeMain.class,
+          "bridge-jars-on-disk",
+          null,
+          "-Djava.io.tmpdir=" + privateTmp);
+
+      assertThat(stale).as("a stale bridge jar").doesNotExist();
+      assertThat(recent).as("a bridge jar of a JVM that may still run").exists();
+      assertThat(directory).as("not a jar file").exists();
+    }
+
+    @Test
+    @DisplayName(
+        "the installer retries a failed bridge injection, rebinds to the last runtime and"
+            + " uninstalls the hooks it wove")
+    void installerLifecycle() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.runWithoutAgent(InstallerProbeMain.class, "lifecycle");
+
+      assertThat(result.value("uninstallBeforeInstall")).isEqualTo("false");
+      assertThat(result.value("injectFailure")).isEqualTo("failed to inject bootstrap bridge");
+      assertThat(result.longValue("installedSleepMillis"))
+          .as("the hooks of the retried install apply")
+          .isGreaterThanOrEqualTo(250L);
+      assertThat(result.longValue("appliedFirst")).as("the replaced runtime").isZero();
+      assertThat(result.longValue("appliedSecond")).as("the runtime installed last").isEqualTo(1L);
+      assertThat(result.value("uninstalled")).isEqualTo("true");
+      assertThat(result.longValue("uninstalledSleepMillis"))
+          .as("no hook is left after the uninstall")
+          .isLessThan(250L);
+      assertThat(result.value("uninstalledAgain")).isEqualTo("false");
+      assertThat(result.value("sweepSkippedLogged")).isEqualTo("true");
+      assertThat(result.value("wovenLogged")).isEqualTo("true");
+    }
+
+    @Test
     @DisplayName("a second copy of the agent in another class loader is refused, not hijacking")
     void secondAgentCopyIsRefused() throws Exception {
       final ChildJvmProbe.ProbeResult result =
@@ -738,6 +794,9 @@ class DefectRegressionIntegrationTest {
 
       assertThat(result.value("secondRefused")).isEqualTo("true");
       assertThat(result.value("refusalMentionsClassLoader")).isEqualTo("true");
+      assertThat(result.value("secondUninstalled"))
+          .as("the refused copy has nothing of its own to uninstall")
+          .isEqualTo("false");
       assertThat(result.longValue("firstCopySleepMillis"))
           .as("the first copy's scenarios still apply")
           .isGreaterThanOrEqualTo(250L);
@@ -1232,6 +1291,20 @@ class DefectRegressionIntegrationTest {
       assertThat(result.value("during.woven")).contains("METHODS");
       assertThat(result.value("after")).isEqualTo("hello a|42");
       assertThat(result.value("after.woven")).doesNotContain("METHODS");
+    }
+
+    @Test
+    @DisplayName("only methods with a body of their own are evaluated: no bridge, no lambda body")
+    void bridgeAndSyntheticMethodsAreNotWoven() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.runWithoutPlan(DefectProbeMain.class, "method-kinds");
+
+      assertThat(result.value("compared")).isEqualTo("-1");
+      assertThat(result.value("label")).isEqualTo("area 4");
+      // compareTo(Shape) and area() twice; label() and area() once. The bridge compareTo(Object)
+      // and the lambda's synthetic body would each count once more.
+      assertThat(result.longValue("matched.shape-methods")).isEqualTo(5L);
+      assertThat(result.value("wovenLog")).isEqualTo("chaos method hooks woven for 1 selector(s)");
     }
   }
 

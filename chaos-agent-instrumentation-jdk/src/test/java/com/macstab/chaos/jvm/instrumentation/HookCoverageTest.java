@@ -50,6 +50,17 @@ class HookCoverageTest {
   }
 
   @Test
+  @DisplayName("a top-level advice is named by its simple name; the hook shows its matcher")
+  void topLevelAdviceAndMatcherText() {
+    final ElementMatcher<MethodDescription> methods = ElementMatchers.named("trim");
+    final ElementMatcher<MethodDescription> hook =
+        HookCoverage.track(HookCoverageTest.class, methods);
+    assertThat(hook).hasToString(methods.toString());
+    assertThat(hook.matches(method("trim"))).isTrue();
+    assertThat(HookCoverage.matched()).contains("HookCoverageTest on " + methods);
+  }
+
+  @Test
   @DisplayName("a failed transformation is reported with its type and cause")
   void failureIsReported() {
     HookCoverage.failed("com.example.Old", new IllegalStateException("class file version 50"));
