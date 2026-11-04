@@ -3,6 +3,7 @@ package com.macstab.chaos.jvm.core;
 import com.macstab.chaos.jvm.api.ChaosEffect;
 import com.macstab.chaos.jvm.api.Internal;
 import com.macstab.chaos.jvm.api.OperationType;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Dispatch of method entry and exit for the methods a {@code MethodSelector} names.
@@ -65,7 +66,7 @@ public final class MethodDispatch {
    * @return the (possibly corrupted) value to return
    * @throws Throwable if a matching scenario fails the call
    */
-  public Object afterMethodExit(
+  public @Nullable Object afterMethodExit(
       final Class<?> declaringType,
       final String methodName,
       final String descriptor,
@@ -128,7 +129,7 @@ public final class MethodDispatch {
    * @return the (possibly corrupted) value to return to the caller
    * @throws Throwable if a matching scenario's terminal action mandates it
    */
-  public Object afterMethodExit(
+  public @Nullable Object afterMethodExit(
       final String className,
       final String methodName,
       final Class<?> returnType,
@@ -151,7 +152,7 @@ public final class MethodDispatch {
         actualValue);
   }
 
-  private Object afterMethodExit(
+  private @Nullable Object afterMethodExit(
       final InvocationContext context, final Class<?> returnType, final Object actualValue)
       throws Throwable {
     final RuntimeDecision decision = engine.evaluate(context);
@@ -160,7 +161,7 @@ public final class MethodDispatch {
         && decision.terminalAction().kind() == TerminalKind.THROW) {
       // A reject on METHOD_EXIT fails the call after its body ran (side effects done, result
       // lost). It used to be dropped: only CORRUPT_RETURN was handled here.
-      throw decision.terminalAction().throwable();
+      throw decision.terminalAction().failure();
     }
     if (decision.terminalAction() != null
         && decision.terminalAction().kind() == TerminalKind.CORRUPT_RETURN) {
@@ -170,7 +171,8 @@ public final class MethodDispatch {
       // the early return skipped engine.sleep(), silently dropping the timing signal operators were
       // testing for.
       final ChaosEffect.ReturnValueCorruptionEffect corruptEffect =
-          (ChaosEffect.ReturnValueCorruptionEffect) decision.terminalAction().returnValue();
+          (ChaosEffect.ReturnValueCorruptionEffect)
+              java.util.Objects.requireNonNull(decision.terminalAction().returnValue());
       // Propagate the scenario id (stored on the TerminalAction at construction time in
       // terminalActionFor) so that corruption fallbacks like "EMPTY → ZERO" name the scenario
       // that fired rather than the literal string "method-exit".

@@ -9,6 +9,7 @@ import com.macstab.chaos.jvm.testkit.WithChaosSupport;
 import io.micronaut.test.extensions.junit5.annotation.MicronautTest;
 import java.util.List;
 import java.util.Optional;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.extension.AfterAllCallback;
 import org.junit.jupiter.api.extension.AfterEachCallback;
 import org.junit.jupiter.api.extension.BeforeAllCallback;
@@ -180,7 +181,7 @@ public final class ChaosMicronautExtension
             + " and beforeAll() has run before parameter injection");
   }
 
-  private static Object findInStoreHierarchy(
+  private static @Nullable Object findInStoreHierarchy(
       final ExtensionContext startContext, final Class<?> type) {
     ExtensionContext current = startContext;
     while (current != null) {

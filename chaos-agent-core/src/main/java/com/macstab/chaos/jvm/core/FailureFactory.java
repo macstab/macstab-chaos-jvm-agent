@@ -5,6 +5,7 @@ import com.macstab.chaos.jvm.api.OperationType;
 import java.io.IOException;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeoutException;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Factory that constructs the appropriate {@link Throwable} for a chaos THROW decision based on the
@@ -48,7 +49,7 @@ final class FailureFactory {
    * @return a new {@link Throwable} appropriate for rejecting {@code operationType}; never {@code
    *     null}
    */
-  static Throwable reject(final OperationType operationType, final String message) {
+  static Throwable reject(final OperationType operationType, final @Nullable String message) {
     return switch (operationType) {
       case CLASS_LOAD -> new ClassNotFoundException(message);
       case EXECUTOR_SUBMIT, THREAD_START, VIRTUAL_THREAD_START, SHUTDOWN_HOOK_REGISTER ->
@@ -130,7 +131,7 @@ final class FailureFactory {
   static Throwable errno(
       final ChaosEffect.Errno errno,
       final OperationType operationType,
-      final String path,
+      final @Nullable String path,
       final boolean javaIo) {
     final String reason = errno.reason();
     return switch (operationType) {
@@ -195,7 +196,7 @@ final class FailureFactory {
   private static Throwable fileErrno(
       final ChaosEffect.Errno errno,
       final OperationType operationType,
-      final String path,
+      final @Nullable String path,
       final boolean javaIo,
       final String reason) {
     if (operationType == OperationType.FILE_IO_SYNC) {
@@ -238,7 +239,9 @@ final class FailureFactory {
    * @return the failure to throw
    */
   static Throwable clientReject(
-      final OperationType operationType, final Object client, final String message) {
+      final OperationType operationType,
+      final @Nullable Object client,
+      final @Nullable String message) {
     final ClassLoader loader = client == null ? null : client.getClass().getClassLoader();
     final String clientClass = client == null ? "" : client.getClass().getName();
     try {
@@ -269,7 +272,7 @@ final class FailureFactory {
   }
 
   private static Throwable construct(
-      final ClassLoader loader, final String className, final String message)
+      final @Nullable ClassLoader loader, final String className, final @Nullable String message)
       throws ReflectiveOperationException {
     return Class.forName(className, true, loader)
         .asSubclass(Throwable.class)
@@ -277,7 +280,8 @@ final class FailureFactory {
         .newInstance(message);
   }
 
-  private static Throwable grpcUnavailable(final ClassLoader loader, final String message)
+  private static Throwable grpcUnavailable(
+      final @Nullable ClassLoader loader, final @Nullable String message)
       throws ReflectiveOperationException {
     final Class<?> status = Class.forName("io.grpc.Status", true, loader);
     final Object unavailable = status.getField("UNAVAILABLE").get(null);
@@ -323,7 +327,7 @@ final class FailureFactory {
     };
   }
 
-  private static Throwable createJndiNamingException(final String message) {
+  private static Throwable createJndiNamingException(final @Nullable String message) {
     try {
       final Class<?> namingExceptionClass = Class.forName("javax.naming.NamingException");
       return (Throwable) namingExceptionClass.getConstructor(String.class).newInstance(message);
@@ -332,7 +336,7 @@ final class FailureFactory {
     }
   }
 
-  private static Throwable createJmxMBeanException(final String message) {
+  private static Throwable createJmxMBeanException(final @Nullable String message) {
     try {
       final Class<?> mbeanExceptionClass = Class.forName("javax.management.MBeanException");
       return (Throwable)
@@ -344,7 +348,7 @@ final class FailureFactory {
     }
   }
 
-  private static Throwable createSslHandshakeException(final String message) {
+  private static Throwable createSslHandshakeException(final @Nullable String message) {
     try {
       final Class<?> sslHandshakeExceptionClass =
           Class.forName("javax.net.ssl.SSLHandshakeException");
@@ -355,7 +359,7 @@ final class FailureFactory {
     }
   }
 
-  private static Throwable createJdbcSqlException(final String message) {
+  private static Throwable createJdbcSqlException(final @Nullable String message) {
     try {
       final Class<?> sqlExceptionClass = Class.forName("java.sql.SQLException");
       return (Throwable) sqlExceptionClass.getConstructor(String.class).newInstance(message);

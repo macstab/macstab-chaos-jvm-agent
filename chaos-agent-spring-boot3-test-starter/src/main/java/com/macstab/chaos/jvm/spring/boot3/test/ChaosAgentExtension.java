@@ -7,6 +7,7 @@ import com.macstab.chaos.jvm.bootstrap.ChaosPlatform;
 import com.macstab.chaos.jvm.testkit.TrackingChaosControlPlane;
 import com.macstab.chaos.jvm.testkit.WithChaosSupport;
 import java.util.List;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.extension.AfterAllCallback;
 import org.junit.jupiter.api.extension.AfterEachCallback;
 import org.junit.jupiter.api.extension.BeforeAllCallback;
@@ -133,7 +134,7 @@ public final class ChaosAgentExtension
             + " and beforeAll() has run before parameter injection");
   }
 
-  private Object findInContextHierarchy(
+  private @Nullable Object findInContextHierarchy(
       final ExtensionContext startContext, final Class<?> parameterType) {
     ExtensionContext current = startContext;
     while (current != null) {

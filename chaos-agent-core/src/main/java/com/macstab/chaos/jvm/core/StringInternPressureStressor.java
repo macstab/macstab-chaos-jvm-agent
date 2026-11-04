@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.logging.Logger;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Interns a configurable number of unique strings into the JVM's native string table (Metaspace),
@@ -42,7 +43,7 @@ final class StringInternPressureStressor implements ManagedStressor {
    */
   private static final int MAX_INTERN_COUNT = 1_000_000;
 
-  private volatile List<String> internedStrings;
+  private volatile @Nullable List<String> internedStrings;
 
   StringInternPressureStressor(final ChaosEffect.StringInternPressureEffect effect) {
     final int lengthBytes = clamp(effect.stringLengthBytes(), 1, MAX_STRING_LENGTH_BYTES);

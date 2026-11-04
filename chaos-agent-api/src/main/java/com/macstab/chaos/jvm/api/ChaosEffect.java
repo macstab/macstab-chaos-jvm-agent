@@ -1,6 +1,7 @@
 package com.macstab.chaos.jvm.api;
 
 import java.time.Duration;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Describes the chaos behavior applied when a scenario matches an invocation.
@@ -829,7 +830,10 @@ public sealed interface ChaosEffect
    * @param limit the most addresses to keep; {@code null} for no limit
    */
   record DnsAnswerEffect(
-      java.util.List<String> override, AddressFamily family, boolean shuffle, Integer limit)
+      java.util.@Nullable List<String> override,
+      @Nullable AddressFamily family,
+      boolean shuffle,
+      @Nullable Integer limit)
       implements ChaosEffect {
     /** Validates the DnsAnswerEffect parameters. */
     public DnsAnswerEffect {
@@ -873,7 +877,7 @@ public sealed interface ChaosEffect
    * @param port the port to connect to instead, {@code 1..65535}; {@code null} keeps the requested
    *     port
    */
-  record RedirectEffect(String host, Integer port) implements ChaosEffect {
+  record RedirectEffect(String host, @Nullable Integer port) implements ChaosEffect {
     /** Validates the RedirectEffect parameters. */
     public RedirectEffect {
       if (host == null || host.isBlank()) {
@@ -1431,7 +1435,8 @@ public sealed interface ChaosEffect
    * @param daemon whether leaked threads run as daemons
    * @param lifespan maximum lifetime per leaked thread; {@code null} means no limit
    */
-  record ThreadLeakEffect(int threadCount, String namePrefix, boolean daemon, Duration lifespan)
+  record ThreadLeakEffect(
+      int threadCount, String namePrefix, boolean daemon, @Nullable Duration lifespan)
       implements ChaosEffect {
     /**
      * Upper bound on {@code threadCount}. Each leaked thread consumes ~1 MiB of native stack plus a

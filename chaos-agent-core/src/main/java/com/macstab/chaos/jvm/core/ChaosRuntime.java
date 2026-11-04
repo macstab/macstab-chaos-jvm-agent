@@ -16,6 +16,7 @@ import java.time.Clock;
 import java.util.Optional;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Thin facade that composes {@link ChaosControlPlaneImpl} and {@link ChaosDispatcher}.
@@ -99,7 +100,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   @Override
-  public ChaosSession.ScopeBinding bindSession(final String sessionId) {
+  public ChaosSession.ScopeBinding bindSession(final @Nullable String sessionId) {
     return controlPlane.bindSession(sessionId);
   }
 
@@ -195,7 +196,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    *
    * @return the current thread-bound session id, or {@code null} if no session is active
    */
-  public String currentSessionId() {
+  public @Nullable String currentSessionId() {
     return dispatcher.currentSessionId();
   }
 
@@ -290,7 +291,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @return an override result from the queue operation, or {@code null} to proceed normally
    * @throws Throwable if an active scenario throws to simulate a failure
    */
-  public Boolean beforeBooleanQueueOperation(final String operation, final Object queue)
+  public @Nullable Boolean beforeBooleanQueueOperation(final String operation, final Object queue)
       throws Throwable {
     return executorDispatch.beforeBooleanQueueOperation(operation, queue);
   }
@@ -305,7 +306,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    *     normally
    * @throws Throwable if an active scenario throws to simulate a failure
    */
-  public Boolean beforeCompletableFutureComplete(
+  public @Nullable Boolean beforeCompletableFutureComplete(
       final String operation, final CompletableFuture<?> future, final Object payload)
       throws Throwable {
     return executorDispatch.beforeCompletableFutureComplete(operation, future, payload);
@@ -331,7 +332,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @return the (possibly substituted) URL to return to the caller
    * @throws Throwable if an active scenario throws to simulate a failure
    */
-  public URL afterResourceLookup(
+  public @Nullable URL afterResourceLookup(
       final ClassLoader loader, final String name, final URL currentValue) throws Throwable {
     return runtimeDispatch.afterResourceLookup(loader, name, currentValue);
   }
@@ -440,7 +441,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @return the (possibly corrupted) value to return
    * @throws Throwable if a matching scenario fails the call
    */
-  public Object afterMethodExit(
+  public @Nullable Object afterMethodExit(
       final Class<?> declaringType,
       final String methodName,
       final String descriptor,
@@ -479,7 +480,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    *     METHOD_EXIT}, thrown after the method body ran ({@code ExceptionInjectionEffect} is valid
    *     on {@code METHOD_ENTER} only)
    */
-  public Object afterMethodExit(
+  public @Nullable Object afterMethodExit(
       final String className,
       final String methodName,
       final Class<?> returnType,
@@ -746,7 +747,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @return the endpoint to connect to instead, or {@code null}
    * @throws Throwable if a chaos effect injects an exception
    */
-  public java.net.InetSocketAddress beforeSocketConnect(
+  public java.net.@Nullable InetSocketAddress beforeSocketConnect(
       final Object socket, final Object socketAddress, final int timeoutMillis) throws Throwable {
     return networkDispatch.beforeSocketConnect(socket, socketAddress, timeoutMillis);
   }
@@ -1145,7 +1146,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @return the name to resolve: {@code hostname}, or another under a {@code DnsRewriteEffect}
    * @throws Throwable if a chaos effect injects an exception
    */
-  public String beforeDnsResolve(final String hostname) throws Throwable {
+  public @Nullable String beforeDnsResolve(final String hostname) throws Throwable {
     return dnsDispatch.beforeDnsResolve(hostname);
   }
 
@@ -1158,7 +1159,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @return the reshaped answer, or {@code null} to keep the original outcome
    * @throws Throwable if a scenario rejects the lookup
    */
-  public java.net.InetAddress[] afterDnsAnswer(
+  public java.net.InetAddress @Nullable [] afterDnsAnswer(
       final String hostname, final java.net.InetAddress[] answer, final Throwable failure)
       throws Throwable {
     return dnsDispatch.afterDnsAnswer(hostname, answer, failure);
@@ -1170,7 +1171,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @param socket the SSL socket
    * @throws Throwable if a chaos effect injects an exception
    */
-  public void beforeSslHandshake(final Object socket) throws Throwable {
+  public void beforeSslHandshake(final @Nullable Object socket) throws Throwable {
     networkDispatch.beforeSslHandshake(socket);
   }
 
@@ -1228,7 +1229,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @param stream the file stream
    * @throws Throwable if a chaos effect injects an exception
    */
-  public void beforeFileIo(final String operation, final Object stream) throws Throwable {
+  public void beforeFileIo(final String operation, final @Nullable Object stream) throws Throwable {
     fileDispatch.beforeFileIo(operation, stream, null, InvocationContext.UNKNOWN);
   }
 
@@ -1243,7 +1244,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @throws Throwable if a chaos effect injects an exception
    */
   public int beforeFileIo(
-      final String operation, final Object stream, final String path, final int byteCount)
+      final String operation, final @Nullable Object stream, final String path, final int byteCount)
       throws Throwable {
     return fileDispatch.beforeFileIo(operation, stream, path, byteCount);
   }

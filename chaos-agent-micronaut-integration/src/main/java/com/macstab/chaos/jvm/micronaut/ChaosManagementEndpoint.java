@@ -14,6 +14,7 @@ import io.micronaut.management.endpoint.annotation.Selector;
 import io.micronaut.management.endpoint.annotation.Write;
 import jakarta.annotation.PreDestroy;
 import java.util.function.Supplier;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The {@code /chaos} management endpoint for Micronaut, matching the Spring Boot actuator's {@code
@@ -37,7 +38,7 @@ import java.util.function.Supplier;
 public class ChaosManagementEndpoint {
 
   private final Supplier<ChaosControlPlane> controlPlane;
-  private volatile ChaosManagement management;
+  private volatile @Nullable ChaosManagement management;
 
   /** Creates the endpoint for the installed agent. */
   public ChaosManagementEndpoint() {
@@ -96,7 +97,8 @@ public class ChaosManagementEndpoint {
     return answer("DELETE", "", null);
   }
 
-  private HttpResponse<String> answer(final String method, final String path, final String body) {
+  private HttpResponse<String> answer(
+      final String method, final String path, final @Nullable String body) {
     final ChaosManagement.HttpResult result;
     try {
       result = management().handle(method, path, body);

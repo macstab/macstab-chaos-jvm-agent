@@ -33,6 +33,7 @@ allprojects {
 
 val junitBom = libs.junit.bom
 val junitPlatformLauncher = libs.junit.platform.launcher
+val jspecify = libs.jspecify
 
 // Modules that are for demonstration / measurement only and MUST NOT be published.
 val nonPublishableModules = setOf(
@@ -113,6 +114,10 @@ subprojects {
                 "-parameters",
                 "-Xlint:all,-serial,-processing,-try",
                 "-Xlint:-classfile",
+                "-Xmaxerrs",
+                "10000",
+                "-Xmaxwarns",
+                "10000",
                 "-Werror",
             ),
         )
@@ -665,11 +670,26 @@ subprojects {
 subprojects {
     plugins.withType<JavaPlugin> {
         apply(plugin = "net.ltgt.errorprone")
-        dependencies { "errorprone"("com.google.errorprone:error_prone_core:2.52.0") }
+        dependencies {
+            "errorprone"("com.google.errorprone:error_prone_core:2.52.0")
+            "errorprone"("com.uber.nullaway:nullaway:0.14.3")
+            "compileOnly"(jspecify)
+            "testCompileOnly"(jspecify)
+        }
         tasks.withType<JavaCompile>().configureEach {
             (options as ExtensionAware).extensions.configure<net.ltgt.gradle.errorprone.ErrorProneOptions> {
                 disableWarningsInGeneratedCode.set(true)
                 excludedPaths.set(".*/build/generated/.*")
+                // NullAway: every reference in production code is non-null unless @Nullable says
+                // otherwise (JSpecify), and the compiler proves it. Tests are not checked.
+                if (!name.contains("Test")) {
+                    option("NullAway:AnnotatedPackages", "com.macstab.chaos.jvm")
+                    // JMH state is initialised in @Setup methods, not in constructors.
+                    option("NullAway:CustomInitializerAnnotations", "org.openjdk.jmh.annotations.Setup")
+                    error("NullAway")
+                } else {
+                    disable("NullAway")
+                }
                 // Style checks this codebase decides otherwise, on purpose: parentheses that make
                 // precedence explicit, Boolean.FALSE passed as an Object sentinel, and statement
                 // switches whose branches throw or fall through to shared code.

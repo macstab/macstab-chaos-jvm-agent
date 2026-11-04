@@ -3,6 +3,7 @@ package com.macstab.chaos.jvm.core;
 import com.macstab.chaos.jvm.api.Internal;
 import com.macstab.chaos.jvm.api.OperationType;
 import java.net.URL;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Dispatch of JVM runtime operations: gc and exit requests, reflection, direct buffers,
@@ -53,7 +54,7 @@ public final class RuntimeDispatch {
    * @return the (possibly substituted) URL to return to the caller
    * @throws Throwable if a matching scenario's terminal action mandates it
    */
-  public URL afterResourceLookup(
+  public @Nullable URL afterResourceLookup(
       final ClassLoader loader, final String name, final URL currentValue) throws Throwable {
     final RuntimeDecision decision =
         (engine.idle(OperationType.RESOURCE_LOAD)
@@ -71,7 +72,7 @@ public final class RuntimeDispatch {
     engine.applyDelayAndGate(decision);
     if (decision.terminalAction() != null) {
       if (decision.terminalAction().kind() == TerminalKind.THROW) {
-        throw decision.terminalAction().throwable();
+        throw decision.terminalAction().failure();
       }
       return (URL) decision.terminalAction().returnValue();
     }
@@ -103,7 +104,7 @@ public final class RuntimeDispatch {
     if (decision.terminalAction() != null) {
       final TerminalAction terminalAction = decision.terminalAction();
       if (terminalAction.kind() == TerminalKind.THROW) {
-        throw terminalAction.throwable();
+        throw terminalAction.failure();
       }
       if (terminalAction.kind() == TerminalKind.SUPPRESS) {
         return true;

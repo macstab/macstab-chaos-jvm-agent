@@ -9,6 +9,7 @@ import java.util.Locale;
 import java.util.Optional;
 import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Reads the attributes client-library hooks report (topic, gRPC method, Redis command, AWS service
@@ -43,7 +44,7 @@ public final class ClientCallExtractor {
    * interface of {@code target}'s type so the call works without {@code setAccessible} even when
    * the runtime class itself is not public.
    */
-  private static Object invoke(final Object target, final String name) throws Throwable {
+  private static @Nullable Object invoke(final Object target, final String name) throws Throwable {
     final Optional<Method> method =
         ACCESSORS.get(target.getClass()).computeIfAbsent(name, ignored -> find(target, name));
     return method.isPresent() ? method.get().invoke(target) : null;
@@ -90,7 +91,7 @@ public final class ClientCallExtractor {
    * @param record the producer record
    * @return the topic, or {@code null}
    */
-  public static String kafkaTopic(final Object record) {
+  public static @Nullable String kafkaTopic(final Object record) {
     return stringOf(record, "topic");
   }
 
@@ -100,7 +101,7 @@ public final class ClientCallExtractor {
    * @param consumer the Kafka consumer
    * @return the topics, or {@code null} when none are subscribed
    */
-  public static String kafkaSubscription(final Object consumer) {
+  public static @Nullable String kafkaSubscription(final Object consumer) {
     try {
       final Object subscription = invoke(consumer, "subscription");
       if (!(subscription instanceof Collection<?> topics) || topics.isEmpty()) {
@@ -122,7 +123,7 @@ public final class ClientCallExtractor {
    * @param methodDescriptor the method descriptor
    * @return {@code package.Service/Method}, or {@code null}
    */
-  public static String grpcMethod(final Object methodDescriptor) {
+  public static @Nullable String grpcMethod(final Object methodDescriptor) {
     return stringOf(methodDescriptor, "getFullMethodName");
   }
 
@@ -132,7 +133,7 @@ public final class ClientCallExtractor {
    * @param commandArguments the command arguments
    * @return the command name, or {@code null}
    */
-  public static String jedisCommand(final Object commandArguments) {
+  public static @Nullable String jedisCommand(final Object commandArguments) {
     try {
       final Object command = invoke(commandArguments, "getCommand");
       if (command == null) {
@@ -155,7 +156,7 @@ public final class ClientCallExtractor {
    * @param redisCommand the Lettuce command
    * @return the command name, or {@code null}
    */
-  public static String lettuceCommand(final Object redisCommand) {
+  public static @Nullable String lettuceCommand(final Object redisCommand) {
     try {
       final Object type = invoke(redisCommand, "getType");
       return type == null ? null : String.valueOf(type).toUpperCase(Locale.ROOT);
@@ -170,7 +171,7 @@ public final class ClientCallExtractor {
    * @param executionParams the execution parameters
    * @return the operation name, or {@code null}
    */
-  public static String awsOperation(final Object executionParams) {
+  public static @Nullable String awsOperation(final Object executionParams) {
     return stringOf(executionParams, "getOperationName");
   }
 
@@ -181,7 +182,7 @@ public final class ClientCallExtractor {
    * @param executionParams the execution parameters
    * @return the service, or {@code null}
    */
-  public static String awsService(final Object executionParams) {
+  public static @Nullable String awsService(final Object executionParams) {
     try {
       final Object input = invoke(executionParams, "getInput");
       if (input == null) {
@@ -206,7 +207,7 @@ public final class ClientCallExtractor {
    * @param unsafe the channel's {@code Unsafe}
    * @return the remote {@code SocketAddress}, or {@code null}
    */
-  public static Object nettyRemoteAddress(final Object unsafe) {
+  public static @Nullable Object nettyRemoteAddress(final Object unsafe) {
     try {
       for (Class<?> type = unsafe.getClass(); type != null; type = type.getSuperclass()) {
         final Field outer;
@@ -225,7 +226,7 @@ public final class ClientCallExtractor {
     }
   }
 
-  private static String stringOf(final Object target, final String accessor) {
+  private static @Nullable String stringOf(final Object target, final String accessor) {
     if (target == null) {
       return null;
     }

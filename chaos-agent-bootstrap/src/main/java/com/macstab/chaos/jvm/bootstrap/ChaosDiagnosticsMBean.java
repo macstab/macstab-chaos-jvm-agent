@@ -9,6 +9,7 @@ import com.macstab.chaos.jvm.startup.ChaosPlanMapper;
 import com.macstab.chaos.jvm.startup.ConfigLoadException;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Package-private JMX adapter that bridges the {@link ChaosDiagnosticsMXBean} interface to the
@@ -23,7 +24,7 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 final class ChaosDiagnosticsMBean implements ChaosDiagnosticsMXBean {
   private final ChaosDiagnostics diagnostics;
-  private final ChaosControlPlane controlPlane;
+  private final @Nullable ChaosControlPlane controlPlane;
   private final boolean controlEnabled;
   private final java.util.function.Predicate<String> visible;
   private final java.util.function.Function<java.util.function.Predicate<String>, String> dump;
@@ -49,7 +50,7 @@ final class ChaosDiagnosticsMBean implements ChaosDiagnosticsMXBean {
    */
   ChaosDiagnosticsMBean(
       final ChaosDiagnostics diagnostics,
-      final ChaosControlPlane controlPlane,
+      final @Nullable ChaosControlPlane controlPlane,
       final boolean controlEnabled) {
     this.diagnostics = diagnostics;
     this.controlPlane = controlPlane;
@@ -97,7 +98,7 @@ final class ChaosDiagnosticsMBean implements ChaosDiagnosticsMXBean {
 
   @Override
   public String activatePlan(final String planJson) {
-    requireControl();
+    final ChaosControlPlane control = requireControl();
     final ChaosPlan plan;
     try {
       plan = ChaosPlanMapper.read(planJson);
@@ -109,7 +110,7 @@ final class ChaosDiagnosticsMBean implements ChaosDiagnosticsMXBean {
     // active and a session-scoped one ran JVM-wide.
     final ChaosActivationHandle planHandle;
     try {
-      planHandle = controlPlane.activate(plan);
+      planHandle = control.activate(plan);
     } catch (final RuntimeException rejected) {
       throw new IllegalArgumentException(rejected.getMessage());
     }
@@ -146,12 +147,15 @@ final class ChaosDiagnosticsMBean implements ChaosDiagnosticsMXBean {
     return stopped;
   }
 
-  private void requireControl() {
-    if (!controlEnabled) {
+  /** Returns the control plane, or fails when the control operations are disabled. */
+  private ChaosControlPlane requireControl() {
+    final ChaosControlPlane control = controlPlane;
+    if (!controlEnabled || control == null) {
       throw new IllegalStateException(
           "chaos JMX control operations are disabled; enable them with the agent argument"
               + " jmxControl=true or -Dmacstab.chaos.jmx.control=true");
     }
+    return control;
   }
 
   /**

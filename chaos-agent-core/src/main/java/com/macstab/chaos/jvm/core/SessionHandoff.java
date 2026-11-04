@@ -8,6 +8,7 @@ import java.util.WeakHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Carries a session from the thread that hands work off to the thread that runs it, for the
@@ -38,7 +39,7 @@ final class SessionHandoff {
    * @param carrier the task or thread the work is handed to
    * @param sessionId the session of the handing-off thread, or {@code null}
    */
-  void capture(final Object carrier, final String sessionId) {
+  void capture(final Object carrier, final @Nullable String sessionId) {
     if (carrier == null || sessionId == null) {
       return;
     }

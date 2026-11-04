@@ -165,7 +165,7 @@ public final class ThreadDispatch {
     if (decision.terminalAction() != null) {
       final TerminalAction terminalAction = decision.terminalAction();
       if (terminalAction.kind() == TerminalKind.THROW) {
-        throw terminalAction.throwable();
+        throw terminalAction.failure();
       }
       if (terminalAction.kind() == TerminalKind.SUPPRESS) {
         return true;
@@ -203,7 +203,7 @@ public final class ThreadDispatch {
     if (decision.terminalAction() != null) {
       final TerminalAction terminalAction = decision.terminalAction();
       if (terminalAction.kind() == TerminalKind.THROW) {
-        throw terminalAction.throwable();
+        throw terminalAction.failure();
       }
       if (terminalAction.kind() == TerminalKind.SUPPRESS) {
         return true;
@@ -243,7 +243,7 @@ public final class ThreadDispatch {
     if (decision.terminalAction() != null) {
       final TerminalAction terminalAction = decision.terminalAction();
       if (terminalAction.kind() == TerminalKind.THROW) {
-        throw terminalAction.throwable();
+        throw terminalAction.failure();
       }
       if (terminalAction.kind() == TerminalKind.SUPPRESS) {
         return true;

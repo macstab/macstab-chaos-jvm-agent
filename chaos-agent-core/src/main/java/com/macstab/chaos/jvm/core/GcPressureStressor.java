@@ -3,6 +3,7 @@ package com.macstab.chaos.jvm.core;
 import com.macstab.chaos.jvm.api.ChaosEffect;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Logger;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Sustains a target allocation rate to stress the garbage collector.
@@ -30,7 +31,7 @@ final class GcPressureStressor implements ManagedStressor {
 
   private final AtomicBoolean running = new AtomicBoolean(true);
   private final Thread allocationThread;
-  private volatile byte[][] ring;
+  private volatile byte @Nullable [][] ring;
 
   GcPressureStressor(final ChaosEffect.GcPressureEffect effect) {
     if (effect.promoteToOldGen()) {

@@ -9,7 +9,7 @@
 
 # 0004 — The API carries no JSON annotations; the plan format is defined by mix-ins
 
-**Status:** Accepted (2.0)
+**Status:** Accepted (2.0); its "no dependencies" consequence is amended by [0008](0008-nullness-in-the-types.md)
 
 ## Context
 

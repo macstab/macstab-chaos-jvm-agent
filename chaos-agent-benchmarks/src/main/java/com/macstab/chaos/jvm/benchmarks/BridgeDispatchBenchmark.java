@@ -12,6 +12,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import org.jspecify.annotations.Nullable;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
 import org.openjdk.jmh.annotations.Fork;
@@ -57,6 +58,7 @@ public class BridgeDispatchBenchmark {
   public BridgeDispatchBenchmark() {}
 
   /** Which scenarios are active while measuring. */
+  @SuppressWarnings("NullAway.Init") // set by JMH before @Setup
   @Param({"none", "otherOperation", "matchedNotYetActive"})
   public String scenarios;
 
@@ -243,7 +245,7 @@ public class BridgeDispatchBenchmark {
    * @throws Throwable never, with these scenarios
    */
   @Benchmark
-  public Object socketChannelRead() throws Throwable {
+  public @Nullable Object socketChannelRead() throws Throwable {
     return BootstrapDispatcher.beforeSocketChannelRead(this, BUFFER);
   }
 

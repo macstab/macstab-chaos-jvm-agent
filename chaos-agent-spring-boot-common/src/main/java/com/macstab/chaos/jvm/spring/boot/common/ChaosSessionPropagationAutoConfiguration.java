@@ -2,6 +2,7 @@ package com.macstab.chaos.jvm.spring.boot.common;
 
 import com.macstab.chaos.jvm.api.ChaosControlPlane;
 import com.macstab.chaos.jvm.bootstrap.ChaosPlatform;
+import org.jspecify.annotations.Nullable;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
@@ -38,7 +39,7 @@ public class ChaosSessionPropagationAutoConfiguration {
     return new ChaosSessionFilter(ChaosSessionPropagationAutoConfiguration::installedControlPlane);
   }
 
-  private static ChaosControlPlane installedControlPlane() {
+  private static @Nullable ChaosControlPlane installedControlPlane() {
     try {
       return ChaosPlatform.current();
     } catch (final IllegalStateException notInstalled) {

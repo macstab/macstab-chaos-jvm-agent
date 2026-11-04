@@ -6,6 +6,7 @@ import io.vertx.core.Handler;
 import io.vertx.ext.web.RoutingContext;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Serves {@code /q/chaos}, the Quarkus counterpart of the Spring Boot actuator's {@code
@@ -23,7 +24,7 @@ public final class ChaosManagementHandler implements Handler<RoutingContext>, Au
   private final String root;
   private final BooleanSupplier enabled;
   private final Supplier<ChaosControlPlane> controlPlane;
-  private volatile ChaosManagement management;
+  private volatile @Nullable ChaosManagement management;
 
   /**
    * Creates the handler.
@@ -69,7 +70,7 @@ public final class ChaosManagementHandler implements Handler<RoutingContext>, Au
   }
 
   /** Answers the request; never leaves it unanswered. */
-  void serve(final RoutingContext context, final String body) {
+  void serve(final RoutingContext context, final @Nullable String body) {
     int status;
     String json;
     try {

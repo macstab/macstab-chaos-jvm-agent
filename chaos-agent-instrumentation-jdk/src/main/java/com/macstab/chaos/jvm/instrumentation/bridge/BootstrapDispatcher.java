@@ -5,6 +5,7 @@ import java.net.URL;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ForkJoinTask;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Bootstrap-classloader-resident static dispatcher that routes intercepted JDK operations to the
@@ -254,7 +255,7 @@ public final class BootstrapDispatcher {
    * Volatile so dispatch methods observe the write without locking. Written after {@link #handles}
    * to uphold the publication invariant described in {@link #install}.
    */
-  private static volatile Object delegate;
+  private static volatile @Nullable Object delegate;
 
   /**
    * Pre-built {@link MethodHandle} array of size {@link #HANDLE_COUNT}. Each element is an unbound
@@ -263,7 +264,7 @@ public final class BootstrapDispatcher {
    * #install} so a reader observing a non-null {@code delegate} is guaranteed to also see a
    * complete handles array.
    */
-  private static volatile MethodHandle[] handles;
+  private static volatile MethodHandle @Nullable [] handles;
 
   // ── Phase 1 handles (0-14): concurrency / scheduling interception points ────
   /** Handle index for {@link #decorateExecutorRunnable(String, Object, Runnable)}. */
@@ -535,7 +536,7 @@ public final class BootstrapDispatcher {
    *     every invocation
    */
   public static synchronized void install(
-      final Object bridgeDelegate, final MethodHandle[] methodHandles) {
+      final @Nullable Object bridgeDelegate, final MethodHandle @Nullable [] methodHandles) {
     // Serialise concurrent install() calls so the (handles, delegate) pair is never torn across
     // two competing installers. Without this lock, thread A's handles = X followed by
     // thread B's delegate = Y2 could leave an advice thread observing `handles` from install A
@@ -556,7 +557,7 @@ public final class BootstrapDispatcher {
    *
    * @return the installed delegate, or {@code null}
    */
-  public static Object installedDelegate() {
+  public static @Nullable Object installedDelegate() {
     return delegate;
   }
 
@@ -786,8 +787,8 @@ public final class BootstrapDispatcher {
    *     returns {@code null} as the fallback
    * @throws Throwable if the delegate throws
    */
-  public static Boolean beforeBooleanQueueOperation(final String operation, final Object queue)
-      throws Throwable {
+  public static @Nullable Boolean beforeBooleanQueueOperation(
+      final String operation, final Object queue) throws Throwable {
     final int[] depth = DEPTH.get();
     if (depth[0] > 0) {
       return null;
@@ -821,7 +822,7 @@ public final class BootstrapDispatcher {
    *     as the fallback
    * @throws Throwable if the delegate throws
    */
-  public static Boolean beforeCompletableFutureComplete(
+  public static @Nullable Boolean beforeCompletableFutureComplete(
       final String operation, final CompletableFuture<?> future, final Object payload)
       throws Throwable {
     final int[] depth = DEPTH.get();
@@ -1639,7 +1640,7 @@ public final class BootstrapDispatcher {
   public static int beforeSocketRead(
       final Object stream,
       final int len,
-      final Object remoteAddress,
+      final @Nullable Object remoteAddress,
       final int remotePort,
       final int soTimeoutMillis)
       throws Throwable {
@@ -1733,7 +1734,7 @@ public final class BootstrapDispatcher {
    * @param command the program, the first element of the command
    * @throws Throwable if an active scenario fails the start
    */
-  public static void beforeProcessStart(final String command) throws Throwable {
+  public static void beforeProcessStart(final @Nullable String command) throws Throwable {
     final int[] depth = DEPTH.get();
     if (depth[0] > 0) {
       return;
@@ -1759,7 +1760,7 @@ public final class BootstrapDispatcher {
    * @param host the request's host
    * @return the session id, or {@code null} when nothing must be sent
    */
-  public static String sessionHeaderFor(final String host) {
+  public static @Nullable String sessionHeaderFor(final String host) {
     return SessionHeaderPolicy.allows(host) ? currentSessionId() : null;
   }
 
@@ -1769,7 +1770,7 @@ public final class BootstrapDispatcher {
    * @return the session id, or {@code null} outside any session, inside the agent or before the
    *     agent is installed
    */
-  public static String currentSessionId() {
+  public static @Nullable String currentSessionId() {
     final int[] depth = DEPTH.get();
     if (depth[0] > 0) {
       return null;
@@ -2125,7 +2126,7 @@ public final class BootstrapDispatcher {
    *     Returns {@code false} as the fallback.
    * @throws Throwable if the delegate throws
    */
-  public static boolean beforeHttpSend(final String url) throws Throwable {
+  public static boolean beforeHttpSend(final @Nullable String url) throws Throwable {
     final int[] depth = DEPTH.get();
     if (depth[0] > 0) {
       return false;
@@ -2154,7 +2155,7 @@ public final class BootstrapDispatcher {
    *     Returns {@code false} as the fallback.
    * @throws Throwable if the delegate throws
    */
-  public static boolean beforeHttpSendAsync(final String url) throws Throwable {
+  public static boolean beforeHttpSendAsync(final @Nullable String url) throws Throwable {
     final int[] depth = DEPTH.get();
     if (depth[0] > 0) {
       return false;
@@ -2183,7 +2184,8 @@ public final class BootstrapDispatcher {
    *     Returns {@code false} as the fallback.
    * @throws Throwable if the delegate throws
    */
-  public static boolean beforeJdbcConnectionAcquire(final String poolName) throws Throwable {
+  public static boolean beforeJdbcConnectionAcquire(final @Nullable String poolName)
+      throws Throwable {
     final int[] depth = DEPTH.get();
     if (depth[0] > 0) {
       return false;
@@ -2210,7 +2212,7 @@ public final class BootstrapDispatcher {
    *     Returns {@code false} as the fallback.
    * @throws Throwable if the delegate throws
    */
-  public static boolean beforeJdbcStatementExecute(final String sql) throws Throwable {
+  public static boolean beforeJdbcStatementExecute(final @Nullable String sql) throws Throwable {
     final int[] depth = DEPTH.get();
     if (depth[0] > 0) {
       return false;
@@ -2341,7 +2343,8 @@ public final class BootstrapDispatcher {
    * @return the name to resolve: {@code hostname}, or another under a {@code DnsRewriteEffect}
    * @throws Throwable if an active scenario injects an exception to simulate a DNS failure
    */
-  public static String beforeDnsResolve(final String hostname) throws Throwable {
+  public static @Nullable String beforeDnsResolve(final @Nullable String hostname)
+      throws Throwable {
     final int[] depth = DEPTH.get();
     if (depth[0] > 0) {
       return hostname;
@@ -2370,7 +2373,7 @@ public final class BootstrapDispatcher {
    * @return the answer to return instead, or {@code null} to keep the original outcome
    * @throws Throwable if an active scenario rejects the lookup
    */
-  public static java.net.InetAddress[] afterDnsAnswer(
+  public static java.net.InetAddress @Nullable [] afterDnsAnswer(
       final String hostname, final java.net.InetAddress[] answer, final Throwable failure)
       throws Throwable {
     final int[] depth = DEPTH.get();
@@ -2400,7 +2403,7 @@ public final class BootstrapDispatcher {
    * @throws Throwable if an active scenario injects an exception to simulate a TLS handshake
    *     failure
    */
-  public static void beforeSslHandshake(final Object socket) throws Throwable {
+  public static void beforeSslHandshake(final @Nullable Object socket) throws Throwable {
     final int[] depth = DEPTH.get();
     if (depth[0] > 0) {
       return;
@@ -2432,7 +2435,10 @@ public final class BootstrapDispatcher {
    * @throws Throwable if an active scenario injects an exception to simulate an I/O failure
    */
   public static int beforeFileIo(
-      final String operation, final Object stream, final String path, final int byteCount)
+      final String operation,
+      final @Nullable Object stream,
+      final @Nullable String path,
+      final int byteCount)
       throws Throwable {
     final int[] depth = DEPTH.get();
     if (depth[0] > 0 || depth[SCOPE_FILE_TRANSFER] > 0) {
@@ -2482,7 +2488,7 @@ public final class BootstrapDispatcher {
    * @throws Throwable if an active scenario fails the send
    */
   public static int beforeDatagramSend(
-      final Object channel, final java.nio.ByteBuffer source, final Object target)
+      final Object channel, final java.nio.ByteBuffer source, final @Nullable Object target)
       throws Throwable {
     final int length = source == null ? 0 : source.remaining();
     if (datagram(OperationTags.DATAGRAM_SEND, channel, target, length) != Integer.MIN_VALUE) {
@@ -2521,7 +2527,7 @@ public final class BootstrapDispatcher {
    * @return the shaping (corruption) of the datagram, or {@code null}
    * @throws Throwable if an active scenario fails the receive
    */
-  public static ChannelBuffers beforeDatagramReceive(
+  public static @Nullable ChannelBuffers beforeDatagramReceive(
       final Object channel, final java.nio.ByteBuffer target) throws Throwable {
     if (target == null) {
       return null;
@@ -2552,7 +2558,7 @@ public final class BootstrapDispatcher {
   }
 
   private static int datagram(
-      final String operation, final Object channel, final Object peer, final int length)
+      final String operation, final Object channel, final @Nullable Object peer, final int length)
       throws Throwable {
     final int[] depth = DEPTH.get();
     final MethodHandle[] h = handles;
@@ -2635,7 +2641,8 @@ public final class BootstrapDispatcher {
    * @throws Throwable if an active scenario fails the shutdown
    */
   public static void beforeSocketShutdown(
-      final Object endpoint, final Object remoteAddress, final int remotePort) throws Throwable {
+      final Object endpoint, final @Nullable Object remoteAddress, final int remotePort)
+      throws Throwable {
     final int[] depth = DEPTH.get();
     final MethodHandle[] h = handles;
     final Object d = delegate;
@@ -2686,7 +2693,7 @@ public final class BootstrapDispatcher {
    * @return the shaping of the read (trickled, corrupted), or {@code null} when it runs unchanged
    * @throws Throwable if an active scenario injects a failure
    */
-  public static ChannelBuffers beforeSocketChannelRead(
+  public static @Nullable ChannelBuffers beforeSocketChannelRead(
       final Object channel, final java.nio.ByteBuffer buffer) throws Throwable {
     return buffer == null
         ? null
@@ -2703,7 +2710,7 @@ public final class BootstrapDispatcher {
    * @return the shaping of the read, or {@code null} when it runs unchanged
    * @throws Throwable if an active scenario injects a failure
    */
-  public static ChannelBuffers beforeSocketChannelRead(
+  public static @Nullable ChannelBuffers beforeSocketChannelRead(
       final Object channel, final java.nio.ByteBuffer[] buffers, final int offset, final int length)
       throws Throwable {
     return shapeMany(BEFORE_SOCKET_CHANNEL_READ, channel, buffers, offset, length);
@@ -2718,7 +2725,7 @@ public final class BootstrapDispatcher {
    * @return the shaping of the write (torn), or {@code null} when it runs unchanged
    * @throws Throwable if an active scenario injects a failure
    */
-  public static ChannelBuffers beforeSocketChannelWrite(
+  public static @Nullable ChannelBuffers beforeSocketChannelWrite(
       final Object channel, final java.nio.ByteBuffer buffer) throws Throwable {
     return buffer == null
         ? null
@@ -2735,7 +2742,7 @@ public final class BootstrapDispatcher {
    * @return the shaping of the write, or {@code null} when it runs unchanged
    * @throws Throwable if an active scenario injects a failure
    */
-  public static ChannelBuffers beforeSocketChannelWrite(
+  public static @Nullable ChannelBuffers beforeSocketChannelWrite(
       final Object channel, final java.nio.ByteBuffer[] buffers, final int offset, final int length)
       throws Throwable {
     return shapeMany(BEFORE_SOCKET_CHANNEL_WRITE, channel, buffers, offset, length);
@@ -2752,7 +2759,7 @@ public final class BootstrapDispatcher {
    * @return the shaping of the write, or {@code null} when it runs unchanged
    * @throws Throwable if an active scenario injects a failure
    */
-  public static ChannelBuffers beforeNioChannelWrite(
+  public static @Nullable ChannelBuffers beforeNioChannelWrite(
       final Object channel, final java.nio.ByteBuffer[] buffers, final int offset, final int length)
       throws Throwable {
     return shapeMany(BEFORE_NIO_CHANNEL_WRITE, channel, buffers, offset, length);
@@ -2771,7 +2778,7 @@ public final class BootstrapDispatcher {
    * @return the shaping of the call (torn, corrupted), or {@code null} when it runs unchanged
    * @throws Throwable if an active scenario injects a failure
    */
-  public static ChannelBuffers beforeFileChannelIo(
+  public static @Nullable ChannelBuffers beforeFileChannelIo(
       final String operation,
       final Object channel,
       final String path,
@@ -2789,7 +2796,7 @@ public final class BootstrapDispatcher {
         : ChannelBuffers.shape(buffers, offset, length, requested, count);
   }
 
-  private static ChannelBuffers shapeOne(
+  private static @Nullable ChannelBuffers shapeOne(
       final int slot, final Object channel, final java.nio.ByteBuffer buffer, final int requested)
       throws Throwable {
     final int count = countFor(slot, channel, requested);
@@ -2798,7 +2805,7 @@ public final class BootstrapDispatcher {
         : ChannelBuffers.shape(new java.nio.ByteBuffer[] {buffer}, 0, 1, requested, count);
   }
 
-  private static ChannelBuffers shapeMany(
+  private static @Nullable ChannelBuffers shapeMany(
       final int slot,
       final Object channel,
       final java.nio.ByteBuffer[] buffers,
@@ -2943,11 +2950,11 @@ public final class BootstrapDispatcher {
    * @return the (possibly corrupted) value to return; {@code value} as the fallback
    * @throws Throwable if an active scenario fails the call
    */
-  public static Object afterMethodExit(
+  public static @Nullable Object afterMethodExit(
       final Class<?> declaringType,
       final String methodName,
       final String descriptor,
-      final Object value)
+      final @Nullable Object value)
       throws Throwable {
     final int[] depth = DEPTH.get();
     if (depth[0] > 0) {
@@ -2981,9 +2988,9 @@ public final class BootstrapDispatcher {
   public static void beforeClientCall(
       final String operation,
       final Object client,
-      final String target,
-      final String detail,
-      final Object remoteAddress)
+      final @Nullable String target,
+      final @Nullable String detail,
+      final @Nullable Object remoteAddress)
       throws Throwable {
     final int[] depth = DEPTH.get();
     if (depth[0] > 0) {

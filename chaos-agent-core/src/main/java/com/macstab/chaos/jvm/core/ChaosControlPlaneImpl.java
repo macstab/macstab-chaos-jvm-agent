@@ -27,6 +27,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Control-plane half of the chaos runtime. Owns scenario lifecycle, session management,
@@ -276,7 +277,7 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
   }
 
   @Override
-  public ChaosSession.ScopeBinding bindSession(final String sessionId) {
+  public ChaosSession.ScopeBinding bindSession(final @Nullable String sessionId) {
     final DefaultChaosSession session = sessionId == null ? null : openSessions.get(sessionId);
     // An id naming no open session still decides: the thread runs outside any session, even if it
     // inherited one (a server worker thread started while a test's session was bound).
@@ -392,7 +393,7 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
   }
 
   private DefaultChaosActivationHandle registerScenario(
-      final ChaosScenario scenario, final String scopeKey, final String sessionId) {
+      final ChaosScenario scenario, final String scopeKey, final @Nullable String sessionId) {
     ensureOpen();
     ScenarioController controller = null;
     boolean validated = false;
@@ -484,7 +485,7 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
   private void recordFailure(
       final String scenarioId,
       final ChaosDiagnostics.FailureCategory category,
-      final String message) {
+      final @Nullable String message) {
     registry.recordFailure(scenarioId, category, message);
     observabilityBus.publish(
         ChaosEvent.Type.FAILED,
@@ -509,7 +510,7 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
   }
 
   private void unregisterAndDestroyQuietly(
-      final ScenarioController controller, final boolean wasRegistered) {
+      final @Nullable ScenarioController controller, final boolean wasRegistered) {
     // A controller that never reached the registry was never started either (start() runs only
     // after a successful register), so it holds no stressor, gate waiter or clock state.
     // Destroying it would only publish a STOPPED event carrying an id that may belong to a

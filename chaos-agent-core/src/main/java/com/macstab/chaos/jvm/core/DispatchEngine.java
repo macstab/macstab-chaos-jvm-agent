@@ -5,6 +5,7 @@ import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.OperationType;
 import java.util.List;
 import java.util.concurrent.RejectedExecutionException;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The evaluation every dispatch domain shares: the operation index check, matching scenarios
@@ -26,7 +27,7 @@ final class DispatchEngine {
    *
    * @return the current thread's session id, or {@code null} when no session is bound
    */
-  public String currentSessionId() {
+  public @Nullable String currentSessionId() {
     return scopeContext.currentSessionId();
   }
 
@@ -41,18 +42,18 @@ final class DispatchEngine {
       return requested;
     }
     switch (terminal.kind()) {
-      case THROW -> throw terminal.throwable();
+      case THROW -> throw terminal.failure();
       case TIMEOUT -> {
-        sleep((Long) terminal.returnValue());
-        throw terminal.throwable();
+        sleep(terminal.number());
+        throw terminal.failure();
       }
       case CAP_LENGTH -> {
-        return requested <= 0 ? requested : Math.min(requested, (Integer) terminal.returnValue());
+        return requested <= 0 ? requested : (int) Math.min(requested, terminal.number());
       }
       case CORRUPT_READ -> {
         // The bit the advice flips after the read derives from this seed (corruptionSeed()).
         final long[] seed = CORRUPTION_SEED.get();
-        seed[0] = (Long) terminal.returnValue();
+        seed[0] = terminal.number();
         seed[1] = 1L;
         return corruptFlag(Math.max(requested, 0));
       }
@@ -85,7 +86,7 @@ final class DispatchEngine {
   }
 
   /** Whether the subject of a file operation is a {@code FileChannel}, which can write short. */
-  static boolean isFileChannel(final String className) {
+  static boolean isFileChannel(final @Nullable String className) {
     return className != null && className.endsWith("FileChannelImpl");
   }
 
@@ -201,7 +202,7 @@ final class DispatchEngine {
 
   private static final long SHUFFLE_SALT = 3L;
 
-  TerminalAction terminalActionFor(
+  @Nullable TerminalAction terminalActionFor(
       final InvocationContext context,
       final ChaosEffect effect,
       final ChaosScenario scenario,
@@ -408,7 +409,7 @@ final class DispatchEngine {
     if (decision.terminalAction() != null) {
       final TerminalAction terminalAction = decision.terminalAction();
       if (terminalAction.kind() == TerminalKind.THROW) {
-        throw terminalAction.throwable();
+        throw terminalAction.failure();
       }
       if (terminalAction.kind() == TerminalKind.RETURN) {
         if (Boolean.FALSE.equals(terminalAction.returnValue())) {
@@ -447,7 +448,7 @@ final class DispatchEngine {
    * earlier version let the checked {@link InterruptedException} escape into methods that do not
    * declare it, with the flag already cleared.
    */
-  void applyGate(final GateAction gateAction) {
+  void applyGate(final @Nullable GateAction gateAction) {
     if (gateAction == null) {
       return;
     }
@@ -499,7 +500,7 @@ final class DispatchEngine {
    * wrapper binds the session, so session-scoped EXECUTOR_WORKER_RUN and SCHEDULE_TICK scenarios
    * never matched work submitted from a session.
    */
-  String taskSession(final Object task) {
+  @Nullable String taskSession(final Object task) {
     final String bound = scopeContext.currentSessionId();
     return bound != null ? bound : ScopeContext.sessionOf(task);
   }
@@ -512,7 +513,7 @@ final class DispatchEngine {
    * become {@code com.example.MyService}. Matching only the older form left the hex suffix on every
    * lambda on the supported JDKs.
    */
-  static String taskClassName(final Object task) {
+  static @Nullable String taskClassName(final Object task) {
     if (task == null) {
       return null;
     }

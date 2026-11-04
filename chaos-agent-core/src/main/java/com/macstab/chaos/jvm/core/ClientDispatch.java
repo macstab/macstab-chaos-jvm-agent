@@ -3,6 +3,7 @@ package com.macstab.chaos.jvm.core;
 import com.macstab.chaos.jvm.api.Internal;
 import com.macstab.chaos.jvm.api.OperationType;
 import java.net.InetSocketAddress;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Dispatch of client-library calls: HTTP clients, JDBC and the messaging, RPC, cache and cloud
@@ -68,7 +69,7 @@ public final class ClientDispatch {
     if (terminal != null && terminal.kind() == TerminalKind.THROW) {
       // Only a reject throws on a client operation (exception injection is for method selectors),
       // so the failure is rebuilt as the library's own exception.
-      throw FailureFactory.clientReject(operationType, client, terminal.throwable().getMessage());
+      throw FailureFactory.clientReject(operationType, client, terminal.failure().getMessage());
     }
   }
 
@@ -98,7 +99,7 @@ public final class ClientDispatch {
     if (decision.terminalAction() != null) {
       final TerminalAction terminalAction = decision.terminalAction();
       if (terminalAction.kind() == TerminalKind.THROW) {
-        throw terminalAction.throwable();
+        throw terminalAction.failure();
       }
       if (terminalAction.kind() == TerminalKind.SUPPRESS) {
         return true;
@@ -164,7 +165,7 @@ public final class ClientDispatch {
   }
 
   private boolean evaluateJdbc(
-      final OperationType opType, final String targetClassName, final String targetName)
+      final OperationType opType, final String targetClassName, final @Nullable String targetName)
       throws Throwable {
     final RuntimeDecision decision =
         (engine.idle(opType)
@@ -183,7 +184,7 @@ public final class ClientDispatch {
     if (decision.terminalAction() != null) {
       final TerminalAction terminalAction = decision.terminalAction();
       if (terminalAction.kind() == TerminalKind.THROW) {
-        throw terminalAction.throwable();
+        throw terminalAction.failure();
       }
       if (terminalAction.kind() == TerminalKind.SUPPRESS) {
         return true;
@@ -192,7 +193,7 @@ public final class ClientDispatch {
     return false;
   }
 
-  private static String snippet(final String sql) {
+  private static @Nullable String snippet(final @Nullable String sql) {
     if (sql == null) {
       return null;
     }

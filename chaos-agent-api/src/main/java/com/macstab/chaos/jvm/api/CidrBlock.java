@@ -4,6 +4,7 @@ import java.net.InetAddress;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import org.jspecify.annotations.Nullable;
 
 /**
  * A block of IP addresses in CIDR notation: {@code "10.0.0.0/8"}, {@code "2001:db8::/32"}, or a
@@ -125,7 +126,7 @@ public final class CidrBlock {
    * @param address the address; {@code null} never matches
    * @return {@code true} if the address is in the block
    */
-  public boolean contains(final InetAddress address) {
+  public boolean contains(final @Nullable InetAddress address) {
     if (address == null) {
       return false;
     }
@@ -181,7 +182,7 @@ public final class CidrBlock {
     return masked;
   }
 
-  private static byte[] parseIpv4(final String text) {
+  private static byte @Nullable [] parseIpv4(final String text) {
     final String[] parts = text.split("\\.", -1);
     if (parts.length != 4) {
       return null;
@@ -201,7 +202,7 @@ public final class CidrBlock {
     return bytes;
   }
 
-  private static byte[] parseIpv6(final String text) {
+  private static byte @Nullable [] parseIpv6(final String text) {
     String body = text;
     byte[] embeddedIpv4 = null;
     final int lastColon = body.lastIndexOf(':');
@@ -253,7 +254,7 @@ public final class CidrBlock {
     return bytes;
   }
 
-  private static String[] splitGroups(final String text) {
+  private static String @Nullable [] splitGroups(final String text) {
     if (text.isEmpty()) {
       return new String[0];
     }

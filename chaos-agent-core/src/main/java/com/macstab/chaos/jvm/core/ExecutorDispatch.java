@@ -6,6 +6,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Dispatch of executor, scheduler, fork-join, queue and future operations, and of shutdown hooks.
@@ -223,7 +224,7 @@ public final class ExecutorDispatch {
    *     result
    * @throws Throwable if a matching scenario's terminal action mandates it
    */
-  public Boolean beforeBooleanQueueOperation(final String operation, final Object queue)
+  public @Nullable Boolean beforeBooleanQueueOperation(final String operation, final Object queue)
       throws Throwable {
     final OperationType indexedOp = OperationType.valueOf(operation);
     final RuntimeDecision decision =
@@ -242,7 +243,7 @@ public final class ExecutorDispatch {
     engine.applyDelayAndGate(decision);
     if (decision.terminalAction() != null) {
       if (decision.terminalAction().kind() == TerminalKind.THROW) {
-        throw decision.terminalAction().throwable();
+        throw decision.terminalAction().failure();
       }
       if (decision.terminalAction().kind() == TerminalKind.RETURN
           || decision.terminalAction().kind() == TerminalKind.SUPPRESS) {
@@ -262,7 +263,7 @@ public final class ExecutorDispatch {
    *     result
    * @throws Throwable if a matching scenario's terminal action mandates it
    */
-  public Boolean beforeCompletableFutureComplete(
+  public @Nullable Boolean beforeCompletableFutureComplete(
       final String operation, final CompletableFuture<?> future, final Object payload)
       throws Throwable {
     final OperationType indexedOp = OperationType.valueOf(operation);
@@ -283,11 +284,11 @@ public final class ExecutorDispatch {
     if (decision.terminalAction() != null) {
       final TerminalAction terminalAction = decision.terminalAction();
       if (terminalAction.kind() == TerminalKind.THROW) {
-        throw terminalAction.throwable();
+        throw terminalAction.failure();
       }
       if (terminalAction.kind() == TerminalKind.TIMEOUT) {
-        engine.sleep((Long) terminalAction.returnValue());
-        throw terminalAction.throwable();
+        engine.sleep(terminalAction.number());
+        throw terminalAction.failure();
       }
       if (terminalAction.kind() == TerminalKind.RETURN) {
         return (Boolean) terminalAction.returnValue();
@@ -421,7 +422,7 @@ public final class ExecutorDispatch {
     engine.applyDelayAndGate(decision);
     if (decision.terminalAction() != null) {
       if (decision.terminalAction().kind() == TerminalKind.THROW) {
-        throw decision.terminalAction().throwable();
+        throw decision.terminalAction().failure();
       }
       if (decision.terminalAction().kind() == TerminalKind.RETURN
           || decision.terminalAction().kind() == TerminalKind.SUPPRESS) {
@@ -460,7 +461,7 @@ public final class ExecutorDispatch {
     if (decision.terminalAction() != null) {
       final TerminalAction terminalAction = decision.terminalAction();
       if (terminalAction.kind() == TerminalKind.THROW) {
-        throw terminalAction.throwable();
+        throw terminalAction.failure();
       }
       if (terminalAction.kind() == TerminalKind.SUPPRESS) {
         return true;

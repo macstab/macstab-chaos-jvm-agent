@@ -1,6 +1,7 @@
 package com.macstab.chaos.jvm.core;
 
 import com.macstab.chaos.jvm.api.Internal;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The hot-path dispatch of the chaos runtime: the entry points the instrumentation layer calls
@@ -34,11 +35,11 @@ public final class ChaosDispatcher {
    * startup clock reads. BootstrapDispatcher lives in the bootstrap classpath (not a compile-time
    * dependency of this module), so reflection is the only way to reach it.
    */
-  @SuppressWarnings("unchecked")
-  private static volatile java.util.concurrent.atomic.AtomicReference<ThreadLocal<int[]>>
+  private static volatile java.util.concurrent.atomic.@Nullable AtomicReference<
+          @Nullable ThreadLocal<int[]>>
       bootstrapDepthRef = null;
 
-  private static ThreadLocal<int[]> resolveBootstrapDepth() {
+  private static @Nullable ThreadLocal<int[]> resolveBootstrapDepth() {
     if (bootstrapDepthRef != null) {
       return bootstrapDepthRef.get();
     }
@@ -136,7 +137,7 @@ public final class ChaosDispatcher {
    *
    * @return the current thread's session id, or {@code null} when no session is bound
    */
-  public String currentSessionId() {
+  public @Nullable String currentSessionId() {
     return engine.currentSessionId();
   }
 

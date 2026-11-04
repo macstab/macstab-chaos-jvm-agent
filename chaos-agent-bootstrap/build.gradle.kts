@@ -101,6 +101,8 @@ tasks.shadowJar {
     relocate("net.bytebuddy", "com.macstab.chaos.jvm.shaded.net.bytebuddy")
     relocate("com.fasterxml.jackson", "com.macstab.chaos.jvm.shaded.com.fasterxml.jackson")
     mergeServiceFiles()
+    // Nullness annotations are for compilers; the running agent needs none of them.
+    dependencies { exclude(dependency("org.jspecify:jspecify")) }
     exclude(
         "META-INF/*.RSA",
         "META-INF/*.SF",

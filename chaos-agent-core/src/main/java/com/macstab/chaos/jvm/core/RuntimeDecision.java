@@ -1,5 +1,7 @@
 package com.macstab.chaos.jvm.core;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * The merged outcome of evaluating all active {@link ScenarioContribution}s against a single
  * intercepted invocation.
@@ -15,7 +17,8 @@ package com.macstab.chaos.jvm.core;
  * @param terminalAction a {@link TerminalAction} to execute after the delay and gate, or {@code
  *     null} if the intercepted operation should proceed normally
  */
-record RuntimeDecision(long delayMillis, GateAction gateAction, TerminalAction terminalAction) {
+record RuntimeDecision(
+    long delayMillis, @Nullable GateAction gateAction, @Nullable TerminalAction terminalAction) {
 
   /**
    * Returns a decision that has no effect: zero delay, no gate, and no terminal action.

@@ -6,6 +6,7 @@ import java.util.Deque;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Reflective URL-extraction helpers for intercepted HTTP client calls.
@@ -61,7 +62,7 @@ public final class HttpUrlExtractor {
    * @param call the {@code okhttp3.Call} instance; may be {@code null}
    * @return the URL string, or {@code null} if extraction fails
    */
-  public static String fromOkHttpCall(final Object call) {
+  public static @Nullable String fromOkHttpCall(final Object call) {
     if (call == null) {
       return null;
     }
@@ -85,7 +86,7 @@ public final class HttpUrlExtractor {
    * @param request an {@code org.apache.http.HttpRequest} instance; may be {@code null}
    * @return the combined URL string, or {@code null} if extraction fails
    */
-  public static String fromApacheHc4Request(final Object host, final Object request) {
+  public static @Nullable String fromApacheHc4Request(final Object host, final Object request) {
     try {
       final String hostPart = host == null ? "" : host.toString();
       final String requestPath = extractApacheHc4RequestPath(request);
@@ -117,7 +118,7 @@ public final class HttpUrlExtractor {
    *     {@code null}
    * @return the URL string, or {@code null} if extraction fails
    */
-  public static String fromApacheHc4UriRequest(final Object request) {
+  public static @Nullable String fromApacheHc4UriRequest(final Object request) {
     if (request == null) {
       return null;
     }
@@ -149,7 +150,7 @@ public final class HttpUrlExtractor {
    *     null}
    * @return the URI string, or {@code null} if extraction fails
    */
-  public static String fromApacheHc5Request(final Object request) {
+  public static @Nullable String fromApacheHc5Request(final Object request) {
     if (request == null) {
       return null;
     }
@@ -181,7 +182,7 @@ public final class HttpUrlExtractor {
    * @param request an {@code org.apache.hc.core5.http.ClassicHttpRequest}; may be {@code null}
    * @return the URL string, or {@code null} if extraction fails
    */
-  public static String fromApacheHc5HostRequest(final Object host, final Object request) {
+  public static @Nullable String fromApacheHc5HostRequest(final Object host, final Object request) {
     try {
       final Object target = request == null ? null : invoke(request, "getRequestUri");
       final String path = target == null ? "" : target.toString();
@@ -205,7 +206,7 @@ public final class HttpUrlExtractor {
    *     null}
    * @return the URI string, or {@code null} if extraction fails
    */
-  public static String fromReactorNettyClient(final Object client) {
+  public static @Nullable String fromReactorNettyClient(final Object client) {
     if (client == null) {
       return null;
     }
@@ -225,7 +226,8 @@ public final class HttpUrlExtractor {
     }
   }
 
-  private static Object invoke(final Object target, final String methodName) throws Throwable {
+  private static @Nullable Object invoke(final Object target, final String methodName)
+      throws Throwable {
     final Class<?> targetClass = target.getClass();
     final ConcurrentHashMap<String, Method> perClass = METHOD_CACHE.get(targetClass);
     Method method = perClass.get(methodName);
@@ -268,7 +270,7 @@ public final class HttpUrlExtractor {
     return method.invoke(target);
   }
 
-  private static Method findMethod(final Class<?> start, final String methodName) {
+  private static @Nullable Method findMethod(final Class<?> start, final String methodName) {
     final Set<Class<?>> visitedInterfaces = new HashSet<>();
     final Deque<Class<?>> interfaceQueue = new ArrayDeque<>();
     Class<?> current = start;

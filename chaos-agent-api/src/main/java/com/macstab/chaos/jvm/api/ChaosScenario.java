@@ -4,6 +4,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Immutable description of a single chaos injection scenario.
@@ -137,8 +138,8 @@ public record ChaosScenario(
     private final String id;
     private String description = "";
     private ScenarioScope scope = ScenarioScope.JVM;
-    private ChaosSelector selector;
-    private ChaosEffect effect;
+    private @Nullable ChaosSelector selector;
+    private @Nullable ChaosEffect effect;
     private ActivationPolicy activationPolicy = ActivationPolicy.always();
     private int precedence;
     private final Map<String, String> tags = new LinkedHashMap<>();
@@ -246,11 +247,18 @@ public record ChaosScenario(
      * Builds the scenario.
      *
      * @return the constructed ChaosScenario
-     * @throws IllegalArgumentException if selector or effect is null
+     * @throws NullPointerException if the selector or the effect was not set
      */
     public ChaosScenario build() {
       return new ChaosScenario(
-          id, description, scope, selector, effect, activationPolicy, precedence, tags);
+          id,
+          description,
+          scope,
+          Objects.requireNonNull(selector, "selector"),
+          Objects.requireNonNull(effect, "effect"),
+          activationPolicy,
+          precedence,
+          tags);
     }
   }
 }

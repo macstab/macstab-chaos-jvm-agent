@@ -2,6 +2,7 @@ package com.macstab.chaos.jvm.api;
 
 import java.util.EnumSet;
 import java.util.Set;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Defines the targeting predicate for a chaos scenario.
@@ -173,7 +174,7 @@ public sealed interface ChaosSelector
       final Set<OperationType> operations,
       final NamePattern classPattern,
       final NamePattern methodNamePattern) {
-    return new MethodSelector(operations, classPattern, methodNamePattern, null);
+    return new MethodSelector(operations, classPattern, methodNamePattern, NamePattern.any());
   }
 
   /**
@@ -559,7 +560,10 @@ public sealed interface ChaosSelector
    *     matches both
    */
   record ThreadSelector(
-      Set<OperationType> operations, ThreadKind kind, NamePattern threadNamePattern, Boolean daemon)
+      Set<OperationType> operations,
+      ThreadKind kind,
+      NamePattern threadNamePattern,
+      @Nullable Boolean daemon)
       implements ChaosSelector {
     static final Set<OperationType> VALID_OPS =
         EnumSet.of(
@@ -589,7 +593,7 @@ public sealed interface ChaosSelector
       Set<OperationType> operations,
       NamePattern executorClassPattern,
       NamePattern taskClassPattern,
-      Boolean scheduledOnly)
+      @Nullable Boolean scheduledOnly)
       implements ChaosSelector {
     static final Set<OperationType> VALID_OPS =
         EnumSet.of(
@@ -656,7 +660,9 @@ public sealed interface ChaosSelector
    * @param periodicOnly when {@code true}, match only periodic schedules; {@code null} matches both
    */
   record SchedulingSelector(
-      Set<OperationType> operations, NamePattern executorClassPattern, Boolean periodicOnly)
+      Set<OperationType> operations,
+      NamePattern executorClassPattern,
+      @Nullable Boolean periodicOnly)
       implements ChaosSelector {
     static final Set<OperationType> VALID_OPS =
         EnumSet.of(OperationType.SCHEDULE_SUBMIT, OperationType.SCHEDULE_TICK);
@@ -904,10 +910,10 @@ public sealed interface ChaosSelector
   record NetworkSelector(
       Set<OperationType> operations,
       NamePattern remoteHostPattern,
-      String remoteCidr,
-      Integer remotePort,
-      Long minBytes,
-      Long maxBytes)
+      @Nullable String remoteCidr,
+      @Nullable Integer remotePort,
+      @Nullable Long minBytes,
+      @Nullable Long maxBytes)
       implements ChaosSelector {
     static final Set<OperationType> VALID_OPS =
         EnumSet.of(
@@ -1115,7 +1121,10 @@ public sealed interface ChaosSelector
    * @param maxBytes the largest byte count matched, inclusive; {@code null} for no upper bound
    */
   record FileIoSelector(
-      Set<OperationType> operations, PathPattern pathPattern, Long minBytes, Long maxBytes)
+      Set<OperationType> operations,
+      @Nullable PathPattern pathPattern,
+      @Nullable Long minBytes,
+      @Nullable Long maxBytes)
       implements ChaosSelector {
     static final Set<OperationType> VALID_OPS =
         EnumSet.of(
@@ -1312,8 +1321,8 @@ public sealed interface ChaosSelector
    * Shared by the selectors with a size filter.
    */
   private static void validateSizeRange(
-      final Long minBytes,
-      final Long maxBytes,
+      final @Nullable Long minBytes,
+      final @Nullable Long maxBytes,
       final Set<OperationType> operations,
       final Set<OperationType> sizedOperations,
       final String selectorName) {

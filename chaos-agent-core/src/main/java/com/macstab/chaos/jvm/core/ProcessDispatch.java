@@ -2,6 +2,7 @@ package com.macstab.chaos.jvm.core;
 
 import com.macstab.chaos.jvm.api.Internal;
 import com.macstab.chaos.jvm.api.OperationType;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Dispatch of child process starts and waits.
@@ -50,10 +51,10 @@ public final class ProcessDispatch {
                 InvocationContext.UNKNOWN,
                 null,
                 (int) Math.min(timeoutMillis, Integer.MAX_VALUE)));
-    if (decision.terminalAction() != null
-        && decision.terminalAction().kind() == TerminalKind.TIMEOUT) {
+    final TerminalAction terminal = decision.terminalAction();
+    if (terminal != null && terminal.kind() == TerminalKind.TIMEOUT) {
       engine.applyDelayAndGate(decision);
-      engine.sleep((Long) decision.terminalAction().returnValue());
+      engine.sleep(terminal.number());
       return true;
     }
     engine.applyPreDecision(decision);
@@ -61,7 +62,7 @@ public final class ProcessDispatch {
   }
 
   /** The file name of the program {@code process} runs, or {@code null} when unknown. */
-  private static String programName(final Object process) {
+  private static @Nullable String programName(final Object process) {
     if (!(process instanceof Process running)) {
       return null;
     }

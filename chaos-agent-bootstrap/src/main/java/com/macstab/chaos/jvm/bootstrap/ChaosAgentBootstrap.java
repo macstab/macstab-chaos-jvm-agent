@@ -17,6 +17,7 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.management.ObjectName;
 import net.bytebuddy.agent.ByteBuddyAgent;
+import org.jspecify.annotations.Nullable;
 
 /**
  * JVM agent entry point and runtime bootstrap for the chaos testing agent.
@@ -77,7 +78,7 @@ public final class ChaosAgentBootstrap {
       new AtomicReference<>();
 
   /** Thread running the current initialization; detects re-entrant initialization. */
-  private static volatile Thread initializingThread;
+  private static volatile @Nullable Thread initializingThread;
 
   private static final String MBEAN_NAME = "com.macstab.chaos.jvm:type=ChaosDiagnostics";
 
@@ -268,7 +269,7 @@ public final class ChaosAgentBootstrap {
   }
 
   /** Returns the fully installed runtime, or {@code null} when none is (yet) installed. */
-  private static ChaosRuntime installedRuntime() {
+  private static @Nullable ChaosRuntime installedRuntime() {
     final CompletableFuture<ChaosRuntime> initialization = INITIALIZATION.get();
     if (initialization == null
         || !initialization.isDone()
@@ -478,7 +479,7 @@ public final class ChaosAgentBootstrap {
       final Instrumentation instrumentation,
       final ChaosRuntime runtime,
       final boolean instrumentationInstalled,
-      final ObjectName registeredMBean,
+      final @Nullable ObjectName registeredMBean,
       final Throwable installFailure) {
     if (instrumentationInstalled) {
       try {
@@ -577,7 +578,8 @@ public final class ChaosAgentBootstrap {
    *
    * @return the registered name, or {@code null} when nothing was registered
    */
-  private static ObjectName registerMBean(final ChaosRuntime runtime, final boolean control) {
+  private static @Nullable ObjectName registerMBean(
+      final ChaosRuntime runtime, final boolean control) {
     try {
       final ObjectName objectName = new ObjectName(MBEAN_NAME);
       ManagementFactory.getPlatformMBeanServer()

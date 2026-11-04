@@ -19,6 +19,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Thread-safe registry of all active {@link ScenarioController}s.
@@ -223,11 +224,14 @@ final class ScenarioRegistry implements ChaosDiagnostics {
    *
    * @param scenarioId the ID of the scenario whose activation failed
    * @param category the category of the failure (e.g. compatibility error, resource exhaustion)
-   * @param message a human-readable description of what went wrong
+   * @param message a human-readable description of what went wrong; an exception without a message
+   *     is recorded as {@code "(no message)"}
    */
   void recordFailure(
-      final String scenarioId, final FailureCategory category, final String message) {
-    failures.add(new ActivationFailure(scenarioId, category, message));
+      final String scenarioId, final FailureCategory category, final @Nullable String message) {
+    failures.add(
+        new ActivationFailure(
+            scenarioId, category, java.util.Objects.requireNonNullElse(message, "(no message)")));
   }
 
   /**

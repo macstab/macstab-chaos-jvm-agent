@@ -13,6 +13,7 @@ import java.util.Base64;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Resolves and loads a {@link ChaosPlan} during JVM agent startup.
@@ -205,7 +206,7 @@ public final class StartupConfigLoader {
       return ChaosPlanMapper.read(json);
     } catch (final ConfigLoadException failure) {
       throw new ConfigLoadException(
-          failure.getMessage(),
+          java.util.Objects.requireNonNullElse(failure.getMessage(), failure.reason()),
           source,
           failure.getCause(),
           failure.line(),
@@ -331,7 +332,9 @@ public final class StartupConfigLoader {
                 + link,
             SOURCE_FILE_PREFIX + originalPath);
       }
-      final Path directory = link.getParent();
+      // Absolute (see readConfigFile), so a link always has a parent directory.
+      final Path directory =
+          java.util.Objects.requireNonNull(link.getParent(), "parent of an absolute link");
       final Path data = directory.resolve("..data");
       if (!Files.isSymbolicLink(data)) {
         throw new ConfigLoadException(
@@ -505,7 +508,8 @@ public final class StartupConfigLoader {
     return false;
   }
 
-  private static String firstNonBlank(final String left, final String right) {
+  private static @Nullable String firstNonBlank(
+      final @Nullable String left, final @Nullable String right) {
     if (left != null && !left.isBlank()) {
       return left;
     }
@@ -527,7 +531,11 @@ public final class StartupConfigLoader {
    *     reloader's baseline
    */
   public record LoadedPlan(
-      ChaosPlan plan, String source, boolean debugDumpOnStart, Path filePath, PlanFile planFile) {
+      ChaosPlan plan,
+      String source,
+      boolean debugDumpOnStart,
+      @Nullable Path filePath,
+      @Nullable PlanFile planFile) {
 
     /**
      * Creates a loaded plan without a file read.
@@ -541,7 +549,7 @@ public final class StartupConfigLoader {
         final ChaosPlan plan,
         final String source,
         final boolean debugDumpOnStart,
-        final Path filePath) {
+        final @Nullable Path filePath) {
       this(plan, source, debugDumpOnStart, filePath, null);
     }
   }

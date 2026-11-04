@@ -3,6 +3,7 @@ package com.macstab.chaos.jvm.core;
 import java.time.Duration;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import org.jspecify.annotations.Nullable;
 
 /**
  * A manually-operated gate that can hold threads at a chaos interception point until explicitly
@@ -72,7 +73,7 @@ final class ManualGate {
    *     non-positive duration means block indefinitely
    * @throws InterruptedException if the calling thread is interrupted while waiting
    */
-  void await(final Duration maxBlock) throws InterruptedException {
+  void await(final @Nullable Duration maxBlock) throws InterruptedException {
     // Snapshot the volatile once so a concurrent reset() cannot make us observe two different
     // latch instances within a single call. Without this, a reset() interleaved between the
     // zero/negative check and the timed-await could cause us to block on a newly installed

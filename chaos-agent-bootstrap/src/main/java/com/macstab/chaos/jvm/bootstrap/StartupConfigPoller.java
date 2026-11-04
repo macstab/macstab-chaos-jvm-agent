@@ -22,6 +22,7 @@ import java.util.Set;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Polls a chaos configuration file at a fixed interval and applies incremental diffs to the {@link
@@ -86,9 +87,9 @@ public final class StartupConfigPoller implements AutoCloseable {
   /** A read whose file was modified this recently may still be in the middle of a write. */
   private static final long PROVISIONAL_MILLIS = 20L;
 
-  private volatile Stamp lastStamp;
-  private volatile byte[] lastDigest;
-  private volatile byte[] failedDigest;
+  private volatile @Nullable Stamp lastStamp;
+  private volatile byte @Nullable [] lastDigest;
+  private volatile byte @Nullable [] failedDigest;
   private volatile boolean provisional;
 
   // Volatile close flag observed by applyDiff so a pollOnce that wins the race against
@@ -154,7 +155,7 @@ public final class StartupConfigPoller implements AutoCloseable {
    */
   public void startWithInitialPlan(
       final com.macstab.chaos.jvm.api.ChaosPlan initialPlan,
-      final StartupConfigLoader.PlanFile baseline) {
+      final StartupConfigLoader.@Nullable PlanFile baseline) {
     if (baseline != null) {
       lastStamp = stampOf(baseline);
       lastDigest = digest(baseline.json());
@@ -235,7 +236,10 @@ public final class StartupConfigPoller implements AutoCloseable {
     }
   }
 
-  private static void destroyHandle(final ChaosActivationHandle handle) {
+  private static void destroyHandle(final @Nullable ChaosActivationHandle handle) {
+    if (handle == null) {
+      return;
+    }
     if (handle instanceof DefaultChaosActivationHandle defaultHandle) {
       defaultHandle.destroy();
     } else {
@@ -536,7 +540,7 @@ public final class StartupConfigPoller implements AutoCloseable {
   }
 
   /** Last reload failure that was logged; identical consecutive failures are logged once. */
-  private String lastLoggedFailure;
+  private @Nullable String lastLoggedFailure;
 
   private void logReloadFailure(final String message) {
     final String sanitised = sanitiseForLog(message);

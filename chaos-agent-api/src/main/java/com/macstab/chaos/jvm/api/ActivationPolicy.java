@@ -2,6 +2,7 @@ package com.macstab.chaos.jvm.api;
 
 import java.time.Duration;
 import java.time.Instant;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Controls when and how often a chaos effect fires when its selector matches an operation.
@@ -68,14 +69,14 @@ public record ActivationPolicy(
     StartMode startMode,
     double probability,
     long activateAfterMatches,
-    Long maxApplications,
-    Duration activeFor,
-    RateLimit rateLimit,
-    Long randomSeed,
+    @Nullable Long maxApplications,
+    @Nullable Duration activeFor,
+    @Nullable RateLimit rateLimit,
+    @Nullable Long randomSeed,
     boolean allowDestructiveEffects,
-    Instant activeFrom,
-    Instant activeUntil,
-    java.util.List<Long> replayMatches) {
+    @Nullable Instant activeFrom,
+    @Nullable Instant activeUntil,
+    java.util.@Nullable List<Long> replayMatches) {
 
   /**
    * Compact canonical constructor — normalises defaults and validates all field invariants.
@@ -155,13 +156,13 @@ public record ActivationPolicy(
       final StartMode startMode,
       final double probability,
       final long activateAfterMatches,
-      final Long maxApplications,
-      final Duration activeFor,
-      final RateLimit rateLimit,
-      final Long randomSeed,
+      final @Nullable Long maxApplications,
+      final @Nullable Duration activeFor,
+      final @Nullable RateLimit rateLimit,
+      final @Nullable Long randomSeed,
       final boolean allowDestructiveEffects,
-      final Instant activeFrom,
-      final Instant activeUntil) {
+      final @Nullable Instant activeFrom,
+      final @Nullable Instant activeUntil) {
     this(
         startMode,
         probability,
@@ -193,10 +194,10 @@ public record ActivationPolicy(
       final StartMode startMode,
       final double probability,
       final long activateAfterMatches,
-      final Long maxApplications,
-      final Duration activeFor,
-      final RateLimit rateLimit,
-      final Long randomSeed,
+      final @Nullable Long maxApplications,
+      final @Nullable Duration activeFor,
+      final @Nullable RateLimit rateLimit,
+      final @Nullable Long randomSeed,
       final boolean allowDestructiveEffects) {
     this(
         startMode,
@@ -242,19 +243,19 @@ public record ActivationPolicy(
    * @return a new {@link ActivationPolicy} built from the parsed JSON values
    */
   public static ActivationPolicy fromJson(
-      final StartMode startMode,
-      final Double probability,
+      final @Nullable StartMode startMode,
+      final @Nullable Double probability,
       final long activateAfterMatches,
-      final Long maxApplications,
-      final Duration activeFor,
-      final RateLimit rateLimit,
-      final Long randomSeed,
+      final @Nullable Long maxApplications,
+      final @Nullable Duration activeFor,
+      final @Nullable RateLimit rateLimit,
+      final @Nullable Long randomSeed,
       final boolean allowDestructiveEffects,
-      final Instant activeFrom,
-      final Instant activeUntil,
-      final java.util.List<Long> replayMatches) {
+      final @Nullable Instant activeFrom,
+      final @Nullable Instant activeUntil,
+      final java.util.@Nullable List<Long> replayMatches) {
     return new ActivationPolicy(
-        startMode,
+        startMode == null ? StartMode.AUTOMATIC : startMode,
         probability == null ? 1.0d : probability,
         activateAfterMatches,
         maxApplications,
@@ -355,14 +356,14 @@ public record ActivationPolicy(
     private StartMode startMode = StartMode.AUTOMATIC;
     private double probability = 1.0d;
     private long activateAfterMatches;
-    private Long maxApplications;
-    private Duration activeFor;
-    private RateLimit rateLimit;
-    private Long randomSeed = 0L;
+    private @Nullable Long maxApplications;
+    private @Nullable Duration activeFor;
+    private @Nullable RateLimit rateLimit;
+    private @Nullable Long randomSeed = 0L;
     private boolean allowDestructiveEffects;
-    private Instant activeFrom;
-    private Instant activeUntil;
-    private java.util.List<Long> replayMatches;
+    private @Nullable Instant activeFrom;
+    private @Nullable Instant activeUntil;
+    private java.util.@Nullable List<Long> replayMatches;
 
     private Builder() {}
 
@@ -405,7 +406,7 @@ public record ActivationPolicy(
      * @param value the cap; {@code null} for unlimited
      * @return this builder
      */
-    public Builder maxApplications(final Long value) {
+    public Builder maxApplications(final @Nullable Long value) {
       this.maxApplications = value;
       return this;
     }
@@ -416,7 +417,7 @@ public record ActivationPolicy(
      * @param value the window; {@code null} for none
      * @return this builder
      */
-    public Builder activeFor(final Duration value) {
+    public Builder activeFor(final @Nullable Duration value) {
       this.activeFor = value;
       return this;
     }
@@ -439,7 +440,7 @@ public record ActivationPolicy(
      * @param value the rate limit; {@code null} for none
      * @return this builder
      */
-    public Builder rateLimit(final RateLimit value) {
+    public Builder rateLimit(final @Nullable RateLimit value) {
       this.rateLimit = value;
       return this;
     }
@@ -450,7 +451,7 @@ public record ActivationPolicy(
      * @param value the seed, or {@code null}
      * @return this builder
      */
-    public Builder randomSeed(final Long value) {
+    public Builder randomSeed(final @Nullable Long value) {
       this.randomSeed = value;
       return this;
     }
@@ -473,7 +474,7 @@ public record ActivationPolicy(
      * @param value the instant; {@code null} for no lower bound
      * @return this builder
      */
-    public Builder activeFrom(final Instant value) {
+    public Builder activeFrom(final @Nullable Instant value) {
       this.activeFrom = value;
       return this;
     }
@@ -484,7 +485,7 @@ public record ActivationPolicy(
      * @param value the instant; {@code null} for no upper bound
      * @return this builder
      */
-    public Builder activeUntil(final Instant value) {
+    public Builder activeUntil(final @Nullable Instant value) {
       this.activeUntil = value;
       return this;
     }
@@ -509,7 +510,7 @@ public record ActivationPolicy(
      * @param value the match numbers, from {@link ChaosDecisionRecorder#matches(String)}
      * @return this builder
      */
-    public Builder replayMatches(final java.util.Collection<Long> value) {
+    public Builder replayMatches(final java.util.@Nullable Collection<Long> value) {
       this.replayMatches = value == null ? null : java.util.List.copyOf(value);
       return this;
     }

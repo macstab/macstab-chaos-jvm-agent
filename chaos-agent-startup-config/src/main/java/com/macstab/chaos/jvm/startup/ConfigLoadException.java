@@ -1,5 +1,7 @@
 package com.macstab.chaos.jvm.startup;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * Thrown when a chaos plan cannot be loaded from any configured source during agent startup.
  *
@@ -44,7 +46,8 @@ public final class ConfigLoadException extends RuntimeException {
    * @param cause the root cause (e.g., an {@link java.io.IOException} from a file read or a Jackson
    *     {@link com.fasterxml.jackson.core.JsonProcessingException})
    */
-  public ConfigLoadException(final String message, final String source, final Throwable cause) {
+  public ConfigLoadException(
+      final String message, final String source, final @Nullable Throwable cause) {
     this(message, source, cause, 0, 0, message);
   }
 
@@ -61,10 +64,10 @@ public final class ConfigLoadException extends RuntimeException {
   public ConfigLoadException(
       final String message,
       final String source,
-      final Throwable cause,
+      final @Nullable Throwable cause,
       final int line,
       final int column,
-      final String reason) {
+      final @Nullable String reason) {
     super(message, cause);
     this.source = source;
     this.line = line;

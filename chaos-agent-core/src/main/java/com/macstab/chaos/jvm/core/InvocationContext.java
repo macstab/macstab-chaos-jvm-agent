@@ -2,6 +2,7 @@ package com.macstab.chaos.jvm.core;
 
 import com.macstab.chaos.jvm.api.OperationType;
 import java.net.InetAddress;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Immutable snapshot of a single intercepted JVM operation, passed to the scenario evaluation
@@ -45,18 +46,18 @@ import java.net.InetAddress;
  */
 record InvocationContext(
     OperationType operationType,
-    String targetClassName,
-    String subjectClassName,
-    String targetName,
+    @Nullable String targetClassName,
+    @Nullable String subjectClassName,
+    @Nullable String targetName,
     boolean periodic,
-    Boolean daemonThread,
-    Boolean virtualThread,
-    String sessionId,
+    @Nullable Boolean daemonThread,
+    @Nullable Boolean virtualThread,
+    @Nullable String sessionId,
     long byteCount,
-    String path,
-    InetAddress remoteAddress,
+    @Nullable String path,
+    @Nullable InetAddress remoteAddress,
     int remotePort,
-    String signature,
+    @Nullable String signature,
     int timeoutMillis) {
 
   /** {@code byteCount} / {@code remotePort} of an operation that has none. */
@@ -76,13 +77,13 @@ record InvocationContext(
    */
   InvocationContext(
       final OperationType operationType,
-      final String targetClassName,
-      final String subjectClassName,
-      final String targetName,
+      final @Nullable String targetClassName,
+      final @Nullable String subjectClassName,
+      final @Nullable String targetName,
       final boolean periodic,
-      final Boolean daemonThread,
-      final Boolean virtualThread,
-      final String sessionId) {
+      final @Nullable Boolean daemonThread,
+      final @Nullable Boolean virtualThread,
+      final @Nullable String sessionId) {
     this(
         operationType,
         targetClassName,

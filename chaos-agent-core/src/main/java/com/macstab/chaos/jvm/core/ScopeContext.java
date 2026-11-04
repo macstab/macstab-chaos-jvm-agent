@@ -10,6 +10,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Thread-local session-ID stack that propagates chaos session context across method calls and
@@ -61,7 +62,7 @@ final class ScopeContext {
    * @return the innermost active session ID, or {@code null}
    */
   @SuppressWarnings("ReferenceEquality") // the NO_SESSION marker is compared by identity
-  String currentSessionId() {
+  @Nullable String currentSessionId() {
     final String top = sessionStack.get().peek();
     // Identity, not equals: only the marker pushed by bindNone() masks a session.
     return top == NO_SESSION ? null : top;
@@ -182,7 +183,7 @@ final class ScopeContext {
    * @param task the task as seen by the executor; may be {@code null}
    * @return the session id carried by the task, or {@code null}
    */
-  static String sessionOf(final Object task) {
+  static @Nullable String sessionOf(final Object task) {
     if (task instanceof ScopedRunnable scoped) {
       return scoped.sessionId();
     }

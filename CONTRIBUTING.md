@@ -32,6 +32,7 @@ Tests for the instrumentation and bootstrap modules start a real agent (self-att
 | `SemanticsLawTraceabilityTest` | every law of `docs/semantics.md` has a test tagged `law-L<n>` | tag the test |
 | `ArchitectureTest` | the bridge jar is closed, advice uses only public members, layering | — |
 | Error Prone (`-Werror`) | static analysis of every compilation; a finding fails the build | fix it, or suppress it where it stands with the reason |
+| NullAway | every reference is non-null unless `@Nullable` (JSpecify) says otherwise, proven per dereference | annotate what may be absent; state an invariant with `Objects.requireNonNull` and its reason |
 | `PlanFuzzTest` | the parser and validator never crash or hang | replay a failure with `-PfuzzSeed=<seed> -PfuzzIterations=<n>` |
 | JaCoCo floors | line and branch coverage per module, child JVMs included | raise the floor in `build.gradle.kts`, never lower it |
 

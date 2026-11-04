@@ -85,6 +85,7 @@ A chaos tool that is wrong about its own behaviour is worse than none. Every cla
 | Reference tables are the code's: 91 operation types, 25 selector types, 33 effect types, 77 bridge entry points | generated from or checked against the code (`CompatibilityMatrixDocTest`, `ReferenceTablesSyncTest`, `HandleTableDocTest`) |
 | The architecture holds: the bootstrap bridge is closed, inlined advice uses only public members | `ArchitectureTest` |
 | No known bug patterns in any line that compiles | Error Prone on every compilation, warnings as errors |
+| No unchecked null in production code | NullAway proves every dereference; optional values are `@Nullable` in the types ([ADR 0008](docs/adr/0008-nullness-in-the-types.md)) |
 | The tests catch real bugs, not just run code | mutation testing (`./gradlew pitest`) with ratcheted thresholds; coverage floors that count the child JVMs |
 | An idle hook costs about 7 ns and allocates nothing | JMH benchmarks with a regression gate in CI ([benchmarks](docs/benchmarks.md)) |
 | What ships is what you can verify | reproducible jars (`scripts/check-reproducible.sh`), a CycloneDX SBOM per module, shaded dependencies listed |
@@ -909,7 +910,7 @@ end note
 
 | Module                                  | Role                                                                      |
 |-----------------------------------------|---------------------------------------------------------------------------|
-| `chaos-agent-api`                       | **Stable public API** — the only module application code should depend on; no dependencies |
+| `chaos-agent-api`                       | **Stable public API** — the only module application code should depend on; its one dependency is the JSpecify nullness annotations |
 | `chaos-agent-bootstrap`                 | The agent JAR: entry points, singleton, MBean registration; self-contained, ByteBuddy and Jackson relocated, no transitive dependencies |
 | `chaos-agent-core`                      | Scenario registry, evaluation pipeline, session scoping, stressors        |
 | `chaos-agent-instrumentation-jdk`       | ByteBuddy advice, bootstrap bridge (77 interception handles)              |

@@ -20,3 +20,4 @@ The decisions that shape the agent, each with the forces behind it, what was cho
 | [0005](0005-real-faults.md) | Faults are the JDK's own failures, raised in the real call | Accepted |
 | [0006](0006-dispatch-domains.md) | Dispatch is one engine and ten domain dispatchers | Accepted |
 | [0007](0007-documentation-from-code.md) | Reference documentation is checked against, or generated from, the code | Accepted |
+| [0008](0008-nullness-in-the-types.md) | Nullness is part of the types, and the compiler proves it | Accepted |

@@ -3,6 +3,7 @@ package com.macstab.chaos.jvm.instrumentation;
 import com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher;
 import com.macstab.chaos.jvm.instrumentation.bridge.OperationTags;
 import net.bytebuddy.asm.Advice;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Advice for {@code BlockingQueue} put / take / poll / offer.
@@ -62,7 +63,7 @@ final class QueueAdvice {
     // method's default reference return (null) is exactly "queue drained to nothing", which is
     // the QUEUE_POLL suppress semantic. Nested calls return null and run the real poll.
     @Advice.OnMethodEnter(skipOn = Advice.OnNonDefaultValue.class)
-    static Boolean enter(@Advice.This final Object queue) throws Throwable {
+    static @Nullable Boolean enter(@Advice.This final Object queue) throws Throwable {
       if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_QUEUE)) {
         return null;
       }
@@ -86,7 +87,7 @@ final class QueueAdvice {
     // exit advice rewrites the return to that Boolean. A null decision (no scenario, or a nested
     // offer inside an outer queue call) runs the real offer.
     @Advice.OnMethodEnter(skipOn = Advice.OnNonDefaultValue.class)
-    static Boolean enter(@Advice.This final Object queue) throws Throwable {
+    static @Nullable Boolean enter(@Advice.This final Object queue) throws Throwable {
       if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_QUEUE)) {
         return null;
       }

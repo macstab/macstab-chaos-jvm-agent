@@ -12,6 +12,7 @@ import net.bytebuddy.description.method.MethodDescription;
 import net.bytebuddy.description.type.TypeDescription;
 import net.bytebuddy.matcher.ElementMatcher;
 import net.bytebuddy.matcher.ElementMatchers;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Weaves method entry and exit hooks into the methods the registered {@link
@@ -31,7 +32,7 @@ final class MethodWeaver {
   private static final Logger LOGGER = Logger.getLogger("com.macstab.chaos.jvm");
 
   private static Set<ChaosSelector.MethodSelector> woven = Set.of();
-  private static ResettableClassFileTransformer transformer;
+  private static @Nullable ResettableClassFileTransformer transformer;
 
   private MethodWeaver() {}
 

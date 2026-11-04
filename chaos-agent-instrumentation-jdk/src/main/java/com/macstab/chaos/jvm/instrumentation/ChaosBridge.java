@@ -6,6 +6,7 @@ import java.net.URL;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ForkJoinTask;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Agent-classloader implementation of {@link
@@ -145,7 +146,7 @@ final class ChaosBridge implements BridgeDelegate {
    * @throws Throwable if the runtime decides to abort the operation
    */
   @Override
-  public Boolean beforeBooleanQueueOperation(final String operation, final Object queue)
+  public @Nullable Boolean beforeBooleanQueueOperation(final String operation, final Object queue)
       throws Throwable {
     return runtime.beforeBooleanQueueOperation(operation, queue);
   }
@@ -162,7 +163,7 @@ final class ChaosBridge implements BridgeDelegate {
    * @throws Throwable if the runtime decides to abort the completion
    */
   @Override
-  public Boolean beforeCompletableFutureComplete(
+  public @Nullable Boolean beforeCompletableFutureComplete(
       final String operation, final CompletableFuture<?> future, final Object payload)
       throws Throwable {
     return runtime.beforeCompletableFutureComplete(operation, future, payload);
@@ -190,7 +191,7 @@ final class ChaosBridge implements BridgeDelegate {
    * @throws Throwable if the runtime decides to abort or simulate a lookup failure
    */
   @Override
-  public URL afterResourceLookup(
+  public @Nullable URL afterResourceLookup(
       final ClassLoader loader, final String name, final URL currentValue) throws Throwable {
     return runtime.afterResourceLookup(loader, name, currentValue);
   }
@@ -451,7 +452,7 @@ final class ChaosBridge implements BridgeDelegate {
    * @throws Throwable if the runtime decides to abort or delay the connection
    */
   @Override
-  public Object beforeSocketConnect(
+  public @Nullable Object beforeSocketConnect(
       final Object socket, final Object socketAddress, final int timeoutMillis) throws Throwable {
     return runtime.beforeSocketConnect(socket, socketAddress, timeoutMillis);
   }
@@ -523,7 +524,7 @@ final class ChaosBridge implements BridgeDelegate {
    * @return the session id, or {@code null}
    */
   @Override
-  public String currentSessionId() {
+  public @Nullable String currentSessionId() {
     return runtime.currentSessionId();
   }
 
@@ -847,7 +848,7 @@ final class ChaosBridge implements BridgeDelegate {
    * @throws Throwable if the runtime decides to abort the lookup
    */
   @Override
-  public String beforeDnsResolve(final String hostname) throws Throwable {
+  public @Nullable String beforeDnsResolve(final String hostname) throws Throwable {
     return runtime.beforeDnsResolve(hostname);
   }
 
@@ -861,7 +862,7 @@ final class ChaosBridge implements BridgeDelegate {
    * @throws Throwable if a scenario rejects the lookup
    */
   @Override
-  public java.net.InetAddress[] afterDnsAnswer(
+  public java.net.InetAddress @Nullable [] afterDnsAnswer(
       final String hostname, final java.net.InetAddress[] answer, final Throwable failure)
       throws Throwable {
     return runtime.afterDnsAnswer(hostname, answer, failure);
@@ -923,7 +924,7 @@ final class ChaosBridge implements BridgeDelegate {
    * @throws Throwable if a scenario fails the call
    */
   @Override
-  public Object afterMethodExit(
+  public @Nullable Object afterMethodExit(
       final Class<?> declaringType,
       final String methodName,
       final String descriptor,

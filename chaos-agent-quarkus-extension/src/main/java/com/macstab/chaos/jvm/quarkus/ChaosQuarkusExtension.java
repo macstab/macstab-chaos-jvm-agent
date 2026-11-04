@@ -16,6 +16,7 @@ import java.util.EnumSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.extension.AfterAllCallback;
 import org.junit.jupiter.api.extension.AfterEachCallback;
 import org.junit.jupiter.api.extension.BeforeAllCallback;
@@ -205,11 +206,11 @@ public final class ChaosQuarkusExtension
             + " and beforeAll() has run before parameter injection");
   }
 
-  private static ChaosSession lookupSession(final ExtensionContext context) {
+  private static @Nullable ChaosSession lookupSession(final ExtensionContext context) {
     return lookupStoreValue(context, ChaosSession.class);
   }
 
-  private static ChaosControlPlane lookupControlPlane(final ExtensionContext context) {
+  private static @Nullable ChaosControlPlane lookupControlPlane(final ExtensionContext context) {
     return lookupStoreValue(context, ChaosControlPlane.class);
   }
 
@@ -217,7 +218,8 @@ public final class ChaosQuarkusExtension
    * Walks the {@link ExtensionContext} parent chain until it finds a store entry for {@code type},
    * or returns {@code null} if none exists.
    */
-  private static <T> T lookupStoreValue(final ExtensionContext context, final Class<T> type) {
+  private static <T> @Nullable T lookupStoreValue(
+      final ExtensionContext context, final Class<T> type) {
     ExtensionContext current = context;
     while (current != null) {
       final T value = current.getStore(NAMESPACE).get(type, type);

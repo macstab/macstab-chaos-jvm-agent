@@ -17,6 +17,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.LockSupport;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The status and hits files, in the native library's format, so tools that read the library's
@@ -56,7 +57,7 @@ final class ChaosReports implements AutoCloseable {
 
   private static final long BATCH_NANOS = TimeUnit.MILLISECONDS.toNanos(100);
 
-  private static volatile ChaosReports current;
+  private static volatile @Nullable ChaosReports current;
 
   private final Path directory;
   private final long pid;
@@ -111,7 +112,7 @@ final class ChaosReports implements AutoCloseable {
     return Optional.ofNullable(current);
   }
 
-  private static String setting(
+  private static @Nullable String setting(
       final Map<String, String> args,
       final Map<String, String> environment,
       final String arg,

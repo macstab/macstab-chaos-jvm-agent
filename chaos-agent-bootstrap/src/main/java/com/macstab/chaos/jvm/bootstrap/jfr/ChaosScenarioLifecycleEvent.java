@@ -6,6 +6,7 @@ import jdk.jfr.Event;
 import jdk.jfr.Label;
 import jdk.jfr.Name;
 import jdk.jfr.StackTrace;
+import org.jspecify.annotations.Nullable;
 
 /**
  * JFR event emitted on every chaos scenario state transition: REGISTERED, STARTED, STOPPED,
@@ -27,20 +28,20 @@ public final class ChaosScenarioLifecycleEvent extends Event {
 
   /** Unique identifier of the scenario that transitioned state. */
   @Label("Scenario ID")
-  public String scenarioId;
+  public @Nullable String scenarioId;
 
   /** Human-readable description of the scenario. */
   @Label("Description")
-  public String description;
+  public @Nullable String description;
 
   /**
    * Lifecycle transition: one of {@code REGISTERED}, {@code STARTED}, {@code STOPPED}, {@code
    * RELEASED}.
    */
   @Label("Event Type")
-  public String eventType;
+  public @Nullable String eventType;
 
   /** Scope key that was active when the transition occurred; {@code null} for global scope. */
   @Label("Scope Key")
-  public String scopeKey;
+  public @Nullable String scopeKey;
 }

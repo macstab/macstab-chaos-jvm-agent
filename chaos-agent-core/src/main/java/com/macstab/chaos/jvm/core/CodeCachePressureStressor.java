@@ -12,6 +12,7 @@ import net.bytebuddy.ByteBuddy;
 import net.bytebuddy.dynamic.DynamicType;
 import net.bytebuddy.dynamic.loading.ClassLoadingStrategy;
 import net.bytebuddy.implementation.FixedValue;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Fills the JVM code cache by generating and loading a large number of unique synthetic classes,
@@ -35,11 +36,11 @@ final class CodeCachePressureStressor implements ManagedStressor {
   private static final Logger LOGGER = Logger.getLogger(CodeCachePressureStressor.class.getName());
   private static final String CLASS_NAME_PREFIX = "com.macstab.chaos.jvm.synthetic.CodeCacheClass$";
 
-  private volatile List<Class<?>> retainedClasses;
-  private volatile List<URLClassLoader> retainedLoaders;
+  private volatile @Nullable List<Class<?>> retainedClasses;
+  private volatile @Nullable List<URLClassLoader> retainedLoaders;
 
   /** Background thread driving JIT compilation; stopped and joined by {@link #close()}. */
-  private volatile Thread compilerThread;
+  private volatile @Nullable Thread compilerThread;
 
   private static final long COMPILER_JOIN_TIMEOUT_MILLIS = 1_000L;
 
@@ -117,7 +118,7 @@ final class CodeCachePressureStressor implements ManagedStressor {
   }
 
   /** Returns the compiler thread, or {@code null} once {@link #close()} has run. */
-  Thread compilerThread() {
+  @Nullable Thread compilerThread() {
     return compilerThread;
   }
 
@@ -157,7 +158,7 @@ final class CodeCachePressureStressor implements ManagedStressor {
     return snapshot == null ? 0 : snapshot.size();
   }
 
-  private static Class<?> generateAndLoadClass(
+  private static @Nullable Class<?> generateAndLoadClass(
       final int index, final int methodsPerClass, final URLClassLoader loader) {
     final String className = CLASS_NAME_PREFIX + index + "$" + Long.toHexString(System.nanoTime());
     try {

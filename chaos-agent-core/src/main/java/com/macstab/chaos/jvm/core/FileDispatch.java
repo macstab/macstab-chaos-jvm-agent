@@ -2,6 +2,7 @@ package com.macstab.chaos.jvm.core;
 
 import com.macstab.chaos.jvm.api.Internal;
 import com.macstab.chaos.jvm.api.OperationType;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Dispatch of file operations: reads, writes, opens, closes, maps, transfers, fsync, truncation,
@@ -33,7 +34,10 @@ public final class FileDispatch {
    * @throws Throwable if an active scenario throws to simulate an I/O failure
    */
   public int beforeFileIo(
-      final String operation, final Object stream, final String path, final int byteCount)
+      final String operation,
+      final @Nullable Object stream,
+      final @Nullable String path,
+      final int byteCount)
       throws Throwable {
     final OperationType fileIoOpType = resolveFileIoOperationType(operation);
     if (engine.idle(fileIoOpType)) {
@@ -60,7 +64,7 @@ public final class FileDispatch {
   }
 
   /** The method a transfer tag stands for, as the context's target name; {@code null} otherwise. */
-  private static String transferTag(final String operationTag) {
+  private static @Nullable String transferTag(final String operationTag) {
     return switch (operationTag) {
       case ChaosDispatcher.TRANSFER_TO -> "transferTo";
       case ChaosDispatcher.TRANSFER_FROM -> "transferFrom";

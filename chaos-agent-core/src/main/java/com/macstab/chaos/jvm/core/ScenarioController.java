@@ -17,6 +17,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Per-scenario runtime controller that evaluates whether the scenario applies to a given {@link
@@ -72,11 +73,11 @@ import java.util.function.Supplier;
  */
 final class ScenarioController {
   /** The policy's replay log as a sorted array, or {@code null} without replay. */
-  private final long[] replayMatches;
+  private final long @Nullable [] replayMatches;
 
   private final ChaosScenario scenario;
   private final String scopeKey;
-  private final String sessionId;
+  private final @Nullable String sessionId;
   private final Clock clock;
   private final ObservabilityBus observabilityBus;
   private final StressorFactory stressorFactory;
@@ -91,16 +92,16 @@ final class ScenarioController {
   private final Object applicationBudgetLock = new Object();
 
   /** Thread that ends a stressor scenario when {@code activeFor} elapses; {@code null} if none. */
-  private volatile Thread expiryThread;
+  private volatile @Nullable Thread expiryThread;
 
   /** Reservations taken by {@link #reserveApplication()} and not yet committed or released. */
   private long reservedApplications;
 
   private volatile ChaosDiagnostics.ScenarioState state;
-  private volatile String reason;
-  private volatile Instant startedAt;
-  private volatile ManagedStressor stressor;
-  private volatile ClockSkewState clockSkewState;
+  private volatile @Nullable String reason;
+  private volatile @Nullable Instant startedAt;
+  private volatile @Nullable ManagedStressor stressor;
+  private volatile @Nullable ClockSkewState clockSkewState;
   private volatile long rateWindowStartMillis;
   private volatile long rateWindowPermits;
 
@@ -110,7 +111,7 @@ final class ScenarioController {
   ScenarioController(
       final ChaosScenario scenario,
       final String scopeKey,
-      final String sessionId,
+      final @Nullable String sessionId,
       final Clock clock,
       final ObservabilityBus observabilityBus,
       final Supplier<Optional<Instrumentation>> instrumentationSupplier) {
@@ -200,7 +201,7 @@ final class ScenarioController {
   }
 
   /** Returns the session this controller is scoped to, or {@code null} for a JVM scenario. */
-  String sessionId() {
+  @Nullable String sessionId() {
     return sessionId;
   }
 
@@ -436,7 +437,7 @@ final class ScenarioController {
    * @return a {@link ScenarioContribution} when chaos should be applied, or {@code null} when any
    *     check fails
    */
-  ScenarioContribution evaluate(final InvocationContext context) {
+  @Nullable ScenarioContribution evaluate(final InvocationContext context) {
     if (!started.get()) {
       return null;
     }
@@ -630,7 +631,7 @@ final class ScenarioController {
    *     com.macstab.chaos.jvm.api.ChaosEffect.ClockSkewEffect} or if the controller has not been
    *     started (or has been stopped)
    */
-  ClockSkewState clockSkewState() {
+  @Nullable ClockSkewState clockSkewState() {
     return clockSkewState;
   }
 
@@ -673,7 +674,7 @@ final class ScenarioController {
    * Returns how long a stressor started now may run: the shorter of {@code activeFor} and the time
    * left until {@code activeUntil}, or {@code null} when neither is set.
    */
-  private Duration stressorLifetime() {
+  private @Nullable Duration stressorLifetime() {
     final ActivationPolicy policy = scenario.activationPolicy();
     Duration lifetime = policy.activeFor();
     if (policy.activeUntil() != null) {
@@ -748,7 +749,8 @@ final class ScenarioController {
    * Publishes SKIPPED for a call the policy kept the effect from, when anyone listens; returns
    * {@code null} so the caller can return it.
    */
-  private ScenarioContribution skipped(final String reason, final InvocationContext context) {
+  private @Nullable ScenarioContribution skipped(
+      final String reason, final InvocationContext context) {
     if (observabilityBus.hasListeners()) {
       observabilityBus.publish(
           ChaosEvent.Type.SKIPPED,
@@ -934,7 +936,7 @@ final class ScenarioController {
     return new SplittableRandom(baseSeed ^ Long.rotateLeft(matched, 32) ^ idMix);
   }
 
-  private Duration gateTimeout() {
+  private @Nullable Duration gateTimeout() {
     if (!(scenario.effect() instanceof ChaosEffect.GateEffect gateEffect)) {
       return null;
     }

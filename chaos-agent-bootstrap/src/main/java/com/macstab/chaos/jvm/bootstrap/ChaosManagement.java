@@ -12,6 +12,7 @@ import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The operations of the chaos management endpoints, independent of any web framework: the Spring
@@ -63,7 +64,7 @@ public final class ChaosManagement implements AutoCloseable {
    *     failing validation), {@code conflict} (a scenario id is already active) or {@code rejected}
    *     (the runtime could not run it), with the reason
    */
-  public ActivationResponse activate(final String planJson) {
+  public ActivationResponse activate(final @Nullable String planJson) {
     if (planJson == null || planJson.isBlank()) {
       return new ActivationResponse("invalid", null, "plan JSON must not be blank");
     }
@@ -144,7 +145,7 @@ public final class ChaosManagement implements AutoCloseable {
    * @param body the request body; {@code null} without one
    * @return the status code and JSON body to answer with
    */
-  public HttpResult handle(final String method, final String subPath, final String body) {
+  public HttpResult handle(final String method, final String subPath, final @Nullable String body) {
     final String path = subPath == null ? "" : subPath.replaceAll("^/+|/+$", "");
     switch (method == null ? "" : method.toUpperCase(java.util.Locale.ROOT)) {
       case "GET" -> {
@@ -204,7 +205,8 @@ public final class ChaosManagement implements AutoCloseable {
    * @param handleId the plan's handle id when activated
    * @param message the reason when not
    */
-  public record ActivationResponse(String status, String handleId, String message) {}
+  public record ActivationResponse(
+      String status, @Nullable String handleId, @Nullable String message) {}
 
   /**
    * The outcome of {@link #stop(String)}.
@@ -213,7 +215,7 @@ public final class ChaosManagement implements AutoCloseable {
    * @param id the id asked for
    * @param message details when not stopped
    */
-  public record StopResponse(String status, String id, String message) {}
+  public record StopResponse(String status, String id, @Nullable String message) {}
 
   /**
    * The outcome of {@link #stopAll()}.

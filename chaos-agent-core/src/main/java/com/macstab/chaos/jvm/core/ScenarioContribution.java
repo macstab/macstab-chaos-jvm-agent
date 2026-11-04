@@ -3,6 +3,7 @@ package com.macstab.chaos.jvm.core;
 import com.macstab.chaos.jvm.api.ChaosEffect;
 import com.macstab.chaos.jvm.api.ChaosScenario;
 import java.time.Duration;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The result of a single {@link ScenarioController} agreeing to participate in a chaos decision.
@@ -31,7 +32,7 @@ record ScenarioContribution(
     ChaosScenario scenario,
     ChaosEffect effect,
     long delayMillis,
-    Duration gateTimeout,
+    @Nullable Duration gateTimeout,
     InvocationContext context,
     long matchNumber) {
 

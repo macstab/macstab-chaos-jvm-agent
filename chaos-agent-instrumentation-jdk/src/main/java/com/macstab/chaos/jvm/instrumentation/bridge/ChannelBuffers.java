@@ -1,6 +1,7 @@
 package com.macstab.chaos.jvm.instrumentation.bridge;
 
 import java.nio.ByteBuffer;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The buffers of one channel read or write that chaos shapes: limited so the call transfers fewer
@@ -26,17 +27,17 @@ public final class ChannelBuffers {
   private final int length;
 
   /** The limits before the call, or {@code null} when the call is not limited. */
-  private final int[] limits;
+  private final int @Nullable [] limits;
 
   /** The positions before the call, or {@code null} when the bytes read are not corrupted. */
-  private final int[] positions;
+  private final int @Nullable [] positions;
 
   private ChannelBuffers(
       final ByteBuffer[] buffers,
       final int offset,
       final int length,
-      final int[] limits,
-      final int[] positions) {
+      final int @Nullable [] limits,
+      final int @Nullable [] positions) {
     this.buffers = buffers;
     this.offset = offset;
     this.length = length;
@@ -80,7 +81,7 @@ public final class ChannelBuffers {
    * @param count the dispatcher's answer
    * @return the shaping, or {@code null} when the call runs unchanged
    */
-  static ChannelBuffers shape(
+  static @Nullable ChannelBuffers shape(
       final ByteBuffer[] buffers,
       final int offset,
       final int length,

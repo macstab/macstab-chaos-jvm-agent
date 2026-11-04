@@ -5,6 +5,7 @@ import com.macstab.chaos.jvm.instrumentation.bridge.ChannelBuffers;
 import com.macstab.chaos.jvm.instrumentation.bridge.OperationTags;
 import net.bytebuddy.asm.Advice;
 import net.bytebuddy.implementation.bytecode.assign.Assigner;
+import org.jspecify.annotations.Nullable;
 
 /**
  * ByteBuddy {@link Advice} classes for JVM-level interception points wired in Phase 2.
@@ -421,7 +422,7 @@ final class JvmRuntimeAdvice {
    */
   static final class NioChannelGatherWriteAdvice {
     @Advice.OnMethodEnter
-    static ChannelBuffers enter(
+    static @Nullable ChannelBuffers enter(
         @Advice.This final Object channel,
         @Advice.Argument(0) final java.nio.ByteBuffer[] buffers,
         @Advice.Argument(1) final int offset,
@@ -548,7 +549,7 @@ final class JvmRuntimeAdvice {
   /** Intercepts {@code DatagramChannel.receive(ByteBuffer)}: a corruption flips one bit. */
   static final class DatagramReceiveAdvice {
     @Advice.OnMethodEnter
-    static ChannelBuffers enter(
+    static @Nullable ChannelBuffers enter(
         @Advice.This final Object channel, @Advice.Argument(0) final java.nio.ByteBuffer target)
         throws Throwable {
       return BootstrapDispatcher.beforeDatagramReceive(channel, target);
@@ -566,7 +567,7 @@ final class JvmRuntimeAdvice {
   /** Intercepts {@code DatagramChannel.read(ByteBuffer)} of a connected channel, as a receive. */
   static final class DatagramReadAdvice {
     @Advice.OnMethodEnter
-    static ChannelBuffers enter(
+    static @Nullable ChannelBuffers enter(
         @Advice.This final Object channel, @Advice.Argument(0) final java.nio.ByteBuffer target)
         throws Throwable {
       return BootstrapDispatcher.beforeDatagramReceive(channel, target);
@@ -653,7 +654,7 @@ final class JvmRuntimeAdvice {
    */
   static final class SocketChannelReadAdvice {
     @Advice.OnMethodEnter
-    static ChannelBuffers enter(
+    static @Nullable ChannelBuffers enter(
         @Advice.This final Object channel, @Advice.Argument(0) final java.nio.ByteBuffer buffer)
         throws Throwable {
       return BootstrapDispatcher.beforeSocketChannelRead(channel, buffer);
@@ -670,7 +671,7 @@ final class JvmRuntimeAdvice {
   /** Intercepts {@code SocketChannel.read(ByteBuffer[], int, int)} (SOCKET_READ, scattering). */
   static final class SocketChannelScatterReadAdvice {
     @Advice.OnMethodEnter
-    static ChannelBuffers enter(
+    static @Nullable ChannelBuffers enter(
         @Advice.This final Object channel,
         @Advice.Argument(0) final java.nio.ByteBuffer[] buffers,
         @Advice.Argument(1) final int offset,
@@ -690,7 +691,7 @@ final class JvmRuntimeAdvice {
   /** Intercepts {@code SocketChannel.write(ByteBuffer)} (SOCKET_WRITE): torn is a short count. */
   static final class SocketChannelWriteAdvice {
     @Advice.OnMethodEnter
-    static ChannelBuffers enter(
+    static @Nullable ChannelBuffers enter(
         @Advice.This final Object channel, @Advice.Argument(0) final java.nio.ByteBuffer buffer)
         throws Throwable {
       return BootstrapDispatcher.beforeSocketChannelWrite(channel, buffer);
@@ -707,7 +708,7 @@ final class JvmRuntimeAdvice {
   /** Intercepts {@code SocketChannel.write(ByteBuffer[], int, int)} (SOCKET_WRITE, gathering). */
   static final class SocketChannelGatherWriteAdvice {
     @Advice.OnMethodEnter
-    static ChannelBuffers enter(
+    static @Nullable ChannelBuffers enter(
         @Advice.This final Object channel,
         @Advice.Argument(0) final java.nio.ByteBuffer[] buffers,
         @Advice.Argument(1) final int offset,
@@ -1445,7 +1446,7 @@ final class JvmRuntimeAdvice {
   /** Intercepts {@code FileChannelImpl.read(ByteBuffer[], int, int)}, a scattering read. */
   static final class FileChannelScatterReadAdvice {
     @Advice.OnMethodEnter
-    static ChannelBuffers enter(
+    static @Nullable ChannelBuffers enter(
         @Advice.This final Object channel,
         @Advice.Argument(0) final java.nio.ByteBuffer[] buffers,
         @Advice.Argument(1) final int offset,
@@ -1467,7 +1468,7 @@ final class JvmRuntimeAdvice {
   /** Intercepts {@code FileChannelImpl.write(ByteBuffer[], int, int)}, a gathering write. */
   static final class FileChannelGatherWriteAdvice {
     @Advice.OnMethodEnter
-    static ChannelBuffers enter(
+    static @Nullable ChannelBuffers enter(
         @Advice.This final Object channel,
         @Advice.Argument(0) final java.nio.ByteBuffer[] buffers,
         @Advice.Argument(1) final int offset,

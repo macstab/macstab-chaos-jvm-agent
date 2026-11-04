@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
+import org.jspecify.annotations.Nullable;
 
 /** Applies a {@link ChaosEffect.DnsAnswerEffect} to a DNS answer. */
 final class DnsAnswers {
@@ -25,7 +26,7 @@ final class DnsAnswers {
    * @return the new answer, or {@code null} to keep a failure no override replaces
    * @throws UnknownHostException if the family filter leaves no address
    */
-  static InetAddress[] shape(
+  static InetAddress @Nullable [] shape(
       final ChaosEffect.DnsAnswerEffect effect,
       final String hostname,
       final InetAddress[] answer,
@@ -46,7 +47,7 @@ final class DnsAnswers {
    * @return the shaped answer
    * @throws UnknownHostException when nothing is left of the answer
    */
-  static InetAddress[] shape(
+  static InetAddress @Nullable [] shape(
       final ChaosEffect.DnsAnswerEffect effect,
       final String hostname,
       final InetAddress[] answer,

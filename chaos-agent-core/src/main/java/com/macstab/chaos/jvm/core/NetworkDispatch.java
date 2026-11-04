@@ -4,6 +4,7 @@ import com.macstab.chaos.jvm.api.ChaosEffect;
 import com.macstab.chaos.jvm.api.Internal;
 import com.macstab.chaos.jvm.api.OperationType;
 import java.net.InetSocketAddress;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Dispatch of socket, socket channel, datagram, selector and TLS operations, with each call's peer
@@ -57,14 +58,14 @@ public final class NetworkDispatch {
     if (decision.terminalAction() != null) {
       final TerminalAction terminalAction = decision.terminalAction();
       if (terminalAction.kind() == TerminalKind.THROW) {
-        throw terminalAction.throwable();
+        throw terminalAction.failure();
       }
       if (terminalAction.kind() == TerminalKind.SUPPRESS) {
         return true;
       }
       if (terminalAction.kind() == TerminalKind.TIMEOUT) {
         // A stalled peer: the select waits out its own timeout and reports no ready channel.
-        engine.sleep((Long) terminalAction.returnValue());
+        engine.sleep(terminalAction.number());
         return true;
       }
     }
@@ -133,7 +134,7 @@ public final class NetworkDispatch {
    *     connect as asked
    * @throws Throwable if an active scenario throws to simulate a failure
    */
-  public InetSocketAddress beforeSocketConnect(
+  public @Nullable InetSocketAddress beforeSocketConnect(
       final Object socket, final Object socketAddress, final int timeoutMillis) throws Throwable {
     if (engine.idle(OperationType.SOCKET_CONNECT)) {
       return null;
@@ -213,7 +214,7 @@ public final class NetworkDispatch {
   public int beforeSocketRead(
       final Object stream,
       final int len,
-      final Object remoteAddress,
+      final @Nullable Object remoteAddress,
       final int remotePort,
       final int soTimeoutMillis)
       throws Throwable {
@@ -252,7 +253,10 @@ public final class NetworkDispatch {
    * @throws Throwable if an active scenario throws to simulate a failure
    */
   public int beforeSocketWrite(
-      final Object stream, final int len, final Object remoteAddress, final int remotePort)
+      final Object stream,
+      final int len,
+      final @Nullable Object remoteAddress,
+      final int remotePort)
       throws Throwable {
     if (engine.idle(OperationType.SOCKET_WRITE)) {
       return len;
@@ -391,9 +395,9 @@ public final class NetworkDispatch {
    */
   private InvocationContext socketContext(
       final OperationType operation,
-      final Object endpoint,
+      final @Nullable Object endpoint,
       final int byteCount,
-      final java.net.SocketAddress peer,
+      final java.net.@Nullable SocketAddress peer,
       final int timeoutMillis) {
     final InetSocketAddress inet = peer instanceof InetSocketAddress address ? address : null;
     return new InvocationContext(
@@ -417,7 +421,7 @@ public final class NetworkDispatch {
    * The peer of a connected socket or socket channel, or {@code null} when it has none (not
    * connected, closed, or another kind of endpoint).
    */
-  static java.net.SocketAddress peerOf(final Object endpoint) {
+  static java.net.@Nullable SocketAddress peerOf(final Object endpoint) {
     if (endpoint instanceof java.net.Socket socket) {
       return socket.getInetAddress() == null
           ? null
@@ -519,7 +523,7 @@ public final class NetworkDispatch {
    * Read from {@link java.net.InetAddress#toString()} ({@code "host/ip"}), which never triggers a
    * reverse lookup — unlike {@link java.net.InetAddress#getHostName()}.
    */
-  static String remoteHost(final Object remoteAddress) {
+  static @Nullable String remoteHost(final @Nullable Object remoteAddress) {
     if (!(remoteAddress instanceof java.net.InetAddress address)) {
       return null;
     }
@@ -538,7 +542,7 @@ public final class NetworkDispatch {
    * @param socket the {@code SSLSocket} or {@code SSLEngine} instance
    * @throws Throwable if an active scenario throws to simulate a TLS handshake failure
    */
-  public void beforeSslHandshake(final Object socket) throws Throwable {
+  public void beforeSslHandshake(final @Nullable Object socket) throws Throwable {
     engine.applyPreDecision(
         (engine.idle(OperationType.SSL_HANDSHAKE)
             ? RuntimeDecision.none()
@@ -554,7 +558,7 @@ public final class NetworkDispatch {
                     engine.scopeContext.currentSessionId()))));
   }
 
-  private static String extractRemoteHost(final Object socketAddress) {
+  private static @Nullable String extractRemoteHost(final Object socketAddress) {
     if (socketAddress instanceof InetSocketAddress inetSocketAddress) {
       final String host = inetSocketAddress.getHostString();
       return host != null ? host : inetSocketAddress.toString();

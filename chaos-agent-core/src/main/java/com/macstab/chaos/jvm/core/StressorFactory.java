@@ -6,6 +6,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Supplier;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Registry of {@link ManagedStressor} factories keyed by {@link ChaosEffect} type.
@@ -80,7 +81,8 @@ final class StressorFactory {
    *     carrier-pinning stressor leaves one carrier of the virtual-thread scheduler free
    * @return a started {@link ManagedStressor}, or {@code null}
    */
-  ManagedStressor createIfNeeded(final ChaosEffect effect, final boolean allowDestructiveEffects) {
+  @Nullable ManagedStressor createIfNeeded(
+      final ChaosEffect effect, final boolean allowDestructiveEffects) {
     ChaosEffect effective = effect;
     if (effect instanceof ChaosEffect.VirtualThreadCarrierPinningEffect pinning
         && !allowDestructiveEffects) {

@@ -4,6 +4,7 @@ import com.macstab.chaos.jvm.api.ChaosSelector;
 import com.macstab.chaos.jvm.api.CidrBlock;
 import com.macstab.chaos.jvm.api.NamePattern;
 import com.macstab.chaos.jvm.api.OperationType;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Stateless utility that evaluates whether a {@link ChaosSelector} matches a given {@link
@@ -184,7 +185,7 @@ final class SelectorMatcher {
    * contain a comma); the pattern matches when it matches any of them.
    */
   private static boolean anyDestinationMatches(
-      final NamePattern pattern, final String destinations) {
+      final NamePattern pattern, final @Nullable String destinations) {
     if (pattern.mode() == NamePattern.MatchMode.ANY) {
       return true;
     }
@@ -206,7 +207,8 @@ final class SelectorMatcher {
    * Checks a byte count against an inclusive range; an unknown count ({@code < 0}) never satisfies
    * a range.
    */
-  private static boolean inSizeRange(final Long minBytes, final Long maxBytes, final long bytes) {
+  private static boolean inSizeRange(
+      final @Nullable Long minBytes, final @Nullable Long maxBytes, final long bytes) {
     if (minBytes == null && maxBytes == null) {
       return true;
     }

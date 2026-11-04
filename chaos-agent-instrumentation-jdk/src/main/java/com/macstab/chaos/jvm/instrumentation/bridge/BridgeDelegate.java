@@ -4,6 +4,7 @@ import java.net.URL;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ForkJoinTask;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Interface implemented by the agent-classloader side of the bootstrap-to-agent classloader bridge.
@@ -132,7 +133,7 @@ public interface BridgeDelegate {
    *     Boolean.FALSE} to force {@code false}, or {@code null} to let the original call proceed
    * @throws Throwable if the delegate throws
    */
-  Boolean beforeBooleanQueueOperation(String operation, Object queue) throws Throwable;
+  @Nullable Boolean beforeBooleanQueueOperation(String operation, Object queue) throws Throwable;
 
   /**
    * Called before a {@link java.util.concurrent.CompletableFuture} completion method ({@code
@@ -147,7 +148,7 @@ public interface BridgeDelegate {
    *     the real completion, or {@code null} to let the original call proceed
    * @throws Throwable if the delegate throws
    */
-  Boolean beforeCompletableFutureComplete(
+  @Nullable Boolean beforeCompletableFutureComplete(
       String operation, CompletableFuture<?> future, Object payload) throws Throwable;
 
   /**
@@ -172,7 +173,8 @@ public interface BridgeDelegate {
    *     when an active scenario is replacing or suppressing the resource
    * @throws Throwable if the delegate throws
    */
-  URL afterResourceLookup(ClassLoader loader, String name, URL currentValue) throws Throwable;
+  @Nullable URL afterResourceLookup(ClassLoader loader, String name, URL currentValue)
+      throws Throwable;
 
   /**
    * Wraps a shutdown hook thread before it is registered with the JVM, allowing a scenario to track
@@ -397,7 +399,7 @@ public interface BridgeDelegate {
    * @throws Throwable if an active scenario injects a failure to simulate a connection refusal or
    *     timeout
    */
-  Object beforeSocketConnect(Object socket, Object socketAddress, int timeoutMillis)
+  @Nullable Object beforeSocketConnect(Object socket, Object socketAddress, int timeoutMillis)
       throws Throwable;
 
   /**
@@ -461,7 +463,7 @@ public interface BridgeDelegate {
    *
    * @return the session id, or {@code null} outside any session
    */
-  String currentSessionId();
+  @Nullable String currentSessionId();
 
   /**
    * Returns the seed of the bit flip the current thread's read was just told to apply.
@@ -758,7 +760,7 @@ public interface BridgeDelegate {
    * @return the name to resolve: {@code hostname}, or another under a {@code DnsRewriteEffect}
    * @throws Throwable if the delegate throws
    */
-  String beforeDnsResolve(String hostname) throws Throwable;
+  @Nullable String beforeDnsResolve(String hostname) throws Throwable;
 
   /**
    * Called when {@link java.net.InetAddress#getAllByName(String)} returns or fails.
@@ -769,7 +771,7 @@ public interface BridgeDelegate {
    * @return the answer to return instead, or {@code null} to keep the original outcome
    * @throws Throwable if a scenario rejects the lookup
    */
-  java.net.InetAddress[] afterDnsAnswer(
+  java.net.InetAddress @Nullable [] afterDnsAnswer(
       String hostname, java.net.InetAddress[] answer, Throwable failure) throws Throwable;
 
   /**
@@ -815,8 +817,8 @@ public interface BridgeDelegate {
    * @return the (possibly corrupted) value to return
    * @throws Throwable if a scenario fails the call
    */
-  Object afterMethodExit(Class<?> declaringType, String methodName, String descriptor, Object value)
-      throws Throwable;
+  @Nullable Object afterMethodExit(
+      Class<?> declaringType, String methodName, String descriptor, Object value) throws Throwable;
 
   /**
    * Called before a call through a client library.

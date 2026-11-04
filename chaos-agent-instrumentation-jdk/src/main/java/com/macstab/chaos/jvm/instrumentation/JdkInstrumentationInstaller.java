@@ -33,6 +33,7 @@ import net.bytebuddy.description.type.TypeDescription;
 import net.bytebuddy.matcher.ElementMatcher;
 import net.bytebuddy.matcher.ElementMatchers;
 import net.bytebuddy.utility.JavaModule;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Static-only installer that wires ByteBuddy instrumentation for all JDK interception points.
@@ -607,7 +608,7 @@ public final class JdkInstrumentationInstaller {
     return true;
   }
 
-  private static Object installedDelegateOrNull() {
+  private static @Nullable Object installedDelegateOrNull() {
     try {
       return bootstrapDispatcherClass().getMethod("installedDelegate").invoke(null);
     } catch (final ClassNotFoundException notInjected) {
@@ -623,7 +624,7 @@ public final class JdkInstrumentationInstaller {
   }
 
   private static void installDelegateRaw(
-      final Object bridgeDelegate, final MethodHandle[] methodHandles) {
+      final @Nullable Object bridgeDelegate, final MethodHandle @Nullable [] methodHandles) {
     try {
       bootstrapDispatcherClass()
           .getMethod("install", Object.class, MethodHandle[].class)

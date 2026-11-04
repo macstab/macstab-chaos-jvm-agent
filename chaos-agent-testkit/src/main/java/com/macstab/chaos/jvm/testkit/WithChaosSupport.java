@@ -12,6 +12,7 @@ import java.lang.reflect.AnnotatedElement;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import org.jspecify.annotations.Nullable;
 import org.junit.platform.commons.support.AnnotationSupport;
 
 /**
@@ -61,7 +62,7 @@ public final class WithChaosSupport {
    *
    * @param handles the handles; may be {@code null}
    */
-  public static void close(final List<ChaosActivationHandle> handles) {
+  public static void close(final @Nullable List<ChaosActivationHandle> handles) {
     if (handles == null) {
       return;
     }

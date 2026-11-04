@@ -2,6 +2,7 @@ package com.macstab.chaos.jvm.core;
 
 import com.macstab.chaos.jvm.api.Internal;
 import com.macstab.chaos.jvm.api.OperationType;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Dispatch of DNS lookups: forward resolution, the answer returned, and reverse lookups.
@@ -50,7 +51,7 @@ public final class DnsDispatch {
    * @return the name to resolve: {@code hostname}, or another under a {@code DnsRewriteEffect}
    * @throws Throwable if an active scenario throws to simulate a DNS failure
    */
-  public String beforeDnsResolve(final String hostname) throws Throwable {
+  public @Nullable String beforeDnsResolve(final String hostname) throws Throwable {
     final RuntimeDecision decision =
         (engine.idle(OperationType.DNS_RESOLVE)
             ? RuntimeDecision.none()
@@ -83,7 +84,7 @@ public final class DnsDispatch {
    * @return the answer to return instead, or {@code null} to keep the original outcome
    * @throws Throwable if a scenario rejects the lookup or a filter leaves no address
    */
-  public java.net.InetAddress[] afterDnsAnswer(
+  public java.net.InetAddress @Nullable [] afterDnsAnswer(
       final String hostname, final java.net.InetAddress[] answer, final Throwable failure)
       throws Throwable {
     if (engine.idle(OperationType.DNS_ANSWER)) {
@@ -106,12 +107,12 @@ public final class DnsDispatch {
       return null;
     }
     if (terminal.kind() == TerminalKind.THROW) {
-      throw terminal.throwable();
+      throw terminal.failure();
     }
     if (terminal.kind() != TerminalKind.DNS_SHAPE) {
       return null;
     }
-    final DnsShape shape = (DnsShape) terminal.returnValue();
+    final DnsShape shape = (DnsShape) java.util.Objects.requireNonNull(terminal.returnValue());
     return DnsAnswers.shape(
         shape.effect(), hostname, answer, failure, new java.util.Random(shape.seed()));
   }

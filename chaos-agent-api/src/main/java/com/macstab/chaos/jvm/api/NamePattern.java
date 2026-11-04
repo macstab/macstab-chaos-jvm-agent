@@ -5,6 +5,7 @@ import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
+import org.jspecify.annotations.Nullable;
 
 /**
  * A named string-matching predicate used by selectors to filter JVM operations by class name,
@@ -191,7 +192,7 @@ public record NamePattern(MatchMode mode, String value) {
    * @param candidate the string to test; {@code null} matches only {@link MatchMode#ANY}
    * @return {@code true} if the candidate satisfies this pattern
    */
-  public boolean matches(final String candidate) {
+  public boolean matches(final @Nullable String candidate) {
     if (mode == MatchMode.ANY) {
       return true;
     }

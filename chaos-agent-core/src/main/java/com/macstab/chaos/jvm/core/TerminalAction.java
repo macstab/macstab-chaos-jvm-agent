@@ -1,5 +1,7 @@
 package com.macstab.chaos.jvm.core;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * A discriminated-union value describing what the chaos engine should do at the end of a decision's
  * execution.
@@ -31,9 +33,39 @@ package com.macstab.chaos.jvm.core;
  *     specific scenario. {@code null} if the action was synthesised outside a scenario context.
  */
 record TerminalAction(
-    TerminalKind kind, Object returnValue, Throwable throwable, String scenarioId) {
+    TerminalKind kind,
+    @Nullable Object returnValue,
+    @Nullable Throwable throwable,
+    @Nullable String scenarioId) {
   /** Backwards-compatible constructor used by call sites that do not have a scenario id. */
-  TerminalAction(final TerminalKind kind, final Object returnValue, final Throwable throwable) {
+  TerminalAction(
+      final TerminalKind kind,
+      final @Nullable Object returnValue,
+      final @Nullable Throwable throwable) {
     this(kind, returnValue, throwable, null);
+  }
+
+  /**
+   * The number a {@code TIMEOUT} (the wait), {@code CAP_LENGTH} (the byte cap) or {@code
+   * CORRUPT_READ} (the seed) action carries.
+   *
+   * @return the value as a {@code long}
+   * @throws NullPointerException if this action carries no value, which would be an engine bug
+   */
+  long number() {
+    return ((Number)
+            java.util.Objects.requireNonNull(returnValue, () -> kind + " carries no value"))
+        .longValue();
+  }
+
+  /**
+   * The exception a {@code THROW}, {@code TIMEOUT} or {@code COMPLETE_EXCEPTIONALLY} action
+   * carries.
+   *
+   * @return the exception to throw or complete with
+   * @throws NullPointerException if this action carries none, which would be an engine bug
+   */
+  Throwable failure() {
+    return java.util.Objects.requireNonNull(throwable, () -> kind + " carries no throwable");
   }
 }

@@ -1,5 +1,7 @@
 package com.macstab.chaos.jvm.api;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * Primary entry point to the chaos agent runtime.
  *
@@ -130,10 +132,11 @@ public interface ChaosControlPlane extends AutoCloseable {
    * the thread outside any session, even one it inherited (a pooled server thread started while a
    * test's session was bound).
    *
-   * @param sessionId the session id, e.g. the value of the {@link ChaosSession#HEADER} header
+   * @param sessionId the session id, e.g. the value of the {@link ChaosSession#HEADER} header;
+   *     {@code null} (no header) also runs the thread outside any session
    * @return the binding to close when the work is done
    */
-  default ChaosSession.ScopeBinding bindSession(final String sessionId) {
+  default ChaosSession.ScopeBinding bindSession(final @Nullable String sessionId) {
     return () -> {};
   }
 }

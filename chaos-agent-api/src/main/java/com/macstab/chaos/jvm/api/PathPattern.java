@@ -1,5 +1,7 @@
 package com.macstab.chaos.jvm.api;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * Matches file paths under a directory, or one file.
  *
@@ -38,7 +40,7 @@ public record PathPattern(String prefix) {
    * @param path the candidate path; {@code null} never matches
    * @return {@code true} on a match
    */
-  public boolean matches(final String path) {
+  public boolean matches(final @Nullable String path) {
     if (path == null) {
       return false;
     }

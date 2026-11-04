@@ -2,6 +2,7 @@ package com.macstab.chaos.jvm.instrumentation;
 
 import java.lang.reflect.Method;
 import java.util.concurrent.ConcurrentHashMap;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Reflective pool-identifier extraction helpers for intercepted JDBC pool calls.
@@ -37,7 +38,7 @@ public final class JdbcTargetExtractor {
    * @return the pool name, or the class name as a fallback, or {@code null} when {@code pool} is
    *     {@code null}
    */
-  public static String fromHikariPool(final Object pool) {
+  public static @Nullable String fromHikariPool(final Object pool) {
     if (pool == null) {
       return null;
     }
@@ -52,7 +53,8 @@ public final class JdbcTargetExtractor {
     return pool.getClass().getName();
   }
 
-  private static Object invoke(final Object target, final String methodName) throws Throwable {
+  private static @Nullable Object invoke(final Object target, final String methodName)
+      throws Throwable {
     final Class<?> targetClass = target.getClass();
     final ConcurrentHashMap<String, Method> perClass = METHOD_CACHE.get(targetClass);
     Method method = perClass.get(methodName);
@@ -78,7 +80,7 @@ public final class JdbcTargetExtractor {
     return method.invoke(target);
   }
 
-  private static Method findMethod(final Class<?> start, final String methodName) {
+  private static @Nullable Method findMethod(final Class<?> start, final String methodName) {
     Class<?> searchClass = start;
     while (searchClass != null) {
       for (final Method candidate : searchClass.getDeclaredMethods()) {

@@ -7,6 +7,7 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.logging.Logger;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Simulates native direct memory exhaustion by allocating off-heap {@link ByteBuffer}s without
@@ -36,10 +37,10 @@ final class DirectBufferPressureStressor implements ManagedStressor {
   private static final Cleaner CLEANER = Cleaner.create();
 
   /** Cached reflection handle for {@code sun.nio.ch.DirectBuffer.cleaner()}, or {@code null}. */
-  private static final Method DIRECT_BUFFER_CLEANER = resolveCleanerMethod();
+  private static final @Nullable Method DIRECT_BUFFER_CLEANER = resolveCleanerMethod();
 
   /** Cached reflection handle for {@code sun.misc.Cleaner.clean()}, or {@code null}. */
-  private static final Method CLEANER_CLEAN = resolveCleanerCleanMethod();
+  private static final @Nullable Method CLEANER_CLEAN = resolveCleanerCleanMethod();
 
   /**
    * Resolves {@code cleaner()} on the {@code sun.nio.ch.DirectBuffer} interface, whose package the
@@ -49,7 +50,7 @@ final class DirectBufferPressureStressor implements ManagedStressor {
    * the handle was {@code null}, and {@link #close()} never freed native memory eagerly — it was
    * released only whenever a GC happened to collect the buffers.
    */
-  private static Method resolveCleanerMethod() {
+  private static @Nullable Method resolveCleanerMethod() {
     try {
       final Method m = Class.forName("sun.nio.ch.DirectBuffer").getMethod("cleaner");
       m.setAccessible(true);
@@ -59,7 +60,7 @@ final class DirectBufferPressureStressor implements ManagedStressor {
     }
   }
 
-  private static Method resolveCleanerCleanMethod() {
+  private static @Nullable Method resolveCleanerCleanMethod() {
     if (DIRECT_BUFFER_CLEANER == null) {
       return null;
     }
