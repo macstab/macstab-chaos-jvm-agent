@@ -272,6 +272,31 @@ class DefectRegressionIntegrationTest {
       assertThat(result.longValue("matched.execute")).isEqualTo(1L);
     }
 
+    @Test
+    @DisplayName("a JDBC selector on the Hikari pool name matches that pool's connection acquire")
+    void hikariPoolNameFilter() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.run(
+              plan(
+                  scenario(
+                      "named-pool",
+                      new ChaosSelector.JdbcSelector(
+                          Set.of(OperationType.JDBC_CONNECTION_ACQUIRE),
+                          NamePattern.exact("defect-pool")),
+                      ChaosEffect.delay(Duration.ofMillis(1))),
+                  scenario(
+                      "other-pool",
+                      new ChaosSelector.JdbcSelector(
+                          Set.of(OperationType.JDBC_CONNECTION_ACQUIRE),
+                          NamePattern.exact("other-pool")),
+                      ChaosEffect.delay(Duration.ofMillis(1)))),
+              DefectProbeMain.class,
+              "jdbc-hikari-execute",
+              System.getProperty("chaos.test.jdbcClasspath"));
+      assertThat(result.longValue("matched.named-pool")).isEqualTo(1L);
+      assertThat(result.longValue("matched.other-pool")).isZero();
+    }
+
     private void assertSingleMatch(final String id, final ChaosSelector selector, final String mode)
         throws Exception {
       final ChildJvmProbe.ProbeResult result =

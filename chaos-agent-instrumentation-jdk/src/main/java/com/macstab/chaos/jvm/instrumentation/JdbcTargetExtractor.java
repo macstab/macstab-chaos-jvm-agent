@@ -31,8 +31,11 @@ public final class JdbcTargetExtractor {
   private JdbcTargetExtractor() {}
 
   /**
-   * Extracts the HikariCP pool name by calling {@code getPoolName()} reflectively. Falls back to
-   * the instance's fully qualified class name when extraction fails.
+   * Extracts the HikariCP pool name. {@code HikariPool} declares no {@code getPoolName()} (only
+   * {@code HikariDataSource} and {@code HikariConfig} do); its {@code PoolBase} holds the name in a
+   * protected field and returns it from {@code toString()}. A {@code getPoolName()} is used where a
+   * pool type has one, then a {@code toString()} the pool class declares itself, then the class
+   * name.
    *
    * @param pool the {@code com.zaxxer.hikari.pool.HikariPool} instance; may be {@code null}
    * @return the pool name, or the class name as a fallback, or {@code null} when {@code pool} is
@@ -46,6 +49,16 @@ public final class JdbcTargetExtractor {
       final Object name = invoke(pool, "getPoolName");
       if (name != null) {
         return name.toString();
+      }
+    } catch (final Throwable ignored) {
+      // fall through
+    }
+    try {
+      if (pool.getClass().getMethod("toString").getDeclaringClass() != Object.class) {
+        final String name = pool.toString();
+        if (name != null && !name.isBlank()) {
+          return name;
+        }
       }
     } catch (final Throwable ignored) {
       // fall through
