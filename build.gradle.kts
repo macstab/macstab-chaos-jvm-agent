@@ -635,9 +635,9 @@ subprojects {
 // is not part of `check`; the threshold is a ratchet like the coverage floors, set a little below
 // the measured score and only ever raised. Reports: <module>/build/reports/pitest/index.html.
 val mutationFloors = mapOf(
-    "chaos-agent-api" to 66,
-    "chaos-agent-core" to 63,
-    "chaos-agent-startup-config" to 70,
+    "chaos-agent-api" to 95,
+    "chaos-agent-core" to 76,
+    "chaos-agent-startup-config" to 94,
 )
 subprojects {
     val floor = mutationFloors[name] ?: return@subprojects
