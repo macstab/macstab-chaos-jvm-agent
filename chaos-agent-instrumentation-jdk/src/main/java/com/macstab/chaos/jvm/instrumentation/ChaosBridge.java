@@ -282,7 +282,6 @@ final class ChaosBridge implements BridgeDelegate {
    *
    * @param realValue the value returned by the real {@link java.time.LocalDateTime#now()}
    * @return the (possibly skewed) local date-time
-   * @throws Throwable if the runtime decides to abort the call
    */
   @Override
   public java.time.LocalDateTime adjustLocalDateTimeNowInZone(

@@ -271,8 +271,10 @@ final class FailureFactory {
   private static Throwable construct(
       final ClassLoader loader, final String className, final String message)
       throws ReflectiveOperationException {
-    return (Throwable)
-        Class.forName(className, true, loader).getConstructor(String.class).newInstance(message);
+    return Class.forName(className, true, loader)
+        .asSubclass(Throwable.class)
+        .getConstructor(String.class)
+        .newInstance(message);
   }
 
   private static Throwable grpcUnavailable(final ClassLoader loader, final String message)

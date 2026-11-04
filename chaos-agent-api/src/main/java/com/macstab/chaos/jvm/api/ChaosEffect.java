@@ -1160,7 +1160,7 @@ public sealed interface ChaosEffect
       // ClockSkewState, silently applying no skew while diagnostics claim it is live. Fail at
       // plan-build time instead, where the caller can react.
       try {
-        skewAmount.toNanos();
+        final long unused = skewAmount.toNanos();
       } catch (final ArithmeticException overflow) {
         throw new IllegalArgumentException(
             "skewAmount out of range (must fit in Long nanos: ~±292 years): " + skewAmount,

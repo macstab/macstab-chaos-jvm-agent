@@ -510,7 +510,7 @@ public final class ChaosAgentBootstrap {
       final Optional<StartupConfigPoller> poller =
           StartupConfigPoller.createIfEnabled(agentArgs, environment, loaded.filePath(), runtime);
       if (poller.isPresent()) {
-        startPollerWithInitialPlan(poller.get(), loaded, runtime);
+        startPollerWithInitialPlan(poller.get(), loaded);
       } else {
         runtime.activate(loaded.plan());
       }
@@ -526,9 +526,7 @@ public final class ChaosAgentBootstrap {
   }
 
   private static void startPollerWithInitialPlan(
-      final StartupConfigPoller poller,
-      final StartupConfigLoader.LoadedPlan loaded,
-      final ChaosRuntime runtime) {
+      final StartupConfigPoller poller, final StartupConfigLoader.LoadedPlan loaded) {
     POLLER.set(poller);
     try {
       poller.startWithInitialPlan(loaded.plan(), loaded.planFile());

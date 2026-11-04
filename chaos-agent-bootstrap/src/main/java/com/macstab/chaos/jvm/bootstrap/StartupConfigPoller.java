@@ -162,7 +162,12 @@ public final class StartupConfigPoller implements AutoCloseable {
     }
     applyDiff(initialPlan.scenarios());
     applyObservability(initialPlan);
-    scheduler.scheduleAtFixedRate(this::pollOnce, intervalMs, intervalMs, TimeUnit.MILLISECONDS);
+    // The future is not needed: pollOnce() catches every Throwable, so the schedule never ends
+    // with a failure that the future would report; close() stops the scheduler.
+    @SuppressWarnings("FutureReturnValueIgnored")
+    final Object unused =
+        scheduler.scheduleAtFixedRate(
+            this::pollOnce, intervalMs, intervalMs, TimeUnit.MILLISECONDS);
   }
 
   /**
@@ -178,7 +183,12 @@ public final class StartupConfigPoller implements AutoCloseable {
     // No baseline: the first tick reads the file and reconciles (a no-op when it is unchanged).
     // A second read here could have seen a newer file and taken it for applied.
     applyDiff(initialScenarios);
-    scheduler.scheduleAtFixedRate(this::pollOnce, intervalMs, intervalMs, TimeUnit.MILLISECONDS);
+    // The future is not needed: pollOnce() catches every Throwable, so the schedule never ends
+    // with a failure that the future would report; close() stops the scheduler.
+    @SuppressWarnings("FutureReturnValueIgnored")
+    final Object unused =
+        scheduler.scheduleAtFixedRate(
+            this::pollOnce, intervalMs, intervalMs, TimeUnit.MILLISECONDS);
   }
 
   /**
@@ -347,7 +357,7 @@ public final class StartupConfigPoller implements AutoCloseable {
         return activation.getMessage() == null
             || !activation.getMessage().contains("already active");
       }
-      if (cause.getCause() == cause) {
+      if (cause.getCause() == null || cause.getCause().equals(cause)) {
         break;
       }
     }

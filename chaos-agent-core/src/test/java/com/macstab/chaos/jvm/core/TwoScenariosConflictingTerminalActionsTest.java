@@ -23,7 +23,7 @@ import org.junit.jupiter.api.Test;
  * Verifies that when two scenarios match the same operation and both carry terminal actions, the
  * precedence merge rule is applied correctly and remains consistent under concurrent access.
  *
- * <h2>Merge semantics (from {@link ChaosRuntime#evaluate})</h2>
+ * <h2>Merge semantics (from {@code DispatchEngine.evaluate})</h2>
  *
  * <ul>
  *   <li>Delays accumulate — both scenarios' delay contributions are summed.
@@ -189,8 +189,7 @@ class TwoScenariosConflictingTerminalActionsTest {
                 }
                 for (int j = 0; j < ITERATIONS_PER_THREAD; j++) {
                   try {
-                    final Runnable r =
-                        runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
+                    runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
                     // Suppress: returns a no-op runnable without throwing
                     suppressions.incrementAndGet();
                   } catch (final java.util.concurrent.RejectedExecutionException e) {

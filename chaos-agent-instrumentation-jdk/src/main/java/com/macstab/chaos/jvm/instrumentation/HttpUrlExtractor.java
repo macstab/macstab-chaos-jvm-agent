@@ -262,7 +262,7 @@ public final class HttpUrlExtractor {
         perClass.putIfAbsent(methodName, NEGATIVE_CACHE_MARKER);
       }
     }
-    if (method == null || method == NEGATIVE_CACHE_MARKER) {
+    if (method == null || isNegativeMarker(method)) {
       return null;
     }
     return method.invoke(target);
@@ -304,5 +304,10 @@ public final class HttpUrlExtractor {
       }
     }
     return null;
+  }
+
+  @SuppressWarnings("ReferenceEquality") // the marker is one instance, compared by identity
+  private static boolean isNegativeMarker(final Method method) {
+    return method == NEGATIVE_CACHE_MARKER;
   }
 }

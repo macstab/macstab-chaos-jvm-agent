@@ -94,8 +94,11 @@ final class ObservabilityBus {
    * @return {@code true} if it was registered
    */
   boolean removeListener(final ChaosEventListener listener) {
-    for (final Registration registration : registrations) {
-      if (registration.registered() == listener && registrations.remove(registration)) {
+    // Copy-on-write lists: removing while iterating is safe. Identity, not equals: a listener is
+    // the instance that was registered.
+    for (final Registration registration : List.copyOf(registrations)) {
+      if (isSameInstance(registration.registered(), listener)
+          && registrations.remove(registration)) {
         listeners.remove(registration.delivered());
         if (registration.delivered() instanceof AsyncDelivery delivery) {
           delivery.close();
@@ -370,5 +373,10 @@ final class ObservabilityBus {
       case REGISTERED -> LOGGER.fine(formatted);
       case SKIPPED -> LOGGER.finer(formatted);
     }
+  }
+
+  @SuppressWarnings("ReferenceEquality")
+  private static boolean isSameInstance(final Object a, final Object b) {
+    return a == b;
   }
 }

@@ -238,6 +238,18 @@ public final class BootstrapDispatcher {
   }
 
   /**
+   * Whether {@code threadLocal} is the dispatcher's own depth counter: the ThreadLocal advice skips
+   * it so that reading the depth does not re-enter the advice. Identity, not equals.
+   *
+   * @param threadLocal the ThreadLocal being read or written
+   * @return {@code true} for the depth counter
+   */
+  @SuppressWarnings("ReferenceEquality")
+  public static boolean isDepthThreadLocal(final Object threadLocal) {
+    return threadLocal == DEPTH;
+  }
+
+  /**
    * The agent-classloader-resident delegate ({@code BridgeDelegate}) installed by {@link #install}.
    * Volatile so dispatch methods observe the write without locking. Written after {@link #handles}
    * to uphold the publication invariant described in {@link #install}.

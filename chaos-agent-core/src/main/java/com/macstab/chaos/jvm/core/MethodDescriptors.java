@@ -37,27 +37,21 @@ final class MethodDescriptors {
   }
 
   private static Class<?> load(final Class<?> declaringType, final String returnDescriptor) {
-    switch (returnDescriptor) {
-      case "V":
-        return void.class;
-      case "Z":
-        return boolean.class;
-      case "B":
-        return byte.class;
-      case "C":
-        return char.class;
-      case "S":
-        return short.class;
-      case "I":
-        return int.class;
-      case "J":
-        return long.class;
-      case "F":
-        return float.class;
-      case "D":
-        return double.class;
-      default:
-        break;
+    final Class<?> primitive =
+        switch (returnDescriptor) {
+          case "V" -> void.class;
+          case "Z" -> boolean.class;
+          case "B" -> byte.class;
+          case "C" -> char.class;
+          case "S" -> short.class;
+          case "I" -> int.class;
+          case "J" -> long.class;
+          case "F" -> float.class;
+          case "D" -> double.class;
+          default -> null;
+        };
+    if (primitive != null) {
+      return primitive;
     }
     final String binaryName =
         returnDescriptor.startsWith("[")

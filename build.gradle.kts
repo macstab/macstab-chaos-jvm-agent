@@ -18,6 +18,7 @@ plugins {
     id("com.gradleup.shadow") version "8.3.9" apply false
     id("info.solidsoft.pitest") version "1.19.0" apply false
     id("org.cyclonedx.bom") version "3.5.1" apply false
+    id("net.ltgt.errorprone") version "5.2.0" apply false
 }
 
 apply(plugin = "com.diffplug.spotless")
@@ -653,6 +654,42 @@ subprojects {
         // What ships, not what the tests and probes use.
         tasks.withType<org.cyclonedx.gradle.CyclonedxDirectTask>().configureEach {
             includeConfigs.set(listOf("runtimeClasspath"))
+        }
+    }
+}
+
+// ── Static analysis ──────────────────────────────────────────────────────────────────────────────
+// Error Prone runs in every compilation; with -Werror its warnings fail the build like javac's.
+// A finding is fixed, or suppressed where it stands with the reason; the few checks disabled below
+// say why.
+subprojects {
+    plugins.withType<JavaPlugin> {
+        apply(plugin = "net.ltgt.errorprone")
+        dependencies { "errorprone"("com.google.errorprone:error_prone_core:2.52.0") }
+        tasks.withType<JavaCompile>().configureEach {
+            (options as ExtensionAware).extensions.configure<net.ltgt.gradle.errorprone.ErrorProneOptions> {
+                disableWarningsInGeneratedCode.set(true)
+                excludedPaths.set(".*/build/generated/.*")
+                // Style checks this codebase decides otherwise, on purpose: parentheses that make
+                // precedence explicit, Boolean.FALSE passed as an Object sentinel, and statement
+                // switches whose branches throw or fall through to shared code.
+                disable("UnnecessaryParentheses", "BooleanLiteral", "RefactorSwitch")
+                if (name.contains("Test")) {
+                    // The tests and child-JVM probes do on purpose what these checks forbid in
+                    // production code: resolve hosts, read the default-zone clocks and Date the
+                    // agent skews, fire tasks under chaos without awaiting them, catch the
+                    // failures they provoke, assert identity, and yield to force races.
+                    disable(
+                        "AddressSelection",
+                        "JavaTimeDefaultTimeZone",
+                        "JavaUtilDate",
+                        "FutureReturnValueIgnored",
+                        "EmptyCatch",
+                        "ReferenceEquality",
+                        "ThreadPriorityCheck",
+                    )
+                }
+            }
         }
     }
 }

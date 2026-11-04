@@ -177,9 +177,8 @@ public record ActivationPolicy(
   }
 
   /**
-   * Creates a policy without an absolute wall-clock window ({@code activeFrom} and {@code
-   * activeUntil} are {@code null}). Kept so callers of the 1.x constructor keep compiling; prefer
-   * {@link #builder()}.
+   * Creates a policy without an absolute wall-clock window (no start or end instant). Kept so
+   * callers of the 1.x constructor keep compiling; prefer {@link #builder()}.
    *
    * @param startMode when the scenario begins accepting matches
    * @param probability fraction of matches that result in effect application
@@ -596,7 +595,7 @@ public record ActivationPolicy(
       // turning an operator configuration mistake into a runtime exception far from the
       // source. Catching it here points the error at the plan parser / YAML author.
       try {
-        window.toNanos();
+        final long unused = window.toNanos();
       } catch (final ArithmeticException overflow) {
         throw new IllegalArgumentException(
             "window is too large to represent in nanoseconds: " + window, overflow);

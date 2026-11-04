@@ -131,6 +131,8 @@ final class ApiJsonMixins {
   })
   private interface EffectMixin {}
 
+  // Mix-ins only declare the creator signatures Jackson binds; their bodies never run.
+  @SuppressWarnings({"UnusedVariable", "DoNotCallSuggester"})
   private abstract static class ActivationPolicyMixin {
     @JsonCreator
     static ActivationPolicy fromJson(
@@ -149,6 +151,7 @@ final class ApiJsonMixins {
     }
   }
 
+  @SuppressWarnings("UnusedVariable")
   private abstract static class NamePatternMixin {
     @JsonCreator
     NamePatternMixin(

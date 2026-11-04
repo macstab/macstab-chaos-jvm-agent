@@ -7,8 +7,8 @@ enum TerminalKind {
   THROW,
   /**
    * Return a specific value from the interception site. When {@link TerminalAction#returnValue()}
-   * is {@link Boolean#FALSE} and the call site uses {@link ChaosRuntime#applyPreDecision}, a {@link
-   * java.util.concurrent.RejectedExecutionException} is thrown instead.
+   * is {@link Boolean#FALSE} and the call site uses {@code DispatchEngine.applyPreDecision}, a
+   * {@link java.util.concurrent.RejectedExecutionException} is thrown instead.
    */
   RETURN,
   /**

@@ -122,7 +122,7 @@ final class ReturnValueCorruptor {
       return actualValue;
     }
     return switch (strategy) {
-      case NULL -> corruptNull(returnType, actualValue, scenarioId);
+      case NULL -> corruptNull(returnType, scenarioId);
       case ZERO -> corruptZero(returnType);
       case EMPTY -> corruptEmpty(returnType, scenarioId);
       case BOUNDARY_MAX ->
@@ -132,8 +132,7 @@ final class ReturnValueCorruptor {
     };
   }
 
-  private static Object corruptNull(
-      final Class<?> returnType, final Object actualValue, final String scenarioId) {
+  private static Object corruptNull(final Class<?> returnType, final String scenarioId) {
     if (returnType.isPrimitive()) {
       LOGGER.fine(
           () ->
@@ -190,6 +189,8 @@ final class ReturnValueCorruptor {
    * only an instance of exactly that type or a subtype fits. Mutable instances are used because
    * callers may add to the result.
    */
+  // Every concrete container type a method may declare; LinkedList is one of them.
+  @SuppressWarnings("JdkObsolete")
   private static final List<Supplier<Object>> EMPTY_CONTAINERS =
       List.of(
           ArrayList::new,

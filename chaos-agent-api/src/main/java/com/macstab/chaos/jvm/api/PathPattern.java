@@ -74,7 +74,7 @@ public record PathPattern(String prefix) {
     final String unified = path.replace('\\', '/');
     final boolean absolute = unified.startsWith("/");
     final java.util.ArrayDeque<String> segments = new java.util.ArrayDeque<>();
-    for (final String segment : unified.split("/")) {
+    for (final String segment : unified.split("/", -1)) {
       if (segment.isEmpty() || segment.equals(".")) {
         continue;
       }

@@ -66,8 +66,8 @@ public record ChaosScenario(
     }
     description = description == null ? "" : description;
     scope = scope == null ? ScenarioScope.JVM : scope;
-    selector = Objects.requireNonNull(selector, "selector");
-    effect = Objects.requireNonNull(effect, "effect");
+    Objects.requireNonNull(selector, "selector");
+    Objects.requireNonNull(effect, "effect");
     activationPolicy = activationPolicy == null ? ActivationPolicy.always() : activationPolicy;
     tags = copyTagsPreservingOrder(tags);
   }

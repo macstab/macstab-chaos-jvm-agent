@@ -84,10 +84,12 @@ public final class ChaosAgentExtension
     final ChaosSession session = tracker.openSession(context.getDisplayName());
     context.getStore(NAMESPACE).put(ChaosControlPlane.class, tracker);
     context.getStore(NAMESPACE).put(ChaosSession.class, session);
-    final boolean declared =
-        !WithChaosSupport.activate(context.getRequiredTestClass(), tracker, session).isEmpty()
-            | !WithChaosSupport.activate(context.getRequiredTestMethod(), tracker, session)
-                .isEmpty();
+    // Both run: the class's and the method's scenarios are activated, whichever declares any.
+    final boolean onClass =
+        !WithChaosSupport.activate(context.getRequiredTestClass(), tracker, session).isEmpty();
+    final boolean onMethod =
+        !WithChaosSupport.activate(context.getRequiredTestMethod(), tracker, session).isEmpty();
+    final boolean declared = onClass || onMethod;
     if (declared) {
       // Declared session scenarios must reach the test body without a manual bind().
       context.getStore(NAMESPACE).put(ChaosSession.ScopeBinding.class, session.bind());

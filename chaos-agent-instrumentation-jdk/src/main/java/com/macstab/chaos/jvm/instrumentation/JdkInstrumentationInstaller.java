@@ -438,7 +438,11 @@ public final class JdkInstrumentationInstaller {
         OperationType.FILE_IO_CLOSE,
         OperationType.FILE_IO_MOVE_TARGET);
 
+    // Immutable in fact: a stateless function and an unmodifiable set.
+    @SuppressWarnings("ImmutableEnumChecker")
     private final java.util.function.UnaryOperator<AgentBuilder> transformations;
+
+    @SuppressWarnings("ImmutableEnumChecker")
     private final Set<OperationType> operations;
 
     HookGroup(
@@ -584,9 +588,7 @@ public final class JdkInstrumentationInstaller {
    */
   private static void rejectForeignDelegate() {
     final Object existing = installedDelegateOrNull();
-    if (existing != null
-        && existing.getClass().getClassLoader()
-            != JdkInstrumentationInstaller.class.getClassLoader()) {
+    if (existing != null && !ownLoader(existing)) {
       throw new IllegalStateException(
           "the chaos agent is already installed in this JVM by another class loader ("
               + existing.getClass().getClassLoader()
@@ -598,9 +600,7 @@ public final class JdkInstrumentationInstaller {
   /** Clears the dispatcher delegate when it belongs to this copy of the agent. */
   private static boolean clearOwnDelegate() {
     final Object existing = installedDelegateOrNull();
-    if (existing == null
-        || existing.getClass().getClassLoader()
-            != JdkInstrumentationInstaller.class.getClassLoader()) {
+    if (existing == null || !ownLoader(existing)) {
       return false;
     }
     installDelegateRaw(null, null);
@@ -724,7 +724,7 @@ public final class JdkInstrumentationInstaller {
   /** {@code BEFORE_SOCKET_READ} → {@code beforeSocketRead}. */
   static String delegateMethodName(final String slot) {
     final StringBuilder name = new StringBuilder();
-    for (final String word : slot.toLowerCase(java.util.Locale.ROOT).split("_")) {
+    for (final String word : slot.toLowerCase(java.util.Locale.ROOT).split("_", -1)) {
       name.append(
           name.length() == 0 ? word : Character.toUpperCase(word.charAt(0)) + word.substring(1));
     }
@@ -2912,5 +2912,14 @@ public final class JdkInstrumentationInstaller {
       inputStream.transferTo(jarOutputStream);
     }
     jarOutputStream.closeEntry();
+  }
+
+  /**
+   * Whether {@code delegate} was loaded by this installer's class loader (identity, not equals).
+   */
+  @SuppressWarnings("ReferenceEquality")
+  private static boolean ownLoader(final Object delegate) {
+    return delegate.getClass().getClassLoader()
+        == JdkInstrumentationInstaller.class.getClassLoader();
   }
 }

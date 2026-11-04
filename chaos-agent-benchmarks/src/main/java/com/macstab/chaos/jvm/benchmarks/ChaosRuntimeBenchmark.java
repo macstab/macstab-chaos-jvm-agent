@@ -42,7 +42,10 @@ public class ChaosRuntimeBenchmark {
   public ChaosRuntimeBenchmark() {}
 
   private static final Executor DUMMY_EXECUTOR = Runnable::run;
+
+  @SuppressWarnings("UnnecessaryLambda") // one shared task, so the benchmark measures dispatch
   private static final Runnable DUMMY_TASK = () -> {};
+
   private static final Duration ZERO_DELAY = Duration.ofMillis(0);
   private static final ActivationPolicy ONE_SHOT_POLICY =
       new ActivationPolicy(

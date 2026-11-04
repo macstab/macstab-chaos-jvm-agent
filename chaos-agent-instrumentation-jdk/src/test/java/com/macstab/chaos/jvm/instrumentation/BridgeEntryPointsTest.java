@@ -100,7 +100,7 @@ class BridgeEntryPointsTest {
       final ByteBuffer[] buffers = {pattern(10), pattern(10)};
       final ChannelBuffers shaping =
           BootstrapDispatcher.beforeSocketChannelWrite(this, buffers, 0, 2);
-      final long allowed = buffers[0].remaining() + buffers[1].remaining();
+      final long allowed = (long) buffers[0].remaining() + buffers[1].remaining();
       assertThat(allowed).isBetween(1L, 19L);
       shaping.finish(0);
       assertThat(buffers[0].limit()).isEqualTo(10);

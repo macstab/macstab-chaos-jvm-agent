@@ -130,6 +130,7 @@ final class JvmRuntimeAdvice {
    * retransformed constructor body is still being verified by the JVM.
    */
   static final class DateNewAdvice {
+    @SuppressWarnings("JavaUtilDate") // the advice skews java.util.Date itself
     @Advice.OnMethodExit
     static void exit(@Advice.This final Object self) throws Throwable {
       final java.util.Date date = (java.util.Date) self;
@@ -1026,7 +1027,7 @@ final class JvmRuntimeAdvice {
       // Without this check, DEPTH.get() inside the BootstrapDispatcher guard would re-trigger
       // this advice, causing a StackOverflowError before the DEPTH guard can protect us.
       // Identity comparison is safe: DEPTH is a static-final bootstrap-CL singleton.
-      if (threadLocal == BootstrapDispatcher.depthThreadLocal()) {
+      if (BootstrapDispatcher.isDepthThreadLocal(threadLocal)) {
         return false;
       }
       return BootstrapDispatcher.beforeThreadLocalGet(threadLocal);
@@ -1059,7 +1060,7 @@ final class JvmRuntimeAdvice {
       // Same reentrancy guard as ThreadLocalGetAdvice: skip the dispatcher's own DEPTH ThreadLocal.
       // set() is not called by DEPTH (which only uses get/set via initialValue), but the guard
       // is symmetric for correctness and defence-in-depth.
-      if (threadLocal == BootstrapDispatcher.depthThreadLocal()) {
+      if (BootstrapDispatcher.isDepthThreadLocal(threadLocal)) {
         return false;
       }
       return BootstrapDispatcher.beforeThreadLocalSet(threadLocal, value);

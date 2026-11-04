@@ -97,15 +97,19 @@ final class ReferenceQueueFloodStressor implements ManagedStressor {
     // in a local list that survives System.gc(), then drop the list so the referents become
     // unreachable while the References themselves remain live for enqueueing.
     final List<WeakReference<byte[]>> anchors = new ArrayList<>(count);
-    for (int i = 0; i < count; i++) {
-      anchors.add(new WeakReference<>(new byte[1024], queue));
+    try {
+      for (int i = 0; i < count; i++) {
+        anchors.add(new WeakReference<>(new byte[1024], queue));
+      }
+      // Suggest GC to enqueue the newly-unreachable referents. The `anchors` list keeps each
+      // WeakReference strongly reachable during and after this call so that enqueueing can
+      // happen.
+      System.gc();
+    } finally {
+      // Reachability fence: the JVM must not hoist `anchors` unreachable before System.gc()
+      // observes the References. Without this, escape analysis + scalar replacement could
+      // resurrect the original bug.
+      java.lang.ref.Reference.reachabilityFence(anchors);
     }
-    // Suggest GC to enqueue the newly-unreachable referents. The `anchors` list keeps each
-    // WeakReference strongly reachable during and after this call so that enqueueing can happen.
-    System.gc();
-    // Reachability fence: the JVM must not hoist `anchors` unreachable before System.gc()
-    // observes the References. Without this, escape analysis + scalar replacement could
-    // resurrect the original bug.
-    java.lang.ref.Reference.reachabilityFence(anchors);
   }
 }

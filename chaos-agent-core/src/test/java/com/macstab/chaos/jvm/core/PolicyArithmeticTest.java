@@ -100,7 +100,7 @@ class PolicyArithmeticTest {
         ChaosScenario.builder("independent")
             .scope(ChaosScenario.ScenarioScope.JVM)
             .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
-            .effect(ChaosEffect.delay(Duration.ZERO, Duration.ofMillis(1_000)))
+            .effect(ChaosEffect.delay(Duration.ZERO, Duration.ofSeconds(1)))
             .activationPolicy(
                 new ActivationPolicy(
                     ActivationPolicy.StartMode.AUTOMATIC, 0.5d, 0L, null, null, null, 42L, false))

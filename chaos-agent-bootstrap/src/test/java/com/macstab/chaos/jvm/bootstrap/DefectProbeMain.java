@@ -1856,7 +1856,11 @@ public final class DefectProbeMain {
     try {
       // Drives connect() through getResponseCode() and then reads the body: one request.
       System.out.println("status=" + connection.getResponseCode());
-      System.out.println("body=" + new String(connection.getInputStream().readAllBytes()));
+      System.out.println(
+          "body="
+              + new String(
+                  connection.getInputStream().readAllBytes(),
+                  java.nio.charset.StandardCharsets.UTF_8));
     } catch (final java.net.ConnectException suppressed) {
       System.out.println("connectException=" + suppressed.getMessage());
     } finally {

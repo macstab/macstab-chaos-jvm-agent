@@ -40,6 +40,9 @@ public class FatJarProbeApplication implements CommandLineRunner {
     System.exit(SpringApplication.exit(SpringApplication.run(FatJarProbeApplication.class, args)));
   }
 
+  // The probe binds and calls the IPv4 loopback literal on purpose: the client must reach exactly
+  // the address the server bound, whichever loopback the host prefers.
+  @SuppressWarnings("AddressSelection")
   @Override
   public void run(final String... args) throws Exception {
     try (Connection connection = dataSource.getConnection();

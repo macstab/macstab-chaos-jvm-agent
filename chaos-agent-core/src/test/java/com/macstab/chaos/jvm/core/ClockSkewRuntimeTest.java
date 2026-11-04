@@ -19,7 +19,6 @@ import org.junit.jupiter.api.Test;
 class ClockSkewRuntimeTest {
 
   private static final long REAL_MILLIS = 1_700_000_000_000L;
-  private static final long REAL_NANOS = 100_000_000_000L;
   private static final long SKEW_MS = 5_000L;
 
   private static ChaosRuntime runtimeWithClockSkew(
@@ -76,7 +75,7 @@ class ClockSkewRuntimeTest {
     @DisplayName("each call adds another skew increment")
     void eachCallAddsAnotherSkewIncrement() {
       final ChaosRuntime runtime =
-          runtimeWithClockSkew(Duration.ofMillis(1_000L), ChaosEffect.ClockSkewMode.DRIFT);
+          runtimeWithClockSkew(Duration.ofSeconds(1), ChaosEffect.ClockSkewMode.DRIFT);
       final long first = runtime.applyClockSkew(REAL_MILLIS, OperationType.SYSTEM_CLOCK_MILLIS);
       final long second = runtime.applyClockSkew(REAL_MILLIS, OperationType.SYSTEM_CLOCK_MILLIS);
       // First call: REAL + 1000; second call: REAL + 2000
@@ -253,9 +252,8 @@ class ClockSkewRuntimeTest {
                   .build());
       try {
         final java.time.Instant adjusted = runtime.adjustInstantNow(real);
-        assertThat(adjusted.toEpochMilli() - real.toEpochMilli()).isEqualTo(30_000L);
-        // Nanosecond-of-second component must be preserved by plusMillis.
-        assertThat(adjusted.getNano() % 1_000_000).isEqualTo(real.getNano() % 1_000_000);
+        // Exactly 30 s later: the sub-millisecond part of the real instant is preserved.
+        assertThat(Duration.between(real, adjusted)).isEqualTo(Duration.ofSeconds(30));
       } finally {
         handle.stop();
       }

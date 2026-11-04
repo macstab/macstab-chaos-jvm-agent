@@ -60,6 +60,7 @@ final class ScopeContext {
    *
    * @return the innermost active session ID, or {@code null}
    */
+  @SuppressWarnings("ReferenceEquality") // the NO_SESSION marker is compared by identity
   String currentSessionId() {
     final String top = sessionStack.get().peek();
     // Identity, not equals: only the marker pushed by bindNone() masks a session.
@@ -201,6 +202,7 @@ final class ScopeContext {
    * @param task the task as seen by the executor; may be {@code null}
    * @return the unwrapped task
    */
+  @SuppressWarnings("FutureReturnValueIgnored") // returns the task, it does not run it
   static Object unwrap(final Object task) {
     if (task instanceof ScopedRunnable scoped) {
       return scoped.delegate();

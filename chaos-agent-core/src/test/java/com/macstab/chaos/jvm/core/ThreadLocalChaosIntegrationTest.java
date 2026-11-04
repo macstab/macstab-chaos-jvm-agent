@@ -36,7 +36,6 @@ class ThreadLocalChaosIntegrationTest {
 
   private static final long DELAY_MS = 50L;
   private static final long DELAY_MIN_MS = (long) (DELAY_MS * 0.8);
-  private static final long NO_DELAY_MAX_MS = 150L;
 
   // ---------------------------------------------------------------------------
   // GET suppression

@@ -70,7 +70,6 @@ class StopDuringEvaluationTest {
     @DisplayName("evaluate() after stop() returns null contribution — no effect applied")
     void evaluateAfterStopReturnsNoContribution() {
       final ChaosRuntime runtime = new ChaosRuntime();
-      final AtomicInteger delayAppliedCount = new AtomicInteger(0);
 
       // Use maxApplications=1 so we can see the difference cleanly
       final ChaosActivationHandle handle =

@@ -94,7 +94,7 @@ public final class ChaosMeterBinder implements MeterBinder, AutoCloseable {
    */
   @Override
   public void close() {
-    for (final ChaosEventListener registered : listeners) {
+    for (final ChaosEventListener registered : java.util.List.copyOf(listeners)) {
       controlPlane.removeEventListener(registered);
       listeners.remove(registered);
     }

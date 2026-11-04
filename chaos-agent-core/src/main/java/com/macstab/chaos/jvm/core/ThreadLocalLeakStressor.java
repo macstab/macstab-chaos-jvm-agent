@@ -56,6 +56,8 @@ final class ThreadLocalLeakStressor implements ManagedStressor {
     for (int e = 0; e < effect.entriesPerThread(); e++) {
       final int valueSizeBytes = effect.valueSizeBytes();
       for (int t = 0; t < parallelism; t++) {
+        // One instance per entry is the leak this stressor produces.
+        @SuppressWarnings("ThreadLocalUsage")
         final ThreadLocal<byte[]> local = new ThreadLocal<>();
         locals.add(local);
         tasks.add(

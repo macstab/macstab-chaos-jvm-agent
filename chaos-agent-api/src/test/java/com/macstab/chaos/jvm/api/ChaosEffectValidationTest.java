@@ -356,7 +356,7 @@ class ChaosEffectValidationTest {
       assertThatCode(
               () ->
                   new ChaosEffect.ClockSkewEffect(
-                      Duration.ofSeconds(-60), ChaosEffect.ClockSkewMode.DRIFT))
+                      Duration.ofMinutes(-1), ChaosEffect.ClockSkewMode.DRIFT))
           .doesNotThrowAnyException();
     }
 

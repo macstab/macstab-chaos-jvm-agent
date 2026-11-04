@@ -89,7 +89,7 @@ public final class ChaosManagement implements AutoCloseable {
       return new ActivationResponse("rejected", null, "plan rejected: " + rejected.getMessage());
     }
     final ChaosActivationHandle previous = handles.put(handle.id(), handle);
-    if (previous != null && previous != handle) {
+    if (previous != null && !previous.equals(handle)) {
       previous.close();
     }
     return new ActivationResponse("activated", handle.id(), null);

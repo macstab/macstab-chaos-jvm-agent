@@ -194,7 +194,7 @@ final class SelectorMatcher {
     if (destinations.indexOf(',') < 0) {
       return pattern.matches(destinations);
     }
-    for (final String destination : destinations.split(",")) {
+    for (final String destination : destinations.split(",", -1)) {
       if (pattern.matches(destination)) {
         return true;
       }

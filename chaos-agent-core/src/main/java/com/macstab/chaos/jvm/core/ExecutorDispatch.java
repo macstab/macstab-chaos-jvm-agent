@@ -6,7 +6,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
 
 /**
  * Dispatch of executor, scheduler, fork-join, queue and future operations, and of shutdown hooks.
@@ -26,19 +25,12 @@ public final class ExecutorDispatch {
     this.shutdownHooks = shutdownHooks;
   }
 
+  // Shared instances: decorated tasks are compared with them by identity.
+  @SuppressWarnings("UnnecessaryLambda")
   private static final Runnable NO_OP_RUNNABLE = () -> {};
 
+  @SuppressWarnings("UnnecessaryLambda")
   private static final Callable<?> NO_OP_CALLABLE = () -> null;
-
-  // Safe upper bound for an "indefinite" schedule delay in milliseconds.
-  // ScheduledThreadPoolExecutor
-  // internally converts the delay to nanoseconds and adds it to System.nanoTime() in
-  // ScheduledFutureTask.triggerTime; returning Long.MAX_VALUE here overflows that multiplication
-  // and
-  // produces a negative trigger time that fires immediately — the opposite of the intent. ~100
-  // years of millis multiplied by 1_000_000 still fits in a long, so the task effectively never
-  // fires but the bookkeeping stays well-defined.
-  private static final long INDEFINITE_SCHEDULE_DELAY_MILLIS = TimeUnit.DAYS.toMillis(365L * 100L);
 
   private final Map<Thread, java.util.concurrent.atomic.AtomicReference<Thread>> hookDelegateRefs =
       new java.util.concurrent.ConcurrentHashMap<>();
@@ -351,7 +343,9 @@ public final class ExecutorDispatch {
             () -> {
               final Thread h = hookRef.getAndSet(null);
               if (h != null) {
-                h.run();
+                // The original hook is never started: its body runs on this wrapper thread,
+                // which the runtime starts at shutdown in its place.
+                runHookBody(h);
               }
             },
             hook.getName() + "-macstab-chaos-wrapper");
@@ -495,5 +489,11 @@ public final class ExecutorDispatch {
       }
     }
     return false;
+  }
+
+  /** Runs a shutdown hook's body on the calling thread: the wrapper thread that replaced it. */
+  @SuppressWarnings("DoNotCall")
+  private static void runHookBody(final Thread hook) {
+    hook.run();
   }
 }

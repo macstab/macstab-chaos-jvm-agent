@@ -299,31 +299,30 @@ public final class ChaosQuarkusExtension
       throw new IllegalArgumentException("selector must be non-blank");
     }
     final String normalized = selector.trim();
-    switch (normalized) {
-      case "executor":
-        return ChaosSelector.executor(
-            EnumSet.of(OperationType.EXECUTOR_SUBMIT, OperationType.EXECUTOR_WORKER_RUN));
-      case "jvmRuntime":
-        // The clock reads that are actually instrumented. SYSTEM_CLOCK_MILLIS
-        // (System.currentTimeMillis) is a JIT intrinsic that is never woven, so mapping to it made
-        // effect="freeze" silently do nothing.
-        return ChaosSelector.jvmRuntime(
-            EnumSet.of(
-                OperationType.INSTANT_NOW,
-                OperationType.LOCAL_DATE_TIME_NOW,
-                OperationType.ZONED_DATE_TIME_NOW,
-                OperationType.DATE_NEW));
-      case "httpClient":
-        return ChaosSelector.httpClient(
-            EnumSet.of(OperationType.HTTP_CLIENT_SEND, OperationType.HTTP_CLIENT_SEND_ASYNC));
-      case "jdbc":
-        return ChaosSelector.jdbc();
-      default:
-        throw new IllegalArgumentException(
-            "unsupported selector identifier: "
-                + selector
-                + "; expected one of executor, jvmRuntime, httpClient, jdbc");
-    }
+    return switch (normalized) {
+      case "executor" ->
+          ChaosSelector.executor(
+              EnumSet.of(OperationType.EXECUTOR_SUBMIT, OperationType.EXECUTOR_WORKER_RUN));
+      // The clock reads that are actually instrumented. SYSTEM_CLOCK_MILLIS
+      // (System.currentTimeMillis) is a JIT intrinsic that is never woven, so mapping to it made
+      // effect="freeze" silently do nothing.
+      case "jvmRuntime" ->
+          ChaosSelector.jvmRuntime(
+              EnumSet.of(
+                  OperationType.INSTANT_NOW,
+                  OperationType.LOCAL_DATE_TIME_NOW,
+                  OperationType.ZONED_DATE_TIME_NOW,
+                  OperationType.DATE_NEW));
+      case "httpClient" ->
+          ChaosSelector.httpClient(
+              EnumSet.of(OperationType.HTTP_CLIENT_SEND, OperationType.HTTP_CLIENT_SEND_ASYNC));
+      case "jdbc" -> ChaosSelector.jdbc();
+      default ->
+          throw new IllegalArgumentException(
+              "unsupported selector identifier: "
+                  + selector
+                  + "; expected one of executor, jvmRuntime, httpClient, jdbc");
+    };
   }
 
   private static ChaosEffect parseEffect(final String effect) {
@@ -334,17 +333,16 @@ public final class ChaosQuarkusExtension
     if (normalized.startsWith(DELAY_EFFECT_PREFIX)) {
       return parseDelayEffect(effect, normalized);
     }
-    switch (normalized) {
-      case "suppress":
-        return ChaosEffect.suppress();
-      case "freeze":
-        return ChaosEffect.skewClock(Duration.ofSeconds(1), ChaosEffect.ClockSkewMode.FREEZE);
-      default:
-        throw new IllegalArgumentException(
-            "unsupported effect identifier: "
-                + effect
-                + "; expected delay:<duration>, suppress, or freeze");
-    }
+    return switch (normalized) {
+      case "suppress" -> ChaosEffect.suppress();
+      case "freeze" ->
+          ChaosEffect.skewClock(Duration.ofSeconds(1), ChaosEffect.ClockSkewMode.FREEZE);
+      default ->
+          throw new IllegalArgumentException(
+              "unsupported effect identifier: "
+                  + effect
+                  + "; expected delay:<duration>, suppress, or freeze");
+    };
   }
 
   private static ChaosEffect parseDelayEffect(final String rawEffect, final String normalized) {

@@ -93,18 +93,21 @@ class PlanSchemaTest {
             + " \"effect\": {\"type\": \"delay\", \"minDelay\": \"PT0.001S\", \"maxDelay\": \"PT0.001S\"}}";
     assertThat(ChaosPlanMapper.read("{\"scenarios\": [" + scenario + "]}").scenarios()).hasSize(1);
     assertThatThrownBy(() -> ChaosPlanMapper.read("{\"metadata\": {\"name\": \"p\"}}"))
-        .as("a plan without scenarios");
+        .as("a plan without scenarios")
+        .isInstanceOf(ConfigLoadException.class);
     for (final String field : REQUIRED.get(ChaosScenario.class)) {
       final String without =
           scenario.replaceFirst("\"" + field + "\": (\\{[^}]*\\}|\"[^\"]*\"),? ?", "");
       assertThatThrownBy(() -> ChaosPlanMapper.read("{\"scenarios\": [" + without + "]}"))
-          .as("a scenario without %s", field);
+          .as("a scenario without %s", field)
+          .isInstanceOf(ConfigLoadException.class);
     }
     assertThatThrownBy(
             () ->
                 ChaosPlanMapper.read(
                     "{\"scenarios\": [" + scenario.replace("\"type\": \"delay\", ", "") + "]}"))
-        .as("an effect without its type");
+        .as("an effect without its type")
+        .isInstanceOf(ConfigLoadException.class);
     assertThatThrownBy(
             () ->
                 ChaosPlanMapper.read(

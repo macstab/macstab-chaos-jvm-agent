@@ -19,6 +19,8 @@ public class MetricsAggregator {
    *
    * @param metric the metric name to record
    */
+  // Yielding while holding the monitor is the point: it pins the carrier of a virtual thread.
+  @SuppressWarnings("ThreadPriorityCheck")
   public void record(final String metric) {
     synchronized (lock) {
       counts.merge(metric, 1L, Long::sum);

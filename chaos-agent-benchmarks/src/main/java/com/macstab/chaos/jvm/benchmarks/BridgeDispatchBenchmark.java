@@ -60,6 +60,7 @@ public class BridgeDispatchBenchmark {
   @Param({"none", "otherOperation", "matchedNotYetActive"})
   public String scenarios;
 
+  @SuppressWarnings("UnnecessaryLambda") // one shared task, so the benchmark measures dispatch
   private static final Runnable TASK = () -> {};
 
   private static final Instant NOW = Instant.ofEpochSecond(1_700_000_000L);

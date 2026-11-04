@@ -215,7 +215,9 @@ class StartupAgentIntegrationTest {
     final boolean finished = process.waitFor(30, TimeUnit.SECONDS);
     assertThat(finished).as("probe JVM should finish").isTrue();
     try (final BufferedReader reader =
-        new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+        new BufferedReader(
+            new InputStreamReader(
+                process.getInputStream(), java.nio.charset.StandardCharsets.UTF_8))) {
       final String output = reader.lines().reduce("", (left, right) -> left + right);
       assertThat(process.exitValue()).as("probe JVM exit value: " + output).isZero();
       return output;
