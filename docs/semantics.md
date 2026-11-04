@@ -58,7 +58,7 @@ All scenarios that pass §3 for a call contribute. They are ordered by descendin
 
 **L13 — One terminal.** Of the terminal contributions (reject, suppress, exception injection, exceptional completion, return-value corruption), the one with the highest precedence (first in order on a tie) decides the outcome, after the delay and the gate.
 
-**L14 — Only what takes effect counts.** `APPLIED` is published, `appliedCount` grows and `maxApplications` is spent only for contributions that take effect: every delay, the winning gate and the winning terminal. A scenario that matched but lost on precedence keeps its budget (`ScenarioContribution.commit`/`release`).
+**L14 — Only what takes effect counts.** `APPLIED` is published, `appliedCount` grows and `maxApplications` is spent only for contributions that take effect: every delay, the winning gate and the winning terminal. A scenario that matched but lost on precedence keeps its budget (`ScenarioContribution.commit`/`release`). An effect that cannot change the call in hand does not take effect either, and counts nothing: a timeout on a call without one, a torn write of fewer than two bytes or to a file stream, a trickle on a read no larger than its cap, a corrupted read of no bytes or of a kernel transfer, a DNS rewrite of the local-host lookup. Every effect the validator accepts on an operation changes that operation's call when it counts (`EffectReachesTheCallTest`); a DNS shuffle that happens to keep the order is one of its draws and counts.
 
 **L15 — An interrupted gate restores the interrupt.** An interrupt ends the gate wait; the interrupt flag is restored and the call proceeds, so the intercepted method observes the interrupt as it would without chaos.
 

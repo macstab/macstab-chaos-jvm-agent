@@ -23,6 +23,7 @@ import java.util.Set;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -156,7 +157,33 @@ class NetworkDispatchTest {
       activate("corrupt", ChaosSelector.network(Set.of(OperationType.SOCKET_READ)), corruptRead());
 
       assertThat(runtime.beforeSocketRead(this, 10, null, 0, 0)).isEqualTo(-11);
-      assertThat(runtime.beforeSocketRead(this, 0, null, 0, 0)).isEqualTo(-1);
+      assertThat(runtime.diagnostics().scenario("corrupt").orElseThrow().appliedCount())
+          .isEqualTo(1);
+    }
+
+    @Test
+    @Tag("law-L14")
+    @DisplayName("a corrupted read of no bytes does not apply")
+    void corruptReadSkipsAnEmptyRead() throws Throwable {
+      activate("corrupt", ChaosSelector.network(Set.of(OperationType.SOCKET_READ)), corruptRead());
+
+      assertThat(runtime.beforeSocketRead(this, 0, null, 0, 0)).isZero();
+      assertThat(runtime.diagnostics().scenario("corrupt").orElseThrow().appliedCount()).isZero();
+    }
+
+    @Test
+    @Tag("law-L14")
+    @DisplayName("a trickle does not apply to a read no larger than its cap")
+    void trickleSkipsAShortRead() throws Throwable {
+      activate(
+          "slow",
+          ChaosSelector.network(Set.of(OperationType.SOCKET_READ)),
+          ChaosEffect.trickle(16));
+
+      assertThat(runtime.beforeSocketRead(this, 16, null, 0, 0)).isEqualTo(16);
+      assertThat(runtime.diagnostics().scenario("slow").orElseThrow().appliedCount()).isZero();
+      assertThat(runtime.beforeSocketRead(this, 64, null, 0, 0)).isEqualTo(16);
+      assertThat(runtime.diagnostics().scenario("slow").orElseThrow().appliedCount()).isEqualTo(1);
     }
 
     @Test

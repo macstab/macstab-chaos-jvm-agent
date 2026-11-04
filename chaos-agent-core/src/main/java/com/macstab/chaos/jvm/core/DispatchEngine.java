@@ -213,6 +213,10 @@ final class DispatchEngine {
       return new TerminalAction(TerminalKind.ABORTIVE_CLOSE, null, null, scenario.id());
     }
     if (effect instanceof ChaosEffect.TrickleEffect trickleEffect) {
+      // A read that asks for no more than the cap is not shortened: nothing to apply or count.
+      if (context.byteCount() >= 0 && context.byteCount() <= trickleEffect.maxBytes()) {
+        return new TerminalAction(TerminalKind.NOT_APPLICABLE, null, null, scenario.id());
+      }
       return new TerminalAction(
           TerminalKind.CAP_LENGTH, trickleEffect.maxBytes(), null, scenario.id());
     }
@@ -253,8 +257,9 @@ final class DispatchEngine {
       return new TerminalAction(TerminalKind.CAP_LENGTH, torn, null, scenario.id());
     }
     if (effect instanceof ChaosEffect.CorruptReadEffect) {
-      if ("transferTo".equals(context.targetName())) {
-        // The bytes go from file to channel inside the kernel: there is nothing to flip.
+      // The bytes of a transfer go from file to channel inside the kernel, and a read of no
+      // bytes has none: there is nothing to flip.
+      if ("transferTo".equals(context.targetName()) || context.byteCount() == 0) {
         return new TerminalAction(TerminalKind.NOT_APPLICABLE, null, null, scenario.id());
       }
       return new TerminalAction(

@@ -38,6 +38,7 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -660,6 +661,7 @@ class EffectReachesTheCallTest {
   }
 
   @ParameterizedTest(name = "{0}")
+  @Tag("law-L14")
   @MethodSource("acceptedPairs")
   @DisplayName("the effect changes the call, or the call does not count as applied")
   void effectReachesTheCall(final Pair pair) {
