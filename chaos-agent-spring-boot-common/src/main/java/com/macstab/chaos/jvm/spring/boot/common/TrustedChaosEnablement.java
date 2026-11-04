@@ -1,6 +1,11 @@
 package com.macstab.chaos.jvm.spring.boot.common;
 
 import java.util.Set;
+import org.jspecify.annotations.Nullable;
+import org.springframework.boot.context.properties.source.ConfigurationProperty;
+import org.springframework.boot.context.properties.source.ConfigurationPropertyName;
+import org.springframework.boot.context.properties.source.ConfigurationPropertySource;
+import org.springframework.boot.context.properties.source.ConfigurationPropertySources;
 import org.springframework.core.env.ConfigurableEnvironment;
 import org.springframework.core.env.PropertySource;
 
@@ -81,36 +86,49 @@ public final class TrustedChaosEnablement {
    * @return the decision; never {@code null}
    */
   public static Decision evaluate(final ConfigurableEnvironment environment) {
-    if (!Boolean.parseBoolean(environment.getProperty(ENABLED_PROPERTY))) {
+    final Winner enabled = winner(environment, ENABLED_PROPERTY);
+    if (enabled == null || !Boolean.parseBoolean(enabled.value())) {
       return Decision.DISABLED;
     }
-    if (comesFromTrustedSource(environment, ENABLED_PROPERTY)) {
+    if (enabled.trusted()) {
       return Decision.ENABLED;
     }
-    if (Boolean.parseBoolean(environment.getProperty(ALLOW_REMOTE_ENABLE_PROPERTY))
-        && comesFromTrustedSource(environment, ALLOW_REMOTE_ENABLE_PROPERTY)) {
+    final Winner allowRemote = winner(environment, ALLOW_REMOTE_ENABLE_PROPERTY);
+    if (allowRemote != null && allowRemote.trusted() && Boolean.parseBoolean(allowRemote.value())) {
       return Decision.ENABLED;
     }
     return Decision.REJECTED_UNTRUSTED_SOURCE;
   }
 
+  /** The value of a property and whether the source it came from is trusted. */
+  private record Winner(String value, boolean trusted) {}
+
   /**
-   * Returns {@code true} when the property source that wins for {@code propertyName} is trusted.
-   * Sources are walked in precedence order and the first one containing the key decides, because
-   * that is the source whose value {@link ConfigurableEnvironment#getProperty} returns.
+   * Finds the source that wins for {@code propertyName} the way Spring Boot resolves it: sources in
+   * precedence order, each matched under every spelling relaxed binding accepts ({@code
+   * macstab.chaos.Enabled}, {@code MACSTAB_CHAOS_ENABLED}, ...). The value and the trust verdict
+   * come from that one source. Matching the exact name only let an untrusted source with another
+   * spelling set the value while a trusted source holding the exact name vouched for it.
    */
-  private static boolean comesFromTrustedSource(
+  private static @Nullable Winner winner(
       final ConfigurableEnvironment environment, final String propertyName) {
-    for (final PropertySource<?> source : environment.getPropertySources()) {
-      if (CONFIGURATION_PROPERTIES_AGGREGATOR.equals(source.getName())) {
+    final ConfigurationPropertyName name = ConfigurationPropertyName.of(propertyName);
+    for (final ConfigurationPropertySource source :
+        ConfigurationPropertySources.from(environment.getPropertySources())) {
+      if (!(source.getUnderlyingSource() instanceof PropertySource<?> underlying)
+          || CONFIGURATION_PROPERTIES_AGGREGATOR.equals(underlying.getName())) {
         continue;
       }
-      if (!source.containsProperty(propertyName)) {
+      final ConfigurationProperty property = source.getConfigurationProperty(name);
+      if (property == null || property.getValue() == null) {
         continue;
       }
-      final String name = source.getName();
-      return TRUSTED_SOURCE_NAMES.contains(name) || name.startsWith(CLASSPATH_CONFIG_SOURCE_PREFIX);
+      final String sourceName = underlying.getName();
+      return new Winner(
+          String.valueOf(property.getValue()),
+          TRUSTED_SOURCE_NAMES.contains(sourceName)
+              || sourceName.startsWith(CLASSPATH_CONFIG_SOURCE_PREFIX));
     }
-    return false;
+    return null;
   }
 }

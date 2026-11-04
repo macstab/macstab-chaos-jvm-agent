@@ -100,8 +100,9 @@ public final class ChaosPlanMapper {
               + " UTF-8 bytes provided)",
           SOURCE_JSON_INPUT);
     }
+    final ChaosPlan plan;
     try {
-      return OBJECT_MAPPER.readValue(json, ChaosPlan.class);
+      plan = OBJECT_MAPPER.readValue(json, ChaosPlan.class);
     } catch (JsonProcessingException exception) {
       final com.fasterxml.jackson.core.JsonLocation location = exception.getLocation();
       final boolean positioned = location != null && location.getLineNr() > 0;
@@ -113,6 +114,12 @@ public final class ChaosPlanMapper {
           positioned ? location.getColumnNr() : 0,
           parseFailureReason(exception));
     }
+    // Jackson maps the JSON literal null to a null value rather than failing.
+    if (plan == null) {
+      throw new ConfigLoadException(
+          "chaos plan JSON is null; expected an object with \"scenarios\"", SOURCE_JSON_INPUT);
+    }
+    return plan;
   }
 
   /**

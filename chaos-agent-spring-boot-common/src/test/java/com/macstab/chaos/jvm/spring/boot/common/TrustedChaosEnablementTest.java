@@ -87,10 +87,10 @@ class TrustedChaosEnablementTest {
     }
 
     @Test
-    @DisplayName("is REJECTED when no source holds the flag under its exact name")
-    void rejectedWithoutANamedSource() {
-      // Spring Boot's relaxed binding resolves another spelling of the flag through the attached
-      // configuration-properties aggregator; no source holds the exact name, so none can vouch.
+    @DisplayName("is REJECTED when an untrusted source holds the flag under another spelling")
+    void rejectedUnderAnotherSpelling() {
+      // Spring Boot's relaxed binding resolves another spelling of the flag; the source that
+      // holds it decides, and it is untrusted.
       final StandardEnvironment environment =
           environmentWith(source("configserver:app", "macstab.chaos.Enabled", "true"));
       ConfigurationPropertySources.attach(environment);
@@ -98,6 +98,50 @@ class TrustedChaosEnablementTest {
       assertThat(environment.getProperty("macstab.chaos.enabled")).isEqualTo("true");
       assertThat(TrustedChaosEnablement.evaluate(environment))
           .isEqualTo(TrustedChaosEnablement.Decision.REJECTED_UNTRUSTED_SOURCE);
+    }
+
+    @Test
+    @DisplayName(
+        "an untrusted source cannot borrow a trusted source's trust through another spelling")
+    void relaxedSpellingCannotBorrowTrust() {
+      // getProperty answers from the remote source (first, relaxed spelling); the trusted source
+      // holding the exact name says false and must not vouch for the remote value.
+      final StandardEnvironment environment =
+          environmentWith(
+              source("configserver:app", "macstab.chaos.Enabled", "true"),
+              source("commandLineArgs", "macstab.chaos.enabled", "false"));
+      ConfigurationPropertySources.attach(environment);
+
+      assertThat(environment.getProperty("macstab.chaos.enabled")).isEqualTo("true");
+      assertThat(TrustedChaosEnablement.evaluate(environment))
+          .isEqualTo(TrustedChaosEnablement.Decision.REJECTED_UNTRUSTED_SOURCE);
+    }
+
+    @Test
+    @DisplayName("a trusted source is trusted under any spelling Spring resolves")
+    void trustedSourceUnderRelaxedSpelling() {
+      final StandardEnvironment environment =
+          environmentWith(source("commandLineArgs", "macstab.chaos.Enabled", "true"));
+      ConfigurationPropertySources.attach(environment);
+
+      assertThat(TrustedChaosEnablement.evaluate(environment))
+          .isEqualTo(TrustedChaosEnablement.Decision.ENABLED);
+    }
+
+    @Test
+    @DisplayName("an environment variable enables chaos under its upper-case name")
+    void environmentVariableSpelling() {
+      final StandardEnvironment environment = environmentWith();
+      environment
+          .getPropertySources()
+          .addFirst(
+              new org.springframework.core.env.SystemEnvironmentPropertySource(
+                  StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME,
+                  Map.of("MACSTAB_CHAOS_ENABLED", "true")));
+      ConfigurationPropertySources.attach(environment);
+
+      assertThat(TrustedChaosEnablement.evaluate(environment))
+          .isEqualTo(TrustedChaosEnablement.Decision.ENABLED);
     }
 
     @Test

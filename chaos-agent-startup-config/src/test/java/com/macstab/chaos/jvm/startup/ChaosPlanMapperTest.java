@@ -508,4 +508,14 @@ class ChaosPlanMapperTest {
     assertThat(failure.line()).isZero();
     assertThat(failure.column()).isZero();
   }
+
+  @Test
+  @DisplayName("the JSON literal null is not a plan")
+  void nullLiteralIsRejected() {
+    assertThatThrownBy(() -> ChaosPlanMapper.read("null"))
+        .isInstanceOf(ConfigLoadException.class)
+        .hasMessageContaining("chaos plan JSON is null");
+    assertThatThrownBy(() -> ChaosPlanMapper.read("  null  "))
+        .isInstanceOf(ConfigLoadException.class);
+  }
 }

@@ -110,6 +110,8 @@ Migration steps for each change: [docs/migration-2.0.md](docs/migration-2.0.md).
 
 ### Bug Fixes
 
+* **spring (security):** the trust check of `macstab.chaos.enabled` matched the property's exact name, while Spring resolves every relaxed spelling. An untrusted source (a config server) holding `macstab.chaos.Enabled=true` switched chaos on whenever a trusted source held `macstab.chaos.enabled`, even as `false`; a trusted source with another spelling was rejected. The winning source is now found the way Spring resolves the property, and its value and its trust are judged together.
+* **startup-config:** the plan JSON `null` was read as a null plan instead of being rejected; it now fails with `ConfigLoadException`.
 * **core:** `trickle` on a read no larger than its cap and `corruptRead` on a read of no bytes counted as applied without changing the call; they no longer apply there (law L14). `EffectReachesTheCallTest` checks every effect the validator accepts on every operation — 420 pairs — and fails one that counts without changing the call.
 * **core:** `dnsRewrite` counted `InetAddress.getLocalHost()` as applied, though that lookup names no host and nothing was rewritten; it no longer applies there.
 * **core:** `timeout()` on `SOCKET_CONNECT` did nothing: the plan was accepted and the scenario counted as applied, but the connect went through. It now waits out the connect timeout and throws `SocketTimeoutException("Connect timed out")`, like a peer that never answers; a connect without a timeout is left alone.
