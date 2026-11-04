@@ -445,10 +445,11 @@ class StressorEdgeBehaviourTest {
                 });
         stressor.close();
         assertThat(stressor.aliveCount()).isZero();
+        // close() interrupts the participants one after another: the first leaves its lock wait
+        // and logs; the next may take the lock it released before its own interrupt arrives and
+        // then leaves through the park loop without logging. At least one is interrupted.
         assertThat(log.messages())
-            .contains(
-                "chaos deadlock thread interrupted: chaos-deadlock-0",
-                "chaos deadlock thread interrupted: chaos-deadlock-1");
+            .anyMatch(message -> message.startsWith("chaos deadlock thread interrupted: "));
       } finally {
         stressor.close();
       }
