@@ -60,13 +60,6 @@ public final class TrustedChaosEnablement {
           "Dynamic Test Properties",
           "test");
 
-  /**
-   * Synthetic aggregator Spring Boot attaches before config data is processed. It forwards {@code
-   * containsProperty} to every real source beneath it, so it is skipped when looking for the source
-   * that owns a value.
-   */
-  private static final String CONFIGURATION_PROPERTIES_AGGREGATOR = "configurationProperties";
-
   private TrustedChaosEnablement() {}
 
   /** Outcome of evaluating the enablement flag against an environment. */
@@ -115,15 +108,12 @@ public final class TrustedChaosEnablement {
     final ConfigurationPropertyName name = ConfigurationPropertyName.of(propertyName);
     for (final ConfigurationPropertySource source :
         ConfigurationPropertySources.from(environment.getPropertySources())) {
-      if (!(source.getUnderlyingSource() instanceof PropertySource<?> underlying)
-          || CONFIGURATION_PROPERTIES_AGGREGATOR.equals(underlying.getName())) {
-        continue;
-      }
+      // from() adapts each PropertySource and skips the configurationProperties aggregator.
       final ConfigurationProperty property = source.getConfigurationProperty(name);
-      if (property == null || property.getValue() == null) {
+      if (property == null) {
         continue;
       }
-      final String sourceName = underlying.getName();
+      final String sourceName = ((PropertySource<?>) source.getUnderlyingSource()).getName();
       return new Winner(
           String.valueOf(property.getValue()),
           TRUSTED_SOURCE_NAMES.contains(sourceName)
