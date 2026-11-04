@@ -51,6 +51,7 @@ jobs:
         run: |
           bench=base/chaos-agent-benchmarks/build/install/chaos-agent-benchmarks/bin/chaos-agent-benchmarks
           if "$bench" -l | grep -q "$BENCHMARKS"; then
+            # shellcheck disable=SC2086 # both hold several words, one argument each
             "$bench" $BENCHMARKS $JMH_ARGS -rff "$PWD/base.json"
           else
             echo "base has no $BENCHMARKS yet; the gate will pass"
@@ -58,6 +59,7 @@ jobs:
 
       - name: Run candidate
         run: |
+          # shellcheck disable=SC2086 # both hold several words, one argument each
           candidate/chaos-agent-benchmarks/build/install/chaos-agent-benchmarks/bin/chaos-agent-benchmarks \
             $BENCHMARKS $JMH_ARGS -rff "$PWD/candidate.json"
 

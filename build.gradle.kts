@@ -252,6 +252,13 @@ subprojects {
             }
 
             repositories {
+                // Every publish also lands here, so the release workflow attests the very files it
+                // deployed (build provenance and the agent's SBOM).
+                maven {
+                    name = "Staging"
+                    url = uri(rootProject.layout.buildDirectory.dir("staging-deploy"))
+                }
+
                 val ghActor = System.getenv("GITHUB_ACTOR") ?: project.findProperty("gpr.user") as String?
                 val ghToken = System.getenv("GITHUB_TOKEN") ?: project.findProperty("gpr.token") as String?
 
