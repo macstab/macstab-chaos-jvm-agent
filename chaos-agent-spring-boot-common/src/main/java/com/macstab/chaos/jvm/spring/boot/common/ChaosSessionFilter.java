@@ -10,6 +10,7 @@ import jakarta.servlet.ServletResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import java.io.IOException;
 import java.util.function.Supplier;
+import org.jspecify.annotations.Nullable;
 import org.springframework.core.Ordered;
 
 /**
@@ -25,7 +26,7 @@ import org.springframework.core.Ordered;
  */
 public final class ChaosSessionFilter implements Filter, Ordered {
 
-  private final Supplier<ChaosControlPlane> controlPlane;
+  private final Supplier<@Nullable ChaosControlPlane> controlPlane;
 
   /**
    * Creates the filter.
@@ -33,7 +34,7 @@ public final class ChaosSessionFilter implements Filter, Ordered {
    * @param controlPlane supplies the installed control plane, or {@code null} when the agent is not
    *     installed
    */
-  public ChaosSessionFilter(final Supplier<ChaosControlPlane> controlPlane) {
+  public ChaosSessionFilter(final Supplier<@Nullable ChaosControlPlane> controlPlane) {
     this.controlPlane = controlPlane;
   }
 

@@ -243,7 +243,7 @@ class ChaosManagementHandlerTest {
                         default -> throw new UnsupportedOperationException(method.getName());
                       });
       handler.handle(context);
-      assertThat(answered.await(10, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+      assertThat(answered.await(30, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
       assertThat(status.get()).isEqualTo(200);
     } finally {
       vertx

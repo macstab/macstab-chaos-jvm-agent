@@ -39,3 +39,18 @@ tasks.jar {
         attributes["Automatic-Module-Name"] = "com.macstab.chaos.jvm.agent.spring.boot.common"
     }
 }
+
+// This module is the shared core of the Spring Boot 3 and 4 starters and is exercised through
+// them: their tests run its classes (the same class files, unshaded), so its coverage counts what
+// they execute as well as its own tests.
+val starterTests =
+    listOf(
+        ":chaos-agent-spring-boot3-starter",
+        ":chaos-agent-spring-boot4-starter",
+        ":chaos-agent-spring-boot3-test-starter",
+        ":chaos-agent-spring-boot4-test-starter",
+    )
+tasks.withType<JacocoReportBase>().configureEach {
+    dependsOn(starterTests.map { "$it:test" })
+    executionData(starterTests.map { project(it).layout.buildDirectory.file("jacoco/test.exec") })
+}

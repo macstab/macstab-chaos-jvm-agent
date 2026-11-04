@@ -109,4 +109,98 @@ class ChaosManagementTest {
     assertThat(management.handle("GET", "/x", null).status()).isEqualTo(404);
     assertThat(management.handle("POST", "/x", PLAN).status()).isEqualTo(404);
   }
+
+  @Test
+  @DisplayName("a plan the runtime cannot run is invalid (400), with the runtime's reason")
+  void semanticallyInvalidPlans() {
+    final ChaosManagement.ActivationResponse unsupported =
+        management.activate(
+            PLAN.replace(
+                "{\"type\":\"delay\",\"minDelay\":\"PT0.001S\",\"maxDelay\":\"PT0.001S\"}",
+                "{\"type\":\"tornWrite\"}"));
+    assertThat(unsupported.status()).isEqualTo("invalid");
+    assertThat(unsupported.message()).startsWith("invalid plan").contains("TornWriteEffect");
+
+    final ChaosManagement.ActivationResponse sessionScoped =
+        management.activate(PLAN.replace("\"scope\":\"JVM\"", "\"scope\":\"SESSION\""));
+    assertThat(sessionScoped.status()).as("not a conflict").isEqualTo("invalid");
+    assertThat(sessionScoped.message()).contains("session");
+    assertThat(management.handle("POST", "", PLAN.replace("JVM", "SESSION")).status())
+        .isEqualTo(400);
+  }
+
+  @Test
+  @DisplayName("any other activation failure is rejected (422); a stale handle is replaced")
+  void otherFailuresAndReplacement() {
+    final java.util.concurrent.atomic.AtomicInteger activations =
+        new java.util.concurrent.atomic.AtomicInteger();
+    final java.util.concurrent.atomic.AtomicInteger closed =
+        new java.util.concurrent.atomic.AtomicInteger();
+    final com.macstab.chaos.jvm.api.ChaosControlPlane scripted =
+        (com.macstab.chaos.jvm.api.ChaosControlPlane)
+            java.lang.reflect.Proxy.newProxyInstance(
+                getClass().getClassLoader(),
+                new Class<?>[] {com.macstab.chaos.jvm.api.ChaosControlPlane.class},
+                (proxy, method, args) -> {
+                  if (!method.getName().equals("activate")) {
+                    return method.isDefault()
+                        ? java.lang.reflect.InvocationHandler.invokeDefault(proxy, method, args)
+                        : null;
+                  }
+                  if (activations.incrementAndGet() == 1) {
+                    throw new IllegalStateException("agent busy");
+                  }
+                  return handle("plan:mgmt", closed);
+                });
+    final ChaosManagement scriptedManagement = new ChaosManagement(scripted);
+
+    final ChaosManagement.ActivationResponse busy = scriptedManagement.activate(PLAN);
+    assertThat(busy.status()).isEqualTo("rejected");
+    assertThat(busy.message()).isEqualTo("plan rejected: agent busy");
+    assertThat(scriptedManagement.handle("PATCH", null, null).status()).isEqualTo(405);
+    assertThat(scriptedManagement.handle(null, null, null).status()).isEqualTo(405);
+
+    scriptedManagement.activate(PLAN);
+    scriptedManagement.activate(PLAN);
+    assertThat(closed).as("the handle it replaced is closed").hasValue(1);
+  }
+
+  private static com.macstab.chaos.jvm.api.ChaosActivationHandle handle(
+      final String id, final java.util.concurrent.atomic.AtomicInteger closed) {
+    return new com.macstab.chaos.jvm.api.ChaosActivationHandle() {
+      @Override
+      public String id() {
+        return id;
+      }
+
+      @Override
+      public void start() {}
+
+      @Override
+      public void stop() {}
+
+      @Override
+      public void release() {}
+
+      @Override
+      public ChaosDiagnostics.ScenarioState state() {
+        return ChaosDiagnostics.ScenarioState.ACTIVE;
+      }
+
+      @Override
+      public long matchedCount() {
+        return 0;
+      }
+
+      @Override
+      public long appliedCount() {
+        return 0;
+      }
+
+      @Override
+      public void close() {
+        closed.incrementAndGet();
+      }
+    };
+  }
 }

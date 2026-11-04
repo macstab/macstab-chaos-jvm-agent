@@ -70,23 +70,23 @@ val inlinedAdvice =
 // little below the measured value and raised as tests are added, never lowered to make a change
 // pass. The agent modules count what their unit tests and the child JVMs executed (agentModules).
 val coverageFloors = mapOf(
-    "chaos-agent-api" to (0.81 to 0.73),
-    "chaos-agent-bootstrap" to (0.79 to 0.64),
-    "chaos-agent-core" to (0.83 to 0.75),
-    "chaos-agent-instrumentation-jdk" to (0.81 to 0.59),
+    "chaos-agent-api" to (0.81 to 0.77),
+    "chaos-agent-bootstrap" to (0.85 to 0.71),
+    "chaos-agent-core" to (0.85 to 0.77),
+    "chaos-agent-instrumentation-jdk" to (0.85 to 0.71),
     "chaos-agent-micrometer" to (0.89 to 0.60),
     "chaos-agent-opentelemetry" to (0.85 to 0.60),
     "chaos-agent-micronaut-integration" to (0.85 to 0.70),
-    "chaos-agent-quarkus-extension" to (0.70 to 0.60),
+    "chaos-agent-quarkus-extension" to (0.80 to 0.68),
     "chaos-agent-quarkus-extension-deployment" to (0.38 to 0.0),
     "chaos-agent-quarkus-management" to (0.80 to 0.60),
     "chaos-agent-quarkus-management-deployment" to (0.80 to 0.0),
-    "chaos-agent-spring-boot-common" to (0.60 to 0.50),
+    "chaos-agent-spring-boot-common" to (0.91 to 0.84),
     "chaos-agent-spring-boot3-starter" to (0.68 to 0.73),
     "chaos-agent-spring-boot3-test-starter" to (0.84 to 0.53),
     "chaos-agent-spring-boot4-starter" to (0.68 to 0.73),
     "chaos-agent-spring-boot4-test-starter" to (0.84 to 0.53),
-    "chaos-agent-startup-config" to (0.81 to 0.66),
+    "chaos-agent-startup-config" to (0.82 to 0.69),
     "chaos-agent-testkit" to (0.84 to 0.79),
 )
 
