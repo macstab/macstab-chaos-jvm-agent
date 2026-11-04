@@ -380,7 +380,7 @@ Not diagrammed — tabular representation is clearer. See [Section 13.4 — Comp
 
 **Responsibility:** Provide a reusable, cached, pattern-matched string predicate for class names, method names, hostnames, URLs, thread names, and any other string-valued attribute in a selector.
 
-**Performance:** GLOB and REGEX patterns are compiled once on `NamePattern` construction and cached in JVM-wide `ConcurrentHashMap`s (capacity 1024 each). Hot-path `matches()` calls do not recompile. GLOB matching does not use the regex for ordinary candidates: an allocation-free wildcard matcher gives identical results (candidates containing line terminators or surrogate characters still go through the compiled regex). REGEX matching allocates one `Matcher` per call. The cache is non-evicting once at capacity (inserts are skipped, not evicted) to preserve correctness under concurrent access.
+**Performance:** a GLOB is matched directly by code points, without a regex and without allocating: `*` matches any sequence (line terminators included), `?` exactly one code point (a surrogate pair is one character), every other character itself. REGEX patterns are compiled once on `NamePattern` construction and cached in a JVM-wide `ConcurrentHashMap` (capacity 1024); hot-path `matches()` calls do not recompile, and each allocates one `Matcher`. The cache is non-evicting once at capacity (inserts are skipped, not evicted) to preserve correctness under concurrent access.
 
 **Safety:** Pattern strings are capped at 4096 characters to mitigate ReDoS risk (Java regex is a backtracking NFA). Patterns are compiled eagerly at construction; syntax errors surface at plan-build time, not at first dispatch.
 
@@ -415,8 +415,8 @@ ChaosScenario {
   id               : String         // non-blank; unique within a plan and within the active registry
   description      : String         // optional; normalised to "" if null
   scope            : ScenarioScope  // JVM (default) or SESSION
-  selector         : ChaosSelector  // required; one of the 19 selector types
-  effect           : ChaosEffect    // required; one of the 24 effect types
+  selector         : ChaosSelector  // required; one of the 25 selector types
+  effect           : ChaosEffect    // required; one of the 33 effect types
   activationPolicy : ActivationPolicy // defaults to ActivationPolicy.always() if null
   precedence       : int            // default 0; higher wins terminal-effect conflicts
   tags             : Map<String,String> // optional metadata; preserved in insertion order
@@ -502,7 +502,7 @@ NamePattern {
 | `ANY`    | Always true                                           | true             | O(1)                         |
 | `EXACT`  | `candidate.equals(value)`                             | false            | O(n) string equals           |
 | `PREFIX` | `candidate.startsWith(value)`                         | false            | O(k) where k = prefix length |
-| `GLOB`   | `*` = any sequence, `?` = one char                    | false            | O(m) wildcard, no alloc      |
+| `GLOB`   | `*` = any sequence, `?` = one code point              | false            | O(n·m) worst, no alloc       |
 | `REGEX`  | Full `java.util.regex.Pattern` match (anchored `^…$`) | false            | O(m) regex match             |
 
 ---
@@ -628,7 +628,7 @@ The evaluation path for each instrumented operation call has the following cost 
 
 ## 11.2 NamePattern Cache
 
-GLOB and REGEX patterns are compiled once per unique expression string and cached. Cache capacity is 1024 entries per mode. Plans that generate distinct patterns dynamically at test time (anti-pattern) will miss the cache after 1024 unique expressions and pay `Pattern.compile` cost repeatedly.
+REGEX patterns are compiled once per unique expression string and cached (GLOB patterns need no compilation). Cache capacity is 1024 entries. Plans that generate distinct regexes dynamically at test time (anti-pattern) will miss the cache after 1024 unique expressions and pay `Pattern.compile` cost repeatedly.
 
 ## 11.3 Stressor Memory Impact
 

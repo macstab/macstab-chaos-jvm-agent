@@ -34,7 +34,7 @@ Principal+ Engineer · [Macstab GmbH](https://macstab.com) · Hamburg, Germany
 |            **JVM bytecode** *(this repo)*            | [**Container orchestration**](https://github.com/macstab/chaos-testing) | [**LD_PRELOAD libc**](https://github.com/macstab/macstab-chaos-testing-libraries) |
 |:----------------------------------------------------:|:-----------------------------------------------------------------------:|:---------------------------------------------------------------------------------:|
 |        In-process chaos for JVM applications         |         Annotation-driven Testcontainers chaos for any service          |               Pure C99 syscall-level chaos for any Linux container                |
-| 62 JDK call sites · Spring 3/4 · Micronaut · Quarkus |        Network · disk · DNS · CPU · memory · pre-built scenarios        |                glibc + musl × amd64 + arm64 · 100 % line coverage                 |
+| 91 operation types · Spring 3/4 · Micronaut · Quarkus |        Network · disk · DNS · CPU · memory · pre-built scenarios        |                glibc + musl × amd64 + arm64 · 100 % line coverage                 |
 
 **One mental model — three layers.** Same selector × effect × policy DSL spans the JVM, the container, and the libc layer. Each layer ships and runs independently; combine them when you need full distributed-system chaos coverage.
 
@@ -67,9 +67,29 @@ void retryLogicSurvivesReplicationLag(ChaosControlPlane chaos) {
 }
 ```
 
-No sidecar. No mocks. No application code changes. The bytecode of `java.net.Socket` reads is rewritten the moment a scenario needs it; chaos applies surgically inside the JVM that's already running your production code paths. **62 JDK call sites** auto-wired across DNS, SSL, JDBC, HTTP, NIO, sockets, virtual threads, monitors, scheduler, GC, class loading, file I/O, ThreadLocal, JNDI, JMX, serialization, native libraries, queues, executors, async completion, and more. One annotation. Zero `--add-opens` flags. The agent self-grants every JDK module open it needs at install time.
+No sidecar. No mocks. No application code changes. The bytecode of `java.net.Socket` reads is rewritten the moment a scenario needs it; chaos applies surgically inside the JVM that's already running your production code paths. **91 operation types** auto-wired across DNS, SSL, JDBC, HTTP, NIO, sockets, virtual threads, monitors, scheduler, GC, class loading, file I/O, ThreadLocal, JNDI, JMX, serialization, native libraries, queues, executors, async completion, and more. One annotation. Zero `--add-opens` flags. The agent self-grants every JDK module open it needs at install time.
 
 Works in JUnit 5 with **Spring Boot 3, Spring Boot 4, Micronaut, and Quarkus** out of the box.
+
+### Why you can trust it
+
+A chaos tool that is wrong about its own behaviour is worse than none. Every claim below is enforced by the build — break it, and `./gradlew build` fails:
+
+| Guarantee | Enforced by |
+|-----------|-------------|
+| The faults are the JDK's own: real exceptions, messages, short writes and resets, raised inside the real call | child-JVM integration tests against the real JDK, on JDK 21 and 25 ([ADR 0005](docs/adr/0005-real-faults.md)) |
+| Every rule of evaluation is a numbered law with a test | `SemanticsLawTraceabilityTest` — a law without a `@Tag("law-L<n>")` test fails the build ([semantics](docs/semantics.md)) |
+| The plan format is one definition: the parser, its JSON Schema and the docs agree | `PlanSchemaTest` generates the schema from the parser; every JSON example in the docs is parsed |
+| The parser and validator never crash or hang, whatever the input | `PlanFuzzTest`: mutated examples and schema-generated plans, seeded and replayable, nightly with a fresh seed |
+| The public API cannot change by accident | `apiCheck` against the committed JVM signatures in `api/*.api` |
+| Reference tables are the code's: 91 operation types, 25 selector types, 33 effect types, 77 bridge entry points | generated from or checked against the code (`CompatibilityMatrixDocTest`, `ReferenceTablesSyncTest`, `HandleTableDocTest`) |
+| The architecture holds: the bootstrap bridge is closed, inlined advice uses only public members | `ArchitectureTest` |
+| No known bug patterns in any line that compiles | Error Prone on every compilation, warnings as errors |
+| The tests catch real bugs, not just run code | mutation testing (`./gradlew pitest`) with ratcheted thresholds; coverage floors that count the child JVMs |
+| An idle hook costs about 7 ns and allocates nothing | JMH benchmarks with a regression gate in CI ([benchmarks](docs/benchmarks.md)) |
+| What ships is what you can verify | reproducible jars (`scripts/check-reproducible.sh`), a CycloneDX SBOM per module, shaded dependencies listed |
+
+The decisions behind the design are recorded as [architecture decision records](docs/adr/README.md).
 
 ### What questions does it answer?
 
@@ -92,7 +112,7 @@ Every one of those becomes a `@ChaosTest` method that runs on every PR. No game 
 
 | Layer                        | Repo                                                                                                    | What it covers                                                                                                                                                                                                                                                                                                                |
 |------------------------------|---------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **JVM bytecode** (this repo) | [`macstab/macstab-chaos-jvm-agent`](https://github.com/macstab/macstab-chaos-jvm-agent)                 | 62 JDK call sites instrumented in-process. Spring Boot 3/4 + Micronaut + Quarkus integration. JUnit 5 `@ChaosTest`. Selector × effect × policy DSL. Live config reload.                                                                                                                                                       |
+| **JVM bytecode** (this repo) | [`macstab/macstab-chaos-jvm-agent`](https://github.com/macstab/macstab-chaos-jvm-agent)                 | 91 operation types instrumented in-process. Spring Boot 3/4 + Micronaut + Quarkus integration. JUnit 5 `@ChaosTest`. Selector × effect × policy DSL. Live config reload.                                                                                                                                                       |
 | **Container orchestration**  | [`macstab/chaos-testing`](https://github.com/macstab/chaos-testing)                                     | Annotation-driven chaos on top of Testcontainers. CPU throttling, memory pressure, disk I/O, network partitions, DNS failures, pre-built Redis Sentinel + replication-lag scenarios, Toxiproxy adapter, Redis-aware fault injection.                                                                                          |
 | **LD_PRELOAD libc**          | [`macstab/macstab-chaos-testing-libraries`](https://github.com/macstab/macstab-chaos-testing-libraries) | Pure C99 LD_PRELOAD shared objects: file I/O (latency / `errno` / torn / corrupt), network (reset / trickle / duplicate / timeout), DNS, clock (offset / regress), process, memory. Rule qualifiers `@first`, `@from`/`@until`, `@size`; status and hits files. A SECCOMP supervisor (`chaos-init`) reaches static binaries and Go programs that bypass libc. **glibc + musl × amd64 + arm64**, 100 % line coverage on shipped sources. Language-agnostic: any process in any container. |
 

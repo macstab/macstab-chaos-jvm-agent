@@ -108,6 +108,46 @@ class ReferenceTablesSyncTest {
     assertThat(codeNames(section(spec, "## 6. Effect types"))).isEqualTo(EFFECTS);
   }
 
+  @Test
+  @DisplayName("every count of operation, selector and effect types in the docs is the code's")
+  void statedCounts() throws IOException {
+    final Map<String, Integer> actual =
+        Map.of(
+            "operation",
+            (int)
+                java.util.Arrays.stream(com.macstab.chaos.jvm.api.OperationType.values())
+                    .filter(type -> type != com.macstab.chaos.jvm.api.OperationType.LIFECYCLE)
+                    .count(),
+            "selector",
+            SELECTORS.size(),
+            "effect",
+            EFFECTS.size());
+    final Pattern count = Pattern.compile("(?<!Phase )\\b(\\d+) (operation|selector|effect) types");
+    final java.util.List<String> wrong = new java.util.ArrayList<>();
+    int found = 0;
+    final java.util.List<Path> documents = new java.util.ArrayList<>();
+    documents.add(root.resolve("README.md"));
+    try (var docs = Files.list(root.resolve("docs"))) {
+      docs.filter(path -> path.toString().endsWith(".md")).sorted().forEach(documents::add);
+    }
+    for (final Path document : documents) {
+      final Matcher claim = count.matcher(Files.readString(document));
+      while (claim.find()) {
+        found++;
+        if (Integer.parseInt(claim.group(1)) != actual.get(claim.group(2))) {
+          wrong.add(
+              root.relativize(document)
+                  + ": "
+                  + claim.group()
+                  + ", not "
+                  + actual.get(claim.group(2)));
+        }
+      }
+    }
+    assertThat(found).as("counts stated in the docs").isPositive();
+    assertThat(wrong).isEmpty();
+  }
+
   /**
    * The operations the reference documents for a selector: the {@code **Operations:**} line of its
    * {@code ### `name`} section, or its row of the client-library table; {@code null} if neither.
