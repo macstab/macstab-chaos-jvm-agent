@@ -43,11 +43,9 @@ final class GcPressureStressor implements ManagedStressor {
     // a negative long; the outer Math.max(1L, …) then silently collapses to 1 byte/batch, leaving
     // the stressor nominally ACTIVE while producing no GC pressure. Clamping instead behaves as
     // if the caller had set the maximum representable rate.
-    final long rate = effect.allocationRateBytesPerSecond();
-    final long saturatedRate = Math.min(rate, Long.MAX_VALUE / BATCH_INTERVAL_MS);
-    final long batchSizeBytes = Math.max(1L, saturatedRate * BATCH_INTERVAL_MS / 1000L);
     final int objectSizeBytes = effect.objectSizeBytes();
-    final int objectsPerBatch = (int) Math.max(1L, batchSizeBytes / objectSizeBytes);
+    final int objectsPerBatch =
+        objectsPerBatch(effect.allocationRateBytesPerSecond(), objectSizeBytes);
     final long durationMillis = effect.duration().toMillis();
     final boolean promote = effect.promoteToOldGen();
 
@@ -57,6 +55,18 @@ final class GcPressureStressor implements ManagedStressor {
             "chaos-gc-pressure");
     allocationThread.setDaemon(true);
     allocationThread.start();
+  }
+
+  /**
+   * The objects allocated per batch for a rate and an object size: at least one, and at most {@link
+   * Integer#MAX_VALUE}. Without the upper clamp a large rate of small objects wrapped to a negative
+   * count, and the stressor allocated nothing while it reported itself running.
+   */
+  static int objectsPerBatch(final long allocationRateBytesPerSecond, final int objectSizeBytes) {
+    final long saturatedRate =
+        Math.min(allocationRateBytesPerSecond, Long.MAX_VALUE / BATCH_INTERVAL_MS);
+    final long batchSizeBytes = Math.max(1L, saturatedRate * BATCH_INTERVAL_MS / 1000L);
+    return (int) Math.min(Integer.MAX_VALUE, Math.max(1L, batchSizeBytes / objectSizeBytes));
   }
 
   /**
