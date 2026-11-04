@@ -678,7 +678,7 @@ HTTP --> Op: 200 OK\n{"status":"activated","handleId":"plan:<name>","message":nu
 note over Registry
   ScenarioController is now ACTIVE.
   Every subsequent instrumented JDK call
-  on any thread runs through the 8-check
+  on any thread runs through the 9-step
   evaluation pipeline against this scenario.
 end note
 @enduml

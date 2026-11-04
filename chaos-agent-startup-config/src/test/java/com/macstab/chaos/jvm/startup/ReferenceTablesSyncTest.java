@@ -148,6 +148,40 @@ class ReferenceTablesSyncTest {
     assertThat(wrong).isEmpty();
   }
 
+  @Test
+  @DisplayName(
+      "every count of the evaluation pipeline's steps in the docs is the semantics table's")
+  void statedPipelineSteps() throws IOException {
+    final String policy =
+        section(
+            Files.readString(root.resolve("docs/semantics.md")),
+            "## 3. The policy of one scenario");
+    final int steps =
+        (int) policy.lines().filter(line -> line.matches("\\|\\s*\\d+\\s*\\|.*")).count();
+    assertThat(steps).as("steps in semantics.md §3").isPositive();
+    final Pattern count =
+        Pattern.compile(
+            "\\b(\\d+)(?:-(?:step|check|gate)| (?:steps|checks|gates)\\b)(?=[^.\\n]*pipeline|\\s*pass)");
+    final java.util.List<String> wrong = new java.util.ArrayList<>();
+    int found = 0;
+    final java.util.List<Path> documents = new java.util.ArrayList<>();
+    documents.add(root.resolve("README.md"));
+    try (var docs = Files.list(root.resolve("docs"))) {
+      docs.filter(path -> path.toString().endsWith(".md")).sorted().forEach(documents::add);
+    }
+    for (final Path document : documents) {
+      final Matcher claim = count.matcher(Files.readString(document));
+      while (claim.find()) {
+        found++;
+        if (Integer.parseInt(claim.group(1)) != steps) {
+          wrong.add(root.relativize(document) + ": " + claim.group() + ", not " + steps);
+        }
+      }
+    }
+    assertThat(found).as("step counts stated in the docs").isPositive();
+    assertThat(wrong).isEmpty();
+  }
+
   /**
    * The operations the reference documents for a selector: the {@code **Operations:**} line of its
    * {@code ### `name`} section, or its row of the client-library table; {@code null} if neither.

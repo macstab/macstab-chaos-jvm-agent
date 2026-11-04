@@ -27,7 +27,7 @@ In scope:
 - `ChaosRuntime` — thin facade that composes the control-plane and dispatch halves. Implements `ChaosControlPlane` by delegation. Exists as a single entry point so downstream modules (`chaos-agent-bootstrap`, `chaos-agent-instrumentation-jdk`, testkit, benchmarks) bind to one type.
 - `ChaosControlPlaneImpl` (package-private) — actual control-plane implementation. Owns scenario registration, session lifecycle, diagnostics, event listeners, instrumentation handle, shutdown-hook tracking.
 - `ChaosDispatcher` (package-private) — hot-path half. Owns the `before*` / `after*` / `adjust*` / `decorate*` interception methods invoked from `BootstrapDispatcher`.
-- `ScenarioController` — per-scenario runtime guard with 8-check evaluation pipeline
+- `ScenarioController` — per-scenario runtime guard with the 9-step evaluation pipeline
 - `ScenarioRegistry` — thread-safe store of controllers plus an immutable `OperationType` → controllers index used by `match()`; implements `ChaosDiagnostics`
 - `SelectorMatcher` — stateless invocation-context matcher
 - `InvocationContext` — value object capturing per-call data
@@ -75,7 +75,7 @@ Out of scope:
 | Term                     | Definition                                                                                                                                                                                                     |
 |--------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | **InvocationContext**    | Immutable record built at each instrumentation point: operation type, class names, target name, periodic flag, daemon/virtual thread flags, session ID.                                                        |
-| **ScenarioContribution** | The value returned by `ScenarioController.evaluate()` when all 8 checks pass: carries the controller, effect, sampled delay, and gate timeout.                                                                 |
+| **ScenarioContribution** | The value returned by `ScenarioController.evaluate()` when all 9 checks pass: carries the controller, effect, sampled delay, and gate timeout.                                                                 |
 | **RuntimeDecision**      | Merged output of all matching contributions: accumulated delay, last gate action, highest-precedence terminal action.                                                                                          |
 | **TerminalAction**       | The final action to execute: THROW, RETURN (with value), SUPPRESS, COMPLETE_EXCEPTIONALLY, or CORRUPT_RETURN.                                                                                                  |
 | **TerminalKind**         | Enum discriminating TerminalAction variants.                                                                                                                                                                   |
@@ -157,7 +157,7 @@ The entry points the instrumentation layer calls (`before*`, `after*`, `adjust*`
 
 ## Per-Invocation Evaluation
 
-`ScenarioController.evaluate(InvocationContext context)` runs 8 checks:
+`ScenarioController.evaluate(InvocationContext context)` runs 9 checks, in the order of [semantics.md §3](semantics.md#3-the-policy-of-one-scenario):
 
 ```
 1. if (!started.get()) return null
@@ -172,24 +172,27 @@ The entry points the instrumentation layer calls (`before*`, `after*`, `adjust*`
    — Exhaustive sealed switch; stateless; no allocation
    — Checks: operationType in selector.operations(), pattern fields
 
-4. long matched = matchedCount.incrementAndGet()
-   if (!passesActivationWindow()) { state=INACTIVE; reason="expired"; return null }
-   — matchedCount increments even if window check fails
-   — This ensures warm-up counter advances even when the window is expired
+4. if (window() == EXPIRED) { state=INACTIVE; reason="expired"; return null }
+   — activeUntil / activeFor, read from the real clock (L7)
 
-5. if (matched <= activateAfterMatches) return null
-   — Warm-up: skip first N matches
+5. if (window() == NOT_YET) return skipped("notYetActive")
+   — before activeFrom: not counted as a match
 
-6. if (!passesProbability(matched)) return null
-   — new SplittableRandom(baseSeed ^ matched ^ id.hashCode()).nextDouble() < probability
+6. long matched = matchedCount.incrementAndGet()
+   if (matched <= activateAfterMatches) return skipped("warmUp")
+   — every call from here on counts as a match
+
+7. if (!passesProbability(matched)) return skipped("probability")
+   — new SplittableRandom(baseSeed ^ rotl(matched, 32) ^ id.hashCode() * φ).nextDouble() < probability
+   — or, with replayMatches, membership of matched in the replay log
    — checked before the rate limit so permits are only consumed by calls that will apply
 
-7. if (!passesRateLimit()) return null
+8. if (!passesRateLimit()) return skipped("rateLimit")
    — synchronized(this): FIXED window anchored at start(), advanced in whole windows, O(1)
 
-8. if (!reserveApplication()) return null
+9. if (!reserveApplication()) return skipped("maxApplications")
    — maxApplications budget: a reservation, not yet a count
-   — if appliedCount >= maxApplications: state=INACTIVE; reason="max applications reached"
+   — once appliedCount reaches maxApplications: state=INACTIVE; reason="max applications reached"
 
 return new ScenarioContribution(this, scenario, effect, sampleDelayMillis(matched), gateTimeout(), context)
 
@@ -199,7 +202,7 @@ return new ScenarioContribution(this, scenario, effect, sampleDelayMillis(matche
 //   releaseApplication()        — for contributions that lost on precedence: budget returned
 ```
 
-**Note on matchedCount semantics**: `matchedCount` is incremented at step 4, before warm-up, probability and rate-limit checks. This means it reflects the total number of times the selector matched, not the number of times the effect was applied. This is intentional: diagnostics consumers can distinguish "the selector is working" from "the effect is being suppressed by policy."
+**Note on matchedCount semantics**: `matchedCount` is incremented at step 6, after the activation window and before warm-up, probability and rate-limit checks. This means it reflects the total number of times the selector matched, not the number of times the effect was applied. This is intentional: diagnostics consumers can distinguish "the selector is working" from "the effect is being suppressed by policy."
 
 ## RuntimeDecision Merge
 

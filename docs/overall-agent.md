@@ -300,7 +300,7 @@ CB -> CR: decorateExecutorRunnable(op, executor, task)
 CR -> CR: build InvocationContext
 CR -> SR: match(context)
 SR -> SC: evaluate(context) [for each controller]
-SC -> SC: 8-check pipeline
+SC -> SC: 9-step pipeline
 SC --> SR: ScenarioContribution or null
 SR --> CR: List<ScenarioContribution>
 CR -> CR: merge → RuntimeDecision
@@ -416,7 +416,7 @@ node "JVM Process" {
 
 ## ScenarioController (`chaos-agent-core`)
 
-**Responsibility**: Per-scenario runtime guard. Evaluates an 8-check pipeline for every `InvocationContext` and either returns a `ScenarioContribution` or `null`.
+**Responsibility**: Per-scenario runtime guard. Evaluates a 9-step pipeline for every `InvocationContext` and either returns a `ScenarioContribution` or `null`.
 
 **Evaluation pipeline** (all checks short-circuit on failure):
 1. `started.get()` — `AtomicBoolean`, lock-free
