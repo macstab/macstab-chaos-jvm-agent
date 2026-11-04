@@ -1,0 +1,19 @@
+version: 2
+updates:
+  # Gradle dependencies: the version catalog and the plugins. Grouped per week so the build, which
+  # pins every integration by its version, is re-run once against the whole set.
+  - package-ecosystem: gradle
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      gradle:
+        patterns: ["*"]
+    open-pull-requests-limit: 5
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]

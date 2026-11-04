@@ -1,0 +1,36 @@
+name: CodeQL
+
+# Static security analysis of the agent's Java code. The agent runs inside other applications'
+# JVMs with the rights of the JVM, so injection, deserialisation and path issues matter more here
+# than in an ordinary library.
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  schedule:
+    - cron: '41 4 * * 1'
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '25'
+          cache: 'gradle'
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: java-kotlin
+          build-mode: manual
+          queries: security-and-quality
+      - name: Compile
+        run: ./gradlew compileJava --no-daemon --no-build-cache
+      - uses: github/codeql-action/analyze@v3

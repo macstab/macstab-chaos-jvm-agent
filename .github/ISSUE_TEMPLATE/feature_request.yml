@@ -1,0 +1,16 @@
+name: Feature request
+description: A fault, an operation or an integration the agent does not offer yet.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: failure
+    attributes:
+      label: The failure to reproduce
+      description: The production failure this would let you test, and the JDK or library call it happens in.
+    validations:
+      required: true
+  - type: textarea
+    id: shape
+    attributes:
+      label: How you would write it
+      description: The selector, effect and policy you would expect (plan JSON or Java), or the native library rule it mirrors.
