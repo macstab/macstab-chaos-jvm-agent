@@ -35,6 +35,7 @@ Tests for the instrumentation and bootstrap modules start a real agent (self-att
 | NullAway | every reference is non-null unless `@Nullable` (JSpecify) says otherwise, proven per dereference, inside generic type arguments too (JSpecify mode) | annotate what may be absent; state an invariant with `Objects.requireNonNull` and its reason |
 | `PlanFuzzTest` | the parser and validator never crash or hang | replay a failure with `-PfuzzSeed=<seed> -PfuzzIterations=<n>` |
 | JaCoCo floors | line and branch coverage per module, child JVMs included | raise the floor in `build.gradle.kts`, never lower it |
+| Coverage per file | every source file 100 % of its lines, or listed in `config/coverage-exceptions.txt` with a minimum, a kind (`unreachable`, `platform`, `race`) and the reason | cover the new lines; list a file only for lines no test can reach, and remove its entry once covered |
 
 Not part of `build`, run before a change to evaluation or validation code:
 

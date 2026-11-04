@@ -90,7 +90,8 @@ A chaos tool that is wrong about its own behaviour is worse than none. Every cla
 | The architecture holds: the bootstrap bridge is closed, inlined advice uses only public members | `ArchitectureTest` |
 | No known bug patterns in any line that compiles | Error Prone on every compilation, warnings as errors |
 | No unchecked null in production code | NullAway proves every dereference; optional values are `@Nullable` in the types ([ADR 0008](docs/adr/0008-nullness-in-the-types.md)) |
-| The tests catch real bugs, not just run code | mutation testing (`./gradlew pitest`) with ratcheted thresholds; coverage floors that count the child JVMs |
+| The tests catch real bugs, not just run code | mutation testing (`./gradlew pitest`) with ratcheted thresholds |
+| Every line is run by a test, or says why it cannot be | every source file 100 % of its lines (child JVMs counted), except those in [`config/coverage-exceptions.txt`](config/coverage-exceptions.txt), each with its minimum and the reason; 97 % of all lines |
 | An idle hook costs 7–12 ns and allocates nothing | JMH benchmarks with a regression gate in CI ([benchmarks](docs/benchmarks.md)) |
 | What ships is what you can verify | reproducible jars (`scripts/check-reproducible.sh`), a CycloneDX SBOM published next to every jar (classifier `cyclonedx`), shaded dependencies listed |
 

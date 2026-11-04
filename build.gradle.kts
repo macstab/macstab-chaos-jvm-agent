@@ -70,24 +70,24 @@ val inlinedAdvice =
 // little below the measured value and raised as tests are added, never lowered to make a change
 // pass. The agent modules count what their unit tests and the child JVMs executed (agentModules).
 val coverageFloors = mapOf(
-    "chaos-agent-api" to (0.81 to 0.77),
-    "chaos-agent-bootstrap" to (0.85 to 0.71),
-    "chaos-agent-core" to (0.85 to 0.77),
-    "chaos-agent-instrumentation-jdk" to (0.85 to 0.71),
-    "chaos-agent-micrometer" to (0.89 to 0.60),
-    "chaos-agent-opentelemetry" to (0.97 to 0.84),
-    "chaos-agent-micronaut-integration" to (0.85 to 0.70),
-    "chaos-agent-quarkus-extension" to (0.80 to 0.68),
-    "chaos-agent-quarkus-extension-deployment" to (0.95 to 0.0),
-    "chaos-agent-quarkus-management" to (0.80 to 0.60),
-    "chaos-agent-quarkus-management-deployment" to (0.80 to 0.0),
-    "chaos-agent-spring-boot-common" to (0.91 to 0.84),
-    "chaos-agent-spring-boot3-starter" to (0.83 to 0.95),
-    "chaos-agent-spring-boot3-test-starter" to (0.94 to 0.92),
-    "chaos-agent-spring-boot4-starter" to (0.83 to 0.95),
-    "chaos-agent-spring-boot4-test-starter" to (0.94 to 0.92),
-    "chaos-agent-startup-config" to (0.82 to 0.69),
-    "chaos-agent-testkit" to (0.84 to 0.79),
+    "chaos-agent-api" to (0.99 to 0.99),
+    "chaos-agent-bootstrap" to (0.96 to 0.96),
+    "chaos-agent-core" to (0.96 to 0.94),
+    "chaos-agent-instrumentation-jdk" to (0.93 to 0.97),
+    "chaos-agent-micrometer" to (0.99 to 0.99),
+    "chaos-agent-opentelemetry" to (0.99 to 0.99),
+    "chaos-agent-micronaut-integration" to (0.96 to 0.96),
+    "chaos-agent-quarkus-extension" to (0.92 to 0.91),
+    "chaos-agent-quarkus-extension-deployment" to (0.99 to 0.00),
+    "chaos-agent-quarkus-management" to (0.99 to 0.94),
+    "chaos-agent-quarkus-management-deployment" to (0.99 to 0.00),
+    "chaos-agent-spring-boot-common" to (0.98 to 0.96),
+    "chaos-agent-spring-boot3-starter" to (0.84 to 0.99),
+    "chaos-agent-spring-boot3-test-starter" to (0.99 to 0.99),
+    "chaos-agent-spring-boot4-starter" to (0.84 to 0.99),
+    "chaos-agent-spring-boot4-test-starter" to (0.99 to 0.99),
+    "chaos-agent-startup-config" to (0.93 to 0.94),
+    "chaos-agent-testkit" to (0.99 to 0.99),
 )
 
 subprojects {
@@ -720,6 +720,77 @@ val verifySnapshotWorkflowModules by tasks.registering {
 }
 project(":chaos-agent-bootstrap").tasks.matching { it.name == "check" }.configureEach {
     dependsOn(verifySnapshotWorkflowModules)
+}
+
+// ── Coverage per file ────────────────────────────────────────────────────────────────────────────
+// Every source file is covered line for line. A file that cannot be (a catch for a failure the JDK
+// cannot produce, a branch for another OS, a line only a thread race reaches) is listed in
+// config/coverage-exceptions.txt with the lowest coverage it may have and why; a file whose
+// exception is no longer needed fails too, so the list only shrinks. Kinds: `unreachable` and
+// `platform` entries must still miss lines; `race` entries may also reach 100 %.
+val coverageExceptionsFile = layout.projectDirectory.file("config/coverage-exceptions.txt")
+
+data class CoverageException(val minimum: Double, val kind: String)
+
+fun coverageExceptions(module: String): Map<String, CoverageException> =
+    coverageExceptionsFile.asFile.readLines()
+        .map { it.trim() }
+        .filter { it.isNotEmpty() && !it.startsWith("#") }
+        .map { it.split(Regex("\\s+"), limit = 5) }
+        .filter { it[0] == module }
+        .associate { it[1] to CoverageException(it[2].removeSuffix("%").toDouble(), it[3]) }
+
+subprojects {
+    if (name !in coverageFloors) return@subprojects
+    val module = name
+    val verifyFileCoverage = tasks.register("verifyFileCoverage") {
+        group = "verification"
+        description = "Fails when a source file is less covered than 100 % or its listed exception."
+        val report = tasks.named<JacocoReport>("jacocoTestReport")
+        dependsOn(report)
+        val xml = layout.buildDirectory.file("reports/jacoco/test/jacocoTestReport.xml")
+        inputs.file(xml)
+        inputs.file(coverageExceptionsFile)
+        doLast {
+            val exceptions = coverageExceptions(module)
+            val factory = javax.xml.parsers.DocumentBuilderFactory.newInstance()
+            factory.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false)
+            val document = factory.newDocumentBuilder().parse(xml.get().asFile)
+            val problems = mutableListOf<String>()
+            val seen = mutableSetOf<String>()
+            val packages = document.getElementsByTagName("package")
+            for (p in 0 until packages.length) {
+                val pkg = packages.item(p) as org.w3c.dom.Element
+                val files = pkg.getElementsByTagName("sourcefile")
+                for (f in 0 until files.length) {
+                    val file = files.item(f) as org.w3c.dom.Element
+                    val path = pkg.getAttribute("name") + "/" + file.getAttribute("name")
+                    val counters = file.getElementsByTagName("counter")
+                    val line = (0 until counters.length)
+                        .map { counters.item(it) as org.w3c.dom.Element }
+                        .firstOrNull { it.getAttribute("type") == "LINE" } ?: continue
+                    val missed = line.getAttribute("missed").toInt()
+                    val covered = line.getAttribute("covered").toInt()
+                    val percent = 100.0 * covered / (missed + covered)
+                    val exception = exceptions[path]
+                    seen += path
+                    when {
+                        exception == null && missed > 0 ->
+                            problems += "$path: %.2f %% of lines, $missed missed (no exception listed)".format(percent)
+                        exception != null && percent < exception.minimum ->
+                            problems += "$path: %.2f %% of lines, below its listed %.2f %%".format(percent, exception.minimum)
+                        exception != null && missed == 0 && exception.kind != "race" ->
+                            problems += "$path: fully covered; remove its entry from config/coverage-exceptions.txt"
+                    }
+                }
+            }
+            (exceptions.keys - seen).forEach { problems += "$it: listed in config/coverage-exceptions.txt but not in the report" }
+            if (problems.isNotEmpty()) {
+                throw GradleException("coverage per file in $module:\n  " + problems.joinToString("\n  "))
+            }
+        }
+    }
+    tasks.named("check") { dependsOn(verifyFileCoverage) }
 }
 
 // ── Static analysis ──────────────────────────────────────────────────────────────────────────────
