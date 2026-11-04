@@ -120,6 +120,38 @@ class JfrChaosEventSinkTest {
   }
 
   @Test
+  @DisplayName("the periodic snapshot leaves stopped scenarios out of the active count and ids")
+  void snapshotSkipsStoppedScenarios() throws Exception {
+    runtime.activate(snapshotScenario("snapshot-running"));
+    runtime.activate(snapshotScenario("snapshot-stopped")).stop();
+    final List<RecordedEvent> events;
+    try (JfrChaosEventSink sink = new JfrChaosEventSink(runtime.diagnostics());
+        Recording recording = new Recording()) {
+      recording.enable(SNAPSHOT).withPeriod(Duration.ofMillis(50));
+      recording.start();
+      Thread.sleep(400);
+      recording.stop();
+      events = read(recording);
+    }
+
+    assertThat(events.stream().filter(e -> e.getEventType().getName().equals(SNAPSHOT)))
+        .anySatisfy(
+            snapshot -> {
+              assertThat(snapshot.getInt("activeScenarioCount")).isEqualTo(1);
+              assertThat(snapshot.getString("activeScenarioIds")).isEqualTo("snapshot-running");
+            });
+  }
+
+  private static ChaosScenario snapshotScenario(final String id) {
+    return ChaosScenario.builder(id)
+        .scope(ChaosScenario.ScenarioScope.JVM)
+        .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+        .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+        .activationPolicy(ActivationPolicy.always())
+        .build();
+  }
+
+  @Test
   @DisplayName("without an enabled recording nothing is committed and nothing fails")
   void disabled() {
     try (JfrChaosEventSink sink = new JfrChaosEventSink(runtime.diagnostics())) {

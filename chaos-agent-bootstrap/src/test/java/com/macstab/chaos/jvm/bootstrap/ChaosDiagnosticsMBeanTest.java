@@ -69,6 +69,65 @@ class ChaosDiagnosticsMBeanTest {
   }
 
   @Test
+  @DisplayName("a read-only bean, or one without a control plane, has control disabled")
+  void readOnlyBean() {
+    runtime.activate(com.macstab.chaos.jvm.startup.ChaosPlanMapper.read(PLAN));
+    final ChaosDiagnosticsMBean readOnly = new ChaosDiagnosticsMBean(runtime.diagnostics());
+
+    assertThat(readOnly.isControlEnabled()).isFalse();
+    assertThat(readOnly.listScenarios()).singleElement().asString().startsWith("jmx-delay ");
+    assertThat(readOnly.debugDump()).contains("jmx-delay");
+    assertThat(new ChaosDiagnosticsMBean(runtime.diagnostics(), null, true).isControlEnabled())
+        .as("enabled without a control plane")
+        .isFalse();
+  }
+
+  @Test
+  @DisplayName("a plan the runtime refuses is an IllegalArgumentException with its reason")
+  void refusedPlan() {
+    final ChaosDiagnosticsMBean bean =
+        new ChaosDiagnosticsMBean(runtime.diagnostics(), runtime, true);
+    bean.activatePlan(PLAN);
+
+    assertThatThrownBy(() -> bean.activatePlan(PLAN.replace("\"jmx\"}", "\"jmx-again\"}")))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("already active");
+  }
+
+  @Test
+  @DisplayName("a scenario stops with its whole plan, so stopAll counts each plan once")
+  void scenariosStopWithTheirPlan() {
+    final ChaosDiagnosticsMBean bean =
+        new ChaosDiagnosticsMBean(runtime.diagnostics(), runtime, true);
+    bean.activatePlan(
+        """
+        {"metadata":{"name":"pair"},"scenarios":[
+          {"id":"pair-a","scope":"JVM","selector":{"type":"executor","operations":["EXECUTOR_SUBMIT"]},
+           "effect":{"type":"delay","minDelay":"PT0.001S","maxDelay":"PT0.001S"}},
+          {"id":"pair-b","scope":"JVM","selector":{"type":"executor","operations":["EXECUTOR_SUBMIT"]},
+           "effect":{"type":"delay","minDelay":"PT0.001S","maxDelay":"PT0.001S"}}]}
+        """);
+    bean.activatePlan(PLAN);
+
+    assertThat(bean.stopScenario("pair-a")).isTrue();
+    assertThat(bean.stopScenario("pair-b")).as("stopped with pair-a").isFalse();
+    assertThat(bean.listScenarios()).noneMatch(line -> line.startsWith("pair-"));
+    assertThat(bean.listScenarios()).anyMatch(line -> line.startsWith("jmx-delay "));
+
+    bean.activatePlan(PLAN.replace("jmx", "two"));
+    bean.activatePlan(
+        """
+        {"metadata":{"name":"trio"},"scenarios":[
+          {"id":"trio-a","scope":"JVM","selector":{"type":"executor","operations":["EXECUTOR_SUBMIT"]},
+           "effect":{"type":"delay","minDelay":"PT0.001S","maxDelay":"PT0.001S"}},
+          {"id":"trio-b","scope":"JVM","selector":{"type":"executor","operations":["EXECUTOR_SUBMIT"]},
+           "effect":{"type":"delay","minDelay":"PT0.001S","maxDelay":"PT0.001S"}}]}
+        """);
+    assertThat(bean.stopAll()).as("jmx, two and trio: three plans").isEqualTo(3);
+    assertThat(bean.listScenarios()).isEmpty();
+  }
+
+  @Test
   @DisplayName("jmxControl is read from the agent args, then the property and environment")
   void controlSetting() {
     assertThat(ChaosAgentBootstrap.jmxControl("jmxControl=true", Map.of())).isTrue();

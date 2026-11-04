@@ -165,6 +165,126 @@ class ChaosManagementTest {
     assertThat(closed).as("the handle it replaced is closed").hasValue(1);
   }
 
+  @Test
+  @DisplayName("a null plan is invalid; a rejection is 422 and an unmanaged stop 409 over HTTP")
+  void nullPlanAndHttpStatuses() {
+    assertThat(management.activate(null).status()).isEqualTo("invalid");
+
+    final ChaosManagement rejecting =
+        new ChaosManagement(
+            scriptedControlPlane(
+                () -> {
+                  throw new IllegalStateException("agent busy");
+                }));
+    final ChaosManagement.HttpResult rejected = rejecting.handle("POST", "", PLAN);
+    assertThat(rejected.status()).isEqualTo(422);
+    assertThat(rejected.json()).contains("\"status\":\"rejected\"");
+
+    runtime.activate(
+        ChaosScenario.builder("app-owned")
+            .scope(ChaosScenario.ScenarioScope.JVM)
+            .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+            .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+            .build());
+    final ChaosManagement.HttpResult unmanaged = management.handle("DELETE", "/app-owned", null);
+    assertThat(unmanaged.status()).isEqualTo(409);
+    assertThat(unmanaged.json()).contains("\"status\":\"unmanaged\"");
+  }
+
+  @Test
+  @DisplayName("an activation failure without a message is invalid, not a conflict")
+  void activationFailureWithoutMessage() {
+    final ChaosManagement failing =
+        new ChaosManagement(
+            scriptedControlPlane(
+                () -> {
+                  throw new com.macstab.chaos.jvm.api.ChaosActivationException(null);
+                }));
+
+    final ChaosManagement.ActivationResponse response = failing.activate(PLAN);
+
+    assertThat(response.status()).isEqualTo("invalid");
+    assertThat(response.message()).isEqualTo("plan rejected: null");
+  }
+
+  @Test
+  @DisplayName("activating a plan that returns the handle already held does not close it")
+  void sameHandleIsKept() {
+    final java.util.concurrent.atomic.AtomicInteger closed =
+        new java.util.concurrent.atomic.AtomicInteger();
+    final com.macstab.chaos.jvm.api.ChaosActivationHandle same = handle("plan:mgmt", closed);
+    final ChaosManagement idempotent = new ChaosManagement(scriptedControlPlane(() -> same));
+
+    idempotent.activate(PLAN);
+    idempotent.activate(PLAN);
+
+    assertThat(closed).as("the held handle is the returned one").hasValue(0);
+    assertThat(idempotent.stopAll().stoppedCount()).isEqualTo(1);
+    assertThat(closed).hasValue(1);
+  }
+
+  @Test
+  @DisplayName("stopAll skips a handle that closing another one already stopped")
+  void stopAllSkipsHandleStoppedMeanwhile() {
+    final java.util.concurrent.atomic.AtomicInteger closed =
+        new java.util.concurrent.atomic.AtomicInteger();
+    final java.util.concurrent.atomic.AtomicReference<ChaosManagement> owner =
+        new java.util.concurrent.atomic.AtomicReference<>();
+    final java.util.Iterator<com.macstab.chaos.jvm.api.ChaosActivationHandle> handles =
+        java.util.List.of(
+                linkedHandle("plan:first", "plan:second", owner, closed),
+                linkedHandle("plan:second", "plan:first", owner, closed))
+            .iterator();
+    final ChaosManagement linked = new ChaosManagement(scriptedControlPlane(handles::next));
+    owner.set(linked);
+    linked.activate(PLAN);
+    linked.activate(PLAN);
+
+    // Closing either handle stops the other through the endpoint: stopAll then finds it gone.
+    assertThat(linked.stopAll().stoppedCount()).isEqualTo(1);
+    assertThat(closed).as("both plans are stopped").hasValue(2);
+    assertThat(linked.stop("plan:first").status()).isEqualTo("not-found");
+  }
+
+  private static com.macstab.chaos.jvm.api.ChaosActivationHandle linkedHandle(
+      final String id,
+      final String partner,
+      final java.util.concurrent.atomic.AtomicReference<ChaosManagement> owner,
+      final java.util.concurrent.atomic.AtomicInteger closed) {
+    final com.macstab.chaos.jvm.api.ChaosActivationHandle counted = handle(id, closed);
+    return (com.macstab.chaos.jvm.api.ChaosActivationHandle)
+        java.lang.reflect.Proxy.newProxyInstance(
+            ChaosManagementTest.class.getClassLoader(),
+            new Class<?>[] {com.macstab.chaos.jvm.api.ChaosActivationHandle.class},
+            (proxy, method, args) -> {
+              if (method.getName().equals("close")) {
+                counted.close();
+                owner.get().stop(partner);
+                return null;
+              }
+              return method.invoke(counted, args);
+            });
+  }
+
+  /** A control plane whose {@code activate(plan)} runs {@code activation}; nothing else works. */
+  private com.macstab.chaos.jvm.api.ChaosControlPlane scriptedControlPlane(
+      final java.util.function.Supplier<com.macstab.chaos.jvm.api.ChaosActivationHandle>
+          activation) {
+    return (com.macstab.chaos.jvm.api.ChaosControlPlane)
+        java.lang.reflect.Proxy.newProxyInstance(
+            ChaosManagementTest.class.getClassLoader(),
+            new Class<?>[] {com.macstab.chaos.jvm.api.ChaosControlPlane.class},
+            (proxy, method, args) -> {
+              if (method.getName().equals("activate")) {
+                return activation.get();
+              }
+              if (method.getName().equals("diagnostics")) {
+                return runtime.diagnostics();
+              }
+              throw new UnsupportedOperationException(method.getName());
+            });
+  }
+
   private static com.macstab.chaos.jvm.api.ChaosActivationHandle handle(
       final String id, final java.util.concurrent.atomic.AtomicInteger closed) {
     return new com.macstab.chaos.jvm.api.ChaosActivationHandle() {
