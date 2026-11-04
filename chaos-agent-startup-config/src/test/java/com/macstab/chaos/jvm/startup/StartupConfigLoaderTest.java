@@ -1,7 +1,9 @@
 package com.macstab.chaos.jvm.startup;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.macstab.chaos.jvm.api.ActivationPolicy;
 import com.macstab.chaos.jvm.api.ChaosEffect;
@@ -10,8 +12,10 @@ import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.ChaosSelector;
 import com.macstab.chaos.jvm.api.OperationType;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
 import java.util.Base64;
 import java.util.List;
@@ -94,6 +98,37 @@ class StartupConfigLoaderTest {
                   .metadata()
                   .name())
           .isEqualTo("b64-variants");
+    }
+
+    @Test
+    @DisplayName("URL-safe base64 that the standard alphabet rejects is decoded")
+    void urlSafeOnlyBase64IsDecoded() {
+      // A run of '?' encodes to '/' in the standard alphabet, so the URL-safe form carries '_'.
+      final String urlSafe =
+          Base64.getUrlEncoder()
+              .encodeToString(writeSampleJson("url-safe?????").getBytes(StandardCharsets.UTF_8));
+      assertThat(urlSafe).contains("_");
+
+      final StartupConfigLoader.LoadedPlan loaded =
+          StartupConfigLoader.load("configBase64=" + urlSafe, Map.of()).orElseThrow();
+
+      assertThat(loaded.plan().metadata().name()).isEqualTo("url-safe?????");
+      assertThat(loaded.source()).isEqualTo("base64");
+    }
+
+    @Test
+    @DisplayName("invalid base64 keeps both decoders' failures for diagnosis")
+    void invalidBase64KeepsBothFailures() {
+      assertThatExceptionOfType(ConfigLoadException.class)
+          .isThrownBy(() -> StartupConfigLoader.load("configBase64=*#!", Map.of()))
+          .satisfies(
+              failure -> {
+                assertThat(failure.getSource()).isEqualTo("base64");
+                assertThat(failure.getCause()).isInstanceOf(IllegalArgumentException.class);
+                assertThat(failure.getCause().getSuppressed())
+                    .singleElement()
+                    .isInstanceOf(IllegalArgumentException.class);
+              });
     }
 
     @Test
@@ -215,10 +250,11 @@ class StartupConfigLoaderTest {
     @Test
     @DisplayName("non-existent file throws ConfigLoadException")
     void missingFile() {
-      assertThatThrownBy(
-              () -> StartupConfigLoader.load("configFile=/does/not/exist.json", Map.of()))
-          .isInstanceOf(ConfigLoadException.class)
-          .hasMessageContaining("does not exist");
+      assertThatExceptionOfType(ConfigLoadException.class)
+          .isThrownBy(() -> StartupConfigLoader.load("configFile=/does/not/exist.json", Map.of()))
+          .withMessageContaining("does not exist")
+          .satisfies(
+              failure -> assertThat(failure.getSource()).isEqualTo("file:/does/not/exist.json"));
     }
 
     @Test
@@ -286,10 +322,245 @@ class StartupConfigLoaderTest {
       java.util.Arrays.fill(data, (byte) ' ');
       Files.write(huge, data);
 
+      // The size is checked on a stat before the read, so the message carries the actual size.
       assertThatThrownBy(() -> StartupConfigLoader.load("configFile=" + huge, Map.of()))
           .isInstanceOf(ConfigLoadException.class)
-          .hasMessageContaining("exceeds maximum size");
+          .hasMessageContaining("exceeds maximum size")
+          .hasMessageContaining("(1048577 actual)");
     }
+
+    @Test
+    @DisplayName("a file of exactly 1 MiB is still accepted")
+    void fileAtSizeLimitAccepted() throws Exception {
+      final String json = writeSampleJson("at-limit");
+      final Path atLimit = tempDir.resolve("at-limit.json");
+      Files.writeString(atLimit, json + " ".repeat(1_048_576 - json.length()));
+      assertThat(Files.size(atLimit)).isEqualTo(1_048_576L);
+
+      assertThat(
+              StartupConfigLoader.load("configFile=" + atLimit, Map.of())
+                  .orElseThrow()
+                  .plan()
+                  .metadata()
+                  .name())
+          .isEqualTo("at-limit");
+    }
+
+    @Test
+    @DisplayName("world-writable file is rejected")
+    void worldWritableFileRejected() throws Exception {
+      assumePosix();
+      final Path file = tempDir.resolve("open.json");
+      Files.writeString(file, writeSampleJson("open"));
+      Files.setPosixFilePermissions(file, PosixFilePermissions.fromString("rw-rw-rw-"));
+
+      assertThatThrownBy(() -> StartupConfigLoader.load("configFile=" + file, Map.of()))
+          .isInstanceOf(ConfigLoadException.class)
+          .hasMessageContaining("config file is world-writable");
+    }
+
+    @Test
+    @DisplayName("file in a world-writable directory without sticky bit is rejected")
+    void worldWritableParentRejected() throws Exception {
+      assumePosix();
+      final Path directory = Files.createDirectory(tempDir.resolve("shared"));
+      final Path file = directory.resolve("plan.json");
+      Files.writeString(file, writeSampleJson("shared"));
+      Files.setPosixFilePermissions(directory, PosixFilePermissions.fromString("rwxrwxrwx"));
+
+      assertThatThrownBy(() -> StartupConfigLoader.load("configFile=" + file, Map.of()))
+          .isInstanceOf(ConfigLoadException.class)
+          .hasMessageContaining("parent directory is world-writable without sticky bit");
+    }
+
+    @Test
+    @DisplayName("file in a world-writable sticky directory (like /tmp) is accepted")
+    void worldWritableStickyParentAccepted() throws Exception {
+      assumePosix();
+      final Path directory = Files.createDirectory(tempDir.resolve("sticky"));
+      final Path file = directory.resolve("plan.json");
+      Files.writeString(file, writeSampleJson("sticky"));
+      // java.nio cannot set the sticky bit; chmod can.
+      final Process chmod =
+          new ProcessBuilder("chmod", "1777", directory.toString()).inheritIO().start();
+      assumeTrue(chmod.waitFor() == 0, "chmod 1777 not available");
+
+      assertThat(
+              StartupConfigLoader.load("configFile=" + file, Map.of())
+                  .orElseThrow()
+                  .plan()
+                  .metadata()
+                  .name())
+          .isEqualTo("sticky");
+    }
+  }
+
+  @Nested
+  @DisplayName("file ownership")
+  class FileOwnership {
+
+    @Test
+    @DisplayName("file owned by another user than the JVM's is rejected")
+    void foreignOwnerRejected() throws Exception {
+      final Path file = tempDir.resolve("plan.json");
+      Files.writeString(file, writeSampleJson("foreign"));
+      assumeTrue(!"root".equals(Files.getOwner(file).getName()), "test runs as root");
+
+      withUserName(
+          "someone-else",
+          () ->
+              assertThatThrownBy(() -> StartupConfigLoader.load("configFile=" + file, Map.of()))
+                  .isInstanceOf(ConfigLoadException.class)
+                  .hasMessageContaining("not by the JVM's user someone-else or root"));
+    }
+
+    @Test
+    @DisplayName("ownership check is skipped when the JVM's user name is unknown or blank")
+    void unknownUserSkipsOwnershipCheck() throws Exception {
+      final Path file = tempDir.resolve("plan.json");
+      Files.writeString(file, writeSampleJson("unnamed-uid"));
+
+      // Containers running an unnamed uid report "?" (or nothing) as user.name.
+      for (final String unnamed : List.of("?", "")) {
+        withUserName(
+            unnamed,
+            () ->
+                assertThat(
+                        StartupConfigLoader.load("configFile=" + file, Map.of())
+                            .orElseThrow()
+                            .plan()
+                            .metadata()
+                            .name())
+                    .isEqualTo("unnamed-uid"));
+      }
+    }
+
+    private void withUserName(final String userName, final Runnable action) {
+      final String original = System.getProperty("user.name");
+      System.setProperty("user.name", userName);
+      try {
+        action.run();
+      } finally {
+        System.setProperty("user.name", original);
+      }
+    }
+  }
+
+  @Nested
+  @DisplayName("Kubernetes ConfigMap layout")
+  class ConfigMapLayout {
+
+    private static final String VERSION_DIR = "..2026_11_04_12_00_00.000000001";
+
+    @Test
+    @DisplayName("follows <dir>/plan.json -> ..data/plan.json -> ..<timestamp>/plan.json")
+    void configMapLinkFollowed() throws Exception {
+      final Path volume = volume(Path.of("..data", "plan.json"), Path.of(VERSION_DIR));
+      final Path link = volume.resolve("plan.json");
+
+      final StartupConfigLoader.LoadedPlan loaded =
+          StartupConfigLoader.load("configFile=" + link, Map.of()).orElseThrow();
+
+      assertThat(loaded.plan().metadata().name()).isEqualTo("config-map");
+      // The poller watches the configured link; the read came from the versioned file.
+      assertThat(loaded.source()).isEqualTo("file:" + link);
+      assertThat(loaded.filePath()).isEqualTo(link.toAbsolutePath().normalize());
+      assertThat(loaded.planFile()).isNotNull();
+      assertThat(loaded.planFile().target())
+          .isEqualTo(volume.resolve(VERSION_DIR).resolve("plan.json").toAbsolutePath().normalize());
+    }
+
+    @Test
+    @DisplayName("rejects a link whose target is not ..data/<same name>")
+    void linkOutsideLayoutRejected() throws Exception {
+      for (final Path linkTarget :
+          List.of(
+              Path.of("..data", "other.json"),
+              Path.of("data", "plan.json"),
+              Path.of("..data", "nested", "plan.json"))) {
+        final Path volume = volume(linkTarget, Path.of(VERSION_DIR));
+
+        assertThatThrownBy(
+                () ->
+                    StartupConfigLoader.load("configFile=" + volume.resolve("plan.json"), Map.of()))
+            .as("link to %s", linkTarget)
+            .isInstanceOf(ConfigLoadException.class)
+            .hasMessageContaining("only the Kubernetes ConfigMap layout");
+      }
+    }
+
+    @Test
+    @DisplayName("rejects ..data when it is a plain directory, not the data link")
+    void plainDataDirectoryRejected() throws Exception {
+      final Path volume = Files.createDirectory(tempDir.resolve("plain"));
+      final Path data = Files.createDirectory(volume.resolve("..data"));
+      Files.writeString(data.resolve("plan.json"), writeSampleJson("plain"));
+      Files.createSymbolicLink(volume.resolve("plan.json"), Path.of("..data", "plan.json"));
+
+      assertThatThrownBy(
+              () -> StartupConfigLoader.load("configFile=" + volume.resolve("plan.json"), Map.of()))
+          .isInstanceOf(ConfigLoadException.class)
+          .hasMessageContaining("which is not the Kubernetes data link");
+    }
+
+    @Test
+    @DisplayName("rejects ..data pointing anywhere but a timestamped directory beside it")
+    void dataLinkOutsideLayoutRejected() throws Exception {
+      final Path elsewhere = Files.createDirectories(tempDir.resolve("elsewhere"));
+      for (final Path dataTarget :
+          List.of(
+              elsewhere.toAbsolutePath(), Path.of(VERSION_DIR, "nested"), Path.of("v2026_11_04"))) {
+        final Path volume = volume(Path.of("..data", "plan.json"), dataTarget);
+
+        assertThatThrownBy(
+                () ->
+                    StartupConfigLoader.load("configFile=" + volume.resolve("plan.json"), Map.of()))
+            .as("..data to %s", dataTarget)
+            .isInstanceOf(ConfigLoadException.class)
+            .hasMessageContaining("..data does not point at a timestamped directory");
+      }
+    }
+
+    /**
+     * Builds a fresh volume directory: {@code plan.json} links to {@code linkTarget}, {@code
+     * ..data} links to {@code dataTarget}, and the real plan lives in {@code VERSION_DIR}.
+     */
+    private Path volume(final Path linkTarget, final Path dataTarget) throws Exception {
+      final Path volume = Files.createTempDirectory(tempDir, "volume");
+      final Path version = Files.createDirectory(volume.resolve(VERSION_DIR));
+      Files.writeString(version.resolve("plan.json"), writeSampleJson("config-map"));
+      Files.createSymbolicLink(volume.resolve("..data"), dataTarget);
+      Files.createSymbolicLink(volume.resolve("plan.json"), linkTarget);
+      return volume;
+    }
+  }
+
+  @Nested
+  @DisplayName("loadPlanFromFile")
+  class LoadPlanFromFile {
+
+    @Test
+    @DisplayName("reads and parses a plan file")
+    void readsPlan() throws Exception {
+      final Path file = tempDir.resolve("plan.json");
+      Files.writeString(file, writeSampleJson("integration"));
+
+      assertThat(StartupConfigLoader.loadPlanFromFile(file.toString()).metadata().name())
+          .isEqualTo("integration");
+    }
+
+    @Test
+    @DisplayName("applies the agent's file checks and names the file as the source")
+    void appliesFileChecks() {
+      assertThatExceptionOfType(ConfigLoadException.class)
+          .isThrownBy(() -> StartupConfigLoader.loadPlanFromFile(tempDir.toString()))
+          .withMessageContaining("not a regular file")
+          .satisfies(failure -> assertThat(failure.getSource()).isEqualTo("file:" + tempDir));
+    }
+  }
+
+  private static void assumePosix() {
+    assumeTrue(FileSystems.getDefault().supportedFileAttributeViews().contains("posix"));
   }
 
   private static String writeSampleJson(String planName) {

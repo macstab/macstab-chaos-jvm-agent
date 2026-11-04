@@ -339,6 +339,55 @@ class ChaosPlanMapperTest {
           .hasMessageContaining("precedence")
           .hasMessageNotContaining("s3cr3t-token");
     }
+
+    @Test
+    @DisplayName("call a syntax error malformed JSON, also inside a value being bound")
+    void reportMalformedJson() {
+      assertThatThrownBy(() -> ChaosPlanMapper.read("{not valid}"))
+          .isInstanceOf(ConfigLoadException.class)
+          .hasMessageContaining(": malformed JSON");
+      assertThatThrownBy(() -> ChaosPlanMapper.read("{\"metadata\": {\"name\": tru}}"))
+          .isInstanceOf(ConfigLoadException.class)
+          .hasMessageContaining(": malformed JSON at metadata");
+    }
+
+    @Test
+    @DisplayName("name an unclassified failure by its exception type, without the value")
+    void reportUnclassifiedFailureByType() {
+      final String json =
+          """
+          {"metadata": {"name": "p"}, "scenarios": [{"id": "a", "scope": "JVM",
+            "selector": {"type": "executor", "operations": ["EXECUTOR_SUBMIT"]},
+            "effect": {"type": "delay", "minDelay": "PT0.1S", "maxDelay": "PT0.1S"},
+            "precedence": 99999999999999999}]}
+          """;
+
+      assertThatThrownBy(() -> ChaosPlanMapper.read(json))
+          .isInstanceOf(ConfigLoadException.class)
+          .hasMessageContaining(": JsonMappingException at scenarios[0].precedence")
+          .hasMessageNotContaining("99999999999999999");
+    }
+  }
+
+  @Test
+  @DisplayName("toJson writes compact JSON that reads back as the same plan")
+  void toJsonIsCompact() {
+    final ChaosPlan plan =
+        new ChaosPlan(
+            new ChaosPlan.Metadata("compact", ""),
+            null,
+            List.of(
+                ChaosScenario.builder("s1")
+                    .scope(ChaosScenario.ScenarioScope.JVM)
+                    .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+                    .effect(ChaosEffect.delay(Duration.ofMillis(10)))
+                    .activationPolicy(ActivationPolicy.always())
+                    .build()));
+
+    final String json = ChaosPlanMapper.toJson(plan);
+
+    assertThat(json).doesNotContain("\n").startsWith("{");
+    assertThat(ChaosPlanMapper.read(json)).isEqualTo(plan);
   }
 
   @org.junit.jupiter.api.Test
