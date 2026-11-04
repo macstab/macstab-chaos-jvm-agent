@@ -326,4 +326,17 @@ class StartupConfigPollerEdgeCaseTest {
     }
     throw new AssertionError("the poller tick never reached the plan it read");
   }
+
+  @Test
+  @DisplayName("a reload that runs after close reports nothing and touches nothing")
+  void reloadAfterCloseIsSilent() throws Exception {
+    final StartupConfigPoller closedPoller = poller("60000");
+    closedPoller.close();
+    write(planJson("b"));
+
+    final String log = stderrOf(closedPoller::pollOnce);
+
+    assertThat(log).doesNotContain("config reloaded");
+    org.mockito.Mockito.verifyNoInteractions(runtime);
+  }
 }

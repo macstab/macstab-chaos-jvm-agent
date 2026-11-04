@@ -110,6 +110,7 @@ Migration steps for each change: [docs/migration-2.0.md](docs/migration-2.0.md).
 
 ### Bug Fixes
 
+* **bootstrap:** a config reload overtaken by the poller's `close()` applied nothing but still reconfigured observability, wrote an ok status and logged "config reloaded"; it now stops silently.
 * **instrumentation:** a bridge injection that failed with an unchecked exception left the bridge marked as injected, so every later install failed with "failed to install bridge delegate"; a retry now injects it.
 * **core:** `gcPressure` with a large rate of small objects wrapped the batch size to a negative count and allocated nothing while reporting itself running; the batch now saturates.
 * **instrumentation:** a JDBC selector on a HikariCP pool name never matched a connection acquire: the hook called `getPoolName()`, which `HikariPool` does not declare, and fell back to the class name. It now reads the name from the pool's `toString()`, which HikariCP defines as the pool name.

@@ -319,6 +319,11 @@ public final class StartupConfigPoller implements AutoCloseable {
     try {
       newPlan = ChaosPlanMapper.read(file.json());
       applyDiff(newPlan.scenarios());
+      // A close that overtook this reload made applyDiff a no-op: nothing was applied, so
+      // nothing is configured, recorded or reported.
+      if (closed) {
+        return;
+      }
       applyObservability(newPlan);
     } catch (final RuntimeException failure) {
       // Remember content that can never apply (malformed, invalid) so it is not parsed again;
