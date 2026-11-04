@@ -689,6 +689,39 @@ subprojects {
     }
 }
 
+// ── Release workflow inputs ──────────────────────────────────────────────────────────────────────
+// The snapshot workflow deletes each module's previous snapshot before publishing it again (GitHub
+// Packages refuses to overwrite one). Its list of modules must be the published ones, or a new
+// module's second snapshot fails to publish.
+val verifySnapshotWorkflowModules by tasks.registering {
+    group = "verification"
+    description = "Checks that publish-snapshot.yml lists exactly the published modules."
+    val workflow = layout.projectDirectory.file(".github/workflows/publish-snapshot.yml")
+    val expected =
+        subprojects
+            .filter { it.name !in nonPublishableModules && it.file("src/main").isDirectory }
+            .map { "${it.group}.${it.name}" }
+            .toSortedSet()
+    inputs.file(workflow)
+    inputs.property("expected", expected.joinToString())
+    doLast {
+        val listed =
+            Regex("\"(com\\.macstab\\.chaos\\.jvm\\.[a-z0-9-]+)\"")
+                .findAll(workflow.asFile.readText())
+                .map { it.groupValues[1] }
+                .toSortedSet()
+        if (listed != expected) {
+            throw GradleException(
+                "publish-snapshot.yml lists the wrong modules: missing ${expected - listed}, " +
+                    "not published ${listed - expected}",
+            )
+        }
+    }
+}
+project(":chaos-agent-bootstrap").tasks.matching { it.name == "check" }.configureEach {
+    dependsOn(verifySnapshotWorkflowModules)
+}
+
 // ── Static analysis ──────────────────────────────────────────────────────────────────────────────
 // Error Prone runs in every compilation; with -Werror its warnings fail the build like javac's.
 // A finding is fixed, or suppressed where it stands with the reason; the few checks disabled below
