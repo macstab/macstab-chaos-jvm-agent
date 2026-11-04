@@ -224,6 +224,11 @@ final class DispatchEngine {
           scenario.id());
     }
     if (effect instanceof ChaosEffect.DnsRewriteEffect rewriteEffect) {
+      // InetAddress.getLocalHost() names no host: there is nothing to rewrite, and the call
+      // must not count as an application.
+      if (context.targetName() == null) {
+        return new TerminalAction(TerminalKind.NOT_APPLICABLE, null, null, scenario.id());
+      }
       return new TerminalAction(TerminalKind.REWRITE, rewriteEffect.host(), null, scenario.id());
     }
     if (effect instanceof ChaosEffect.RedirectEffect redirectEffect) {

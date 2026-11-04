@@ -110,6 +110,7 @@ Migration steps for each change: [docs/migration-2.0.md](docs/migration-2.0.md).
 
 ### Bug Fixes
 
+* **core:** `dnsRewrite` counted `InetAddress.getLocalHost()` as applied, though that lookup names no host and nothing was rewritten; it no longer applies there.
 * **core:** `timeout()` on `SOCKET_CONNECT` did nothing: the plan was accepted and the scenario counted as applied, but the connect went through. It now waits out the connect timeout and throws `SocketTimeoutException("Connect timed out")`, like a peer that never answers; a connect without a timeout is left alone.
 * **api:** `PathPattern` matched an empty path differently from its normal form `.`.
 * **startup-config:** a plan with a syntax error inside a value (a trailing comma in the scenario list) was reported as `JsonMappingException` instead of `malformed JSON`; an unknown property's path named the property twice (`at scenarios[0].effect.delayy`), now the object that holds it, as documented.

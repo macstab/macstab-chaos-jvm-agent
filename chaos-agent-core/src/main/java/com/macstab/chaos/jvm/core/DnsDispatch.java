@@ -51,7 +51,7 @@ public final class DnsDispatch {
    * @return the name to resolve: {@code hostname}, or another under a {@code DnsRewriteEffect}
    * @throws Throwable if an active scenario throws to simulate a DNS failure
    */
-  public @Nullable String beforeDnsResolve(final String hostname) throws Throwable {
+  public @Nullable String beforeDnsResolve(final @Nullable String hostname) throws Throwable {
     final RuntimeDecision decision =
         (engine.idle(OperationType.DNS_RESOLVE)
             ? RuntimeDecision.none()

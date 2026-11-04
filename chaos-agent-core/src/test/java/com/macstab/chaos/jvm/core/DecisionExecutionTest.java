@@ -288,6 +288,19 @@ class DecisionExecutionTest {
     }
 
     @Test
+    @DisplayName("a rewrite does not apply to the local-host lookup, which names no host")
+    void rewriteSkipsTheLocalHostLookup() throws Throwable {
+      activate(
+          "rewrite",
+          ChaosSelector.dns(Set.of(OperationType.DNS_RESOLVE)),
+          ChaosEffect.dnsRewrite("db-replica.internal"));
+
+      assertThat(runtime.beforeDnsResolve(null)).isNull();
+      assertThat(runtime.diagnostics().scenario("rewrite").orElseThrow().appliedCount()).isZero();
+      assertThat(runtime.beforeDnsResolve("db.internal")).isEqualTo("db-replica.internal");
+    }
+
+    @Test
     @DisplayName("a rejected resolution fails with UnknownHostException")
     void reject() {
       activate(

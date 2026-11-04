@@ -1146,7 +1146,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @return the name to resolve: {@code hostname}, or another under a {@code DnsRewriteEffect}
    * @throws Throwable if a chaos effect injects an exception
    */
-  public @Nullable String beforeDnsResolve(final String hostname) throws Throwable {
+  public @Nullable String beforeDnsResolve(final @Nullable String hostname) throws Throwable {
     return dnsDispatch.beforeDnsResolve(hostname);
   }
 
