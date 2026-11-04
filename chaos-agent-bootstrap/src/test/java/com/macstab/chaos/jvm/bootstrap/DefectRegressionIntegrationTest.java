@@ -1390,6 +1390,10 @@ class DefectRegressionIntegrationTest {
               "-Djava.io.tmpdir=" + tmp);
       assertThat(result.longValue("read")).isEqualTo(64L);
       assertThat(result.longValue("differingBits")).isEqualTo(1L);
+      // the single-byte and the channel read paths flip one bit too
+      assertThat(result.longValue("singleByteDifferingBits")).isEqualTo(1L);
+      assertThat(result.longValue("channelRead")).isEqualTo(64L);
+      assertThat(result.longValue("channelDifferingBits")).isEqualTo(1L);
     }
 
     private ChildJvmProbe.ProbeResult runInTmp(

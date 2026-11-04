@@ -747,7 +747,10 @@ public final class DefectProbeMain {
     }
   }
 
-  /** Writes 64 known bytes to a temporary file and reads them back with read(byte[]). */
+  /**
+   * Writes 64 known bytes to a temporary file and reads them back with read(byte[]), read() and a
+   * FileChannel read.
+   */
   private static void fileCorruptRead() throws Exception {
     final java.nio.file.Path file = java.nio.file.Files.createTempFile("chaos-corrupt", ".bin");
     try {
@@ -765,6 +768,20 @@ public final class DefectProbeMain {
         }
         System.out.println("read=" + read);
         System.out.println("differingBits=" + differingBits);
+      }
+      try (java.io.FileInputStream in = new java.io.FileInputStream(file.toFile())) {
+        System.out.println(
+            "singleByteDifferingBits=" + Integer.bitCount((in.read() ^ sent[0]) & 0xFF));
+      }
+      try (java.nio.channels.FileChannel channel = java.nio.channels.FileChannel.open(file)) {
+        final java.nio.ByteBuffer buffer = java.nio.ByteBuffer.allocate(64);
+        final int read = channel.read(buffer);
+        int differingBits = 0;
+        for (int i = 0; i < read; i++) {
+          differingBits += Integer.bitCount((buffer.get(i) ^ sent[i]) & 0xFF);
+        }
+        System.out.println("channelRead=" + read);
+        System.out.println("channelDifferingBits=" + differingBits);
       }
     } finally {
       java.nio.file.Files.deleteIfExists(file);
