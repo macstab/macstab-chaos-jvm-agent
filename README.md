@@ -91,7 +91,7 @@ A chaos tool that is wrong about its own behaviour is worse than none. Every cla
 | No known bug patterns in any line that compiles | Error Prone on every compilation, warnings as errors |
 | No unchecked null in production code | NullAway proves every dereference; optional values are `@Nullable` in the types ([ADR 0008](docs/adr/0008-nullness-in-the-types.md)) |
 | The tests catch real bugs, not just run code | mutation testing (`./gradlew pitest`) with ratcheted thresholds; coverage floors that count the child JVMs |
-| An idle hook costs about 7 ns and allocates nothing | JMH benchmarks with a regression gate in CI ([benchmarks](docs/benchmarks.md)) |
+| An idle hook costs 7–12 ns and allocates nothing | JMH benchmarks with a regression gate in CI ([benchmarks](docs/benchmarks.md)) |
 | What ships is what you can verify | reproducible jars (`scripts/check-reproducible.sh`), a CycloneDX SBOM published next to every jar (classifier `cyclonedx`), shaded dependencies listed |
 
 The decisions behind the design are recorded as [architecture decision records](docs/adr/README.md).
@@ -181,7 +181,7 @@ flowchart LR
     BR["ChaosBridge"] --> RT["ChaosRuntime"]
     RT --> DOM["domain dispatcher<br/>NetworkDispatch, FileDispatch, …"]
     DOM --> IDLE{"any scenario<br/>for this operation?"}
-    IDLE -- no --> PASS["return unmodified<br/>≈7 ns · 0 B"]
+    IDLE -- no --> PASS["return unmodified<br/>7–12 ns · 0 B"]
     IDLE -- yes --> ENG["DispatchEngine.evaluate<br/>ScenarioRegistry.match"]
     ENG --> POL["each ScenarioController:<br/>policy steps 1–9"]
     POL --> DEC["RuntimeDecision<br/>Σ delays → one gate → one terminal"]
