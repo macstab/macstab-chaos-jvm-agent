@@ -118,6 +118,94 @@ class ChaosOpenTelemetryTest {
             });
   }
 
+  @Test
+  @DisplayName("counts the matches a policy kept from applying, and failed activations, by reason")
+  void skipsAndFailures() throws Exception {
+    try (AutoCloseable metrics = ChaosOpenTelemetry.metrics(runtime, sdk)) {
+      runtime.activate(
+          ChaosScenario.builder("otel-warm-up")
+              .scope(ChaosScenario.ScenarioScope.JVM)
+              .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+              .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+              .activationPolicy(
+                  com.macstab.chaos.jvm.api.ActivationPolicy.builder()
+                      .activateAfterMatches(5)
+                      .build())
+              .build());
+      submit();
+      submit();
+      org.assertj.core.api.Assertions.assertThatThrownBy(
+          () ->
+              runtime.activate(
+                  ChaosScenario.builder("otel-invalid")
+                      .scope(ChaosScenario.ScenarioScope.JVM)
+                      .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+                      .effect(ChaosEffect.tornWrite())
+                      .build()));
+
+      final MetricData skips = await("chaos.skips");
+      assertThat(skips.getLongSumData().getPoints())
+          .singleElement()
+          .satisfies(
+              point -> {
+                assertThat(point.getValue()).isEqualTo(2L);
+                assertThat(point.getAttributes().get(ChaosOpenTelemetry.SKIP_REASON))
+                    .isEqualTo("warmUp");
+              });
+      final MetricData failures = await("chaos.activation.failures");
+      assertThat(failures.getLongSumData().getPoints())
+          .singleElement()
+          .satisfies(
+              point -> {
+                assertThat(point.getValue()).isEqualTo(1L);
+                assertThat(point.getAttributes().get(ChaosOpenTelemetry.FAILURE_CATEGORY))
+                    .isEqualTo("INVALID_CONFIGURATION");
+                assertThat(point.getAttributes().get(ChaosOpenTelemetry.SCENARIO_ID))
+                    .isEqualTo("otel-invalid");
+              });
+    }
+  }
+
+  @Test
+  @DisplayName("span events are added only for applied effects, without a delay when there is none")
+  void spanEventsOnlyForApplications() throws Exception {
+    runtime.activate(
+        ChaosScenario.builder("otel-suppress")
+            .scope(ChaosScenario.ScenarioScope.JVM)
+            .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+            .effect(ChaosEffect.suppress())
+            .build());
+    try (AutoCloseable events = ChaosOpenTelemetry.spanEvents(runtime)) {
+      final Span span = sdk.getTracer("test").spanBuilder("request").startSpan();
+      try (Scope ignored = span.makeCurrent()) {
+        submit();
+        // Lifecycle events reach the listener too (REGISTERED, STARTED, STOPPED); they add
+        // nothing to the span.
+        runtime.activate(delayScenario("otel-lifecycle-only")).close();
+      } finally {
+        span.end();
+      }
+    }
+    assertThat(spans.getFinishedSpanItems().get(0).getEvents())
+        .singleElement()
+        .satisfies(
+            event ->
+                assertThat(event.getAttributes().get(ChaosOpenTelemetry.DELAY_MILLIS)).isNull());
+  }
+
+  /** The named metric, once the asynchronous listener has delivered what it records. */
+  private MetricData await(final String name) throws InterruptedException {
+    final long deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
+    while (System.nanoTime() < deadline) {
+      final Optional<MetricData> metric = find(reader.collectAllMetrics(), name);
+      if (metric.isPresent()) {
+        return metric.get();
+      }
+      Thread.sleep(10L);
+    }
+    throw new AssertionError("no " + name + " metric recorded");
+  }
+
   private void submit() {
     runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
   }
