@@ -110,18 +110,16 @@ public final class ExecutorDispatch {
       return scoped;
     }
     final RuntimeDecision decision =
-        (engine.idle(indexedOp)
-            ? RuntimeDecision.none()
-            : engine.evaluate(
-                new InvocationContext(
-                    indexedOp,
-                    executor == null ? "unknown" : executor.getClass().getName(),
-                    DispatchEngine.taskClassName(task),
-                    null,
-                    false,
-                    null,
-                    null,
-                    sessionId)));
+        engine.evaluate(
+            new InvocationContext(
+                indexedOp,
+                executor == null ? "unknown" : executor.getClass().getName(),
+                DispatchEngine.taskClassName(task),
+                null,
+                false,
+                null,
+                null,
+                sessionId));
     if (decision.terminalAction() != null
         && decision.terminalAction().kind() == TerminalKind.SUPPRESS) {
       // See decorateExecutorRunnable — apply gate + delay before returning the no-op Callable
@@ -324,18 +322,9 @@ public final class ExecutorDispatch {
                     hook == null ? null : hook.isDaemon(),
                     hook == null ? null : engine.featureSet.isVirtualThread(hook),
                     null)));
+    // A throwing terminal (reject) unwinds here; suppress is rejected for this operation at
+    // activation (CompatibilityValidator), so every other decision registers the wrapper.
     engine.applyPreDecision(decision);
-    // SUPPRESS: `applyPreDecision` returns normally for SUPPRESS (unlike THROW, which unwinds)
-    // but the hook should not reach Runtime.addShutdownHook if the operator asked for the
-    // registration to be suppressed. Building and mapping a decorated wrapper here leaves the
-    // JVM with a hook it cannot `removeShutdownHook` later (resolveShutdownHook would return
-    // the wrapper, which Runtime doesn't know about). Return the original unchanged so the
-    // registration still happens verbatim — the suppress intent is honoured by the agent not
-    // introducing a wrapper, not by actively blocking registration.
-    if (decision.terminalAction() != null
-        && decision.terminalAction().kind() == TerminalKind.SUPPRESS) {
-      return hook;
-    }
     final java.util.concurrent.atomic.AtomicReference<Thread> hookRef =
         new java.util.concurrent.atomic.AtomicReference<>(hook);
     final Thread decorated =
