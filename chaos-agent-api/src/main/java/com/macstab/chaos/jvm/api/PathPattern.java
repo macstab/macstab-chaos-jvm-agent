@@ -52,7 +52,8 @@ public record PathPattern(String prefix) {
   }
 
   private static boolean needsNormalizing(final String path) {
-    return path.indexOf('\\') >= 0
+    return path.isEmpty()
+        || path.indexOf('\\') >= 0
         || path.contains("//")
         || path.contains("/./")
         || path.contains("/../")
