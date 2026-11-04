@@ -19,6 +19,30 @@ CHAOS_DSL_PATH=../macstab-chaos-testing-libraries/docs/DSL.md \
 
 Tests for the instrumentation and bootstrap modules start a real agent (self-attach). They require no flags but do need the process to be attachable (`-Djdk.attach.allowAttachSelf=true` is wired automatically by the test extension).
 
+## Quality gates
+
+`./gradlew build` runs every gate below; each one fails the build, and each generated file is regenerated with the command shown, so an intended change shows in review as a diff.
+
+| Gate | Guards | Record an intended change |
+|------|--------|---------------------------|
+| `apiCheck` | the public API of every API module (`api/<module>.api`, JVM signatures) | `./gradlew apiDump` |
+| `PlanSchemaTest` | the published plan schema is the parser's | `./gradlew :chaos-agent-startup-config:test --tests '*PlanSchemaTest*' -PupdatePlanSchema` |
+| `CompatibilityMatrixDocTest` | the effect/operation table is the validator's | `./gradlew :chaos-agent-core:test --tests '*CompatibilityMatrixDocTest*' -PupdateDocs` |
+| `ReferenceTablesSyncTest`, `HandleTableDocTest`, `CrossLayerDocSyncTest` | reference tables, handle counts, API names and JSON examples in the docs | edit the docs |
+| `SemanticsLawTraceabilityTest` | every law of `docs/semantics.md` has a test tagged `law-L<n>` | tag the test |
+| `ArchitectureTest` | the bridge jar is closed, advice uses only public members, layering | — |
+| `PlanFuzzTest` | the parser and validator never crash or hang | replay a failure with `-PfuzzSeed=<seed> -PfuzzIterations=<n>` |
+| JaCoCo floors | line and branch coverage per module, child JVMs included | raise the floor in `build.gradle.kts`, never lower it |
+
+Not part of `build`, run before a change to evaluation or validation code:
+
+```bash
+./gradlew pitest                    # mutation testing of api, core and startup-config; reports in <module>/build/reports/pitest
+scripts/check-reproducible.sh       # builds every jar twice and fails when any differs
+```
+
+The decisions behind the architecture are recorded in [docs/adr](docs/adr/README.md); a change that reverses one adds a record that supersedes it.
+
 ## Code style
 
 Spotless enforces **Google Java Format**. Run `./gradlew spotlessApply` before pushing. The CI build fails on any formatting violation.

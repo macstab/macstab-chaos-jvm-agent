@@ -92,28 +92,22 @@ Migration steps for each change: [docs/migration-2.0.md](docs/migration-2.0.md).
 * **build:** the documentation tests declare the docs and the law-tagged test sources as inputs; a change to a document alone used to leave them up to date, so a broken example passed.
 * **docs:** the selector ↔ effect compatibility table of the configuration reference is generated from `CompatibilityValidator` (`CompatibilityMatrixDocTest` probes every interceptor effect against every operation; `-PupdateDocs` regenerates it). The hand-written matrix it replaces left out `errno`, the data-delivery effects, the DNS effects and `redirect`.
 * **docs:** the reference tables are checked against the code. `ReferenceTablesSyncTest`: each selector's operations in the configuration reference are the ones it accepts, every effect has its section, the type lists of the plan specification are complete. `HandleTableDocTest`: the bridge slot table lists every `BootstrapDispatcher` slot at its index, every `NAME = n` is right, every handle count is `HANDLE_COUNT`. Fixed on the way: handle counts of 57, 64 and 67 in the README, the user guide and the overviews (it is 77); `DNS_ANSWER`, `DNS_REVERSE`, `PROCESS_WAIT` and `R2DBC_STATEMENT_EXECUTE` missing from their selectors' operations; `tornWrite` and `redirect` absent from the effect headings; `tornWrite()`'s Javadoc limited to file channels.
-
-### Performance Improvements
-
-* **core:** `ScenarioRegistry` keeps an immutable index from operation type to controllers, pre-sorted by descending precedence then id and swapped on register/unregister. `match()` evaluates only the scenarios whose selector names the intercepted operation and no longer sorts per call; clock-skew reads use the same index and return immediately when no scenario names the clock.
-* **instrumentation:** the dispatch path allocates nothing per call. `BootstrapDispatcher` no longer routes through the shared `invoke(ThrowingSupplier, fallback)` trampoline (whose call site saw every lambda, so the JIT could not elide the 24-byte capturing lambda allocated per intercepted call); each dispatch method guards reentrancy inline. `ThrowingSupplier` was removed from the bootstrap bridge.
-* **api:** `NamePattern` GLOB matching uses an allocation-free wildcard matcher instead of the compiled regex for ordinary candidates, with identical results (candidates containing line terminators or surrogate characters still use the regex).
-
-
-# 1.0.0 (2026-04-29)
-
+* **build:** the public API of every API module is recorded in `api/<module>.api` (JVM signatures of every public and protected class, field and method, and the permitted subtypes of sealed types); `check` fails on an unrecorded change, `./gradlew apiDump` records an intended one.
+* **build:** `ArchitectureTest` enforces what the module graph cannot: the bootstrap bridge jar is closed (its classes reference no agent class outside it, the list is `JdkInstrumentationInstaller.BRIDGE_CLASSES`), inlined advice uses only public members of public agent classes, the domain dispatchers depend on the engine and not on each other, and only stressors touch ByteBuddy in the core.
+* **build:** mutation testing with PIT (`./gradlew pitest`, not part of `check`) on the API, the core and the plan reader, with ratcheted thresholds. New boundary, property and differential tests from its survivors: rate-limit windows, `maxApplications` reservations, inclusive delay ranges, gates released on stop and expiry (`PolicyBoundaryTest`); CIDR parsing against the JDK's address parser (`CidrBlockPropertyTest`); glob and path fast paths against their definitions (`PatternDifferentialTest`); the plan reader's size cap and failure reports (`PlanReaderBoundaryTest`).
+* **build:** a CycloneDX SBOM per published module (`cyclonedxDirectBom`); the agent jar's lists the ByteBuddy and Jackson it shades. `scripts/check-reproducible.sh` builds every jar twice and fails when any differs.
+* **ci:** CodeQL, Dependabot (Gradle and actions, grouped weekly) and a weekly compatibility run on macOS, Windows and JDK 22–24, outside the gating build until green there. CODEOWNERS, issue and pull request templates.
+* **docs:** architecture decision records in `docs/adr` (the bootstrap bridge, on-demand weaving, the shaded jar, the plan format by mix-ins, real faults, the dispatch domains, documentation from code); CONTRIBUTING lists every quality gate and how to record an intended change.
 
 ### Bug Fixes
 
+* **api:** `PathPattern` matched an empty path differently from its normal form `.`.
+* **startup-config:** a plan with a syntax error inside a value (a trailing comma in the scenario list) was reported as `JsonMappingException` instead of `malformed JSON`; an unknown property's path named the property twice (`at scenarios[0].effect.delayy`), now the object that holds it, as documented.
 * **core:** idle dispatches could allocate: executor submissions always (32 B, the no-op decision escaped), file I/O and thread sleeps in some JVMs, depending on the JIT. The hot paths (executor decoration, file I/O, thread sleep, socket reads and writes, NIO channel writes) now return before building a decision when no scenario is indexed for the operation: 0 B in every fork, 7–12 ns.
-
 * **instrumentation:** Apache HttpClient 4 chaos never applied: its class files are Java 6, and the advice's string concatenation compiled to `invokedynamic`, which cannot be woven into them, so every transformation of `CloseableHttpClient` failed. Found by the new hook-coverage test.
-
 * **instrumentation:** a class loaded as a side effect of weaving one hook group (inside another class's load hook) escaped the transformers of groups woven before it; the post-install retransformation that repaired this for the object streams now runs after every weave and covers the socket classes.
-
 * **instrumentation:** a torn socket stream write now really resets the connection (`SO_LINGER` 0, then close) after sending its prefix; before, the socket stayed open, so the peer saw neither a reset nor an end of stream and the writer could keep writing.
 * **core:** `randomSeed` now also fixes the effects' own random choices: the torn-write length, the bit `corruptRead()` flips and the `SHUFFLE` order of a DNS answer, each derived from the match's seed. They were drawn from `ThreadLocalRandom`, so a seeded run could not reproduce them.
-
 * **reload:** a plan file changed between the agent's startup read and the reloader's start was never applied (the baseline came from a second read; the loader now hands its read to the reloader). A transient activation failure (an id taken elsewhere, a weaving failure) is retried instead of being skipped until the file changes. A ConfigMap swap during a read no longer reports a spurious error. A file missing for a single tick no longer stops and restarts every scenario. A plan file or ConfigMap link owned by another user (root excepted) is refused, so another local user cannot plant one in a shared directory such as `/tmp`.
 * **quarkus:** the `/q/chaos` route moved into its own extension, `chaos-agent-quarkus-management` (+ `-deployment`); the main extension no longer pulls in `quarkus-vertx-http` (which started an HTTP server in command-mode applications). The route now always answers (503 without the agent instead of hanging), works off the event loop, uses a body another extension already read, URL-decodes ids, answers 404 outside its root instead of stopping everything, reads `macstab.chaos.management.enabled` at runtime, and stops its plans on shutdown and dev-mode reload.
 * **micronaut:** the `/chaos` endpoint answers with the operation's status code (it always answered 200) and no longer installs the agent when it is enabled; 503 when no agent is installed.
@@ -134,6 +128,20 @@ Migration steps for each change: [docs/migration-2.0.md](docs/migration-2.0.md).
 * **instrumentation:** a URL filter (`urlPattern`) never matched the JDK `HttpClient`: the URL was read reflectively through the request's internal class, which is not open to the agent, and came out `null`. The advice, inlined into `HttpClientImpl`, now calls `HttpRequest.uri()` directly.
 * **startup-config:** a reloaded plan with an invalid scenario stopped the changed scenarios, activated part of the new plan and then rolled back, so for a moment neither plan was fully active and part of the invalid one was. Every new or changed scenario is now validated before the active set is touched.
 * **micrometer:** `chaos.events` was registered with different tag keys per event type (`reason` on skipped, `category` on failed), which Prometheus registries reject; those tags moved to `chaos.skips` and `chaos.activation.failures`, so every meter has one tag key set.
+
+### Performance Improvements
+
+* **core:** `ScenarioRegistry` keeps an immutable index from operation type to controllers, pre-sorted by descending precedence then id and swapped on register/unregister. `match()` evaluates only the scenarios whose selector names the intercepted operation and no longer sorts per call; clock-skew reads use the same index and return immediately when no scenario names the clock.
+* **instrumentation:** the dispatch path allocates nothing per call. `BootstrapDispatcher` no longer routes through the shared `invoke(ThrowingSupplier, fallback)` trampoline (whose call site saw every lambda, so the JIT could not elide the 24-byte capturing lambda allocated per intercepted call); each dispatch method guards reentrancy inline. `ThrowingSupplier` was removed from the bootstrap bridge.
+* **api:** `NamePattern` GLOB matching uses an allocation-free wildcard matcher instead of the compiled regex for ordinary candidates, with identical results (candidates containing line terminators or surrogate characters still use the regex).
+
+
+# 1.0.0 (2026-04-29)
+
+
+### Bug Fixes
+
+
 * resolve ThreadLocal reentrancy - re-enable ThreadLocal/park/AQS instrumentation ([738d4ed](https://github.com/macstab/macstab-chaos-jvm-agent/commit/738d4ed3613f0f67483bc4323febdc77201a57b3))
 
 

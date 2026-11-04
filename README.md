@@ -1070,6 +1070,7 @@ Internal Architecture documentation lives in [`docs/`](docs/):
 | [`api.md`](docs/api.md)                               | Stable API contract: builders, selectors, effects, diagnostics                                                            |
 | [`core.md`](docs/core.md)                             | Evaluation pipeline, session scoping, stressor lifecycle, JMM analysis                                                    |
 | [`semantics.md`](docs/semantics.md)                   | Evaluation laws: matching, policy order, composition of scenarios, clock skew, stressors, lifecycle                       |
+| [`adr/`](docs/adr/README.md)                          | Architecture decision records: the bridge, on-demand weaving, shading, the plan format, real faults, dispatch, docs from code |
 | [`observability.md`](docs/observability.md)           | Status and hits files, events, Micrometer metrics, JMX operations, handle counters                                         |
 | [`instrumentation.md`](docs/instrumentation.md)       | ByteBuddy advice, bootstrap bridge, reentrancy guard, handle table, hook coverage                                         |
 | [`bootstrap.md`](docs/bootstrap.md)                   | Agent initialization, self-attach, MBean registration                                                                     |
