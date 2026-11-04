@@ -29,6 +29,7 @@
 | 8 | `ChaosEffect.Errno.code()` is the current OS's number | you compare it with Linux numbers on macOS | use `linuxCode()` (§8) |
 | 9 | `OperationType` gained constants between existing ones | you persist ordinals | persist names (§9) |
 | 10 | Bridge handle slots renumbered | you call `BootstrapDispatcher` directly | none for applications (§10) |
+| 11 | A glob's `*` also matches line terminators | a GLOB must not match across a line break | use a REGEX (§11) |
 
 ---
 
@@ -158,6 +159,13 @@ New operations (`CLOCK_READ`, `FILE_IO_OPEN`, `SOCKET_BIND`, `DATAGRAM_SEND`, �
 ## 10. Bridge handle slots renumbered
 
 The unused slot `ADJUST_SCHEDULE_DELAY` was removed and new slots were appended; `BootstrapDispatcher.HANDLE_COUNT` is 77. Only code that calls `BootstrapDispatcher` or implements `BridgeDelegate` directly — the agent itself — is affected. `ChaosAgentBootstrap.initialize` lost its `premainMode` parameter; it is package-private.
+
+
+## 11. A glob's `*` also matches line terminators
+
+In 1.x a GLOB was a regex in which `*` was `.*`, which stops at a line break, while `?` matched any single character, a line break included. In 2.0 a glob is matched by code points: `*` matches any sequence and `?` exactly one character, a line terminator in both cases, and a surrogate pair counts as one character. Names the agent matches (hosts, URLs, classes, threads, topics, paths) rarely contain a line break, so a plan is affected only when it relied on `*` not crossing one.
+
+Before (1.x): `NamePattern.glob("a*b")` does not match `"a\nb"`. Now it does; `NamePattern.regex("a.*b")` keeps the old behaviour.
 
 ---
 

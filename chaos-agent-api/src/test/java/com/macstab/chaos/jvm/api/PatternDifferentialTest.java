@@ -3,7 +3,6 @@ package com.macstab.chaos.jvm.api;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import java.util.regex.Pattern;
 import net.jqwik.api.Arbitraries;
 import net.jqwik.api.Arbitrary;
 import net.jqwik.api.ForAll;
@@ -12,21 +11,11 @@ import net.jqwik.api.Provide;
 import org.junit.jupiter.api.Test;
 
 /**
- * The fast paths of the patterns against their definitions. A GLOB is the regex in which '*' is
- * {@code .*} (no line terminator), '?' is one code point and every other character is literal; the
- * allocation-free matcher must agree with that regex on every candidate, including those it hands
- * to the regex (line terminators, surrogates). A path pattern matches a path exactly as it matches
- * the path's lexically normalised form.
+ * The fast paths of the patterns against their definitions (the GLOB matcher's is {@code
+ * NamePatternTest.GlobEquivalence}). A path pattern matches a path exactly as it matches the path's
+ * lexically normalised form.
  */
 class PatternDifferentialTest {
-
-  @Property(tries = 3000)
-  void globMatchesLikeItsRegex(
-      @ForAll("globs") final String glob, @ForAll("candidates") final String candidate) {
-    assertThat(NamePattern.glob(glob).matches(candidate))
-        .as("glob %s on %s", glob, escape(candidate))
-        .isEqualTo(reference(glob).matcher(candidate).matches());
-  }
 
   @Property(tries = 3000)
   void pathMatchesLikeItsNormalisedForm(
@@ -66,46 +55,11 @@ class PatternDifferentialTest {
   // ── generators and the reference ─────────────────────────────────────────
 
   @Provide
-  Arbitrary<String> globs() {
-    return Arbitraries.strings().withChars("ab*?.+(\\$").ofMinLength(1).ofMaxLength(6);
-  }
-
-  @Provide
-  Arbitrary<String> candidates() {
-    return Arbitraries.strings()
-        .withChars('a', 'b', '.', '+', '(', '\\', '$', '\n', '\r', '\u0085', ' ', ' ')
-        .withChars("😀")
-        .ofMaxLength(7);
-  }
-
-  @Provide
   Arbitrary<String> paths() {
     return Arbitraries.of("", "/", "a", "b", ".", "..", "\\")
         .list()
         .ofMaxSize(6)
         .map(segments -> String.join("/", segments))
         .map(path -> path.replace("/\\/", "\\"));
-  }
-
-  private static Pattern reference(final String glob) {
-    final StringBuilder regex = new StringBuilder();
-    for (final char c : glob.toCharArray()) {
-      regex.append(
-          switch (c) {
-            case '*' -> ".*";
-            // one code point: a surrogate pair or any other single char, a line terminator too
-            case '?' -> "(?:[\\uD800-\\uDBFF][\\uDC00-\\uDFFF]|[^\\uD800-\\uDFFF])";
-            default -> Pattern.quote(String.valueOf(c));
-          });
-    }
-    return Pattern.compile(regex.toString());
-  }
-
-  private static String escape(final String text) {
-    final StringBuilder escaped = new StringBuilder();
-    for (final char c : text.toCharArray()) {
-      escaped.append(c < 0x20 || c > 0x7e ? String.format("\\u%04x", (int) c) : String.valueOf(c));
-    }
-    return escaped.toString();
   }
 }

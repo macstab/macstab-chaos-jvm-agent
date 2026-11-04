@@ -21,8 +21,9 @@ import java.util.regex.PatternSyntaxException;
  *       <td>{@code NamePattern.exact("java.sql.Connection")}</td></tr>
  *   <tr><td>{@link MatchMode#PREFIX}</td><td>String starts with value.</td>
  *       <td>{@code NamePattern.prefix("io.lettuce")}</td></tr>
- *   <tr><td>{@link MatchMode#GLOB}</td><td>{@code *} matches any sequence, {@code ?} matches
- *       one character.</td>
+ *   <tr><td>{@link MatchMode#GLOB}</td><td>{@code *} matches any sequence of characters, {@code
+ *       ?} exactly one (one code point: a surrogate pair is one character, a line terminator is
+ *       one too); every other character matches itself.</td>
  *       <td>{@code NamePattern.glob("com.example.*.Repository")}</td></tr>
  *   <tr><td>{@link MatchMode#REGEX}</td><td>Full {@link java.util.regex.Pattern} match.</td>
  *       <td>{@code NamePattern.regex(".*Service(Impl)?")}</td></tr>
@@ -30,10 +31,10 @@ import java.util.regex.PatternSyntaxException;
  *
  * <p>A {@code null} candidate string never matches any pattern except {@link MatchMode#ANY}.
  *
- * <p>GLOB and REGEX patterns are compiled once and cached in a JVM-wide bounded LRU cache keyed by
- * the pattern string (capacity {@value #CACHE_CAPACITY}). Repeated calls to {@link #matches} on hot
- * paths do not pay the {@link Pattern#compile} cost. The cache is bounded so that a
- * pattern-spamming plan cannot pin arbitrary heap; rarely-used entries evict in access order.
+ * <p>A GLOB is matched directly, without a regex and without allocating. REGEX patterns are
+ * compiled once and cached in a JVM-wide bounded cache keyed by the pattern string (capacity
+ * {@value #CACHE_CAPACITY}); past the capacity a pattern is compiled per call instead of cached, so
+ * a pattern-spamming plan cannot pin arbitrary heap.
  *
  * @param mode matching algorithm to apply; {@code null} normalises to {@link MatchMode#ANY}
  * @param value pattern string interpreted according to {@code mode}
@@ -41,8 +42,8 @@ import java.util.regex.PatternSyntaxException;
 public record NamePattern(MatchMode mode, String value) {
 
   /**
-   * Upper bound on distinct GLOB/REGEX expressions cached per JVM. The cache is meant to amortise
-   * the compile cost for the finite set of expressions a deployed plan actually uses; a hostile or
+   * Upper bound on distinct REGEX expressions cached per JVM. The cache is meant to amortise the
+   * compile cost for the finite set of expressions a deployed plan actually uses; a hostile or
    * buggy plan that generates thousands of unique patterns should not be able to pin heap.
    */
   private static final int CACHE_CAPACITY = 1024;
@@ -54,9 +55,6 @@ public record NamePattern(MatchMode mode, String value) {
    * case for any given expression and makes denial-of-service-by-regex far less practical.
    */
   private static final int MAX_PATTERN_LENGTH = 4096;
-
-  /** Pre-compiled regex patterns for GLOB mode, keyed by the glob expression string. */
-  private static final Map<String, Pattern> GLOB_CACHE = new ConcurrentHashMap<>();
 
   /** Pre-compiled patterns for REGEX mode, keyed by the raw regex string. */
   private static final Map<String, Pattern> REGEX_CACHE = new ConcurrentHashMap<>();
@@ -114,9 +112,7 @@ public record NamePattern(MatchMode mode, String value) {
       // FINE and the operator never learns why chaos isn't firing. Seed the cache so the first
       // runtime matches() call stays on the fast path.
       try {
-        if (this.mode == MatchMode.GLOB) {
-          cachedCompile(GLOB_CACHE, this.value, toRegex(this.value));
-        } else {
+        if (this.mode == MatchMode.REGEX) {
           cachedCompile(REGEX_CACHE, this.value, this.value);
         }
       } catch (final PatternSyntaxException syntaxError) {
@@ -164,8 +160,9 @@ public record NamePattern(MatchMode mode, String value) {
   }
 
   /**
-   * Returns a glob pattern where {@code *} matches any sequence of characters and {@code ?} matches
-   * exactly one character.
+   * Returns a glob pattern where {@code *} matches any sequence of characters (line terminators
+   * included) and {@code ?} matches exactly one character (one code point); every other character,
+   * {@code \} and regex metacharacters included, matches itself.
    *
    * <p>Examples: {@code "com.example.*.Repository"}, {@code "worker-thread-?"}.
    *
@@ -210,65 +207,44 @@ public record NamePattern(MatchMode mode, String value) {
     };
   }
 
-  private static Pattern compiledGlob(final String value) {
-    // Look the pattern up before building its regex: toRegex allocates a new string per call.
-    final Pattern cached = GLOB_CACHE.get(value);
-    return cached != null ? cached : cachedCompile(GLOB_CACHE, value, toRegex(value));
-  }
-
   /**
-   * Matches {@code candidate} against {@code glob} without allocating. For a candidate without line
-   * terminators or surrogates, '*' (regex {@code .*}) matches any sequence and '?' exactly one
-   * char, so the two-pointer wildcard match below gives the same answer as the compiled regex.
-   * Other candidates go through the regex, which keeps the exact semantics for them.
+   * Matches {@code candidate} against {@code glob} by code points, without allocating: '*' matches
+   * any sequence, '?' exactly one code point, anything else itself. Two pointers with backtracking
+   * to the last '*': linear in the candidate for globs with one '*', and bounded by the product of
+   * the lengths in the worst case, never exponential.
    */
   private static boolean globMatches(final String glob, final String candidate) {
-    if (needsRegex(candidate)) {
-      return compiledGlob(glob).matcher(candidate).matches();
-    }
     int patternIndex = 0;
     int candidateIndex = 0;
     int starIndex = -1;
     int starMatchEnd = 0;
     while (candidateIndex < candidate.length()) {
       if (patternIndex < glob.length()) {
-        final char token = glob.charAt(patternIndex);
+        final int token = glob.codePointAt(patternIndex);
         if (token == '*') {
           starIndex = patternIndex++;
           starMatchEnd = candidateIndex;
           continue;
         }
-        if (token == '?' || token == candidate.charAt(candidateIndex)) {
-          patternIndex++;
-          candidateIndex++;
+        final int character = candidate.codePointAt(candidateIndex);
+        if (token == '?' || token == character) {
+          patternIndex += Character.charCount(token);
+          candidateIndex += Character.charCount(character);
           continue;
         }
       }
       if (starIndex < 0) {
         return false;
       }
+      // Let the last '*' take one more code point and retry the rest of the glob after it.
       patternIndex = starIndex + 1;
-      candidateIndex = ++starMatchEnd;
+      starMatchEnd += Character.charCount(candidate.codePointAt(starMatchEnd));
+      candidateIndex = starMatchEnd;
     }
     while (patternIndex < glob.length() && glob.charAt(patternIndex) == '*') {
       patternIndex++;
     }
     return patternIndex == glob.length();
-  }
-
-  private static boolean needsRegex(final String candidate) {
-    for (int i = 0; i < candidate.length(); i++) {
-      final char c = candidate.charAt(i);
-      if (c == '\n'
-          || c == '\r'
-          || c == '\u0085'
-          || c == '\u2028'
-          || c == '\u2029'
-          || Character.isSurrogate(c)) {
-        return true;
-      }
-    }
-    return false;
   }
 
   private static Pattern compiledRegex(final String value) {
@@ -286,31 +262,6 @@ public record NamePattern(MatchMode mode, String value) {
     }
   }
 
-  private static String toRegex(final String glob) {
-    // Escape every Java regex metacharacter so the compiled pattern only treats '*' and '?' as
-    // wildcards. Missing '[', ']', '{', '}' previously let glob inputs like "class[0-9]" expand
-    // into real character classes, causing unexpected matches.
-    //
-    // '?' emits a code-point-aware single-character class instead of the bare '.'. Java regex
-    // '.' matches one UTF-16 code unit, so a glob "a?b" against "a😀b" would fail because the
-    // emoji is a surrogate pair (two code units). The explicit alternation matches either a
-    // high/low surrogate pair or any non-surrogate code unit — one user-visible character in
-    // both BMP and supplementary planes.
-    final StringBuilder builder = new StringBuilder("^");
-    for (int i = 0; i < glob.length(); i++) {
-      final char current = glob.charAt(i);
-      switch (current) {
-        case '*' -> builder.append(".*");
-        case '?' -> builder.append("(?:[\\uD800-\\uDBFF][\\uDC00-\\uDFFF]|[^\\uD800-\\uDFFF])");
-        case '.', '(', ')', '+', '|', '^', '$', '@', '%', '[', ']', '{', '}' ->
-            builder.append('\\').append(current);
-        case '\\' -> builder.append("\\\\");
-        default -> builder.append(current);
-      }
-    }
-    return builder.append('$').toString();
-  }
-
   /** Determines the matching algorithm applied by {@link NamePattern#matches}. */
   public enum MatchMode {
 
@@ -324,9 +275,9 @@ public record NamePattern(MatchMode mode, String value) {
     PREFIX,
 
     /**
-     * Glob match: {@code *} expands to any character sequence, {@code ?} to a single character.
-     * Special regex characters in the glob value are escaped automatically. The compiled {@link
-     * Pattern} is cached in a JVM-wide static map keyed by the glob string.
+     * Glob match: {@code *} matches any character sequence (line terminators included), {@code ?}
+     * exactly one character (one code point), every other character itself. Matched directly,
+     * without a regex.
      */
     GLOB,
 

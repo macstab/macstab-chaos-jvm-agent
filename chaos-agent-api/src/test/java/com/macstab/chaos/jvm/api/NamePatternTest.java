@@ -338,7 +338,7 @@ class NamePatternTest {
         if (glob.isBlank()) {
           continue;
         }
-        final String candidate = randomString(random, "ab.x\\", random.nextInt(9));
+        final String candidate = randomString(random, "ab.x\\\n\u2028", random.nextInt(9));
         assertThat(NamePattern.glob(glob).matches(candidate))
             .as("glob %s against %s", glob, candidate)
             .isEqualTo(referenceRegex(glob).matcher(candidate).matches());
@@ -347,7 +347,8 @@ class NamePatternTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"a\nb", "a\rb", "a\u2028b", "a\uD83D\uDE00b", "\uD83D"})
-    @DisplayName("keeps the regex semantics for line terminators and surrogates")
+    @DisplayName(
+        "'*' and '?' match line terminators; '?' matches a surrogate pair as one character")
     void specialCandidates(final String candidate) {
       for (final String glob : new String[] {"a*b", "a?b", "*", "?", "a*", "*b"}) {
         assertThat(NamePattern.glob(glob).matches(candidate))
@@ -365,17 +366,21 @@ class NamePatternTest {
       return builder.toString();
     }
 
-    /** The glob-to-regex translation the documented GLOB semantics are defined by. */
+    /**
+     * The definition of the GLOB semantics: the DOTALL regex in which '*' is {@code .*} and '?' is
+     * {@code .}, which Java reads as one code point.
+     */
     private static Pattern referenceRegex(final String glob) {
       final StringBuilder builder = new StringBuilder("^");
-      for (final char c : glob.toCharArray()) {
+      for (int i = 0; i < glob.length(); i++) {
+        final char c = glob.charAt(i);
         switch (c) {
           case '*' -> builder.append(".*");
-          case '?' -> builder.append("(?:[\\uD800-\\uDBFF][\\uDC00-\\uDFFF]|[^\\uD800-\\uDFFF])");
+          case '?' -> builder.append('.');
           default -> builder.append(Pattern.quote(String.valueOf(c)));
         }
       }
-      return Pattern.compile(builder.append('$').toString());
+      return Pattern.compile(builder.append('$').toString(), Pattern.DOTALL);
     }
   }
 }

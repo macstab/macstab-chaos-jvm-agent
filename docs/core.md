@@ -661,7 +661,7 @@ JVM-scoped controllers are NOT removed on session close. They stay registered un
 
 ## Selector Matching Cost
 
-`SelectorMatcher.matches()` is a sealed-hierarchy switch. Each case is at most 3–4 field comparisons and `NamePattern.matches()` calls. For simple string patterns (exact match), this is sub-microsecond. GLOB patterns use an allocation-free wildcard matcher (the compiled regex is only used for candidates containing line terminators or surrogate characters). For regex patterns, the cost depends on the regex complexity, and each match allocates a `Matcher`.
+`SelectorMatcher.matches()` is a sealed-hierarchy switch. Each case is at most 3–4 field comparisons and `NamePattern.matches()` calls. For simple string patterns (exact match), this is sub-microsecond. GLOB patterns are matched by an allocation-free wildcard matcher over code points, with no regex. For regex patterns, the cost depends on the regex complexity, and each match allocates a `Matcher`.
 
 **Recommendation**: Use exact class name matches or simple prefix patterns rather than complex regexes in performance-sensitive scenarios.
 
