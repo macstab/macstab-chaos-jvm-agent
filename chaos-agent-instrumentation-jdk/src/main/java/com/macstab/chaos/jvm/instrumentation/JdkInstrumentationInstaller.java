@@ -2783,15 +2783,6 @@ public final class JdkInstrumentationInstaller {
   }
 
   /**
-   * Returns the prefixes whose clock call sites are rewritten.
-   *
-   * @return the prefixes; empty when clock call-site weaving is off
-   */
-  static List<String> clockCallSitePackages() {
-    return CLOCK_CALL_SITE_PACKAGES;
-  }
-
-  /**
    * Clock call sites: in classes under the configured prefixes, every {@code invokestatic} of
    * {@link System#currentTimeMillis()} and {@link System#nanoTime()} becomes a call of {@link
    * BootstrapDispatcher#currentTimeMillis()} / {@link BootstrapDispatcher#nanoTime()}, which return

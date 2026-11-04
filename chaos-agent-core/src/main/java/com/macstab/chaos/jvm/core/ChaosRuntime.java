@@ -637,7 +637,8 @@ public final class ChaosRuntime implements ChaosControlPlane {
   /**
    * Delegates to {@link RuntimeDispatch#beforeGcRequest}.
    *
-   * @return {@code true} if the GC request should proceed
+   * @return {@code true} to suppress the real {@code System.gc()} call, {@code false} to let it
+   *     proceed
    * @throws Throwable if a chaos effect injects an exception
    */
   public boolean beforeGcRequest() throws Throwable {
