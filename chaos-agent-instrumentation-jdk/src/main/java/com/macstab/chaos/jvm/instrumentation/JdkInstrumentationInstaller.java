@@ -831,6 +831,7 @@ public final class JdkInstrumentationInstaller {
     if (!BRIDGE_INJECTED.compareAndSet(false, true)) {
       return;
     }
+    boolean appended = false;
     try {
       // On POSIX filesystems create with 0600: the bridge JAR contains the code that bootstrap
       // classloader will load, so a world-readable/writable file (the default 0644 umask-adjusted
@@ -862,6 +863,7 @@ public final class JdkInstrumentationInstaller {
       final java.util.jar.JarFile jarFile = new java.util.jar.JarFile(bridgeJar.toFile());
       BRIDGE_JARS.add(jarFile);
       instrumentation.appendToBootstrapClassLoaderSearch(jarFile);
+      appended = true;
       // The bootstrap class path entry is opened when it is appended, and the JarFile above holds
       // its own handle, so on POSIX the file can be unlinked now and nothing is left in the temp
       // directory, even when the JVM is killed. deleteOnExit alone left one jar per JVM start
@@ -877,6 +879,13 @@ public final class JdkInstrumentationInstaller {
       // than silently returning success when the bridge was never actually in place.
       BRIDGE_INJECTED.set(false);
       throw new IllegalStateException("failed to inject bootstrap bridge", exception);
+    } catch (final RuntimeException | Error failure) {
+      // The same for an unchecked failure, unless the jar is already on the bootstrap class path:
+      // that cannot be undone, and appending a second copy is what the flag prevents.
+      if (!appended) {
+        BRIDGE_INJECTED.set(false);
+      }
+      throw failure;
     }
   }
 

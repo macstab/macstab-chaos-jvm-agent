@@ -155,6 +155,15 @@ class StartupPathIntegrationTest {
     }
 
     @Test
+    @DisplayName("a retry after an unchecked bridge-injection failure injects the bridge")
+    void bridgeInjectionRetry() throws Exception {
+      final Result result = run(Map.of(), List.of(), "bridge-retry");
+
+      assertThat(result.value("firstAttempt")).startsWith("IllegalStateException:bridge refused");
+      assertThat(result.value("retry")).isEqualTo("runtime");
+    }
+
+    @Test
     @DisplayName(
         "a local install waiting for the install lock returns the runtime installed meanwhile")
     void localInstallAfterLock() throws Exception {

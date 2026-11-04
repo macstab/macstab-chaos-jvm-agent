@@ -50,6 +50,7 @@ public final class StartupPathProbeMain {
       case "rollback-failures" -> rollbackFailures();
       case "no-jfr" -> noJfr();
       case "no-attach" -> noAttach();
+      case "bridge-retry" -> bridgeRetry();
       default -> throw new IllegalArgumentException("unknown probe mode: " + args[0]);
     }
   }
@@ -317,6 +318,21 @@ public final class StartupPathProbeMain {
   /** Started with the attach mechanism disabled: a local install fails with a clear message. */
   private static void noAttach() {
     System.out.println("localInstall=" + describe(ChaosAgentBootstrap::installForLocalTests));
+  }
+
+  /**
+   * Initializes once with a bridge injection that fails with an unchecked exception, then again
+   * with the real instrumentation: the retry must inject the bridge and install.
+   */
+  private static void bridgeRetry() {
+    final Instrumentation real = ByteBuddyAgent.install();
+    final ScriptedInstrumentation refusing =
+        new ScriptedInstrumentation(real)
+            .failBridgeInjection(new IllegalStateException("bridge refused"));
+    System.out.println(
+        "firstAttempt=" + describe(() -> ChaosAgentBootstrap.initialize("", refusing, Map.of())));
+    System.out.println(
+        "retry=" + describe(() -> ChaosAgentBootstrap.initialize("", real, Map.of())));
   }
 
   /** {@code runtime} for a returned runtime, else the exception's class, message and cause. */
