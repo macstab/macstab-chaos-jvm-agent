@@ -201,6 +201,26 @@ class ReturnValueCorruptorTest {
     }
   }
 
+  @Nested
+  @DisplayName("fallbacks")
+  class Fallbacks {
+
+    @Test
+    @DisplayName("an unknown return type passes the value through unchanged")
+    void unknownReturnTypePassesThrough() {
+      assertThat(corrupt(ChaosEffect.ReturnValueStrategy.NULL, null, "hello")).isEqualTo("hello");
+    }
+
+    @Test
+    @DisplayName("a boundary strategy without a boundary for the type falls back to ZERO")
+    void boundaryFallsBackToZero() {
+      assertThat(corrupt(ChaosEffect.ReturnValueStrategy.BOUNDARY_MAX, boolean.class, true))
+          .isEqualTo(Boolean.FALSE);
+      assertThat(corrupt(ChaosEffect.ReturnValueStrategy.BOUNDARY_MIN, boolean.class, true))
+          .isEqualTo(Boolean.FALSE);
+    }
+  }
+
   private static Object corrupt(
       final ChaosEffect.ReturnValueStrategy strategy,
       final Class<?> returnType,
