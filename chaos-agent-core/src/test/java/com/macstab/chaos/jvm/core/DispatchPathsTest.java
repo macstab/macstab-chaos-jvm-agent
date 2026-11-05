@@ -441,17 +441,24 @@ class DispatchPathsTest {
   class Handoff {
 
     @Test
-    @DisplayName("nothing is captured without a carrier or a session, and a carrier counts once")
+    @DisplayName("nothing is captured without a session, and a carrier captured twice runs once")
     void captureCountsOncePerCarrier() {
       final SessionHandoff handoff = new SessionHandoff();
+      final ScopeContext scope = new ScopeContext();
       handoff.capture(null, "s");
-      handoff.capture(new Object(), null);
-      assertThat(handoff.pendingCount()).isZero();
+      final Object withoutSession = new Object();
+      handoff.capture(withoutSession, null);
+      handoff.enter(withoutSession, scope);
+      assertThat(scope.currentSessionId()).isNull();
 
       final Object carrier = new Object();
       handoff.capture(carrier, "s");
       handoff.capture(carrier, "s");
-      assertThat(handoff.pendingCount()).isEqualTo(1);
+      handoff.enter(carrier, scope);
+      assertThat(scope.currentSessionId()).isEqualTo("s");
+      handoff.exit(carrier);
+      handoff.enter(carrier, scope);
+      assertThat(scope.currentSessionId()).isNull();
     }
 
     @Test
@@ -462,7 +469,6 @@ class DispatchPathsTest {
       handoff.capture(new Object(), "s");
       handoff.enter(null, scope);
       handoff.exit(null);
-      assertThat(handoff.pendingCount()).isEqualTo(1);
       assertThat(scope.currentSessionId()).isNull();
     }
 

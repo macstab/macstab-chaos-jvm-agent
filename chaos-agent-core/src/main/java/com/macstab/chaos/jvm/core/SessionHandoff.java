@@ -43,8 +43,12 @@ final class SessionHandoff {
     if (carrier == null || sessionId == null) {
       return;
     }
-    if (captured.put(carrier, sessionId) == null) {
-      pending.incrementAndGet();
+    // The counter changes only together with the table, under the table's own lock: a resync in
+    // enter() cannot then reset it between this put and its increment.
+    synchronized (captured) {
+      if (captured.put(carrier, sessionId) == null) {
+        pending.incrementAndGet();
+      }
     }
   }
 
@@ -64,16 +68,19 @@ final class SessionHandoff {
     if (carrier instanceof Thread thread && thread != Thread.currentThread()) {
       return;
     }
-    final String sessionId = captured.remove(carrier);
-    if (sessionId == null) {
-      // Captures whose carrier never ran (a Thread subclass overriding run(), a cancelled task)
-      // are dropped by the weak map without decrementing; resync, so the fast path returns.
-      if (captured.isEmpty()) {
-        pending.set(0);
+    final String sessionId;
+    synchronized (captured) {
+      sessionId = captured.remove(carrier);
+      if (sessionId == null) {
+        // Captures whose carrier never ran (a Thread subclass overriding run(), a cancelled task)
+        // are dropped by the weak map without decrementing; resync, so the fast path returns.
+        if (captured.isEmpty()) {
+          pending.set(0);
+        }
+        return;
       }
-      return;
+      pending.decrementAndGet();
     }
-    pending.decrementAndGet();
     active.put(carrier, scopeContext.bind(sessionId));
     running.incrementAndGet();
   }
@@ -97,14 +104,5 @@ final class SessionHandoff {
     } catch (final RuntimeException closeFailure) {
       LOGGER.log(Level.FINE, "chaos session hand-off release failed", closeFailure);
     }
-  }
-
-  /**
-   * Returns how many captures are waiting for their carrier to run; for tests.
-   *
-   * @return the pending count
-   */
-  int pendingCount() {
-    return pending.get();
   }
 }

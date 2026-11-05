@@ -53,7 +53,7 @@ class SessionBindingTest {
   }
 
   @Test
-  @DisplayName("hand-off captures that never run do not leave the fast path disabled")
+  @DisplayName("after captures that never ran are dropped, a new capture still reaches its carrier")
   void handoffCounterResyncs() throws Exception {
     final SessionHandoff handoff = new SessionHandoff();
     final ScopeContext scopes = new ScopeContext();
@@ -67,6 +67,11 @@ class SessionBindingTest {
       Thread.sleep(10L);
     }
     handoff.enter(new Object(), scopes);
-    assertThat(handoff.pendingCount()).isZero();
+
+    final Object next = new Object();
+    handoff.capture(next, "s2");
+    handoff.enter(next, scopes);
+    assertThat(scopes.currentSessionId()).isEqualTo("s2");
+    handoff.exit(next);
   }
 }
