@@ -1,6 +1,7 @@
 package com.macstab.chaos.jvm.micrometer;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 
 import com.macstab.chaos.jvm.api.ActivationPolicy;
 import com.macstab.chaos.jvm.api.ChaosEffect;
@@ -43,10 +44,7 @@ class ChaosMeterBinderTest {
 
     // Events are counted asynchronously; wait for both applications. The delay is the last meter
     // an application updates, so once it holds both, every other meter does too.
-    final long deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
-    while (delayCount() < 2 && System.nanoTime() < deadline) {
-      Thread.sleep(10L);
-    }
+    await().atMost(Duration.ofSeconds(5)).until(() -> delayCount() >= 2);
 
     assertThat(
             registry
@@ -107,10 +105,7 @@ class ChaosMeterBinderTest {
     for (int i = 0; i < 20; i++) {
       runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
     }
-    final long deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
-    while (strict.find("chaos.skips").counter() == null && System.nanoTime() < deadline) {
-      Thread.sleep(10L);
-    }
+    await().atMost(Duration.ofSeconds(5)).until(() -> strict.find("chaos.skips").counter() != null);
     binder.close();
 
     assertThat(strict.get("chaos.events").tags("type", "skipped").counter().count()).isPositive();

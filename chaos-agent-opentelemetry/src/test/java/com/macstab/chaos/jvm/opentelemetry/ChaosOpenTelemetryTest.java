@@ -1,6 +1,7 @@
 package com.macstab.chaos.jvm.opentelemetry;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 
 import com.macstab.chaos.jvm.api.ChaosEffect;
 import com.macstab.chaos.jvm.api.ChaosScenario;
@@ -54,13 +55,11 @@ class ChaosOpenTelemetryTest {
       submit();
       submit();
 
-      final long deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
-      Collection<MetricData> collected = reader.collectAllMetrics();
       // Both applications, not only the first: the listener records them one by one.
-      while (delayCount(collected) < 2L && System.nanoTime() < deadline) {
-        Thread.sleep(10L);
-        collected = reader.collectAllMetrics();
-      }
+      final Collection<MetricData> collected =
+          await()
+              .atMost(Duration.ofSeconds(5))
+              .until(reader::collectAllMetrics, all -> delayCount(all) >= 2L);
 
       final MetricData applications = find(collected, "chaos.applications").orElseThrow();
       assertThat(applications.getLongSumData().getPoints())
@@ -144,7 +143,7 @@ class ChaosOpenTelemetryTest {
                       .effect(ChaosEffect.tornWrite())
                       .build()));
 
-      final MetricData skips = await("chaos.skips");
+      final MetricData skips = metric("chaos.skips");
       assertThat(skips.getLongSumData().getPoints())
           .singleElement()
           .satisfies(
@@ -153,7 +152,7 @@ class ChaosOpenTelemetryTest {
                 assertThat(point.getAttributes().get(ChaosOpenTelemetry.SKIP_REASON))
                     .isEqualTo("warmUp");
               });
-      final MetricData failures = await("chaos.activation.failures");
+      final MetricData failures = metric("chaos.activation.failures");
       assertThat(failures.getLongSumData().getPoints())
           .singleElement()
           .satisfies(
@@ -195,16 +194,11 @@ class ChaosOpenTelemetryTest {
   }
 
   /** The named metric, once the asynchronous listener has delivered what it records. */
-  private MetricData await(final String name) throws InterruptedException {
-    final long deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
-    while (System.nanoTime() < deadline) {
-      final Optional<MetricData> metric = find(reader.collectAllMetrics(), name);
-      if (metric.isPresent()) {
-        return metric.get();
-      }
-      Thread.sleep(10L);
-    }
-    throw new AssertionError("no " + name + " metric recorded");
+  private MetricData metric(final String name) {
+    return await()
+        .atMost(Duration.ofSeconds(5))
+        .until(() -> find(reader.collectAllMetrics(), name), Optional::isPresent)
+        .orElseThrow();
   }
 
   private static long delayCount(final Collection<MetricData> metrics) {

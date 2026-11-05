@@ -2,6 +2,7 @@ package com.macstab.chaos.jvm.core;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.awaitility.Awaitility.await;
 
 import com.macstab.chaos.jvm.api.ActivationPolicy;
 import com.macstab.chaos.jvm.api.ChaosDiagnostics;
@@ -17,7 +18,6 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.Set;
-import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -164,12 +164,9 @@ class WallClockWindowTest {
     void endAtActiveUntil() throws InterruptedException {
       runtime.activate(keepAlive(ActivationPolicy.window(null, T0.plusMillis(200))));
 
-      final long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
-      while (state() != ChaosDiagnostics.ScenarioState.INACTIVE && System.nanoTime() < deadline) {
-        Thread.sleep(20L);
-      }
-
-      assertThat(state()).isEqualTo(ChaosDiagnostics.ScenarioState.INACTIVE);
+      await()
+          .atMost(Duration.ofSeconds(5))
+          .until(() -> state() == ChaosDiagnostics.ScenarioState.INACTIVE);
     }
 
     @Test
