@@ -1,7 +1,7 @@
 // A Spring Boot fat jar (nested jars, Spring Boot's own class loader) started with -javaagent: the
 // layout in which install-time presence checks used to miss pool and HTTP client hooks.
 plugins {
-    id("org.springframework.boot") version "3.5.13"
+    id("org.springframework.boot") version "3.5.16"
 }
 
 evaluationDependsOn(":chaos-agent-bootstrap")

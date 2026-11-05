@@ -26,10 +26,10 @@ This gives four modules, each compiled against its own Spring Boot BOM and carry
 
 | Module                                  | Scope                                  | Spring Boot | Automatic-Module-Name                           | Base Package                              |
 |-----------------------------------------|----------------------------------------|-------------|-------------------------------------------------|-------------------------------------------|
-| `chaos-agent-spring-boot3-test-starter` | Test (JUnit 5 + `@SpringBootTest`)     | 3.5.13      | `com.macstab.chaos.jvm.agent.spring.boot3.test` | `com.macstab.chaos.jvm.spring.boot3.test` |
-| `chaos-agent-spring-boot4-test-starter` | Test (JUnit 5 + `@SpringBootTest`)     | 4.0.5       | `com.macstab.chaos.jvm.agent.spring.boot4.test` | `com.macstab.chaos.jvm.spring.boot4.test` |
-| `chaos-agent-spring-boot3-starter`      | Runtime (production / soak / game day) | 3.5.13      | `com.macstab.chaos.jvm.agent.spring.boot3`      | `com.macstab.chaos.jvm.spring.boot3`      |
-| `chaos-agent-spring-boot4-starter`      | Runtime (production / soak / game day) | 4.0.5       | `com.macstab.chaos.jvm.agent.spring.boot4`      | `com.macstab.chaos.jvm.spring.boot4`      |
+| `chaos-agent-spring-boot3-test-starter` | Test (JUnit 5 + `@SpringBootTest`)     | 3.5.16      | `com.macstab.chaos.jvm.agent.spring.boot3.test` | `com.macstab.chaos.jvm.spring.boot3.test` |
+| `chaos-agent-spring-boot4-test-starter` | Test (JUnit 5 + `@SpringBootTest`)     | 4.1.2       | `com.macstab.chaos.jvm.agent.spring.boot4.test` | `com.macstab.chaos.jvm.spring.boot4.test` |
+| `chaos-agent-spring-boot3-starter`      | Runtime (production / soak / game day) | 3.5.16      | `com.macstab.chaos.jvm.agent.spring.boot3`      | `com.macstab.chaos.jvm.spring.boot3`      |
+| `chaos-agent-spring-boot4-starter`      | Runtime (production / soak / game day) | 4.1.2       | `com.macstab.chaos.jvm.agent.spring.boot4`      | `com.macstab.chaos.jvm.spring.boot4`      |
 
 The test and runtime starters are intentionally separate. Combining them in a single artifact would put Actuator plumbing on the test classpath and test-only classes in production JARs. The separation enforces the blast-radius boundary at the Gradle dependency level rather than requiring callers to remember which scope to use.
 
@@ -711,7 +711,7 @@ Everything else is source-identical between Boot 3 and Boot 4 variants. The diff
 
 - Package names (`spring.boot3` vs `spring.boot4`)
 - The `Automatic-Module-Name` in the JAR manifest
-- The Spring Boot BOM version used for compilation (`3.5.13` vs `4.0.5`)
+- The Spring Boot BOM version used for compilation (`3.5.16` vs `4.1.2`)
 - The `EnvironmentPostProcessor` interface package and `spring.factories` key (as described above)
 
 All class names, method signatures, annotation usages, `@ConditionalOn*` expressions, JUnit 5 extension logic, parameter resolution, session lifecycle, and property key names are identical. The Java source of `ChaosProperties`, `ChaosAutoConfiguration`, `ChaosActuatorEndpoint`, `ChaosHandleRegistry`, `ChaosAgentExtension`, `ChaosAgentInitializer`, `ChaosTestAutoConfiguration`, and `@ChaosTest` contain no conditional logic — they compile against their respective BOMs and work identically at runtime.

@@ -22,6 +22,7 @@ Migration steps for each change: [docs/migration-2.0.md](docs/migration-2.0.md).
 
 ### Features
 
+* **spring:** built and tested against Spring Boot 3.5.16 and 4.1.2 (were 3.5.13 and 4.0.5).
 * **instrumentation:** hook health in the diagnostics: `unmatchedHooks` lists hooks woven into a type that matched none of its methods (a JDK or library release changed the method, so the hook is inactive), `hookFailures` the types whose weaving failed. `HookCoverageIntegrationTest` requires every advice to match on the JDK under test, with the supported client libraries loaded.
 
 * **instrumentation:** the rest of the native io and net operations: `FILE_IO_CLOSE` (evaluated after a stream, `RandomAccessFile` or `FileChannel` closed, so a failing close still releases the descriptor; one event for a stream and its channel), `FILE_IO_MOVE_TARGET` (a move or rename by its destination), `SOCKET_SHUTDOWN` (`shutdownInput` / `shutdownOutput`), and `PROCESS_WAIT` (`Process.waitFor`). `ChaosEffect.timeout()` also applies to `select(timeout)`, which then waits it out and reports no ready channel, and to a timed `waitFor`, which reports a child that has not exited. `ChaosEffect.Errno` gains `EINVAL`, `EOPNOTSUPP`, `EAFNOSUPPORT` and `EPROTONOSUPPORT`.
