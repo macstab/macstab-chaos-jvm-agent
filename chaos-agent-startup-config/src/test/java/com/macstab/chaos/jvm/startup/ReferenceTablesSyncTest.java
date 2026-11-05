@@ -229,4 +229,19 @@ class ReferenceTablesSyncTest {
   private static String typeName(final JsonNode definition) {
     return definition.get("properties").get("type").get("const").asText();
   }
+
+  @Test
+  @DisplayName("the docs index links every document in docs/")
+  void docsIndexIsComplete() throws IOException {
+    final String index = Files.readString(root.resolve("docs/README.md"));
+    final java.util.List<String> missing = new java.util.ArrayList<>();
+    try (var docs = Files.list(root.resolve("docs"))) {
+      docs.map(path -> path.getFileName().toString())
+          .filter(name -> name.endsWith(".md") && !name.equals("README.md"))
+          .filter(name -> !index.contains("(" + name + ")"))
+          .sorted()
+          .forEach(missing::add);
+    }
+    assertThat(missing).as("documents not linked from docs/README.md").isEmpty();
+  }
 }
