@@ -8,7 +8,7 @@ buildscript {
         mavenCentral()
     }
     dependencies {
-        classpath("com.diffplug.spotless:spotless-plugin-gradle:8.2.1")
+        classpath(libs.spotless.plugin)
         classpath(libs.jacoco.core)
         // apiDump reads the class files with ASM.
         classpath(libs.asm)
@@ -37,6 +37,11 @@ val junitBom = libs.junit.bom
 val junitPlatformLauncher = libs.junit.platform.launcher
 val jspecify = libs.jspecify
 val jacocoVersion = libs.versions.jacoco.get()
+val errorProneCore = libs.error.prone.core
+val nullaway = libs.nullaway
+val jsr305 = libs.jsr305
+val pitestToolVersion = libs.versions.pitest.get()
+val pitestJunit5ToolVersion = libs.versions.pitestJunit5.get()
 
 // Modules that are for demonstration / measurement only and MUST NOT be published.
 val nonPublishableModules = setOf(
@@ -625,8 +630,8 @@ subprojects {
     val floor = mutationFloors[name] ?: return@subprojects
     apply(plugin = "info.solidsoft.pitest")
     extensions.configure<info.solidsoft.gradle.pitest.PitestPluginExtension> {
-        pitestVersion.set("1.30.1")
-        junit5PluginVersion.set("1.2.3")
+        pitestVersion.set(pitestToolVersion)
+        junit5PluginVersion.set(pitestJunit5ToolVersion)
         targetClasses.set(listOf("com.macstab.chaos.jvm.*"))
         threads.set(Runtime.getRuntime().availableProcessors())
         outputFormats.set(listOf("HTML", "XML"))
@@ -679,12 +684,12 @@ subprojects {
     plugins.withType<JavaPlugin> {
         apply(plugin = "net.ltgt.errorprone")
         dependencies {
-            "errorprone"("com.google.errorprone:error_prone_core:2.52.0")
-            "errorprone"("com.uber.nullaway:nullaway:0.14.3")
+            "errorprone"(errorProneCore)
+            "errorprone"(nullaway)
             "compileOnly"(jspecify)
             // ByteBuddy's own nullness annotations refer to JSR-305's When; JSpecify mode reads
             // them, so the compiler needs the class (compile time only).
-            "compileOnly"("com.google.code.findbugs:jsr305:3.0.2")
+            "compileOnly"(jsr305)
             "testCompileOnly"(jspecify)
         }
         tasks.withType<JavaCompile>().configureEach {
