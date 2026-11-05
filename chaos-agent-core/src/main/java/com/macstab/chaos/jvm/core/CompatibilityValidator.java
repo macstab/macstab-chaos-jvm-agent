@@ -5,7 +5,6 @@ import com.macstab.chaos.jvm.api.ChaosActivationException;
 import com.macstab.chaos.jvm.api.ChaosEffect;
 import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.ChaosSelector;
-import com.macstab.chaos.jvm.api.ChaosUnsupportedFeatureException;
 import com.macstab.chaos.jvm.api.ChaosValidationException;
 import com.macstab.chaos.jvm.api.NamePattern;
 import com.macstab.chaos.jvm.api.OperationType;
@@ -78,23 +77,12 @@ final class CompatibilityValidator {
                 + " is JVM-global and cannot be session scoped");
       }
     }
-    if (scenario.selector() instanceof ChaosSelector.ThreadSelector threadSelector
-        && threadSelector.kind() == ChaosSelector.ThreadKind.VIRTUAL
-        && !featureSet.supportsVirtualThreads()) {
-      throw new ChaosUnsupportedFeatureException(
-          "virtual-thread chaos requires JDK 21+ at runtime");
-    }
     if (scenario.selector() instanceof ChaosSelector.StressSelector stressSelector) {
       if (scenario.scope() != ChaosScenario.ScenarioScope.JVM) {
         throw new ChaosValidationException("stress scenarios must be JVM scoped");
       }
       validateStressBinding(stressSelector.target(), scenario.effect());
       validateStressActivationPolicy(scenario.activationPolicy());
-      if (stressSelector.target() == ChaosSelector.StressTarget.VIRTUAL_THREAD_CARRIER_PINNING
-          && !featureSet.supportsVirtualThreads()) {
-        throw new ChaosUnsupportedFeatureException(
-            "VIRTUAL_THREAD_CARRIER_PINNING requires JDK 21+ at runtime");
-      }
     }
     if (scenario.effect() instanceof ChaosEffect.ClockSkewEffect) {
       validateClockSkewActivationPolicy(scenario.activationPolicy());

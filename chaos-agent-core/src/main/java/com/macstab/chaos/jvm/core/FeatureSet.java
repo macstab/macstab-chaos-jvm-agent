@@ -1,22 +1,18 @@
 package com.macstab.chaos.jvm.core;
 
-import java.lang.reflect.Method;
 import org.jspecify.annotations.Nullable;
 
 /**
  * Probes the running JVM at construction time to discover which optional features are available.
  *
- * <p>The agent's declared baseline is JDK 21 ({@code release=21} in the build, enforced at the
- * bytecode level — a class-file major version of 65 refuses to load on earlier JVMs). The probes in
- * this class are therefore belt-and-braces against a future downgrade or against a JRE variant that
- * omits optional modules (e.g. JFR), not a portability gate against pre-21 JVMs.
+ * <p>The agent's baseline is JDK 21 ({@code release=21} in the build, enforced at the bytecode
+ * level), so virtual threads always exist; what varies is whether the runtime ships optional
+ * modules (JFR).
  *
  * <h2>Probes performed</h2>
  *
  * <ul>
  *   <li><b>runtimeFeatureVersion</b> — {@code Runtime.version().feature()} (always available).
- *   <li><b>isVirtualMethod</b> — {@code Thread.isVirtual()} via reflection; present on JDK 21+. Set
- *       to {@code null} if the method is absent (should not happen at the declared baseline).
  *   <li><b>jfrSupported</b> — {@code Class.forName("jdk.jfr.FlightRecorder")} probe; {@code true}
  *       if JFR is available.
  * </ul>
@@ -27,33 +23,12 @@ import org.jspecify.annotations.Nullable;
  * threads.
  */
 final class FeatureSet {
-  private final @Nullable Method isVirtualMethod;
   private final int runtimeFeatureVersion;
   private final boolean jfrSupported;
 
   FeatureSet() {
     this.runtimeFeatureVersion = Runtime.version().feature();
-    Method method;
-    try {
-      method = Thread.class.getMethod("isVirtual");
-    } catch (final NoSuchMethodException ignored) {
-      method = null;
-    }
-    this.isVirtualMethod = method;
     this.jfrSupported = probeJfr();
-  }
-
-  /**
-   * Returns {@code true} if the running JVM supports virtual threads (JDK 21+).
-   *
-   * <p>Equivalent to checking whether {@code Thread.isVirtual()} was found via reflection at
-   * construction time. When this returns {@code false}, {@link #isVirtualThread(Thread)} always
-   * returns {@code false}.
-   *
-   * @return {@code true} if virtual-thread detection is available
-   */
-  boolean supportsVirtualThreads() {
-    return isVirtualMethod != null;
   }
 
   /**
@@ -93,27 +68,10 @@ final class FeatureSet {
   /**
    * Tests whether {@code thread} is a virtual thread.
    *
-   * <p>Invokes the cached {@code Thread.isVirtual()} {@link Method} reflectively. Returns {@code
-   * false} without throwing if:
-   *
-   * <ul>
-   *   <li>{@code thread} is {@code null},
-   *   <li>the JVM does not support virtual threads ({@link #supportsVirtualThreads()} is {@code
-   *       false}), or
-   *   <li>the reflective invocation fails for any reason.
-   * </ul>
-   *
    * @param thread the thread to test; may be {@code null}
    * @return {@code true} if {@code thread} is a virtual thread
    */
-  boolean isVirtualThread(final Thread thread) {
-    if (thread == null || isVirtualMethod == null) {
-      return false;
-    }
-    try {
-      return (boolean) isVirtualMethod.invoke(thread);
-    } catch (final ReflectiveOperationException ignored) {
-      return false;
-    }
+  boolean isVirtualThread(final @Nullable Thread thread) {
+    return thread != null && thread.isVirtual();
   }
 }

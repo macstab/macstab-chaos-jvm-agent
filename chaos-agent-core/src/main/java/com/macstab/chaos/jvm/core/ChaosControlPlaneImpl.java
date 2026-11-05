@@ -569,7 +569,8 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
   private Map<String, String> runtimeDetails() {
     final Map<String, String> details = new LinkedHashMap<>();
     details.put("jdkFeatureVersion", Integer.toString(featureSet.runtimeFeatureVersion()));
-    details.put("virtualThreadsSupported", Boolean.toString(featureSet.supportsVirtualThreads()));
+    // The JDK 21 baseline has virtual threads; the key stays for diagnostics readers.
+    details.put("virtualThreadsSupported", "true");
     details.put("jfrSupported", Boolean.toString(featureSet.jfrSupported()));
     details.put("currentSessionId", String.valueOf(scopeContext.currentSessionId()));
     details.put("droppedEvents", String.valueOf(observabilityBus.droppedEvents()));
