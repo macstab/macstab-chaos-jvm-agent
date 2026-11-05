@@ -152,9 +152,10 @@ final class CompositeActivationHandle implements ChaosActivationHandle {
    * Returns the aggregated state across all delegates.
    *
    * <p>{@code ACTIVE} if any delegate is active, {@code STOPPED} if every delegate has reached the
-   * terminal {@code STOPPED} state, otherwise {@code INACTIVE}. Collapsing post-teardown state to
-   * {@code INACTIVE} would violate the {@link ChaosActivationHandle} contract: callers asserting
-   * {@code handle.state() == STOPPED} after {@code destroy()} would never see the transition.
+   * terminal {@code STOPPED} state, {@code REGISTERED} if none has started yet (a manually started
+   * plan), otherwise {@code INACTIVE}. Collapsing post-teardown state to {@code INACTIVE} would
+   * violate the {@link ChaosActivationHandle} contract: callers asserting {@code handle.state() ==
+   * STOPPED} after {@code destroy()} would never see the transition.
    *
    * @return the aggregated state across all delegates
    */
@@ -162,6 +163,7 @@ final class CompositeActivationHandle implements ChaosActivationHandle {
   public ChaosDiagnostics.ScenarioState state() {
     boolean anyActive = false;
     boolean allStopped = !delegates.isEmpty();
+    boolean allRegistered = !delegates.isEmpty();
     for (final ChaosActivationHandle handle : delegates) {
       final ChaosDiagnostics.ScenarioState delegateState = handle.state();
       if (delegateState == ChaosDiagnostics.ScenarioState.ACTIVE) {
@@ -170,12 +172,18 @@ final class CompositeActivationHandle implements ChaosActivationHandle {
       if (delegateState != ChaosDiagnostics.ScenarioState.STOPPED) {
         allStopped = false;
       }
+      if (delegateState != ChaosDiagnostics.ScenarioState.REGISTERED) {
+        allRegistered = false;
+      }
     }
     if (anyActive) {
       return ChaosDiagnostics.ScenarioState.ACTIVE;
     }
     if (allStopped) {
       return ChaosDiagnostics.ScenarioState.STOPPED;
+    }
+    if (allRegistered) {
+      return ChaosDiagnostics.ScenarioState.REGISTERED;
     }
     return ChaosDiagnostics.ScenarioState.INACTIVE;
   }

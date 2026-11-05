@@ -128,7 +128,7 @@ class ControlPlaneLifecycleTest {
                       ActivationPolicy.manual())));
 
       assertThat(handle.id()).isEqualTo("plan:pair");
-      assertThat(handle.state()).isEqualTo(ChaosDiagnostics.ScenarioState.INACTIVE);
+      assertThat(handle.state()).isEqualTo(ChaosDiagnostics.ScenarioState.REGISTERED);
       assertThat(submissionRejected()).isFalse();
 
       handle.start();
