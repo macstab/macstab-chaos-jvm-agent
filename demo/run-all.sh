@@ -2,7 +2,8 @@
 # Runs every demo under the agent and checks its output against expected.txt. Each demo is a
 # single-file Java program (java Demo.java) with its plan.json, run in a scratch working copy.
 #
-# Usage:  demo/run-all.sh [agent.jar]     (default: chaos-agent-bootstrap/build/libs/*.jar)
+# Usage:  demo/run-all.sh [agent.jar]
+#         (default: chaos-agent-bootstrap/build/libs/chaos-agent-bootstrap-<version>.jar)
 # Exit status: 0 when every demo printed what it expects, 1 otherwise.
 set -euo pipefail
 
@@ -10,8 +11,8 @@ DEMO_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$DEMO_DIR/.." && pwd)"
 AGENT="${1:-}"
 if [[ -z "$AGENT" ]]; then
-  AGENT="$(ls "$REPO_ROOT"/chaos-agent-bootstrap/build/libs/chaos-agent-bootstrap-*.jar \
-    | grep -v -e '-plain' -e '-sources' -e '-javadoc' | head -1)"
+  VERSION="$(sed -n 's/^version *= *//p' "$REPO_ROOT/gradle.properties")"
+  AGENT="$REPO_ROOT/chaos-agent-bootstrap/build/libs/chaos-agent-bootstrap-$VERSION.jar"
 fi
 if [[ ! -f "$AGENT" ]]; then
   echo "agent jar not found; build it with ./gradlew :chaos-agent-bootstrap:shadowJar" >&2

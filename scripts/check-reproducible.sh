@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Builds every published jar twice from a clean tree, without the build cache, and fails when any
-# jar differs between the two builds. A reproducible jar lets anyone verify that a published
-# artifact was built from the tagged sources.
+# Builds the module jars (examples and benchmarks excluded) twice from a clean tree, without the
+# build cache, and fails when any jar differs between the two builds. Both builds run on this
+# machine with the same JDK; the check shows that the build itself adds no timestamps or ordering.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
