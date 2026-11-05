@@ -139,7 +139,7 @@ class LifecycleEdgeTest {
     void validateRejectsSessionScope() {
       assertThatThrownBy(() -> runtime.validate(sessionScenario("s")))
           .isInstanceOf(ChaosActivationException.class)
-          .hasMessage("session-scoped scenario s cannot be activated outside a session");
+          .hasMessageStartingWith("session-scoped scenario s must be activated on a session");
       assertThatCode(() -> runtime.validate(executorScenario("ok", ActivationPolicy.always())))
           .doesNotThrowAnyException();
       assertThat(runtime.diagnostics().snapshot().scenarios()).isEmpty();

@@ -103,12 +103,7 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
    */
   private void rejectSessionScope(final ChaosScenario scenario) {
     if (scenario.scope() == ChaosScenario.ScenarioScope.SESSION) {
-      final ChaosActivationException failure =
-          new ChaosActivationException(
-              "session-scoped scenario "
-                  + scenario.id()
-                  + " must be activated on a session (ChaosSession.activate); outside one it"
-                  + " would apply to every thread");
+      final ChaosActivationException failure = outsideSession(scenario);
       recordFailure(
           scenario.id(),
           ChaosDiagnostics.FailureCategory.INVALID_CONFIGURATION,
@@ -127,10 +122,17 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
    */
   void validate(final ChaosScenario scenario) {
     if (scenario.scope() == ChaosScenario.ScenarioScope.SESSION) {
-      throw new ChaosActivationException(
-          "session-scoped scenario " + scenario.id() + " cannot be activated outside a session");
+      throw outsideSession(scenario);
     }
     CompatibilityValidator.validate(scenario, featureSet);
+  }
+
+  private static ChaosActivationException outsideSession(final ChaosScenario scenario) {
+    return new ChaosActivationException(
+        "session-scoped scenario "
+            + scenario.id()
+            + " must be activated on a session (ChaosSession.activate); outside one it"
+            + " would apply to every thread");
   }
 
   /**
