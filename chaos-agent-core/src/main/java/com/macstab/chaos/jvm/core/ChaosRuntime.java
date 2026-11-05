@@ -391,8 +391,9 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * Quarkus interceptors, or your own bytecode advice) at the start of every intercepted method to
    * give chaos scenarios a chance to inject an exception before the body runs.
    *
-   * <p>The agent does <i>not</i> auto-rewrite arbitrary user methods, so the entry event must be
-   * raised here. A matching {@code MethodSelector} scenario with {@link
+   * <p>For use without the agent (a plain {@code ChaosRuntime} in a unit test). With the agent
+   * attached, a {@code MethodSelector} scenario weaves its methods itself; calling this hook for
+   * them as well evaluates each call twice. A matching {@code MethodSelector} scenario with {@link
    * com.macstab.chaos.jvm.api.ChaosEffect.ExceptionInjectionEffect} causes this method to throw the
    * configured exception type.
    *
