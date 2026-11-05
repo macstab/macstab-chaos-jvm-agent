@@ -79,11 +79,11 @@ public interface com/macstab/chaos/jvm/api/ChaosControlPlane implements java/lan
   public abstract method activate(Lcom/macstab/chaos/jvm/api/ChaosPlan;)Lcom/macstab/chaos/jvm/api/ChaosActivationHandle;
   public abstract method activate(Lcom/macstab/chaos/jvm/api/ChaosScenario;)Lcom/macstab/chaos/jvm/api/ChaosActivationHandle;
   public abstract method addEventListener(Lcom/macstab/chaos/jvm/api/ChaosEventListener;)V
+  public abstract method bindSession(Ljava/lang/String;)Lcom/macstab/chaos/jvm/api/ChaosSession$ScopeBinding;
   public abstract method close()V
   public abstract method diagnostics()Lcom/macstab/chaos/jvm/api/ChaosDiagnostics;
   public abstract method openSession(Ljava/lang/String;)Lcom/macstab/chaos/jvm/api/ChaosSession;
   public abstract method removeEventListener(Lcom/macstab/chaos/jvm/api/ChaosEventListener;)Z
-  public method bindSession(Ljava/lang/String;)Lcom/macstab/chaos/jvm/api/ChaosSession$ScopeBinding;
 
 public final class com/macstab/chaos/jvm/api/ChaosDecisionRecorder implements com/macstab/chaos/jvm/api/ChaosEventListener
   public method <init>()V

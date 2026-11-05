@@ -299,6 +299,11 @@ class ChaosQuarkusExtensionGuardsTest {
 
     @Override
     public void close() {}
+
+    @Override
+    public ChaosSession.ScopeBinding bindSession(final String sessionId) {
+      return () -> {};
+    }
   }
 
   /** Records the scenarios activated on it. */

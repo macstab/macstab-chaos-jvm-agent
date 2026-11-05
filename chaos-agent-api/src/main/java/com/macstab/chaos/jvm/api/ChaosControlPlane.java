@@ -136,7 +136,5 @@ public interface ChaosControlPlane extends AutoCloseable {
    *     {@code null} (no header) also runs the thread outside any session
    * @return the binding to close when the work is done
    */
-  default ChaosSession.ScopeBinding bindSession(final @Nullable String sessionId) {
-    return () -> {};
-  }
+  ChaosSession.ScopeBinding bindSession(@Nullable String sessionId);
 }

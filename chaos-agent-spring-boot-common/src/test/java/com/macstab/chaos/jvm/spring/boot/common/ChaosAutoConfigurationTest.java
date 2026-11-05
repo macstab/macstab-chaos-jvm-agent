@@ -136,5 +136,10 @@ class ChaosAutoConfigurationTest {
 
     @Override
     public void close() {}
+
+    @Override
+    public ChaosSession.ScopeBinding bindSession(final String sessionId) {
+      return () -> {};
+    }
   }
 }

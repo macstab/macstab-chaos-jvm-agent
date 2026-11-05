@@ -1,7 +1,6 @@
 package com.macstab.chaos.jvm.api;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.Duration;
@@ -175,17 +174,6 @@ class ApiContractsTest {
 
       assertThat(stops).hasValue(1);
     }
-
-    @Test
-    @DisplayName("a control plane without sessions binds to a no-op binding")
-    void defaultBindSession() {
-      final ChaosControlPlane plane = new StubControlPlane();
-
-      final ChaosSession.ScopeBinding binding = plane.bindSession("any");
-
-      assertThat(binding).isNotNull();
-      assertThatCode(binding::close).doesNotThrowAnyException();
-    }
   }
 
   @Test
@@ -235,38 +223,5 @@ class ApiContractsTest {
     public long appliedCount() {
       return 0;
     }
-  }
-
-  private static final class StubControlPlane implements ChaosControlPlane {
-    @Override
-    public ChaosActivationHandle activate(final ChaosScenario scenario) {
-      throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public ChaosActivationHandle activate(final ChaosPlan plan) {
-      throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public ChaosSession openSession(final String displayName) {
-      throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public ChaosDiagnostics diagnostics() {
-      throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public void addEventListener(final ChaosEventListener listener) {}
-
-    @Override
-    public boolean removeEventListener(final ChaosEventListener listener) {
-      return false;
-    }
-
-    @Override
-    public void close() {}
   }
 }

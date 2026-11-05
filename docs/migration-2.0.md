@@ -142,6 +142,7 @@ Implementations of the API interfaces (rare: test doubles, decorators) must add:
 ```java
 // ChaosControlPlane
 boolean removeEventListener(ChaosEventListener listener);
+ChaosSession.ScopeBinding bindSession(@Nullable String sessionId); // a decorator delegates
 
 // ChaosActivationHandle
 long matchedCount();
