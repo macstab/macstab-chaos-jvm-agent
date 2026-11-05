@@ -74,6 +74,8 @@ class PlanSchemaTest {
       final Path target = Path.of("src/main/resources").resolve(RESOURCE);
       Files.createDirectories(target.getParent());
       Files.writeString(target, generated);
+      // The class path still holds the copy processResources made before the rewrite.
+      return;
     }
     final String committed;
     try (InputStream in = getClass().getClassLoader().getResourceAsStream(RESOURCE)) {
@@ -81,7 +83,8 @@ class PlanSchemaTest {
       committed = new String(in.readAllBytes(), StandardCharsets.UTF_8);
     }
     assertThat(committed)
-        .as("plan model changed: regenerate with -Dchaos.schema.update=true")
+        .as(
+            "plan model changed: regenerate with ./gradlew :chaos-agent-startup-config:test -PupdatePlanSchema")
         .isEqualTo(generated);
   }
 
