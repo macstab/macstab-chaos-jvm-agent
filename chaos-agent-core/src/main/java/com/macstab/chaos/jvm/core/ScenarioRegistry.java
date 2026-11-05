@@ -339,8 +339,8 @@ final class ScenarioRegistry implements ChaosDiagnostics {
    * <p>Captures the current state of every registered controller as a {@link ScenarioReport}, sorts
    * them by ID then scope key for a stable ordering, and bundles them together with the accumulated
    * activation failures and the runtime details from the supplier provided at construction time.
-   * The {@link Snapshot#capturedAt()} timestamp is derived from the {@link Clock} supplied at
-   * construction time.
+   * The {@link Snapshot#capturedAt()} timestamp is read, unskewed, from the {@link Clock} supplied
+   * at construction time.
    */
   @Override
   public Snapshot snapshot() {
@@ -351,7 +351,7 @@ final class ScenarioRegistry implements ChaosDiagnostics {
                 Comparator.comparing(ScenarioReport::id).thenComparing(ScenarioReport::scopeKey))
             .toList();
     return new Snapshot(
-        Instant.ofEpochMilli(clock.millis()),
+        Instant.ofEpochMilli(ChaosDispatcher.unskewedInstant(clock).toEpochMilli()),
         reports,
         List.copyOf(failures),
         runtimeDetailsSupplier.get());

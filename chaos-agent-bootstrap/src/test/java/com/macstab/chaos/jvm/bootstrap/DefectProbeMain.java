@@ -1885,6 +1885,24 @@ public final class DefectProbeMain {
         java.time.Instant.ofEpochMilli(java.lang.System.currentTimeMillis()).getEpochSecond();
     System.out.println(
         "clockAhead=" + (java.time.Clock.systemUTC().instant().getEpochSecond() - real));
+    // An event published on this (skewed) thread outside any dispatch carries the real time.
+    final java.util.concurrent.atomic.AtomicLong registeredAt =
+        new java.util.concurrent.atomic.AtomicLong(-1L);
+    final ChaosControlPlane plane = ChaosPlatform.current();
+    plane.addEventListener(
+        event -> {
+          if (event.type() == com.macstab.chaos.jvm.api.ChaosEvent.Type.REGISTERED) {
+            registeredAt.set(event.timestamp().getEpochSecond());
+          }
+        });
+    plane
+        .activate(
+            ChaosScenario.builder("event-time")
+                .selector(ChaosSelector.process(NamePattern.exact("never-started")))
+                .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+                .build())
+        .close();
+    System.out.println("eventAhead=" + (registeredAt.get() - real));
     final ExecutorService executor = Executors.newSingleThreadExecutor();
     try {
       executor.submit(() -> {}).get(5L, TimeUnit.SECONDS);

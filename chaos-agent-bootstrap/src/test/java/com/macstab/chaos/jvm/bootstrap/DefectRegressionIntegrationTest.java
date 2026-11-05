@@ -661,6 +661,9 @@ class DefectRegressionIntegrationTest {
       assertThat(result.longValue("applied.bounded"))
           .as("a day ahead lies past activeUntil and activeFor; the bounds read the real clock")
           .isEqualTo(1L);
+      assertThat(result.longValue("eventAhead"))
+          .as("event timestamps read the real clock, not the skewed one")
+          .isBetween(-5L, 5L);
     }
 
     @Test

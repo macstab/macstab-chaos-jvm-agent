@@ -1,6 +1,7 @@
 package com.macstab.chaos.jvm.core;
 
 import com.macstab.chaos.jvm.api.Internal;
+import java.time.Instant;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -91,6 +92,22 @@ public final class ChaosDispatcher {
     final ThreadLocal<int[]> depth = resolveBootstrapDepth();
     if (depth != null) {
       depth.get()[0]--;
+    }
+  }
+
+  /**
+   * Reads the real time: with the dispatch depth raised, so an active clock-skew scenario does not
+   * apply to the agent's own timestamps.
+   *
+   * @param clock the clock to read
+   * @return the clock's instant
+   */
+  static Instant unskewedInstant(final java.time.Clock clock) {
+    incrementDispatchDepth();
+    try {
+      return clock.instant();
+    } finally {
+      decrementDispatchDepth();
     }
   }
 

@@ -250,15 +250,9 @@ final class ObservabilityBus {
   /**
    * Constructs a {@link ChaosEvent} and dispatches it synchronously to every registered listener.
    *
-   * <p>The event timestamp is captured as the first action of this method via {@link
-   * Instant#now()}. When publish is invoked from inside the dispatcher's reentrancy guard, that
-   * {@code Instant.now()} call is already shielded from chaos clock-skew adjustment (the adjustment
-   * advice re-enters the dispatcher, which returns the real instant on reentrancy). When publish is
-   * invoked from outside a dispatch path (e.g. lifecycle STARTED / STOPPED from {@code activate()}
-   * / {@code stop()}), the adjustment would otherwise apply and event timestamps would silently
-   * reflect the app-perceived (skewed) clock — desirable for the user's code, undesirable for the
-   * operator reading chaos diagnostics. Capturing the timestamp first puts it as close as possible
-   * to the true event moment and keeps it consistent across call sites.
+   * <p>The event timestamp is the real time, captured first: read with the dispatch depth raised,
+   * so a clock-skew scenario never applies to it, whether publish runs inside a dispatch (APPLIED)
+   * or on a control-plane thread (REGISTERED, STARTED, STOPPED, FAILED).
    *
    * <p>Listeners are notified in registration order. A listener that throws is isolated: the
    * exception is logged at WARNING level and delivery continues to the remaining listeners. This
@@ -278,7 +272,7 @@ final class ObservabilityBus {
       final Map<String, String> attributes) {
     // Capture the timestamp first, before any other work in this method, so that event ordering
     // reflects publish()-arrival order as closely as possible even under listener backpressure.
-    final Instant timestamp = Instant.now();
+    final Instant timestamp = ChaosDispatcher.unskewedInstant(java.time.Clock.systemUTC());
     final ChaosEvent event = new ChaosEvent(timestamp, type, scenarioId, message, attributes);
     for (final ChaosEventListener listener : listeners) {
       try {
