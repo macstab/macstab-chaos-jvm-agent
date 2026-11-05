@@ -7,8 +7,8 @@ enum TerminalKind {
   THROW,
   /**
    * Return a specific value from the interception site. When {@link TerminalAction#returnValue()}
-   * is {@link Boolean#FALSE} and the call site uses {@link ChaosRuntime#applyPreDecision}, a {@link
-   * java.util.concurrent.RejectedExecutionException} is thrown instead.
+   * is {@link Boolean#FALSE} and the call site uses {@code DispatchEngine.applyPreDecision}, a
+   * {@link java.util.concurrent.RejectedExecutionException} is thrown instead.
    */
   RETURN,
   /**
@@ -28,4 +28,29 @@ enum TerminalKind {
    * ChaosEffect.ReturnValueCorruptionEffect}.
    */
   CORRUPT_RETURN,
+  /**
+   * Cap the byte count of a read at {@link TerminalAction#returnValue()} (an {@link Integer}):
+   * {@code TrickleEffect}.
+   */
+  CAP_LENGTH,
+  /** Flip one bit in the bytes the read returns: {@code CorruptReadEffect}. */
+  CORRUPT_READ,
+  /** Close the socket abortively ({@code SO_LINGER} 0): {@code ConnectionResetEffect}. */
+  ABORTIVE_CLOSE,
+  /**
+   * Wait {@link TerminalAction#returnValue()} milliseconds (a {@link Long}), then throw {@link
+   * TerminalAction#throwable()}: {@code TimeoutEffect}.
+   */
+  TIMEOUT,
+  /**
+   * The effect does not apply to this call (a {@code TimeoutEffect} on a socket without a timeout):
+   * the scenario neither takes effect nor counts an application.
+   */
+  NOT_APPLICABLE,
+  /**
+   * Reshape a DNS answer by the {@code DnsAnswerEffect} in {@link TerminalAction#returnValue()}.
+   */
+  DNS_SHAPE,
+  /** Resolve the host in {@link TerminalAction#returnValue()} instead: {@code DnsRewriteEffect}. */
+  REWRITE,
 }

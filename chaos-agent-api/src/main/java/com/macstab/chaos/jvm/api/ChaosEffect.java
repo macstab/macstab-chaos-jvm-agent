@@ -1,8 +1,7 @@
 package com.macstab.chaos.jvm.api;
 
-import com.fasterxml.jackson.annotation.JsonSubTypes;
-import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import java.time.Duration;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Describes the chaos behavior applied when a scenario matches an invocation.
@@ -19,50 +18,6 @@ import java.time.Duration;
  * <p>Valid selector ↔ effect combinations are enforced by the runtime validator at activation time,
  * not by the type system.
  */
-@JsonTypeInfo(use = JsonTypeInfo.Id.NAME, include = JsonTypeInfo.As.PROPERTY, property = "type")
-@JsonSubTypes({
-  // ── Interceptor effects ────────────────────────────────────────────────────
-  @JsonSubTypes.Type(value = ChaosEffect.DelayEffect.class, name = "delay"),
-  @JsonSubTypes.Type(value = ChaosEffect.GateEffect.class, name = "gate"),
-  @JsonSubTypes.Type(value = ChaosEffect.RejectEffect.class, name = "reject"),
-  @JsonSubTypes.Type(value = ChaosEffect.SuppressEffect.class, name = "suppress"),
-  @JsonSubTypes.Type(
-      value = ChaosEffect.ExceptionalCompletionEffect.class,
-      name = "exceptionalCompletion"),
-  @JsonSubTypes.Type(
-      value = ChaosEffect.ExceptionInjectionEffect.class,
-      name = "exceptionInjection"),
-  @JsonSubTypes.Type(
-      value = ChaosEffect.ReturnValueCorruptionEffect.class,
-      name = "returnValueCorruption"),
-  @JsonSubTypes.Type(value = ChaosEffect.ClockSkewEffect.class, name = "clockSkew"),
-
-  // ── Stressor effects ───────────────────────────────────────────────────────
-  @JsonSubTypes.Type(value = ChaosEffect.HeapPressureEffect.class, name = "heapPressure"),
-  @JsonSubTypes.Type(value = ChaosEffect.KeepAliveEffect.class, name = "keepAlive"),
-  @JsonSubTypes.Type(value = ChaosEffect.MetaspacePressureEffect.class, name = "metaspacePressure"),
-  @JsonSubTypes.Type(
-      value = ChaosEffect.DirectBufferPressureEffect.class,
-      name = "directBufferPressure"),
-  @JsonSubTypes.Type(value = ChaosEffect.GcPressureEffect.class, name = "gcPressure"),
-  @JsonSubTypes.Type(value = ChaosEffect.FinalizerBacklogEffect.class, name = "finalizerBacklog"),
-  @JsonSubTypes.Type(value = ChaosEffect.DeadlockEffect.class, name = "deadlock"),
-  @JsonSubTypes.Type(value = ChaosEffect.ThreadLeakEffect.class, name = "threadLeak"),
-  @JsonSubTypes.Type(value = ChaosEffect.ThreadLocalLeakEffect.class, name = "threadLocalLeak"),
-  @JsonSubTypes.Type(value = ChaosEffect.MonitorContentionEffect.class, name = "monitorContention"),
-  @JsonSubTypes.Type(value = ChaosEffect.SpuriousWakeupEffect.class, name = "spuriousWakeup"),
-  @JsonSubTypes.Type(value = ChaosEffect.CodeCachePressureEffect.class, name = "codeCachePressure"),
-  @JsonSubTypes.Type(value = ChaosEffect.SafepointStormEffect.class, name = "safepointStorm"),
-  @JsonSubTypes.Type(
-      value = ChaosEffect.StringInternPressureEffect.class,
-      name = "stringInternPressure"),
-  @JsonSubTypes.Type(
-      value = ChaosEffect.ReferenceQueueFloodEffect.class,
-      name = "referenceQueueFlood"),
-  @JsonSubTypes.Type(
-      value = ChaosEffect.VirtualThreadCarrierPinningEffect.class,
-      name = "virtualThreadCarrierPinning"),
-})
 public sealed interface ChaosEffect
     permits ChaosEffect.DelayEffect,
         ChaosEffect.GateEffect,
@@ -73,6 +28,15 @@ public sealed interface ChaosEffect
         ChaosEffect.ReturnValueCorruptionEffect,
         ChaosEffect.ClockSkewEffect,
         ChaosEffect.SpuriousWakeupEffect,
+        ChaosEffect.ErrnoEffect,
+        ChaosEffect.ConnectionResetEffect,
+        ChaosEffect.TrickleEffect,
+        ChaosEffect.CorruptReadEffect,
+        ChaosEffect.TimeoutEffect,
+        ChaosEffect.TornWriteEffect,
+        ChaosEffect.DnsAnswerEffect,
+        ChaosEffect.DnsRewriteEffect,
+        ChaosEffect.RedirectEffect,
         ChaosEffect.HeapPressureEffect,
         ChaosEffect.KeepAliveEffect,
         ChaosEffect.MetaspacePressureEffect,
@@ -123,6 +87,156 @@ public sealed interface ChaosEffect
    */
   static GateEffect gate(final Duration maxBlock) {
     return new GateEffect(maxBlock);
+  }
+
+  /**
+   * Returns an effect that fails the operation the way the operating system reports {@code errno}:
+   * the native library's {@code ERRNO} effect, expressed as the Java exception callers catch.
+   *
+   * @param errno the error
+   * @return a new {@link ErrnoEffect}
+   */
+  static ErrnoEffect errno(final Errno errno) {
+    return new ErrnoEffect(errno);
+  }
+
+  /**
+   * Returns an effect that closes the socket abortively ({@code SO_LINGER} 0), so the peer sees a
+   * connection reset instead of an orderly close: the native library's {@code RESET}. Valid for
+   * {@link OperationType#SOCKET_CLOSE}.
+   *
+   * @return a new {@link ConnectionResetEffect}
+   */
+  static ConnectionResetEffect connectionReset() {
+    return new ConnectionResetEffect();
+  }
+
+  /**
+   * Returns an effect that lets each socket read return at most {@code maxBytes} bytes: the native
+   * library's {@code TRICKLE}. Valid for {@link OperationType#SOCKET_READ}.
+   *
+   * @param maxBytes the most bytes a read returns; {@code >= 1}
+   * @return a new {@link TrickleEffect}
+   */
+  static TrickleEffect trickle(final int maxBytes) {
+    return new TrickleEffect(maxBytes);
+  }
+
+  /**
+   * Returns an effect that flips one bit in the bytes a read returned: the native library's {@code
+   * CORRUPT}. Valid for {@link OperationType#SOCKET_READ} and {@link OperationType#FILE_IO_READ}.
+   *
+   * @return a new {@link CorruptReadEffect}
+   */
+  static CorruptReadEffect corruptRead() {
+    return new CorruptReadEffect();
+  }
+
+  /**
+   * Returns an effect that lets the call time out: it waits for the socket's own timeout ({@code
+   * SO_TIMEOUT} on a read, the connect timeout on a connect) and then throws {@link
+   * java.net.SocketTimeoutException}. It never fires when the timeout is infinite (0), like the
+   * native library's {@code TIMEOUT}. Valid for {@link OperationType#SOCKET_READ} and {@link
+   * OperationType#SOCKET_CONNECT}.
+   *
+   * @return a new {@link TimeoutEffect}
+   */
+  static TimeoutEffect timeout() {
+    return new TimeoutEffect();
+  }
+
+  /**
+   * Returns an effect that tears a write: a {@code FileChannel} or {@code SocketChannel} write
+   * writes a random 1 to n-1 of the n bytes and returns that count, which callers must loop on; a
+   * socket stream write sends that prefix and then resets the connection. The native library's
+   * {@code TORN}. Valid for {@link OperationType#FILE_IO_WRITE}, {@link OperationType#SOCKET_WRITE}
+   * and {@link OperationType#NIO_CHANNEL_WRITE}; a file stream write ({@code FileOutputStream},
+   * {@code RandomAccessFile}) either completes or throws, so a match there does nothing and counts
+   * no application.
+   *
+   * @return a new {@link TornWriteEffect}
+   */
+  static TornWriteEffect tornWrite() {
+    return new TornWriteEffect();
+  }
+
+  /**
+   * Returns an effect that answers DNS lookups with {@code addresses} instead of the resolver's
+   * answer — even when the real lookup failed: the native library's {@code OVERRIDE}. Valid for
+   * {@link OperationType#DNS_ANSWER}.
+   *
+   * @param addresses IPv4 or IPv6 literals; at least one
+   * @return a new {@link DnsAnswerEffect}
+   */
+  static DnsAnswerEffect dnsOverride(final String... addresses) {
+    return new DnsAnswerEffect(java.util.List.of(addresses), null, false, null);
+  }
+
+  /**
+   * Returns an effect that keeps only the addresses of {@code family} in a DNS answer; an answer
+   * left empty fails with {@link java.net.UnknownHostException}: the native library's {@code
+   * FILTER_FAMILY}. Valid for {@link OperationType#DNS_ANSWER}.
+   *
+   * @param family the family to keep
+   * @return a new {@link DnsAnswerEffect}
+   */
+  static DnsAnswerEffect dnsFamily(final AddressFamily family) {
+    return new DnsAnswerEffect(null, family, false, null);
+  }
+
+  /**
+   * Returns an effect that shuffles the addresses of a DNS answer: the native library's {@code
+   * SHUFFLE}. Valid for {@link OperationType#DNS_ANSWER}.
+   *
+   * @return a new {@link DnsAnswerEffect}
+   */
+  static DnsAnswerEffect dnsShuffle() {
+    return new DnsAnswerEffect(null, null, true, null);
+  }
+
+  /**
+   * Returns an effect that keeps at most {@code count} addresses of a DNS answer: the native
+   * library's {@code LIMIT}. Valid for {@link OperationType#DNS_ANSWER}.
+   *
+   * @param count the most addresses to keep; {@code >= 1}
+   * @return a new {@link DnsAnswerEffect}
+   */
+  static DnsAnswerEffect dnsLimit(final int count) {
+    return new DnsAnswerEffect(null, null, false, count);
+  }
+
+  /**
+   * Returns an effect that looks up {@code host} instead of the name the application asked for: the
+   * native library's {@code REWRITE}. Valid for {@link OperationType#DNS_RESOLVE}.
+   *
+   * @param host the name to resolve instead
+   * @return a new {@link DnsRewriteEffect}
+   */
+  static DnsRewriteEffect dnsRewrite(final String host) {
+    return new DnsRewriteEffect(host);
+  }
+
+  /**
+   * Returns an effect that connects to {@code host:port} instead of the endpoint the application
+   * asked for: a failover target, a black hole, a slow proxy in front of the real service. Valid
+   * for {@link OperationType#SOCKET_CONNECT}.
+   *
+   * @param host the host to connect to instead; resolved when the connect is redirected
+   * @param port the port to connect to instead, {@code 1..65535}
+   * @return a new {@link RedirectEffect}
+   */
+  static RedirectEffect redirect(final String host, final int port) {
+    return new RedirectEffect(host, port);
+  }
+
+  /**
+   * Returns an effect that connects to {@code host} on the port the application asked for.
+   *
+   * @param host the host to connect to instead
+   * @return a new {@link RedirectEffect}
+   */
+  static RedirectEffect redirect(final String host) {
+    return new RedirectEffect(host, null);
   }
 
   /**
@@ -571,6 +685,14 @@ public sealed interface ChaosEffect
      * hung NTP daemon or failed clock source.
      */
     FREEZE,
+    /**
+     * Step the clock back once by {@code skewAmount} and keep it there, the native library's {@code
+     * REGRESS}. The first read after activation (inside the policy's time bounds) is returned
+     * unchanged and arms the scenario; the next read jumps back by {@code skewAmount}, and every
+     * later read stays shifted. Time visibly runs backwards once: what deadline, lease and ordering
+     * logic must survive after an NTP step. {@code skewAmount} must be positive.
+     */
+    REGRESS,
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -640,6 +762,258 @@ public sealed interface ChaosEffect
       if (message == null || message.isBlank()) {
         throw new IllegalArgumentException("message must be non-blank");
       }
+    }
+  }
+
+  /**
+   * Fails the operation the way the operating system reports {@code errno}, as the Java exception
+   * an application catches for it — the native library's {@code ERRNO} effect. Network errors apply
+   * to socket and NIO channel operations, file errors to file operations; a mismatch is rejected at
+   * activation.
+   *
+   * <p>File errors carry the file's path when the stream or channel has one ({@link
+   * java.nio.file.FileSystemException#getFile()}).
+   *
+   * @param errno the error to raise
+   */
+  record ErrnoEffect(Errno errno) implements ChaosEffect {
+    /** Validates the ErrnoEffect parameters. */
+    public ErrnoEffect {
+      if (errno == null) {
+        throw new IllegalArgumentException("errno must not be null");
+      }
+    }
+  }
+
+  /** Closes the socket abortively ({@code SO_LINGER} 0): the peer sees a connection reset. */
+  record ConnectionResetEffect() implements ChaosEffect {}
+
+  /**
+   * Lets each socket read return at most {@code maxBytes} bytes.
+   *
+   * @param maxBytes the most bytes a read returns; {@code >= 1}
+   */
+  record TrickleEffect(int maxBytes) implements ChaosEffect {
+    /** Validates the TrickleEffect parameters. */
+    public TrickleEffect {
+      if (maxBytes < 1) {
+        throw new IllegalArgumentException("maxBytes must be >= 1, got " + maxBytes);
+      }
+    }
+  }
+
+  /** Flips exactly one bit in the bytes a successful read returned. */
+  record CorruptReadEffect() implements ChaosEffect {}
+
+  /**
+   * Waits for the socket's own timeout, then throws {@link java.net.SocketTimeoutException}; never
+   * fires when the timeout is infinite.
+   */
+  record TimeoutEffect() implements ChaosEffect {}
+
+  /** The address family a {@link DnsAnswerEffect} keeps. */
+  enum AddressFamily {
+    /** IPv4 addresses. */
+    IPV4,
+    /** IPv6 addresses. */
+    IPV6
+  }
+
+  /**
+   * Reshapes a DNS answer: replaces it ({@code override}, IP literals; applied even when the real
+   * lookup failed), keeps one address family, shuffles it and limits its size, in that order. Every
+   * field is optional, but at least one must be set.
+   *
+   * @param override the addresses to answer with instead; {@code null} to keep the real answer
+   * @param family the family to keep; {@code null} to keep both
+   * @param shuffle whether to shuffle the addresses
+   * @param limit the most addresses to keep; {@code null} for no limit
+   */
+  record DnsAnswerEffect(
+      java.util.@Nullable List<String> override,
+      @Nullable AddressFamily family,
+      boolean shuffle,
+      @Nullable Integer limit)
+      implements ChaosEffect {
+    /** Validates the DnsAnswerEffect parameters. */
+    public DnsAnswerEffect {
+      if (override != null) {
+        if (override.isEmpty()) {
+          throw new IllegalArgumentException("override must name at least one address");
+        }
+        override = java.util.List.copyOf(override);
+        for (final String address : override) {
+          CidrBlock.parseAddress(address);
+        }
+      }
+      if (limit != null && limit < 1) {
+        throw new IllegalArgumentException("limit must be >= 1, got " + limit);
+      }
+      if (override == null && family == null && !shuffle && limit == null) {
+        throw new IllegalArgumentException(
+            "DnsAnswerEffect needs override, family, shuffle or limit");
+      }
+    }
+  }
+
+  /**
+   * Resolves {@code host} instead of the name the application asked for.
+   *
+   * @param host the name to resolve instead; non-blank
+   */
+  record DnsRewriteEffect(String host) implements ChaosEffect {
+    /** Validates the DnsRewriteEffect parameters. */
+    public DnsRewriteEffect {
+      if (host == null || host.isBlank()) {
+        throw new IllegalArgumentException("host must be non-blank");
+      }
+    }
+  }
+
+  /**
+   * Connects to another endpoint than the one the application asked for.
+   *
+   * @param host the host to connect to instead; non-blank
+   * @param port the port to connect to instead, {@code 1..65535}; {@code null} keeps the requested
+   *     port
+   */
+  record RedirectEffect(String host, @Nullable Integer port) implements ChaosEffect {
+    /** Validates the RedirectEffect parameters. */
+    public RedirectEffect {
+      if (host == null || host.isBlank()) {
+        throw new IllegalArgumentException("host must be non-blank");
+      }
+      if (port != null && (port < 1 || port > 65_535)) {
+        throw new IllegalArgumentException("port must be in 1..65535, got " + port);
+      }
+    }
+  }
+
+  /** Tears a write: a channel write succeeds short, a socket stream write is cut and reset. */
+  record TornWriteEffect() implements ChaosEffect {}
+
+  /** The errors an {@link ErrnoEffect} can raise, with the Java exception each becomes. */
+  enum Errno {
+    /** Connection refused: {@link java.net.ConnectException}. */
+    ECONNREFUSED(Family.NETWORK, 111, 61, "Connection refused"),
+    /**
+     * Timed out: {@link java.net.SocketTimeoutException} on a read, {@link
+     * java.net.ConnectException} on a connect.
+     */
+    ETIMEDOUT(Family.NETWORK, 110, 60, "Connection timed out"),
+    /** Connection reset by peer: {@link java.net.SocketException}. */
+    ECONNRESET(Family.NETWORK, 104, 54, "Connection reset"),
+    /** No route to host: {@link java.net.NoRouteToHostException}. */
+    EHOSTUNREACH(Family.NETWORK, 113, 65, "No route to host"),
+    /** Network is unreachable: {@link java.net.SocketException}. */
+    ENETUNREACH(Family.NETWORK, 101, 51, "Network is unreachable"),
+    /** Broken pipe (write to a closed connection): {@link java.net.SocketException}. */
+    EPIPE(Family.NETWORK, 32, 32, "Broken pipe"),
+    /** Address already in use: {@link java.net.BindException}. */
+    EADDRINUSE(Family.NETWORK, 98, 48, "Address already in use"),
+    /** Cannot assign the requested (local) address: {@link java.net.BindException}. */
+    EADDRNOTAVAIL(Family.NETWORK, 99, 49, "Cannot assign requested address"),
+    /** The socket is not connected: {@link java.net.SocketException}. */
+    ENOTCONN(Family.NETWORK, 107, 57, "Transport endpoint is not connected"),
+    /** No buffer space available (kernel socket buffers): {@link java.net.SocketException}. */
+    ENOBUFS(Family.NETWORK, 105, 55, "No buffer space available"),
+    /** Invalid argument: {@link java.net.SocketException}. */
+    EINVAL(Family.NETWORK, 22, 22, "Invalid argument"),
+    /** Operation not supported on the socket: {@link java.net.SocketException}. */
+    EOPNOTSUPP(Family.NETWORK, 95, 102, "Operation not supported"),
+    /** Address family not supported: {@link java.net.SocketException}. */
+    EAFNOSUPPORT(Family.NETWORK, 97, 47, "Address family not supported by protocol"),
+    /** Protocol not supported: {@link java.net.SocketException}. */
+    EPROTONOSUPPORT(Family.NETWORK, 93, 43, "Protocol not supported"),
+    /** No space left on device: {@link java.nio.file.FileSystemException}. */
+    ENOSPC(Family.FILE, 28, 28, "No space left on device"),
+    /** Disk quota exceeded: {@link java.nio.file.FileSystemException}. */
+    EDQUOT(Family.FILE, 122, 69, "Disk quota exceeded"),
+    /** Read-only file system: {@link java.nio.file.FileSystemException}. */
+    EROFS(Family.FILE, 30, 30, "Read-only file system"),
+    /** Permission denied: {@link java.nio.file.AccessDeniedException}. */
+    EACCES(Family.FILE, 13, 13, "Permission denied"),
+    /** No such file or directory: {@link java.nio.file.NoSuchFileException}. */
+    ENOENT(Family.FILE, 2, 2, "No such file or directory"),
+    /** Input/output error (a failing disk): {@link java.nio.file.FileSystemException}. */
+    EIO(Family.FILE, 5, 5, "Input/output error"),
+    /**
+     * Too many open files (the process limit): {@link java.nio.file.FileSystemException}; also on
+     * socket connects and accepts, which open a descriptor.
+     */
+    EMFILE(Family.FILE, 24, 24, "Too many open files"),
+    /** Too many open files in the system (the system limit): as {@link #EMFILE}. */
+    ENFILE(Family.FILE, 23, 23, "Too many open files in system"),
+    /**
+     * Resource temporarily unavailable (the process or thread limit): on {@link
+     * OperationType#PROCESS_START}, {@code IOException: Cannot run program}; on {@link
+     * OperationType#THREAD_START}, the JDK's {@code OutOfMemoryError: unable to create native
+     * thread}.
+     */
+    EAGAIN(Family.PROCESS, 11, 35, "Resource temporarily unavailable"),
+    /** Cannot allocate memory: on {@link OperationType#PROCESS_START}, as {@link #EAGAIN}. */
+    ENOMEM(Family.PROCESS, 12, 12, "Cannot allocate memory");
+
+    /** Which operations an error belongs to. */
+    public enum Family {
+      /** Socket and NIO channel operations. */
+      NETWORK,
+      /** File operations; also process starts, which fail on the program file. */
+      FILE,
+      /** Process starts only. */
+      PROCESS
+    }
+
+    private static final boolean MACOS =
+        System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).startsWith("mac");
+
+    private final Family family;
+    private final int linuxCode;
+    private final int macosCode;
+    private final String reason;
+
+    Errno(final Family family, final int linuxCode, final int macosCode, final String reason) {
+      this.family = family;
+      this.linuxCode = linuxCode;
+      this.macosCode = macosCode;
+      this.reason = reason;
+    }
+
+    /**
+     * Returns the error's number on this operating system (Linux numbering elsewhere), as the JDK
+     * prints it in {@code error=N}: {@code EAGAIN} is 11 on Linux and 35 on macOS.
+     *
+     * @return the errno value
+     */
+    public int code() {
+      return MACOS ? macosCode : linuxCode;
+    }
+
+    /**
+     * Returns the error's number on Linux, whatever the current operating system.
+     *
+     * @return the Linux errno value
+     */
+    public int linuxCode() {
+      return linuxCode;
+    }
+
+    /**
+     * Returns the operations this error belongs to.
+     *
+     * @return the family
+     */
+    public Family family() {
+      return family;
+    }
+
+    /**
+     * Returns the operating system's text for this error, used as the exception reason.
+     *
+     * @return the reason
+     */
+    public String reason() {
+      return reason;
     }
   }
 
@@ -780,13 +1154,17 @@ public sealed interface ChaosEffect
       if (mode == null) {
         throw new IllegalArgumentException("mode must not be null");
       }
+      if (mode == ClockSkewMode.REGRESS && skewAmount.isNegative()) {
+        throw new IllegalArgumentException(
+            "REGRESS steps the clock back by skewAmount; skewAmount must be positive");
+      }
       // Duration.toNanos() overflows (ArithmeticException) past ~±292 years. Letting that escape
       // at scenario-start time leaves the controller half-initialised — started=true is written
       // before the ClockSkewState constructor runs — and the scenario remains ACTIVE with a null
       // ClockSkewState, silently applying no skew while diagnostics claim it is live. Fail at
       // plan-build time instead, where the caller can react.
       try {
-        skewAmount.toNanos();
+        final long unused = skewAmount.toNanos();
       } catch (final ArithmeticException overflow) {
         throw new IllegalArgumentException(
             "skewAmount out of range (must fit in Long nanos: ~±292 years): " + skewAmount,
@@ -1057,7 +1435,8 @@ public sealed interface ChaosEffect
    * @param daemon whether leaked threads run as daemons
    * @param lifespan maximum lifetime per leaked thread; {@code null} means no limit
    */
-  record ThreadLeakEffect(int threadCount, String namePrefix, boolean daemon, Duration lifespan)
+  record ThreadLeakEffect(
+      int threadCount, String namePrefix, boolean daemon, @Nullable Duration lifespan)
       implements ChaosEffect {
     /**
      * Upper bound on {@code threadCount}. Each leaked thread consumes ~1 MiB of native stack plus a

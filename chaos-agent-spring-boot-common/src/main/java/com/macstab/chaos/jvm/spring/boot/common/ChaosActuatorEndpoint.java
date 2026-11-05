@@ -9,6 +9,7 @@ import com.macstab.chaos.jvm.startup.ConfigLoadException;
 import java.util.Objects;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import org.jspecify.annotations.Nullable;
 import org.springframework.boot.actuate.endpoint.annotation.DeleteOperation;
 import org.springframework.boot.actuate.endpoint.annotation.Endpoint;
 import org.springframework.boot.actuate.endpoint.annotation.ReadOperation;
@@ -147,7 +148,8 @@ public class ChaosActuatorEndpoint {
    * @param handleId the handle ID of the activated plan, when successful
    * @param message optional human-readable detail
    */
-  public record ActivationResponse(String status, String handleId, String message) {}
+  public record ActivationResponse(
+      String status, @Nullable String handleId, @Nullable String message) {}
 
   /**
    * Response body for the {@code stop} operation.
@@ -156,7 +158,7 @@ public class ChaosActuatorEndpoint {
    * @param scenarioId the scenario ID targeted by the operation
    * @param message optional human-readable detail
    */
-  public record StopResponse(String status, String scenarioId, String message) {}
+  public record StopResponse(String status, String scenarioId, @Nullable String message) {}
 
   /**
    * Response body for the {@code stopAll} operation.

@@ -189,10 +189,10 @@ public class Phase4DispatchBenchmark {
       dispatcher = runtime.dispatcher();
 
       // Consume each scenario once so they are exhausted for the measurement loop.
-      dispatcher.beforeThreadSleep(SLEEP_DURATION_MILLIS);
-      dispatcher.beforeDnsResolve(SETUP_DNS_HOSTNAME);
-      dispatcher.beforeSslHandshake(null);
-      dispatcher.beforeFileIo(FILE_IO_READ_OPERATION, null);
+      dispatcher.thread().beforeThreadSleep(SLEEP_DURATION_MILLIS);
+      dispatcher.dns().beforeDnsResolve(SETUP_DNS_HOSTNAME);
+      dispatcher.network().beforeSslHandshake(null);
+      dispatcher.file().beforeFileIo(FILE_IO_READ_OPERATION, null, "/tmp/bench.dat", 4096);
     }
 
     /** Closes the runtime after the measurement trial. */
@@ -213,7 +213,7 @@ public class Phase4DispatchBenchmark {
    */
   @Benchmark
   public boolean threadSleep_zeroScenarios(ZeroScenariosState state) throws Throwable {
-    return state.dispatcher.beforeThreadSleep(SLEEP_DURATION_MILLIS);
+    return state.dispatcher.thread().beforeThreadSleep(SLEEP_DURATION_MILLIS);
   }
 
   /**
@@ -225,7 +225,7 @@ public class Phase4DispatchBenchmark {
    */
   @Benchmark
   public boolean threadSleep_oneScenarioNoMatch(OneScenarioNoMatchState state) throws Throwable {
-    return state.dispatcher.beforeThreadSleep(SLEEP_DURATION_MILLIS);
+    return state.dispatcher.thread().beforeThreadSleep(SLEEP_DURATION_MILLIS);
   }
 
   /**
@@ -238,7 +238,7 @@ public class Phase4DispatchBenchmark {
   @Benchmark
   public boolean threadSleep_fourScenariosExhausted(FourScenariosExhaustedState state)
       throws Throwable {
-    return state.dispatcher.beforeThreadSleep(SLEEP_DURATION_MILLIS);
+    return state.dispatcher.thread().beforeThreadSleep(SLEEP_DURATION_MILLIS);
   }
 
   // ── DNS resolve ──────────────────────────────────────────────────────────
@@ -252,7 +252,7 @@ public class Phase4DispatchBenchmark {
    */
   @Benchmark
   public void dnsResolve_zeroScenarios(ZeroScenariosState state, Blackhole bh) throws Throwable {
-    state.dispatcher.beforeDnsResolve(DNS_HOSTNAME);
+    state.dispatcher.dns().beforeDnsResolve(DNS_HOSTNAME);
     bh.consume(state);
   }
 
@@ -266,7 +266,7 @@ public class Phase4DispatchBenchmark {
   @Benchmark
   public void dnsResolve_oneScenarioNoMatch(OneScenarioNoMatchState state, Blackhole bh)
       throws Throwable {
-    state.dispatcher.beforeDnsResolve(DNS_HOSTNAME);
+    state.dispatcher.dns().beforeDnsResolve(DNS_HOSTNAME);
     bh.consume(state);
   }
 
@@ -280,7 +280,7 @@ public class Phase4DispatchBenchmark {
   @Benchmark
   public void dnsResolve_fourScenariosExhausted(FourScenariosExhaustedState state, Blackhole bh)
       throws Throwable {
-    state.dispatcher.beforeDnsResolve(DNS_HOSTNAME);
+    state.dispatcher.dns().beforeDnsResolve(DNS_HOSTNAME);
     bh.consume(state);
   }
 
@@ -295,7 +295,7 @@ public class Phase4DispatchBenchmark {
    */
   @Benchmark
   public void sslHandshake_zeroScenarios(ZeroScenariosState state, Blackhole bh) throws Throwable {
-    state.dispatcher.beforeSslHandshake(null);
+    state.dispatcher.network().beforeSslHandshake(null);
     bh.consume(state);
   }
 
@@ -309,7 +309,7 @@ public class Phase4DispatchBenchmark {
   @Benchmark
   public void sslHandshake_oneScenarioNoMatch(OneScenarioNoMatchState state, Blackhole bh)
       throws Throwable {
-    state.dispatcher.beforeSslHandshake(null);
+    state.dispatcher.network().beforeSslHandshake(null);
     bh.consume(state);
   }
 
@@ -324,7 +324,7 @@ public class Phase4DispatchBenchmark {
   @Benchmark
   public void sslHandshake_fourScenariosExhausted(FourScenariosExhaustedState state, Blackhole bh)
       throws Throwable {
-    state.dispatcher.beforeSslHandshake(null);
+    state.dispatcher.network().beforeSslHandshake(null);
     bh.consume(state);
   }
 
@@ -339,7 +339,7 @@ public class Phase4DispatchBenchmark {
    */
   @Benchmark
   public void fileIoRead_zeroScenarios(ZeroScenariosState state, Blackhole bh) throws Throwable {
-    state.dispatcher.beforeFileIo(FILE_IO_READ_OPERATION, null);
+    state.dispatcher.file().beforeFileIo(FILE_IO_READ_OPERATION, null, "/tmp/bench.dat", 4096);
     bh.consume(state);
   }
 
@@ -354,7 +354,7 @@ public class Phase4DispatchBenchmark {
   @Benchmark
   public void fileIoRead_oneScenarioNoMatch(OneScenarioNoMatchState state, Blackhole bh)
       throws Throwable {
-    state.dispatcher.beforeFileIo(FILE_IO_READ_OPERATION, null);
+    state.dispatcher.file().beforeFileIo(FILE_IO_READ_OPERATION, null, "/tmp/bench.dat", 4096);
     bh.consume(state);
   }
 
@@ -369,7 +369,7 @@ public class Phase4DispatchBenchmark {
   @Benchmark
   public void fileIoRead_fourScenariosExhausted(FourScenariosExhaustedState state, Blackhole bh)
       throws Throwable {
-    state.dispatcher.beforeFileIo(FILE_IO_READ_OPERATION, null);
+    state.dispatcher.file().beforeFileIo(FILE_IO_READ_OPERATION, null, "/tmp/bench.dat", 4096);
     bh.consume(state);
   }
 
@@ -384,7 +384,7 @@ public class Phase4DispatchBenchmark {
    */
   @Benchmark
   public void fileIoWrite_zeroScenarios(ZeroScenariosState state, Blackhole bh) throws Throwable {
-    state.dispatcher.beforeFileIo(FILE_IO_WRITE_OPERATION, null);
+    state.dispatcher.file().beforeFileIo(FILE_IO_WRITE_OPERATION, null, "/tmp/bench.dat", 4096);
     bh.consume(state);
   }
 
@@ -399,7 +399,7 @@ public class Phase4DispatchBenchmark {
   @Benchmark
   public void fileIoWrite_oneScenarioNoMatch(OneScenarioNoMatchState state, Blackhole bh)
       throws Throwable {
-    state.dispatcher.beforeFileIo(FILE_IO_WRITE_OPERATION, null);
+    state.dispatcher.file().beforeFileIo(FILE_IO_WRITE_OPERATION, null, "/tmp/bench.dat", 4096);
     bh.consume(state);
   }
 
@@ -414,7 +414,7 @@ public class Phase4DispatchBenchmark {
   @Benchmark
   public void fileIoWrite_fourScenariosExhausted(FourScenariosExhaustedState state, Blackhole bh)
       throws Throwable {
-    state.dispatcher.beforeFileIo(FILE_IO_WRITE_OPERATION, null);
+    state.dispatcher.file().beforeFileIo(FILE_IO_WRITE_OPERATION, null, "/tmp/bench.dat", 4096);
     bh.consume(state);
   }
 }

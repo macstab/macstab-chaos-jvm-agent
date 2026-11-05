@@ -2,17 +2,24 @@ package com.macstab.chaos.jvm.core;
 
 import com.macstab.chaos.jvm.api.ChaosActivationException;
 import com.macstab.chaos.jvm.api.ChaosDiagnostics;
+import com.macstab.chaos.jvm.api.ChaosSelector;
+import com.macstab.chaos.jvm.api.OperationType;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.EnumMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Thread-safe registry of all active {@link ScenarioController}s.
@@ -39,15 +46,32 @@ import java.util.function.Supplier;
  * <p>All methods are thread-safe. The internal map is a {@link
  * java.util.concurrent.ConcurrentHashMap}; the failure queue is a {@link
  * java.util.concurrent.ConcurrentLinkedQueue}.
+ *
+ * <h2>Operation index</h2>
+ *
+ * <p>Every selector matches a fixed, non-empty set of {@link OperationType}s ({@link
+ * SelectorOperations#of}). The registry keeps an immutable index from operation type to the
+ * controllers whose selector names it, already in match order, and replaces it whenever a
+ * controller is registered or unregistered. {@link #match(InvocationContext)} therefore only
+ * evaluates scenarios that can match the intercepted operation, instead of every registered
+ * scenario, and never sorts.
  */
 final class ScenarioRegistry implements ChaosDiagnostics {
-  private static final Comparator<ScenarioContribution> CONTRIBUTION_ORDER =
-      Comparator.comparingInt((ScenarioContribution c) -> c.scenario().precedence())
+  private static final Comparator<ScenarioController> MATCH_ORDER =
+      Comparator.comparingInt((ScenarioController c) -> c.scenario().precedence())
           .reversed()
           .thenComparing(c -> c.scenario().id());
 
+  private static final ScenarioController[] NO_CONTROLLERS = new ScenarioController[0];
+
   private final ConcurrentHashMap<String, ScenarioController> controllers =
       new ConcurrentHashMap<>();
+  private final Object indexLock = new Object();
+  private volatile Map<OperationType, ScenarioController[]> index =
+      new EnumMap<>(OperationType.class);
+  private volatile Set<ChaosSelector.MethodSelector> methodSelectors = Set.of();
+  private volatile Consumer<Set<ChaosSelector.MethodSelector>> methodSelectorListener =
+      selectors -> {};
   private final ConcurrentLinkedQueue<ActivationFailure> failures = new ConcurrentLinkedQueue<>();
   private final Supplier<Map<String, String>> runtimeDetailsSupplier;
   private final Clock clock;
@@ -95,7 +119,20 @@ final class ScenarioRegistry implements ChaosDiagnostics {
           }
           throw new ChaosActivationException("scenario key already active: " + key);
         });
+    rebuildIndex();
     return replaced[0];
+  }
+
+  /**
+   * Returns whether a controller registered under {@code key} is still {@code REGISTERED} or {@code
+   * ACTIVE}, so registering another one under the key would fail.
+   *
+   * @param key the registry key ({@code scope::id})
+   * @return {@code true} when the key is taken by a live controller
+   */
+  boolean isLive(final String key) {
+    final ScenarioController existing = controllers.get(key);
+    return existing != null && !isFinished(existing);
   }
 
   private static boolean isFinished(final ScenarioController controller) {
@@ -114,7 +151,72 @@ final class ScenarioRegistry implements ChaosDiagnostics {
    * @param controller the controller to deregister; must not be {@code null}
    */
   void unregister(final ScenarioController controller) {
-    controllers.remove(controller.key(), controller);
+    if (controllers.remove(controller.key(), controller)) {
+      rebuildIndex();
+    }
+  }
+
+  /**
+   * Replaces the operation index with one built from the current controllers. Every change to
+   * {@link #controllers} is followed by a rebuild, and rebuilds are serialised, so the last rebuild
+   * always sees every change made before it.
+   */
+  private void rebuildIndex() {
+    final Set<ChaosSelector.MethodSelector> changedMethodSelectors;
+    synchronized (indexLock) {
+      final EnumMap<OperationType, List<ScenarioController>> byOperation =
+          new EnumMap<>(OperationType.class);
+      for (final ScenarioController controller : controllers.values()) {
+        for (final OperationType operation :
+            SelectorOperations.of(controller.scenario().selector())) {
+          byOperation.computeIfAbsent(operation, ignored -> new ArrayList<>()).add(controller);
+        }
+      }
+      final EnumMap<OperationType, ScenarioController[]> next = new EnumMap<>(OperationType.class);
+      byOperation.forEach(
+          (operation, list) -> {
+            list.sort(MATCH_ORDER);
+            next.put(operation, list.toArray(NO_CONTROLLERS));
+          });
+      index = next;
+      final Set<ChaosSelector.MethodSelector> nextMethodSelectors = collectMethodSelectors();
+      changedMethodSelectors =
+          nextMethodSelectors.equals(methodSelectors) ? null : nextMethodSelectors;
+      methodSelectors = nextMethodSelectors;
+    }
+    if (changedMethodSelectors != null) {
+      methodSelectorListener.accept(changedMethodSelectors);
+    }
+  }
+
+  private Set<ChaosSelector.MethodSelector> collectMethodSelectors() {
+    final Set<ChaosSelector.MethodSelector> selectors = new HashSet<>();
+    for (final ScenarioController controller : controllers.values()) {
+      if (controller.scenario().selector() instanceof ChaosSelector.MethodSelector selector) {
+        selectors.add(selector);
+      }
+    }
+    return Set.copyOf(selectors);
+  }
+
+  /**
+   * Returns the method selectors of every registered scenario.
+   *
+   * @return the selectors; empty when no registered scenario uses a method selector
+   */
+  Set<ChaosSelector.MethodSelector> methodSelectors() {
+    return methodSelectors;
+  }
+
+  /**
+   * Sets the listener told about the registered method selectors whenever their set changes (a
+   * scenario with a method selector was registered or removed). It runs on the thread that changed
+   * the registry, outside the registry's locks.
+   *
+   * @param listener the listener; replaces the previous one
+   */
+  void onMethodSelectorsChanged(final Consumer<Set<ChaosSelector.MethodSelector>> listener) {
+    methodSelectorListener = listener;
   }
 
   /**
@@ -122,19 +224,23 @@ final class ScenarioRegistry implements ChaosDiagnostics {
    *
    * @param scenarioId the ID of the scenario whose activation failed
    * @param category the category of the failure (e.g. compatibility error, resource exhaustion)
-   * @param message a human-readable description of what went wrong
+   * @param message a human-readable description of what went wrong; an exception without a message
+   *     is recorded as {@code "(no message)"}
    */
   void recordFailure(
-      final String scenarioId, final FailureCategory category, final String message) {
-    failures.add(new ActivationFailure(scenarioId, category, message));
+      final String scenarioId, final FailureCategory category, final @Nullable String message) {
+    failures.add(
+        new ActivationFailure(
+            scenarioId, category, java.util.Objects.requireNonNullElse(message, "(no message)")));
   }
 
   /**
-   * Evaluates all registered controllers against {@code context} and returns the matching
+   * Evaluates the controllers that can match {@code context}'s operation and returns the matching
    * contributions in deterministic order.
    *
-   * <p>Each registered {@link ScenarioController} is asked to evaluate the context. Controllers
-   * that return {@code null} (no match) are excluded. Survivors are sorted by:
+   * <p>Each {@link ScenarioController} indexed under the context's {@link OperationType} is asked
+   * to evaluate the context. Controllers that return {@code null} (no match) are excluded. The
+   * survivors keep the index order:
    *
    * <ol>
    *   <li>Descending {@link com.macstab.chaos.jvm.api.ChaosScenario#precedence()} — higher
@@ -153,11 +259,12 @@ final class ScenarioRegistry implements ChaosDiagnostics {
    *     scenario matches
    */
   List<ScenarioContribution> match(final InvocationContext context) {
-    if (controllers.isEmpty()) {
+    final ScenarioController[] candidates = index.get(context.operationType());
+    if (candidates == null) {
       return List.of();
     }
     ArrayList<ScenarioContribution> results = null;
-    for (final ScenarioController controller : controllers.values()) {
+    for (final ScenarioController controller : candidates) {
       final ScenarioContribution contribution = controller.evaluate(context);
       if (contribution == null) {
         continue;
@@ -170,10 +277,19 @@ final class ScenarioRegistry implements ChaosDiagnostics {
     if (results == null) {
       return List.of();
     }
-    if (results.size() > 1) {
-      results.sort(CONTRIBUTION_ORDER);
-    }
     return Collections.unmodifiableList(results);
+  }
+
+  /**
+   * Returns the controllers whose selector names {@code operation}, in match order, straight from
+   * the index: no copy is made, so callers must not modify the array.
+   *
+   * @param operation the intercepted operation
+   * @return the indexed controllers; an empty array when none can match
+   */
+  ScenarioController[] candidates(final OperationType operation) {
+    final ScenarioController[] candidates = index.get(operation);
+    return candidates == null ? NO_CONTROLLERS : candidates;
   }
 
   /**
@@ -254,6 +370,16 @@ final class ScenarioRegistry implements ChaosDiagnostics {
    */
   @Override
   public String debugDump() {
+    return debugDump(id -> true);
+  }
+
+  /**
+   * Returns the debug dump restricted to the scenarios {@code include} accepts.
+   *
+   * @param include whether a scenario id is part of the dump
+   * @return the dump
+   */
+  String debugDump(final java.util.function.Predicate<String> include) {
     final Snapshot snapshot = snapshot();
     final StringBuilder builder = new StringBuilder();
     builder.append("macstab-chaos diagnostics").append(System.lineSeparator());
@@ -264,6 +390,9 @@ final class ScenarioRegistry implements ChaosDiagnostics {
             (key, value) ->
                 builder.append(key).append('=').append(value).append(System.lineSeparator()));
     for (final ScenarioReport report : snapshot.scenarios()) {
+      if (!include.test(report.id())) {
+        continue;
+      }
       builder
           .append(report.id())
           .append(" state=")

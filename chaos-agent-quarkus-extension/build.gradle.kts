@@ -17,6 +17,8 @@ dependencies {
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.assertj)
+    // The recorder runs against Quarkus's runtime types and MicroProfile Config.
+    testImplementation("io.quarkus:quarkus-core")
 }
 
 // Quarkus bootstrap discovers an extension through META-INF/quarkus-extension.properties in the

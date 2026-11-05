@@ -1,0 +1,22 @@
+public final class com/macstab/chaos/jvm/spring/boot3/test/ChaosAgentExtension implements org/junit/jupiter/api/extension/AfterAllCallback, org/junit/jupiter/api/extension/AfterEachCallback, org/junit/jupiter/api/extension/BeforeAllCallback, org/junit/jupiter/api/extension/BeforeEachCallback, org/junit/jupiter/api/extension/ParameterResolver
+  public method <init>()V
+  public method afterAll(Lorg/junit/jupiter/api/extension/ExtensionContext;)V
+  public method afterEach(Lorg/junit/jupiter/api/extension/ExtensionContext;)V
+  public method beforeAll(Lorg/junit/jupiter/api/extension/ExtensionContext;)V
+  public method beforeEach(Lorg/junit/jupiter/api/extension/ExtensionContext;)V
+  public method resolveParameter(Lorg/junit/jupiter/api/extension/ParameterContext;Lorg/junit/jupiter/api/extension/ExtensionContext;)Ljava/lang/Object;
+  public method supportsParameter(Lorg/junit/jupiter/api/extension/ParameterContext;Lorg/junit/jupiter/api/extension/ExtensionContext;)Z
+
+public final class com/macstab/chaos/jvm/spring/boot3/test/ChaosAgentInitializer implements org/springframework/context/ApplicationContextInitializer
+  public method <init>()V
+  public method initialize(Lorg/springframework/context/ConfigurableApplicationContext;)V
+
+public @interface com/macstab/chaos/jvm/spring/boot3/test/ChaosTest implements java/lang/annotation/Annotation
+  public abstract method args()[Ljava/lang/String;
+  public abstract method classes()[Ljava/lang/Class;
+  public abstract method properties()[Ljava/lang/String;
+  public abstract method webEnvironment()Lorg/springframework/boot/test/context/SpringBootTest$WebEnvironment;
+
+public class com/macstab/chaos/jvm/spring/boot3/test/ChaosTestAutoConfiguration
+  public method <init>()V
+  public method chaosControlPlane()Lcom/macstab/chaos/jvm/api/ChaosControlPlane;

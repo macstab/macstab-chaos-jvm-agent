@@ -4,6 +4,7 @@ import java.net.URL;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ForkJoinTask;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Interface implemented by the agent-classloader side of the bootstrap-to-agent classloader bridge.
@@ -76,9 +77,11 @@ public interface BridgeDelegate {
    * observability.
    *
    * @param thread the thread about to be started; never {@code null}
+   * @param poolWorker whether a thread pool is starting one of its workers, which must not inherit
+   *     the starter's session
    * @throws Throwable if an active scenario injects an exception to suppress the start
    */
-  void beforeThreadStart(Thread thread) throws Throwable;
+  void beforeThreadStart(Thread thread, boolean poolWorker) throws Throwable;
 
   /**
    * Called at the top of a thread-pool worker's run loop, before the next task is dequeued.
@@ -98,24 +101,6 @@ public interface BridgeDelegate {
    * @throws Throwable if an active scenario injects an exception
    */
   void beforeForkJoinTaskRun(ForkJoinTask<?> task) throws Throwable;
-
-  /**
-   * Allows an active scenario to alter the scheduling delay of a {@link
-   * java.util.concurrent.ScheduledExecutorService} submission.
-   *
-   * @param operation a tag identifying the scheduling call (e.g. {@code "schedule"}, {@code
-   *     "scheduleAtFixedRate"}); never {@code null}
-   * @param executor the scheduled executor; may be {@code null}
-   * @param task the task being scheduled; may be {@code null}
-   * @param delay the requested delay in milliseconds; may be zero or negative for immediate
-   *     execution
-   * @param periodic {@code true} if the task is a fixed-rate or fixed-delay repeating task
-   * @return the (possibly modified) delay in milliseconds
-   * @throws Throwable if the delegate throws
-   */
-  long adjustScheduleDelay(
-      String operation, Object executor, Object task, long delay, boolean periodic)
-      throws Throwable;
 
   /**
    * Called before each execution of a scheduled task (both one-shot and periodic).
@@ -148,7 +133,7 @@ public interface BridgeDelegate {
    *     Boolean.FALSE} to force {@code false}, or {@code null} to let the original call proceed
    * @throws Throwable if the delegate throws
    */
-  Boolean beforeBooleanQueueOperation(String operation, Object queue) throws Throwable;
+  @Nullable Boolean beforeBooleanQueueOperation(String operation, Object queue) throws Throwable;
 
   /**
    * Called before a {@link java.util.concurrent.CompletableFuture} completion method ({@code
@@ -163,7 +148,7 @@ public interface BridgeDelegate {
    *     the real completion, or {@code null} to let the original call proceed
    * @throws Throwable if the delegate throws
    */
-  Boolean beforeCompletableFutureComplete(
+  @Nullable Boolean beforeCompletableFutureComplete(
       String operation, CompletableFuture<?> future, Object payload) throws Throwable;
 
   /**
@@ -188,7 +173,8 @@ public interface BridgeDelegate {
    *     when an active scenario is replacing or suppressing the resource
    * @throws Throwable if the delegate throws
    */
-  URL afterResourceLookup(ClassLoader loader, String name, URL currentValue) throws Throwable;
+  @Nullable URL afterResourceLookup(ClassLoader loader, String name, URL currentValue)
+      throws Throwable;
 
   /**
    * Wraps a shutdown hook thread before it is registered with the JVM, allowing a scenario to track
@@ -409,10 +395,12 @@ public interface BridgeDelegate {
    * @param socket the socket initiating the connection; never {@code null}
    * @param socketAddress the remote endpoint; never {@code null}
    * @param timeoutMillis the connection timeout; {@code 0} for infinite timeout
+   * @return the {@code InetSocketAddress} to connect to instead, or {@code null}
    * @throws Throwable if an active scenario injects a failure to simulate a connection refusal or
    *     timeout
    */
-  void beforeSocketConnect(Object socket, Object socketAddress, int timeoutMillis) throws Throwable;
+  @Nullable Object beforeSocketConnect(Object socket, Object socketAddress, int timeoutMillis)
+      throws Throwable;
 
   /**
    * Called before {@link java.net.ServerSocket#accept()}.
@@ -427,10 +415,16 @@ public interface BridgeDelegate {
    * Called before a socket input-stream read operation.
    *
    * @param stream the socket implementation being read from; never {@code null}
+   * @param len the number of bytes requested
    * @param remoteAddress the peer {@code java.net.InetAddress}, or {@code null} if not connected
+   * @param remotePort the peer port
+   * @param soTimeoutMillis the socket's {@code SO_TIMEOUT}; {@code 0} for infinite
+   * @return the byte count to read, encoded as {@code -(count) - 1} to corrupt the bytes read
    * @throws Throwable if an active scenario injects a failure to simulate a read error or timeout
    */
-  void beforeSocketRead(Object stream, Object remoteAddress) throws Throwable;
+  int beforeSocketRead(
+      Object stream, int len, Object remoteAddress, int remotePort, int soTimeoutMillis)
+      throws Throwable;
 
   /**
    * Called before a socket output-stream write operation.
@@ -438,9 +432,45 @@ public interface BridgeDelegate {
    * @param stream the socket {@link java.io.OutputStream}; never {@code null}
    * @param len the number of bytes about to be written
    * @param remoteAddress the peer {@code java.net.InetAddress}, or {@code null} if not connected
+   * @param remotePort the peer port
+   * @return the bytes to write: {@code len}, or a shorter prefix under a torn write
    * @throws Throwable if an active scenario injects a failure to simulate a write error
    */
-  void beforeSocketWrite(Object stream, int len, Object remoteAddress) throws Throwable;
+  int beforeSocketWrite(Object stream, int len, Object remoteAddress, int remotePort)
+      throws Throwable;
+
+  /**
+   * Called before {@link java.nio.channels.SocketChannel#write(java.nio.ByteBuffer)}.
+   *
+   * @param channel the channel being written to
+   * @param remaining the bytes the buffer holds
+   * @return the bytes to write: {@code remaining}, or fewer under a torn write
+   * @throws Throwable if an active scenario injects a failure to simulate a write error
+   */
+  int beforeNioChannelWrite(Object channel, int remaining) throws Throwable;
+
+  /**
+   * Called before a child process is started ({@code ProcessBuilder.start}, {@code Runtime.exec}).
+   *
+   * @param command the program, the first element of the command
+   * @throws Throwable if an active scenario fails the start
+   */
+  void beforeProcessStart(String command) throws Throwable;
+
+  /**
+   * Returns the id of the session the calling thread is bound to, for the HTTP client hooks that
+   * forward it as the {@code X-Chaos-Session} header.
+   *
+   * @return the session id, or {@code null} outside any session
+   */
+  @Nullable String currentSessionId();
+
+  /**
+   * Returns the seed of the bit flip the current thread's read was just told to apply.
+   *
+   * @return the seed
+   */
+  long corruptionSeed();
 
   /**
    * Called before {@link java.net.Socket#close()}.
@@ -449,6 +479,93 @@ public interface BridgeDelegate {
    * @throws Throwable if an active scenario injects a failure to simulate a close error
    */
   void beforeSocketClose(Object socket) throws Throwable;
+
+  /**
+   * Called before a {@code SocketChannel} read: its {@code SOCKET_READ} event.
+   *
+   * @param channel the channel being read from
+   * @param remaining the bytes the buffers can take
+   * @return the bytes to read, or {@code -(n) - 1} when the bytes read must be corrupted
+   * @throws Throwable if an active scenario injects a failure
+   */
+  int beforeSocketChannelRead(Object channel, int remaining) throws Throwable;
+
+  /**
+   * Called before a {@code SocketChannel} write: its {@code SOCKET_WRITE} event.
+   *
+   * @param channel the channel being written to
+   * @param remaining the bytes the buffers hold
+   * @return the bytes to write: {@code remaining}, or fewer under a torn write
+   * @throws Throwable if an active scenario injects a failure
+   */
+  int beforeSocketChannelWrite(Object channel, int remaining) throws Throwable;
+
+  /**
+   * Called before a socket is bound to a local address.
+   *
+   * @param address the local {@code InetAddress}
+   * @param port the local port
+   * @throws Throwable if an active scenario fails the bind
+   */
+  void beforeSocketBind(Object address, int port) throws Throwable;
+
+  /**
+   * Called before a datagram is sent or received.
+   *
+   * @param operation {@code "DATAGRAM_SEND"} or {@code "DATAGRAM_RECEIVE"}
+   * @param channel the datagram channel
+   * @param peer the destination of a send, or {@code null}
+   * @param length the datagram's length or the space for it
+   * @return {@code length}, {@code Integer.MIN_VALUE} to drop a send, or the corrupt flag
+   * @throws Throwable if an active scenario fails the call
+   */
+  int beforeDatagram(String operation, Object channel, Object peer, int length) throws Throwable;
+
+  /**
+   * Called before a reverse lookup.
+   *
+   * @param address the IP literal looked up
+   * @throws Throwable an {@code UnknownHostException} when a scenario fails the lookup
+   */
+  void beforeDnsReverse(String address) throws Throwable;
+
+  /**
+   * Called before a thread waits for a child process.
+   *
+   * @param process the process
+   * @param timeoutMillis the wait's timeout, {@code 0} for none
+   * @return {@code true} when the wait must report that the child has not exited
+   * @throws Throwable if an active scenario rejects the wait
+   */
+  boolean beforeProcessWait(Object process, long timeoutMillis) throws Throwable;
+
+  /**
+   * Called before a connection is half-closed.
+   *
+   * @param endpoint the socket implementation or channel
+   * @param remoteAddress the peer address, or {@code null}
+   * @param remotePort the peer port
+   * @throws Throwable if an active scenario fails the shutdown
+   */
+  void beforeSocketShutdown(Object endpoint, Object remoteAddress, int remotePort) throws Throwable;
+
+  /**
+   * Rewrites an instant read from the system {@code java.time.Clock} for clock skew.
+   *
+   * @param realInstant the instant read
+   * @return the (possibly skewed) instant
+   * @throws Throwable if the runtime throws
+   */
+  java.time.Instant adjustClockInstant(java.time.Instant realInstant) throws Throwable;
+
+  /**
+   * Rewrites the milliseconds read from the system {@code java.time.Clock} for clock skew.
+   *
+   * @param realMillis the milliseconds read
+   * @return the (possibly skewed) milliseconds
+   * @throws Throwable if the runtime throws
+   */
+  long adjustClockReadMillis(long realMillis) throws Throwable;
 
   /**
    * Called before {@link javax.naming.InitialContext#lookup(String)}.
@@ -640,9 +757,22 @@ public interface BridgeDelegate {
    * java.net.InetAddress#getAllByName(String)}, or {@link java.net.InetAddress#getLocalHost()}.
    *
    * @param hostname the hostname being resolved; {@code null} for {@code getLocalHost()}
+   * @return the name to resolve: {@code hostname}, or another under a {@code DnsRewriteEffect}
    * @throws Throwable if the delegate throws
    */
-  void beforeDnsResolve(String hostname) throws Throwable;
+  @Nullable String beforeDnsResolve(String hostname) throws Throwable;
+
+  /**
+   * Called when {@link java.net.InetAddress#getAllByName(String)} returns or fails.
+   *
+   * @param hostname the name that was looked up
+   * @param answer the resolver's answer, or {@code null}
+   * @param failure the lookup failure, or {@code null}
+   * @return the answer to return instead, or {@code null} to keep the original outcome
+   * @throws Throwable if a scenario rejects the lookup
+   */
+  java.net.InetAddress @Nullable [] afterDnsAnswer(
+      String hostname, java.net.InetAddress[] answer, Throwable failure) throws Throwable;
 
   /**
    * Called before {@link javax.net.ssl.SSLSocket#startHandshake()} or {@link
@@ -659,7 +789,72 @@ public interface BridgeDelegate {
    *
    * @param operation {@code "FILE_IO_READ"} or {@code "FILE_IO_WRITE"}
    * @param stream the stream instance
+   * @param path the path the stream was opened with, or {@code null}
+   * @param byteCount the bytes read (requested) or written by the call
+   * @return {@code byteCount}, encoded as {@code -(count) - 1} to corrupt a read's bytes
    * @throws Throwable if the delegate throws
    */
-  void beforeFileIo(String operation, Object stream) throws Throwable;
+  int beforeFileIo(String operation, Object stream, String path, int byteCount) throws Throwable;
+
+  /**
+   * Called on entry to a method woven for a {@code MethodSelector}.
+   *
+   * @param declaringType the class declaring the method
+   * @param methodName the method name
+   * @param descriptor the method's JVM descriptor
+   * @throws Throwable if a scenario injects an exception
+   */
+  void beforeMethodEnter(Class<?> declaringType, String methodName, String descriptor)
+      throws Throwable;
+
+  /**
+   * Called on the normal exit of a method woven for a {@code MethodSelector}.
+   *
+   * @param declaringType the class declaring the method
+   * @param methodName the method name
+   * @param descriptor the method's JVM descriptor
+   * @param value the returned value, boxed; {@code null} for a void method
+   * @return the (possibly corrupted) value to return
+   * @throws Throwable if a scenario fails the call
+   */
+  @Nullable Object afterMethodExit(
+      Class<?> declaringType, String methodName, String descriptor, Object value) throws Throwable;
+
+  /**
+   * Called before a call through a client library.
+   *
+   * @param operation the {@code OperationType} name
+   * @param client the client object
+   * @param target the topic(s), method, command or AWS operation, or {@code null}
+   * @param detail the AWS service, or {@code null}
+   * @param remoteAddress the peer address of a Netty channel, or {@code null}
+   * @throws Throwable if a scenario rejects the call
+   */
+  void beforeClientCall(
+      String operation, Object client, String target, String detail, Object remoteAddress)
+      throws Throwable;
+
+  /**
+   * Records the current session for a fork-join task being submitted or forked.
+   *
+   * @param carrier the task
+   * @throws Throwable never in practice
+   */
+  void captureSession(Object carrier) throws Throwable;
+
+  /**
+   * Binds the session handed to a task or thread that starts running.
+   *
+   * @param carrier the task or thread
+   * @throws Throwable never in practice
+   */
+  void enterSession(Object carrier) throws Throwable;
+
+  /**
+   * Releases the session bound by {@link #enterSession(Object)}.
+   *
+   * @param carrier the task or thread
+   * @throws Throwable never in practice
+   */
+  void exitSession(Object carrier) throws Throwable;
 }

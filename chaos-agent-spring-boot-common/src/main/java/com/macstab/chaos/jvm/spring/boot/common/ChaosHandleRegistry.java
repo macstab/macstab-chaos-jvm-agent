@@ -66,7 +66,7 @@ public final class ChaosHandleRegistry implements DisposableBean {
       return;
     }
     final ChaosActivationHandle previous = handles.put(handle.id(), handle);
-    if (previous != null && previous != handle) {
+    if (previous != null && !previous.equals(handle)) {
       try {
         previous.close();
       } catch (final RuntimeException exception) {

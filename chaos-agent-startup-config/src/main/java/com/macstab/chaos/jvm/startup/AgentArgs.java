@@ -3,6 +3,7 @@ package com.macstab.chaos.jvm.startup;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Immutable view of parsed agent arguments.
@@ -33,7 +34,7 @@ public record AgentArgs(Map<String, String> values) {
    * @param key argument key to look up
    * @return the raw string value, or {@code null} if the key is absent
    */
-  public String get(final String key) {
+  public @Nullable String get(final String key) {
     return values.get(key);
   }
 
@@ -86,7 +87,7 @@ public record AgentArgs(Map<String, String> values) {
    * @return the parsed flag
    */
   public static boolean parseBoolean(
-      final String name, final String raw, final boolean defaultValue) {
+      final String name, final @Nullable String raw, final boolean defaultValue) {
     if (raw == null) {
       return defaultValue;
     }

@@ -54,6 +54,50 @@ final class ChildJvmProbe {
   }
 
   /**
+   * Runs {@code mainClass mode} in a child JVM with the agent attached and no startup plan.
+   *
+   * @param mainClass the probe main class
+   * @param mode the probe mode passed as the first program argument
+   * @param jvmArgs additional JVM arguments placed before the classpath
+   * @return the probe's {@code key=value} output lines
+   */
+  ProbeResult runWithoutPlan(final Class<?> mainClass, final String mode, final String... jvmArgs)
+      throws Exception {
+    return runWithoutPlanOnClasspath(mainClass, mode, null, jvmArgs);
+  }
+
+  /**
+   * As {@link #runWithoutPlan(Class, String, String...)}, with {@code extraClasspath} appended to
+   * the child's classpath.
+   *
+   * @param mainClass the probe main class
+   * @param mode the probe mode passed as the first program argument
+   * @param extraClasspath extra classpath entries, or {@code null}
+   * @param jvmArgs additional JVM arguments placed before the classpath
+   * @return the probe's {@code key=value} output lines
+   */
+  ProbeResult runWithoutPlanOnClasspath(
+      final Class<?> mainClass,
+      final String mode,
+      final String extraClasspath,
+      final String... jvmArgs)
+      throws Exception {
+    final List<String> command = new ArrayList<>();
+    command.add(Path.of(System.getProperty("java.home"), "bin", "java").toString());
+    command.add("-javaagent:" + System.getProperty("chaos.bootstrap.agentJar"));
+    command.addAll(List.of(jvmArgs));
+    command.add("-cp");
+    final String baseClasspath = System.getProperty("java.class.path");
+    command.add(
+        extraClasspath == null || extraClasspath.isEmpty()
+            ? baseClasspath
+            : baseClasspath + File.pathSeparator + extraClasspath);
+    command.add(mainClass.getName());
+    command.add(mode);
+    return execute(command);
+  }
+
+  /**
    * Runs {@code mainClass mode} in a child JVM with the agent attached and {@code plan} loaded.
    *
    * @param plan the plan written to the child's config file
@@ -90,24 +134,62 @@ final class ChildJvmProbe {
     return execute(command);
   }
 
-  private static ProbeResult execute(final List<String> command) throws Exception {
-    final Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
-    final List<String> lines = new ArrayList<>();
-    try (final BufferedReader reader =
-        new BufferedReader(
-            new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
-      String line;
-      while ((line = reader.readLine()) != null) {
-        lines.add(line);
-      }
+  /**
+   * The JVM options that record the child's coverage, placed before every other agent: the JaCoCo
+   * agent named by {@code chaos.test.jacocoAgent}, appending to {@code chaos.test.jacocoExec}, for
+   * the agent's own classes (the bootstrap-loaded bridge included, the shaded libraries not). Empty
+   * when the build does not ask for coverage.
+   *
+   * @return the options, or an empty list
+   */
+  static List<String> coverageAgent() {
+    final String agent = System.getProperty("chaos.test.jacocoAgent");
+    final String exec = System.getProperty("chaos.test.jacocoExec");
+    if (agent == null || agent.isBlank() || exec == null || exec.isBlank()) {
+      return List.of();
     }
+    return List.of(
+        "-javaagent:"
+            + agent
+            + "=destfile="
+            + exec
+            + ",append=true,inclbootstrapclasses=true"
+            + ",includes=com.macstab.chaos.jvm.*,excludes=com.macstab.chaos.jvm.shaded.*");
+  }
+
+  private static ProbeResult execute(final List<String> base) throws Exception {
+    final List<String> command = new ArrayList<>(base);
+    command.addAll(1, coverageAgent());
+    final Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
+    final List<String> lines = new java.util.concurrent.CopyOnWriteArrayList<>();
+    // Read on another thread: reading to the end first would block until the child exits, so a
+    // hanging child would never reach the timeout below.
+    final Thread reader =
+        Thread.ofPlatform()
+            .daemon()
+            .start(
+                () -> {
+                  try (BufferedReader in =
+                      new BufferedReader(
+                          new InputStreamReader(
+                              process.getInputStream(), StandardCharsets.UTF_8))) {
+                    String line;
+                    while ((line = in.readLine()) != null) {
+                      lines.add(line);
+                    }
+                  } catch (final java.io.IOException closed) {
+                    // the process was destroyed
+                  }
+                });
     final boolean finished = process.waitFor(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+    final String threads = finished ? "" : threadDump(process);
     if (!finished) {
       process.destroyForcibly();
     }
+    reader.join(TimeUnit.SECONDS.toMillis(5));
     final String output = String.join("\n", lines);
     assertThat(finished)
-        .as("probe JVM must finish within %d s: %s", TIMEOUT_SECONDS, output)
+        .as("probe JVM must finish within %d s: %s\nthreads:\n%s", TIMEOUT_SECONDS, output, threads)
         .isTrue();
     assertThat(process.exitValue()).as("probe JVM exit value, output:\n%s", output).isZero();
     return new ProbeResult(output, parse(lines));
@@ -138,6 +220,27 @@ final class ChildJvmProbe {
     /** Returns the value printed for {@code key} as a {@code long}. */
     long longValue(final String key) {
       return Long.parseLong(value(key));
+    }
+  }
+
+  /**
+   * The threads of a probe JVM that did not finish, from {@code jcmd Thread.print}, so a hang
+   * reports where it stuck; empty when the dump itself fails.
+   */
+  static String threadDump(final Process process) {
+    try {
+      final Process jcmd =
+          new ProcessBuilder(
+                  java.nio.file.Path.of(System.getProperty("java.home"), "bin", "jcmd").toString(),
+                  Long.toString(process.pid()),
+                  "Thread.print")
+              .redirectErrorStream(true)
+              .start();
+      final byte[] dump = jcmd.getInputStream().readAllBytes();
+      jcmd.waitFor(10, TimeUnit.SECONDS);
+      return new String(dump, StandardCharsets.UTF_8);
+    } catch (final java.io.IOException | InterruptedException failed) {
+      return "(no thread dump: " + failed + ")";
     }
   }
 }

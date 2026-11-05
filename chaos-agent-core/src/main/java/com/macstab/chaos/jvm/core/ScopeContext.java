@@ -10,6 +10,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Thread-local session-ID stack that propagates chaos session context across method calls and
@@ -45,6 +46,12 @@ import java.util.logging.Logger;
 final class ScopeContext {
   private static final Logger LOGGER = Logger.getLogger("com.macstab.chaos.jvm");
 
+  /**
+   * Stack entry that masks the sessions beneath it; compared by identity, so a session can never
+   * collide with it (session ids are UUID strings created elsewhere).
+   */
+  private static final String NO_SESSION = new String("<no session>");
+
   private final ThreadLocal<Deque<String>> sessionStack =
       ThreadLocal.withInitial(ConcurrentLinkedDeque::new);
 
@@ -54,8 +61,21 @@ final class ScopeContext {
    *
    * @return the innermost active session ID, or {@code null}
    */
-  String currentSessionId() {
-    return sessionStack.get().peek();
+  @SuppressWarnings("ReferenceEquality") // the NO_SESSION marker is compared by identity
+  @Nullable String currentSessionId() {
+    final String top = sessionStack.get().peek();
+    // Identity, not equals: only the marker pushed by bindNone() masks a session.
+    return top == NO_SESSION ? null : top;
+  }
+
+  /**
+   * Marks the current thread as outside any session until the returned binding is closed, masking a
+   * session it is bound to or inherited (a pooled server thread started inside a session).
+   *
+   * @return the binding that removes the mark
+   */
+  ChaosSession.ScopeBinding bindNone() {
+    return bind(NO_SESSION);
   }
 
   /**
@@ -163,7 +183,7 @@ final class ScopeContext {
    * @param task the task as seen by the executor; may be {@code null}
    * @return the session id carried by the task, or {@code null}
    */
-  static String sessionOf(final Object task) {
+  static @Nullable String sessionOf(final Object task) {
     if (task instanceof ScopedRunnable scoped) {
       return scoped.sessionId();
     }
@@ -183,6 +203,7 @@ final class ScopeContext {
    * @param task the task as seen by the executor; may be {@code null}
    * @return the unwrapped task
    */
+  @SuppressWarnings("FutureReturnValueIgnored") // returns the task, it does not run it
   static Object unwrap(final Object task) {
     if (task instanceof ScopedRunnable scoped) {
       return scoped.delegate();

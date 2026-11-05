@@ -7,6 +7,7 @@ import jdk.jfr.Label;
 import jdk.jfr.Name;
 import jdk.jfr.Period;
 import jdk.jfr.StackTrace;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Periodic JFR event that snapshots the current state of all active chaos scenarios.
@@ -47,5 +48,5 @@ public final class ChaosStressorSnapshotEvent extends Event {
    * Truncated to 1024 characters to bound JFR field size under extreme concurrency.
    */
   @Label("Active Scenario IDs")
-  public String activeScenarioIds;
+  public @Nullable String activeScenarioIds;
 }

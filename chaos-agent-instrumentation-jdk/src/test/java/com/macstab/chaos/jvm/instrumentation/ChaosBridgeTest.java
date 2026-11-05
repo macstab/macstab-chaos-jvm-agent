@@ -57,7 +57,7 @@ class ChaosBridgeTest {
     @Test
     @DisplayName("beforeThreadStart completes without throwing when no scenarios are active")
     void beforeThreadStartCompletes() {
-      assertThatCode(() -> bridge.beforeThreadStart(new Thread(() -> {})))
+      assertThatCode(() -> bridge.beforeThreadStart(new Thread(() -> {}), false))
           .doesNotThrowAnyException();
     }
 
@@ -94,20 +94,6 @@ class ChaosBridgeTest {
     void beforeExecutorShutdownCompletes() {
       assertThatCode(() -> bridge.beforeExecutorShutdown("EXECUTOR_SHUTDOWN", new Object(), 0L))
           .doesNotThrowAnyException();
-    }
-  }
-
-  @Nested
-  @DisplayName("schedule delay adjustment")
-  class ScheduleDelayAdjustment {
-
-    @Test
-    @DisplayName("returns original delay unchanged when no scenarios are active")
-    void returnsOriginalDelayWhenNoScenarios() throws Throwable {
-      assertThat(
-              bridge.adjustScheduleDelay(
-                  "SCHEDULE_SUBMIT", new Object(), new Object(), 500L, false))
-          .isEqualTo(500L);
     }
   }
 

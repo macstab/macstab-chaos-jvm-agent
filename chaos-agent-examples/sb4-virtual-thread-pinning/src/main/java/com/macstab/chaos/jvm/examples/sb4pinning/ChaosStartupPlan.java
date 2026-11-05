@@ -8,6 +8,7 @@ import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.ChaosSelector;
 import jakarta.annotation.PreDestroy;
 import java.time.Duration;
+import org.jspecify.annotations.Nullable;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.ApplicationListener;
@@ -19,7 +20,7 @@ public class ChaosStartupPlan implements ApplicationListener<ApplicationReadyEve
 
   private final ChaosControlPlane controlPlane;
   private final boolean contentionEnabled;
-  private volatile ChaosActivationHandle handle;
+  private volatile @Nullable ChaosActivationHandle handle;
 
   /**
    * Creates a new ChaosStartupPlan.

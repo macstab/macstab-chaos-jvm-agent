@@ -65,6 +65,8 @@ public final class AgentProcessProbeMain {
   // Simple serializable value for OBJECT_SERIALIZE / OBJECT_DESERIALIZE probes.
   private static final class ProbeValue implements Serializable {
     private static final long serialVersionUID = 1L;
+
+    @SuppressWarnings("UnusedVariable") // read back through serialization
     final String v = "chaos";
   }
 
@@ -346,6 +348,7 @@ public final class AgentProcessProbeMain {
 
   // ── Queue ─────────────────────────────────────────────────────────────────────
 
+  @SuppressWarnings("ModifiedButNotUsed") // the put is the measured operation
   private static void queuePutDelay() throws Exception {
     final LinkedBlockingQueue<String> queue = new LinkedBlockingQueue<>();
     final long start = System.nanoTime();
@@ -421,7 +424,10 @@ public final class AgentProcessProbeMain {
   }
 
   private static void zipInflateDelay() throws Exception {
-    final byte[] raw = "chaos probe data chaos probe data chaos probe data".repeat(5).getBytes();
+    final byte[] raw =
+        "chaos probe data chaos probe data chaos probe data"
+            .repeat(5)
+            .getBytes(java.nio.charset.StandardCharsets.UTF_8);
     final byte[] compressed = new byte[4096];
     final Deflater deflater = new Deflater();
     deflater.setInput(raw);
@@ -929,7 +935,7 @@ public final class AgentProcessProbeMain {
                   ch.write(
                       ByteBuffer.wrap(
                           "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"
-                              .getBytes()));
+                              .getBytes(java.nio.charset.StandardCharsets.UTF_8)));
                   ch.close();
                 } catch (final Exception ignored) {
                 }
@@ -962,7 +968,7 @@ public final class AgentProcessProbeMain {
                   ch.write(
                       ByteBuffer.wrap(
                           "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"
-                              .getBytes()));
+                              .getBytes(java.nio.charset.StandardCharsets.UTF_8)));
                   ch.close();
                 } catch (final Exception ignored) {
                 }

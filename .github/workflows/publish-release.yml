@@ -13,6 +13,9 @@ concurrency:
 permissions:
   contents: read
   packages: write
+  # Build provenance and the SBOM attestation are signed with the workflow's OIDC identity.
+  id-token: write
+  attestations: write
 
 jobs:
   publish:
@@ -34,7 +37,7 @@ jobs:
 
       - name: Extract version from tag
         id: version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
 
       - name: Update version in gradle.properties
         run: sed -i 's/^version=.*/version=${{ steps.version.outputs.VERSION }}/' gradle.properties
@@ -44,3 +47,14 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_ACTOR: ${{ github.actor }}
+
+      - name: Attest build provenance of every published jar
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: 'build/staging-deploy/**/*.jar'
+
+      - name: Attest the agent jar's SBOM (it shades ByteBuddy and Jackson)
+        uses: actions/attest-sbom@v2
+        with:
+          subject-path: 'build/staging-deploy/com/macstab/chaos/jvm/chaos-agent-bootstrap/${{ steps.version.outputs.VERSION }}/chaos-agent-bootstrap-${{ steps.version.outputs.VERSION }}.jar'
+          sbom-path: 'build/staging-deploy/com/macstab/chaos/jvm/chaos-agent-bootstrap/${{ steps.version.outputs.VERSION }}/chaos-agent-bootstrap-${{ steps.version.outputs.VERSION }}-cyclonedx.json'

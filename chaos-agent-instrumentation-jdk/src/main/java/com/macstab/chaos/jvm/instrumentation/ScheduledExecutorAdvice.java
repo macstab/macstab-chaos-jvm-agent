@@ -1,6 +1,7 @@
 package com.macstab.chaos.jvm.instrumentation;
 
 import com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher;
+import com.macstab.chaos.jvm.instrumentation.bridge.OperationTags;
 import java.util.concurrent.Callable;
 import net.bytebuddy.asm.Advice;
 
@@ -28,7 +29,9 @@ final class ScheduledExecutorAdvice {
         @Advice.This final Object executor,
         @Advice.Argument(value = 0, readOnly = false) Runnable task)
         throws Throwable {
-      task = BootstrapDispatcher.decorateExecutorRunnable("SCHEDULE_SUBMIT", executor, task);
+      task =
+          BootstrapDispatcher.decorateExecutorRunnable(
+              OperationTags.SCHEDULE_SUBMIT, executor, task);
       task = new ScheduledRunnableWrapper(executor, task, false);
     }
   }
@@ -39,7 +42,9 @@ final class ScheduledExecutorAdvice {
         @Advice.This final Object executor,
         @Advice.Argument(value = 0, readOnly = false) Callable<?> task)
         throws Throwable {
-      task = BootstrapDispatcher.decorateExecutorCallable("SCHEDULE_SUBMIT", executor, task);
+      task =
+          BootstrapDispatcher.decorateExecutorCallable(
+              OperationTags.SCHEDULE_SUBMIT, executor, task);
       task = new ScheduledCallableWrapper<>(executor, task);
     }
   }
@@ -50,7 +55,9 @@ final class ScheduledExecutorAdvice {
         @Advice.This final Object executor,
         @Advice.Argument(value = 0, readOnly = false) Runnable task)
         throws Throwable {
-      task = BootstrapDispatcher.decorateExecutorRunnable("SCHEDULE_SUBMIT", executor, task);
+      task =
+          BootstrapDispatcher.decorateExecutorRunnable(
+              OperationTags.SCHEDULE_SUBMIT, executor, task);
       task = new ScheduledRunnableWrapper(executor, task, true);
     }
   }

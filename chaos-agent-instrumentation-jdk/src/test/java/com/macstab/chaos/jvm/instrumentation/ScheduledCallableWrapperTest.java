@@ -150,6 +150,40 @@ class ScheduledCallableWrapperTest {
 
       assertThatThrownBy(wrapper::call).isSameAs(delegateEx);
     }
+
+    @Test
+    @DisplayName("an interrupt from delegate.call() is rethrown with the interrupt flag restored")
+    void interruptFromDelegateRestoresTheFlag() throws Exception {
+      installTickBridge((e, t, p) -> true);
+      final InterruptedException interrupted = new InterruptedException("from-delegate");
+      final ScheduledCallableWrapper<String> wrapper =
+          new ScheduledCallableWrapper<>(
+              executor,
+              () -> {
+                throw interrupted;
+              });
+      try {
+        assertThatThrownBy(wrapper::call).isSameAs(interrupted);
+        assertThat(Thread.currentThread().isInterrupted()).isTrue();
+      } finally {
+        Thread.interrupted();
+      }
+    }
+  }
+
+  @Nested
+  @DisplayName("when the executor is gone")
+  class WhenExecutorGone {
+
+    @Test
+    @DisplayName("calls the delegate without consulting the tick")
+    void callsWithoutTick() throws Exception {
+      installTickBridge(
+          (e, t, p) -> {
+            throw new AssertionError("the tick must not be consulted");
+          });
+      assertThat(new ScheduledCallableWrapper<>(null, () -> "result").call()).isEqualTo("result");
+    }
   }
 
   // — bridge test infrastructure —

@@ -9,11 +9,16 @@ buildscript {
     }
     dependencies {
         classpath("com.diffplug.spotless:spotless-plugin-gradle:8.2.1")
+        classpath("org.jacoco:org.jacoco.core:0.8.12")
     }
 }
 
 plugins {
     base
+    id("com.gradleup.shadow") version "8.3.9" apply false
+    id("info.solidsoft.pitest") version "1.19.0" apply false
+    id("org.cyclonedx.bom") version "3.5.1" apply false
+    id("net.ltgt.errorprone") version "5.2.0" apply false
 }
 
 apply(plugin = "com.diffplug.spotless")
@@ -28,15 +33,61 @@ allprojects {
 
 val junitBom = libs.junit.bom
 val junitPlatformLauncher = libs.junit.platform.launcher
+val jspecify = libs.jspecify
 
 // Modules that are for demonstration / measurement only and MUST NOT be published.
 val nonPublishableModules = setOf(
     "chaos-agent-benchmarks",
     "chaos-agent-examples",
     "sb3-actuator-live-chaos",
+    "sb3-fat-jar-probe",
     "sb3-retry-resilience-test",
     "sb4-sla-validation-test",
     "sb4-virtual-thread-pinning",
+)
+
+// The modules whose classes run in the child JVMs of chaos-agent-bootstrap's tests, inside the
+// shaded agent jar. Their coverage includes what those JVMs executed (see childJvmCoverage).
+val agentModules =
+    listOf(
+        "chaos-agent-api",
+        "chaos-agent-core",
+        "chaos-agent-instrumentation-jdk",
+        "chaos-agent-startup-config",
+        "chaos-agent-bootstrap",
+    )
+
+// Advice bodies are inlined into the JDK and library classes they instrument and never run as the
+// advice classes JaCoCo measures; HookCoverageIntegrationTest requires every one of them to match
+// a method, and the child-JVM tests exercise what they do. Left out of the coverage denominator.
+val inlinedAdvice =
+    listOf(
+        "**/instrumentation/*Advice.class",
+        "**/instrumentation/*Advice$*.class",
+    )
+
+// Coverage floor per module: (line, branch) covered ratio enforced by `check`. A ratchet: set a
+// little below the measured value and raised as tests are added, never lowered to make a change
+// pass. The agent modules count what their unit tests and the child JVMs executed (agentModules).
+val coverageFloors = mapOf(
+    "chaos-agent-api" to (0.99 to 0.99),
+    "chaos-agent-bootstrap" to (0.96 to 0.96),
+    "chaos-agent-core" to (0.96 to 0.94),
+    "chaos-agent-instrumentation-jdk" to (0.93 to 0.97),
+    "chaos-agent-micrometer" to (0.99 to 0.99),
+    "chaos-agent-opentelemetry" to (0.99 to 0.99),
+    "chaos-agent-micronaut-integration" to (0.96 to 0.96),
+    "chaos-agent-quarkus-extension" to (0.92 to 0.91),
+    "chaos-agent-quarkus-extension-deployment" to (0.99 to 0.00),
+    "chaos-agent-quarkus-management" to (0.99 to 0.94),
+    "chaos-agent-quarkus-management-deployment" to (0.99 to 0.00),
+    "chaos-agent-spring-boot-common" to (0.98 to 0.96),
+    "chaos-agent-spring-boot3-starter" to (0.84 to 0.99),
+    "chaos-agent-spring-boot3-test-starter" to (0.99 to 0.99),
+    "chaos-agent-spring-boot4-starter" to (0.84 to 0.99),
+    "chaos-agent-spring-boot4-test-starter" to (0.99 to 0.99),
+    "chaos-agent-startup-config" to (0.93 to 0.94),
+    "chaos-agent-testkit" to (0.99 to 0.99),
 )
 
 subprojects {
@@ -63,6 +114,10 @@ subprojects {
                 "-parameters",
                 "-Xlint:all,-serial,-processing,-try",
                 "-Xlint:-classfile",
+                "-Xmaxerrs",
+                "10000",
+                "-Xmaxwarns",
+                "10000",
                 "-Werror",
             ),
         )
@@ -113,6 +168,38 @@ subprojects {
         }
     }
 
+    if (name in agentModules) {
+        val childCoverage = rootProject.layout.buildDirectory.file("jacoco/child-jvms-remapped.exec")
+        tasks.withType<JacocoReportBase>().configureEach {
+            dependsOn(":childJvmCoverage")
+            executionData(childCoverage)
+            if (project.name == "chaos-agent-instrumentation-jdk") {
+                classDirectories.setFrom(
+                    classDirectories.files.map { fileTree(it) { exclude(inlinedAdvice) } },
+                )
+            }
+        }
+    }
+
+    coverageFloors[name]?.let { (line, branch) ->
+        val verification = tasks.named<JacocoCoverageVerification>("jacocoTestCoverageVerification") {
+            dependsOn(tasks.named("test"))
+            violationRules {
+                rule {
+                    limit {
+                        counter = "LINE"
+                        minimum = line.toBigDecimal()
+                    }
+                    limit {
+                        counter = "BRANCH"
+                        minimum = branch.toBigDecimal()
+                    }
+                }
+            }
+        }
+        tasks.named("check") { dependsOn(verification) }
+    }
+
     tasks.withType<Jar>().configureEach {
         isReproducibleFileOrder = true
         isPreserveFileTimestamps = false
@@ -126,7 +213,10 @@ subprojects {
         extensions.configure<PublishingExtension> {
             publications {
                 create<MavenPublication>("maven") {
-                    from(components["java"])
+                    // The agent jar publishes its shaded jar instead (see chaos-agent-bootstrap).
+                    if (project.name != "chaos-agent-bootstrap") {
+                        from(components["java"])
+                    }
 
                     pom {
                         name.set(project.name)
@@ -162,6 +252,13 @@ subprojects {
             }
 
             repositories {
+                // Every publish also lands here, so the release workflow attests the very files it
+                // deployed (build provenance and the agent's SBOM).
+                maven {
+                    name = "Staging"
+                    url = uri(rootProject.layout.buildDirectory.dir("staging-deploy"))
+                }
+
                 val ghActor = System.getenv("GITHUB_ACTOR") ?: project.findProperty("gpr.user") as String?
                 val ghToken = System.getenv("GITHUB_TOKEN") ?: project.findProperty("gpr.token") as String?
 
@@ -353,6 +450,401 @@ tasks.register("releaseToCentral") {
             logger.error("  2. Find ${project.group}")
             logger.error("  3. Click Publish")
             throw GradleException("Failed to publish to Maven Central (exit code: $exitCode)")
+        }
+    }
+}
+
+// The child JVMs run the shaded agent jar. Shading re-encodes every class (the constant pool is
+// reordered, the bytecode is the same), so JaCoCo's class ids differ from the module classes' and
+// their execution data would be ignored. This task keys each class's execution data to the id of
+// the module class of the same name. JaCoCo checks the probe layout when it analyses a class and
+// fails the report if the data does not fit, so a class whose bytecode differed cannot slip through.
+tasks.register("childJvmCoverage") {
+    description = "Remaps the child JVMs' coverage of the shaded agent jar onto the module classes."
+    dependsOn(":chaos-agent-bootstrap:test")
+    val source = project(":chaos-agent-bootstrap").layout.buildDirectory.file("jacoco/child-jvms.exec")
+    val target = layout.buildDirectory.file("jacoco/child-jvms-remapped.exec")
+    val classDirs = agentModules.map { project(":$it").layout.buildDirectory.dir("classes/java/main") }
+    // Both are inputs: without them the task counted as up to date and kept data remapped onto
+    // classes that no longer exist.
+    inputs.files(source).withPropertyName("childExecutionData").optional()
+    inputs.files(classDirs).withPropertyName("moduleClasses")
+    outputs.file(target)
+    doLast {
+        val out = target.get().asFile
+        out.parentFile.mkdirs()
+        val loader = org.jacoco.core.tools.ExecFileLoader()
+        val src = source.get().asFile
+        if (src.exists()) {
+            loader.load(src)
+        }
+        val classes = mutableMapOf<String, ByteArray>()
+        classDirs.map { it.get().asFile }.filter { it.isDirectory }.forEach { dir ->
+            dir.walkTopDown().filter { it.extension == "class" }.forEach { file ->
+                classes[file.relativeTo(dir).invariantSeparatorsPath.removeSuffix(".class")] = file.readBytes()
+            }
+        }
+        val remapped = org.jacoco.core.data.ExecutionDataStore()
+        loader.executionDataStore.contents.forEach { data ->
+            classes[data.name]?.let { bytes ->
+                remapped.put(
+                    org.jacoco.core.data.ExecutionData(
+                        org.jacoco.core.internal.data.CRC64.classId(bytes), data.name, data.probes.clone(),
+                    ),
+                )
+            }
+        }
+        out.outputStream().use { stream ->
+            val writer = org.jacoco.core.data.ExecutionDataWriter(stream)
+            loader.sessionInfoStore.accept(writer)
+            remapped.accept(writer)
+        }
+    }
+}
+
+// ── Public API signatures ────────────────────────────────────────────────────────────────────────
+// Each API module commits the signatures of its public API in api/<module>.api: every public or
+// protected class, field, constructor and method its class files expose, with JVM descriptors (so a
+// change of a parameter, return or field type shows), and the permitted subtypes of sealed types
+// (adding one breaks exhaustive switches). `check` runs `apiCheck`, which fails when the compiled
+// API differs from the file; `./gradlew apiDump` records an intended change, which then shows in
+// review. Types annotated @Internal are left out. The internal implementation modules (core,
+// instrumentation, the agent jar) are not API (docs/configuration-reference.md §14.2).
+val internalModules = setOf("chaos-agent-core", "chaos-agent-instrumentation-jdk", "chaos-agent-bootstrap")
+
+fun renderApi(classesDir: File): String {
+    val internal = "Lcom/macstab/chaos/jvm/api/Internal;"
+    val access = { flags: Int ->
+        buildList {
+            if (flags and org.objectweb.asm.Opcodes.ACC_PUBLIC != 0) add("public")
+            if (flags and org.objectweb.asm.Opcodes.ACC_PROTECTED != 0) add("protected")
+            if (flags and org.objectweb.asm.Opcodes.ACC_STATIC != 0) add("static")
+            if (flags and org.objectweb.asm.Opcodes.ACC_FINAL != 0) add("final")
+            if (flags and org.objectweb.asm.Opcodes.ACC_ABSTRACT != 0) add("abstract")
+        }.joinToString(" ")
+    }
+    val visible = { flags: Int ->
+        flags and (org.objectweb.asm.Opcodes.ACC_PUBLIC or org.objectweb.asm.Opcodes.ACC_PROTECTED) != 0 &&
+            flags and org.objectweb.asm.Opcodes.ACC_SYNTHETIC == 0
+    }
+    class Type(val name: String, val text: String, val outer: String?, var flags: Int, val internal: Boolean)
+    val types = mutableMapOf<String, Type>()
+    classesDir.walk().filter { it.isFile && it.name.endsWith(".class") && it.name != "module-info.class" }.forEach { file ->
+        val reader = org.objectweb.asm.ClassReader(file.readBytes())
+        val lines = mutableListOf<String>()
+        var flags = reader.access
+        var outer: String? = null
+        var isInternal = false
+        val permits = mutableListOf<String>()
+        reader.accept(object : org.objectweb.asm.ClassVisitor(org.objectweb.asm.Opcodes.ASM9) {
+            override fun visitAnnotation(descriptor: String, visible: Boolean): org.objectweb.asm.AnnotationVisitor? {
+                if (descriptor == internal) isInternal = true
+                return null
+            }
+            override fun visitInnerClass(name: String, outerName: String?, innerName: String?, innerAccess: Int) {
+                if (name == reader.className) {
+                    flags = innerAccess
+                    outer = outerName
+                }
+            }
+            override fun visitPermittedSubclass(permittedSubclass: String) {
+                permits += permittedSubclass
+            }
+            override fun visitField(fieldAccess: Int, name: String, descriptor: String, signature: String?, value: Any?): org.objectweb.asm.FieldVisitor? {
+                if (visible(fieldAccess)) lines += "  ${access(fieldAccess)} field $name $descriptor"
+                return null
+            }
+            override fun visitMethod(methodAccess: Int, name: String, descriptor: String, signature: String?, exceptions: Array<out String>?): org.objectweb.asm.MethodVisitor? {
+                if (visible(methodAccess) && methodAccess and org.objectweb.asm.Opcodes.ACC_BRIDGE == 0) {
+                    lines += "  ${access(methodAccess)} method $name$descriptor"
+                }
+                return null
+            }
+        }, org.objectweb.asm.ClassReader.SKIP_CODE)
+        val kind = when {
+            flags and org.objectweb.asm.Opcodes.ACC_ANNOTATION != 0 -> "@interface"
+            flags and org.objectweb.asm.Opcodes.ACC_INTERFACE != 0 -> "interface"
+            flags and org.objectweb.asm.Opcodes.ACC_ENUM != 0 -> "enum"
+            reader.superName == "java/lang/Record" -> "record"
+            else -> "class"
+        }
+        val header = buildString {
+            append(access(flags and org.objectweb.asm.Opcodes.ACC_INTERFACE.inv() and org.objectweb.asm.Opcodes.ACC_ABSTRACT.let { if (kind == "interface" || kind == "@interface") it.inv() else -1 }))
+            append(" ").append(kind).append(" ").append(reader.className)
+            if (reader.superName != null && reader.superName != "java/lang/Object" && kind == "class") append(" extends ").append(reader.superName)
+            if (reader.interfaces.isNotEmpty()) append(" implements ").append(reader.interfaces.sorted().joinToString(", "))
+            if (permits.isNotEmpty()) append(" permits ").append(permits.sorted().joinToString(", "))
+        }
+        types[reader.className] = Type(reader.className, (listOf(header) + lines.sorted()).joinToString("\n"), outer, flags, isInternal)
+    }
+    // A type is API when it and every type enclosing it are visible and not @Internal.
+    fun exported(type: Type): Boolean =
+        visible(type.flags) && !type.internal && (type.outer == null || types[type.outer]?.let(::exported) ?: false)
+    return types.values.filter(::exported).sortedBy { it.name }.joinToString("\n\n", postfix = "\n") { it.text }
+}
+
+subprojects {
+    if (name in nonPublishableModules || name in internalModules) return@subprojects
+    val module = name
+    plugins.withType<JavaPlugin> {
+        val classes = layout.buildDirectory.dir("classes/java/main")
+        val apiFile = layout.projectDirectory.file("api/$module.api")
+        tasks.register("apiDump") {
+            group = "verification"
+            description = "Records the public API signatures in api/$module.api."
+            dependsOn("classes")
+            inputs.dir(classes).withPropertyName("classes")
+            outputs.file(apiFile)
+            doLast {
+                apiFile.asFile.parentFile.mkdirs()
+                apiFile.asFile.writeText(renderApi(classes.get().asFile))
+            }
+        }
+        val apiCheck = tasks.register("apiCheck") {
+            group = "verification"
+            description = "Fails when the public API differs from api/$module.api."
+            dependsOn("classes")
+            inputs.dir(classes).withPropertyName("classes")
+            inputs.file(apiFile).withPropertyName("committedApi").optional()
+            val marker = layout.buildDirectory.file("api/checked")
+            outputs.file(marker)
+            doLast {
+                val committed = apiFile.asFile
+                val actual = renderApi(classes.get().asFile)
+                if (!committed.isFile || committed.readText() != actual) {
+                    val expectedLines = if (committed.isFile) committed.readLines().toSet() else emptySet()
+                    val actualLines = actual.lines().toSet()
+                    val removed = (expectedLines - actualLines).take(20).joinToString("\n") { "- $it" }
+                    val added = (actualLines - expectedLines).take(20).joinToString("\n") { "+ $it" }
+                    throw GradleException(
+                        "The public API of $module changed. If intended, record it with " +
+                            "./gradlew :$module:apiDump and review the diff of api/$module.api.\n$removed\n$added",
+                    )
+                }
+                marker.get().asFile.apply { parentFile.mkdirs(); writeText("ok") }
+            }
+        }
+        tasks.named("check") { dependsOn(apiCheck) }
+    }
+}
+
+// ── Mutation testing ─────────────────────────────────────────────────────────────────────────────
+// `./gradlew pitest` mutates the bytecode of the modules whose behaviour is decided in plain Java
+// (the API's validation, the core's evaluation, the plan parser) and runs their unit tests against
+// each mutant: a surviving mutant is a behaviour no test pins down. Too slow for every build, so it
+// is not part of `check`; the threshold is a ratchet like the coverage floors, set a little below
+// the measured score and only ever raised. Reports: <module>/build/reports/pitest/index.html.
+val mutationFloors = mapOf(
+    "chaos-agent-api" to 95,
+    "chaos-agent-core" to 83,
+    "chaos-agent-startup-config" to 94,
+)
+subprojects {
+    val floor = mutationFloors[name] ?: return@subprojects
+    apply(plugin = "info.solidsoft.pitest")
+    extensions.configure<info.solidsoft.gradle.pitest.PitestPluginExtension> {
+        pitestVersion.set("1.30.1")
+        junit5PluginVersion.set("1.2.3")
+        targetClasses.set(listOf("com.macstab.chaos.jvm.*"))
+        threads.set(Runtime.getRuntime().availableProcessors())
+        outputFormats.set(listOf("HTML", "XML"))
+        timestampedReports.set(false)
+        mutationThreshold.set(floor)
+        timeoutConstInMillis.set(10_000)
+        jvmArgs.set(listOf("-XX:+EnableDynamicAgentLoading"))
+    }
+}
+
+// ── Software bill of materials ───────────────────────────────────────────────────────────────────
+// Every published module gets a CycloneDX SBOM of its runtime dependencies. The agent jar's is the
+// one that matters most: ByteBuddy and Jackson are shaded into it, so no dependency scanner can
+// see them in its (empty) POM.
+subprojects {
+    if (name in nonPublishableModules) return@subprojects
+    plugins.withType<JavaPlugin> {
+        apply(plugin = "org.cyclonedx.bom")
+        // What ships, not what the tests and probes use.
+        tasks.withType<org.cyclonedx.gradle.CyclonedxDirectTask>().configureEach {
+            includeConfigs.set(listOf("runtimeClasspath"))
+        }
+        // The SBOM ships with the artifact it describes, under the classifier the CycloneDX Maven
+        // plugin uses, so a scanner reading the repository finds it next to the jar.
+        val bom = tasks.named<org.cyclonedx.gradle.CyclonedxDirectTask>("cyclonedxDirectBom")
+        plugins.withId("maven-publish") {
+            extensions.configure<PublishingExtension> {
+                publications.withType<MavenPublication>().matching { it.name == "maven" }.configureEach {
+                    artifact(bom.flatMap { it.jsonOutput }) {
+                        classifier = "cyclonedx"
+                        extension = "json"
+                        builtBy(bom)
+                    }
+                    artifact(bom.flatMap { it.xmlOutput }) {
+                        classifier = "cyclonedx"
+                        extension = "xml"
+                        builtBy(bom)
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ── Release workflow inputs ──────────────────────────────────────────────────────────────────────
+// The snapshot workflow deletes each module's previous snapshot before publishing it again (GitHub
+// Packages refuses to overwrite one). Its list of modules must be the published ones, or a new
+// module's second snapshot fails to publish.
+val verifySnapshotWorkflowModules by tasks.registering {
+    group = "verification"
+    description = "Checks that publish-snapshot.yml lists exactly the published modules."
+    val workflow = layout.projectDirectory.file(".github/workflows/publish-snapshot.yml")
+    val expected =
+        subprojects
+            .filter { it.name !in nonPublishableModules && it.file("src/main").isDirectory }
+            .map { "${it.group}.${it.name}" }
+            .toSortedSet()
+    inputs.file(workflow)
+    inputs.property("expected", expected.joinToString())
+    doLast {
+        val listed =
+            Regex("\"(com\\.macstab\\.chaos\\.jvm\\.[a-z0-9-]+)\"")
+                .findAll(workflow.asFile.readText())
+                .map { it.groupValues[1] }
+                .toSortedSet()
+        if (listed != expected) {
+            throw GradleException(
+                "publish-snapshot.yml lists the wrong modules: missing ${expected - listed}, " +
+                    "not published ${listed - expected}",
+            )
+        }
+    }
+}
+project(":chaos-agent-bootstrap").tasks.matching { it.name == "check" }.configureEach {
+    dependsOn(verifySnapshotWorkflowModules)
+}
+
+// ── Coverage per file ────────────────────────────────────────────────────────────────────────────
+// Every source file is covered line for line. A file that cannot be (a catch for a failure the JDK
+// cannot produce, a branch for another OS, a line only a thread race reaches) is listed in
+// config/coverage-exceptions.txt with the lowest coverage it may have and why; a file whose
+// exception is no longer needed fails too, so the list only shrinks. Kinds: `unreachable` and
+// `platform` entries must still miss lines; `race` entries may also reach 100 %.
+val coverageExceptionsFile = layout.projectDirectory.file("config/coverage-exceptions.txt")
+
+data class CoverageException(val minimum: Double, val kind: String)
+
+fun coverageExceptions(module: String): Map<String, CoverageException> =
+    coverageExceptionsFile.asFile.readLines()
+        .map { it.trim() }
+        .filter { it.isNotEmpty() && !it.startsWith("#") }
+        .map { it.split(Regex("\\s+"), limit = 5) }
+        .filter { it[0] == module }
+        .associate { it[1] to CoverageException(it[2].removeSuffix("%").toDouble(), it[3]) }
+
+subprojects {
+    if (name !in coverageFloors) return@subprojects
+    val module = name
+    val verifyFileCoverage = tasks.register("verifyFileCoverage") {
+        group = "verification"
+        description = "Fails when a source file is less covered than 100 % or its listed exception."
+        val report = tasks.named<JacocoReport>("jacocoTestReport")
+        dependsOn(report)
+        val xml = layout.buildDirectory.file("reports/jacoco/test/jacocoTestReport.xml")
+        inputs.file(xml)
+        inputs.file(coverageExceptionsFile)
+        doLast {
+            val exceptions = coverageExceptions(module)
+            val factory = javax.xml.parsers.DocumentBuilderFactory.newInstance()
+            factory.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false)
+            val document = factory.newDocumentBuilder().parse(xml.get().asFile)
+            val problems = mutableListOf<String>()
+            val seen = mutableSetOf<String>()
+            val packages = document.getElementsByTagName("package")
+            for (p in 0 until packages.length) {
+                val pkg = packages.item(p) as org.w3c.dom.Element
+                val files = pkg.getElementsByTagName("sourcefile")
+                for (f in 0 until files.length) {
+                    val file = files.item(f) as org.w3c.dom.Element
+                    val path = pkg.getAttribute("name") + "/" + file.getAttribute("name")
+                    val counters = file.getElementsByTagName("counter")
+                    val line = (0 until counters.length)
+                        .map { counters.item(it) as org.w3c.dom.Element }
+                        .firstOrNull { it.getAttribute("type") == "LINE" } ?: continue
+                    val missed = line.getAttribute("missed").toInt()
+                    val covered = line.getAttribute("covered").toInt()
+                    val percent = 100.0 * covered / (missed + covered)
+                    val exception = exceptions[path]
+                    seen += path
+                    when {
+                        exception == null && missed > 0 ->
+                            problems += "$path: %.2f %% of lines, $missed missed (no exception listed)".format(percent)
+                        exception != null && percent < exception.minimum ->
+                            problems += "$path: %.2f %% of lines, below its listed %.2f %%".format(percent, exception.minimum)
+                        exception != null && missed == 0 && exception.kind != "race" ->
+                            problems += "$path: fully covered; remove its entry from config/coverage-exceptions.txt"
+                    }
+                }
+            }
+            (exceptions.keys - seen).forEach { problems += "$it: listed in config/coverage-exceptions.txt but not in the report" }
+            if (problems.isNotEmpty()) {
+                throw GradleException("coverage per file in $module:\n  " + problems.joinToString("\n  "))
+            }
+        }
+    }
+    tasks.named("check") { dependsOn(verifyFileCoverage) }
+}
+
+// ── Static analysis ──────────────────────────────────────────────────────────────────────────────
+// Error Prone runs in every compilation; with -Werror its warnings fail the build like javac's.
+// A finding is fixed, or suppressed where it stands with the reason; the few checks disabled below
+// say why.
+subprojects {
+    plugins.withType<JavaPlugin> {
+        apply(plugin = "net.ltgt.errorprone")
+        dependencies {
+            "errorprone"("com.google.errorprone:error_prone_core:2.52.0")
+            "errorprone"("com.uber.nullaway:nullaway:0.14.3")
+            "compileOnly"(jspecify)
+            // ByteBuddy's own nullness annotations refer to JSR-305's When; JSpecify mode reads
+            // them, so the compiler needs the class (compile time only).
+            "compileOnly"("com.google.code.findbugs:jsr305:3.0.2")
+            "testCompileOnly"(jspecify)
+        }
+        tasks.withType<JavaCompile>().configureEach {
+            (options as ExtensionAware).extensions.configure<net.ltgt.gradle.errorprone.ErrorProneOptions> {
+                disableWarningsInGeneratedCode.set(true)
+                excludedPaths.set(".*/build/generated/.*")
+                // NullAway: every reference in production code is non-null unless @Nullable says
+                // otherwise (JSpecify), and the compiler proves it. Tests are not checked.
+                if (!name.contains("Test")) {
+                    option("NullAway:AnnotatedPackages", "com.macstab.chaos.jvm")
+                    // JSpecify mode: nullness inside generics (Supplier<@Nullable T>) is checked too.
+                    option("NullAway:JSpecifyMode", "true")
+                    // JMH state is initialised in @Setup methods, not in constructors.
+                    option("NullAway:CustomInitializerAnnotations", "org.openjdk.jmh.annotations.Setup")
+                    error("NullAway")
+                } else {
+                    disable("NullAway")
+                }
+                // Style checks this codebase decides otherwise, on purpose: parentheses that make
+                // precedence explicit, Boolean.FALSE passed as an Object sentinel, and statement
+                // switches whose branches throw or fall through to shared code.
+                disable("UnnecessaryParentheses", "BooleanLiteral", "RefactorSwitch")
+                if (name.contains("Test")) {
+                    // The tests and child-JVM probes do on purpose what these checks forbid in
+                    // production code: resolve hosts, read the default-zone clocks and Date the
+                    // agent skews, fire tasks under chaos without awaiting them, catch the
+                    // failures they provoke, assert identity, and yield to force races.
+                    disable(
+                        "AddressSelection",
+                        "JavaTimeDefaultTimeZone",
+                        "JavaUtilDate",
+                        "FutureReturnValueIgnored",
+                        "EmptyCatch",
+                        "ReferenceEquality",
+                        "ThreadPriorityCheck",
+                    )
+                }
+            }
         }
     }
 }

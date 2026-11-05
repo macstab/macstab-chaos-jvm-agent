@@ -61,15 +61,19 @@ public final class ExampleServiceMain {
     queue.put("payload");
 
     final CompletableFuture<String> resultFuture = new CompletableFuture<>();
-    workerPool.submit(() -> consumeQueueAndComplete(queue, resultFuture));
+    workerPool.execute(() -> consumeQueueAndComplete(queue, resultFuture));
 
-    heartbeatScheduler.scheduleAtFixedRate(
-        () -> System.out.println("heartbeat"),
-        HEARTBEAT_INITIAL_DELAY_MS,
-        HEARTBEAT_PERIOD_MS,
-        TimeUnit.MILLISECONDS);
-
-    return resultFuture.get(RESULT_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+    final java.util.concurrent.ScheduledFuture<?> heartbeat =
+        heartbeatScheduler.scheduleAtFixedRate(
+            () -> System.out.println("heartbeat"),
+            HEARTBEAT_INITIAL_DELAY_MS,
+            HEARTBEAT_PERIOD_MS,
+            TimeUnit.MILLISECONDS);
+    try {
+      return resultFuture.get(RESULT_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+    } finally {
+      heartbeat.cancel(false);
+    }
   }
 
   private static void consumeQueueAndComplete(

@@ -21,6 +21,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 @DisplayName("Gate semantics")
@@ -81,6 +82,7 @@ class GateSemanticsTest {
   }
 
   @Test
+  @Tag("law-L15")
   @DisplayName("an interrupted gate wait returns with the interrupt flag set and no exception")
   void interruptEndsTheWaitAndKeepsTheFlag() throws Exception {
     // Arrange

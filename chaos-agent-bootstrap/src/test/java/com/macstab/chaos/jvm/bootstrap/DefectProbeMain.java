@@ -1,6 +1,7 @@
 package com.macstab.chaos.jvm.bootstrap;
 
 import com.macstab.chaos.jvm.api.ActivationPolicy;
+import com.macstab.chaos.jvm.api.ChaosActivationHandle;
 import com.macstab.chaos.jvm.api.ChaosControlPlane;
 import com.macstab.chaos.jvm.api.ChaosDiagnostics;
 import com.macstab.chaos.jvm.api.ChaosEffect;
@@ -8,6 +9,7 @@ import com.macstab.chaos.jvm.api.ChaosHttpSuppressException;
 import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.ChaosSelector;
 import com.macstab.chaos.jvm.api.ChaosSession;
+import com.macstab.chaos.jvm.api.NamePattern;
 import com.macstab.chaos.jvm.api.OperationType;
 import com.sun.net.httpserver.HttpServer;
 import com.zaxxer.hikari.HikariConfig;
@@ -59,6 +61,10 @@ import javax.management.ObjectName;
  */
 public final class DefectProbeMain {
 
+  /** The agent's logger, held while probes that check what the agent logs configure it. */
+  private static final java.util.logging.Logger AGENT_LOGGER =
+      java.util.logging.Logger.getLogger("com.macstab.chaos.jvm");
+
   private DefectProbeMain() {}
 
   public static void main(final String[] args) throws Exception {
@@ -80,42 +86,94 @@ public final class DefectProbeMain {
       case "initialize-retry" -> initializeRetry();
       case "second-agent-copy" -> secondAgentCopy();
       case "clock-now-in-zone" -> clockNowInZone();
+      case "clock-reads" -> clockReads();
+      case "skewed-time-bounds" -> skewedTimeBounds();
       case "socket-read-loopback" -> socketReadLoopback();
       case "direct-buffer-release" -> directBufferRelease();
       case "bridge-jars-on-disk" -> bridgeJarsOnDisk();
+      case "socket-write-sizes" -> socketWriteSizes();
+      case "socket-read-effects" ->
+          socketReadEffects(System.getProperty("chaos.test.soTimeout", "200"));
+      case "socket-reset" -> socketReset();
+      case "socket-connect-timeout" -> socketConnectTimeout();
+      case "file-corrupt-read" -> fileCorruptRead();
+      case "file-channel-write" -> fileChannelWrite();
+      case "dns-lookups" -> dnsLookups();
+      case "session-handoff" -> sessionHandoff();
+      case "random-access-write" -> randomAccessWrite();
+      case "file-writes-by-path" -> fileWritesByPath();
+      case "file-ops" -> fileOps();
+      case "process-start" -> processStart();
+      case "clock-call-sites" -> clockCallSites();
+      case "session-header" -> sessionHeader();
+      case "pool-worker-session" -> poolWorkerSession();
+      case "socket-torn-write" -> socketTornWrite();
+      case "socket-channel" -> socketChannel();
+      case "file-open" -> fileOpen();
+      case "hook-coverage" -> hookCoverage();
+      case "close-shutdown-wait" -> closeShutdownAndWait();
+      case "redirect" -> redirect();
+      case "udp-dns" -> udpAndReverseDns();
+      case "file-map-transfer" -> fileMapAndTransfer();
+      case "socket-bind" -> socketBind();
+      case "thread-eagain" -> threadEagain();
+      case "method-weaving" -> methodWeaving();
+      case "method-kinds" -> methodKinds();
+      case "woven-groups" -> printWovenGroups();
+      case "woven-groups-after-thread-local" -> wovenGroupsAfterThreadLocal();
       case "virtual-thread-start" -> Thread.ofVirtual().start(() -> {}).join();
       case "runtime-exit" -> runtimeExit();
       case "select-consumer" -> selectConsumer();
       case "sleep-duration" -> sleepDuration();
       case "jdk-send-async" -> withHttpServer(DefectProbeMain::jdkSendAsync);
+      case "http-url-connection" -> withHttpServer(DefectProbeMain::httpUrlConnection);
       default -> throw new IllegalArgumentException("unknown probe mode: " + args[0]);
     }
     printCounts();
   }
 
-  /** Prints the remaining delay of a 1900 µs schedule right after submission. */
+  /**
+   * Prints the remaining delay of a 1900 µs schedule right after submission, plus the time elapsed
+   * since the submission started: their sum is the delay the executor was given, however long the
+   * submission took on a loaded machine.
+   */
   private static void scheduleSubMillisecondDelay() throws Exception {
     final ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor();
     try {
       // Warm up the schedule path (class loading, dispatch) so the measured call is not dominated
       // by first-call overhead.
       executor.schedule(() -> {}, 0L, TimeUnit.MILLISECONDS).get(5L, TimeUnit.SECONDS);
+      final long submitted = System.nanoTime();
       final ScheduledFuture<?> future = executor.schedule(() -> {}, 1900L, TimeUnit.MICROSECONDS);
-      System.out.println("remainingNanos=" + future.getDelay(TimeUnit.NANOSECONDS));
+      final long remaining = future.getDelay(TimeUnit.NANOSECONDS);
+      System.out.println("scheduledDelayNanos=" + (remaining + System.nanoTime() - submitted));
       future.get(5L, TimeUnit.SECONDS);
     } finally {
       executor.shutdownNow();
     }
   }
 
-  /** Counts the ticks of a 300 µs fixed-rate schedule over 300 ms. */
+  /**
+   * Runs a 300 µs fixed-rate schedule and prints its ticks and the milliseconds elapsed. A
+   * fixed-rate executor catches up on runs it missed, so the ratio converges to the real rate
+   * (about 3.3 per ms; at most 1 if the period were rewritten to 1 ms) even on a starved machine:
+   * the probe waits, up to 5 s, until it has.
+   */
   private static void scheduleSubMillisecondPeriod() throws Exception {
     final ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor();
     final AtomicLong ticks = new AtomicLong();
     try {
+      final long start = System.nanoTime();
       executor.scheduleAtFixedRate(ticks::incrementAndGet, 0L, 300L, TimeUnit.MICROSECONDS);
-      Thread.sleep(300L);
-      System.out.println("ticks=" + ticks.get());
+      long elapsedMillis;
+      long count;
+      do {
+        Thread.sleep(50L);
+        count = ticks.get();
+        elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+      } while ((elapsedMillis < 300L || count < 2L * elapsedMillis) && elapsedMillis < 5_000L);
+      System.out.println("ticks=" + count);
+      System.out.println("elapsedMillis=" + elapsedMillis);
     } finally {
       executor.shutdownNow();
     }
@@ -238,7 +296,7 @@ public final class DefectProbeMain {
             + "\"scope\":\"JVM\",\"selector\":{\"type\":\"stress\",\"target\":\"DEADLOCK\"},"
             + "\"effect\":{\"type\":\"deadlock\",\"participantCount\":2}}]}";
     try {
-      ChaosAgentBootstrap.initialize("configJson=" + failingPlan, instrumentation, Map.of(), true);
+      ChaosAgentBootstrap.initialize("configJson=" + failingPlan, instrumentation, Map.of());
       System.out.println("firstFailed=false");
     } catch (final RuntimeException expected) {
       System.out.println("firstFailed=true");
@@ -248,7 +306,7 @@ public final class DefectProbeMain {
             + "\"scope\":\"JVM\",\"selector\":{\"type\":\"thread\","
             + "\"operations\":[\"THREAD_SLEEP\"],\"kind\":\"ANY\"},"
             + "\"effect\":{\"type\":\"delay\",\"minDelay\":\"PT0.3S\",\"maxDelay\":\"PT0.3S\"}}]}";
-    ChaosAgentBootstrap.initialize("configJson=" + sleepPlan, instrumentation, Map.of(), true);
+    ChaosAgentBootstrap.initialize("configJson=" + sleepPlan, instrumentation, Map.of());
     final long start = System.nanoTime();
     Thread.sleep(1L);
     System.out.println("sleepMillis=" + TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start));
@@ -302,6 +360,15 @@ public final class DefectProbeMain {
             "refusalMentionsClassLoader="
                 + String.valueOf(refused.getCause().getMessage()).contains("another class loader"));
       }
+      // The refused copy's uninstall must leave the first copy's delegate in place.
+      final Object uninstalled =
+          Class.forName(
+                  com.macstab.chaos.jvm.instrumentation.JdkInstrumentationInstaller.class.getName(),
+                  true,
+                  isolated)
+              .getMethod("uninstall", java.lang.instrument.Instrumentation.class)
+              .invoke(null, net.bytebuddy.agent.ByteBuddyAgent.install());
+      System.out.println("secondUninstalled=" + uninstalled);
     }
     final long start = System.nanoTime();
     Thread.sleep(1L);
@@ -338,6 +405,39 @@ public final class DefectProbeMain {
     System.out.println("directAfterMiB=" + (after - before) / (1024 * 1024));
   }
 
+  /** Prints the hook groups the agent has woven so far. */
+  private static void printWovenGroups() {
+    System.out.println(
+        "woven="
+            + ChaosPlatform.current()
+                .diagnostics()
+                .snapshot()
+                .runtimeDetails()
+                .get("wovenHookGroups"));
+  }
+
+  /** Activates a ThreadLocal scenario at runtime and prints the woven groups before and after. */
+  private static void wovenGroupsAfterThreadLocal() {
+    System.out.println(
+        "before="
+            + ChaosPlatform.current()
+                .diagnostics()
+                .snapshot()
+                .runtimeDetails()
+                .get("wovenHookGroups"));
+    ChaosPlatform.current()
+        .activate(
+            ChaosScenario.builder("thread-local")
+                .scope(ChaosScenario.ScenarioScope.JVM)
+                .selector(
+                    new ChaosSelector.ThreadLocalSelector(
+                        Set.of(OperationType.THREAD_LOCAL_GET), null))
+                .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+                .activationPolicy(ActivationPolicy.always())
+                .build());
+    printWovenGroups();
+  }
+
   /** Prints how many bridge jars are left in java.io.tmpdir while the agent is running. */
   private static void bridgeJarsOnDisk() throws Exception {
     try (java.nio.file.DirectoryStream<Path> jars =
@@ -367,6 +467,1377 @@ public final class DefectProbeMain {
     }
   }
 
+  /**
+   * Activates method scenarios at runtime against {@link com.example.chaostarget.Greeter}, calls
+   * it, closes them and calls it again.
+   */
+  private static void methodWeaving() {
+    final com.example.chaostarget.Greeter greeter = new com.example.chaostarget.Greeter();
+    System.out.println("before=" + greeter.greet("a") + "|" + greeter.count());
+    final ChaosControlPlane plane = ChaosPlatform.current();
+    final ChaosActivationHandle inject =
+        plane.activate(
+            ChaosScenario.builder("inject-greet-one-arg")
+                .scope(ChaosScenario.ScenarioScope.JVM)
+                .selector(
+                    new ChaosSelector.MethodSelector(
+                        Set.of(OperationType.METHOD_ENTER),
+                        NamePattern.exact("com.example.chaostarget.Greeter"),
+                        NamePattern.exact("greet"),
+                        NamePattern.prefix("(Ljava/lang/String;)")))
+                .effect(
+                    new ChaosEffect.ExceptionInjectionEffect(
+                        "java.lang.IllegalStateException", "injected", false))
+                .activationPolicy(ActivationPolicy.always())
+                .build());
+    final ChaosActivationHandle corrupt =
+        plane.activate(
+            ChaosScenario.builder("zero-count")
+                .scope(ChaosScenario.ScenarioScope.JVM)
+                .selector(
+                    new ChaosSelector.MethodSelector(
+                        Set.of(OperationType.METHOD_EXIT),
+                        NamePattern.prefix("com.example.chaostarget."),
+                        NamePattern.exact("count"),
+                        null))
+                .effect(ChaosEffect.corruptReturnValue(ChaosEffect.ReturnValueStrategy.ZERO))
+                .activationPolicy(ActivationPolicy.always())
+                .build());
+    try {
+      greeter.greet("a");
+      System.out.println("during.greet=returned");
+    } catch (final IllegalStateException injected) {
+      System.out.println("during.greet=" + injected.getMessage());
+    }
+    System.out.println("during.overload=" + greeter.greet("a", 2));
+    System.out.println("during.count=" + greeter.count());
+    System.out.println("during.lateCount=" + new com.example.chaostarget.LateCounter().count());
+    System.out.println(
+        "during.woven=" + plane.diagnostics().snapshot().runtimeDetails().get("wovenHookGroups"));
+    inject.close();
+    corrupt.close();
+    System.out.println("after=" + greeter.greet("a") + "|" + greeter.count());
+    System.out.println(
+        "after.woven=" + plane.diagnostics().snapshot().runtimeDetails().get("wovenHookGroups"));
+  }
+
+  /**
+   * Activates a method scenario on every method of {@link com.example.chaostarget.Shape} and {@link
+   * com.example.chaostarget.Square}, then compares two squares through {@link Comparable} (its
+   * bridge method) and reads a label through a lambda. Only the methods with a body of their own
+   * may be evaluated: not the bridge, not the lambda's synthetic body. Also prints the agent's FINE
+   * report of the weaving.
+   */
+  private static void methodKinds() {
+    AGENT_LOGGER.setLevel(java.util.logging.Level.FINE);
+    AGENT_LOGGER.addHandler(
+        new java.util.logging.Handler() {
+          @Override
+          public void publish(final java.util.logging.LogRecord logRecord) {
+            final String message = String.valueOf(logRecord.getMessage());
+            if (message.startsWith("chaos method hooks woven")) {
+              System.out.println("wovenLog=" + message);
+            }
+          }
+
+          @Override
+          public void flush() {}
+
+          @Override
+          public void close() {}
+        });
+    try (ChaosActivationHandle ignored =
+        ChaosPlatform.current()
+            .activate(
+                ChaosScenario.builder("shape-methods")
+                    .scope(ChaosScenario.ScenarioScope.JVM)
+                    .selector(
+                        new ChaosSelector.MethodSelector(
+                            Set.of(OperationType.METHOD_ENTER),
+                            NamePattern.regex("com\\.example\\.chaostarget\\.(Shape|Square)"),
+                            NamePattern.any(),
+                            null))
+                    .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+                    .activationPolicy(ActivationPolicy.always())
+                    .build())) {
+      final Comparable<com.example.chaostarget.Shape> square =
+          new com.example.chaostarget.Square(2);
+      System.out.println(
+          "compared=" + Integer.signum(square.compareTo(new com.example.chaostarget.Square(3))));
+      System.out.println("label=" + new com.example.chaostarget.Square(2).label().get());
+      printCounts();
+    }
+  }
+
+  /**
+   * Sends 64 known bytes over loopback and reads them with one read on a socket whose SO_TIMEOUT is
+   * {@code timeoutMillis}; prints how many bytes the read returned, how many bits differ, and any
+   * timeout.
+   */
+  private static void socketReadEffects(final String timeoutMillis) throws Exception {
+    final byte[] sent = new byte[64];
+    for (int i = 0; i < sent.length; i++) {
+      sent[i] = (byte) i;
+    }
+    try (java.net.ServerSocket server =
+            new java.net.ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"));
+        java.net.Socket client = new java.net.Socket("127.0.0.1", server.getLocalPort());
+        java.net.Socket accepted = server.accept()) {
+      accepted.getOutputStream().write(sent);
+      accepted.getOutputStream().flush();
+      Thread.sleep(100L);
+      client.setSoTimeout(Integer.parseInt(timeoutMillis));
+      final byte[] received = new byte[64];
+      final long start = System.nanoTime();
+      try {
+        final int read = client.getInputStream().read(received, 0, received.length);
+        System.out.println("read=" + read);
+        int differingBits = 0;
+        for (int i = 0; i < read; i++) {
+          differingBits += Integer.bitCount((received[i] ^ sent[i]) & 0xFF);
+        }
+        System.out.println("differingBits=" + differingBits);
+      } catch (final java.net.SocketTimeoutException timedOut) {
+        System.out.println("timeout=" + timedOut.getMessage());
+        System.out.println("waitedMillis=" + (System.nanoTime() - start) / 1_000_000L);
+      }
+    }
+  }
+
+  /** Connects to a listening loopback port with a 200 ms connect timeout. */
+  private static void socketConnectTimeout() throws Exception {
+    try (java.net.ServerSocket server =
+            new java.net.ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"));
+        java.net.Socket client = new java.net.Socket()) {
+      final long start = System.nanoTime();
+      try {
+        client.connect(new java.net.InetSocketAddress("127.0.0.1", server.getLocalPort()), 200);
+        System.out.println("connected=" + client.isConnected());
+      } catch (final java.net.SocketTimeoutException timedOut) {
+        System.out.println("timeout=" + timedOut.getMessage());
+        System.out.println("waitedMillis=" + (System.nanoTime() - start) / 1_000_000L);
+      }
+    }
+  }
+
+  /** Closes the accepted side of a loopback connection and reports what the client's read sees. */
+  private static void socketReset() throws Exception {
+    try (java.net.ServerSocket server =
+            new java.net.ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"));
+        java.net.Socket client = new java.net.Socket("127.0.0.1", server.getLocalPort())) {
+      final java.net.Socket accepted = server.accept();
+      accepted.close();
+      client.setSoTimeout(2000);
+      try {
+        System.out.println("read=" + client.getInputStream().read());
+      } catch (final java.net.SocketException reset) {
+        System.out.println("clientSaw=" + reset.getMessage());
+      }
+    }
+  }
+
+  /**
+   * Writes 100 bytes through a FileChannel: reports the first write's count, writes the rest,
+   * forces the channel and reports the file's final size or the sync failure.
+   */
+  private static void fileChannelWrite() throws Exception {
+    final java.nio.file.Path file = java.nio.file.Files.createTempFile("chaos-channel", ".bin");
+    try (java.nio.channels.FileChannel channel =
+        java.nio.channels.FileChannel.open(file, java.nio.file.StandardOpenOption.WRITE)) {
+      final java.nio.ByteBuffer buffer = java.nio.ByteBuffer.allocate(100);
+      System.out.println("firstWrite=" + channel.write(buffer));
+      while (buffer.hasRemaining()) {
+        channel.write(buffer);
+      }
+      try {
+        channel.force(true);
+        System.out.println("force=ok");
+      } catch (final java.io.IOException failed) {
+        System.out.println("force=" + failed.getClass().getName() + ": " + failed.getMessage());
+      }
+    }
+    System.out.println("size=" + java.nio.file.Files.size(file));
+    java.nio.file.Files.deleteIfExists(file);
+  }
+
+  /**
+   * Inside a session whose method scenario injects an exception into Greeter.greet, calls it from a
+   * ForkJoin task, a started thread, a virtual thread and a parallel stream; prints what each saw.
+   */
+  private static void sessionHandoff() throws Exception {
+    final com.example.chaostarget.Greeter greeter = new com.example.chaostarget.Greeter();
+    final java.util.function.Supplier<String> attempt =
+        () -> {
+          try {
+            greeter.greet("x");
+            return "ok";
+          } catch (final IllegalStateException injected) {
+            return "injected";
+          }
+        };
+    try (ChaosSession session = ChaosPlatform.current().openSession("handoff")) {
+      session.activate(
+          ChaosScenario.builder("inject-in-session")
+              .scope(ChaosScenario.ScenarioScope.SESSION)
+              .selector(
+                  new ChaosSelector.MethodSelector(
+                      Set.of(OperationType.METHOD_ENTER),
+                      NamePattern.exact("com.example.chaostarget.Greeter"),
+                      NamePattern.exact("greet"),
+                      null))
+              .effect(
+                  new ChaosEffect.ExceptionInjectionEffect(
+                      "java.lang.IllegalStateException", "injected", false))
+              .activationPolicy(ActivationPolicy.always())
+              .build());
+      System.out.println("caller=" + attempt.get());
+      System.out.println(
+          "forkJoin=" + java.util.concurrent.CompletableFuture.supplyAsync(attempt).get());
+      final java.util.concurrent.atomic.AtomicReference<String> seen =
+          new java.util.concurrent.atomic.AtomicReference<>();
+      final Thread thread = new Thread(() -> seen.set(attempt.get()));
+      thread.start();
+      thread.join();
+      System.out.println("thread=" + seen.get());
+      Thread.ofVirtual().start(() -> seen.set(attempt.get())).join();
+      System.out.println("virtual=" + seen.get());
+      System.out.println(
+          "parallel="
+              + java.util.stream.IntStream.range(0, 16)
+                  .parallel()
+                  .mapToObj(i -> attempt.get())
+                  .distinct()
+                  .sorted()
+                  .collect(java.util.stream.Collectors.joining(",")));
+    }
+    final java.util.concurrent.atomic.AtomicReference<String> after =
+        new java.util.concurrent.atomic.AtomicReference<>();
+    final Thread outside = new Thread(() -> after.set(attempt.get()));
+    outside.start();
+    outside.join();
+    System.out.println("outside=" + after.get());
+  }
+
+  /** Resolves an unresolvable name and localhost, reporting answers or failures. */
+  private static void dnsLookups() {
+    for (final String host : new String[] {"chaos-probe.invalid", "localhost"}) {
+      try {
+        final StringBuilder addresses = new StringBuilder();
+        for (final InetAddress address : InetAddress.getAllByName(host)) {
+          addresses.append(addresses.length() == 0 ? "" : ",").append(address.getHostAddress());
+        }
+        System.out.println(host + "=" + addresses);
+      } catch (final java.net.UnknownHostException unknown) {
+        System.out.println(host + "=unknown");
+      }
+    }
+  }
+
+  /** Writes through a RandomAccessFile and reports the failure, if any. */
+  private static void randomAccessWrite() throws Exception {
+    final java.nio.file.Path file = java.nio.file.Files.createTempFile("chaos-raf", ".bin");
+    try (java.io.RandomAccessFile raf = new java.io.RandomAccessFile(file.toFile(), "rw")) {
+      raf.write(new byte[] {1, 2, 3});
+      System.out.println("raf=ok");
+    } catch (final java.io.IOException failed) {
+      System.out.println("raf.type=" + failed.getClass().getName());
+      System.out.println("raf.message=" + failed.getMessage());
+    } finally {
+      java.nio.file.Files.deleteIfExists(file);
+    }
+  }
+
+  /**
+   * Writes 64 known bytes to a temporary file and reads them back with read(byte[]), read() and a
+   * FileChannel read.
+   */
+  private static void fileCorruptRead() throws Exception {
+    final java.nio.file.Path file = java.nio.file.Files.createTempFile("chaos-corrupt", ".bin");
+    try {
+      final byte[] sent = new byte[64];
+      for (int i = 0; i < sent.length; i++) {
+        sent[i] = (byte) i;
+      }
+      java.nio.file.Files.write(file, sent);
+      final byte[] received = new byte[64];
+      try (java.io.FileInputStream in = new java.io.FileInputStream(file.toFile())) {
+        final int read = in.read(received);
+        int differingBits = 0;
+        for (int i = 0; i < read; i++) {
+          differingBits += Integer.bitCount((received[i] ^ sent[i]) & 0xFF);
+        }
+        System.out.println("read=" + read);
+        System.out.println("differingBits=" + differingBits);
+      }
+      try (java.io.FileInputStream in = new java.io.FileInputStream(file.toFile())) {
+        System.out.println(
+            "singleByteDifferingBits=" + Integer.bitCount((in.read() ^ sent[0]) & 0xFF));
+      }
+      try (java.nio.channels.FileChannel channel = java.nio.channels.FileChannel.open(file)) {
+        final java.nio.ByteBuffer buffer = java.nio.ByteBuffer.allocate(64);
+        final int read = channel.read(buffer);
+        int differingBits = 0;
+        for (int i = 0; i < read; i++) {
+          differingBits += Integer.bitCount((buffer.get(i) ^ sent[i]) & 0xFF);
+        }
+        System.out.println("channelRead=" + read);
+        System.out.println("channelDifferingBits=" + differingBits);
+      }
+    } finally {
+      java.nio.file.Files.deleteIfExists(file);
+    }
+  }
+
+  /** Writes 10 bytes and then 2000 bytes over a loopback connection. */
+  private static void socketWriteSizes() throws Exception {
+    try (java.net.ServerSocket server =
+            new java.net.ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"));
+        java.net.Socket client = new java.net.Socket("127.0.0.1", server.getLocalPort());
+        java.net.Socket accepted = server.accept()) {
+      client.getOutputStream().write(new byte[10]);
+      client.getOutputStream().write(new byte[2000]);
+      client.getOutputStream().flush();
+      System.out.println("received=" + accepted.getInputStream().readNBytes(2010).length);
+    }
+  }
+
+  /** Writes a file in directory "a" and one in directory "b" under -Dchaos.test.dir. */
+  private static void fileWritesByPath() throws Exception {
+    final java.nio.file.Path root = java.nio.file.Path.of(System.getProperty("chaos.test.dir"));
+    for (final String directory : new String[] {"a", "b"}) {
+      final java.nio.file.Path dir = java.nio.file.Files.createDirectories(root.resolve(directory));
+      try (java.io.FileOutputStream out = new java.io.FileOutputStream(dir.resolve("f").toFile())) {
+        out.write(new byte[] {1, 2, 3});
+        System.out.println(directory + "=ok");
+      } catch (final java.io.IOException rejected) {
+        System.out.println(directory + "=rejected");
+        System.out.println(directory + ".type=" + rejected.getClass().getName());
+        System.out.println(directory + ".message=" + rejected.getMessage());
+      }
+    }
+  }
+
+  /**
+   * In directories a and b of chaos.test.dir: truncates through a FileChannel and a
+   * RandomAccessFile, moves with Files.move and File.renameTo, deletes with Files.delete and
+   * File.delete; prints each outcome ("ok", "true"/"false" or the exception class).
+   */
+  private static void fileOps() throws Exception {
+    final java.nio.file.Path root = java.nio.file.Path.of(System.getProperty("chaos.test.dir"));
+    for (final String directory : new String[] {"a", "b"}) {
+      final java.nio.file.Path dir = java.nio.file.Files.createDirectories(root.resolve(directory));
+      java.nio.file.Path current = dir.resolve("f");
+      java.nio.file.Files.write(current, new byte[10]);
+      try (java.nio.channels.FileChannel channel =
+          java.nio.channels.FileChannel.open(current, java.nio.file.StandardOpenOption.WRITE)) {
+        channel.truncate(5);
+        System.out.println(directory + ".truncate=ok");
+      } catch (final java.io.IOException failed) {
+        System.out.println(directory + ".truncate=" + failed.getClass().getName());
+      }
+      try (java.io.RandomAccessFile file = new java.io.RandomAccessFile(current.toFile(), "rw")) {
+        file.setLength(3);
+        System.out.println(directory + ".setLength=ok");
+      } catch (final java.io.IOException failed) {
+        System.out.println(directory + ".setLength=" + failed.getClass().getName());
+      }
+      try {
+        current = java.nio.file.Files.move(current, dir.resolve("g"));
+        System.out.println(directory + ".move=ok");
+      } catch (final java.io.IOException failed) {
+        System.out.println(directory + ".move=" + failed.getClass().getName());
+      }
+      final java.io.File renamed = dir.resolve("h").toFile();
+      final boolean renameResult = current.toFile().renameTo(renamed);
+      System.out.println(directory + ".renameTo=" + renameResult);
+      if (renameResult) {
+        current = renamed.toPath();
+      }
+      try {
+        java.nio.file.Files.delete(current);
+        System.out.println(directory + ".delete=ok");
+      } catch (final java.io.IOException failed) {
+        System.out.println(directory + ".delete=" + failed.getClass().getName());
+      }
+      final java.io.File other = dir.resolve("k").toFile();
+      java.nio.file.Files.write(other.toPath(), new byte[1]);
+      System.out.println(directory + ".fileDelete=" + other.delete());
+      System.out.println(directory + ".exists=" + java.nio.file.Files.exists(current));
+      try {
+        System.out.println(
+            directory
+                + ".deleteIfExists="
+                + java.nio.file.Files.deleteIfExists(dir.resolve("absent")));
+      } catch (final java.io.IOException failed) {
+        System.out.println(directory + ".deleteIfExists=" + failed.getClass().getName());
+      }
+    }
+  }
+
+  /**
+   * Writes 1000 bytes through a socket stream and 1000 through a SocketChannel to a loopback server
+   * that counts what it receives; prints the stream write's failure, the channel's first write
+   * count and the bytes the server received from the stream.
+   */
+  private static void socketTornWrite() throws Exception {
+    try (java.net.ServerSocket server =
+        new java.net.ServerSocket(0, 2, InetAddress.getByName("127.0.0.1"))) {
+      final String[] peerEnd = {"eof"};
+      final java.util.concurrent.CompletableFuture<Long> received =
+          java.util.concurrent.CompletableFuture.supplyAsync(
+              () -> {
+                try (java.net.Socket accepted = server.accept()) {
+                  final byte[] buffer = new byte[4096];
+                  long total = 0;
+                  try {
+                    for (int n; (n = accepted.getInputStream().read(buffer)) > 0; ) {
+                      total += n;
+                    }
+                  } catch (final java.io.IOException reset) {
+                    // the writer's connection ended; what arrived is counted
+                    peerEnd[0] = "reset";
+                  }
+                  return total;
+                } catch (final java.io.IOException failed) {
+                  return -1L;
+                }
+              });
+      try (java.net.Socket client = new java.net.Socket("127.0.0.1", server.getLocalPort())) {
+        try {
+          client.getOutputStream().write(new byte[1000]);
+          System.out.println("streamWrite=ok");
+        } catch (final java.net.SocketException torn) {
+          System.out.println("streamWrite=" + torn.getMessage());
+        }
+        try {
+          client.getOutputStream().write(1);
+          System.out.println("afterTorn=ok");
+        } catch (final java.io.IOException closed) {
+          System.out.println("afterTorn=" + closed.getMessage());
+        }
+      }
+      System.out.println("received=" + received.get(5, TimeUnit.SECONDS));
+      System.out.println("peerEnd=" + peerEnd[0]);
+      final java.util.concurrent.CompletableFuture<java.net.Socket> sink =
+          java.util.concurrent.CompletableFuture.supplyAsync(
+              () -> {
+                try {
+                  return server.accept();
+                } catch (final java.io.IOException failed) {
+                  return null;
+                }
+              });
+      try (java.nio.channels.SocketChannel channel =
+          java.nio.channels.SocketChannel.open(
+              new java.net.InetSocketAddress("127.0.0.1", server.getLocalPort()))) {
+        System.out.println(
+            "channelFirstWrite=" + channel.write(java.nio.ByteBuffer.allocate(1000)));
+      }
+      final java.net.Socket accepted = sink.get(5, TimeUnit.SECONDS);
+      if (accepted != null) {
+        accepted.close();
+      }
+    }
+  }
+
+  /**
+   * Opens a file under directories {@code a} and {@code b} of {@code chaos.test.dir} in every way
+   * the JDK offers; prints "ok" or the failure's class and message for each.
+   */
+  private static void fileOpen() throws Exception {
+    final java.nio.file.Path root = java.nio.file.Path.of(System.getProperty("chaos.test.dir"));
+    for (final String directory : new String[] {"a", "b"}) {
+      final java.nio.file.Path file =
+          java.nio.file.Files.createDirectories(root.resolve(directory)).resolve("f");
+      // Created through File.createNewFile, which is not an open.
+      file.toFile().createNewFile();
+      final Map<String, java.util.concurrent.Callable<java.io.Closeable>> opens =
+          new java.util.LinkedHashMap<>();
+      opens.put("fileInputStream", () -> new java.io.FileInputStream(file.toFile()));
+      opens.put("fileOutputStream", () -> new java.io.FileOutputStream(file.toFile(), true));
+      opens.put("randomAccessFile", () -> new java.io.RandomAccessFile(file.toFile(), "r"));
+      opens.put("newInputStream", () -> java.nio.file.Files.newInputStream(file));
+      opens.put("newBufferedReader", () -> java.nio.file.Files.newBufferedReader(file));
+      opens.put("fileChannel", () -> java.nio.channels.FileChannel.open(file));
+      for (final Map.Entry<String, java.util.concurrent.Callable<java.io.Closeable>> open :
+          opens.entrySet()) {
+        try (java.io.Closeable opened = open.getValue().call()) {
+          System.out.println(directory + "." + open.getKey() + "=ok");
+        } catch (final java.io.IOException failed) {
+          System.out.println(
+              directory
+                  + "."
+                  + open.getKey()
+                  + "="
+                  + failed.getClass().getName()
+                  + ": "
+                  + failed.getMessage());
+        }
+      }
+    }
+  }
+
+  /**
+   * Under {@code chaos.test.dir}: maps a file in {@code map}, forces a mapping in {@code plain},
+   * transfers into a file in {@code torn} and out of one in {@code corrupt}, and copies into {@code
+   * denied}. Prints what each call returned or threw.
+   */
+  private static void fileMapAndTransfer() throws Exception {
+    final java.nio.file.Path root = java.nio.file.Path.of(System.getProperty("chaos.test.dir"));
+    final byte[] pattern = new byte[1024];
+    for (int i = 0; i < pattern.length; i++) {
+      pattern[i] = (byte) i;
+    }
+    final java.util.function.Function<String, java.nio.file.Path> file =
+        directory -> {
+          try {
+            final java.nio.file.Path created =
+                java.nio.file.Files.createDirectories(root.resolve(directory)).resolve("f");
+            java.nio.file.Files.write(created, pattern);
+            return created;
+          } catch (final java.io.IOException failed) {
+            throw new java.io.UncheckedIOException(failed);
+          }
+        };
+    final java.nio.file.Path mapped = file.apply("map");
+    try (java.nio.channels.FileChannel channel = java.nio.channels.FileChannel.open(mapped)) {
+      channel.map(java.nio.channels.FileChannel.MapMode.READ_ONLY, 0, pattern.length);
+      System.out.println("map=ok");
+    } catch (final java.io.IOException failed) {
+      System.out.println(
+          "map=" + failed.getMessage() + " / " + failed.getCause().getClass().getName());
+    }
+    final java.nio.file.Path plain = file.apply("plain");
+    try (java.nio.channels.FileChannel channel =
+        java.nio.channels.FileChannel.open(
+            plain, java.nio.file.StandardOpenOption.READ, java.nio.file.StandardOpenOption.WRITE)) {
+      final java.nio.MappedByteBuffer buffer =
+          channel.map(java.nio.channels.FileChannel.MapMode.READ_WRITE, 0, pattern.length);
+      buffer.force();
+      System.out.println("force=ok");
+    } catch (final java.io.UncheckedIOException failed) {
+      System.out.println("force=" + failed.getCause().getClass().getName());
+    }
+    // Created empty: a write of the pattern would itself be torn.
+    final java.nio.file.Path torn =
+        java.nio.file.Files.createDirectories(root.resolve("torn")).resolve("f");
+    torn.toFile().createNewFile();
+    try (java.nio.channels.FileChannel out =
+            java.nio.channels.FileChannel.open(torn, java.nio.file.StandardOpenOption.WRITE);
+        java.nio.channels.ReadableByteChannel in =
+            java.nio.channels.Channels.newChannel(new java.io.ByteArrayInputStream(pattern))) {
+      System.out.println("transferFrom=" + out.transferFrom(in, 0, pattern.length));
+    }
+    final java.nio.file.Path corrupt = file.apply("corrupt");
+    final ByteArrayOutputStream sink = new ByteArrayOutputStream();
+    try (java.nio.channels.FileChannel channel = java.nio.channels.FileChannel.open(corrupt)) {
+      System.out.println(
+          "transferTo="
+              + channel.transferTo(0, pattern.length, java.nio.channels.Channels.newChannel(sink)));
+    }
+    System.out.println("transferIntact=" + Arrays.equals(sink.toByteArray(), pattern));
+    java.nio.file.Files.createDirectories(root.resolve("denied"));
+    try {
+      java.nio.file.Files.copy(plain, root.resolve("denied").resolve("copy"));
+      System.out.println("copy=ok");
+    } catch (final java.io.IOException failed) {
+      System.out.println("copy=" + failed.getClass().getName() + ": " + failed.getMessage());
+    }
+  }
+
+  /**
+   * UDP over loopback and a reverse lookup, each under a scenario activated here for the receiver's
+   * port: a dropped datagram, corrupted receives, a refused send and a failed reverse lookup.
+   * Prints what the application saw.
+   */
+  private static void udpAndReverseDns() throws Exception {
+    final ChaosControlPlane plane = ChaosPlatform.current();
+    final byte[] pattern = new byte[64];
+    for (int i = 0; i < pattern.length; i++) {
+      pattern[i] = (byte) i;
+    }
+    try (java.net.DatagramSocket receiver =
+            new java.net.DatagramSocket(new InetSocketAddress("127.0.0.1", 0));
+        java.net.DatagramSocket sender = new java.net.DatagramSocket()) {
+      receiver.setSoTimeout(2000);
+      final InetSocketAddress to = new InetSocketAddress("127.0.0.1", receiver.getLocalPort());
+      final java.util.function.Function<OperationType, ChaosSelector> toReceiver =
+          operation ->
+              new ChaosSelector.NetworkSelector(
+                  Set.of(operation), NamePattern.any(), "127.0.0.1", to.getPort(), null, null);
+
+      final ChaosActivationHandle drop =
+          plane.activate(
+              ChaosScenario.builder("udp-drop-first")
+                  .selector(toReceiver.apply(OperationType.DATAGRAM_SEND))
+                  .effect(ChaosEffect.suppress())
+                  .activationPolicy(ActivationPolicy.count(1))
+                  .build());
+      sender.send(new java.net.DatagramPacket("one".getBytes(StandardCharsets.UTF_8), 3, to));
+      sender.send(new java.net.DatagramPacket("two".getBytes(StandardCharsets.UTF_8), 3, to));
+      final java.net.DatagramPacket first = new java.net.DatagramPacket(new byte[16], 16);
+      receiver.receive(first);
+      System.out.println(
+          "udpFirst=" + new String(first.getData(), 0, first.getLength(), StandardCharsets.UTF_8));
+      printApplied(drop);
+
+      final ChaosActivationHandle corrupt =
+          plane.activate(
+              ChaosScenario.builder("udp-corrupt")
+                  .selector(ChaosSelector.network(Set.of(OperationType.DATAGRAM_RECEIVE)))
+                  .effect(ChaosEffect.corruptRead())
+                  .build());
+      sender.send(new java.net.DatagramPacket(pattern, pattern.length, to));
+      final java.net.DatagramPacket packet = new java.net.DatagramPacket(new byte[128], 128);
+      receiver.receive(packet);
+      System.out.println("udpSocketBits=" + flippedBits(packet.getData(), pattern));
+      try (java.nio.channels.DatagramChannel channel =
+          java.nio.channels.DatagramChannel.open().bind(new InetSocketAddress("127.0.0.1", 0))) {
+        sender.send(
+            new java.net.DatagramPacket(pattern, pattern.length, channel.getLocalAddress()));
+        final java.nio.ByteBuffer buffer = java.nio.ByteBuffer.allocate(128);
+        channel.receive(buffer);
+        System.out.println("udpChannelBits=" + flippedBits(buffer.array(), pattern));
+      }
+      printApplied(corrupt);
+
+      final ChaosActivationHandle refused =
+          plane.activate(
+              ChaosScenario.builder("udp-refused")
+                  .selector(toReceiver.apply(OperationType.DATAGRAM_SEND))
+                  .effect(ChaosEffect.errno(ChaosEffect.Errno.ECONNREFUSED))
+                  .build());
+      try {
+        sender.send(new java.net.DatagramPacket(pattern, pattern.length, to));
+        System.out.println("udpRefused=sent");
+      } catch (final java.io.IOException failed) {
+        System.out.println("udpRefused=" + failed.getClass().getName());
+      }
+      printApplied(refused);
+    }
+
+    final InetAddress loopback = InetAddress.getByAddress(new byte[] {127, 0, 0, 1});
+    final ChaosActivationHandle reverse =
+        plane.activate(
+            ChaosScenario.builder("reverse-fails")
+                .selector(
+                    ChaosSelector.dns(
+                        Set.of(OperationType.DNS_REVERSE), NamePattern.exact("127.0.0.1")))
+                .effect(ChaosEffect.reject("no PTR"))
+                .build());
+    System.out.println("reverseName=" + loopback.getCanonicalHostName());
+    printApplied(reverse);
+  }
+
+  /** Counts the bits in which {@code received} differs from {@code expected}. */
+  private static int flippedBits(final byte[] received, final byte[] expected) {
+    int flipped = 0;
+    for (int i = 0; i < expected.length; i++) {
+      flipped += Integer.bitCount((received[i] ^ expected[i]) & 0xFF);
+    }
+    return flipped;
+  }
+
+  /**
+   * Connects a socket and a socket channel to a port nothing listens on, under a scenario that
+   * redirects that port to a live server; prints what each connect reached.
+   */
+  private static void redirect() throws Exception {
+    final int deadPort;
+    try (java.net.ServerSocket probe = new java.net.ServerSocket(0)) {
+      deadPort = probe.getLocalPort();
+    }
+    try (java.net.ServerSocket server =
+        new java.net.ServerSocket(0, 2, InetAddress.getByName("127.0.0.1"))) {
+      final ChaosActivationHandle redirect =
+          ChaosPlatform.current()
+              .activate(
+                  ChaosScenario.builder("failover")
+                      .selector(
+                          new ChaosSelector.NetworkSelector(
+                              Set.of(OperationType.SOCKET_CONNECT),
+                              NamePattern.any(),
+                              "127.0.0.1",
+                              deadPort,
+                              null,
+                              null))
+                      .effect(ChaosEffect.redirect("127.0.0.1", server.getLocalPort()))
+                      .build());
+      try (java.net.Socket socket = new java.net.Socket("127.0.0.1", deadPort);
+          java.net.Socket accepted = server.accept()) {
+        System.out.println("socketPeer=" + (socket.getPort() == server.getLocalPort()));
+      }
+      try (java.nio.channels.SocketChannel channel =
+              java.nio.channels.SocketChannel.open(new InetSocketAddress("127.0.0.1", deadPort));
+          java.net.Socket accepted = server.accept()) {
+        System.out.println(
+            "channelPeer="
+                + (((InetSocketAddress) channel.getRemoteAddress()).getPort()
+                    == server.getLocalPort()));
+      }
+      printApplied(redirect);
+    }
+  }
+
+  /**
+   * File closes and moves under {@code chaos.test.dir}, socket half-closes, a timed select and a
+   * timed process wait, each under a scenario activated here. Prints what the application saw.
+   */
+  private static void closeShutdownAndWait() throws Exception {
+    final ChaosControlPlane plane = ChaosPlatform.current();
+    final java.nio.file.Path root = java.nio.file.Path.of(System.getProperty("chaos.test.dir"));
+    final java.nio.file.Path failing = java.nio.file.Files.createDirectories(root.resolve("nfs"));
+    final java.nio.file.Path locked = java.nio.file.Files.createDirectories(root.resolve("locked"));
+    final java.nio.file.Path plain = java.nio.file.Files.createDirectories(root.resolve("plain"));
+    final ChaosActivationHandle closeEio =
+        plane.activate(
+            ChaosScenario.builder("close-eio")
+                .selector(
+                    new ChaosSelector.FileIoSelector(
+                        Set.of(OperationType.FILE_IO_CLOSE),
+                        com.macstab.chaos.jvm.api.PathPattern.under(failing.toString()),
+                        null,
+                        null))
+                .effect(ChaosEffect.errno(ChaosEffect.Errno.EIO))
+                .build());
+    final java.io.FileOutputStream stream =
+        new java.io.FileOutputStream(failing.resolve("a").toFile());
+    try {
+      stream.close();
+      System.out.println("streamClose=ok");
+    } catch (final java.io.IOException failed) {
+      System.out.println("streamClose=" + failed.getClass().getName() + ": " + failed.getMessage());
+    }
+    // the descriptor is released all the same
+    System.out.println("streamFdValid=" + stream.getFD().valid());
+    final java.nio.channels.FileChannel channel =
+        java.nio.channels.FileChannel.open(
+            failing.resolve("b"),
+            java.nio.file.StandardOpenOption.CREATE,
+            java.nio.file.StandardOpenOption.WRITE);
+    try {
+      channel.close();
+      System.out.println("channelClose=ok");
+    } catch (final java.io.IOException failed) {
+      System.out.println("channelClose=" + failed.getClass().getName());
+    }
+    System.out.println("channelOpen=" + channel.isOpen());
+    try (java.io.FileOutputStream other =
+        new java.io.FileOutputStream(plain.resolve("c").toFile())) {
+      other.getChannel().write(java.nio.ByteBuffer.allocate(1));
+    }
+    System.out.println("plainClose=ok");
+    printApplied(closeEio);
+
+    final ChaosActivationHandle moveDenied =
+        plane.activate(
+            ChaosScenario.builder("move-into-locked")
+                .selector(
+                    new ChaosSelector.FileIoSelector(
+                        Set.of(OperationType.FILE_IO_MOVE_TARGET),
+                        com.macstab.chaos.jvm.api.PathPattern.under(locked.toString()),
+                        null,
+                        null))
+                .effect(ChaosEffect.errno(ChaosEffect.Errno.EACCES))
+                .build());
+    try {
+      java.nio.file.Files.move(plain.resolve("c"), locked.resolve("c"));
+      System.out.println("moveInto=ok");
+    } catch (final java.io.IOException failed) {
+      System.out.println("moveInto=" + failed.getClass().getName());
+    }
+    System.out.println(
+        "renameInto=" + plain.resolve("c").toFile().renameTo(locked.resolve("d").toFile()));
+    System.out.println(
+        "renameElsewhere=" + plain.resolve("c").toFile().renameTo(plain.resolve("e").toFile()));
+    printApplied(moveDenied);
+
+    try (java.net.ServerSocket server =
+        new java.net.ServerSocket(0, 2, InetAddress.getByName("127.0.0.1"))) {
+      final ChaosActivationHandle notConnected =
+          plane.activate(
+              ChaosScenario.builder("shutdown-enotconn")
+                  .selector(
+                      new ChaosSelector.NetworkSelector(
+                          Set.of(OperationType.SOCKET_SHUTDOWN),
+                          NamePattern.any(),
+                          "127.0.0.1",
+                          server.getLocalPort(),
+                          null,
+                          null))
+                  .effect(ChaosEffect.errno(ChaosEffect.Errno.ENOTCONN))
+                  .build());
+      try (java.net.Socket socket = new java.net.Socket("127.0.0.1", server.getLocalPort());
+          java.net.Socket accepted = server.accept()) {
+        socket.shutdownOutput();
+        System.out.println("socketShutdown=ok");
+      } catch (final java.net.SocketException failed) {
+        System.out.println("socketShutdown=" + failed.getMessage());
+      }
+      try (java.nio.channels.SocketChannel socketChannel =
+              java.nio.channels.SocketChannel.open(
+                  new InetSocketAddress("127.0.0.1", server.getLocalPort()));
+          java.net.Socket accepted = server.accept()) {
+        socketChannel.shutdownOutput();
+        System.out.println("channelShutdown=ok");
+      } catch (final java.net.SocketException failed) {
+        System.out.println("channelShutdown=" + failed.getMessage());
+      }
+      printApplied(notConnected);
+    }
+
+    final ChaosActivationHandle stalled =
+        plane.activate(
+            ChaosScenario.builder("select-stalls")
+                .selector(
+                    new ChaosSelector.NioSelector(
+                        Set.of(OperationType.NIO_SELECTOR_SELECT), NamePattern.any()))
+                .effect(ChaosEffect.timeout())
+                .build());
+    final java.nio.channels.Pipe pipe = java.nio.channels.Pipe.open();
+    try (Selector selector = Selector.open()) {
+      pipe.source().configureBlocking(false);
+      pipe.source().register(selector, java.nio.channels.SelectionKey.OP_READ);
+      pipe.sink().write(java.nio.ByteBuffer.wrap(new byte[] {1}));
+      final long start = System.nanoTime();
+      final int ready = selector.select(300);
+      System.out.println("selectReady=" + ready);
+      System.out.println(
+          "selectMillis=" + TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start));
+      System.out.println("selectNowReady=" + selector.selectNow());
+    } finally {
+      pipe.sink().close();
+      pipe.source().close();
+    }
+    printApplied(stalled);
+
+    final ChaosActivationHandle hangs =
+        plane.activate(
+            ChaosScenario.builder("child-hangs")
+                .selector(
+                    new ChaosSelector.ProcessSelector(
+                        Set.of(OperationType.PROCESS_WAIT), NamePattern.exact("java")))
+                .effect(ChaosEffect.timeout())
+                .build());
+    final Process child =
+        new ProcessBuilder(
+                java.nio.file.Path.of(System.getProperty("java.home"), "bin", "java").toString(),
+                "-version")
+            .redirectErrorStream(true)
+            .redirectOutput(ProcessBuilder.Redirect.DISCARD)
+            .start();
+    final long start = System.nanoTime();
+    System.out.println("waitExited=" + child.waitFor(300, TimeUnit.MILLISECONDS));
+    System.out.println("waitMillis=" + TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start));
+    printApplied(hangs);
+    System.out.println("exitCode=" + child.waitFor());
+  }
+
+  /**
+   * With every hook group woven ({@code instrumentation=eager}), loads every JDK class a hook
+   * targets — by name, or by creating the platform's implementation of a JDK type — and prints the
+   * hooks that matched a method and those that matched none.
+   */
+  private static void hookCoverage() throws Exception {
+    final String[] targets = {
+      "java.lang.ProcessBuilder",
+      "java.lang.ProcessImpl",
+      "java.lang.VirtualThread",
+      "java.nio.MappedByteBuffer",
+      "java.time.Clock$SystemClock",
+      "java.time.Clock$SystemInstantSource",
+      "sun.nio.ch.DatagramChannelImpl",
+      "sun.nio.ch.FileChannelImpl",
+      "sun.nio.ch.Net",
+      "sun.nio.ch.NioSocketImpl",
+      "sun.nio.ch.ServerSocketChannelImpl",
+      "sun.nio.ch.SocketChannelImpl",
+      "sun.net.www.protocol.http.HttpURLConnection",
+      "jdk.internal.net.http.HttpClientImpl",
+      "java.util.concurrent.ArrayBlockingQueue",
+      "java.util.concurrent.LinkedBlockingQueue",
+      "java.util.concurrent.LinkedBlockingDeque",
+      "java.util.concurrent.PriorityBlockingQueue",
+      "java.util.concurrent.DelayQueue",
+      "java.util.concurrent.SynchronousQueue",
+      "java.util.concurrent.LinkedTransferQueue",
+      "javax.naming.InitialContext",
+      // client libraries, on the classpath of the coverage run
+      "com.zaxxer.hikari.pool.HikariPool",
+      "com.mchange.v2.c3p0.impl.C3P0PooledConnectionPool",
+      "io.grpc.internal.ClientCallImpl",
+      "io.lettuce.core.RedisChannelHandler",
+      "io.netty.channel.AbstractChannel$AbstractUnsafe",
+      "io.netty.channel.nio.AbstractNioByteChannel$NioByteUnsafe",
+      "io.netty.channel.epoll.AbstractEpollStreamChannel$EpollStreamUnsafe",
+      "io.netty.channel.kqueue.AbstractKQueueStreamChannel$KQueueStreamUnsafe",
+      "io.r2dbc.h2.H2Statement",
+      "okhttp3.internal.connection.RealCall",
+      "org.apache.hc.client5.http.impl.classic.CloseableHttpClient",
+      "org.apache.hc.client5.http.impl.classic.InternalHttpClient",
+      "org.apache.http.impl.client.CloseableHttpClient",
+      "org.apache.kafka.clients.consumer.KafkaConsumer",
+      "org.apache.kafka.clients.producer.KafkaProducer",
+      "org.apache.tomcat.util.threads.ThreadPoolExecutor",
+      "reactor.netty.http.client.HttpClientConnect",
+      "redis.clients.jedis.Connection",
+      "software.amazon.awssdk.core.internal.handler.BaseAsyncClientHandler",
+      "software.amazon.awssdk.core.internal.handler.BaseSyncClientHandler",
+    };
+    for (final String target : targets) {
+      try {
+        Class.forName(target, false, ClassLoader.getSystemClassLoader());
+      } catch (final ClassNotFoundException absent) {
+        System.out.println("absent." + target + "=true");
+      }
+    }
+    // Implementations chosen by the platform: create one of each.
+    Selector.open().close();
+    javax.net.ssl.SSLContext.getDefault().createSSLEngine();
+    javax.net.ssl.SSLSocketFactory.getDefault().createSocket().close();
+    ManagementFactory.getPlatformMBeanServer();
+    new java.util.zip.Inflater().end();
+    new java.util.zip.Deflater().end();
+    new java.util.concurrent.ScheduledThreadPoolExecutor(1).shutdownNow();
+    try (Connection connection = DriverManager.getConnection("jdbc:h2:mem:coverage");
+        Statement statement = connection.createStatement();
+        PreparedStatement prepared = connection.prepareStatement("select 1")) {
+      statement.execute("select 1");
+      prepared.execute();
+    }
+    System.out.println("runtime=" + Runtime.version());
+    System.out.println(
+        "matchedHooks="
+            + String.join(
+                "|",
+                com.macstab.chaos.jvm.instrumentation.JdkInstrumentationInstaller.matchedHooks()));
+    System.out.println(
+        "unmatchedHooks="
+            + ChaosPlatform.current()
+                .diagnostics()
+                .snapshot()
+                .runtimeDetails()
+                .get("unmatchedHooks"));
+    System.out.println(
+        "hookFailures="
+            + ChaosPlatform.current()
+                .diagnostics()
+                .snapshot()
+                .runtimeDetails()
+                .get("hookFailures"));
+  }
+
+  /**
+   * Binds a server socket and a server socket channel to 127.0.0.1 and to ::1, then accepts on a
+   * ::1 server; prints "ok" or the failure for each.
+   */
+  private static void socketBind() throws Exception {
+    for (final String host : new String[] {"127.0.0.1", "::1"}) {
+      try (java.net.ServerSocket server = new java.net.ServerSocket()) {
+        server.bind(new InetSocketAddress(host, 0));
+        System.out.println("serverSocket." + host + "=ok");
+      } catch (final java.io.IOException failed) {
+        System.out.println(
+            "serverSocket."
+                + host
+                + "="
+                + failed.getClass().getName()
+                + ": "
+                + failed.getMessage());
+      }
+      try (java.nio.channels.ServerSocketChannel channel =
+          java.nio.channels.ServerSocketChannel.open()) {
+        channel.bind(new InetSocketAddress(host, 0));
+        System.out.println("serverChannel." + host + "=ok");
+      } catch (final java.io.IOException failed) {
+        System.out.println(
+            "serverChannel."
+                + host
+                + "="
+                + failed.getClass().getName()
+                + ": "
+                + failed.getMessage());
+      }
+    }
+    try (java.net.ServerSocket server =
+        new java.net.ServerSocket(0, 1, InetAddress.getByName("::1"))) {
+      // No client connects: the EMFILE scenario must fail the accept. Bounded, so a fault that
+      // did not apply reports a timeout instead of hanging the probe.
+      server.setSoTimeout(5_000);
+      server.accept().close();
+      System.out.println("accept=ok");
+    } catch (final java.io.IOException failed) {
+      System.out.println("accept=" + failed.getClass().getName() + ": " + failed.getMessage());
+    }
+  }
+
+  /** Starts one platform thread under an EAGAIN scenario, then one after it is closed. */
+  private static void threadEagain() throws Exception {
+    final ChaosActivationHandle eagain =
+        ChaosPlatform.current()
+            .activate(
+                ChaosScenario.builder("thread-eagain")
+                    .selector(
+                        new ChaosSelector.ThreadSelector(
+                            Set.of(OperationType.THREAD_START),
+                            ChaosSelector.ThreadKind.PLATFORM,
+                            NamePattern.exact("probe-worker"),
+                            null))
+                    .effect(ChaosEffect.errno(ChaosEffect.Errno.EAGAIN))
+                    .build());
+    try {
+      new Thread(() -> {}, "probe-worker").start();
+      System.out.println("during=started");
+    } catch (final OutOfMemoryError failed) {
+      System.out.println("during=" + failed.getMessage());
+    }
+    eagain.close();
+    final Thread after = new Thread(() -> {}, "probe-worker");
+    after.start();
+    after.join();
+    System.out.println("after=started");
+  }
+
+  /**
+   * Socket channels as sockets, filtered on the server's port so only the client's side matches.
+   * Phase one trickles the client's reads and resets its close; phase two corrupts its reads and
+   * tears its writes, single and gathered. Prints what the client and the server saw.
+   */
+  private static void socketChannel() throws Exception {
+    final byte[] payload = new byte[1000];
+    for (int i = 0; i < payload.length; i++) {
+      payload[i] = (byte) i;
+    }
+    final ChaosControlPlane plane = ChaosPlatform.current();
+    try (java.net.ServerSocket server =
+        new java.net.ServerSocket(0, 2, InetAddress.getByName("127.0.0.1"))) {
+      final int port = server.getLocalPort();
+      final java.util.function.Function<String, ChaosSelector> clientSide =
+          operation ->
+              new ChaosSelector.NetworkSelector(
+                  Set.of(OperationType.valueOf(operation)),
+                  NamePattern.any(),
+                  "127.0.0.1",
+                  port,
+                  null,
+                  null);
+
+      final ChaosActivationHandle trickle =
+          plane.activate(
+              ChaosScenario.builder("channel-trickle")
+                  .selector(clientSide.apply("SOCKET_READ"))
+                  .effect(ChaosEffect.trickle(16))
+                  .build());
+      final ChaosActivationHandle reset =
+          plane.activate(
+              ChaosScenario.builder("channel-reset")
+                  .selector(clientSide.apply("SOCKET_CLOSE"))
+                  .effect(ChaosEffect.connectionReset())
+                  .build());
+      final java.util.concurrent.CompletableFuture<String> firstPeer = serve(server, payload);
+      try (java.nio.channels.SocketChannel channel =
+          java.nio.channels.SocketChannel.open(new InetSocketAddress("127.0.0.1", port))) {
+        final java.nio.ByteBuffer buffer = java.nio.ByteBuffer.allocate(payload.length);
+        System.out.println("trickledRead=" + channel.read(buffer));
+      }
+      System.out.println("closePeer=" + firstPeer.get(5, TimeUnit.SECONDS));
+      printApplied(trickle, reset);
+
+      final ChaosActivationHandle corrupt =
+          plane.activate(
+              ChaosScenario.builder("channel-corrupt")
+                  .selector(clientSide.apply("SOCKET_READ"))
+                  .effect(ChaosEffect.corruptRead())
+                  .build());
+      final ChaosActivationHandle torn =
+          plane.activate(
+              ChaosScenario.builder("channel-torn")
+                  .selector(clientSide.apply("SOCKET_WRITE"))
+                  .effect(ChaosEffect.tornWrite())
+                  .build());
+      final java.util.concurrent.CompletableFuture<String> secondPeer = serve(server, payload);
+      try (java.nio.channels.SocketChannel channel =
+          java.nio.channels.SocketChannel.open(new InetSocketAddress("127.0.0.1", port))) {
+        final java.nio.ByteBuffer first = java.nio.ByteBuffer.allocate(400);
+        final java.nio.ByteBuffer second = java.nio.ByteBuffer.allocate(payload.length - 400);
+        int reads = 0;
+        while (second.hasRemaining()
+            && channel.read(new java.nio.ByteBuffer[] {first, second}, 0, 2) > 0) {
+          reads++;
+        }
+        int flipped = 0;
+        for (int i = 0; i < payload.length; i++) {
+          final byte got = i < 400 ? first.get(i) : second.get(i - 400);
+          flipped += Integer.bitCount((got ^ payload[i]) & 0xFF);
+        }
+        System.out.println("scatterReads=" + reads);
+        System.out.println("bitsFlipped=" + flipped);
+        System.out.println("tornWrite=" + channel.write(java.nio.ByteBuffer.allocate(600)));
+        System.out.println(
+            "tornGather="
+                + channel.write(
+                    new java.nio.ByteBuffer[] {
+                      java.nio.ByteBuffer.allocate(600), java.nio.ByteBuffer.allocate(600)
+                    }));
+      }
+      System.out.println("secondPeer=" + secondPeer.get(5, TimeUnit.SECONDS));
+      printApplied(corrupt, torn);
+    }
+    unixSocketChannel();
+  }
+
+  /**
+   * A Unix-domain socket channel: its peer is the socket's path, which a {@code NetworkSelector}
+   * host pattern matches. Trickles the client's read of the server's 100 bytes to 4.
+   */
+  private static void unixSocketChannel() throws Exception {
+    final java.nio.file.Path dir = java.nio.file.Files.createTempDirectory("chaos-unix");
+    final java.nio.file.Path path = dir.resolve("app.sock");
+    final ChaosActivationHandle trickle =
+        ChaosPlatform.current()
+            .activate(
+                ChaosScenario.builder("unix-trickle")
+                    .selector(
+                        ChaosSelector.network(
+                            Set.of(OperationType.SOCKET_READ), NamePattern.exact(path.toString())))
+                    .effect(ChaosEffect.trickle(4))
+                    .build());
+    try (java.nio.channels.ServerSocketChannel server =
+        java.nio.channels.ServerSocketChannel.open(java.net.StandardProtocolFamily.UNIX)) {
+      server.bind(java.net.UnixDomainSocketAddress.of(path));
+      try (java.nio.channels.SocketChannel client =
+              java.nio.channels.SocketChannel.open(java.net.UnixDomainSocketAddress.of(path));
+          java.nio.channels.SocketChannel accepted = server.accept()) {
+        accepted.write(java.nio.ByteBuffer.allocate(100));
+        System.out.println("unixRead=" + client.read(java.nio.ByteBuffer.allocate(100)));
+      }
+    } finally {
+      printApplied(trickle);
+      java.nio.file.Files.deleteIfExists(path);
+      java.nio.file.Files.deleteIfExists(dir);
+    }
+  }
+
+  /** Prints each handle's applied count, then closes it. */
+  private static void printApplied(final ChaosActivationHandle... handles) {
+    for (final ChaosActivationHandle handle : handles) {
+      System.out.println("applied." + handle.id() + "=" + handle.appliedCount());
+      handle.close();
+    }
+  }
+
+  /**
+   * Accepts one connection, sends {@code payload}, then reads until the client goes away; completes
+   * with {@code "reset"} or {@code "eof"}.
+   */
+  private static java.util.concurrent.CompletableFuture<String> serve(
+      final java.net.ServerSocket server, final byte[] payload) {
+    return java.util.concurrent.CompletableFuture.supplyAsync(
+        () -> {
+          try (java.net.Socket accepted = server.accept()) {
+            accepted.getOutputStream().write(payload);
+            accepted.getOutputStream().flush();
+            final byte[] buffer = new byte[4096];
+            try {
+              while (accepted.getInputStream().read(buffer) > 0) {
+                // drain what the client writes
+              }
+              return "eof";
+            } catch (final java.io.IOException reset) {
+              return "reset";
+            }
+          } catch (final java.io.IOException failed) {
+            return "failed: " + failed.getMessage();
+          }
+        });
+  }
+
+  /**
+   * Starts this JVM's java launcher with ProcessBuilder and with Runtime.exec, and a missing
+   * program; prints "ok" or the failure message of each.
+   */
+  private static void processStart() throws Exception {
+    final String launcher =
+        java.nio.file.Path.of(System.getProperty("java.home"), "bin", "java").toString();
+    try {
+      System.out.println(
+          "builder="
+              + (new ProcessBuilder(launcher, "-version").start().waitFor() == 0 ? "ok" : "exit"));
+    } catch (final java.io.IOException failed) {
+      System.out.println("builder=" + failed.getMessage());
+    }
+    try {
+      System.out.println(
+          "exec="
+              + (Runtime.getRuntime().exec(new String[] {launcher, "-version"}).waitFor() == 0
+                  ? "ok"
+                  : "exit"));
+    } catch (final java.io.IOException failed) {
+      System.out.println("exec=" + failed.getMessage());
+    }
+    try {
+      new ProcessBuilder("definitely-not-a-program-xyz").start();
+      System.out.println("other=started");
+    } catch (final java.io.IOException failed) {
+      System.out.println("other=" + failed.getMessage());
+    }
+  }
+
+  /**
+   * Prints how far the clocks read by ClockReader (a selected package) are from those read here
+   * (not selected), in seconds; read after JIT compilation of ClockReader too.
+   */
+  private static void clockCallSites() {
+    for (int i = 0; i < 20_000; i++) {
+      com.example.chaostarget.ClockReader.millis();
+      com.example.chaostarget.ClockReader.nanos();
+    }
+    System.out.println(
+        "millisSkewSeconds="
+            + Math.round(
+                (com.example.chaostarget.ClockReader.millis() - System.currentTimeMillis())
+                    / 1000.0));
+    System.out.println(
+        "nanosSkewSeconds="
+            + Math.round((com.example.chaostarget.ClockReader.nanos() - System.nanoTime()) / 1e9));
+  }
+
+  /**
+   * A loopback server that joins the session named by the request's X-Chaos-Session header and
+   * calls Greeter.greet, which a session-scoped scenario fails. Requests are sent through the JDK
+   * HttpClient and HttpURLConnection inside the session, then once more after it closed; prints the
+   * header each request carried and what the server saw.
+   */
+  private static void sessionHeader() throws Exception {
+    final com.sun.net.httpserver.HttpServer server =
+        com.sun.net.httpserver.HttpServer.create(
+            new java.net.InetSocketAddress(InetAddress.getByName("127.0.0.1"), 0), 0);
+    server.createContext(
+        "/",
+        exchange -> {
+          final String header = exchange.getRequestHeaders().getFirst(ChaosSession.HEADER);
+          String outcome;
+          try (ChaosSession.ScopeBinding joined = ChaosPlatform.current().bindSession(header)) {
+            new com.example.chaostarget.Greeter().greet("x");
+            outcome = "ok";
+          } catch (final IllegalStateException injected) {
+            outcome = "injected";
+          }
+          final byte[] body = (header + "|" + outcome).getBytes(StandardCharsets.UTF_8);
+          exchange.sendResponseHeaders(200, body.length);
+          exchange.getResponseBody().write(body);
+          exchange.close();
+        });
+    server.start();
+    final String url = "http://127.0.0.1:" + server.getAddress().getPort() + "/";
+    try {
+      final String sessionId;
+      try (ChaosSession session = ChaosPlatform.current().openSession("header")) {
+        sessionId = session.id();
+        session.activate(
+            ChaosScenario.builder("inject-via-header")
+                .scope(ChaosScenario.ScenarioScope.SESSION)
+                .selector(
+                    new ChaosSelector.MethodSelector(
+                        Set.of(OperationType.METHOD_ENTER),
+                        NamePattern.exact("com.example.chaostarget.Greeter"),
+                        NamePattern.exact("greet"),
+                        null))
+                .effect(
+                    new ChaosEffect.ExceptionInjectionEffect(
+                        "java.lang.IllegalStateException", "injected", false))
+                .activationPolicy(ActivationPolicy.always())
+                .build());
+        System.out.println("httpClient=" + viaHttpClient(url, sessionId));
+        System.out.println("urlConnection=" + viaUrlConnection(url, sessionId));
+      }
+      System.out.println("afterClose=" + viaHttpClient(url, sessionId));
+    } finally {
+      server.stop(0);
+    }
+  }
+
+  /** Returns the server's answer with the session id replaced by "session". */
+  private static String viaHttpClient(final String url, final String sessionId) throws Exception {
+    try (java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient()) {
+      final String body =
+          client
+              .send(
+                  java.net.http.HttpRequest.newBuilder(java.net.URI.create(url)).build(),
+                  java.net.http.HttpResponse.BodyHandlers.ofString())
+              .body();
+      return body.replace(sessionId, "session");
+    }
+  }
+
+  private static String viaUrlConnection(final String url, final String sessionId)
+      throws Exception {
+    final java.net.HttpURLConnection connection =
+        (java.net.HttpURLConnection) java.net.URI.create(url).toURL().openConnection();
+    try (java.io.InputStream in = connection.getInputStream()) {
+      return new String(in.readAllBytes(), StandardCharsets.UTF_8).replace(sessionId, "session");
+    } finally {
+      connection.disconnect();
+    }
+  }
+
+  /**
+   * A pool whose worker is created by a submission from inside a session: the task submitted in the
+   * session runs in it, a later task submitted from outside any session must not.
+   */
+  private static void poolWorkerSession() throws Exception {
+    final com.example.chaostarget.Greeter greeter = new com.example.chaostarget.Greeter();
+    final java.util.concurrent.Callable<String> attempt =
+        () -> {
+          try {
+            greeter.greet("x");
+            return "ok";
+          } catch (final IllegalStateException injected) {
+            return "injected";
+          }
+        };
+    final ExecutorService pool = Executors.newSingleThreadExecutor();
+    try {
+      final java.util.concurrent.atomic.AtomicReference<String> later =
+          new java.util.concurrent.atomic.AtomicReference<>();
+      try (ChaosSession session = ChaosPlatform.current().openSession("pool")) {
+        session.activate(
+            ChaosScenario.builder("inject-in-pool-session")
+                .scope(ChaosScenario.ScenarioScope.SESSION)
+                .selector(
+                    new ChaosSelector.MethodSelector(
+                        Set.of(OperationType.METHOD_ENTER),
+                        NamePattern.exact("com.example.chaostarget.Greeter"),
+                        NamePattern.exact("greet"),
+                        null))
+                .effect(
+                    new ChaosEffect.ExceptionInjectionEffect(
+                        "java.lang.IllegalStateException", "injected", false))
+                .activationPolicy(ActivationPolicy.always())
+                .build());
+        System.out.println("inSession=" + pool.submit(attempt).get(5, TimeUnit.SECONDS));
+        // A thread outside the session submits to the same worker while the session is open.
+        final Thread outsider =
+            Thread.ofPlatform()
+                .unstarted(
+                    () -> {
+                      try {
+                        later.set(pool.submit(attempt).get(5, TimeUnit.SECONDS));
+                      } catch (final Exception failed) {
+                        later.set(failed.toString());
+                      }
+                    });
+        try (ChaosSession.ScopeBinding none = ChaosPlatform.current().bindSession(null)) {
+          outsider.start();
+        }
+        outsider.join();
+      }
+      System.out.println("outsideSession=" + later.get());
+    } finally {
+      pool.shutdownNow();
+    }
+  }
+
   /** Prints how far now(ZoneId) is from the unskewed Instant.now(), in seconds. */
   private static void clockNowInZone() {
     final java.time.ZoneId tokyo = java.time.ZoneId.of("Asia/Tokyo");
@@ -380,6 +1851,46 @@ public final class DefectProbeMain {
     System.out.println(
         "zonedSkewSeconds="
             + Duration.between(real, java.time.ZonedDateTime.now(tokyo).toInstant()).toSeconds());
+  }
+
+  /**
+   * Prints how far each system-clock read is ahead of the real time, in seconds: the system clock's
+   * instant and millis, the system instant source, the java.time now() methods without an operation
+   * of their own, and Instant.now / LocalDateTime.now.
+   */
+  private static void clockReads() {
+    final long real =
+        java.time.Instant.ofEpochMilli(java.lang.System.currentTimeMillis()).getEpochSecond();
+    final java.time.ZoneOffset utc = java.time.ZoneOffset.UTC;
+    final Map<String, Long> reads = new java.util.LinkedHashMap<>();
+    reads.put("clockInstant", java.time.Clock.systemUTC().instant().getEpochSecond());
+    reads.put("clockMillis", java.time.Clock.systemDefaultZone().millis() / 1000L);
+    reads.put("instantSource", java.time.InstantSource.system().instant().getEpochSecond());
+    reads.put("offsetDateTime", java.time.OffsetDateTime.now(utc).toEpochSecond());
+    reads.put("localTime", (long) java.time.LocalTime.now(utc).toSecondOfDay());
+    reads.put("instantNow", java.time.Instant.now().getEpochSecond());
+    reads.put("localDateTime", java.time.LocalDateTime.now(utc).toEpochSecond(utc));
+    for (final Map.Entry<String, Long> read : reads.entrySet()) {
+      final long ahead =
+          read.getKey().equals("localTime")
+              ? Math.floorMod(read.getValue() - Math.floorMod(real, 86_400L), 86_400L)
+              : read.getValue() - real;
+      System.out.println(read.getKey() + "=" + ahead);
+    }
+  }
+
+  /** Reads the skewed clock, then submits one task to an executor. */
+  private static void skewedTimeBounds() throws Exception {
+    final long real =
+        java.time.Instant.ofEpochMilli(java.lang.System.currentTimeMillis()).getEpochSecond();
+    System.out.println(
+        "clockAhead=" + (java.time.Clock.systemUTC().instant().getEpochSecond() - real));
+    final ExecutorService executor = Executors.newSingleThreadExecutor();
+    try {
+      executor.submit(() -> {}).get(5L, TimeUnit.SECONDS);
+    } finally {
+      executor.shutdownNow();
+    }
   }
 
   private static void virtualThreadExecutor() throws Exception {
@@ -435,6 +1946,25 @@ public final class DefectProbeMain {
   @FunctionalInterface
   interface HttpProbe {
     void call(String url) throws Exception;
+  }
+
+  /** Reads a response through java.net.HttpURLConnection; a suppressed call is reported. */
+  private static void httpUrlConnection(final String url) throws Exception {
+    final java.net.HttpURLConnection connection =
+        (java.net.HttpURLConnection) URI.create(url).toURL().openConnection();
+    try {
+      // Drives connect() through getResponseCode() and then reads the body: one request.
+      System.out.println("status=" + connection.getResponseCode());
+      System.out.println(
+          "body="
+              + new String(
+                  connection.getInputStream().readAllBytes(),
+                  java.nio.charset.StandardCharsets.UTF_8));
+    } catch (final java.net.ConnectException suppressed) {
+      System.out.println("connectException=" + suppressed.getMessage());
+    } finally {
+      connection.disconnect();
+    }
   }
 
   private static void jdkSendAsync(final String url) throws Exception {

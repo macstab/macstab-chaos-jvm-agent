@@ -3,6 +3,10 @@ package com.macstab.chaos.jvm.startup;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.io.ByteArrayOutputStream;
+import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
+import java.util.Map;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -140,6 +144,14 @@ class AgentArgsParserTest {
     }
 
     @Test
+    @DisplayName("a key of only whitespace throws instead of being stored under no name")
+    void blankKey() {
+      assertThatThrownBy(() -> AgentArgsParser.parse("  =value"))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessage("invalid agent arg token '  =value': blank key before '='");
+    }
+
+    @Test
     @DisplayName("oversized input throws")
     void oversizedInput() {
       String huge = "k=" + "x".repeat(9000);
@@ -200,5 +212,83 @@ class AgentArgsParserTest {
       AgentArgs args = AgentArgsParser.parse("other=value");
       assertThat(args.getBoolean("flag", true)).isTrue();
     }
+
+    @Test
+    @DisplayName("blank value yields default")
+    void blankValueYieldsDefault() {
+      AgentArgs args = AgentArgsParser.parse("flag=  ");
+      assertThat(args.getBoolean("flag", true)).isTrue();
+      assertThat(args.getBoolean("flag", false)).isFalse();
+    }
+
+    @Test
+    @DisplayName("unrecognised value warns on stderr with the key and the literal")
+    void typoWarns() {
+      AgentArgs args = AgentArgsParser.parse("flag=tru");
+      assertThat(stderrOf(() -> args.getBoolean("flag", false)))
+          .contains("'flag'")
+          .contains("'tru'")
+          .contains("Using default: false");
+    }
+  }
+
+  @Nested
+  @DisplayName("AgentArgs long accessor")
+  class LongAccessor {
+
+    @Test
+    @DisplayName("parses the value with surrounding whitespace stripped")
+    void parsesStripped() {
+      assertThat(new AgentArgs(Map.of("n", " 42 ")).getLong("n", 7)).isEqualTo(42L);
+    }
+
+    @Test
+    @DisplayName("missing, blank or non-numeric values yield default")
+    void fallsBackToDefault() {
+      AgentArgs args = new AgentArgs(Map.of("blank", "  ", "text", "forty-two"));
+      assertThat(args.getLong("missing", 7)).isEqualTo(7L);
+      assertThat(args.getLong("blank", 7)).isEqualTo(7L);
+      assertThat(args.getLong("text", 7)).isEqualTo(7L);
+    }
+  }
+
+  @Nested
+  @DisplayName("duplicate key warnings")
+  class DuplicateKeyWarnings {
+
+    @Test
+    @DisplayName("a repeated key=value warns on stderr, distinct keys do not")
+    void repeatedPairWarns() {
+      assertThat(stderrOf(() -> AgentArgsParser.parse("key=first;key=second")))
+          .contains("duplicate agent arg key 'key'");
+      assertThat(stderrOf(() -> AgentArgsParser.parse("a=1;b=2"))).isEmpty();
+    }
+
+    @Test
+    @DisplayName("a repeated bare flag warns on stderr, a single flag does not")
+    void repeatedFlagWarns() {
+      assertThat(stderrOf(() -> AgentArgsParser.parse("debugDump;debugDump")))
+          .contains("duplicate agent arg key 'debugDump'");
+      assertThat(stderrOf(() -> AgentArgsParser.parse("debugDump;other=1"))).isEmpty();
+    }
+  }
+
+  @Test
+  @DisplayName("input of exactly the maximum length is accepted")
+  void inputAtMaximumLengthAccepted() {
+    String atLimit = "k=" + "x".repeat(8192 - 2);
+    assertThat(AgentArgsParser.parse(atLimit).get("k")).hasSize(8190);
+  }
+
+  private static String stderrOf(final Runnable action) {
+    final PrintStream original = System.err;
+    final ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+    System.setErr(new PrintStream(buffer, true, StandardCharsets.UTF_8));
+    try {
+      action.run();
+    } finally {
+      System.setErr(original);
+    }
+    return buffer.toString(StandardCharsets.UTF_8);
   }
 }

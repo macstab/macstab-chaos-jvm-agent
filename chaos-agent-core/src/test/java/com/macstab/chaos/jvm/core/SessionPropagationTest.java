@@ -15,6 +15,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /** Session-scoped scenarios on operations whose dispatch used to ignore the session. */
@@ -84,6 +85,7 @@ class SessionPropagationTest {
   }
 
   @Test
+  @Tag("law-L16")
   @DisplayName("a session-scoped clock skew applies only on threads bound to the session")
   void sessionClockSkewDoesNotLeak() throws Exception {
     // Arrange

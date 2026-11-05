@@ -8,13 +8,43 @@
 ## Build & test
 
 ```bash
-./gradlew build                        # compile, format-check, test, Jacoco
+./gradlew build                        # compile, format-check, test, Jacoco and coverage floors
+./gradlew test -PtestJavaVersion=21    # run the tests on another installed JDK (CI: 21 and 25, amd64 and arm64)
+CHAOS_DSL_PATH=../macstab-chaos-testing-libraries/docs/DSL.md \
+  ./gradlew :chaos-agent-startup-config:test --tests '*CrossLayerDocSyncTest*'   # check the native library's DSL.md against this API
 ./gradlew spotlessApply                # auto-fix formatting before committing
 ./gradlew aggregatedJavadoc            # build API docs at build/docs/aggregated-javadoc/
 ./gradlew :chaos-agent-core:test       # run tests for a single module
 ```
 
 Tests for the instrumentation and bootstrap modules start a real agent (self-attach). They require no flags but do need the process to be attachable (`-Djdk.attach.allowAttachSelf=true` is wired automatically by the test extension).
+
+## Quality gates
+
+`./gradlew build` runs every gate below; each one fails the build, and each generated file is regenerated with the command shown, so an intended change shows in review as a diff.
+
+| Gate | Guards | Record an intended change |
+|------|--------|---------------------------|
+| `apiCheck` | the public API of every API module (`api/<module>.api`, JVM signatures) | `./gradlew apiDump` |
+| `PlanSchemaTest` | the published plan schema is the parser's | `./gradlew :chaos-agent-startup-config:test --tests '*PlanSchemaTest*' -PupdatePlanSchema` |
+| `CompatibilityMatrixDocTest` | the effect/operation table is the validator's | `./gradlew :chaos-agent-core:test --tests '*CompatibilityMatrixDocTest*' -PupdateDocs` |
+| `ReferenceTablesSyncTest`, `HandleTableDocTest`, `CrossLayerDocSyncTest` | reference tables, handle counts, API names and JSON examples in the docs | edit the docs |
+| `SemanticsLawTraceabilityTest` | every law of `docs/semantics.md` has a test tagged `law-L<n>` | tag the test |
+| `ArchitectureTest` | the bridge jar is closed, advice uses only public members, layering | — |
+| Error Prone (`-Werror`) | static analysis of every compilation; a finding fails the build | fix it, or suppress it where it stands with the reason |
+| NullAway | every reference is non-null unless `@Nullable` (JSpecify) says otherwise, proven per dereference, inside generic type arguments too (JSpecify mode) | annotate what may be absent; state an invariant with `Objects.requireNonNull` and its reason |
+| `PlanFuzzTest` | the parser and validator never crash or hang | replay a failure with `-PfuzzSeed=<seed> -PfuzzIterations=<n>` |
+| JaCoCo floors | line and branch coverage per module, child JVMs included | raise the floor in `build.gradle.kts`, never lower it |
+| Coverage per file | every source file 100 % of its lines, or listed in `config/coverage-exceptions.txt` with a minimum, a kind (`unreachable`, `platform`, `race`) and the reason | cover the new lines; list a file only for lines no test can reach, and remove its entry once covered |
+
+Not part of `build`, run before a change to evaluation or validation code:
+
+```bash
+./gradlew pitest                    # mutation testing of api, core and startup-config; reports in <module>/build/reports/pitest
+scripts/check-reproducible.sh       # builds every jar twice and fails when any differs
+```
+
+The decisions behind the architecture are recorded in [docs/adr](docs/adr/README.md); a change that reverses one adds a record that supersedes it.
 
 ## Code style
 
@@ -118,7 +148,7 @@ Phase 1 points (always installed) go before the `if (premainMode)` check. Phase 
 
 ### 6. Handle the dispatch in `ChaosDispatcher`
 
-Add the corresponding `beforeMyOperation(...)` method that receives the call from `ChaosBridge` and routes it through `ScenarioRegistry` → `ScenarioController` evaluation. Follow the pattern of any existing `before*` method in `ChaosDispatcher`.
+Add the corresponding `beforeMyOperation(...)` method that receives the call from `ChaosBridge` and routes it through `ScenarioRegistry` → `ScenarioController` evaluation. Follow the pattern of any existing `before*` method in `ChaosDispatcher`, including its `idle(operation)` check: return the unmodified result before building the `InvocationContext`, so a call without a scenario for its operation allocates nothing.
 
 ### 7. Test it
 
@@ -148,5 +178,7 @@ Stressors are simpler — they live entirely in `chaos-agent-core` and have no B
 
 - One logical change per PR
 - Tests required for new interception points and stressors
-- `./gradlew build` must pass locally before opening a PR
+- `./gradlew build` must pass locally before opening a PR. It enforces a line and branch coverage floor per module (`coverageFloors` in `build.gradle.kts`); raise a floor when your tests raise coverage, never lower one to make a change pass
+- Documentation examples are checked: every API name, enum constant and plan JSON `type` in `README.md` and `docs/*.md` must exist, and every `json` plan or scenario must parse (`CrossLayerDocSyncTest`). Fence a schema sketch with placeholders as `jsonc`. A Java example fenced as `java verified` must be a complete compilation unit with a public type: the test compiles it against the API. When you rename API, update the native library's `docs/DSL.md` too; CI checks it against its `develop` branch
+- Pull requests into `main` run the benchmark gate (`docs/benchmarks.md` §8): a dispatch benchmark more than 15 % and 25 ns slower than `main` (p < 0.01) fails it
 - For breaking API changes, add a `BREAKING CHANGE:` footer to the commit message

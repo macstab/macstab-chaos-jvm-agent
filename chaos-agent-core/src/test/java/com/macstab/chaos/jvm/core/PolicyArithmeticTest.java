@@ -17,6 +17,7 @@ import java.util.Optional;
 import java.util.Set;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 @DisplayName("Activation-policy arithmetic")
@@ -30,6 +31,7 @@ class PolicyArithmeticTest {
     private final ChaosRuntime runtime = new ChaosRuntime(clock, ChaosMetricsSink.NOOP);
 
     @Test
+    @Tag("law-L10")
     @DisplayName("the first window starts when the scenario starts, not at an epoch boundary")
     void windowIsAnchoredAtStart() {
       runtime.activate(rateLimited(1, Duration.ofSeconds(1)));
@@ -48,6 +50,7 @@ class PolicyArithmeticTest {
     }
 
     @Test
+    @Tag("law-L10")
     @DisplayName("a clock that steps back re-anchors the window instead of blocking it")
     void clockStepBackReAnchors() {
       runtime.activate(rateLimited(1, Duration.ofSeconds(1)));
@@ -87,6 +90,7 @@ class PolicyArithmeticTest {
   }
 
   @Test
+  @Tag("law-L9")
   @DisplayName("the sampled delay is independent of the probability draw")
   void delayIsIndependentOfProbabilityDraw() {
     // With probability 0.5 only draws below 0.5 apply. When the delay came from the same
@@ -96,7 +100,7 @@ class PolicyArithmeticTest {
         ChaosScenario.builder("independent")
             .scope(ChaosScenario.ScenarioScope.JVM)
             .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
-            .effect(ChaosEffect.delay(Duration.ZERO, Duration.ofMillis(1_000)))
+            .effect(ChaosEffect.delay(Duration.ZERO, Duration.ofSeconds(1)))
             .activationPolicy(
                 new ActivationPolicy(
                     ActivationPolicy.StartMode.AUTOMATIC, 0.5d, 0L, null, null, null, 42L, false))

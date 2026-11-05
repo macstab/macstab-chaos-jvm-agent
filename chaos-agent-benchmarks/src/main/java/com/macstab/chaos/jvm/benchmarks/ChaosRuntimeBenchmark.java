@@ -42,7 +42,10 @@ public class ChaosRuntimeBenchmark {
   public ChaosRuntimeBenchmark() {}
 
   private static final Executor DUMMY_EXECUTOR = Runnable::run;
+
+  @SuppressWarnings("UnnecessaryLambda") // one shared task, so the benchmark measures dispatch
   private static final Runnable DUMMY_TASK = () -> {};
+
   private static final Duration ZERO_DELAY = Duration.ofMillis(0);
   private static final ActivationPolicy ONE_SHOT_POLICY =
       new ActivationPolicy(
@@ -251,7 +254,7 @@ public class ChaosRuntimeBenchmark {
   @Benchmark
   public void agentInstalled_zeroScenarios(ZeroScenariosState state, Blackhole bh)
       throws Throwable {
-    bh.consume(state.dispatcher.beforeJdbcStatementExecute(BENCHMARK_SQL));
+    bh.consume(state.dispatcher.client().beforeJdbcStatementExecute(BENCHMARK_SQL));
   }
 
   /**
@@ -264,7 +267,7 @@ public class ChaosRuntimeBenchmark {
   @Benchmark
   public void agentInstalled_oneScenario_noMatch(OneScenarioNoMatchState state, Blackhole bh)
       throws Throwable {
-    bh.consume(state.dispatcher.beforeJdbcStatementExecute(BENCHMARK_SQL));
+    bh.consume(state.dispatcher.client().beforeJdbcStatementExecute(BENCHMARK_SQL));
   }
 
   /**
@@ -277,7 +280,7 @@ public class ChaosRuntimeBenchmark {
   @Benchmark
   public void agentInstalled_oneMatch_noEffect(OneMatchNoEffectState state, Blackhole bh)
       throws Throwable {
-    bh.consume(state.dispatcher.beforeJdbcStatementExecute(BENCHMARK_SQL));
+    bh.consume(state.dispatcher.client().beforeJdbcStatementExecute(BENCHMARK_SQL));
   }
 
   /**
@@ -290,7 +293,7 @@ public class ChaosRuntimeBenchmark {
    */
   @Benchmark
   public void sessionIdMiss(SessionMissState state, Blackhole bh) throws Throwable {
-    bh.consume(state.dispatcher.beforeJdbcStatementExecute(BENCHMARK_SQL));
+    bh.consume(state.dispatcher.client().beforeJdbcStatementExecute(BENCHMARK_SQL));
   }
 
   /**
@@ -302,6 +305,6 @@ public class ChaosRuntimeBenchmark {
    */
   @Benchmark
   public void tenScenarios_oneMatch(TenScenariosState state, Blackhole bh) throws Throwable {
-    bh.consume(state.dispatcher.beforeJdbcStatementExecute(BENCHMARK_SQL));
+    bh.consume(state.dispatcher.client().beforeJdbcStatementExecute(BENCHMARK_SQL));
   }
 }

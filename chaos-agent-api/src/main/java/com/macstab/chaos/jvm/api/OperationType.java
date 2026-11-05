@@ -25,17 +25,18 @@ package com.macstab.chaos.jvm.api;
  *   <li>{@link ChaosSelector.MethodSelector} — {@link #METHOD_ENTER}, {@link #METHOD_EXIT}
  *   <li>{@link ChaosSelector.MonitorSelector} — {@link #MONITOR_ENTER}, {@link #THREAD_PARK}
  *   <li>{@link ChaosSelector.JvmRuntimeSelector} — {@link #SYSTEM_CLOCK_MILLIS}, {@link
- *       #SYSTEM_CLOCK_NANOS}, {@link #INSTANT_NOW}, {@link #LOCAL_DATE_TIME_NOW}, {@link
- *       #ZONED_DATE_TIME_NOW}, {@link #DATE_NEW}, {@link #SYSTEM_GC_REQUEST}, {@link
- *       #SYSTEM_EXIT_REQUEST}, {@link #REFLECTION_INVOKE}, {@link #DIRECT_BUFFER_ALLOCATE}, {@link
- *       #OBJECT_DESERIALIZE}, {@link #OBJECT_SERIALIZE}, {@link #NATIVE_LIBRARY_LOAD}, {@link
- *       #JNDI_LOOKUP}, {@link #JMX_INVOKE}, {@link #JMX_GET_ATTR}, {@link #ZIP_INFLATE}, {@link
- *       #ZIP_DEFLATE}
+ *       #SYSTEM_CLOCK_NANOS}, {@link #INSTANT_NOW}, {@link #CLOCK_READ}, {@link
+ *       #LOCAL_DATE_TIME_NOW}, {@link #ZONED_DATE_TIME_NOW}, {@link #DATE_NEW}, {@link
+ *       #SYSTEM_GC_REQUEST}, {@link #SYSTEM_EXIT_REQUEST}, {@link #REFLECTION_INVOKE}, {@link
+ *       #DIRECT_BUFFER_ALLOCATE}, {@link #OBJECT_DESERIALIZE}, {@link #OBJECT_SERIALIZE}, {@link
+ *       #NATIVE_LIBRARY_LOAD}, {@link #JNDI_LOOKUP}, {@link #JMX_INVOKE}, {@link #JMX_GET_ATTR},
+ *       {@link #ZIP_INFLATE}, {@link #ZIP_DEFLATE}
  *   <li>{@link ChaosSelector.NioSelector} — {@link #NIO_SELECTOR_SELECT}, {@link
  *       #NIO_CHANNEL_READ}, {@link #NIO_CHANNEL_WRITE}, {@link #NIO_CHANNEL_CONNECT}, {@link
  *       #NIO_CHANNEL_ACCEPT}
  *   <li>{@link ChaosSelector.NetworkSelector} — {@link #SOCKET_CONNECT}, {@link #SOCKET_ACCEPT},
- *       {@link #SOCKET_READ}, {@link #SOCKET_WRITE}, {@link #SOCKET_CLOSE}
+ *       {@link #SOCKET_READ}, {@link #SOCKET_WRITE}, {@link #SOCKET_CLOSE}, {@link #SOCKET_BIND},
+ *       {@link #SOCKET_SHUTDOWN}, {@link #DATAGRAM_SEND}, {@link #DATAGRAM_RECEIVE}
  *   <li>{@link ChaosSelector.ThreadLocalSelector} — {@link #THREAD_LOCAL_GET}, {@link
  *       #THREAD_LOCAL_SET}
  *   <li>{@link ChaosSelector.HttpClientSelector} — {@link #HTTP_CLIENT_SEND}, {@link
@@ -45,9 +46,21 @@ package com.macstab.chaos.jvm.api;
  *       #JDBC_TRANSACTION_COMMIT}, {@link #JDBC_TRANSACTION_ROLLBACK}
  *   <li>{@link ChaosSelector.ThreadSelector} — {@link #THREAD_SLEEP} (in addition to thread start
  *       operations)
- *   <li>{@link ChaosSelector.DnsSelector} — {@link #DNS_RESOLVE}
+ *   <li>{@link ChaosSelector.DnsSelector} — {@link #DNS_RESOLVE}, {@link #DNS_ANSWER}, {@link
+ *       #DNS_REVERSE}
  *   <li>{@link ChaosSelector.SslSelector} — {@link #SSL_HANDSHAKE}
- *   <li>{@link ChaosSelector.FileIoSelector} — {@link #FILE_IO_READ}, {@link #FILE_IO_WRITE}
+ *   <li>{@link ChaosSelector.FileIoSelector} — {@link #FILE_IO_READ}, {@link #FILE_IO_WRITE},
+ *       {@link #FILE_IO_SYNC}, {@link #FILE_IO_TRUNCATE}, {@link #FILE_IO_DELETE}, {@link
+ *       #FILE_IO_MOVE}, {@link #FILE_IO_MOVE_TARGET}, {@link #FILE_IO_OPEN}, {@link #FILE_IO_MAP},
+ *       {@link #FILE_IO_CLOSE}
+ *   <li>{@link ChaosSelector.MessagingSelector} — {@link #MESSAGE_SEND}, {@link #MESSAGE_RECEIVE}
+ *   <li>{@link ChaosSelector.RpcSelector} — {@link #RPC_CALL}
+ *   <li>{@link ChaosSelector.RedisSelector} — {@link #REDIS_COMMAND}
+ *   <li>{@link ChaosSelector.AwsSdkSelector} — {@link #AWS_SDK_CALL}
+ *   <li>{@link ChaosSelector.ProcessSelector} — {@link #PROCESS_START}, {@link #PROCESS_WAIT}
+ *   <li>{@link ChaosSelector.NettySelector} — {@link #NETTY_CHANNEL_WRITE}, {@link
+ *       #NETTY_CHANNEL_READ}
+ *   <li>{@link ChaosSelector.JdbcSelector} — also {@link #R2DBC_STATEMENT_EXECUTE}
  *   <li>{@link ChaosSelector.StressSelector} — {@link #LIFECYCLE} (internal; not set by callers)
  * </ul>
  */
@@ -204,16 +217,14 @@ public enum OperationType {
   // ── Method-level interception ───────────────────────────────────────────────
 
   /**
-   * Fires when application-side instrumentation routes a method-entry event through the agent's
-   * public hook. Combined with {@link ChaosEffect.ExceptionInjectionEffect} this injects any
-   * exception into any method without modifying its bytecode at the source level.
+   * Fires on entry to a method a {@link ChaosSelector.MethodSelector} names. Combined with {@link
+   * ChaosEffect.ExceptionInjectionEffect} this injects any exception into any method without
+   * modifying its source.
    *
-   * <p><b>Manual hook required.</b> The agent does <i>not</i> auto-instrument arbitrary user
-   * methods — there is no engine in this build that takes a {@link ChaosSelector.MethodSelector}
-   * and dynamically rewrites every matching class on activation. The method-entry event must be
-   * raised by interception machinery the application already runs (Spring AOP, AspectJ, Micronaut /
-   * Quarkus interceptors, a custom annotation processor, or your own ByteBuddy / ASM advice).
-   * Inside that interceptor:
+   * <p>With the agent attached, the methods are woven automatically when the scenario is activated
+   * (see {@link ChaosSelector.MethodSelector}). Without the agent — a {@code ChaosRuntime} in a
+   * plain unit test — the event can be raised by interception the application already runs (Spring
+   * AOP, AspectJ, Micronaut / Quarkus interceptors). Inside that interceptor:
    *
    * <pre>{@code
    * @Around("@annotation(com.example.Audited)")
@@ -233,12 +244,12 @@ public enum OperationType {
   METHOD_ENTER,
 
   /**
-   * Fires when application-side instrumentation routes a method-exit event through the agent's
-   * public hook. Combined with {@link ChaosEffect.ReturnValueCorruptionEffect} this replaces the
-   * return value with a boundary, null, zero, or empty value.
+   * Fires on the normal exit of a method a {@link ChaosSelector.MethodSelector} names. Combined
+   * with {@link ChaosEffect.ReturnValueCorruptionEffect} this replaces the return value with a
+   * boundary, null, zero, or empty value.
    *
-   * <p><b>Manual hook required.</b> Same constraint as {@link #METHOD_ENTER}: no automatic dynamic
-   * per-class instrumentation is built. Wire from the same interceptor:
+   * <p>Woven automatically like {@link #METHOD_ENTER}; without the agent, raise it from the same
+   * interceptor:
    *
    * <pre>{@code
    * Object result = pjp.proceed();
@@ -282,11 +293,13 @@ public enum OperationType {
    * agent's public clock-skew hook. Used with {@link ChaosEffect.ClockSkewEffect} to apply fixed,
    * drifting, or frozen offsets and test time-dependent logic.
    *
-   * <p><b>Manual hook required.</b> The agent does <i>not</i> auto-instrument {@link
-   * System#currentTimeMillis()} — that method is {@code public static native} and marked
-   * {@code @IntrinsicCandidate}, and HotSpot's JIT replaces the call with a direct hardware-clock
-   * instruction (RDTSC / MRS CNTVCT_EL0) that bypasses any bytecode wrapper, so retransformation
-   * has no effect. Apply this operation type by routing real time through the agent yourself:
+   * <p><b>Call sites, not the method.</b> {@link System#currentTimeMillis()} is {@code public
+   * static native} and marked {@code @IntrinsicCandidate}, and HotSpot's JIT replaces the call with
+   * a direct hardware-clock instruction (RDTSC / MRS CNTVCT_EL0) that bypasses any bytecode
+   * wrapper, so the method itself cannot be advised. Its call sites can: with the agent setting
+   * {@code clockCallSites=<package prefixes>}, calls in those packages are rewritten to read the
+   * clock through this operation while a scenario needs it. Without the setting, route real time
+   * through the agent yourself:
    *
    * <pre>{@code
    * long real = System.currentTimeMillis();
@@ -294,9 +307,8 @@ public enum OperationType {
    * }</pre>
    *
    * <p>Typical wiring point: an application-level {@code TimeProvider} / {@code Clock} wrapper
-   * already used in place of {@code System.currentTimeMillis()}. For zero-config skew of plain
-   * {@code System.currentTimeMillis()} call sites this operation type is unsupported; use {@link
-   * #INSTANT_NOW} instead, which the agent <i>does</i> auto-wire.
+   * already used in place of {@code System.currentTimeMillis()}. For skew without any setting, use
+   * {@link #INSTANT_NOW}, which the agent always wires.
    *
    * <p>Used exclusively with {@link ChaosSelector.JvmRuntimeSelector}.
    */
@@ -307,10 +319,10 @@ public enum OperationType {
    * clock-skew hook. A backward skew intentionally violates the monotonicity contract to expose
    * assumptions in timing loops and profiling code.
    *
-   * <p><b>Manual hook required.</b> Same JVM constraint as {@link #SYSTEM_CLOCK_MILLIS}: {@link
-   * System#nanoTime()} is {@code native @IntrinsicCandidate} and is JIT-replaced with a direct
-   * hardware counter read; bytecode advice on it does not take effect. Apply this operation type by
-   * routing real time through the agent yourself:
+   * <p><b>Call sites, not the method.</b> Same JVM constraint as {@link #SYSTEM_CLOCK_MILLIS}:
+   * {@link System#nanoTime()} is {@code native @IntrinsicCandidate} and is JIT-replaced with a
+   * direct hardware counter read. With {@code clockCallSites} its call sites in the named packages
+   * are rewritten; otherwise route real time through the agent yourself:
    *
    * <pre>{@code
    * long real = System.nanoTime();
@@ -333,6 +345,20 @@ public enum OperationType {
    * <p>Used exclusively with {@link ChaosSelector.JvmRuntimeSelector}.
    */
   INSTANT_NOW,
+
+  /**
+   * Fires when the system {@link java.time.Clock} is read: {@code instant()} and {@code millis()}
+   * of {@link java.time.Clock#systemUTC()}, {@link java.time.Clock#systemDefaultZone()}, {@link
+   * java.time.Clock#system(java.time.ZoneId)} and {@link java.time.InstantSource#system()}, and so
+   * every {@code java.time} {@code now()} without an operation of its own: {@code LocalDate},
+   * {@code LocalTime}, {@code OffsetDateTime}, {@code OffsetTime}, {@code Year}, {@code YearMonth},
+   * {@code MonthDay}, and clocks derived from the system clock ({@code Clock.offset}, {@code
+   * Clock.tick}). The reads inside {@link #INSTANT_NOW}, {@link #LOCAL_DATE_TIME_NOW} and {@link
+   * #ZONED_DATE_TIME_NOW} belong to those operations and are not skewed a second time.
+   *
+   * <p>Use with {@link ChaosSelector.JvmRuntimeSelector} and a clock-skew effect.
+   */
+  CLOCK_READ,
 
   /**
    * Fires on every call to {@link java.time.LocalDateTime#now()} (no-argument variant). Used with
@@ -487,6 +513,46 @@ public enum OperationType {
    * <p>Use with {@link ChaosSelector.NetworkSelector}.
    */
   SOCKET_CLOSE,
+
+  /**
+   * Fires before a socket is bound to a local address: {@code Socket.bind}, {@code
+   * ServerSocket.bind}, {@code SocketChannel.bind}, {@code ServerSocketChannel.bind} and the
+   * implicit binds before them, through the JDK's {@code sun.nio.ch.Net.bind}. An {@code errno}
+   * such as {@code EADDRINUSE} fails with {@link java.net.BindException}.
+   *
+   * <p>Use with {@link ChaosSelector.NetworkSelector}: for a bind, {@code remoteCidr} and {@code
+   * remotePort} match the local address and port being bound.
+   */
+  SOCKET_BIND,
+
+  /**
+   * Fires before a connection is half-closed: {@code Socket.shutdownInput} / {@code shutdownOutput}
+   * and those of {@code SocketChannel}. An {@code errno} such as {@code ENOTCONN} fails it with
+   * {@link java.net.SocketException}.
+   *
+   * <p>Use with {@link ChaosSelector.NetworkSelector}; the peer is the connection's.
+   */
+  SOCKET_SHUTDOWN,
+
+  /**
+   * Fires before a UDP datagram is sent: {@code DatagramSocket.send}, {@code DatagramChannel.send}
+   * and {@code DatagramChannel.write}. The peer is the destination, the byte count the datagram's
+   * length. {@code ChaosEffect.suppress()} drops the datagram silently: the send reports success
+   * and nothing goes on the wire, as a lossy network does.
+   *
+   * <p>Use with {@link ChaosSelector.NetworkSelector}.
+   */
+  DATAGRAM_SEND,
+
+  /**
+   * Fires before a UDP datagram is received: {@code DatagramSocket.receive}, {@code
+   * DatagramChannel.receive} and {@code DatagramChannel.read}. The peer is known only for a
+   * connected socket or channel; the byte count is the space the buffer offers. {@code
+   * ChaosEffect.corruptRead()} flips one bit of the datagram received.
+   *
+   * <p>Use with {@link ChaosSelector.NetworkSelector}.
+   */
+  DATAGRAM_RECEIVE,
 
   // ── Extended JVM runtime services ───────────────────────────────────────────
 
@@ -676,6 +742,26 @@ public enum OperationType {
    */
   DNS_RESOLVE,
 
+  /**
+   * Fires when {@code InetAddress.getAllByName} returns or fails, with the answer: the point where
+   * a {@link ChaosEffect.DnsAnswerEffect} overrides, filters, shuffles or limits the addresses.
+   * {@code InetAddress.getByName} resolves through it too. Evaluated once per lookup, separately
+   * from {@link #DNS_RESOLVE} (which fires before the lookup).
+   *
+   * <p>Use with {@link ChaosSelector.DnsSelector}.
+   */
+  DNS_ANSWER,
+
+  /**
+   * Fires before a reverse lookup: {@link java.net.InetAddress#getHostName()} and {@link
+   * java.net.InetAddress#getCanonicalHostName()} of an address without a known name. The host
+   * pattern matches the address's IP literal. A rejection fails the lookup the way the JDK reports
+   * it: the IP literal is returned instead of a name.
+   *
+   * <p>Use with {@link ChaosSelector.DnsSelector}.
+   */
+  DNS_REVERSE,
+
   // ── SSL/TLS handshake ───────────────────────────────────────────────────────
 
   /**
@@ -705,6 +791,188 @@ public enum OperationType {
    * <p>Use with {@link ChaosSelector.FileIoSelector}.
    */
   FILE_IO_WRITE,
+
+  /**
+   * Fires before data is forced to the storage device: {@code FileChannel.force(boolean)} and
+   * {@code FileDescriptor.sync()} (fsync). A reject or an {@code ErrnoEffect} throws {@link
+   * java.io.SyncFailedException}: the durability failure write-ahead logs and databases must
+   * survive.
+   *
+   * <p>Use with {@link ChaosSelector.FileIoSelector}.
+   */
+  FILE_IO_SYNC,
+
+  /**
+   * Fires before a file is shortened or extended: {@code FileChannel.truncate(long)} and {@code
+   * RandomAccessFile.setLength(long)}. A reject throws {@link java.io.IOException}; an {@code
+   * ErrnoEffect} the matching {@link java.nio.file.FileSystemException} (for example {@code
+   * ENOSPC}, {@code EROFS}).
+   *
+   * <p>Use with {@link ChaosSelector.FileIoSelector}; the path is the file's.
+   */
+  FILE_IO_TRUNCATE,
+
+  /**
+   * Fires before a file or empty directory is deleted: {@code Files.delete}, {@code
+   * Files.deleteIfExists} and {@link java.io.File#delete()}. A reject or an {@code ErrnoEffect}
+   * fails the delete: the {@code Files} methods throw ({@link java.io.IOException} or the matching
+   * {@link java.nio.file.FileSystemException}), {@code File.delete()} returns {@code false}, which
+   * is how {@code java.io} reports a failed delete.
+   *
+   * <p>Use with {@link ChaosSelector.FileIoSelector}; the path is the file being deleted.
+   */
+  FILE_IO_DELETE,
+
+  /**
+   * Fires before a file is moved or renamed: {@code Files.move} and {@link
+   * java.io.File#renameTo(java.io.File)}. Failures behave as for {@link #FILE_IO_DELETE}: the
+   * {@code Files} method throws, {@code File.renameTo} returns {@code false}.
+   *
+   * <p>Use with {@link ChaosSelector.FileIoSelector}; the path is the source.
+   */
+  FILE_IO_MOVE,
+
+  /**
+   * Fires before a file is opened: the {@code FileInputStream}, {@code FileOutputStream} and {@code
+   * RandomAccessFile} constructors, and the platform file system's {@code newByteChannel} and
+   * {@code newFileChannel} ({@code Files.newInputStream}, {@code Files.newOutputStream}, {@code
+   * Files.newByteChannel}, {@code FileChannel.open} and the readers and writers built on them). A
+   * {@code java.io} constructor fails with {@link java.io.FileNotFoundException} ({@code "path
+   * (reason)"}), as the JDK does; a {@code java.nio} open with the matching {@link
+   * java.nio.file.FileSystemException}.
+   *
+   * <p>Use with {@link ChaosSelector.FileIoSelector}; the path is the file opened.
+   */
+  FILE_IO_OPEN,
+
+  /**
+   * Fires before a file region is memory-mapped: {@code FileChannel.map}, also to a {@code
+   * MemorySegment}. The byte count is the size of the region. {@code ENOMEM} fails with the JDK's
+   * {@code IOException("Map failed")}.
+   *
+   * <p>Use with {@link ChaosSelector.FileIoSelector}; the path is the channel's file.
+   */
+  FILE_IO_MAP,
+
+  /**
+   * Fires after a file is closed: the {@code FileInputStream}, {@code FileOutputStream} and {@code
+   * RandomAccessFile} {@code close()}, and a {@code FileChannel}'s. Evaluated once the descriptor
+   * is released, as a real {@code close} that reports an error ({@code EIO}, {@code ENOSPC} on a
+   * network file system) still releases it; a stream and its channel are one close.
+   *
+   * <p>Use with {@link ChaosSelector.FileIoSelector}; the path is the file closed.
+   */
+  FILE_IO_CLOSE,
+
+  /**
+   * Fires before a file is moved or renamed, by its destination: {@code Files.move} and {@link
+   * java.io.File#renameTo(java.io.File)}, as {@link #FILE_IO_MOVE} is by its source. Failures
+   * behave as for {@link #FILE_IO_MOVE}.
+   *
+   * <p>Use with {@link ChaosSelector.FileIoSelector}; the path is the destination.
+   */
+  FILE_IO_MOVE_TARGET,
+
+  // ── Client libraries ───────────────────────────────────────────────────────────
+
+  /**
+   * Fires before a Kafka producer sends a record: {@code KafkaProducer.send(ProducerRecord,
+   * Callback)} (the one-argument {@code send} delegates to it). The destination is the record's
+   * topic. A reject throws Kafka's {@code org.apache.kafka.common.errors.TimeoutException} from
+   * {@code send()}.
+   *
+   * <p>Use with {@link ChaosSelector.MessagingSelector}.
+   */
+  MESSAGE_SEND,
+
+  /**
+   * Fires before a Kafka consumer polls: {@code KafkaConsumer.poll(Duration)}. The destinations are
+   * the consumer's subscribed topics. A reject throws Kafka's {@code
+   * org.apache.kafka.common.errors.TimeoutException} from {@code poll()}.
+   *
+   * <p>Use with {@link ChaosSelector.MessagingSelector}.
+   */
+  MESSAGE_RECEIVE,
+
+  /**
+   * Fires when a gRPC client call starts ({@code io.grpc.internal.ClientCallImpl.start}), once per
+   * call, for blocking, future and async stubs and any transport. The target is the full method
+   * name ({@code package.Service/Method}). A reject throws {@code StatusRuntimeException} with
+   * status {@code UNAVAILABLE}.
+   *
+   * <p>Use with {@link ChaosSelector.RpcSelector}.
+   */
+  RPC_CALL,
+
+  /**
+   * Fires before a Redis command is written: Jedis {@code Connection.sendCommand(CommandArguments)}
+   * (every Jedis command, pipelined or not) and Lettuce {@code RedisChannelHandler.dispatch}. The
+   * target is the command name in upper case ({@code GET}, {@code SET}, ...). A reject throws
+   * {@code JedisConnectionException} or Lettuce's {@code RedisCommandTimeoutException}.
+   *
+   * <p>Use with {@link ChaosSelector.RedisSelector}.
+   */
+  REDIS_COMMAND,
+
+  /**
+   * Fires when an R2DBC statement is executed ({@code io.r2dbc.spi.Statement.execute()}, in any
+   * driver). The call is evaluated when the execution is requested (the publisher is created), not
+   * when it is subscribed. A reject throws {@code R2dbcTransientResourceException}.
+   *
+   * <p>Use with {@link ChaosSelector.JdbcSelector}; the target pattern does not apply (R2DBC
+   * statements do not expose their SQL).
+   */
+  R2DBC_STATEMENT_EXECUTE,
+
+  /**
+   * Fires when an AWS SDK for Java v2 client calls an operation, sync or async ({@code
+   * BaseSyncClientHandler} / {@code BaseAsyncClientHandler.execute}), before signing and sending.
+   * The service is taken from the request's package ({@code s3}, {@code dynamodb}, ...), the
+   * operation from the SDK ({@code GetObject}). A reject throws {@code SdkClientException}.
+   *
+   * <p>Use with {@link ChaosSelector.AwsSdkSelector}.
+   */
+  AWS_SDK_CALL,
+
+  /**
+   * Fires before Netty flushes a channel's outbound buffer ({@code
+   * AbstractChannel.AbstractUnsafe.flush0()}), for every transport including the native epoll and
+   * kqueue ones that bypass {@code java.nio}. A reject throws {@link java.io.IOException}.
+   *
+   * <p>Use with {@link ChaosSelector.NettySelector}.
+   */
+  NETTY_CHANNEL_WRITE,
+
+  /**
+   * Fires before Netty reads from a channel: the NIO, epoll and kqueue stream-channel read loops. A
+   * reject throws {@link java.io.IOException}.
+   *
+   * <p>Use with {@link ChaosSelector.NettySelector}.
+   */
+  NETTY_CHANNEL_READ,
+
+  // ── Processes ─────────────────────────────────────────────────────────────────
+
+  /**
+   * Fires before a child process is started: {@link ProcessBuilder#start()}, {@code
+   * ProcessBuilder.startPipeline} and {@link Runtime#exec(String[])}, which all reach the same
+   * funnel. The target name is the program (the first element of the command). A reject throws
+   * {@link java.io.IOException}; an {@code ErrnoEffect} throws the JDK's own failure, {@code
+   * IOException: Cannot run program "x": error=N, reason}.
+   *
+   * <p>Use with {@link ChaosSelector.ProcessSelector}.
+   */
+  PROCESS_START,
+
+  /**
+   * Fires before a thread waits for a child process: {@code Process.waitFor()} and {@code
+   * waitFor(long, TimeUnit)}. A delay makes the child seem slower; {@code ChaosEffect.timeout()} on
+   * a timed wait waits it out and returns {@code false}, as for a child that hangs; a rejection
+   * throws {@link InterruptedException}. The pattern matches the program's file name.
+   *
+   * <p>Use with {@link ChaosSelector.ProcessSelector}.
+   */
+  PROCESS_WAIT,
 
   // ── Agent lifecycle ─────────────────────────────────────────────────────────
 

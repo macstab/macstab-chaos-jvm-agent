@@ -7,6 +7,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
+import org.springframework.boot.context.properties.source.ConfigurationPropertySources;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.core.env.MapPropertySource;
@@ -83,6 +84,87 @@ class TrustedChaosEnablementTest {
                               "macstab.chaos.enabled", "true",
                               "macstab.chaos.allow-remote-enable", "true")))))
           .isEqualTo(TrustedChaosEnablement.Decision.REJECTED_UNTRUSTED_SOURCE);
+    }
+
+    @Test
+    @DisplayName("is REJECTED when an untrusted source holds the flag under another spelling")
+    void rejectedUnderAnotherSpelling() {
+      // Spring Boot's relaxed binding resolves another spelling of the flag; the source that
+      // holds it decides, and it is untrusted.
+      final StandardEnvironment environment =
+          environmentWith(source("configserver:app", "macstab.chaos.Enabled", "true"));
+      ConfigurationPropertySources.attach(environment);
+
+      assertThat(environment.getProperty("macstab.chaos.enabled")).isEqualTo("true");
+      assertThat(TrustedChaosEnablement.evaluate(environment))
+          .isEqualTo(TrustedChaosEnablement.Decision.REJECTED_UNTRUSTED_SOURCE);
+    }
+
+    @Test
+    @DisplayName(
+        "an untrusted source cannot borrow a trusted source's trust through another spelling")
+    void relaxedSpellingCannotBorrowTrust() {
+      // getProperty answers from the remote source (first, relaxed spelling); the trusted source
+      // holding the exact name says false and must not vouch for the remote value.
+      final StandardEnvironment environment =
+          environmentWith(
+              source("configserver:app", "macstab.chaos.Enabled", "true"),
+              source("commandLineArgs", "macstab.chaos.enabled", "false"));
+      ConfigurationPropertySources.attach(environment);
+
+      assertThat(environment.getProperty("macstab.chaos.enabled")).isEqualTo("true");
+      assertThat(TrustedChaosEnablement.evaluate(environment))
+          .isEqualTo(TrustedChaosEnablement.Decision.REJECTED_UNTRUSTED_SOURCE);
+    }
+
+    @Test
+    @DisplayName("a trusted source is trusted under any spelling Spring resolves")
+    void trustedSourceUnderRelaxedSpelling() {
+      final StandardEnvironment environment =
+          environmentWith(source("commandLineArgs", "macstab.chaos.Enabled", "true"));
+      ConfigurationPropertySources.attach(environment);
+
+      assertThat(TrustedChaosEnablement.evaluate(environment))
+          .isEqualTo(TrustedChaosEnablement.Decision.ENABLED);
+    }
+
+    @Test
+    @DisplayName("an environment variable enables chaos under its upper-case name")
+    void environmentVariableSpelling() {
+      final StandardEnvironment environment = environmentWith();
+      environment
+          .getPropertySources()
+          .addFirst(
+              new org.springframework.core.env.SystemEnvironmentPropertySource(
+                  StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME,
+                  Map.of("MACSTAB_CHAOS_ENABLED", "true")));
+      ConfigurationPropertySources.attach(environment);
+
+      assertThat(TrustedChaosEnablement.evaluate(environment))
+          .isEqualTo(TrustedChaosEnablement.Decision.ENABLED);
+    }
+
+    @Test
+    @DisplayName("the condition does not match an environment it cannot inspect by source")
+    void conditionNeedsConfigurableEnvironment() {
+      final org.springframework.core.env.Environment plain =
+          (org.springframework.core.env.Environment)
+              java.lang.reflect.Proxy.newProxyInstance(
+                  getClass().getClassLoader(),
+                  new Class<?>[] {org.springframework.core.env.Environment.class},
+                  (self, method, args) -> null);
+      final org.springframework.context.annotation.ConditionContext context =
+          (org.springframework.context.annotation.ConditionContext)
+              java.lang.reflect.Proxy.newProxyInstance(
+                  getClass().getClassLoader(),
+                  new Class<?>[] {org.springframework.context.annotation.ConditionContext.class},
+                  (self, method, args) -> method.getName().equals("getEnvironment") ? plain : null);
+
+      final org.springframework.boot.autoconfigure.condition.ConditionOutcome outcome =
+          new OnTrustedChaosEnablementCondition().getMatchOutcome(context, null);
+
+      assertThat(outcome.isMatch()).isFalse();
+      assertThat(outcome.getMessage()).isEqualTo("environment is not a ConfigurableEnvironment");
     }
   }
 

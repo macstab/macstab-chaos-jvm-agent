@@ -4,6 +4,7 @@ import com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher;
 import java.lang.ref.WeakReference;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CancellationException;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Wraps a {@link Callable} scheduled on an executor so that chaos tick hooks fire around each
@@ -37,7 +38,7 @@ public final class ScheduledCallableWrapper<T> implements Callable<T> {
   }
 
   @Override
-  public T call() throws Exception {
+  public @Nullable T call() throws Exception {
     try {
       final Object executor = executorRef.get();
       if (executor != null && !BootstrapDispatcher.beforeScheduledTick(executor, delegate, false)) {

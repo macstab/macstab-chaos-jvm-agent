@@ -1,0 +1,3 @@
+{"scenarios": [{"id": "trickle", "scope": "JVM",
+  "selector": {"type": "network", "operations": ["SOCKET_READ"]},
+  "effect": {"type": "trickle", "maxBytes": 16}}]}

@@ -19,7 +19,6 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -59,7 +58,6 @@ class MaxApplicationsConcurrencyTest {
             .build());
 
     final CountDownLatch startLatch = new CountDownLatch(1);
-    final AtomicLong totalApplied = new AtomicLong(0);
     final var executor = Executors.newFixedThreadPool(THREAD_COUNT);
     try {
       for (int i = 0; i < THREAD_COUNT; i++) {
@@ -89,9 +87,11 @@ class MaxApplicationsConcurrencyTest {
             .mapToLong(ChaosDiagnostics.ScenarioReport::appliedCount)
             .sum();
 
+    // 50 threads compete for 5 applications: exactly the budget is spent, never more, and the
+    // reservations of the losers never leave it short.
     assertThat(appliedCount)
-        .as("applied count must not exceed maxApplications")
-        .isLessThanOrEqualTo(MAX_APPLICATIONS);
+        .as("applied count must be exactly maxApplications")
+        .isEqualTo(MAX_APPLICATIONS);
   }
 
   static final class ConcurrentThreadLocal extends ThreadLocal<String> {}

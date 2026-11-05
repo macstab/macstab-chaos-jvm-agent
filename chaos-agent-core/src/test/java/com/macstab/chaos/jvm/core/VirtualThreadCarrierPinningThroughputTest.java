@@ -13,6 +13,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -37,6 +38,7 @@ class VirtualThreadCarrierPinningThroughputTest {
   class ThroughRuntime {
 
     @Test
+    @Tag("law-L18")
     @DisplayName("a virtual thread cannot run while all carriers are held, and runs after stop")
     void starvesVirtualThreadsUntilStopped() throws Exception {
       final ChaosRuntime runtime = new ChaosRuntime();
@@ -95,6 +97,7 @@ class VirtualThreadCarrierPinningThroughputTest {
   class WithoutConsent {
 
     @Test
+    @Tag("law-L18")
     @DisplayName("leaves one carrier free, so other virtual threads still run")
     void leavesOneCarrierFree() throws Exception {
       final ChaosRuntime runtime = new ChaosRuntime();

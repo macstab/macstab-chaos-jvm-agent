@@ -142,4 +142,20 @@ class ChaosAgentEnvironmentPostProcessorTest {
   @SpringBootConfiguration
   @Import(ChaosAutoConfiguration.class)
   static class MinimalApp {}
+
+  @Test
+  @DisplayName("macstab.chaos.enabled=true from an untrusted source (remote config) is ignored")
+  void untrustedSourceIsIgnored() {
+    final org.springframework.core.env.StandardEnvironment environment =
+        new org.springframework.core.env.StandardEnvironment();
+    environment
+        .getPropertySources()
+        .addFirst(
+            new org.springframework.core.env.MapPropertySource(
+                "configserver:remote", java.util.Map.of("macstab.chaos.enabled", "true")));
+    new ChaosAgentEnvironmentPostProcessor().postProcessEnvironment(environment, null);
+    assertThat(environment.getProperty("macstab.chaos.agent.attach-phase"))
+        .as("not attached: the switch came from a source an attacker could control")
+        .isNull();
+  }
 }

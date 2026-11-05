@@ -9,6 +9,7 @@ import java.util.logging.Logger;
 import net.bytebuddy.ByteBuddy;
 import net.bytebuddy.dynamic.DynamicType;
 import net.bytebuddy.dynamic.loading.ClassLoadingStrategy;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Simulates a classloader leak by generating and loading synthetic classes into the JVM Metaspace.
@@ -39,8 +40,8 @@ final class MetaspacePressureStressor implements ManagedStressor {
   // Isolated classloader so generated classes can be reclaimed when the stressor is closed.
   // Injecting into the agent's classloader would anchor these classes for the JVM lifetime —
   // every activation/deactivation would permanently grow Metaspace.
-  private volatile URLClassLoader isolatedLoader;
-  private volatile List<Class<?>> retainedClasses;
+  private volatile @Nullable URLClassLoader isolatedLoader;
+  private volatile @Nullable List<Class<?>> retainedClasses;
 
   MetaspacePressureStressor(final ChaosEffect.MetaspacePressureEffect effect) {
     final URLClassLoader loader = new URLClassLoader(new URL[0], null);

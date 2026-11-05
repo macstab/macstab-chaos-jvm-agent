@@ -13,6 +13,7 @@ import java.util.Base64;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Resolves and loads a {@link ChaosPlan} during JVM agent startup.
@@ -114,7 +115,7 @@ public final class StartupConfigLoader {
             || AgentArgs.parseBoolean(ENV_DEBUG_DUMP, environment.get(ENV_DEBUG_DUMP), false);
 
     if (inlineJson != null) {
-      final ChaosPlan plan = ChaosPlanMapper.read(inlineJson);
+      final ChaosPlan plan = parse(inlineJson, SOURCE_INLINE_JSON);
       return Optional.of(new LoadedPlan(plan, SOURCE_INLINE_JSON, debugDumpOnStart, null));
     }
     if (base64Json != null) {
@@ -151,14 +152,28 @@ public final class StartupConfigLoader {
       final String base64Json, final boolean debugDumpOnStart) {
     final byte[] decoded = decodeBase64(base64Json);
     final String json = new String(decoded, StandardCharsets.UTF_8);
-    final ChaosPlan plan = ChaosPlanMapper.read(json);
+    final ChaosPlan plan = parse(json, SOURCE_BASE64);
     return new LoadedPlan(plan, SOURCE_BASE64, debugDumpOnStart, null);
   }
 
   private static LoadedPlan loadFromFile(final String filePath, final boolean debugDumpOnStart) {
-    final ValidatedRead read = readValidatedPlanFile(filePath);
+    // One read for both the plan and the reloader's baseline: a second read could see a newer
+    // file, which the reloader would then treat as already applied.
+    final PlanFile file =
+        readPlanFile(filePath)
+            .orElseThrow(
+                () ->
+                    new ConfigLoadException(
+                        "config file does not exist: " + filePath, SOURCE_FILE_PREFIX + filePath));
+    final ChaosPlan plan = parse(file.json(), SOURCE_FILE_PREFIX + filePath);
+    // The configured path, not the resolved target: a reloading poller must keep watching the
+    // ConfigMap link, whose target directory is replaced on every update.
     return new LoadedPlan(
-        read.plan(), SOURCE_FILE_PREFIX + filePath, debugDumpOnStart, read.path());
+        plan,
+        SOURCE_FILE_PREFIX + filePath,
+        debugDumpOnStart,
+        Path.of(filePath).toAbsolutePath().normalize(),
+        file);
   }
 
   /**
@@ -174,14 +189,30 @@ public final class StartupConfigLoader {
    * @throws ConfigLoadException if the path is unsafe, unreadable, oversize, or the JSON is invalid
    */
   public static ChaosPlan loadPlanFromFile(final String filePath) {
-    return readValidatedPlanFile(filePath).plan();
+    return readValidatedPlanFile(filePath);
   }
 
-  private static ValidatedRead readValidatedPlanFile(final String filePath) {
-    final Path path = validateAndResolvePath(filePath);
-    final String json = readFileContents(path, filePath);
-    final ChaosPlan plan = ChaosPlanMapper.read(json);
-    return new ValidatedRead(plan, path);
+  private static ChaosPlan readValidatedPlanFile(final String filePath) {
+    final Path target = validateAndResolvePath(filePath);
+    return parse(readFileContents(target, filePath), SOURCE_FILE_PREFIX + filePath);
+  }
+
+  /**
+   * Parses a plan, reporting a failure with the source it came from instead of the mapper's generic
+   * one; the position and reason are kept.
+   */
+  private static ChaosPlan parse(final String json, final String source) {
+    try {
+      return ChaosPlanMapper.read(json);
+    } catch (final ConfigLoadException failure) {
+      throw new ConfigLoadException(
+          java.util.Objects.requireNonNullElse(failure.getMessage(), failure.reason()),
+          source,
+          failure.getCause(),
+          failure.line(),
+          failure.column(),
+          failure.reason());
+    }
   }
 
   /**
@@ -218,7 +249,35 @@ public final class StartupConfigLoader {
     }
   }
 
-  private record ValidatedRead(ChaosPlan plan, Path path) {}
+  /**
+   * Rejects a plan file (or ConfigMap link) owned by another user than the JVM's, root excepted: in
+   * a shared world-writable directory such as {@code /tmp}, another local user could otherwise
+   * plant the plan while it is missing and inject their faults. Skipped where file ownership is not
+   * available or the user name is unknown (containers running an unnamed uid).
+   */
+  private static void rejectForeignOwner(final Path path, final String filePath) {
+    final String self = System.getProperty("user.name", "");
+    if (self.isBlank() || self.equals("?")) {
+      return;
+    }
+    final String owner;
+    try {
+      owner = Files.getOwner(path, LinkOption.NOFOLLOW_LINKS).getName();
+    } catch (final IOException | UnsupportedOperationException unavailable) {
+      return;
+    }
+    if (!owner.equals(self) && !owner.equals("root")) {
+      throw new ConfigLoadException(
+          "config file "
+              + path
+              + " is owned by "
+              + owner
+              + ", not by the JVM's user "
+              + self
+              + " or root",
+          SOURCE_FILE_PREFIX + filePath);
+    }
+  }
 
   /**
    * Validates the file path against basic safety constraints.
@@ -227,7 +286,8 @@ public final class StartupConfigLoader {
    * check is applied, neutralising traversal sequences. Symlink rejection is the primary
    * path-safety control on the resolved path.
    *
-   * @throws ConfigLoadException if the path is unsafe, a symlink, or exceeds size limits
+   * @throws ConfigLoadException if the path is unsafe, a symlink other than the Kubernetes
+   *     ConfigMap layout, or exceeds size limits
    */
   private static Path validateAndResolvePath(final String filePath) {
     final Path path = Path.of(filePath).toAbsolutePath().normalize();
@@ -236,18 +296,117 @@ public final class StartupConfigLoader {
       throw new ConfigLoadException(
           "config file does not exist: " + path, SOURCE_FILE_PREFIX + filePath);
     }
-    if (Files.isSymbolicLink(path)) {
+    final Path target = Files.isSymbolicLink(path) ? configMapTarget(path, filePath) : path;
+    if (!Files.isRegularFile(target, LinkOption.NOFOLLOW_LINKS)) {
       throw new ConfigLoadException(
-          "config file is a symbolic link (rejected for safety): " + path,
-          SOURCE_FILE_PREFIX + filePath);
+          "config path is not a regular file: " + target, SOURCE_FILE_PREFIX + filePath);
     }
-    if (!Files.isRegularFile(path)) {
+    rejectIfOversize(target, filePath);
+    rejectWorldWritable(target, filePath);
+    rejectForeignOwner(path, filePath);
+    if (!target.equals(path)) {
+      rejectForeignOwner(target, filePath);
+    }
+    return target;
+  }
+
+  /**
+   * Resolves a symbolic link in the layout Kubernetes uses for ConfigMap and Secret volumes, and
+   * rejects every other link. In that layout {@code <dir>/plan.json} links to {@code
+   * ..data/plan.json}, {@code <dir>/..data} links to a {@code ..<timestamp>} directory beside it,
+   * and an update swaps {@code ..data} atomically. The returned path is the real file inside the
+   * timestamped directory; the caller applies the regular-file, size and permission checks to it
+   * and reads it without following links, so a link planted anywhere else is still refused.
+   */
+  private static Path configMapTarget(final Path link, final String originalPath) {
+    try {
+      final Path linkTarget = Files.readSymbolicLink(link);
+      final Path fileName = link.getFileName();
+      if (linkTarget.isAbsolute()
+          || linkTarget.getNameCount() != 2
+          || !linkTarget.getName(0).toString().equals("..data")
+          || !linkTarget.getName(1).equals(fileName)) {
+        throw new ConfigLoadException(
+            "config file is a symbolic link (rejected for safety; only the Kubernetes ConfigMap"
+                + " layout <dir>/<name> -> ..data/<name> is followed): "
+                + link,
+            SOURCE_FILE_PREFIX + originalPath);
+      }
+      // Absolute (see readConfigFile), so a link always has a parent directory.
+      final Path directory =
+          java.util.Objects.requireNonNull(link.getParent(), "parent of an absolute link");
+      final Path data = directory.resolve("..data");
+      if (!Files.isSymbolicLink(data)) {
+        throw new ConfigLoadException(
+            "config file links into ..data, which is not the Kubernetes data link: " + data,
+            SOURCE_FILE_PREFIX + originalPath);
+      }
+      final Path version = Files.readSymbolicLink(data);
+      if (version.isAbsolute()
+          || version.getNameCount() != 1
+          || !version.getFileName().toString().startsWith("..")) {
+        throw new ConfigLoadException(
+            "..data does not point at a timestamped directory beside it: " + data,
+            SOURCE_FILE_PREFIX + originalPath);
+      }
+      return directory.resolve(version).resolve(fileName);
+    } catch (final IOException unreadable) {
       throw new ConfigLoadException(
-          "config path is not a regular file: " + path, SOURCE_FILE_PREFIX + filePath);
+          "cannot resolve config file link: " + link,
+          SOURCE_FILE_PREFIX + originalPath,
+          unreadable);
     }
-    rejectIfOversize(path, filePath);
-    rejectWorldWritable(path, filePath);
-    return path;
+  }
+
+  /**
+   * The file a configured plan path reads from, with what identifies its contents for change
+   * detection.
+   *
+   * @param target the regular file read (inside the ConfigMap's timestamped directory, if any)
+   * @param json the file's contents
+   * @param lastModified the file's modification time
+   * @param size the file's size in bytes
+   * @param fileKey the file system's key of the file (inode), or {@code null}
+   */
+  public record PlanFile(
+      Path target,
+      String json,
+      java.nio.file.attribute.FileTime lastModified,
+      long size,
+      Object fileKey) {}
+
+  /**
+   * Reads a plan file with the startup checks (regular file or Kubernetes ConfigMap link, size cap,
+   * permissions), for a poller that reloads it.
+   *
+   * @param filePath the configured path
+   * @return the file and its contents, or empty when the configured path does not exist
+   * @throws ConfigLoadException if the path is unsafe or unreadable
+   */
+  public static Optional<PlanFile> readPlanFile(final String filePath) {
+    final Path path = Path.of(filePath).toAbsolutePath().normalize();
+    if (!Files.exists(path, LinkOption.NOFOLLOW_LINKS)) {
+      return Optional.empty();
+    }
+    final Path target = validateAndResolvePath(filePath);
+    try {
+      final java.nio.file.attribute.BasicFileAttributes attributes =
+          Files.readAttributes(
+              target, java.nio.file.attribute.BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+      final String json = readFileContents(target, filePath);
+      return Optional.of(
+          new PlanFile(
+              target,
+              json,
+              attributes.lastModifiedTime(),
+              attributes.size(),
+              attributes.fileKey()));
+    } catch (final IOException unreadable) {
+      throw new ConfigLoadException(
+          "failed to read chaos plan config file: " + target,
+          SOURCE_FILE_PREFIX + filePath,
+          unreadable);
+    }
   }
 
   /**
@@ -349,7 +508,8 @@ public final class StartupConfigLoader {
     return false;
   }
 
-  private static String firstNonBlank(final String left, final String right) {
+  private static @Nullable String firstNonBlank(
+      final @Nullable String left, final @Nullable String right) {
     if (left != null && !left.isBlank()) {
       return left;
     }
@@ -367,7 +527,30 @@ public final class StartupConfigLoader {
    * @param debugDumpOnStart whether to print a diagnostic dump at startup
    * @param filePath the resolved file path when the source was a config file, {@code null}
    *     otherwise; used by the bootstrap poller to set up file watching
+   * @param planFile the file read the plan came from, {@code null} for other sources: the
+   *     reloader's baseline
    */
   public record LoadedPlan(
-      ChaosPlan plan, String source, boolean debugDumpOnStart, Path filePath) {}
+      ChaosPlan plan,
+      String source,
+      boolean debugDumpOnStart,
+      @Nullable Path filePath,
+      @Nullable PlanFile planFile) {
+
+    /**
+     * Creates a loaded plan without a file read.
+     *
+     * @param plan the parsed plan
+     * @param source where it came from
+     * @param debugDumpOnStart whether to print a diagnostic dump at startup
+     * @param filePath the config file path, or {@code null}
+     */
+    public LoadedPlan(
+        final ChaosPlan plan,
+        final String source,
+        final boolean debugDumpOnStart,
+        final @Nullable Path filePath) {
+      this(plan, source, debugDumpOnStart, filePath, null);
+    }
+  }
 }

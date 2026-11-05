@@ -8,6 +8,7 @@ import com.macstab.chaos.jvm.api.ChaosSelector;
 import com.macstab.chaos.jvm.api.ChaosSession;
 import com.macstab.chaos.jvm.api.OperationType;
 import com.macstab.chaos.jvm.bootstrap.ChaosPlatform;
+import com.macstab.chaos.jvm.testkit.WithChaosSupport;
 import java.lang.reflect.Method;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -15,6 +16,7 @@ import java.util.EnumSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.extension.AfterAllCallback;
 import org.junit.jupiter.api.extension.AfterEachCallback;
 import org.junit.jupiter.api.extension.BeforeAllCallback;
@@ -51,6 +53,8 @@ import org.junit.jupiter.api.extension.ParameterResolver;
  * <p>The extension injects {@link ChaosSession} and {@link ChaosControlPlane} parameters on test
  * methods and lifecycle methods.
  */
+// Still honours the deprecated @ChaosScenario until it is removed.
+@SuppressWarnings("removal")
 public final class ChaosQuarkusExtension
     implements BeforeAllCallback,
         BeforeEachCallback,
@@ -96,6 +100,8 @@ public final class ChaosQuarkusExtension
           session,
           testClass.getAnnotationsByType(ChaosScenario.class),
           jvmHandles(context));
+      // @WithChaos (full JSON model): both scopes are released in afterAll.
+      jvmHandles(context).addAll(WithChaosSupport.activate(testClass, controlPlane, session));
     }
   }
 
@@ -122,6 +128,8 @@ public final class ChaosQuarkusExtension
         session,
         testMethod.getAnnotationsByType(ChaosScenario.class),
         methodJvmHandles);
+    // Method-level @WithChaos scenarios of either scope end with the method.
+    methodJvmHandles.addAll(WithChaosSupport.activate(testMethod, controlPlane, session));
   }
 
   @Override
@@ -198,11 +206,11 @@ public final class ChaosQuarkusExtension
             + " and beforeAll() has run before parameter injection");
   }
 
-  private static ChaosSession lookupSession(final ExtensionContext context) {
+  private static @Nullable ChaosSession lookupSession(final ExtensionContext context) {
     return lookupStoreValue(context, ChaosSession.class);
   }
 
-  private static ChaosControlPlane lookupControlPlane(final ExtensionContext context) {
+  private static @Nullable ChaosControlPlane lookupControlPlane(final ExtensionContext context) {
     return lookupStoreValue(context, ChaosControlPlane.class);
   }
 
@@ -210,7 +218,8 @@ public final class ChaosQuarkusExtension
    * Walks the {@link ExtensionContext} parent chain until it finds a store entry for {@code type},
    * or returns {@code null} if none exists.
    */
-  private static <T> T lookupStoreValue(final ExtensionContext context, final Class<T> type) {
+  private static <T> @Nullable T lookupStoreValue(
+      final ExtensionContext context, final Class<T> type) {
     ExtensionContext current = context;
     while (current != null) {
       final T value = current.getStore(NAMESPACE).get(type, type);
@@ -292,31 +301,30 @@ public final class ChaosQuarkusExtension
       throw new IllegalArgumentException("selector must be non-blank");
     }
     final String normalized = selector.trim();
-    switch (normalized) {
-      case "executor":
-        return ChaosSelector.executor(
-            EnumSet.of(OperationType.EXECUTOR_SUBMIT, OperationType.EXECUTOR_WORKER_RUN));
-      case "jvmRuntime":
-        // The clock reads that are actually instrumented. SYSTEM_CLOCK_MILLIS
-        // (System.currentTimeMillis) is a JIT intrinsic that is never woven, so mapping to it made
-        // effect="freeze" silently do nothing.
-        return ChaosSelector.jvmRuntime(
-            EnumSet.of(
-                OperationType.INSTANT_NOW,
-                OperationType.LOCAL_DATE_TIME_NOW,
-                OperationType.ZONED_DATE_TIME_NOW,
-                OperationType.DATE_NEW));
-      case "httpClient":
-        return ChaosSelector.httpClient(
-            EnumSet.of(OperationType.HTTP_CLIENT_SEND, OperationType.HTTP_CLIENT_SEND_ASYNC));
-      case "jdbc":
-        return ChaosSelector.jdbc();
-      default:
-        throw new IllegalArgumentException(
-            "unsupported selector identifier: "
-                + selector
-                + "; expected one of executor, jvmRuntime, httpClient, jdbc");
-    }
+    return switch (normalized) {
+      case "executor" ->
+          ChaosSelector.executor(
+              EnumSet.of(OperationType.EXECUTOR_SUBMIT, OperationType.EXECUTOR_WORKER_RUN));
+      // The clock reads that are actually instrumented. SYSTEM_CLOCK_MILLIS
+      // (System.currentTimeMillis) is a JIT intrinsic that is never woven, so mapping to it made
+      // effect="freeze" silently do nothing.
+      case "jvmRuntime" ->
+          ChaosSelector.jvmRuntime(
+              EnumSet.of(
+                  OperationType.INSTANT_NOW,
+                  OperationType.LOCAL_DATE_TIME_NOW,
+                  OperationType.ZONED_DATE_TIME_NOW,
+                  OperationType.DATE_NEW));
+      case "httpClient" ->
+          ChaosSelector.httpClient(
+              EnumSet.of(OperationType.HTTP_CLIENT_SEND, OperationType.HTTP_CLIENT_SEND_ASYNC));
+      case "jdbc" -> ChaosSelector.jdbc();
+      default ->
+          throw new IllegalArgumentException(
+              "unsupported selector identifier: "
+                  + selector
+                  + "; expected one of executor, jvmRuntime, httpClient, jdbc");
+    };
   }
 
   private static ChaosEffect parseEffect(final String effect) {
@@ -327,17 +335,16 @@ public final class ChaosQuarkusExtension
     if (normalized.startsWith(DELAY_EFFECT_PREFIX)) {
       return parseDelayEffect(effect, normalized);
     }
-    switch (normalized) {
-      case "suppress":
-        return ChaosEffect.suppress();
-      case "freeze":
-        return ChaosEffect.skewClock(Duration.ofSeconds(1), ChaosEffect.ClockSkewMode.FREEZE);
-      default:
-        throw new IllegalArgumentException(
-            "unsupported effect identifier: "
-                + effect
-                + "; expected delay:<duration>, suppress, or freeze");
-    }
+    return switch (normalized) {
+      case "suppress" -> ChaosEffect.suppress();
+      case "freeze" ->
+          ChaosEffect.skewClock(Duration.ofSeconds(1), ChaosEffect.ClockSkewMode.FREEZE);
+      default ->
+          throw new IllegalArgumentException(
+              "unsupported effect identifier: "
+                  + effect
+                  + "; expected delay:<duration>, suppress, or freeze");
+    };
   }
 
   private static ChaosEffect parseDelayEffect(final String rawEffect, final String normalized) {

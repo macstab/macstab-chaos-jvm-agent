@@ -1,7 +1,6 @@
 package com.macstab.chaos.jvm.core;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.macstab.chaos.jvm.api.ChaosSelector;
 import com.macstab.chaos.jvm.api.NamePattern;
@@ -748,21 +747,39 @@ class SelectorMatcherTest {
     }
 
     @Test
-    @DisplayName("non-ANY signature pattern is rejected until runtime wiring lands")
-    void nonAnySignaturePatternIsRejected() {
-      // The runtime does not yet propagate the JVM method descriptor through InvocationContext,
-      // so a non-null signaturePattern would silently never match. MethodSelector's canonical
-      // constructor must reject such patterns at plan-build time to prevent zero-activation
-      // scenarios (see CRIT-4 in BUGS.md).
-      assertThatThrownBy(
-              () ->
-                  new ChaosSelector.MethodSelector(
-                      Set.of(OperationType.METHOD_ENTER),
-                      NamePattern.exact("com.example.Dao"),
-                      NamePattern.any(),
-                      NamePattern.exact("(Ljava/lang/String;)V")))
-          .isInstanceOf(IllegalArgumentException.class)
-          .hasMessageContaining("signaturePattern");
+    @DisplayName("a signature pattern is matched against the method descriptor")
+    void signaturePatternMatchesDescriptor() {
+      final ChaosSelector selector =
+          new ChaosSelector.MethodSelector(
+              Set.of(OperationType.METHOD_ENTER),
+              NamePattern.exact("com.example.Dao"),
+              NamePattern.any(),
+              NamePattern.exact("(Ljava/lang/String;)V"));
+
+      assertThat(SelectorMatcher.matches(selector, methodContext("(Ljava/lang/String;)V")))
+          .isTrue();
+      assertThat(SelectorMatcher.matches(selector, methodContext("(I)V"))).isFalse();
+      assertThat(SelectorMatcher.matches(selector, methodContext(null)))
+          .as("a call without a descriptor never matches a signature pattern")
+          .isFalse();
+    }
+
+    private InvocationContext methodContext(final String descriptor) {
+      return new InvocationContext(
+          OperationType.METHOD_ENTER,
+          "com.example.Dao",
+          "com.example.Dao",
+          "find",
+          false,
+          null,
+          null,
+          null,
+          InvocationContext.UNKNOWN,
+          null,
+          null,
+          InvocationContext.UNKNOWN,
+          descriptor,
+          InvocationContext.UNKNOWN);
     }
 
     @Test

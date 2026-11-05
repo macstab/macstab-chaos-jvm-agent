@@ -88,14 +88,18 @@ public record ChaosEvent(
     APPLIED,
 
     /**
-     * A potential match was evaluated but the effect was not applied, typically because {@link
-     * ActivationPolicy} constraints (probability, rate limit, maxApplications) were not satisfied.
+     * The selector matched but the policy kept the effect from applying. The {@code reason}
+     * attribute names the policy check: {@code notYetActive} (before {@code activeFrom}), {@code
+     * warmUp} ({@code activateAfterMatches}), {@code probability}, {@code rateLimit} or {@code
+     * maxApplications}. Published only while a listener other than the built-in logging one is
+     * registered, so that the hot path stays free of the allocation otherwise.
      */
     SKIPPED,
 
     /**
-     * An internal error occurred during effect application. The operation proceeded normally. Check
-     * the message for diagnostic details.
+     * A scenario could not be activated: invalid configuration, an unsupported runtime, an
+     * activation conflict or a weaving failure. The {@code category} attribute is the {@link
+     * ChaosDiagnostics.FailureCategory}; the failure is also recorded in the diagnostics.
      */
     FAILED,
   }

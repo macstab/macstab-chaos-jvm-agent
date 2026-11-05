@@ -22,6 +22,19 @@ final class ClockSkewState {
   private final long frozenMillis;
   private final long frozenNanos;
 
+  /** REGRESS: no read yet. */
+  private static final int UNARMED = 0;
+
+  /** REGRESS: a real read has been returned; the next read jumps. */
+  private static final int ARMED = 1;
+
+  /** REGRESS: the clock has stepped back and stays there. */
+  private static final int JUMPED = 2;
+
+  /** REGRESS progress, shared by every clock the scenario skews so they step back together. */
+  private final java.util.concurrent.atomic.AtomicInteger regressState =
+      new java.util.concurrent.atomic.AtomicInteger(UNARMED);
+
   /** Accumulated offset in milliseconds added to each call in DRIFT mode. */
   private final AtomicLong accumulatedDriftMillis = new AtomicLong(0L);
 
@@ -73,6 +86,7 @@ final class ClockSkewState {
       case FIXED -> saturatingAdd(realMillis, skewMillis);
       case DRIFT -> saturatingAdd(realMillis, addSaturating(accumulatedDriftMillis, skewMillis));
       case FREEZE -> frozenMillis;
+      case REGRESS -> regressed() ? saturatingAdd(realMillis, -skewMillis) : realMillis;
     };
   }
 
@@ -88,7 +102,26 @@ final class ClockSkewState {
       case FIXED -> saturatingAdd(realNanos, skewNanos);
       case DRIFT -> saturatingAdd(realNanos, addSaturating(accumulatedDriftNanos, skewNanos));
       case FREEZE -> frozenNanos;
+      case REGRESS -> regressed() ? saturatingAdd(realNanos, -skewNanos) : realNanos;
     };
+  }
+
+  /**
+   * Advances the REGRESS state machine for one read and returns whether this read is shifted: the
+   * first read arms and is real, the next one jumps, and every later one stays shifted. Exactly one
+   * read performs the jump, whichever thread wins the compare-and-set.
+   */
+  private boolean regressed() {
+    while (true) {
+      final int state = regressState.get();
+      if (state == JUMPED) {
+        return true;
+      }
+      final int next = state == UNARMED ? ARMED : JUMPED;
+      if (regressState.compareAndSet(state, next)) {
+        return next == JUMPED;
+      }
+    }
   }
 
   private static long saturatingAdd(final long a, final long b) {

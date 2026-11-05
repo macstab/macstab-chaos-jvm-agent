@@ -1,0 +1,98 @@
+package com.macstab.chaos.jvm.testkit;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
+
+import com.macstab.chaos.jvm.api.ChaosControlPlane;
+import com.macstab.chaos.jvm.api.ChaosSession;
+import java.lang.reflect.Parameter;
+import java.lang.reflect.Proxy;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Optional;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtensionContext;
+import org.junit.jupiter.api.extension.ParameterContext;
+
+/**
+ * The extension's teardown when its setup never ran (an earlier extension failed first): there is
+ * nothing to close, and it resolves only its own parameter types.
+ */
+@DisplayName("ChaosAgentExtension without setup")
+class ChaosAgentExtensionGuardsTest {
+
+  private final ChaosAgentExtension extension = new ChaosAgentExtension();
+
+  @Test
+  @DisplayName("after a test whose setup never ran, nothing is closed")
+  void teardownWithoutSetup() {
+    final Map<Object, Object> values = new HashMap<>();
+
+    assertThatCode(() -> extension.afterEach(context(values))).doesNotThrowAnyException();
+    assertThat(values).isEmpty();
+  }
+
+  @Test
+  @DisplayName("resolves only sessions and control planes")
+  void parameterTypes() throws Exception {
+    final ExtensionContext context = context(new HashMap<>());
+
+    assertThat(extension.supportsParameter(parameter(ChaosSession.class), context)).isTrue();
+    assertThat(extension.supportsParameter(parameter(ChaosControlPlane.class), context)).isTrue();
+    assertThat(extension.supportsParameter(parameter(String.class), context)).isFalse();
+  }
+
+  @SuppressWarnings("unused")
+  private static void target(
+      final ChaosSession session, final ChaosControlPlane plane, final String other) {}
+
+  private static ParameterContext parameter(final Class<?> type) throws Exception {
+    final Parameter parameter =
+        java.util.Arrays.stream(
+                ChaosAgentExtensionGuardsTest.class
+                    .getDeclaredMethod(
+                        "target", ChaosSession.class, ChaosControlPlane.class, String.class)
+                    .getParameters())
+            .filter(candidate -> candidate.getType() == type)
+            .findFirst()
+            .orElseThrow();
+    return (ParameterContext)
+        Proxy.newProxyInstance(
+            ParameterContext.class.getClassLoader(),
+            new Class<?>[] {ParameterContext.class},
+            (self, method, args) ->
+                method.getName().equals("getParameter")
+                    ? parameter
+                    : method.isDefault()
+                        ? java.lang.reflect.InvocationHandler.invokeDefault(self, method, args)
+                        : null);
+  }
+
+  /** A context whose store holds {@code values} and that has no parent. */
+  private static ExtensionContext context(final Map<Object, Object> values) {
+    final ExtensionContext.Store store =
+        (ExtensionContext.Store)
+            Proxy.newProxyInstance(
+                ExtensionContext.Store.class.getClassLoader(),
+                new Class<?>[] {ExtensionContext.Store.class},
+                (self, method, args) ->
+                    switch (method.getName()) {
+                      case "get" -> values.get(args[0]);
+                      case "put" -> values.put(args[0], args[1]);
+                      case "remove" -> values.remove(args[0]);
+                      default -> null;
+                    });
+    return (ExtensionContext)
+        Proxy.newProxyInstance(
+            ExtensionContext.class.getClassLoader(),
+            new Class<?>[] {ExtensionContext.class},
+            (self, method, args) ->
+                switch (method.getName()) {
+                  case "getStore" -> store;
+                  case "getParent" -> Optional.empty();
+                  case "getDisplayName" -> "guards";
+                  default -> null;
+                });
+  }
+}

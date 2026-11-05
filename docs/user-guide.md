@@ -36,7 +36,7 @@
 
 ## 1. What This Is (and Is Not)
 
-This agent intercepts JDK operations through 58 interception handles — thread pools, sockets, NIO, JDBC, HTTP clients, clocks, queues, class loaders, and more — by rewriting JVM bytecode at agent attachment time. Every fault it injects is **real**: a real `ConnectException`, a real sleep, a real `OutOfMemoryError`. No mocks.
+This agent intercepts JDK operations through 77 interception handles — thread pools, sockets, NIO, JDBC, HTTP clients, clocks, queues, class loaders, and more — by rewriting JVM bytecode on demand, when a scenario first needs a hook. Every fault it injects is **real**: a real `ConnectException`, a real sleep, a real `OutOfMemoryError`. No mocks.
 
 **This is not a network chaos proxy.** It operates entirely inside one JVM process. For network-layer chaos (packet loss, latency between processes) use a complementary tool like `tc netem` or Toxiproxy.
 
@@ -723,19 +723,19 @@ ChaosEffect.suppress()
 ChaosEffect.gate(Duration.ofSeconds(30))
 
 // Inject an arbitrary checked exception
-ChaosEffect.exception("java.io.IOException", "chaos injected", true)
+ChaosEffect.injectException("java.io.IOException", "chaos injected")
 
 // Corrupt a return value
 ChaosEffect.corruptReturnValue(ChaosEffect.ReturnValueStrategy.NULL)
 
-// Clock skew: advance all clock reads by 5 seconds
-ChaosEffect.clockSkew(ClockSkewEffect.Mode.FIXED, Duration.ofSeconds(5))
+// Clock skew: advance java.time and java.util.Date reads by 5 seconds
+ChaosEffect.skewClock(Duration.ofSeconds(5), ChaosEffect.ClockSkewMode.FIXED)
 
 // Heap pressure: allocate and retain 64 MiB until scenario stops
-ChaosEffect.heapPressure(64 * 1024 * 1024)
+ChaosEffect.heapPressure(64L * 1024 * 1024, 1024 * 1024)
 
 // Deadlock: spawn two threads that acquire locks in opposite order
-ChaosEffect.deadlock()
+ChaosEffect.deadlock(2)
 ```
 
 ### 9.3 Activation Policies
@@ -783,27 +783,29 @@ Measured with JMH on JDK 21, x86-64 (see `docs/benchmarks.md` for the full metho
 | One scenario, selector matches, no effect fires | < 300 ns | < 3% of a 10 µs HikariCP pool acquire              |
 | Ten scenarios, one match                        | < 1 µs   | 10% of a 10 µs pool acquire — use only transiently |
 
-The agent is designed to be permanently installed in production. With zero active scenarios, every intercepted call site costs approximately 5–15 ns for the `BootstrapDispatcher.invoke()` fast path.
+The agent is designed to be permanently installed in production. With zero active scenarios, every intercepted call site costs approximately 5–15 ns for the `BootstrapDispatcher` fast path (inline reentrancy check, no allocation). Hook groups are woven on demand, so call sites whose hook group no scenario has needed yet are not instrumented at all.
 
 ---
 
 ## 11. Limitations and Known Constraints
 
-### `System.currentTimeMillis()` and `System.nanoTime()` Are Not Directly Interceptable
+### `System.currentTimeMillis()` and `System.nanoTime()` Are Skewed Only at Opted-In Call Sites
 
-Both methods are JVM intrinsics with `@IntrinsicCandidate` annotations. The JIT replaces their call sites with CPU instructions — no method body is executed, so advice cannot be woven. The clock skew effect targets the higher-level `java.time` APIs (`Instant.now()`, `LocalDateTime.now()`, `ZonedDateTime.now()`) and `new Date()` instead. Application code reading the clock through `System.currentTimeMillis()` directly is not skewed.
+Both methods are JVM intrinsics with `@IntrinsicCandidate` annotations. The JIT replaces their call sites with CPU instructions — no method body is executed, so advice cannot be woven into them. The clock skew effect targets the higher-level `java.time` APIs (`Instant.now()`, `LocalDateTime.now()`, `ZonedDateTime.now()`) and `new Date()` out of the box. Direct `System.currentTimeMillis()` / `nanoTime()` calls are skewed when their callers are named with `clockCallSites=com.example.,org.acme.` (agent arg; `-Dmacstab.chaos.clockCallSites` or `MACSTAB_CHAOS_CLOCK_CALL_SITES`) and a `SYSTEM_CLOCK_MILLIS` / `SYSTEM_CLOCK_NANOS` scenario is active: the agent rewrites the call sites in those packages (see [configuration-reference.md](configuration-reference.md)). JDK and library code outside the prefixes keeps the real clock.
 
 ### `java.net.http.HttpClient` Is Intercepted Out of the Box
 
 The agent self-grants the required `--add-opens java.net.http/jdk.internal.net.http=ALL-UNNAMED` at install time — via the `Add-Opens` manifest attribute on `-javaagent:` startup attach, and via `Instrumentation#redefineModule` for runtime self-attach (`agentmain`, test starters, `ByteBuddyAgent.install`). **Users do not need to add `--add-opens` JVM flags for any built-in chaos selector**, including `HttpClientSelector(HTTP_CLIENT_SEND/_ASYNC)` which targets `jdk.internal.net.http.HttpClientImpl`. See [Module access strategy](instrumentation.md#module-access-strategy) for the full set of opens granted.
 
-### Dynamic Attach Installs Phase 1 Only
+### Hooks Are Woven on Demand
 
-When attaching via `VirtualMachine.attach()` (the `agentmain` path), only Phase 1 instrumentation is installed: `ThreadPoolExecutor`, `Thread`, `ScheduledThreadPoolExecutor`. Phase 2 (socket, NIO, HTTP, JDBC, clock, queues, etc.) is skipped because those JDK classes are already loaded and retransforming them from a dynamic attach path risks silent bytecode corruption in live production JVMs. Use `-javaagent:` at startup for full Phase 2 coverage.
+The agent does not weave its hooks at start. Every interception point belongs to a hook group (`THREAD_POOL_EXECUTOR`, `SOCKET`, `HTTP_CLIENT`, `JDBC`, …) that is woven by retransformation the first time a scenario needing one of its operations is activated (or a session is opened, for executor decoration). A JVM without scenarios runs unmodified JDK classes; the first activation of a group pays its one-time weaving cost, and a weaving failure fails that activation with failure category `INSTRUMENTATION_FAILURE`. Set `instrumentation=eager` (agent argument), `-Dmacstab.chaos.instrumentation=eager` or `MACSTAB_CHAOS_INSTRUMENTATION=eager` to weave every group at start, as in 1.x. The woven groups are listed under `wovenHookGroups` in `ChaosDiagnostics.snapshot().runtimeDetails()`.
+
+Because every group is woven through retransformation, dynamic attach via `VirtualMachine.attach()` (the `agentmain` path, which still requires its explicit opt-in) and self-attach get exactly the same hooks as `-javaagent:` — sockets, NIO, HTTP, JDBC, clock, queues and the rest.
 
 ### Instrumentation Stays Installed for the JVM Lifetime
 
-Stopping or closing a scenario removes its effect from the dispatch hot path, but the advice bytecode remains woven into the JDK methods — there is no public uninstall. Internally, `JdkInstrumentationInstaller.uninstall(Instrumentation)` resets the ByteBuddy transformations and clears the bridge delegate; it is used to fully roll back a failed initialization, so a later attempt starts from a clean JVM. Classes already loaded through the bootstrap bridge jar stay on the bootstrap class path either way.
+Stopping or closing a scenario removes its effect from the dispatch hot path, but once a hook group has been woven its advice bytecode remains in the JDK methods — there is no public uninstall. Internally, `JdkInstrumentationInstaller.uninstall(Instrumentation)` resets the ByteBuddy transformations of every woven group and clears the bridge delegate; it is used to fully roll back a failed initialization, so a later attempt starts from a clean JVM. Classes already loaded through the bootstrap bridge jar stay on the bootstrap class path either way.
 
 ### One Copy of the Agent per JVM
 
@@ -866,7 +868,7 @@ The CI build runs `spotlessCheck` and fails on any formatting violation.
 2. Add the corresponding method to `BridgeDelegate`
 3. Implement the method in `ChaosBridge` (thin delegation to `ChaosRuntime`)
 4. Add the `@Advice` class in `JdkInstrumentationInstaller`
-5. Wire the `AgentBuilder` matcher in `JdkInstrumentationInstaller.install()`
+5. Add the advice's `AgentBuilder` transformation to the matching `JdkInstrumentationInstaller.HookGroup` (or a new group listing the `OperationType`s it serves), so it is woven when a scenario needs it
 6. Add a new `OperationType` enum value in `chaos-agent-api`
 7. Handle the new type in `SelectorMatcher` and `ChaosDispatcher`
 8. Add a test in the appropriate `*Test` class

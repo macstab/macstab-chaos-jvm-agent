@@ -72,6 +72,8 @@ final class FinalizerBacklogStressor implements ManagedStressor {
       this.stopped = stopped;
     }
 
+    // A finalizer is the point: the stressor fills the finalizer queue.
+    @SuppressWarnings({"Finalize", "removal"})
     @Override
     protected void finalize() {
       if (stopped.get()) {

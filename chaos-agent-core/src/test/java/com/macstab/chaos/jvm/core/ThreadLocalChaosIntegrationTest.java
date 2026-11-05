@@ -14,6 +14,7 @@ import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -35,7 +36,6 @@ class ThreadLocalChaosIntegrationTest {
 
   private static final long DELAY_MS = 50L;
   private static final long DELAY_MIN_MS = (long) (DELAY_MS * 0.8);
-  private static final long NO_DELAY_MAX_MS = 150L;
 
   // ---------------------------------------------------------------------------
   // GET suppression
@@ -163,6 +163,7 @@ class ThreadLocalChaosIntegrationTest {
   class DispatcherDepthNotAffected {
 
     @Test
+    @Tag("law-L3")
     @DisplayName("plain java.lang.ThreadLocal not suppressed by test-class prefix pattern")
     void plainThreadLocalNotSuppressedByNarrowPattern() throws Throwable {
       final ChaosRuntime runtime = new ChaosRuntime();

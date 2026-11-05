@@ -22,7 +22,7 @@ class TaskClassNameTest {
     final Runnable lambda = () -> {};
 
     assertThat(lambda.getClass().getName()).contains("$$Lambda");
-    assertThat(ChaosDispatcher.taskClassName(lambda)).isEqualTo(TaskClassNameTest.class.getName());
+    assertThat(DispatchEngine.taskClassName(lambda)).isEqualTo(TaskClassNameTest.class.getName());
   }
 
   @Test

@@ -6,14 +6,16 @@ import java.util.Deque;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Reflective URL-extraction helpers for intercepted HTTP client calls.
  *
- * <p>All client types ({@code java.net.http.HttpRequest}, {@code okhttp3.Call}, Apache
- * HttpComponents request classes, Reactor Netty {@code HttpClientRequest}) are {@code compileOnly}
- * dependencies in the agent. They may or may not be on the application classpath at runtime.
- * Accessing them via {@link Method#invoke} keeps the instrumentation module free of any hard link.
+ * <p>All client types ({@code okhttp3.Call}, Apache HttpComponents request classes, Reactor Netty
+ * {@code HttpClient}) are {@code compileOnly} dependencies in the agent. (The JDK {@code
+ * HttpClient} advice reads {@code HttpRequest.uri()} directly and needs no extraction.) They may or
+ * may not be on the application classpath at runtime. Accessing them via {@link Method#invoke}
+ * keeps the instrumentation module free of any hard link.
  *
  * <p>Failures are swallowed and returned as {@code null} — the caller treats a {@code null} URL as
  * "no URL filter will match" which matches the {@link com.macstab.chaos.jvm.api.NamePattern#any()}
@@ -55,31 +57,12 @@ public final class HttpUrlExtractor {
   private HttpUrlExtractor() {}
 
   /**
-   * Extracts the URL from a {@code java.net.http.HttpRequest} by calling {@code uri().toString()}
-   * reflectively.
-   *
-   * @param request the {@code HttpRequest} instance; may be {@code null}
-   * @return the URL string, or {@code null} if extraction fails
-   */
-  public static String fromJavaHttpRequest(final Object request) {
-    if (request == null) {
-      return null;
-    }
-    try {
-      final Object uri = invoke(request, "uri");
-      return uri == null ? null : uri.toString();
-    } catch (final Throwable ignored) {
-      return null;
-    }
-  }
-
-  /**
    * Extracts the URL from an {@code okhttp3.Call} by calling {@code request().url().toString()}.
    *
    * @param call the {@code okhttp3.Call} instance; may be {@code null}
    * @return the URL string, or {@code null} if extraction fails
    */
-  public static String fromOkHttpCall(final Object call) {
+  public static @Nullable String fromOkHttpCall(final Object call) {
     if (call == null) {
       return null;
     }
@@ -103,7 +86,7 @@ public final class HttpUrlExtractor {
    * @param request an {@code org.apache.http.HttpRequest} instance; may be {@code null}
    * @return the combined URL string, or {@code null} if extraction fails
    */
-  public static String fromApacheHc4Request(final Object host, final Object request) {
+  public static @Nullable String fromApacheHc4Request(final Object host, final Object request) {
     try {
       final String hostPart = host == null ? "" : host.toString();
       final String requestPath = extractApacheHc4RequestPath(request);
@@ -135,7 +118,7 @@ public final class HttpUrlExtractor {
    *     {@code null}
    * @return the URL string, or {@code null} if extraction fails
    */
-  public static String fromApacheHc4UriRequest(final Object request) {
+  public static @Nullable String fromApacheHc4UriRequest(final Object request) {
     if (request == null) {
       return null;
     }
@@ -167,7 +150,7 @@ public final class HttpUrlExtractor {
    *     null}
    * @return the URI string, or {@code null} if extraction fails
    */
-  public static String fromApacheHc5Request(final Object request) {
+  public static @Nullable String fromApacheHc5Request(final Object request) {
     if (request == null) {
       return null;
     }
@@ -199,7 +182,7 @@ public final class HttpUrlExtractor {
    * @param request an {@code org.apache.hc.core5.http.ClassicHttpRequest}; may be {@code null}
    * @return the URL string, or {@code null} if extraction fails
    */
-  public static String fromApacheHc5HostRequest(final Object host, final Object request) {
+  public static @Nullable String fromApacheHc5HostRequest(final Object host, final Object request) {
     try {
       final Object target = request == null ? null : invoke(request, "getRequestUri");
       final String path = target == null ? "" : target.toString();
@@ -223,7 +206,7 @@ public final class HttpUrlExtractor {
    *     null}
    * @return the URI string, or {@code null} if extraction fails
    */
-  public static String fromReactorNettyClient(final Object client) {
+  public static @Nullable String fromReactorNettyClient(final Object client) {
     if (client == null) {
       return null;
     }
@@ -243,7 +226,8 @@ public final class HttpUrlExtractor {
     }
   }
 
-  private static Object invoke(final Object target, final String methodName) throws Throwable {
+  private static @Nullable Object invoke(final Object target, final String methodName)
+      throws Throwable {
     final Class<?> targetClass = target.getClass();
     final ConcurrentHashMap<String, Method> perClass = METHOD_CACHE.get(targetClass);
     Method method = perClass.get(methodName);
@@ -254,10 +238,10 @@ public final class HttpUrlExtractor {
         // module has not opened the defining package for reflective access. Without catching
         // it specifically, the outer catch(Throwable) in every public entry point would hide
         // the concrete reason (module encapsulation) behind a silent null, leaking the real
-        // diagnostic. Swallow InaccessibleObjectException here because several of the HTTP
-        // client types (HttpRequest in java.net.http) ARE reachable without setAccessible
-        // when called from a module that reads java.net.http — we still cache the Method so
-        // invoke() can try it as-is. If the eventual invoke fails, the outer catch returns
+        // diagnostic. Swallow InaccessibleObjectException here because a public method of a
+        // client type can be reachable without setAccessible even when its module does not
+        // open the package — we still cache the Method so invoke() can try it as-is. If the
+        // eventual invoke fails, the outer catch returns
         // null and the extractor falls back to "no URL filter".
         try {
           method.setAccessible(true);
@@ -280,13 +264,13 @@ public final class HttpUrlExtractor {
         perClass.putIfAbsent(methodName, NEGATIVE_CACHE_MARKER);
       }
     }
-    if (method == null || method == NEGATIVE_CACHE_MARKER) {
+    if (method == null || isNegativeMarker(method)) {
       return null;
     }
     return method.invoke(target);
   }
 
-  private static Method findMethod(final Class<?> start, final String methodName) {
+  private static @Nullable Method findMethod(final Class<?> start, final String methodName) {
     final Set<Class<?>> visitedInterfaces = new HashSet<>();
     final Deque<Class<?>> interfaceQueue = new ArrayDeque<>();
     Class<?> current = start;
@@ -322,5 +306,10 @@ public final class HttpUrlExtractor {
       }
     }
     return null;
+  }
+
+  @SuppressWarnings("ReferenceEquality") // the marker is one instance, compared by identity
+  private static boolean isNegativeMarker(final Method method) {
+    return method == NEGATIVE_CACHE_MARKER;
   }
 }

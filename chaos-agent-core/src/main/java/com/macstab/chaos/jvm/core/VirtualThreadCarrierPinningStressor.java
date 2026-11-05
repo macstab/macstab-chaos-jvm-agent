@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Logger;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Takes {@code pinnedThreadCount} carrier threads of the virtual-thread scheduler out of service,
@@ -104,7 +105,7 @@ final class VirtualThreadCarrierPinningStressor implements ManagedStressor {
    * @param effect the requested effect
    * @return the effect to run, or {@code null} to run nothing
    */
-  static ChaosEffect.VirtualThreadCarrierPinningEffect leavingOneCarrier(
+  static ChaosEffect.@Nullable VirtualThreadCarrierPinningEffect leavingOneCarrier(
       final ChaosEffect.VirtualThreadCarrierPinningEffect effect) {
     final int carriers = schedulerParallelism();
     final int allowed = carriers - 1;

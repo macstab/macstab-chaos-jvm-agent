@@ -96,6 +96,9 @@ final class CompatibilityValidator {
             "VIRTUAL_THREAD_CARRIER_PINNING requires JDK 21+ at runtime");
       }
     }
+    if (scenario.effect() instanceof ChaosEffect.ClockSkewEffect) {
+      validateClockSkewActivationPolicy(scenario.activationPolicy());
+    }
     validateInterceptorConstraints(scenario);
   }
 
@@ -109,10 +112,31 @@ final class CompatibilityValidator {
     if (policy.maxApplications() != null
         || policy.rateLimit() != null
         || policy.activateAfterMatches() > 0
-        || policy.probability() < 1.0d) {
+        || policy.probability() < 1.0d
+        || policy.activeFrom() != null
+        || policy.replayMatches() != null) {
       throw new ChaosValidationException(
-          "stress scenarios run from start until stop or activeFor ends; maxApplications,"
-              + " rateLimit, activateAfterMatches and probability do not apply to them");
+          "stress scenarios run from start until stop, activeFor or activeUntil ends;"
+              + " maxApplications, rateLimit, activateAfterMatches, probability, activeFrom and"
+              + " replayMatches do not apply to them");
+    }
+  }
+
+  /**
+   * A clock skew is applied on every clock read while its time bounds hold; it is not a per-call
+   * application, so the counting and sampling fields of the policy have no meaning for it. They
+   * used to be silently ignored.
+   */
+  private static void validateClockSkewActivationPolicy(final ActivationPolicy policy) {
+    if (policy.maxApplications() != null
+        || policy.rateLimit() != null
+        || policy.activateAfterMatches() > 0
+        || policy.probability() < 1.0d
+        || policy.replayMatches() != null) {
+      throw new ChaosValidationException(
+          "a clock skew applies to every clock read while active (bounded by activeFor,"
+              + " activeFrom and activeUntil); maxApplications, rateLimit, activateAfterMatches,"
+              + " probability and replayMatches do not apply to it");
     }
   }
 
@@ -267,8 +291,6 @@ final class CompatibilityValidator {
     validateEffectSelectorAffinity(effect, selector);
     validateEffectOperationSupport(effect, selector);
     validateNetworkHostFilter(selector);
-    validateSelectorOperationSets(selector);
-    validateOperationTypeSelectorAffinity(selector);
   }
 
   /**
@@ -404,102 +426,6 @@ final class CompatibilityValidator {
   }
 
   /**
-   * Validates that each selector's declared operations are confined to the operation types that are
-   * legal for that selector kind.
-   */
-  private static void validateSelectorOperationSets(final ChaosSelector selector) {
-    if (selector instanceof ChaosSelector.NioSelector nioSelector) {
-      validateOperationSet(nioSelector.operations(), NIO_OPS, "NioSelector", "NIO operation");
-    }
-    if (selector instanceof ChaosSelector.NetworkSelector networkSelector) {
-      validateOperationSet(
-          networkSelector.operations(), NETWORK_OPS, "NetworkSelector", "socket operation");
-    }
-    if (selector instanceof ChaosSelector.ThreadLocalSelector threadLocalSelector) {
-      validateOperationSet(
-          threadLocalSelector.operations(), THREAD_LOCAL_OPS, "ThreadLocalSelector", "valid");
-    }
-    if (selector instanceof ChaosSelector.HttpClientSelector httpClientSelector) {
-      validateOperationSet(
-          httpClientSelector.operations(), HTTP_OPS, "HttpClientSelector", "valid");
-    }
-    if (selector instanceof ChaosSelector.JdbcSelector jdbcSelector) {
-      validateOperationSet(jdbcSelector.operations(), JDBC_OPS, "JdbcSelector", "valid");
-    }
-  }
-
-  private static void validateOperationSet(
-      final Set<OperationType> operations,
-      final Set<OperationType> allowedOps,
-      final String selectorName,
-      final String validDescription) {
-    for (final OperationType operation : operations) {
-      if (!allowedOps.contains(operation)) {
-        throw new ChaosValidationException(
-            selectorName
-                + " operation "
-                + operation
-                + " is not "
-                + validDescription
-                + "; valid ops: "
-                + allowedOps);
-      }
-    }
-  }
-
-  /**
-   * Validates that operation types requiring a specific selector kind are not used with the wrong
-   * selector (e.g. HTTP operations outside {@link ChaosSelector.HttpClientSelector}, JDBC
-   * operations outside {@link ChaosSelector.JdbcSelector}).
-   */
-  private static void validateOperationTypeSelectorAffinity(final ChaosSelector selector) {
-    if (!(selector instanceof ChaosSelector.HttpClientSelector)
-        && selectorContainsAny(selector, HTTP_OPS)) {
-      throw new ChaosValidationException(
-          "HTTP_CLIENT_SEND / HTTP_CLIENT_SEND_ASYNC operations require HttpClientSelector");
-    }
-    if (!(selector instanceof ChaosSelector.JdbcSelector)
-        && selectorContainsAny(selector, JDBC_OPS)) {
-      throw new ChaosValidationException("JDBC_* operations require JdbcSelector");
-    }
-  }
-
-  private static final Set<OperationType> HTTP_OPS =
-      Set.of(OperationType.HTTP_CLIENT_SEND, OperationType.HTTP_CLIENT_SEND_ASYNC);
-
-  private static final Set<OperationType> JDBC_OPS =
-      Set.of(
-          OperationType.JDBC_CONNECTION_ACQUIRE,
-          OperationType.JDBC_STATEMENT_EXECUTE,
-          OperationType.JDBC_PREPARED_STATEMENT,
-          OperationType.JDBC_TRANSACTION_COMMIT,
-          OperationType.JDBC_TRANSACTION_ROLLBACK);
-
-  private static final Set<OperationType> NIO_OPS =
-      Set.of(
-          OperationType.NIO_SELECTOR_SELECT,
-          OperationType.NIO_CHANNEL_READ,
-          OperationType.NIO_CHANNEL_WRITE,
-          OperationType.NIO_CHANNEL_CONNECT,
-          OperationType.NIO_CHANNEL_ACCEPT);
-
-  private static final Set<OperationType> NETWORK_OPS =
-      Set.of(
-          OperationType.SOCKET_CONNECT,
-          OperationType.SOCKET_ACCEPT,
-          OperationType.SOCKET_READ,
-          OperationType.SOCKET_WRITE,
-          OperationType.SOCKET_CLOSE);
-
-  private static final Set<OperationType> THREAD_LOCAL_OPS =
-      Set.of(OperationType.THREAD_LOCAL_GET, OperationType.THREAD_LOCAL_SET);
-
-  private static boolean selectorContainsAny(
-      final ChaosSelector selector, final Set<OperationType> needles) {
-    return containsAny(selectorOperations(selector), needles);
-  }
-
-  /**
    * Rejects a host filter on {@code SOCKET_ACCEPT}: the remote host of an accepted connection is
    * only known after {@code accept()} returns, so the pattern can never match before the call is
    * intercepted.
@@ -507,38 +433,109 @@ final class CompatibilityValidator {
   private static void validateNetworkHostFilter(final ChaosSelector selector) {
     if (selector instanceof ChaosSelector.NetworkSelector network
         && network.operations().contains(OperationType.SOCKET_ACCEPT)
-        && network.remoteHostPattern() != null
-        && network.remoteHostPattern().mode() != NamePattern.MatchMode.ANY) {
+        && ((network.remoteHostPattern() != null
+                && network.remoteHostPattern().mode() != NamePattern.MatchMode.ANY)
+            || network.remoteCidr() != null
+            || network.remotePort() != null)) {
       throw new ChaosValidationException(
-          "NetworkSelector remoteHostPattern cannot apply to SOCKET_ACCEPT: the peer is unknown"
-              + " until accept() returns; use a separate scenario without a host filter for accepts");
+          "NetworkSelector remoteHostPattern, remoteCidr and remotePort cannot apply to"
+              + " SOCKET_ACCEPT: the peer is unknown until accept() returns; use a separate"
+              + " scenario without a peer filter for accepts");
     }
   }
 
-  /** Returns the operations a selector matches; a stress selector matches no call. */
-  private static Set<OperationType> selectorOperations(final ChaosSelector selector) {
-    return switch (selector) {
-      case ChaosSelector.ThreadSelector threadSel -> threadSel.operations();
-      case ChaosSelector.ExecutorSelector executorSel -> executorSel.operations();
-      case ChaosSelector.QueueSelector queueSel -> queueSel.operations();
-      case ChaosSelector.AsyncSelector asyncSel -> asyncSel.operations();
-      case ChaosSelector.SchedulingSelector schedulingSel -> schedulingSel.operations();
-      case ChaosSelector.ShutdownSelector shutdownSel -> shutdownSel.operations();
-      case ChaosSelector.ClassLoadingSelector classLoadingSel -> classLoadingSel.operations();
-      case ChaosSelector.MethodSelector methodSel -> methodSel.operations();
-      case ChaosSelector.MonitorSelector monitorSel -> monitorSel.operations();
-      case ChaosSelector.JvmRuntimeSelector jvmRuntimeSel -> jvmRuntimeSel.operations();
-      case ChaosSelector.NioSelector nioSel -> nioSel.operations();
-      case ChaosSelector.NetworkSelector networkSel -> networkSel.operations();
-      case ChaosSelector.ThreadLocalSelector threadLocalSel -> threadLocalSel.operations();
-      case ChaosSelector.HttpClientSelector httpClientSel -> httpClientSel.operations();
-      case ChaosSelector.JdbcSelector jdbcSel -> jdbcSel.operations();
-      case ChaosSelector.DnsSelector dnsSel -> dnsSel.operations();
-      case ChaosSelector.SslSelector sslSel -> sslSel.operations();
-      case ChaosSelector.FileIoSelector fileIoSel -> fileIoSel.operations();
-      case ChaosSelector.StressSelector ignored -> Set.of();
-    };
-  }
+  /** The operations each data-delivery effect applies to. */
+  private static final java.util.Map<Class<? extends ChaosEffect>, Set<OperationType>>
+      DELIVERY_EFFECT_OPS =
+          java.util.Map.of(
+              ChaosEffect.ConnectionResetEffect.class,
+              EnumSet.of(OperationType.SOCKET_CLOSE),
+              ChaosEffect.TrickleEffect.class,
+              EnumSet.of(OperationType.SOCKET_READ),
+              ChaosEffect.CorruptReadEffect.class,
+              EnumSet.of(
+                  OperationType.SOCKET_READ,
+                  OperationType.FILE_IO_READ,
+                  OperationType.DATAGRAM_RECEIVE),
+              ChaosEffect.TimeoutEffect.class,
+              EnumSet.of(
+                  OperationType.SOCKET_READ,
+                  OperationType.SOCKET_CONNECT,
+                  OperationType.NIO_SELECTOR_SELECT,
+                  OperationType.PROCESS_WAIT),
+              ChaosEffect.TornWriteEffect.class,
+              EnumSet.of(
+                  OperationType.FILE_IO_WRITE,
+                  OperationType.SOCKET_WRITE,
+                  OperationType.NIO_CHANNEL_WRITE),
+              ChaosEffect.DnsAnswerEffect.class,
+              EnumSet.of(OperationType.DNS_ANSWER),
+              ChaosEffect.DnsRewriteEffect.class,
+              EnumSet.of(OperationType.DNS_RESOLVE),
+              ChaosEffect.RedirectEffect.class,
+              EnumSet.of(OperationType.SOCKET_CONNECT));
+
+  /** Operations a network {@link ChaosEffect.Errno} applies to. */
+  private static final Set<OperationType> ERRNO_NETWORK_OPS =
+      EnumSet.of(
+          OperationType.SOCKET_CONNECT,
+          OperationType.SOCKET_ACCEPT,
+          OperationType.SOCKET_READ,
+          OperationType.SOCKET_WRITE,
+          OperationType.SOCKET_CLOSE,
+          OperationType.SOCKET_BIND,
+          OperationType.SOCKET_SHUTDOWN,
+          OperationType.DATAGRAM_SEND,
+          OperationType.DATAGRAM_RECEIVE,
+          OperationType.NIO_CHANNEL_CONNECT,
+          OperationType.NIO_CHANNEL_ACCEPT,
+          OperationType.NIO_CHANNEL_READ,
+          OperationType.NIO_CHANNEL_WRITE);
+
+  /** Operations a file {@link ChaosEffect.Errno} applies to. */
+  private static final Set<OperationType> ERRNO_FILE_OPS =
+      EnumSet.of(
+          OperationType.FILE_IO_READ,
+          OperationType.FILE_IO_WRITE,
+          OperationType.FILE_IO_SYNC,
+          OperationType.FILE_IO_TRUNCATE,
+          OperationType.FILE_IO_DELETE,
+          OperationType.FILE_IO_MOVE,
+          OperationType.FILE_IO_OPEN,
+          OperationType.FILE_IO_MAP,
+          OperationType.FILE_IO_CLOSE,
+          OperationType.FILE_IO_MOVE_TARGET,
+          // A process start fails on the program file: ENOENT, EACCES and the like.
+          OperationType.PROCESS_START);
+
+  /**
+   * Operations an {@link ChaosEffect.Errno} applies to beyond its family's: errors the kernel
+   * reports for more than one kind of call.
+   */
+  private static final java.util.Map<ChaosEffect.Errno, Set<OperationType>> ERRNO_EXTRA_OPS =
+      java.util.Map.of(
+          // binding a privileged port
+          ChaosEffect.Errno.EACCES,
+          EnumSet.of(OperationType.SOCKET_BIND),
+          // connects and accepts open a descriptor
+          ChaosEffect.Errno.EMFILE,
+          EnumSet.of(
+              OperationType.SOCKET_CONNECT,
+              OperationType.SOCKET_ACCEPT,
+              OperationType.NIO_CHANNEL_CONNECT,
+              OperationType.NIO_CHANNEL_ACCEPT),
+          ChaosEffect.Errno.ENFILE,
+          EnumSet.of(
+              OperationType.SOCKET_CONNECT,
+              OperationType.SOCKET_ACCEPT,
+              OperationType.NIO_CHANNEL_CONNECT,
+              OperationType.NIO_CHANNEL_ACCEPT),
+          // pthread_create of a platform thread
+          ChaosEffect.Errno.EAGAIN,
+          EnumSet.of(OperationType.THREAD_START),
+          // pthread_create, and mmap of a file region
+          ChaosEffect.Errno.ENOMEM,
+          EnumSet.of(OperationType.THREAD_START, OperationType.FILE_IO_MAP));
 
   /**
    * Operations whose interception point can carry out a {@link ChaosEffect.SuppressEffect}: it
@@ -571,12 +568,15 @@ final class CompatibilityValidator {
           OperationType.JDBC_STATEMENT_EXECUTE,
           OperationType.JDBC_PREPARED_STATEMENT,
           OperationType.JDBC_TRANSACTION_COMMIT,
-          OperationType.JDBC_TRANSACTION_ROLLBACK);
+          OperationType.JDBC_TRANSACTION_ROLLBACK,
+          // a dropped datagram: the send reports success, nothing goes on the wire
+          OperationType.DATAGRAM_SEND);
 
   /** Clock reads: they only return a (possibly skewed) time and cannot be delayed or failed. */
   private static final Set<OperationType> CLOCK_READ_OPS =
       EnumSet.of(
           OperationType.INSTANT_NOW,
+          OperationType.CLOCK_READ,
           OperationType.LOCAL_DATE_TIME_NOW,
           OperationType.ZONED_DATE_TIME_NOW,
           OperationType.DATE_NEW,
@@ -590,7 +590,7 @@ final class CompatibilityValidator {
    */
   private static void validateEffectOperationSupport(
       final ChaosEffect effect, final ChaosSelector selector) {
-    final Set<OperationType> operations = selectorOperations(selector);
+    final Set<OperationType> operations = SelectorOperations.of(selector);
     if (effect instanceof ChaosEffect.SuppressEffect) {
       for (final OperationType operation : operations) {
         if (!SUPPRESS_OPS.contains(operation)) {
@@ -602,6 +602,45 @@ final class CompatibilityValidator {
                   + SUPPRESS_OPS);
         }
       }
+    }
+    final Set<OperationType> deliveryOps = DELIVERY_EFFECT_OPS.get(effect.getClass());
+    if (deliveryOps != null && !deliveryOps.containsAll(operations)) {
+      throw new ChaosValidationException(
+          effect.getClass().getSimpleName()
+              + " applies only to "
+              + deliveryOps
+              + ", not "
+              + operations);
+    }
+    if (effect instanceof ChaosEffect.ErrnoEffect errnoEffect) {
+      final Set<OperationType> allowed =
+          EnumSet.copyOf(
+              switch (errnoEffect.errno().family()) {
+                case NETWORK -> ERRNO_NETWORK_OPS;
+                case FILE -> ERRNO_FILE_OPS;
+                case PROCESS -> EnumSet.of(OperationType.PROCESS_START);
+              });
+      allowed.addAll(ERRNO_EXTRA_OPS.getOrDefault(errnoEffect.errno(), Set.of()));
+      for (final OperationType operation : operations) {
+        if (!allowed.contains(operation)) {
+          throw new ChaosValidationException(
+              errnoEffect.errno()
+                  + " is a "
+                  + errnoEffect.errno().family().name().toLowerCase(java.util.Locale.ROOT)
+                  + " error and does not apply to "
+                  + operation
+                  + "; it applies to "
+                  + allowed);
+        }
+      }
+    }
+    if (effect instanceof ChaosEffect.RejectEffect
+        && operations.contains(OperationType.NETTY_CHANNEL_READ)) {
+      // The read loop runs on the event loop outside the pipeline's exception handling: a
+      // throwable there reaches the event loop, not the channel's handlers.
+      throw new ChaosValidationException(
+          "RejectEffect is not supported for NETTY_CHANNEL_READ; delay or gate the read, or"
+              + " reject NETTY_CHANNEL_WRITE, which fails through the pipeline");
     }
     if (effect instanceof ChaosEffect.ClockSkewEffect) {
       for (final OperationType operation : operations) {

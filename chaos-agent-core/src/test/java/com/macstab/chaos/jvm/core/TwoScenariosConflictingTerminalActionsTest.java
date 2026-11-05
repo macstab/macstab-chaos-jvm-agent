@@ -16,19 +16,20 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
  * Verifies that when two scenarios match the same operation and both carry terminal actions, the
  * precedence merge rule is applied correctly and remains consistent under concurrent access.
  *
- * <h2>Merge semantics (from {@link ChaosRuntime#evaluate})</h2>
+ * <h2>Merge semantics (from {@code DispatchEngine.evaluate})</h2>
  *
  * <ul>
  *   <li>Delays accumulate — both scenarios' delay contributions are summed.
  *   <li>Terminal action — the scenario with the <em>higher</em> {@link ChaosScenario#precedence()}
- *       wins. Equal precedence is last-write (non-deterministic in concurrent evaluation, but
- *       <em>always exactly one</em> terminal action is applied — never zero, never two).
+ *       wins; on equal precedence the smaller scenario id wins. Exactly one terminal action is
+ *       applied — never zero, never two.
  * </ul>
  */
 @DisplayName("Two scenarios with conflicting terminal actions")
@@ -41,6 +42,7 @@ class TwoScenariosConflictingTerminalActionsTest {
   class SerialMerge {
 
     @Test
+    @Tag("law-L13")
     @DisplayName("higher-precedence REJECT wins over lower-precedence SUPPRESS")
     void higherPrecedenceRejectWinsOverLowerPrecedenceSuppress() {
       final ChaosRuntime runtime = new ChaosRuntime();
@@ -72,6 +74,7 @@ class TwoScenariosConflictingTerminalActionsTest {
     }
 
     @Test
+    @Tag("law-L11")
     @DisplayName("delays from both matching scenarios accumulate regardless of precedence")
     void delaysAccumulateAcrossBothScenarios() {
       final ChaosRuntime runtime = new ChaosRuntime();
@@ -186,8 +189,7 @@ class TwoScenariosConflictingTerminalActionsTest {
                 }
                 for (int j = 0; j < ITERATIONS_PER_THREAD; j++) {
                   try {
-                    final Runnable r =
-                        runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
+                    runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
                     // Suppress: returns a no-op runnable without throwing
                     suppressions.incrementAndGet();
                   } catch (final java.util.concurrent.RejectedExecutionException e) {

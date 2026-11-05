@@ -27,8 +27,8 @@ In scope:
 - `ChaosRuntime` — thin facade that composes the control-plane and dispatch halves. Implements `ChaosControlPlane` by delegation. Exists as a single entry point so downstream modules (`chaos-agent-bootstrap`, `chaos-agent-instrumentation-jdk`, testkit, benchmarks) bind to one type.
 - `ChaosControlPlaneImpl` (package-private) — actual control-plane implementation. Owns scenario registration, session lifecycle, diagnostics, event listeners, instrumentation handle, shutdown-hook tracking.
 - `ChaosDispatcher` (package-private) — hot-path half. Owns the `before*` / `after*` / `adjust*` / `decorate*` interception methods invoked from `BootstrapDispatcher`.
-- `ScenarioController` — per-scenario runtime guard with 8-check evaluation pipeline
-- `ScenarioRegistry` — thread-safe store of controllers; implements `ChaosDiagnostics`
+- `ScenarioController` — per-scenario runtime guard with the 9-step evaluation pipeline
+- `ScenarioRegistry` — thread-safe store of controllers plus an immutable `OperationType` → controllers index used by `match()`; implements `ChaosDiagnostics`
 - `SelectorMatcher` — stateless invocation-context matcher
 - `InvocationContext` — value object capturing per-call data
 - `RuntimeDecision` — merged decision: delay + gate + terminal action
@@ -75,7 +75,7 @@ Out of scope:
 | Term                     | Definition                                                                                                                                                                                                     |
 |--------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | **InvocationContext**    | Immutable record built at each instrumentation point: operation type, class names, target name, periodic flag, daemon/virtual thread flags, session ID.                                                        |
-| **ScenarioContribution** | The value returned by `ScenarioController.evaluate()` when all 8 checks pass: carries the controller, effect, sampled delay, and gate timeout.                                                                 |
+| **ScenarioContribution** | The value returned by `ScenarioController.evaluate()` when all 9 checks pass: carries the controller, effect, sampled delay, and gate timeout.                                                                 |
 | **RuntimeDecision**      | Merged output of all matching contributions: accumulated delay, last gate action, highest-precedence terminal action.                                                                                          |
 | **TerminalAction**       | The final action to execute: THROW, RETURN (with value), SUPPRESS, COMPLETE_EXCEPTIONALLY, or CORRUPT_RETURN.                                                                                                  |
 | **TerminalKind**         | Enum discriminating TerminalAction variants.                                                                                                                                                                   |
@@ -99,11 +99,17 @@ CompatibilityValidator.validate(scenario, featureSet)
   — throws ChaosUnsupportedFeatureException on JVM feature mismatch
   — throws ChaosValidationException on selector/effect/operation incompatibility
   ↓
+hookDemand.require(SelectorOperations.of(scenario.selector()))
+  — the instrumentation layer weaves the hook groups serving these operations, once each
+    (no-op for stress selectors and for groups already woven)
+  — a weaving failure fails the activation (failure category INSTRUMENTATION_FAILURE)
+  ↓
 new ScenarioController(scenario, scopeKey, sessionId, clock, observabilityBus, instrumentationSupplier)
   — state = REGISTERED; started = false
   ↓
 ScenarioRegistry.register(controller)
   — atomic ConcurrentHashMap.compute(key, ...)
+  — rebuilds and swaps the immutable operation index (pre-sorted per operation)
   — an existing STOPPED or INACTIVE controller under the key is replaced (and destroyed)
   — throws ChaosActivationException("scenario key already active") if the existing
     controller is REGISTERED or ACTIVE
@@ -130,9 +136,28 @@ return DefaultChaosActivationHandle
 // already registered are destroyed and the exception propagates (the plan is atomic).
 ```
 
+## Dispatch Structure
+
+The entry points the instrumentation layer calls (`before*`, `after*`, `adjust*`, `decorate*`) live in one class per domain, all over one shared evaluation engine:
+
+| Class | Domain |
+|-------|--------|
+| `ThreadDispatch` | thread starts, sleeps, parks, monitor entries, thread-locals; session hand-off between threads |
+| `ExecutorDispatch` | executor submission and worker runs, scheduling, fork-join, queues, futures, shutdown hooks |
+| `MethodDispatch` | entry and exit of the methods a `MethodSelector` names |
+| `ClockDispatch` | clock skew of `System` call sites, `java.time`, the system `Clock`, `java.util.Date` |
+| `RuntimeDispatch` | gc and exit requests, reflection, direct buffers, serialization, class loading, resources, native libraries, zip, JNDI, JMX |
+| `NetworkDispatch` | sockets, socket channels, datagrams, selectors, TLS — with each call's peer and byte count |
+| `DnsDispatch` | forward lookups, their answer, reverse lookups |
+| `FileDispatch` | file reads, writes, opens, closes, maps, transfers, fsync, truncation, deletion, moves |
+| `ProcessDispatch` | child process starts and waits |
+| `ClientDispatch` | HTTP clients, JDBC, messaging, RPC, cache and cloud clients |
+
+`DispatchEngine` holds what every domain shares: the operation index check (`idle`), matching scenarios against an `InvocationContext` (`evaluate`), resolving their contributions to one `RuntimeDecision` (`terminalActionFor`), and carrying it out (`applyPreDecision`, `applyDelayAndGate`, `readCount`). `ChaosDispatcher` composes them; `ChaosRuntime` delegates each entry point to its domain.
+
 ## Per-Invocation Evaluation
 
-`ScenarioController.evaluate(InvocationContext context)` runs 8 checks:
+`ScenarioController.evaluate(InvocationContext context)` runs 9 checks, in the order of [semantics.md §3](semantics.md#3-the-policy-of-one-scenario):
 
 ```
 1. if (!started.get()) return null
@@ -147,24 +172,27 @@ return DefaultChaosActivationHandle
    — Exhaustive sealed switch; stateless; no allocation
    — Checks: operationType in selector.operations(), pattern fields
 
-4. long matched = matchedCount.incrementAndGet()
-   if (!passesActivationWindow()) { state=INACTIVE; reason="expired"; return null }
-   — matchedCount increments even if window check fails
-   — This ensures warm-up counter advances even when the window is expired
+4. if (window() == EXPIRED) { state=INACTIVE; reason="expired"; return null }
+   — activeUntil / activeFor, read from the real clock (L7)
 
-5. if (matched <= activateAfterMatches) return null
-   — Warm-up: skip first N matches
+5. if (window() == NOT_YET) return skipped("notYetActive")
+   — before activeFrom: not counted as a match
 
-6. if (!passesProbability(matched)) return null
-   — new SplittableRandom(baseSeed ^ matched ^ id.hashCode()).nextDouble() < probability
+6. long matched = matchedCount.incrementAndGet()
+   if (matched <= activateAfterMatches) return skipped("warmUp")
+   — every call from here on counts as a match
+
+7. if (!passesProbability(matched)) return skipped("probability")
+   — new SplittableRandom(baseSeed ^ rotl(matched, 32) ^ id.hashCode() * φ).nextDouble() < probability
+   — or, with replayMatches, membership of matched in the replay log
    — checked before the rate limit so permits are only consumed by calls that will apply
 
-7. if (!passesRateLimit()) return null
+8. if (!passesRateLimit()) return skipped("rateLimit")
    — synchronized(this): FIXED window anchored at start(), advanced in whole windows, O(1)
 
-8. if (!reserveApplication()) return null
+9. if (!reserveApplication()) return skipped("maxApplications")
    — maxApplications budget: a reservation, not yet a count
-   — if appliedCount >= maxApplications: state=INACTIVE; reason="max applications reached"
+   — once appliedCount reaches maxApplications: state=INACTIVE; reason="max applications reached"
 
 return new ScenarioContribution(this, scenario, effect, sampleDelayMillis(matched), gateTimeout(), context)
 
@@ -174,7 +202,7 @@ return new ScenarioContribution(this, scenario, effect, sampleDelayMillis(matche
 //   releaseApplication()        — for contributions that lost on precedence: budget returned
 ```
 
-**Note on matchedCount semantics**: `matchedCount` is incremented at step 4, before warm-up, probability and rate-limit checks. This means it reflects the total number of times the selector matched, not the number of times the effect was applied. This is intentional: diagnostics consumers can distinguish "the selector is working" from "the effect is being suppressed by policy."
+**Note on matchedCount semantics**: `matchedCount` is incremented at step 6, after the activation window and before warm-up, probability and rate-limit checks. This means it reflects the total number of times the selector matched, not the number of times the effect was applied. This is intentional: diagnostics consumers can distinguish "the selector is working" from "the effect is being suppressed by policy."
 
 ## RuntimeDecision Merge
 
@@ -203,7 +231,7 @@ Delay composition: multiple delay scenarios stack. Three scenarios each contribu
 
 Gate composition: only the last gate in the sorted contribution list applies. Two gate scenarios = the higher-precedence gate blocks; the lower-precedence gate is ignored. This is a limitation of the current implementation (not a deliberate multi-gate feature).
 
-Terminal action selection: the highest-precedence scenario wins. If two scenarios share the same precedence, the lexicographically first `id` wins (due to the stable sort in `ScenarioRegistry.match()`).
+Terminal action selection: the highest-precedence scenario wins. If two scenarios share the same precedence, the lexicographically first `id` wins (the `ScenarioRegistry` operation index keeps each operation's controllers pre-sorted by descending precedence, then id; `match()` preserves that order and does not sort per call).
 
 ## Decision Execution
 
@@ -227,109 +255,98 @@ Note: `applyPreDecision` is not used for operations that return a value; those o
 
 ## Class Diagram — Core Component Relationships
 
-```plantuml
-@startuml
-class ChaosRuntime {
-  +activate(scenario) : ChaosActivationHandle
-  +openSession(name) : ChaosSession
-  +diagnostics() : ChaosDiagnostics
-  +before*() / after*() / adjust*() / decorate*()
-  -registry : ScenarioRegistry
-  -scopeContext : ScopeContext
-  -observabilityBus : ObservabilityBus
-  -featureSet : FeatureSet
-}
-
-class ScenarioRegistry {
-  +register(controller)
-  +unregister(controller)
-  +match(context) : List<ScenarioContribution>
-  +snapshot() : Snapshot
-  -controllers : ConcurrentHashMap<String, ScenarioController>
-  -failures : ConcurrentLinkedQueue<ActivationFailure>
-}
-
-class ScenarioController {
-  +evaluate(context) : ScenarioContribution
-  +start() / stop() / release() / destroy()
-  -started : AtomicBoolean
-  -matchedCount : AtomicLong
-  -appliedCount : AtomicLong
-  -state : volatile ScenarioState
-  -gate : ManualGate
-  -stressor : volatile ManagedStressor
-  -clockSkewState : volatile ClockSkewState
-}
-
-class SelectorMatcher {
-  +{static} matches(selector, context) : boolean
-}
-
-class InvocationContext {
-  operationType
-  targetClassName
-  subjectClassName
-  targetName
-  periodic
-  daemonThread
-  virtualThread
-  sessionId
-}
-
-class RuntimeDecision {
-  delayMillis
-  gateAction
-  terminalAction
-}
-
-class ScenarioContribution {
-  controller
-  scenario
-  effect
-  delayMillis
-  gateTimeout
-}
-
-ChaosRuntime --> ScenarioRegistry
-ChaosRuntime --> ScopeContext
-ScenarioRegistry "1" *-- "N" ScenarioController
-ScenarioController --> SelectorMatcher
-ScenarioController --> ManualGate
-ScenarioController --> ManagedStressor
-ChaosRuntime ..> InvocationContext : creates
-ScenarioRegistry ..> ScenarioContribution : returns
-ChaosRuntime ..> RuntimeDecision : builds
-@enduml
+```mermaid
+classDiagram
+  class ChaosRuntime {
+    +activate(scenario) : ChaosActivationHandle
+    +openSession(name) : ChaosSession
+    +diagnostics() : ChaosDiagnostics
+    +beforeX() / afterX() / adjustX() / decorateX()
+    -registry : ScenarioRegistry
+    -scopeContext : ScopeContext
+    -observabilityBus : ObservabilityBus
+    -featureSet : FeatureSet
+  }
+  class ScenarioRegistry {
+    +register(controller)
+    +unregister(controller)
+    +match(context) : List~ScenarioContribution~
+    +snapshot() : Snapshot
+    -controllers : ConcurrentHashMap~String, ScenarioController~
+    -index : Map~OperationType, ScenarioController[]~
+    -failures : ConcurrentLinkedQueue~ActivationFailure~
+  }
+  class ScenarioController {
+    +evaluate(context) : ScenarioContribution
+    +start() / stop() / release() / destroy()
+    -started : AtomicBoolean
+    -matchedCount : AtomicLong
+    -appliedCount : AtomicLong
+    -state : ScenarioState
+    -gate : ManualGate
+    -stressor : ManagedStressor
+    -clockSkewState : ClockSkewState
+  }
+  class SelectorMatcher {
+    +matches(selector, context) : boolean$
+  }
+  class InvocationContext {
+    operationType
+    targetClassName
+    subjectClassName
+    targetName
+    periodic
+    daemonThread
+    virtualThread
+    sessionId
+  }
+  class RuntimeDecision {
+    delayMillis
+    gateAction
+    terminalAction
+  }
+  class ScenarioContribution {
+    controller
+    scenario
+    effect
+    delayMillis
+    gateTimeout
+  }
+  ChaosRuntime --> ScenarioRegistry
+  ChaosRuntime --> ScopeContext
+  ScenarioRegistry "1" *-- "N" ScenarioController
+  ScenarioController --> SelectorMatcher
+  ScenarioController --> ManualGate
+  ScenarioController --> ManagedStressor
+  ChaosRuntime ..> InvocationContext : creates
+  ScenarioRegistry ..> ScenarioContribution : returns
+  ChaosRuntime ..> RuntimeDecision : builds
 ```
 
 **Takeaway**: `ChaosRuntime` is a thin orchestrator. The substantive decisions are in `ScenarioController.evaluate()` (policy) and `SelectorMatcher.matches()` (routing).
 
 ## Sequence Diagram — Gate Effect Lifecycle
 
-```plantuml
-@startuml
-participant "Application Thread A" as A
-participant "ChaosRuntime" as CR
-participant "ScenarioController" as SC
-participant "ManualGate" as G
-participant "Test Thread" as T
-
-T -> CR: activate(gateScenario) → handle
-CR -> SC: start()
-SC -> G: reset()
-
-A -> CR: beforeSocketConnect(...)
-CR -> SC: evaluate(context) → contribution with GateEffect
-CR -> G: await(maxBlock)
-note over G: A blocks here
-
-T -> T: observe A is blocked
-T -> SC: handle.release()
-SC -> G: release()
-note over G: A unblocks
-G --> CR: returns
-CR -> A: continues
-@enduml
+```mermaid
+sequenceDiagram
+  participant A as Application Thread A
+  participant CR as ChaosRuntime
+  participant SC as ScenarioController
+  participant G as ManualGate
+  participant T as Test Thread
+  T->>CR: activate(gateScenario) → handle
+  CR->>SC: start()
+  SC->>G: reset()
+  A->>CR: beforeSocketConnect(...)
+  CR->>SC: evaluate(context) → contribution with GateEffect
+  CR->>G: await(maxBlock)
+  Note over G: A blocks here
+  T->>T: observe A is blocked
+  T->>SC: handle.release()
+  SC->>G: release()
+  Note over G: A unblocks
+  G-->>CR: returns
+  CR->>A: continues
 ```
 
 **Takeaway**: `ManualGate` is a reusable barrier backed by `ReentrantLock + Condition`. Each `release()` opens the gate for all currently waiting threads. The gate is auto-reset by `start()` on the next activation.
@@ -376,7 +393,7 @@ Key checks:
 - `ReturnValueCorruptionEffect` requires `MethodSelector` with `METHOD_EXIT` operation
 - `ExceptionInjectionEffect` requires `MethodSelector` with `METHOD_ENTER` operation
 - `ExceptionalCompletionEffect` requires `AsyncSelector`
-- `ClockSkewEffect` requires `JvmRuntimeSelector` with one of: `SYSTEM_CLOCK_MILLIS`, `SYSTEM_CLOCK_NANOS`, `INSTANT_NOW`, `LOCAL_DATE_TIME_NOW`, `ZONED_DATE_TIME_NOW`, or `DATE_NEW`
+- `ClockSkewEffect` requires `JvmRuntimeSelector` with one of: `SYSTEM_CLOCK_MILLIS`, `SYSTEM_CLOCK_NANOS`, `INSTANT_NOW`, `CLOCK_READ`, `LOCAL_DATE_TIME_NOW`, `ZONED_DATE_TIME_NOW`, or `DATE_NEW`
 - Session-scope scenarios may not use JVM-global selectors (clock, GC, exit, class loading, native library)
 - **Destructive effects guard**: `DeadlockEffect` and `ThreadLeakEffect` require `activationPolicy.allowDestructiveEffects() == true`; activation without the flag throws `ChaosActivationException` at registration time
 
@@ -391,7 +408,9 @@ Wraps a single `ThreadLocal<String>` holding the current session ID. Key operati
 
 **Why ThreadLocal and not a method argument**: The session ID must be available at every instrumentation point without changing the signature of any JDK method. `ThreadLocal` is the only transparent carrier for per-thread state in a JVM agent context.
 
-**Limitation**: Session context propagates only to threads that are explicitly wrapped via `session.wrap(task)` or `ScopeContext.wrap(sessionId, task)`. Threads spawned independently (e.g., by third-party libraries) without wrapping do not carry the session ID and will not be affected by session-scoped scenarios.
+**Propagation**: besides explicit wrapping (`session.wrap(task)`, `ScopeContext.wrap(sessionId, task)`) and executor decoration, `SessionHandoff` carries the session across `ForkJoinPool` submissions and forks, `Thread.start()` and virtual threads: the session is recorded against the task or thread (weak, identity-keyed) when it is handed off and bound for the duration of its run. Work handed off from a thread without a session carries none; a `Thread` subclass whose `run()` does not call `super.run()` does not receive the session. A thread started inside a session runs in it for its whole life — except pool workers: a thread a `ThreadPoolExecutor` (or Tomcat's copy) creates in `addWorker`, and every `ForkJoinWorkerThread`, serves many tasks that each carry their submitter's session, so the worker itself inherits none. Other long-lived threads a session starts directly (a Netty event loop started from a test thread, a hand-made worker loop) stay in it.
+
+**Across HTTP**: requests the JDK `HttpClient` or `HttpURLConnection` sends from a thread in a session carry `X-Chaos-Session: <id>` (`ChaosSession.HEADER`) — to internal hosts only: loopback, private and link-local addresses, single-label names and the `.local`, `.localhost`, `.internal`, `.svc` and `.cluster.local` domains, plus the globs of the agent setting `sessionHeaderHosts` (`-Dmacstab.chaos.sessionHeaderHosts`, `MACSTAB_CHAOS_SESSION_HEADER_HOSTS`; `*` for all). A header the caller set is left alone. A server joins it with `controlPlane.bindSession(id)` for the duration of the request — the Spring Boot starters register `ChaosSessionFilter` for that. The header decides every request: a session open in this JVM is bound; an unknown id, a closed session or no header at all runs the request outside any session, masking one the thread may have inherited. Other HTTP clients (OkHttp, Apache, Reactor Netty) do not add the header yet; set it yourself from `session.id()`.
 
 ## ManualGate
 
@@ -418,7 +437,7 @@ Mode semantics:
 
 `ClockSkewState` is `volatile` in `ScenarioController`. On `stop()`, it is set to `null`; `applyClockSkew()` in `ChaosRuntime` checks for null before calling state methods.
 
-`applyClockSkew()` is the single generalised entry point that handles all six clock operation types: `SYSTEM_CLOCK_MILLIS`, `SYSTEM_CLOCK_NANOS`, `INSTANT_NOW`, `LOCAL_DATE_TIME_NOW`, `ZONED_DATE_TIME_NOW`, and `DATE_NEW`. Only `SYSTEM_CLOCK_NANOS` routes through the nanosecond skew channel; every other type routes through the millisecond channel. The higher-level type-specific wrappers (`adjustInstantNow`, `adjustLocalDateTimeNow`, `adjustZonedDateTimeNow`, `adjustDateNew`) each extract the underlying millisecond value, pass it to `applyClockSkew()` with the appropriate `OperationType`, then reconstruct the high-level time object — preserving zone identity for `ZonedDateTime` and nanosecond sub-millisecond precision for `Instant`.
+`applyClockSkew()` is the single generalised entry point that handles all seven clock operation types: `SYSTEM_CLOCK_MILLIS`, `SYSTEM_CLOCK_NANOS`, `INSTANT_NOW`, `CLOCK_READ`, `LOCAL_DATE_TIME_NOW`, `ZONED_DATE_TIME_NOW`, and `DATE_NEW`. Only `SYSTEM_CLOCK_NANOS` routes through the nanosecond skew channel; every other type routes through the millisecond channel. The higher-level type-specific wrappers (`adjustInstantNow`, `adjustLocalDateTimeNow`, `adjustZonedDateTimeNow`, `adjustDateNew`) each extract the underlying millisecond value, pass it to `applyClockSkew()` with the appropriate `OperationType`, then reconstruct the high-level time object — preserving zone identity for `ZonedDateTime` and nanosecond sub-millisecond precision for `Instant`.
 
 Test coverage: `ClockSkewRuntimeTest$HigherLevelTimeApis` (8 tests) covers FIXED skew on `Instant.now`, `LocalDateTime.now`, `ZonedDateTime.now`, and `Date`; FREEZE mode on `Instant.now`; isolation between `INSTANT_NOW` and `DATE_NEW` operation types; and passthrough when no scenario matches.
 
@@ -627,9 +646,13 @@ JVM-scoped controllers are NOT removed on session close. They stay registered un
 
 # 11. Performance Model
 
+## Scenario Lookup Cost
+
+`ScenarioRegistry.match()` reads the immutable operation index once and evaluates only the controllers whose selector names the intercepted operation, in their pre-sorted order — scenarios for other operations cost nothing and nothing is sorted per call. Clock-skew reads use the same index and return immediately when no scenario names the clock operation.
+
 ## Selector Matching Cost
 
-`SelectorMatcher.matches()` is a sealed-hierarchy switch. Each case is at most 3–4 field comparisons and `Pattern.matches()` calls. For simple string patterns (exact match), this is sub-microsecond. For regex patterns, the cost depends on the regex complexity.
+`SelectorMatcher.matches()` is a sealed-hierarchy switch. Each case is at most 3–4 field comparisons and `NamePattern.matches()` calls. For simple string patterns (exact match), this is sub-microsecond. GLOB patterns are matched by an allocation-free wildcard matcher over code points, with no regex. For regex patterns, the cost depends on the regex complexity, and each match allocates a `Matcher`.
 
 **Recommendation**: Use exact class name matches or simple prefix patterns rather than complex regexes in performance-sensitive scenarios.
 
@@ -680,7 +703,7 @@ Key invariants enforced at construction time by the builder API or `Compatibilit
 
 **Hot path**: See Section 4 for the full call sequence from `ChaosRuntime.before*()` to `evaluate()` to decision execution.
 
-**JVM layer**: `AtomicBoolean.get()`, `AtomicLong.incrementAndGet()`, `AtomicLong.compareAndSet()` — all mapped to x86 `LOCK CMPXCHG` / `LOCK XADD` instructions. `ConcurrentHashMap.values().stream()` — no lock acquisition on the map's read path in JDK 17+.
+**JVM layer**: `AtomicBoolean.get()`, `AtomicLong.incrementAndGet()`, `AtomicLong.compareAndSet()` — all mapped to x86 `LOCK CMPXCHG` / `LOCK XADD` instructions. `ScenarioRegistry.match()` — one `volatile` read of the immutable operation index; no lock, no stream.
 
 **OS layer**: `Thread.sleep(delayMillis)` → `nanosleep(2)` on Linux. `synchronized(this)` → OS mutex via HotSpot's biased locking / lightweight locking / inflated lock stack depending on contention level.
 
@@ -694,7 +717,7 @@ Key invariants enforced at construction time by the builder API or `Compatibilit
 - Reference: JSR-133 — Java Memory Model §17.4 — happens-before rules for `volatile` reads/writes
 - Reference: Java SE API — `java.util.concurrent.atomic.AtomicBoolean`, `AtomicLong` — https://docs.oracle.com/en/java/docs/api/java.base/java/util/concurrent/atomic/AtomicLong.html
 - Reference: Java SE API — `java.util.concurrent.ConcurrentHashMap` (lock-free read via segment traversal) — https://docs.oracle.com/en/java/docs/api/java.base/java/util/concurrent/ConcurrentHashMap.html
-- Reference: Java SE API — `java.util.SplittableRandom` (not thread-safe; xorshift-based non-linear PRNG) — https://docs.oracle.com/en/java/docs/api/java.base/java/util/SplittableRandom.html
+- Reference: Java SE API — `java.util.SplittableRandom` (not thread-safe; SplitMix64) — https://docs.oracle.com/en/java/docs/api/java.base/java/util/SplittableRandom.html
 - Reference: JSR-133 — Java Memory Model §17.4 — happens-before rules for `volatile` reads/writes — https://jcp.org/aboutJava/communityprocess/mrel/jsr133/index.html
 - Reference: JLS §17.7 — Non-atomic treatment of double and long; `volatile long` guarantees — https://docs.oracle.com/javase/specs/jls/se21/html/jls-17.html#jls-17.7
 - Reference: Java SE API — `java.util.concurrent.locks.ReentrantLock`, `Condition.await(timeout, unit)` — https://docs.oracle.com/en/java/docs/api/java.base/java/util/concurrent/locks/ReentrantLock.html

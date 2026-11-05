@@ -1,1 +1,2 @@
 com.macstab.chaos.jvm.spring.boot.common.ChaosAutoConfiguration
+com.macstab.chaos.jvm.spring.boot.common.ChaosSessionPropagationAutoConfiguration

@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.macstab.chaos.jvm.api.NamePattern.MatchMode;
+import java.util.SplittableRandom;
+import java.util.regex.Pattern;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -320,6 +322,65 @@ class NamePatternTest {
           .isInstanceOf(IllegalArgumentException.class);
       assertThatThrownBy(() -> new NamePattern(MatchMode.REGEX, ""))
           .isInstanceOf(IllegalArgumentException.class);
+    }
+  }
+
+  @Nested
+  @DisplayName("GLOB matching without regex")
+  class GlobEquivalence {
+
+    @Test
+    @DisplayName("agrees with the regex the glob compiles to on random globs and candidates")
+    void agreesWithRegex() {
+      final SplittableRandom random = new SplittableRandom(42L);
+      for (int round = 0; round < 20_000; round++) {
+        final String glob = randomString(random, "ab.*?\\", 1 + random.nextInt(7));
+        if (glob.isBlank()) {
+          continue;
+        }
+        final String candidate = randomString(random, "ab.x\\\n\u2028", random.nextInt(9));
+        assertThat(NamePattern.glob(glob).matches(candidate))
+            .as("glob %s against %s", glob, candidate)
+            .isEqualTo(referenceRegex(glob).matcher(candidate).matches());
+      }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"a\nb", "a\rb", "a\u2028b", "a\uD83D\uDE00b", "\uD83D"})
+    @DisplayName(
+        "'*' and '?' match line terminators; '?' matches a surrogate pair as one character")
+    void specialCandidates(final String candidate) {
+      for (final String glob : new String[] {"a*b", "a?b", "*", "?", "a*", "*b"}) {
+        assertThat(NamePattern.glob(glob).matches(candidate))
+            .as("glob %s against %s", glob, candidate)
+            .isEqualTo(referenceRegex(glob).matcher(candidate).matches());
+      }
+    }
+
+    private static String randomString(
+        final SplittableRandom random, final String alphabet, final int length) {
+      final StringBuilder builder = new StringBuilder(length);
+      for (int i = 0; i < length; i++) {
+        builder.append(alphabet.charAt(random.nextInt(alphabet.length())));
+      }
+      return builder.toString();
+    }
+
+    /**
+     * The definition of the GLOB semantics: the DOTALL regex in which '*' is {@code .*} and '?' is
+     * {@code .}, which Java reads as one code point.
+     */
+    private static Pattern referenceRegex(final String glob) {
+      final StringBuilder builder = new StringBuilder("^");
+      for (int i = 0; i < glob.length(); i++) {
+        final char c = glob.charAt(i);
+        switch (c) {
+          case '*' -> builder.append(".*");
+          case '?' -> builder.append('.');
+          default -> builder.append(Pattern.quote(String.valueOf(c)));
+        }
+      }
+      return Pattern.compile(builder.append('$').toString(), Pattern.DOTALL);
     }
   }
 }

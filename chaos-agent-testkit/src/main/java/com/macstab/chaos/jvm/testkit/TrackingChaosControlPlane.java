@@ -12,6 +12,7 @@ import java.util.Deque;
 import java.util.Iterator;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Test-scoped decorator around a JVM-wide {@link ChaosControlPlane} that tracks every handle
@@ -77,6 +78,11 @@ public final class TrackingChaosControlPlane implements ChaosControlPlane {
   }
 
   @Override
+  public boolean removeEventListener(final ChaosEventListener listener) {
+    return delegate.removeEventListener(listener);
+  }
+
+  @Override
   public void close() {
     // See class javadoc: delegate is JVM-wide; closing it would affect other tests. The extension
     // relies exclusively on stopTracked() to release handles issued during this test.
@@ -130,5 +136,10 @@ public final class TrackingChaosControlPlane implements ChaosControlPlane {
           exception,
           () -> "chaos-agent: failed to stop JVM-scoped handle during test teardown");
     }
+  }
+
+  @Override
+  public ChaosSession.ScopeBinding bindSession(final @Nullable String sessionId) {
+    return delegate.bindSession(sessionId);
   }
 }

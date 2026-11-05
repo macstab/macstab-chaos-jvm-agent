@@ -56,6 +56,11 @@ public final class ChaosPlanMapper {
 
   private ChaosPlanMapper() {}
 
+  /** The configured mapper: the plan schema is derived from it ({@code PlanSchemaTest}). */
+  static ObjectMapper objectMapper() {
+    return OBJECT_MAPPER;
+  }
+
   private static ObjectMapper buildObjectMapper() {
     final JsonFactory factory =
         JsonFactory.builder()
@@ -65,7 +70,7 @@ public final class ChaosPlanMapper {
                     .maxStringLength(MAX_STRING_LENGTH)
                     .build())
             .build();
-    return JsonMapper.builder(factory)
+    return ApiJsonMixins.register(JsonMapper.builder(factory))
         .addModule(new JavaTimeModule())
         .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
         .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
@@ -95,11 +100,26 @@ public final class ChaosPlanMapper {
               + " UTF-8 bytes provided)",
           SOURCE_JSON_INPUT);
     }
+    final ChaosPlan plan;
     try {
-      return OBJECT_MAPPER.readValue(json, ChaosPlan.class);
+      plan = OBJECT_MAPPER.readValue(json, ChaosPlan.class);
     } catch (JsonProcessingException exception) {
-      throw new ConfigLoadException(parseFailureMessage(exception), SOURCE_JSON_INPUT, exception);
+      final com.fasterxml.jackson.core.JsonLocation location = exception.getLocation();
+      final boolean positioned = location != null && location.getLineNr() > 0;
+      throw new ConfigLoadException(
+          parseFailureMessage(exception),
+          SOURCE_JSON_INPUT,
+          exception,
+          positioned ? location.getLineNr() : 0,
+          positioned ? location.getColumnNr() : 0,
+          parseFailureReason(exception));
     }
+    // Jackson maps the JSON literal null to a null value rather than failing.
+    if (plan == null) {
+      throw new ConfigLoadException(
+          "chaos plan JSON is null; expected an object with \"scenarios\"", SOURCE_JSON_INPUT);
+    }
+    return plan;
   }
 
   /**
@@ -129,6 +149,18 @@ public final class ChaosPlanMapper {
     return message.toString();
   }
 
+  /** The failure without its position: the kind and, for mapping failures, the JSON path. */
+  static String parseFailureReason(final JsonProcessingException exception) {
+    final StringBuilder reason = new StringBuilder(failureKind(exception));
+    if (exception instanceof com.fasterxml.jackson.databind.JsonMappingException mapping) {
+      final String path = jsonPath(mapping);
+      if (!path.isEmpty()) {
+        reason.append(" at ").append(path);
+      }
+    }
+    return reason.toString();
+  }
+
   private static String failureKind(final JsonProcessingException exception) {
     if (exception
         instanceof com.fasterxml.jackson.databind.exc.UnrecognizedPropertyException unrecognized) {
@@ -149,7 +181,9 @@ public final class ChaosPlanMapper {
     if (exception instanceof com.fasterxml.jackson.databind.exc.MismatchedInputException) {
       return "value of the wrong type";
     }
-    if (exception instanceof com.fasterxml.jackson.core.JsonParseException) {
+    // A syntax error inside a value being bound arrives wrapped in a mapping exception.
+    if (exception instanceof com.fasterxml.jackson.core.JsonParseException
+        || exception.getCause() instanceof com.fasterxml.jackson.core.JsonParseException) {
       return "malformed JSON";
     }
     return exception.getClass().getSimpleName();
@@ -158,8 +192,16 @@ public final class ChaosPlanMapper {
   private static String jsonPath(
       final com.fasterxml.jackson.databind.JsonMappingException mapping) {
     final StringBuilder path = new StringBuilder();
+    java.util.List<com.fasterxml.jackson.databind.JsonMappingException.Reference> references =
+        mapping.getPath();
+    if (mapping instanceof com.fasterxml.jackson.databind.exc.UnrecognizedPropertyException
+        && !references.isEmpty()) {
+      // The last reference is the unknown property itself, which the kind already names: the
+      // path is the object that holds it.
+      references = references.subList(0, references.size() - 1);
+    }
     for (final com.fasterxml.jackson.databind.JsonMappingException.Reference reference :
-        mapping.getPath()) {
+        references) {
       if (reference.getFieldName() != null) {
         if (!path.isEmpty()) {
           path.append('.');
@@ -223,5 +265,52 @@ public final class ChaosPlanMapper {
     } catch (JsonProcessingException exception) {
       throw new IllegalStateException("failed to serialize chaos plan", exception);
     }
+  }
+
+  /**
+   * Serialises any value the plan model and diagnostics consist of (records, enums, durations,
+   * instants) to compact JSON, with the same conventions as plans.
+   *
+   * @param value the value
+   * @return JSON
+   * @throws IllegalStateException if serialisation fails (indicates a bug)
+   */
+  public static String toJson(final Object value) {
+    try {
+      return OBJECT_MAPPER.writeValueAsString(value);
+    } catch (JsonProcessingException exception) {
+      throw new IllegalStateException(
+          "failed to serialize " + value.getClass().getName(), exception);
+    }
+  }
+
+  /**
+   * Reads a plan, a single scenario or an array of scenarios, recognised by the JSON's structure
+   * (an object with a {@code scenarios} member is a plan). Scenarios are wrapped in a plan named
+   * {@code planName}.
+   *
+   * @param json the JSON
+   * @param planName the name of the plan wrapping bare scenarios
+   * @return the plan
+   * @throws ConfigLoadException if the JSON is malformed or invalid
+   */
+  public static ChaosPlan readPlanOrScenarios(final String json, final String planName) {
+    final com.fasterxml.jackson.databind.JsonNode tree;
+    try {
+      tree = OBJECT_MAPPER.readTree(json);
+    } catch (JsonProcessingException exception) {
+      return read(json); // reports the syntax error with its position
+    }
+    if (tree != null && tree.isObject() && tree.has("scenarios")) {
+      return read(json);
+    }
+    final com.fasterxml.jackson.databind.node.ObjectNode plan = OBJECT_MAPPER.createObjectNode();
+    plan.putObject("metadata").put("name", planName);
+    if (tree != null && tree.isArray()) {
+      plan.set("scenarios", tree);
+    } else {
+      plan.putArray("scenarios").add(tree);
+    }
+    return read(plan.toString());
   }
 }

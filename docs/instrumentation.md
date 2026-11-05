@@ -9,7 +9,7 @@
 
 # chaos-agent-instrumentation-jdk — Instrumentation Layer Reference
 
-> Internal reference for the bootstrap bridge, ByteBuddy advice classes, reentrancy guard, and the 58-handle interception surface.
+> Internal reference for the bootstrap bridge, ByteBuddy advice classes, reentrancy guard, and the 64-handle interception surface.
 > 
 > *Engineered by* **[Christian Schnapka](https://macstab.com)** — Embedded Principal+ Engineer · [Macstab GmbH](https://macstab.com) · Hamburg, Germany
 
@@ -22,19 +22,20 @@
 `chaos-agent-instrumentation-jdk` is the adapter between ByteBuddy's advice model and `ChaosRuntime`'s normalized dispatch API. Its responsibilities:
 
 1. Package `BootstrapDispatcher` into a temp JAR and append it to the bootstrap classpath
-2. Build a 58-slot `MethodHandle[]` array and wire it into `BootstrapDispatcher` via reflection
-3. Assemble an `AgentBuilder` covering all Phase 1 and Phase 2 interception points and install it
+2. Build a 77-slot `MethodHandle[]` array and wire it into `BootstrapDispatcher` via reflection
+3. Register a `HookDemand` callback on the runtime and weave each hook group (one `AgentBuilder` installation per `HookGroup`) the first time a scenario needs one of its operations — or every group at once in `eager` mode
 
-After installation, this module has no further runtime role. All runtime execution paths go through `BootstrapDispatcher` → `ChaosBridge` → `ChaosRuntime`.
+Apart from weaving hook groups on demand, this module has no further runtime role. All runtime execution paths go through `BootstrapDispatcher` → `ChaosBridge` → `ChaosRuntime`.
 
 ## Scope
 
 In scope:
 - `JdkInstrumentationInstaller` — entry point; orchestrates all startup steps
-- `BootstrapDispatcher` — bootstrap-classloader-resident static dispatcher (58 dispatch methods + reentrancy guard and call-depth scopes)
-- `BridgeDelegate` — interface defining the 58-method contract
+- `BootstrapDispatcher` — bootstrap-classloader-resident static dispatcher (77 handle slots + reentrancy guard and call-depth scopes)
+- `ChannelBuffers` — bootstrap-resident shaping of a channel call's buffers (single, scattering, gathering): limits for torn and trickled calls, the bit flip of a corrupted read
+- `BridgeDelegate` — interface defining the 64-method contract
 - `ChaosBridge` — agent-classloader implementation of `BridgeDelegate`; thin delegation to `ChaosRuntime`
-- All `@Advice` classes for Phase 1 and Phase 2 interception points
+- All `@Advice` classes, grouped into `JdkInstrumentationInstaller.HookGroup`s
 - `ScheduledCallableWrapper`, `ScheduledRunnableWrapper` — task wrappers for tick-level interception
 
 Out of scope:
@@ -67,7 +68,7 @@ The agent reflects into and instruments classes in non-exported JDK internal pac
 | Attach path                                                                     | Mechanism                                            | Where                                                                                              |
 |---------------------------------------------------------------------------------|------------------------------------------------------|----------------------------------------------------------------------------------------------------|
 | `-javaagent:` (premain at JVM startup)                                          | `Add-Opens` attribute in agent JAR `MANIFEST.MF`     | `chaos-agent-bootstrap/build.gradle.kts`                                                           |
-| `agentmain` / dynamic attach / `ByteBuddyAgent.install()` (runtime self-attach) | `Instrumentation.redefineModule(module, …, opens=…)` | `JdkInstrumentationInstaller#grantInternalModuleOpens`, called as the first step of `install(...)` |
+| `agentmain` / dynamic attach / `ByteBuddyAgent.install()` (runtime self-attach) | `Instrumentation.redefineModule(module, …, opens=…)` | `ModuleOpener#grantInternalModuleOpens`, called as the first step of `install(...)` |
 
 Both mechanisms grant the same set of opens to the unnamed module of the system classloader (matching `=ALL-UNNAMED`):
 
@@ -79,7 +80,7 @@ Both mechanisms grant the same set of opens to the unnamed module of the system 
 | `java.base/sun.nio.ch`                | `DirectBuffer.cleaner()` reflection (`DirectBufferPressureStressor`).                         |
 | `java.base/jdk.internal.ref`          | Modern `Cleaner` mechanism (Java 9+ replacement for `sun.misc.Cleaner`).                      |
 
-**Adding a new internal**: when a new feature requires access to another non-exported package, add it to **both** the manifest in `chaos-agent-bootstrap/build.gradle.kts` and the list inside `JdkInstrumentationInstaller#grantInternalModuleOpens`. Same pattern applies if a new advice class references additional helper types: those types must be injected into the bootstrap classloader from `injectBridge(...)` (see `ChaosHttpSuppressException` and `HttpUrlExtractor` for prior art).
+**Adding a new internal**: when a new feature requires access to another non-exported package, add it to **both** the manifest in `chaos-agent-bootstrap/build.gradle.kts` and the list inside `ModuleOpener#grantInternalModuleOpens`. Same pattern applies if a new advice class references additional helper types: those types must be injected into the bootstrap classloader from `injectBridge(...)` (see `ChaosHttpSuppressException` and `HttpUrlExtractor` for prior art).
 
 ---
 
@@ -90,13 +91,13 @@ Both mechanisms grant the same set of opens to the unnamed module of the system 
 | **Bootstrap classloader** | The JVM root classloader; loads `java.*`, `javax.*`. Has no parent. Can only see classes from `rt.jar`/`java.base` and explicitly appended JARs.                                                                                                         |
 | **Agent classloader**     | The classloader created for the agent JAR. Has the bootstrap classloader as parent (indirect). Can see all agent classes.                                                                                                                                |
 | **Advice class**          | A ByteBuddy concept: a class containing `@Advice.OnMethodEnter` and/or `@Advice.OnMethodExit` static methods, whose bytecode is inlined into the instrumented method. Not a real class instantiation at runtime — the advice body is copied as bytecode. |
-| **BootstrapDispatcher**   | A class that must be visible to the bootstrap classloader. Provides 58 static dispatch methods called from advice.                                                                                                                                       |
-| **BridgeDelegate**        | Interface in the agent classloader defining the 58-method contract. Implemented by `ChaosBridge`.                                                                                                                                                        |
+| **BootstrapDispatcher**   | A class that must be visible to the bootstrap classloader. Provides 64 static dispatch methods called from advice.                                                                                                                                       |
+| **BridgeDelegate**        | Interface in the agent classloader defining the 64-method contract. Implemented by `ChaosBridge`.                                                                                                                                                        |
 | **MethodHandle**          | A typed reference to a method, invokable across classloader boundaries. Built from the agent classloader; stored in `BootstrapDispatcher.handles[]`.                                                                                                     |
 | **DEPTH guard**           | `ThreadLocal<int[]>` in `BootstrapDispatcher`. Prevents infinite recursion when chaos code calls instrumented JDK methods.                                                                                                                               |
-| **Phase 1**               | Instrumentation installed in both premain and agentmain: `ThreadPoolExecutor`, `Thread`, `ScheduledThreadPoolExecutor`.                                                                                                                                  |
-| **Phase 2**               | Instrumentation installed in premain only: all bootstrap-loaded JDK classes requiring retransformation.                                                                                                                                                  |
-| **Retransformation**      | Replacing the bytecode of an already-loaded class. Requires `Can-Retransform-Classes: true` in the agent manifest and premain-mode attachment.                                                                                                           |
+| **Hook group**            | A `JdkInstrumentationInstaller.HookGroup`: related interception points (e.g. `SOCKET`, `JDBC`) tagged with the `OperationType`s they serve. Woven once, on the first activation needing them (or at start when eager); stays woven until uninstall.      |
+| **HookDemand**            | Callback (`chaos-agent-core`) registered on the runtime by the installer. The control plane calls `require(operations)` before a scenario starts or a session opens; the installer weaves the groups not yet woven.                                      |
+| **Retransformation**      | Replacing the bytecode of an already-loaded class. Requires `Can-Retransform-Classes: true` in the agent manifest. Used for every hook group in every attach mode (`-javaagent:`, dynamic attach, self-attach).                                          |
 
 ---
 
@@ -105,13 +106,14 @@ Both mechanisms grant the same set of opens to the unnamed module of the system 
 ## Agent Startup Sequence
 
 ```
-JdkInstrumentationInstaller.install(instrumentation, runtime, premainMode)
+JdkInstrumentationInstaller.install(instrumentation, runtime, eager)
   ↓
-0. grantInternalModuleOpens(instrumentation)   — see Module access strategy
+0. ModuleOpener.grantInternalModuleOpens(instrumentation)   — see Module access strategy
 
-1. injectBridge(instrumentation)   (once per JVM)
+1. BridgeInjector.injectBridge(instrumentation)   (once per JVM)
    — Read BootstrapDispatcher.class bytes from agent JAR resources
-   — Read BootstrapDispatcher$ThrowingSupplier.class bytes (and helper types)
+   — Read the types woven advice references (ScheduledRunnableWrapper,
+     ScheduledCallableWrapper, API exceptions, helper types)
    — Write them into a temp JAR at java.io.tmpdir (0600 on POSIX)
    — instrumentation.appendToBootstrapClassLoaderSearch(new JarFile(tempJar))
    — On POSIX the file is unlinked right away (the open JarFile keeps it readable);
@@ -124,22 +126,29 @@ JdkInstrumentationInstaller.install(instrumentation, runtime, premainMode)
      only one copy of the agent can be active per JVM
 
 2. installDelegate(new ChaosBridge(runtime))
-   — buildMethodHandles(): 58 MethodHandle[] via MethodHandles.publicLookup() against BridgeDelegate
+   — buildMethodHandles(): 77 MethodHandle[] via MethodHandles.publicLookup() against BridgeDelegate
    — Class.forName("...BootstrapDispatcher", true, null)  // null CL = bootstrap CL
    — bootstrapDispatcherClass.getMethod("install", Object.class, MethodHandle[].class)
                               .invoke(null, bridgeDelegate, mh)
    → handles written before delegate (two-field safe publication)
 
-3. AgentBuilder construction
-   — Phase 1: ThreadPoolExecutor, Thread, ScheduledThreadPoolExecutor (always)
-   — Phase 2: System, Runtime, LockSupport, AQS, NIO, Socket, BlockingQueue,
-             CompletableFuture, ClassLoader, etc. (premainMode only)
+3. runtime.setHookDemand(...)
+   — registers the HookDemand callback: require(operations) → weave(instrumentation, operations)
+   — eager == true: weave every hook group now (the 1.x behaviour)
+   — eager == false (default): nothing is woven yet; JDK classes stay unmodified
+   — If this step throws, uninstall() resets woven groups and clears the delegate
 
-4. agentBuilder.installOn(instrumentation)
+Later, on scenario activation / session open:
+ChaosControlPlane → HookDemand.require(SelectorOperations.of(selector))
+  ↓
+4. weave(instrumentation, operations)   (serialised; each group at most once)
+   — for every HookGroup serving one of the operations and not yet woven:
+       group.apply(baseAgentBuilder).installOn(instrumentation)
+       → its own ResettableClassFileTransformer, kept until uninstall()
    — RETRANSFORMATION strategy: retransforms already-loaded JDK classes
    — disableClassFormatChanges(): no structural changes; only adds advice bytecode inline
    — Error listener: logs warnings on per-class transformation failure; does not abort
-   — If installOn() throws, uninstall() resets the transformer and clears the delegate
+   — If installOn() throws, the activation fails (failure category INSTRUMENTATION_FAILURE)
 ```
 
 ## Per-Call Dispatch (hot path)
@@ -149,10 +158,11 @@ Instrumented method fires @Advice.OnMethodEnter
   ↓
 Advice calls BootstrapDispatcher.someDispatchMethod(...)  [static call, visible from bootstrap CL]
   ↓
-BootstrapDispatcher.invoke(supplier, fallback):
-  if (DEPTH.get() > 0):
+BootstrapDispatcher.someDispatchMethod(...)   (guard inlined in every method):
+  int[] depth = DEPTH.get()
+  if (depth[0] > 0):
     return fallback    // reentrancy: return safe default immediately
-  DEPTH.set(DEPTH.get() + 1)
+  depth[0]++
   try:
     snapshot: MethodHandle[] h = handles; Object d = delegate;
     if (d == null || h == null): return fallback   // not yet installed
@@ -168,7 +178,7 @@ BootstrapDispatcher.invoke(supplier, fallback):
 
 ## ThreadLocal Reentrancy Special Case
 
-`ThreadLocal.get()` and `ThreadLocal.set()` are globally instrumented in Phase 2. The DEPTH guard itself uses `DEPTH.get()`, which is a `ThreadLocal.get()` call. Without a special check, this would create infinite recursion: `ThreadLocal.get()` → advice → `BootstrapDispatcher.beforeThreadLocalGet()` → `invoke()` → `DEPTH.get()` → `ThreadLocal.get()` → ...
+`ThreadLocal.get()` and `ThreadLocal.set()` are globally instrumented once the `THREAD_LOCAL` hook group is woven. The DEPTH guard itself uses `DEPTH.get()`, which is a `ThreadLocal.get()` call. Without a special check, this would create infinite recursion: `ThreadLocal.get()` → advice → `BootstrapDispatcher.beforeThreadLocalGet()` → `DEPTH.get()` → `ThreadLocal.get()` → ...
 
 The special case in `ThreadLocalGetAdvice.onEnter()`:
 ```java
@@ -183,85 +193,76 @@ This identity check fires before any delegation. When `DEPTH` reads itself, the 
 
 ## Bootstrap Bridge Architecture
 
-```plantuml
-@startuml
-node "Bootstrap ClassLoader" {
-  rectangle "JDK classes\n(java.lang.Thread,\njava.net.Socket, etc.)" as JDK
-  rectangle "BootstrapDispatcher\n(injected via temp JAR)\n\nvolatile Object delegate\nvolatile MethodHandle[] handles\nThreadLocal<int[]> DEPTH" as BD
-}
-
-node "Agent ClassLoader" {
-  rectangle "ChaosBridge\nimplements BridgeDelegate" as CB
-  rectangle "ChaosRuntime" as CR
-}
-
-JDK --> BD : "@Advice static call\n(Bootstrap-visible)"
-BD --> CB : "handles[N].invoke(delegate, args)\n(MethodHandle cross-CL call)"
-CB --> CR : "direct method call\n(same classloader)"
-
-note bottom of BD
-  Two-field safe publication:
-  handles written BEFORE delegate.
-  null-check on both before dispatch.
-end note
-@enduml
+```mermaid
+flowchart TB
+  subgraph g1["Bootstrap ClassLoader"]
+    JDK["JDK classes<br/>(java.lang.Thread,<br/>java.net.Socket, etc.)"]
+    BD["BootstrapDispatcher<br/>(injected via temp JAR)<br/><br/>volatile Object delegate<br/>volatile MethodHandle[] handles<br/>ThreadLocal<int[]> DEPTH"]
+  end
+  subgraph g2["Agent ClassLoader"]
+    CB["ChaosBridge<br/>implements BridgeDelegate"]
+    CR["ChaosRuntime"]
+  end
+  JDK -->|""@Advice static call<br/>(Bootstrap-visible)""| BD
+  BD -->|""handles[N].invoke(delegate, args)<br/>(MethodHandle cross-CL call)""| CB
+  CB -->|""direct method call<br/>(same classloader)""| CR
+  note3["Two-field safe publication:<br/>handles written BEFORE delegate.<br/>null-check on both before dispatch."]
+  note3 -.- BD
 ```
 
 **Takeaway**: The only crossing of the classloader boundary is via `MethodHandle.invoke()`. No class cast is performed across classloaders. Type erasure (`Object` typed parameters) absorbs the type mismatch.
 
-## Phase 1 vs Phase 2 Interception Map
+## Interception Map
 
-```plantuml
-@startuml
-rectangle "Phase 1 (premain + agentmain)" {
-  [Thread.start() / start(ThreadContainer)]
-  [VirtualThread.start() / start(ThreadContainer)]
-  [ThreadPoolExecutor.execute()]
-  [ThreadPoolExecutor.beforeExecute()]
-  [ThreadPoolExecutor.shutdown()]
-  [ThreadPoolExecutor.awaitTermination()]
-  [ScheduledThreadPoolExecutor.schedule*()] 
-  [ScheduledCallableWrapper / ScheduledRunnableWrapper (tick)]
-}
-
-rectangle "Phase 2 (premain only)" {
-  [BlockingQueue.put/take/offer/poll]
-  [CompletableFuture.complete/completeExceptionally/cancel]
-  [ClassLoader.loadClass/getResource]
-  [ClassLoader.defineClass]
-  [Runtime.addShutdownHook/removeShutdownHook]
-  [ForkJoinTask.doExec]
-  [System.gc]
-  [Runtime.exit/halt (System.exit delegates to Runtime.exit)]
-  [Method.invoke]
-  [ByteBuffer.allocateDirect]
-  [ObjectInputStream.readObject]
-  [ObjectOutputStream.writeObject]
-  [LockSupport.park/parkNanos/parkUntil]
-  [AQS.acquire]
-  [Selector.select/select(long)/selectNow + Consumer overloads]
-  [Thread.sleep(long)/sleep(long,int)/sleep(Duration)]
-  [SSLSocket.startHandshake (explicit + implicit)/SSLEngine.beginHandshake]
-  [SocketChannel.connect/read/write]
-  [ServerSocketChannel.accept]
-  [Socket.connect/close]
-  [ServerSocket.accept]
-  [SocketInputStream.read]
-  [SocketOutputStream.write]
-  [Inflater.inflate]
-  [Deflater.deflate]
-  [ThreadLocal.get/set]
-  [InitialContext.lookup]
-  [MBeanServer.invoke/getAttribute]
-  [Runtime.loadLibrary0]
-  [Instant.now()]
-  [LocalDateTime.now() / now(ZoneId)]
-  [ZonedDateTime.now() / now(ZoneId)]
-  [Date() constructor]
-  [HttpClientImpl.send/sendAsync, OkHttp 3/4, Apache HC 4/5, Reactor Netty]
-  [JDBC pools, Statement/PreparedStatement execute*, Connection prepare/commit/rollback]
-}
-@enduml
+```mermaid
+flowchart TB
+  subgraph g1["Executor and thread hook groups"]
+    n2["Thread.start() / start(ThreadContainer)"]
+    n3["VirtualThread.start() / start(ThreadContainer)"]
+    n4["ThreadPoolExecutor.execute()"]
+    n5["ThreadPoolExecutor.beforeExecute()"]
+    n6["ThreadPoolExecutor.shutdown()"]
+    n7["ThreadPoolExecutor.awaitTermination()"]
+    n8["ScheduledThreadPoolExecutor.schedule*()"]
+    n9["ScheduledCallableWrapper / ScheduledRunnableWrapper (tick)"]
+  end
+  subgraph g10["JDK and library hook groups"]
+    n11["BlockingQueue.put/take/offer/poll"]
+    n12["CompletableFuture.complete/completeExceptionally/cancel"]
+    n13["ClassLoader.loadClass/getResource"]
+    n14["ClassLoader.defineClass"]
+    n15["Runtime.addShutdownHook/removeShutdownHook"]
+    n16["ForkJoinTask.doExec"]
+    n17["System.gc"]
+    n18["Runtime.exit/halt (System.exit delegates to Runtime.exit)"]
+    n19["Method.invoke"]
+    n20["ByteBuffer.allocateDirect"]
+    n21["ObjectInputStream.readObject"]
+    n22["ObjectOutputStream.writeObject"]
+    n23["LockSupport.park/parkNanos/parkUntil"]
+    n24["AQS.acquire"]
+    n25["Selector.select/select(long)/selectNow + Consumer overloads"]
+    n26["Thread.sleep(long)/sleep(long,int)/sleep(Duration)"]
+    n27["SSLSocket.startHandshake (explicit + implicit)/SSLEngine.beginHandshake"]
+    n28["SocketChannel.connect/read/write"]
+    n29["ServerSocketChannel.accept"]
+    n30["Socket.connect/close"]
+    n31["ServerSocket.accept"]
+    n32["SocketInputStream.read"]
+    n33["SocketOutputStream.write"]
+    n34["Inflater.inflate"]
+    n35["Deflater.deflate"]
+    n36["ThreadLocal.get/set"]
+    n37["InitialContext.lookup"]
+    n38["MBeanServer.invoke/getAttribute"]
+    n39["Runtime.loadLibrary0"]
+    n40["Instant.now()"]
+    n41["LocalDateTime.now() / now(ZoneId)"]
+    n42["ZonedDateTime.now() / now(ZoneId)"]
+    n43["Date() constructor"]
+    n44["HttpClientImpl.send/sendAsync, HttpURLConnection, OkHttp 3/4, Apache HC 4/5, Reactor Netty"]
+    n45["JDBC pools, Statement/PreparedStatement execute*, Connection prepare/commit/rollback"]
+  end
 ```
 
 ---
@@ -270,11 +271,15 @@ rectangle "Phase 2 (premain only)" {
 
 ## JdkInstrumentationInstaller
 
-**Responsibility**: One-time setup of the entire instrumentation stack. `install()` is called once per JVM from a single thread (serialised by the bootstrap); it retains the installed `ResettableClassFileTransformer` so that `uninstall(Instrumentation)` can reset the transformations and clear the bridge delegate — used by the bootstrap to roll back a failed initialization.
+**Responsibility**: Setup of the instrumentation stack. `install()` is called once per JVM from a single thread (serialised by the bootstrap); it injects the bridge, installs the delegate and registers the `HookDemand` callback. `weave()` then installs one `AgentBuilder` per `HookGroup` on demand and retains each group's `ResettableClassFileTransformer`, so that `uninstall(Instrumentation)` can reset every woven group and clear the bridge delegate — used by the bootstrap to roll back a failed initialization. The woven groups are reported in `ChaosDiagnostics.snapshot().runtimeDetails()` under `wovenHookGroups` (comma-separated, sorted group names; empty when none).
+
+**Hook coverage.** Every advice is applied through `advise(advice, methods)`, which wraps the method matcher in a recording one (`HookCoverage`). A hook is *registered* when it is woven into a type and *matched* once it matches a method of any type it is woven into — per hook, not per type, because a hook on the subtypes of a JDK type reaches subtypes that inherit the method. A registered hook that never matched is inactive: the JDK or library changed the method's name or signature (as JDK 25 did to `InetAddress.getHostFromNameService`). Such hooks are listed under `unmatchedHooks`, failed transformations under `hookFailures`. `HookCoverageIntegrationTest` weaves every group in a child JVM, loads every class a hook targets (JDK and client libraries) and requires every advice class to match, on each JDK the build tests.
 
 **`injectBridge()`**: Reads class bytecode from the agent JAR's own classloader resources (the `.class` files are in the same JAR). Writes verbatim into a temp JAR. This ensures the bootstrap-injected class is byte-for-byte identical to the agent-classloader version — there is no separate bootstrap-dispatcher source; it is one class compiled once and loaded twice into different classloaders.
 
-**`buildMethodHandles()`**: Uses `MethodHandles.publicLookup()` against `BridgeDelegate.class`. Public lookup is required because the bootstrap classloader must be able to invoke the handles; a full-access lookup with the agent classloader's module system would not be reachable from the bootstrap context. Each handle is a virtual method handle; when invoked with `delegate` as the first argument, it dispatches to the `ChaosBridge` implementation. The array has exactly 58 slots (indices 0–57); see §7 for the full slot table.
+**`buildMethodHandles()`**: Uses `MethodHandles.publicLookup()` against `BridgeDelegate.class`. Public lookup is required because the bootstrap classloader must be able to invoke the handles; a full-access lookup with the agent classloader's module system would not be reachable from the bootstrap context. Each handle is a virtual method handle; when invoked with `delegate` as the first argument, it dispatches to the `ChaosBridge` implementation. The array has `HANDLE_COUNT` (77) slots; see §7 for the full slot table.
+
+The wiring is derived, not written per slot: each `public static final int` slot constant `FOO_BAR` on `BootstrapDispatcher` (other than `SCOPE_*` and `HANDLE_COUNT`) is served by the `BridgeDelegate` method `fooBar`. Adding a dispatch entry point is therefore a constant, a delegate method and its `ChaosBridge` implementation; `buildMethodHandles()` checks the table in full and fails the install naming the mismatch — a slot without a method, a method without a slot, an index used twice or left unset, an overloaded delegate method.
 
 **`installDelegate()`**: Uses `Class.forName("...BootstrapDispatcher", true, null)` — the `null` classloader argument requests loading from the bootstrap classloader, ensuring the instance obtained is the bootstrap-classloader version, not the agent-classloader version. Reflective invocation of `install()` crosses the classloader boundary without sharing type references.
 
@@ -282,21 +287,23 @@ rectangle "Phase 2 (premain only)" {
 
 **`AgentBuilder` configuration**:
 - `disableClassFormatChanges()`: prevents ByteBuddy from adding fields or changing the constant pool structure — required for retransformation
-- `RedefinitionStrategy.RETRANSFORMATION`: allows transforming already-loaded classes; required for Phase 2 JDK classes that are loaded before the agent
+- `RedefinitionStrategy.RETRANSFORMATION`: allows transforming already-loaded classes; required for JDK classes that are already loaded when a hook group is woven
 - `ignore(nameStartsWith("net.bytebuddy.") or nameStartsWith("com.macstab.chaos.jvm."))`: prevents self-instrumentation of the agent and ByteBuddy itself
 
 ## BootstrapDispatcher
 
-58 public static dispatch methods, each:
-1. Constructs a `ThrowingSupplier<T>` lambda that snapshot-reads `handles` and `delegate` into locals
-2. Calls `invoke(supplier, fallback)`
-3. Returns the result or re-throws the exception
+57 public static dispatch methods, each guarding reentrancy inline:
+1. Returns the fallback when `DEPTH[0] > 0`; otherwise increments `DEPTH[0]`
+2. Snapshot-reads `handles` and `delegate` into locals and invokes the slot's handle (fallback when not installed)
+3. Returns the result or rethrows the exception via `sneakyThrow`; decrements `DEPTH[0]` in `finally`
+
+There is no shared `invoke(supplier, fallback)` trampoline: its single call site saw every dispatch lambda, so the JIT could not elide them and every intercepted call allocated a 24-byte capturing lambda. With the guard inlined, the dispatch path allocates nothing per call.
 
 The snapshot-read pattern (`final MethodHandle[] h = handles; final Object d = delegate;`) is required because `handles` and `delegate` are separate `volatile` fields. Reading them in two separate reads could theoretically see a stale value for one but not the other if reads were not ordered. The safe publication protocol (handles written before delegate) guarantees that if `d != null` is observed, `h != null` is also guaranteed to be visible. The local snapshot prevents a second read from seeing a reset (`uninstall()` calls `install(null, null)`).
 
-**DEPTH lifetime**: `DEPTH` holds an `int[]`: index 0 is the reentrancy depth, the remaining slots are call-depth scope counters. The array is not removed when the depth returns to 0, because it also carries the scope counters of enclosing instrumented calls; its footprint is one small `int[]` per thread that reaches an instrumented call, released with the thread. The decrement runs in the `finally` block, so it runs even if the supplier throws.
+**DEPTH lifetime**: `DEPTH` holds an `int[]`: index 0 is the reentrancy depth, the remaining slots are call-depth scope counters. The array is not removed when the depth returns to 0, because it also carries the scope counters of enclosing instrumented calls; its footprint is one small `int[]` per thread that reaches an instrumented call, released with the thread. The decrement runs in the `finally` block, so it runs even if the handle throws.
 
-**Call-depth scopes**: many instrumented methods call another instrumented method for the same logical operation (`InetAddress.getByName` → `getAllByName`, `CloseableHttpClient.execute(request)` → `execute(request, context)`, a pool proxy statement → the driver statement, `sendAsync(2-arg)` → `sendAsync(3-arg)`, `Thread.sleep` overloads, `VirtualThread.start()` → `start(container)`, class-loader parent delegation, explicit → implicit TLS handshake). Advice for these operations brackets the method with `enterScope(SCOPE_*)` / `exitScope(SCOPE_*)`; only the outermost call on the thread dispatches. A nested or delegating call is therefore evaluated once: delays do not add up, probability is rolled once and `maxApplications` is consumed once. Scopes exist for DNS, zip inflate/deflate, JMX, queues, class load/define, resource lookup, thread park, JDBC prepare/execute/commit/rollback, HTTP, TLS handshake, thread start and thread sleep.
+**Call-depth scopes**: many instrumented methods call another instrumented method for the same logical operation (`InetAddress.getByName` → `getAllByName`, `CloseableHttpClient.execute(request)` → `execute(request, context)`, a pool proxy statement → the driver statement, `sendAsync(2-arg)` → `sendAsync(3-arg)`, `Thread.sleep` overloads, `VirtualThread.start()` → `start(container)`, class-loader parent delegation, explicit → implicit TLS handshake). Advice for these operations brackets the method with `enterScope(SCOPE_*)` / `exitScope(SCOPE_*)`; only the outermost call on the thread dispatches. A nested or delegating call is therefore evaluated once: delays do not add up, probability is rolled once and `maxApplications` is consumed once. Scopes exist for DNS, zip inflate/deflate, JMX, queues, class load/define, resource lookup, thread park, JDBC prepare/execute/commit/rollback, HTTP, TLS handshake, thread start and thread sleep, client libraries, pool-worker creation, `java.time` `now()` methods with an operation of their own (their system-clock read is not a `CLOCK_READ`), file transfers and file closes.
 
 ## ChaosBridge
 
@@ -309,7 +316,7 @@ Thin delegation layer. Every method is a one-line call to the corresponding `Cha
 Each advice class is a static inner class following ByteBuddy's advice pattern:
 
 ```java
-// Void dispatch (typical Phase 1):
+// Void dispatch (typical executor hook):
 public static class BeforeExecuteAdvice {
     @Advice.OnMethodEnter(suppress = Throwable.class)
     public static void onEnter(
@@ -337,7 +344,7 @@ public static class ExecuteAdvice {
 
 **Exception-injecting advice** (e.g., `ExitRequestAdvice`): Does NOT use `suppress = Throwable.class` because it intentionally allows injected exceptions to propagate.
 
-**Return-value rewriting advice** (e.g., `ClockMillisAdvice`): Uses `@Advice.OnMethodExit` with `@Advice.Return(readOnly = false)` to overwrite the return value. `ClockMillisAdvice` and `ClockNanosAdvice` are defined but cannot be woven into `java.lang.System.currentTimeMillis()` / `nanoTime()` due to the JVM limitation documented in §14 Known Limitations (item 1). They remain available for instrumentation of non-bootstrap native methods in future releases.
+**Return-value rewriting advice** (e.g., `SystemClockMillisAdvice`): Uses `@Advice.OnMethodExit` with `@Advice.Return(readOnly = false)` to overwrite the return value. `System.currentTimeMillis()` / `nanoTime()` themselves cannot be woven (§14 Known Limitations, item 1); calls to them in the packages named by `clockCallSites` are rewritten to `BootstrapDispatcher.currentTimeMillis()` / `nanoTime()` with `MemberSubstitution` instead.
 
 **Skip-on advice** (e.g., `GcRequestAdvice`, `NioSelectNoArgAdvice`): Uses `@Advice.OnMethodEnter(skipOn = Advice.OnNonDefaultValue.class)` — if the advice method returns a non-default value (non-zero, non-null, non-false), ByteBuddy skips the actual method body. This is the mechanism for suppressing `System.gc()` and `Selector.select()`.
 
@@ -351,7 +358,7 @@ If the bridge is not installed (`BootstrapDispatcher.handles == null`), the wrap
 
 ---
 
-# 7. The 58 Interception Handles
+# 7. The 77 Interception Handles
 
 | Index | Constant                             | JDK method(s) intercepted                                                                                                                                                       | Direction                                    |
 |-------|--------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------|
@@ -360,75 +367,96 @@ If the bridge is not installed (`BootstrapDispatcher.handles == null`), the wrap
 | 2     | `BEFORE_THREAD_START`                | `Thread.start()`, `start(ThreadContainer)`; `VirtualThread.start()`, `start(ThreadContainer)` (`newVirtualThreadPerTaskExecutor`, structured concurrency)                       | enter                                        |
 | 3     | `BEFORE_WORKER_RUN`                  | `ThreadPoolExecutor.beforeExecute(Thread, Runnable)`                                                                                                                            | enter                                        |
 | 4     | `BEFORE_FORK_JOIN_TASK_RUN`          | `ForkJoinTask.doExec()`                                                                                                                                                         | enter                                        |
-| 5     | `ADJUST_SCHEDULE_DELAY`              | wired but not dispatched by any advice: the caller's delay, period and unit are never rewritten                                                                                 | —                                            |
-| 6     | `BEFORE_SCHEDULED_TICK`              | `ScheduledCallableWrapper.call()`, `ScheduledRunnableWrapper.run()`                                                                                                             | boolean skip                                 |
-| 7     | `BEFORE_QUEUE_OPERATION`             | `BlockingQueue.put()`, `take()`                                                                                                                                                 | enter (void)                                 |
-| 8     | `BEFORE_BOOLEAN_QUEUE_OPERATION`     | `BlockingQueue.offer()`, `poll()`                                                                                                                                               | enter (Boolean skip)                         |
-| 9     | `BEFORE_COMPLETABLE_FUTURE_COMPLETE` | `CompletableFuture.complete()`, `completeExceptionally()`                                                                                                                       | Boolean skip                                 |
-| 10    | `BEFORE_CLASS_LOAD`                  | `ClassLoader.loadClass(String)`, `loadClass(String, boolean)`                                                                                                                   | enter                                        |
-| 11    | `AFTER_RESOURCE_LOOKUP`              | `ClassLoader.getResource(String)`                                                                                                                                               | exit (URL rewrite)                           |
-| 12    | `DECORATE_SHUTDOWN_HOOK`             | `Runtime.addShutdownHook(Thread)`                                                                                                                                               | argument decoration                          |
-| 13    | `RESOLVE_SHUTDOWN_HOOK`              | `Runtime.removeShutdownHook(Thread)`                                                                                                                                            | argument rewrite                             |
-| 14    | `BEFORE_EXECUTOR_SHUTDOWN`           | `ThreadPoolExecutor.shutdown()`, `awaitTermination(...)`                                                                                                                        | enter                                        |
-| 15    | `ADJUST_CLOCK_MILLIS`                | `System.currentTimeMillis()` — not woven (§14, item 1); slot reachable only from code wired explicitly                                                                          | exit (long rewrite)                          |
-| 16    | `ADJUST_CLOCK_NANOS`                 | `System.nanoTime()` — not woven (§14, item 1); slot reachable only from code wired explicitly                                                                                   | exit (long rewrite)                          |
-| 17    | `BEFORE_GC_REQUEST`                  | `System.gc()` (`Runtime.gc()` is native)                                                                                                                                        | enter (boolean skip)                         |
-| 18    | `BEFORE_EXIT_REQUEST`                | `Runtime.exit(int)` (`System.exit` delegates to it), `Runtime.halt(int)`                                                                                                        | enter                                        |
-| 19    | `BEFORE_REFLECTION_INVOKE`           | `Method.invoke(Object, Object[])`                                                                                                                                               | enter                                        |
-| 20    | `BEFORE_DIRECT_BUFFER_ALLOCATE`      | `ByteBuffer.allocateDirect(int)`                                                                                                                                                | enter                                        |
-| 21    | `BEFORE_OBJECT_DESERIALIZE`          | `ObjectInputStream.readObject()`                                                                                                                                                | enter                                        |
-| 22    | `BEFORE_CLASS_DEFINE`                | `ClassLoader.defineClass(String, ...)`                                                                                                                                          | enter                                        |
-| 23    | `BEFORE_MONITOR_ENTER`               | `AbstractQueuedSynchronizer.acquire(int)`                                                                                                                                       | enter                                        |
-| 24    | `BEFORE_THREAD_PARK`                 | `LockSupport.park(Object)`, `parkNanos(...)`, `parkUntil(...)`                                                                                                                  | enter                                        |
-| 25    | `BEFORE_NIO_SELECT`                  | `SelectorImpl.select()`, `select(long)`, `selectNow()`, `select(Consumer)`, `select(Consumer, long)`, `selectNow(Consumer)`                                                     | enter (boolean skip)                         |
-| 26    | `BEFORE_NIO_CHANNEL_OP`              | `SocketChannel.connect/read/write`, `ServerSocketChannel.accept`                                                                                                                | enter                                        |
-| 27    | `BEFORE_SOCKET_CONNECT`              | `Socket.connect(SocketAddress, int)`                                                                                                                                            | enter                                        |
-| 28    | `BEFORE_SOCKET_ACCEPT`               | `ServerSocket.accept()`                                                                                                                                                         | enter                                        |
-| 29    | `BEFORE_SOCKET_READ`                 | `SocketInputStream.read(...)`                                                                                                                                                   | enter                                        |
-| 30    | `BEFORE_SOCKET_WRITE`                | `SocketOutputStream.write(...)`                                                                                                                                                 | enter                                        |
-| 31    | `BEFORE_SOCKET_CLOSE`                | `Socket.close()`                                                                                                                                                                | enter                                        |
-| 32    | `BEFORE_JNDI_LOOKUP`                 | `InitialContext.lookup(String)`                                                                                                                                                 | enter                                        |
-| 33    | `BEFORE_OBJECT_SERIALIZE`            | `ObjectOutputStream.writeObject(Object)`                                                                                                                                        | enter                                        |
-| 34    | `BEFORE_NATIVE_LIBRARY_LOAD`         | `Runtime.loadLibrary0(ClassLoader, String)`                                                                                                                                     | enter                                        |
-| 35    | `BEFORE_ASYNC_CANCEL`                | `CompletableFuture.cancel(boolean)`                                                                                                                                             | enter (boolean skip)                         |
-| 36    | `BEFORE_ZIP_INFLATE`                 | `Inflater.inflate(...)`                                                                                                                                                         | enter                                        |
-| 37    | `BEFORE_ZIP_DEFLATE`                 | `Deflater.deflate(...)`                                                                                                                                                         | enter                                        |
-| 38    | `BEFORE_THREAD_LOCAL_GET`            | `ThreadLocal.get()`                                                                                                                                                             | enter (boolean skip)                         |
-| 39    | `BEFORE_THREAD_LOCAL_SET`            | `ThreadLocal.set(Object)`                                                                                                                                                       | enter (boolean skip)                         |
-| 40    | `BEFORE_JMX_INVOKE`                  | `MBeanServer.invoke(ObjectName, String, Object[], String[])`                                                                                                                    | enter                                        |
-| 41    | `BEFORE_JMX_GET_ATTR`                | `MBeanServer.getAttribute(ObjectName, String)`                                                                                                                                  | enter                                        |
-| 42    | `ADJUST_INSTANT_NOW`                 | `Instant.now()` (no-arg static)                                                                                                                                                 | exit (`Instant` rewrite)                     |
-| 43    | `ADJUST_LOCAL_DATE_TIME_NOW`         | `LocalDateTime.now()` (no-arg static)                                                                                                                                           | exit (`LocalDateTime` rewrite)               |
-| 44    | `ADJUST_ZONED_DATE_TIME_NOW`         | `ZonedDateTime.now()`, `now(ZoneId)` (static)                                                                                                                                   | exit (`ZonedDateTime` rewrite)               |
-| 45    | `ADJUST_DATE_NEW`                    | `Date()` (no-arg constructor)                                                                                                                                                   | exit (embedded millis rewrite via `setTime`) |
-| 46    | `BEFORE_HTTP_SEND`                   | `HttpClientImpl.send`, OkHttp 3/4 `RealCall.execute()`, Apache HC 4/5 `CloseableHttpClient.execute(...)` (request-first and host-first)                                         | enter (boolean suppress)                     |
-| 47    | `BEFORE_HTTP_SEND_ASYNC`             | `HttpClientImpl.sendAsync` (2- and 3-arg), OkHttp 3/4 `RealCall.enqueue(Callback)`, Reactor Netty `HttpClientConnect.connect()`                                                 | enter (boolean suppress)                     |
-| 48    | `BEFORE_JDBC_CONNECTION_ACQUIRE`     | `HikariPool.getConnection(long)`, c3p0 `checkoutPooledConnection()`                                                                                                             | enter (boolean suppress)                     |
-| 49    | `BEFORE_JDBC_STATEMENT_EXECUTE`      | `Statement.execute*(String, …)`; `PreparedStatement.execute()`, `executeQuery()`, `executeUpdate()`, `executeLargeUpdate()` (target `null`)                                     | enter (boolean suppress)                     |
-| 50    | `BEFORE_JDBC_PREPARED_STATEMENT`     | `Connection.prepareStatement(String, …)`, `prepareCall(String, …)`                                                                                                              | enter (boolean suppress)                     |
-| 51    | `BEFORE_JDBC_TRANSACTION_COMMIT`     | `Connection.commit()`                                                                                                                                                           | enter (boolean suppress)                     |
-| 52    | `BEFORE_JDBC_TRANSACTION_ROLLBACK`   | `Connection.rollback()`                                                                                                                                                         | enter (boolean suppress)                     |
-| 53    | `BEFORE_THREAD_SLEEP`                | `Thread.sleep(long)`, `sleep(long, int)`, `sleep(Duration)`                                                                                                                     | enter (boolean suppress)                     |
-| 54    | `BEFORE_DNS_RESOLVE`                 | `InetAddress.getByName(String)`, `getAllByName(String)`, `getLocalHost()`                                                                                                       | enter                                        |
-| 55    | `BEFORE_SSL_HANDSHAKE`               | `SSLSocket.startHandshake()` and implicit handshakes (`startHandshake(boolean)`), `SSLEngine.beginHandshake()`                                                                  | enter                                        |
-| 56    | `BEFORE_FILE_IO`                     | `FileInputStream`/`FileOutputStream` operations                                                                                                                                 | enter                                        |
-| 57    | `ADJUST_LOCAL_DATE_TIME_NOW_IN_ZONE` | `LocalDateTime.now(ZoneId)` (static; `now(Clock)` is not hooked)                                                                                                                | exit (`LocalDateTime` rewrite)               |
+| 5     | `BEFORE_SCHEDULED_TICK`              | `ScheduledCallableWrapper.call()`, `ScheduledRunnableWrapper.run()`                                                                                                             | boolean skip                                 |
+| 6     | `BEFORE_QUEUE_OPERATION`             | `BlockingQueue.put()`, `take()`                                                                                                                                                 | enter (void)                                 |
+| 7     | `BEFORE_BOOLEAN_QUEUE_OPERATION`     | `BlockingQueue.offer()`, `poll()`                                                                                                                                               | enter (Boolean skip)                         |
+| 8     | `BEFORE_COMPLETABLE_FUTURE_COMPLETE` | `CompletableFuture.complete()`, `completeExceptionally()`                                                                                                                       | Boolean skip                                 |
+| 9     | `BEFORE_CLASS_LOAD`                  | `ClassLoader.loadClass(String)`, `loadClass(String, boolean)`                                                                                                                   | enter                                        |
+| 10    | `AFTER_RESOURCE_LOOKUP`              | `ClassLoader.getResource(String)`                                                                                                                                               | exit (URL rewrite)                           |
+| 11    | `DECORATE_SHUTDOWN_HOOK`             | `Runtime.addShutdownHook(Thread)`                                                                                                                                               | argument decoration                          |
+| 12    | `RESOLVE_SHUTDOWN_HOOK`              | `Runtime.removeShutdownHook(Thread)`                                                                                                                                            | argument rewrite                             |
+| 13    | `BEFORE_EXECUTOR_SHUTDOWN`           | `ThreadPoolExecutor.shutdown()`, `awaitTermination(...)`                                                                                                                        | enter                                        |
+| 14    | `ADJUST_CLOCK_MILLIS`                | `System.currentTimeMillis()` — not woven (§14, item 1); slot reachable only from code wired explicitly                                                                          | exit (long rewrite)                          |
+| 15    | `ADJUST_CLOCK_NANOS`                 | `System.nanoTime()` — not woven (§14, item 1); slot reachable only from code wired explicitly                                                                                   | exit (long rewrite)                          |
+| 16    | `BEFORE_GC_REQUEST`                  | `System.gc()` (`Runtime.gc()` is native)                                                                                                                                        | enter (boolean skip)                         |
+| 17    | `BEFORE_EXIT_REQUEST`                | `Runtime.exit(int)` (`System.exit` delegates to it), `Runtime.halt(int)`                                                                                                        | enter                                        |
+| 18    | `BEFORE_REFLECTION_INVOKE`           | `Method.invoke(Object, Object[])`                                                                                                                                               | enter                                        |
+| 19    | `BEFORE_DIRECT_BUFFER_ALLOCATE`      | `ByteBuffer.allocateDirect(int)`                                                                                                                                                | enter                                        |
+| 20    | `BEFORE_OBJECT_DESERIALIZE`          | `ObjectInputStream.readObject()`                                                                                                                                                | enter                                        |
+| 21    | `BEFORE_CLASS_DEFINE`                | `ClassLoader.defineClass(String, ...)`                                                                                                                                          | enter                                        |
+| 22    | `BEFORE_MONITOR_ENTER`               | `AbstractQueuedSynchronizer.acquire(int)`                                                                                                                                       | enter                                        |
+| 23    | `BEFORE_THREAD_PARK`                 | `LockSupport.park(Object)`, `parkNanos(...)`, `parkUntil(...)`                                                                                                                  | enter                                        |
+| 24    | `BEFORE_NIO_SELECT`                  | `SelectorImpl.select()`, `select(long)`, `selectNow()`, `select(Consumer)`, `select(Consumer, long)`, `selectNow(Consumer)`                                                     | enter (boolean skip)                         |
+| 25    | `BEFORE_NIO_CHANNEL_OP`              | `SocketChannel.connect/read/write`, `ServerSocketChannel.accept`                                                                                                                | enter                                        |
+| 26    | `BEFORE_SOCKET_CONNECT`              | `Socket.connect(SocketAddress, int)`, `SocketChannel.connect(SocketAddress)`                                                                                                    | enter (redirect: argument rewritten)         |
+| 27    | `BEFORE_SOCKET_ACCEPT`               | `ServerSocket.accept()`, `ServerSocketChannel.accept()`                                                                                                                         | enter                                        |
+| 28    | `BEFORE_SOCKET_READ`                 | `SocketInputStream.read(...)`                                                                                                                                                   | enter                                        |
+| 29    | `BEFORE_SOCKET_WRITE`                | `SocketOutputStream.write(...)`                                                                                                                                                 | enter                                        |
+| 30    | `BEFORE_SOCKET_CLOSE`                | `Socket.close()`                                                                                                                                                                | enter                                        |
+| 31    | `BEFORE_JNDI_LOOKUP`                 | `InitialContext.lookup(String)`                                                                                                                                                 | enter                                        |
+| 32    | `BEFORE_OBJECT_SERIALIZE`            | `ObjectOutputStream.writeObject(Object)`                                                                                                                                        | enter                                        |
+| 33    | `BEFORE_NATIVE_LIBRARY_LOAD`         | `Runtime.loadLibrary0(ClassLoader, String)`                                                                                                                                     | enter                                        |
+| 34    | `BEFORE_ASYNC_CANCEL`                | `CompletableFuture.cancel(boolean)`                                                                                                                                             | enter (boolean skip)                         |
+| 35    | `BEFORE_ZIP_INFLATE`                 | `Inflater.inflate(...)`                                                                                                                                                         | enter                                        |
+| 36    | `BEFORE_ZIP_DEFLATE`                 | `Deflater.deflate(...)`                                                                                                                                                         | enter                                        |
+| 37    | `BEFORE_THREAD_LOCAL_GET`            | `ThreadLocal.get()`                                                                                                                                                             | enter (boolean skip)                         |
+| 38    | `BEFORE_THREAD_LOCAL_SET`            | `ThreadLocal.set(Object)`                                                                                                                                                       | enter (boolean skip)                         |
+| 39    | `BEFORE_JMX_INVOKE`                  | `MBeanServer.invoke(ObjectName, String, Object[], String[])`                                                                                                                    | enter                                        |
+| 40    | `BEFORE_JMX_GET_ATTR`                | `MBeanServer.getAttribute(ObjectName, String)`                                                                                                                                  | enter                                        |
+| 41    | `ADJUST_INSTANT_NOW`                 | `Instant.now()` (no-arg static)                                                                                                                                                 | exit (`Instant` rewrite)                     |
+| 42    | `ADJUST_LOCAL_DATE_TIME_NOW`         | `LocalDateTime.now()` (no-arg static)                                                                                                                                           | exit (`LocalDateTime` rewrite)               |
+| 43    | `ADJUST_ZONED_DATE_TIME_NOW`         | `ZonedDateTime.now()`, `now(ZoneId)` (static)                                                                                                                                   | exit (`ZonedDateTime` rewrite)               |
+| 44    | `ADJUST_DATE_NEW`                    | `Date()` (no-arg constructor)                                                                                                                                                   | exit (embedded millis rewrite via `setTime`) |
+| 45    | `BEFORE_HTTP_SEND`                   | `HttpClientImpl.send`, `HttpURLConnection.plainConnect0()`, OkHttp 3/4 `RealCall.execute()`, Apache HC 4/5 `CloseableHttpClient.execute(...)` (request-first and host-first)                                         | enter (boolean suppress)                     |
+| 46    | `BEFORE_HTTP_SEND_ASYNC`             | `HttpClientImpl.sendAsync` (2- and 3-arg), OkHttp 3/4 `RealCall.enqueue(Callback)`, Reactor Netty `HttpClientConnect.connect()`                                                 | enter (boolean suppress)                     |
+| 47    | `BEFORE_JDBC_CONNECTION_ACQUIRE`     | `HikariPool.getConnection(long)`, c3p0 `checkoutPooledConnection()`                                                                                                             | enter (boolean suppress)                     |
+| 48    | `BEFORE_JDBC_STATEMENT_EXECUTE`      | `Statement.execute*(String, …)`; `PreparedStatement.execute()`, `executeQuery()`, `executeUpdate()`, `executeLargeUpdate()` (target `null`)                                     | enter (boolean suppress)                     |
+| 49    | `BEFORE_JDBC_PREPARED_STATEMENT`     | `Connection.prepareStatement(String, …)`, `prepareCall(String, …)`                                                                                                              | enter (boolean suppress)                     |
+| 50    | `BEFORE_JDBC_TRANSACTION_COMMIT`     | `Connection.commit()`                                                                                                                                                           | enter (boolean suppress)                     |
+| 51    | `BEFORE_JDBC_TRANSACTION_ROLLBACK`   | `Connection.rollback()`                                                                                                                                                         | enter (boolean suppress)                     |
+| 52    | `BEFORE_THREAD_SLEEP`                | `Thread.sleep(long)`, `sleep(long, int)`, `sleep(Duration)`                                                                                                                     | enter (boolean suppress)                     |
+| 53    | `BEFORE_DNS_RESOLVE`                 | `InetAddress.getByName(String)`, `getAllByName(String)`, `getLocalHost()`                                                                                                       | enter                                        |
+| 54    | `BEFORE_SSL_HANDSHAKE`               | `SSLSocket.startHandshake()` and implicit handshakes (`startHandshake(boolean)`), `SSLEngine.beginHandshake()`                                                                  | enter                                        |
+| 55    | `BEFORE_FILE_IO`                     | every file operation: streams, `RandomAccessFile`, `FileChannel` (also scattering, gathering, transfers, maps), opens, closes, fsync, truncate, delete, move                     | enter (close: exit)                          |
+| 56    | `ADJUST_LOCAL_DATE_TIME_NOW_IN_ZONE` | `LocalDateTime.now(ZoneId)` (static; `now(Clock)` is not hooked)                                                                                                                | exit (`LocalDateTime` rewrite)               |
+| 57    | `BEFORE_METHOD_ENTER`                | Entry of every method a `MethodSelector` names (woven per scenario by `MethodWeaver`)                                                                                            | enter                                        |
+| 58    | `AFTER_METHOD_EXIT`                  | Normal exit of every method a `MethodSelector` names                                                                                                                              | exit (return-value rewrite)                  |
+| 59    | `BEFORE_CLIENT_CALL`                 | Kafka `KafkaProducer.send(record, callback)` / `KafkaConsumer.poll(Duration)`, gRPC `ClientCallImpl.start`, Jedis `Connection.sendCommand(CommandArguments)`, Lettuce `RedisChannelHandler.dispatch`, R2DBC `Statement.execute()`, AWS SDK v2 `BaseSync/AsyncClientHandler.execute`, Netty `AbstractUnsafe.flush0()` and stream-channel reads | enter (reject throws the library's exception) |
+| 60    | `AFTER_DNS_ANSWER`                   | `InetAddress.getAllByName(String)` exit, on return or `UnknownHostException` (`DNS_ANSWER`)                                                                                       | exit (answer rewrite)                        |
+| 61    | `CAPTURE_SESSION`                    | `ForkJoinPool.poolSubmit(boolean, ForkJoinTask)`, `ForkJoinTask.fork()` — records the submitting thread's session for the task                                                      | enter (session hand-off)                     |
+| 62    | `ENTER_SESSION`                      | `ForkJoinTask.doExec()` enter, `Thread.run()` enter, `VirtualThread.run(Runnable)` enter and `mount()` exit — binds the handed-off session                                        | enter (session hand-off)                     |
+| 63    | `EXIT_SESSION`                       | `ForkJoinTask.doExec()`, `Thread.run()`, `VirtualThread.run(Runnable)` exit — releases it                                                                                         | exit (session hand-off)                      |
+| 64    | `BEFORE_NIO_CHANNEL_WRITE`           | `SocketChannel.write(ByteBuffer)` and gathering `write(ByteBuffer[], int, int)` (`NIO_CHANNEL_WRITE`)                                                                         | enter (torn: buffer limits lowered)          |
+| 65    | `BEFORE_PROCESS_START`               | `ProcessBuilder.start(Redirect[])` — `start()`, `startPipeline`, `Runtime.exec` (`PROCESS_START`)                                                                             | enter                                        |
+| 66    | `CURRENT_SESSION_ID`                 | `HttpClient` / `HttpURLConnection` sends, for the `X-Chaos-Session` header                                                                                                        | enter (header)                               |
+| 67    | `CORRUPTION_SEED`                    | the bit flip after a corrupted read: its seed, from the match's `randomSeed`                                                                                                      | exit (corruption)                            |
+| 68    | `BEFORE_SOCKET_CHANNEL_READ`         | `SocketChannel.read(ByteBuffer)` and scattering `read(ByteBuffer[], int, int)` (`SOCKET_READ` with the channel's peer)                                                         | enter / exit (trickle, corrupt via `ChannelBuffers`) |
+| 69    | `BEFORE_SOCKET_CHANNEL_WRITE`        | `SocketChannel.write(ByteBuffer)` and gathering `write(ByteBuffer[], int, int)` (`SOCKET_WRITE`)                                                                               | enter / exit (torn: short count)             |
+| 70    | `BEFORE_SOCKET_BIND`                 | `sun.nio.ch.Net.bind(ProtocolFamily, FileDescriptor, InetAddress, int)` — every socket and channel bind (`SOCKET_BIND`)                                                         | enter                                        |
+| 71    | `ADJUST_CLOCK_INSTANT`               | `Clock$SystemClock.instant()`, `Clock$SystemInstantSource.instant()` (`CLOCK_READ`); skipped inside `LocalDateTime.now` / `ZonedDateTime.now` (`SCOPE_CLOCK_API`)              | exit (`Instant` rewrite)                     |
+| 72    | `ADJUST_CLOCK_READ_MILLIS`           | `millis()` of the same two classes (`CLOCK_READ`)                                                                                                                                 | exit (`long` rewrite)                        |
+| 73    | `BEFORE_DATAGRAM`                    | `DatagramChannelImpl.send` / `write` / `blockingSend` (`DATAGRAM_SEND`), `receive` / `read` / `blockingReceive` (`DATAGRAM_RECEIVE`)                                            | enter (drop: call skipped) / exit (corrupt)  |
+| 74    | `BEFORE_DNS_REVERSE`                 | `InetAddress.getHostFromNameService` — `getHostName`, `getCanonicalHostName` (`DNS_REVERSE`)                                                                                    | enter (failure: IP literal returned)         |
+| 75    | `BEFORE_PROCESS_WAIT`                | `ProcessImpl.waitFor()` and `waitFor(long, TimeUnit)` (`PROCESS_WAIT`)                                                                                                            | enter (timeout: returns `false`)             |
+| 76    | `BEFORE_SOCKET_SHUTDOWN`             | `NioSocketImpl` and `SocketChannelImpl` `shutdownInput` / `shutdownOutput` (`SOCKET_SHUTDOWN`)                                                                                  | enter                                        |
+
+`BEFORE_SOCKET_CONNECT` returns the endpoint to connect to: the requested one, or another under `ChaosEffect.redirect(...)`, which the `Socket.connect` and `SocketChannel.connect` advice write back into their argument. File operations without a slot of their own (`FILE_IO_OPEN`, `FILE_IO_CLOSE`, `FILE_IO_MAP`, `FILE_IO_MOVE_TARGET`, transfers, scattering and gathering `FileChannel` calls) go through `BEFORE_FILE_IO` with their operation tag; a transfer is one event (`SCOPE_FILE_TRANSFER`), a stream and its channel are one close (`SCOPE_FILE_CLOSE`).
 
 ---
 
-## 7a. Higher-Level Java Time API Interception (slots 42–45, 57)
+## 7a. Higher-Level Java Time API Interception (slots 41–44, 56)
 
-The handles in slots 42–45 (and slot 57 for `LocalDateTime.now(ZoneId)`) address a specific gap: application code that reads wall-clock time through `java.time` or `java.util.Date` rather than calling `System.currentTimeMillis()` directly. Direct interception of `currentTimeMillis()` and `nanoTime()` is blocked by the JVM constraints documented in §14 Known Limitations (item 1). The higher-level APIs are free of both constraints — they are ordinary Java methods with no `native` modifier and no `@IntrinsicCandidate` annotation — so they can be woven at exit with `@Advice.OnMethodExit`.
+The handles in slots 41–44 (and slot 56 for `LocalDateTime.now(ZoneId)`) address a specific gap: application code that reads wall-clock time through `java.time` or `java.util.Date` rather than calling `System.currentTimeMillis()` directly. Direct interception of `currentTimeMillis()` and `nanoTime()` is blocked by the JVM constraints documented in §14 Known Limitations (item 1). The higher-level APIs are free of both constraints — they are ordinary Java methods with no `native` modifier and no `@IntrinsicCandidate` annotation — so they can be woven at exit with `@Advice.OnMethodExit`.
 
 ### Why each target is instrumentable
 
-**`java.time.Instant.now()` (slot 42)** — A pure Java static method in `java.time.Instant`. It delegates to `Clock.systemUTC().instant()`, which in turn eventually reaches `System.currentTimeMillis()` deep in the JDK. The top-level `now()` method itself carries no special JVM treatment: no `native`, no `@IntrinsicCandidate`. ByteBuddy can weave an `@OnMethodExit` that snapshot-reads the returned `Instant` and passes it to `BootstrapDispatcher.adjustInstantNow()`.
+**`java.time.Instant.now()` (slot 41)** — A pure Java static method in `java.time.Instant`. It delegates to `Clock.systemUTC().instant()`, which in turn eventually reaches `System.currentTimeMillis()` deep in the JDK. The top-level `now()` method itself carries no special JVM treatment: no `native`, no `@IntrinsicCandidate`. ByteBuddy can weave an `@OnMethodExit` that snapshot-reads the returned `Instant` and passes it to `BootstrapDispatcher.adjustInstantNow()`.
 
-**`java.time.LocalDateTime.now()` (slot 43) and `now(ZoneId)` (slot 57)** — Same family. The no-argument variant delegates to `Clock.systemDefaultZone().instant()` and then converts to local time via the system zone. `now(ZoneId)` goes to `now(Clock)` without calling `now()`, so it has its own advice; `now(Clock)` is deliberately not hooked, because a caller-supplied clock (fixed, offset) must not be skewed. No JVM restriction blocks exit-advice weaving.
+**`java.time.LocalDateTime.now()` (slot 42) and `now(ZoneId)` (slot 56)** — Same family. The no-argument variant delegates to `Clock.systemDefaultZone().instant()` and then converts to local time via the system zone. `now(ZoneId)` goes to `now(Clock)` without calling `now()`, so it has its own advice; `now(Clock)` is deliberately not hooked, because a caller-supplied clock (fixed, offset) must not be skewed. No JVM restriction blocks exit-advice weaving.
 
-**`java.time.ZonedDateTime.now()` and `now(ZoneId)` (slot 44)** — Identical reasoning. The no-argument variant reads the system clock and attaches the system default zone; one advice covers both overloads because the returned value carries its zone. Zone identity is captured from the real return value before skewing and reattached after — see below for the preservation guarantee.
+**`java.time.ZonedDateTime.now()` and `now(ZoneId)` (slot 43)** — Identical reasoning. The no-argument variant reads the system clock and attaches the system default zone; one advice covers both overloads because the returned value carries its zone. Zone identity is captured from the real return value before skewing and reattached after — see below for the preservation guarantee.
 
-**`java.util.Date()` no-arg constructor (slot 45)** — `Date()` calls `System.currentTimeMillis()` internally to seed `this.fastTime`. Unlike the `java.time` methods, `Date()` is a constructor: it has no return value to rewrite. Instead, `DateNewAdvice` uses `@Advice.OnMethodExit` with `@Advice.This` to obtain the freshly-constructed `Date` instance, reads its time via `getTime()`, passes it to `BootstrapDispatcher.adjustDateNew()`, and if the adjusted value differs, calls `setTime(adjusted)` to overwrite the embedded field.
+**`java.util.Date()` no-arg constructor (slot 44)** — `Date()` calls `System.currentTimeMillis()` internally to seed `this.fastTime`. Unlike the `java.time` methods, `Date()` is a constructor: it has no return value to rewrite. Instead, `DateNewAdvice` uses `@Advice.OnMethodExit` with `@Advice.This` to obtain the freshly-constructed `Date` instance, reads its time via `getTime()`, passes it to `BootstrapDispatcher.adjustDateNew()`, and if the adjusted value differs, calls `setTime(adjusted)` to overwrite the embedded field.
 
 ### The `DateNewAdvice` ClassCircularityError edge case
 
@@ -482,12 +510,12 @@ return delta == 0L ? realInstant : realInstant.plusMillis(delta);
 The dispatcher itself has no mutable per-call state. The two `volatile` fields (`handles`, `delegate`) are written once at startup and never reset. All dispatch methods are re-entrant provided the DEPTH guard is functioning.
 
 **DEPTH ThreadLocal lifecycle**:
-- Set to 1 at the start of the outermost `invoke()` call on the current thread
-- Incremented if a nested `invoke()` fires (which returns the fallback without recursing)
+- `DEPTH[0]` is incremented to 1 at the start of the outermost dispatch-method call on the current thread
+- A nested dispatch call sees `DEPTH[0] > 0` and returns the fallback without recursing
 - Decremented in `finally`
-- `.remove()`d when it returns to 0
+- The `int[]` is not removed when the depth returns to 0 (it also holds the call-depth scope counters)
 
-**Memory leak risk**: If a thread is interrupted or killed between `DEPTH.set(1)` and `DEPTH.remove()`, the `ThreadLocal` entry persists on the thread. This is benign for threads that terminate (the entry is GC'd with the thread), but for long-lived pooled threads that do not recycle, the entry persists. The `finally` block ensures removal under normal conditions, including exceptions.
+**Memory footprint**: The `ThreadLocal` entry persists on every thread that has reached an instrumented call: one small `int[]` per thread, released with the thread. For long-lived pooled threads the entry lives as long as the thread. The `finally` block keeps the depth counter balanced under normal conditions, including exceptions.
 
 **`MethodHandle.invoke()` and JIT**: After sufficient warm-up (~thousands of calls), the JIT inlines `MethodHandle.invoke()` through the `ChaosBridge` delegation into `ChaosRuntime`. The virtual dispatch overhead disappears. Pre-JIT, the cost is ~10–20 ns for the handle invocation itself.
 
@@ -510,7 +538,7 @@ This is a fatal startup failure; the agent cannot operate without the bootstrap 
 
 ## MethodHandle Construction Failure
 
-`buildMethodHandles()` throws `Exception` if any method is not found on `BridgeDelegate`. This would indicate a mismatch between the handle index constants in `BootstrapDispatcher` and the methods on `BridgeDelegate`. This should never happen in a correctly built artifact but would be caught immediately at startup.
+`buildMethodHandles()` throws `IllegalStateException` naming the mismatch when the slot constants of `BootstrapDispatcher` and the methods of `BridgeDelegate` do not correspond one to one. `JdkInstrumentationInstallerTest` builds the handles, so a mismatch fails the build long before an install.
 
 ## Missing Optional Classes
 
@@ -534,16 +562,16 @@ The instrumentation layer has two potential security implications:
 
 When `ScenarioRegistry.controllers` is empty:
 - Advice fires: ~2–5 ns (advice bytecode inlined into method)
-- `BootstrapDispatcher.invoke()`: `DEPTH.get()` (1 ThreadLocal read) + null-check of `delegate` → returns fallback
+- `BootstrapDispatcher` dispatch method: `DEPTH.get()` (1 ThreadLocal read) + inline depth check + null-check of `delegate` → returns fallback; no allocation
 - Total additional overhead per intercepted method call: ~5–15 ns
 
 ## Advice Overhead (with scenarios)
 
 See [overall-agent.md §11] for full hot-path cost breakdown.
 
-## Retransformation Cost at Startup
+## Retransformation Cost (on-demand weaving)
 
-`AgentBuilder.installOn(instrumentation)` with `RETRANSFORMATION` strategy triggers bytecode rewriting of every matched JDK class. This is a one-time cost at JVM startup, proportional to the number of instrumented classes and their method counts. Expected range: 50–500 ms for the full Phase 2 instrumentation suite on JDK 21. This adds to JVM startup time but has no ongoing cost.
+`AgentBuilder.installOn(instrumentation)` with `RETRANSFORMATION` strategy triggers bytecode rewriting of every matched JDK class. With on-demand weaving (the default), nothing is woven at JVM startup: a JVM without scenarios runs unmodified JDK classes. The first activation that needs a hook group pays that group's one-time retransformation cost, proportional to the number of classes it targets and their method counts; later activations of the same group pay nothing. With `instrumentation=eager` every group is woven at start, as in 1.x — expected range 50–500 ms for the full suite on JDK 21, added to JVM startup time. Either way there is no ongoing cost.
 
 ---
 
@@ -561,6 +589,7 @@ The agent instruments the JDK `HttpClient` plus four third-party HTTP client lib
 |----------------------------------|-----------------------------------------------------------|------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------|
 | JDK `HttpClient` synchronous     | JDK 11+                                                   | `jdk.internal.net.http.HttpClientImpl`                                 | `send(HttpRequest, BodyHandler)` (2-arg)                                                                                                                          | `BEFORE_HTTP_SEND` (sync)        |
 | JDK `HttpClient` asynchronous    | JDK 11+                                                   | `jdk.internal.net.http.HttpClientImpl`                                 | `sendAsync(...)` (2-arg and 3-arg with `PushPromiseHandler`)                                                                                                      | `BEFORE_HTTP_SEND_ASYNC` (async) |
+| JDK `HttpURLConnection` (and HTTPS) | JDK                                                    | `sun.net.www.protocol.http.HttpURLConnection`                          | `plainConnect0()` — once per request, however it is driven (`connect`, `getResponseCode`, `getInputStream`, `getOutputStream`); suppress throws `ConnectException` | `BEFORE_HTTP_SEND` (sync)        |
 | OkHttp synchronous               | `com.squareup.okhttp3:okhttp:4.12.0` (3.x also supported) | `okhttp3.RealCall` (3.x), `okhttp3.internal.connection.RealCall` (4.x) | `execute()` (0-arg)                                                                                                                                               | `BEFORE_HTTP_SEND` (sync)        |
 | OkHttp asynchronous              | same                                                      | same                                                                   | `enqueue(Callback)` (1-arg)                                                                                                                                       | `BEFORE_HTTP_SEND_ASYNC` (async) |
 | Apache HC 4.x                    | `org.apache.httpcomponents:httpclient:4.5.14`             | `org.apache.http.impl.client.CloseableHttpClient`                      | every `execute(HttpHost, HttpRequest, …)` and `execute(HttpUriRequest, …)` overload                                                                               | `BEFORE_HTTP_SEND` (sync)        |
@@ -573,8 +602,8 @@ Spring `WebClient` dispatches all HTTP through Reactor Netty's internal `HttpCli
 
 The handle slots in `BootstrapDispatcher` are:
 
-- `BEFORE_HTTP_SEND = 46` — synchronous send (JDK `send()`, OkHttp `execute()`, Apache HC 4/5 `execute()`)
-- `BEFORE_HTTP_SEND_ASYNC = 47` — asynchronous / reactive send (JDK `sendAsync()`, OkHttp `enqueue()`, Reactor Netty `connect()`)
+- `BEFORE_HTTP_SEND = 45` — synchronous send (JDK `send()`, `HttpURLConnection`, OkHttp `execute()`, Apache HC 4/5 `execute()`)
+- `BEFORE_HTTP_SEND_ASYNC = 46` — asynchronous / reactive send (JDK `sendAsync()`, OkHttp `enqueue()`, Reactor Netty `connect()`)
 
 Both slots carry the URL string as a single `String` argument and return `boolean` (`true` = suppress).
 
@@ -588,7 +617,6 @@ For each client:
 
 | Client                            | Extraction chain                                                                 | Key method name                 |
 |-----------------------------------|----------------------------------------------------------------------------------|---------------------------------|
-| `java.net.http.HttpRequest`       | `request.uri().toString()`                                                       | `uri`                           |
 | OkHttp `RealCall` (3.x / 4.x)     | `call.request().url().toString()`                                                | `request`, then `url`           |
 | Apache HC 4.x host-first          | `host.toString() + requestLine.getUri().toString()`                              | `getRequestLine`, then `getUri` |
 | Apache HC 4.x request-first       | `request.getURI().toString()`, falling back to the request line                  | `getURI`                        |
@@ -630,7 +658,7 @@ The advice classes `JavaHttpClientSendAdvice` and `JavaHttpClientSendAsyncAdvice
 
 `jdk.internal.net.http.HttpClientImpl` lives in the non-exported package `jdk.internal.net.http` inside the `java.net.http` module. The agent self-grants the required reflective open at install time — see [Module access strategy](#module-access-strategy) — so users never need to set `--add-opens` JVM flags. Two pieces are involved:
 
-1. **Module open** — `Instrumentation#redefineModule(...)` is called from `JdkInstrumentationInstaller#grantInternalModuleOpens` as the first step of `install`, and the agent JAR's `MANIFEST.MF` carries an `Add-Opens` line for the same packages (the manifest attribute is honoured on `-javaagent:` premain attach; `redefineModule` covers `agentmain` / runtime self-attach).
+1. **Module open** — `Instrumentation#redefineModule(...)` is called from `ModuleOpener#grantInternalModuleOpens` as the first step of `install`, and the agent JAR's `MANIFEST.MF` carries an `Add-Opens` line for the same packages (the manifest attribute is honoured on `-javaagent:` premain attach; `redefineModule` covers `agentmain` / runtime self-attach).
 2. **Bootstrap-classpath types** — types referenced by woven advice (`ChaosHttpSuppressException`, `HttpUrlExtractor`) are injected into the bootstrap classloader's classpath alongside `BootstrapDispatcher`. Without this the JVM verifier raises `NoClassDefFoundError` because `HttpClientImpl` is loaded by the platform classloader and cannot resolve agent-classloader types directly.
 
 ## 12.7 URL Pattern Matching in `SelectorMatcher`
@@ -650,83 +678,68 @@ The `HttpClientSelectorTest` (`agentInstalled_zeroScenarios` through `sessionIdM
 
 ## 12.8 Sequence Diagram — OkHttp Synchronous Path
 
-```plantuml
-@startuml
-title OkHttp RealCall.execute() → chaos pipeline → suppression or passthrough
+*OkHttp RealCall.execute() → chaos pipeline → suppression or passthrough*
 
-participant "Application\nThread" as App
-participant "okhttp3.RealCall\n(advice woven)" as RC
-participant "HttpClientAdvice\n.OkHttpExecuteAdvice" as Advice
-participant "BootstrapDispatcher\n.beforeHttpSend(url)" as BD
-participant "ChaosBridge\n.beforeHttpSend(url)" as CB
-participant "ChaosDispatcher\n.beforeHttpSend(url, HTTP_CLIENT_SEND)" as CD
-participant "ScenarioRegistry\n.match(context)" as SR
-participant "SelectorMatcher" as SM
-
-App -> RC : call.execute()
-activate RC
-
-note over RC : @Advice.OnMethodEnter fires\nbefore method body
-
-RC -> Advice : OkHttpExecuteAdvice.enter(this)
-activate Advice
-
-Advice -> Advice : url = HttpUrlExtractor.fromOkHttpCall(call)\n  → call.request().url().toString()
-
-Advice -> BD : beforeHttpSend(url)
-activate BD
-
-note over BD : DEPTH.get() == 0?\nyes → proceed\nDEPTH.set(1)
-
-BD -> CB : handles[46].invoke(delegate, url)
-activate CB
-
-CB -> CD : beforeHttpSend(url, HTTP_CLIENT_SEND)
-activate CD
-
-CD -> CD : build InvocationContext\n(HTTP_CLIENT_SEND, "http.client",\nnull, url, false, ...)
-
-CD -> SR : registry.match(context)
-activate SR
-
-SR -> SM : SelectorMatcher.matches(\n  HttpClientSelector, context)
-activate SM
-SM -> SM : operationType in selector.operations?\nurlPattern.matches(url)?
-SM --> SR : true / false
-deactivate SM
-
-SR --> CD : List<ScenarioContribution>
-deactivate SR
-
-alt no matching scenario
-  CD --> CB : false (no suppress)
-  CB --> BD : false
-  BD --> Advice : false
-  Advice --> RC : (no throw — passthrough)
-  RC -> RC : real OkHttp I/O executes
-  RC --> App : Response
-else SUPPRESS scenario matched
-  CD --> CB : true (suppress)
-  CB --> BD : true
-  BD --> Advice : true
-  Advice -> Advice : throw new ChaosHttpSuppressException(\n  "HTTP execute suppressed: " + url)
+```mermaid
+sequenceDiagram
+  participant App as Application<br/>Thread
+  participant RC as okhttp3.RealCall<br/>(advice woven)
+  participant Advice as HttpClientAdvice<br/>.OkHttpExecuteAdvice
+  participant BD as BootstrapDispatcher<br/>.beforeHttpSend(url)
+  participant CB as ChaosBridge<br/>.beforeHttpSend(url)
+  participant CD as ChaosDispatcher<br/>.beforeHttpSend(url, HTTP_CLIENT_SEND)
+  participant SR as ScenarioRegistry<br/>.match(context)
+  participant SM as SelectorMatcher
+  App->>RC: call.execute()
+  activate RC
+  Note over RC: @Advice.OnMethodEnter fires<br/>before method body
+  RC->>Advice: OkHttpExecuteAdvice.enter(this)
+  activate Advice
+  Advice->>Advice: url = HttpUrlExtractor.fromOkHttpCall(call)<br/>  → call.request().url().toString()
+  Advice->>BD: beforeHttpSend(url)
+  activate BD
+  Note over BD: DEPTH.get() == 0?<br/>yes → proceed<br/>DEPTH.set(1)
+  BD->>CB: handles[45].invoke(delegate, url)
+  activate CB
+  CB->>CD: beforeHttpSend(url, HTTP_CLIENT_SEND)
+  activate CD
+  CD->>CD: build InvocationContext<br/>(HTTP_CLIENT_SEND, "http.client",<br/>null, url, false, ...)
+  CD->>SR: registry.match(context)
+  activate SR
+  SR->>SM: SelectorMatcher.matches(<br/>  HttpClientSelector, context)
+  activate SM
+  SM->>SM: operationType in selector.operations?<br/>urlPattern.matches(url)?
+  SM-->>SR: true / false
+  deactivate SM
+  SR-->>CD: List#lt;ScenarioContribution#gt;
+  deactivate SR
+  alt no matching scenario
+  CD-->>CB: false (no suppress)
+  CB-->>BD: false
+  BD-->>Advice: false
+  Advice-->>RC: (no throw — passthrough)
+  RC->>RC: real OkHttp I/O executes
+  RC-->>App: Response
+  else SUPPRESS scenario matched
+  CD-->>CB: true (suppress)
+  CB-->>BD: true
+  BD-->>Advice: true
+  Advice->>Advice: throw new ChaosHttpSuppressException(<br/>  "HTTP execute suppressed: " + url)
   deactivate Advice
-  Advice --> App : ChaosHttpSuppressException\n(propagates as unchecked)
+  Advice-->>App: ChaosHttpSuppressException<br/>(propagates as unchecked)
   deactivate RC
-else DELAY scenario matched
-  CD -> CD : Thread.sleep(delayMillis)
-  CD --> CB : false
-  CB --> BD : false
-  BD --> Advice : false
-  Advice --> RC : (no throw — passthrough after delay)
-  RC -> RC : real OkHttp I/O executes
-  RC --> App : Response (delayed)
-end
-
-deactivate CD
-deactivate CB
-deactivate BD
-@enduml
+  else DELAY scenario matched
+  CD->>CD: Thread.sleep(delayMillis)
+  CD-->>CB: false
+  CB-->>BD: false
+  BD-->>Advice: false
+  Advice-->>RC: (no throw — passthrough after delay)
+  RC->>RC: real OkHttp I/O executes
+  RC-->>App: Response (delayed)
+  end
+  deactivate CD
+  deactivate CB
+  deactivate BD
 ```
 
 ---
@@ -755,11 +768,11 @@ HikariCP and c3p0 are wired via `instrumentOptional` — their absence from the 
 
 The handle slots in `BootstrapDispatcher`:
 
-- `BEFORE_JDBC_CONNECTION_ACQUIRE = 48`
-- `BEFORE_JDBC_STATEMENT_EXECUTE = 49`
-- `BEFORE_JDBC_PREPARED_STATEMENT = 50`
-- `BEFORE_JDBC_TRANSACTION_COMMIT = 51`
-- `BEFORE_JDBC_TRANSACTION_ROLLBACK = 52`
+- `BEFORE_JDBC_CONNECTION_ACQUIRE = 47`
+- `BEFORE_JDBC_STATEMENT_EXECUTE = 48`
+- `BEFORE_JDBC_PREPARED_STATEMENT = 49`
+- `BEFORE_JDBC_TRANSACTION_COMMIT = 50`
+- `BEFORE_JDBC_TRANSACTION_ROLLBACK = 51`
 
 ## 13.3 Interface Subtype Matching — The JVM Constraint
 
@@ -784,7 +797,7 @@ ByteBuddy's retransformation strategy handles the lazy loading of driver classes
 
 ## 13.4 SQL Truncation — The 200-Character Limit
 
-For `JDBC_STATEMENT_EXECUTE` and `JDBC_PREPARED_STATEMENT`, the `targetName` in `InvocationContext` is set to the SQL string truncated to 200 characters. The `snippet()` helper in `ChaosDispatcher`:
+For `JDBC_STATEMENT_EXECUTE` and `JDBC_PREPARED_STATEMENT`, the `targetName` in `InvocationContext` is set to the SQL string truncated to 200 characters. The `snippet()` helper in `ClientDispatch`:
 
 ```java
 private static String snippet(final String sql) {
@@ -827,7 +840,7 @@ The same propagation logic applies to all other JDBC advice methods: `Statement.
 
 ## 13.7 The `evaluateJdbc` Shared Pipeline
 
-All five JDBC dispatch methods in `ChaosDispatcher` funnel through a single private helper:
+All five JDBC dispatch methods in `ClientDispatch` funnel through a single private helper:
 
 ```java
 private boolean evaluateJdbc(
@@ -893,91 +906,74 @@ void installBridge() throws Exception {
 }
 ```
 
-`ChaosPlatform.installLocally()` — the self-attach mechanism used by the Spring test starter — calls `JdkInstrumentationInstaller.install(instrumentation, runtime, premainMode=true)` which includes Phase 2 JDK instrumentation. The `chaos-agent-instrumentation-jdk` module already depends on `chaos-agent-bootstrap` for the `ChaosPlatform` type. `chaos-agent-bootstrap` in turn depends on `chaos-agent-instrumentation-jdk`. Calling `ChaosPlatform.installLocally()` from within `chaos-agent-instrumentation-jdk`'s own test scope would create a module dependency cycle: the module-under-test would need its own outputs on the classpath at test time in a way that the Gradle project structure does not support without forking a child process with `-javaagent:`.
-
-Additionally, JDBC instrumentation in `JdkInstrumentationInstaller` is gated on `premainMode=true`. A self-attach via `agentmain` sets `premainMode=false`, which means the JDBC `isSubTypeOf(Statement.class)` transformations are never installed during dynamic attach. Self-attach therefore cannot exercise the JDBC ByteBuddy wiring at all.
+`ChaosPlatform.installLocally()` — the self-attach mechanism used by the Spring test starter — calls `JdkInstrumentationInstaller.install(instrumentation, runtime, eager)`, which weaves every hook group (JDBC included) on demand exactly as a `-javaagent:` start does. The `chaos-agent-instrumentation-jdk` module already depends on `chaos-agent-bootstrap` for the `ChaosPlatform` type. `chaos-agent-bootstrap` in turn depends on `chaos-agent-instrumentation-jdk`. Calling `ChaosPlatform.installLocally()` from within `chaos-agent-instrumentation-jdk`'s own test scope would create a module dependency cycle: the module-under-test would need its own outputs on the classpath at test time in a way that the Gradle project structure does not support without forking a child process with `-javaagent:`.
 
 The manual `BootstrapDispatcher.install(bridge, handles)` approach bypasses ByteBuddy entirely. The test calls the `BootstrapDispatcher` static dispatch methods (`beforeJdbcStatementExecute`, `beforeJdbcConnectionAcquire`, etc.) directly, simulating what the ByteBuddy-woven advice would call at production runtime. The real `ChaosRuntime` → `ChaosDispatcher` → `ScenarioRegistry` → `SelectorMatcher` pipeline executes in full. The real H2 in-memory database and HikariCP connection pool are used. The only missing piece is the ByteBuddy weaving — which is a concern for `JdkInstrumentationInstaller` to test, not for `JdbcIntegrationTest`. The test covers the dispatch path, the suppression signal, the exception throw, and the passthrough path; it leaves the bytecode transformation mechanics to the installer's own test scope.
 
 ## 13.9 Sequence Diagram — HikariCP Connection Acquire
 
-```plantuml
-@startuml
-title HikariPool.getConnection(long) → chaos pipeline → suppress or passthrough
+*HikariPool.getConnection(long) → chaos pipeline → suppress or passthrough*
 
-participant "Application\nThread" as App
-participant "HikariPool\n(advice woven)" as HP
-participant "JdbcAdvice\n.HikariGetConnectionAdvice" as Advice
-participant "BootstrapDispatcher\n.beforeJdbcConnectionAcquire(poolName)" as BD
-participant "ChaosBridge\n.beforeJdbcConnectionAcquire(poolName)" as CB
-participant "ChaosDispatcher\n.beforeJdbcConnectionAcquire()" as CD
-participant "evaluateJdbc()" as EJ
-participant "ScenarioRegistry\n.match(context)" as SR
-
-App -> HP : dataSource.getConnection()\n  → HikariPool.getConnection(timeoutMs)
-activate HP
-
-note over HP : @Advice.OnMethodEnter fires\nbefore method body
-
-HP -> Advice : HikariGetConnectionAdvice.enter(this)
-activate Advice
-
-Advice -> Advice : poolName = JdbcTargetExtractor\n  .fromHikariPool(pool)\n  → reflective getPoolName()
-
-Advice -> BD : beforeJdbcConnectionAcquire(poolName)
-activate BD
-
-note over BD : DEPTH.get() == 0\nDEPTH.set(1)
-
-BD -> CB : handles[48].invoke(delegate, poolName)
-activate CB
-
-CB -> CD : beforeJdbcConnectionAcquire(poolName)
-activate CD
-
-CD -> EJ : evaluateJdbc(JDBC_CONNECTION_ACQUIRE,\n  "jdbc.pool", poolName)
-activate EJ
-
-EJ -> SR : registry.match(\n  InvocationContext(JDBC_CONNECTION_ACQUIRE,\n  "jdbc.pool", null, poolName, ...))
-activate SR
-SR --> EJ : List<ScenarioContribution>
-deactivate SR
-
-alt no matching scenario
-  EJ --> CD : false
-  CD --> CB : false
-  CB --> BD : false
-  BD --> Advice : false
-  Advice --> HP : (no throw — passthrough)
-  HP -> HP : real connection borrowed from pool
-  HP --> App : Connection
-
-else SUPPRESS scenario matched
-  EJ --> CD : true (suppress)
-  CD --> CB : true
-  CB --> BD : true
-  BD --> Advice : true
-  Advice -> Advice : throw new ChaosJdbcSuppressException(\n  "JDBC connection acquire suppressed: " + poolName)
+```mermaid
+sequenceDiagram
+  participant App as Application<br/>Thread
+  participant HP as HikariPool<br/>(advice woven)
+  participant Advice as JdbcAdvice<br/>.HikariGetConnectionAdvice
+  participant BD as BootstrapDispatcher<br/>.beforeJdbcConnectionAcquire(poolName)
+  participant CB as ChaosBridge<br/>.beforeJdbcConnectionAcquire(poolName)
+  participant CD as ChaosDispatcher<br/>.beforeJdbcConnectionAcquire()
+  participant EJ as evaluateJdbc()
+  participant SR as ScenarioRegistry<br/>.match(context)
+  App->>HP: dataSource.getConnection()<br/>  → HikariPool.getConnection(timeoutMs)
+  activate HP
+  Note over HP: @Advice.OnMethodEnter fires<br/>before method body
+  HP->>Advice: HikariGetConnectionAdvice.enter(this)
+  activate Advice
+  Advice->>Advice: poolName = JdbcTargetExtractor<br/>  .fromHikariPool(pool)<br/>  → reflective getPoolName()
+  Advice->>BD: beforeJdbcConnectionAcquire(poolName)
+  activate BD
+  Note over BD: DEPTH.get() == 0<br/>DEPTH.set(1)
+  BD->>CB: handles[47].invoke(delegate, poolName)
+  activate CB
+  CB->>CD: beforeJdbcConnectionAcquire(poolName)
+  activate CD
+  CD->>EJ: evaluateJdbc(JDBC_CONNECTION_ACQUIRE,<br/>  "jdbc.pool", poolName)
+  activate EJ
+  EJ->>SR: registry.match(<br/>  InvocationContext(JDBC_CONNECTION_ACQUIRE,<br/>  "jdbc.pool", null, poolName, ...))
+  activate SR
+  SR-->>EJ: List#lt;ScenarioContribution#gt;
+  deactivate SR
+  alt no matching scenario
+  EJ-->>CD: false
+  CD-->>CB: false
+  CB-->>BD: false
+  BD-->>Advice: false
+  Advice-->>HP: (no throw — passthrough)
+  HP->>HP: real connection borrowed from pool
+  HP-->>App: Connection
+  else SUPPRESS scenario matched
+  EJ-->>CD: true (suppress)
+  CD-->>CB: true
+  CB-->>BD: true
+  BD-->>Advice: true
+  Advice->>Advice: throw new ChaosJdbcSuppressException(<br/>  "JDBC connection acquire suppressed: " + poolName)
   deactivate Advice
-  Advice --> App : ChaosJdbcSuppressException\n(propagates unchecked through HikariCP)
+  Advice-->>App: ChaosJdbcSuppressException<br/>(propagates unchecked through HikariCP)
   deactivate HP
-
-else DELAY scenario matched
-  EJ -> EJ : Thread.sleep(delayMillis)
-  EJ --> CD : false
-  CD --> CB : false
-  CB --> BD : false
-  BD --> Advice : false
-  Advice --> HP : (no throw — passthrough after delay)
-  HP -> HP : real connection borrowed from pool
-  HP --> App : Connection (delayed)
-end
-
-deactivate EJ
-deactivate CD
-deactivate CB
-deactivate BD
-@enduml
+  else DELAY scenario matched
+  EJ->>EJ: Thread.sleep(delayMillis)
+  EJ-->>CD: false
+  CD-->>CB: false
+  CB-->>BD: false
+  BD-->>Advice: false
+  Advice-->>HP: (no throw — passthrough after delay)
+  HP->>HP: real connection borrowed from pool
+  HP-->>App: Connection (delayed)
+  end
+  deactivate EJ
+  deactivate CD
+  deactivate CB
+  deactivate BD
 ```
 
 ---
@@ -997,9 +993,9 @@ deactivate BD
    before `premain` runs; class-load-time interception is therefore unavailable.
 
    *Constraint B — `@IntrinsicCandidate` JIT bypass.*
-   HotSpot C2 recognises `java.lang.System.currentTimeMillis` / `nanoTime` by class+method name
-   and replaces the callsite with a direct `RDTSC` / `MRS CNTVCT_EL0` hardware read after
-   ~10 000 invocations, bypassing any Java-level wrapper that might exist.
+   HotSpot recognises `java.lang.System.currentTimeMillis` / `nanoTime` by class+method name
+   and, once the caller is compiled, replaces the call with a direct call to the VM clock
+   (`clock_gettime` through the vDSO on Linux), bypassing any Java-level wrapper that might exist.
 
    **Investigation result**: a second `AgentBuilder` with `enableNativeMethodPrefix("$chaos$")`
    and `RETRANSFORMATION` was tested empirically. ByteBuddy fires a TRANSFORM event for
@@ -1009,9 +1005,9 @@ deactivate BD
 
    **Clock skew works via two supported paths:**
    - Code explicitly wired through `BootstrapDispatcher.adjustClockMillis` / `adjustClockNanos`.
-   - `java.time.Instant.now()`, `LocalDateTime.now()` / `now(ZoneId)`, `ZonedDateTime.now()` / `now(ZoneId)`, and `new java.util.Date()` — all are non-native Java members woven at exit in the Phase 2 block. See §7a for implementation details including the `DateNewAdvice` `ClassCircularityError` edge case and the nanosecond-precision preservation guarantee for `Instant`.
+   - `java.time.Instant.now()`, `LocalDateTime.now()` / `now(ZoneId)`, `ZonedDateTime.now()` / `now(ZoneId)`, and `new java.util.Date()` — all are non-native Java members woven at exit by the `TIME_API` hook group. See §7a for implementation details including the `DateNewAdvice` `ClassCircularityError` edge case and the nanosecond-precision preservation guarantee for `Instant`.
 
-2. **Agentmain Phase 2 not available**: Dynamic attach (`agentmain`) cannot retransform bootstrap-loaded classes that were loaded before the agent attached. Phase 2 interception points (sockets, NIO, LockSupport, etc.) require premain attachment.
+2. **Dynamic attach requires opt-in**: Dynamic attach (`agentmain`) weaves the same hook groups as `-javaagent:` — every group is applied by retransformation on demand, so sockets, NIO, `LockSupport`, HTTP, JDBC, etc. are all available — but `agentmain` remains a no-op unless dynamic attach is explicitly enabled (see [bootstrap.md](bootstrap.md)).
 
 3. **Native method wrapping for other bootstrap classes**: The `disableClassFormatChanges()`
    restriction in the primary `AgentBuilder` prevents ByteBuddy from creating native method

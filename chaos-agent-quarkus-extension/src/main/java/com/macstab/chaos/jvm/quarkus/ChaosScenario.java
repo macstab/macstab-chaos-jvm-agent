@@ -10,17 +10,19 @@ import java.lang.annotation.Target;
 /**
  * Declarative chaos scenario activation for Quarkus tests.
  *
- * <p>When placed on a test class or method, the {@link ChaosQuarkusExtension} reads the annotation
- * metadata, builds a matching {@link com.macstab.chaos.jvm.api.ChaosScenario}, and activates it on
- * the class-scoped {@link com.macstab.chaos.jvm.api.ChaosSession} opened for the test.
- *
- * <p>Multiple {@code @ChaosScenario} annotations may be placed on the same element — each is
- * activated independently. Test-method annotations take precedence for parity with the usual JUnit
- * annotation-override rules.
- *
- * <h2>Example</h2>
- *
- * <pre>{@code
+ * @deprecated Use {@link com.macstab.chaos.jvm.testkit.WithChaos}: it takes the full plan JSON
+ *     model (every selector, effect and policy field), works with every test extension, and is
+ *     honoured by {@link ChaosQuarkusExtension} too. This annotation only knows a few selectors and
+ *     effect shorthands and will be removed in 3.0.
+ *     <p>When placed on a test class or method, the {@link ChaosQuarkusExtension} reads the
+ *     annotation metadata, builds a matching {@link com.macstab.chaos.jvm.api.ChaosScenario}, and
+ *     activates it on the class-scoped {@link com.macstab.chaos.jvm.api.ChaosSession} opened for
+ *     the test.
+ *     <p>Multiple {@code @ChaosScenario} annotations may be placed on the same element — each is
+ *     activated independently. Test-method annotations take precedence for parity with the usual
+ *     JUnit annotation-override rules.
+ *     <h2>Example</h2>
+ *     <pre>{@code
  * @QuarkusChaosTest
  * @ChaosScenario(id = "slow-jdbc", selector = "jdbc", effect = "delay:PT0.1S")
  * class OrderServiceTest {
@@ -38,6 +40,8 @@ import java.lang.annotation.Target;
 @Retention(RetentionPolicy.RUNTIME)
 @Inherited
 @Repeatable(ChaosScenarios.class)
+@Deprecated(since = "2.0", forRemoval = true)
+@SuppressWarnings("removal")
 public @interface ChaosScenario {
 
   /**

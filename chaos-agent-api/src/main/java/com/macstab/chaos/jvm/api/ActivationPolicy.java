@@ -1,8 +1,8 @@
 package com.macstab.chaos.jvm.api;
 
-import com.fasterxml.jackson.annotation.JsonCreator;
-import com.fasterxml.jackson.annotation.JsonProperty;
 import java.time.Duration;
+import java.time.Instant;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Controls when and how often a chaos effect fires when its selector matches an operation.
@@ -55,16 +55,28 @@ import java.time.Duration;
  *     sampling is non-deterministic across JVM restarts; set an explicit value for reproducible
  *     sequences
  * @param allowDestructiveEffects whether non-recoverable effects may be activated
+ * @param activeFrom wall-clock instant before which the scenario does not fire; {@code null} means
+ *     no lower bound. Read from the real system clock, so a clock skew the agent injects cannot
+ *     move it
+ * @param activeUntil wall-clock instant from which on the scenario no longer fires and becomes
+ *     {@code INACTIVE}; {@code null} means no upper bound. Read from the real system clock
+ * @param replayMatches the 1-based match numbers on which the scenario fires, in place of the
+ *     probability draw: a decision log recorded by {@link ChaosDecisionRecorder} replayed exactly.
+ *     {@code null} means no replay. Sorted, distinct and positive; requires probability {@code 1.0}
+ *     and no rate limit, which would change the decisions
  */
 public record ActivationPolicy(
     StartMode startMode,
     double probability,
     long activateAfterMatches,
-    Long maxApplications,
-    Duration activeFor,
-    RateLimit rateLimit,
-    Long randomSeed,
-    boolean allowDestructiveEffects) {
+    @Nullable Long maxApplications,
+    @Nullable Duration activeFor,
+    @Nullable RateLimit rateLimit,
+    @Nullable Long randomSeed,
+    boolean allowDestructiveEffects,
+    @Nullable Instant activeFrom,
+    @Nullable Instant activeUntil,
+    java.util.@Nullable List<Long> replayMatches) {
 
   /**
    * Compact canonical constructor — normalises defaults and validates all field invariants.
@@ -101,6 +113,103 @@ public record ActivationPolicy(
     if (activeFor != null && (activeFor.isZero() || activeFor.isNegative())) {
       throw new IllegalArgumentException("activeFor must be positive when set");
     }
+    if (activeFrom != null && activeUntil != null && !activeFrom.isBefore(activeUntil)) {
+      throw new IllegalArgumentException(
+          "activeFrom must be before activeUntil, got " + activeFrom + " and " + activeUntil);
+    }
+    if (replayMatches != null) {
+      if (replayMatches.stream().anyMatch(match -> match == null || match <= 0)) {
+        throw new IllegalArgumentException("replayMatches must hold positive match numbers");
+      }
+      if (probability < 1.0d || rateLimit != null) {
+        throw new IllegalArgumentException(
+            "replayMatches replaces the probability draw: it requires probability 1.0 and no"
+                + " rateLimit");
+      }
+      replayMatches = replayMatches.stream().distinct().sorted().toList();
+      if (!replayMatches.isEmpty() && replayMatches.get(0) <= activateAfterMatches) {
+        throw new IllegalArgumentException(
+            "replayMatches "
+                + replayMatches.get(0)
+                + " lies inside the warm-up of "
+                + activateAfterMatches
+                + " matches and could never fire");
+      }
+    }
+  }
+
+  /**
+   * Creates a policy without replay.
+   *
+   * @param startMode when the scenario begins accepting matches
+   * @param probability fraction of matches that fire
+   * @param activateAfterMatches initial matches to skip
+   * @param maxApplications cap on applications; {@code null} for none
+   * @param activeFor how long the scenario stays active; {@code null} for no bound
+   * @param rateLimit rate cap; {@code null} for none
+   * @param randomSeed PRNG seed; {@code null} for a random one
+   * @param allowDestructiveEffects whether non-recoverable effects may be activated
+   * @param activeFrom wall-clock start; {@code null} for none
+   * @param activeUntil wall-clock end; {@code null} for none
+   */
+  public ActivationPolicy(
+      final StartMode startMode,
+      final double probability,
+      final long activateAfterMatches,
+      final @Nullable Long maxApplications,
+      final @Nullable Duration activeFor,
+      final @Nullable RateLimit rateLimit,
+      final @Nullable Long randomSeed,
+      final boolean allowDestructiveEffects,
+      final @Nullable Instant activeFrom,
+      final @Nullable Instant activeUntil) {
+    this(
+        startMode,
+        probability,
+        activateAfterMatches,
+        maxApplications,
+        activeFor,
+        rateLimit,
+        randomSeed,
+        allowDestructiveEffects,
+        activeFrom,
+        activeUntil,
+        null);
+  }
+
+  /**
+   * Creates a policy without an absolute wall-clock window (no start or end instant). Kept so
+   * callers of the 1.x constructor keep compiling; prefer {@link #builder()}.
+   *
+   * @param startMode when the scenario begins accepting matches
+   * @param probability fraction of matches that result in effect application
+   * @param activateAfterMatches number of initial matches to skip
+   * @param maxApplications hard cap on total effect applications; {@code null} means unlimited
+   * @param activeFor time window from start; {@code null} means none
+   * @param rateLimit fixed-window rate cap; {@code null} means unlimited
+   * @param randomSeed fixed PRNG seed; {@code null} draws a random seed
+   * @param allowDestructiveEffects whether non-recoverable effects may be activated
+   */
+  public ActivationPolicy(
+      final StartMode startMode,
+      final double probability,
+      final long activateAfterMatches,
+      final @Nullable Long maxApplications,
+      final @Nullable Duration activeFor,
+      final @Nullable RateLimit rateLimit,
+      final @Nullable Long randomSeed,
+      final boolean allowDestructiveEffects) {
+    this(
+        startMode,
+        probability,
+        activateAfterMatches,
+        maxApplications,
+        activeFor,
+        rateLimit,
+        randomSeed,
+        allowDestructiveEffects,
+        null,
+        null);
   }
 
   /**
@@ -125,27 +234,38 @@ public record ActivationPolicy(
    *     random seed from {@link java.util.concurrent.ThreadLocalRandom} — non-deterministic across
    *     JVM restarts
    * @param allowDestructiveEffects whether non-recoverable effects may be activated
+   * @param activeFrom wall-clock instant before which the scenario does not fire; may be {@code
+   *     null}
+   * @param activeUntil wall-clock instant from which on the scenario no longer fires; may be {@code
+   *     null}
+   * @param replayMatches the match numbers to fire on in place of the probability draw; may be
+   *     {@code null}
    * @return a new {@link ActivationPolicy} built from the parsed JSON values
    */
-  @JsonCreator
   public static ActivationPolicy fromJson(
-      @JsonProperty("startMode") final StartMode startMode,
-      @JsonProperty("probability") final Double probability,
-      @JsonProperty("activateAfterMatches") final long activateAfterMatches,
-      @JsonProperty("maxApplications") final Long maxApplications,
-      @JsonProperty("activeFor") final Duration activeFor,
-      @JsonProperty("rateLimit") final RateLimit rateLimit,
-      @JsonProperty("randomSeed") final Long randomSeed,
-      @JsonProperty("allowDestructiveEffects") final boolean allowDestructiveEffects) {
+      final @Nullable StartMode startMode,
+      final @Nullable Double probability,
+      final long activateAfterMatches,
+      final @Nullable Long maxApplications,
+      final @Nullable Duration activeFor,
+      final @Nullable RateLimit rateLimit,
+      final @Nullable Long randomSeed,
+      final boolean allowDestructiveEffects,
+      final @Nullable Instant activeFrom,
+      final @Nullable Instant activeUntil,
+      final java.util.@Nullable List<Long> replayMatches) {
     return new ActivationPolicy(
-        startMode,
+        startMode == null ? StartMode.AUTOMATIC : startMode,
         probability == null ? 1.0d : probability,
         activateAfterMatches,
         maxApplications,
         activeFor,
         rateLimit,
         randomSeed,
-        allowDestructiveEffects);
+        allowDestructiveEffects,
+        activeFrom,
+        activeUntil,
+        replayMatches);
   }
 
   /**
@@ -191,6 +311,34 @@ public record ActivationPolicy(
   }
 
   /**
+   * Returns a policy that fires on the first {@code applications} matches and then becomes {@code
+   * INACTIVE}: {@link #always()} with {@code maxApplications = applications}. The equivalent of the
+   * native library's {@code @first=N} qualifier.
+   *
+   * @param applications the number of applications; {@code > 0}
+   * @return the policy
+   * @throws IllegalArgumentException if {@code applications} is not positive
+   */
+  public static ActivationPolicy count(final long applications) {
+    return builder().maxApplications(applications).build();
+  }
+
+  /**
+   * Returns a policy that fires on every match between two wall-clock instants: {@link #always()}
+   * with {@code activeFrom = from} and {@code activeUntil = until}. The equivalent of the native
+   * library's {@code @from}/{@code @until} qualifiers. Either bound may be {@code null}.
+   *
+   * @param from the first instant the scenario fires at; {@code null} for no lower bound
+   * @param until the instant from which on the scenario no longer fires; {@code null} for no upper
+   *     bound
+   * @return the policy
+   * @throws IllegalArgumentException if {@code from} is not before {@code until}
+   */
+  public static ActivationPolicy window(final Instant from, final Instant until) {
+    return builder().window(from, until).build();
+  }
+
+  /**
    * Returns a builder whose defaults equal {@link #always()}: automatic start, probability {@code
    * 1.0}, no warm-up, cap, window or rate limit, seed {@code 0}, no destructive effects.
    *
@@ -208,11 +356,14 @@ public record ActivationPolicy(
     private StartMode startMode = StartMode.AUTOMATIC;
     private double probability = 1.0d;
     private long activateAfterMatches;
-    private Long maxApplications;
-    private Duration activeFor;
-    private RateLimit rateLimit;
-    private Long randomSeed = 0L;
+    private @Nullable Long maxApplications;
+    private @Nullable Duration activeFor;
+    private @Nullable RateLimit rateLimit;
+    private @Nullable Long randomSeed = 0L;
     private boolean allowDestructiveEffects;
+    private @Nullable Instant activeFrom;
+    private @Nullable Instant activeUntil;
+    private java.util.@Nullable List<Long> replayMatches;
 
     private Builder() {}
 
@@ -255,7 +406,7 @@ public record ActivationPolicy(
      * @param value the cap; {@code null} for unlimited
      * @return this builder
      */
-    public Builder maxApplications(final Long value) {
+    public Builder maxApplications(final @Nullable Long value) {
       this.maxApplications = value;
       return this;
     }
@@ -266,7 +417,7 @@ public record ActivationPolicy(
      * @param value the window; {@code null} for none
      * @return this builder
      */
-    public Builder activeFor(final Duration value) {
+    public Builder activeFor(final @Nullable Duration value) {
       this.activeFor = value;
       return this;
     }
@@ -289,7 +440,7 @@ public record ActivationPolicy(
      * @param value the rate limit; {@code null} for none
      * @return this builder
      */
-    public Builder rateLimit(final RateLimit value) {
+    public Builder rateLimit(final @Nullable RateLimit value) {
       this.rateLimit = value;
       return this;
     }
@@ -300,7 +451,7 @@ public record ActivationPolicy(
      * @param value the seed, or {@code null}
      * @return this builder
      */
-    public Builder randomSeed(final Long value) {
+    public Builder randomSeed(final @Nullable Long value) {
       this.randomSeed = value;
       return this;
     }
@@ -314,6 +465,53 @@ public record ActivationPolicy(
      */
     public Builder allowDestructiveEffects(final boolean value) {
       this.allowDestructiveEffects = value;
+      return this;
+    }
+
+    /**
+     * Sets the wall-clock instant before which the scenario does not fire.
+     *
+     * @param value the instant; {@code null} for no lower bound
+     * @return this builder
+     */
+    public Builder activeFrom(final @Nullable Instant value) {
+      this.activeFrom = value;
+      return this;
+    }
+
+    /**
+     * Sets the wall-clock instant from which on the scenario no longer fires.
+     *
+     * @param value the instant; {@code null} for no upper bound
+     * @return this builder
+     */
+    public Builder activeUntil(final @Nullable Instant value) {
+      this.activeUntil = value;
+      return this;
+    }
+
+    /**
+     * Sets both wall-clock bounds.
+     *
+     * @param from the first instant the scenario fires at; {@code null} for no lower bound
+     * @param until the instant from which on the scenario no longer fires; {@code null} for no
+     *     upper bound
+     * @return this builder
+     */
+    public Builder window(final Instant from, final Instant until) {
+      this.activeFrom = from;
+      this.activeUntil = until;
+      return this;
+    }
+
+    /**
+     * Replays a recorded decision log: the scenario fires on exactly these 1-based match numbers.
+     *
+     * @param value the match numbers, from {@link ChaosDecisionRecorder#matches(String)}
+     * @return this builder
+     */
+    public Builder replayMatches(final java.util.@Nullable Collection<Long> value) {
+      this.replayMatches = value == null ? null : java.util.List.copyOf(value);
       return this;
     }
 
@@ -332,7 +530,10 @@ public record ActivationPolicy(
           activeFor,
           rateLimit,
           randomSeed,
-          allowDestructiveEffects);
+          allowDestructiveEffects,
+          activeFrom,
+          activeUntil,
+          replayMatches);
     }
   }
 
@@ -395,7 +596,7 @@ public record ActivationPolicy(
       // turning an operator configuration mistake into a runtime exception far from the
       // source. Catching it here points the error at the plan parser / YAML author.
       try {
-        window.toNanos();
+        final long unused = window.toNanos();
       } catch (final ArithmeticException overflow) {
         throw new IllegalArgumentException(
             "window is too large to represent in nanoseconds: " + window, overflow);

@@ -17,6 +17,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Per-scenario runtime controller that evaluates whether the scenario applies to a given {@link
@@ -71,9 +72,12 @@ import java.util.function.Supplier;
  * them would stall every concurrent {@code evaluate()} caller and risk listener-induced deadlock.
  */
 final class ScenarioController {
+  /** The policy's replay log as a sorted array, or {@code null} without replay. */
+  private final long @Nullable [] replayMatches;
+
   private final ChaosScenario scenario;
   private final String scopeKey;
-  private final String sessionId;
+  private final @Nullable String sessionId;
   private final Clock clock;
   private final ObservabilityBus observabilityBus;
   private final StressorFactory stressorFactory;
@@ -88,16 +92,16 @@ final class ScenarioController {
   private final Object applicationBudgetLock = new Object();
 
   /** Thread that ends a stressor scenario when {@code activeFor} elapses; {@code null} if none. */
-  private volatile Thread expiryThread;
+  private volatile @Nullable Thread expiryThread;
 
   /** Reservations taken by {@link #reserveApplication()} and not yet committed or released. */
   private long reservedApplications;
 
   private volatile ChaosDiagnostics.ScenarioState state;
-  private volatile String reason;
-  private volatile Instant startedAt;
-  private volatile ManagedStressor stressor;
-  private volatile ClockSkewState clockSkewState;
+  private volatile @Nullable String reason;
+  private volatile @Nullable Instant startedAt;
+  private volatile @Nullable ManagedStressor stressor;
+  private volatile @Nullable ClockSkewState clockSkewState;
   private volatile long rateWindowStartMillis;
   private volatile long rateWindowPermits;
 
@@ -107,10 +111,16 @@ final class ScenarioController {
   ScenarioController(
       final ChaosScenario scenario,
       final String scopeKey,
-      final String sessionId,
+      final @Nullable String sessionId,
       final Clock clock,
       final ObservabilityBus observabilityBus,
       final Supplier<Optional<Instrumentation>> instrumentationSupplier) {
+    this.replayMatches =
+        scenario.activationPolicy().replayMatches() == null
+            ? null
+            : scenario.activationPolicy().replayMatches().stream()
+                .mapToLong(Long::longValue)
+                .toArray();
     this.scenario = scenario;
     this.scopeKey = scopeKey;
     this.sessionId = sessionId;
@@ -191,7 +201,7 @@ final class ScenarioController {
   }
 
   /** Returns the session this controller is scoped to, or {@code null} for a JVM scenario. */
-  String sessionId() {
+  @Nullable String sessionId() {
     return sessionId;
   }
 
@@ -320,9 +330,9 @@ final class ScenarioController {
     if (transitioned) {
       observabilityBus.publish(
           ChaosEvent.Type.STARTED, scenario.id(), "scenario started", Map.of("scope", scopeKey));
-      final Duration activeFor = scenario.activationPolicy().activeFor();
-      if (newStressor != null && activeFor != null) {
-        scheduleStressorExpiry(activeFor);
+      final Duration lifetime = stressorLifetime();
+      if (newStressor != null && lifetime != null) {
+        scheduleStressorExpiry(lifetime);
       }
     }
   }
@@ -400,9 +410,10 @@ final class ScenarioController {
    *       equal the session ID this controller was registered with.
    *   <li><b>Selector match</b>: {@link SelectorMatcher#matches} must return {@code true} for the
    *       scenario's selector and the given context.
-   *   <li><b>Activation window</b>: if an {@code activeFor} duration is configured, the elapsed
-   *       time since {@link #start()} must not exceed it. A failure transitions the state to {@code
-   *       INACTIVE} with reason {@code "expired"}.
+   *   <li><b>Activation window</b>: the current instant must lie before {@code activeUntil} and
+   *       within {@code activeFor} of {@link #start()}; otherwise the state becomes {@code
+   *       INACTIVE} with reason {@code "expired"}. Before {@code activeFrom} the call is skipped
+   *       without being counted.
    *   <li><b>Warm-up</b>: {@code matchedCount} must exceed {@code activateAfterMatches}.
    *   <li><b>Probability</b>: a random draw using {@link java.util.SplittableRandom} seeded with
    *       the configured seed XOR-ed with the match count and scenario ID hash must be below the
@@ -426,7 +437,7 @@ final class ScenarioController {
    * @return a {@link ScenarioContribution} when chaos should be applied, or {@code null} when any
    *     check fails
    */
-  ScenarioContribution evaluate(final InvocationContext context) {
+  @Nullable ScenarioContribution evaluate(final InvocationContext context) {
     if (!started.get()) {
       return null;
     }
@@ -436,23 +447,27 @@ final class ScenarioController {
     if (!SelectorMatcher.matches(scenario.selector(), context)) {
       return null;
     }
-    if (!passesActivationWindow()) {
+    final Window window = window();
+    if (window == Window.EXPIRED) {
       markInactive("expired");
       return null;
     }
+    if (window == Window.NOT_YET) {
+      return skipped("notYetActive", context);
+    }
     final long matchCount = matchedCount.incrementAndGet();
     if (matchCount <= scenario.activationPolicy().activateAfterMatches()) {
-      return null;
+      return skipped("warmUp", context);
     }
     // Probability is checked before rate-limit so that rate-limit permits are only consumed when
     // the effect will actually be applied. Checking rate-limit first would burn permits on
     // invocations that probability then rejects, making the effective throughput
     // `rate_limit * probability` instead of the operator-configured `rate_limit`.
     if (!passesProbability(matchCount)) {
-      return null;
+      return skipped("probability", context);
     }
     if (!passesRateLimit()) {
-      return null;
+      return skipped("rateLimit", context);
     }
     // Re-check the started flag before we commit to applying the effect. stop() can flip
     // started.get() to false while we were in the rate-limit / probability / CAS branches
@@ -464,19 +479,25 @@ final class ScenarioController {
       return null;
     }
     if (!reserveApplication()) {
-      return null;
+      return skipped("maxApplications", context);
     }
     return new ScenarioContribution(
-        this, scenario, scenario.effect(), sampleDelayMillis(matchCount), gateTimeout(), context);
+        this,
+        scenario,
+        scenario.effect(),
+        sampleDelayMillis(matchCount),
+        gateTimeout(),
+        context,
+        matchCount);
   }
 
   /**
    * Reserves one application against {@code maxApplications} for a contribution that has not yet
    * been chosen. The dispatcher decides afterwards which contributions take effect (every delay,
    * the winning gate and the winning terminal action by precedence) and calls {@link
-   * #commitApplication(InvocationContext)} for those and {@link #releaseApplication()} for the
-   * rest. An earlier version counted and published {@code APPLIED} here, so a scenario that lost on
-   * precedence still reported itself as applied and used up its budget.
+   * #commitApplication(InvocationContext, long, long)} for those and {@link #releaseApplication()}
+   * for the rest. An earlier version counted and published {@code APPLIED} here, so a scenario that
+   * lost on precedence still reported itself as applied and used up its budget.
    *
    * <p>Committed applications plus outstanding reservations never exceed the cap. The scenario is
    * marked {@code INACTIVE} only once committed applications reach the cap, so a reservation that
@@ -509,7 +530,8 @@ final class ScenarioController {
    *
    * @param context the invocation the contribution was evaluated for
    */
-  void commitApplication(final InvocationContext context) {
+  void commitApplication(
+      final InvocationContext context, final long delayMillis, final long matchNumber) {
     final Long maxApplications = scenario.activationPolicy().maxApplications();
     if (maxApplications == null) {
       appliedCount.incrementAndGet();
@@ -523,7 +545,7 @@ final class ScenarioController {
         markInactive("max applications reached");
       }
     }
-    publishAppliedEvent(context);
+    publishAppliedEvent(context, delayMillis, matchNumber);
   }
 
   /** Returns a reservation taken by {@link #reserveApplication()} that was not applied. */
@@ -536,11 +558,18 @@ final class ScenarioController {
     }
   }
 
-  private void publishAppliedEvent(final InvocationContext context) {
+  private void publishAppliedEvent(
+      final InvocationContext context, final long delayMillis, final long matchNumber) {
     final Map<String, String> eventAttributes = new LinkedHashMap<>();
     eventAttributes.put("operation", context.operationType().name());
+    // The scenario's 1-based match number: what ChaosDecisionRecorder records for replay.
+    eventAttributes.put("match", Long.toString(matchNumber));
     eventAttributes.put("scope", scopeKey);
     eventAttributes.put("effectType", scenario.effect().getClass().getSimpleName());
+    if (delayMillis > 0L) {
+      // The delay this application adds to the call: the source of injected-latency metrics.
+      eventAttributes.put("delayMillis", Long.toString(delayMillis));
+    }
     if (sessionId != null) {
       eventAttributes.put("sessionId", sessionId);
     }
@@ -602,7 +631,7 @@ final class ScenarioController {
    *     com.macstab.chaos.jvm.api.ChaosEffect.ClockSkewEffect} or if the controller has not been
    *     started (or has been stopped)
    */
-  ClockSkewState clockSkewState() {
+  @Nullable ClockSkewState clockSkewState() {
     return clockSkewState;
   }
 
@@ -642,10 +671,31 @@ final class ScenarioController {
   }
 
   /**
-   * Ends a stressor scenario when its {@code activeFor} window elapses. Stressors are never
-   * evaluated per call, so the window check in {@link #evaluate(InvocationContext)} never ran for
-   * them and a heap, thread-leak or deadlock stressor with {@code activeFor} kept running until
-   * {@code stop()}.
+   * Returns how long a stressor started now may run: the shorter of {@code activeFor} and the time
+   * left until {@code activeUntil}, or {@code null} when neither is set.
+   */
+  private @Nullable Duration stressorLifetime() {
+    final ActivationPolicy policy = scenario.activationPolicy();
+    Duration lifetime = policy.activeFor();
+    if (policy.activeUntil() != null) {
+      final Duration untilEnd;
+      ChaosDispatcher.incrementDispatchDepth();
+      try {
+        untilEnd = Duration.between(clock.instant(), policy.activeUntil());
+      } finally {
+        ChaosDispatcher.decrementDispatchDepth();
+      }
+      final Duration bounded = untilEnd.isNegative() ? Duration.ZERO : untilEnd;
+      lifetime = lifetime == null || bounded.compareTo(lifetime) < 0 ? bounded : lifetime;
+    }
+    return lifetime;
+  }
+
+  /**
+   * Ends a stressor scenario when its lifetime ({@code activeFor}, {@code activeUntil}) elapses.
+   * Stressors are never evaluated per call, so the window check in {@link
+   * #evaluate(InvocationContext)} never ran for them and a heap, thread-leak or deadlock stressor
+   * with {@code activeFor} kept running until {@code stop()}.
    *
    * <p>The expiry thread is agent-owned: it runs with the dispatch depth raised for its whole life,
    * so user scenarios (thread start, park, sleep) never apply to it. It ends early when the
@@ -695,32 +745,86 @@ final class ScenarioController {
     }
   }
 
-  private boolean passesActivationWindow() {
-    final Duration activeFor = scenario.activationPolicy().activeFor();
-    if (activeFor == null) {
-      return true;
+  /**
+   * Publishes SKIPPED for a call the policy kept the effect from, when anyone listens; returns
+   * {@code null} so the caller can return it.
+   */
+  private @Nullable ScenarioContribution skipped(
+      final String reason, final InvocationContext context) {
+    if (observabilityBus.hasListeners()) {
+      observabilityBus.publish(
+          ChaosEvent.Type.SKIPPED,
+          scenario.id(),
+          "skipped: " + reason,
+          Map.of("reason", reason, "operation", context.operationType().name(), "scope", scopeKey));
     }
-    // Snapshot the volatile reference to a local so the null-check and the plus() call observe
-    // the same value. Without the snapshot a concurrent stop()→start() sequence could set
-    // startedAt=null briefly (not today's contract but cheap to defend), and two separate reads
-    // could return non-null then null. One read, one check.
-    final Instant capturedStart = startedAt;
-    if (capturedStart == null) {
-      return true;
+    return null;
+  }
+
+  /** Where the current instant lies relative to the policy's time bounds. */
+  enum Window {
+    /** Before {@code activeFrom}: the scenario does not fire yet. */
+    NOT_YET,
+    /** Within every bound. */
+    OPEN,
+    /** At or after {@code activeUntil}, or {@code activeFor} has elapsed since start. */
+    EXPIRED
+  }
+
+  /**
+   * Checks the policy's time bounds against the controller's clock. The clock is the real system
+   * clock in production; it is read inside a dispatch, where the agent's own clock hooks return the
+   * real value, so an active clock skew cannot move the window.
+   *
+   * @return the window state; {@link Window#OPEN} when no bound is configured
+   */
+  Window window() {
+    final ActivationPolicy policy = scenario.activationPolicy();
+    final Duration activeFor = policy.activeFor();
+    final Instant activeFrom = policy.activeFrom();
+    final Instant activeUntil = policy.activeUntil();
+    if (activeFor == null && activeFrom == null && activeUntil == null) {
+      return Window.OPEN;
     }
-    // Instant.plus throws DateTimeException when activeFor would push the deadline past
-    // Instant.MAX, and ArithmeticException for nanos overflow. ActivationPolicy does not bound
-    // activeFor, so a misconfigured plan with e.g. Duration.ofDays(Long.MAX_VALUE) would leak a
-    // runtime exception into the instrumented application thread instead of expiring cleanly.
-    // Treat an un-representable deadline as "effectively never expires" — the common intent
-    // when someone writes a preposterously large duration.
-    final Instant deadline;
-    try {
-      deadline = capturedStart.plus(activeFor);
-    } catch (final java.time.DateTimeException | ArithmeticException overflow) {
-      return true;
+    final Instant now = clock.instant();
+    if (activeUntil != null && !now.isBefore(activeUntil)) {
+      return Window.EXPIRED;
     }
-    return clock.instant().isBefore(deadline);
+    if (activeFor != null) {
+      // Snapshot the volatile reference so the null-check and plus() observe the same value.
+      final Instant capturedStart = startedAt;
+      if (capturedStart != null) {
+        // Instant.plus throws for a deadline past Instant.MAX; ActivationPolicy does not bound
+        // activeFor, so treat an un-representable deadline as "never expires" instead of leaking
+        // the exception into the instrumented application thread.
+        try {
+          if (!now.isBefore(capturedStart.plus(activeFor))) {
+            return Window.EXPIRED;
+          }
+        } catch (final java.time.DateTimeException | ArithmeticException overflow) {
+          // never expires
+        }
+      }
+    }
+    if (activeFrom != null && now.isBefore(activeFrom)) {
+      return Window.NOT_YET;
+    }
+    return Window.OPEN;
+  }
+
+  /**
+   * Checks the time bounds for a caller that bypasses {@link #evaluate} (clock skew), marking the
+   * scenario {@code INACTIVE} once they have passed.
+   *
+   * @return {@code true} when the scenario may apply now
+   */
+  boolean withinWindow() {
+    final Window window = window();
+    if (window == Window.EXPIRED) {
+      markInactive("expired");
+      return false;
+    }
+    return window == Window.OPEN;
   }
 
   private boolean passesRateLimit() {
@@ -760,6 +864,10 @@ final class ScenarioController {
   }
 
   private boolean passesProbability(final long matched) {
+    if (replayMatches != null) {
+      // A recorded decision log replaces the draw: fire on exactly these match numbers.
+      return java.util.Arrays.binarySearch(replayMatches, matched) >= 0;
+    }
     final double probability = scenario.activationPolicy().probability();
     if (probability >= 1.0d) {
       return true;
@@ -797,6 +905,19 @@ final class ScenarioController {
   }
 
   /**
+   * Returns the seed of an effect's own random choice (a torn length, a corrupted bit, a DNS
+   * shuffle) for the {@code matched}-th match: derived like the probability draw, so a fixed {@code
+   * randomSeed} reproduces it, and salted per choice so it is independent of the draw.
+   *
+   * @param matched the 1-based match number
+   * @param salt distinguishes the kinds of choice
+   * @return the seed
+   */
+  long effectSeed(final long matched, final long salt) {
+    return splittableRandom(matched).nextLong() ^ (salt * 0xbf58476d1ce4e5b9L);
+  }
+
+  /**
    * Returns a {@link SplittableRandom} seeded with {@code baseSeed ^ matched ^ scenarioIdHash}.
    *
    * <p>A new instance is constructed per call because {@link SplittableRandom} is not thread-safe.
@@ -815,7 +936,7 @@ final class ScenarioController {
     return new SplittableRandom(baseSeed ^ Long.rotateLeft(matched, 32) ^ idMix);
   }
 
-  private Duration gateTimeout() {
+  private @Nullable Duration gateTimeout() {
     if (!(scenario.effect() instanceof ChaosEffect.GateEffect gateEffect)) {
       return null;
     }

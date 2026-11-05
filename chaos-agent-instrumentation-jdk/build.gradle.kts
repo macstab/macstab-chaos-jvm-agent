@@ -13,6 +13,7 @@ dependencies {
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.assertj)
+    testImplementation(libs.archunit.junit5)
     testImplementation(libs.h2)
     testImplementation(libs.hikari.cp)
 }
@@ -21,4 +22,11 @@ tasks.jar {
     manifest {
         attributes["Automatic-Module-Name"] = "com.macstab.chaos.jvm.agent.instrumentation.jdk"
     }
+}
+
+// HandleTableDocTest reads the docs and the README: a change to them must rerun it.
+tasks.test {
+    inputs.files(rootProject.fileTree("docs") { include("*.md") }, rootProject.file("README.md"))
+        .withPropertyName("documentation")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
 }

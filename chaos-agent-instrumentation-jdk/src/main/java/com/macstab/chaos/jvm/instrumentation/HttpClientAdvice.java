@@ -32,19 +32,40 @@ final class HttpClientAdvice {
    */
   static final class JavaHttpClientSendAdvice {
     @Advice.OnMethodEnter
-    static void enter(@Advice.Argument(0) final Object request) throws Throwable {
+    static void enter(
+        @Advice.Argument(
+                value = 0,
+                readOnly = false,
+                typing = net.bytebuddy.implementation.bytecode.assign.Assigner.Typing.DYNAMIC)
+            Object request)
+        throws Throwable {
+      // Inside a session, a request to an internal host carries its id to the next service.
+      if (request instanceof java.net.http.HttpRequest httpRequest
+          && httpRequest.headers().firstValue(BootstrapDispatcher.SESSION_HEADER).isEmpty()) {
+        final String session = BootstrapDispatcher.sessionHeaderFor(httpRequest.uri().getHost());
+        if (session != null) {
+          try {
+            request =
+                java.net.http.HttpRequest.newBuilder(httpRequest, BootstrapDispatcher.ALL_HEADERS)
+                    .header(BootstrapDispatcher.SESSION_HEADER, session)
+                    .build();
+          } catch (final RuntimeException uncopyable) {
+            // a custom HttpRequest the builder cannot copy goes out as it is
+          }
+        }
+      }
       if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_HTTP)) {
         return;
       }
-      final String url;
+      // Inlined into HttpClientImpl (java.net.http), the advice calls HttpRequest.uri() directly.
+      // Reflection through the request's class (jdk.internal.net.http, not open to the agent)
+      // failed, so the URL was always null and URL filters never matched this client.
+      final String url =
+          request instanceof java.net.http.HttpRequest httpRequest
+              ? String.valueOf(httpRequest.uri())
+              : null;
       final boolean suppressed;
       try {
-        BootstrapDispatcher.beginInternalCall();
-        try {
-          url = HttpUrlExtractor.fromJavaHttpRequest(request);
-        } finally {
-          BootstrapDispatcher.endInternalCall();
-        }
         suppressed = BootstrapDispatcher.beforeHttpSend(url);
       } catch (final Throwable throwable) {
         BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
@@ -67,19 +88,40 @@ final class HttpClientAdvice {
    */
   static final class JavaHttpClientSendAsyncAdvice {
     @Advice.OnMethodEnter
-    static void enter(@Advice.Argument(0) final Object request) throws Throwable {
+    static void enter(
+        @Advice.Argument(
+                value = 0,
+                readOnly = false,
+                typing = net.bytebuddy.implementation.bytecode.assign.Assigner.Typing.DYNAMIC)
+            Object request)
+        throws Throwable {
+      // Inside a session, a request to an internal host carries its id to the next service.
+      if (request instanceof java.net.http.HttpRequest httpRequest
+          && httpRequest.headers().firstValue(BootstrapDispatcher.SESSION_HEADER).isEmpty()) {
+        final String session = BootstrapDispatcher.sessionHeaderFor(httpRequest.uri().getHost());
+        if (session != null) {
+          try {
+            request =
+                java.net.http.HttpRequest.newBuilder(httpRequest, BootstrapDispatcher.ALL_HEADERS)
+                    .header(BootstrapDispatcher.SESSION_HEADER, session)
+                    .build();
+          } catch (final RuntimeException uncopyable) {
+            // a custom HttpRequest the builder cannot copy goes out as it is
+          }
+        }
+      }
       if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_HTTP)) {
         return;
       }
-      final String url;
+      // Inlined into HttpClientImpl (java.net.http), the advice calls HttpRequest.uri() directly.
+      // Reflection through the request's class (jdk.internal.net.http, not open to the agent)
+      // failed, so the URL was always null and URL filters never matched this client.
+      final String url =
+          request instanceof java.net.http.HttpRequest httpRequest
+              ? String.valueOf(httpRequest.uri())
+              : null;
       final boolean suppressed;
       try {
-        BootstrapDispatcher.beginInternalCall();
-        try {
-          url = HttpUrlExtractor.fromJavaHttpRequest(request);
-        } finally {
-          BootstrapDispatcher.endInternalCall();
-        }
         suppressed = BootstrapDispatcher.beforeHttpSendAsync(url);
       } catch (final Throwable throwable) {
         BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
@@ -94,6 +136,70 @@ final class HttpClientAdvice {
     @Advice.OnMethodExit(onThrowable = Throwable.class)
     static void exit() {
       BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
+    }
+  }
+
+  /**
+   * Intercepts {@code sun.net.www.protocol.http.HttpURLConnection.plainConnect0()}: the JDK's
+   * {@link java.net.HttpURLConnection} (and {@code HttpsURLConnection}, which delegates to it). It
+   * runs once per request, when the connection is first used ({@code connect()}, {@code
+   * getInputStream()}, {@code getOutputStream()}, {@code getResponseCode()}), so a request is
+   * evaluated once however it is driven. This is the transport of Spring's {@code
+   * SimpleClientHttpRequestFactory} ({@code RestTemplate}'s default) and of the AWS SDK's URL
+   * connection client.
+   *
+   * <p>A suppressed request fails with {@link java.net.ConnectException}: callers of {@code
+   * URLConnection} handle {@link java.io.IOException}, and a refused connection is what they expect
+   * to see.
+   */
+  static final class HttpUrlConnectionConnectAdvice {
+    @Advice.OnMethodEnter
+    static void enter(@Advice.FieldValue("url") final java.net.URL url) throws Throwable {
+      if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_HTTP)) {
+        return;
+      }
+      // URL.toString() formats the URL; unlike equals()/hashCode() it never resolves the host.
+      final String target = url == null ? null : url.toString();
+      final boolean suppressed;
+      try {
+        suppressed = BootstrapDispatcher.beforeHttpSend(target);
+      } catch (final Throwable throwable) {
+        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
+        throw throwable;
+      }
+      if (suppressed) {
+        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
+        throw new java.net.ConnectException("HTTP connect suppressed by chaos agent: " + target);
+      }
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit() {
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
+    }
+  }
+
+  /**
+   * Adds {@code X-Chaos-Session} to a {@code sun.net.www.protocol.http.HttpURLConnection} request
+   * made inside a session, on {@code connect()}, {@code getInputStream()} and {@code
+   * getOutputStream()} while the request headers can still change. A connection that already
+   * connected, or that set the header itself, is left alone.
+   */
+  static final class HttpUrlConnectionSessionHeaderAdvice {
+    @Advice.OnMethodEnter
+    static void enter(@Advice.This final Object connection) {
+      final java.net.URLConnection urlConnection = (java.net.URLConnection) connection;
+      final String session = BootstrapDispatcher.sessionHeaderFor(urlConnection.getURL().getHost());
+      if (session == null) {
+        return;
+      }
+      try {
+        if (urlConnection.getRequestProperty(BootstrapDispatcher.SESSION_HEADER) == null) {
+          urlConnection.setRequestProperty(BootstrapDispatcher.SESSION_HEADER, session);
+        }
+      } catch (final IllegalStateException alreadyConnected) {
+        // headers are fixed once connected; the request went out without the session
+      }
     }
   }
 
@@ -193,7 +299,10 @@ final class HttpClientAdvice {
       }
       if (suppressed) {
         BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
-        throw new ChaosHttpSuppressException("HTTP execute suppressed by chaos agent: " + url);
+        // HttpClient 4 class files are Java 6: inlined advice must not use invokedynamic, which
+        // string concatenation with + compiles to.
+        throw new ChaosHttpSuppressException(
+            "HTTP execute suppressed by chaos agent: ".concat(String.valueOf(url)));
       }
     }
 
@@ -233,7 +342,10 @@ final class HttpClientAdvice {
       }
       if (suppressed) {
         BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
-        throw new ChaosHttpSuppressException("HTTP execute suppressed by chaos agent: " + url);
+        // HttpClient 4 class files are Java 6: inlined advice must not use invokedynamic, which
+        // string concatenation with + compiles to.
+        throw new ChaosHttpSuppressException(
+            "HTTP execute suppressed by chaos agent: ".concat(String.valueOf(url)));
       }
     }
 

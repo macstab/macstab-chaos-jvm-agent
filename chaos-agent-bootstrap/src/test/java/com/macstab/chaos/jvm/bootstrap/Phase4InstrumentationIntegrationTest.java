@@ -10,9 +10,7 @@ import com.macstab.chaos.jvm.api.ChaosSelector;
 import com.macstab.chaos.jvm.api.NamePattern;
 import com.macstab.chaos.jvm.api.OperationType;
 import com.macstab.chaos.jvm.startup.ChaosPlanMapper;
-import java.io.BufferedReader;
 import java.io.File;
-import java.io.InputStreamReader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -1286,15 +1284,26 @@ class Phase4InstrumentationIntegrationTest {
     cmd.add(AgentProcessProbeMain.class.getName());
     cmd.add(mode);
 
-    final Process process = new ProcessBuilder(cmd).redirectErrorStream(true).start();
+    // No coverage agent here: these plans reach every file write, thread start, class load, gc and
+    // exit of the JVM, the coverage agent's own dump at shutdown included.
+    // Output goes to a file, not a pipe: a pipe is read only after the JVM exits, so a child that
+    // writes more than the pipe holds would block on its next write until the timeout.
+    final Path log = tempDir.resolve(mode + ".out");
+    final Process process =
+        new ProcessBuilder(cmd).redirectErrorStream(true).redirectOutput(log.toFile()).start();
     final boolean finished = process.waitFor(30, TimeUnit.SECONDS);
-    assertThat(finished).as("probe JVM should finish within 30 s").isTrue();
-    try (final BufferedReader reader =
-        new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-      final String output = reader.lines().reduce("", (a, b) -> a + b);
-      assertThat(process.exitValue()).as("probe JVM exit value: " + output).isZero();
-      return output;
+    if (!finished) {
+      final String threads = ChildJvmProbe.threadDump(process);
+      process.destroyForcibly().waitFor(10, TimeUnit.SECONDS);
+      assertThat(finished)
+          .as(
+              "probe JVM should finish within 30 s; output:%n%s%nthreads:%n%s",
+              Files.readString(log), threads)
+          .isTrue();
     }
+    final String output = String.join("", Files.readAllLines(log));
+    assertThat(process.exitValue()).as("probe JVM exit value: " + output).isZero();
+    return output;
   }
 
   private static long parseElapsed(final String output) {

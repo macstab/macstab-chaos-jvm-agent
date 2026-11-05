@@ -27,6 +27,9 @@ import java.util.List;
 final class CompositeActivationHandle implements ChaosActivationHandle {
   private final String id;
   private final List<ChaosActivationHandle> delegates;
+  private final Runnable onClose;
+  private final java.util.concurrent.atomic.AtomicBoolean closed =
+      new java.util.concurrent.atomic.AtomicBoolean();
 
   /**
    * Creates a composite handle with the given logical ID and delegate handles.
@@ -39,8 +42,21 @@ final class CompositeActivationHandle implements ChaosActivationHandle {
    *     {@code null} or contain {@code null} elements
    */
   CompositeActivationHandle(final String id, final List<ChaosActivationHandle> delegates) {
+    this(id, delegates, () -> {});
+  }
+
+  /**
+   * Creates a composite handle that runs {@code onClose} after closing its delegates.
+   *
+   * @param id the logical identifier
+   * @param delegates the individual handles
+   * @param onClose run once the delegates are closed, even if one of them failed
+   */
+  CompositeActivationHandle(
+      final String id, final List<ChaosActivationHandle> delegates, final Runnable onClose) {
     this.id = id;
     this.delegates = List.copyOf(delegates);
+    this.onClose = onClose;
   }
 
   /**
@@ -68,7 +84,16 @@ final class CompositeActivationHandle implements ChaosActivationHandle {
   /** Closes every scenario of the plan, removing each from the registry. */
   @Override
   public void close() {
-    broadcast("close", ChaosActivationHandle::close);
+    // Idempotent: a second close (try-with-resources plus framework teardown) must not run
+    // onClose again after another plan took over the same ids.
+    if (!closed.compareAndSet(false, true)) {
+      return;
+    }
+    try {
+      broadcast("close", ChaosActivationHandle::close);
+    } finally {
+      onClose.run();
+    }
   }
 
   /** Broadcasts {@link ChaosActivationHandle#release()} to all delegate handles. */
@@ -115,6 +140,24 @@ final class CompositeActivationHandle implements ChaosActivationHandle {
    *
    * @return the aggregated state across all delegates
    */
+  @Override
+  public long matchedCount() {
+    long total = 0L;
+    for (final ChaosActivationHandle handle : delegates) {
+      total += handle.matchedCount();
+    }
+    return total;
+  }
+
+  @Override
+  public long appliedCount() {
+    long total = 0L;
+    for (final ChaosActivationHandle handle : delegates) {
+      total += handle.appliedCount();
+    }
+    return total;
+  }
+
   @Override
   public ChaosDiagnostics.ScenarioState state() {
     boolean anyActive = false;

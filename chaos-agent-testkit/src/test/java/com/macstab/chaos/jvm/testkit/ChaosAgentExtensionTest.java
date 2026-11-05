@@ -5,6 +5,9 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 
 import com.macstab.chaos.jvm.api.ChaosControlPlane;
 import com.macstab.chaos.jvm.api.ChaosSession;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -68,6 +71,34 @@ class ChaosAgentExtensionTest {
       assertThat(session).isNotNull();
       assertThat(controlPlane).isNotNull();
       assertThat(session.id()).isNotNull();
+    }
+  }
+
+  @Nested
+  @DisplayName("method-level declarations")
+  class MethodLevelDeclarations {
+
+    @Test
+    @WithChaos(
+        """
+        {"id": "ext-method-only", "scope": "SESSION",
+         "selector": {"type": "executor", "operations": ["EXECUTOR_SUBMIT"]},
+         "effect": {"type": "delay", "minDelay": "PT0.001S", "maxDelay": "PT0.001S"}}
+        """)
+    @DisplayName("a @WithChaos on the method alone binds the test thread to the session")
+    void methodOnlyDeclarationBindsTheThread(final ChaosControlPlane controlPlane)
+        throws Exception {
+      final ExecutorService executor = Executors.newSingleThreadExecutor();
+      try {
+        executor.submit(() -> {}).get(5, TimeUnit.SECONDS);
+      } finally {
+        executor.shutdownNow();
+      }
+
+      ChaosAssertions.assertThat(controlPlane.diagnostics())
+          .scenario("ext-method-only")
+          .applied()
+          .atLeast(1);
     }
   }
 }

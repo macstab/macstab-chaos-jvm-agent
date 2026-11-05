@@ -36,7 +36,9 @@ import org.junit.jupiter.api.extension.ParameterResolver;
  *   <li><b>Before each test</b> ({@link #beforeEach}): ensures the chaos agent is installed
  *       (self-attaching if necessary via {@link ChaosPlatform#installLocally()}), then opens a
  *       fresh {@link ChaosSession} scoped to the test's display name. The {@link ChaosControlPlane}
- *       and {@link ChaosSession} are stored in the JUnit {@link ExtensionContext} store.
+ *       and {@link ChaosSession} are stored in the JUnit {@link ExtensionContext} store. Scenarios
+ *       declared with {@link WithChaos} on the test class and method are then activated, and the
+ *       test thread is bound to the session so session-scoped ones reach the test body.
  *   <li><b>After each test</b> ({@link #afterEach}): closes the session, which stops all
  *       session-scoped scenarios and releases any session-bound threads. The session is removed
  *       from the store to prevent cross-test leakage.
@@ -82,6 +84,16 @@ public final class ChaosAgentExtension
     final ChaosSession session = tracker.openSession(context.getDisplayName());
     context.getStore(NAMESPACE).put(ChaosControlPlane.class, tracker);
     context.getStore(NAMESPACE).put(ChaosSession.class, session);
+    // Both run: the class's and the method's scenarios are activated, whichever declares any.
+    final boolean onClass =
+        !WithChaosSupport.activate(context.getRequiredTestClass(), tracker, session).isEmpty();
+    final boolean onMethod =
+        !WithChaosSupport.activate(context.getRequiredTestMethod(), tracker, session).isEmpty();
+    final boolean declared = onClass || onMethod;
+    if (declared) {
+      // Declared session scenarios must reach the test body without a manual bind().
+      context.getStore(NAMESPACE).put(ChaosSession.ScopeBinding.class, session.bind());
+    }
   }
 
   /**
@@ -96,6 +108,13 @@ public final class ChaosAgentExtension
    */
   @Override
   public void afterEach(final ExtensionContext context) {
+    final ChaosSession.ScopeBinding binding =
+        context
+            .getStore(NAMESPACE)
+            .remove(ChaosSession.ScopeBinding.class, ChaosSession.ScopeBinding.class);
+    if (binding != null) {
+      binding.close();
+    }
     final ChaosSession session =
         context.getStore(NAMESPACE).remove(ChaosSession.class, ChaosSession.class);
     final ChaosControlPlane controlPlane =

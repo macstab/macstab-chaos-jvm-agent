@@ -1,6 +1,7 @@
 package com.macstab.chaos.jvm.core;
 
 import java.lang.reflect.Method;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Probes the running JVM at construction time to discover which optional features are available.
@@ -26,7 +27,7 @@ import java.lang.reflect.Method;
  * threads.
  */
 final class FeatureSet {
-  private final Method isVirtualMethod;
+  private final @Nullable Method isVirtualMethod;
   private final int runtimeFeatureVersion;
   private final boolean jfrSupported;
 

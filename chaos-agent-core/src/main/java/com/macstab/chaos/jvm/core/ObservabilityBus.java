@@ -36,7 +36,23 @@ import java.util.logging.Logger;
 final class ObservabilityBus {
   private static final Logger LOGGER = Logger.getLogger("com.macstab.chaos.jvm");
 
+  /**
+   * Scenarios whose plan set {@code structuredLoggingEnabled=false}: their events are not logged.
+   */
+  private final java.util.Set<String> loggingMuted =
+      java.util.concurrent.ConcurrentHashMap.newKeySet();
+
   private final List<ChaosEventListener> listeners = new CopyOnWriteArrayList<>();
+
+  /** What each registered listener was registered as: itself, or its asynchronous delivery. */
+  private final List<Registration> registrations = new CopyOnWriteArrayList<>();
+
+  /** Events dropped because an asynchronous listener's queue was full. */
+  private final java.util.concurrent.atomic.AtomicLong droppedEvents =
+      new java.util.concurrent.atomic.AtomicLong();
+
+  private record Registration(ChaosEventListener registered, ChaosEventListener delivered) {}
+
   private final ChaosMetricsSink metricsSink;
 
   /**
@@ -62,7 +78,129 @@ final class ObservabilityBus {
    * @param listener the listener to register; must not be {@code null}
    */
   void addListener(final ChaosEventListener listener) {
-    listeners.add(listener);
+    final ChaosEventListener delivered =
+        listener instanceof com.macstab.chaos.jvm.api.AsyncChaosEventListener async
+            ? new AsyncDelivery(async.delegate(), droppedEvents)
+            : listener;
+    registrations.add(new Registration(listener, delivered));
+    listeners.add(delivered);
+  }
+
+  /**
+   * Removes a listener registered with {@link #addListener}, stopping its delivery thread if it was
+   * asynchronous.
+   *
+   * @param listener the listener as it was registered
+   * @return {@code true} if it was registered
+   */
+  boolean removeListener(final ChaosEventListener listener) {
+    // Copy-on-write lists: removing while iterating is safe. Identity, not equals: a listener is
+    // the instance that was registered.
+    for (final Registration registration : List.copyOf(registrations)) {
+      if (isSameInstance(registration.registered(), listener)
+          && registrations.remove(registration)) {
+        listeners.remove(registration.delivered());
+        if (registration.delivered() instanceof AsyncDelivery delivery) {
+          delivery.close();
+        }
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Whether a listener other than the built-in logging one is registered: events published only for
+   * observers ({@code SKIPPED}) are not built otherwise.
+   *
+   * @return {@code true} when someone listens
+   */
+  boolean hasListeners() {
+    return !registrations.isEmpty();
+  }
+
+  /**
+   * Returns the number of events dropped because an asynchronous listener fell behind.
+   *
+   * @return the dropped events
+   */
+  long droppedEvents() {
+    return droppedEvents.get();
+  }
+
+  /**
+   * Delivers events to a listener on an agent-owned thread through a bounded queue. The thread runs
+   * with the dispatch depth raised, so chaos never applies to the delivery itself.
+   */
+  private static final class AsyncDelivery implements ChaosEventListener, AutoCloseable {
+    private static final int CAPACITY = 10_000;
+
+    private final java.util.concurrent.BlockingQueue<ChaosEvent> queue =
+        new java.util.concurrent.ArrayBlockingQueue<>(CAPACITY);
+    private final ChaosEventListener delegate;
+    private final java.util.concurrent.atomic.AtomicLong dropped;
+    private final Thread thread;
+    private volatile boolean closed;
+
+    AsyncDelivery(
+        final ChaosEventListener delegate, final java.util.concurrent.atomic.AtomicLong dropped) {
+      this.delegate = delegate;
+      this.dropped = dropped;
+      this.thread = new Thread(this::deliver, "macstab-chaos-events");
+      this.thread.setDaemon(true);
+      ChaosDispatcher.incrementDispatchDepth();
+      try {
+        this.thread.start();
+      } finally {
+        ChaosDispatcher.decrementDispatchDepth();
+      }
+    }
+
+    @Override
+    public void onEvent(final ChaosEvent event) {
+      if (!queue.offer(event)) {
+        dropped.incrementAndGet();
+      }
+    }
+
+    private void deliver() {
+      ChaosDispatcher.incrementDispatchDepth();
+      try {
+        while (!closed) {
+          final ChaosEvent event;
+          try {
+            event = queue.take();
+          } catch (final InterruptedException interrupted) {
+            return;
+          }
+          try {
+            delegate.onEvent(event);
+          } catch (final Throwable listenerFailure) {
+            LOGGER.warning(
+                () ->
+                    "asynchronous ChaosEventListener threw; delivery continues. listener="
+                        + delegate.getClass().getName()
+                        + " error="
+                        + listenerFailure);
+          }
+        }
+      } finally {
+        ChaosDispatcher.decrementDispatchDepth();
+      }
+    }
+
+    @Override
+    public void close() {
+      closed = true;
+      thread.interrupt();
+      if (delegate instanceof AutoCloseable closeable) {
+        try {
+          closeable.close();
+        } catch (final Exception ignored) {
+          // closing a listener must not fail the control plane's shutdown
+        }
+      }
+    }
   }
 
   /**
@@ -93,6 +231,21 @@ final class ObservabilityBus {
       }
     }
     listeners.clear();
+    registrations.clear();
+  }
+
+  /**
+   * Turns the structured logging of one scenario's events off or back on.
+   *
+   * @param scenarioId the scenario id
+   * @param muted {@code true} to stop logging its events
+   */
+  void muteLogging(final String scenarioId, final boolean muted) {
+    if (muted) {
+      loggingMuted.add(scenarioId);
+    } else {
+      loggingMuted.remove(scenarioId);
+    }
   }
 
   /**
@@ -196,6 +349,9 @@ final class ObservabilityBus {
    * @param event the event to log; must not be {@code null}
    */
   private void log(final ChaosEvent event) {
+    if (event.scenarioId() != null && loggingMuted.contains(event.scenarioId())) {
+      return;
+    }
     final String formatted =
         "type="
             + event.type()
@@ -217,5 +373,10 @@ final class ObservabilityBus {
       case REGISTERED -> LOGGER.fine(formatted);
       case SKIPPED -> LOGGER.finer(formatted);
     }
+  }
+
+  @SuppressWarnings("ReferenceEquality")
+  private static boolean isSameInstance(final Object a, final Object b) {
+    return a == b;
   }
 }

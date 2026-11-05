@@ -235,7 +235,8 @@ public class HttpClientBenchmark {
   @Benchmark
   public void agentInstalled_zeroScenarios(ZeroScenariosState state, Blackhole bh)
       throws Throwable {
-    bh.consume(state.dispatcher.beforeHttpSend(BENCHMARK_URL, OperationType.HTTP_CLIENT_SEND));
+    bh.consume(
+        state.dispatcher.client().beforeHttpSend(BENCHMARK_URL, OperationType.HTTP_CLIENT_SEND));
   }
 
   /**
@@ -248,7 +249,8 @@ public class HttpClientBenchmark {
   @Benchmark
   public void agentInstalled_oneScenario_noMatch(OneScenarioNoMatchState state, Blackhole bh)
       throws Throwable {
-    bh.consume(state.dispatcher.beforeHttpSend(BENCHMARK_URL, OperationType.HTTP_CLIENT_SEND));
+    bh.consume(
+        state.dispatcher.client().beforeHttpSend(BENCHMARK_URL, OperationType.HTTP_CLIENT_SEND));
   }
 
   /**
@@ -262,7 +264,8 @@ public class HttpClientBenchmark {
   @Benchmark
   public void agentInstalled_oneMatch_noEffect(OneMatchNoEffectState state, Blackhole bh)
       throws Throwable {
-    bh.consume(state.dispatcher.beforeHttpSend(BENCHMARK_URL, OperationType.HTTP_CLIENT_SEND));
+    bh.consume(
+        state.dispatcher.client().beforeHttpSend(BENCHMARK_URL, OperationType.HTTP_CLIENT_SEND));
   }
 
   /**
@@ -275,7 +278,8 @@ public class HttpClientBenchmark {
    */
   @Benchmark
   public void sessionIdMiss(SessionMissState state, Blackhole bh) throws Throwable {
-    bh.consume(state.dispatcher.beforeHttpSend(BENCHMARK_URL, OperationType.HTTP_CLIENT_SEND));
+    bh.consume(
+        state.dispatcher.client().beforeHttpSend(BENCHMARK_URL, OperationType.HTTP_CLIENT_SEND));
   }
 
   /**
@@ -288,6 +292,7 @@ public class HttpClientBenchmark {
    */
   @Benchmark
   public void tenScenarios_oneMatch(TenScenariosState state, Blackhole bh) throws Throwable {
-    bh.consume(state.dispatcher.beforeHttpSend(BENCHMARK_URL, OperationType.HTTP_CLIENT_SEND));
+    bh.consume(
+        state.dispatcher.client().beforeHttpSend(BENCHMARK_URL, OperationType.HTTP_CLIENT_SEND));
   }
 }

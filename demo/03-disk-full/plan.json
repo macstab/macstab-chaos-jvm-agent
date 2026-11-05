@@ -1,0 +1,3 @@
+{"scenarios": [{"id": "data-disk-full", "scope": "JVM",
+  "selector": {"type": "fileIo", "operations": ["FILE_IO_WRITE"], "pathPattern": {"prefix": "data"}},
+  "effect": {"type": "errno", "errno": "ENOSPC"}}]}

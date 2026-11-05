@@ -38,6 +38,14 @@ import java.util.concurrent.Callable;
 public interface ChaosSession extends AutoCloseable {
 
   /**
+   * The HTTP header that carries a session id between services. Requests the JDK {@code HttpClient}
+   * or {@code HttpURLConnection} sends from a thread bound to a session carry it automatically; a
+   * server binds the request to the session with {@link ChaosControlPlane#bindSession(String)} (the
+   * Spring Boot starters register a filter for that).
+   */
+  String HEADER = "X-Chaos-Session";
+
+  /**
    * Returns the unique identifier of this session. Used as a filter key in session-scoped scenario
    * evaluation.
    *

@@ -1,5 +1,7 @@
 package com.macstab.chaos.jvm.api;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * Primary entry point to the chaos agent runtime.
  *
@@ -105,6 +107,16 @@ public interface ChaosControlPlane extends AutoCloseable {
   void addEventListener(ChaosEventListener listener);
 
   /**
+   * Removes a listener registered with {@link #addEventListener}; a listener registered more than
+   * once is removed once. Removing an {@link ChaosEventListener#async asynchronous} listener stops
+   * its delivery thread; events still queued for it are discarded.
+   *
+   * @param listener the listener to remove, as it was registered
+   * @return {@code true} if it was registered
+   */
+  boolean removeEventListener(ChaosEventListener listener);
+
+  /**
    * Stops all active scenarios, closes all open sessions, and cleans up stressor resources.
    *
    * <p>After this call the control plane is inert; all selector evaluations return no-match.
@@ -112,4 +124,19 @@ public interface ChaosControlPlane extends AutoCloseable {
    */
   @Override
   void close();
+
+  /**
+   * Binds the calling thread to the open session with {@code sessionId}, as {@link
+   * ChaosSession#bind()} would: how a server joins the session a request came from ({@link
+   * ChaosSession#HEADER}). The id decides for the binding's lifetime: an unknown or closed id runs
+   * the thread outside any session, even one it inherited (a pooled server thread started while a
+   * test's session was bound).
+   *
+   * @param sessionId the session id, e.g. the value of the {@link ChaosSession#HEADER} header;
+   *     {@code null} (no header) also runs the thread outside any session
+   * @return the binding to close when the work is done
+   */
+  default ChaosSession.ScopeBinding bindSession(final @Nullable String sessionId) {
+    return () -> {};
+  }
 }

@@ -1,13 +1,19 @@
 package com.macstab.chaos.jvm.micronaut;
 
+import com.macstab.chaos.jvm.api.ChaosActivationHandle;
 import com.macstab.chaos.jvm.api.ChaosControlPlane;
 import com.macstab.chaos.jvm.api.ChaosSession;
 import com.macstab.chaos.jvm.bootstrap.ChaosPlatform;
 import com.macstab.chaos.jvm.testkit.TrackingChaosControlPlane;
+import com.macstab.chaos.jvm.testkit.WithChaosSupport;
 import io.micronaut.test.extensions.junit5.annotation.MicronautTest;
+import java.util.List;
 import java.util.Optional;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.extension.AfterAllCallback;
+import org.junit.jupiter.api.extension.AfterEachCallback;
 import org.junit.jupiter.api.extension.BeforeAllCallback;
+import org.junit.jupiter.api.extension.BeforeEachCallback;
 import org.junit.jupiter.api.extension.ExtensionContext;
 import org.junit.jupiter.api.extension.ParameterContext;
 import org.junit.jupiter.api.extension.ParameterResolutionException;
@@ -49,7 +55,11 @@ import org.junit.platform.commons.support.AnnotationSupport;
  * plane from its own store.
  */
 public final class ChaosMicronautExtension
-    implements BeforeAllCallback, AfterAllCallback, ParameterResolver {
+    implements BeforeAllCallback,
+        AfterAllCallback,
+        BeforeEachCallback,
+        AfterEachCallback,
+        ParameterResolver {
   static final ExtensionContext.Namespace NAMESPACE =
       ExtensionContext.Namespace.create(ChaosMicronautExtension.class);
 
@@ -69,6 +79,33 @@ public final class ChaosMicronautExtension
     final ExtensionContext.Store store = context.getStore(NAMESPACE);
     store.put(ChaosControlPlane.class, tracker);
     store.put(ChaosSession.class, session);
+    // Class-level @WithChaos: JVM-scoped handles are tracked, session-scoped ones end with the
+    // session, so afterAll releases both without keeping the handles here.
+    WithChaosSupport.activate(context.getRequiredTestClass(), tracker, session);
+  }
+
+  @Override
+  public void beforeEach(final ExtensionContext context) {
+    final ChaosControlPlane controlPlane =
+        (ChaosControlPlane) findInStoreHierarchy(context, ChaosControlPlane.class);
+    final ChaosSession session = (ChaosSession) findInStoreHierarchy(context, ChaosSession.class);
+    if (controlPlane == null || session == null) {
+      return;
+    }
+    context
+        .getStore(NAMESPACE)
+        .put(
+            WithChaosSupport.class,
+            WithChaosSupport.activate(context.getRequiredTestMethod(), controlPlane, session));
+  }
+
+  @Override
+  @SuppressWarnings("unchecked")
+  public void afterEach(final ExtensionContext context) {
+    // Method-level @WithChaos scenarios end with the method, not with the class.
+    WithChaosSupport.close(
+        (List<ChaosActivationHandle>)
+            context.getStore(NAMESPACE).remove(WithChaosSupport.class, List.class));
   }
 
   @Override
@@ -144,7 +181,7 @@ public final class ChaosMicronautExtension
             + " and beforeAll() has run before parameter injection");
   }
 
-  private static Object findInStoreHierarchy(
+  private static @Nullable Object findInStoreHierarchy(
       final ExtensionContext startContext, final Class<?> type) {
     ExtensionContext current = startContext;
     while (current != null) {

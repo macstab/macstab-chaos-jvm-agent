@@ -18,6 +18,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /** Selector fields that the dispatcher used to leave empty, so non-ANY filters never matched. */
@@ -101,7 +102,7 @@ class ContextFieldsTest {
     @DisplayName("the host name of an address is used when known, without a lookup")
     void hostNameWhenKnown() throws Exception {
       assertThat(
-              ChaosDispatcher.remoteHost(
+              NetworkDispatch.remoteHost(
                   InetAddress.getByAddress("db.internal", new byte[] {10, 0, 0, 5})))
           .isEqualTo("db.internal");
     }
@@ -109,11 +110,12 @@ class ContextFieldsTest {
     @Test
     @DisplayName("the IP literal is used when no host name is known")
     void ipLiteralOtherwise() throws Exception {
-      assertThat(ChaosDispatcher.remoteHost(InetAddress.getByAddress(new byte[] {10, 0, 0, 5})))
+      assertThat(NetworkDispatch.remoteHost(InetAddress.getByAddress(new byte[] {10, 0, 0, 5})))
           .isEqualTo("10.0.0.5");
     }
 
     @Test
+    @Tag("law-L6")
     @DisplayName("a host filter on SOCKET_ACCEPT is rejected because the peer is unknown")
     void hostFilterOnAcceptIsRejected() {
       assertThatThrownBy(
@@ -130,6 +132,31 @@ class ContextFieldsTest {
                           .build()))
           .isInstanceOf(ChaosValidationException.class)
           .hasMessageContaining("SOCKET_ACCEPT");
+    }
+
+    @Test
+    @Tag("law-L6")
+    @DisplayName("a CIDR or port filter on SOCKET_ACCEPT is rejected for the same reason")
+    void peerFiltersOnAcceptAreRejected() {
+      for (final ChaosSelector selector :
+          new ChaosSelector[] {
+            new ChaosSelector.NetworkSelector(
+                Set.of(OperationType.SOCKET_ACCEPT), null, "10.0.0.0/8", null, null, null),
+            new ChaosSelector.NetworkSelector(
+                Set.of(OperationType.SOCKET_ACCEPT), null, null, 8080, null, null)
+          }) {
+        assertThatThrownBy(
+                () ->
+                    runtime.activate(
+                        ChaosScenario.builder("accept-peer")
+                            .scope(ChaosScenario.ScenarioScope.JVM)
+                            .selector(selector)
+                            .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+                            .activationPolicy(ActivationPolicy.always())
+                            .build()))
+            .isInstanceOf(ChaosValidationException.class)
+            .hasMessageContaining("SOCKET_ACCEPT");
+      }
     }
   }
 }

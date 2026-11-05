@@ -6,6 +6,19 @@ import net.bytebuddy.asm.Advice;
 final class ThreadAdvice {
   private ThreadAdvice() {}
 
+  /** Marks {@code ThreadPoolExecutor.addWorker}: threads started inside it are pool workers. */
+  static final class PoolWorkerScopeAdvice {
+    @Advice.OnMethodEnter
+    static void enter() {
+      BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_POOL_WORKER);
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit() {
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_POOL_WORKER);
+    }
+  }
+
   /**
    * Advice for {@code Thread.start()}, {@code Thread.start(ThreadContainer)} and {@code
    * VirtualThread.start(ThreadContainer)}. Thread-per-task executors ({@code
@@ -30,6 +43,35 @@ final class ThreadAdvice {
     @Advice.OnMethodExit(onThrowable = Throwable.class)
     static void exit() {
       BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_THREAD_START);
+    }
+  }
+
+  /**
+   * {@code Thread.run()} and {@code VirtualThread.run(Runnable)}: a started thread runs in the
+   * session of the thread that started it, bound for the whole run. A {@code Thread} subclass that
+   * overrides {@code run()} without calling {@code super.run()} does not get the session.
+   */
+  static final class RunSessionAdvice {
+    @Advice.OnMethodEnter
+    static void enter(@Advice.This final Thread thread) {
+      BootstrapDispatcher.enterSession(thread);
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit(@Advice.This final Thread thread) {
+      BootstrapDispatcher.exitSession(thread);
+    }
+  }
+
+  /**
+   * {@code VirtualThread.mount()} exit: on JDK builds that mount inside {@code run(Runnable)}
+   * (21.0.0 to 21.0.2), the virtual thread becomes current only here, so this is where its session
+   * is bound. Later mounts find nothing to bind.
+   */
+  static final class MountSessionAdvice {
+    @Advice.OnMethodExit
+    static void exit(@Advice.This final Thread thread) {
+      BootstrapDispatcher.enterSession(thread);
     }
   }
 }

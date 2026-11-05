@@ -25,6 +25,7 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.PriorityBlockingQueue;
 import java.util.function.Supplier;
 import java.util.logging.Logger;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Produces corrupted return values according to a {@link ChaosEffect.ReturnValueStrategy}.
@@ -107,7 +108,7 @@ final class ReturnValueCorruptor {
    * @param scenarioId the scenario ID, used in fallback log messages
    * @return the corrupted value, or {@code null} when NULL strategy is applied to a reference type
    */
-  static Object corrupt(
+  static @Nullable Object corrupt(
       final ChaosEffect.ReturnValueStrategy strategy,
       final Class<?> returnType,
       final Object actualValue,
@@ -122,7 +123,7 @@ final class ReturnValueCorruptor {
       return actualValue;
     }
     return switch (strategy) {
-      case NULL -> corruptNull(returnType, actualValue, scenarioId);
+      case NULL -> corruptNull(returnType, scenarioId);
       case ZERO -> corruptZero(returnType);
       case EMPTY -> corruptEmpty(returnType, scenarioId);
       case BOUNDARY_MAX ->
@@ -132,8 +133,7 @@ final class ReturnValueCorruptor {
     };
   }
 
-  private static Object corruptNull(
-      final Class<?> returnType, final Object actualValue, final String scenarioId) {
+  private static @Nullable Object corruptNull(final Class<?> returnType, final String scenarioId) {
     if (returnType.isPrimitive()) {
       LOGGER.fine(
           () ->
@@ -147,12 +147,12 @@ final class ReturnValueCorruptor {
     return null;
   }
 
-  private static Object corruptZero(final Class<?> returnType) {
+  private static @Nullable Object corruptZero(final Class<?> returnType) {
     // Reference types not in the map return null — the closest representation of zero
     return ZERO_VALUES.getOrDefault(returnType, null);
   }
 
-  private static Object corruptEmpty(final Class<?> returnType, final String scenarioId) {
+  private static @Nullable Object corruptEmpty(final Class<?> returnType, final String scenarioId) {
     Object result;
     if ((result = tryEmptyString(returnType)) != null) {
       return result;
@@ -176,7 +176,7 @@ final class ReturnValueCorruptor {
   }
 
   /** Empty String fallback. Returns {@code ""} for {@code String.class}, else {@code null}. */
-  private static Object tryEmptyString(final Class<?> returnType) {
+  private static @Nullable Object tryEmptyString(final Class<?> returnType) {
     if (returnType == String.class) {
       return "";
     }
@@ -190,6 +190,8 @@ final class ReturnValueCorruptor {
    * only an instance of exactly that type or a subtype fits. Mutable instances are used because
    * callers may add to the result.
    */
+  // Every concrete container type a method may declare; LinkedList is one of them.
+  @SuppressWarnings("JdkObsolete")
   private static final List<Supplier<Object>> EMPTY_CONTAINERS =
       List.of(
           ArrayList::new,
@@ -221,7 +223,7 @@ final class ReturnValueCorruptor {
    * ArrayList}, and {@code BlockingQueue} or {@code ConcurrentNavigableMap} got a {@code
    * LinkedList} or {@code TreeMap}, all failing with {@code ClassCastException} at the call site.
    */
-  private static Object tryEmptyContainer(final Class<?> returnType) {
+  private static @Nullable Object tryEmptyContainer(final Class<?> returnType) {
     if (!Collection.class.isAssignableFrom(returnType)
         && !Map.class.isAssignableFrom(returnType)
         && returnType != Iterable.class) {
@@ -237,14 +239,14 @@ final class ReturnValueCorruptor {
   }
 
   /** Optional is a value type; {@link Optional#empty()} is always assignable-compatible. */
-  private static Object tryEmptyOptional(final Class<?> returnType) {
+  private static @Nullable Object tryEmptyOptional(final Class<?> returnType) {
     if (Optional.class.isAssignableFrom(returnType)) {
       return Optional.empty();
     }
     return null;
   }
 
-  private static Object corruptBoundary(
+  private static @Nullable Object corruptBoundary(
       final Map<Class<?>, Object> boundaryValues,
       final String strategyName,
       final Class<?> returnType,

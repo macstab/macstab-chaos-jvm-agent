@@ -151,7 +151,10 @@ class SlaValidationTest {
    * <p><b>Per-step quiescence:</b> {@link #quiesce()} is called before every measurement so an
    * incidental GC pause that happens to fall inside one of the 30-iteration windows does not
    * inflate that step's P99 above its real value. All assertions are anchored to the single
-   * baseline measurement so per-step measurement noise does not compound.
+   * baseline measurement so per-step measurement noise does not compound. The baseline is the
+   * median, not the P99: with a fixed delay every request of step {@code n} takes at least {@code
+   * n} steps longer than a typical baseline request, while a baseline P99 is its slowest outlier,
+   * which a loaded machine can push above the delayed step's P99.
    */
   @Test
   void graduatedDelayLadderStacksAdditively(final ChaosControlPlane controlPlane) {
@@ -159,7 +162,7 @@ class SlaValidationTest {
 
     warmup(client);
     quiesce();
-    final long p99_0 = measureP99(client);
+    final long baselineMedian = measurePercentile(client, 50.0);
 
     final List<ChaosActivationHandle> handles = new ArrayList<>();
     try {
@@ -176,8 +179,8 @@ class SlaValidationTest {
       final long p99_3 = measureP99(client);
 
       log.info(
-          "P99 ladder: 0={}ms  1={}ms  2={}ms  3={}ms  (threshold/step={}ms)",
-          p99_0 / 1_000_000,
+          "P99 ladder (0 = baseline median): 0={}ms  1={}ms  2={}ms  3={}ms  (threshold/step={}ms)",
+          baselineMedian / 1_000_000,
           p99_1 / 1_000_000,
           p99_2 / 1_000_000,
           p99_3 / 1_000_000,
@@ -187,17 +190,17 @@ class SlaValidationTest {
           .as(
               "1 delay scenario must raise P99 by at least %d ms over baseline",
               STEP_MIN_NANOS / 1_000_000)
-          .isGreaterThanOrEqualTo(p99_0 + STEP_MIN_NANOS);
+          .isGreaterThanOrEqualTo(baselineMedian + STEP_MIN_NANOS);
       assertThat(p99_2)
           .as(
               "2 stacked scenarios must raise P99 by at least %d ms over baseline",
               2 * STEP_MIN_NANOS / 1_000_000)
-          .isGreaterThanOrEqualTo(p99_0 + 2 * STEP_MIN_NANOS);
+          .isGreaterThanOrEqualTo(baselineMedian + 2 * STEP_MIN_NANOS);
       assertThat(p99_3)
           .as(
               "3 stacked scenarios must raise P99 by at least %d ms over baseline",
               3 * STEP_MIN_NANOS / 1_000_000)
-          .isGreaterThanOrEqualTo(p99_0 + 3 * STEP_MIN_NANOS);
+          .isGreaterThanOrEqualTo(baselineMedian + 3 * STEP_MIN_NANOS);
     } finally {
       handles.forEach(ChaosActivationHandle::stop);
     }
@@ -210,6 +213,10 @@ class SlaValidationTest {
   }
 
   private long measureP99(final RestClient client) {
+    return measurePercentile(client, 99.0);
+  }
+
+  private long measurePercentile(final RestClient client, final double percentile) {
     final long[] nanos = new long[ITERATIONS];
     for (int i = 0; i < ITERATIONS; i++) {
       final long start = System.nanoTime();
@@ -222,7 +229,7 @@ class SlaValidationTest {
           .isEqualTo(HttpStatus.OK);
     }
     Arrays.sort(nanos);
-    return LatencyStats.percentile(nanos, 99.0);
+    return LatencyStats.percentile(nanos, percentile);
   }
 
   private static ChaosScenario fixedDelayScenario(final String id) {

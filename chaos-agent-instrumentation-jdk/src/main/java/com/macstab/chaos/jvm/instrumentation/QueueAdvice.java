@@ -1,7 +1,9 @@
 package com.macstab.chaos.jvm.instrumentation;
 
 import com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher;
+import com.macstab.chaos.jvm.instrumentation.bridge.OperationTags;
 import net.bytebuddy.asm.Advice;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Advice for {@code BlockingQueue} put / take / poll / offer.
@@ -23,7 +25,7 @@ final class QueueAdvice {
     static void enter(@Advice.This final Object queue) throws Throwable {
       if (BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_QUEUE)) {
         try {
-          BootstrapDispatcher.beforeQueueOperation("QUEUE_PUT", queue);
+          BootstrapDispatcher.beforeQueueOperation(OperationTags.QUEUE_PUT, queue);
         } catch (final Throwable throwable) {
           BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_QUEUE);
           throw throwable;
@@ -42,7 +44,7 @@ final class QueueAdvice {
     static void enter(@Advice.This final Object queue) throws Throwable {
       if (BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_QUEUE)) {
         try {
-          BootstrapDispatcher.beforeQueueOperation("QUEUE_TAKE", queue);
+          BootstrapDispatcher.beforeQueueOperation(OperationTags.QUEUE_TAKE, queue);
         } catch (final Throwable throwable) {
           BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_QUEUE);
           throw throwable;
@@ -61,12 +63,12 @@ final class QueueAdvice {
     // method's default reference return (null) is exactly "queue drained to nothing", which is
     // the QUEUE_POLL suppress semantic. Nested calls return null and run the real poll.
     @Advice.OnMethodEnter(skipOn = Advice.OnNonDefaultValue.class)
-    static Boolean enter(@Advice.This final Object queue) throws Throwable {
+    static @Nullable Boolean enter(@Advice.This final Object queue) throws Throwable {
       if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_QUEUE)) {
         return null;
       }
       try {
-        return BootstrapDispatcher.beforeBooleanQueueOperation("QUEUE_POLL", queue);
+        return BootstrapDispatcher.beforeBooleanQueueOperation(OperationTags.QUEUE_POLL, queue);
       } catch (final Throwable throwable) {
         BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_QUEUE);
         throw throwable;
@@ -85,12 +87,12 @@ final class QueueAdvice {
     // exit advice rewrites the return to that Boolean. A null decision (no scenario, or a nested
     // offer inside an outer queue call) runs the real offer.
     @Advice.OnMethodEnter(skipOn = Advice.OnNonDefaultValue.class)
-    static Boolean enter(@Advice.This final Object queue) throws Throwable {
+    static @Nullable Boolean enter(@Advice.This final Object queue) throws Throwable {
       if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_QUEUE)) {
         return null;
       }
       try {
-        return BootstrapDispatcher.beforeBooleanQueueOperation("QUEUE_OFFER", queue);
+        return BootstrapDispatcher.beforeBooleanQueueOperation(OperationTags.QUEUE_OFFER, queue);
       } catch (final Throwable throwable) {
         BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_QUEUE);
         throw throwable;
