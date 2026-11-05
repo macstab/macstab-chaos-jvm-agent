@@ -4,7 +4,6 @@ import com.macstab.chaos.jvm.api.ChaosControlPlane;
 import com.macstab.chaos.jvm.bootstrap.jfr.JfrIntegration;
 import com.macstab.chaos.jvm.core.ChaosRuntime;
 import com.macstab.chaos.jvm.instrumentation.JdkInstrumentationInstaller;
-import com.macstab.chaos.jvm.startup.AgentArgsParser;
 import com.macstab.chaos.jvm.startup.ConfigLoadException;
 import com.macstab.chaos.jvm.startup.StartupConfigLoader;
 import java.lang.instrument.Instrumentation;
@@ -433,13 +432,14 @@ public final class ChaosAgentBootstrap {
    */
   static boolean eagerInstrumentation(
       final String agentArgs, final Map<String, String> environment) {
-    final String fromArgs = AgentArgsParser.parse(agentArgs).get(INSTRUMENTATION_ARG);
-    final String mode =
-        fromArgs != null
-            ? fromArgs
-            : System.getProperty(
-                INSTRUMENTATION_PROPERTY, environment.getOrDefault(INSTRUMENTATION_ENV, ""));
-    return "eager".equalsIgnoreCase(mode.strip());
+    return "eager"
+        .equalsIgnoreCase(
+            AgentSettings.valueOrEmpty(
+                agentArgs,
+                environment,
+                INSTRUMENTATION_ARG,
+                INSTRUMENTATION_PROPERTY,
+                INSTRUMENTATION_ENV));
   }
 
   /**
@@ -464,11 +464,7 @@ public final class ChaosAgentBootstrap {
       final String arg,
       final String property,
       final String env) {
-    final String fromArgs = AgentArgsParser.parse(agentArgs).get(arg);
-    final String value =
-        fromArgs != null
-            ? fromArgs
-            : System.getProperty(property, environment.getOrDefault(env, ""));
+    final String value = AgentSettings.valueOrEmpty(agentArgs, environment, arg, property, env);
     return java.util.Arrays.stream(value.split(","))
         .map(String::strip)
         .filter(entry -> !entry.isEmpty())
@@ -563,15 +559,15 @@ public final class ChaosAgentBootstrap {
    * MACSTAB_CHAOS_JMX_CONTROL=true}. Off by default.
    */
   static boolean jmxControl(final String agentArgs, final Map<String, String> environment) {
-    final String fromArgs = AgentArgsParser.parse(agentArgs).get("jmxControl");
-    final String value =
-        fromArgs != null
-            ? fromArgs
-            : System.getProperty(
-                "macstab.chaos.jmx.control",
-                environment.getOrDefault("MACSTAB_CHAOS_JMX_CONTROL", ""));
-    return "true".equalsIgnoreCase(value.strip());
+    return "true"
+        .equalsIgnoreCase(
+            AgentSettings.valueOrEmpty(
+                agentArgs, environment, JMX_CONTROL_ARG, JMX_CONTROL_PROPERTY, JMX_CONTROL_ENV));
   }
+
+  private static final String JMX_CONTROL_ARG = "jmxControl";
+  private static final String JMX_CONTROL_PROPERTY = "macstab.chaos.jmx.control";
+  private static final String JMX_CONTROL_ENV = "MACSTAB_CHAOS_JMX_CONTROL";
 
   /**
    * Registers the diagnostics MBean.

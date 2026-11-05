@@ -4,7 +4,6 @@ import com.macstab.chaos.jvm.api.ChaosDiagnostics;
 import com.macstab.chaos.jvm.api.ChaosEvent;
 import com.macstab.chaos.jvm.core.ChaosRuntime;
 import com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher;
-import com.macstab.chaos.jvm.startup.AgentArgsParser;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -92,17 +91,18 @@ final class ChaosReports implements AutoCloseable {
    */
   static Optional<ChaosReports> createIfEnabled(
       final String agentArgs, final Map<String, String> environment, final ChaosRuntime runtime) {
-    final Map<String, String> args = AgentArgsParser.parse(agentArgs).values();
-    final String enabled = setting(args, environment, REPORTS_ARG, REPORTS_PROPERTY, REPORTS_ENV);
+    final String enabled =
+        AgentSettings.valueOrEmpty(
+            agentArgs, environment, REPORTS_ARG, REPORTS_PROPERTY, REPORTS_ENV);
     if (!"on".equalsIgnoreCase(enabled) && !"true".equalsIgnoreCase(enabled)) {
       return Optional.empty();
     }
     final String dir =
-        setting(args, environment, REPORTS_DIR_ARG, REPORTS_DIR_PROPERTY, REPORTS_DIR_ENV);
+        AgentSettings.valueOrEmpty(
+            agentArgs, environment, REPORTS_DIR_ARG, REPORTS_DIR_PROPERTY, REPORTS_DIR_ENV);
     final ChaosReports reports =
         new ChaosReports(
-            Path.of(dir == null || dir.isBlank() ? System.getProperty("java.io.tmpdir") : dir),
-            runtime);
+            Path.of(dir.isEmpty() ? System.getProperty("java.io.tmpdir") : dir), runtime);
     reports.start();
     current = reports;
     return Optional.of(reports);
@@ -115,20 +115,6 @@ final class ChaosReports implements AutoCloseable {
    */
   static Optional<ChaosReports> current() {
     return Optional.ofNullable(current);
-  }
-
-  private static @Nullable String setting(
-      final Map<String, String> args,
-      final Map<String, String> environment,
-      final String arg,
-      final String property,
-      final String env) {
-    final String fromArgs = args.get(arg);
-    if (fromArgs != null) {
-      return fromArgs;
-    }
-    final String fromProperty = System.getProperty(property);
-    return fromProperty != null ? fromProperty : environment.get(env);
   }
 
   private void start() {
