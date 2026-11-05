@@ -103,9 +103,15 @@ public interface ChaosControlPlane {
     // Inspect current agent state
     ChaosDiagnostics diagnostics();
 
-    // Register event listener. Invoked synchronously for the published event types:
-    //   STARTED, STOPPED, RELEASED, APPLIED
+    // Register an event listener; invoked synchronously (wrap it in ChaosEventListener.async
+    // to receive events on an agent-owned thread)
     void addEventListener(ChaosEventListener listener);
+
+    // Remove a listener as it was registered; true if it was registered
+    boolean removeEventListener(ChaosEventListener listener);
+
+    // Bind the calling thread to the open session with this id (null or unknown: no session)
+    ChaosSession.ScopeBinding bindSession(@Nullable String sessionId);
 
     // Stop and unregister all scenarios (does not uninstall instrumentation);
     // afterwards activate/openSession/addEventListener throw IllegalStateException
@@ -664,22 +670,22 @@ record ChaosEvent(
     Map<String, String> attributes
 ) {
     enum Type {
-        REGISTERED,  // defined, not currently published
+        REGISTERED,  // scenario registered, before it starts
         STARTED,     // scenario transitioned to ACTIVE
         APPLIED,     // a contribution took effect on a matched operation
-        SKIPPED,     // defined, not currently published
-        FAILED,      // defined, not currently published
+        SKIPPED,     // the selector matched, the policy kept the effect (only while a listener is registered)
+        FAILED,      // an activation failed
         RELEASED,    // gate-effect release() unblocked waiters
         STOPPED      // scenario transitioned to STOPPED
     }
 }
 ```
 
-**Published events**: only `STARTED`, `STOPPED`, `RELEASED` and `APPLIED` are published by the runtime. `APPLIED` is published only for contributions that actually take effect on a call — every matching delay, the winning gate and the winning terminal action by precedence. A scenario that loses on precedence publishes nothing and does not consume its `maxApplications` budget. `APPLIED` attributes carry `operation`, `scope`, `effectType` and, for session scenarios, `sessionId`.
+**Published events**: every type is published; when, and with which attributes, is in [observability.md §2](observability.md#2-events). `APPLIED` is published only for contributions that actually take effect on a call — every matching delay, the winning gate and the winning terminal action by precedence. A scenario that loses on precedence publishes nothing and does not consume its `maxApplications` budget. `APPLIED` attributes carry `operation`, `scope`, `effectType` and, for session scenarios, `sessionId`.
 
-**Contract**: Listeners are called synchronously on the application thread that triggered the event. Must not block, perform I/O, or throw checked exceptions. Listener exceptions are caught and logged; they do not abort the chaos operation.
+**Contract**: Listeners are called synchronously on the thread that triggered the event, unless wrapped in `ChaosEventListener.async(listener)` (bounded queue of 10 000; overflow is dropped and counted as `droppedEvents`). Must not block, perform I/O, or throw checked exceptions. Listener exceptions are caught and logged; they do not abort the chaos operation.
 
-**Observability use**: Subscribe a listener to count `APPLIED` events per scenario ID — this is the ground truth for "how many times did my chaos actually fire during this test?". For skipped matches, compare `matchedCount` and `appliedCount` in `diagnostics().snapshot()`.
+**Observability use**: Subscribe a listener to count `APPLIED` events per scenario ID — this is the ground truth for "how many times did my chaos actually fire during this test?". Skipped matches arrive as `SKIPPED` with the policy check as `reason`; `matchedCount` and `appliedCount` in `diagnostics().snapshot()` give the totals.
 
 ---
 
@@ -687,7 +693,9 @@ record ChaosEvent(
 
 | Exception | Module | When thrown |
 |-----------|--------|-------------|
-| `ChaosActivationException` | `chaos-agent-api` | Scenario activation fails: duplicate ID, scope mismatch, invalid configuration |
+| `ChaosActivationException` | `chaos-agent-api` | Scenario activation fails: scope mismatch, invalid configuration |
+| `ChaosActivationConflictException` | `chaos-agent-api` | A `ChaosActivationException`: a scenario with the same id is already active (a retry may succeed once it stops) |
+| `ChaosValidationException` | `chaos-agent-api` | A scenario's effect, selector and policy do not fit together (`CompatibilityValidator`) |
 | `ChaosUnsupportedFeatureException` | `chaos-agent-api` | Scenario requires a JVM feature not available on the running JVM (e.g., JFR absent on a stripped JRE) |
 | `ConfigLoadException` | `chaos-agent-startup-config` | Startup configuration cannot be read or parsed. Not part of the core API surface — only thrown from `StartupConfigLoader.load()` and only visible to code that imports the startup-config module. |
 

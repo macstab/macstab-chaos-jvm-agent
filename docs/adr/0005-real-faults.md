@@ -22,7 +22,7 @@ Advice runs inside the intercepted JDK or library method and fails it the way th
 ## Consequences
 
 - Application code cannot tell an injected fault from a real one, which is the point.
-- Each fault must be specified per operation: `CompatibilityValidator` rejects an effect on an operation it cannot fail faithfully, and the generated compatibility table documents the result.
+- Each fault must be specified per operation: `CompatibilityValidator` rejects an effect on an operation it cannot fail faithfully, and the compatibility table of the configuration reference documents the result.
 - The child-JVM integration tests assert the exact exceptions and messages, against the real JDK.
 
 ## Alternatives rejected

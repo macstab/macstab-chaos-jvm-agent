@@ -466,7 +466,7 @@ RateLimit {
 6. Does the fixed-window `rateLimit` permit another application?
 7. Does `maxApplications` still have budget? (a reservation is taken; it is only consumed if the contribution actually takes effect)
 
-All conditions must hold. No event is published for a skipped match — `ChaosEvent.SKIPPED` is defined in the API but not published; compare `matchedCount` and `appliedCount` in diagnostics instead.
+All conditions must hold. A skipped match publishes `SKIPPED` with the failing check as `reason`, while a listener is registered; `matchedCount` and `appliedCount` in the diagnostics give the totals.
 
 **Rate limit window:** the window is **fixed**, anchored at scenario start and advanced in whole window multiples — not sliding. A burst straddling a window boundary can therefore see up to `2 × permits` applications within one window length.
 
@@ -544,7 +544,7 @@ Interceptors run on the calling virtual thread if the application uses Project L
 
 ## 9.2 Runtime Failures (Hot Path)
 
-Exceptions produced on purpose by an effect (`reject`, `exceptionInjection`, exceptional completion) propagate to the caller by design. Failures in event listeners and the metrics sink are caught and logged so they never reach application code. `ChaosEvent.FAILED` is defined in the API but is not currently published by the runtime.
+Exceptions produced on purpose by an effect (`reject`, `exceptionInjection`, exceptional completion) propagate to the caller by design. Failures in event listeners and the metrics sink are caught and logged so they never reach application code. A failed activation publishes `ChaosEvent.FAILED` with its `category`.
 
 ## 9.3 Config Loading Failures
 
@@ -643,7 +643,7 @@ Access via `jconsole`, `jmc`, or any JMX client. `Observability.jmxEnabled = fal
 
 ## 12.2 Structured Logging
 
-Chaos events are written to `java.util.logging` (logger `com.macstab.chaos.jvm`): `STARTED`/`STOPPED` at `INFO`, `APPLIED`/`RELEASED` at `FINE`. Configure with `-Djava.util.logging.config.file=logging.properties` or programmatically. Each line carries the event type, scenario ID, message and attributes (for `APPLIED`: operation, scope, effect type and, for session scenarios, session ID). `REGISTERED`, `SKIPPED` and `FAILED` are not published.
+Chaos events are written to `java.util.logging` (logger `com.macstab.chaos.jvm`): `FAILED` at `WARNING`, `STARTED`/`STOPPED` at `INFO`, `REGISTERED`/`APPLIED`/`RELEASED` at `FINE`, `SKIPPED` at `FINER`. Configure with `-Djava.util.logging.config.file=logging.properties` or programmatically. Each line carries the event type, scenario ID, message and attributes (for `APPLIED`: operation, scope, effect type and, for session scenarios, session ID).
 
 ## 12.3 JFR Integration
 

@@ -94,7 +94,7 @@ This is the most constrained part of the codebase. Read this section before touc
 
 ### 2. Add the operation tag
 
-Add a constant to the appropriate enum or constant class in `chaos-agent-api` (e.g., `JvmOperation`). This is the string your selector will match.
+Add a constant to `OperationType` in `chaos-agent-api`, next to its family, and add it to the `VALID_OPS` of the selector that matches it.
 
 ### 3. Implement the `BootstrapDispatcher` entry point
 
@@ -159,12 +159,11 @@ The `ChaosAgentExtension` handles self-attach — no `-javaagent` flag needed in
 
 Stressors are simpler — they live entirely in `chaos-agent-core` and have no ByteBuddy involvement.
 
-1. Implement `ManagedStressor` in `chaos-agent-core`
-2. Allocate resources in `start()`, release them in `stop()`
-3. For destructive stressors (deadlock, thread leak, permanent memory pressure), check `ChaosRuntime.isDestructiveEffectsEnabled()` and throw `IllegalStateException` if not enabled
-4. Register the stressor type in the sealed effect hierarchy in `chaos-agent-api`
-5. Wire activation in `ScenarioController`
-6. Add a lifecycle test: verify `isActive()` transitions and that `stop()` releases resources
+1. Add the effect record to the sealed `ChaosEffect` hierarchy in `chaos-agent-api`
+2. Implement `ManagedStressor` in `chaos-agent-core`: start the work in the constructor, stop it and release every resource in `close()` (idempotent)
+3. Register the effect type and its stressor in the `StressorFactory` constructor, and add the effect to `CompatibilityValidator.STRESSOR_EFFECTS` (stressors need a `StressSelector`)
+4. For a destructive stressor (deadlock, thread leak, permanent memory pressure), add the effect to the `allowDestructiveEffects` check in `CompatibilityValidator.validateDestructiveEffectGuard`
+5. Add a lifecycle test: the stressor runs, and `close()` stops its threads and releases what it holds
 
 ---
 
@@ -173,5 +172,5 @@ Stressors are simpler — they live entirely in `chaos-agent-core` and have no B
 - One logical change per PR
 - Tests required for new interception points and stressors
 - `./gradlew build` must pass locally before opening a PR. It enforces a line and branch coverage floor per module (`coverageFloors` in `build.gradle.kts`); raise a floor when your tests raise coverage, never lower one to make a change pass
-- Pull requests into `main` run the benchmark gate (`docs/benchmarks.md` §8): a dispatch benchmark more than 15 % and 25 ns slower than `main` (p < 0.01) fails it
+- A change to the dispatch path is compared against its base with `BridgeDispatchBenchmark` (`docs/benchmarks.md` §8.3)
 - For breaking API changes, add a `BREAKING CHANGE:` footer to the commit message

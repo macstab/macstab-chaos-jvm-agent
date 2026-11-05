@@ -658,7 +658,7 @@ Published event types:
 | `RELEASED` | `GateEffect` gate opened via `handle.release()`                                                                                       |
 | `STOPPED`  | `handle.stop()`, `handle.close()` or `controlPlane.close()`                                                                           |
 
-`ChaosEvent.Type` also defines `REGISTERED`, `SKIPPED` and `FAILED`, but the runtime does not publish them. A scenario that loses on precedence publishes no `APPLIED` event and does not consume its `maxApplications` budget. To see matches that were filtered by policy, compare `matchedCount` and `appliedCount` in the snapshot.
+The runtime also publishes `REGISTERED` (before a scenario starts), `SKIPPED` (the policy kept a matched effect, with the check as `reason`; only while a listener is registered) and `FAILED` (an activation failed, with its `category`); see [observability.md §2](observability.md#2-events). A scenario that loses on precedence publishes no `APPLIED` event and does not consume its `maxApplications` budget.
 
 ### 8.3 Debug Dump
 

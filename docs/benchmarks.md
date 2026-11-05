@@ -597,7 +597,7 @@ Each benchmark method calls a `BootstrapDispatcher` dispatch method exactly as w
 
 ### 8.2 Measured Results
 
-Apple M-series, JDK 25, `-f 3 -wi 3 -i 5 -prof gc` (indicative; CI measures its own baseline):
+Apple M-series, JDK 25, `-f 3 -wi 3 -i 5 -prof gc` (indicative; compare runs on the same machine):
 
 | Method              | `none`        | `otherOperation` | `matchedNotYetActive` |
 |---------------------|---------------|------------------|-----------------------|

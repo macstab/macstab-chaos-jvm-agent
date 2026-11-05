@@ -103,7 +103,7 @@ The reentrancy guard short-circuits when chaos code itself calls instrumented JD
 ```mermaid
 flowchart TB
   subgraph contract["Public Contract"]
-    api["chaos-agent-api<br/>sealed ChaosSelector (25 selector types), ChaosEffect (33 effect types)<br/>records ChaosScenario, ChaosPlan, ActivationPolicy, NamePattern<br/>OperationType (91 operation types)"]
+    api["chaos-agent-api<br/>sealed ChaosSelector (25 selector types), ChaosEffect (33 effect types)<br/>records ChaosScenario, ChaosPlan, ActivationPolicy, NamePattern<br/>OperationType (92 operation types)"]
   end
   subgraph runtime["Runtime"]
     core["chaos-agent-core"]
@@ -801,7 +801,7 @@ The agent uses `java.util.logging` (`java.util.logging.Logger`). Log output goes
 - `RELEASED`: gate manually released
 - `APPLIED`: a contribution took effect — every matching delay, the winning gate, the winning terminal action (on the hot path — listeners must be non-blocking)
 
-`REGISTERED`, `SKIPPED` and `FAILED` exist in `ChaosEvent.Type` but are not published.
+`REGISTERED` (before a scenario starts), `SKIPPED` (the policy kept a matched effect; only while a listener is registered) and `FAILED` (an activation failed) complete the set; [observability.md §2](observability.md#2-events) lists their attributes.
 
 Register via `controlPlane.addEventListener(listener)`. Listeners execute synchronously on the calling thread inside `ObservabilityBus.publish()`. **Do not perform I/O or blocking operations in listeners.**
 
