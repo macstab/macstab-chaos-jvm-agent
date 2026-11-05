@@ -53,6 +53,53 @@ class MethodSelectorDemandTest {
     }
 
     @Test
+    @DisplayName("a registration that fails after weaving drops its method selector again")
+    void failedRegistrationUnweaves() {
+      runtime.setHookDemand(recording(null));
+      final ChaosSelector.MethodSelector kept = selector("a.Kept");
+      runtime.activate(scenario("taken", kept));
+
+      assertThatThrownBy(() -> runtime.activate(scenario("taken", selector("b.Rejected"))))
+          .isInstanceOf(com.macstab.chaos.jvm.api.ChaosActivationException.class);
+
+      assertThat(requests.get(requests.size() - 1)).containsExactly(kept);
+    }
+
+    @Test
+    @DisplayName("concurrent activations and removals leave the weaver with the registered set")
+    void concurrentChangesEndConsistent() throws Exception {
+      runtime.setHookDemand(recording(null));
+      final int threads = 4;
+      final java.util.concurrent.ExecutorService pool =
+          java.util.concurrent.Executors.newFixedThreadPool(threads);
+      try {
+        final List<java.util.concurrent.Future<?>> done = new java.util.ArrayList<>();
+        for (int t = 0; t < threads; t++) {
+          final int thread = t;
+          done.add(
+              pool.submit(
+                  () -> {
+                    for (int i = 0; i < 50; i++) {
+                      runtime
+                          .activate(scenario("s" + thread + "-" + i, selector("c.T" + thread)))
+                          .close();
+                    }
+                    runtime.activate(scenario("last" + thread, selector("d.Last" + thread)));
+                  }));
+        }
+        for (final java.util.concurrent.Future<?> future : done) {
+          future.get(30, java.util.concurrent.TimeUnit.SECONDS);
+        }
+      } finally {
+        pool.shutdownNow();
+      }
+
+      assertThat(requests.get(requests.size() - 1))
+          .containsExactlyInAnyOrder(
+              selector("d.Last0"), selector("d.Last1"), selector("d.Last2"), selector("d.Last3"));
+    }
+
+    @Test
     @Tag("law-L21")
     @DisplayName("a weaving failure fails the activation as INSTRUMENTATION_FAILURE")
     void weavingFailure() {

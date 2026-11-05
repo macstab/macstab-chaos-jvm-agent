@@ -273,7 +273,7 @@ class LifecycleEdgeTest {
                 "chaos-agent: could not update method hooks:"
                     + " java.lang.IllegalStateException: retransform refused");
       }
-      assertThat(runtime.registry().methodSelectors()).isEmpty();
+      assertThat(runtime.registry().controllers()).isEmpty();
     }
 
     @Test
@@ -493,6 +493,9 @@ class LifecycleEdgeTest {
     @DisplayName("a registry without a method-selector listener still tracks method selectors")
     void tracksMethodSelectorsWithoutListener() {
       final ScenarioRegistry registry = new ScenarioRegistry(Clock.systemUTC(), Map::of);
+      final java.util.List<Set<ChaosSelector.MethodSelector>> delivered =
+          new java.util.ArrayList<>();
+      registry.onMethodSelectorsChanged(delivered::add);
       final ChaosSelector.MethodSelector selector =
           new ChaosSelector.MethodSelector(
               Set.of(OperationType.METHOD_ENTER), NamePattern.exact("com.example.A"), null, null);
@@ -509,11 +512,11 @@ class LifecycleEdgeTest {
               new ObservabilityBus(ChaosMetricsSink.NOOP),
               Optional::empty);
       registry.register(controller);
-      assertThat(registry.methodSelectors()).containsExactly(selector);
+      assertThat(delivered).containsExactly(Set.of(selector));
 
       registry.unregister(controller);
       registry.unregister(controller);
-      assertThat(registry.methodSelectors()).isEmpty();
+      assertThat(delivered).containsExactly(Set.of(selector), Set.of());
       assertThat(registry.controllers()).isEmpty();
     }
 

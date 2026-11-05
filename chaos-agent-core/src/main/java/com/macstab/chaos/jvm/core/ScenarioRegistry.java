@@ -69,9 +69,18 @@ final class ScenarioRegistry implements ChaosDiagnostics {
   private final Object indexLock = new Object();
   private volatile Map<OperationType, ScenarioController[]> index =
       new EnumMap<>(OperationType.class);
-  private volatile Set<ChaosSelector.MethodSelector> methodSelectors = Set.of();
   private volatile Consumer<Set<ChaosSelector.MethodSelector>> methodSelectorListener =
       selectors -> {};
+
+  /**
+   * Serialises every hand-over of method selectors to the weaver; computing the set and handing it
+   * over happen under it together, so the last hand-over always reflects the latest registry state.
+   */
+  private final Object weaveLock = new Object();
+
+  /** The method selectors last handed to the weaver; guarded by {@link #weaveLock}. */
+  private Set<ChaosSelector.MethodSelector> wovenMethodSelectors = Set.of();
+
   private final ConcurrentLinkedQueue<ActivationFailure> failures = new ConcurrentLinkedQueue<>();
   private final Supplier<Map<String, String>> runtimeDetailsSupplier;
   private final Clock clock;
@@ -162,7 +171,6 @@ final class ScenarioRegistry implements ChaosDiagnostics {
    * always sees every change made before it.
    */
   private void rebuildIndex() {
-    final Set<ChaosSelector.MethodSelector> changedMethodSelectors;
     synchronized (indexLock) {
       final EnumMap<OperationType, List<ScenarioController>> byOperation =
           new EnumMap<>(OperationType.class);
@@ -179,13 +187,42 @@ final class ScenarioRegistry implements ChaosDiagnostics {
             next.put(operation, list.toArray(NO_CONTROLLERS));
           });
       index = next;
-      final Set<ChaosSelector.MethodSelector> nextMethodSelectors = collectMethodSelectors();
-      changedMethodSelectors =
-          nextMethodSelectors.equals(methodSelectors) ? null : nextMethodSelectors;
-      methodSelectors = nextMethodSelectors;
     }
-    if (changedMethodSelectors != null) {
-      methodSelectorListener.accept(changedMethodSelectors);
+    reconcileMethodSelectors();
+  }
+
+  /**
+   * Hands the method selectors of the registered scenarios to the weaver when they differ from the
+   * ones it has. Runs on the thread that changed the registry, outside the index lock.
+   */
+  void reconcileMethodSelectors() {
+    synchronized (weaveLock) {
+      final Set<ChaosSelector.MethodSelector> current = collectMethodSelectors();
+      if (!current.equals(wovenMethodSelectors)) {
+        wovenMethodSelectors = current;
+        methodSelectorListener.accept(current);
+      }
+    }
+  }
+
+  /**
+   * Weaves the method selectors of the registered scenarios plus {@code added} before a scenario
+   * with {@code added} is registered, so a weaving failure leaves nothing registered. A failure of
+   * {@code weaver} propagates; after a failed registration, {@link #reconcileMethodSelectors()}
+   * removes {@code added} again.
+   *
+   * @param added the method selector of the scenario about to be registered
+   * @param weaver weaves the given selectors
+   */
+  void weaveBeforeRegistering(
+      final ChaosSelector.MethodSelector added,
+      final Consumer<Set<ChaosSelector.MethodSelector>> weaver) {
+    synchronized (weaveLock) {
+      final Set<ChaosSelector.MethodSelector> selectors = new HashSet<>(collectMethodSelectors());
+      selectors.add(added);
+      final Set<ChaosSelector.MethodSelector> next = Set.copyOf(selectors);
+      weaver.accept(next);
+      wovenMethodSelectors = next;
     }
   }
 
@@ -197,15 +234,6 @@ final class ScenarioRegistry implements ChaosDiagnostics {
       }
     }
     return Set.copyOf(selectors);
-  }
-
-  /**
-   * Returns the method selectors of every registered scenario.
-   *
-   * @return the selectors; empty when no registered scenario uses a method selector
-   */
-  Set<ChaosSelector.MethodSelector> methodSelectors() {
-    return methodSelectors;
   }
 
   /**

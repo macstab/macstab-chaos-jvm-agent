@@ -18,7 +18,6 @@ import java.lang.instrument.Instrumentation;
 import java.time.Clock;
 import java.util.ArrayList;
 import java.util.EnumSet;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -406,10 +405,7 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
         hookDemand.require(SelectorOperations.of(scenario.selector()));
         if (scenario.selector() instanceof ChaosSelector.MethodSelector methodSelector) {
           // Weave before registering, so a weaving failure leaves nothing registered.
-          final Set<ChaosSelector.MethodSelector> selectors =
-              new HashSet<>(registry.methodSelectors());
-          selectors.add(methodSelector);
-          hookDemand.methods(Set.copyOf(selectors));
+          registry.weaveBeforeRegistering(methodSelector, hookDemand::methods);
         }
       } catch (final RuntimeException weavingFailure) {
         weavingFailed = true;
@@ -516,6 +512,8 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
     // Destroying it would only publish a STOPPED event carrying an id that may belong to a
     // scenario that is still running.
     if (controller == null || !wasRegistered) {
+      // A method selector woven before the failed registration is dropped again.
+      registry.reconcileMethodSelectors();
       return;
     }
     try {
