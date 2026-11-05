@@ -69,7 +69,6 @@ class StopDuringEvaluationTest {
     void evaluateAfterStopReturnsNoContribution() {
       final ChaosRuntime runtime = new ChaosRuntime();
 
-      // Use maxApplications=1 so we can see the difference cleanly
       final ChaosActivationHandle handle =
           runtime.activate(
               ChaosScenario.builder("stop-no-effect")
@@ -201,6 +200,7 @@ class StopDuringEvaluationTest {
 
       final CountDownLatch startLatch = new CountDownLatch(1);
       final AtomicInteger reversals = new AtomicInteger(0);
+      final AtomicInteger sawStop = new AtomicInteger(0);
 
       // Reader threads: each polls state repeatedly. A reversal (STOPPED → ACTIVE) is a bug.
       final int readers = 20;
@@ -215,16 +215,19 @@ class StopDuringEvaluationTest {
                   Thread.currentThread().interrupt();
                   return;
                 }
-                ChaosDiagnostics.ScenarioState prev = null;
-                for (int j = 0; j < 50; j++) {
-                  final ChaosDiagnostics.ScenarioState current = handle.state();
-                  // Once STOPPED is observed, it must never revert to anything else.
-                  if (prev == ChaosDiagnostics.ScenarioState.STOPPED
-                      && current != ChaosDiagnostics.ScenarioState.STOPPED) {
+                // Read until STOPPED is seen, then keep reading: it must never revert.
+                final long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+                int readsAfterStop = 0;
+                while (readsAfterStop < 50 && System.nanoTime() < deadline) {
+                  if (handle.state() == ChaosDiagnostics.ScenarioState.STOPPED) {
+                    readsAfterStop++;
+                  } else if (readsAfterStop > 0) {
                     reversals.incrementAndGet();
                   }
-                  prev = current;
                   Thread.yield();
+                }
+                if (readsAfterStop == 50) {
+                  sawStop.incrementAndGet();
                 }
               });
         }
@@ -233,7 +236,6 @@ class StopDuringEvaluationTest {
             () -> {
               try {
                 startLatch.await();
-                Thread.sleep(5);
               } catch (final InterruptedException e) {
                 Thread.currentThread().interrupt();
                 return;
@@ -248,6 +250,7 @@ class StopDuringEvaluationTest {
         executor.shutdownNow();
       }
 
+      assertThat(sawStop).as("every reader observed the stop").hasValue(readers);
       assertThat(reversals.get())
           .as("ScenarioState must never revert after STOPPED is observed")
           .isZero();
