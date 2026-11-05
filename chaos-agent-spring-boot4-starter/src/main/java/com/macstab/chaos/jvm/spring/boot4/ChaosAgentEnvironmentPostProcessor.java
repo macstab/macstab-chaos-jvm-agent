@@ -39,9 +39,9 @@ public class ChaosAgentEnvironmentPostProcessor implements EnvironmentPostProces
   public static final String ATTACH_MARKER_PROPERTY = "macstab.chaos.agent.attach-phase";
 
   /**
-   * Runs directly after config data processing. An earlier version ran at {@code
-   * HIGHEST_PRECEDENCE}, before {@code application.properties} / {@code .yml} were loaded, so a
-   * flag set there never triggered the early attach.
+   * Runs directly after config data processing, so a flag set in {@code application.properties} /
+   * {@code .yml} is already loaded and triggers the early attach; at {@code HIGHEST_PRECEDENCE} it
+   * would not be.
    */
   static final int ORDER = ConfigDataEnvironmentPostProcessor.ORDER + 1;
 

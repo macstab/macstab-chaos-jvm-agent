@@ -363,8 +363,8 @@ public final class ChaosAgentBootstrap {
    * Installs a new runtime: instrumentation, MBean, JFR and the startup plan. On failure every step
    * that already ran is undone — the transformers and the bridge delegate are removed, the MBean is
    * unregistered and the runtime (with its JFR listener) is closed — so a retry starts from a clean
-   * JVM. An earlier version only cleared the published reference: a retry installed a second set of
-   * transformers (advice ran twice) and the MBean kept reporting the dead runtime.
+   * JVM. Clearing only the published reference is not enough: a retry would install a second set of
+   * transformers (advice runs twice) and the MBean would keep reporting the dead runtime.
    */
   private static ChaosRuntime installRuntime(
       final String agentArgs,

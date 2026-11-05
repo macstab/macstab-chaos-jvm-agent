@@ -135,9 +135,9 @@ final class ClockSkewState {
   }
 
   private static long addSaturating(final AtomicLong accumulator, final long increment) {
-    // DRIFT mode previously used `accumulator.addAndGet(increment)` which wraps unboundedly; after
-    // roughly Long.MAX_VALUE / increment calls the counter flips sign and the observed clock
-    // jumps ~292 years into the past mid-scenario. Saturate via CAS so a forward drift stays
+    // A plain `accumulator.addAndGet(increment)` wraps unboundedly; after roughly
+    // Long.MAX_VALUE / increment calls the counter would flip sign and the observed clock would
+    // jump ~292 years into the past mid-scenario. Saturate via CAS so a forward drift stays
     // forward even after astronomically many matches.
     while (true) {
       final long current = accumulator.get();

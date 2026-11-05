@@ -183,9 +183,9 @@ class NamePatternTest {
     @Test
     @DisplayName("regex metacharacters '[' ']' '{' '}' in glob are literal, not regex syntax")
     void globEscapesCharacterClassAndRepetitionMetacharacters() {
-      // Before the escape was added these chars were passed through verbatim to the regex
-      // compiler, so "class[0-9]*" would behave like the regex "class[0-9].*" \u2014 matching
-      // "class4", which is wrong for a literal glob containing '[' and ']'.
+      // Passed through verbatim to the regex compiler, these chars would make "class[0-9]*"
+      // behave like the regex "class[0-9].*" \u2014 matching "class4",
+      // which is wrong for a literal glob containing '[' and ']'.
       assertThat(NamePattern.glob("class[0-9]*").matches("class[0-9]foo")).isTrue();
       assertThat(NamePattern.glob("class[0-9]*").matches("class4")).isFalse();
       assertThat(NamePattern.glob("count{1,3}").matches("count{1,3}")).isTrue();

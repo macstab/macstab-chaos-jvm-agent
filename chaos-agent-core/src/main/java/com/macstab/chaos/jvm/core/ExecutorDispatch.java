@@ -69,8 +69,8 @@ public final class ExecutorDispatch {
         && decision.terminalAction().kind() == TerminalKind.SUPPRESS) {
       // Honour composed "gate + delay + suppress" scenarios before substituting the no-op, so
       // the executor path matches beforeHttpSend / beforeScheduledTick / afterMethodExit which
-      // already fire the gate and delay around their terminal. Previously the early return
-      // silently dropped both, turning "pause 5 s then suppress" into instant suppression.
+      // already fire the gate and delay around their terminal; returning early here would turn
+      // "pause 5 s then suppress" into instant suppression.
       try {
         engine.applyDelayAndGate(decision);
       } catch (final Throwable throwable) {
@@ -461,8 +461,7 @@ public final class ExecutorDispatch {
       }
       // COMPLETE_EXCEPTIONALLY is documented as "complete a CompletableFuture exceptionally with
       // the enclosed throwable" — the ASYNC_CANCEL site is the canonical call site for that
-      // semantic. Without this branch the scenario's terminal action would be silently dropped
-      // and the cancel() would proceed normally, contradicting the plan.
+      // semantic, so the terminal action is applied here and the real cancel() does not run.
       if (terminalAction instanceof TerminalAction.CompleteExceptionally completing
           && future instanceof CompletableFuture<?> completable) {
         completable.completeExceptionally(completing.failure());

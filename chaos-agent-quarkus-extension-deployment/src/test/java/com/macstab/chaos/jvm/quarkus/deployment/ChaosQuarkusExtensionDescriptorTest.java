@@ -15,9 +15,9 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 /**
- * Checks the metadata through which Quarkus discovers this extension. Without it the extension was
- * never loaded: no build step ran, the agent was never installed and {@code ChaosControlPlane}
- * could not be injected.
+ * Checks the metadata through which Quarkus discovers this extension. Without it the extension is
+ * never loaded: no build step runs, the agent is never installed and {@code ChaosControlPlane}
+ * cannot be injected.
  */
 @DisplayName("Quarkus extension descriptor")
 class ChaosQuarkusExtensionDescriptorTest {

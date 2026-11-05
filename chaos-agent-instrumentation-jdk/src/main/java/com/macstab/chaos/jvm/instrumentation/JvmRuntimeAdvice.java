@@ -115,7 +115,7 @@ final class JvmRuntimeAdvice {
     static void enter(@Advice.This(optional = true) final Object lock) throws Throwable {
       // Pass the actual AQS (or @This-null for static-context edge cases) through so scenario
       // matchers that filter by MonitorSelector.monitorClass see the real runtime type instead
-      // of the constant AQS string the dispatcher previously substituted.
+      // of a constant AQS string.
       BootstrapDispatcher.beforeMonitorEnter(lock);
     }
   }
@@ -272,7 +272,7 @@ final class JvmRuntimeAdvice {
    *             → ... StackOverflowError
    * </pre>
    *
-   * <p>The fix: before delegating to the dispatcher, compare the intercepted {@code ThreadLocal}
+   * <p>The guard: before delegating to the dispatcher, compare the intercepted {@code ThreadLocal}
    * instance to {@code BootstrapDispatcher.DEPTH} by identity ({@code ==}). If they are the same
    * object, return {@code false} immediately — no delegation, no recursion. This is safe because:
    *
@@ -422,7 +422,7 @@ final class JvmRuntimeAdvice {
 
   /**
    * Intercepts {@link Thread#sleep(java.time.Duration)}, which does not delegate to {@code
-   * sleep(long)} on JDK 21+ and was previously not instrumented. Same skip semantics as {@link
+   * sleep(long)} on JDK 21+ and so needs its own advice. Same skip semantics as {@link
    * ThreadSleepAdvice}; the duration is passed to the dispatcher in milliseconds, saturating for
    * durations beyond {@code Long.MAX_VALUE} ms.
    */

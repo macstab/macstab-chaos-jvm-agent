@@ -422,9 +422,8 @@ public final class StartupConfigPoller implements AutoCloseable {
    * free for the new versions), and every new or changed scenario is activated. If an activation
    * still fails (a conflict with a scenario activated elsewhere, a weaving failure), the scenarios
    * activated by this call are closed and the previous versions are re-activated; they passed
-   * validation when they were first activated. An earlier version activated each scenario
-   * independently and logged failures, so a changed scenario that failed validation was left
-   * stopped and the plan was partially applied.
+   * validation when they were first activated. A reloaded plan is therefore never partially
+   * applied, and a changed scenario that fails never stays stopped.
    *
    * @param newScenarios the scenarios of the reloaded plan
    * @throws IllegalStateException when the plan has duplicate ids or a scenario fails to activate;

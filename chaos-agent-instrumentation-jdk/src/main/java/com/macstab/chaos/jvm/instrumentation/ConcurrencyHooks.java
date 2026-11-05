@@ -324,11 +324,11 @@ final class ConcurrencyHooks {
   }
 
   /**
-   * ThreadLocal.get() / set() (THREAD_LOCAL_GET / THREAD_LOCAL_SET). Previously excluded due to
-   * reentrancy with BootstrapDispatcher.DEPTH (also a ThreadLocal). Now safe: ThreadLocalGetAdvice
-   * and ThreadLocalSetAdvice include an identity check (threadLocal == BootstrapDispatcher.DEPTH)
-   * that exits before any delegation, breaking the recursion at the only point where it could
-   * occur. See ThreadLocalGetAdvice for the full reentrancy analysis.
+   * ThreadLocal.get() / set() (THREAD_LOCAL_GET / THREAD_LOCAL_SET). BootstrapDispatcher.DEPTH is
+   * itself a ThreadLocal, so these hooks are reentrant by nature. ThreadLocalGetAdvice and
+   * ThreadLocalSetAdvice include an identity check (threadLocal == BootstrapDispatcher.DEPTH) that
+   * exits before any delegation, breaking the recursion at the only point where it could occur. See
+   * ThreadLocalGetAdvice for the full reentrancy analysis.
    */
   static AgentBuilder applyThreadLocalTransformations(final AgentBuilder builder) {
     return builder

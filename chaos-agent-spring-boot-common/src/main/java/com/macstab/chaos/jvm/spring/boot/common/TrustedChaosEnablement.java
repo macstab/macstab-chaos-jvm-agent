@@ -32,8 +32,8 @@ import org.springframework.core.env.PropertySource;
  * same check.
  *
  * <p>The same decision gates both the early self-attach in the version-specific {@code
- * EnvironmentPostProcessor} and {@link ChaosAutoConfiguration}. Gating only the former let the
- * auto-configuration attach the agent anyway from an untrusted source.
+ * EnvironmentPostProcessor} and {@link ChaosAutoConfiguration}. Gating only the former would let
+ * the auto-configuration attach the agent anyway from an untrusted source.
  */
 public final class TrustedChaosEnablement {
 

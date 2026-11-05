@@ -127,11 +127,11 @@ final class ScenarioController {
     this.clock = clock;
     this.observabilityBus = observabilityBus;
     this.stressorFactory = new StressorFactory(instrumentationSupplier);
-    // randomSeed==null must mean "non-deterministic sampling", not "seed 0". Seeding with 0 made
-    // splittableRandom(matched) collapse to baseSeed ^ matched ^ scenario.id().hashCode() — a
-    // function of scenario ID and match count only, so every JVM run reproduced the exact same
-    // fire/no-fire sequence. Operators with probability<1.0 expecting stochastic sampling across
-    // CI runs instead got a fixed schedule. Draw the fallback seed from ThreadLocalRandom so
+    // randomSeed==null must mean "non-deterministic sampling", not "seed 0". Seeding with 0 would
+    // make splittableRandom(matched) collapse to baseSeed ^ matched ^ scenario.id().hashCode() — a
+    // function of scenario ID and match count only, so every JVM run would reproduce the exact
+    // same fire/no-fire sequence, and operators with probability<1.0 expecting stochastic sampling
+    // across CI runs would get a fixed schedule. Draw the fallback seed from ThreadLocalRandom so
     // successive JVMs get distinct sequences; users who want reproducibility set randomSeed
     // explicitly.
     this.baseSeed =
@@ -379,10 +379,9 @@ final class ScenarioController {
    * inside a gate-effect hold without stopping the scenario. Subsequent invocations that pass the
    * full evaluation pipeline will re-enter the gate and wait again until the next release.
    *
-   * <p>The gate closes again in the same step: an earlier version only counted the latch down, so
-   * after the first release the gate stayed open and no later call was ever held. Publishes a
-   * {@link com.macstab.chaos.jvm.api.ChaosEvent.Type#RELEASED} event to the {@link
-   * ObservabilityBus}.
+   * <p>The gate closes again in the same step; only counting the latch down would leave the gate
+   * open after the first release, so no later call would ever be held. Publishes a {@link
+   * com.macstab.chaos.jvm.api.ChaosEvent.Type#RELEASED} event to the {@link ObservabilityBus}.
    *
    * <p>A no-op, without an event, for a scenario that has no gate effect or is not active, as
    * {@link com.macstab.chaos.jvm.api.ChaosActivationHandle#release()} documents.
@@ -496,8 +495,8 @@ final class ScenarioController {
    * been chosen. The dispatcher decides afterwards which contributions take effect (every delay,
    * the winning gate and the winning terminal action by precedence) and calls {@link
    * #commitApplication(InvocationContext, long, long)} for those and {@link #releaseApplication()}
-   * for the rest. An earlier version counted and published {@code APPLIED} here, so a scenario that
-   * lost on precedence still reported itself as applied and used up its budget.
+   * for the rest. Nothing is counted or published as {@code APPLIED} here, so a scenario that loses
+   * on precedence neither reports itself as applied nor uses up its budget.
    *
    * <p>Committed applications plus outstanding reservations never exceed the cap. The scenario is
    * marked {@code INACTIVE} only once committed applications reach the cap, so a reservation that

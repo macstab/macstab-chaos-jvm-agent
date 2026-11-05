@@ -177,8 +177,8 @@ final class SocketAdvice {
   /**
    * Intercepts {@code NioSocketImpl.read(byte[], int, int)}. The remote address is read from the
    * inherited {@code SocketImpl.address} field — the advice is inlined into the socket
-   * implementation, so no reflection is involved — and lets {@code NetworkSelector} host patterns
-   * match reads, which previously never matched because no host was reported.
+   * implementation, so no reflection is involved — and reported, so {@code NetworkSelector} host
+   * patterns match reads.
    */
   static final class SocketReadAdvice {
     @Advice.OnMethodEnter

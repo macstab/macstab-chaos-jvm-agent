@@ -47,7 +47,7 @@ public final class AgentArgsParser {
       if (escaped) {
         // Only ';', '=' and '\\' are escapable. Any other backslash is kept as written, so
         // Windows paths (configFile=C:\\chaos\\plan.json) and JSON escapes in configJson (\\",
-        // \\d) reach the consumer unchanged; dropping every backslash used to mangle both.
+        // \\d) reach the consumer unchanged; dropping every backslash would mangle both.
         if (ch != ';' && ch != '=' && ch != '\\') {
           current.append('\\');
         }

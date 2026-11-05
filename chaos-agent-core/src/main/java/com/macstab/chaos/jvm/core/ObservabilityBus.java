@@ -209,11 +209,10 @@ final class ObservabilityBus {
    * <p>Called from {@link ChaosControlPlaneImpl#close()} so that listeners which install JVM-wide
    * side effects on construction (for example {@code JfrChaosEventSink}, which registers a {@link
    * jdk.jfr.FlightRecorder#addPeriodicEvent} hook) can unwind those effects deterministically when
-   * the control plane is torn down. Previously the JFR sink's {@code close()} was never invoked, so
-   * every test-suite that spun up a new {@code ChaosRuntime} accumulated a stale periodic hook on
-   * the JFR singleton, each one pinning the dead runtime via its captured diagnostics reference.
-   * Failures are swallowed and logged — a mis-behaving listener's close() must not mask a sibling's
-   * cleanup or an application's shutdown sequence.
+   * the control plane is torn down. Without it, every new {@code ChaosRuntime} a test suite spins
+   * up would leave a stale periodic hook on the JFR singleton, each one pinning the dead runtime
+   * via its captured diagnostics reference. Failures are swallowed and logged — a mis-behaving
+   * listener's close() must not mask a sibling's cleanup or an application's shutdown sequence.
    */
   void close() {
     for (final ChaosEventListener listener : listeners) {

@@ -14,13 +14,14 @@ import org.springframework.context.annotation.Bean;
  *
  * <p>Registered via {@code
  * META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports} — the standard
- * Spring Boot auto-configuration SPI. The earlier {@code
+ * Spring Boot auto-configuration SPI. The {@code
  * org.springframework.boot.test.autoconfigure.ImportAutoConfiguration.imports} layout is only
  * consulted when the test class carries {@code @ImportAutoConfiguration} (directly or via a slice
- * annotation like {@code @DataJpaTest}/{@code @WebMvcTest}), so the bean was silently absent from
- * plain {@code @SpringBootTest} and {@code @ChaosTest} contexts. Standard auto-config discovery
- * runs on every {@code @SpringBootTest}-driven context regardless of slice annotations, so the bean
- * is now reliably present for test code using {@code @Autowired ChaosControlPlane}.
+ * annotation like {@code @DataJpaTest}/{@code @WebMvcTest}), so registered there the bean would be
+ * silently absent from plain {@code @SpringBootTest} and {@code @ChaosTest} contexts. Standard
+ * auto-config discovery runs on every {@code @SpringBootTest}-driven context regardless of slice
+ * annotations, so the bean is reliably present for test code using {@code @Autowired
+ * ChaosControlPlane}.
  */
 @AutoConfiguration
 @ConditionalOnClass(ChaosAgentExtension.class)

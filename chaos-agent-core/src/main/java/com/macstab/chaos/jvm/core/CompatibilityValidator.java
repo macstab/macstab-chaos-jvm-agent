@@ -124,8 +124,8 @@ final class CompatibilityValidator {
 
   /**
    * A clock skew is applied on every clock read while its time bounds hold; it is not a per-call
-   * application, so the counting and sampling fields of the policy have no meaning for it. They
-   * used to be silently ignored.
+   * application, so the counting and sampling fields of the policy have no meaning for it and are
+   * rejected rather than silently ignored.
    */
   private static void validateClockSkewActivationPolicy(final ActivationPolicy policy) {
     if (policy.maxApplications() != null
@@ -237,8 +237,8 @@ final class CompatibilityValidator {
         }
       }
       case VIRTUAL_THREAD_CARRIER_PINNING -> {
-        // The enum-switch was previously non-exhaustive — a user-supplied pairing like
-        // (VIRTUAL_THREAD_CARRIER_PINNING, HeapPressureEffect) slipped through and failed
+        // Without this case a user-supplied pairing like
+        // (VIRTUAL_THREAD_CARRIER_PINNING, HeapPressureEffect) would slip through and fail
         // far downstream with a ClassCastException inside the stressor factory. The JDK-21
         // feature gate lives in validate(); this case exists to enforce the effect-type
         // contract so every StressTarget has a binding rule.
@@ -541,7 +541,8 @@ final class CompatibilityValidator {
    * Operations whose interception point can carry out a {@link ChaosEffect.SuppressEffect}: it
    * skips the call, substitutes a no-op or returns an empty result, or — where skipping cannot be
    * expressed (thread start, exit, HTTP, JDBC) — fails the call with the documented exception.
-   * Every other interception point can only delay or throw; SUPPRESS there was silently ignored.
+   * Every other interception point can only delay or throw, so SUPPRESS is rejected there instead
+   * of being silently ignored.
    */
   private static final Set<OperationType> SUPPRESS_OPS =
       EnumSet.of(

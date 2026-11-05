@@ -49,7 +49,7 @@ final class NioAdvice {
    * <p>Identical to {@link NioSelectNoArgAdvice} in every respect except the timeout sentinel: the
    * dispatcher call passes {@code -1L} rather than {@code 0L} so scenario matchers can distinguish
    * the blocking {@code select()} from the non-blocking {@code selectNow()} without heuristics.
-   * Sharing {@code NioSelectNoArgAdvice} between the two previously collapsed both calls to {@code
+   * Sharing {@code NioSelectNoArgAdvice} between the two would collapse both calls to {@code
    * timeoutMillis=0L}, making a {@code selectNow()}-only scenario fire on the blocking {@code
    * select()} too (and vice versa).
    */

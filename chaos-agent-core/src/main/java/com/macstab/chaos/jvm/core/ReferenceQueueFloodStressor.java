@@ -107,8 +107,8 @@ final class ReferenceQueueFloodStressor implements ManagedStressor {
       System.gc();
     } finally {
       // Reachability fence: the JVM must not hoist `anchors` unreachable before System.gc()
-      // observes the References. Without this, escape analysis + scalar replacement could
-      // resurrect the original bug.
+      // observes the References. Without this, escape analysis + scalar replacement could let
+      // the References be collected before they are ever enqueued.
       java.lang.ref.Reference.reachabilityFence(anchors);
     }
   }

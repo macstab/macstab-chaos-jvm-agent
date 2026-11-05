@@ -127,7 +127,7 @@ public final class ChaosPlanMapper {
    * chaos plan JSON at line 7, column 21: unknown property 'delayy' at scenarios[0].effect"}.
    * Values from the input are never included — Jackson's own messages can quote them (a mistyped
    * value would be echoed into logs), so only field names, which come from the plan's structure,
-   * are reported. An earlier version reported only "failed to parse chaos plan JSON".
+   * are reported.
    */
   static String parseFailureMessage(final JsonProcessingException exception) {
     final StringBuilder message = new StringBuilder("failed to parse chaos plan JSON");
@@ -232,10 +232,9 @@ public final class ChaosPlanMapper {
         // Only a well-formed surrogate pair encodes to 4 UTF-8 bytes. A lone high surrogate —
         // either at the end of the string or followed by a non-low-surrogate — gets replaced
         // with U+FFFD at encode time, which is 3 bytes, and the next char must still be counted
-        // on its own. Consuming it unconditionally (the old code did `i++` regardless) over-
-        // counted lone surrogates by one byte each and under-counted the following CJK char by
-        // three, shifting the net tally far enough off to let ~50% oversized JSON slip past the
-        // 1 MiB guard on JDK 17/21.
+        // on its own. Consuming it unconditionally (`i++` regardless) would over-count lone
+        // surrogates by one byte each and under-count the following CJK char by three, shifting
+        // the net tally far enough off to let ~50% oversized JSON slip past the 1 MiB guard.
         if (i + 1 < length && Character.isLowSurrogate(text.charAt(i + 1))) {
           bytes += 4;
           i++;

@@ -77,7 +77,7 @@ class MonitorEnterChaosIntegrationTest {
   }
 
   // ---------------------------------------------------------------------------
-  // Monitor class filter (HIGH-36 regression guard)
+  // Monitor class filter
   // ---------------------------------------------------------------------------
 
   @Nested

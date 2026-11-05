@@ -78,8 +78,8 @@ final class ChaosDiagnosticsMBean implements ChaosDiagnosticsMXBean {
       throw new IllegalArgumentException(invalid.getMessage());
     }
     // As one plan: validated whole before anything starts, with its observability settings, and
-    // rolled back as a unit. Scenario by scenario, a failing third scenario left the first two
-    // active and a session-scoped one ran JVM-wide.
+    // rolled back as a unit. Scenario by scenario, a failing third scenario would leave the first
+    // two active and a session-scoped one would run JVM-wide.
     final ChaosActivationHandle planHandle;
     try {
       planHandle = control.activate(plan);

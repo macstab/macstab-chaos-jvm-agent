@@ -217,10 +217,10 @@ final class ReturnValueCorruptor {
    * Returns an empty collection or map that is assignable to {@code returnType}, or {@code null}.
    *
    * <p>ByteBuddy emits a checkcast to the declared type where the corrupted value is written, so
-   * the substitute must be an instance of that type. An earlier version tested the opposite
-   * direction ({@code ArrayList.class.isAssignableFrom(returnType)}), which is true for subclasses:
-   * a method declared to return {@code javax.management.AttributeList} got a plain {@code
-   * ArrayList}, and {@code BlockingQueue} or {@code ConcurrentNavigableMap} got a {@code
+   * the substitute must be an instance of that type. The test runs in this direction because the
+   * opposite one ({@code ArrayList.class.isAssignableFrom(returnType)}) is also true for
+   * subclasses: a method declared to return {@code javax.management.AttributeList} would get a
+   * plain {@code ArrayList}, and {@code BlockingQueue} or {@code ConcurrentNavigableMap} a {@code
    * LinkedList} or {@code TreeMap}, all failing with {@code ClassCastException} at the call site.
    */
   private static @Nullable Object tryEmptyContainer(final Class<?> returnType) {

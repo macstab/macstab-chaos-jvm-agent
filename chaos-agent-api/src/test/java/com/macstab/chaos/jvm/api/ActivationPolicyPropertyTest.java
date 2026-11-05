@@ -34,10 +34,9 @@ class ActivationPolicyPropertyTest {
 
   @Property
   void zeroProbabilityIsRejected() {
-    // Silent normalisation of 0.0 → 1.0 was removed: a user who typed 0 meant "never fire"
-    // and was instead getting "always fire", which is the opposite of the stated intent.
-    // Now 0.0 is rejected explicitly and the user is pointed at maxApplications=0 for the
-    // disable-this-scenario case.
+    // 0.0 is rejected rather than normalised to 1.0: a user who types 0 means "never fire",
+    // and "always fire" would be the opposite of the stated intent. The message points the
+    // user at maxApplications=0 for the disable-this-scenario case.
     assertThatThrownBy(
             () ->
                 new ActivationPolicy(

@@ -44,11 +44,11 @@ final class DirectBufferPressureStressor implements ManagedStressor {
 
   /**
    * Resolves {@code cleaner()} on the {@code sun.nio.ch.DirectBuffer} interface, whose package the
-   * agent opens (manifest {@code Add-Opens} and {@code redefineModule}). An earlier version looked
-   * the method up on the buffer's own class, {@code java.nio.DirectByteBuffer}, which is
-   * package-private in the unopened {@code java.nio} package: {@code setAccessible} always failed,
-   * the handle was {@code null}, and {@link #close()} never freed native memory eagerly — it was
-   * released only whenever a GC happened to collect the buffers.
+   * agent opens (manifest {@code Add-Opens} and {@code redefineModule}). The buffer's own class,
+   * {@code java.nio.DirectByteBuffer}, is package-private in the unopened {@code java.nio} package:
+   * looked up there, {@code setAccessible} always fails, the handle is {@code null}, and {@link
+   * #close()} cannot free native memory eagerly — it is released only whenever a GC happens to
+   * collect the buffers.
    */
   private static @Nullable Method resolveCleanerMethod() {
     try {
@@ -86,10 +86,9 @@ final class DirectBufferPressureStressor implements ManagedStressor {
       final int size = (int) Math.min(effect.bufferSizeBytes(), remaining);
       final ByteBuffer buffer = ByteBuffer.allocateDirect(size);
       // Always retain a strong reference so the buffer survives until close() or until this
-      // stressor instance becomes phantom-reachable. Without this retention, registerCleaner=true
-      // previously used a throwaway local referent that became unreachable at loop-iteration
-      // end, so GC could reclaim the buffer immediately and the stressor produced zero
-      // sustained pressure.
+      // stressor instance becomes phantom-reachable. Without this retention, with
+      // registerCleaner=true the buffer would become unreachable at loop-iteration end, GC could
+      // reclaim it immediately and the stressor would produce zero sustained pressure.
       buffers.add(buffer);
       if (effect.registerCleaner()) {
         // Referent = this stressor. The cleaner fires only when the stressor is

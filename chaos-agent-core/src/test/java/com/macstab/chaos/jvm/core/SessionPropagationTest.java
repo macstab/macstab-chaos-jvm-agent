@@ -18,7 +18,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
-/** Session-scoped scenarios on operations whose dispatch used to ignore the session. */
+/** Session-scoped scenarios on operations whose dispatch must honour the session. */
 @DisplayName("Session scoping")
 class SessionPropagationTest {
 

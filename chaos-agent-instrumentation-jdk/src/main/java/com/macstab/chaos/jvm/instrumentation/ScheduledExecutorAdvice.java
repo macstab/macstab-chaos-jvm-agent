@@ -15,10 +15,9 @@ import net.bytebuddy.asm.Advice;
  * replaces the task with a no-op. The task is then wrapped so each run is evaluated for {@code
  * SCHEDULE_TICK}.
  *
- * <p>The caller's delay, period and {@link java.util.concurrent.TimeUnit} are never rewritten. An
- * earlier version normalised every call to milliseconds, even with no scenario active, which turned
- * sub-millisecond schedules into 1 ms schedules, and it evaluated SCHEDULE_SUBMIT a second time to
- * adjust the delay, applying every delay twice.
+ * <p>The caller's delay, period and {@link java.util.concurrent.TimeUnit} are never rewritten:
+ * normalising to milliseconds would turn sub-millisecond schedules into 1 ms schedules even with no
+ * scenario active. SCHEDULE_SUBMIT is evaluated once, so its delay is applied once.
  */
 final class ScheduledExecutorAdvice {
   private ScheduledExecutorAdvice() {}

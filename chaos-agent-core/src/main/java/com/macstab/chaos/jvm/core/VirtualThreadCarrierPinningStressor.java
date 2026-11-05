@@ -28,9 +28,9 @@ import org.jspecify.annotations.Nullable;
  *       per held carrier while active.
  * </ul>
  *
- * <p>An earlier version ran these loops on <em>platform</em> threads. A platform thread is not a
- * carrier, so the virtual-thread scheduler was never affected and the effect did nothing on any
- * JDK.
+ * <p>The loops run on <em>virtual</em> threads on purpose: a platform thread is not a carrier, so
+ * holding one would never affect the virtual-thread scheduler and the effect would do nothing on
+ * any JDK.
  *
  * <p>The stressor's threads are agent-owned: they are started and run with the dispatch depth
  * raised, so user scenarios (thread start, sleep, park) never apply to them. {@link #close()} stops
@@ -98,9 +98,9 @@ final class VirtualThreadCarrierPinningStressor implements ManagedStressor {
    *
    * <p>Holding every carrier stops every virtual thread in the JVM until the scenario ends: an
    * application serving requests on virtual threads stops responding, which is a deadlock rather
-   * than pinning. Whether a plan does that depended on the machine — {@code pinnedThreadCount = 4}
-   * leaves carriers free on a 16-core workstation and holds all of them on a 4-core CI runner. It
-   * now requires {@code allowDestructiveEffects}.
+   * than pinning. Whether a plan does that depends on the machine — {@code pinnedThreadCount = 4}
+   * leaves carriers free on a 16-core workstation and holds all of them on a 4-core CI runner — so
+   * it requires {@code allowDestructiveEffects}.
    *
    * @param effect the requested effect
    * @return the effect to run, or {@code null} to run nothing

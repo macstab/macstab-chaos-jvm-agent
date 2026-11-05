@@ -139,12 +139,12 @@ final class ScopeContext {
    * bindings would force callers to reverse-order-close sibling sessions, which neither the JUnit
    * extension lifecycle nor typical test code does.
    *
-   * <p>Nested bindings created via {@link #bind(String)} still enforce strict LIFO — they guard the
-   * thread-pool-leak bug that motivated HIGH-59. Since root session IDs are unique UUIDs, a nested
-   * {@code bind()} that happens to reuse this session's ID (for instance, an explicit {@code
-   * session.bind()} re-entry on the same thread) sits at the stack head while the root sits at the
-   * tail; {@code removeLastOccurrence} unambiguously targets the root entry and leaves the nested
-   * entry — and its LIFO guarantee — untouched.
+   * <p>Nested bindings created via {@link #bind(String)} still enforce strict LIFO — they guard
+   * against leaking a session into later work served by the same pooled thread. Since root session
+   * IDs are unique UUIDs, a nested {@code bind()} that happens to reuse this session's ID (for
+   * instance, an explicit {@code session.bind()} re-entry on the same thread) sits at the stack
+   * head while the root sits at the tail; {@code removeLastOccurrence} unambiguously targets the
+   * root entry and leaves the nested entry — and its LIFO guarantee — untouched.
    *
    * @param sessionId the session ID to push; must not be {@code null}
    * @return an {@link AutoCloseable} that removes this session's root entry when closed

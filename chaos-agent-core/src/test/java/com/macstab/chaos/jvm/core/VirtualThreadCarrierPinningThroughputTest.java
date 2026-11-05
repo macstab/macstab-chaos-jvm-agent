@@ -19,8 +19,8 @@ import org.junit.jupiter.api.Test;
 /**
  * Verifies that the carrier-pinning stressor actually takes virtual-thread carriers out of service:
  * while it holds every carrier, a newly started virtual thread cannot run; once it stops, the
- * virtual thread runs. The 1.0.0 stressor used platform threads and passed its old tests (which
- * only counted threads) while having no effect on the scheduler at all.
+ * virtual thread runs. Counting the stressor's threads is not enough: platform threads would pass
+ * such a check while having no effect on the scheduler at all.
  */
 @DisplayName("VirtualThreadCarrierPinning holds virtual-thread carriers")
 class VirtualThreadCarrierPinningThroughputTest {

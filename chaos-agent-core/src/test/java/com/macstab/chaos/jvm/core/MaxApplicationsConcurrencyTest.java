@@ -27,8 +27,8 @@ import org.junit.jupiter.api.Test;
  * Verifies that the CAS loop in {@link ScenarioController} prevents {@code appliedCount} from
  * exceeding {@code maxApplications} under concurrent evaluation.
  *
- * <p>Without the CAS fix (Task 2), multiple threads could simultaneously read the counter below the
- * cap, both increment it, and both receive a non-null contribution — overshooting the cap.
+ * <p>Without the CAS loop, multiple threads could simultaneously read the counter below the cap,
+ * both increment it, and both receive a non-null contribution — overshooting the cap.
  */
 @DisplayName("maxApplications CAS correctness under concurrency")
 class MaxApplicationsConcurrencyTest {

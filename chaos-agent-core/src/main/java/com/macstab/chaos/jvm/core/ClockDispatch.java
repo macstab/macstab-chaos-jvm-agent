@@ -53,15 +53,15 @@ public final class ClockDispatch {
         continue;
       }
       // The time bounds (activeFor, activeFrom, activeUntil) apply to a clock skew like to any
-      // scenario; they used to be ignored here because clock reads bypass engine.evaluate().
+      // scenario. They are checked here because clock reads bypass engine.evaluate().
       if (!controller.withinWindow()) {
         continue;
       }
       if (!SelectorMatcher.matches(controller.scenario().selector(), context)) {
         continue;
       }
-      // A session-scoped clock skew applies only on threads bound to its session; it used to
-      // skew every thread in the JVM. The current session is resolved once, and only when a
+      // A session-scoped clock skew applies only on threads bound to its session, never to every
+      // thread in the JVM. The current session is resolved once, and only when a
       // session-scoped skew is active, to keep the common clock-read path free of the lookup.
       if (controller.sessionId() != null) {
         if (!currentSessionResolved) {
@@ -153,8 +153,7 @@ public final class ClockDispatch {
    * LocalDateTime.now(ZoneId)}.
    *
    * <p>The skew (in milliseconds) is added to the real instant, so the sub-millisecond part of the
-   * real value is kept; an earlier version rebuilt the value from epoch milliseconds and dropped
-   * it.
+   * real value is kept; rebuilding the value from epoch milliseconds would drop it.
    *
    * @param realValue the real local date-time
    * @param zone the zone the local date-time was produced in

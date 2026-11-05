@@ -129,9 +129,8 @@ public record NamePattern(MatchMode mode, String value) {
 
   /**
    * Returns a pattern that matches any string, including {@code null}. The standard choice when a
-   * selector field is not constrained. Returns a shared singleton: every selector that uses {@code
-   * any()} previously allocated a fresh two-field record, which added churn to the plan parsing
-   * path.
+   * selector field is not constrained. Returns a shared singleton, so selectors that use {@code
+   * any()} allocate nothing on the plan parsing path.
    *
    * @return a NamePattern that matches any name
    */

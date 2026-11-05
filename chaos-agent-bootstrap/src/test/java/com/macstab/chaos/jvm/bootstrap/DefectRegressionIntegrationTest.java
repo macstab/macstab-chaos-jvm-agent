@@ -145,7 +145,7 @@ class DefectRegressionIntegrationTest {
               "gzip-write",
               null);
       // DeflaterOutputStream.write + finish call deflate(b, off, len) a handful of times; each
-      // public overload delegates to deflate(b, off, len, flush), which used to count twice.
+      // public overload delegates to deflate(b, off, len, flush), and each call counts once.
       final long matched = result.longValue("matched.deflate");
       assertThat(matched).isPositive();
       assertThat(result.longValue("applied.deflate")).isEqualTo(matched);

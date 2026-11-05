@@ -21,7 +21,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
-/** Selector fields that the dispatcher used to leave empty, so non-ANY filters never matched. */
+/** Selector fields the dispatcher must fill in, or non-ANY filters on them never match. */
 @DisplayName("Invocation context fields")
 class ContextFieldsTest {
 

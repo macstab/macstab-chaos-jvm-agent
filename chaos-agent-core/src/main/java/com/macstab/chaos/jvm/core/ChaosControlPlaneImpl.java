@@ -201,8 +201,8 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
     // "part of this plan is active". Roll back by stopping and destroying every successfully
     // registered handle before propagating the original exception.
     ensureOpen();
-    // Validate every scenario and check every id before anything is registered or started: an
-    // invalid fifth scenario used to roll back four that had already injected faults.
+    // Validate every scenario and check every id before anything is registered or started, so an
+    // invalid fifth scenario never forces a rollback of four that have already injected faults.
     for (final ChaosScenario scenario : plan.scenarios()) {
       try {
         validate(scenario);
@@ -267,9 +267,8 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
   public ChaosSession openSession(final String displayName) {
     // A session only needs {@code activateInSession} to register session-scoped scenarios; that
     // method lives on this control plane, so the session can hold a direct reference instead of
-    // bouncing through the ChaosRuntime facade. This removes the UnsupportedOperationException
-    // trap that used to sit here for any caller who got to the control plane without going
-    // through ChaosRuntime.
+    // bouncing through the ChaosRuntime facade. Callers that reach the control plane without
+    // going through ChaosRuntime can open sessions too.
     ensureOpen();
     hookDemand.require(SESSION_PROPAGATION_OPERATIONS);
     final DefaultChaosSession session = new DefaultChaosSession(displayName, scopeContext, this);
@@ -342,9 +341,8 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
       }
     }
     // Close AutoCloseable listeners (e.g. JfrChaosEventSink's FlightRecorder periodic hook).
-    // Previously those hooks were never removed, so every new ChaosRuntime accumulated a stale
-    // FlightRecorder entry pinning dead runtimes — a silent JVM-wide leak that escalated in
-    // test suites spinning up multiple runtimes.
+    // A hook left registered pins its dead runtime in FlightRecorder — a silent JVM-wide leak
+    // that grows with every runtime a test suite spins up.
     observabilityBus.close();
   }
 
@@ -418,11 +416,11 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
               scenario, scopeKey, sessionId, clock, observabilityBus, () -> instrumentation);
       final DefaultChaosActivationHandle handle =
           new DefaultChaosActivationHandle(controller, registry);
-      // Register before starting. A duplicate id is rejected here, before any side effect: an
-      // earlier version started the new controller first (spawning its stressor and publishing
-      // STARTED), then rolled it back with a STOPPED event carrying the id of the scenario that
-      // was still running. A registered but not yet started controller is invisible to the
-      // dispatch path, because evaluate() returns null until start() has set the started flag.
+      // Register before starting. A duplicate id is rejected here, before any side effect;
+      // starting first would spawn the new controller's stressor and publish STARTED, then roll
+      // it back with a STOPPED event carrying the id of the scenario that is still running. A
+      // registered but not yet started controller is invisible to the dispatch path, because
+      // evaluate() returns null until start() has set the started flag.
       final ScenarioController replaced = registry.register(controller);
       registeredInRegistry = true;
       observabilityBus.publish(

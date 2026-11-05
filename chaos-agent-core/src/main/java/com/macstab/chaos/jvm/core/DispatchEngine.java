@@ -428,8 +428,8 @@ final class DispatchEngine {
   /**
    * Applies the delay and then the gate of a decision, in the order {@link RuntimeDecision}
    * documents (delay, gate, terminal action). The delay of every matching scenario is applied even
-   * when a terminal action then throws or returns early; an earlier version ran the gate first and
-   * skipped the delay whenever a THROW or RETURN terminal won.
+   * when a terminal action then throws or returns early, so a THROW or RETURN terminal never skips
+   * the delay.
    */
   void applyDelayAndGate(final RuntimeDecision decision) throws Throwable {
     sleep(decision.delayMillis());
@@ -439,9 +439,9 @@ final class DispatchEngine {
   /**
    * Holds the caller at the gate. An interrupt ends the wait: the interrupt flag is restored and
    * the call proceeds, so the intercepted JDK method observes the interrupt exactly as it would
-   * have without chaos (sleep and wait throw, park returns, interruptible channels close). An
-   * earlier version let the checked {@link InterruptedException} escape into methods that do not
-   * declare it, with the flag already cleared.
+   * have without chaos (sleep and wait throw, park returns, interruptible channels close). The
+   * checked {@link InterruptedException} never escapes into methods that do not declare it, and the
+   * flag is never left cleared.
    */
   void applyGate(final @Nullable GateAction gateAction) {
     if (gateAction == null) {
@@ -475,14 +475,13 @@ final class DispatchEngine {
     }
     // Gate blocking inside applyPreDecision() can unwind as InterruptedException — for example
     // an operator scenario that parks the caller until an external signal arrives, then a thread
-    // pool shutdown interrupts the worker. The previous implementation wrapped it as
-    // IllegalStateException and silently dropped the interrupt bit: the worker then unwound with
-    // the "chaos interception failed" exception but flag-clear, so the next blocking call
-    // (Thread.sleep, Object.wait, Condition.await, …) would sit forever instead of honouring
-    // the shutdown. Restore the interrupt flag before wrapping so subsequent blocking calls see
-    // it; we still wrap in a RuntimeException because callers advised by Byte Buddy cannot
-    // propagate a checked exception without advice-level `throws` declarations we don't want
-    // to require everywhere.
+    // pool shutdown interrupts the worker. Wrapping it without restoring the interrupt bit would
+    // unwind the worker with the "chaos interception failed" exception but flag-clear, so the
+    // next blocking call (Thread.sleep, Object.wait, Condition.await, …) would sit forever
+    // instead of honouring the shutdown. Restore the interrupt flag before wrapping so subsequent
+    // blocking calls see it; we still wrap in a RuntimeException because callers advised by Byte
+    // Buddy cannot propagate a checked exception without advice-level `throws` declarations we
+    // don't want to require everywhere.
     if (throwable instanceof InterruptedException) {
       Thread.currentThread().interrupt();
     }
@@ -505,8 +504,8 @@ final class DispatchEngine {
    * {@code GLOB} task-class patterns work transparently for lambda tasks. A lambda defined in
    * {@code com.example.MyService} is named {@code com.example.MyService$$Lambda/0x0000...} on JDK
    * 21+ (hidden classes) and {@code com.example.MyService$$Lambda$14/0x0000...} on older JDKs; both
-   * become {@code com.example.MyService}. Matching only the older form left the hex suffix on every
-   * lambda on the supported JDKs.
+   * become {@code com.example.MyService}. Matching only the older form would leave the hex suffix
+   * on every lambda on the supported JDKs.
    */
   static @Nullable String taskClassName(final Object task) {
     if (task == null) {

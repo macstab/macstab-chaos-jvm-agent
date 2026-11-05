@@ -91,7 +91,7 @@ public final class ChaosQuarkusExtension
     store.put(ChaosSession.class, session);
     // Class-scoped list of handles for JVM-scoped scenarios activated via @ChaosScenario.
     // Session-scoped scenarios are torn down by session.close(); JVM-scoped ones outlive any
-    // session and previously leaked into subsequent tests — we now stop them in afterAll.
+    // session, so afterAll stops them to keep them from leaking into subsequent tests.
     store.put(JVM_HANDLES_KEY, new ArrayList<ChaosActivationHandle>());
     final Class<?> testClass = context.getTestClass().orElse(null);
     if (testClass != null) {

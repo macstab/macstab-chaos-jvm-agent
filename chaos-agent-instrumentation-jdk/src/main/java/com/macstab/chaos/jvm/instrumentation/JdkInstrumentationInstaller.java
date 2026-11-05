@@ -621,10 +621,9 @@ public final class JdkInstrumentationInstaller {
    * else. Advice applied this way only uses {@code Object}-typed parameters and reflective access,
    * so the libraries are not needed on the agent's classpath.
    *
-   * <p>An earlier version probed for the class with {@code Class.forName} at install time and
-   * skipped the transformation when the probe failed. Under {@code premain} in a fat jar the probe
-   * always failed, so OkHttp, Apache HttpClient, HikariCP, c3p0 and Reactor Netty chaos silently
-   * never applied.
+   * <p>The class is not probed with {@code Class.forName} at install time: under {@code premain} in
+   * a fat jar such a probe always fails, so OkHttp, Apache HttpClient, HikariCP, c3p0 and Reactor
+   * Netty chaos would silently never apply.
    *
    * @param builder the current {@link AgentBuilder} chain
    * @param transformer a {@link BuilderTransformer} that applies one or more {@link

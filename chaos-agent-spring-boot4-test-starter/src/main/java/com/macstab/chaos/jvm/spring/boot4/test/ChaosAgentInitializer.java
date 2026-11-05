@@ -28,8 +28,8 @@ public final class ChaosAgentInitializer
     // Install the JVM-wide agent before context refresh; see ChaosAgentInitializer in the
     // Boot 3 starter for the reasoning behind delegating bean exposure to the auto-config
     // rather than calling beanFactory.registerSingleton(...) here.
-    // The flag is added to this context's environment only. A JVM-wide system property leaked
-    // into every later @SpringBootTest context, so bean presence depended on test order.
+    // The flag is added to this context's environment only. A JVM-wide system property would
+    // leak into every later @SpringBootTest context, making bean presence depend on test order.
     applicationContext
         .getEnvironment()
         .getPropertySources()

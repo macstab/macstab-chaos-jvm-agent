@@ -1346,10 +1346,10 @@ public sealed interface ChaosEffect
   record FinalizerBacklogEffect(int objectCount, Duration finalizerDelay) implements ChaosEffect {
     /**
      * Upper bound on {@code objectCount}. The stressor constructor allocates and retains every
-     * object simultaneously; pathological values like {@link Integer#MAX_VALUE} previously passed
-     * validation and then triggered {@link OutOfMemoryError} mid-loop, which unwinds through {@code
-     * ScenarioController.start()} and leaves the already-registered controller orphaned. Failing
-     * plan validation is far cheaper than explaining a partially-activated scenario.
+     * object simultaneously; a pathological value like {@link Integer#MAX_VALUE} would trigger
+     * {@link OutOfMemoryError} mid-loop, which unwinds through {@code ScenarioController.start()}
+     * and leaves the already-registered controller orphaned. Failing plan validation is far cheaper
+     * than explaining a partially-activated scenario.
      */
     public static final int MAX_OBJECT_COUNT = 50_000_000;
 

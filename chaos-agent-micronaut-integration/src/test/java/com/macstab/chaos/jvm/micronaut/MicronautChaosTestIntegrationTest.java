@@ -10,10 +10,10 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 /**
- * Runs a real Micronaut test context through {@link MicronautChaosTest}. Before the bean
- * definitions were generated ChaosControlPlane was not a bean, and once it was, the extension
- * competed with Micronaut's own parameter resolver because it did not see {@code @MicronautTest} as
- * a meta-annotation.
+ * Runs a real Micronaut test context through {@link MicronautChaosTest}, checking that
+ * ChaosControlPlane is a bean (its bean definitions are generated) and that the extension sees
+ * {@code @MicronautTest} as a meta-annotation, so it does not compete with Micronaut's own
+ * parameter resolver.
  */
 @MicronautChaosTest
 @DisplayName("@MicronautChaosTest (end-to-end)")

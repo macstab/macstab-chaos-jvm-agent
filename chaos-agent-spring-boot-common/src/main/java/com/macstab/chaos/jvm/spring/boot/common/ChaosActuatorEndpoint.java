@@ -100,9 +100,7 @@ public class ChaosActuatorEndpoint {
    * <p>{@code id} is the {@code handleId} returned by {@link #activate(String)} ({@code
    * plan:<name>}) or the plan name alone. Plans are activated atomically, so an individual scenario
    * of a plan cannot be stopped on its own: a scenario id answers {@code "unmanaged"} with a hint
-   * to stop the plan by its handle id. An earlier version looked handles up under {@code
-   * jvm::<scenarioId>}, a key this endpoint never registers, so a stop by the plan handle id was
-   * the only one that could ever succeed, and nothing told the caller.
+   * to stop the plan by its handle id, rather than failing without telling the caller why.
    *
    * @param id plan handle id, plan name, or scenario id
    * @return the outcome; never {@code null}
@@ -125,11 +123,11 @@ public class ChaosActuatorEndpoint {
   /**
    * Stops all JVM-scoped scenarios that were activated through this starter.
    *
-   * <p>Mapped to {@code DELETE /actuator/chaos}. Previously this was a {@code @WriteOperation}
-   * (POST) alongside {@link #activate(String)}, which Spring Boot Actuator refuses to start with a
-   * {@code BeanCreationException}: two {@code @WriteOperation} methods on the same endpoint without
-   * distinguishing selectors collide on the same HTTP verb and path. DELETE pairs naturally with
-   * the no-selector bulk-stop semantics and is distinct from {@link #stop(String)}, which is a
+   * <p>Mapped to {@code DELETE /actuator/chaos}. It cannot be a {@code @WriteOperation} (POST)
+   * alongside {@link #activate(String)}: Spring Boot Actuator refuses to start with a {@code
+   * BeanCreationException}, because two {@code @WriteOperation} methods on the same endpoint
+   * without distinguishing selectors collide on the same HTTP verb and path. DELETE pairs naturally
+   * with the no-selector bulk-stop semantics and is distinct from {@link #stop(String)}, which is a
    * {@code DELETE /actuator/chaos/{scenarioId}} — both are DELETEs but the path segment introduced
    * by {@code @Selector} keeps them routable.
    *
