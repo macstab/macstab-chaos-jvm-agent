@@ -92,8 +92,8 @@ final class DefaultChaosSession implements ChaosSession {
   /**
    * Activates the given scenario within this session.
    *
-   * <p>Delegates to {@link ChaosRuntime#activateInSession} and registers the resulting handle so
-   * that it is automatically destroyed when this session is {@linkplain #close() closed}.
+   * <p>Delegates to {@link ChaosControlPlaneImpl#activateInSession} and registers the resulting
+   * handle so that it is automatically destroyed when this session is {@linkplain #close() closed}.
    *
    * @param scenario the scenario to activate
    * @return a handle for controlling the activated scenario

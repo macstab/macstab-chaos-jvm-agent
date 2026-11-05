@@ -295,10 +295,6 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
     openSessions.remove(sessionId);
   }
 
-  ChaosSession openSession(final String displayName, final ChaosRuntime runtime) {
-    return openSession(displayName);
-  }
-
   @Override
   public ChaosDiagnostics diagnostics() {
     return registry;

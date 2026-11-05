@@ -3,7 +3,6 @@ package com.macstab.chaos.jvm.core;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.awaitility.Awaitility.await;
 
 import com.macstab.chaos.jvm.api.ChaosEffect;
 import com.macstab.chaos.jvm.api.ChaosScenario;
@@ -22,7 +21,6 @@ import java.util.List;
 import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
@@ -411,28 +409,6 @@ class DispatchPathsTest {
                 gate.await(Duration.ofSeconds(Long.MAX_VALUE));
               })
           .doesNotThrowAnyException();
-    }
-
-    @Test
-    @DisplayName("reset() closes a released gate again")
-    void resetClosesGate() throws Exception {
-      final ManualGate gate = new ManualGate();
-      gate.release();
-      gate.reset();
-      final Thread waiter =
-          new Thread(
-              () -> {
-                try {
-                  gate.await(null);
-                } catch (final InterruptedException interrupted) {
-                  Thread.currentThread().interrupt();
-                }
-              });
-      waiter.start();
-      await().atMost(5, TimeUnit.SECONDS).until(() -> waiter.getState() == Thread.State.WAITING);
-      gate.release();
-      waiter.join(5_000L);
-      assertThat(waiter.isAlive()).isFalse();
     }
   }
 

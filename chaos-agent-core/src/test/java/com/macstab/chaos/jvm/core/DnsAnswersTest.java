@@ -26,8 +26,7 @@ class DnsAnswersTest {
   @DisplayName("override answers with literals, even when the lookup failed")
   void override() throws Exception {
     final InetAddress[] shaped =
-        DnsAnswers.shape(
-            ChaosEffect.dnsOverride("192.0.2.7"), "svc", null, new UnknownHostException("svc"));
+        shape(ChaosEffect.dnsOverride("192.0.2.7"), "svc", null, new UnknownHostException("svc"));
 
     assertThat(shaped).hasSize(1);
     assertThat(shaped[0].getHostAddress()).isEqualTo("192.0.2.7");
@@ -37,26 +36,20 @@ class DnsAnswersTest {
   @Test
   @DisplayName("a failed lookup without override keeps its failure")
   void failureKept() throws Exception {
-    assertThat(
-            DnsAnswers.shape(
-                ChaosEffect.dnsShuffle(), "svc", null, new UnknownHostException("svc")))
+    assertThat(shape(ChaosEffect.dnsShuffle(), "svc", null, new UnknownHostException("svc")))
         .isNull();
   }
 
   @Test
   @DisplayName("family filters, and an empty result is UnknownHostException")
   void family() throws Exception {
-    assertThat(
-            DnsAnswers.shape(
-                ChaosEffect.dnsFamily(ChaosEffect.AddressFamily.IPV4), "h", answer(), null))
+    assertThat(shape(ChaosEffect.dnsFamily(ChaosEffect.AddressFamily.IPV4), "h", answer(), null))
         .hasSize(2);
-    assertThat(
-            DnsAnswers.shape(
-                ChaosEffect.dnsFamily(ChaosEffect.AddressFamily.IPV6), "h", answer(), null))
+    assertThat(shape(ChaosEffect.dnsFamily(ChaosEffect.AddressFamily.IPV6), "h", answer(), null))
         .hasSize(1);
     assertThatThrownBy(
             () ->
-                DnsAnswers.shape(
+                shape(
                     ChaosEffect.dnsFamily(ChaosEffect.AddressFamily.IPV6),
                     "h",
                     Arrays.copyOf(answer(), 2),
@@ -67,9 +60,8 @@ class DnsAnswersTest {
   @Test
   @DisplayName("limit keeps the first n, shuffle keeps the same addresses")
   void limitAndShuffle() throws Exception {
-    assertThat(DnsAnswers.shape(ChaosEffect.dnsLimit(1), "h", answer(), null))
-        .containsExactly(answer()[0]);
-    assertThat(DnsAnswers.shape(ChaosEffect.dnsShuffle(), "h", answer(), null))
+    assertThat(shape(ChaosEffect.dnsLimit(1), "h", answer(), null)).containsExactly(answer()[0]);
+    assertThat(shape(ChaosEffect.dnsShuffle(), "h", answer(), null))
         .containsExactlyInAnyOrder(answer());
   }
 
@@ -78,5 +70,14 @@ class DnsAnswersTest {
   void overrideRejectsNames() {
     assertThatThrownBy(() -> ChaosEffect.dnsOverride("example.com"))
         .isInstanceOf(IllegalArgumentException.class);
+  }
+
+  private static InetAddress[] shape(
+      final ChaosEffect.DnsAnswerEffect effect,
+      final String hostname,
+      final InetAddress[] answer,
+      final Throwable failure)
+      throws java.net.UnknownHostException {
+    return DnsAnswers.shape(effect, hostname, answer, failure, new java.util.Random(0L));
   }
 }

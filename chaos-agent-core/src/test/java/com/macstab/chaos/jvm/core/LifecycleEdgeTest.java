@@ -167,7 +167,6 @@ class LifecycleEdgeTest {
       final List<String> calls = new CopyOnWriteArrayList<>();
       final Instrumentation instrumentation = unsupportedInstrumentation(calls);
       runtime.setInstrumentation(instrumentation);
-      assertThat(runtime.instrumentation()).containsSame(instrumentation);
 
       final ChaosActivationHandle handle =
           runtime.activate(
@@ -199,13 +198,10 @@ class LifecycleEdgeTest {
       final DefaultChaosSession session = (DefaultChaosSession) runtime.openSession("s");
       try {
         assertThatThrownBy(
-                () ->
-                    runtime.activateInSession(
-                        session, executorScenario("jvm-one", ActivationPolicy.always())))
+                () -> session.activate(executorScenario("jvm-one", ActivationPolicy.always())))
             .isInstanceOf(ChaosActivationException.class)
             .hasMessage("session activation requires scenario scope SESSION for jvm-one");
-        final DefaultChaosActivationHandle handle =
-            runtime.activateInSession(session, sessionScenario("session-one"));
+        final ChaosActivationHandle handle = session.activate(sessionScenario("session-one"));
         assertThat(handle.state()).isEqualTo(ChaosDiagnostics.ScenarioState.ACTIVE);
         assertThat(controller("session-one").sessionId()).isEqualTo(session.id());
       } finally {

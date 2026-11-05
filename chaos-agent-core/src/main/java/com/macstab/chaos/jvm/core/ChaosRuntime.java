@@ -13,7 +13,6 @@ import com.macstab.chaos.jvm.api.OperationType;
 import java.lang.instrument.Instrumentation;
 import java.net.URL;
 import java.time.Clock;
-import java.util.Optional;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import org.jspecify.annotations.Nullable;
@@ -168,7 +167,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
 
   @Override
   public ChaosSession openSession(final String displayName) {
-    return controlPlane.openSession(displayName, this);
+    return controlPlane.openSession(displayName);
   }
 
   @Override
@@ -1249,15 +1248,6 @@ public final class ChaosRuntime implements ChaosControlPlane {
       final String operation, final @Nullable Object stream, final String path, final int byteCount)
       throws Throwable {
     return fileDispatch.beforeFileIo(operation, stream, path, byteCount);
-  }
-
-  Optional<Instrumentation> instrumentation() {
-    return controlPlane.instrumentation();
-  }
-
-  DefaultChaosActivationHandle activateInSession(
-      final DefaultChaosSession session, final ChaosScenario scenario) {
-    return controlPlane.activateInSession(session, scenario);
   }
 
   ScenarioRegistry registry() {
