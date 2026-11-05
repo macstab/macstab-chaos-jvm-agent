@@ -9,9 +9,11 @@ on:
 permissions:
   contents: read
 
-# Deduplication by commit SHA: same commit runs once, duplicates are skipped.
+# One run per branch or pull request: a newer push supersedes the older run. A pull request
+# (refs/pull/N/merge) never cancels the push build of its target branch, which the snapshot and
+# release workflows wait for.
 concurrency:
-  group: build-${{ github.sha }}
+  group: build-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
