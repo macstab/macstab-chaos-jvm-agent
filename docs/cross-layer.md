@@ -11,7 +11,7 @@
 
 > How a rule of the native chaos libraries (`macstab-chaos-testing-libraries`, `libchaos-<lib>` preloaded into a process) translates into a scenario of this agent, and back. Both layers express a fault as the same triple — selector × effect × activation policy — over different interception points: the native libraries intercept libc calls beneath any runtime, the agent intercepts JVM and library calls above it.
 >
-> Every JVM name on this page (API methods, enum constants, plan JSON `type` names) and every JSON example is checked against the code by `CrossLayerDocSyncTest`; the same test checks the native library's `docs/DSL.md` when the `CHAOS_DSL_PATH` environment variable or the `chaos.dsl.path` system property names it, as the `cross-layer-docs` CI job does; without it that part is skipped, so a stale neighbouring checkout cannot fail the build.
+> Every JVM name on this page (API methods, enum constants, plan JSON `type` names) and every JSON example is checked against the code by `CrossLayerDocSyncTest`; the same test checks the native library's `docs/DSL.md` when the `CHAOS_DSL_PATH` environment variable or the `chaos.dsl.path` system property names it; without it that part is skipped, so a stale neighbouring checkout cannot fail the build.
 >
 > *Engineered by* **[Christian Schnapka](https://macstab.com)** — Embedded Principal+ Engineer · [Macstab GmbH](https://macstab.com) · Hamburg, Germany
 

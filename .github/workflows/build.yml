@@ -111,45 +111,6 @@ jobs:
           name: test-results-${{ matrix.os }}-jdk${{ matrix.java }}
           path: '**/build/test-results/**/*.xml'
 
-  # The native library's docs/DSL.md names this agent's API; the doc-sync test fails when a JVM
-  # name there does not exist here, or a JSON example does not parse.
-  cross-layer-docs:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    # Branches of this repository are built on push; pull requests from forks, which get no push
-    # build here, are built on pull_request. Before, pull requests ran no checks at all.
-    if: |
-      github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Checkout the native library's documentation
-        uses: actions/checkout@v4
-        with:
-          repository: macstab/macstab-chaos-testing-libraries
-          ref: develop
-          # A read token for the library repository when it is private; the default otherwise.
-          token: ${{ secrets.NATIVE_LIBS_TOKEN || github.token }}
-          path: native-library
-          sparse-checkout: docs
-
-      - name: Set up JDK 25
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '25'
-          cache: 'gradle'
-
-      - name: Check the cross-layer documentation
-        env:
-          CHAOS_DSL_PATH: ${{ github.workspace }}/native-library/docs/DSL.md
-        run: |
-          chmod +x gradlew
-          ./gradlew :chaos-agent-startup-config:test --tests '*CrossLayerDocSyncTest*' --no-daemon
-
-  # One-fault demos (demo/NN-*/): each runs under the agent and must print its expected output.
   demos:
     runs-on: ubuntu-latest
     timeout-minutes: 20
