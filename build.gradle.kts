@@ -155,7 +155,6 @@ subprojects {
         extensions.configure<JacocoTaskExtension> {
             includes = listOf("com.macstab.chaos.jvm.*")
         }
-        finalizedBy(tasks.named("jacocoTestReport"))
     }
 
     tasks.named<JacocoReport>("jacocoTestReport") {
@@ -330,44 +329,23 @@ configure<SpotlessExtension> {
 }
 
 tasks.wrapper {
-    gradleVersion = "8.14.3"
+    gradleVersion = "9.4.0"
     distributionType = DistributionType.ALL
 }
 
-// Aggregated Jacoco report across every subproject that ran tests, emitted to
-// build/reports/jacoco/aggregated/. XML is used by CI coverage badges and
-// HTML is uploaded as a workflow artifact.
-apply(plugin = "jacoco-report-aggregation")
-
-val codeCoverageReport = configurations.create("codeCoverageReport") {
-    isCanBeResolved = true
-    isCanBeConsumed = false
-}
-
-subprojects {
-    plugins.withType<JacocoPlugin> {
-        rootProject.dependencies.add(codeCoverageReport.name, rootProject.dependencies.project(this@subprojects.path))
-    }
-}
-
+// One coverage report over the modules with a coverage floor, built from their own reports, so it
+// counts what the floors count (child-JVM and starter data included, inlined advice excluded).
+// XML and HTML land in build/reports/jacoco/aggregated/; CI uploads them as an artifact.
 tasks.register<JacocoReport>("jacocoAggregatedReport") {
     group = "verification"
-    description = "Aggregate Jacoco coverage from every subproject."
-
-    val jacocoExecFiles = subprojects.flatMap { sub ->
-        sub.tasks.withType<Test>().map { it.extensions.getByType<JacocoTaskExtension>().destinationFile!! }
+    description = "Aggregates the coverage reports of the modules that have a coverage floor."
+    subprojects.filter { it.name in coverageFloors }.forEach { sub ->
+        val report = sub.tasks.named<JacocoReport>("jacocoTestReport")
+        dependsOn(report)
+        executionData.from(report.map { it.executionData })
+        classDirectories.from(report.map { it.classDirectories })
+        sourceDirectories.from(report.map { it.sourceDirectories })
     }
-    executionData.setFrom(files(jacocoExecFiles).filter { it.exists() })
-
-    subprojects.forEach { sub ->
-        val javaExt = sub.extensions.findByType(JavaPluginExtension::class)
-        if (javaExt != null) {
-            sourceDirectories.from(javaExt.sourceSets["main"].allSource.srcDirs)
-            classDirectories.from(javaExt.sourceSets["main"].output)
-        }
-        dependsOn(sub.tasks.matching { it.name == "test" })
-    }
-
     reports {
         xml.required.set(true)
         html.required.set(true)
@@ -410,7 +388,7 @@ tasks.register<Javadoc>("aggregatedJavadoc") {
     }
 }
 
-// Task that prints release instructions (used by RELEASE.md).
+// Asks the Central Portal to publish the staged deployment (RELEASE.md).
 tasks.register("releaseToCentral") {
     group = "publishing"
     description = "Publish staged deployment to Maven Central via the Central Portal API."
@@ -431,11 +409,16 @@ tasks.register("releaseToCentral") {
 
         val apiUrl = "https://ossrh-staging-api.central.sonatype.com/manual/upload/defaultRepository/com.macstab"
 
-        val process = ProcessBuilder(
-            "curl", "-u", "$username:$password",
-            "-X", "POST",
-            apiUrl,
-        ).inheritIO().start()
+        // The credentials go to curl through its config on stdin, not the command line, where every
+        // local user could read them; --fail-with-body turns an HTTP error into a failed exit.
+        val process = ProcessBuilder("curl", "--fail-with-body", "--config", "-", "-X", "POST", apiUrl)
+            .redirectOutput(ProcessBuilder.Redirect.INHERIT)
+            .redirectError(ProcessBuilder.Redirect.INHERIT)
+            .start()
+        process.outputStream.bufferedWriter().use { config ->
+            val escaped = "$username:$password".replace("\\", "\\\\").replace("\"", "\\\"")
+            config.write("user = \"$escaped\"\n")
+        }
 
         val exitCode = process.waitFor()
 
