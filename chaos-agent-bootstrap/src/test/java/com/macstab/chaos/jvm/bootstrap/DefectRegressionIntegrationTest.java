@@ -1695,6 +1695,7 @@ class DefectRegressionIntegrationTest {
           "file-writes-by-path",
           null,
           "-Dchaos.test.dir=" + root,
+          "-Dmacstab.chaos.reports=on",
           "-Dmacstab.chaos.reportsDir=" + reports);
 
       final Map<String, String> status = readKeyValues(reports.resolve(".chaos-jvm.status"));
@@ -1723,6 +1724,7 @@ class DefectRegressionIntegrationTest {
                               + System.getProperty("chaos.bootstrap.agentJar")
                               + "=configFile="
                               + planFile,
+                          "-Dmacstab.chaos.reports=on",
                           "-Dmacstab.chaos.reportsDir=" + reports,
                           "-cp",
                           System.getProperty("java.class.path"),

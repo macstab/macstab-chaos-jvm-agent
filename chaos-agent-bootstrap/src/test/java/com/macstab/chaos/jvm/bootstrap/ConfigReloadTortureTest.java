@@ -56,7 +56,8 @@ class ConfigReloadTortureTest {
   @DisplayName("invalid and torn plans are never applied, valid ones always are")
   void torture() throws Exception {
     reports =
-        ChaosReports.createIfEnabled("reportsDir=" + tempDir, Map.of(), runtime).orElseThrow();
+        ChaosReports.createIfEnabled("reports=on;reportsDir=" + tempDir, Map.of(), runtime)
+            .orElseThrow();
     final Path volume = Files.createDirectories(tempDir.resolve("configmap"));
     int generation = 0;
     publish(volume, generation, validPlan("g0"));
@@ -139,7 +140,8 @@ class ConfigReloadTortureTest {
   @DisplayName("a broken plan reports its line and column in the status file")
   void statusReportsPosition() throws Exception {
     reports =
-        ChaosReports.createIfEnabled("reportsDir=" + tempDir, Map.of(), runtime).orElseThrow();
+        ChaosReports.createIfEnabled("reports=on;reportsDir=" + tempDir, Map.of(), runtime)
+            .orElseThrow();
     final Path file = tempDir.resolve("plan.json");
     Files.writeString(file, validPlan("ok"));
     Files.setLastModifiedTime(

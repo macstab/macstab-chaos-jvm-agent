@@ -53,10 +53,11 @@ class ChaosReportsTest {
   }
 
   @Test
-  @DisplayName("reports=off or false, from the args or the environment, writes no reports")
+  @DisplayName("without reports=on, and with off or false, no reports are written")
   void switchedOff() {
     final Optional<ChaosReports> before = ChaosReports.current();
 
+    assertThat(ChaosReports.createIfEnabled("", Map.of(), runtime)).as("off by default").isEmpty();
     assertThat(ChaosReports.createIfEnabled("reports=off", Map.of(), runtime)).isEmpty();
     assertThat(ChaosReports.createIfEnabled("reports=FALSE", Map.of(), runtime)).isEmpty();
     assertThat(
@@ -77,7 +78,7 @@ class ChaosReportsTest {
     final ChaosReports reports;
     System.setProperty("java.io.tmpdir", tempDir.toString());
     try {
-      reports = create("", Map.of(ChaosReports.REPORTS_DIR_ENV, "  "));
+      reports = create("reports=on", Map.of(ChaosReports.REPORTS_DIR_ENV, "  "));
     } finally {
       System.setProperty("java.io.tmpdir", tmp);
     }
@@ -96,7 +97,7 @@ class ChaosReportsTest {
   @Test
   @DisplayName("an error status flattens control characters, bounds long text and blanks a null")
   void errorStatusText() throws Exception {
-    final ChaosReports reports = create("reportsDir=" + tempDir, Map.of());
+    final ChaosReports reports = create("reports=on;reportsDir=" + tempDir, Map.of());
 
     reports.statusError("x".repeat(300), 3, 7, null);
     final Map<String, String> missingReason = status(tempDir);
@@ -115,7 +116,7 @@ class ChaosReportsTest {
   @DisplayName("an unwritable report directory or status path leaves no file behind and no error")
   void unwritableReports() throws Exception {
     final Path notADirectory = Files.writeString(tempDir.resolve("plain-file"), "x");
-    final ChaosReports blocked = create("reportsDir=" + notADirectory, Map.of());
+    final ChaosReports blocked = create("reports=on;reportsDir=" + notADirectory, Map.of());
     blocked.statusOk(1, "inline");
     assertThat(Files.readString(notADirectory)).isEqualTo("x");
 
@@ -123,7 +124,7 @@ class ChaosReportsTest {
     final Path directory = Files.createDirectories(tempDir.resolve("reports"));
     final Path occupied = Files.createDirectories(directory.resolve(ChaosReports.STATUS_FILE));
     Files.writeString(occupied.resolve("keep"), "x");
-    final ChaosReports reports = create("reportsDir=" + directory, Map.of());
+    final ChaosReports reports = create("reports=on;reportsDir=" + directory, Map.of());
     reports.statusOk(1, "inline");
     reports.removeStatus();
 
@@ -145,7 +146,7 @@ class ChaosReportsTest {
             .effect(ChaosEffect.suppress())
             .activationPolicy(ActivationPolicy.always())
             .build());
-    final ChaosReports reports = create("reportsDir=" + tempDir, Map.of());
+    final ChaosReports reports = create("reports=on;reportsDir=" + tempDir, Map.of());
 
     for (int i = 0; i < 70; i++) {
       assertThat(runtime.beforeGcRequest()).as("suppressed").isTrue();
@@ -170,8 +171,10 @@ class ChaosReportsTest {
   @Test
   @DisplayName("closing a superseded instance keeps the current one; a second close does nothing")
   void closeKeepsNewerInstance() throws Exception {
-    final ChaosReports older = create("reportsDir=" + tempDir.resolve("older"), Map.of());
-    final ChaosReports newer = create("reportsDir=" + tempDir.resolve("newer"), Map.of());
+    final ChaosReports older =
+        create("reports=on;reportsDir=" + tempDir.resolve("older"), Map.of());
+    final ChaosReports newer =
+        create("reports=on;reportsDir=" + tempDir.resolve("newer"), Map.of());
 
     older.close();
     older.close();

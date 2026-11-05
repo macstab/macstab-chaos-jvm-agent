@@ -38,7 +38,8 @@ import org.jspecify.annotations.Nullable;
  * <p>Both are written to a staging file and renamed over the report, so a reader never sees a
  * partial file. The writes run with the dispatch depth raised: a file I/O scenario never applies to
  * the agent's own reports. {@code <dir>} is {@code java.io.tmpdir} ({@code /tmp} on Linux, like the
- * library) unless {@code reportsDir} is set; {@code reports=off} disables both files.
+ * library) unless {@code reportsDir} is set. Both files are off unless {@code reports=on}: an agent
+ * leaves nothing in a shared directory by default.
  */
 final class ChaosReports implements AutoCloseable {
 
@@ -67,6 +68,10 @@ final class ChaosReports implements AutoCloseable {
   private final AtomicBoolean closed = new AtomicBoolean();
   private final Thread hitsWriter;
   private final Thread shutdownHook;
+  private final com.macstab.chaos.jvm.api.ChaosEventListener hitCounter = this::countHit;
+
+  /** Whether a failed write was logged; later failures stay quiet. */
+  private final AtomicBoolean failureLogged = new AtomicBoolean();
 
   private ChaosReports(final Path directory, final ChaosRuntime runtime) {
     this.directory = directory;
@@ -78,18 +83,18 @@ final class ChaosReports implements AutoCloseable {
   }
 
   /**
-   * Creates and starts the reports unless they are switched off ({@code reports=off}).
+   * Creates and starts the reports when they are switched on ({@code reports=on}).
    *
    * @param agentArgs the raw agent arguments
    * @param environment the process environment
    * @param runtime the runtime whose scenarios are reported
-   * @return the reports, or empty when switched off
+   * @return the reports, or empty when not switched on
    */
   static Optional<ChaosReports> createIfEnabled(
       final String agentArgs, final Map<String, String> environment, final ChaosRuntime runtime) {
     final Map<String, String> args = AgentArgsParser.parse(agentArgs).values();
     final String enabled = setting(args, environment, REPORTS_ARG, REPORTS_PROPERTY, REPORTS_ENV);
-    if (enabled != null && ("off".equalsIgnoreCase(enabled) || "false".equalsIgnoreCase(enabled))) {
+    if (!"on".equalsIgnoreCase(enabled) && !"true".equalsIgnoreCase(enabled)) {
       return Optional.empty();
     }
     final String dir =
@@ -127,21 +132,22 @@ final class ChaosReports implements AutoCloseable {
   }
 
   private void start() {
-    runtime.addEventListener(
-        event -> {
-          if (event.type() == ChaosEvent.Type.APPLIED) {
-            hitsDirty.set(true);
-            if (applications.incrementAndGet() <= IMMEDIATE_HITS) {
-              LockSupport.unpark(hitsWriter);
-            }
-          }
-        });
+    runtime.addEventListener(hitCounter);
     BootstrapDispatcher.beginInternalCall();
     try {
       hitsWriter.start();
       Runtime.getRuntime().addShutdownHook(shutdownHook);
     } finally {
       BootstrapDispatcher.endInternalCall();
+    }
+  }
+
+  private void countHit(final ChaosEvent event) {
+    if (event.type() == ChaosEvent.Type.APPLIED) {
+      hitsDirty.set(true);
+      if (applications.incrementAndGet() <= IMMEDIATE_HITS) {
+        LockSupport.unpark(hitsWriter);
+      }
     }
   }
 
@@ -163,9 +169,10 @@ final class ChaosReports implements AutoCloseable {
    * @param source where the plan came from
    * @param line 1-based line of the failure; {@code 0} without a position
    * @param column 1-based column of the failure; {@code 0} without a position
-   * @param reason what is wrong
+   * @param reason what is wrong; {@code null} when the failure carried no message
    */
-  void statusError(final String source, final int line, final int column, final String reason) {
+  void statusError(
+      final String source, final int line, final int column, final @Nullable String reason) {
     writeAtomically(
         STATUS_FILE,
         "state=error\nscenarios=0\nline="
@@ -248,7 +255,14 @@ final class ChaosReports implements AutoCloseable {
           StandardCopyOption.REPLACE_EXISTING);
     } catch (final IOException | RuntimeException failed) {
       // A report that cannot be written leaves the previous one in place; chaos must not fail
-      // because a report directory is unwritable.
+      // because a report directory is unwritable. The first failure says why.
+      if (failureLogged.compareAndSet(false, true)) {
+        java.util.logging.Logger.getLogger(ChaosReports.class.getName())
+            .log(
+                java.util.logging.Level.WARNING,
+                failed,
+                () -> "chaos-agent: cannot write reports in " + directory);
+      }
       if (staging != null) {
         try {
           Files.deleteIfExists(staging);
@@ -261,7 +275,7 @@ final class ChaosReports implements AutoCloseable {
     }
   }
 
-  private static String oneLine(final String value) {
+  private static String oneLine(final @Nullable String value) {
     if (value == null) {
       return "";
     }
@@ -275,6 +289,7 @@ final class ChaosReports implements AutoCloseable {
     if (!closed.compareAndSet(false, true)) {
       return;
     }
+    runtime.removeEventListener(hitCounter);
     LockSupport.unpark(hitsWriter);
     writeFinalHits();
     if (current == this) {

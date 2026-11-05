@@ -177,7 +177,7 @@ public final class StartupPathProbeMain {
   private static void startupRetry() throws Exception {
     final Instrumentation instrumentation = ByteBuddyAgent.install();
     final Path reports = Path.of(System.getProperty("chaos.test.reports"));
-    final String watch = ";configWatchInterval=3600000;reportsDir=" + reports;
+    final String watch = ";configWatchInterval=3600000;reports=on;reportsDir=" + reports;
     System.out.println(
         "firstAttempt="
             + describe(
@@ -222,7 +222,7 @@ public final class StartupPathProbeMain {
     ChaosAgentBootstrap.initialize(
         "configFile="
             + System.getProperty("chaos.test.goodPlan")
-            + ";debugDumpOnStart=true;reportsDir="
+            + ";debugDumpOnStart=true;reports=on;reportsDir="
             + System.getProperty("chaos.test.reports"),
         ByteBuddyAgent.install(),
         Map.of());
@@ -281,7 +281,7 @@ public final class StartupPathProbeMain {
       ChaosAgentBootstrap.initialize(
           "instrumentation=eager;configFile="
               + System.getProperty("chaos.test.badPlan")
-              + ";reportsDir="
+              + ";reports=on;reportsDir="
               + System.getProperty("chaos.test.reports"),
           instrumentation,
           Map.of());
