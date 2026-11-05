@@ -724,7 +724,7 @@ class EffectReachesTheCallTest {
     for (final Class<?> type : ChaosEffect.class.getPermittedSubclasses()) {
       if (type != ChaosEffect.DelayEffect.class
           && type != ChaosEffect.GateEffect.class
-          && !isStressor(type)) {
+          && !CompatibilityValidator.STRESSOR_EFFECTS.contains(type)) {
         assertThat(probed).as("an instance of %s", type.getSimpleName()).contains(type);
       }
     }
@@ -848,17 +848,5 @@ class EffectReachesTheCallTest {
       return 0L;
     }
     return null;
-  }
-
-  /** A stressor is an effect {@link StressorFactory} builds a stressor for. */
-  private static boolean isStressor(final Class<?> type) {
-    try {
-      final java.lang.reflect.Field registry = StressorFactory.class.getDeclaredField("registry");
-      registry.setAccessible(true);
-      return ((Map<?, ?>) registry.get(new StressorFactory(java.util.Optional::empty)))
-          .containsKey(type);
-    } catch (final ReflectiveOperationException unreadable) {
-      throw new IllegalStateException(unreadable);
-    }
   }
 }

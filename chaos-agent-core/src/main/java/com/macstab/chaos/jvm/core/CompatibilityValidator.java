@@ -324,22 +324,30 @@ final class CompatibilityValidator {
     }
   }
 
+  /**
+   * The effects a stressor carries out; they run beside the application and need a {@link
+   * ChaosSelector.StressSelector}.
+   */
+  static final Set<Class<? extends ChaosEffect>> STRESSOR_EFFECTS =
+      Set.of(
+          ChaosEffect.HeapPressureEffect.class,
+          ChaosEffect.MetaspacePressureEffect.class,
+          ChaosEffect.DirectBufferPressureEffect.class,
+          ChaosEffect.GcPressureEffect.class,
+          ChaosEffect.FinalizerBacklogEffect.class,
+          ChaosEffect.KeepAliveEffect.class,
+          ChaosEffect.ThreadLeakEffect.class,
+          ChaosEffect.ThreadLocalLeakEffect.class,
+          ChaosEffect.DeadlockEffect.class,
+          ChaosEffect.MonitorContentionEffect.class,
+          ChaosEffect.CodeCachePressureEffect.class,
+          ChaosEffect.SafepointStormEffect.class,
+          ChaosEffect.StringInternPressureEffect.class,
+          ChaosEffect.ReferenceQueueFloodEffect.class,
+          ChaosEffect.VirtualThreadCarrierPinningEffect.class);
+
   private static boolean isStressorEffect(final ChaosEffect effect) {
-    return effect instanceof ChaosEffect.HeapPressureEffect
-        || effect instanceof ChaosEffect.MetaspacePressureEffect
-        || effect instanceof ChaosEffect.DirectBufferPressureEffect
-        || effect instanceof ChaosEffect.GcPressureEffect
-        || effect instanceof ChaosEffect.FinalizerBacklogEffect
-        || effect instanceof ChaosEffect.KeepAliveEffect
-        || effect instanceof ChaosEffect.ThreadLeakEffect
-        || effect instanceof ChaosEffect.ThreadLocalLeakEffect
-        || effect instanceof ChaosEffect.DeadlockEffect
-        || effect instanceof ChaosEffect.MonitorContentionEffect
-        || effect instanceof ChaosEffect.CodeCachePressureEffect
-        || effect instanceof ChaosEffect.SafepointStormEffect
-        || effect instanceof ChaosEffect.StringInternPressureEffect
-        || effect instanceof ChaosEffect.ReferenceQueueFloodEffect
-        || effect instanceof ChaosEffect.VirtualThreadCarrierPinningEffect;
+    return STRESSOR_EFFECTS.contains(effect.getClass());
   }
 
   /**
