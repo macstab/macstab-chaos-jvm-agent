@@ -1,71 +1,199 @@
 package com.macstab.chaos.jvm.core;
 
+import com.macstab.chaos.jvm.api.ChaosEffect;
 import org.jspecify.annotations.Nullable;
 
 /**
- * A discriminated-union value describing what the chaos engine should do at the end of a decision's
- * execution.
+ * What the chaos engine does at the end of a decision: one record per {@link TerminalKind}, each
+ * carrying exactly the payload its kind needs.
  *
- * <p>Only one of the payload fields ({@code returnValue} or {@code throwable}) is meaningful for a
- * given {@link TerminalKind}:
- *
- * <ul>
- *   <li>{@link TerminalKind#THROW} — {@code throwable} contains the exception to throw; {@code
- *       returnValue} is {@code null}.
- *   <li>{@link TerminalKind#RETURN} — {@code returnValue} contains the value to return from the
- *       intercepted method; {@code throwable} is {@code null}.
- *   <li>{@link TerminalKind#SUPPRESS} — both payload fields are {@code null}; the intercepted call
- *       is skipped entirely and the advice returns its zero/null/false default.
- *   <li>{@link TerminalKind#COMPLETE_EXCEPTIONALLY} — {@code throwable} contains the exception to
- *       pass to {@link java.util.concurrent.CompletableFuture#completeExceptionally}; {@code
- *       returnValue} is {@code null}.
- *   <li>{@link TerminalKind#CORRUPT_RETURN} — {@code returnValue} contains the corrupted value that
- *       will replace the original return value post-exit; {@code throwable} is {@code null}.
- * </ul>
- *
- * @param kind the action to take; never {@code null}
- * @param returnValue the replacement return value for {@code RETURN} and {@code CORRUPT_RETURN}
- *     kinds, or {@code null} for other kinds
- * @param throwable the exception to inject for {@code THROW} and {@code COMPLETE_EXCEPTIONALLY}
- *     kinds, or {@code null} for other kinds
- * @param scenarioId the id of the scenario that produced this terminal; surfaced in fallback and
- *     diagnostic log messages so operators can correlate a fallback ("EMPTY → ZERO") back to a
- *     specific scenario. {@code null} if the action was synthesised outside a scenario context.
+ * <p>Every action names the scenario that produced it ({@code null} for an action made outside a
+ * scenario), so fallback and diagnostic log messages can be traced back to it.
  */
-record TerminalAction(
-    TerminalKind kind,
-    @Nullable Object returnValue,
-    @Nullable Throwable throwable,
-    @Nullable String scenarioId) {
-  /** Backwards-compatible constructor used by call sites that do not have a scenario id. */
-  TerminalAction(
-      final TerminalKind kind,
-      final @Nullable Object returnValue,
-      final @Nullable Throwable throwable) {
-    this(kind, returnValue, throwable, null);
+sealed interface TerminalAction {
+
+  /**
+   * Returns the kind of this action.
+   *
+   * @return the kind
+   */
+  TerminalKind kind();
+
+  /**
+   * Returns the id of the scenario that produced this action.
+   *
+   * @return the scenario id, or {@code null} outside a scenario
+   */
+  @Nullable String scenarioId();
+
+  /**
+   * Throw {@code failure} from the interception site.
+   *
+   * @param failure the exception to throw
+   * @param scenarioId the producing scenario
+   */
+  record Throw(Throwable failure, @Nullable String scenarioId) implements TerminalAction {
+    @Override
+    public TerminalKind kind() {
+      return TerminalKind.THROW;
+    }
   }
 
   /**
-   * The number a {@code TIMEOUT} (the wait), {@code CAP_LENGTH} (the byte cap) or {@code
-   * CORRUPT_READ} (the seed) action carries.
+   * Return {@code value} from the interception site.
    *
-   * @return the value as a {@code long}
-   * @throws NullPointerException if this action carries no value, which would be an engine bug
+   * @param value the value; {@link Boolean#FALSE} for a refused operation, {@code null} for none
+   * @param scenarioId the producing scenario
    */
-  long number() {
-    return ((Number)
-            java.util.Objects.requireNonNull(returnValue, () -> kind + " carries no value"))
-        .longValue();
+  record Return(@Nullable Boolean value, @Nullable String scenarioId) implements TerminalAction {
+    @Override
+    public TerminalKind kind() {
+      return TerminalKind.RETURN;
+    }
   }
 
   /**
-   * The exception a {@code THROW}, {@code TIMEOUT} or {@code COMPLETE_EXCEPTIONALLY} action
-   * carries.
+   * Complete a future exceptionally with {@code failure}.
    *
-   * @return the exception to throw or complete with
-   * @throws NullPointerException if this action carries none, which would be an engine bug
+   * @param failure the exception to complete with
+   * @param scenarioId the producing scenario
    */
-  Throwable failure() {
-    return java.util.Objects.requireNonNull(throwable, () -> kind + " carries no throwable");
+  record CompleteExceptionally(Throwable failure, @Nullable String scenarioId)
+      implements TerminalAction {
+    @Override
+    public TerminalKind kind() {
+      return TerminalKind.COMPLETE_EXCEPTIONALLY;
+    }
+  }
+
+  /**
+   * Suppress the operation.
+   *
+   * @param scenarioId the producing scenario
+   */
+  record Suppress(@Nullable String scenarioId) implements TerminalAction {
+    @Override
+    public TerminalKind kind() {
+      return TerminalKind.SUPPRESS;
+    }
+  }
+
+  /**
+   * Corrupt the method's return value by {@code effect} on exit.
+   *
+   * @param effect the corruption to apply
+   * @param scenarioId the producing scenario
+   */
+  record CorruptReturn(ChaosEffect.ReturnValueCorruptionEffect effect, @Nullable String scenarioId)
+      implements TerminalAction {
+    @Override
+    public TerminalKind kind() {
+      return TerminalKind.CORRUPT_RETURN;
+    }
+  }
+
+  /**
+   * Cap the byte count of a read or write at {@code limit}.
+   *
+   * @param limit the most bytes the call may move
+   * @param scenarioId the producing scenario
+   */
+  record CapLength(long limit, @Nullable String scenarioId) implements TerminalAction {
+    @Override
+    public TerminalKind kind() {
+      return TerminalKind.CAP_LENGTH;
+    }
+  }
+
+  /**
+   * Flip one bit in the bytes a read returns, chosen from {@code seed}.
+   *
+   * @param seed the seed of the bit to flip
+   * @param scenarioId the producing scenario
+   */
+  record CorruptRead(long seed, @Nullable String scenarioId) implements TerminalAction {
+    @Override
+    public TerminalKind kind() {
+      return TerminalKind.CORRUPT_READ;
+    }
+  }
+
+  /**
+   * Close the socket abortively.
+   *
+   * @param scenarioId the producing scenario
+   */
+  record AbortiveClose(@Nullable String scenarioId) implements TerminalAction {
+    @Override
+    public TerminalKind kind() {
+      return TerminalKind.ABORTIVE_CLOSE;
+    }
+  }
+
+  /**
+   * Wait {@code waitMillis}, then throw {@code failure}.
+   *
+   * @param waitMillis the call's own timeout
+   * @param failure the timeout exception
+   * @param scenarioId the producing scenario
+   */
+  record Timeout(long waitMillis, Throwable failure, @Nullable String scenarioId)
+      implements TerminalAction {
+    @Override
+    public TerminalKind kind() {
+      return TerminalKind.TIMEOUT;
+    }
+  }
+
+  /**
+   * The effect does not apply to this call.
+   *
+   * @param scenarioId the producing scenario
+   */
+  record NotApplicable(@Nullable String scenarioId) implements TerminalAction {
+    @Override
+    public TerminalKind kind() {
+      return TerminalKind.NOT_APPLICABLE;
+    }
+  }
+
+  /**
+   * Reshape a DNS answer by {@code shape}.
+   *
+   * @param shape the effect and the seed of its random choices
+   * @param scenarioId the producing scenario
+   */
+  record DnsAnswer(DnsShape shape, @Nullable String scenarioId) implements TerminalAction {
+    @Override
+    public TerminalKind kind() {
+      return TerminalKind.DNS_SHAPE;
+    }
+  }
+
+  /**
+   * Resolve {@code host} instead of the requested name.
+   *
+   * @param host the host to resolve
+   * @param scenarioId the producing scenario
+   */
+  record DnsRewrite(String host, @Nullable String scenarioId) implements TerminalAction {
+    @Override
+    public TerminalKind kind() {
+      return TerminalKind.REWRITE;
+    }
+  }
+
+  /**
+   * Connect to the endpoint of {@code redirect} instead.
+   *
+   * @param redirect the redirect effect naming the endpoint
+   * @param scenarioId the producing scenario
+   */
+  record Redirect(ChaosEffect.RedirectEffect redirect, @Nullable String scenarioId)
+      implements TerminalAction {
+    @Override
+    public TerminalKind kind() {
+      return TerminalKind.REDIRECT;
+    }
   }
 }

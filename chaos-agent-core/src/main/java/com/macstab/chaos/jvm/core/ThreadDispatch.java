@@ -164,8 +164,8 @@ public final class ThreadDispatch {
     engine.applyDelayAndGate(decision);
     if (decision.terminalAction() != null) {
       final TerminalAction terminalAction = decision.terminalAction();
-      if (terminalAction.kind() == TerminalKind.THROW) {
-        throw terminalAction.failure();
+      if (terminalAction instanceof TerminalAction.Throw thrown) {
+        throw thrown.failure();
       }
       if (terminalAction.kind() == TerminalKind.SUPPRESS) {
         return true;
@@ -202,8 +202,8 @@ public final class ThreadDispatch {
     engine.applyDelayAndGate(decision);
     if (decision.terminalAction() != null) {
       final TerminalAction terminalAction = decision.terminalAction();
-      if (terminalAction.kind() == TerminalKind.THROW) {
-        throw terminalAction.failure();
+      if (terminalAction instanceof TerminalAction.Throw thrown) {
+        throw thrown.failure();
       }
       if (terminalAction.kind() == TerminalKind.SUPPRESS) {
         return true;
@@ -242,8 +242,8 @@ public final class ThreadDispatch {
     engine.applyDelayAndGate(decision);
     if (decision.terminalAction() != null) {
       final TerminalAction terminalAction = decision.terminalAction();
-      if (terminalAction.kind() == TerminalKind.THROW) {
-        throw terminalAction.failure();
+      if (terminalAction instanceof TerminalAction.Throw thrown) {
+        throw thrown.failure();
       }
       if (terminalAction.kind() == TerminalKind.SUPPRESS) {
         return true;

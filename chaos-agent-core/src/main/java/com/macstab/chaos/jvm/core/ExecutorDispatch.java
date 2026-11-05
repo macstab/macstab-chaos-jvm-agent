@@ -240,12 +240,11 @@ public final class ExecutorDispatch {
                     engine.scopeContext.currentSessionId())));
     engine.applyDelayAndGate(decision);
     if (decision.terminalAction() != null) {
-      if (decision.terminalAction().kind() == TerminalKind.THROW) {
-        throw decision.terminalAction().failure();
+      if (decision.terminalAction() instanceof TerminalAction.Throw thrown) {
+        throw thrown.failure();
       }
-      if (decision.terminalAction().kind() == TerminalKind.RETURN
-          || decision.terminalAction().kind() == TerminalKind.SUPPRESS) {
-        return (Boolean) decision.terminalAction().returnValue();
+      if (decision.terminalAction() instanceof TerminalAction.Return returned) {
+        return returned.value();
       }
     }
     return null;
@@ -281,14 +280,14 @@ public final class ExecutorDispatch {
     engine.applyDelayAndGate(decision);
     if (decision.terminalAction() != null) {
       final TerminalAction terminalAction = decision.terminalAction();
-      if (terminalAction.kind() == TerminalKind.THROW) {
-        throw terminalAction.failure();
+      if (terminalAction instanceof TerminalAction.Throw thrown) {
+        throw thrown.failure();
       }
-      if (terminalAction.kind() == TerminalKind.RETURN) {
-        return (Boolean) terminalAction.returnValue();
+      if (terminalAction instanceof TerminalAction.Return returned) {
+        return returned.value();
       }
-      if (terminalAction.kind() == TerminalKind.COMPLETE_EXCEPTIONALLY) {
-        return future.completeExceptionally(terminalAction.throwable());
+      if (terminalAction instanceof TerminalAction.CompleteExceptionally completing) {
+        return future.completeExceptionally(completing.failure());
       }
     }
     return null;
@@ -415,8 +414,8 @@ public final class ExecutorDispatch {
                     engine.taskSession(task))));
     engine.applyDelayAndGate(decision);
     if (decision.terminalAction() != null) {
-      if (decision.terminalAction().kind() == TerminalKind.THROW) {
-        throw decision.terminalAction().failure();
+      if (decision.terminalAction() instanceof TerminalAction.Throw thrown) {
+        throw thrown.failure();
       }
       if (decision.terminalAction().kind() == TerminalKind.RETURN
           || decision.terminalAction().kind() == TerminalKind.SUPPRESS) {
@@ -454,8 +453,8 @@ public final class ExecutorDispatch {
     engine.applyDelayAndGate(decision);
     if (decision.terminalAction() != null) {
       final TerminalAction terminalAction = decision.terminalAction();
-      if (terminalAction.kind() == TerminalKind.THROW) {
-        throw terminalAction.failure();
+      if (terminalAction instanceof TerminalAction.Throw thrown) {
+        throw thrown.failure();
       }
       if (terminalAction.kind() == TerminalKind.SUPPRESS) {
         return true;
@@ -464,9 +463,9 @@ public final class ExecutorDispatch {
       // the enclosed throwable" — the ASYNC_CANCEL site is the canonical call site for that
       // semantic. Without this branch the scenario's terminal action would be silently dropped
       // and the cancel() would proceed normally, contradicting the plan.
-      if (terminalAction.kind() == TerminalKind.COMPLETE_EXCEPTIONALLY
+      if (terminalAction instanceof TerminalAction.CompleteExceptionally completing
           && future instanceof CompletableFuture<?> completable) {
-        completable.completeExceptionally(terminalAction.throwable());
+        completable.completeExceptionally(completing.failure());
         // Report "cancel succeeded" so the call site short-circuits and does not invoke the
         // real cancel (which would race against our completeExceptionally).
         return true;

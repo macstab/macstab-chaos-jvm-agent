@@ -66,10 +66,10 @@ public final class ClientDispatch {
                 InvocationContext.UNKNOWN));
     engine.applyDelayAndGate(decision);
     final TerminalAction terminal = decision.terminalAction();
-    if (terminal != null && terminal.kind() == TerminalKind.THROW) {
+    if (terminal instanceof TerminalAction.Throw thrown) {
       // Only a reject throws on a client operation (exception injection is for method selectors),
       // so the failure is rebuilt as the library's own exception.
-      throw FailureFactory.clientReject(operationType, client, terminal.failure().getMessage());
+      throw FailureFactory.clientReject(operationType, client, thrown.failure().getMessage());
     }
   }
 
@@ -98,8 +98,8 @@ public final class ClientDispatch {
     engine.applyDelayAndGate(decision);
     if (decision.terminalAction() != null) {
       final TerminalAction terminalAction = decision.terminalAction();
-      if (terminalAction.kind() == TerminalKind.THROW) {
-        throw terminalAction.failure();
+      if (terminalAction instanceof TerminalAction.Throw thrown) {
+        throw thrown.failure();
       }
       if (terminalAction.kind() == TerminalKind.SUPPRESS) {
         return true;
@@ -183,8 +183,8 @@ public final class ClientDispatch {
     engine.applyDelayAndGate(decision);
     if (decision.terminalAction() != null) {
       final TerminalAction terminalAction = decision.terminalAction();
-      if (terminalAction.kind() == TerminalKind.THROW) {
-        throw terminalAction.failure();
+      if (terminalAction instanceof TerminalAction.Throw thrown) {
+        throw thrown.failure();
       }
       if (terminalAction.kind() == TerminalKind.SUPPRESS) {
         return true;

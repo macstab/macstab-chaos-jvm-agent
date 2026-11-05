@@ -41,19 +41,19 @@ final class DispatchEngine {
     if (terminal == null) {
       return requested;
     }
-    switch (terminal.kind()) {
-      case THROW -> throw terminal.failure();
-      case TIMEOUT -> {
-        sleep(terminal.number());
-        throw terminal.failure();
+    switch (terminal) {
+      case TerminalAction.Throw thrown -> throw thrown.failure();
+      case TerminalAction.Timeout timeout -> {
+        sleep(timeout.waitMillis());
+        throw timeout.failure();
       }
-      case CAP_LENGTH -> {
-        return requested <= 0 ? requested : (int) Math.min(requested, terminal.number());
+      case TerminalAction.CapLength cap -> {
+        return requested <= 0 ? requested : (int) Math.min(requested, cap.limit());
       }
-      case CORRUPT_READ -> {
+      case TerminalAction.CorruptRead corrupt -> {
         // The bit the advice flips after the read derives from this seed (corruptionSeed()).
         final long[] seed = CORRUPTION_SEED.get();
-        seed[0] = terminal.number();
+        seed[0] = corrupt.seed();
         seed[1] = 1L;
         return corruptFlag(Math.max(requested, 0));
       }
@@ -210,33 +210,30 @@ final class DispatchEngine {
       final long matchNumber) {
     final OperationType operationType = context.operationType();
     if (effect instanceof ChaosEffect.ConnectionResetEffect) {
-      return new TerminalAction(TerminalKind.ABORTIVE_CLOSE, null, null, scenario.id());
+      return new TerminalAction.AbortiveClose(scenario.id());
     }
     if (effect instanceof ChaosEffect.TrickleEffect trickleEffect) {
       // A read that asks for no more than the cap is not shortened: nothing to apply or count.
       if (context.byteCount() >= 0 && context.byteCount() <= trickleEffect.maxBytes()) {
-        return new TerminalAction(TerminalKind.NOT_APPLICABLE, null, null, scenario.id());
+        return new TerminalAction.NotApplicable(scenario.id());
       }
-      return new TerminalAction(
-          TerminalKind.CAP_LENGTH, trickleEffect.maxBytes(), null, scenario.id());
+      return new TerminalAction.CapLength(trickleEffect.maxBytes(), scenario.id());
     }
     if (effect instanceof ChaosEffect.DnsAnswerEffect answerEffect) {
-      return new TerminalAction(
-          TerminalKind.DNS_SHAPE,
+      return new TerminalAction.DnsAnswer(
           new DnsShape(answerEffect, controller.effectSeed(matchNumber, SHUFFLE_SALT)),
-          null,
           scenario.id());
     }
     if (effect instanceof ChaosEffect.DnsRewriteEffect rewriteEffect) {
       // InetAddress.getLocalHost() names no host: there is nothing to rewrite, and the call
       // must not count as an application.
       if (context.targetName() == null) {
-        return new TerminalAction(TerminalKind.NOT_APPLICABLE, null, null, scenario.id());
+        return new TerminalAction.NotApplicable(scenario.id());
       }
-      return new TerminalAction(TerminalKind.REWRITE, rewriteEffect.host(), null, scenario.id());
+      return new TerminalAction.DnsRewrite(rewriteEffect.host(), scenario.id());
     }
     if (effect instanceof ChaosEffect.RedirectEffect redirectEffect) {
-      return new TerminalAction(TerminalKind.REWRITE, redirectEffect, null, scenario.id());
+      return new TerminalAction.Redirect(redirectEffect, scenario.id());
     }
     if (effect instanceof ChaosEffect.TornWriteEffect) {
       // A channel write succeeds short; a socket stream write sends the prefix, then the advice
@@ -248,34 +245,30 @@ final class DispatchEngine {
               || context.operationType() == OperationType.NIO_CHANNEL_WRITE
               || isFileChannel(context.targetClassName());
       if (requested < 2 || !tearable) {
-        return new TerminalAction(TerminalKind.NOT_APPLICABLE, null, null, scenario.id());
+        return new TerminalAction.NotApplicable(scenario.id());
       }
       final int torn =
           1
               + new java.util.SplittableRandom(controller.effectSeed(matchNumber, TORN_SALT))
                   .nextInt((int) requested - 1);
-      return new TerminalAction(TerminalKind.CAP_LENGTH, torn, null, scenario.id());
+      return new TerminalAction.CapLength(torn, scenario.id());
     }
     if (effect instanceof ChaosEffect.CorruptReadEffect) {
       // The bytes of a transfer go from file to channel inside the kernel, and a read of no
       // bytes has none: there is nothing to flip.
       if ("transferTo".equals(context.targetName()) || context.byteCount() == 0) {
-        return new TerminalAction(TerminalKind.NOT_APPLICABLE, null, null, scenario.id());
+        return new TerminalAction.NotApplicable(scenario.id());
       }
-      return new TerminalAction(
-          TerminalKind.CORRUPT_READ,
-          controller.effectSeed(matchNumber, CORRUPT_SALT),
-          null,
-          scenario.id());
+      return new TerminalAction.CorruptRead(
+          controller.effectSeed(matchNumber, CORRUPT_SALT), scenario.id());
     }
     if (effect instanceof ChaosEffect.TimeoutEffect) {
       // Like the native library, a timeout never fires on a call without one (infinite).
       if (context.timeoutMillis() <= 0) {
-        return new TerminalAction(TerminalKind.NOT_APPLICABLE, null, null, scenario.id());
+        return new TerminalAction.NotApplicable(scenario.id());
       }
-      return new TerminalAction(
-          TerminalKind.TIMEOUT,
-          (long) context.timeoutMillis(),
+      return new TerminalAction.Timeout(
+          context.timeoutMillis(),
           new java.net.SocketTimeoutException(
               operationType == OperationType.SOCKET_CONNECT
                   ? "Connect timed out"
@@ -283,9 +276,7 @@ final class DispatchEngine {
           scenario.id());
     }
     if (effect instanceof ChaosEffect.ErrnoEffect errnoEffect) {
-      return new TerminalAction(
-          TerminalKind.THROW,
-          null,
+      return new TerminalAction.Throw(
           FailureFactory.errno(
               errnoEffect.errno(),
               operationType,
@@ -301,17 +292,16 @@ final class DispatchEngine {
       return suppressTerminal(operationType);
     }
     if (effect instanceof ChaosEffect.ExceptionalCompletionEffect exceptionalCompletionEffect) {
-      return new TerminalAction(
-          TerminalKind.COMPLETE_EXCEPTIONALLY,
-          null,
+      return new TerminalAction.CompleteExceptionally(
           FailureFactory.completionFailure(
-              exceptionalCompletionEffect.failureKind(), exceptionalCompletionEffect.message()));
+              exceptionalCompletionEffect.failureKind(), exceptionalCompletionEffect.message()),
+          null);
     }
     if (effect instanceof ChaosEffect.ExceptionInjectionEffect injectionEffect) {
       return buildInjectedExceptionTerminal(injectionEffect);
     }
     if (effect instanceof ChaosEffect.ReturnValueCorruptionEffect corruptEffect) {
-      return new TerminalAction(TerminalKind.CORRUPT_RETURN, corruptEffect, null, scenario.id());
+      return new TerminalAction.CorruptReturn(corruptEffect, scenario.id());
     }
     if (effect instanceof ChaosEffect.SpuriousWakeupEffect) {
       // A spurious selector wakeup semantically means: return from select() immediately with
@@ -325,7 +315,8 @@ final class DispatchEngine {
     return null;
   }
 
-  TerminalAction buildInjectedExceptionTerminal(final ChaosEffect.ExceptionInjectionEffect effect) {
+  TerminalAction.Throw buildInjectedExceptionTerminal(
+      final ChaosEffect.ExceptionInjectionEffect effect) {
     try {
       // Class.forName(name, initialize=false, loader): deliberately skip static initialisation.
       // Running <clinit> of an attacker-chosen class during exception construction would turn
@@ -334,12 +325,11 @@ final class DispatchEngine {
       final Class<?> exClass =
           Class.forName(effect.exceptionClassName(), false, ChaosDispatcher.class.getClassLoader());
       if (!Throwable.class.isAssignableFrom(exClass)) {
-        return new TerminalAction(
-            TerminalKind.THROW,
-            null,
+        return new TerminalAction.Throw(
             new IllegalArgumentException(
                 "chaos-agent: configured exception class does not extend Throwable: "
-                    + effect.exceptionClassName()));
+                    + effect.exceptionClassName()),
+            null);
       }
       Throwable instance;
       try {
@@ -369,48 +359,43 @@ final class DispatchEngine {
       if (!effect.withStackTrace()) {
         instance.setStackTrace(new StackTraceElement[0]);
       }
-      return new TerminalAction(TerminalKind.THROW, null, instance);
+      return new TerminalAction.Throw(instance, null);
     } catch (final ReflectiveOperationException reflective) {
       // Preserve the cause chain so operators can see *why* instantiation failed
       // (missing class, inaccessible ctor, ctor threw, etc.) without having to reproduce.
       final RuntimeException wrapped =
           new RuntimeException(
               "chaos-agent: failed to instantiate " + effect.exceptionClassName(), reflective);
-      return new TerminalAction(TerminalKind.THROW, null, wrapped);
+      return new TerminalAction.Throw(wrapped, null);
     }
   }
 
   TerminalAction rejectTerminal(final OperationType operationType, final String message) {
     return switch (operationType) {
       case QUEUE_OFFER, ASYNC_COMPLETE, ASYNC_COMPLETE_EXCEPTIONALLY ->
-          new TerminalAction(TerminalKind.RETURN, Boolean.FALSE, null);
-      case RESOURCE_LOAD -> new TerminalAction(TerminalKind.RETURN, null, null);
-      default ->
-          new TerminalAction(
-              TerminalKind.THROW, null, FailureFactory.reject(operationType, message));
+          new TerminalAction.Return(Boolean.FALSE, null);
+      case RESOURCE_LOAD -> new TerminalAction.Return(null, null);
+      default -> new TerminalAction.Throw(FailureFactory.reject(operationType, message), null);
     };
   }
 
   TerminalAction suppressTerminal(final OperationType operationType) {
     return switch (operationType) {
       case THREAD_START, VIRTUAL_THREAD_START ->
-          new TerminalAction(
-              TerminalKind.THROW,
-              null,
-              new RejectedExecutionException("thread start suppressed by chaos agent"));
+          new TerminalAction.Throw(
+              new RejectedExecutionException("thread start suppressed by chaos agent"), null);
       case SYSTEM_EXIT_REQUEST ->
-          new TerminalAction(
-              TerminalKind.THROW, null, new SecurityException("exit suppressed by chaos agent"));
+          new TerminalAction.Throw(new SecurityException("exit suppressed by chaos agent"), null);
       case QUEUE_OFFER, ASYNC_COMPLETE, ASYNC_COMPLETE_EXCEPTIONALLY ->
-          new TerminalAction(TerminalKind.RETURN, Boolean.FALSE, null);
+          new TerminalAction.Return(Boolean.FALSE, null);
       // QUEUE_POLL: routed through beforeBooleanQueueOperation which returns the Boolean to the
       // advice. A non-null return triggers PollAdvice's skipOn = OnNonDefaultValue and the real
       // poll() is skipped — the skipped body's default reference return is null, which is the
       // intended SUPPRESS semantics ("queue returned nothing"). Boolean.FALSE is used only as a
       // non-null sentinel; its boolean value never reaches the caller.
-      case QUEUE_POLL -> new TerminalAction(TerminalKind.RETURN, Boolean.FALSE, null);
-      case RESOURCE_LOAD -> new TerminalAction(TerminalKind.RETURN, null, null);
-      default -> new TerminalAction(TerminalKind.SUPPRESS, null, null);
+      case QUEUE_POLL -> new TerminalAction.Return(Boolean.FALSE, null);
+      case RESOURCE_LOAD -> new TerminalAction.Return(null, null);
+      default -> new TerminalAction.Suppress(null);
     };
   }
 
@@ -418,11 +403,11 @@ final class DispatchEngine {
     applyDelayAndGate(decision);
     if (decision.terminalAction() != null) {
       final TerminalAction terminalAction = decision.terminalAction();
-      if (terminalAction.kind() == TerminalKind.THROW) {
-        throw terminalAction.failure();
+      if (terminalAction instanceof TerminalAction.Throw thrown) {
+        throw thrown.failure();
       }
-      if (terminalAction.kind() == TerminalKind.RETURN) {
-        if (Boolean.FALSE.equals(terminalAction.returnValue())) {
+      if (terminalAction instanceof TerminalAction.Return returned) {
+        if (Boolean.FALSE.equals(returned.value())) {
           throw new RejectedExecutionException("operation suppressed by chaos agent");
         }
         return;

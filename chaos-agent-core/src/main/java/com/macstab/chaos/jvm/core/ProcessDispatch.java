@@ -52,9 +52,9 @@ public final class ProcessDispatch {
                 null,
                 (int) Math.min(timeoutMillis, Integer.MAX_VALUE)));
     final TerminalAction terminal = decision.terminalAction();
-    if (terminal != null && terminal.kind() == TerminalKind.TIMEOUT) {
+    if (terminal instanceof TerminalAction.Timeout timeout) {
       engine.applyDelayAndGate(decision);
-      engine.sleep(terminal.number());
+      engine.sleep(timeout.waitMillis());
       return true;
     }
     engine.applyPreDecision(decision);

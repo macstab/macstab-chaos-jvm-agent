@@ -58,18 +58,14 @@ class DispatchEngineEdgeTest {
     @Test
     @DisplayName("a terminal that does not shape reads leaves the requested count")
     void otherTerminalLeavesCount() throws Throwable {
-      assertThat(
-              engine.readCount(
-                  terminal(new TerminalAction(TerminalKind.REWRITE, "elsewhere", null)), 64))
+      assertThat(engine.readCount(terminal(new TerminalAction.DnsRewrite("elsewhere", null)), 64))
           .isEqualTo(64);
     }
 
     @Test
     @DisplayName("a length cap leaves a read of no bytes as it is")
     void capKeepsEmptyRead() throws Throwable {
-      assertThat(
-              engine.readCount(terminal(new TerminalAction(TerminalKind.CAP_LENGTH, 4L, null)), 0))
-          .isZero();
+      assertThat(engine.readCount(terminal(new TerminalAction.CapLength(4L, null)), 0)).isZero();
     }
   }
 
@@ -86,8 +82,9 @@ class DispatchEngineEdgeTest {
       final ChaosEffect.TrickleEffect trickle = new ChaosEffect.TrickleEffect(8);
       final TerminalAction action =
           engine.terminalActionFor(unknownSize, trickle, scenario(trickle), null, 1L);
-      assertThat(action.kind()).isEqualTo(TerminalKind.CAP_LENGTH);
-      assertThat(action.number()).isEqualTo(8L);
+      assertThat(action)
+          .isInstanceOfSatisfying(
+              TerminalAction.CapLength.class, cap -> assertThat(cap.limit()).isEqualTo(8L));
     }
 
     @Test
@@ -112,16 +109,19 @@ class DispatchEngineEdgeTest {
       final ChaosEffect.ErrnoEffect errno = ChaosEffect.errno(ChaosEffect.Errno.ENOENT);
       final TerminalAction action =
           engine.terminalActionFor(noOwner, errno, scenario(errno), null, 1L);
-      assertThat(action.kind()).isEqualTo(TerminalKind.THROW);
-      assertThat(action.failure())
-          .isInstanceOf(java.nio.file.NoSuchFileException.class)
-          .hasMessage("/data/file");
+      assertThat(action)
+          .isInstanceOfSatisfying(
+              TerminalAction.Throw.class,
+              thrown ->
+                  assertThat(thrown.failure())
+                      .isInstanceOf(java.nio.file.NoSuchFileException.class)
+                      .hasMessage("/data/file"));
     }
 
     @Test
     @DisplayName("an injected exception that sets its own cause keeps it")
     void injectedExceptionKeepsOwnCause() {
-      final TerminalAction action =
+      final TerminalAction.Throw action =
           engine.buildInjectedExceptionTerminal(
               new ChaosEffect.ExceptionInjectionEffect(
                   PreCausedException.class.getName(), "configured message", true));
@@ -142,18 +142,14 @@ class DispatchEngineEdgeTest {
     void returnWithValueProceeds() {
       assertThatCode(
               () ->
-                  engine.applyPreDecision(
-                      terminal(new TerminalAction(TerminalKind.RETURN, "value", null))))
+                  engine.applyPreDecision(terminal(new TerminalAction.Return(Boolean.TRUE, null))))
           .doesNotThrowAnyException();
     }
 
     @Test
     @DisplayName("a RETURN without a value lets the call go on")
     void returnWithoutValueProceeds() {
-      assertThatCode(
-              () ->
-                  engine.applyPreDecision(
-                      terminal(new TerminalAction(TerminalKind.RETURN, null, null))))
+      assertThatCode(() -> engine.applyPreDecision(terminal(new TerminalAction.Return(null, null))))
           .doesNotThrowAnyException();
     }
 
@@ -163,7 +159,10 @@ class DispatchEngineEdgeTest {
       assertThatThrownBy(
               () ->
                   engine.applyPreDecision(
-                      terminal(new TerminalAction(TerminalKind.CORRUPT_RETURN, null, null))))
+                      terminal(
+                          new TerminalAction.CorruptReturn(
+                              ChaosEffect.corruptReturnValue(ChaosEffect.ReturnValueStrategy.NULL),
+                              null))))
           .isInstanceOf(IllegalStateException.class)
           .hasMessage(
               "CORRUPT_RETURN terminal reached applyPreDecision — only valid from afterMethodExit");
@@ -172,10 +171,7 @@ class DispatchEngineEdgeTest {
     @Test
     @DisplayName("a terminal with no pre-call meaning lets the call go on")
     void otherTerminalProceeds() {
-      assertThatCode(
-              () ->
-                  engine.applyPreDecision(
-                      terminal(new TerminalAction(TerminalKind.SUPPRESS, null, null))))
+      assertThatCode(() -> engine.applyPreDecision(terminal(new TerminalAction.Suppress(null))))
           .doesNotThrowAnyException();
     }
   }
@@ -231,27 +227,6 @@ class DispatchEngineEdgeTest {
     @DisplayName("an unnamed subject is not a file channel")
     void nullIsNotFileChannel() {
       assertThat(DispatchEngine.isFileChannel(null)).isFalse();
-    }
-  }
-
-  @Nested
-  @DisplayName("TerminalAction")
-  class Terminal {
-
-    @Test
-    @DisplayName("asking a value-less terminal for its number names the kind")
-    void numberWithoutValue() {
-      assertThatThrownBy(() -> new TerminalAction(TerminalKind.THROW, null, null).number())
-          .isInstanceOf(NullPointerException.class)
-          .hasMessage("THROW carries no value");
-    }
-
-    @Test
-    @DisplayName("asking a throwable-less terminal for its failure names the kind")
-    void failureWithoutThrowable() {
-      assertThatThrownBy(() -> new TerminalAction(TerminalKind.RETURN, null, null).failure())
-          .isInstanceOf(NullPointerException.class)
-          .hasMessage("RETURN carries no throwable");
     }
   }
 

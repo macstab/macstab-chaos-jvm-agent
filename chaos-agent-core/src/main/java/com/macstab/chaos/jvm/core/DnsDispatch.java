@@ -65,10 +65,9 @@ public final class DnsDispatch {
                     null,
                     null,
                     engine.scopeContext.currentSessionId())));
-    if (decision.terminalAction() != null
-        && decision.terminalAction().kind() == TerminalKind.REWRITE) {
+    if (decision.terminalAction() instanceof TerminalAction.DnsRewrite rewrite) {
       engine.applyDelayAndGate(decision);
-      return (String) decision.terminalAction().returnValue();
+      return rewrite.host();
     }
     engine.applyPreDecision(decision);
     return hostname;
@@ -106,13 +105,13 @@ public final class DnsDispatch {
     if (terminal == null) {
       return null;
     }
-    if (terminal.kind() == TerminalKind.THROW) {
-      throw terminal.failure();
+    if (terminal instanceof TerminalAction.Throw thrown) {
+      throw thrown.failure();
     }
-    if (terminal.kind() != TerminalKind.DNS_SHAPE) {
+    if (!(terminal instanceof TerminalAction.DnsAnswer reshaping)) {
       return null;
     }
-    final DnsShape shape = (DnsShape) java.util.Objects.requireNonNull(terminal.returnValue());
+    final DnsShape shape = reshaping.shape();
     return DnsAnswers.shape(
         shape.effect(), hostname, answer, failure, new java.util.Random(shape.seed()));
   }

@@ -1,6 +1,5 @@
 package com.macstab.chaos.jvm.core;
 
-import com.macstab.chaos.jvm.api.ChaosEffect;
 import com.macstab.chaos.jvm.api.Internal;
 import com.macstab.chaos.jvm.api.OperationType;
 import org.jspecify.annotations.Nullable;
@@ -157,28 +156,17 @@ public final class MethodDispatch {
       throws Throwable {
     final RuntimeDecision decision = engine.evaluate(context);
     engine.applyDelayAndGate(decision);
-    if (decision.terminalAction() != null
-        && decision.terminalAction().kind() == TerminalKind.THROW) {
+    if (decision.terminalAction() instanceof TerminalAction.Throw thrown) {
       // A reject on METHOD_EXIT fails the call after its body ran (side effects done, result
-      // lost). It used to be dropped: only CORRUPT_RETURN was handled here.
-      throw decision.terminalAction().failure();
+      // lost).
+      throw thrown.failure();
     }
-    if (decision.terminalAction() != null
-        && decision.terminalAction().kind() == TerminalKind.CORRUPT_RETURN) {
-      // Sleep BEFORE substituting the corrupted return. RuntimeDecision documents "delay first,
-      // then gate, then terminal action" and CORRUPT_RETURN still returns normally (unlike
-      // THROW), so a composed "delay + corrupt" scenario must deliver both effects. Previously
-      // the early return skipped engine.sleep(), silently dropping the timing signal operators were
-      // testing for.
-      final ChaosEffect.ReturnValueCorruptionEffect corruptEffect =
-          (ChaosEffect.ReturnValueCorruptionEffect)
-              java.util.Objects.requireNonNull(decision.terminalAction().returnValue());
-      // Propagate the scenario id (stored on the TerminalAction at construction time in
-      // terminalActionFor) so that corruption fallbacks like "EMPTY → ZERO" name the scenario
-      // that fired rather than the literal string "method-exit".
-      final String scenarioId = decision.terminalAction().scenarioId();
+    if (decision.terminalAction() instanceof TerminalAction.CorruptReturn corrupting) {
+      // The delay and the gate above have already run: a composed "delay + corrupt" scenario
+      // delivers both. Fallbacks such as "EMPTY -> ZERO" name the scenario that fired.
+      final String scenarioId = corrupting.scenarioId();
       return ReturnValueCorruptor.corrupt(
-          corruptEffect.strategy(),
+          corrupting.effect().strategy(),
           returnType,
           actualValue,
           scenarioId != null ? scenarioId : "method-exit");

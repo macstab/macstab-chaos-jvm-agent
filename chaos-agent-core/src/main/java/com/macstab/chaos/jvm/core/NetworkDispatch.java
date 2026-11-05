@@ -57,15 +57,15 @@ public final class NetworkDispatch {
     engine.applyDelayAndGate(decision);
     if (decision.terminalAction() != null) {
       final TerminalAction terminalAction = decision.terminalAction();
-      if (terminalAction.kind() == TerminalKind.THROW) {
-        throw terminalAction.failure();
+      if (terminalAction instanceof TerminalAction.Throw thrown) {
+        throw thrown.failure();
       }
       if (terminalAction.kind() == TerminalKind.SUPPRESS) {
         return true;
       }
-      if (terminalAction.kind() == TerminalKind.TIMEOUT) {
+      if (terminalAction instanceof TerminalAction.Timeout timeout) {
         // A stalled peer: the select waits out its own timeout and reports no ready channel.
-        engine.sleep(terminalAction.number());
+        engine.sleep(timeout.waitMillis());
         return true;
       }
     }
@@ -159,9 +159,8 @@ public final class NetworkDispatch {
                 inetSocketAddress == null ? InvocationContext.UNKNOWN : inetSocketAddress.getPort(),
                 null,
                 timeoutMillis));
-    if (decision.terminalAction() != null
-        && decision.terminalAction().kind() == TerminalKind.REWRITE
-        && decision.terminalAction().returnValue() instanceof ChaosEffect.RedirectEffect redirect) {
+    if (decision.terminalAction() instanceof TerminalAction.Redirect redirecting) {
+      final ChaosEffect.RedirectEffect redirect = redirecting.redirect();
       engine.applyDelayAndGate(decision);
       // Resolved here, where the agent's own lookup is not evaluated by the DNS hooks.
       return new InetSocketAddress(
@@ -170,12 +169,11 @@ public final class NetworkDispatch {
               ? redirect.port()
               : inetSocketAddress == null ? 0 : inetSocketAddress.getPort());
     }
-    if (decision.terminalAction() != null
-        && decision.terminalAction().kind() == TerminalKind.TIMEOUT) {
+    if (decision.terminalAction() instanceof TerminalAction.Timeout timeout) {
       // A peer that never answers the SYN: the connect waits out its own timeout, then fails.
       engine.applyDelayAndGate(decision);
-      engine.sleep(decision.terminalAction().number());
-      throw decision.terminalAction().failure();
+      engine.sleep(timeout.waitMillis());
+      throw timeout.failure();
     }
     engine.applyPreDecision(decision);
     return null;

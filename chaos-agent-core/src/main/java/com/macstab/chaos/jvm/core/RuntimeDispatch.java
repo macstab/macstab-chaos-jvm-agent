@@ -71,10 +71,11 @@ public final class RuntimeDispatch {
                     null)));
     engine.applyDelayAndGate(decision);
     if (decision.terminalAction() != null) {
-      if (decision.terminalAction().kind() == TerminalKind.THROW) {
-        throw decision.terminalAction().failure();
+      if (decision.terminalAction() instanceof TerminalAction.Throw thrown) {
+        throw thrown.failure();
       }
-      return (URL) decision.terminalAction().returnValue();
+      // A rejected or suppressed lookup finds nothing.
+      return null;
     }
     return currentValue;
   }
@@ -103,8 +104,8 @@ public final class RuntimeDispatch {
     engine.applyDelayAndGate(decision);
     if (decision.terminalAction() != null) {
       final TerminalAction terminalAction = decision.terminalAction();
-      if (terminalAction.kind() == TerminalKind.THROW) {
-        throw terminalAction.failure();
+      if (terminalAction instanceof TerminalAction.Throw thrown) {
+        throw thrown.failure();
       }
       if (terminalAction.kind() == TerminalKind.SUPPRESS) {
         return true;
