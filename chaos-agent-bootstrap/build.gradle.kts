@@ -127,10 +127,6 @@ extensions.configure<PublishingExtension> {
 }
 
 tasks.test {
-    // PlanFuzzTest mutates the plan examples of the docs: a doc change must rerun it.
-    inputs.files(rootProject.fileTree("docs") { include("*.md") })
-        .withPropertyName("documentedPlans")
-        .withPathSensitivity(PathSensitivity.RELATIVE)
     dependsOn(tasks.shadowJar)
     // Probe mains run in child JVMs whose classpath carries libraries (HTTP clients, JDBC) that
     // the test JVM does not have; keep them out of test discovery, which would have to load and

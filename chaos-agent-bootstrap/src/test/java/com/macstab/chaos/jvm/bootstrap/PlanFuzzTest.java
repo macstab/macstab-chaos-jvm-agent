@@ -16,15 +16,10 @@ import com.macstab.chaos.jvm.startup.ChaosPlanMapper;
 import com.macstab.chaos.jvm.startup.ConfigLoadException;
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.SplittableRandom;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -33,9 +28,9 @@ import org.junit.jupiter.api.Test;
  * The plan pipeline on arbitrary input. Whatever the input, parsing returns a plan or throws {@link
  * ConfigLoadException}, and validating a parsed scenario returns or throws {@link
  * ChaosValidationException} / {@link ChaosActivationException}: no other exception, no hang. Two
- * sources of input: mutations of every JSON example in the documentation, and plans generated from
- * the published plan schema, which reach the record constructors and validators of every selector
- * and effect.
+ * sources of input: mutations of the seed plans in {@code fuzz-plans.json}, and plans generated
+ * from the published plan schema, which reach the record constructors and validators of every
+ * selector and effect.
  *
  * <p>Seeded and replayable: {@code ./gradlew :chaos-agent-bootstrap:test --tests '*PlanFuzzTest*'
  * -PfuzzSeed=<seed> -PfuzzIterations=<n>} (defaults 20261103 and 4000); a failure names the seed,
@@ -47,8 +42,6 @@ class PlanFuzzTest {
   private static final long SEED = Long.getLong("chaos.fuzz.seed", 20261103L);
   private static final int ITERATIONS = Integer.getInteger("chaos.fuzz.iterations", 4000);
   private static final long MAX_NANOS_PER_INPUT = 1_000_000_000L;
-  private static final Pattern JSON_BLOCK =
-      Pattern.compile("^```json[^\\n]*\\n(.*?)^```", Pattern.MULTILINE | Pattern.DOTALL);
 
   private final ChaosRuntime runtime = new ChaosRuntime();
   private final ObjectMapper json = new ObjectMapper();
@@ -61,10 +54,8 @@ class PlanFuzzTest {
   @Test
   @DisplayName("mutated documentation examples are parsed or rejected, never crash")
   void mutatedExamples() throws IOException {
-    final List<String> corpus = documentedPlans();
-    assertThat(corpus)
-        .as("documented plan, scenario, selector and effect examples")
-        .hasSizeGreaterThan(20);
+    final List<String> corpus = seedPlans();
+    assertThat(corpus).as("seed plans").hasSizeGreaterThan(20);
     final SplittableRandom random = new SplittableRandom(SEED);
     for (int iteration = 0; iteration < ITERATIONS; iteration++) {
       final String input = mutate(corpus.get(random.nextInt(corpus.size())), random);
@@ -151,55 +142,16 @@ class PlanFuzzTest {
 
   // ── corpus and mutations ──────────────────────────────────────────────────
 
-  private static final String ANY_SELECTOR =
-      "{\"type\": \"thread\", \"operations\": [\"THREAD_START\"]}";
-  private static final String ANY_EFFECT =
-      "{\"type\": \"delay\", \"minDelay\": \"PT0.001S\", \"maxDelay\": \"PT0.001S\"}";
-
-  /**
-   * Every json block of the documentation that is a plan, a scenario, a selector or an effect; a
-   * selector or effect becomes a scenario with a fixed counterpart.
-   */
-  private List<String> documentedPlans() throws IOException {
-    Path root = Path.of("").toAbsolutePath();
-    while (root != null && !Files.isDirectory(root.resolve("docs"))) {
-      root = root.getParent();
-    }
-    assertThat(root).as("repository root with docs/").isNotNull();
+  /** The seed plans: one of every selector family and effect kind, as a user writes them. */
+  private List<String> seedPlans() throws IOException {
     final List<String> corpus = new ArrayList<>();
-    try (Stream<Path> docs = Files.list(root.resolve("docs"))) {
-      for (final Path doc : docs.filter(p -> p.toString().endsWith(".md")).sorted().toList()) {
-        final Matcher block = JSON_BLOCK.matcher(Files.readString(doc));
-        while (block.find()) {
-          final String text = block.group(1);
-          for (final String candidate :
-              List.of(text, scenario(text, ANY_EFFECT), scenario(ANY_SELECTOR, text))) {
-            if (parses(candidate)) {
-              corpus.add(
-                  candidate.contains("\"scenarios\"")
-                      ? candidate
-                      : "{\"scenarios\": [" + candidate + "]}");
-              break;
-            }
-          }
-        }
+    try (InputStream plans = PlanFuzzTest.class.getResourceAsStream("fuzz-plans.json")) {
+      assertThat(plans).as("fuzz-plans.json").isNotNull();
+      for (final JsonNode plan : json.readTree(plans)) {
+        corpus.add(plan.toPrettyString());
       }
     }
     return corpus;
-  }
-
-  private static String scenario(final String selector, final String effect) {
-    return "{\"id\": \"doc\", \"selector\": " + selector + ", \"effect\": " + effect + "}";
-  }
-
-  private static boolean parses(final String text) {
-    try {
-      ChaosPlanMapper.readPlanOrScenarios(text, "fuzz");
-      return true;
-    } catch (final RuntimeException notAPlan) {
-      // policy fragments, patterns, commented examples: not inputs of the plan reader
-      return false;
-    }
   }
 
   private static final String[] TOKENS = {

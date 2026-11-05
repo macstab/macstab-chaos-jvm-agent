@@ -1,0 +1,668 @@
+[
+  {
+    "scenarios": [
+      {
+        "id": "doc",
+        "selector": {
+          "type": "thread",
+          "operations": [
+            "THREAD_START"
+          ],
+          "kind": "VIRTUAL",
+          "threadNamePattern": {
+            "mode": "PREFIX",
+            "value": "worker-"
+          },
+          "daemon": null
+        },
+        "effect": {
+          "type": "delay",
+          "minDelay": "PT0.001S",
+          "maxDelay": "PT0.001S"
+        }
+      }
+    ]
+  },
+  {
+    "scenarios": [
+      {
+        "id": "doc",
+        "selector": {
+          "type": "method",
+          "operations": [
+            "METHOD_ENTER"
+          ],
+          "classPattern": {
+            "mode": "PREFIX",
+            "value": "io.lettuce.core"
+          },
+          "methodNamePattern": {
+            "mode": "ANY"
+          }
+        },
+        "effect": {
+          "type": "delay",
+          "minDelay": "PT0.001S",
+          "maxDelay": "PT0.001S"
+        }
+      }
+    ]
+  },
+  {
+    "scenarios": [
+      {
+        "id": "skew-intrinsics",
+        "scope": "JVM",
+        "selector": {
+          "type": "jvmRuntime",
+          "operations": [
+            "SYSTEM_CLOCK_MILLIS",
+            "SYSTEM_CLOCK_NANOS"
+          ]
+        },
+        "effect": {
+          "type": "clockSkew",
+          "skewAmount": "PT1H",
+          "mode": "FIXED"
+        }
+      }
+    ]
+  },
+  {
+    "scenarios": [
+      {
+        "id": "doc",
+        "selector": {
+          "type": "network",
+          "operations": [
+            "SOCKET_WRITE"
+          ],
+          "remoteCidr": "10.20.0.0/16",
+          "remotePort": 5432,
+          "minBytes": 65536
+        },
+        "effect": {
+          "type": "delay",
+          "minDelay": "PT0.001S",
+          "maxDelay": "PT0.001S"
+        }
+      }
+    ]
+  },
+  {
+    "scenarios": [
+      {
+        "id": "doc",
+        "selector": {
+          "type": "httpClient",
+          "operations": [
+            "HTTP_CLIENT_SEND",
+            "HTTP_CLIENT_SEND_ASYNC"
+          ],
+          "urlPattern": {
+            "mode": "GLOB",
+            "value": "https://payments.internal/*"
+          }
+        },
+        "effect": {
+          "type": "delay",
+          "minDelay": "PT0.001S",
+          "maxDelay": "PT0.001S"
+        }
+      }
+    ]
+  },
+  {
+    "scenarios": [
+      {
+        "id": "doc",
+        "selector": {
+          "type": "jdbc",
+          "operations": [
+            "JDBC_CONNECTION_ACQUIRE"
+          ],
+          "targetPattern": {
+            "mode": "EXACT",
+            "value": "HikariPool-main"
+          }
+        },
+        "effect": {
+          "type": "delay",
+          "minDelay": "PT0.001S",
+          "maxDelay": "PT0.001S"
+        }
+      }
+    ]
+  },
+  {
+    "scenarios": [
+      {
+        "id": "doc",
+        "selector": {
+          "type": "fileIo",
+          "operations": [
+            "FILE_IO_WRITE"
+          ],
+          "pathPattern": {
+            "prefix": "/var/lib/app/wal"
+          },
+          "minBytes": 4096
+        },
+        "effect": {
+          "type": "delay",
+          "minDelay": "PT0.001S",
+          "maxDelay": "PT0.001S"
+        }
+      }
+    ]
+  },
+  {
+    "scenarios": [
+      {
+        "id": "doc",
+        "selector": {
+          "type": "process",
+          "operations": [
+            "PROCESS_START"
+          ],
+          "commandPattern": {
+            "mode": "EXACT",
+            "value": "git"
+          }
+        },
+        "effect": {
+          "type": "delay",
+          "minDelay": "PT0.001S",
+          "maxDelay": "PT0.001S"
+        }
+      }
+    ]
+  },
+  {
+    "scenarios": [
+      {
+        "id": "doc",
+        "selector": {
+          "type": "stress",
+          "target": "HEAP"
+        },
+        "effect": {
+          "type": "delay",
+          "minDelay": "PT0.001S",
+          "maxDelay": "PT0.001S"
+        }
+      }
+    ]
+  },
+  {
+    "scenarios": [
+      {
+        "id": "doc",
+        "selector": {
+          "type": "thread",
+          "operations": [
+            "THREAD_START"
+          ]
+        },
+        "effect": {
+          "type": "delay",
+          "minDelay": "PT0.1S",
+          "maxDelay": "PT0.5S"
+        }
+      }
+    ]
+  },
+  {
+    "scenarios": [
+      {
+        "id": "doc",
+        "selector": {
+          "type": "thread",
+          "operations": [
+            "THREAD_START"
+          ]
+        },
+        "effect": {
+          "type": "gate",
+          "maxBlock": "PT5S"
+        }
+      }
+    ]
+  },
+  {
+    "scenarios": [
+      {
+        "id": "doc",
+        "selector": {
+          "type": "thread",
+          "operations": [
+            "THREAD_START"
+          ]
+        },
+        "effect": {
+          "type": "reject",
+          "message": "chaos: executor overloaded"
+        }
+      }
+    ]
+  },
+  {
+    "scenarios": [
+      {
+        "id": "doc",
+        "selector": {
+          "type": "thread",
+          "operations": [
+            "THREAD_START"
+          ]
+        },
+        "effect": {
+          "type": "errno",
+          "errno": "ENOSPC"
+        }
+      }
+    ]
+  },
+  {
+    "scenarios": [
+      {
+        "id": "doc",
+        "selector": {
+          "type": "thread",
+          "operations": [
+            "THREAD_START"
+          ]
+        },
+        "effect": {
+          "type": "suppress"
+        }
+      }
+    ]
+  },
+  {
+    "scenarios": [
+      {
+        "id": "doc",
+        "selector": {
+          "type": "thread",
+          "operations": [
+            "THREAD_START"
+          ]
+        },
+        "effect": {
+          "type": "exceptionalCompletion",
+          "failureKind": "TIMEOUT",
+          "message": "chaos: upstream timeout"
+        }
+      }
+    ]
+  },
+  {
+    "scenarios": [
+      {
+        "id": "doc",
+        "selector": {
+          "type": "thread",
+          "operations": [
+            "THREAD_START"
+          ]
+        },
+        "effect": {
+          "type": "exceptionInjection",
+          "exceptionClassName": "java.sql.SQLException",
+          "message": "chaos: simulated DB error",
+          "withStackTrace": true
+        }
+      }
+    ]
+  },
+  {
+    "scenarios": [
+      {
+        "id": "doc",
+        "selector": {
+          "type": "thread",
+          "operations": [
+            "THREAD_START"
+          ]
+        },
+        "effect": {
+          "type": "returnValueCorruption",
+          "strategy": "NULL"
+        }
+      }
+    ]
+  },
+  {
+    "scenarios": [
+      {
+        "id": "doc",
+        "selector": {
+          "type": "thread",
+          "operations": [
+            "THREAD_START"
+          ]
+        },
+        "effect": {
+          "type": "clockSkew",
+          "skewAmount": "PT3600S",
+          "mode": "FIXED"
+        }
+      }
+    ]
+  },
+  {
+    "scenarios": [
+      {
+        "id": "doc",
+        "selector": {
+          "type": "thread",
+          "operations": [
+            "THREAD_START"
+          ]
+        },
+        "effect": {
+          "type": "spuriousWakeup"
+        }
+      }
+    ]
+  },
+  {
+    "metadata": {
+      "name": "integration-chaos-suite",
+      "description": "Chaos plan for integration test phase — HTTP latency + DB connection pressure"
+    },
+    "observability": {
+      "jmxEnabled": true,
+      "structuredLoggingEnabled": true,
+      "debugDumpOnStart": false
+    },
+    "scenarios": [
+      {
+        "id": "http-latency",
+        "description": "50ms–200ms delay on all outbound HTTP calls to payment service",
+        "scope": "JVM",
+        "selector": {
+          "type": "httpClient",
+          "operations": [
+            "HTTP_CLIENT_SEND",
+            "HTTP_CLIENT_SEND_ASYNC"
+          ],
+          "urlPattern": {
+            "mode": "GLOB",
+            "value": "https://payments.internal/*"
+          }
+        },
+        "effect": {
+          "type": "delay",
+          "minDelay": "PT0.05S",
+          "maxDelay": "PT0.2S"
+        },
+        "activationPolicy": {
+          "startMode": "AUTOMATIC",
+          "probability": 0.3,
+          "maxApplications": 1000,
+          "activeFor": "PT5M"
+        },
+        "tags": {
+          "tier": "external",
+          "owner": "payments-team"
+        }
+      },
+      {
+        "id": "jdbc-pool-latency",
+        "description": "Slow connection acquisition from main HikariCP pool",
+        "scope": "JVM",
+        "selector": {
+          "type": "jdbc",
+          "operations": [
+            "JDBC_CONNECTION_ACQUIRE"
+          ],
+          "targetPattern": {
+            "mode": "EXACT",
+            "value": "HikariPool-main"
+          }
+        },
+        "effect": {
+          "type": "delay",
+          "minDelay": "PT0.5S",
+          "maxDelay": "PT2S"
+        },
+        "activationPolicy": {
+          "probability": 0.1,
+          "rateLimit": {
+            "permits": 5,
+            "window": "PT1S"
+          }
+        }
+      },
+      {
+        "id": "dns-failure",
+        "description": "Simulate DNS lookup failure for external-api hostname",
+        "scope": "JVM",
+        "selector": {
+          "type": "dns",
+          "operations": [
+            "DNS_RESOLVE"
+          ],
+          "hostnamePattern": {
+            "mode": "EXACT",
+            "value": "external-api.example.com"
+          }
+        },
+        "effect": {
+          "type": "exceptionInjection",
+          "exceptionClassName": "java.net.UnknownHostException",
+          "message": "chaos: DNS failure for external-api.example.com",
+          "withStackTrace": false
+        },
+        "activationPolicy": {
+          "probability": 0.05
+        }
+      },
+      {
+        "id": "heap-pressure",
+        "description": "Retain 512 MiB of heap to simulate memory pressure",
+        "scope": "JVM",
+        "selector": {
+          "type": "stress",
+          "target": "HEAP"
+        },
+        "effect": {
+          "type": "heapPressure",
+          "bytes": 536870912,
+          "chunkSizeBytes": 10485760
+        },
+        "activationPolicy": {
+          "startMode": "AUTOMATIC"
+        }
+      }
+    ]
+  },
+  {
+    "scenarios": [
+      {
+        "id": "fsync-eio-5pct",
+        "scope": "JVM",
+        "selector": {
+          "type": "fileIo",
+          "operations": [
+            "FILE_IO_SYNC"
+          ],
+          "pathPattern": {
+            "prefix": "/var/lib/app"
+          }
+        },
+        "effect": {
+          "type": "errno",
+          "errno": "EIO"
+        },
+        "activationPolicy": {
+          "probability": 0.05
+        }
+      }
+    ]
+  },
+  {
+    "scenarios": [
+      {
+        "id": "broker-large-writes-slow",
+        "scope": "JVM",
+        "selector": {
+          "type": "network",
+          "operations": [
+            "SOCKET_WRITE"
+          ],
+          "remoteCidr": "10.0.0.7",
+          "remotePort": 9092,
+          "minBytes": 65537
+        },
+        "effect": {
+          "type": "delay",
+          "minDelay": "PT0.2S",
+          "maxDelay": "PT0.2S"
+        },
+        "activationPolicy": {
+          "activeFrom": "2026-11-01T08:00:00Z",
+          "activeUntil": "2026-11-01T09:30:00Z"
+        }
+      }
+    ]
+  },
+  {
+    "metadata": {
+      "name": "replica-failover"
+    },
+    "scenarios": [
+      {
+        "id": "replica-ipv6-only",
+        "scope": "JVM",
+        "selector": {
+          "type": "dns",
+          "operations": [
+            "DNS_ANSWER"
+          ],
+          "hostnamePattern": {
+            "mode": "EXACT",
+            "value": "replica.internal"
+          }
+        },
+        "effect": {
+          "type": "dnsAnswer",
+          "family": "IPV6"
+        }
+      },
+      {
+        "id": "replica-refused-thrice",
+        "scope": "JVM",
+        "selector": {
+          "type": "network",
+          "operations": [
+            "SOCKET_CONNECT"
+          ],
+          "remoteCidr": "::/0",
+          "remotePort": 5432
+        },
+        "effect": {
+          "type": "errno",
+          "errno": "ECONNREFUSED"
+        },
+        "activationPolicy": {
+          "maxApplications": 3
+        }
+      }
+    ]
+  },
+  {
+    "scenarios": [
+      {
+        "id": "clock-regress",
+        "scope": "JVM",
+        "selector": {
+          "type": "jvmRuntime",
+          "operations": [
+            "INSTANT_NOW",
+            "CLOCK_READ",
+            "LOCAL_DATE_TIME_NOW",
+            "ZONED_DATE_TIME_NOW",
+            "DATE_NEW"
+          ]
+        },
+        "effect": {
+          "type": "clockSkew",
+          "skewAmount": "PT1S",
+          "mode": "REGRESS"
+        }
+      }
+    ]
+  },
+  {
+    "metadata": {
+      "name": "checkout-soak",
+      "description": "optional"
+    },
+    "observability": {
+      "jmxEnabled": true,
+      "structuredLoggingEnabled": true,
+      "debugDumpOnStart": false
+    },
+    "scenarios": [
+      {
+        "id": "slow-pool-submit",
+        "description": "optional",
+        "scope": "JVM",
+        "precedence": 0,
+        "selector": {
+          "type": "executor",
+          "operations": [
+            "EXECUTOR_SUBMIT"
+          ],
+          "executorClassPattern": {
+            "mode": "GLOB",
+            "value": "*ThreadPool*"
+          }
+        },
+        "effect": {
+          "type": "delay",
+          "minDelay": "PT0.1S",
+          "maxDelay": "PT0.5S"
+        },
+        "activationPolicy": {
+          "probability": 0.5,
+          "rateLimit": {
+            "permits": 10,
+            "window": "PT1S"
+          },
+          "activeFor": "PT30S",
+          "maxApplications": 100,
+          "randomSeed": 42
+        }
+      }
+    ]
+  },
+  {
+    "metadata": {
+      "name": "db-delay-soak"
+    },
+    "scenarios": [
+      {
+        "id": "delay-jdbc-acquire",
+        "scope": "JVM",
+        "selector": {
+          "type": "jdbc",
+          "operations": [
+            "JDBC_CONNECTION_ACQUIRE"
+          ]
+        },
+        "effect": {
+          "type": "delay",
+          "minDelay": "PT0.1S",
+          "maxDelay": "PT0.5S"
+        },
+        "activationPolicy": {
+          "probability": 0.1
+        }
+      }
+    ]
+  }
+]
