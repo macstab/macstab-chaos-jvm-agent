@@ -19,7 +19,7 @@ chaos-agent-core com/macstab/chaos/jvm/core/ChaosControlPlaneImpl.java 96.86% un
 chaos-agent-core com/macstab/chaos/jvm/core/ChaosDispatcher.java 95.91% race the re-check inside double-checked locking
 chaos-agent-core com/macstab/chaos/jvm/core/ClockDispatch.java 98.18% unreachable candidates are indexed by the clock operation, which the selector matches on alone
 chaos-agent-core com/macstab/chaos/jvm/core/ClockSkewState.java 86.36% race the retry after a failed compare-and-set needs a concurrent clock read; the overflow clamp is ruled out by the effect's own bounds
-chaos-agent-core com/macstab/chaos/jvm/core/CodeCachePressureStressor.java 88.63% unreachable class generation and invocation do not fail, closing an empty-URL loader does not throw; JVMs without compilation monitoring
+chaos-agent-core com/macstab/chaos/jvm/core/CodeCachePressureStressor.java 86.36% race the compiler thread interrupted by close() in the middle of its loop; class generation and invocation do not fail, closing an empty-URL loader does not throw
 chaos-agent-core com/macstab/chaos/jvm/core/CompatibilityValidator.java 97.97% unreachable virtual threads always exist on JDK 21+, and conditions rejected earlier by the same validator
 chaos-agent-core com/macstab/chaos/jvm/core/DeadlockStressor.java 84.61% race the participants always form a cycle, so the second lock is acquired only if teardown releases it first
 chaos-agent-core com/macstab/chaos/jvm/core/DefaultChaosSession.java 85.00% unreachable plan children are always DefaultChaosActivationHandle and destroy() swallows every failure, so its catches cannot run
@@ -38,6 +38,9 @@ chaos-agent-core com/macstab/chaos/jvm/core/RuntimeDispatch.java 99.15% unreacha
 chaos-agent-core com/macstab/chaos/jvm/core/ScenarioController.java 97.96% race stop() or the maxApplications cap racing an in-flight evaluate
 chaos-agent-core com/macstab/chaos/jvm/core/StringInternPressureStressor.java 96.66% unreachable the effect requires counts above 0, so the lower clamp never applies
 chaos-agent-core com/macstab/chaos/jvm/core/ThreadLocalLeakStressor.java 85.71% unreachable joining a ThreadLocal::remove task cannot fail
+chaos-agent-core com/macstab/chaos/jvm/core/GcPressureStressor.java 97.95% race the ring nulled mid-batch, or the allocation thread dying abnormally
+chaos-agent-core com/macstab/chaos/jvm/core/VirtualThreadCarrierPinningStressor.java 98.66% race the stop flag seen in the pin loop rather than the interrupted sleep
+chaos-agent-core com/macstab/chaos/jvm/core/ObservabilityBus.java 99.10% race a listener removed while an event is published
 
 chaos-agent-instrumentation-jdk com/macstab/chaos/jvm/instrumentation/HttpUrlExtractor.java 96.49% race the cache's putIfAbsent loser path; Object.hashCode always exists
 chaos-agent-instrumentation-jdk com/macstab/chaos/jvm/instrumentation/JdbcTargetExtractor.java 94.59% unreachable a getPoolName() in a module package that is not opened; no JDK class declares one
@@ -49,12 +52,14 @@ chaos-agent-instrumentation-jdk com/macstab/chaos/jvm/instrumentation/bridge/Boo
 chaos-agent-instrumentation-jdk com/macstab/chaos/jvm/instrumentation/bridge/ChannelBuffers.java 98.30% unreachable the loop always returns inside: the target is below the bytes transferred
 
 chaos-agent-micronaut-integration com/macstab/chaos/jvm/micronaut/ChaosContextConfigurer.java 82.35% unreachable installLocally() failing in a JVM where self-attach works
+chaos-agent-micronaut-integration com/macstab/chaos/jvm/micronaut/ChaosManagementEndpoint.java 96.42% race the re-check inside double-checked locking
 
 chaos-agent-quarkus-extension com/macstab/chaos/jvm/quarkus/ChaosQuarkusExtension.java 95.34% unreachable getAnnotationsByType never returns null, and the parent-context fallback cannot happen after beforeAll stores the list
 chaos-agent-quarkus-extension com/macstab/chaos/jvm/quarkus/ChaosQuarkusRecorder.java 69.23% unreachable installLocally() failing in a JVM where self-attach works
 
 chaos-agent-spring-boot-common com/macstab/chaos/jvm/spring/boot/common/ChaosAutoConfiguration.java 97.87% unreachable the Spring Security branch needs Spring Security on the test classpath
 chaos-agent-spring-boot-common com/macstab/chaos/jvm/spring/boot/common/ChaosSessionPropagationAutoConfiguration.java 80.00% unreachable needs the agent attached in a JVM with the servlet API; this module's tests never attach and the attaching starter tests have no servlet API
+chaos-agent-spring-boot-common com/macstab/chaos/jvm/spring/boot/common/ChaosHandleRegistry.java 97.87% race another thread changing the map between put and remove
 
 chaos-agent-spring-boot3-starter com/macstab/chaos/jvm/spring/boot3/ChaosAgentEnvironmentPostProcessor.java 85.00% unreachable installLocally() failing in a JVM where self-attach works
 
@@ -63,3 +68,4 @@ chaos-agent-spring-boot4-starter com/macstab/chaos/jvm/spring/boot4/ChaosAgentEn
 chaos-agent-startup-config com/macstab/chaos/jvm/startup/ApiJsonMixins.java 71.42% unreachable Jackson mix-in bodies are never invoked by design
 chaos-agent-startup-config com/macstab/chaos/jvm/startup/ChaosPlanMapper.java 97.45% unreachable Jackson always reports a position for a String read, writing a plan cannot fail, and readTree never returns null
 chaos-agent-startup-config com/macstab/chaos/jvm/startup/StartupConfigLoader.java 89.33% race an I/O failure after an earlier call on the same path succeeded (the file swapped or deleted concurrently); a non-POSIX default file system
+chaos-agent-quarkus-management com/macstab/chaos/jvm/quarkus/management/ChaosManagementHandler.java 98.27% race the re-check inside double-checked locking
