@@ -13,9 +13,8 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 /**
- * Unit tests for the four new stressor implementations introduced in Phase 2 Task 11:
- * CodeCachePressureStressor, SafepointStormStressor, StringInternPressureStressor, and
- * ReferenceQueueFloodStressor.
+ * Unit tests for the lifecycle of four stressors: CodeCachePressureStressor,
+ * SafepointStormStressor, StringInternPressureStressor, and ReferenceQueueFloodStressor.
  */
 @DisplayName("New stressor lifecycle")
 class NewStressorLifecycleTest {

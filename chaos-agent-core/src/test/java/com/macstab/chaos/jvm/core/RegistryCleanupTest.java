@@ -14,7 +14,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 /**
- * Tests for Task 4 — {@link DefaultChaosActivationHandle#destroy()} must call {@link
+ * Tests that {@link DefaultChaosActivationHandle#destroy()} calls {@link
  * ScenarioRegistry#unregister(ScenarioController)} so that closed session scenarios do not
  * accumulate indefinitely in the registry.
  */

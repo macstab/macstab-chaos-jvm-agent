@@ -12,9 +12,9 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 /**
- * Unit tests for the eight stressor implementations introduced in Task 10. Each test verifies basic
- * lifecycle behaviour (construction does not throw, retained-count accessors return expected
- * values, close() does not throw and makes the stressor stop or release resources).
+ * Unit tests for the lifecycle of eight stressors. Each test verifies basic lifecycle behaviour
+ * (construction does not throw, retained-count accessors return expected values, close() does not
+ * throw and makes the stressor stop or release resources).
  */
 @DisplayName("Stressor lifecycle")
 class StressorLifecycleTest {

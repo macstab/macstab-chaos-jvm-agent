@@ -138,7 +138,7 @@ final class ScenarioController {
         scenario.activationPolicy().randomSeed() != null
             ? scenario.activationPolicy().randomSeed()
             : ThreadLocalRandom.current().nextLong();
-    // Task 1: Always start REGISTERED regardless of start mode. The start() call
+    // Always start REGISTERED regardless of start mode. The start() call
     // transitions to ACTIVE. Setting ACTIVE here while started=false produces a
     // diagnostic state that is observably wrong (ACTIVE but evaluating returns null).
     this.state = ChaosDiagnostics.ScenarioState.REGISTERED;

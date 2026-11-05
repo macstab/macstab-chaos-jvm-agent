@@ -39,7 +39,7 @@ class ScenarioControllerStateTest {
   @DisplayName("initial state is REGISTERED regardless of StartMode")
   void initialStateIsRegistered() {
     final ScenarioController controller = makeController("init-state");
-    // Task 1: Must be REGISTERED, not ACTIVE, before start() is called.
+    // Must be REGISTERED, not ACTIVE, before start() is called.
     assertThat(controller.state()).isEqualTo(ChaosDiagnostics.ScenarioState.REGISTERED);
   }
 
