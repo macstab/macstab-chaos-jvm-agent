@@ -317,6 +317,26 @@ class LifecycleEdgeTest {
   class Sessions {
 
     @Test
+    @DisplayName("a session plan's observability settings apply to its scenarios until it closes")
+    void sessionPlanObservability() {
+      final ChaosSession session = runtime.openSession("plan-o");
+      try {
+        final ChaosActivationHandle plan =
+            session.activate(
+                new ChaosPlan(
+                    new ChaosPlan.Metadata("hidden", ""),
+                    new ChaosPlan.Observability(false, true, false),
+                    List.of(sessionScenario("hidden-s"))));
+
+        assertThat(runtime.jmxVisible("hidden-s")).isFalse();
+        plan.close();
+        assertThat(runtime.jmxVisible("hidden-s")).isTrue();
+      } finally {
+        session.close();
+      }
+    }
+
+    @Test
     @DisplayName("a closed session refuses to activate")
     void closedSessionRefuses() {
       final ChaosSession session = runtime.openSession("closed");

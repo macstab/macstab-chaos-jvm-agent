@@ -116,46 +116,34 @@ final class DefaultChaosSession implements ChaosSession {
   }
 
   /**
-   * Activates all scenarios in the given plan within this session and returns a composite handle.
-   *
-   * <p>Each scenario in {@link ChaosPlan#scenarios()} is activated individually via {@link
-   * #activate(ChaosScenario)}, and all resulting handles are aggregated into a {@link
-   * CompositeActivationHandle}.
+   * Activates all scenarios in the given plan within this session, as one unit: every scenario is
+   * validated before any is registered, the plan's observability settings apply to its scenarios,
+   * and a failure rolls back those already registered (see {@link
+   * ChaosControlPlaneImpl#activatePlan}).
    *
    * @param plan the chaos plan whose scenarios should all be activated
    * @return a composite handle that delegates operations to every activated scenario
    */
   @Override
   public ChaosActivationHandle activate(final ChaosPlan plan) {
-    // Same all-or-nothing contract as ChaosControlPlaneImpl.activate(ChaosPlan): if the 4th of
-    // 5 scenarios fails validation, the first 3 must be rolled back. Without this the plan is
-    // silently partially applied and the operator has no way to reason about state.
-    final List<ChaosActivationHandle> children = new java.util.ArrayList<>();
-    try {
-      for (final ChaosScenario scenario : plan.scenarios()) {
-        children.add(activate(scenario));
-      }
-      return new CompositeActivationHandle("session-plan:" + plan.metadata().name(), children);
-    } catch (final RuntimeException failure) {
-      for (final ChaosActivationHandle child : children) {
-        try {
+    if (closed.get()) {
+      throw new IllegalStateException("cannot activate a plan on a closed session");
+    }
+    return controlPlane.activatePlan(
+        plan,
+        "session:" + id,
+        "session-plan:",
+        controlPlane::validateInSession,
+        this::activate,
+        child -> {
+          // Leave the session's handle list first, so close() never destroys it a second time.
           if (child instanceof DefaultChaosActivationHandle defaultHandle) {
-            // Remove from session's handle list BEFORE destroy so close() can't double-destroy
-            // this handle after a partial rollback. activate(ChaosScenario) appends
-            // the handle to this.handles; without this remove, close() would iterate handles and
-            // destroy every already-rolled-back entry a second time, emitting duplicate STOPPED
-            // events for each to every observability listener.
             handles.remove(defaultHandle);
             defaultHandle.destroy();
           } else {
             child.stop();
           }
-        } catch (final RuntimeException rollback) {
-          failure.addSuppressed(rollback);
-        }
-      }
-      throw failure;
-    }
+        });
   }
 
   /**

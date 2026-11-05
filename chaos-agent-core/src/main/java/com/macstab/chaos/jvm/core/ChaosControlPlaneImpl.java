@@ -27,6 +27,8 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
+import java.util.function.Function;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -197,17 +199,52 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
 
   @Override
   public ChaosActivationHandle activate(final ChaosPlan plan) {
-    // A plan is atomic: either every scenario is registered or none are. If the 4th of 5
-    // scenarios fails validation we must undo the first 3, otherwise the plan is silently
-    // partially applied and the operator has no way to tell apart "this plan is active" from
-    // "part of this plan is active". Roll back by stopping and destroying every successfully
-    // registered handle before propagating the original exception.
+    return activatePlan(
+        plan,
+        "jvm",
+        "plan:",
+        this::validate,
+        this::activate,
+        handle -> {
+          // Only destroy() unregisters a controller; stop() alone would leave it registered and
+          // block re-activating its id. activate(ChaosScenario) returns a
+          // DefaultChaosActivationHandle, so any other type means the contract is broken.
+          if (!(handle instanceof DefaultChaosActivationHandle defaultHandle)) {
+            throw new IllegalStateException(
+                "plan rollback received unexpected handle type: " + handle.getClass().getName());
+          }
+          defaultHandle.destroy();
+        });
+  }
+
+  /**
+   * Activates a plan as one unit, for the control plane ({@code jvm}) and for a session.
+   *
+   * <p>Every scenario is validated and its key checked before anything is registered, so an invalid
+   * fifth scenario never forces a rollback of four that already injected faults. Then the plan's
+   * observability settings are applied and the scenarios registered; if one still fails, those
+   * already registered are rolled back and the settings cleared, so the plan is never partly
+   * active.
+   *
+   * @param plan the plan
+   * @param scopeKey the scope of its scenarios ({@code jvm}, or {@code session:<id>})
+   * @param idPrefix the prefix of the plan handle's id
+   * @param validator the checks one scenario must pass before any is registered
+   * @param activator registers one scenario
+   * @param rollback undoes one registered scenario
+   * @return the plan handle
+   */
+  ChaosActivationHandle activatePlan(
+      final ChaosPlan plan,
+      final String scopeKey,
+      final String idPrefix,
+      final Consumer<ChaosScenario> validator,
+      final Function<ChaosScenario, ChaosActivationHandle> activator,
+      final Consumer<ChaosActivationHandle> rollback) {
     ensureOpen();
-    // Validate every scenario and check every id before anything is registered or started, so an
-    // invalid fifth scenario never forces a rollback of four that have already injected faults.
     for (final ChaosScenario scenario : plan.scenarios()) {
       try {
-        validate(scenario);
+        validator.accept(scenario);
       } catch (final RuntimeException invalid) {
         recordFailure(
             scenario.id(),
@@ -215,10 +252,10 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
             invalid.getMessage());
         throw invalid;
       }
-      if (registry.isLive("jvm::" + scenario.id())) {
+      final String key = scopeKey + "::" + scenario.id();
+      if (registry.isLive(key)) {
         final ChaosActivationException conflict =
-            new ChaosActivationConflictException(
-                "scenario key already active: jvm::" + scenario.id());
+            new ChaosActivationConflictException("scenario key already active: " + key);
         recordFailure(
             scenario.id(),
             ChaosDiagnostics.FailureCategory.ACTIVATION_CONFLICT,
@@ -232,11 +269,11 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
     final List<ChaosActivationHandle> handles = new ArrayList<>();
     try {
       for (final ChaosScenario scenario : plan.scenarios()) {
-        handles.add(activate(scenario));
+        handles.add(activator.apply(scenario));
       }
       final ChaosActivationHandle planHandle =
           new CompositeActivationHandle(
-              "plan:" + plan.metadata().name(), handles, () -> clearPlanObservability(ids, owner));
+              idPrefix + plan.metadata().name(), handles, () -> clearPlanObservability(ids, owner));
       if (plan.observability().debugDumpOnStart()) {
         System.err.println(registry.debugDump());
       }
@@ -245,23 +282,30 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
       clearPlanObservability(ids, owner);
       for (final ChaosActivationHandle handle : handles) {
         try {
-          // activate(ChaosScenario) on this class returns a DefaultChaosActivationHandle, and the
-          // plan-rollback list is populated exclusively by that path. Only
-          // destroy() unregisters the controller from the ScenarioRegistry; stop() alone would
-          // leave ghost STOPPED entries in diagnostics and block re-activation under the same
-          // id. Treat a non-default handle as a programmer error — it means this rollback list
-          // was populated from outside the expected path and the rollback contract has been
-          // broken.
-          if (!(handle instanceof DefaultChaosActivationHandle defaultHandle)) {
-            throw new IllegalStateException(
-                "plan rollback received unexpected handle type: " + handle.getClass().getName());
-          }
-          defaultHandle.destroy();
+          rollback.accept(handle);
         } catch (final RuntimeException rollbackFailure) {
           failure.addSuppressed(rollbackFailure);
         }
       }
       throw failure;
+    }
+  }
+
+  /**
+   * The checks a scenario must pass to be activated in a session: session scope, then the same
+   * compatibility checks as everywhere else.
+   *
+   * @param scenario the scenario
+   */
+  void validateInSession(final ChaosScenario scenario) {
+    requireSessionScope(scenario);
+    CompatibilityValidator.validate(scenario, featureSet);
+  }
+
+  private static void requireSessionScope(final ChaosScenario scenario) {
+    if (scenario.scope() != ChaosScenario.ScenarioScope.SESSION) {
+      throw new ChaosActivationException(
+          "session activation requires scenario scope SESSION for " + scenario.id());
     }
   }
 
@@ -355,10 +399,7 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
 
   DefaultChaosActivationHandle activateInSession(
       final DefaultChaosSession session, final ChaosScenario scenario) {
-    if (scenario.scope() != ChaosScenario.ScenarioScope.SESSION) {
-      throw new ChaosActivationException(
-          "session activation requires scenario scope SESSION for " + scenario.id());
-    }
+    requireSessionScope(scenario);
     return registerScenario(scenario, "session:" + session.id(), session.id());
   }
 

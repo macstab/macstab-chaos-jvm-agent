@@ -466,7 +466,7 @@ class ControlPlaneLifecycleTest {
     }
 
     @Test
-    @DisplayName("a session plan that fails part-way rolls back the scenarios it activated")
+    @DisplayName("a session plan with an invalid scenario activates none of its scenarios")
     void sessionPlanRollsBack() {
       try (ChaosSession session = runtime.openSession("plan")) {
         assertThatThrownBy(
@@ -479,9 +479,11 @@ class ControlPlaneLifecycleTest {
             .isInstanceOf(ChaosActivationException.class);
 
         assertThat(submissionRejected()).isFalse();
-        assertThat(count(ChaosEvent.Type.STOPPED, "ok")).isOne();
+        assertThat(count(ChaosEvent.Type.REGISTERED, "ok"))
+            .as("validated before registering")
+            .isZero();
       }
-      assertThat(count(ChaosEvent.Type.STOPPED, "ok")).as("not destroyed again").isOne();
+      assertThat(count(ChaosEvent.Type.STOPPED, "ok")).isZero();
     }
 
     private ChaosScenario sessionScenario(final String id) {
