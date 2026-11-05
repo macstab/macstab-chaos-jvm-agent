@@ -44,7 +44,8 @@ chaos-agent-core com/macstab/chaos/jvm/core/ObservabilityBus.java 99.10% race a 
 
 chaos-agent-instrumentation-jdk com/macstab/chaos/jvm/instrumentation/HttpUrlExtractor.java 96.49% race the cache's putIfAbsent loser path; Object.hashCode always exists
 chaos-agent-instrumentation-jdk com/macstab/chaos/jvm/instrumentation/JdbcTargetExtractor.java 94.59% unreachable a getPoolName() in a module package that is not opened; no JDK class declares one
-chaos-agent-instrumentation-jdk com/macstab/chaos/jvm/instrumentation/JdkInstrumentationInstaller.java 97.77% platform consistency checks between bridge and dispatcher that hold, ByteBuddy reporting errors instead of throwing, every retransform target present on JDK 21/25, the KQueue Netty hook without its jar
+chaos-agent-instrumentation-jdk com/macstab/chaos/jvm/instrumentation/JdkInstrumentationInstaller.java 95.85% platform consistency checks between bridge and dispatcher that hold, ByteBuddy reporting errors instead of throwing, every retransform target present on JDK 21/25
+chaos-agent-instrumentation-jdk com/macstab/chaos/jvm/instrumentation/ClientLibraryHooks.java 97.14% platform the KQueue Netty hook (macOS/BSD native transport) needs netty-transport-classes-kqueue, which the probe classpath does not carry
 chaos-agent-instrumentation-jdk com/macstab/chaos/jvm/instrumentation/BridgeInjector.java 92.85% platform Windows (an open jar cannot be deleted; no POSIX temp files), a stale-jar delete failing mid-sweep, a bridge class missing from the agent jar
 chaos-agent-instrumentation-jdk com/macstab/chaos/jvm/instrumentation/ModuleOpener.java 75.86% platform a JDK without one of the opened modules or packages, or one that refuses redefineModule
 chaos-agent-instrumentation-jdk com/macstab/chaos/jvm/instrumentation/MethodWeaver.java 96.96% unreachable installOn reports weave failures to the listener instead of throwing
