@@ -20,7 +20,12 @@ permissions:
 jobs:
   publish-snapshot:
     runs-on: ubuntu-latest
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    # Only a push to this repository's develop: a pull request from a fork can use a branch named
+    # develop too, and its code must never run with the publishing token.
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
 
     steps:
       - name: Debug workflow_run context
