@@ -1,15 +1,23 @@
 version: 2
 updates:
-  # Gradle dependencies: the version catalog and the plugins. Grouped per week so the build, which
-  # pins every integration by its version, is re-run once against the whole set.
+  # Gradle dependencies: the version catalog and the plugins. Minor and patch updates come as one
+  # weekly pull request; a major update comes alone, so one breaking change cannot hold back the
+  # rest.
   - package-ecosystem: gradle
     directory: /
     schedule:
       interval: weekly
     groups:
-      gradle:
+      gradle-minor-and-patch:
         patterns: ["*"]
-    open-pull-requests-limit: 5
+        update-types: [minor, patch]
+    ignore:
+      # The Spring Boot 3 and 4 starters pin one line each of the same artifacts; a major update
+      # would move the Boot 3 line to Boot 4.
+      - dependency-name: "org.springframework.boot:spring-boot-dependencies"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "org.springframework.boot"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: github-actions
     directory: /
     schedule:

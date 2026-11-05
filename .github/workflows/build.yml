@@ -4,7 +4,10 @@ on:
   pull_request:
     branches: [main, develop]
   push:
-    branches: [main, develop, feat/**]
+    branches: [main, develop]
+
+permissions:
+  contents: read
 
 # Deduplication by commit SHA: same commit runs once, duplicates are skipped.
 concurrency:
@@ -16,10 +19,6 @@ jobs:
     runs-on: ubuntu-latest
     # A hung test otherwise holds the runner for GitHub's 6-hour default.
     timeout-minutes: 30
-    # Branches of this repository are built on push; pull requests from forks, which get no push
-    # build here, are built on pull_request. Before, pull requests ran no checks at all.
-    if: |
-      github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
 
     steps:
       - name: Checkout code
@@ -71,15 +70,15 @@ jobs:
   jdk-matrix:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
-    # Branches of this repository are built on push; pull requests from forks, which get no push
-    # build here, are built on pull_request. Before, pull requests ran no checks at all.
-    if: |
-      github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, ubuntu-24.04-arm]
         java: [21, 25]
+        exclude:
+          # The build job already runs the tests on JDK 25 on amd64.
+          - os: ubuntu-latest
+            java: 25
 
     steps:
       - name: Checkout code
@@ -114,10 +113,6 @@ jobs:
   demos:
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    # Branches of this repository are built on push; pull requests from forks, which get no push
-    # build here, are built on pull_request. Before, pull requests ran no checks at all.
-    if: |
-      github.event_name == 'push' || github.event.pull_request.head.repo.full_name != github.repository
 
     steps:
       - name: Checkout code
