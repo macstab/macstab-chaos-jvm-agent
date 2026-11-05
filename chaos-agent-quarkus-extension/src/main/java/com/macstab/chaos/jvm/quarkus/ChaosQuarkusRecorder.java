@@ -68,13 +68,11 @@ public class ChaosQuarkusRecorder {
   }
 
   /**
-   * Reads {@code macstab.chaos.enabled} through MicroProfile Config, which in Quarkus covers system
-   * properties, environment variables ({@code MACSTAB_CHAOS_ENABLED}) and {@code
-   * application.properties}. Reading only system properties and environment variables ignored
-   * {@code application.properties}, while the ArC producer honoured it, so the producer created the
-   * bean but the runtime-init attach was skipped.
+   * Reads {@code macstab.chaos.enabled} at run time through MicroProfile Config: system properties,
+   * environment variables ({@code MACSTAB_CHAOS_ENABLED}) and {@code application.properties}. The
+   * runtime-init attach and the {@link ChaosArcProducer} both decide with it.
    */
-  private static boolean chaosEnabled() {
+  static boolean chaosEnabled() {
     return ConfigProvider.getConfig()
         .getOptionalValue(ENABLED_PROPERTY, Boolean.class)
         .orElse(Boolean.FALSE);

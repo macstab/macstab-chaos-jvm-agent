@@ -58,14 +58,20 @@ public class ChaosArcProducer {
    * the application provides its own producer — exactly the behaviour we want so that merely
    * shipping the extension on the classpath does not self-attach chaos in production.
    *
-   * @return the active {@link ChaosControlPlane}, installed on demand if the agent has not yet
-   *     attached
+   * <p>The build-time property only registers the producer; the agent is attached only while {@code
+   * macstab.chaos.enabled} is also true at run time. Otherwise the bean is an agent already
+   * installed ({@code -javaagent:}, the test extension), and injecting it without one fails.
+   *
+   * @return the active {@link ChaosControlPlane}
+   * @throws IllegalStateException when chaos is disabled at run time and no agent is installed
    */
   @Produces
   @ApplicationScoped
   @DefaultBean
   @IfBuildProperty(name = "macstab.chaos.enabled", stringValue = "true", enableIfMissing = false)
   public ChaosControlPlane chaosControlPlane() {
-    return ChaosPlatform.installLocally();
+    return ChaosQuarkusRecorder.chaosEnabled()
+        ? ChaosPlatform.installLocally()
+        : ChaosPlatform.current();
   }
 }

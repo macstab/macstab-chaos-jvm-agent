@@ -11,8 +11,35 @@ import org.junit.jupiter.api.Test;
 class ChaosArcProducerTest {
 
   @Test
-  @DisplayName("produces the control plane installed in this JVM")
-  void producesTheInstalledControlPlane() {
-    assertThat(new ChaosArcProducer().chaosControlPlane()).isSameAs(ChaosPlatform.installLocally());
+  @DisplayName("enabled at run time, it produces the control plane installed in this JVM")
+  void enabledProducesTheInstalledControlPlane() {
+    final String previous = System.getProperty(ChaosQuarkusRecorder.ENABLED_PROPERTY);
+    System.setProperty(ChaosQuarkusRecorder.ENABLED_PROPERTY, "true");
+    try {
+      assertThat(new ChaosArcProducer().chaosControlPlane()).isSameAs(ChaosPlatform.current());
+    } finally {
+      restore(previous);
+    }
+  }
+
+  @Test
+  @DisplayName("disabled at run time, it produces an agent that is already installed")
+  void disabledProducesTheAlreadyInstalledAgent() {
+    final var installed = ChaosPlatform.installLocally();
+    final String previous = System.getProperty(ChaosQuarkusRecorder.ENABLED_PROPERTY);
+    System.setProperty(ChaosQuarkusRecorder.ENABLED_PROPERTY, "false");
+    try {
+      assertThat(new ChaosArcProducer().chaosControlPlane()).isSameAs(installed);
+    } finally {
+      restore(previous);
+    }
+  }
+
+  private static void restore(final String previous) {
+    if (previous == null) {
+      System.clearProperty(ChaosQuarkusRecorder.ENABLED_PROPERTY);
+    } else {
+      System.setProperty(ChaosQuarkusRecorder.ENABLED_PROPERTY, previous);
+    }
   }
 }
