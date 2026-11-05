@@ -270,6 +270,52 @@ class ChaosManagementHandlerTest {
   }
 
   @Test
+  @DisplayName("the recorder's handler refuses anonymous requests unless allow-anonymous is set")
+  void recorderHandlerRefusesAnonymousByDefault() {
+    final io.quarkus.runtime.ShutdownContext shutdown =
+        new io.quarkus.runtime.ShutdownContext() {
+          @Override
+          public void addShutdownTask(final Runnable task) {}
+
+          @Override
+          public void addLastShutdownTask(final Runnable task) {}
+        };
+    final AtomicInteger status = new AtomicInteger();
+    final RoutingContext anonymous =
+        (RoutingContext)
+            Proxy.newProxyInstance(
+                RoutingContext.class.getClassLoader(),
+                new Class<?>[] {RoutingContext.class},
+                (self, method, args) ->
+                    switch (method.getName()) {
+                      case "normalizedPath" -> "/q/chaos";
+                      case "response" ->
+                          Proxy.newProxyInstance(
+                              HttpServerResponse.class.getClassLoader(),
+                              new Class<?>[] {HttpServerResponse.class},
+                              (r, m, a) -> {
+                                if (m.getName().equals("setStatusCode")) {
+                                  status.set((Integer) a[0]);
+                                }
+                                return m.getName().equals("end") ? Future.succeededFuture() : r;
+                              });
+                      default -> null;
+                    });
+    System.setProperty(ChaosManagementRecorder.ENABLED_PROPERTY, "true");
+    try {
+      final ChaosManagementHandler recorded =
+          (ChaosManagementHandler) new ChaosManagementRecorder().handler("/q/chaos", shutdown);
+
+      recorded.serve(anonymous, null);
+
+      assertThat(status.get()).isEqualTo(401);
+      recorded.close();
+    } finally {
+      System.clearProperty(ChaosManagementRecorder.ENABLED_PROPERTY);
+    }
+  }
+
+  @Test
   @DisplayName(
       "a body handler without a buffer, and an unreadable or empty body, reach the route as none")
   void unreadableBodyIsNoBody() throws Exception {
