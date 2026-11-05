@@ -65,7 +65,7 @@ public class ChaosContextConfigurer implements ApplicationContextConfigurer {
    * environment variable. The environment fallback uses upper-snake-case ({@code
    * MACSTAB_CHAOS_ENABLED}) to match the twelve-factor convention Micronaut itself adopts.
    */
-  private static boolean chaosEnabled() {
+  static boolean chaosEnabled() {
     final String sysProp = System.getProperty(ENABLED_PROPERTY);
     if (sysProp != null) {
       return Boolean.parseBoolean(sysProp);

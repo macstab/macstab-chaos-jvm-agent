@@ -16,11 +16,11 @@ import jakarta.inject.Singleton;
  * {@link ChaosControlPlane} bean (mirroring the {@code @ConditionalOnMissingBean} pattern used by
  * the Spring Boot starters).
  *
- * <p>The returned control plane is the JVM-wide instance installed via {@link
- * ChaosPlatform#installLocally()}. Closing the control plane is the responsibility of the JVM
- * shutdown sequence; this factory does not register a bean-level {@code preDestroy} hook because
- * the chaos platform tolerates multiple {@code close()} calls and must remain live for the entire
- * application lifetime.
+ * <p>The returned control plane is the JVM-wide instance; it attaches the agent only under the same
+ * opt-in as {@link ChaosContextConfigurer} (see {@link #chaosControlPlane()}). Closing the control
+ * plane is the responsibility of the JVM shutdown sequence; this factory does not register a
+ * bean-level {@code preDestroy} hook because the chaos platform tolerates multiple {@code close()}
+ * calls and must remain live for the entire application lifetime.
  */
 @Factory
 public class ChaosFactory {
@@ -29,14 +29,20 @@ public class ChaosFactory {
   public ChaosFactory() {}
 
   /**
-   * Exposes the installed {@link ChaosControlPlane} as a Micronaut singleton bean.
+   * Exposes the JVM's {@link ChaosControlPlane} as a Micronaut singleton bean. The agent is
+   * attached here only when {@value ChaosContextConfigurer#ENABLED_PROPERTY} is set, like the
+   * context configurer does; otherwise the bean is the agent already installed ({@code
+   * -javaagent:}, a chaos test extension), and injecting it without one fails.
    *
    * @return the JVM-wide control plane
+   * @throws IllegalStateException when chaos is not enabled and no agent is installed
    */
   @Bean
   @Singleton
   @Requires(missingBeans = ChaosControlPlane.class)
   public ChaosControlPlane chaosControlPlane() {
-    return ChaosPlatform.installLocally();
+    return ChaosContextConfigurer.chaosEnabled()
+        ? ChaosPlatform.installLocally()
+        : ChaosPlatform.current();
   }
 }
