@@ -52,20 +52,22 @@ class DispatchEngineEdgeTest {
   }
 
   @Nested
-  @DisplayName("readCount")
+  @DisplayName("transferCount")
   class ReadCount {
 
     @Test
     @DisplayName("a terminal that does not shape reads leaves the requested count")
     void otherTerminalLeavesCount() throws Throwable {
-      assertThat(engine.readCount(terminal(new TerminalAction.DnsRewrite("elsewhere", null)), 64))
+      assertThat(
+              engine.transferCount(terminal(new TerminalAction.DnsRewrite("elsewhere", null)), 64))
           .isEqualTo(64);
     }
 
     @Test
     @DisplayName("a length cap leaves a read of no bytes as it is")
     void capKeepsEmptyRead() throws Throwable {
-      assertThat(engine.readCount(terminal(new TerminalAction.CapLength(4L, null)), 0)).isZero();
+      assertThat(engine.transferCount(terminal(new TerminalAction.CapLength(4L, null)), 0))
+          .isZero();
     }
   }
 

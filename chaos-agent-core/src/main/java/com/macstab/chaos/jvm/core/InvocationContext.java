@@ -8,21 +8,21 @@ import org.jspecify.annotations.Nullable;
  * Immutable snapshot of a single intercepted JVM operation, passed to the scenario evaluation
  * pipeline.
  *
- * <p>An {@code InvocationContext} is constructed by {@code ChaosRuntime} at each instrumentation
- * point and forwarded to {@link ScenarioRegistry#match(InvocationContext)}, which passes it to
- * every registered {@link ScenarioController#evaluate(InvocationContext)}. The record is never
- * modified after construction.
+ * <p>An {@code InvocationContext} is built by the domain dispatcher of the intercepted call ({@code
+ * NetworkDispatch}, {@code FileDispatch}, …) and forwarded to {@link
+ * ScenarioRegistry#match(InvocationContext)}, which passes it to every registered {@link
+ * ScenarioController#evaluate(InvocationContext)}. The record is never modified after construction.
  *
  * @param operationType the kind of JVM operation being intercepted (e.g. {@link
  *     OperationType#THREAD_START}, {@link OperationType#SOCKET_CONNECT}); never {@code null}
  * @param targetClassName the binary name of the class that owns the intercepted method (e.g. {@code
- *     "java.net.Socket"}); never {@code null}
+ *     "java.net.Socket"}), or {@code null} when the advice supplies none
  * @param subjectClassName the binary name of the class of the concrete object at the interception
  *     point (e.g. the runtime class of the executor or socket), or {@code null} when not applicable
  *     (e.g. for static-method interceptions)
  * @param targetName the simple name identifying the specific resource within the target class —
  *     typically the method name, a library name, or an operation tag supplied by the advice (e.g.
- *     {@code "connect"}, {@code "libssl"}); never {@code null}
+ *     {@code "connect"}, {@code "libssl"}), or {@code null} when the advice supplies none
  * @param periodic {@code true} if the intercepted invocation is a recurring scheduled task; {@code
  *     false} for one-shot or non-scheduled operations
  * @param daemonThread {@code Boolean.TRUE} if the calling thread is a daemon thread, {@code
@@ -60,7 +60,7 @@ record InvocationContext(
     @Nullable String signature,
     int timeoutMillis) {
 
-  /** {@code byteCount} / {@code remotePort} of an operation that has none. */
+  /** {@code byteCount}, {@code remotePort} or {@code timeoutMillis} of a call that has none. */
   static final int UNKNOWN = -1;
 
   /**

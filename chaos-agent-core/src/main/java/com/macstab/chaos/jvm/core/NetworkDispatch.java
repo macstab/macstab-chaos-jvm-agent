@@ -226,7 +226,7 @@ public final class NetworkDispatch {
     if (engine.idle(OperationType.SOCKET_READ)) {
       return len;
     }
-    return engine.readCount(
+    return engine.transferCount(
         (engine.evaluate(
             new InvocationContext(
                 OperationType.SOCKET_READ,
@@ -266,7 +266,7 @@ public final class NetworkDispatch {
     if (engine.idle(OperationType.SOCKET_WRITE)) {
       return len;
     }
-    return engine.readCount(
+    return engine.transferCount(
         (engine.evaluate(
             new InvocationContext(
                 OperationType.SOCKET_WRITE,
@@ -301,7 +301,7 @@ public final class NetworkDispatch {
     if (engine.idle(OperationType.SOCKET_READ)) {
       return remaining;
     }
-    return engine.readCount(
+    return engine.transferCount(
         engine.evaluate(
             socketContext(OperationType.SOCKET_READ, channel, remaining, peerOf(channel), 0)),
         remaining);
@@ -322,7 +322,7 @@ public final class NetworkDispatch {
     if (engine.idle(OperationType.SOCKET_WRITE)) {
       return remaining;
     }
-    return engine.readCount(
+    return engine.transferCount(
         engine.evaluate(
             socketContext(
                 OperationType.SOCKET_WRITE,
@@ -391,7 +391,7 @@ public final class NetworkDispatch {
       engine.applyDelayAndGate(decision);
       return ChaosDispatcher.DATAGRAM_DROPPED;
     }
-    return engine.readCount(decision, length);
+    return engine.transferCount(decision, length);
   }
 
   /**
@@ -457,7 +457,7 @@ public final class NetworkDispatch {
     if (engine.idle(OperationType.NIO_CHANNEL_WRITE)) {
       return remaining;
     }
-    return engine.readCount(
+    return engine.transferCount(
         engine.evaluate(
             new InvocationContext(
                 OperationType.NIO_CHANNEL_WRITE,

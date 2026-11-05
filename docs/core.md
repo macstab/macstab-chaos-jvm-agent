@@ -153,7 +153,7 @@ The entry points the instrumentation layer calls (`before*`, `after*`, `adjust*`
 | `ProcessDispatch` | child process starts and waits |
 | `ClientDispatch` | HTTP clients, JDBC, messaging, RPC, cache and cloud clients |
 
-`DispatchEngine` holds what every domain shares: the operation index check (`idle`), matching scenarios against an `InvocationContext` (`evaluate`), resolving their contributions to one `RuntimeDecision` (`terminalActionFor`), and carrying it out (`applyPreDecision`, `applyDelayAndGate`, `readCount`). `ChaosDispatcher` composes them; `ChaosRuntime` delegates each entry point to its domain.
+`DispatchEngine` holds what every domain shares: the operation index check (`idle`), matching scenarios against an `InvocationContext` (`evaluate`), resolving their contributions to one `RuntimeDecision` (`terminalActionFor`), and carrying it out (`applyPreDecision`, `applyDelayAndGate`, `transferCount`). `ChaosDispatcher` composes them; `ChaosRuntime` delegates each entry point to its domain.
 
 ## Per-Invocation Evaluation
 

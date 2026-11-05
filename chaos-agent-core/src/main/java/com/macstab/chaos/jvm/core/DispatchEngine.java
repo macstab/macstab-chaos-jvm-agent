@@ -32,10 +32,11 @@ final class DispatchEngine {
   }
 
   /**
-   * Applies a read's decision and returns the byte count to read, flagging a corrupting read. Delay
-   * and gate run first; a throwing terminal throws; {@code TrickleEffect} lowers the count.
+   * Applies a read's or write's decision and returns the byte count to transfer, flagging a
+   * corrupting read. Delay and gate run first; a throwing terminal throws; {@code TrickleEffect}
+   * and a torn write lower the count.
    */
-  int readCount(final RuntimeDecision decision, final int requested) throws Throwable {
+  int transferCount(final RuntimeDecision decision, final int requested) throws Throwable {
     applyDelayAndGate(decision);
     final TerminalAction terminal = decision.terminalAction();
     if (terminal == null) {

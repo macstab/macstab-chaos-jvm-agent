@@ -43,7 +43,7 @@ public final class FileDispatch {
     if (engine.idle(fileIoOpType)) {
       return byteCount;
     }
-    return engine.readCount(
+    return engine.transferCount(
         (engine.evaluate(
             new InvocationContext(
                 fileIoOpType,
