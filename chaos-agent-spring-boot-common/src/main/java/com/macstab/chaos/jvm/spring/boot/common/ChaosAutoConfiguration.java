@@ -12,7 +12,6 @@ import org.springframework.boot.actuate.endpoint.annotation.Endpoint;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.ApplicationListener;
@@ -20,6 +19,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
+import org.springframework.core.env.ConfigurableEnvironment;
 
 /**
  * Auto-configuration that wires the chaos agent runtime into a Spring Boot application. Shared
@@ -42,6 +42,8 @@ import org.springframework.context.annotation.Import;
 public class ChaosAutoConfiguration {
 
   private static final Logger LOGGER = Logger.getLogger(ChaosAutoConfiguration.class.getName());
+
+  private static final String CONFIG_FILE_PROPERTY = "macstab.chaos.config-file";
 
   /** Default constructor invoked by Spring when the configuration is imported. */
   public ChaosAutoConfiguration() {}
@@ -83,6 +85,7 @@ public class ChaosAutoConfiguration {
    * @param controlPlane the chaos control plane bean
    * @param properties the chaos configuration properties
    * @param handleRegistry the starter-local handle registry
+   * @param environment the environment, to check where {@code config-file} comes from
    * @return an {@link ApplicationListener} that performs the startup work
    */
   @Bean
@@ -90,16 +93,24 @@ public class ChaosAutoConfiguration {
   public ApplicationListener<ApplicationReadyEvent> chaosStartupApplier(
       final ChaosControlPlane controlPlane,
       final ChaosProperties properties,
-      final ChaosHandleRegistry handleRegistry) {
-    return event -> applyStartup(controlPlane, properties, handleRegistry);
+      final ChaosHandleRegistry handleRegistry,
+      final ConfigurableEnvironment environment) {
+    return event -> applyStartup(controlPlane, properties, handleRegistry, environment);
   }
 
   private static void applyStartup(
       final ChaosControlPlane controlPlane,
       final ChaosProperties properties,
-      final ChaosHandleRegistry handleRegistry) {
+      final ChaosHandleRegistry handleRegistry,
+      final ConfigurableEnvironment environment) {
     final String configFile = properties.getConfigFile();
-    if (configFile != null && !configFile.isBlank()) {
+    // The plan file injects faults: an untrusted source may not name it, as for enabled.
+    if (configFile != null && TrustedChaosEnablement.rejected(environment, CONFIG_FILE_PROPERTY)) {
+      LOGGER.warning(
+          "chaos-agent: "
+              + CONFIG_FILE_PROPERTY
+              + " comes from an untrusted property source and is ignored");
+    } else if (configFile != null && !configFile.isBlank()) {
       // Strip CR/LF/NUL from the operator-supplied path before it enters any log record.
       // Without this, a property value like "/etc/plan.json\n2026-04-20 FORGED: chaos
       // deactivated" forges a second log line downstream in structured-log pipelines (CRLF
@@ -182,7 +193,7 @@ public class ChaosAutoConfiguration {
    */
   @Configuration(proxyBeanMethods = false)
   @ConditionalOnClass(Endpoint.class)
-  @ConditionalOnProperty(prefix = "macstab.chaos.actuator", name = "enabled", havingValue = "true")
+  @Conditional(OnTrustedActuatorEnablementCondition.class)
   public static class ActuatorConfiguration {
 
     /** Default constructor invoked by Spring when the nested configuration is imported. */

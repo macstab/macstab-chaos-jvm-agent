@@ -34,7 +34,7 @@ public class com/macstab/chaos/jvm/spring/boot/common/ChaosAutoConfiguration
   public method <init>()V
   public method chaosControlPlane()Lcom/macstab/chaos/jvm/api/ChaosControlPlane;
   public method chaosHandleRegistry()Lcom/macstab/chaos/jvm/spring/boot/common/ChaosHandleRegistry;
-  public method chaosStartupApplier(Lcom/macstab/chaos/jvm/api/ChaosControlPlane;Lcom/macstab/chaos/jvm/spring/boot/common/ChaosProperties;Lcom/macstab/chaos/jvm/spring/boot/common/ChaosHandleRegistry;)Lorg/springframework/context/ApplicationListener;
+  public method chaosStartupApplier(Lcom/macstab/chaos/jvm/api/ChaosControlPlane;Lcom/macstab/chaos/jvm/spring/boot/common/ChaosProperties;Lcom/macstab/chaos/jvm/spring/boot/common/ChaosHandleRegistry;Lorg/springframework/core/env/ConfigurableEnvironment;)Lorg/springframework/context/ApplicationListener;
 
 public static class com/macstab/chaos/jvm/spring/boot/common/ChaosAutoConfiguration$ActuatorConfiguration
   public method <init>()V

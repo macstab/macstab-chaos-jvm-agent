@@ -96,6 +96,34 @@ class ChaosStartupApplierTest {
   }
 
   @Test
+  @DisplayName("a plan file named by an untrusted source is ignored with a warning")
+  void untrustedPlanFileIsIgnored() throws IOException {
+    final Path plan = Files.writeString(directory.resolve("plan.json"), PLAN);
+    runner
+        .withInitializer(
+            context ->
+                context
+                    .getEnvironment()
+                    .getPropertySources()
+                    .addFirst(
+                        new org.springframework.core.env.MapPropertySource(
+                            "configserver:app",
+                            java.util.Map.of("macstab.chaos.config-file", plan.toString()))))
+        .run(
+            context -> {
+              ready(context);
+              assertThat(
+                      context.getBean(ChaosRuntime.class).diagnostics().scenario("startup-delay"))
+                  .isEmpty();
+              assertThat(logged)
+                  .anyMatch(
+                      record ->
+                          record.getMessage().contains("untrusted property source")
+                              && record.getMessage().contains("macstab.chaos.config-file"));
+            });
+  }
+
+  @Test
   @DisplayName("a missing or malformed plan is logged and leaves the application running")
   void badPlanIsLogged() throws IOException {
     final Path malformed = Files.writeString(directory.resolve("bad.json"), "{\"scenarios\": [");

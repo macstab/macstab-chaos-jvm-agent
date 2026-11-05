@@ -86,11 +86,45 @@ public final class TrustedChaosEnablement {
     if (enabled.trusted()) {
       return Decision.ENABLED;
     }
-    final Winner allowRemote = winner(environment, ALLOW_REMOTE_ENABLE_PROPERTY);
-    if (allowRemote != null && allowRemote.trusted() && Boolean.parseBoolean(allowRemote.value())) {
-      return Decision.ENABLED;
+    return remoteAllowed(environment) ? Decision.ENABLED : Decision.REJECTED_UNTRUSTED_SOURCE;
+  }
+
+  /**
+   * Returns the value of {@code propertyName} when the source it comes from is trusted, or when
+   * {@value #ALLOW_REMOTE_ENABLE_PROPERTY} allows untrusted sources; {@code null} when the property
+   * is absent or its source may not set it. For the settings that inject faults as {@value
+   * #ENABLED_PROPERTY} does: the actuator switch and the startup plan file.
+   *
+   * @param environment the environment to inspect
+   * @param propertyName the property, in canonical form
+   * @return the trusted value, or {@code null}
+   */
+  static @Nullable String trustedValue(
+      final ConfigurableEnvironment environment, final String propertyName) {
+    final Winner winner = winner(environment, propertyName);
+    if (winner == null) {
+      return null;
     }
-    return Decision.REJECTED_UNTRUSTED_SOURCE;
+    return winner.trusted() || remoteAllowed(environment) ? winner.value() : null;
+  }
+
+  /**
+   * Whether {@code propertyName} is set by a source that may not set it.
+   *
+   * @param environment the environment to inspect
+   * @param propertyName the property, in canonical form
+   * @return {@code true} when the property is present but its value is not trusted
+   */
+  static boolean rejected(final ConfigurableEnvironment environment, final String propertyName) {
+    return winner(environment, propertyName) != null
+        && trustedValue(environment, propertyName) == null;
+  }
+
+  private static boolean remoteAllowed(final ConfigurableEnvironment environment) {
+    final Winner allowRemote = winner(environment, ALLOW_REMOTE_ENABLE_PROPERTY);
+    return allowRemote != null
+        && allowRemote.trusted()
+        && Boolean.parseBoolean(allowRemote.value());
   }
 
   /** The value of a property and whether the source it came from is trusted. */

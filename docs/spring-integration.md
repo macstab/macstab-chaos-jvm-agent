@@ -698,9 +698,9 @@ All properties live under the `macstab.chaos` prefix and apply to both Boot 3 an
 |-------------------------------------|-----------|---------|----------------------------------------------------------------------------------------------------------------------|
 | `macstab.chaos.enabled`             | `boolean` | `false` | Master switch. Gates the early attach and all beans in `ChaosAutoConfiguration`; honoured only from trusted sources. |
 | `macstab.chaos.allow-remote-enable` | `boolean` | `false` | Lets `macstab.chaos.enabled` come from any property source. Itself honoured only from a trusted source.              |
-| `macstab.chaos.config-file`         | `String`  | `null`  | Absolute or relative path to a JSON plan file. Loaded on `ApplicationReadyEvent`. Null or blank = no startup plan.   |
+| `macstab.chaos.config-file`         | `String`  | `null`  | Absolute or relative path to a JSON plan file. Loaded on `ApplicationReadyEvent`. Null or blank = no startup plan. Honoured only from trusted sources. |
 | `macstab.chaos.debug-dump-on-start` | `boolean` | `false` | If `true`, logs the full `controlPlane.diagnostics().debugDump()` output at `INFO` after the startup plan activates. |
-| `macstab.chaos.actuator.enabled`    | `boolean` | `false` | Enables `ChaosActuatorEndpoint`. Requires both this flag and `spring-boot-actuator` on the classpath.                |
+| `macstab.chaos.actuator.enabled`    | `boolean` | `false` | Enables `ChaosActuatorEndpoint`. Requires both this flag and `spring-boot-actuator` on the classpath. Honoured only from trusted sources. |
 | `macstab.chaos.session-propagation.enabled` | `boolean` | `true` | Registers `ChaosSessionFilter` in servlet applications: a request carrying `X-Chaos-Session` runs in that chaos session, so session-scoped scenarios reach the server side of calls a test makes. The test starters register it in every test application; the runtime starters only together with `macstab.chaos.enabled`. It only joins sessions already open in this JVM. |
 
 Full YAML example showing all options:

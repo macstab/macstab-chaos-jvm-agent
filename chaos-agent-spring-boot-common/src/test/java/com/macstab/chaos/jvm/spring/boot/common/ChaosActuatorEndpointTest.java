@@ -37,6 +37,22 @@ class ChaosActuatorEndpointTest {
   }
 
   @Test
+  @DisplayName("endpoint bean is absent when actuator.enabled=true comes from an untrusted source")
+  void endpointAbsentWhenSwitchUntrusted() {
+    runner
+        .withPropertyValues("macstab.chaos.enabled=true")
+        .withInitializer(
+            context ->
+                context
+                    .getEnvironment()
+                    .getPropertySources()
+                    .addFirst(
+                        new org.springframework.core.env.MapPropertySource(
+                            "configserver:app", Map.of("macstab.chaos.actuator.enabled", "true"))))
+        .run(context -> assertThat(context).doesNotHaveBean(ChaosActuatorEndpoint.class));
+  }
+
+  @Test
   @DisplayName("endpoint bean is absent when macstab.chaos.actuator.enabled is default")
   void endpointAbsentByDefault() {
     runner

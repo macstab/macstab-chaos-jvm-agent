@@ -17,6 +17,50 @@ import org.springframework.core.env.StandardEnvironment;
 class TrustedChaosEnablementTest {
 
   @Nested
+  @DisplayName("other fault-injecting settings (actuator switch, plan file)")
+  class OtherSettings {
+
+    private static final String ACTUATOR = "macstab.chaos.actuator.enabled";
+
+    @Test
+    @DisplayName("a trusted source sets the value")
+    void trustedSourceSets() {
+      final var environment = environmentWith(source("systemProperties", ACTUATOR, "true"));
+      assertThat(TrustedChaosEnablement.trustedValue(environment, ACTUATOR)).isEqualTo("true");
+      assertThat(TrustedChaosEnablement.rejected(environment, ACTUATOR)).isFalse();
+    }
+
+    @Test
+    @DisplayName("an untrusted source is rejected, even when a trusted one holds the property too")
+    void untrustedSourceIsRejected() {
+      final var environment =
+          environmentWith(
+              source("configserver:app", ACTUATOR, "true"),
+              source("commandLineArgs", ACTUATOR, "false"));
+      assertThat(TrustedChaosEnablement.trustedValue(environment, ACTUATOR)).isNull();
+      assertThat(TrustedChaosEnablement.rejected(environment, ACTUATOR)).isTrue();
+    }
+
+    @Test
+    @DisplayName("allow-remote-enable from a trusted source admits an untrusted value")
+    void remoteAllowed() {
+      final var environment =
+          environmentWith(
+              source("configserver:app", ACTUATOR, "true"),
+              source("systemProperties", "macstab.chaos.allow-remote-enable", "true"));
+      assertThat(TrustedChaosEnablement.trustedValue(environment, ACTUATOR)).isEqualTo("true");
+    }
+
+    @Test
+    @DisplayName("an absent property is neither set nor rejected")
+    void absent() {
+      final var environment = environmentWith();
+      assertThat(TrustedChaosEnablement.trustedValue(environment, ACTUATOR)).isNull();
+      assertThat(TrustedChaosEnablement.rejected(environment, ACTUATOR)).isFalse();
+    }
+  }
+
+  @Nested
   @DisplayName("decision")
   class Decision {
 
