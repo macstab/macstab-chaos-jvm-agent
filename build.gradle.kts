@@ -9,7 +9,9 @@ buildscript {
     }
     dependencies {
         classpath("com.diffplug.spotless:spotless-plugin-gradle:8.2.1")
-        classpath("org.jacoco:org.jacoco.core:0.8.12")
+        classpath(libs.jacoco.core)
+        // apiDump reads the class files with ASM.
+        classpath(libs.asm)
     }
 }
 
@@ -34,6 +36,7 @@ allprojects {
 val junitBom = libs.junit.bom
 val junitPlatformLauncher = libs.junit.platform.launcher
 val jspecify = libs.jspecify
+val jacocoVersion = libs.versions.jacoco.get()
 
 // Modules that are for demonstration / measurement only and MUST NOT be published.
 val nonPublishableModules = setOf(
@@ -103,7 +106,7 @@ subprojects {
     }
 
     extensions.configure<JacocoPluginExtension> {
-        toolVersion = "0.8.12"
+        toolVersion = jacocoVersion
     }
 
     tasks.withType<JavaCompile>().configureEach {
@@ -114,10 +117,6 @@ subprojects {
                 "-parameters",
                 "-Xlint:all,-serial,-processing,-try",
                 "-Xlint:-classfile",
-                "-Xmaxerrs",
-                "10000",
-                "-Xmaxwarns",
-                "10000",
                 "-Werror",
             ),
         )

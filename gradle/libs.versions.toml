@@ -1,6 +1,7 @@
 [versions]
 apacheHc4 = "4.5.14"
 apacheHc5 = "5.3.1"
+asm = "9.10.1"
 awaitility = "4.2.2"
 byteBuddy = "1.17.8"
 c3p0 = "0.10.1"
@@ -8,6 +9,7 @@ googleJavaFormat = "1.33.0"
 h2 = "2.3.232"
 hikariCp = "5.1.0"
 jackson = "2.19.4"
+jacoco = "0.8.12"
 jmh = "1.37"
 jqwik = "1.9.3"
 archunit = "1.5.1"
@@ -36,6 +38,7 @@ r2dbcH2 = "1.1.0.RELEASE"
 
 [libraries]
 jspecify = { module = "org.jspecify:jspecify", version.ref = "jspecify" }
+asm = { module = "org.ow2.asm:asm", version.ref = "asm" }
 archunit-junit5 = { module = "com.tngtech.archunit:archunit-junit5", version.ref = "archunit" }
 micrometer-core = { module = "io.micrometer:micrometer-core", version.ref = "micrometer" }
 opentelemetry-api = { module = "io.opentelemetry:opentelemetry-api", version.ref = "opentelemetry" }
@@ -60,6 +63,8 @@ hikari-cp = { module = "com.zaxxer:HikariCP", version.ref = "hikariCp" }
 byte-buddy-agent = { module = "net.bytebuddy:byte-buddy-agent", version.ref = "byteBuddy" }
 jackson-annotations = { module = "com.fasterxml.jackson.core:jackson-annotations", version.ref = "jackson" }
 jackson-databind = { module = "com.fasterxml.jackson.core:jackson-databind", version.ref = "jackson" }
+jacoco-agent = { module = "org.jacoco:org.jacoco.agent", version.ref = "jacoco" }
+jacoco-core = { module = "org.jacoco:org.jacoco.core", version.ref = "jacoco" }
 jackson-jsr310 = { module = "com.fasterxml.jackson.datatype:jackson-datatype-jsr310", version.ref = "jackson" }
 jmh-core = { module = "org.openjdk.jmh:jmh-core", version.ref = "jmh" }
 jmh-generator-annprocess = { module = "org.openjdk.jmh:jmh-generator-annprocess", version.ref = "jmh" }

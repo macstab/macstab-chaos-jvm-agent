@@ -42,7 +42,7 @@ dependencies {
     testCompileOnly(libs.apache.httpclient5)
     testCompileOnly(libs.reactor.netty.http)
     testCompileOnly(libs.apache.httpclient4)
-    jacocoChildAgent("org.jacoco:org.jacoco.agent:0.8.12:runtime")
+    jacocoChildAgent(variantOf(libs.jacoco.agent) { classifier("runtime") })
     coverageProbe(libs.apache.httpclient4)
     coverageProbe(libs.c3p0)
     httpClientProbe(libs.okhttp)
