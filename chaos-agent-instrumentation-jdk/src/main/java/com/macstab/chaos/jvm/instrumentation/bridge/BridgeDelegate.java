@@ -180,11 +180,11 @@ public interface BridgeDelegate {
    * Wraps a shutdown hook thread before it is registered with the JVM, allowing a scenario to track
    * or intercept JVM shutdown.
    *
-   * @param hook the shutdown-hook thread submitted by the application; never {@code null}
-   * @return the (possibly wrapped) thread to register
+   * @param hook the shutdown-hook thread submitted by the application, or {@code null}
+   * @return the (possibly wrapped) thread to register; {@code null} for a {@code null} hook
    * @throws Throwable if the delegate throws
    */
-  Thread decorateShutdownHook(Thread hook) throws Throwable;
+  @Nullable Thread decorateShutdownHook(@Nullable Thread hook) throws Throwable;
 
   /**
    * Resolves the original application hook from a previously wrapped hook thread.

@@ -910,11 +910,13 @@ public final class BootstrapDispatcher {
    * Wraps a shutdown hook thread before it is registered with the JVM, allowing a scenario to track
    * or intercept JVM shutdown.
    *
-   * @param hook the shutdown-hook thread submitted by the application; never {@code null}
+   * @param hook the shutdown-hook thread submitted by the application; {@code null} when the
+   *     application passed none (the JDK then throws)
    * @return the (possibly wrapped) thread to register; equals {@code hook} as the fallback
    * @throws Throwable if the delegate throws
    */
-  public static Thread decorateShutdownHook(final Thread hook) throws Throwable {
+  public static @Nullable Thread decorateShutdownHook(final @Nullable Thread hook)
+      throws Throwable {
     final int[] depth = DEPTH.get();
     if (depth[0] > 0) {
       return hook;
@@ -923,7 +925,9 @@ public final class BootstrapDispatcher {
     try {
       final MethodHandle[] h = handles;
       final Object d = delegate;
-      return (d == null || h == null) ? hook : (Thread) h[DECORATE_SHUTDOWN_HOOK].invoke(d, hook);
+      return (d == null || h == null)
+          ? hook
+          : (@Nullable Thread) h[DECORATE_SHUTDOWN_HOOK].invoke(d, hook);
     } catch (final Throwable throwable) {
       sneakyThrow(throwable);
       return hook;

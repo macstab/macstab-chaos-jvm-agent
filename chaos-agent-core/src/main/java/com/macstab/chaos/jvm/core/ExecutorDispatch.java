@@ -298,11 +298,11 @@ public final class ExecutorDispatch {
    * Runtime#addShutdownHook(Thread)}.
    *
    * @param hook the shutdown hook being registered; may be {@code null}
-   * @return the thread to register in place of {@code hook}, or {@code hook} itself when decoration
-   *     is skipped
+   * @return the thread to register in place of {@code hook}: its wrapper (the same one when the
+   *     hook is already registered), or {@code null} for a {@code null} hook
    * @throws Throwable if a matching scenario's terminal action mandates it
    */
-  public Thread decorateShutdownHook(final Thread hook) throws Throwable {
+  public @Nullable Thread decorateShutdownHook(final @Nullable Thread hook) throws Throwable {
     final RuntimeDecision decision =
         (engine.idle(OperationType.SHUTDOWN_HOOK_REGISTER)
             ? RuntimeDecision.none()
@@ -319,6 +319,15 @@ public final class ExecutorDispatch {
     // A throwing terminal (reject) unwinds here; suppress is rejected for this operation at
     // activation (CompatibilityValidator), so every other decision registers the wrapper.
     engine.applyPreDecision(decision);
+    if (hook == null) {
+      return null; // Runtime.addShutdownHook throws its own NullPointerException
+    }
+    final Thread registered = shutdownHooks.get(hook);
+    if (registered != null) {
+      // The JDK rejects the wrapper it already holds ("Hook previously registered"), as it would
+      // reject the hook itself; a second wrapper would run the hook twice.
+      return registered;
+    }
     final java.util.concurrent.atomic.AtomicReference<@Nullable Thread> hookRef =
         new java.util.concurrent.atomic.AtomicReference<>(hook);
     final Thread decorated =
@@ -333,7 +342,10 @@ public final class ExecutorDispatch {
             },
             hook.getName() + "-macstab-chaos-wrapper");
     decorated.setDaemon(hook.isDaemon());
-    shutdownHooks.put(hook, decorated);
+    final Thread raced = shutdownHooks.putIfAbsent(hook, decorated);
+    if (raced != null) {
+      return raced;
+    }
     hookDelegateRefs.put(hook, hookRef);
     return decorated;
   }

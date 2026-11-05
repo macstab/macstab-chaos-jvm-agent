@@ -451,6 +451,33 @@ class ExecutorDispatchTest {
     }
 
     @Test
+    @DisplayName("a missing hook without a matching scenario reaches the JDK as null")
+    void missingHookPassesThrough() throws Throwable {
+      activate(
+          "hooks",
+          ChaosSelector.shutdown(Set.of(OperationType.SHUTDOWN_HOOK_REGISTER)),
+          ChaosEffect.delay(Duration.ofMillis(1)));
+
+      assertThat(runtime.decorateShutdownHook(null)).isNull();
+    }
+
+    @Test
+    @DisplayName("a hook registered twice gets its first wrapper, so the JDK rejects the second")
+    void hookRegisteredTwice() throws Throwable {
+      activate(
+          "hooks",
+          ChaosSelector.shutdown(Set.of(OperationType.SHUTDOWN_HOOK_REGISTER)),
+          ChaosEffect.delay(Duration.ofMillis(1)));
+      final Thread hook = new Thread(runs::incrementAndGet, "twice-hook");
+
+      final Thread first = runtime.decorateShutdownHook(hook);
+
+      assertThat(runtime.decorateShutdownHook(hook)).isSameAs(first);
+      assertThat(runtime.resolveShutdownHook(hook)).isSameAs(first);
+      assertThat(runtime.resolveShutdownHook(hook)).isSameAs(hook);
+    }
+
+    @Test
     @DisplayName("the wrapper of a daemon hook is a daemon too")
     void daemonWrapper() throws Throwable {
       activate(

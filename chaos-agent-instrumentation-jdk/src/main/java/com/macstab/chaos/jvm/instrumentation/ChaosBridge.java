@@ -204,7 +204,7 @@ final class ChaosBridge implements BridgeDelegate {
    * @throws Throwable if the runtime decides to abort hook registration
    */
   @Override
-  public Thread decorateShutdownHook(final Thread hook) throws Throwable {
+  public @Nullable Thread decorateShutdownHook(final @Nullable Thread hook) throws Throwable {
     return runtime.decorateShutdownHook(hook);
   }
 
