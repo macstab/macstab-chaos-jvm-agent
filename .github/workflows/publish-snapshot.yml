@@ -11,7 +11,7 @@ on:
 # CRITICAL: serialize snapshot publishes - parallel runs corrupt artifacts.
 concurrency:
   group: publish-snapshot-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   packages: write
@@ -28,15 +28,6 @@ jobs:
       github.event.workflow_run.head_repository.full_name == github.repository
 
     steps:
-      - name: Debug workflow_run context
-        run: |
-          echo "=== Workflow Run Context ==="
-          echo "head_branch: ${{ github.event.workflow_run.head_branch }}"
-          echo "head_sha:    ${{ github.event.workflow_run.head_sha }}"
-          echo "github.ref:  ${{ github.ref }}"
-          echo "github.sha:  ${{ github.sha }}"
-          echo "event:       ${{ github.event.workflow_run.event }}"
-
       - name: Checkout code
         uses: actions/checkout@v4
         with:
