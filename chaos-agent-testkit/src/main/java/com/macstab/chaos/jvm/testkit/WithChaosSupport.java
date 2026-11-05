@@ -17,8 +17,9 @@ import org.junit.platform.commons.support.AnnotationSupport;
 
 /**
  * Activates the {@link WithChaos} scenarios declared on a test class or method. Shared by every
- * test extension, so the annotation means the same in plain JUnit, Spring, Micronaut and Quarkus
- * tests.
+ * test extension, so the annotation is read the same way in plain JUnit, Spring, Micronaut and
+ * Quarkus tests; which threads a session-scoped scenario reaches depends on the extension (see
+ * {@link WithChaos}).
  */
 public final class WithChaosSupport {
 

@@ -19,7 +19,10 @@ import java.lang.annotation.Target;
  * (class-level annotation, Spring and Micronaut) ends.
  *
  * <p>Honoured by the testkit's {@link ChaosAgentExtension} and by the Spring Boot, Micronaut and
- * Quarkus test extensions, so the same annotation works in every stack.
+ * Quarkus test extensions. The testkit extension also binds the test thread to the session when the
+ * test declares scenarios; the framework extensions do not, so there a session-scoped scenario
+ * reaches the threads bound to the test's session (for example requests carrying its {@code
+ * X-Chaos-Session} header) and the work they hand off.
  *
  * <pre>{@code
  * @ExtendWith(ChaosAgentExtension.class)
