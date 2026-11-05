@@ -363,6 +363,55 @@ class NetworkDispatchTest {
     }
 
     @Test
+    @DisplayName("a reset on a connection that refuses SO_LINGER closes it normally")
+    void resetOnABrokenConnectionClosesNormally() {
+      activate(
+          "reset",
+          ChaosSelector.network(Set.of(OperationType.SOCKET_CLOSE)),
+          ChaosEffect.connectionReset());
+      // Whether the OS refuses SO_LINGER on a socket depends on its state and the platform; a
+      // channel that always refuses reaches the same path on every OS.
+      final java.nio.channels.NetworkChannel broken =
+          new java.nio.channels.NetworkChannel() {
+            @Override
+            public java.nio.channels.NetworkChannel bind(final java.net.SocketAddress local) {
+              return this;
+            }
+
+            @Override
+            public <T> java.nio.channels.NetworkChannel setOption(
+                final java.net.SocketOption<T> name, final T value) throws java.io.IOException {
+              throw new java.io.IOException("Connection reset by peer");
+            }
+
+            @Override
+            public <T> T getOption(final java.net.SocketOption<T> name) {
+              throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public Set<java.net.SocketOption<?>> supportedOptions() {
+              return Set.of(java.net.StandardSocketOptions.SO_LINGER);
+            }
+
+            @Override
+            public java.net.SocketAddress getLocalAddress() {
+              return new java.net.InetSocketAddress(0);
+            }
+
+            @Override
+            public boolean isOpen() {
+              return true;
+            }
+
+            @Override
+            public void close() {}
+          };
+
+      assertThatCode(() -> runtime.beforeSocketClose(broken)).doesNotThrowAnyException();
+    }
+
+    @Test
     @DisplayName("a connection reset sets linger 0 on the socket, after a composed delay")
     void connectionResetSetsLingerZero() throws Throwable {
       delayThen(
