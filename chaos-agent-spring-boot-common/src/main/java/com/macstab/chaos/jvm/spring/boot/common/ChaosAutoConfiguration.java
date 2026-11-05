@@ -19,6 +19,7 @@ import org.springframework.context.ApplicationListener;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Import;
 
 /**
  * Auto-configuration that wires the chaos agent runtime into a Spring Boot application. Shared
@@ -37,6 +38,7 @@ import org.springframework.context.annotation.Configuration;
 @AutoConfiguration
 @Conditional(OnTrustedChaosEnablementCondition.class)
 @EnableConfigurationProperties(ChaosProperties.class)
+@Import(ChaosSessionPropagationConfiguration.class)
 public class ChaosAutoConfiguration {
 
   private static final Logger LOGGER = Logger.getLogger(ChaosAutoConfiguration.class.getName());

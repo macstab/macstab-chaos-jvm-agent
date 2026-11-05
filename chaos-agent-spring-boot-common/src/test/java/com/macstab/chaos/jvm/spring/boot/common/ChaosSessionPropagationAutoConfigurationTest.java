@@ -12,7 +12,10 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 
-/** The session filter is on by default, off by property, and backs off for a user's own. */
+/**
+ * The session filter is on by default in the test starters, off by property, backs off for a user's
+ * own, and in a running application exists only when chaos is enabled.
+ */
 @DisplayName("Session propagation auto-configuration")
 class ChaosSessionPropagationAutoConfigurationTest {
 
@@ -53,6 +56,14 @@ class ChaosSessionPropagationAutoConfigurationTest {
             context ->
                 assertThat(context.getBean(ChaosSessionFilter.class))
                     .isSameAs(context.getBean(OwnFilter.class).filter));
+  }
+
+  @Test
+  @DisplayName("a running application without trusted chaos enablement has no filter")
+  void runtimeNeedsEnablement() {
+    new ApplicationContextRunner()
+        .withConfiguration(AutoConfigurations.of(ChaosAutoConfiguration.class))
+        .run(context -> assertThat(context).doesNotHaveBean(ChaosSessionFilter.class));
   }
 
   @Configuration(proxyBeanMethods = false)
