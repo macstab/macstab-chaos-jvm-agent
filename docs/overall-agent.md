@@ -234,141 +234,110 @@ Consequence: a test can safely activate session-scoped chaos and submit work to 
 
 ## Component Diagram — Answering: What depends on what?
 
-```plantuml
-@startuml
-skinparam componentStyle rectangle
-
-package "Public API" {
-  [chaos-agent-api]
-}
-
-package "Agent Runtime" {
-  [chaos-agent-bootstrap]
-  [chaos-agent-core]
-  [chaos-agent-instrumentation-jdk]
-  [chaos-agent-startup-config]
-}
-
-package "Test Support" {
-  [chaos-agent-testkit]
-}
-
-[chaos-agent-bootstrap] --> [chaos-agent-core]
-[chaos-agent-bootstrap] --> [chaos-agent-instrumentation-jdk]
-[chaos-agent-bootstrap] --> [chaos-agent-startup-config]
-[chaos-agent-core] --> [chaos-agent-api]
-[chaos-agent-instrumentation-jdk] --> [chaos-agent-core]
-[chaos-agent-instrumentation-jdk] --> [chaos-agent-api]
-[chaos-agent-startup-config] --> [chaos-agent-api]
-[chaos-agent-testkit] --> [chaos-agent-api]
-[chaos-agent-testkit] --> [chaos-agent-bootstrap]
-
-note bottom of [chaos-agent-api]
-  Stable public contract.
-  All other modules are internal.
-end note
-@enduml
+```mermaid
+flowchart TB
+  subgraph g1["Public API"]
+    n2["chaos-agent-api"]
+  end
+  subgraph g3["Agent Runtime"]
+    n4["chaos-agent-bootstrap"]
+    n5["chaos-agent-core"]
+    n6["chaos-agent-instrumentation-jdk"]
+    n7["chaos-agent-startup-config"]
+  end
+  subgraph g8["Test Support"]
+    n9["chaos-agent-testkit"]
+  end
+  n4 --> n5
+  n4 --> n6
+  n4 --> n7
+  n5 --> n2
+  n6 --> n5
+  n6 --> n2
+  n7 --> n2
+  n9 --> n2
+  n9 --> n4
+  note10["Stable public contract.<br/>The API of startup-config, testkit and the<br/>integrations is recorded and checked too."]
+  note10 -.- n2
 ```
 
 **Takeaway**: Only `chaos-agent-api` is a stable external contract. All other modules are internal implementation detail, even if public in the Java sense.
 
 ## Sequence Diagram — Hot path through ByteBuddy → BootstrapDispatcher → ChaosRuntime
 
-```plantuml
-@startuml
-participant "Application Thread" as T
-participant "ByteBuddy Advice\n(bootstrap CL)" as A
-participant "BootstrapDispatcher\n(bootstrap CL)" as BD
-participant "ChaosBridge\n(agent CL)" as CB
-participant "ChaosRuntime\n(agent CL)" as CR
-participant "ScenarioRegistry\n(agent CL)" as SR
-participant "ScenarioController\n(agent CL)" as SC
-
-T -> A: call instrumented JDK method
-A -> BD: decorateExecutorRunnable(op, executor, task)
-BD -> BD: DEPTH guard check
-BD -> CB: h[0].invoke(delegate, op, executor, task)\nvia MethodHandle
-CB -> CR: decorateExecutorRunnable(op, executor, task)
-CR -> CR: build InvocationContext
-CR -> SR: match(context)
-SR -> SC: evaluate(context) [for each controller]
-SC -> SC: 9-step pipeline
-SC --> SR: ScenarioContribution or null
-SR --> CR: List<ScenarioContribution>
-CR -> CR: merge → RuntimeDecision
-CR -> CR: applyPreDecision / sleep
-CR --> CB: (possibly wrapped) Runnable
-CB --> BD: Runnable
-BD -> BD: DEPTH--; remove if 0
-BD --> A: Runnable
-A --> T: (original method runs with wrapped task)
-@enduml
+```mermaid
+sequenceDiagram
+  participant T as Application Thread
+  participant A as ByteBuddy Advice<br/>(bootstrap CL)
+  participant BD as BootstrapDispatcher<br/>(bootstrap CL)
+  participant CB as ChaosBridge<br/>(agent CL)
+  participant CR as ChaosRuntime<br/>(agent CL)
+  participant SR as ScenarioRegistry<br/>(agent CL)
+  participant SC as ScenarioController<br/>(agent CL)
+  T->>A: call instrumented JDK method
+  A->>BD: decorateExecutorRunnable(op, executor, task)
+  BD->>BD: DEPTH guard check
+  BD->>CB: h[0].invoke(delegate, op, executor, task)<br/>via MethodHandle
+  CB->>CR: decorateExecutorRunnable(op, executor, task)
+  CR->>CR: build InvocationContext
+  CR->>SR: match(context)
+  SR->>SC: evaluate(context) [for each controller]
+  SC->>SC: 9-step pipeline
+  SC-->>SR: ScenarioContribution or null
+  SR-->>CR: List#lt;ScenarioContribution#gt;
+  CR->>CR: merge → RuntimeDecision
+  CR->>CR: applyPreDecision / sleep
+  CR-->>CB: (possibly wrapped) Runnable
+  CB-->>BD: Runnable
+  BD->>BD: DEPTH--#59; remove if 0
+  BD-->>A: Runnable
+  A-->>T: (original method runs with wrapped task)
 ```
 
 **Takeaway**: Every intercepted JDK operation crosses the bootstrap-to-agent classloader boundary via a pre-built `MethodHandle`. The full round-trip is: application thread → advice → BootstrapDispatcher → ChaosBridge → ChaosRuntime → ScenarioRegistry → ScenarioController × N → back.
 
 ## State Diagram — ScenarioController lifecycle
 
-```plantuml
-@startuml
-[*] --> REGISTERED : constructor\n(startMode=AUTOMATIC\nor MANUAL)
-REGISTERED --> ACTIVE : start()
-ACTIVE --> INACTIVE : activeFor expired\nor maxApplications reached
-ACTIVE --> STOPPED : stop() / destroy()
-INACTIVE --> STOPPED : stop() / destroy()
-STOPPED --> [*]
-
-note right of ACTIVE
-  evaluate() returns
-  ScenarioContribution
-end note
-
-note right of INACTIVE
-  evaluate() returns null.
-  State transition happens inside
-  evaluate() on the calling thread.
-  No background sweeper.
-end note
-
-note right of STOPPED
-  gate released.
-  stressor closed.
-  clockSkewState nulled.
-end note
-@enduml
+```mermaid
+sequenceDiagram
+  ___-->>REGISTERED: constructor<br/>(startMode=AUTOMATIC<br/>or MANUAL)
+  REGISTERED-->>ACTIVE: start()
+  ACTIVE-->>INACTIVE: activeFor expired<br/>or maxApplications reached
+  ACTIVE-->>STOPPED: stop() / destroy()
+  INACTIVE-->>STOPPED: stop() / destroy()
+  STOPPED-->>___:
+  Note right of ACTIVE: evaluate() returns<br/>ScenarioContribution
+  Note right of INACTIVE: evaluate() returns null.<br/>State transition happens inside<br/>evaluate() on the calling thread.<br/>No background sweeper.
+  Note right of STOPPED: gate released.<br/>stressor closed.<br/>clockSkewState nulled.
 ```
 
 **Takeaway**: State transitions to INACTIVE happen lazily inside `evaluate()` on the calling thread — there is no background expiry sweeper for interceptor scenarios (a stressor's `activeFor` is enforced by a scheduled expiry). STOPPED is terminal; a stopped controller cannot be restarted. Activating the same id again registers a new controller that replaces the STOPPED or INACTIVE one; a duplicate id while the old one is REGISTERED or ACTIVE throws `ChaosActivationException`.
 
 ## Deployment Diagram — classloader structure at runtime
 
-```plantuml
-@startuml
-node "JVM Process" {
-  artifact "Bootstrap ClassLoader" {
-    component "java.lang.*\njava.util.*\njava.net.*\netc." as JDK
-    component "BootstrapDispatcher\n(temp JAR injected at startup)" as BD
-  }
-
-  artifact "Agent ClassLoader" {
-    component "ChaosRuntime" as CR
-    component "ScenarioRegistry" as SR
-    component "ChaosBridge" as CB
-    component "ByteBuddy Advice Classes" as ADV
-    component "Stressor threads" as ST
-  }
-
-  artifact "Application ClassLoader" {
-    component "Application Code" as APP
-  }
-
-  JDK ..> BD : advice calls (static)
-  BD ..> CB : MethodHandle[]
-  CB ..> CR : direct call
-  CR ..> SR : local field
-  ADV ..> JDK : woven into
-}
-@enduml
+```mermaid
+flowchart TB
+  subgraph g1["JVM Process"]
+  subgraph g2["Bootstrap ClassLoader"]
+    JDK["java.lang.*<br/>java.util.*<br/>java.net.*<br/>etc."]
+    BD["BootstrapDispatcher<br/>(temp JAR injected at startup)"]
+  end
+  subgraph g3["Agent ClassLoader"]
+    CR["ChaosRuntime"]
+    SR["ScenarioRegistry"]
+    CB["ChaosBridge"]
+    ADV["ByteBuddy Advice Classes"]
+    ST["Stressor threads"]
+  end
+  subgraph g4["Application ClassLoader"]
+    APP["Application Code"]
+  end
+  JDK -.->|"advice calls (static)"| BD
+  BD -.->|"MethodHandle[]"| CB
+  CB -.->|"direct call"| CR
+  CR -.->|"local field"| SR
+  ADV -.->|"woven into"| JDK
+  end
 ```
 
 **Takeaway**: `BootstrapDispatcher` must be visible to JDK classes; it therefore lives in the bootstrap classloader. `ChaosRuntime` and all policy logic live in the agent classloader. The `MethodHandle[]` array is the only communication path across the classloader boundary; no class cast is performed across it.

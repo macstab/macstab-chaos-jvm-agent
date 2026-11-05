@@ -255,110 +255,98 @@ Note: `applyPreDecision` is not used for operations that return a value; those o
 
 ## Class Diagram — Core Component Relationships
 
-```plantuml
-@startuml
-class ChaosRuntime {
-  +activate(scenario) : ChaosActivationHandle
-  +openSession(name) : ChaosSession
-  +diagnostics() : ChaosDiagnostics
-  +before*() / after*() / adjust*() / decorate*()
-  -registry : ScenarioRegistry
-  -scopeContext : ScopeContext
-  -observabilityBus : ObservabilityBus
-  -featureSet : FeatureSet
-}
-
-class ScenarioRegistry {
-  +register(controller)
-  +unregister(controller)
-  +match(context) : List<ScenarioContribution>
-  +snapshot() : Snapshot
-  -controllers : ConcurrentHashMap<String, ScenarioController>
-  -index : volatile Map<OperationType, ScenarioController[]>
-  -failures : ConcurrentLinkedQueue<ActivationFailure>
-}
-
-class ScenarioController {
-  +evaluate(context) : ScenarioContribution
-  +start() / stop() / release() / destroy()
-  -started : AtomicBoolean
-  -matchedCount : AtomicLong
-  -appliedCount : AtomicLong
-  -state : volatile ScenarioState
-  -gate : ManualGate
-  -stressor : volatile ManagedStressor
-  -clockSkewState : volatile ClockSkewState
-}
-
-class SelectorMatcher {
-  +{static} matches(selector, context) : boolean
-}
-
-class InvocationContext {
-  operationType
-  targetClassName
-  subjectClassName
-  targetName
-  periodic
-  daemonThread
-  virtualThread
-  sessionId
-}
-
-class RuntimeDecision {
-  delayMillis
-  gateAction
-  terminalAction
-}
-
-class ScenarioContribution {
-  controller
-  scenario
-  effect
-  delayMillis
-  gateTimeout
-}
-
-ChaosRuntime --> ScenarioRegistry
-ChaosRuntime --> ScopeContext
-ScenarioRegistry "1" *-- "N" ScenarioController
-ScenarioController --> SelectorMatcher
-ScenarioController --> ManualGate
-ScenarioController --> ManagedStressor
-ChaosRuntime ..> InvocationContext : creates
-ScenarioRegistry ..> ScenarioContribution : returns
-ChaosRuntime ..> RuntimeDecision : builds
-@enduml
+```mermaid
+classDiagram
+  class ChaosRuntime {
+    +activate(scenario) : ChaosActivationHandle
+    +openSession(name) : ChaosSession
+    +diagnostics() : ChaosDiagnostics
+    +beforeX() / afterX() / adjustX() / decorateX()
+    -registry : ScenarioRegistry
+    -scopeContext : ScopeContext
+    -observabilityBus : ObservabilityBus
+    -featureSet : FeatureSet
+  }
+  class ScenarioRegistry {
+    +register(controller)
+    +unregister(controller)
+    +match(context) : List~ScenarioContribution~
+    +snapshot() : Snapshot
+    -controllers : ConcurrentHashMap~String, ScenarioController~
+    -index : Map~OperationType, ScenarioController[]~
+    -failures : ConcurrentLinkedQueue~ActivationFailure~
+  }
+  class ScenarioController {
+    +evaluate(context) : ScenarioContribution
+    +start() / stop() / release() / destroy()
+    -started : AtomicBoolean
+    -matchedCount : AtomicLong
+    -appliedCount : AtomicLong
+    -state : ScenarioState
+    -gate : ManualGate
+    -stressor : ManagedStressor
+    -clockSkewState : ClockSkewState
+  }
+  class SelectorMatcher {
+    +matches(selector, context) : boolean$
+  }
+  class InvocationContext {
+    operationType
+    targetClassName
+    subjectClassName
+    targetName
+    periodic
+    daemonThread
+    virtualThread
+    sessionId
+  }
+  class RuntimeDecision {
+    delayMillis
+    gateAction
+    terminalAction
+  }
+  class ScenarioContribution {
+    controller
+    scenario
+    effect
+    delayMillis
+    gateTimeout
+  }
+  ChaosRuntime --> ScenarioRegistry
+  ChaosRuntime --> ScopeContext
+  ScenarioRegistry "1" *-- "N" ScenarioController
+  ScenarioController --> SelectorMatcher
+  ScenarioController --> ManualGate
+  ScenarioController --> ManagedStressor
+  ChaosRuntime ..> InvocationContext : creates
+  ScenarioRegistry ..> ScenarioContribution : returns
+  ChaosRuntime ..> RuntimeDecision : builds
 ```
 
 **Takeaway**: `ChaosRuntime` is a thin orchestrator. The substantive decisions are in `ScenarioController.evaluate()` (policy) and `SelectorMatcher.matches()` (routing).
 
 ## Sequence Diagram — Gate Effect Lifecycle
 
-```plantuml
-@startuml
-participant "Application Thread A" as A
-participant "ChaosRuntime" as CR
-participant "ScenarioController" as SC
-participant "ManualGate" as G
-participant "Test Thread" as T
-
-T -> CR: activate(gateScenario) → handle
-CR -> SC: start()
-SC -> G: reset()
-
-A -> CR: beforeSocketConnect(...)
-CR -> SC: evaluate(context) → contribution with GateEffect
-CR -> G: await(maxBlock)
-note over G: A blocks here
-
-T -> T: observe A is blocked
-T -> SC: handle.release()
-SC -> G: release()
-note over G: A unblocks
-G --> CR: returns
-CR -> A: continues
-@enduml
+```mermaid
+sequenceDiagram
+  participant A as Application Thread A
+  participant CR as ChaosRuntime
+  participant SC as ScenarioController
+  participant G as ManualGate
+  participant T as Test Thread
+  T->>CR: activate(gateScenario) → handle
+  CR->>SC: start()
+  SC->>G: reset()
+  A->>CR: beforeSocketConnect(...)
+  CR->>SC: evaluate(context) → contribution with GateEffect
+  CR->>G: await(maxBlock)
+  Note over G: A blocks here
+  T->>T: observe A is blocked
+  T->>SC: handle.release()
+  SC->>G: release()
+  Note over G: A unblocks
+  G-->>CR: returns
+  CR->>A: continues
 ```
 
 **Takeaway**: `ManualGate` is a reusable barrier backed by `ReentrantLock + Condition`. Each `release()` opens the gate for all currently waiting threads. The gate is auto-reset by `start()` on the next activation.

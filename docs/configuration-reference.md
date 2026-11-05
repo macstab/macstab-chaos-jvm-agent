@@ -243,57 +243,48 @@ The plan file is deserialized by `ChaosPlanMapper` (Jackson) at startup. The exa
 
 *Answers: what are the major components and how does configuration flow into scenario activation?*
 
-```plantuml
-@startuml chaos-config-components
-!theme plain
-skinparam componentStyle rectangle
-
-package "External Configuration" {
-  [JVM Agent Args\n(configJson/configFile)] as AgentArgs
-  [Environment Variables\n(MACSTAB_CHAOS_*)] as EnvVars
-  [Config File\n(JSON on disk)] as ConfigFile
-}
-
-package "chaos-agent-startup-config" {
-  [StartupConfigLoader] as SCL
-  [AgentArgsParser] as AAP
-  [ChaosPlanMapper\n(Jackson)] as CPM
-}
-
-package "chaos-agent-api" {
-  [ChaosPlan] as Plan
-  [ChaosScenario] as Scenario
-  [ChaosSelector] as Selector
-  [ChaosEffect] as Effect
-  [ActivationPolicy] as Policy
-}
-
-package "chaos-agent-core" {
-  [ChaosControlPlane\n(facade)] as CCP
-  [ScenarioRegistry] as SR
-  [ChaosDispatcher\n(hot path)] as CD
-}
-
-package "chaos-agent-bootstrap" {
-  [BootstrapDispatcher\n(67 slots)] as BD
-}
-
-AgentArgs --> AAP
-EnvVars --> SCL
-ConfigFile --> SCL
-AAP --> SCL
-SCL --> CPM : raw JSON/base64/file
-CPM --> Plan : deserialized
-Plan --> Scenario
-Scenario --> Selector
-Scenario --> Effect
-Scenario --> Policy
-Plan --> CCP : activate(plan)
-CCP --> SR : register scenarios
-SR --> CD : evaluated on every call
-CD --> BD : slot dispatch
-BD --> [JDK instrumented\nmethods] : advice woven
-@enduml
+```mermaid
+flowchart TB
+  subgraph g1["External Configuration"]
+    AgentArgs["JVM Agent Args<br/>(configJson/configFile)"]
+    EnvVars["Environment Variables<br/>(MACSTAB_CHAOS_*)"]
+    ConfigFile["Config File<br/>(JSON on disk)"]
+  end
+  subgraph g2["chaos-agent-startup-config"]
+    SCL["StartupConfigLoader"]
+    AAP["AgentArgsParser"]
+    CPM["ChaosPlanMapper<br/>(Jackson)"]
+  end
+  subgraph g3["chaos-agent-api"]
+    Plan["ChaosPlan"]
+    Scenario["ChaosScenario"]
+    Selector["ChaosSelector"]
+    Effect["ChaosEffect"]
+    Policy["ActivationPolicy"]
+  end
+  subgraph g4["chaos-agent-core"]
+    CCP["ChaosControlPlane<br/>(facade)"]
+    SR["ScenarioRegistry"]
+    CD["ChaosDispatcher<br/>(hot path)"]
+  end
+  subgraph g5["chaos-agent-bootstrap"]
+    BD["BootstrapDispatcher<br/>(67 slots)"]
+  end
+  AgentArgs --> AAP
+  EnvVars --> SCL
+  ConfigFile --> SCL
+  AAP --> SCL
+  SCL -->|"raw JSON/base64/file"| CPM
+  CPM -->|"deserialized"| Plan
+  Plan --> Scenario
+  Scenario --> Selector
+  Scenario --> Effect
+  Scenario --> Policy
+  Plan -->|"activate(plan)"| CCP
+  CCP -->|"register scenarios"| SR
+  SR -->|"evaluated on every call"| CD
+  CD -->|"slot dispatch"| BD
+  BD -->|"advice woven"| n6
 ```
 
 **Takeaway:** configuration is a one-way flow from external sources through deserialization into the ScenarioRegistry. At runtime, `ChaosDispatcher` evaluates active scenarios on every instrumented call without touching the configuration path.
@@ -304,24 +295,19 @@ BD --> [JDK instrumented\nmethods] : advice woven
 
 *Answers: what states can a scenario be in and what transitions are possible?*
 
-```plantuml
-@startuml chaos-scenario-state
-!theme plain
-
-[*] --> REGISTERED : activate() with StartMode.MANUAL
-[*] --> ACTIVE     : activate() with StartMode.AUTOMATIC
-
-REGISTERED --> ACTIVE   : handle.start()
-ACTIVE     --> ACTIVE   : effect applied (ChaosEvent.APPLIED)
-ACTIVE     --> ACTIVE   : handle.release() re-arms a gate (ChaosEvent.RELEASED)
-ACTIVE     --> INACTIVE : maxApplications reached or activeFor elapsed
-REGISTERED --> STOPPED  : handle.stop()
-ACTIVE     --> STOPPED  : handle.stop()
-INACTIVE   --> STOPPED  : handle.stop()
-
-STOPPED  --> [*] : handle.close() unregisters
-INACTIVE --> [*] : handle.close() unregisters
-@enduml
+```mermaid
+sequenceDiagram
+  ___-->>REGISTERED: activate() with StartMode.MANUAL
+  ___-->>ACTIVE: activate() with StartMode.AUTOMATIC
+  REGISTERED-->>ACTIVE: handle.start()
+  ACTIVE-->>ACTIVE: effect applied (ChaosEvent.APPLIED)
+  ACTIVE-->>ACTIVE: handle.release() re-arms a gate (ChaosEvent.RELEASED)
+  ACTIVE-->>INACTIVE: maxApplications reached or activeFor elapsed
+  REGISTERED-->>STOPPED: handle.stop()
+  ACTIVE-->>STOPPED: handle.stop()
+  INACTIVE-->>STOPPED: handle.stop()
+  STOPPED-->>___: handle.close() unregisters
+  INACTIVE-->>___: handle.close() unregisters
 ```
 
 **Takeaway:** `ACTIVE` does not mean "effect always fires" — the activation policy filters matches via probability, rate, count, and time constraints. `STOPPED` is final: `start()` after `stop()` has no effect. `close()` stops **and** unregisters the scenario. Activating the same id again works once the previous scenario is `STOPPED` or `INACTIVE` (it is replaced); a duplicate id while the previous one is `REGISTERED` or `ACTIVE` throws `ChaosActivationException`.

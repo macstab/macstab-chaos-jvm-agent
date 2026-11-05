@@ -628,81 +628,75 @@ The reentrancy guard short-circuits when chaos code itself calls instrumented JD
 
 ### Structural diagram
 
-```plantuml
-@startuml
-!theme plain
-title macstab-chaos-jvm-agent — Module Architecture
+*macstab-chaos-jvm-agent — Module Architecture*
 
-skinparam componentStyle rectangle
-skinparam component {
-  BackgroundColor<<api>> #E8F4FD
-  BackgroundColor<<core>> #FFF3E0
-  BackgroundColor<<bridge>> #F3E5F5
-  BackgroundColor<<boot>> #E8F5E9
-  BackgroundColor<<config>> #FFF8E1
-  BackgroundColor<<test>> #FCE4EC
-  BackgroundColor<<spring>> #E0F2F1
-}
+```mermaid
+flowchart TB
+  subgraph contract["Public Contract"]
+    api["chaos-agent-api<br/>sealed ChaosSelector (25 selector types), ChaosEffect (33 effect types)<br/>records ChaosScenario, ChaosPlan, ActivationPolicy, NamePattern<br/>OperationType (91 operation types)"]
+  end
+  subgraph runtime["Runtime"]
+    core["chaos-agent-core"]
+    instr["chaos-agent-instrumentation-jdk<br/>ByteBuddy @Advice + BootstrapDispatcher (bootstrap CL)<br/>77 handle slots, ThreadLocal&lt;int[]&gt; reentrancy guard,<br/>volatile two-field publication"]
+    config["chaos-agent-startup-config"]
+    boot["chaos-agent-bootstrap"]
+  end
+  subgraph testing["Test-Time Integrations"]
+    testkit["chaos-agent-testkit"]
+    sb3t["chaos-agent-spring-boot3-test-starter"]
+    sb4t["chaos-agent-spring-boot4-test-starter"]
+  end
+  subgraph integrations["Runtime Integrations"]
+    sbc["chaos-agent-spring-boot-common"]
+    sb3["chaos-agent-spring-boot3-starter"]
+    sb4["chaos-agent-spring-boot4-starter"]
+    qx["chaos-agent-quarkus-extension (+ deployment)"]
+    qm["chaos-agent-quarkus-management (+ deployment)"]
+    mn["chaos-agent-micronaut-integration"]
+    mm["chaos-agent-micrometer"]
+    otel["chaos-agent-opentelemetry"]
+  end
 
-package "Public Contract" {
-  [chaos-agent-api] <<api>>
-}
+  core --> api
+  instr --> core
+  instr --> api
+  config --> api
+  boot --> core
+  boot --> instr
+  boot --> config
+  testkit --> boot
+  testkit --> config
+  testkit --> api
+  sb3t --> testkit
+  sb4t --> testkit
+  sb3t --> sbc
+  sb4t --> sbc
+  sbc --> boot
+  sb3 --> sbc
+  sb4 --> sbc
+  qx --> testkit
+  qx --> boot
+  qm --> core
+  qm --> boot
+  mn --> testkit
+  mn --> boot
+  mm --> core
+  otel --> core
 
-package "Runtime" {
-  [chaos-agent-core]                  <<core>>
-  [chaos-agent-instrumentation-jdk]   <<bridge>>
-  [chaos-agent-startup-config]        <<config>>
-  [chaos-agent-bootstrap]             <<boot>>
-}
-
-package "Test-Time Integrations" {
-  [chaos-agent-testkit]                     <<test>>
-  [chaos-agent-spring-boot3-test-starter]   <<test>>
-  [chaos-agent-spring-boot4-test-starter]   <<test>>
-}
-
-package "Runtime Integrations" {
-  [chaos-agent-spring-boot3-starter]  <<spring>>
-  [chaos-agent-spring-boot4-starter]  <<spring>>
-}
-
-[chaos-agent-core]                --> [chaos-agent-api]
-[chaos-agent-instrumentation-jdk] --> [chaos-agent-core]
-[chaos-agent-instrumentation-jdk] --> [chaos-agent-api]
-[chaos-agent-startup-config]      --> [chaos-agent-api]
-
-[chaos-agent-bootstrap] --> [chaos-agent-core]
-[chaos-agent-bootstrap] --> [chaos-agent-instrumentation-jdk]
-[chaos-agent-bootstrap] --> [chaos-agent-startup-config]
-
-[chaos-agent-testkit]                   --> [chaos-agent-bootstrap]
-[chaos-agent-testkit]                   --> [chaos-agent-api]
-[chaos-agent-spring-boot3-test-starter] --> [chaos-agent-testkit]
-[chaos-agent-spring-boot4-test-starter] --> [chaos-agent-testkit]
-
-[chaos-agent-spring-boot3-starter] --> [chaos-agent-bootstrap]
-[chaos-agent-spring-boot4-starter] --> [chaos-agent-bootstrap]
-
-note right of [chaos-agent-api]
-  Sealed hierarchies:
-    ChaosSelector (19 subtypes)
-    ChaosEffect   (23 subtypes)
-  Records:
-    ChaosScenario, ChaosPlan,
-    ActivationPolicy, NamePattern
-  Enums:
-    OperationType (67 values)
-end note
-
-note bottom of [chaos-agent-instrumentation-jdk]
-  ByteBuddy @Advice +
-  BootstrapDispatcher (bootstrap CL)
-  — 57 MethodHandles
-  — ThreadLocal<int[]> reentrancy guard
-  — volatile two-field publication
-end note
-
-@enduml
+  classDef apiStyle fill:#E8F4FD,stroke:#5B8DB8,color:#000
+  classDef coreStyle fill:#FFF3E0,stroke:#C28A3A,color:#000
+  classDef bridgeStyle fill:#F3E5F5,stroke:#8E5BA8,color:#000
+  classDef bootStyle fill:#E8F5E9,stroke:#4E9A5B,color:#000
+  classDef configStyle fill:#FFF8E1,stroke:#C2A13A,color:#000
+  classDef testStyle fill:#FCE4EC,stroke:#B8587A,color:#000
+  classDef springStyle fill:#E0F2F1,stroke:#3E8E86,color:#000
+  class api apiStyle
+  class core coreStyle
+  class instr bridgeStyle
+  class boot bootStyle
+  class config configStyle
+  class testkit,sb3t,sb4t testStyle
+  class sbc,sb3,sb4,qx,qm,mn,mm,otel springStyle
 ```
 
 `plantuml` code fences do not render on GitHub directly — copy the source into the IntelliJ PlantUML plugin, `plantuml.jar`, or [plantuml.com/plantuml](https://www.plantuml.com/plantuml) to render. Pre-rendered diagrams for this and all downstream sequences live in [`docs/overall-agent.md`](docs/overall-agent.md).

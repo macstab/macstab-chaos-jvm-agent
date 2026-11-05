@@ -223,58 +223,37 @@ The `ImportAutoConfiguration.imports` layout is consulted only when the test cla
 
 ### 2.6 Sequence Diagram — Test Lifecycle
 
-```plantuml
-@startuml
-skinparam sequenceMessageAlign center
-skinparam responseMessageBelowArrow true
-
-participant "JUnit Engine" as JUnit
-participant "ChaosAgentExtension\nbeforeAll" as Ext
-participant "ChaosPlatform\n(idempotent)" as Platform
-participant "ChaosAgentInitializer\n(context init)" as Init
-participant "Spring\nApplicationContext" as Spring
-participant "Test Method" as Test
-participant "ChaosAgentExtension\nafterAll" as After
-
-JUnit -> Ext: beforeAll(context)
-Ext -> Platform: installLocally()
-note right of Platform
-  First call: dynamic self-attach via JVM Attach API.
-  Subsequent calls: return already-installed instance.
-end note
-Platform --> Ext: ChaosControlPlane
-Ext -> Ext: controlPlane.openSession(displayName)
-Ext -> Ext: store.put(ChaosControlPlane.class, cp)
-Ext -> Ext: store.put(ChaosSession.class, session)
-
-JUnit -> Init: initialize(applicationContext)
-note right of Init
-  Fires before ApplicationContext.refresh().
-  Guarantees agent is installed before any
-  @Bean / @PostConstruct executes.
-end note
-Init -> Spring: addFirst(property source\n  macstab.chaos.test.enabled=true)
-Init -> Platform: installLocally()
-Platform --> Init: ChaosControlPlane (same instance)
-
-JUnit -> Spring: refresh()
-Spring -> Spring: instantiate beans (incl.\nChaosTestAutoConfiguration\n.chaosControlPlane()),\n@PostConstruct, listeners...
-Spring --> JUnit: context ready
-
-JUnit -> Test: execute test method
-Test -> Test: inject ChaosSession\n(via ParameterResolver, parent-walk)
-Test -> Test: session.activate(...)\nsession.bind()\n...
-
-JUnit -> After: afterAll(context)
-After -> After: store.remove(ChaosSession.class)
-After -> After: session.close()
-note right of After
-  Stops all session-scoped ScenarioControllers,
-  then tracker.stopTracked() stops JVM-scoped
-  handles activated via the injected control plane.
-  Other JVM-scoped scenarios are unaffected.
-end note
-@enduml
+```mermaid
+sequenceDiagram
+  participant JUnit as JUnit Engine
+  participant Ext as ChaosAgentExtension<br/>beforeAll
+  participant Platform as ChaosPlatform<br/>(idempotent)
+  participant Init as ChaosAgentInitializer<br/>(context init)
+  participant Spring as Spring<br/>ApplicationContext
+  participant Test as Test Method
+  participant After as ChaosAgentExtension<br/>afterAll
+  JUnit->>Ext: beforeAll(context)
+  Ext->>Platform: installLocally()
+  Note right of Platform: First call: dynamic self-attach via JVM Attach API.<br/>Subsequent calls: return already-installed instance.
+  Platform-->>Ext: ChaosControlPlane
+  Ext->>Ext: controlPlane.openSession(displayName)
+  Ext->>Ext: store.put(ChaosControlPlane.class, cp)
+  Ext->>Ext: store.put(ChaosSession.class, session)
+  JUnit->>Init: initialize(applicationContext)
+  Note right of Init: Fires before ApplicationContext.refresh().<br/>Guarantees agent is installed before any<br/>@Bean / @PostConstruct executes.
+  Init->>Spring: addFirst(property source<br/>  macstab.chaos.test.enabled=true)
+  Init->>Platform: installLocally()
+  Platform-->>Init: ChaosControlPlane (same instance)
+  JUnit->>Spring: refresh()
+  Spring->>Spring: instantiate beans (incl.<br/>ChaosTestAutoConfiguration<br/>.chaosControlPlane()),<br/>@PostConstruct, listeners...
+  Spring-->>JUnit: context ready
+  JUnit->>Test: execute test method
+  Test->>Test: inject ChaosSession<br/>(via ParameterResolver, parent-walk)
+  Test->>Test: session.activate(...)<br/>session.bind()<br/>...
+  JUnit->>After: afterAll(context)
+  After->>After: store.remove(ChaosSession.class)
+  After->>After: session.close()
+  Note right of After: Stops all session-scoped ScenarioControllers,<br/>then tracker.stopTracked() stops JVM-scoped<br/>handles activated via the injected control plane.<br/>Other JVM-scoped scenarios are unaffected.
 ```
 
 ---
@@ -648,40 +627,29 @@ The registry is a `DisposableBean`. On context close, `destroy()` sets a closing
 
 ### 3.7 Sequence Diagram — POST `/actuator/chaos`
 
-```plantuml
-@startuml
-skinparam sequenceMessageAlign center
-skinparam responseMessageBelowArrow true
-
-actor "Operator" as Op
-participant "HTTP Layer\n(Spring Web)" as HTTP
-participant "ChaosActuatorEndpoint" as Endpoint
-participant "ChaosPlanMapper" as Mapper
-participant "ChaosControlPlane\n(ChaosRuntime)" as CP
-participant "ScenarioRegistry" as Registry
-participant "ChaosHandleRegistry" as HandleReg
-
-Op -> HTTP: POST /actuator/chaos\nBody: {"planJson": "<escaped plan JSON>"}
-HTTP -> Endpoint: activate(planJson)
-Endpoint -> Endpoint: null/blank check
-Endpoint -> Mapper: read(planJson)
-Mapper --> Endpoint: ChaosPlan
-Endpoint -> CP: activate(plan)
-CP -> Registry: registerScenario(controller) per scenario
-Registry --> CP: ScenarioController registered
-CP -> CP: controller.start()\n(AUTOMATIC start mode)
-CP --> Endpoint: ChaosActivationHandle
-Endpoint -> HandleReg: register(handle)
-Endpoint --> HTTP: ActivationResponse("activated", handleId, null)
-HTTP --> Op: 200 OK\n{"status":"activated","handleId":"plan:<name>","message":null}
-
-note over Registry
-  ScenarioController is now ACTIVE.
-  Every subsequent instrumented JDK call
-  on any thread runs through the 9-step
-  evaluation pipeline against this scenario.
-end note
-@enduml
+```mermaid
+sequenceDiagram
+  actor Op as Operator
+  participant HTTP as HTTP Layer<br/>(Spring Web)
+  participant Endpoint as ChaosActuatorEndpoint
+  participant Mapper as ChaosPlanMapper
+  participant CP as ChaosControlPlane<br/>(ChaosRuntime)
+  participant Registry as ScenarioRegistry
+  participant HandleReg as ChaosHandleRegistry
+  Op->>HTTP: POST /actuator/chaos<br/>Body: {"planJson": "#lt;escaped plan JSON#gt;"}
+  HTTP->>Endpoint: activate(planJson)
+  Endpoint->>Endpoint: null/blank check
+  Endpoint->>Mapper: read(planJson)
+  Mapper-->>Endpoint: ChaosPlan
+  Endpoint->>CP: activate(plan)
+  CP->>Registry: registerScenario(controller) per scenario
+  Registry-->>CP: ScenarioController registered
+  CP->>CP: controller.start()<br/>(AUTOMATIC start mode)
+  CP-->>Endpoint: ChaosActivationHandle
+  Endpoint->>HandleReg: register(handle)
+  Endpoint-->>HTTP: ActivationResponse("activated", handleId, null)
+  HTTP-->>Op: 200 OK<br/>{"status":"activated","handleId":"plan:#lt;name#gt;","message":null}
+  Note over Registry: ScenarioController is now ACTIVE.<br/>Every subsequent instrumented JDK call<br/>on any thread runs through the 9-step<br/>evaluation pipeline against this scenario.
 ```
 
 ---

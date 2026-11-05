@@ -193,85 +193,76 @@ This identity check fires before any delegation. When `DEPTH` reads itself, the 
 
 ## Bootstrap Bridge Architecture
 
-```plantuml
-@startuml
-node "Bootstrap ClassLoader" {
-  rectangle "JDK classes\n(java.lang.Thread,\njava.net.Socket, etc.)" as JDK
-  rectangle "BootstrapDispatcher\n(injected via temp JAR)\n\nvolatile Object delegate\nvolatile MethodHandle[] handles\nThreadLocal<int[]> DEPTH" as BD
-}
-
-node "Agent ClassLoader" {
-  rectangle "ChaosBridge\nimplements BridgeDelegate" as CB
-  rectangle "ChaosRuntime" as CR
-}
-
-JDK --> BD : "@Advice static call\n(Bootstrap-visible)"
-BD --> CB : "handles[N].invoke(delegate, args)\n(MethodHandle cross-CL call)"
-CB --> CR : "direct method call\n(same classloader)"
-
-note bottom of BD
-  Two-field safe publication:
-  handles written BEFORE delegate.
-  null-check on both before dispatch.
-end note
-@enduml
+```mermaid
+flowchart TB
+  subgraph g1["Bootstrap ClassLoader"]
+    JDK["JDK classes<br/>(java.lang.Thread,<br/>java.net.Socket, etc.)"]
+    BD["BootstrapDispatcher<br/>(injected via temp JAR)<br/><br/>volatile Object delegate<br/>volatile MethodHandle[] handles<br/>ThreadLocal<int[]> DEPTH"]
+  end
+  subgraph g2["Agent ClassLoader"]
+    CB["ChaosBridge<br/>implements BridgeDelegate"]
+    CR["ChaosRuntime"]
+  end
+  JDK -->|""@Advice static call<br/>(Bootstrap-visible)""| BD
+  BD -->|""handles[N].invoke(delegate, args)<br/>(MethodHandle cross-CL call)""| CB
+  CB -->|""direct method call<br/>(same classloader)""| CR
+  note3["Two-field safe publication:<br/>handles written BEFORE delegate.<br/>null-check on both before dispatch."]
+  note3 -.- BD
 ```
 
 **Takeaway**: The only crossing of the classloader boundary is via `MethodHandle.invoke()`. No class cast is performed across classloaders. Type erasure (`Object` typed parameters) absorbs the type mismatch.
 
 ## Interception Map
 
-```plantuml
-@startuml
-rectangle "Executor and thread hook groups" {
-  [Thread.start() / start(ThreadContainer)]
-  [VirtualThread.start() / start(ThreadContainer)]
-  [ThreadPoolExecutor.execute()]
-  [ThreadPoolExecutor.beforeExecute()]
-  [ThreadPoolExecutor.shutdown()]
-  [ThreadPoolExecutor.awaitTermination()]
-  [ScheduledThreadPoolExecutor.schedule*()] 
-  [ScheduledCallableWrapper / ScheduledRunnableWrapper (tick)]
-}
-
-rectangle "JDK and library hook groups" {
-  [BlockingQueue.put/take/offer/poll]
-  [CompletableFuture.complete/completeExceptionally/cancel]
-  [ClassLoader.loadClass/getResource]
-  [ClassLoader.defineClass]
-  [Runtime.addShutdownHook/removeShutdownHook]
-  [ForkJoinTask.doExec]
-  [System.gc]
-  [Runtime.exit/halt (System.exit delegates to Runtime.exit)]
-  [Method.invoke]
-  [ByteBuffer.allocateDirect]
-  [ObjectInputStream.readObject]
-  [ObjectOutputStream.writeObject]
-  [LockSupport.park/parkNanos/parkUntil]
-  [AQS.acquire]
-  [Selector.select/select(long)/selectNow + Consumer overloads]
-  [Thread.sleep(long)/sleep(long,int)/sleep(Duration)]
-  [SSLSocket.startHandshake (explicit + implicit)/SSLEngine.beginHandshake]
-  [SocketChannel.connect/read/write]
-  [ServerSocketChannel.accept]
-  [Socket.connect/close]
-  [ServerSocket.accept]
-  [SocketInputStream.read]
-  [SocketOutputStream.write]
-  [Inflater.inflate]
-  [Deflater.deflate]
-  [ThreadLocal.get/set]
-  [InitialContext.lookup]
-  [MBeanServer.invoke/getAttribute]
-  [Runtime.loadLibrary0]
-  [Instant.now()]
-  [LocalDateTime.now() / now(ZoneId)]
-  [ZonedDateTime.now() / now(ZoneId)]
-  [Date() constructor]
-  [HttpClientImpl.send/sendAsync, HttpURLConnection, OkHttp 3/4, Apache HC 4/5, Reactor Netty]
-  [JDBC pools, Statement/PreparedStatement execute*, Connection prepare/commit/rollback]
-}
-@enduml
+```mermaid
+flowchart TB
+  subgraph g1["Executor and thread hook groups"]
+    n2["Thread.start() / start(ThreadContainer)"]
+    n3["VirtualThread.start() / start(ThreadContainer)"]
+    n4["ThreadPoolExecutor.execute()"]
+    n5["ThreadPoolExecutor.beforeExecute()"]
+    n6["ThreadPoolExecutor.shutdown()"]
+    n7["ThreadPoolExecutor.awaitTermination()"]
+    n8["ScheduledThreadPoolExecutor.schedule*()"]
+    n9["ScheduledCallableWrapper / ScheduledRunnableWrapper (tick)"]
+  end
+  subgraph g10["JDK and library hook groups"]
+    n11["BlockingQueue.put/take/offer/poll"]
+    n12["CompletableFuture.complete/completeExceptionally/cancel"]
+    n13["ClassLoader.loadClass/getResource"]
+    n14["ClassLoader.defineClass"]
+    n15["Runtime.addShutdownHook/removeShutdownHook"]
+    n16["ForkJoinTask.doExec"]
+    n17["System.gc"]
+    n18["Runtime.exit/halt (System.exit delegates to Runtime.exit)"]
+    n19["Method.invoke"]
+    n20["ByteBuffer.allocateDirect"]
+    n21["ObjectInputStream.readObject"]
+    n22["ObjectOutputStream.writeObject"]
+    n23["LockSupport.park/parkNanos/parkUntil"]
+    n24["AQS.acquire"]
+    n25["Selector.select/select(long)/selectNow + Consumer overloads"]
+    n26["Thread.sleep(long)/sleep(long,int)/sleep(Duration)"]
+    n27["SSLSocket.startHandshake (explicit + implicit)/SSLEngine.beginHandshake"]
+    n28["SocketChannel.connect/read/write"]
+    n29["ServerSocketChannel.accept"]
+    n30["Socket.connect/close"]
+    n31["ServerSocket.accept"]
+    n32["SocketInputStream.read"]
+    n33["SocketOutputStream.write"]
+    n34["Inflater.inflate"]
+    n35["Deflater.deflate"]
+    n36["ThreadLocal.get/set"]
+    n37["InitialContext.lookup"]
+    n38["MBeanServer.invoke/getAttribute"]
+    n39["Runtime.loadLibrary0"]
+    n40["Instant.now()"]
+    n41["LocalDateTime.now() / now(ZoneId)"]
+    n42["ZonedDateTime.now() / now(ZoneId)"]
+    n43["Date() constructor"]
+    n44["HttpClientImpl.send/sendAsync, HttpURLConnection, OkHttp 3/4, Apache HC 4/5, Reactor Netty"]
+    n45["JDBC pools, Statement/PreparedStatement execute*, Connection prepare/commit/rollback"]
+  end
 ```
 
 ---
@@ -687,83 +678,68 @@ The `HttpClientSelectorTest` (`agentInstalled_zeroScenarios` through `sessionIdM
 
 ## 12.8 Sequence Diagram — OkHttp Synchronous Path
 
-```plantuml
-@startuml
-title OkHttp RealCall.execute() → chaos pipeline → suppression or passthrough
+*OkHttp RealCall.execute() → chaos pipeline → suppression or passthrough*
 
-participant "Application\nThread" as App
-participant "okhttp3.RealCall\n(advice woven)" as RC
-participant "HttpClientAdvice\n.OkHttpExecuteAdvice" as Advice
-participant "BootstrapDispatcher\n.beforeHttpSend(url)" as BD
-participant "ChaosBridge\n.beforeHttpSend(url)" as CB
-participant "ChaosDispatcher\n.beforeHttpSend(url, HTTP_CLIENT_SEND)" as CD
-participant "ScenarioRegistry\n.match(context)" as SR
-participant "SelectorMatcher" as SM
-
-App -> RC : call.execute()
-activate RC
-
-note over RC : @Advice.OnMethodEnter fires\nbefore method body
-
-RC -> Advice : OkHttpExecuteAdvice.enter(this)
-activate Advice
-
-Advice -> Advice : url = HttpUrlExtractor.fromOkHttpCall(call)\n  → call.request().url().toString()
-
-Advice -> BD : beforeHttpSend(url)
-activate BD
-
-note over BD : DEPTH.get() == 0?\nyes → proceed\nDEPTH.set(1)
-
-BD -> CB : handles[45].invoke(delegate, url)
-activate CB
-
-CB -> CD : beforeHttpSend(url, HTTP_CLIENT_SEND)
-activate CD
-
-CD -> CD : build InvocationContext\n(HTTP_CLIENT_SEND, "http.client",\nnull, url, false, ...)
-
-CD -> SR : registry.match(context)
-activate SR
-
-SR -> SM : SelectorMatcher.matches(\n  HttpClientSelector, context)
-activate SM
-SM -> SM : operationType in selector.operations?\nurlPattern.matches(url)?
-SM --> SR : true / false
-deactivate SM
-
-SR --> CD : List<ScenarioContribution>
-deactivate SR
-
-alt no matching scenario
-  CD --> CB : false (no suppress)
-  CB --> BD : false
-  BD --> Advice : false
-  Advice --> RC : (no throw — passthrough)
-  RC -> RC : real OkHttp I/O executes
-  RC --> App : Response
-else SUPPRESS scenario matched
-  CD --> CB : true (suppress)
-  CB --> BD : true
-  BD --> Advice : true
-  Advice -> Advice : throw new ChaosHttpSuppressException(\n  "HTTP execute suppressed: " + url)
+```mermaid
+sequenceDiagram
+  participant App as Application<br/>Thread
+  participant RC as okhttp3.RealCall<br/>(advice woven)
+  participant Advice as HttpClientAdvice<br/>.OkHttpExecuteAdvice
+  participant BD as BootstrapDispatcher<br/>.beforeHttpSend(url)
+  participant CB as ChaosBridge<br/>.beforeHttpSend(url)
+  participant CD as ChaosDispatcher<br/>.beforeHttpSend(url, HTTP_CLIENT_SEND)
+  participant SR as ScenarioRegistry<br/>.match(context)
+  participant SM as SelectorMatcher
+  App->>RC: call.execute()
+  activate RC
+  Note over RC: @Advice.OnMethodEnter fires<br/>before method body
+  RC->>Advice: OkHttpExecuteAdvice.enter(this)
+  activate Advice
+  Advice->>Advice: url = HttpUrlExtractor.fromOkHttpCall(call)<br/>  → call.request().url().toString()
+  Advice->>BD: beforeHttpSend(url)
+  activate BD
+  Note over BD: DEPTH.get() == 0?<br/>yes → proceed<br/>DEPTH.set(1)
+  BD->>CB: handles[45].invoke(delegate, url)
+  activate CB
+  CB->>CD: beforeHttpSend(url, HTTP_CLIENT_SEND)
+  activate CD
+  CD->>CD: build InvocationContext<br/>(HTTP_CLIENT_SEND, "http.client",<br/>null, url, false, ...)
+  CD->>SR: registry.match(context)
+  activate SR
+  SR->>SM: SelectorMatcher.matches(<br/>  HttpClientSelector, context)
+  activate SM
+  SM->>SM: operationType in selector.operations?<br/>urlPattern.matches(url)?
+  SM-->>SR: true / false
+  deactivate SM
+  SR-->>CD: List#lt;ScenarioContribution#gt;
+  deactivate SR
+  alt no matching scenario
+  CD-->>CB: false (no suppress)
+  CB-->>BD: false
+  BD-->>Advice: false
+  Advice-->>RC: (no throw — passthrough)
+  RC->>RC: real OkHttp I/O executes
+  RC-->>App: Response
+  else SUPPRESS scenario matched
+  CD-->>CB: true (suppress)
+  CB-->>BD: true
+  BD-->>Advice: true
+  Advice->>Advice: throw new ChaosHttpSuppressException(<br/>  "HTTP execute suppressed: " + url)
   deactivate Advice
-  Advice --> App : ChaosHttpSuppressException\n(propagates as unchecked)
+  Advice-->>App: ChaosHttpSuppressException<br/>(propagates as unchecked)
   deactivate RC
-else DELAY scenario matched
-  CD -> CD : Thread.sleep(delayMillis)
-  CD --> CB : false
-  CB --> BD : false
-  BD --> Advice : false
-  Advice --> RC : (no throw — passthrough after delay)
-  RC -> RC : real OkHttp I/O executes
-  RC --> App : Response (delayed)
-end
-
-deactivate CD
-deactivate CB
-deactivate BD
-@enduml
+  else DELAY scenario matched
+  CD->>CD: Thread.sleep(delayMillis)
+  CD-->>CB: false
+  CB-->>BD: false
+  BD-->>Advice: false
+  Advice-->>RC: (no throw — passthrough after delay)
+  RC->>RC: real OkHttp I/O executes
+  RC-->>App: Response (delayed)
+  end
+  deactivate CD
+  deactivate CB
+  deactivate BD
 ```
 
 ---
@@ -936,83 +912,68 @@ The manual `BootstrapDispatcher.install(bridge, handles)` approach bypasses Byte
 
 ## 13.9 Sequence Diagram — HikariCP Connection Acquire
 
-```plantuml
-@startuml
-title HikariPool.getConnection(long) → chaos pipeline → suppress or passthrough
+*HikariPool.getConnection(long) → chaos pipeline → suppress or passthrough*
 
-participant "Application\nThread" as App
-participant "HikariPool\n(advice woven)" as HP
-participant "JdbcAdvice\n.HikariGetConnectionAdvice" as Advice
-participant "BootstrapDispatcher\n.beforeJdbcConnectionAcquire(poolName)" as BD
-participant "ChaosBridge\n.beforeJdbcConnectionAcquire(poolName)" as CB
-participant "ChaosDispatcher\n.beforeJdbcConnectionAcquire()" as CD
-participant "evaluateJdbc()" as EJ
-participant "ScenarioRegistry\n.match(context)" as SR
-
-App -> HP : dataSource.getConnection()\n  → HikariPool.getConnection(timeoutMs)
-activate HP
-
-note over HP : @Advice.OnMethodEnter fires\nbefore method body
-
-HP -> Advice : HikariGetConnectionAdvice.enter(this)
-activate Advice
-
-Advice -> Advice : poolName = JdbcTargetExtractor\n  .fromHikariPool(pool)\n  → reflective getPoolName()
-
-Advice -> BD : beforeJdbcConnectionAcquire(poolName)
-activate BD
-
-note over BD : DEPTH.get() == 0\nDEPTH.set(1)
-
-BD -> CB : handles[47].invoke(delegate, poolName)
-activate CB
-
-CB -> CD : beforeJdbcConnectionAcquire(poolName)
-activate CD
-
-CD -> EJ : evaluateJdbc(JDBC_CONNECTION_ACQUIRE,\n  "jdbc.pool", poolName)
-activate EJ
-
-EJ -> SR : registry.match(\n  InvocationContext(JDBC_CONNECTION_ACQUIRE,\n  "jdbc.pool", null, poolName, ...))
-activate SR
-SR --> EJ : List<ScenarioContribution>
-deactivate SR
-
-alt no matching scenario
-  EJ --> CD : false
-  CD --> CB : false
-  CB --> BD : false
-  BD --> Advice : false
-  Advice --> HP : (no throw — passthrough)
-  HP -> HP : real connection borrowed from pool
-  HP --> App : Connection
-
-else SUPPRESS scenario matched
-  EJ --> CD : true (suppress)
-  CD --> CB : true
-  CB --> BD : true
-  BD --> Advice : true
-  Advice -> Advice : throw new ChaosJdbcSuppressException(\n  "JDBC connection acquire suppressed: " + poolName)
+```mermaid
+sequenceDiagram
+  participant App as Application<br/>Thread
+  participant HP as HikariPool<br/>(advice woven)
+  participant Advice as JdbcAdvice<br/>.HikariGetConnectionAdvice
+  participant BD as BootstrapDispatcher<br/>.beforeJdbcConnectionAcquire(poolName)
+  participant CB as ChaosBridge<br/>.beforeJdbcConnectionAcquire(poolName)
+  participant CD as ChaosDispatcher<br/>.beforeJdbcConnectionAcquire()
+  participant EJ as evaluateJdbc()
+  participant SR as ScenarioRegistry<br/>.match(context)
+  App->>HP: dataSource.getConnection()<br/>  → HikariPool.getConnection(timeoutMs)
+  activate HP
+  Note over HP: @Advice.OnMethodEnter fires<br/>before method body
+  HP->>Advice: HikariGetConnectionAdvice.enter(this)
+  activate Advice
+  Advice->>Advice: poolName = JdbcTargetExtractor<br/>  .fromHikariPool(pool)<br/>  → reflective getPoolName()
+  Advice->>BD: beforeJdbcConnectionAcquire(poolName)
+  activate BD
+  Note over BD: DEPTH.get() == 0<br/>DEPTH.set(1)
+  BD->>CB: handles[47].invoke(delegate, poolName)
+  activate CB
+  CB->>CD: beforeJdbcConnectionAcquire(poolName)
+  activate CD
+  CD->>EJ: evaluateJdbc(JDBC_CONNECTION_ACQUIRE,<br/>  "jdbc.pool", poolName)
+  activate EJ
+  EJ->>SR: registry.match(<br/>  InvocationContext(JDBC_CONNECTION_ACQUIRE,<br/>  "jdbc.pool", null, poolName, ...))
+  activate SR
+  SR-->>EJ: List#lt;ScenarioContribution#gt;
+  deactivate SR
+  alt no matching scenario
+  EJ-->>CD: false
+  CD-->>CB: false
+  CB-->>BD: false
+  BD-->>Advice: false
+  Advice-->>HP: (no throw — passthrough)
+  HP->>HP: real connection borrowed from pool
+  HP-->>App: Connection
+  else SUPPRESS scenario matched
+  EJ-->>CD: true (suppress)
+  CD-->>CB: true
+  CB-->>BD: true
+  BD-->>Advice: true
+  Advice->>Advice: throw new ChaosJdbcSuppressException(<br/>  "JDBC connection acquire suppressed: " + poolName)
   deactivate Advice
-  Advice --> App : ChaosJdbcSuppressException\n(propagates unchecked through HikariCP)
+  Advice-->>App: ChaosJdbcSuppressException<br/>(propagates unchecked through HikariCP)
   deactivate HP
-
-else DELAY scenario matched
-  EJ -> EJ : Thread.sleep(delayMillis)
-  EJ --> CD : false
-  CD --> CB : false
-  CB --> BD : false
-  BD --> Advice : false
-  Advice --> HP : (no throw — passthrough after delay)
-  HP -> HP : real connection borrowed from pool
-  HP --> App : Connection (delayed)
-end
-
-deactivate EJ
-deactivate CD
-deactivate CB
-deactivate BD
-@enduml
+  else DELAY scenario matched
+  EJ->>EJ: Thread.sleep(delayMillis)
+  EJ-->>CD: false
+  CD-->>CB: false
+  CB-->>BD: false
+  BD-->>Advice: false
+  Advice-->>HP: (no throw — passthrough after delay)
+  HP->>HP: real connection borrowed from pool
+  HP-->>App: Connection (delayed)
+  end
+  deactivate EJ
+  deactivate CD
+  deactivate CB
+  deactivate BD
 ```
 
 ---
