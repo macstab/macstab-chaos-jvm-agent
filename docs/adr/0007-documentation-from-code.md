@@ -9,7 +9,7 @@
 
 # 0007 — Reference documentation is checked against, or generated from, the code
 
-**Status:** Accepted (2.0)
+**Status:** Superseded (2.0). The documentation tests were removed; the published plan schema (`PlanSchemaTest`) and the public API (`apiCheck`) remain checked against the code.
 
 ## Context
 

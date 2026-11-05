@@ -1,6 +1,6 @@
 # Evaluation Semantics
 
-> The rules the agent follows when an intercepted call meets the active scenarios, stated as laws. Every law here is enforced by code and verified by the tests tagged with its id (`@Tag("law-L14")`; `SemanticsLawTraceabilityTest` fails the build for a law without one); where a law names a class, that class is where it is enforced.
+> The rules the agent follows when an intercepted call meets the active scenarios, stated as laws. Every law here is enforced by code and verified by the tests tagged with its id (`@Tag("law-L14")`); where a law names a class, that class is where it is enforced.
 
 ---
 

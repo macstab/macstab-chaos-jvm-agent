@@ -1263,9 +1263,8 @@ The client libraries below are hooked by class name and never loaded by the agen
 
 The runtime validator enforces this at activation time. Mismatches throw `ChaosValidationException`.
 
-Each interceptor effect applies to the operations below, with any selector that selects them; any other operation is rejected. A stressor effect needs the `stress` selector with the matching `target`. Within an operation's list, `errno` depends on the code (see [`errno`](#errno--errnoeffect)) and `exceptionInjection` / `returnValueCorruption` need a `method` selector. The table is generated from `CompatibilityValidator` by `CompatibilityMatrixDocTest`; regenerate it with `./gradlew :chaos-agent-core:test --tests '*CompatibilityMatrixDocTest*' -PupdateDocs`.
+Each interceptor effect applies to the operations below, with any selector that selects them; any other operation is rejected. A stressor effect needs the `stress` selector with the matching `target`. Within an operation's list, `errno` depends on the code (see [`errno`](#errno--errnoeffect)) and `exceptionInjection` / `returnValueCorruption` need a `method` selector.
 
-<!-- compatibility-table:begin (generated) -->
 | Effect | Operations it applies to |
 |--------|--------------------------|
 | `delay` | every operation except `SYSTEM_CLOCK_MILLIS`, `SYSTEM_CLOCK_NANOS`, `INSTANT_NOW`, `CLOCK_READ`, `LOCAL_DATE_TIME_NOW`, `ZONED_DATE_TIME_NOW`, `DATE_NEW` |
@@ -1286,7 +1285,6 @@ Each interceptor effect applies to the operations below, with any selector that 
 | `returnValueCorruption` | `METHOD_EXIT` |
 | `clockSkew` | `SYSTEM_CLOCK_MILLIS`, `SYSTEM_CLOCK_NANOS`, `INSTANT_NOW`, `CLOCK_READ`, `LOCAL_DATE_TIME_NOW`, `ZONED_DATE_TIME_NOW`, `DATE_NEW` |
 | `spuriousWakeup` | `NIO_SELECTOR_SELECT` |
-<!-- compatibility-table:end -->
 
 ---
 

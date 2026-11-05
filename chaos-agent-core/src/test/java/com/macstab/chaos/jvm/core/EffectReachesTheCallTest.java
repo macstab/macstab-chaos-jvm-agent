@@ -57,10 +57,10 @@ import org.junit.jupiter.params.provider.MethodSource;
  * did exactly this.
  *
  * <p>The pairs are enumerated from the code, not listed by hand: every {@link OperationType} except
- * {@code LIFECYCLE}, with a selector that selects only that operation (built as {@link
- * CompatibilityMatrixDocTest} builds them), times one instance of every per-call effect. A pair is
- * checked when {@link ChaosRuntime#activate(ChaosScenario)} accepts it. Each check runs the
- * operation once without a scenario and once with it, and compares the two outcomes.
+ * {@code LIFECYCLE}, with a selector that selects only that operation (built by reflection over the
+ * selector factories), times one instance of every per-call effect. A pair is checked when {@link
+ * ChaosRuntime#activate(ChaosScenario)} accepts it. Each check runs the operation once without a
+ * scenario and once with it, and compares the two outcomes.
  *
  * <p>Not checked here:
  *
@@ -787,7 +787,7 @@ class EffectReachesTheCallTest {
    */
   static final class ProbeFileChannelImpl {}
 
-  // --- enumeration helpers (as CompatibilityMatrixDocTest builds its selectors) ---
+  // --- enumeration helpers ---
 
   /** For each operation, the selectors (with no filter) that select only that operation. */
   private static Map<OperationType, List<ChaosSelector>> selectorsByOperation() {

@@ -24,7 +24,7 @@ A small set of classes (`BridgeInjector.BRIDGE_CLASSES`, led by `BootstrapDispat
 - JDK classes reach the agent without a type reference to it; the agent's classes can be replaced in tests without touching the bootstrap side.
 - Every bridge class and every type it references must be in the bridge jar. `ArchitectureTest` checks the jar is closed, and that inlined advice uses only public members.
 - One indirection per intercepted call: an idle dispatch costs about 7 ns and allocates nothing (`BridgeDispatchBenchmark`).
-- The slot table is documented in `docs/instrumentation.md` §7 and checked by `HandleTableDocTest`.
+- The slot table is documented in `docs/instrumentation.md` §7.
 
 ## Alternatives rejected
 

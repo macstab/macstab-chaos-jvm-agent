@@ -9,7 +9,7 @@
 
 # Migrating from 1.x to 2.0
 
-> Every change in 2.0 that can break a 1.x setup, who it affects, and what to change. The Java examples marked as compiled are compiled against the 2.0 API by `CrossLayerDocSyncTest`, so they cannot go stale. The full list of changes is in the [CHANGELOG](../CHANGELOG.md).
+> Every change in 2.0 that can break a 1.x setup, who it affects, and what to change. The full list of changes is in the [CHANGELOG](../CHANGELOG.md).
 >
 > *Engineered by* **[Christian Schnapka](https://macstab.com)** — Embedded Principal+ Engineer · [Macstab GmbH](https://macstab.com) · Hamburg, Germany
 

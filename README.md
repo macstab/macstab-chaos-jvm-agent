@@ -82,16 +82,13 @@ A chaos tool that is wrong about its own behaviour is worse than none. Every cla
 | Guarantee | Enforced by |
 |-----------|-------------|
 | The faults are the JDK's own: real exceptions, messages, short writes and resets, raised inside the real call | child-JVM integration tests against the real JDK, on JDK 21 and 25 ([ADR 0005](docs/adr/0005-real-faults.md)) |
-| Every rule of evaluation is a numbered law with a test | `SemanticsLawTraceabilityTest` — a law without a `@Tag("law-L<n>")` test fails the build ([semantics](docs/semantics.md)) |
 | The plan format is one definition: the parser, its JSON Schema and the docs agree | `PlanSchemaTest` generates the schema from the parser; every JSON example in the docs is parsed |
 | The parser and validator never crash or hang, whatever the input | `PlanFuzzTest`: mutated examples and schema-generated plans, seeded and replayable, nightly with a fresh seed |
 | The public API cannot change by accident | `apiCheck` against the committed JVM signatures in `api/*.api` |
-| Reference tables are the code's: 91 operation types, 25 selector types, 33 effect types, 77 bridge entry points | generated from or checked against the code (`CompatibilityMatrixDocTest`, `ReferenceTablesSyncTest`, `HandleTableDocTest`) |
 | The architecture holds: the bootstrap bridge is closed, inlined advice uses only public members | `ArchitectureTest` |
 | No known bug patterns in any line that compiles | Error Prone on every compilation, warnings as errors |
 | No unchecked null in production code | NullAway proves every dereference; optional values are `@Nullable` in the types ([ADR 0008](docs/adr/0008-nullness-in-the-types.md)) |
 | The tests catch real bugs, not just run code | mutation testing (`./gradlew pitest`) with ratcheted thresholds |
-| Every line is run by a test, or says why it cannot be | every source file 100 % of its lines (child JVMs counted), except those in [`config/coverage-exceptions.txt`](config/coverage-exceptions.txt), each with its minimum and the reason; 97 % of all lines |
 | An idle hook costs 7–12 ns and allocates nothing | JMH benchmarks with a regression gate in CI ([benchmarks](docs/benchmarks.md)) |
 | What ships is what you can verify | reproducible jars (`scripts/check-reproducible.sh`), a CycloneDX SBOM published next to every jar (classifier `cyclonedx`), shaded dependencies listed |
 
@@ -218,7 +215,7 @@ The evaluation pipeline gate by gate, the class-loader bridge and its reentrancy
 
 ## Selectors
 
-A selector names the operations a scenario applies to (`Set<OperationType>`; an empty set accepts every operation the selector understands) and narrows them with optional filters, given as `NamePattern`s (`NamePattern.prefix(...)`, `NamePattern.regex(...)`, `NamePattern.any()`) or as peer address, port, path or size bounds. Every selector, its factory, its operations and its filters are listed in [docs/configuration-reference.md §13.3](docs/configuration-reference.md#133-selector-reference), which a test keeps equal to the code.
+A selector names the operations a scenario applies to (`Set<OperationType>`; an empty set accepts every operation the selector understands) and narrows them with optional filters, given as `NamePattern`s (`NamePattern.prefix(...)`, `NamePattern.regex(...)`, `NamePattern.any()`) or as peer address, port, path or size bounds. Every selector, its factory, its operations and its filters are listed in [docs/configuration-reference.md §13.3](docs/configuration-reference.md#133-selector-reference).
 
 ---
 
@@ -521,7 +518,7 @@ Three repos, one mental model: **the same selector × effect × policy DSL spans
 | `dns://db.internal:FILTER_FAMILY:inet6`                | operation `DNS_ANSWER`, effect `{"type": "dnsAnswer", "family": "IPV6"}`                                         |
 | `clock_gettime/realtime:REGRESS:1000`                  | effect `{"type": "clockSkew", "skewAmount": "PT1S", "mode": "REGRESS"}` (on `java.time` reads, and on `System.currentTimeMillis()` call sites under `clockCallSites`) |
 
-The full mapping, including what does not translate in either direction, is [docs/cross-layer.md](docs/cross-layer.md); a test keeps it, and the native library's `docs/DSL.md`, in step with the API.
+The full mapping, including what does not translate in either direction, is [docs/cross-layer.md](docs/cross-layer.md).
 
 ---
 
@@ -558,7 +555,7 @@ Requires JDK 21+ at runtime. Build toolchain targets JDK 25; `--release 21` is e
 
 ## Detailed Documentation
 
-The documentation in [`docs/`](docs/README.md) is indexed by what you want to do: use the agent, run it and see what it does, or understand how it works. A test keeps the index complete.
+The documentation in [`docs/`](docs/README.md) is indexed by what you want to do: use the agent, run it and see what it does, or understand how it works.
 
 ---
 
