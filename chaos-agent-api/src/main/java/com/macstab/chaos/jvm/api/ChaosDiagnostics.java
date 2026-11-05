@@ -79,8 +79,8 @@ public interface ChaosDiagnostics {
 
     /**
      * The scenario is temporarily inactive. Occurs when {@link ActivationPolicy#activeFor()} has
-     * elapsed, {@link ActivationPolicy#maxApplications()} is exhausted, or a manual stop was
-     * called. No effects fire while inactive.
+     * elapsed or {@link ActivationPolicy#maxApplications()} is exhausted (a stop leads to {@code
+     * STOPPED}). No effects fire while inactive.
      */
     INACTIVE,
 

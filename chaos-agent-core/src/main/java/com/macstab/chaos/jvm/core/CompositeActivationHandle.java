@@ -130,16 +130,6 @@ final class CompositeActivationHandle implements ChaosActivationHandle {
     }
   }
 
-  /**
-   * Returns the aggregated state across all delegates.
-   *
-   * <p>{@code ACTIVE} if any delegate is active, {@code STOPPED} if every delegate has reached the
-   * terminal {@code STOPPED} state, otherwise {@code INACTIVE}. Collapsing post-teardown state to
-   * {@code INACTIVE} would violate the {@link ChaosActivationHandle} contract: callers asserting
-   * {@code handle.state() == STOPPED} after {@code destroy()} would never see the transition.
-   *
-   * @return the aggregated state across all delegates
-   */
   @Override
   public long matchedCount() {
     long total = 0L;
@@ -158,6 +148,16 @@ final class CompositeActivationHandle implements ChaosActivationHandle {
     return total;
   }
 
+  /**
+   * Returns the aggregated state across all delegates.
+   *
+   * <p>{@code ACTIVE} if any delegate is active, {@code STOPPED} if every delegate has reached the
+   * terminal {@code STOPPED} state, otherwise {@code INACTIVE}. Collapsing post-teardown state to
+   * {@code INACTIVE} would violate the {@link ChaosActivationHandle} contract: callers asserting
+   * {@code handle.state() == STOPPED} after {@code destroy()} would never see the transition.
+   *
+   * @return the aggregated state across all delegates
+   */
   @Override
   public ChaosDiagnostics.ScenarioState state() {
     boolean anyActive = false;

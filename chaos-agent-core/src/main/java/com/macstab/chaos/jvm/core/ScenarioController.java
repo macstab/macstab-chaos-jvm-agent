@@ -32,8 +32,8 @@ import org.jspecify.annotations.Nullable;
  *   <li><b>REGISTERED</b> — initial state; {@link #evaluate} always returns {@code null}.
  *   <li><b>ACTIVE</b> — entered via {@link #start()}; {@link #evaluate} participates in chaos
  *       decisions.
- *   <li><b>INACTIVE</b> — entered via manual control (gate hold or explicit pause); evaluation is
- *       suspended.
+ *   <li><b>INACTIVE</b> — entered when the activation window expires or {@code maxApplications} is
+ *       used up; evaluation is suspended.
  *   <li><b>STOPPED</b> — terminal; entered via {@link #stop()} or {@link #destroy()}; {@link
  *       #evaluate} always returns {@code null} after this point.
  * </ol>
@@ -189,10 +189,10 @@ final class ScenarioController {
   }
 
   /**
-   * Returns the total number of times this scenario's effect was actually applied (i.e., the full
-   * evaluation pipeline passed and a {@link ScenarioContribution} was returned). This count is
-   * incremented only after all filters — warm-up, rate limit, probability, and max-applications —
-   * have been satisfied.
+   * Returns the total number of times this scenario's effect was actually applied: counted in
+   * {@link #commitApplication}, when the dispatcher applies a contribution that passed every
+   * filter, not when {@code evaluate} returns it (a contribution that loses on precedence is never
+   * counted).
    *
    * @return the cumulative applied count; always &ge; 0 and &le; {@link #matchedCount()}
    */
@@ -294,8 +294,8 @@ final class ScenarioController {
       ChaosDispatcher.incrementDispatchDepth();
       try {
         startedAt = clock.instant();
-        // Anchor the rate-limit window at activation. It started at epoch 0 before, so the first
-        // window ended at an arbitrary epoch-aligned instant instead of one window after start.
+        // Anchor the rate-limit window at activation, so the first window ends one window after
+        // start rather than at an epoch-aligned instant.
         rateWindowStartMillis = startedAt.toEpochMilli();
         rateWindowPermits = 0;
       } finally {
@@ -691,8 +691,7 @@ final class ScenarioController {
   /**
    * Ends a stressor scenario when its lifetime ({@code activeFor}, {@code activeUntil}) elapses.
    * Stressors are never evaluated per call, so the window check in {@link
-   * #evaluate(InvocationContext)} never ran for them and a heap, thread-leak or deadlock stressor
-   * with {@code activeFor} kept running until {@code stop()}.
+   * #evaluate(InvocationContext)} cannot end them; this thread does.
    *
    * <p>The expiry thread is agent-owned: it runs with the dispatch depth raised for its whole life,
    * so user scenarios (thread start, park, sleep) never apply to it. It ends early when the
@@ -895,9 +894,9 @@ final class ScenarioController {
     } else {
       upperExclusive = max + 1L;
     }
-    // split(): an independent stream derived from the same seed. Drawing the delay from the very
-    // generator the probability draw used made the two correlated (a draw just below the
-    // probability threshold always came with a short delay).
+    // split(): an independent stream derived from the same seed, so the delay is not correlated
+    // with the probability draw (a draw just below the threshold would otherwise always come with
+    // a short delay).
     return splittableRandom(matched).split().nextLong(min, upperExclusive);
   }
 

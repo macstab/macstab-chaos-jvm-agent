@@ -98,8 +98,8 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
   }
 
   /**
-   * A session-scoped scenario activated outside a session had no session to match and fired for
-   * every thread in the JVM (the plan-file reloader and JMX activated scenarios this way).
+   * Refuses a session-scoped scenario outside a session: with no session to match it would fire for
+   * every thread in the JVM.
    */
   private void rejectSessionScope(final ChaosScenario scenario) {
     if (scenario.scope() == ChaosScenario.ScenarioScope.SESSION) {
@@ -246,7 +246,7 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
       for (final ChaosActivationHandle handle : handles) {
         try {
           // activate(ChaosScenario) on this class returns a DefaultChaosActivationHandle, and the
-          // plan-rollback list is populated exclusively by that path (see line 70 above). Only
+          // plan-rollback list is populated exclusively by that path. Only
           // destroy() unregisters the controller from the ScenarioRegistry; stop() alone would
           // leave ghost STOPPED entries in diagnostics and block re-activation under the same
           // id. Treat a non-default handle as a programmer error — it means this rollback list
@@ -323,12 +323,9 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
     if (!closed.compareAndSet(false, true)) {
       return;
     }
-    // Destroy *and* unregister each controller. destroy() alone only calls stop(); it does not
-    // remove the controller from the registry. ScenarioRegistry.register() uses putIfAbsent and
-    // throws on re-registration of the same id, so a ChaosRuntime that is closed and then re-opened
-    // (Spring ContextRefreshed cycles, test-suite reinit, JVM-wide recreate) would see every
-    // previously-registered scenario id fail to reactivate. Snapshot the controllers into a list
-    // first — unregister() mutates the registry, so iterating the live view and mutating
+    // Destroy *and* unregister each controller: destroy() alone only stops it, and a closed
+    // runtime must hold no controllers. Snapshot the controllers into a list first — unregister()
+    // mutates the registry, so iterating the live view and mutating
     // concurrently risks ConcurrentModificationException from non-ConcurrentMap backing.
     final List<ScenarioController> toUnregister = new ArrayList<>(registry.controllers());
     for (final ScenarioController controller : toUnregister) {

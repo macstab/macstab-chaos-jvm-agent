@@ -129,9 +129,8 @@ public final class StartupConfigLoader {
 
   /**
    * Decodes standard or URL-safe base64, ignoring whitespace (line breaks from wrapped {@code
-   * base64} output). Any other character is an error: the MIME decoder used before silently skipped
-   * invalid characters, so URL-safe input ({@code -} and {@code _}) decoded to garbage that then
-   * failed as a misleading JSON parse error.
+   * base64} output). Any other character is an error rather than skipped, so malformed input is
+   * reported as base64, not as a misleading JSON parse error.
    */
   private static byte[] decodeBase64(final String encoded) {
     final String compact = encoded.replaceAll("\\s+", "");
@@ -314,7 +313,7 @@ public final class StartupConfigLoader {
                 + link,
             SOURCE_FILE_PREFIX + originalPath);
       }
-      // Absolute (see readConfigFile), so a link always has a parent directory.
+      // Absolute (see validateAndResolvePath), so a link always has a parent directory.
       final Path directory =
           java.util.Objects.requireNonNull(link.getParent(), "parent of an absolute link");
       final Path data = directory.resolve("..data");

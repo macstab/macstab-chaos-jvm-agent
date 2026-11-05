@@ -40,7 +40,7 @@ public interface ChaosActivationHandle extends AutoCloseable {
   String id();
 
   /**
-   * Transitions the scenario from {@link ChaosDiagnostics.ScenarioState#INACTIVE INACTIVE} to
+   * Transitions the scenario from {@link ChaosDiagnostics.ScenarioState#REGISTERED REGISTERED} to
    * {@link ChaosDiagnostics.ScenarioState#ACTIVE ACTIVE}. For scenarios with {@link
    * ActivationPolicy.StartMode#AUTOMATIC}, this is a no-op as they start immediately on activation.
    *

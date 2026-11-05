@@ -26,7 +26,7 @@ public final class ExecutorDispatch {
     this.shutdownHooks = shutdownHooks;
   }
 
-  // Shared instances: decorated tasks are compared with them by identity.
+  // Shared instances: replacing a suppressed task allocates nothing.
   @SuppressWarnings("UnnecessaryLambda")
   private static final Runnable NO_OP_RUNNABLE = () -> {};
 

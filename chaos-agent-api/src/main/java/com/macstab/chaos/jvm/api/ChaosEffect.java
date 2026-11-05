@@ -1140,7 +1140,8 @@ public sealed interface ChaosEffect
    * replaced clock source.
    *
    * @param skewAmount amount to shift the observed clock; non-zero, positive or negative
-   * @param mode strategy used to apply the skew (jump, drift, or freeze)
+   * @param mode strategy used to apply the skew ({@code FIXED}, {@code DRIFT}, {@code FREEZE} or
+   *     {@code REGRESS})
    */
   record ClockSkewEffect(Duration skewAmount, ClockSkewMode mode) implements ChaosEffect {
     /** Validates the clock skew parameters. */
@@ -1158,11 +1159,8 @@ public sealed interface ChaosEffect
         throw new IllegalArgumentException(
             "REGRESS steps the clock back by skewAmount; skewAmount must be positive");
       }
-      // Duration.toNanos() overflows (ArithmeticException) past ~±292 years. Letting that escape
-      // at scenario-start time leaves the controller half-initialised — started=true is written
-      // before the ClockSkewState constructor runs — and the scenario remains ACTIVE with a null
-      // ClockSkewState, silently applying no skew while diagnostics claim it is live. Fail at
-      // plan-build time instead, where the caller can react.
+      // Duration.toNanos() overflows (ArithmeticException) past ~±292 years: reject such a skew
+      // when the plan is built, where the caller can react, not when the scenario starts.
       try {
         final long unused = skewAmount.toNanos();
       } catch (final ArithmeticException overflow) {

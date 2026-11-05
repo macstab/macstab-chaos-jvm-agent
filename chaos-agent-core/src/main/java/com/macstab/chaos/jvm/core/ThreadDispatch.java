@@ -222,8 +222,7 @@ public final class ThreadDispatch {
    */
   public boolean beforeThreadSleep(final long millis) throws Throwable {
     // The sleeping thread is the current thread. Its name, daemon flag and kind are reported so
-    // ThreadSelector filters (threadNamePattern, daemon, kind) apply to THREAD_SLEEP; they were
-    // left null, so a non-ANY filter never matched and kind=PLATFORM also matched virtual threads.
+    // ThreadSelector filters (threadNamePattern, daemon, kind) apply to THREAD_SLEEP.
     if (engine.idle(OperationType.THREAD_SLEEP)) {
       return false;
     }

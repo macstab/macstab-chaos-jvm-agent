@@ -364,7 +364,10 @@ class LifecycleEdgeTest {
 
       assertThatThrownBy(session::close)
           .isInstanceOf(IllegalStateException.class)
-          .hasMessage("session root binding close() called but the stack is empty (double-close?)");
+          .hasMessage(
+              "session root binding close() could not find sessionId='"
+                  + session.id()
+                  + "' on the stack");
     }
 
     @Test

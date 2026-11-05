@@ -81,7 +81,7 @@ public final class AgentArgsParser {
     final int separator = token.indexOf('=');
     if (separator < 0) {
       // A bare key is a boolean flag (debugDumpOnStart is the same as debugDumpOnStart=true), as
-      // documented. Rejecting it threw from premain and aborted the JVM.
+      // documented; rejecting it would throw from premain and abort the JVM.
       addFlag(target, token.trim());
       return;
     }

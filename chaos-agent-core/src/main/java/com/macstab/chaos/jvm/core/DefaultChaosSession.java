@@ -141,7 +141,7 @@ final class DefaultChaosSession implements ChaosSession {
         try {
           if (child instanceof DefaultChaosActivationHandle defaultHandle) {
             // Remove from session's handle list BEFORE destroy so close() can't double-destroy
-            // this handle after a partial rollback. activate(ChaosScenario) at line 104 appends
+            // this handle after a partial rollback. activate(ChaosScenario) appends
             // the handle to this.handles; without this remove, close() would iterate handles and
             // destroy every already-rolled-back entry a second time, emitting duplicate STOPPED
             // events for each to every observability listener.

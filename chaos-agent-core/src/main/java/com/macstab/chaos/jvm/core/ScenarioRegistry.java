@@ -50,12 +50,12 @@ import org.jspecify.annotations.Nullable;
  *
  * <h2>Operation index</h2>
  *
- * <p>Every selector matches a fixed, non-empty set of {@link OperationType}s ({@link
- * SelectorOperations#of}). The registry keeps an immutable index from operation type to the
- * controllers whose selector names it, already in match order, and replaces it whenever a
- * controller is registered or unregistered. {@link #match(InvocationContext)} therefore only
- * evaluates scenarios that can match the intercepted operation, instead of every registered
- * scenario, and never sorts.
+ * <p>Every selector matches a fixed set of {@link OperationType}s ({@link SelectorOperations#of};
+ * empty for a stress selector, which is never evaluated per call). The registry keeps an immutable
+ * index from operation type to the controllers whose selector names it, already in match order, and
+ * replaces it whenever a controller is registered or unregistered. {@link
+ * #match(InvocationContext)} therefore only evaluates scenarios that can match the intercepted
+ * operation, instead of every registered scenario, and never sorts.
  */
 final class ScenarioRegistry implements ChaosDiagnostics {
   private static final Comparator<ScenarioController> MATCH_ORDER =
@@ -240,7 +240,7 @@ final class ScenarioRegistry implements ChaosDiagnostics {
   /**
    * Sets the listener told about the registered method selectors whenever their set changes (a
    * scenario with a method selector was registered or removed). It runs on the thread that changed
-   * the registry, outside the registry's locks.
+   * the registry, under the registry's weave lock (never the index lock), so weaves are serialised.
    *
    * @param listener the listener; replaces the previous one
    */
