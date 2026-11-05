@@ -22,10 +22,11 @@ public final class FileDispatch {
   }
 
   /**
-   * Called before a {@link java.io.FileInputStream#read} or {@link java.io.FileOutputStream#write}
-   * call.
+   * Called before a file operation: a read, write, open, close, sync, truncation, deletion, move,
+   * map or channel transfer.
    *
-   * @param operation {@code "FILE_IO_READ"} or {@code "FILE_IO_WRITE"}
+   * @param operation the name of a {@code FILE_IO_*} operation, or a transfer tag ({@link
+   *     ChaosDispatcher#TRANSFER_TO}, {@link ChaosDispatcher#TRANSFER_FROM})
    * @param stream the stream instance
    * @param path the path the stream was opened with, or {@code null}
    * @param byteCount the bytes read (requested) or written by the call
