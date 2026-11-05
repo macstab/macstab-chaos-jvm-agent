@@ -729,7 +729,7 @@ Key invariants enforced at construction time by the builder API or `Compatibilit
 - Reference: JSR-133 — Java Memory Model §17.4 — happens-before rules for `volatile` reads/writes
 - Reference: Java SE API — `java.util.concurrent.atomic.AtomicBoolean`, `AtomicLong` — https://docs.oracle.com/en/java/docs/api/java.base/java/util/concurrent/atomic/AtomicLong.html
 - Reference: Java SE API — `java.util.concurrent.ConcurrentHashMap` (lock-free read via segment traversal) — https://docs.oracle.com/en/java/docs/api/java.base/java/util/concurrent/ConcurrentHashMap.html
-- Reference: Java SE API — `java.util.SplittableRandom` (not thread-safe; xorshift-based non-linear PRNG) — https://docs.oracle.com/en/java/docs/api/java.base/java/util/SplittableRandom.html
+- Reference: Java SE API — `java.util.SplittableRandom` (not thread-safe; SplitMix64) — https://docs.oracle.com/en/java/docs/api/java.base/java/util/SplittableRandom.html
 - Reference: JSR-133 — Java Memory Model §17.4 — happens-before rules for `volatile` reads/writes — https://jcp.org/aboutJava/communityprocess/mrel/jsr133/index.html
 - Reference: JLS §17.7 — Non-atomic treatment of double and long; `volatile long` guarantees — https://docs.oracle.com/javase/specs/jls/se21/html/jls-17.html#jls-17.7
 - Reference: Java SE API — `java.util.concurrent.locks.ReentrantLock`, `Condition.await(timeout, unit)` — https://docs.oracle.com/en/java/docs/api/java.base/java/util/concurrent/locks/ReentrantLock.html

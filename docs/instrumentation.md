@@ -22,7 +22,7 @@
 `chaos-agent-instrumentation-jdk` is the adapter between ByteBuddy's advice model and `ChaosRuntime`'s normalized dispatch API. Its responsibilities:
 
 1. Package `BootstrapDispatcher` into a temp JAR and append it to the bootstrap classpath
-2. Build a 57-slot `MethodHandle[]` array and wire it into `BootstrapDispatcher` via reflection
+2. Build a 77-slot `MethodHandle[]` array and wire it into `BootstrapDispatcher` via reflection
 3. Register a `HookDemand` callback on the runtime and weave each hook group (one `AgentBuilder` installation per `HookGroup`) the first time a scenario needs one of its operations — or every group at once in `eager` mode
 
 Apart from weaving hook groups on demand, this module has no further runtime role. All runtime execution paths go through `BootstrapDispatcher` → `ChaosBridge` → `ChaosRuntime`.
@@ -1032,9 +1032,9 @@ deactivate BD
    before `premain` runs; class-load-time interception is therefore unavailable.
 
    *Constraint B — `@IntrinsicCandidate` JIT bypass.*
-   HotSpot C2 recognises `java.lang.System.currentTimeMillis` / `nanoTime` by class+method name
-   and replaces the callsite with a direct `RDTSC` / `MRS CNTVCT_EL0` hardware read after
-   ~10 000 invocations, bypassing any Java-level wrapper that might exist.
+   HotSpot recognises `java.lang.System.currentTimeMillis` / `nanoTime` by class+method name
+   and, once the caller is compiled, replaces the call with a direct call to the VM clock
+   (`clock_gettime` through the vDSO on Linux), bypassing any Java-level wrapper that might exist.
 
    **Investigation result**: a second `AgentBuilder` with `enableNativeMethodPrefix("$chaos$")`
    and `RETRANSFORMATION` was tested empirically. ByteBuddy fires a TRANSFORM event for

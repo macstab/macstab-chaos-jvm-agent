@@ -155,7 +155,7 @@ ChaosRuntime created (Clock.systemUTC, NOOP metrics sink)
 JdkInstrumentationInstaller.install(instrumentation, runtime, eager)
     ├── injectBridge(): package BootstrapDispatcher into temp JAR,
     │                   appendToBootstrapClassLoaderSearch
-    ├── installDelegate(): build 57-slot MethodHandle[], wire into BootstrapDispatcher.install()
+    ├── installDelegate(): build 77-slot MethodHandle[], wire into BootstrapDispatcher.install()
     └── runtime.setHookDemand(...): hook groups are woven via retransformation when a
         scenario first needs them (eager: every group now)
   ↓
@@ -191,16 +191,8 @@ BootstrapDispatcher.decorateExecutorRunnable("execute", executor, task)
   ↓
   ScenarioRegistry.match(context) → controllers indexed under EXECUTOR_SUBMIT (pre-sorted),
                                     evaluate each, collect non-null contributions
-    Per controller, ScenarioController.evaluate():
-      1. started == true? (ACTIVE check)
-      2. sessionId matches? (session scope filter)
-      3. SelectorMatcher.matches(selector, context)? (pattern/operation check)
-      4. activationWindow passes? (activeFor duration)
-      5. warmUp passes? (matchedCount > activateAfterMatches)
-      6. probability passes? (SplittableRandom draw)
-      7. rateLimit passes? (synchronized fixed window anchored at start)
-      8. maxApplications reservation succeeds?
-    Returns ScenarioContribution or null
+    Per controller, ScenarioController.evaluate() runs the nine policy steps
+    (semantics.md §3) and returns a ScenarioContribution or null
   ↓
   RuntimeDecision merge (applied in the order delay → gate → terminal action):
     - delayMillis: SUM of all contributions' sampled delays
@@ -418,19 +410,9 @@ node "JVM Process" {
 
 **Responsibility**: Per-scenario runtime guard. Evaluates a 9-step pipeline for every `InvocationContext` and either returns a `ScenarioContribution` or `null`.
 
-**Evaluation pipeline** (all checks short-circuit on failure):
-1. `started.get()` — `AtomicBoolean`, lock-free
-2. `sessionId` match — string equality, lock-free
-3. `SelectorMatcher.matches(selector, context)` — stateless switch over sealed selector hierarchy
-4. `passesActivationWindow()` — `clock.instant().isBefore(startedAt.plus(activeFor))`; transitions state to INACTIVE
-5. `matchedCount > activateAfterMatches` — `AtomicLong.incrementAndGet()` runs regardless
-6. `passesProbability(matched)` — `new SplittableRandom(baseSeed ^ matched ^ scenarioId.hashCode()).nextDouble()`
-7. `passesRateLimit()` — fixed window anchored at `start()` and advanced in whole windows, `synchronized(this)` on `rateWindowStartMillis` + `rateWindowPermits` (a burst across a boundary can see up to 2× permits)
-8. `reserveApplication()` — reserves one unit of `maxApplications` budget under a lock
+**Evaluation pipeline**: the nine steps, their order and which of them count a match are law L6 in [semantics.md §3](semantics.md#3-the-policy-of-one-scenario); what each step costs is in [internals.md](internals.md#evaluation-pipeline).
 
 **Why a reservation for maxApplications**: committed applications plus outstanding reservations never exceed the cap, so concurrent threads cannot overshoot it. The dispatcher commits the reservation (incrementing `appliedCount` and publishing `APPLIED`) only for contributions that take effect; a scenario that loses on precedence releases it and keeps its budget.
-
-**Why new `SplittableRandom` per call**: `SplittableRandom` is not thread-safe. The per-call seed (`baseSeed ^ matched ^ scenarioId.hashCode()`) is deterministic given the same inputs, enabling reproducible sampling with a fixed `randomSeed` while still varying across successive invocations.
 
 **Rate limit synchronization**: The rate window uses `synchronized(this)` rather than a lock-free structure. This is a deliberate simplicity trade-off: rate-limited scenarios are not expected to be on ultra-hot paths where this contention would matter. The lock scope is minimal (a few nanoseconds).
 

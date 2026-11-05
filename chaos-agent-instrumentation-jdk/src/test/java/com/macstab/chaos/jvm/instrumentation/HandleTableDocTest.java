@@ -32,7 +32,7 @@ class HandleTableDocTest {
   private static final Pattern SLOT_MENTION = Pattern.compile("`([A-Z][A-Z0-9_]+) = (\\d+)`");
   private static final Pattern COUNT =
       Pattern.compile(
-          "(\\d+) (?:interception handles|Interception Handles|handle slots)"
+          "(\\d+)(?: (?:interception handles|Interception Handles|handle slots)|-slot)"
               + "|HANDLE_COUNT`?[^()\\n.]{0,20}\\((?:currently )?(\\d+)\\)"
               + "|HANDLE_COUNT`? is (\\d+)");
 
