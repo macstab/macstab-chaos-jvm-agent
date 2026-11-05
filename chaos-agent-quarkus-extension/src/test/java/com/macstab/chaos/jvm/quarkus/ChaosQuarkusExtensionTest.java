@@ -1,15 +1,17 @@
 package com.macstab.chaos.jvm.quarkus;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.macstab.chaos.jvm.api.ChaosActivationHandle;
 import com.macstab.chaos.jvm.api.ChaosControlPlane;
+import com.macstab.chaos.jvm.api.ChaosDiagnostics;
 import com.macstab.chaos.jvm.api.ChaosEffect;
 import com.macstab.chaos.jvm.api.ChaosSelector;
 import com.macstab.chaos.jvm.api.ChaosSession;
 import com.macstab.chaos.jvm.api.OperationType;
 import java.time.Duration;
+import java.util.Set;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -55,7 +57,16 @@ class ChaosQuarkusExtensionTest {
     @Test
     @DisplayName("session is open and usable during test execution")
     void sessionIsOpenDuringTest(final ChaosSession session) {
-      assertThatCode(() -> session.bind().close()).doesNotThrowAnyException();
+      // A closed session refuses activations; an open one runs them.
+      try (ChaosActivationHandle handle =
+          session.activate(
+              com.macstab.chaos.jvm.api.ChaosScenario.builder("open-session")
+                  .scope(com.macstab.chaos.jvm.api.ChaosScenario.ScenarioScope.SESSION)
+                  .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+                  .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+                  .build())) {
+        assertThat(handle.state()).isEqualTo(ChaosDiagnostics.ScenarioState.ACTIVE);
+      }
     }
 
     @Test
