@@ -240,6 +240,19 @@ class LifecycleEdgeTest {
   class ControlPlane {
 
     @Test
+    @DisplayName("re-activating a stopped id ends with REGISTERED, STARTED for the new scenario")
+    void reactivationEventsEndWithTheNewScenario() {
+      runtime.activate(executorScenario("again", ActivationPolicy.always())).stop();
+      events.clear();
+
+      runtime.activate(executorScenario("again", ActivationPolicy.always()));
+
+      final List<ChaosEvent.Type> types = events.stream().map(ChaosEvent::type).toList();
+      assertThat(types.subList(types.size() - 2, types.size()))
+          .containsExactly(ChaosEvent.Type.REGISTERED, ChaosEvent.Type.STARTED);
+    }
+
+    @Test
     @DisplayName("a failure to unweave a removed method scenario is reported, not thrown")
     void unweaveFailureIsLogged() {
       runtime.setHookDemand(

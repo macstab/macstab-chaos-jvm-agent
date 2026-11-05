@@ -425,14 +425,15 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
       // evaluate() returns null until start() has set the started flag.
       final ScenarioController replaced = registry.register(controller);
       registeredInRegistry = true;
+      // The finished controller this one replaces reports its end before the new one begins.
+      if (replaced != null) {
+        destroyQuietly(replaced);
+      }
       observabilityBus.publish(
           ChaosEvent.Type.REGISTERED,
           scenario.id(),
           "scenario registered",
           Map.of("scope", scopeKey));
-      if (replaced != null) {
-        destroyQuietly(replaced);
-      }
       if (scenario.activationPolicy().startMode() == ActivationPolicy.StartMode.AUTOMATIC) {
         handle.start();
       }
