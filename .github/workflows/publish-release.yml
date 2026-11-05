@@ -40,7 +40,9 @@ jobs:
         run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
 
       - name: Update version in gradle.properties
-        run: sed -i 's/^version=.*/version=${{ steps.version.outputs.VERSION }}/' gradle.properties
+        run: |
+          sed -i -E 's/^version *=.*/version = ${{ steps.version.outputs.VERSION }}/' gradle.properties
+          grep -qx 'version = ${{ steps.version.outputs.VERSION }}' gradle.properties
 
       - name: Build and publish release to GitHub Packages (tests already ran pre-tag)
         run: ./gradlew publish --no-daemon --stacktrace
