@@ -45,7 +45,7 @@ ChaosSelector.network(Set.of(OperationType.SOCKET_CONNECT))
 
 After: name the peer the fault is meant for. Compiled:
 
-```java verified
+```java
 import com.macstab.chaos.jvm.api.ChaosEffect;
 import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.ChaosSelector;
@@ -80,7 +80,7 @@ com.macstab.chaos.core.ChaosRuntime      →  com.macstab.chaos.jvm.core.ChaosRu
 
 `chaos-agent-api` no longer depends on `jackson-annotations`: the JSON shape of plans (the `type` discriminators, the creators of `ActivationPolicy` and `NamePattern`) lives in mix-ins of `chaos-agent-startup-config`. A plain `ObjectMapper` no longer knows the discriminators. Compiled:
 
-```java verified
+```java
 import com.macstab.chaos.jvm.api.ChaosPlan;
 import com.macstab.chaos.jvm.startup.ChaosPlanMapper;
 
@@ -100,7 +100,7 @@ public final class ReadPlan {
 
 1.x ignored `probability`, `maxApplications`, `rateLimit` and `activateAfterMatches` on a clock skew: a clock read is not an event to sample. 2.0 rejects such a scenario with `ChaosValidationException`. A time window still applies. Compiled:
 
-```java verified
+```java
 import com.macstab.chaos.jvm.api.ActivationPolicy;
 import com.macstab.chaos.jvm.api.ChaosEffect;
 import com.macstab.chaos.jvm.api.ChaosScenario;

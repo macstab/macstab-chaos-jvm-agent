@@ -32,7 +32,7 @@ The two benchmark classes cover the two hot-path entry points added in roadmap 2
 
 Both measure the dispatch classes' method calls directly, bypassing the `BootstrapDispatcher` → `ChaosBridge` indirection. This isolates the dispatch logic (scenario registry match, selector evaluation, decision building) from the fixed overhead of the classloader bridge.
 
-`BridgeDispatchBenchmark` (§8) measures the full path woven advice takes, through `BootstrapDispatcher`, and is the one the CI benchmark gate compares release over release.
+`BridgeDispatchBenchmark` (§8) measures the full path woven advice takes, through `BootstrapDispatcher`, and is the one to compare when a change touches the dispatch path.
 
 ### Module and Execution
 
@@ -300,7 +300,7 @@ The 3.2 refactor split `ChaosRuntime` into:
 - `ChaosControlPlaneImpl` — owns scenario lifecycle, session management, `ScenarioRegistry` construction, diagnostics, event listeners, and the `Instrumentation` handle
 - `ChaosDispatcher` — composes the dispatch domains (`ThreadDispatch`, `ExecutorDispatch`, `MethodDispatch`, `ClockDispatch`, `RuntimeDispatch`, `NetworkDispatch`, `DnsDispatch`, `FileDispatch`, `ProcessDispatch`, `ClientDispatch`), which own the `before*` / `after*` / `adjust*` / `decorate*` methods, over one shared `DispatchEngine`
 
-`ChaosRuntime` is now a thin facade that delegates to both components. `ChaosBridge` (the bootstrap bridge delegate) calls `ChaosRuntime` methods, which forward to the appropriate component.
+`ChaosRuntime` is a thin facade that delegates to both components. `ChaosBridge` (the bootstrap bridge delegate) calls `ChaosRuntime` methods, which forward to the appropriate component.
 
 The benchmarks reference `ChaosDispatcher` directly:
 
@@ -518,8 +518,8 @@ profile:
 **Total agent overhead — no chaos scenarios active:**
 5 300 calls/sec × 58 ns/call = **307 400 ns = 0.31 ms per second**
 
-A service spending 2 000 req/sec × say 5 ms average latency = 10 000 ms of CPU time per second.
-The agent costs **0.31 ms out of 10 000 ms — 0.003% of one CPU core.**
+One CPU core provides 1 000 ms of CPU time per second.
+The agent costs **0.31 ms of it — 0.031% of one CPU core.**
 
 **Total agent overhead — 4 exhausted scenarios, worst-case paths:**
 - 4 000 file reads × 333 ns = 1 332 000 ns
@@ -528,10 +528,10 @@ The agent costs **0.31 ms out of 10 000 ms — 0.003% of one CPU core.**
 - 200 thread sleeps × 333 ns = 66 600 ns
 - **Total: 1 737 200 ns = 1.74 ms per second**
 
-1.74 ms out of 10 000 ms = **0.017% of one CPU core.**
+1.74 ms out of 1 000 ms = **0.17% of one CPU core.**
 
 Even with four exhausted scenarios sitting in the registry across all operation types, the chaos
-agent consumes less than two hundredths of one percent of one CPU core in a realistic microservice
+agent consumes less than two tenths of one percent of one CPU core in a realistic microservice
 workload. The dominant cost is always the business logic, the I/O, and the network — not the
 dispatch overhead.
 
@@ -583,7 +583,7 @@ confidence intervals.
 
 ---
 
-## 8. `BridgeDispatchBenchmark` — the woven path, and the release gate
+## 8. `BridgeDispatchBenchmark` — the woven path
 
 ### 8.1 What It Measures
 
@@ -616,21 +616,14 @@ Apple M-series, JDK 25, `-f 3 -wi 3 -i 5 -prof gc` (indicative; CI measures its 
 
 A call whose operation has no scenario allocates nothing: the dispatcher checks the operation index before it builds the `InvocationContext`. Before 2.0 every one of these calls built the context first (23–54 ns and 104–200 B per call with no scenario at all). A call that reaches a matching selector allocates its context, which escape analysis cannot remove across the registry's megamorphic controller loop.
 
-### 8.3 The Gate
+### 8.3 Comparing Two Builds
 
-`.github/workflows/benchmark-gate.yml` runs on every pull request into `main`. It builds the benchmarks of the target branch and of the pull request, runs `BridgeDispatchBenchmark` for both on the same runner (`-f 3 -wi 3 -i 5`, 15 samples each), and compares them with `scripts/jmh-gate.py`. A benchmark fails the gate only when all three hold:
-
-- its median is more than **15 %** slower,
-- **and** more than **25 ns** slower (nanosecond-scale noise does not count),
-- **and** a one-sided Mann-Whitney U test over the raw iteration scores gives **p < 0.01**.
-
-Benchmarks that exist on only one side are listed and skipped; a target branch without the benchmark passes. Run the same comparison locally:
+The benchmarks run on demand; no CI job runs them. To compare a change against its base, run `BridgeDispatchBenchmark` for both builds on the same machine with the same settings and compare the medians and their error bounds:
 
 ```
 ./gradlew :chaos-agent-benchmarks:installDist
 chaos-agent-benchmarks/build/install/chaos-agent-benchmarks/bin/chaos-agent-benchmarks \
     BridgeDispatchBenchmark -f 3 -wi 3 -i 5 -rf json -rff candidate.json
-python3 scripts/jmh-gate.py base.json candidate.json
 ```
 
 ---

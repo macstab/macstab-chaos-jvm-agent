@@ -535,7 +535,7 @@ Under high concurrency with many threads hitting the same rate-limited scenario,
 
 ## matchedCount vs appliedCount
 
-`matchedCount.incrementAndGet()` runs at step 4, before warm-up and rate-limit checks. This is deliberate:
+`matchedCount.incrementAndGet()` runs at step 6, before the warm-up, probability and rate-limit checks. This is deliberate:
 - `matchedCount` answers "is the selector working?"
 - `appliedCount` answers "is the effect being applied?"
 - `matchedCount > 0 && appliedCount == 0` diagnoses activation policy suppression
@@ -569,7 +569,7 @@ The last row confirms that `maxApplications` and `rateLimit` are independent gua
 - Threads that enter `evaluate()` _after_ the stopped flag is visible receive a null contribution — no effect is applied.
 - Concurrent reader threads never observe a `STOPPED → ACTIVE` state reversal. The `stopped` flag is an `AtomicBoolean`; once `true`, `compareAndSet(false, true)` by any other writer fails.
 
-**Implementation note**: `evaluate()` reads `stopped` at the first step of the pipeline (before the selector check). This minimizes work done on stopped controllers and ensures the evaluation short-circuits cleanly without producing partial state.
+**Implementation note**: `evaluate()` reads `started` at the first step of the pipeline (before the selector check), and again right before reserving an application. This minimizes work done on stopped controllers and ensures the evaluation short-circuits cleanly without producing partial state.
 
 ## Multi-Scenario Terminal Action Precedence
 
@@ -600,7 +600,7 @@ Sessions provide hard isolation boundaries via `ScopeContext`, a thread-local st
 | 50 unbound threads, 10 active session scenarios | All session `appliedCount == 0` — unbound threads invisible to session selectors |
 | Session closed after pre-close applications     | Post-close calls on any thread are not delayed — effect stops immediately        |
 
-**Why cross-session bleed is impossible**: `ScopeContext.currentSessionId()` returns the top of the calling thread's session ID stack. The `ScenarioController` for a SESSION-scoped scenario stores its session ID at registration time. The evaluation pipeline (step 3) compares `currentSessionId()` against the controller's ID with reference equality on interned session UUIDs. A thread in session A can never satisfy the guard for a controller registered to session B.
+**Why cross-session bleed is impossible**: `ScopeContext.currentSessionId()` returns the top of the calling thread's session ID stack. The `ScenarioController` for a SESSION-scoped scenario stores its session ID at registration time. The evaluation pipeline (step 2) compares the context's session ID with the controller's with `String.equals`. A thread in session A can never satisfy the guard for a controller registered to session B.
 
 **Root binding and lifecycle**: `DefaultChaosSession(...)` calls `scopeContext.bindRoot(id)` in its constructor — the opening thread is automatically in-scope from construction. `session.close()` calls `rootBinding.close()` last, after all controllers are destroyed, ensuring no thread reads a dangling session ID.
 
@@ -659,11 +659,11 @@ JVM-scoped controllers are NOT removed on session close. They stay registered un
 ## Evaluation Pipeline Cost (per controller, per intercepted call)
 
 - Steps 1–3: ~10–50 ns (AtomicBoolean read + string equality + SelectorMatcher)
-- Step 4 (matchedCount + window check): ~5 ns (AtomicLong CAS + instant comparison)
-- Step 5 (warm-up): ~3 ns (AtomicLong comparison)
-- Step 6 (rate limit): ~10–100 ns depending on synchronized contention
+- Steps 4–5 (activation window): ~3 ns (instant comparison)
+- Step 6 (matchedCount + warm-up): ~5 ns (AtomicLong increment + comparison)
 - Step 7 (probability): ~50 ns (SplittableRandom allocation + nextDouble)
-- Step 8 (maxApplications CAS): ~5–20 ns (AtomicLong CAS)
+- Step 8 (rate limit): ~10–100 ns depending on synchronized contention
+- Step 9 (maxApplications reservation): ~5–20 ns (a short synchronized block)
 
 Total per matching controller that passes all checks: ~100–300 ns exclusive of the effect itself.
 
@@ -705,7 +705,7 @@ Key invariants enforced at construction time by the builder API or `Compatibilit
 
 **JVM layer**: `AtomicBoolean.get()`, `AtomicLong.incrementAndGet()`, `AtomicLong.compareAndSet()` — all mapped to x86 `LOCK CMPXCHG` / `LOCK XADD` instructions. `ScenarioRegistry.match()` — one `volatile` read of the immutable operation index; no lock, no stream.
 
-**OS layer**: `Thread.sleep(delayMillis)` → `nanosleep(2)` on Linux. `synchronized(this)` → OS mutex via HotSpot's biased locking / lightweight locking / inflated lock stack depending on contention level.
+**OS layer**: `Thread.sleep(delayMillis)` → `nanosleep(2)` on Linux. `synchronized(this)` → HotSpot lightweight locking, inflated to an OS-backed monitor under contention.
 
 ---
 

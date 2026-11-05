@@ -126,9 +126,9 @@ Rules:
 - To modify an argument, add `readOnly = false` to `@Advice.Argument` and assign to it
 - Never call anything that could trigger the advice you're installing (causes reentrancy)
 
-### 5. Register the transformation in `JdkInstrumentationInstaller`
+### 5. Register the transformation in its hook group
 
-In `install()`, add a `.type(...).transform(...)` entry to the `AgentBuilder` chain:
+In the `*Hooks` class of the domain (`NetworkHooks`, `ConcurrencyHooks`, …), add a `.type(...).transform(...)` entry to the `AgentBuilder` chain:
 
 ```java
 .type(ElementMatchers.named("java.some.TargetClass"))
@@ -138,11 +138,11 @@ In `install()`, add a `.type(...).transform(...)` entry to the `AgentBuilder` ch
             .and(ElementMatchers.takesArguments(MyParam.class)))))
 ```
 
-Phase 1 points (always installed) go before the `if (premainMode)` check. Phase 2 points (require retransformation of already-loaded classes) go inside it.
+List the new operation in the `JdkInstrumentationInstaller.HookGroup` whose transformations contain the entry. A group is woven on the first activation that names one of its operations, or at start with `instrumentation=eager`.
 
-### 6. Handle the dispatch in `ChaosDispatcher`
+### 6. Handle the dispatch in the domain dispatcher
 
-Add the corresponding `beforeMyOperation(...)` method that receives the call from `ChaosBridge` and routes it through `ScenarioRegistry` → `ScenarioController` evaluation. Follow the pattern of any existing `before*` method in `ChaosDispatcher`, including its `idle(operation)` check: return the unmodified result before building the `InvocationContext`, so a call without a scenario for its operation allocates nothing.
+Add the corresponding `beforeMyOperation(...)` method to the domain dispatcher (`NetworkDispatch`, `ExecutorDispatch`, …) and expose it through `ChaosRuntime`, which `ChaosBridge` calls. Follow the pattern of any existing `before*` method there, including its `engine.idle(operation)` check: return the unmodified result before building the `InvocationContext`, so a call without a scenario for its operation allocates nothing.
 
 ### 7. Test it
 

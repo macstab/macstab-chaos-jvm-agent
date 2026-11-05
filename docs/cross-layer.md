@@ -161,7 +161,7 @@ JVM:
 
 The same scenario through the Java API (this block is compiled by the documentation test):
 
-```java verified
+```java
 import com.macstab.chaos.jvm.api.ActivationPolicy;
 import com.macstab.chaos.jvm.api.ChaosEffect;
 import com.macstab.chaos.jvm.api.ChaosScenario;

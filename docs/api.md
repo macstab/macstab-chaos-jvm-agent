@@ -22,7 +22,7 @@
 
 Compiled by the documentation test, so it always matches the API: a session-scoped slow database for one test, a plan-wide cap, and a replay of a recorded run.
 
-```java verified
+```java
 import com.macstab.chaos.jvm.api.ActivationPolicy;
 import com.macstab.chaos.jvm.api.ChaosControlPlane;
 import com.macstab.chaos.jvm.api.ChaosDecisionRecorder;
@@ -333,7 +333,7 @@ Sealed hierarchy. Divided into interceptor effects (applied inline on the callin
 | `ChaosPresets.clockJump(offset)` | every wall-clock read is off | `clock_gettime/realtime:OFFSET` |
 | `ChaosPresets.threadExhaustion()` | platform thread starts fail | `pthread_create:ERRNO:EAGAIN` |
 
-```java verified
+```java
 import com.macstab.chaos.jvm.api.ActivationPolicy;
 import com.macstab.chaos.jvm.api.ChaosControlPlane;
 import com.macstab.chaos.jvm.api.ChaosPresets;
