@@ -8,6 +8,7 @@ import com.macstab.chaos.jvm.api.ActivationPolicy;
 import com.macstab.chaos.jvm.api.ChaosActivationHandle;
 import com.macstab.chaos.jvm.api.ChaosDiagnostics;
 import com.macstab.chaos.jvm.api.ChaosEffect;
+import com.macstab.chaos.jvm.api.ChaosEvent;
 import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.ChaosSelector;
 import com.macstab.chaos.jvm.api.ChaosValidationException;
@@ -65,6 +66,35 @@ class StressorActiveForTest {
 
     await().atMost(Duration.ofSeconds(5)).until(() -> !threadAlive(threadName));
     assertThat(threadAlive("macstab-chaos-expiry-stopped")).as("expiry thread ended").isFalse();
+  }
+
+  @Test
+  @DisplayName("a stop racing the start (from a STARTED listener) leaves no expiry thread behind")
+  void stopDuringStartLeavesNoExpiryThread() {
+    final ActivationPolicy manual =
+        new ActivationPolicy(
+            ActivationPolicy.StartMode.MANUAL,
+            1.0d,
+            0L,
+            null,
+            Duration.ofHours(1),
+            null,
+            0L,
+            false);
+    final ChaosActivationHandle handle =
+        runtime.activate(keepAlive("raced", "stressor-raced-" + System.nanoTime(), manual));
+    // The listener runs on the starting thread once start() has left the controller's monitor,
+    // the window in which a stop() used to find no expiry thread to cancel.
+    runtime.addEventListener(
+        event -> {
+          if (event.type() == ChaosEvent.Type.STARTED && event.scenarioId().equals("raced")) {
+            handle.stop();
+          }
+        });
+
+    handle.start();
+
+    await().atMost(Duration.ofSeconds(5)).until(() -> !threadAlive("macstab-chaos-expiry-raced"));
   }
 
   @Test

@@ -267,7 +267,6 @@ final class ScenarioController {
     final ManagedStressor newStressor =
         stressorFactory.createIfNeeded(
             scenario.effect(), scenario.activationPolicy().allowDestructiveEffects());
-    final boolean transitioned;
     synchronized (this) {
       if (state == ChaosDiagnostics.ScenarioState.STOPPED) {
         if (newStressor != null) {
@@ -325,16 +324,15 @@ final class ScenarioController {
       started.set(true);
       state = ChaosDiagnostics.ScenarioState.ACTIVE;
       reason = "started";
-      transitioned = true;
-    }
-    if (transitioned) {
-      observabilityBus.publish(
-          ChaosEvent.Type.STARTED, scenario.id(), "scenario started", Map.of("scope", scopeKey));
+      // Under the monitor: a stop() that runs once start() has left it then finds the expiry
+      // thread and cancels it, instead of a thread scheduled afterwards parking for activeFor.
       final Duration lifetime = stressorLifetime();
       if (newStressor != null && lifetime != null) {
         scheduleStressorExpiry(lifetime);
       }
     }
+    observabilityBus.publish(
+        ChaosEvent.Type.STARTED, scenario.id(), "scenario started", Map.of("scope", scopeKey));
   }
 
   /**
