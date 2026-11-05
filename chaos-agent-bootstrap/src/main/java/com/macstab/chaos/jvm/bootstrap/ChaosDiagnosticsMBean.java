@@ -9,7 +9,6 @@ import com.macstab.chaos.jvm.startup.ChaosPlanMapper;
 import com.macstab.chaos.jvm.startup.ConfigLoadException;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import org.jspecify.annotations.Nullable;
 
 /**
  * Package-private JMX adapter that bridges the {@link ChaosDiagnosticsMXBean} interface to the
@@ -24,40 +23,13 @@ import org.jspecify.annotations.Nullable;
  */
 final class ChaosDiagnosticsMBean implements ChaosDiagnosticsMXBean {
   private final ChaosDiagnostics diagnostics;
-  private final @Nullable ChaosControlPlane controlPlane;
+  private final ChaosControlPlane controlPlane;
   private final boolean controlEnabled;
   private final java.util.function.Predicate<String> visible;
   private final java.util.function.Function<java.util.function.Predicate<String>, String> dump;
 
   /** Handles of scenarios activated through JMX, by scenario id. */
   private final Map<String, ChaosActivationHandle> activated = new ConcurrentHashMap<>();
-
-  /**
-   * Constructs the MBean adapter backed by the given diagnostics source, without control.
-   *
-   * @param diagnostics the runtime diagnostics provider; must not be null
-   */
-  ChaosDiagnosticsMBean(final ChaosDiagnostics diagnostics) {
-    this(diagnostics, null, false);
-  }
-
-  /**
-   * Constructs the MBean adapter.
-   *
-   * @param diagnostics the runtime diagnostics provider
-   * @param controlPlane the control plane the control operations act on
-   * @param controlEnabled whether the control operations are allowed
-   */
-  ChaosDiagnosticsMBean(
-      final ChaosDiagnostics diagnostics,
-      final @Nullable ChaosControlPlane controlPlane,
-      final boolean controlEnabled) {
-    this.diagnostics = diagnostics;
-    this.controlPlane = controlPlane;
-    this.controlEnabled = controlEnabled && controlPlane != null;
-    this.visible = id -> true;
-    this.dump = include -> diagnostics.debugDump();
-  }
 
   /**
    * Constructs the MBean for the agent's runtime: scenarios whose plan set {@code jmxEnabled=false}
@@ -149,13 +121,12 @@ final class ChaosDiagnosticsMBean implements ChaosDiagnosticsMXBean {
 
   /** Returns the control plane, or fails when the control operations are disabled. */
   private ChaosControlPlane requireControl() {
-    final ChaosControlPlane control = controlPlane;
-    if (!controlEnabled || control == null) {
+    if (!controlEnabled) {
       throw new IllegalStateException(
           "chaos JMX control operations are disabled; enable them with the agent argument"
               + " jmxControl=true or -Dmacstab.chaos.jmx.control=true");
     }
-    return control;
+    return controlPlane;
   }
 
   /**

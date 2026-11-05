@@ -58,7 +58,7 @@ class ConfigReloadTest {
         StartupConfigPoller.createIfEnabled(
                 "configWatchInterval=3600000", Map.of(), configured, runtime)
             .orElseThrow();
-    poller.startWithInitialPlan(ChaosPlanMapper.read(Files.readString(configured)).scenarios());
+    poller.startWithInitialPlan(ChaosPlanMapper.read(Files.readString(configured)), null);
   }
 
   private ChaosDiagnostics.ScenarioState state(final String id) {

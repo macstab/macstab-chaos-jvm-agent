@@ -91,51 +91,25 @@ public final class JdkInstrumentationInstaller {
    * <p>Hooks are woven on demand: the runtime calls back into {@link #weave} before a scenario that
    * needs a hook group starts (and when a session opens, for executor task decoration), so a JVM
    * without scenarios carries no advice in its JDK classes. The same path serves {@code premain},
-   * {@code agentmain} and self-attach; dynamic attach is no longer limited to a subset of hooks.
+   * {@code agentmain} and self-attach.
+   *
+   * <p>In the classes under {@code clockCallSitePackages}, calls to {@link
+   * System#currentTimeMillis()} and {@link System#nanoTime()} are rewritten to go through the
+   * clock-skew dispatch once a {@code SYSTEM_CLOCK_MILLIS} or {@code SYSTEM_CLOCK_NANOS} scenario
+   * is activated: the methods are JIT intrinsics no advice can reach, their call sites can be
+   * rewritten.
    *
    * @param instrumentation the {@link Instrumentation} handle provided by the JVM at agent
    *     attachment
    * @param runtime the runtime the bridge dispatches to
-   * @param eager {@code true} to weave every hook group immediately instead of on demand (the 1.x
-   *     behaviour; useful when activation must not pay the one-time weaving cost)
-   */
-  public static void install(
-      final Instrumentation instrumentation, final ChaosRuntime runtime, final boolean eager) {
-    install(instrumentation, runtime, eager, List.of());
-  }
-
-  /**
-   * Installs the agent, with clock call-site weaving for the classes under {@code
-   * clockCallSitePackages}: there, calls to {@link System#currentTimeMillis()} and {@link
-   * System#nanoTime()} are rewritten to go through the clock-skew dispatch once a {@code
-   * SYSTEM_CLOCK_MILLIS} or {@code SYSTEM_CLOCK_NANOS} scenario is activated. The methods
-   * themselves are JIT intrinsics no advice can reach; their call sites can be rewritten.
-   *
-   * @param instrumentation the {@link Instrumentation} handle
-   * @param runtime the runtime the bridge dispatches to
-   * @param eager {@code true} to weave every hook group immediately
+   * @param eager {@code true} to weave every hook group immediately instead of on demand, so no
+   *     activation pays the one-time weaving cost
    * @param clockCallSitePackages package (or class-name) prefixes whose clock calls are rewritten,
    *     e.g. {@code com.example.}; {@code java.}, {@code javax.}, {@code jdk.}, {@code sun.} and
    *     {@code com.sun.} prefixes are refused
-   * @throws IllegalArgumentException if a prefix names JDK classes
-   */
-  public static void install(
-      final Instrumentation instrumentation,
-      final ChaosRuntime runtime,
-      final boolean eager,
-      final List<String> clockCallSitePackages) {
-    install(instrumentation, runtime, eager, clockCallSitePackages, List.of());
-  }
-
-  /**
-   * Installs the agent with clock call-site weaving and additional session-header hosts.
-   *
-   * @param instrumentation the {@link Instrumentation} handle
-   * @param runtime the runtime the bridge dispatches to
-   * @param eager {@code true} to weave every hook group immediately
-   * @param clockCallSitePackages package prefixes whose clock calls are rewritten
    * @param sessionHeaderHosts host globs that receive {@code X-Chaos-Session} besides the internal
    *     hosts ({@code *} for all)
+   * @throws IllegalArgumentException if a clock prefix names JDK classes
    */
   public static void install(
       final Instrumentation instrumentation,

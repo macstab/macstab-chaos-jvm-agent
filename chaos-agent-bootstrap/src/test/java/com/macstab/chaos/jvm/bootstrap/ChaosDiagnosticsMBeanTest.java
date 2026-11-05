@@ -29,8 +29,7 @@ class ChaosDiagnosticsMBeanTest {
   @Test
   @DisplayName("control operations are refused unless enabled")
   void controlDisabled() {
-    final ChaosDiagnosticsMBean bean =
-        new ChaosDiagnosticsMBean(runtime.diagnostics(), runtime, false);
+    final ChaosDiagnosticsMBean bean = new ChaosDiagnosticsMBean(runtime, false);
 
     assertThat(bean.isControlEnabled()).isFalse();
     assertThatThrownBy(() -> bean.activatePlan(PLAN))
@@ -42,8 +41,7 @@ class ChaosDiagnosticsMBeanTest {
   @Test
   @DisplayName("with control enabled a plan is activated, listed and stopped")
   void controlEnabled() {
-    final ChaosDiagnosticsMBean bean =
-        new ChaosDiagnosticsMBean(runtime.diagnostics(), runtime, true);
+    final ChaosDiagnosticsMBean bean = new ChaosDiagnosticsMBean(runtime, true);
 
     assertThat(bean.activatePlan(PLAN)).isEqualTo("jmx-delay");
     assertThat(bean.listScenarios())
@@ -60,8 +58,7 @@ class ChaosDiagnosticsMBeanTest {
   @Test
   @DisplayName("an invalid plan is an IllegalArgumentException with the parse message")
   void invalidPlan() {
-    final ChaosDiagnosticsMBean bean =
-        new ChaosDiagnosticsMBean(runtime.diagnostics(), runtime, true);
+    final ChaosDiagnosticsMBean bean = new ChaosDiagnosticsMBean(runtime, true);
 
     assertThatThrownBy(() -> bean.activatePlan("{"))
         .isInstanceOf(IllegalArgumentException.class)
@@ -72,21 +69,17 @@ class ChaosDiagnosticsMBeanTest {
   @DisplayName("a read-only bean, or one without a control plane, has control disabled")
   void readOnlyBean() {
     runtime.activate(com.macstab.chaos.jvm.startup.ChaosPlanMapper.read(PLAN));
-    final ChaosDiagnosticsMBean readOnly = new ChaosDiagnosticsMBean(runtime.diagnostics());
+    final ChaosDiagnosticsMBean readOnly = new ChaosDiagnosticsMBean(runtime, false);
 
     assertThat(readOnly.isControlEnabled()).isFalse();
     assertThat(readOnly.listScenarios()).singleElement().asString().startsWith("jmx-delay ");
     assertThat(readOnly.debugDump()).contains("jmx-delay");
-    assertThat(new ChaosDiagnosticsMBean(runtime.diagnostics(), null, true).isControlEnabled())
-        .as("enabled without a control plane")
-        .isFalse();
   }
 
   @Test
   @DisplayName("a plan the runtime refuses is an IllegalArgumentException with its reason")
   void refusedPlan() {
-    final ChaosDiagnosticsMBean bean =
-        new ChaosDiagnosticsMBean(runtime.diagnostics(), runtime, true);
+    final ChaosDiagnosticsMBean bean = new ChaosDiagnosticsMBean(runtime, true);
     bean.activatePlan(PLAN);
 
     assertThatThrownBy(() -> bean.activatePlan(PLAN.replace("\"jmx\"}", "\"jmx-again\"}")))
@@ -97,8 +90,7 @@ class ChaosDiagnosticsMBeanTest {
   @Test
   @DisplayName("a scenario stops with its whole plan, so stopAll counts each plan once")
   void scenariosStopWithTheirPlan() {
-    final ChaosDiagnosticsMBean bean =
-        new ChaosDiagnosticsMBean(runtime.diagnostics(), runtime, true);
+    final ChaosDiagnosticsMBean bean = new ChaosDiagnosticsMBean(runtime, true);
     bean.activatePlan(
         """
         {"metadata":{"name":"pair"},"scenarios":[

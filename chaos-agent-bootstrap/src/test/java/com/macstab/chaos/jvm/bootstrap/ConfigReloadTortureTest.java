@@ -68,7 +68,7 @@ class ConfigReloadTortureTest {
                 volume.resolve("plan.json"),
                 runtime)
             .orElseThrow();
-    poller.startWithInitialPlan(ChaosPlanMapper.read(validPlan("g0")));
+    poller.startWithInitialPlan(ChaosPlanMapper.read(validPlan("g0")), null);
 
     final List<String> violations = new CopyOnWriteArrayList<>();
     final AtomicBoolean writing = new AtomicBoolean(true);
@@ -147,7 +147,7 @@ class ConfigReloadTortureTest {
     poller =
         StartupConfigPoller.createIfEnabled("configWatchInterval=3600000", Map.of(), file, runtime)
             .orElseThrow();
-    poller.startWithInitialPlan(ChaosPlanMapper.read(validPlan("ok")));
+    poller.startWithInitialPlan(ChaosPlanMapper.read(validPlan("ok")), null);
 
     Files.writeString(file, "{\n  \"scenarios\": [\n    {\"id\": oops}\n  ]\n}\n");
     poller.pollOnce();

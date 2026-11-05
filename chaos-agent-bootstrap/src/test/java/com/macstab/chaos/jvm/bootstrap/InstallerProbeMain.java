@@ -53,7 +53,8 @@ public final class InstallerProbeMain {
         java.nio.file.Path.of(tmpDir, "missing-" + System.nanoTime());
     System.setProperty("java.io.tmpdir", missing.toString());
     try {
-      JdkInstrumentationInstaller.install(instrumentation, new ChaosRuntime(), false);
+      JdkInstrumentationInstaller.install(
+          instrumentation, new ChaosRuntime(), false, List.of(), List.of());
       System.out.println("injectFailure=none");
     } catch (final IllegalStateException failed) {
       System.out.println("injectFailure=" + failed.getMessage());
@@ -62,9 +63,9 @@ public final class InstallerProbeMain {
     }
 
     final ChaosRuntime first = new ChaosRuntime();
-    JdkInstrumentationInstaller.install(instrumentation, first, false);
+    JdkInstrumentationInstaller.install(instrumentation, first, false, List.of(), List.of());
     final ChaosRuntime second = new ChaosRuntime();
-    JdkInstrumentationInstaller.install(instrumentation, second, false, List.of());
+    JdkInstrumentationInstaller.install(instrumentation, second, false, List.of(), List.of());
     first.activate(sleepDelay("first-sleep"));
     second.activate(sleepDelay("second-sleep"));
     System.out.println("installedSleepMillis=" + sleepMillis());
