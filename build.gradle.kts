@@ -619,8 +619,8 @@ subprojects {
 // `./gradlew pitest` mutates the bytecode of the modules whose behaviour is decided in plain Java
 // (the API's validation, the core's evaluation, the plan parser) and runs their unit tests against
 // each mutant: a surviving mutant is a behaviour no test pins down. Too slow for every build, so it
-// is not part of `check`; the threshold is a ratchet like the coverage floors, set a little below
-// the measured score and only ever raised. Reports: <module>/build/reports/pitest/index.html.
+// is not part of `check` and runs on demand; each threshold is set a little below the measured
+// score. Reports: <module>/build/reports/pitest/index.html.
 val mutationFloors = mapOf(
     "chaos-agent-api" to 95,
     "chaos-agent-core" to 83,
