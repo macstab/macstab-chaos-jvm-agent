@@ -1,7 +1,7 @@
 package com.macstab.chaos.jvm.instrumentation;
 
-import static com.macstab.chaos.jvm.instrumentation.JdkInstrumentationInstaller.CLOCK_CALL_SITE_PACKAGES;
 import static com.macstab.chaos.jvm.instrumentation.JdkInstrumentationInstaller.advise;
+import static com.macstab.chaos.jvm.instrumentation.JdkInstrumentationInstaller.clockPackages;
 
 import com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher;
 import java.util.List;
@@ -104,7 +104,7 @@ final class ClockHooks {
    * change, nothing else.
    */
   static AgentBuilder applyClockCallSiteTransformations(final AgentBuilder agentBuilder) {
-    final List<String> packages = CLOCK_CALL_SITE_PACKAGES;
+    final List<String> packages = clockPackages;
     if (packages.isEmpty()) {
       // A SYSTEM_CLOCK_* scenario is valid without the setting (manual adjustClockMillis hooks),
       // but direct System.currentTimeMillis() calls stay unskewed: say so instead of doing

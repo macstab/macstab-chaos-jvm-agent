@@ -66,18 +66,17 @@ import org.jspecify.annotations.Nullable;
  *
  * <h2>Thread safety</h2>
  *
- * <p>This class is stateless. {@link #install} is expected to be called exactly once at startup,
- * from a single thread.
+ * <p>{@link #install} is expected to be called once at startup, from a single thread. {@link
+ * #weave} and {@link #uninstall} may run on any thread: the woven groups are guarded by their map's
+ * monitor.
  */
 public final class JdkInstrumentationInstaller {
   private static final Logger LOGGER =
       Logger.getLogger(JdkInstrumentationInstaller.class.getName());
 
   /**
-   * The transformer returned by the last successful {@link AgentBuilder#installOn} call. Retained
-   * so dynamic-attach test runners and framework teardown paths can call {@link #uninstall} to
-   * reset applied class transformations. {@code volatile} so the latest reference is visible to
-   * {@link #uninstall} on any thread.
+   * The transformer of each hook group woven so far, kept so {@link #uninstall} can reset the
+   * transformations. Guarded by its own monitor.
    */
   private static final Map<HookGroup, ResettableClassFileTransformer> WOVEN_GROUPS =
       new java.util.EnumMap<>(HookGroup.class);
@@ -117,14 +116,13 @@ public final class JdkInstrumentationInstaller {
       final boolean eager,
       final List<String> clockCallSitePackages,
       final List<String> sessionHeaderHosts) {
-    CLOCK_CALL_SITE_PACKAGES = validatedClockPackages(clockCallSitePackages);
-    SESSION_HEADER_HOSTS = List.copyOf(sessionHeaderHosts);
+    clockPackages = validatedClockPackages(clockCallSitePackages);
     ModuleOpener.grantInternalModuleOpens(instrumentation);
     BridgeInjector.injectBridge(instrumentation);
     rejectForeignDelegate();
     installDelegate(new ChaosBridge(runtime));
     com.macstab.chaos.jvm.instrumentation.bridge.SessionHeaderPolicy.setExtraHosts(
-        SESSION_HEADER_HOSTS);
+        sessionHeaderHosts);
     try {
       runtime.setHookDemand(
           new HookDemand() {
@@ -1471,11 +1469,8 @@ public final class JdkInstrumentationInstaller {
                                         long.class, java.util.concurrent.TimeUnit.class)))));
   }
 
-  /** Host globs that receive the session header besides internal hosts; set before injection. */
-  private static volatile List<String> SESSION_HEADER_HOSTS = List.of();
-
   /** Prefixes whose clock call sites are rewritten; empty when the feature is off. */
-  static volatile List<String> CLOCK_CALL_SITE_PACKAGES = List.of();
+  static volatile List<String> clockPackages = List.of();
 
   private static final List<String> JDK_PREFIXES =
       List.of("java.", "javax.", "jdk.", "sun.", "com.sun.");

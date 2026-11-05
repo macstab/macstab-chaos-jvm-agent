@@ -57,12 +57,6 @@ final class BridgeInjector {
     }
     boolean appended = false;
     try {
-      // On POSIX filesystems create with 0600: the bridge JAR contains the code that bootstrap
-      // classloader will load, so a world-readable/writable file (the default 0644 umask-adjusted
-      // file) is a privilege-escalation hazard — any local user who can write to /tmp could swap
-      // the file before the JVM opens it and run arbitrary bootstrap-level code. On non-POSIX
-      // filesystems (e.g. Windows) fall back to the default because PosixFileAttributes are
-      // unsupported there; other platform-specific ACLs would have to be layered in separately.
       sweepStaleBridgeJars();
       final Path bridgeJar = createSecureTempFile();
       bridgeJar.toFile().deleteOnExit();
@@ -159,6 +153,12 @@ final class BridgeInjector {
     }
   }
 
+  /**
+   * Creates the bridge jar's file, owner-only (0600) on POSIX file systems: the bootstrap
+   * classloader loads its code, so a file another local user could replace before the JVM opens it
+   * would let them run code at bootstrap level. Other file systems (Windows) get the default
+   * permissions.
+   */
   private static Path createSecureTempFile() throws IOException {
     final String tmpDir = System.getProperty("java.io.tmpdir");
     final Path tmpPath = Path.of(tmpDir);
