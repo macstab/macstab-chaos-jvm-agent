@@ -14,6 +14,9 @@ public class ChaosManagementRecorder {
   /** The runtime switch of the route. */
   public static final String ENABLED_PROPERTY = "macstab.chaos.management.enabled";
 
+  /** Serves requests without an authenticated user; off by default. */
+  public static final String ALLOW_ANONYMOUS_PROPERTY = "macstab.chaos.management.allow-anonymous";
+
   /** Default constructor invoked by the Quarkus build step. */
   public ChaosManagementRecorder() {}
 
@@ -29,12 +32,16 @@ public class ChaosManagementRecorder {
     final ChaosManagementHandler handler =
         new ChaosManagementHandler(
             root,
-            () ->
-                ConfigProvider.getConfig()
-                    .getOptionalValue(ENABLED_PROPERTY, Boolean.class)
-                    .orElse(Boolean.FALSE),
+            () -> flag(ENABLED_PROPERTY),
+            () -> flag(ALLOW_ANONYMOUS_PROPERTY),
             ChaosPlatform::current);
     shutdown.addShutdownTask(handler::close);
     return handler;
+  }
+
+  private static boolean flag(final String property) {
+    return ConfigProvider.getConfig()
+        .getOptionalValue(property, Boolean.class)
+        .orElse(Boolean.FALSE);
   }
 }

@@ -30,8 +30,11 @@ class ChaosManagementHandlerTest {
 
   private final ChaosRuntime runtime = new ChaosRuntime();
   private final AtomicBoolean enabled = new AtomicBoolean(true);
+  private final AtomicBoolean allowAnonymous = new AtomicBoolean(false);
+  private final AtomicReference<io.vertx.ext.auth.User> user =
+      new AtomicReference<>(io.vertx.ext.auth.User.fromName("operator"));
   private final ChaosManagementHandler handler =
-      new ChaosManagementHandler("/q/chaos", enabled::get, () -> runtime);
+      new ChaosManagementHandler("/q/chaos", enabled::get, allowAnonymous::get, () -> runtime);
 
   @AfterEach
   void tearDown() {
@@ -53,7 +56,9 @@ class ChaosManagementHandlerTest {
               if (answer == SELF) {
                 return self;
               }
-              if (answer == null && !method.getName().equals("body")) {
+              if (answer == null
+                  && !method.getName().equals("body")
+                  && !method.getName().equals("user")) {
                 throw new UnsupportedOperationException(method.getName());
               }
               return answer;
@@ -109,6 +114,7 @@ class ChaosManagementHandlerTest {
                   case "request" -> request;
                   case "response" -> recording;
                   case "body" -> body;
+                  case "user" -> user.get();
                   default -> null;
                 });
     handler.handle(context);
@@ -129,6 +135,27 @@ class ChaosManagementHandlerTest {
   }
 
   @Test
+  @DisplayName("refuses a request without an authenticated user with 401, and activates nothing")
+  void anonymousRequestRefused() {
+    user.set(null);
+
+    final Answer refused = call(HttpMethod.POST, "/q/chaos", PLAN);
+
+    assertThat(refused.status()).isEqualTo(401);
+    assertThat(refused.body()).contains("authentication required");
+    assertThat(runtime.diagnostics().snapshot().scenarios()).isEmpty();
+  }
+
+  @Test
+  @DisplayName("serves an anonymous request only when anonymous access is allowed explicitly")
+  void anonymousRequestWhenAllowed() {
+    user.set(null);
+    allowAnonymous.set(true);
+
+    assertThat(call(HttpMethod.POST, "/q/chaos", PLAN).status()).isEqualTo(200);
+  }
+
+  @Test
   @DisplayName("answers 404 while disabled or outside its root, 503 without the agent")
   void neverLeavesARequestUnanswered() {
     enabled.set(false);
@@ -138,6 +165,7 @@ class ChaosManagementHandlerTest {
     final ChaosManagementHandler withoutAgent =
         new ChaosManagementHandler(
             "/q/chaos",
+            () -> true,
             () -> true,
             () -> {
               throw new IllegalStateException("not installed");
@@ -296,6 +324,7 @@ class ChaosManagementHandlerTest {
                     (self, method, args) ->
                         switch (method.getName()) {
                           case "normalizedPath" -> "/q/chaos";
+                          case "user" -> user.get();
                           case "request" -> request;
                           case "response" -> response;
                           case "vertx" -> vertx;
@@ -359,6 +388,7 @@ class ChaosManagementHandlerTest {
                   (self, method, args) ->
                       switch (method.getName()) {
                         case "normalizedPath" -> "/q/chaos";
+                        case "user" -> user.get();
                         case "request" -> request;
                         case "response" -> response;
                         case "vertx" -> vertx;

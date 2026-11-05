@@ -29,7 +29,7 @@ class ChaosManagementBuildStepTest {
               @Override
               public io.vertx.core.Handler<io.vertx.ext.web.RoutingContext> handler(
                   final String root, final io.quarkus.runtime.ShutdownContext shutdown) {
-                return new ChaosManagementHandler(root, () -> true, () -> null);
+                return new ChaosManagementHandler(root, () -> true, () -> false, () -> null);
               }
             },
             new NonApplicationRootPathBuildItem("/", "/q", null),

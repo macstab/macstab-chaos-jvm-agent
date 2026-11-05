@@ -15,14 +15,18 @@ import org.jspecify.annotations.Nullable;
  * to stop them all.
  *
  * <p>Every request is answered: 404 while {@code macstab.chaos.management.enabled} is not {@code
- * true} (read on each request, so it can be switched without a rebuild), 503 when the agent is not
- * installed, otherwise the operation's status and JSON. The work runs on a worker thread, never on
- * the event loop; a body another extension has already read is used as it is.
+ * true} (read on each request, so it can be switched without a rebuild); 401 for a request without
+ * an authenticated user (secure the path with Quarkus security, e.g. {@code
+ * quarkus.http.auth.permission}), unless {@code macstab.chaos.management.allow-anonymous} is {@code
+ * true}; 503 when the agent is not installed; otherwise the operation's status and JSON. The work
+ * runs on a worker thread, never on the event loop; a body another extension has already read is
+ * used as it is.
  */
 public final class ChaosManagementHandler implements Handler<RoutingContext>, AutoCloseable {
 
   private final String root;
   private final BooleanSupplier enabled;
+  private final BooleanSupplier allowAnonymous;
   private final Supplier<ChaosControlPlane> controlPlane;
   private volatile @Nullable ChaosManagement management;
 
@@ -31,15 +35,19 @@ public final class ChaosManagementHandler implements Handler<RoutingContext>, Au
    *
    * @param root the route's path, e.g. {@code /q/chaos}; the rest of a request path is the id
    * @param enabled whether management is switched on, read per request
+   * @param allowAnonymous whether requests without an authenticated user are served, read per
+   *     request
    * @param controlPlane the installed control plane; throws {@link IllegalStateException} when the
    *     agent is not installed
    */
   public ChaosManagementHandler(
       final String root,
       final BooleanSupplier enabled,
+      final BooleanSupplier allowAnonymous,
       final Supplier<ChaosControlPlane> controlPlane) {
     this.root = root;
     this.enabled = enabled;
+    this.allowAnonymous = allowAnonymous;
     this.controlPlane = controlPlane;
   }
 
@@ -78,6 +86,10 @@ public final class ChaosManagementHandler implements Handler<RoutingContext>, Au
       if (!enabled.getAsBoolean()) {
         status = 404;
         json = "{\"status\":\"error\",\"message\":\"chaos management is disabled\"}";
+      } else if (context.user() == null && !allowAnonymous.getAsBoolean()) {
+        // Activating chaos is as powerful as deploying code: an anonymous caller may not.
+        status = 401;
+        json = "{\"status\":\"error\",\"message\":\"authentication required\"}";
       } else if (!path.equals(root) && !path.startsWith(root + "/")) {
         status = 404;
         json = "{\"status\":\"error\",\"message\":\"unknown path\"}";
