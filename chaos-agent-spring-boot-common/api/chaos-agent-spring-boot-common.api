@@ -71,6 +71,9 @@ public final class com/macstab/chaos/jvm/spring/boot/common/ChaosSessionFilter i
 
 public class com/macstab/chaos/jvm/spring/boot/common/ChaosSessionPropagationAutoConfiguration
   public method <init>()V
+
+public class com/macstab/chaos/jvm/spring/boot/common/ChaosSessionPropagationConfiguration
+  public method <init>()V
   public method chaosSessionFilter()Lcom/macstab/chaos/jvm/spring/boot/common/ChaosSessionFilter;
 
 public final class com/macstab/chaos/jvm/spring/boot/common/OnTrustedChaosEnablementCondition extends org/springframework/boot/autoconfigure/condition/SpringBootCondition

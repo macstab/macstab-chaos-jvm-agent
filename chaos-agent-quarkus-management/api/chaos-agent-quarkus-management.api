@@ -1,9 +1,10 @@
 public final class com/macstab/chaos/jvm/quarkus/management/ChaosManagementHandler implements io/vertx/core/Handler, java/lang/AutoCloseable
-  public method <init>(Ljava/lang/String;Ljava/util/function/BooleanSupplier;Ljava/util/function/Supplier;)V
+  public method <init>(Ljava/lang/String;Ljava/util/function/BooleanSupplier;Ljava/util/function/BooleanSupplier;Ljava/util/function/Supplier;)V
   public method close()V
   public method handle(Lio/vertx/ext/web/RoutingContext;)V
 
 public class com/macstab/chaos/jvm/quarkus/management/ChaosManagementRecorder
   public method <init>()V
   public method handler(Ljava/lang/String;Lio/quarkus/runtime/ShutdownContext;)Lio/vertx/core/Handler;
+  public static final field ALLOW_ANONYMOUS_PROPERTY Ljava/lang/String;
   public static final field ENABLED_PROPERTY Ljava/lang/String;
