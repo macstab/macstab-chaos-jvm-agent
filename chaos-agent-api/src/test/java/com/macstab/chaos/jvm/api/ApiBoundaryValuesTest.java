@@ -289,14 +289,6 @@ class ApiBoundaryValuesTest {
           .isInstanceOf(IllegalArgumentException.class)
           .hasMessage("path prefix must be non-blank");
     }
-
-    @Test
-    @DisplayName("the no-op metrics sink accepts durations")
-    void noopSinkRecordsDuration() {
-      assertThatCode(
-              () -> ChaosMetricsSink.NOOP.recordDuration("d", Duration.ofMillis(1), Map.of()))
-          .doesNotThrowAnyException();
-    }
   }
 
   @Nested

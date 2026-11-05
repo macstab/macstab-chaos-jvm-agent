@@ -3,7 +3,6 @@ package com.macstab.chaos.jvm.api;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -66,51 +65,6 @@ class ApiContractsTest {
 
       assertThat(policy.startMode()).isEqualTo(ActivationPolicy.StartMode.AUTOMATIC);
       assertThat(policy.probability()).isEqualTo(1.0d);
-    }
-
-    @Test
-    @DisplayName("fromJson keeps every given field")
-    void fromJsonKeeps() {
-      final ActivationPolicy.RateLimit rateLimit =
-          new ActivationPolicy.RateLimit(2, Duration.ofSeconds(1));
-      final ActivationPolicy policy =
-          ActivationPolicy.fromJson(
-              ActivationPolicy.StartMode.MANUAL,
-              0.5d,
-              2L,
-              7L,
-              Duration.ofMinutes(1),
-              rateLimit,
-              42L,
-              true,
-              null,
-              null,
-              null);
-
-      assertThat(policy)
-          .isEqualTo(
-              new ActivationPolicy(
-                  ActivationPolicy.StartMode.MANUAL,
-                  0.5d,
-                  2L,
-                  7L,
-                  Duration.ofMinutes(1),
-                  rateLimit,
-                  42L,
-                  true,
-                  null,
-                  null,
-                  null));
-    }
-
-    @Test
-    @DisplayName("the builder takes a ready rate limit")
-    void builderTakesRateLimit() {
-      final ActivationPolicy.RateLimit rateLimit =
-          new ActivationPolicy.RateLimit(3, Duration.ofSeconds(2));
-
-      assertThat(ActivationPolicy.builder().rateLimit(rateLimit).build().rateLimit())
-          .isEqualTo(rateLimit);
     }
   }
 

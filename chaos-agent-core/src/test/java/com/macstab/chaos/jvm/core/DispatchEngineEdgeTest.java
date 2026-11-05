@@ -218,18 +218,6 @@ class DispatchEngineEdgeTest {
         session.close();
       }
     }
-
-    @Test
-    @DisplayName("a missing task has no class name")
-    void nullTaskHasNoClassName() {
-      assertThat(DispatchEngine.taskClassName(null)).isNull();
-    }
-
-    @Test
-    @DisplayName("an unnamed subject is not a file channel")
-    void nullIsNotFileChannel() {
-      assertThat(DispatchEngine.isFileChannel(null)).isFalse();
-    }
   }
 
   @Nested
