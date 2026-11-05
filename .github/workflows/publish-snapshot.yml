@@ -67,6 +67,11 @@ jobs:
           VERSION=$(grep -E '^\s*version\s*=' gradle.properties | sed -E 's/.*=\s*//' | tr -d ' \t\n\r')
           echo "PROJECT_VERSION=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "Extracted version: ${VERSION}"
+          # The next step deletes the published packages of this version: never a release.
+          case "${VERSION}" in
+            *-SNAPSHOT) ;;
+            *) echo "ERROR: ${VERSION} is not a SNAPSHOT version; refusing to replace it"; exit 1 ;;
+          esac
 
       - name: Delete existing snapshot if present
         run: |
