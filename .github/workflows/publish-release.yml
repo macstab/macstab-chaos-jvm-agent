@@ -8,7 +8,7 @@ on:
 # CRITICAL: serialize release publishes - parallel runs corrupt artifacts.
 concurrency:
   group: publish-release-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: read
