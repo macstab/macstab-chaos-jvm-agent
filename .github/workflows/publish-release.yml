@@ -43,7 +43,7 @@ jobs:
         run: sed -i 's/^version=.*/version=${{ steps.version.outputs.VERSION }}/' gradle.properties
 
       - name: Build and publish release to GitHub Packages (tests already ran pre-tag)
-        run: ./gradlew build publish -x test --no-daemon --stacktrace
+        run: ./gradlew publish --no-daemon --stacktrace
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_ACTOR: ${{ github.actor }}
