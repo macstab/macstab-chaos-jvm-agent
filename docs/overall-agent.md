@@ -68,27 +68,128 @@ Out of scope:
 
 ---
 
-# 2. Engineerural Context
+# 2. Architectural Context
 
 ## Module Decomposition
 
-```
-chaos-agent-api           — stable public contract; the only module application code directly depends on
-chaos-agent-bootstrap     — agent entry point (premain/agentmain), singleton init, JMX MBean
-chaos-agent-core          — matching engine, scenario controllers, activation policies, session scoping, stressors
-chaos-agent-instrumentation-jdk — ByteBuddy advice, bootstrap bridge, 77 interception handles
-chaos-agent-startup-config — config resolution: JSON/base64/file; Jackson mapping
-chaos-agent-testkit       — JUnit 5 extension, ChaosPlatform.installLocally() for self-attach
-chaos-agent-examples      — runnable examples
+The agent is a multi-module Gradle project organised as a strict directed dependency graph: the stable public API at the top, bytecode instrumentation and the bootstrap bridge at the bottom, with runtime core, startup configuration, and framework integrations layered between. Every module is independently versioned and independently publishable — consumers depend on `chaos-agent-api` for contract stability and pull in exactly one integration module (test or runtime, Boot 3 or Boot 4) for the chosen environment.
+
+### Module responsibilities
+
+- **Public contract** — `chaos-agent-api` is the only module application code compiles against. Sealed hierarchies (`ChaosSelector`, `ChaosEffect`), records (`ChaosScenario`, `ChaosPlan`, `ActivationPolicy`, `NamePattern`), and the `ChaosControlPlane` / `ChaosSession` interfaces form the stable surface. Everything else is implementation.
+- **Runtime core** — `chaos-agent-core` holds the scenario registry, the 9-step evaluation pipeline, session scoping, and every stressor implementation (heap, metaspace, direct-buffer, GC, finalizer, deadlock, thread-leak, monitor, code-cache, safepoint, string-intern, reference-queue, thread-local, keep-alive, virtual-thread carrier pinning). Hot-path code (`ChaosDispatcher`, `ScenarioController`) is profiled against JMH benchmarks.
+- **Bytecode instrumentation** — `chaos-agent-instrumentation-jdk` defines the ByteBuddy `@Advice` classes and the bootstrap-classloader bridge. `BootstrapDispatcher` (bootstrap-resident, appended via `Instrumentation.appendToBootstrapClassLoaderSearch`) is the only path by which instrumented JDK methods reach the agent classloader — a `volatile` two-field publication protocol guarantees JMM visibility of the 77-slot `MethodHandle[]` dispatch table.
+- **Agent lifecycle** — `chaos-agent-bootstrap` owns the `premain` / `agentmain` entry points, the singleton `ChaosControlPlane` installation, and JMX MBean registration.
+- **Configuration resolution** — `chaos-agent-startup-config` resolves plans from `configFile`, `configJson`, `configBase64`, and environment variables, deserialises them via Jackson polymorphic mapping, and runs the live-reload file watcher.
+- **Test integrations** — `chaos-agent-testkit` provides `ChaosAgentExtension` (JUnit 5) and `ChaosPlatform.installLocally()` for self-attach. `chaos-agent-spring-boot3-test-starter` and `chaos-agent-spring-boot4-test-starter` compose `@ChaosTest` on top and wire a class-scoped `ChaosSession` into Spring Boot tests.
+- **Runtime integrations** — `chaos-agent-spring-boot3-starter` and `chaos-agent-spring-boot4-starter` expose `ChaosControlPlane` as a Spring bean and register the `/actuator/chaos` endpoint for live plan activation against running applications.
+
+### Runtime dispatch
+
+Every intercepted JVM operation travels through five bytecode frames before a decision is reached:
+
+1. **Instrumented JDK method** — e.g. `ThreadPoolExecutor.execute()`, with ByteBuddy advice woven into the method body when a scenario first needs its hook group (not called — *copied* inline)
+2. **`BootstrapDispatcher`** — bootstrap-classloader-resident static entry point holding the 77-slot `MethodHandle[]` and a `ThreadLocal<int[]>` reentrancy depth guard (a one-element `int` array avoids `Integer` autoboxing per call)
+3. **`BridgeDelegate`** — agent-classloader bridge that unboxes arguments and forwards to the active runtime
+4. **`ChaosDispatcher` / `ScenarioController`** — registry lookup + the 9-step evaluation pipeline: `started` → session → selector → expiry → `activeFrom` → `matchedCount++` and warm-up → probability → rate limit → max-applications reservation
+5. **`ChaosEffect`** — terminal action executed inline on the calling thread (`delay` / `reject` / `suppress` / `gate` / `exception` / `corruptReturnValue` / `skewClock` / stressor handle)
+
+The reentrancy guard short-circuits when chaos code itself calls instrumented JDK methods (e.g. a delay effect's own `Thread.sleep` would otherwise recurse into `THREAD_PARK` interception). The same per-thread `int[]` carries call-depth scope counters, so nested or delegating instrumented calls are evaluated once, at the outermost call.
+
+### Structural diagram
+
+*macstab-chaos-jvm-agent — Module Architecture*
+
+```mermaid
+flowchart TB
+  subgraph contract["Public Contract"]
+    api["chaos-agent-api<br/>sealed ChaosSelector (25 selector types), ChaosEffect (33 effect types)<br/>records ChaosScenario, ChaosPlan, ActivationPolicy, NamePattern<br/>OperationType (91 operation types)"]
+  end
+  subgraph runtime["Runtime"]
+    core["chaos-agent-core"]
+    instr["chaos-agent-instrumentation-jdk<br/>ByteBuddy @Advice + BootstrapDispatcher (bootstrap CL)<br/>77 handle slots, ThreadLocal&lt;int[]&gt; reentrancy guard,<br/>volatile two-field publication"]
+    config["chaos-agent-startup-config"]
+    boot["chaos-agent-bootstrap"]
+  end
+  subgraph testing["Test-Time Integrations"]
+    testkit["chaos-agent-testkit"]
+    sb3t["chaos-agent-spring-boot3-test-starter"]
+    sb4t["chaos-agent-spring-boot4-test-starter"]
+  end
+  subgraph integrations["Runtime Integrations"]
+    sbc["chaos-agent-spring-boot-common"]
+    sb3["chaos-agent-spring-boot3-starter"]
+    sb4["chaos-agent-spring-boot4-starter"]
+    qx["chaos-agent-quarkus-extension (+ deployment)"]
+    qm["chaos-agent-quarkus-management (+ deployment)"]
+    mn["chaos-agent-micronaut-integration"]
+    mm["chaos-agent-micrometer"]
+    otel["chaos-agent-opentelemetry"]
+  end
+
+  core --> api
+  instr --> core
+  instr --> api
+  config --> api
+  boot --> core
+  boot --> instr
+  boot --> config
+  testkit --> boot
+  testkit --> config
+  testkit --> api
+  sb3t --> testkit
+  sb4t --> testkit
+  sb3t --> sbc
+  sb4t --> sbc
+  sbc --> boot
+  sb3 --> sbc
+  sb4 --> sbc
+  qx --> testkit
+  qx --> boot
+  qm --> core
+  qm --> boot
+  mn --> testkit
+  mn --> boot
+  mm --> core
+  otel --> core
+
+  classDef apiStyle fill:#E8F4FD,stroke:#5B8DB8,color:#000
+  classDef coreStyle fill:#FFF3E0,stroke:#C28A3A,color:#000
+  classDef bridgeStyle fill:#F3E5F5,stroke:#8E5BA8,color:#000
+  classDef bootStyle fill:#E8F5E9,stroke:#4E9A5B,color:#000
+  classDef configStyle fill:#FFF8E1,stroke:#C2A13A,color:#000
+  classDef testStyle fill:#FCE4EC,stroke:#B8587A,color:#000
+  classDef springStyle fill:#E0F2F1,stroke:#3E8E86,color:#000
+  class api apiStyle
+  class core coreStyle
+  class instr bridgeStyle
+  class boot bootStyle
+  class config configStyle
+  class testkit,sb3t,sb4t testStyle
+  class sbc,sb3,sb4,qx,qm,mn,mm,otel springStyle
 ```
 
-Dependency direction (no cycles):
-```
-bootstrap → core → api
-bootstrap → instrumentation-jdk → core → api
-bootstrap → startup-config → api
-testkit → api, bootstrap
-```
+### Module reference
+
+| Module                                  | Role                                                                      |
+|-----------------------------------------|---------------------------------------------------------------------------|
+| `chaos-agent-api`                       | **Stable public API** — the only module application code should depend on; its one dependency is the JSpecify nullness annotations |
+| `chaos-agent-bootstrap`                 | The agent JAR: entry points, singleton, MBean registration; self-contained, ByteBuddy and Jackson relocated, no transitive dependencies |
+| `chaos-agent-core`                      | Scenario registry, evaluation pipeline, session scoping, stressors        |
+| `chaos-agent-instrumentation-jdk`       | ByteBuddy advice, bootstrap bridge (77 interception handles)              |
+| `chaos-agent-startup-config`            | JSON/base64/file config resolution and Jackson mapping                    |
+| `chaos-agent-spring-boot-common`        | Shared Spring Boot code of both starters: auto-configuration, trusted enablement, Actuator endpoint, session filter |
+| `chaos-agent-quarkus-extension`         | Quarkus `@ChaosTest` support and CDI producer, with its deployment module |
+| `chaos-agent-micronaut-integration`     | Micronaut test extension, context configurer and `/chaos` management endpoint |
+| `chaos-agent-micrometer`                | Optional Micrometer binder: event, application and skip counters, injected-delay timer, scenario gauges |
+| `chaos-agent-quarkus-management`        | Optional Quarkus extension serving `/q/chaos` (snapshot, activate, stop), with its deployment module |
+| `chaos-agent-opentelemetry`             | Optional OpenTelemetry metrics and `chaos.applied` span events on the traced calls chaos hit |
+| `chaos-agent-testkit`                   | JUnit 5 extension, `ChaosPlatform.installLocally()` for self-attach       |
+| `chaos-agent-spring-boot3-test-starter` | `@ChaosTest` + `ChaosAgentExtension` for Spring Boot 3 tests              |
+| `chaos-agent-spring-boot4-test-starter` | `@ChaosTest` + `ChaosAgentExtension` for Spring Boot 4 tests              |
+| `chaos-agent-spring-boot3-starter`      | Runtime starter with Actuator endpoint for Spring Boot 3                  |
+| `chaos-agent-spring-boot4-starter`      | Runtime starter with Actuator endpoint for Spring Boot 4                  |
+| `chaos-agent-examples`                  | Runnable usage examples                                                   |
 
 ## Runtime Boundaries
 
@@ -234,32 +335,7 @@ Consequence: a test can safely activate session-scoped chaos and submit work to 
 
 ## Component Diagram — Answering: What depends on what?
 
-```mermaid
-flowchart TB
-  subgraph g1["Public API"]
-    n2["chaos-agent-api"]
-  end
-  subgraph g3["Agent Runtime"]
-    n4["chaos-agent-bootstrap"]
-    n5["chaos-agent-core"]
-    n6["chaos-agent-instrumentation-jdk"]
-    n7["chaos-agent-startup-config"]
-  end
-  subgraph g8["Test Support"]
-    n9["chaos-agent-testkit"]
-  end
-  n4 --> n5
-  n4 --> n6
-  n4 --> n7
-  n5 --> n2
-  n6 --> n5
-  n6 --> n2
-  n7 --> n2
-  n9 --> n2
-  n9 --> n4
-  note10["Stable public contract.<br/>The API of startup-config, testkit and the<br/>integrations is recorded and checked too."]
-  note10 -.- n2
-```
+The module graph, with every module and its dependencies, is the structural diagram under [Module Decomposition](#module-decomposition).
 
 **Takeaway**: Only `chaos-agent-api` is a stable external contract. All other modules are internal implementation detail, even if public in the Java sense.
 
