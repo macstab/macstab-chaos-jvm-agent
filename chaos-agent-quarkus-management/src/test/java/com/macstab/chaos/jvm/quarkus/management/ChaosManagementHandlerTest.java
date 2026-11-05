@@ -301,6 +301,7 @@ class ChaosManagementHandlerTest {
                               });
                       default -> null;
                     });
+    final String previous = System.getProperty(ChaosManagementRecorder.ENABLED_PROPERTY);
     System.setProperty(ChaosManagementRecorder.ENABLED_PROPERTY, "true");
     try {
       final ChaosManagementHandler recorded =
@@ -311,7 +312,11 @@ class ChaosManagementHandlerTest {
       assertThat(status.get()).isEqualTo(401);
       recorded.close();
     } finally {
-      System.clearProperty(ChaosManagementRecorder.ENABLED_PROPERTY);
+      if (previous == null) {
+        System.clearProperty(ChaosManagementRecorder.ENABLED_PROPERTY);
+      } else {
+        System.setProperty(ChaosManagementRecorder.ENABLED_PROPERTY, previous);
+      }
     }
   }
 
