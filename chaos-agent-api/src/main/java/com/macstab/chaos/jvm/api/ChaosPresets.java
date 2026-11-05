@@ -2,6 +2,7 @@ package com.macstab.chaos.jvm.api;
 
 import java.time.Duration;
 import java.util.Set;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Ready-made scenarios for the faults production systems actually meet: a full or failing disk, a
@@ -44,12 +45,12 @@ public final class ChaosPresets {
   }
 
   private static ChaosSelector peer(
-      final String cidr, final Integer port, final OperationType... operations) {
+      final String cidr, final @Nullable Integer port, final OperationType... operations) {
     return new ChaosSelector.NetworkSelector(
         Set.of(operations), NamePattern.any(), cidr, port, null, null);
   }
 
-  private static String endpoint(final String cidr, final Integer port) {
+  private static String endpoint(final String cidr, final @Nullable Integer port) {
     return cidr + (port == null ? "" : ":" + port);
   }
 
@@ -149,7 +150,8 @@ public final class ChaosPresets {
    * @param port the peer port, or {@code null} for any
    * @return the prefilled builder
    */
-  public static ChaosScenario.Builder connectionRefused(final String cidr, final Integer port) {
+  public static ChaosScenario.Builder connectionRefused(
+      final String cidr, final @Nullable Integer port) {
     return preset(
         "connectionRefused",
         "connection-refused:" + endpoint(cidr, port),
@@ -165,7 +167,8 @@ public final class ChaosPresets {
    * @param port the peer port, or {@code null} for any
    * @return the prefilled builder
    */
-  public static ChaosScenario.Builder connectionResets(final String cidr, final Integer port) {
+  public static ChaosScenario.Builder connectionResets(
+      final String cidr, final @Nullable Integer port) {
     return preset(
         "connectionResets",
         "connection-resets:" + endpoint(cidr, port),
@@ -183,7 +186,7 @@ public final class ChaosPresets {
    * @return the prefilled builder
    */
   public static ChaosScenario.Builder slowNetwork(
-      final String cidr, final Integer port, final Duration latency) {
+      final String cidr, final @Nullable Integer port, final Duration latency) {
     return preset(
         "slowNetwork",
         "slow-network:" + endpoint(cidr, port),
@@ -201,7 +204,7 @@ public final class ChaosPresets {
    * @return the prefilled builder
    */
   public static ChaosScenario.Builder trickledResponses(
-      final String cidr, final Integer port, final int maxBytes) {
+      final String cidr, final @Nullable Integer port, final int maxBytes) {
     return preset(
         "trickledResponses",
         "trickled-responses:" + endpoint(cidr, port),
@@ -217,7 +220,7 @@ public final class ChaosPresets {
    * @param port the destination port, or {@code null} for any
    * @return the prefilled builder
    */
-  public static ChaosScenario.Builder packetLoss(final String cidr, final Integer port) {
+  public static ChaosScenario.Builder packetLoss(final String cidr, final @Nullable Integer port) {
     return preset(
         "packetLoss",
         "packet-loss:" + endpoint(cidr, port),

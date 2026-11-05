@@ -1257,7 +1257,8 @@ public sealed interface ChaosSelector
    *     any
    * @param remotePort the peer port; {@code null} for any
    */
-  record NettySelector(Set<OperationType> operations, String remoteCidr, Integer remotePort)
+  record NettySelector(
+      Set<OperationType> operations, @Nullable String remoteCidr, @Nullable Integer remotePort)
       implements ChaosSelector {
     static final Set<OperationType> VALID_OPS =
         EnumSet.of(OperationType.NETTY_CHANNEL_WRITE, OperationType.NETTY_CHANNEL_READ);
