@@ -182,13 +182,14 @@ final class ChildJvmProbe {
                   }
                 });
     final boolean finished = process.waitFor(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+    final String threads = finished ? "" : threadDump(process);
     if (!finished) {
       process.destroyForcibly();
     }
     reader.join(TimeUnit.SECONDS.toMillis(5));
     final String output = String.join("\n", lines);
     assertThat(finished)
-        .as("probe JVM must finish within %d s: %s", TIMEOUT_SECONDS, output)
+        .as("probe JVM must finish within %d s: %s\nthreads:\n%s", TIMEOUT_SECONDS, output, threads)
         .isTrue();
     assertThat(process.exitValue()).as("probe JVM exit value, output:\n%s", output).isZero();
     return new ProbeResult(output, parse(lines));
@@ -219,6 +220,27 @@ final class ChildJvmProbe {
     /** Returns the value printed for {@code key} as a {@code long}. */
     long longValue(final String key) {
       return Long.parseLong(value(key));
+    }
+  }
+
+  /**
+   * The threads of a probe JVM that did not finish, from {@code jcmd Thread.print}, so a hang
+   * reports where it stuck; empty when the dump itself fails.
+   */
+  static String threadDump(final Process process) {
+    try {
+      final Process jcmd =
+          new ProcessBuilder(
+                  java.nio.file.Path.of(System.getProperty("java.home"), "bin", "jcmd").toString(),
+                  Long.toString(process.pid()),
+                  "Thread.print")
+              .redirectErrorStream(true)
+              .start();
+      final byte[] dump = jcmd.getInputStream().readAllBytes();
+      jcmd.waitFor(10, TimeUnit.SECONDS);
+      return new String(dump, StandardCharsets.UTF_8);
+    } catch (final java.io.IOException | InterruptedException failed) {
+      return "(no thread dump: " + failed + ")";
     }
   }
 }
