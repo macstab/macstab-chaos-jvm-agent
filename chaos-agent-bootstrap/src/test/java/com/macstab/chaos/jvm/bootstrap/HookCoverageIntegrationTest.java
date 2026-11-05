@@ -28,15 +28,22 @@ class HookCoverageIntegrationTest {
       List.of(
           "ClassLoaderAdvice",
           "ClientCallAdvice",
+          "ClockAdvice",
           "CompletableFutureAdvice",
+          "DatagramAdvice",
+          "DnsAdvice",
           "ExecutorAdvice",
+          "FileIoAdvice",
           "ForkJoinAdvice",
           "HttpClientAdvice",
           "JdbcAdvice",
           "JvmRuntimeAdvice",
+          "NioAdvice",
+          "ProcessAdvice",
           "QueueAdvice",
           "ScheduledExecutorAdvice",
           "ShutdownAdvice",
+          "SocketAdvice",
           "ThreadAdvice");
 
   @TempDir Path tempDir;

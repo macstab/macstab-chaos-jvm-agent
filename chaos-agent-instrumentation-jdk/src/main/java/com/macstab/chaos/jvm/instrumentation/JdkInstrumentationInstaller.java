@@ -1429,37 +1429,37 @@ public final class JdkInstrumentationInstaller {
                 typeBuilder
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.NioSelectNoArgAdvice.class,
+                            NioAdvice.NioSelectNoArgAdvice.class,
                             ElementMatchers.named("select").and(ElementMatchers.takesArguments(0))))
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.NioSelectTimeoutAdvice.class,
+                            NioAdvice.NioSelectTimeoutAdvice.class,
                             ElementMatchers.named("select")
                                 .and(ElementMatchers.takesArguments(long.class))))
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.NioSelectNowAdvice.class,
+                            NioAdvice.NioSelectNowAdvice.class,
                             ElementMatchers.named("selectNow")
                                 .and(ElementMatchers.takesArguments(0))))
                     // JDK 11+ select(Consumer) / select(Consumer, long) / selectNow(Consumer)
                     // reach lockAndDoSelect without calling the overloads above.
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.NioSelectNoArgAdvice.class,
+                            NioAdvice.NioSelectNoArgAdvice.class,
                             ElementMatchers.named("select")
                                 .and(
                                     ElementMatchers.takesArguments(
                                         java.util.function.Consumer.class))))
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.NioSelectConsumerTimeoutAdvice.class,
+                            NioAdvice.NioSelectConsumerTimeoutAdvice.class,
                             ElementMatchers.named("select")
                                 .and(
                                     ElementMatchers.takesArguments(
                                         java.util.function.Consumer.class, long.class))))
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.NioSelectNowAdvice.class,
+                            NioAdvice.NioSelectNowAdvice.class,
                             ElementMatchers.named("selectNow")
                                 .and(
                                     ElementMatchers.takesArguments(
@@ -1474,16 +1474,16 @@ public final class JdkInstrumentationInstaller {
                 typeBuilder
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.NioSelectNoArgAdvice.class,
+                            NioAdvice.NioSelectNoArgAdvice.class,
                             ElementMatchers.named("select").and(ElementMatchers.takesArguments(0))))
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.NioSelectTimeoutAdvice.class,
+                            NioAdvice.NioSelectTimeoutAdvice.class,
                             ElementMatchers.named("select")
                                 .and(ElementMatchers.takesArguments(long.class))))
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.NioSelectNowAdvice.class,
+                            NioAdvice.NioSelectNowAdvice.class,
                             ElementMatchers.named("selectNow")
                                 .and(ElementMatchers.takesArguments(0)))))
         // NIO SocketChannel — the public class is abstract, so name() would only match the
@@ -1500,29 +1500,29 @@ public final class JdkInstrumentationInstaller {
                 typeBuilder
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.NioChannelConnectAdvice.class,
+                            NioAdvice.NioChannelConnectAdvice.class,
                             ElementMatchers.named("connect")
                                 .and(ElementMatchers.takesArguments(java.net.SocketAddress.class))))
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.NioChannelReadAdvice.class,
+                            NioAdvice.NioChannelReadAdvice.class,
                             ElementMatchers.named("read")
                                 .and(ElementMatchers.takesArguments(java.nio.ByteBuffer.class))))
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.NioChannelWriteAdvice.class,
+                            NioAdvice.NioChannelWriteAdvice.class,
                             ElementMatchers.named("write")
                                 .and(ElementMatchers.takesArguments(java.nio.ByteBuffer.class))))
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.NioChannelScatterReadAdvice.class,
+                            NioAdvice.NioChannelScatterReadAdvice.class,
                             ElementMatchers.named("read")
                                 .and(
                                     ElementMatchers.takesArguments(
                                         java.nio.ByteBuffer[].class, int.class, int.class))))
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.NioChannelGatherWriteAdvice.class,
+                            NioAdvice.NioChannelGatherWriteAdvice.class,
                             ElementMatchers.named("write")
                                 .and(
                                     ElementMatchers.takesArguments(
@@ -1537,7 +1537,7 @@ public final class JdkInstrumentationInstaller {
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder.visit(
                     advise(
-                        JvmRuntimeAdvice.NioChannelAcceptAdvice.class,
+                        NioAdvice.NioChannelAcceptAdvice.class,
                         ElementMatchers.named("accept").and(ElementMatchers.takesArguments(0)))));
   }
 
@@ -1553,7 +1553,7 @@ public final class JdkInstrumentationInstaller {
                 typeBuilder
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.DatagramSendAdvice.class,
+                            DatagramAdvice.DatagramSendAdvice.class,
                             ElementMatchers.named("send")
                                 .and(ElementMatchers.isPublic())
                                 .and(
@@ -1561,29 +1561,29 @@ public final class JdkInstrumentationInstaller {
                                         java.nio.ByteBuffer.class, java.net.SocketAddress.class))))
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.DatagramWriteAdvice.class,
+                            DatagramAdvice.DatagramWriteAdvice.class,
                             ElementMatchers.named("write")
                                 .and(ElementMatchers.takesArguments(java.nio.ByteBuffer.class))))
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.DatagramPacketSendAdvice.class,
+                            DatagramAdvice.DatagramPacketSendAdvice.class,
                             ElementMatchers.named("blockingSend")
                                 .and(
                                     ElementMatchers.takesArguments(java.net.DatagramPacket.class))))
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.DatagramReceiveAdvice.class,
+                            DatagramAdvice.DatagramReceiveAdvice.class,
                             ElementMatchers.named("receive")
                                 .and(ElementMatchers.isPublic())
                                 .and(ElementMatchers.takesArguments(java.nio.ByteBuffer.class))))
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.DatagramReadAdvice.class,
+                            DatagramAdvice.DatagramReadAdvice.class,
                             ElementMatchers.named("read")
                                 .and(ElementMatchers.takesArguments(java.nio.ByteBuffer.class))))
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.DatagramPacketReceiveAdvice.class,
+                            DatagramAdvice.DatagramPacketReceiveAdvice.class,
                             ElementMatchers.named("blockingReceive")
                                 .and(
                                     ElementMatchers.takesArguments(
@@ -1609,34 +1609,34 @@ public final class JdkInstrumentationInstaller {
                 typeBuilder
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.SocketChannelConnectAdvice.class,
+                            SocketAdvice.SocketChannelConnectAdvice.class,
                             ElementMatchers.named("connect")
                                 .and(ElementMatchers.takesArguments(java.net.SocketAddress.class))))
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.SocketChannelShutdownAdvice.class,
+                            SocketAdvice.SocketChannelShutdownAdvice.class,
                             ElementMatchers.namedOneOf("shutdownInput", "shutdownOutput")
                                 .and(ElementMatchers.takesArguments(0))))
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.SocketChannelReadAdvice.class,
+                            SocketAdvice.SocketChannelReadAdvice.class,
                             ElementMatchers.named("read")
                                 .and(ElementMatchers.takesArguments(java.nio.ByteBuffer.class))))
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.SocketChannelScatterReadAdvice.class,
+                            SocketAdvice.SocketChannelScatterReadAdvice.class,
                             ElementMatchers.named("read")
                                 .and(
                                     ElementMatchers.takesArguments(
                                         java.nio.ByteBuffer[].class, int.class, int.class))))
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.SocketChannelWriteAdvice.class,
+                            SocketAdvice.SocketChannelWriteAdvice.class,
                             ElementMatchers.named("write")
                                 .and(ElementMatchers.takesArguments(java.nio.ByteBuffer.class))))
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.SocketChannelGatherWriteAdvice.class,
+                            SocketAdvice.SocketChannelGatherWriteAdvice.class,
                             ElementMatchers.named("write")
                                 .and(
                                     ElementMatchers.takesArguments(
@@ -1650,14 +1650,14 @@ public final class JdkInstrumentationInstaller {
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder.visit(
                     advise(
-                        JvmRuntimeAdvice.SocketChannelAcceptAdvice.class,
+                        SocketAdvice.SocketChannelAcceptAdvice.class,
                         ElementMatchers.named("accept").and(ElementMatchers.takesArguments(0)))))
         .type(ElementMatchers.named("java.nio.channels.spi.AbstractInterruptibleChannel"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder.visit(
                     advise(
-                        JvmRuntimeAdvice.SocketChannelCloseAdvice.class,
+                        SocketAdvice.SocketChannelCloseAdvice.class,
                         ElementMatchers.named("close").and(ElementMatchers.takesArguments(0)))));
   }
 
@@ -1676,7 +1676,7 @@ public final class JdkInstrumentationInstaller {
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder.visit(
                     advise(
-                        JvmRuntimeAdvice.SocketBindAdvice.class,
+                        SocketAdvice.SocketBindAdvice.class,
                         ElementMatchers.named("bind")
                             .and(
                                 ElementMatchers.takesArguments(
@@ -1690,21 +1690,21 @@ public final class JdkInstrumentationInstaller {
                 typeBuilder
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.SocketConnectAdvice.class,
+                            SocketAdvice.SocketConnectAdvice.class,
                             ElementMatchers.named("connect")
                                 .and(
                                     ElementMatchers.takesArguments(
                                         java.net.SocketAddress.class, int.class))))
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.SocketCloseAdvice.class,
+                            SocketAdvice.SocketCloseAdvice.class,
                             ElementMatchers.named("close").and(ElementMatchers.takesArguments(0)))))
         .type(ElementMatchers.named("java.net.ServerSocket"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder.visit(
                     advise(
-                        JvmRuntimeAdvice.SocketAcceptAdvice.class,
+                        SocketAdvice.SocketAcceptAdvice.class,
                         ElementMatchers.named("accept").and(ElementMatchers.takesArguments(0)))))
         // Socket$SocketInputStream / Socket$SocketOutputStream are private inner classes loaded
         // as a side-effect of ByteBuddy retransforming java.net.Socket (JVMTI ClassFileLoadHook
@@ -1718,12 +1718,12 @@ public final class JdkInstrumentationInstaller {
                 typeBuilder
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.SocketShutdownAdvice.class,
+                            SocketAdvice.SocketShutdownAdvice.class,
                             ElementMatchers.namedOneOf("shutdownInput", "shutdownOutput")
                                 .and(ElementMatchers.takesArguments(0))))
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.SocketReadAdvice.class,
+                            SocketAdvice.SocketReadAdvice.class,
                             ElementMatchers.named("read")
                                 .and(
                                     ElementMatchers.takesArguments(
@@ -1732,7 +1732,7 @@ public final class JdkInstrumentationInstaller {
                     // stream go through write(byte[], int, int) with len 1.
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.SocketWriteBulkAdvice.class,
+                            SocketAdvice.SocketWriteBulkAdvice.class,
                             ElementMatchers.named("write")
                                 .and(
                                     ElementMatchers.takesArguments(
@@ -1793,7 +1793,7 @@ public final class JdkInstrumentationInstaller {
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder.visit(
                     advise(
-                        JvmRuntimeAdvice.InstantNowAdvice.class,
+                        ClockAdvice.InstantNowAdvice.class,
                         ElementMatchers.named("now")
                             .and(ElementMatchers.isStatic())
                             .and(ElementMatchers.takesArguments(0)))))
@@ -1803,7 +1803,7 @@ public final class JdkInstrumentationInstaller {
                 typeBuilder
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.LocalDateTimeNowAdvice.class,
+                            ClockAdvice.LocalDateTimeNowAdvice.class,
                             ElementMatchers.named("now")
                                 .and(ElementMatchers.isStatic())
                                 .and(ElementMatchers.takesArguments(0))))
@@ -1811,7 +1811,7 @@ public final class JdkInstrumentationInstaller {
                     // hooked because a caller-supplied clock (fixed, offset) must not be skewed.
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.LocalDateTimeNowInZoneAdvice.class,
+                            ClockAdvice.LocalDateTimeNowInZoneAdvice.class,
                             ElementMatchers.named("now")
                                 .and(ElementMatchers.isStatic())
                                 .and(ElementMatchers.takesArguments(java.time.ZoneId.class)))))
@@ -1822,7 +1822,7 @@ public final class JdkInstrumentationInstaller {
                 // now(ZoneId).
                 typeBuilder.visit(
                     advise(
-                        JvmRuntimeAdvice.ZonedDateTimeNowAdvice.class,
+                        ClockAdvice.ZonedDateTimeNowAdvice.class,
                         ElementMatchers.named("now")
                             .and(ElementMatchers.isStatic())
                             .and(
@@ -1837,12 +1837,12 @@ public final class JdkInstrumentationInstaller {
                 typeBuilder
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.SystemClockInstantAdvice.class,
+                            ClockAdvice.SystemClockInstantAdvice.class,
                             ElementMatchers.named("instant")
                                 .and(ElementMatchers.takesArguments(0))))
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.SystemClockMillisAdvice.class,
+                            ClockAdvice.SystemClockMillisAdvice.class,
                             ElementMatchers.named("millis")
                                 .and(ElementMatchers.takesArguments(0)))))
         .type(ElementMatchers.named("java.util.Date"))
@@ -1850,7 +1850,7 @@ public final class JdkInstrumentationInstaller {
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder.visit(
                     advise(
-                        JvmRuntimeAdvice.DateNewAdvice.class,
+                        ClockAdvice.DateNewAdvice.class,
                         ElementMatchers.isConstructor().and(ElementMatchers.takesArguments(0)))));
   }
 
@@ -1891,7 +1891,7 @@ public final class JdkInstrumentationInstaller {
                         // calling startHandshake(); the SCOPE_SSL_HANDSHAKE scope evaluates an
                         // explicit startHandshake() → startHandshake(true) chain once.
                         advise(
-                            JvmRuntimeAdvice.SslHandshakeAdvice.class,
+                            SocketAdvice.SslHandshakeAdvice.class,
                             ElementMatchers.named("startHandshake")
                                 .and(
                                     ElementMatchers.takesArguments(0)
@@ -1908,7 +1908,7 @@ public final class JdkInstrumentationInstaller {
                 (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                     typeBuilder.visit(
                         advise(
-                            JvmRuntimeAdvice.SslHandshakeAdvice.class,
+                            SocketAdvice.SslHandshakeAdvice.class,
                             ElementMatchers.named("beginHandshake")
                                 .and(ElementMatchers.takesArguments(0)))));
 
@@ -2296,32 +2296,32 @@ public final class JdkInstrumentationInstaller {
                 typeBuilder
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.DnsResolveAdvice.class,
+                            DnsAdvice.DnsResolveAdvice.class,
                             ElementMatchers.named("getByName")
                                 .and(ElementMatchers.isStatic())
                                 .and(ElementMatchers.takesArguments(String.class))))
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.DnsResolveAdvice.class,
+                            DnsAdvice.DnsResolveAdvice.class,
                             ElementMatchers.named("getAllByName")
                                 .and(ElementMatchers.isStatic())
                                 .and(ElementMatchers.takesArguments(String.class))))
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.DnsAnswerAdvice.class,
+                            DnsAdvice.DnsAnswerAdvice.class,
                             ElementMatchers.named("getAllByName")
                                 .and(ElementMatchers.isStatic())
                                 .and(ElementMatchers.takesArguments(String.class))))
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.DnsLocalHostAdvice.class,
+                            DnsAdvice.DnsLocalHostAdvice.class,
                             ElementMatchers.named("getLocalHost")
                                 .and(ElementMatchers.isStatic())
                                 .and(ElementMatchers.takesArguments(0))))
                     // getHostName and getCanonicalHostName both look the name up here.
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.DnsReverseAdvice.class,
+                            DnsAdvice.DnsReverseAdvice.class,
                             // (InetAddress, boolean) up to JDK 24, (InetAddress) since
                             ElementMatchers.named("getHostFromNameService")
                                 .and(ElementMatchers.isStatic())
@@ -2342,16 +2342,16 @@ public final class JdkInstrumentationInstaller {
                 typeBuilder
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.FileReadByteAdvice.class,
+                            FileIoAdvice.FileReadByteAdvice.class,
                             ElementMatchers.named("read").and(ElementMatchers.takesArguments(0))))
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.FileReadArrayAdvice.class,
+                            FileIoAdvice.FileReadArrayAdvice.class,
                             ElementMatchers.named("read")
                                 .and(ElementMatchers.takesArguments(byte[].class))))
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.FileReadRangeAdvice.class,
+                            FileIoAdvice.FileReadRangeAdvice.class,
                             ElementMatchers.named("read")
                                 .and(
                                     ElementMatchers.takesArguments(
@@ -2362,17 +2362,17 @@ public final class JdkInstrumentationInstaller {
                 typeBuilder
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.FileWriteByteAdvice.class,
+                            FileIoAdvice.FileWriteByteAdvice.class,
                             ElementMatchers.named("write")
                                 .and(ElementMatchers.takesArguments(int.class))))
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.FileWriteArrayAdvice.class,
+                            FileIoAdvice.FileWriteArrayAdvice.class,
                             ElementMatchers.named("write")
                                 .and(ElementMatchers.takesArguments(byte[].class))))
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.FileWriteRangeAdvice.class,
+                            FileIoAdvice.FileWriteRangeAdvice.class,
                             ElementMatchers.named("write")
                                 .and(
                                     ElementMatchers.takesArguments(
@@ -2528,38 +2528,38 @@ public final class JdkInstrumentationInstaller {
                 typeBuilder
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.FileChannelReadAdvice.class,
+                            FileIoAdvice.FileChannelReadAdvice.class,
                             ElementMatchers.named("read")
                                 .and(ElementMatchers.takesArgument(0, java.nio.ByteBuffer.class))))
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.FileChannelWriteAdvice.class,
+                            FileIoAdvice.FileChannelWriteAdvice.class,
                             ElementMatchers.named("write")
                                 .and(ElementMatchers.takesArgument(0, java.nio.ByteBuffer.class))))
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.FileChannelScatterReadAdvice.class,
+                            FileIoAdvice.FileChannelScatterReadAdvice.class,
                             ElementMatchers.named("read")
                                 .and(
                                     ElementMatchers.takesArguments(
                                         java.nio.ByteBuffer[].class, int.class, int.class))))
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.FileChannelGatherWriteAdvice.class,
+                            FileIoAdvice.FileChannelGatherWriteAdvice.class,
                             ElementMatchers.named("write")
                                 .and(
                                     ElementMatchers.takesArguments(
                                         java.nio.ByteBuffer[].class, int.class, int.class))))
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.FileChannelMapAdvice.class,
+                            FileIoAdvice.FileChannelMapAdvice.class,
                             ElementMatchers.named("map")
                                 .and(
                                     ElementMatchers.takesArgument(
                                         0, java.nio.channels.FileChannel.MapMode.class))))
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.FileChannelTransferToAdvice.class,
+                            FileIoAdvice.FileChannelTransferToAdvice.class,
                             ElementMatchers.named("transferTo")
                                 .and(
                                     ElementMatchers.takesArguments(
@@ -2568,7 +2568,7 @@ public final class JdkInstrumentationInstaller {
                                         java.nio.channels.WritableByteChannel.class))))
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.FileChannelTransferFromAdvice.class,
+                            FileIoAdvice.FileChannelTransferFromAdvice.class,
                             ElementMatchers.named("transferFrom")
                                 .and(
                                     ElementMatchers.takesArguments(
@@ -2577,17 +2577,17 @@ public final class JdkInstrumentationInstaller {
                                         long.class))))
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.FileChannelCloseAdvice.class,
+                            FileIoAdvice.FileChannelCloseAdvice.class,
                             ElementMatchers.named("implCloseChannel")
                                 .and(ElementMatchers.takesArguments(0))))
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.FileChannelForceAdvice.class,
+                            FileIoAdvice.FileChannelForceAdvice.class,
                             ElementMatchers.named("force")
                                 .and(ElementMatchers.takesArguments(boolean.class))))
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.FileTruncateAdvice.class,
+                            FileIoAdvice.FileTruncateAdvice.class,
                             ElementMatchers.named("truncate")
                                 .and(ElementMatchers.takesArguments(long.class)))))
         .type(ElementMatchers.named("java.io.RandomAccessFile"))
@@ -2596,30 +2596,30 @@ public final class JdkInstrumentationInstaller {
                 typeBuilder
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.RandomAccessReadByteAdvice.class,
+                            FileIoAdvice.RandomAccessReadByteAdvice.class,
                             ElementMatchers.named("read").and(ElementMatchers.takesArguments(0))))
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.RandomAccessReadRangeAdvice.class,
+                            FileIoAdvice.RandomAccessReadRangeAdvice.class,
                             ElementMatchers.named("readBytes")
                                 .and(
                                     ElementMatchers.takesArguments(
                                         byte[].class, int.class, int.class))))
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.FileWriteByteAdvice.class,
+                            FileIoAdvice.FileWriteByteAdvice.class,
                             ElementMatchers.named("write")
                                 .and(ElementMatchers.takesArguments(int.class))))
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.FileWriteRangeAdvice.class,
+                            FileIoAdvice.FileWriteRangeAdvice.class,
                             ElementMatchers.named("writeBytes")
                                 .and(
                                     ElementMatchers.takesArguments(
                                         byte[].class, int.class, int.class))))
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.FileTruncateAdvice.class,
+                            FileIoAdvice.FileTruncateAdvice.class,
                             ElementMatchers.named("setLength")
                                 .and(ElementMatchers.takesArguments(long.class)))))
         // Files.delete / deleteIfExists: the platform providers inherit both from
@@ -2630,12 +2630,12 @@ public final class JdkInstrumentationInstaller {
                 typeBuilder
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.FilesDeleteAdvice.class,
+                            FileIoAdvice.FilesDeleteAdvice.class,
                             ElementMatchers.named("delete")
                                 .and(ElementMatchers.takesArguments(java.nio.file.Path.class))))
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.FilesDeleteIfExistsAdvice.class,
+                            FileIoAdvice.FilesDeleteIfExistsAdvice.class,
                             ElementMatchers.named("deleteIfExists")
                                 .and(ElementMatchers.takesArguments(java.nio.file.Path.class)))))
         // Opens and closes of java.io: the private open funnels of the constructors, close().
@@ -2647,13 +2647,13 @@ public final class JdkInstrumentationInstaller {
                 typeBuilder
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.FileOpenAdvice.class,
+                            FileIoAdvice.FileOpenAdvice.class,
                             ElementMatchers.named("open")
                                 .and(ElementMatchers.takesArgument(0, String.class))
                                 .and(ElementMatchers.not(ElementMatchers.isNative()))))
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.FileStreamCloseAdvice.class,
+                            FileIoAdvice.FileStreamCloseAdvice.class,
                             ElementMatchers.named("close").and(ElementMatchers.takesArguments(0)))))
         // Opens of java.nio: Files.newInputStream / newOutputStream / newByteChannel and
         // FileChannel.open reach the platform provider's newByteChannel or newFileChannel.
@@ -2664,7 +2664,7 @@ public final class JdkInstrumentationInstaller {
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder.visit(
                     advise(
-                        JvmRuntimeAdvice.FilesOpenAdvice.class,
+                        FileIoAdvice.FilesOpenAdvice.class,
                         ElementMatchers.namedOneOf("newByteChannel", "newFileChannel")
                             .and(ElementMatchers.takesArguments(3))
                             .and(ElementMatchers.takesArgument(0, java.nio.file.Path.class))
@@ -2679,13 +2679,13 @@ public final class JdkInstrumentationInstaller {
                 typeBuilder
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.FilesMoveAdvice.class,
+                            FileIoAdvice.FilesMoveAdvice.class,
                             ElementMatchers.named("move")
                                 .and(ElementMatchers.takesArguments(3))
                                 .and(ElementMatchers.not(ElementMatchers.isAbstract()))))
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.FilesCopyAdvice.class,
+                            FileIoAdvice.FilesCopyAdvice.class,
                             ElementMatchers.named("copy")
                                 .and(ElementMatchers.takesArguments(3))
                                 .and(ElementMatchers.takesArgument(0, java.nio.file.Path.class))
@@ -2697,11 +2697,11 @@ public final class JdkInstrumentationInstaller {
                 typeBuilder
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.FileDeleteAdvice.class,
+                            FileIoAdvice.FileDeleteAdvice.class,
                             ElementMatchers.named("delete").and(ElementMatchers.takesArguments(0))))
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.FileRenameAdvice.class,
+                            FileIoAdvice.FileRenameAdvice.class,
                             ElementMatchers.named("renameTo")
                                 .and(ElementMatchers.takesArguments(java.io.File.class)))))
         // msync of a mapped file region.
@@ -2710,7 +2710,7 @@ public final class JdkInstrumentationInstaller {
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder.visit(
                     advise(
-                        JvmRuntimeAdvice.MappedBufferForceAdvice.class,
+                        FileIoAdvice.MappedBufferForceAdvice.class,
                         ElementMatchers.named("force")
                             .and(ElementMatchers.takesArguments(int.class, int.class)))))
         .type(ElementMatchers.named("java.io.FileDescriptor"))
@@ -2718,7 +2718,7 @@ public final class JdkInstrumentationInstaller {
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder.visit(
                     advise(
-                        JvmRuntimeAdvice.FileDescriptorSyncAdvice.class,
+                        FileIoAdvice.FileDescriptorSyncAdvice.class,
                         ElementMatchers.named("sync").and(ElementMatchers.takesArguments(0)))));
   }
 
@@ -2733,7 +2733,7 @@ public final class JdkInstrumentationInstaller {
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder.visit(
                     advise(
-                        JvmRuntimeAdvice.ProcessStartAdvice.class,
+                        ProcessAdvice.ProcessStartAdvice.class,
                         // By arity, not by parameter type: resolving ProcessBuilder$Redirect
                         // while ProcessBuilder is being transformed is a ClassCircularityError.
                         // start() has no other one-argument overload.
@@ -2744,12 +2744,12 @@ public final class JdkInstrumentationInstaller {
                 typeBuilder
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.ProcessWaitAdvice.class,
+                            ProcessAdvice.ProcessWaitAdvice.class,
                             ElementMatchers.named("waitFor")
                                 .and(ElementMatchers.takesArguments(0))))
                     .visit(
                         advise(
-                            JvmRuntimeAdvice.ProcessTimedWaitAdvice.class,
+                            ProcessAdvice.ProcessTimedWaitAdvice.class,
                             ElementMatchers.named("waitFor")
                                 .and(
                                     ElementMatchers.takesArguments(
