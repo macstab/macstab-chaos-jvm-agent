@@ -636,7 +636,7 @@ subprojects {
 // the measured score and only ever raised. Reports: <module>/build/reports/pitest/index.html.
 val mutationFloors = mapOf(
     "chaos-agent-api" to 95,
-    "chaos-agent-core" to 76,
+    "chaos-agent-core" to 83,
     "chaos-agent-startup-config" to 94,
 )
 subprojects {
