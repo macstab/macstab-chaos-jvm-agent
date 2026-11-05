@@ -66,17 +66,17 @@ public final class StartupConfigPoller implements AutoCloseable {
   /** Agent arg key that sets the poll interval in milliseconds, overrides the env var. */
   public static final String ARG_WATCH_INTERVAL = "configWatchInterval";
 
-  /** The scenario ids the current plan's observability settings apply to. */
-  private Set<String> observedIds = Set.of();
-
   private final Path configPath;
   private final ChaosRuntime runtime;
   private final long intervalMs;
   private final ScheduledExecutorService scheduler;
 
-  // Guarded by synchronized(this)
+  // Shared with close(); guarded by synchronized(this).
   private final Map<String, ChaosScenario> activeScenarios = new HashMap<>();
   private final Map<String, ChaosActivationHandle> activeHandles = new HashMap<>();
+
+  /** The scenario ids the current plan's observability settings apply to. */
+  private Set<String> observedIds = Set.of();
 
   /**
    * What identifies the file's contents for change detection: the regular file actually read (a
@@ -87,16 +87,25 @@ public final class StartupConfigPoller implements AutoCloseable {
   /** A read whose file was modified this recently may still be in the middle of a write. */
   private static final long PROVISIONAL_MILLIS = 20L;
 
-  private volatile @Nullable Stamp lastStamp;
-  private volatile byte @Nullable [] lastDigest;
-  private volatile byte @Nullable [] failedDigest;
-  private volatile boolean provisional;
+  // Confined to the poll thread: written at start before the schedule begins (which
+  // happens-before every tick), then only by pollOnce, whose runs never overlap.
+  private @Nullable Stamp lastStamp;
+  private byte @Nullable [] lastDigest;
+  private byte @Nullable [] failedDigest;
+  private boolean provisional;
 
-  // Volatile close flag observed by applyDiff so a pollOnce that wins the race against
-  // close() (e.g. blocked in Files.newInputStream and not interruptible) cannot silently
-  // re-activate scenarios into a torn-down poller, leaving zombies registered in the runtime
-  // that no one owns. Writes are under synchronized(this); reads in applyDiff are inside the
-  // same monitor so plain read is sufficient, but marking volatile keeps close() lock-free.
+  /** Whether a missing file has been reported since it disappeared. */
+  private boolean missingReported;
+
+  /** The previous tick found the file missing; a second one in a row stops its scenarios. */
+  private boolean missingOnce;
+
+  /** Last reload failure that was logged; identical consecutive failures are logged once. */
+  private @Nullable String lastLoggedFailure;
+
+  // Set by close() before the scheduler stops, read by applyDiff under the monitor: a poll that
+  // outlives the shutdown (blocked in an uninterruptible read) then activates nothing, so no
+  // scenario stays registered without an owner.
   private volatile boolean closed = false;
 
   private StartupConfigPoller(
@@ -318,12 +327,6 @@ public final class StartupConfigPoller implements AutoCloseable {
             + sanitiseForLog(configPath.toString()));
   }
 
-  /** Whether a missing file has been reported since it disappeared. */
-  private boolean missingReported;
-
-  /** The previous tick found the file missing; a second one in a row stops its scenarios. */
-  private boolean missingOnce;
-
   /** Whether a reload failure would recur for the same file content. */
   private static boolean isDeterministic(final Throwable failure) {
     for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
@@ -363,10 +366,10 @@ public final class StartupConfigPoller implements AutoCloseable {
     final int stopped;
     synchronized (this) {
       stopped = activeScenarios.size();
+      applyDiff(List.of());
+      runtime.clearPlanObservability(observedIds, this);
+      observedIds = Set.of();
     }
-    applyDiff(List.of());
-    runtime.clearPlanObservability(observedIds, this);
-    observedIds = Set.of();
     lastStamp = null;
     lastDigest = null;
     failedDigest = null;
@@ -392,8 +395,7 @@ public final class StartupConfigPoller implements AutoCloseable {
       return java.security.MessageDigest.getInstance("SHA-256")
           .digest(json.getBytes(StandardCharsets.UTF_8));
     } catch (final java.security.NoSuchAlgorithmException unavailable) {
-      // Every JDK provides SHA-256; fall back to the content itself.
-      return json.getBytes(StandardCharsets.UTF_8);
+      throw new IllegalStateException("SHA-256 is required of every JDK", unavailable);
     }
   }
 
@@ -512,9 +514,6 @@ public final class StartupConfigPoller implements AutoCloseable {
               }
             });
   }
-
-  /** Last reload failure that was logged; identical consecutive failures are logged once. */
-  private @Nullable String lastLoggedFailure;
 
   private void logReloadFailure(final String message) {
     final String sanitised = sanitiseForLog(message);

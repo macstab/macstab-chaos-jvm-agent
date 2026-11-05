@@ -95,6 +95,7 @@ final class ChaosDiagnosticsMBean implements ChaosDiagnosticsMXBean {
   }
 
   @Override
+  @SuppressWarnings("ReferenceEquality") // one handle per activation: identity names the plan
   public boolean stopScenario(final String scenarioId) {
     requireControl();
     final ChaosActivationHandle handle = activated.remove(scenarioId);
@@ -102,7 +103,7 @@ final class ChaosDiagnosticsMBean implements ChaosDiagnosticsMXBean {
       return false;
     }
     // A scenario stops with the plan it was activated in.
-    activated.values().removeIf(other -> isSameHandle(other, handle));
+    activated.values().removeIf(other -> other == handle);
     handle.close();
     return true;
   }
@@ -137,11 +138,5 @@ final class ChaosDiagnosticsMBean implements ChaosDiagnosticsMXBean {
   @Override
   public String debugDump() {
     return dump.apply(visible);
-  }
-
-  /** Handles are compared by identity: one handle per activation. */
-  @SuppressWarnings("ReferenceEquality")
-  private static boolean isSameHandle(final Object a, final Object b) {
-    return a == b;
   }
 }
