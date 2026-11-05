@@ -77,20 +77,20 @@ Works in JUnit 5 with **Spring Boot 3, Spring Boot 4, Micronaut, and Quarkus** o
 
 ### Why you can trust it
 
-A chaos tool that is wrong about its own behaviour is worse than none. Every claim below is enforced by the build — break it, and `./gradlew build` fails:
+A chaos tool that is wrong about its own behaviour is worse than none. Each claim below is checked in this repository; all but the last three fail `./gradlew build` when broken:
 
-| Guarantee | Enforced by |
+| Guarantee | Checked by |
 |-----------|-------------|
 | The faults are the JDK's own: real exceptions, messages, short writes and resets, raised inside the real call | child-JVM integration tests against the real JDK, on JDK 21 and 25 ([ADR 0005](docs/adr/0005-real-faults.md)) |
-| The plan format is one definition: the parser, its JSON Schema and the docs agree | `PlanSchemaTest` generates the schema from the parser; every JSON example in the docs is parsed |
-| The parser and validator never crash or hang, whatever the input | `PlanFuzzTest`: mutated examples and schema-generated plans, seeded and replayable, nightly with a fresh seed |
+| The plan format is one definition: the parser and its published JSON Schema agree | `PlanSchemaTest` generates the schema from the parser and fails when the published one differs |
+| The parser and validator never crash or hang, whatever the input | `PlanFuzzTest`: mutated plans and schema-generated plans, seeded and replayable |
 | The public API cannot change by accident | `apiCheck` against the committed JVM signatures in `api/*.api` |
 | The architecture holds: the bootstrap bridge is closed, inlined advice uses only public members | `ArchitectureTest` |
 | No known bug patterns in any line that compiles | Error Prone on every compilation, warnings as errors |
 | No unchecked null in production code | NullAway proves every dereference; optional values are `@Nullable` in the types ([ADR 0008](docs/adr/0008-nullness-in-the-types.md)) |
-| The tests catch real bugs, not just run code | mutation testing (`./gradlew pitest`) with ratcheted thresholds |
-| An idle hook costs 7–12 ns and allocates nothing | JMH benchmarks with a regression gate in CI ([benchmarks](docs/benchmarks.md)) |
-| What ships is what you can verify | reproducible jars (`scripts/check-reproducible.sh`), a CycloneDX SBOM published next to every jar (classifier `cyclonedx`), shaded dependencies listed |
+| The tests catch real bugs, not just run code | mutation testing with thresholds (`./gradlew pitest`, run on demand) |
+| An idle hook costs 7–12 ns and allocates nothing | JMH benchmarks, run on demand ([benchmarks](docs/benchmarks.md)) |
+| What ships is what you can verify | reproducible jars (`scripts/check-reproducible.sh`, run on demand), a CycloneDX SBOM published next to every jar (classifier `cyclonedx`), shaded dependencies listed |
 
 The decisions behind the design are recorded as [architecture decision records](docs/adr/README.md).
 
@@ -594,7 +594,7 @@ The depth shown in this project — JVMTI re-entrancy debugging on JDK 25, `@Int
 
 Concrete artifacts a reviewer can read:
 
-- **62 of 67 `OperationType` values auto-wired** across modern JDK internals — including JDK 25 changes most chaos tools haven't caught up to (`Socket$SocketInputStream` rename, `sun.nio.ch.NioSocketImpl` as default `SocketImpl`, `jdk.internal.loader.NativeLibraries.load` going `native`)
+- **92 `OperationType` values over 77 interception handles** across modern JDK internals — including JDK 25 changes most chaos tools haven't caught up to (`Socket$SocketInputStream` rename, `sun.nio.ch.NioSocketImpl` as default `SocketImpl`, `jdk.internal.loader.NativeLibraries.load` going `native`)
 - **Single-annotation `@ChaosTest` integration** working on Spring Boot 3, Spring Boot 4, Micronaut, and Quarkus — four frameworks with four different test-context conventions, one annotation
 - **Honest documentation** of what *cannot* work and why — `SYSTEM_CLOCK_MILLIS` documented with the actual JVM constraints (native `@IntrinsicCandidate`, compiled into a direct call to the VM clock), not papered over
 - **Cross-libc and cross-arch validation** in the sister C repo — `glibc + musl × amd64 + arm64`, 100 % line coverage on shipped sources, Docker runtime validation as a quality gate

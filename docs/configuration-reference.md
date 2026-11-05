@@ -268,7 +268,7 @@ flowchart TB
     CD["ChaosDispatcher<br/>(hot path)"]
   end
   subgraph g5["chaos-agent-bootstrap"]
-    BD["BootstrapDispatcher<br/>(67 slots)"]
+    BD["BootstrapDispatcher<br/>(77 slots)"]
   end
   AgentArgs --> AAP
   EnvVars --> SCL
@@ -2076,7 +2076,7 @@ ByteBuddy `AgentBuilder` installs `Advice` on JDK classes per hook group — on 
 
 ### BootstrapDispatcher
 
-64 static `MethodHandle` slots in `BootstrapDispatcher` (slots do not map one-to-one to the 67 `OperationType` values). The slot for a given operation type holds a method handle to the `ChaosDispatcher` evaluation method. Advice woven into JDK classes calls the slot directly from the bootstrap classloader context.
+77 static `MethodHandle` slots in `BootstrapDispatcher` (slots do not map one-to-one to the 92 `OperationType` values). The slot for a given operation type holds a method handle to the `ChaosDispatcher` evaluation method. Advice woven into JDK classes calls the slot directly from the bootstrap classloader context.
 
 ### ThreadLocal Reentrancy Guard
 
