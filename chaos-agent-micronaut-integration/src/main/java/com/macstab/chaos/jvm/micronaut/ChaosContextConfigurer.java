@@ -42,8 +42,16 @@ public class ChaosContextConfigurer implements ApplicationContextConfigurer {
 
   private static final Logger LOGGER = Logger.getLogger(ChaosContextConfigurer.class.getName());
 
+  private final Runnable install;
+
   /** Default constructor invoked by Micronaut when the configurer is discovered. */
-  public ChaosContextConfigurer() {}
+  public ChaosContextConfigurer() {
+    this(ChaosPlatform::installLocally);
+  }
+
+  ChaosContextConfigurer(final Runnable install) {
+    this.install = install;
+  }
 
   @Override
   public void configure(final ApplicationContextBuilder builder) {
@@ -51,7 +59,7 @@ public class ChaosContextConfigurer implements ApplicationContextConfigurer {
       return;
     }
     try {
-      ChaosPlatform.installLocally();
+      install.run();
     } catch (final RuntimeException exception) {
       LOGGER.log(
           Level.WARNING,

@@ -1,8 +1,9 @@
 package com.macstab.chaos.jvm.micronaut;
 
-import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThat;
 
 import io.micronaut.context.ApplicationContextBuilder;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -11,6 +12,9 @@ import org.junit.jupiter.api.Test;
 @DisplayName("ChaosContextConfigurer gate")
 class ChaosContextConfigurerTest {
 
+  private final AtomicInteger installs = new AtomicInteger();
+  private final ChaosContextConfigurer configurer =
+      new ChaosContextConfigurer(installs::incrementAndGet);
   private String previousValue;
 
   @BeforeEach
@@ -28,34 +32,45 @@ class ChaosContextConfigurerTest {
     }
   }
 
-  // configure() does not dereference the builder when the gate is closed and passes it straight
-  // through to ChaosPlatform.installLocally() (which also ignores it). We intentionally pass null
-  // to avoid instantiating an ApplicationContextBuilder, which drags in Micronaut's internal
-  // service-loader scanner and is irrelevant to the gate contract under test.
+  // The builder is never read; null keeps Micronaut's service-loader scanning out of the test.
 
   @Test
-  @DisplayName("is a no-op when macstab.chaos.enabled is absent")
-  void noOpWhenFlagAbsent() {
-    assertThatCode(() -> new ChaosContextConfigurer().configure((ApplicationContextBuilder) null))
-        .doesNotThrowAnyException();
+  @DisplayName("does not install when macstab.chaos.enabled is absent")
+  void noInstallWhenFlagAbsent() {
+    configurer.configure((ApplicationContextBuilder) null);
+
+    assertThat(installs).hasValue(0);
   }
 
   @Test
-  @DisplayName("is a no-op when macstab.chaos.enabled=false")
-  void noOpWhenFlagFalse() {
+  @DisplayName("does not install when macstab.chaos.enabled=false")
+  void noInstallWhenFlagFalse() {
     System.setProperty(ChaosContextConfigurer.ENABLED_PROPERTY, "false");
-    assertThatCode(() -> new ChaosContextConfigurer().configure((ApplicationContextBuilder) null))
-        .doesNotThrowAnyException();
+
+    configurer.configure((ApplicationContextBuilder) null);
+
+    assertThat(installs).hasValue(0);
   }
 
   @Test
-  @DisplayName("installs platform without throwing when macstab.chaos.enabled=true")
+  @DisplayName("installs once when macstab.chaos.enabled=true")
   void installsWhenFlagTrue() {
     System.setProperty(ChaosContextConfigurer.ENABLED_PROPERTY, "true");
-    // Installation is idempotent; the only observable contract from this test's perspective is
-    // that the configurer completes successfully when the gate is open. Deeper installation
-    // semantics are exercised by the ChaosMicronautExtension integration test.
-    assertThatCode(() -> new ChaosContextConfigurer().configure((ApplicationContextBuilder) null))
-        .doesNotThrowAnyException();
+
+    configurer.configure((ApplicationContextBuilder) null);
+
+    assertThat(installs).hasValue(1);
+  }
+
+  @Test
+  @DisplayName("a failing install is logged and does not abort the context")
+  void failingInstallDoesNotAbort() {
+    System.setProperty(ChaosContextConfigurer.ENABLED_PROPERTY, "true");
+
+    new ChaosContextConfigurer(
+            () -> {
+              throw new IllegalStateException("attach unavailable");
+            })
+        .configure((ApplicationContextBuilder) null);
   }
 }
