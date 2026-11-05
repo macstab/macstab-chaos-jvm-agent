@@ -86,6 +86,19 @@ public final class ChaosPlanMapper {
    *     contract
    */
   public static ChaosPlan read(final String json) {
+    return read(json, SOURCE_JSON_INPUT);
+  }
+
+  /**
+   * Deserialises a plan, reporting a failure with {@code source} (for example the plan file).
+   *
+   * @param json non-null JSON representation of a chaos plan
+   * @param source where the JSON came from, as {@link ConfigLoadException#getSource()} reports it
+   * @return validated ChaosPlan instance
+   * @throws ConfigLoadException if the JSON is malformed, exceeds size limits, or violates the plan
+   *     contract
+   */
+  static ChaosPlan read(final String json, final String source) {
     // String.length() counts UTF-16 chars, not bytes — a 500k-char JSON full of 4-byte
     // codepoints is ~2 MiB encoded, silently bypassing the documented 1 MiB gate. Count the
     // actual UTF-8 byte length with a short-circuit pass so oversized inputs are rejected
@@ -98,7 +111,7 @@ public final class ChaosPlanMapper {
               + " bytes (>"
               + MAX_JSON_LENGTH
               + " UTF-8 bytes provided)",
-          SOURCE_JSON_INPUT);
+          source);
     }
     final ChaosPlan plan;
     try {
@@ -108,7 +121,7 @@ public final class ChaosPlanMapper {
       final boolean positioned = location != null && location.getLineNr() > 0;
       throw new ConfigLoadException(
           parseFailureMessage(exception),
-          SOURCE_JSON_INPUT,
+          source,
           exception,
           positioned ? location.getLineNr() : 0,
           positioned ? location.getColumnNr() : 0,
@@ -117,7 +130,7 @@ public final class ChaosPlanMapper {
     // Jackson maps the JSON literal null to a null value rather than failing.
     if (plan == null) {
       throw new ConfigLoadException(
-          "chaos plan JSON is null; expected an object with \"scenarios\"", SOURCE_JSON_INPUT);
+          "chaos plan JSON is null; expected an object with \"scenarios\"", source);
     }
     return plan;
   }

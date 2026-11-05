@@ -115,7 +115,7 @@ public final class StartupConfigLoader {
             || AgentArgs.parseBoolean(ENV_DEBUG_DUMP, environment.get(ENV_DEBUG_DUMP), false);
 
     if (inlineJson != null) {
-      final ChaosPlan plan = parse(inlineJson, SOURCE_INLINE_JSON);
+      final ChaosPlan plan = ChaosPlanMapper.read(inlineJson, SOURCE_INLINE_JSON);
       return Optional.of(new LoadedPlan(plan, SOURCE_INLINE_JSON, debugDumpOnStart, null));
     }
     if (base64Json != null) {
@@ -152,7 +152,7 @@ public final class StartupConfigLoader {
       final String base64Json, final boolean debugDumpOnStart) {
     final byte[] decoded = decodeBase64(base64Json);
     final String json = new String(decoded, StandardCharsets.UTF_8);
-    final ChaosPlan plan = parse(json, SOURCE_BASE64);
+    final ChaosPlan plan = ChaosPlanMapper.read(json, SOURCE_BASE64);
     return new LoadedPlan(plan, SOURCE_BASE64, debugDumpOnStart, null);
   }
 
@@ -165,7 +165,7 @@ public final class StartupConfigLoader {
                 () ->
                     new ConfigLoadException(
                         "config file does not exist: " + filePath, SOURCE_FILE_PREFIX + filePath));
-    final ChaosPlan plan = parse(file.json(), SOURCE_FILE_PREFIX + filePath);
+    final ChaosPlan plan = ChaosPlanMapper.read(file.json(), SOURCE_FILE_PREFIX + filePath);
     // The configured path, not the resolved target: a reloading poller must keep watching the
     // ConfigMap link, whose target directory is replaced on every update.
     return new LoadedPlan(
@@ -194,25 +194,7 @@ public final class StartupConfigLoader {
 
   private static ChaosPlan readValidatedPlanFile(final String filePath) {
     final Path target = validateAndResolvePath(filePath);
-    return parse(readFileContents(target, filePath), SOURCE_FILE_PREFIX + filePath);
-  }
-
-  /**
-   * Parses a plan, reporting a failure with the source it came from instead of the mapper's generic
-   * one; the position and reason are kept.
-   */
-  private static ChaosPlan parse(final String json, final String source) {
-    try {
-      return ChaosPlanMapper.read(json);
-    } catch (final ConfigLoadException failure) {
-      throw new ConfigLoadException(
-          java.util.Objects.requireNonNullElse(failure.getMessage(), failure.reason()),
-          source,
-          failure.getCause(),
-          failure.line(),
-          failure.column(),
-          failure.reason());
-    }
+    return ChaosPlanMapper.read(readFileContents(target, filePath), SOURCE_FILE_PREFIX + filePath);
   }
 
   /**
