@@ -105,7 +105,7 @@ public record NamePattern(MatchMode mode, String value) {
     // plan contained to the parser and prevents latent surprise during live chaos execution.
     if (this.mode == MatchMode.GLOB || this.mode == MatchMode.REGEX) {
       guardPatternLength(this.value);
-      // Eagerly compile GLOB/REGEX so malformed expressions fail plan construction instead of
+      // Eagerly compile a REGEX so a malformed expression fails plan construction instead of
       // silently passing validation and throwing PatternSyntaxException on the first dispatch
       // event that exercises the selector. Without this, a plan with {"mode":"REGEX","value":
       // "(a["} loads cleanly, registers as ACTIVE, and only surfaces the syntax error at
