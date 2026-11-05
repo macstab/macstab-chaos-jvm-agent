@@ -13,7 +13,6 @@ import java.util.Set;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /** Delay, gate and terminal action are applied in that order, and the delay is never dropped. */
@@ -21,7 +20,6 @@ import org.junit.jupiter.api.Test;
 class DecisionOrderTest {
 
   @Test
-  @Tag("law-L11")
   @DisplayName("a delay from one scenario is applied before another scenario's reject is thrown")
   void delayIsAppliedBeforeThrow() {
     // Arrange

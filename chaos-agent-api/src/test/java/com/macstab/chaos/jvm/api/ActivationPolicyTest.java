@@ -7,7 +7,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import java.time.Duration;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
-import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 @DisplayName("ActivationPolicy")
@@ -88,7 +87,6 @@ class ActivationPolicyTest {
   class ProbabilityZeroRejection {
 
     @Test
-    @Tag("law-L8")
     @DisplayName("probability 0.0 throws IllegalArgumentException pointing at omit-activation")
     void probabilityZeroRejected() {
       // Silently normalising 0.0 to 1.0 would be the opposite of what a user who types 0 means.

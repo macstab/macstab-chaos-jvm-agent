@@ -20,7 +20,6 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
-import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 @DisplayName("Scenario re-activation and handle lifecycle")
@@ -38,7 +37,6 @@ class ScenarioReactivationTest {
   class Reactivation {
 
     @Test
-    @Tag("law-L20")
     @DisplayName("is possible after close() (try-with-resources)")
     void afterClose() {
       // Arrange
@@ -54,7 +52,6 @@ class ScenarioReactivationTest {
     }
 
     @Test
-    @Tag("law-L20")
     @DisplayName("is possible after stop(), replacing the stopped scenario")
     void afterStop() {
       // Arrange
@@ -75,7 +72,6 @@ class ScenarioReactivationTest {
     }
 
     @Test
-    @Tag("law-L19")
     @DisplayName("a replaced handle can no longer start the old scenario")
     void replacedHandleCannotRestart() {
       // Arrange
@@ -114,7 +110,6 @@ class ScenarioReactivationTest {
   class DuplicateActivation {
 
     @Test
-    @Tag("law-L20")
     @DisplayName("throws ChaosActivationException as documented")
     void throwsActivationException() {
       runtime.activate(scenario("dup"));
@@ -125,8 +120,6 @@ class ScenarioReactivationTest {
     }
 
     @Test
-    @Tag("law-L21")
-    @Tag("law-L20")
     @DisplayName("does not start the rejected scenario or publish events for the live id")
     void rejectedScenarioHasNoSideEffects() {
       // Arrange
@@ -150,7 +143,6 @@ class ScenarioReactivationTest {
     }
 
     @Test
-    @Tag("law-L21")
     @DisplayName("is reported as an activation conflict in diagnostics")
     void recordedAsConflict() {
       runtime.activate(scenario("dup"));

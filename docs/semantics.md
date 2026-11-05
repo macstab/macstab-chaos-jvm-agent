@@ -1,6 +1,6 @@
 # Evaluation Semantics
 
-> The rules the agent follows when an intercepted call meets the active scenarios, stated as laws. Every law here is enforced by code and verified by the tests tagged with its id (`@Tag("law-L14")`); where a law names a class, that class is where it is enforced.
+> The rules the agent follows when an intercepted call meets the active scenarios, stated as laws. Every law here is enforced by code and covered by tests; where a law names a class, that class is where it is enforced.
 
 ---
 

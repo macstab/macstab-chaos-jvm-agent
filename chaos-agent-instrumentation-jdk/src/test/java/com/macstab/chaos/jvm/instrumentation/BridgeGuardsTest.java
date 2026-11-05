@@ -78,7 +78,6 @@ class BridgeGuardsTest {
 
   @Test
   @DisplayName("inside the agent's own work every entry point passes the call through (L3)")
-  @org.junit.jupiter.api.Tag("law-L3")
   void passThroughInsideAgentWork() throws Exception {
     final ChaosRuntime runtime = new ChaosRuntime();
     try (AutoCloseable connected = JdkInstrumentationInstaller.connectDispatcher(runtime)) {

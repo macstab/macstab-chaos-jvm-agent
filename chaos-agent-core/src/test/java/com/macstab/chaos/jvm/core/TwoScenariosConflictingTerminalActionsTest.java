@@ -16,7 +16,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
-import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -42,7 +41,6 @@ class TwoScenariosConflictingTerminalActionsTest {
   class SerialMerge {
 
     @Test
-    @Tag("law-L13")
     @DisplayName("higher-precedence REJECT wins over lower-precedence SUPPRESS")
     void higherPrecedenceRejectWinsOverLowerPrecedenceSuppress() {
       final ChaosRuntime runtime = new ChaosRuntime();
@@ -74,7 +72,6 @@ class TwoScenariosConflictingTerminalActionsTest {
     }
 
     @Test
-    @Tag("law-L11")
     @DisplayName("delays from both matching scenarios accumulate regardless of precedence")
     void delaysAccumulateAcrossBothScenarios() {
       final ChaosRuntime runtime = new ChaosRuntime();

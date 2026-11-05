@@ -19,7 +19,6 @@ import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
-import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -88,7 +87,6 @@ class DefectRegressionIntegrationTest {
     }
 
     @Test
-    @Tag("law-L4")
     @DisplayName("a SCHEDULE_SUBMIT delay is applied once per schedule() call")
     void scheduleSubmitDelayIsEvaluatedOnce() throws Exception {
       // Arrange
@@ -122,7 +120,6 @@ class DefectRegressionIntegrationTest {
   class SingleEvaluation {
 
     @Test
-    @Tag("law-L4")
     @DisplayName("InetAddress.getByName is one DNS_RESOLVE match")
     void dnsGetByName() throws Exception {
       assertSingleMatch(
@@ -254,7 +251,6 @@ class DefectRegressionIntegrationTest {
     }
 
     @Test
-    @Tag("law-L4")
     @DisplayName("Statement.execute through a Hikari proxy is one JDBC_STATEMENT_EXECUTE match")
     void hikariProxyStatementExecute() throws Exception {
       final ChildJvmProbe.ProbeResult result =
@@ -598,7 +594,6 @@ class DefectRegressionIntegrationTest {
     }
 
     @Test
-    @Tag("law-L16")
     @DisplayName("CLOCK_READ skews the system Clock and every now() without an operation")
     void clockReadsAreSkewed() throws Exception {
       final ChildJvmProbe.ProbeResult result = runClockReads(Set.of(OperationType.CLOCK_READ));
@@ -634,7 +629,6 @@ class DefectRegressionIntegrationTest {
     }
 
     @Test
-    @Tag("law-L7")
     @DisplayName("an injected clock skew cannot move a scenario's time bounds")
     void timeBoundsUseTheRealClock() throws Exception {
       final ChaosScenario bounded =
@@ -1219,7 +1213,6 @@ class DefectRegressionIntegrationTest {
     }
 
     @Test
-    @Tag("law-L2")
     @DisplayName("gRPC call: an unmatched scenario leaves the call alone")
     void grpcCallUnmatched() throws Exception {
       final ChildJvmProbe.ProbeResult result =
@@ -1298,7 +1291,6 @@ class DefectRegressionIntegrationTest {
   class MethodSelectorWeaving {
 
     @Test
-    @Tag("law-L2")
     @DisplayName("activating weaves the named methods, closing restores them")
     void weavesAndRestores() throws Exception {
       final ChildJvmProbe.ProbeResult result =
@@ -1773,7 +1765,6 @@ class DefectRegressionIntegrationTest {
   class OnDemandWeaving {
 
     @Test
-    @Tag("law-L1")
     @DisplayName("an agent without scenarios weaves no hooks")
     void idleAgentWeavesNothing() throws Exception {
       final ChildJvmProbe.ProbeResult result =
@@ -1791,7 +1782,6 @@ class DefectRegressionIntegrationTest {
     }
 
     @Test
-    @Tag("law-L1")
     @DisplayName("instrumentation=eager weaves every group at start")
     void eagerWeavesEverything() throws Exception {
       final ChildJvmProbe.ProbeResult result =

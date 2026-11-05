@@ -17,7 +17,6 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.RejectedExecutionException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -42,7 +41,6 @@ class AppliedOnlyWhenEffectiveTest {
   }
 
   @Test
-  @Tag("law-L14")
   @DisplayName("the losing terminal scenario keeps its budget and reports no APPLIED")
   void losingTerminalKeepsBudget() {
     // Arrange: a low-precedence suppress capped at one application, a high-precedence reject.
@@ -62,7 +60,6 @@ class AppliedOnlyWhenEffectiveTest {
   }
 
   @Test
-  @Tag("law-L14")
   @DisplayName("delays of all matching scenarios are applied alongside the winning terminal")
   void delaysAreAppliedWithTheTerminal() {
     // Arrange
@@ -80,7 +77,6 @@ class AppliedOnlyWhenEffectiveTest {
   }
 
   @Test
-  @Tag("law-L14")
   @DisplayName("once the loser wins later, its budget is spent and it becomes INACTIVE")
   void loserSpendsBudgetWhenItTakesEffect() {
     // Arrange

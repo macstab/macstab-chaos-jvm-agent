@@ -19,7 +19,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 @DisplayName("Event model")
@@ -46,7 +45,6 @@ class EventModelTest {
   }
 
   @Test
-  @Tag("law-L21")
   @DisplayName("a failed activation publishes FAILED with its category")
   void failedActivation() {
     runtime.addEventListener(recorder);

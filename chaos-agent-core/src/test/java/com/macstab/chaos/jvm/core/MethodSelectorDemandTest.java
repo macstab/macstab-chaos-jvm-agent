@@ -18,7 +18,6 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
-import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 @DisplayName("Method selector weaving demand")
@@ -100,7 +99,6 @@ class MethodSelectorDemandTest {
     }
 
     @Test
-    @Tag("law-L21")
     @DisplayName("a weaving failure fails the activation as INSTRUMENTATION_FAILURE")
     void weavingFailure() {
       runtime.setHookDemand(recording(new IllegalStateException("cannot weave")));

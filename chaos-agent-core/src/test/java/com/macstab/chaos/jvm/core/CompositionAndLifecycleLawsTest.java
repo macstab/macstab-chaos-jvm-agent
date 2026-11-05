@@ -21,7 +21,6 @@ import java.util.concurrent.RejectedExecutionException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -52,7 +51,6 @@ class CompositionAndLifecycleLawsTest {
   }
 
   @Test
-  @Tag("law-L11")
   @DisplayName("the delays of every matching scenario are summed into one delay")
   void delaysAddUp() {
     runtime.activate(
@@ -79,7 +77,6 @@ class CompositionAndLifecycleLawsTest {
   }
 
   @Test
-  @Tag("law-L11")
   @DisplayName("a single delay is bounded, so no number of scenarios can overflow the sum")
   void delayIsBounded() {
     assertThatThrownBy(() -> ChaosEffect.delay(Duration.ofHours(721)))
@@ -88,8 +85,6 @@ class CompositionAndLifecycleLawsTest {
   }
 
   @Test
-  @Tag("law-L12")
-  @Tag("law-L14")
   @DisplayName("of two gates only the higher-precedence one holds the caller and is applied")
   void oneGate() {
     runtime.activate(
@@ -109,7 +104,6 @@ class CompositionAndLifecycleLawsTest {
   }
 
   @Test
-  @Tag("law-L13")
   @DisplayName("of two terminals with equal precedence the smaller scenario id decides")
   void terminalTieBreak() {
     // Activated in reverse order, so activation order cannot be what decides.
@@ -127,7 +121,6 @@ class CompositionAndLifecycleLawsTest {
   }
 
   @Test
-  @Tag("law-L19")
   @DisplayName("start() on a stopped handle is a no-op: the scenario never fires again")
   void stopIsFinal() {
     final ChaosActivationHandle handle =
@@ -143,7 +136,6 @@ class CompositionAndLifecycleLawsTest {
   }
 
   @Test
-  @Tag("law-L20")
   @DisplayName("a REGISTERED id cannot be activated again; the waiting scenario is unchanged")
   void registeredIdConflicts() {
     final ChaosActivationHandle waiting =
@@ -162,7 +154,6 @@ class CompositionAndLifecycleLawsTest {
   }
 
   @Test
-  @Tag("law-L20")
   @DisplayName("an INACTIVE id is replaced by a new activation")
   void inactiveIdIsReplaced() {
     final ActivationPolicy once =

@@ -26,7 +26,6 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -64,7 +63,6 @@ class PolicyBoundaryTest {
   }
 
   @Test
-  @Tag("law-L10")
   @DisplayName("a rate-limit window grants exactly its permits and ends exactly at its length")
   void rateLimitWindowBoundaries() {
     final ScenarioController controller =
@@ -89,7 +87,6 @@ class PolicyBoundaryTest {
   }
 
   @Test
-  @Tag("law-L14")
   @DisplayName("maxApplications counts outstanding reservations; a released one is available again")
   void reservationsCountAgainstTheCap() {
     final ScenarioController controller =
@@ -149,7 +146,6 @@ class PolicyBoundaryTest {
   }
 
   @Test
-  @Tag("law-L9")
   @DisplayName("the draws depend on the scenario id, not only on the seed")
   void drawsDependOnTheId() {
     final ActivationPolicy seeded =

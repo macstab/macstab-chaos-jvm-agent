@@ -15,7 +15,6 @@ import java.time.Duration;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 @DisplayName("Stressor scenarios and their activation policy")
@@ -34,7 +33,6 @@ class StressorActiveForTest {
   }
 
   @Test
-  @Tag("law-L17")
   @DisplayName("a stressor with activeFor ends its load and turns INACTIVE when the window elapses")
   void stressorExpires() {
     // Arrange
@@ -57,7 +55,6 @@ class StressorActiveForTest {
   }
 
   @Test
-  @Tag("law-L17")
   @DisplayName("stopping a stressor before its window ends stops it at once")
   void stopBeforeExpiry() {
     final String threadName = "stressor-stop-" + System.nanoTime();
@@ -71,7 +68,6 @@ class StressorActiveForTest {
   }
 
   @Test
-  @Tag("law-L17")
   @DisplayName("per-call policy fields are rejected because a stressor is never evaluated per call")
   void perCallPolicyIsRejected() {
     final ActivationPolicy capped =
@@ -84,7 +80,6 @@ class StressorActiveForTest {
   }
 
   @Test
-  @Tag("law-L17")
   @DisplayName("closing a stressor's handle ends it, as stopping does")
   void closeEndsTheStressor() {
     final String threadName = "stressor-close-" + System.nanoTime();
@@ -98,7 +93,6 @@ class StressorActiveForTest {
   }
 
   @Test
-  @Tag("law-L17")
   @DisplayName("a rate limit, a warm-up and a probability below 1.0 are rejected for a stressor")
   void otherPerCallFieldsAreRejected() {
     for (final ActivationPolicy policy :

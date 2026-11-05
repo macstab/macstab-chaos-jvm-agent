@@ -23,7 +23,6 @@ import java.util.Set;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
-import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -162,7 +161,6 @@ class NetworkDispatchTest {
     }
 
     @Test
-    @Tag("law-L14")
     @DisplayName("a corrupted read of no bytes does not apply")
     void corruptReadSkipsAnEmptyRead() throws Throwable {
       activate("corrupt", ChaosSelector.network(Set.of(OperationType.SOCKET_READ)), corruptRead());
@@ -172,7 +170,6 @@ class NetworkDispatchTest {
     }
 
     @Test
-    @Tag("law-L14")
     @DisplayName("a trickle does not apply to a read no larger than its cap")
     void trickleSkipsAShortRead() throws Throwable {
       activate(

@@ -13,7 +13,6 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 /** Recording the decisions of a run and replaying them with {@code replayMatches}. */
@@ -23,7 +22,6 @@ class DecisionReplayTest {
   private static final int CALLS = 200;
 
   @Test
-  @Tag("law-L9a")
   @DisplayName("replays an unseeded probabilistic run decision by decision")
   void replaysUnseededRun() {
     final ChaosScenario recorded =
@@ -47,7 +45,6 @@ class DecisionReplayTest {
   }
 
   @Test
-  @Tag("law-L9a")
   @DisplayName("replay counts warm-up matches, as recording did")
   void replayWithWarmUp() {
     final ChaosScenario scenario =
