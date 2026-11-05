@@ -57,12 +57,12 @@ public final class CidrBlock {
     if (slash < 0) {
       prefix = maxPrefix;
     } else {
-      try {
-        prefix = Integer.parseInt(trimmed.substring(slash + 1));
-      } catch (final NumberFormatException e) {
-        throw new IllegalArgumentException("invalid CIDR prefix length: " + text, e);
+      final String prefixText = trimmed.substring(slash + 1);
+      if (prefixText.isEmpty() || prefixText.length() > 3 || !isAsciiDigits(prefixText)) {
+        throw new IllegalArgumentException("invalid CIDR prefix length: " + text);
       }
-      if (prefix < 0 || prefix > maxPrefix) {
+      prefix = Integer.parseInt(prefixText);
+      if (prefix > maxPrefix) {
         throw new IllegalArgumentException(
             "CIDR prefix length must be in [0, " + maxPrefix + "]: " + text);
       }
@@ -190,7 +190,7 @@ public final class CidrBlock {
     final byte[] bytes = new byte[4];
     for (int i = 0; i < 4; i++) {
       final String part = parts[i];
-      if (part.isEmpty() || part.length() > 3 || !part.chars().allMatch(Character::isDigit)) {
+      if (part.isEmpty() || part.length() > 3 || !isAsciiDigits(part)) {
         return null;
       }
       final int value = Integer.parseInt(part);
@@ -272,10 +272,22 @@ public final class CidrBlock {
       return -1;
     }
     for (int i = 0; i < group.length(); i++) {
-      if (Character.digit(group.charAt(i), 16) < 0) {
+      final char c = group.charAt(i);
+      if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))) {
         return -1;
       }
     }
     return Integer.parseInt(group, 16);
+  }
+
+  /** Address literals use ASCII digits only; {@link Character#isDigit} accepts every script's. */
+  private static boolean isAsciiDigits(final String text) {
+    for (int i = 0; i < text.length(); i++) {
+      final char c = text.charAt(i);
+      if (c < '0' || c > '9') {
+        return false;
+      }
+    }
+    return true;
   }
 }

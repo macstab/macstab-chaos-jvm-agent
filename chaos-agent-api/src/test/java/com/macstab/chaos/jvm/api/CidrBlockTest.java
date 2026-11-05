@@ -54,6 +54,18 @@ class CidrBlockTest {
   }
 
   @Test
+  @DisplayName("only ASCII digits are digits: other scripts' digits and signs are rejected")
+  void asciiDigitsOnly() {
+    // U+0661 U+0660 are ARABIC-INDIC DIGIT ONE and ZERO, U+0968 is DEVANAGARI DIGIT EIGHT.
+    for (final String text :
+        new String[] {"\u0661\u0660.0.0.1", "fe80::\u0661", "10.0.0.0/\u0968", "10.0.0.0/+8"}) {
+      assertThatThrownBy(() -> CidrBlock.parse(text))
+          .as(text)
+          .isInstanceOf(IllegalArgumentException.class);
+    }
+  }
+
+  @Test
   @DisplayName("an IPv6 group holding a non-hex character is not an address")
   void nonHexGroup() {
     assertThatThrownBy(() -> CidrBlock.parse("fe80::zz"))
