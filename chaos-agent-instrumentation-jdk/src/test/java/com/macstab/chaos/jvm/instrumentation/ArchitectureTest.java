@@ -45,7 +45,7 @@ class ArchitectureTest {
       "the bootstrap bridge jar is closed: its classes reference no agent class outside it")
   void bridgeIsClosed() {
     final Set<String> bridge =
-        JdkInstrumentationInstaller.BRIDGE_CLASSES.stream()
+        BridgeInjector.BRIDGE_CLASSES.stream()
             .map(path -> path.substring(0, path.length() - ".class".length()).replace('/', '.'))
             .collect(Collectors.toCollection(TreeSet::new));
     final List<String> escapes = new ArrayList<>();

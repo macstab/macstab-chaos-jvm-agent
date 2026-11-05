@@ -17,7 +17,7 @@ Advice is inlined into JDK classes (`Thread`, `SocketChannelImpl`, `FileChannelI
 
 ## Decision
 
-A small set of classes (`JdkInstrumentationInstaller.BRIDGE_CLASSES`, led by `BootstrapDispatcher`) is written into a jar appended to the bootstrap class path. Advice calls static methods of `BootstrapDispatcher`; those invoke a table of `MethodHandle`s, built with `MethodHandles.publicLookup()` against the `BridgeDelegate` interface and bound to the agent at install time. Each slot is a `public static final int` constant `FOO_BAR` served by the delegate method `fooBar`; the table is derived and checked in full at install. A per-thread depth counter returns the unmodified result for calls the agent itself makes (L3) and for nested calls of the same logical operation (L4).
+A small set of classes (`BridgeInjector.BRIDGE_CLASSES`, led by `BootstrapDispatcher`) is written into a jar appended to the bootstrap class path. Advice calls static methods of `BootstrapDispatcher`; those invoke a table of `MethodHandle`s, built with `MethodHandles.publicLookup()` against the `BridgeDelegate` interface and bound to the agent at install time. Each slot is a `public static final int` constant `FOO_BAR` served by the delegate method `fooBar`; the table is derived and checked in full at install. A per-thread depth counter returns the unmodified result for calls the agent itself makes (L3) and for nested calls of the same logical operation (L4).
 
 ## Consequences
 

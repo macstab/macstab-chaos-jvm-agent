@@ -68,7 +68,7 @@ The agent reflects into and instruments classes in non-exported JDK internal pac
 | Attach path                                                                     | Mechanism                                            | Where                                                                                              |
 |---------------------------------------------------------------------------------|------------------------------------------------------|----------------------------------------------------------------------------------------------------|
 | `-javaagent:` (premain at JVM startup)                                          | `Add-Opens` attribute in agent JAR `MANIFEST.MF`     | `chaos-agent-bootstrap/build.gradle.kts`                                                           |
-| `agentmain` / dynamic attach / `ByteBuddyAgent.install()` (runtime self-attach) | `Instrumentation.redefineModule(module, …, opens=…)` | `JdkInstrumentationInstaller#grantInternalModuleOpens`, called as the first step of `install(...)` |
+| `agentmain` / dynamic attach / `ByteBuddyAgent.install()` (runtime self-attach) | `Instrumentation.redefineModule(module, …, opens=…)` | `ModuleOpener#grantInternalModuleOpens`, called as the first step of `install(...)` |
 
 Both mechanisms grant the same set of opens to the unnamed module of the system classloader (matching `=ALL-UNNAMED`):
 
@@ -80,7 +80,7 @@ Both mechanisms grant the same set of opens to the unnamed module of the system 
 | `java.base/sun.nio.ch`                | `DirectBuffer.cleaner()` reflection (`DirectBufferPressureStressor`).                         |
 | `java.base/jdk.internal.ref`          | Modern `Cleaner` mechanism (Java 9+ replacement for `sun.misc.Cleaner`).                      |
 
-**Adding a new internal**: when a new feature requires access to another non-exported package, add it to **both** the manifest in `chaos-agent-bootstrap/build.gradle.kts` and the list inside `JdkInstrumentationInstaller#grantInternalModuleOpens`. Same pattern applies if a new advice class references additional helper types: those types must be injected into the bootstrap classloader from `injectBridge(...)` (see `ChaosHttpSuppressException` and `HttpUrlExtractor` for prior art).
+**Adding a new internal**: when a new feature requires access to another non-exported package, add it to **both** the manifest in `chaos-agent-bootstrap/build.gradle.kts` and the list inside `ModuleOpener#grantInternalModuleOpens`. Same pattern applies if a new advice class references additional helper types: those types must be injected into the bootstrap classloader from `injectBridge(...)` (see `ChaosHttpSuppressException` and `HttpUrlExtractor` for prior art).
 
 ---
 
@@ -108,9 +108,9 @@ Both mechanisms grant the same set of opens to the unnamed module of the system 
 ```
 JdkInstrumentationInstaller.install(instrumentation, runtime, eager)
   ↓
-0. grantInternalModuleOpens(instrumentation)   — see Module access strategy
+0. ModuleOpener.grantInternalModuleOpens(instrumentation)   — see Module access strategy
 
-1. injectBridge(instrumentation)   (once per JVM)
+1. BridgeInjector.injectBridge(instrumentation)   (once per JVM)
    — Read BootstrapDispatcher.class bytes from agent JAR resources
    — Read the types woven advice references (ScheduledRunnableWrapper,
      ScheduledCallableWrapper, API exceptions, helper types)
@@ -667,7 +667,7 @@ The advice classes `JavaHttpClientSendAdvice` and `JavaHttpClientSendAsyncAdvice
 
 `jdk.internal.net.http.HttpClientImpl` lives in the non-exported package `jdk.internal.net.http` inside the `java.net.http` module. The agent self-grants the required reflective open at install time — see [Module access strategy](#module-access-strategy) — so users never need to set `--add-opens` JVM flags. Two pieces are involved:
 
-1. **Module open** — `Instrumentation#redefineModule(...)` is called from `JdkInstrumentationInstaller#grantInternalModuleOpens` as the first step of `install`, and the agent JAR's `MANIFEST.MF` carries an `Add-Opens` line for the same packages (the manifest attribute is honoured on `-javaagent:` premain attach; `redefineModule` covers `agentmain` / runtime self-attach).
+1. **Module open** — `Instrumentation#redefineModule(...)` is called from `ModuleOpener#grantInternalModuleOpens` as the first step of `install`, and the agent JAR's `MANIFEST.MF` carries an `Add-Opens` line for the same packages (the manifest attribute is honoured on `-javaagent:` premain attach; `redefineModule` covers `agentmain` / runtime self-attach).
 2. **Bootstrap-classpath types** — types referenced by woven advice (`ChaosHttpSuppressException`, `HttpUrlExtractor`) are injected into the bootstrap classloader's classpath alongside `BootstrapDispatcher`. Without this the JVM verifier raises `NoClassDefFoundError` because `HttpClientImpl` is loaded by the platform classloader and cannot resolve agent-classloader types directly.
 
 ## 12.7 URL Pattern Matching in `SelectorMatcher`

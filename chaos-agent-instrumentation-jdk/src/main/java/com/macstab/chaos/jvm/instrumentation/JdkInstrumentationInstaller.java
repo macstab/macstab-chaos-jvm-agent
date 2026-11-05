@@ -6,23 +6,15 @@ import com.macstab.chaos.jvm.core.ChaosRuntime;
 import com.macstab.chaos.jvm.core.HookDemand;
 import com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher;
 import com.macstab.chaos.jvm.instrumentation.bridge.BridgeDelegate;
-import java.io.IOException;
-import java.io.InputStream;
 import java.lang.instrument.Instrumentation;
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.Collections;
 import java.util.EnumSet;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Callable;
-import java.util.jar.JarEntry;
-import java.util.jar.JarOutputStream;
-import java.util.logging.Level;
 import java.util.logging.Logger;
 import net.bytebuddy.agent.builder.AgentBuilder;
 import net.bytebuddy.agent.builder.ResettableClassFileTransformer;
@@ -42,7 +34,7 @@ import org.jspecify.annotations.Nullable;
  *
  * <ol>
  *   <li>{@link #install} is called once by {@code ChaosAgentBootstrap} after the runtime is ready.
- *   <li>{@link #injectBridge(java.lang.instrument.Instrumentation)} packages {@link
+ *   <li>{@link BridgeInjector#injectBridge(java.lang.instrument.Instrumentation)} packages {@link
  *       com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher} and the types woven
  *       advice references into a temporary JAR and appends it to the bootstrap classpath so that
  *       bootstrap-loaded JDK classes can see it.
@@ -82,9 +74,6 @@ import org.jspecify.annotations.Nullable;
 public final class JdkInstrumentationInstaller {
   private static final Logger LOGGER =
       Logger.getLogger(JdkInstrumentationInstaller.class.getName());
-
-  private static final String BRIDGE_JAR_PREFIX = "macstab-chaos-bootstrap-bridge";
-  private static final String BRIDGE_JAR_SUFFIX = ".jar";
 
   /**
    * The transformer returned by the last successful {@link AgentBuilder#installOn} call. Retained
@@ -158,8 +147,8 @@ public final class JdkInstrumentationInstaller {
       final List<String> sessionHeaderHosts) {
     CLOCK_CALL_SITE_PACKAGES = validatedClockPackages(clockCallSitePackages);
     SESSION_HEADER_HOSTS = List.copyOf(sessionHeaderHosts);
-    grantInternalModuleOpens(instrumentation);
-    injectBridge(instrumentation);
+    ModuleOpener.grantInternalModuleOpens(instrumentation);
+    BridgeInjector.injectBridge(instrumentation);
     rejectForeignDelegate();
     installDelegate(new ChaosBridge(runtime));
     com.macstab.chaos.jvm.instrumentation.bridge.SessionHeaderPolicy.setExtraHosts(
@@ -473,85 +462,6 @@ public final class JdkInstrumentationInstaller {
   }
 
   /**
-   * Self-grants reflective and instrumentation access to the JDK internal packages this agent needs
-   * to function, without requiring the user to set {@code --add-opens} JVM flags.
-   *
-   * <p>The agent JAR's {@code MANIFEST.MF} carries a matching {@code Add-Opens} attribute (see
-   * {@code chaos-agent-bootstrap/build.gradle.kts}) that the JVM honours on the {@code -javaagent:}
-   * (premain) attach path before {@code premain} runs. Manifest opens are <b>not</b> honoured for
-   * {@code agentmain} or runtime self-attach via {@code ByteBuddyAgent.install()}, so for those
-   * paths this method calls {@link Instrumentation#redefineModule} programmatically — exposing the
-   * same opens to the unnamed module of the system class loader. Same pattern OpenTelemetry,
-   * Datadog, and New Relic agents use.
-   *
-   * <p>Each entry below is paired with the agent feature that depends on it. If a future feature
-   * needs a new internal package, add it both to the manifest <i>and</i> to this list.
-   *
-   * <p>Failures are tolerated and logged at FINE level: the JVM may legitimately deny {@code
-   * redefineModule} on stripped or future runtimes. Downstream code that depends on the open
-   * already handles {@code java.lang.reflect.InaccessibleObjectException} via try/catch (see {@code
-   * HttpUrlExtractor}, {@code JdbcTargetExtractor}, {@code DirectBufferPressureStressor}).
-   *
-   * @param instrumentation the JVM-supplied {@link Instrumentation} handle, used for the {@code
-   *     redefineModule} call
-   */
-  private static void grantInternalModuleOpens(final Instrumentation instrumentation) {
-    final Module unnamed = ClassLoader.getSystemClassLoader().getUnnamedModule();
-    final Set<Module> openTo = Set.of(unnamed);
-
-    // moduleClass → packages to open. Loaded reflectively so this code stays compilable on
-    // toolchains that expose only some of these modules. Each lookup tolerates an absent module.
-    final List<String[]> opens =
-        List.of(
-            new String[] {"java.net.http", "jdk.internal.net.http"},
-            new String[] {"java.base", "jdk.internal.misc"},
-            new String[] {"java.base", "jdk.internal.loader"},
-            new String[] {"java.base", "sun.nio.ch"},
-            new String[] {"java.base", "jdk.internal.ref"});
-
-    for (final String[] entry : opens) {
-      final String moduleName = entry[0];
-      final String packageName = entry[1];
-      final Module module = ModuleLayer.boot().findModule(moduleName).orElse(null);
-      if (module == null) {
-        LOGGER.log(
-            Level.FINE,
-            "module {0} not present; skipping open of {1}",
-            new Object[] {moduleName, packageName});
-        continue;
-      }
-      if (!module.getPackages().contains(packageName)) {
-        LOGGER.log(
-            Level.FINE,
-            "module {0} does not contain package {1}; skipping",
-            new Object[] {moduleName, packageName});
-        continue;
-      }
-      try {
-        final Map<String, Set<Module>> extraOpens = new LinkedHashMap<>();
-        extraOpens.put(packageName, openTo);
-        instrumentation.redefineModule(
-            module,
-            Collections.emptySet(), // extraReads
-            Collections.emptyMap(), // extraExports
-            extraOpens, // extraOpens
-            Collections.emptySet(), // extraUses
-            Collections.emptyMap()); // extraProvides
-      } catch (final RuntimeException failure) {
-        LOGGER.log(
-            Level.FINE,
-            failure,
-            () ->
-                "failed to redefineModule open for "
-                    + moduleName
-                    + "/"
-                    + packageName
-                    + " — chaos features depending on this open may degrade gracefully");
-      }
-    }
-  }
-
-  /**
    * Resets the installed ByteBuddy transformer, reverting class transformations applied by the most
    * recent {@link #install} call.
    *
@@ -775,8 +685,8 @@ public final class JdkInstrumentationInstaller {
    * com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher}.
    *
    * <p>Because {@code BootstrapDispatcher} is loaded by the bootstrap classloader (after {@link
-   * #injectBridge} appends it) and this class is loaded by the agent classloader, the two share no
-   * common type. The method therefore resolves {@code BootstrapDispatcher} via {@link
+   * BridgeInjector#injectBridge} appends it) and this class is loaded by the agent classloader, the
+   * two share no common type. The method therefore resolves {@code BootstrapDispatcher} via {@link
    * Class#forName(String, boolean, ClassLoader)} with a {@code null} classloader argument
    * (bootstrap) and invokes its {@code install(Object, MethodHandle[])} method reflectively. The
    * {@link MethodHandle} array is built fresh by {@link #buildMethodHandles} for each call.
@@ -797,112 +707,6 @@ public final class JdkInstrumentationInstaller {
     // Reflection: install() lives on the bootstrap-loaded copy of BootstrapDispatcher.
     installDelegateRaw(bridgeDelegate, methodHandles);
   }
-
-  /**
-   * Packages the bootstrap bridge classes into a temporary JAR and appends it to the bootstrap
-   * classpath.
-   *
-   * <p>The classes written are {@code BootstrapDispatcher} and the types that advice woven into JDK
-   * classes references (the scheduled-task wrappers and the API exceptions it throws).
-   *
-   * <p>They are read from the agent classloader's resources (the same JAR that contains this class)
-   * and written verbatim into the temp JAR. The temp file is registered for deletion on JVM exit.
-   * After the JAR is written, {@link Instrumentation#appendToBootstrapClassLoaderSearch} makes its
-   * contents visible to the bootstrap classloader, allowing instrumented JDK classes — which are
-   * loaded by the bootstrap classloader — to call {@code BootstrapDispatcher} static methods.
-   *
-   * @param instrumentation the {@link Instrumentation} handle used to append to the bootstrap
-   *     classpath
-   * @throws IllegalStateException wrapping the underlying {@link java.io.IOException} if the
-   *     temporary JAR cannot be created, if a required class resource is missing from the agent
-   *     JAR, or if appending to the bootstrap classpath fails
-   */
-  private static void injectBridge(final Instrumentation instrumentation) {
-    // Idempotency: appendToBootstrapClassLoaderSearch has no unwind operation — once a JAR
-    // is appended, its entries stay visible to the bootstrap classloader for the JVM's
-    // lifetime, and the bootstrap classloader caches the classes it has loaded. A second
-    // install() call (dynamic-attach test runners that cycle install→uninstall→install)
-    // that rebuilds and re-appends a fresh temp JAR would:
-    //   (1) leak file descriptors in BRIDGE_JARS on every cycle,
-    //   (2) shadow the already-loaded BootstrapDispatcher with a new Class object on a
-    //       newer classpath entry for any class still resolvable lazily (inner classes),
-    // neither of which is desirable. The bridge classes are fixed bytecode — once injected,
-    // they never change — so skipping subsequent calls is both safe and correct.
-    if (!BRIDGE_INJECTED.compareAndSet(false, true)) {
-      return;
-    }
-    boolean appended = false;
-    try {
-      // On POSIX filesystems create with 0600: the bridge JAR contains the code that bootstrap
-      // classloader will load, so a world-readable/writable file (the default 0644 umask-adjusted
-      // file) is a privilege-escalation hazard — any local user who can write to /tmp could swap
-      // the file before the JVM opens it and run arbitrary bootstrap-level code. On non-POSIX
-      // filesystems (e.g. Windows) fall back to the default because PosixFileAttributes are
-      // unsupported there; other platform-specific ACLs would have to be layered in separately.
-      sweepStaleBridgeJars();
-      final Path bridgeJar = createSecureTempFile();
-      bridgeJar.toFile().deleteOnExit();
-      try (JarOutputStream jarOutputStream =
-          new JarOutputStream(Files.newOutputStream(bridgeJar))) {
-        for (final String bridgeClass : BRIDGE_CLASSES) {
-          writeClass(jarOutputStream, bridgeClass);
-        }
-      }
-      // Retain the JarFile in a static field. appendToBootstrapClassLoaderSearch does not
-      // document whether the JVM keeps a strong reference to the Java-side JarFile; on
-      // HotSpot the underlying native classpath entry is kept open, but the Java wrapper
-      // becomes unreachable as soon as this method returns. If the JarFile is finalized and
-      // its ZipFile closed, later bootstrap loads of ScheduledRunnableWrapper /
-      // ScheduledCallableWrapper / BootstrapDispatcher classes can fail with
-      // ZipException("ZipFile closed") at the first intercepted schedule() call — hours or
-      // days into an otherwise-healthy run. Holding the reference is cheap (one file handle
-      // per JVM) and eliminates the finalizer race. Note that BRIDGE_JARS is NEVER cleared
-      // on uninstall — the bootstrap classloader has already loaded classes from the JAR and
-      // releasing the JarFile would let its ZipFile finalize, breaking every future class
-      // load that resolves lazily through the bootstrap classpath entry.
-      final java.util.jar.JarFile jarFile = new java.util.jar.JarFile(bridgeJar.toFile());
-      BRIDGE_JARS.add(jarFile);
-      instrumentation.appendToBootstrapClassLoaderSearch(jarFile);
-      appended = true;
-      // The bootstrap class path entry is opened when it is appended, and the JarFile above holds
-      // its own handle, so on POSIX the file can be unlinked now and nothing is left in the temp
-      // directory, even when the JVM is killed. deleteOnExit alone left one jar per JVM start
-      // behind after kill -9. Windows refuses to delete an open file: there the jar stays until
-      // a later start sweeps it (see sweepStaleBridgeJars).
-      try {
-        Files.deleteIfExists(bridgeJar);
-      } catch (final IOException inUse) {
-        LOGGER.fine(() -> "bridge jar kept until exit: " + bridgeJar);
-      }
-    } catch (final IOException exception) {
-      // Failure path: clear the injected flag so a subsequent install() can retry rather
-      // than silently returning success when the bridge was never actually in place.
-      BRIDGE_INJECTED.set(false);
-      throw new IllegalStateException("failed to inject bootstrap bridge", exception);
-    } catch (final RuntimeException | Error failure) {
-      // The same for an unchecked failure, unless the jar is already on the bootstrap class path:
-      // that cannot be undone, and appending a second copy is what the flag prevents.
-      if (!appended) {
-        BRIDGE_INJECTED.set(false);
-      }
-      throw failure;
-    }
-  }
-
-  /**
-   * Tracks whether {@link #injectBridge} has successfully installed the bootstrap bridge JAR.
-   * JVM-wide single-shot because {@code Instrumentation.appendToBootstrapClassLoaderSearch} has no
-   * reverse operation.
-   */
-  private static final java.util.concurrent.atomic.AtomicBoolean BRIDGE_INJECTED =
-      new java.util.concurrent.atomic.AtomicBoolean(false);
-
-  /**
-   * Strong-reference holder for the injected bridge {@link java.util.jar.JarFile}. See the call
-   * site above for the rationale.
-   */
-  private static final java.util.List<java.util.jar.JarFile> BRIDGE_JARS =
-      java.util.Collections.synchronizedList(new java.util.ArrayList<>());
 
   /**
    * Names of classes that are reliably loaded as a side-effect of {@link AgentBuilder#installOn}
@@ -1929,9 +1733,9 @@ public final class JdkInstrumentationInstaller {
    * are required to instrument it without users having to set {@code --add-opens} JVM flags:
    *
    * <ol>
-   *   <li>Module access — granted automatically by {@link #grantInternalModuleOpens} (programmatic
-   *       {@code redefineModule}) plus the {@code Add-Opens} attribute in the agent JAR's {@code
-   *       MANIFEST.MF}.
+   *   <li>Module access — granted automatically by {@link ModuleOpener#grantInternalModuleOpens}
+   *       (programmatic {@code redefineModule}) plus the {@code Add-Opens} attribute in the agent
+   *       JAR's {@code MANIFEST.MF}.
    *   <li>A separate {@link AgentBuilder} pass — historically, mixing this transformation into the
    *       same builder pass as the other Phase 2 transformations could cause silent corruption of
    *       the retransformation pipeline. With the open already in place at install time the
@@ -2831,88 +2635,6 @@ public final class JdkInstrumentationInstaller {
                                 .and(ElementMatchers.takesArguments(0)))
                         .replaceWith(skewedNanos)
                         .on(ElementMatchers.any())));
-  }
-
-  /** Bridge jars older than this are left over from earlier JVMs and are removed. */
-  private static final java.time.Duration STALE_BRIDGE_JAR_AGE = java.time.Duration.ofDays(1);
-
-  /**
-   * Removes bridge jars of earlier JVMs that could not delete their own (Windows, where an open
-   * file cannot be deleted, or JVMs killed before exit). Only files with the bridge prefix that are
-   * older than a day are considered; a jar still in use by a running JVM is locked on Windows and
-   * the delete simply fails. Failures are ignored: the sweep is housekeeping only.
-   */
-  private static void sweepStaleBridgeJars() {
-    final Path tmpPath = Path.of(System.getProperty("java.io.tmpdir"));
-    final java.time.Instant cutoff = java.time.Instant.now().minus(STALE_BRIDGE_JAR_AGE);
-    try (java.nio.file.DirectoryStream<Path> candidates =
-        Files.newDirectoryStream(tmpPath, BRIDGE_JAR_PREFIX + "*" + BRIDGE_JAR_SUFFIX)) {
-      for (final Path candidate : candidates) {
-        try {
-          if (Files.isRegularFile(candidate, java.nio.file.LinkOption.NOFOLLOW_LINKS)
-              && Files.getLastModifiedTime(candidate, java.nio.file.LinkOption.NOFOLLOW_LINKS)
-                  .toInstant()
-                  .isBefore(cutoff)) {
-            Files.deleteIfExists(candidate);
-          }
-        } catch (final IOException | SecurityException skipped) {
-          // In use, owned by another user, or already gone.
-        }
-      }
-    } catch (final IOException | SecurityException unavailable) {
-      LOGGER.fine(() -> "bridge jar sweep skipped: " + unavailable);
-    }
-  }
-
-  private static Path createSecureTempFile() throws IOException {
-    final String tmpDir = System.getProperty("java.io.tmpdir");
-    final Path tmpPath = Path.of(tmpDir);
-    if (Files.getFileStore(tmpPath).supportsFileAttributeView("posix")) {
-      final java.nio.file.attribute.FileAttribute<?> ownerOnly =
-          java.nio.file.attribute.PosixFilePermissions.asFileAttribute(
-              java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"));
-      return Files.createTempFile(BRIDGE_JAR_PREFIX, BRIDGE_JAR_SUFFIX, ownerOnly);
-    }
-    return Files.createTempFile(BRIDGE_JAR_PREFIX, BRIDGE_JAR_SUFFIX);
-  }
-
-  /**
-   * The class files of the bootstrap bridge jar. JDK classes woven by the agent resolve the types
-   * their advice references through the bootstrap class loader, so every agent type the bridge
-   * references must be in this list; {@code ArchitectureTest} checks that it is closed.
-   */
-  static final java.util.List<String> BRIDGE_CLASSES =
-      java.util.List.of(
-          "com/macstab/chaos/jvm/instrumentation/bridge/BootstrapDispatcher.class",
-          "com/macstab/chaos/jvm/instrumentation/bridge/SessionHeaderPolicy.class",
-          "com/macstab/chaos/jvm/instrumentation/bridge/ChannelBuffers.class",
-          "com/macstab/chaos/jvm/instrumentation/bridge/OperationTags.class",
-          "com/macstab/chaos/jvm/instrumentation/ScheduledRunnableWrapper.class",
-          "com/macstab/chaos/jvm/instrumentation/ScheduledCallableWrapper.class",
-          // Advice woven into JDK module classes (e.g. jdk.internal.net.http.HttpClientImpl in
-          // the platform class loader) references these types; without them the verifier raises
-          // NoClassDefFoundError when the JDK class is first used.
-          "com/macstab/chaos/jvm/api/ChaosHttpSuppressException.class",
-          "com/macstab/chaos/jvm/instrumentation/HttpUrlExtractor.class",
-          "com/macstab/chaos/jvm/instrumentation/HttpUrlExtractor$1.class",
-          // JDBC advice woven into HikariPool, c3p0 and java.sql types references these: the
-          // inlined references resolve through the bootstrap class path.
-          "com/macstab/chaos/jvm/api/ChaosJdbcSuppressException.class",
-          "com/macstab/chaos/jvm/instrumentation/JdbcTargetExtractor.class",
-          "com/macstab/chaos/jvm/instrumentation/JdbcTargetExtractor$1.class");
-
-  private static void writeClass(final JarOutputStream jarOutputStream, final String resourcePath)
-      throws IOException {
-    final JarEntry jarEntry = new JarEntry(resourcePath);
-    jarOutputStream.putNextEntry(jarEntry);
-    try (InputStream inputStream =
-        JdkInstrumentationInstaller.class.getClassLoader().getResourceAsStream(resourcePath)) {
-      if (inputStream == null) {
-        throw new IOException("missing bridge resource " + resourcePath);
-      }
-      inputStream.transferTo(jarOutputStream);
-    }
-    jarOutputStream.closeEntry();
   }
 
   /**
