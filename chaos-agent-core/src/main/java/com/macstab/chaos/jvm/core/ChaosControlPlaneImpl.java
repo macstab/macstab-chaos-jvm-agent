@@ -1,6 +1,7 @@
 package com.macstab.chaos.jvm.core;
 
 import com.macstab.chaos.jvm.api.ActivationPolicy;
+import com.macstab.chaos.jvm.api.ChaosActivationConflictException;
 import com.macstab.chaos.jvm.api.ChaosActivationException;
 import com.macstab.chaos.jvm.api.ChaosActivationHandle;
 import com.macstab.chaos.jvm.api.ChaosControlPlane;
@@ -214,7 +215,8 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
       }
       if (registry.isLive("jvm::" + scenario.id())) {
         final ChaosActivationException conflict =
-            new ChaosActivationException("scenario key already active: jvm::" + scenario.id());
+            new ChaosActivationConflictException(
+                "scenario key already active: jvm::" + scenario.id());
         recordFailure(
             scenario.id(),
             ChaosDiagnostics.FailureCategory.ACTIVATION_CONFLICT,

@@ -138,15 +138,6 @@ public final class StartupConfigPoller implements AutoCloseable {
   }
 
   /**
-   * Applies the initial plan, with its observability settings, and starts polling.
-   *
-   * @param initialPlan the plan from the first file read, already parsed by the caller
-   */
-  public void startWithInitialPlan(final com.macstab.chaos.jvm.api.ChaosPlan initialPlan) {
-    startWithInitialPlan(initialPlan, null);
-  }
-
-  /**
    * Applies the initial plan and starts polling, with the file read it came from as the baseline: a
    * change after that read is applied on the next tick.
    *
@@ -163,27 +154,6 @@ public final class StartupConfigPoller implements AutoCloseable {
     }
     applyDiff(initialPlan.scenarios());
     applyObservability(initialPlan);
-    // The future is not needed: pollOnce() catches every Throwable, so the schedule never ends
-    // with a failure that the future would report; close() stops the scheduler.
-    @SuppressWarnings("FutureReturnValueIgnored")
-    final Object unused =
-        scheduler.scheduleAtFixedRate(
-            this::pollOnce, intervalMs, intervalMs, TimeUnit.MILLISECONDS);
-  }
-
-  /**
-   * Activates the initial set of scenarios and starts the polling loop.
-   *
-   * <p>The initial scenarios are applied as the first diff (from empty state), so they are tracked
-   * by this poller and managed by all subsequent reloads. The polling scheduler begins ticking
-   * after this call returns.
-   *
-   * @param initialScenarios scenarios from the first file read, already parsed by the caller
-   */
-  public void startWithInitialPlan(final List<ChaosScenario> initialScenarios) {
-    // No baseline: the first tick reads the file and reconciles (a no-op when it is unchanged).
-    // A second read here could have seen a newer file and taken it for applied.
-    applyDiff(initialScenarios);
     // The future is not needed: pollOnce() catches every Throwable, so the schedule never ends
     // with a failure that the future would report; close() stops the scheduler.
     @SuppressWarnings("FutureReturnValueIgnored")
@@ -362,9 +332,9 @@ public final class StartupConfigPoller implements AutoCloseable {
           || cause instanceof IllegalArgumentException) {
         return true;
       }
-      if (cause instanceof com.macstab.chaos.jvm.api.ChaosActivationException activation) {
-        return activation.getMessage() == null
-            || !activation.getMessage().contains("already active");
+      if (cause instanceof com.macstab.chaos.jvm.api.ChaosActivationException) {
+        // A conflict with a scenario activated elsewhere may clear; any other failure is final.
+        return !(cause instanceof com.macstab.chaos.jvm.api.ChaosActivationConflictException);
       }
       if (cause.getCause() == null || cause.getCause().equals(cause)) {
         break;

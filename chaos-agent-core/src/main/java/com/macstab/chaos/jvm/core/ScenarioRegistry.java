@@ -1,5 +1,6 @@
 package com.macstab.chaos.jvm.core;
 
+import com.macstab.chaos.jvm.api.ChaosActivationConflictException;
 import com.macstab.chaos.jvm.api.ChaosActivationException;
 import com.macstab.chaos.jvm.api.ChaosDiagnostics;
 import com.macstab.chaos.jvm.api.ChaosSelector;
@@ -126,7 +127,7 @@ final class ScenarioRegistry implements ChaosDiagnostics {
             replaced[0] = existing;
             return controller;
           }
-          throw new ChaosActivationException("scenario key already active: " + key);
+          throw new ChaosActivationConflictException("scenario key already active: " + key);
         });
     rebuildIndex();
     return replaced[0];

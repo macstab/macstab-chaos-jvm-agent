@@ -80,11 +80,10 @@ public final class ChaosManagement implements AutoCloseable {
       handle = controlPlane.activate(plan);
     } catch (final com.macstab.chaos.jvm.api.ChaosValidationException invalid) {
       return new ActivationResponse("invalid", null, "invalid plan: " + invalid.getMessage());
+    } catch (final com.macstab.chaos.jvm.api.ChaosActivationConflictException conflict) {
+      return new ActivationResponse("conflict", null, "plan rejected: " + conflict.getMessage());
     } catch (final com.macstab.chaos.jvm.api.ChaosActivationException failed) {
-      final boolean conflict =
-          failed.getMessage() != null && failed.getMessage().contains("already active");
-      return new ActivationResponse(
-          conflict ? "conflict" : "invalid", null, "plan rejected: " + failed.getMessage());
+      return new ActivationResponse("invalid", null, "plan rejected: " + failed.getMessage());
     } catch (final RuntimeException rejected) {
       LOGGER.log(Level.WARNING, rejected, () -> "chaos-agent: plan activation rejected");
       return new ActivationResponse("rejected", null, "plan rejected: " + rejected.getMessage());

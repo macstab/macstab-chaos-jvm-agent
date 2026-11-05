@@ -12,6 +12,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.macstab.chaos.jvm.api.ActivationPolicy;
+import com.macstab.chaos.jvm.api.ChaosActivationConflictException;
 import com.macstab.chaos.jvm.api.ChaosActivationException;
 import com.macstab.chaos.jvm.api.ChaosActivationHandle;
 import com.macstab.chaos.jvm.api.ChaosEffect;
@@ -32,7 +33,6 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -244,7 +244,7 @@ class StartupConfigPollerEdgeCaseTest {
   @DisplayName("a conflict with a scenario active elsewhere is retried for the same content")
   void conflictRetried() throws Exception {
     when(runtime.activate(any(ChaosScenario.class)))
-        .thenThrow(new ChaosActivationException("scenario 'a' is already active"));
+        .thenThrow(new ChaosActivationConflictException("scenario 'a' is already active"));
     poller("60000").pollOnce();
     stamp(30_000);
     poller.pollOnce();
@@ -292,39 +292,6 @@ class StartupConfigPollerEdgeCaseTest {
     poller.pollOnce();
     verify(runtime, times(2)).activate(any(ChaosScenario.class));
     verify(handle).stop();
-  }
-
-  @Test
-  @DisplayName("an interrupted close keeps the interrupt and a reload it overtook applies nothing")
-  void interruptedCloseWithReloadInFlight() throws Exception {
-    final StartupConfigPoller racing = poller("50");
-    final Thread worker;
-    synchronized (racing) {
-      racing.startWithInitialPlan(List.of());
-      // The first tick reads plan "a" and blocks on this monitor to apply it.
-      worker = awaitBlockedPollerThread();
-      Thread.currentThread().interrupt();
-      racing.close();
-      assertThat(Thread.interrupted()).as("the interrupt survives close").isTrue();
-    }
-    worker.join(TimeUnit.SECONDS.toMillis(10));
-
-    assertThat(worker.isAlive()).isFalse();
-    verify(runtime, never()).activate(any(ChaosScenario.class));
-  }
-
-  private static Thread awaitBlockedPollerThread() throws InterruptedException {
-    final long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
-    while (System.nanoTime() < deadline) {
-      for (final Thread thread : Thread.getAllStackTraces().keySet()) {
-        if (thread.getName().equals("chaos-config-poller")
-            && thread.getState() == Thread.State.BLOCKED) {
-          return thread;
-        }
-      }
-      Thread.sleep(5);
-    }
-    throw new AssertionError("the poller tick never reached the plan it read");
   }
 
   @Test

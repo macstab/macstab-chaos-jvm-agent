@@ -58,6 +58,9 @@ public final class com/macstab/chaos/jvm/api/AsyncChaosEventListener implements 
   public method delegate()Lcom/macstab/chaos/jvm/api/ChaosEventListener;
   public method onEvent(Lcom/macstab/chaos/jvm/api/ChaosEvent;)V
 
+public class com/macstab/chaos/jvm/api/ChaosActivationConflictException extends com/macstab/chaos/jvm/api/ChaosActivationException
+  public method <init>(Ljava/lang/String;)V
+
 public class com/macstab/chaos/jvm/api/ChaosActivationException extends java/lang/RuntimeException
   public method <init>(Ljava/lang/String;)V
   public method <init>(Ljava/lang/String;Ljava/lang/Throwable;)V
