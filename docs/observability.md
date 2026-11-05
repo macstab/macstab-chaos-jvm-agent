@@ -6,7 +6,7 @@
 
 ## 1. Status and hits files
 
-The same two files the native chaos libraries write, in the same format, so one tool reads every layer.
+The same two files the native chaos libraries write, in the same format, so one tool reads every layer. They are written only when switched on with `reports=on`; the first write that fails is logged once as a warning naming the directory.
 
 **Status file** `<dir>/.chaos-jvm.status`, rewritten after every load of the startup plan and every reload:
 
@@ -38,7 +38,7 @@ Both files are written to a staging file and renamed, so a reader never sees a p
 
 | Setting                | Agent arg    | System property            | Environment variable         | Default            |
 |------------------------|--------------|----------------------------|------------------------------|--------------------|
-| Switch the files off   | `reports=off`| `macstab.chaos.reports`    | `MACSTAB_CHAOS_REPORTS`      | on                 |
+| Switch the files on    | `reports=on` | `macstab.chaos.reports`    | `MACSTAB_CHAOS_REPORTS`      | off                |
 | Directory              | `reportsDir` | `macstab.chaos.reportsDir` | `MACSTAB_CHAOS_REPORTS_DIR`  | `java.io.tmpdir`   |
 
 ## 2. Events
@@ -115,7 +115,7 @@ The same four operations over HTTP in each framework, all off by default and to 
 | Stop every plan activated here | `DELETE /actuator/chaos`                              | `DELETE /chaos`                              | `DELETE /q/chaos`                          |
 | Switch                         | `macstab.chaos.actuator.enabled=true`                 | `macstab.chaos.management.enabled=true` (needs `micronaut-management`) | add the extension; `macstab.chaos.management.enabled=true` at runtime |
 
-`{id}` is a plan's handle id (`plan:<name>`, URL-encoded) or its name. Only plans activated through the endpoint can be stopped through it, and they are stopped when the application context (or Quarkus application, including a dev-mode reload) shuts down. Micronaut and Quarkus share `ChaosManagement` (in the agent) and answer with JSON and the operation's status: 200 done; 400 `invalid` (malformed, failing validation); 404 `not-found`; 409 `conflict` (a scenario id is already active) or `unmanaged` (a scenario not activated here); 422 `rejected` (the runtime could not run it); 503 when no agent is installed — neither endpoint installs one. The Micronaut endpoint is `defaultSensitive`. The Quarkus route lives in its own extension, so only applications that add it depend on `quarkus-vertx-http`; it runs on a worker thread under Quarkus' non-application root (`/q` by default) and reads its switch on every request.
+`{id}` is a plan's handle id (`plan:<name>`, URL-encoded) or its name. Only plans activated through the endpoint can be stopped through it, and they are stopped when the application context (or Quarkus application, including a dev-mode reload) shuts down. Micronaut and Quarkus share `ChaosManagement` (in the agent) and answer with JSON and the operation's status: 200 done; 400 `invalid` (malformed, failing validation); 404 `not-found`; 409 `conflict` (a scenario id is already active) or `unmanaged` (a scenario not activated here); 422 `rejected` (the runtime could not run it); 503 when no agent is installed — neither endpoint installs one. The Micronaut endpoint is `defaultSensitive`. The Quarkus route lives in its own extension, so only applications that add it depend on `quarkus-vertx-http`; it runs on a worker thread under Quarkus' non-application root (`/q` by default) and reads its switch on every request. It answers 401 to a request without an authenticated user (configure Quarkus security for the path); `macstab.chaos.management.allow-anonymous=true` serves anonymous requests, for a network that is already restricted.
 
 ## 5. Handle counters
 
