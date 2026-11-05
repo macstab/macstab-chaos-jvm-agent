@@ -55,18 +55,16 @@ public final class ExecutorDispatch {
       return scoped;
     }
     final RuntimeDecision decision =
-        (engine.idle(indexedOp)
-            ? RuntimeDecision.none()
-            : engine.evaluate(
-                new InvocationContext(
-                    indexedOp,
-                    executor == null ? "unknown" : executor.getClass().getName(),
-                    DispatchEngine.taskClassName(task),
-                    null,
-                    false,
-                    null,
-                    null,
-                    sessionId)));
+        engine.evaluate(
+            new InvocationContext(
+                indexedOp,
+                executor == null ? "unknown" : executor.getClass().getName(),
+                DispatchEngine.taskClassName(task),
+                null,
+                false,
+                null,
+                null,
+                sessionId));
     if (decision.terminalAction() != null
         && decision.terminalAction().kind() == TerminalKind.SUPPRESS) {
       // Honour composed "gate + delay + suppress" scenarios before substituting the no-op, so
@@ -284,10 +282,6 @@ public final class ExecutorDispatch {
     if (decision.terminalAction() != null) {
       final TerminalAction terminalAction = decision.terminalAction();
       if (terminalAction.kind() == TerminalKind.THROW) {
-        throw terminalAction.failure();
-      }
-      if (terminalAction.kind() == TerminalKind.TIMEOUT) {
-        engine.sleep(terminalAction.number());
         throw terminalAction.failure();
       }
       if (terminalAction.kind() == TerminalKind.RETURN) {

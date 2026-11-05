@@ -26,7 +26,7 @@ chaos-agent-core com/macstab/chaos/jvm/core/DefaultChaosSession.java 85.00% unre
 chaos-agent-core com/macstab/chaos/jvm/core/DirectBufferPressureStressor.java 90.00% unreachable a fresh direct buffer always has a cleaner, and clean() does not throw
 chaos-agent-core com/macstab/chaos/jvm/core/DispatchEngine.java 99.55% unreachable an exception-injection message is validated non-blank
 chaos-agent-core com/macstab/chaos/jvm/core/DnsDispatch.java 97.14% unreachable DNS_ANSWER yields only THROW or DNS_SHAPE
-chaos-agent-core com/macstab/chaos/jvm/core/ExecutorDispatch.java 95.05% unreachable terminal kinds the CompatibilityValidator never lets reach these operations (EffectReachesTheCallTest), and a second idle() check only a concurrent removal changes
+chaos-agent-core com/macstab/chaos/jvm/core/ExecutorDispatch.java 96.62% unreachable the compiler requires a catch around applyDelayAndGate, which does not throw; terminal kinds the CompatibilityValidator never lets reach these operations (EffectReachesTheCallTest)
 chaos-agent-core com/macstab/chaos/jvm/core/FailureFactory.java 93.70% platform fallbacks for JVMs without java.naming, java.management, javax.net.ssl or java.sql
 chaos-agent-core com/macstab/chaos/jvm/core/FeatureSet.java 80.95% platform fallbacks for JDKs before 21 (no Thread.isVirtual) and JVMs without JFR
 chaos-agent-core com/macstab/chaos/jvm/core/FinalizerBacklogStressor.java 83.33% race a finalizer runs only when the GC decides to
