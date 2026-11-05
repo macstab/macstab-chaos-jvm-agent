@@ -1,7 +1,2 @@
-# Every change is reviewed by the maintainer. The public API signatures (api/*.api), the plan
-# schema and the bridge are the surfaces whose changes reach users; they are listed so a change to
-# them is never merged unseen.
+# Every change is reviewed by the maintainer.
 *                                         @nolem
-**/api/*.api                              @nolem
-chaos-agent-startup-config/src/main/resources/com/macstab/chaos/jvm/startup/chaos-plan.schema.json @nolem
-chaos-agent-instrumentation-jdk/src/main/java/com/macstab/chaos/jvm/instrumentation/bridge/ @nolem

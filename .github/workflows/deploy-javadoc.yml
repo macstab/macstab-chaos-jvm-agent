@@ -16,6 +16,7 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
       - name: Checkout code
@@ -28,12 +29,6 @@ jobs:
           java-version: '25'
           cache: 'gradle'
 
-      - name: Grant execute permission for gradlew
-        run: chmod +x gradlew
-
-      - name: Build aggregated Javadoc
-        run: ./gradlew aggregatedJavadoc --no-daemon --stacktrace
-
       - name: Resolve version
         id: version
         run: |
@@ -45,9 +40,13 @@ jobs:
             echo "IS_TAG=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Build aggregated Javadoc
+        # A tag documents its own version; a manual run documents the branch's.
+        run: ./gradlew aggregatedJavadoc --no-daemon --stacktrace ${{ steps.version.outputs.IS_TAG == 'true' && format('-Pversion={0}', steps.version.outputs.VERSION) || '' }}
+
       - name: Deploy versioned Javadoc
         if: steps.version.outputs.IS_TAG == 'true'
-        uses: peaceiris/actions-gh-pages@v4
+        uses: peaceiris/actions-gh-pages@84c30a85c19949d7eee79c4ff27748b70285e453 # v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./build/docs/aggregated-javadoc
@@ -55,7 +54,7 @@ jobs:
           keep_files: true
 
       - name: Deploy latest alias
-        uses: peaceiris/actions-gh-pages@v4
+        uses: peaceiris/actions-gh-pages@84c30a85c19949d7eee79c4ff27748b70285e453 # v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./build/docs/aggregated-javadoc

@@ -370,7 +370,7 @@ tasks.register<Javadoc>("aggregatedJavadoc") {
     description = "Aggregate Javadoc from all publishable subprojects into one site."
 
     setDestinationDir(layout.buildDirectory.dir("docs/aggregated-javadoc").get().asFile)
-    title = "macstab macstab-chaos-jvm-agent ${project.version} API"
+    title = "macstab-chaos-jvm-agent ${project.version} API"
 
     publishableSubprojects.forEach { sub ->
         dependsOn(sub.tasks.matching { it.name == "compileJava" })

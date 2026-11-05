@@ -33,9 +33,6 @@ jobs:
           java-version: '25'
           cache: 'gradle'
 
-      - name: Grant execute permission for gradlew
-        run: chmod +x gradlew
-
       - name: Check code formatting
         run: ./gradlew spotlessCheck --no-daemon --stacktrace
 
@@ -95,9 +92,6 @@ jobs:
             25
           cache: 'gradle'
 
-      - name: Grant execute permission for gradlew
-        run: chmod +x gradlew
-
       - name: Test on JDK ${{ matrix.java }}
         run: >
           ./gradlew test --no-daemon --stacktrace
@@ -128,9 +122,7 @@ jobs:
           cache: 'gradle'
 
       - name: Build the agent jar
-        run: |
-          chmod +x gradlew
-          ./gradlew :chaos-agent-bootstrap:shadowJar --no-daemon
+        run: ./gradlew :chaos-agent-bootstrap:shadowJar --no-daemon
 
       - name: Run the demos
         run: demo/run-all.sh
