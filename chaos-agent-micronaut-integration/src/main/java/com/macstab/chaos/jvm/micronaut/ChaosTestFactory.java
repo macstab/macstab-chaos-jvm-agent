@@ -1,6 +1,7 @@
 package com.macstab.chaos.jvm.micronaut;
 
 import com.macstab.chaos.jvm.api.ChaosControlPlane;
+import com.macstab.chaos.jvm.bootstrap.ChaosPlatform;
 import io.micronaut.context.annotation.Bean;
 import io.micronaut.context.annotation.Factory;
 import io.micronaut.context.annotation.Replaces;
@@ -30,6 +31,9 @@ class ChaosTestFactory {
   @Singleton
   @Replaces(value = ChaosControlPlane.class, factory = ChaosFactory.class)
   ChaosControlPlane chaosControlPlane() {
-    return ChaosMicronautExtension.contextPlane(new ChaosFactory().chaosControlPlane());
+    // Installs the agent itself: Micronaut can create the bean before ChaosMicronautExtension's
+    // beforeAll ran (a PER_CLASS test instance is injected in Micronaut's own beforeAll, an eager
+    // bean when the context starts).
+    return ChaosMicronautExtension.contextPlane(ChaosPlatform.installLocally());
   }
 }
