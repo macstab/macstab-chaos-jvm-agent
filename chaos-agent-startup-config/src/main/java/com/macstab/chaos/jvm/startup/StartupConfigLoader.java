@@ -354,7 +354,7 @@ public final class StartupConfigLoader {
       String json,
       java.nio.file.attribute.FileTime lastModified,
       long size,
-      Object fileKey) {}
+      @Nullable Object fileKey) {}
 
   /**
    * Reads a plan file with the startup checks (regular file or Kubernetes ConfigMap link, size cap,

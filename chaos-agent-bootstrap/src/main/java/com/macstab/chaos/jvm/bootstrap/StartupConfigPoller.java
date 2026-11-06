@@ -82,7 +82,7 @@ public final class StartupConfigPoller implements AutoCloseable {
    * What identifies the file's contents for change detection: the regular file actually read (a
    * Kubernetes ConfigMap update replaces it), its modification time, size and file key.
    */
-  private record Stamp(Path target, FileTime lastModified, long size, Object fileKey) {}
+  private record Stamp(Path target, FileTime lastModified, long size, @Nullable Object fileKey) {}
 
   /** A read whose file was modified this recently may still be in the middle of a write. */
   private static final long PROVISIONAL_MILLIS = 20L;
