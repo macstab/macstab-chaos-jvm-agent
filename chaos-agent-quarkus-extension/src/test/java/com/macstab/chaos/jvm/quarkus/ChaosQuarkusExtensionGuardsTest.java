@@ -48,11 +48,34 @@ class ChaosQuarkusExtensionGuardsTest {
     extension.beforeAll(context);
     try {
       assertThat(values).containsKeys(ChaosControlPlane.class, ChaosSession.class);
-      assertThat(values.get(ChaosControlPlane.class)).isSameAs(ChaosPlatform.installLocally());
+      assertThat(values.get(ChaosControlPlane.class))
+          .isInstanceOf(com.macstab.chaos.jvm.testkit.TrackingChaosControlPlane.class);
     } finally {
       extension.afterAll(context);
     }
     assertThat(values).doesNotContainKeys(ChaosSession.class);
+  }
+
+  @Test
+  @DisplayName("a JVM scenario activated through the injected control plane ends with the class")
+  void injectedActivationEndsWithTheClass() {
+    final Map<Object, Object> values = new HashMap<>();
+    final ExtensionContext context = context(values, null, null, null);
+    extension.beforeAll(context);
+    final ChaosControlPlane injected = (ChaosControlPlane) values.get(ChaosControlPlane.class);
+    try {
+      injected.activate(
+          com.macstab.chaos.jvm.api.ChaosScenario.builder("injected-jvm")
+              .selector(
+                  com.macstab.chaos.jvm.api.ChaosSelector.executor(
+                      java.util.Set.of(com.macstab.chaos.jvm.api.OperationType.EXECUTOR_SUBMIT)))
+              .effect(com.macstab.chaos.jvm.api.ChaosEffect.delay(java.time.Duration.ofMillis(1)))
+              .build());
+    } finally {
+      extension.afterAll(context);
+    }
+
+    assertThat(ChaosPlatform.current().diagnostics().scenario("injected-jvm")).isEmpty();
   }
 
   @Test

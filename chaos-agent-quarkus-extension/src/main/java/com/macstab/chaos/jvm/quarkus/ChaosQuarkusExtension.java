@@ -8,6 +8,7 @@ import com.macstab.chaos.jvm.api.ChaosSelector;
 import com.macstab.chaos.jvm.api.ChaosSession;
 import com.macstab.chaos.jvm.api.OperationType;
 import com.macstab.chaos.jvm.bootstrap.ChaosPlatform;
+import com.macstab.chaos.jvm.testkit.TrackingChaosControlPlane;
 import com.macstab.chaos.jvm.testkit.WithChaosSupport;
 import java.lang.reflect.Method;
 import java.time.Duration;
@@ -84,7 +85,10 @@ public final class ChaosQuarkusExtension
 
   @Override
   public void beforeAll(final ExtensionContext context) {
-    final ChaosControlPlane controlPlane = ChaosPlatform.installLocally();
+    // The tracker records every scenario activated through the injected control plane, so
+    // afterAll releases JVM-scoped ones however the test activated them.
+    final TrackingChaosControlPlane controlPlane =
+        new TrackingChaosControlPlane(ChaosPlatform.installLocally());
     final ChaosSession session = controlPlane.openSession(context.getDisplayName());
     final ExtensionContext.Store store = context.getStore(NAMESPACE);
     store.put(ChaosControlPlane.class, controlPlane);
@@ -150,6 +154,8 @@ public final class ChaosQuarkusExtension
   public void afterAll(final ExtensionContext context) {
     final ExtensionContext.Store store = context.getStore(NAMESPACE);
     final ChaosSession session = store.remove(ChaosSession.class, ChaosSession.class);
+    final ChaosControlPlane controlPlane =
+        store.remove(ChaosControlPlane.class, ChaosControlPlane.class);
     // try/finally ensures JVM-scoped handles are always stopped even if session.close() throws.
     try {
       if (session != null) {
@@ -162,6 +168,9 @@ public final class ChaosQuarkusExtension
       final List<ChaosActivationHandle> classHandles =
           (List<ChaosActivationHandle>) store.remove(JVM_HANDLES_KEY, List.class);
       stopHandlesSafely(classHandles);
+      if (controlPlane instanceof TrackingChaosControlPlane tracker) {
+        tracker.stopTracked();
+      }
     }
   }
 
