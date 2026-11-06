@@ -2,9 +2,6 @@ package com.macstab.chaos.jvm.core;
 
 import com.macstab.chaos.jvm.api.ChaosEffect;
 import java.lang.instrument.Instrumentation;
-import java.lang.management.GarbageCollectorMXBean;
-import java.lang.management.ManagementFactory;
-import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
@@ -82,19 +79,6 @@ final class SafepointStormStressor implements ManagedStressor {
   /** Returns the total number of GC cycles triggered so far. */
   long gcCycleCount() {
     return gcCycleCount.get();
-  }
-
-  /** Returns the cumulative GC count across all collectors, useful for test assertions. */
-  static long totalGcCount() {
-    long total = 0L;
-    final List<GarbageCollectorMXBean> gcBeans = ManagementFactory.getGarbageCollectorMXBeans();
-    for (final GarbageCollectorMXBean bean : gcBeans) {
-      final long count = bean.getCollectionCount();
-      if (count > 0L) {
-        total += count;
-      }
-    }
-    return total;
   }
 
   private static void retransformSample(
