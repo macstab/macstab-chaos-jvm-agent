@@ -26,9 +26,9 @@ import org.springframework.core.env.MapPropertySource;
  * macstab.chaos.enabled=true} is present in the resolved environment.
  *
  * <p>On successful attach a single-entry property source named {@value #ATTACH_MARKER_SOURCE} is
- * prepended to the environment exposing {@link #ATTACH_MARKER_PROPERTY}{@code = spring-boot-3}.
- * This lets integration tests assert the EPP actually fired rather than a later {@code
- * ChaosAutoConfiguration} bean.
+ * prepended to the environment exposing {@link #ATTACH_MARKER_PROPERTY}{@code = spring-boot-3}. It
+ * shows in the environment (e.g. {@code /actuator/env}) that the agent attached during environment
+ * preparation, before any bean was created.
  */
 public class ChaosAgentEnvironmentPostProcessor implements EnvironmentPostProcessor, Ordered {
 

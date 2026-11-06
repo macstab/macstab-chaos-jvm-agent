@@ -3,7 +3,6 @@ package com.macstab.chaos.jvm.spring.boot3.test;
 import com.macstab.chaos.jvm.api.ChaosControlPlane;
 import com.macstab.chaos.jvm.bootstrap.ChaosPlatform;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
@@ -24,7 +23,6 @@ import org.springframework.context.annotation.Bean;
  * ChaosControlPlane}.
  */
 @AutoConfiguration
-@ConditionalOnClass(ChaosAgentExtension.class)
 public class ChaosTestAutoConfiguration {
 
   /**

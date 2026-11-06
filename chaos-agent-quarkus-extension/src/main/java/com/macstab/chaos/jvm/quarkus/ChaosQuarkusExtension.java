@@ -96,16 +96,14 @@ public final class ChaosQuarkusExtension
     // Class-scoped list of handles for JVM-scoped scenarios activated via @ChaosScenario.
     // Session-scoped scenarios are torn down by session.close(); JVM-scoped ones outlive any
     // session, so afterAll stops them to keep them from leaking into subsequent tests.
-    store.put(JVM_HANDLES_KEY, new ArrayList<ChaosActivationHandle>());
+    final List<ChaosActivationHandle> classHandles = new ArrayList<>();
+    store.put(JVM_HANDLES_KEY, classHandles);
     final Class<?> testClass = context.getTestClass().orElse(null);
     if (testClass != null) {
       activateAnnotations(
-          controlPlane,
-          session,
-          testClass.getAnnotationsByType(ChaosScenario.class),
-          jvmHandles(context));
+          controlPlane, session, testClass.getAnnotationsByType(ChaosScenario.class), classHandles);
       // @WithChaos (full JSON model): both scopes are released in afterAll.
-      jvmHandles(context).addAll(WithChaosSupport.activate(testClass, controlPlane, session));
+      classHandles.addAll(WithChaosSupport.activate(testClass, controlPlane, session));
     }
   }
 
@@ -259,25 +257,6 @@ public final class ChaosQuarkusExtension
         session.activate(scenario);
       }
     }
-  }
-
-  @SuppressWarnings("unchecked")
-  private static List<ChaosActivationHandle> jvmHandles(final ExtensionContext context) {
-    ExtensionContext current = context;
-    while (current != null) {
-      final List<ChaosActivationHandle> handles =
-          (List<ChaosActivationHandle>) current.getStore(NAMESPACE).get(JVM_HANDLES_KEY);
-      if (handles != null) {
-        return handles;
-      }
-      current = current.getParent().orElse(null);
-    }
-    // Defensive fallback — beforeAll always installs the list. If somehow reached without
-    // beforeAll (e.g. extension registered without @QuarkusChaosTest), create and store a
-    // new list in the nearest writable context so afterAll can find and stop these handles.
-    final List<ChaosActivationHandle> fallback = new ArrayList<>();
-    context.getStore(NAMESPACE).put(JVM_HANDLES_KEY, fallback);
-    return fallback;
   }
 
   static com.macstab.chaos.jvm.api.ChaosScenario toScenario(final ChaosScenario annotation) {
