@@ -18,7 +18,7 @@ import org.jspecify.annotations.Nullable;
  * @param scenario the immutable descriptor of the chaos scenario; never {@code null}
  * @param effect the specific {@link ChaosEffect} variant to apply (e.g. delay, exception,
  *     suppress); never {@code null}
- * @param delayMillis the artificial delay in milliseconds to inject before the effect; {@code 0}
+ * @param delayNanos the artificial delay in nanoseconds to inject before the effect; {@code 0}
  *     means no delay; always non-negative
  * @param gateTimeout the maximum time to block on a {@link ManualGate}, or {@code null} if no gate
  *     applies to this contribution
@@ -31,14 +31,14 @@ record ScenarioContribution(
     ScenarioController controller,
     ChaosScenario scenario,
     ChaosEffect effect,
-    long delayMillis,
+    long delayNanos,
     @Nullable Duration gateTimeout,
     InvocationContext context,
     long matchNumber) {
 
   /** Records this contribution as applied. */
   void commit() {
-    controller.commitApplication(context, delayMillis, matchNumber);
+    controller.commitApplication(context, delayNanos, matchNumber);
   }
 
   /** Returns this contribution's reservation without applying it. */

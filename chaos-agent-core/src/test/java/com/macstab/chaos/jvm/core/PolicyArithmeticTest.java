@@ -120,7 +120,7 @@ class PolicyArithmeticTest {
       final ScenarioContribution contribution = controller.evaluate(context);
       if (contribution != null) {
         applied++;
-        if (contribution.delayMillis() > 500L) {
+        if (contribution.delayNanos() > Duration.ofMillis(500).toNanos()) {
           upperHalf++;
         }
         contribution.release();

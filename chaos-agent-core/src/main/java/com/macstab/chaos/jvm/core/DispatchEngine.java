@@ -62,7 +62,7 @@ final class DispatchEngine {
     switch (terminal) {
       case TerminalAction.Throw thrown -> throw thrown.failure();
       case TerminalAction.Timeout timeout -> {
-        sleep(timeout.waitMillis());
+        sleepNanos(java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(timeout.waitMillis()));
         throw timeout.failure();
       }
       case TerminalAction.CapLength cap -> {
@@ -136,7 +136,7 @@ final class DispatchEngine {
     final boolean[] applied = new boolean[contributions.size()];
     boolean decided = false;
     try {
-      long delayMillis = 0L;
+      long delayNanos = 0L;
       GateAction gateAction = null;
       int gateIndex = -1;
       int gatePrecedence = Integer.MIN_VALUE;
@@ -146,15 +146,15 @@ final class DispatchEngine {
       for (int index = 0; index < contributions.size(); index++) {
         final ScenarioContribution contribution = contributions.get(index);
         // Saturating add: naive += with two large per-scenario delays would wrap to a negative
-        // value, and the sleep() helper treats negative as "skip sleep" — silently turning an
+        // value, and the sleepNanos() helper treats negative as "skip sleep" — silently turning an
         // intended multi-minute delay into no delay at all is exactly the kind of quiet bug we
         // should not ship. Cap at Long.MAX_VALUE instead so the intent ("a very long delay") is
         // preserved; downstream Thread.sleep still accepts it.
-        final long contributionDelay = contribution.delayMillis();
-        if (contributionDelay > 0L && delayMillis > Long.MAX_VALUE - contributionDelay) {
-          delayMillis = Long.MAX_VALUE;
+        final long contributionDelay = contribution.delayNanos();
+        if (contributionDelay > 0L && delayNanos > Long.MAX_VALUE - contributionDelay) {
+          delayNanos = Long.MAX_VALUE;
         } else {
-          delayMillis += contributionDelay;
+          delayNanos += contributionDelay;
         }
         // Tie-break rule for both gate and terminal: the ScenarioRegistry sorts contributions by
         // precedence DESC then id ASC, so on strict `>` the first-iterated (highest precedence,
@@ -196,7 +196,7 @@ final class DispatchEngine {
       if (terminalIndex >= 0) {
         applied[terminalIndex] = true;
       }
-      final RuntimeDecision decision = new RuntimeDecision(delayMillis, gateAction, terminalAction);
+      final RuntimeDecision decision = new RuntimeDecision(delayNanos, gateAction, terminalAction);
       decided = true;
       return decision;
     } finally {
@@ -444,7 +444,7 @@ final class DispatchEngine {
    * the delay.
    */
   void applyDelayAndGate(final RuntimeDecision decision) throws Throwable {
-    sleep(decision.delayMillis());
+    sleepNanos(decision.delayNanos());
     applyGate(decision.gateAction());
   }
 
@@ -466,12 +466,12 @@ final class DispatchEngine {
     }
   }
 
-  void sleep(final long delayMillis) {
-    if (delayMillis <= 0L) {
+  void sleepNanos(final long delayNanos) {
+    if (delayNanos <= 0L) {
       return;
     }
     try {
-      Thread.sleep(delayMillis);
+      Thread.sleep(delayNanos / 1_000_000L, (int) (delayNanos % 1_000_000L));
     } catch (final InterruptedException interruptedException) {
       // Restore the interrupt flag and return. Wrapping this as IllegalStateException would break
       // the caller's interrupt contract: any subsequent blocking call they make will throw

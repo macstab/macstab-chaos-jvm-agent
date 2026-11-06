@@ -734,7 +734,7 @@ class LifecycleEdgeTest {
                   ActivationPolicy.builder()
                       .activeFor(Duration.ofSeconds(Long.MAX_VALUE))
                       .build()));
-      assertThat(submitDecision(runtime).delayMillis()).isEqualTo(1L);
+      assertThat(submitDecision(runtime).delayNanos()).isEqualTo(Duration.ofMillis(1).toNanos());
       assertThat(handle.appliedCount()).isEqualTo(1L);
       assertThat(handle.state()).isEqualTo(ChaosDiagnostics.ScenarioState.ACTIVE);
     }

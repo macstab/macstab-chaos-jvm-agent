@@ -482,7 +482,7 @@ final class ScenarioController {
         this,
         scenario,
         scenario.effect(),
-        sampleDelayMillis(matchCount),
+        sampleDelayNanos(matchCount),
         gateTimeout(),
         context,
         matchCount);
@@ -528,7 +528,7 @@ final class ScenarioController {
    * @param context the invocation the contribution was evaluated for
    */
   void commitApplication(
-      final InvocationContext context, final long delayMillis, final long matchNumber) {
+      final InvocationContext context, final long delayNanos, final long matchNumber) {
     final Long maxApplications = scenario.activationPolicy().maxApplications();
     if (maxApplications == null) {
       appliedCount.incrementAndGet();
@@ -542,7 +542,7 @@ final class ScenarioController {
         markInactive("max applications reached");
       }
     }
-    publishAppliedEvent(context, delayMillis, matchNumber);
+    publishAppliedEvent(context, delayNanos, matchNumber);
   }
 
   /** Returns a reservation taken by {@link #reserveApplication()} that was not applied. */
@@ -556,13 +556,14 @@ final class ScenarioController {
   }
 
   private void publishAppliedEvent(
-      final InvocationContext context, final long delayMillis, final long matchNumber) {
+      final InvocationContext context, final long delayNanos, final long matchNumber) {
     final Map<String, String> eventAttributes = new LinkedHashMap<>();
     eventAttributes.put("operation", context.operationType().name());
     // The scenario's 1-based match number: what ChaosDecisionRecorder records for replay.
     eventAttributes.put("match", Long.toString(matchNumber));
     eventAttributes.put("scope", scopeKey);
     eventAttributes.put("effectType", scenario.effect().getClass().getSimpleName());
+    final long delayMillis = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(delayNanos);
     if (delayMillis > 0L) {
       // The delay this application adds to the call: the source of injected-latency metrics.
       eventAttributes.put("delayMillis", Long.toString(delayMillis));
@@ -874,12 +875,14 @@ final class ScenarioController {
     return splittableRandom(matched).nextDouble() < probability;
   }
 
-  private long sampleDelayMillis(final long matched) {
+  private long sampleDelayNanos(final long matched) {
     if (!(scenario.effect() instanceof ChaosEffect.DelayEffect delayEffect)) {
       return 0L;
     }
-    final long min = delayEffect.minDelay().toMillis();
-    final long max = delayEffect.maxDelay().toMillis();
+    // Nanoseconds: a delay below a millisecond, or its sub-millisecond part, is a delay too.
+    // DelayEffect.MAX_DELAY keeps both bounds far inside the long range.
+    final long min = delayEffect.minDelay().toNanos();
+    final long max = delayEffect.maxDelay().toNanos();
     if (min == max) {
       return min;
     }

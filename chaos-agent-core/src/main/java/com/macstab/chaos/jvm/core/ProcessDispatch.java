@@ -54,7 +54,7 @@ public final class ProcessDispatch {
     final TerminalAction terminal = decision.terminalAction();
     if (terminal instanceof TerminalAction.Timeout timeout) {
       engine.applyDelayAndGate(decision);
-      engine.sleep(timeout.waitMillis());
+      engine.sleepNanos(java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(timeout.waitMillis()));
       return true;
     }
     engine.applyPreDecision(decision);

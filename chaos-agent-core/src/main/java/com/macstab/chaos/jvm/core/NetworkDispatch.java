@@ -65,7 +65,7 @@ public final class NetworkDispatch {
       }
       if (terminalAction instanceof TerminalAction.Timeout timeout) {
         // A stalled peer: the select waits out its own timeout and reports no ready channel.
-        engine.sleep(timeout.waitMillis());
+        engine.sleepNanos(java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(timeout.waitMillis()));
         return true;
       }
     }
@@ -173,7 +173,7 @@ public final class NetworkDispatch {
     if (decision.terminalAction() instanceof TerminalAction.Timeout timeout) {
       // A peer that never answers the SYN: the connect waits out its own timeout, then fails.
       engine.applyDelayAndGate(decision);
-      engine.sleep(timeout.waitMillis());
+      engine.sleepNanos(java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(timeout.waitMillis()));
       throw timeout.failure();
     }
     engine.applyPreDecision(decision);

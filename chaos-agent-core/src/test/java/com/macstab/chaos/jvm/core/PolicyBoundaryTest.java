@@ -134,15 +134,36 @@ class PolicyBoundaryTest {
   void delayRangeIsInclusive() {
     final ScenarioController controller =
         controller(
-            ChaosEffect.delay(Duration.ofMillis(10), Duration.ofMillis(12)),
+            ChaosEffect.delay(Duration.ofNanos(10), Duration.ofNanos(12)),
             ActivationPolicy.always());
     final Set<Long> drawn = new TreeSet<>();
     for (int match = 0; match < 300; match++) {
       final ScenarioContribution contribution = controller.evaluate(SUBMIT);
-      drawn.add(contribution.delayMillis());
+      drawn.add(contribution.delayNanos());
       contribution.release();
     }
     assertThat(drawn).containsExactly(10L, 11L, 12L);
+  }
+
+  @Test
+  @DisplayName("a delay below a millisecond is drawn, and slept, to the nanosecond")
+  void subMillisecondDelay() {
+    final ScenarioController controller =
+        controller(ChaosEffect.delay(Duration.ofNanos(500_000)), ActivationPolicy.always());
+    final ScenarioContribution contribution = controller.evaluate(SUBMIT);
+    assertThat(contribution.delayNanos()).isEqualTo(500_000L);
+    contribution.release();
+
+    try (ChaosRuntime runtime = new ChaosRuntime()) {
+      runtime.activate(
+          ChaosScenario.builder("sub-millisecond")
+              .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+              .effect(ChaosEffect.delay(Duration.ofNanos(500_000)))
+              .build());
+      final long start = System.nanoTime();
+      runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
+      assertThat(System.nanoTime() - start).isGreaterThanOrEqualTo(500_000L);
+    }
   }
 
   @Test

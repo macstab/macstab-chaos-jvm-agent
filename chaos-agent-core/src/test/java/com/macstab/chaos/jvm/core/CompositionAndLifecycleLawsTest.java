@@ -73,7 +73,8 @@ class CompositionAndLifecycleLawsTest {
                     null,
                     null));
 
-    assertThat(decision.delayMillis()).isEqualTo(Duration.ofHours(700).toMillis() + 5L);
+    assertThat(decision.delayNanos())
+        .isEqualTo(Duration.ofHours(700).toNanos() + Duration.ofMillis(5).toNanos());
   }
 
   @Test
