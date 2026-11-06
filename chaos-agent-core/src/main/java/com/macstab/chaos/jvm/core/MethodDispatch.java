@@ -166,12 +166,8 @@ public final class MethodDispatch {
     if (decision.terminalAction() instanceof TerminalAction.CorruptReturn corrupting) {
       // The delay and the gate above have already run: a composed "delay + corrupt" scenario
       // delivers both. Fallbacks such as "EMPTY -> ZERO" name the scenario that fired.
-      final String scenarioId = corrupting.scenarioId();
       return ReturnValueCorruptor.corrupt(
-          corrupting.effect().strategy(),
-          returnType,
-          actualValue,
-          scenarioId != null ? scenarioId : "method-exit");
+          corrupting.effect().strategy(), returnType, actualValue, corrupting.scenarioId());
     }
     return actualValue;
   }

@@ -58,16 +58,14 @@ class DispatchEngineEdgeTest {
     @Test
     @DisplayName("a terminal that does not shape reads leaves the requested count")
     void otherTerminalLeavesCount() throws Throwable {
-      assertThat(
-              engine.transferCount(terminal(new TerminalAction.DnsRewrite("elsewhere", null)), 64))
+      assertThat(engine.transferCount(terminal(new TerminalAction.DnsRewrite("elsewhere")), 64))
           .isEqualTo(64);
     }
 
     @Test
     @DisplayName("a length cap leaves a read of no bytes as it is")
     void capKeepsEmptyRead() throws Throwable {
-      assertThat(engine.transferCount(terminal(new TerminalAction.CapLength(4L, null)), 0))
-          .isZero();
+      assertThat(engine.transferCount(terminal(new TerminalAction.CapLength(4L)), 0)).isZero();
     }
   }
 
@@ -143,15 +141,14 @@ class DispatchEngineEdgeTest {
     @DisplayName("a RETURN carrying a value other than the suppression marker lets the call go on")
     void returnWithValueProceeds() {
       assertThatCode(
-              () ->
-                  engine.applyPreDecision(terminal(new TerminalAction.Return(Boolean.TRUE, null))))
+              () -> engine.applyPreDecision(terminal(new TerminalAction.Return(Boolean.TRUE))))
           .doesNotThrowAnyException();
     }
 
     @Test
     @DisplayName("a RETURN without a value lets the call go on")
     void returnWithoutValueProceeds() {
-      assertThatCode(() -> engine.applyPreDecision(terminal(new TerminalAction.Return(null, null))))
+      assertThatCode(() -> engine.applyPreDecision(terminal(new TerminalAction.Return(null))))
           .doesNotThrowAnyException();
     }
 
@@ -164,7 +161,7 @@ class DispatchEngineEdgeTest {
                       terminal(
                           new TerminalAction.CorruptReturn(
                               ChaosEffect.corruptReturnValue(ChaosEffect.ReturnValueStrategy.NULL),
-                              null))))
+                              "corrupt"))))
           .isInstanceOf(IllegalStateException.class)
           .hasMessage(
               "CORRUPT_RETURN terminal reached applyPreDecision — only valid from afterMethodExit");
@@ -173,7 +170,7 @@ class DispatchEngineEdgeTest {
     @Test
     @DisplayName("a terminal with no pre-call meaning lets the call go on")
     void otherTerminalProceeds() {
-      assertThatCode(() -> engine.applyPreDecision(terminal(new TerminalAction.Suppress(null))))
+      assertThatCode(() -> engine.applyPreDecision(terminal(new TerminalAction.Suppress())))
           .doesNotThrowAnyException();
     }
   }
