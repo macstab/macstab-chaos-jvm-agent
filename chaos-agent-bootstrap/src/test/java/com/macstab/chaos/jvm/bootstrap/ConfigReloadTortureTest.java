@@ -159,6 +159,46 @@ class ConfigReloadTortureTest {
     assertThat(activeIds()).containsExactlyInAnyOrderElementsOf(ids("ok"));
   }
 
+  @Test
+  @DisplayName("reverting a broken edit reports ok again; the broken content again is an error")
+  void revertedEditReportsOk() throws Exception {
+    reports =
+        ChaosReports.createIfEnabled("reports=on;reportsDir=" + tempDir, Map.of(), runtime)
+            .orElseThrow();
+    final Path file = tempDir.resolve("plan.json");
+    final Path status = tempDir.resolve(ChaosReports.STATUS_FILE);
+    final String broken = "{\n  \"scenarios\": [\n    {\"id\": oops}\n  ]\n}\n";
+    write(file, validPlan("ok"), 60);
+    poller =
+        StartupConfigPoller.createIfEnabled("configWatchInterval=3600000", Map.of(), file, runtime)
+            .orElseThrow();
+    poller.startWithInitialPlan(ChaosPlanMapper.read(validPlan("ok")), null);
+    poller.pollOnce();
+
+    write(file, broken, 50);
+    poller.pollOnce();
+    assertThat(Files.readString(status)).contains("state=error");
+
+    write(file, validPlan("ok"), 40);
+    poller.pollOnce();
+    assertThat(Files.readString(status)).contains("state=ok").contains("scenarios=3");
+
+    write(file, broken, 30);
+    poller.pollOnce();
+    assertThat(Files.readString(status)).contains("state=error");
+    assertThat(activeIds()).containsExactlyInAnyOrderElementsOf(ids("ok"));
+  }
+
+  /** Writes {@code content}, dated {@code secondsAgo} so that it is not read as mid-write. */
+  private static void write(final Path file, final String content, final int secondsAgo)
+      throws java.io.IOException {
+    Files.writeString(file, content);
+    Files.setLastModifiedTime(
+        file,
+        java.nio.file.attribute.FileTime.fromMillis(
+            System.currentTimeMillis() - secondsAgo * 1_000L));
+  }
+
   private void assertStillActive(final String group, final List<String> violations)
       throws InterruptedException {
     Thread.sleep(3 * POLL_MILLIS);

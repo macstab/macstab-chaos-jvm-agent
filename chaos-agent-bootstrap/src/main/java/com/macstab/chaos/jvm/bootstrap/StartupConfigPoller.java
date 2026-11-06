@@ -257,12 +257,14 @@ public final class StartupConfigPoller implements AutoCloseable {
   private void reloadIfChanged(final StartupConfigLoader.PlanFile file) throws IOException {
     final Stamp stamp = stampOf(file);
     if (!provisional && stamp.equals(lastStamp)) {
+      recovered();
       return;
     }
     final byte[] digest = digest(file.json());
     if (java.util.Arrays.equals(digest, lastDigest)) {
       lastStamp = stamp;
       provisional = isRecent(file.lastModified());
+      recovered();
       return;
     }
     if (java.util.Arrays.equals(digest, failedDigest)) {
@@ -315,6 +317,24 @@ public final class StartupConfigPoller implements AutoCloseable {
             + newPlan.scenarios().size()
             + " scenario(s) from "
             + sanitiseForLog(configPath.toString()));
+  }
+
+  /**
+   * The applied plan reads cleanly again after a failure (a broken edit reverted, a read that
+   * failed during a ConfigMap swap): report it as loaded, and forget the failed content so that it
+   * is reported again if it comes back.
+   */
+  private void recovered() {
+    if (lastLoggedFailure == null) {
+      return;
+    }
+    lastLoggedFailure = null;
+    failedDigest = null;
+    final int scenarios;
+    synchronized (this) {
+      scenarios = activeScenarios.size();
+    }
+    ChaosReports.current().ifPresent(reports -> reports.statusOk(scenarios, "file:" + configPath));
   }
 
   /** Whether a reload failure would recur for the same file content. */
