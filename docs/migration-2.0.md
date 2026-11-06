@@ -168,6 +168,10 @@ In 1.x a GLOB was a regex in which `*` was `.*`, which stops at a line break, wh
 
 Before (1.x): `NamePattern.glob("a*b")` does not match `"a\nb"`. Now it does; `NamePattern.regex("a.*b")` keeps the old behaviour.
 
+## 12. `/actuator/chaos` answers with the operation's HTTP status
+
+The Spring actuator endpoint answers like the Micronaut and Quarkus endpoints: a failed activation is 400 `invalid`, 409 `conflict` or 422 `rejected` instead of 200 with `status = "error"`; a stop is 404 `not-found` or 409 `unmanaged`. Clients that read `status = "error"` from a 200 must check the HTTP status (or the `invalid`, `conflict`, `rejected` outcomes). The startup plan (`macstab.chaos.config-file`) is no longer stoppable through the endpoint, which stops only the plans activated through it.
+
 ---
 
 <div align="center">
