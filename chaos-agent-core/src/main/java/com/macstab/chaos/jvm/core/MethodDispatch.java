@@ -69,7 +69,7 @@ public final class MethodDispatch {
       final Class<?> declaringType,
       final String methodName,
       final String descriptor,
-      final Object actualValue)
+      final @Nullable Object actualValue)
       throws Throwable {
     if (engine.idle(OperationType.METHOD_EXIT)) {
       return actualValue;
@@ -131,8 +131,8 @@ public final class MethodDispatch {
   public @Nullable Object afterMethodExit(
       final String className,
       final String methodName,
-      final Class<?> returnType,
-      final Object actualValue)
+      final @Nullable Class<?> returnType,
+      final @Nullable Object actualValue)
       throws Throwable {
     if (engine.idle(OperationType.METHOD_EXIT)) {
       return actualValue;
@@ -152,7 +152,9 @@ public final class MethodDispatch {
   }
 
   private @Nullable Object afterMethodExit(
-      final InvocationContext context, final Class<?> returnType, final Object actualValue)
+      final InvocationContext context,
+      final @Nullable Class<?> returnType,
+      final @Nullable Object actualValue)
       throws Throwable {
     final RuntimeDecision decision = engine.evaluate(context);
     engine.applyDelayAndGate(decision);

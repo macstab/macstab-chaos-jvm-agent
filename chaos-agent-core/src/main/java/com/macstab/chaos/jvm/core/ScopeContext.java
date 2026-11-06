@@ -179,7 +179,7 @@ final class ScopeContext {
    * @param task the task as seen by the executor; may be {@code null}
    * @return the session id carried by the task, or {@code null}
    */
-  static @Nullable String sessionOf(final Object task) {
+  static @Nullable String sessionOf(final @Nullable Object task) {
     if (task instanceof ScopedRunnable scoped) {
       return scoped.sessionId();
     }
@@ -200,7 +200,7 @@ final class ScopeContext {
    * @return the unwrapped task
    */
   @SuppressWarnings("FutureReturnValueIgnored") // returns the task, it does not run it
-  static Object unwrap(final Object task) {
+  static @Nullable Object unwrap(final @Nullable Object task) {
     if (task instanceof ScopedRunnable scoped) {
       return scoped.delegate();
     }

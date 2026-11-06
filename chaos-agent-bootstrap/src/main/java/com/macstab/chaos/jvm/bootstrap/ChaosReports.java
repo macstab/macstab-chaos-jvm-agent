@@ -90,7 +90,9 @@ final class ChaosReports implements AutoCloseable {
    * @return the reports, or empty when not switched on
    */
   static Optional<ChaosReports> createIfEnabled(
-      final String agentArgs, final Map<String, String> environment, final ChaosRuntime runtime) {
+      final @Nullable String agentArgs,
+      final Map<String, String> environment,
+      final ChaosRuntime runtime) {
     final String enabled =
         AgentSettings.valueOrEmpty(
             agentArgs, environment, REPORTS_ARG, REPORTS_PROPERTY, REPORTS_ENV);

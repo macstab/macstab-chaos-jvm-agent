@@ -1,5 +1,7 @@
 package com.macstab.chaos.jvm.api;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * Thrown by JDBC interceptors when an active chaos scenario requires the call to be suppressed
  * entirely.
@@ -31,7 +33,7 @@ public class ChaosJdbcSuppressException extends RuntimeException {
    * @param message human-readable description
    * @param cause the root cause of the failure; may be null
    */
-  public ChaosJdbcSuppressException(final String message, final Throwable cause) {
+  public ChaosJdbcSuppressException(final String message, final @Nullable Throwable cause) {
     super(message, cause);
   }
 }

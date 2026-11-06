@@ -39,7 +39,7 @@ final class SessionHandoff {
    * @param carrier the task or thread the work is handed to
    * @param sessionId the session of the handing-off thread, or {@code null}
    */
-  void capture(final Object carrier, final @Nullable String sessionId) {
+  void capture(final @Nullable Object carrier, final @Nullable String sessionId) {
     if (carrier == null || sessionId == null) {
       return;
     }

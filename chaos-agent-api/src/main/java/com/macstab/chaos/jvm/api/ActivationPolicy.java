@@ -334,7 +334,8 @@ public record ActivationPolicy(
    * @return the policy
    * @throws IllegalArgumentException if {@code from} is not before {@code until}
    */
-  public static ActivationPolicy window(final Instant from, final Instant until) {
+  public static ActivationPolicy window(
+      final @Nullable Instant from, final @Nullable Instant until) {
     return builder().window(from, until).build();
   }
 
@@ -498,7 +499,7 @@ public record ActivationPolicy(
      *     upper bound
      * @return this builder
      */
-    public Builder window(final Instant from, final Instant until) {
+    public Builder window(final @Nullable Instant from, final @Nullable Instant until) {
       this.activeFrom = from;
       this.activeUntil = until;
       return this;

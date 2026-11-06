@@ -98,7 +98,7 @@ public final class StartupConfigLoader {
    * @throws ConfigLoadException if a source is specified but cannot be read or parsed
    */
   public static Optional<LoadedPlan> load(
-      final String rawAgentArgs, final Map<String, String> environment) {
+      final @Nullable String rawAgentArgs, final Map<String, String> environment) {
     final AgentArgs agentArgs = AgentArgsParser.parse(rawAgentArgs);
 
     final String inlineJson =

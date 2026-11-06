@@ -85,7 +85,7 @@ public sealed interface ChaosEffect
    * @param maxBlock maximum time to block; {@code null} blocks indefinitely
    * @return a GateEffect that blocks for up to maxBlock
    */
-  static GateEffect gate(final Duration maxBlock) {
+  static GateEffect gate(final @Nullable Duration maxBlock) {
     return new GateEffect(maxBlock);
   }
 
@@ -741,7 +741,7 @@ public sealed interface ChaosEffect
    * @param maxBlock maximum time the operation blocks before unblocking; {@code null} means no
    *     timeout
    */
-  record GateEffect(Duration maxBlock) implements ChaosEffect {
+  record GateEffect(@Nullable Duration maxBlock) implements ChaosEffect {
     /** Validates the gate parameters. */
     public GateEffect {
       if (maxBlock != null && (maxBlock.isZero() || maxBlock.isNegative())) {

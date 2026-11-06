@@ -54,7 +54,7 @@ public class ChaosProperties {
    *
    * @param configFile the file path, or {@code null}/blank to disable loading
    */
-  public void setConfigFile(final String configFile) {
+  public void setConfigFile(final @Nullable String configFile) {
     this.configFile = configFile;
   }
 

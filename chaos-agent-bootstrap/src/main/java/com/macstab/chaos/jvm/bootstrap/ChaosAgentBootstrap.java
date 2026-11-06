@@ -155,7 +155,8 @@ public final class ChaosAgentBootstrap {
    * @param instrumentation the {@link Instrumentation} instance provided by the JVM; used to
    *     install class-file transformers for all interception points
    */
-  public static void premain(final String agentArgs, final Instrumentation instrumentation) {
+  public static void premain(
+      final @Nullable String agentArgs, final Instrumentation instrumentation) {
     initialize(agentArgs, instrumentation, System.getenv());
   }
 
@@ -180,7 +181,8 @@ public final class ChaosAgentBootstrap {
    * @param agentArgs the raw argument string passed to the attach call; may be {@code null}
    * @param instrumentation the {@link Instrumentation} instance provided by the JVM
    */
-  public static void agentmain(final String agentArgs, final Instrumentation instrumentation) {
+  public static void agentmain(
+      final @Nullable String agentArgs, final Instrumentation instrumentation) {
     if (!dynamicAttachAllowed(System.getProperties(), System.getenv())) {
       System.err.println(
           "[chaos-agent] ignoring dynamic attach: set -D"
@@ -308,7 +310,7 @@ public final class ChaosAgentBootstrap {
    * @return the initialized (or already-initialized) {@link ChaosRuntime}; never null
    */
   static ChaosRuntime initialize(
-      final String agentArgs,
+      final @Nullable String agentArgs,
       final Instrumentation instrumentation,
       final Map<String, String> environment) {
     final CompletableFuture<ChaosRuntime> claim = new CompletableFuture<>();
@@ -367,7 +369,7 @@ public final class ChaosAgentBootstrap {
    * transformers (advice runs twice) and the MBean would keep reporting the dead runtime.
    */
   private static ChaosRuntime installRuntime(
-      final String agentArgs,
+      final @Nullable String agentArgs,
       final Instrumentation instrumentation,
       final Map<String, String> environment) {
     final ChaosRuntime runtime = new ChaosRuntime();
@@ -431,7 +433,7 @@ public final class ChaosAgentBootstrap {
    * environment variable {@value #INSTRUMENTATION_ENV}{@code =eager}. On demand is the default.
    */
   static boolean eagerInstrumentation(
-      final String agentArgs, final Map<String, String> environment) {
+      final @Nullable String agentArgs, final Map<String, String> environment) {
     return "eager"
         .equalsIgnoreCase(
             AgentSettings.valueOrEmpty(
@@ -448,7 +450,7 @@ public final class ChaosAgentBootstrap {
    * #CLOCK_CALL_SITES_ENV}, comma-separated. Off (empty) by default.
    */
   static List<String> clockCallSites(
-      final String agentArgs, final Map<String, String> environment) {
+      final @Nullable String agentArgs, final Map<String, String> environment) {
     return listSetting(
         agentArgs,
         environment,
@@ -459,7 +461,7 @@ public final class ChaosAgentBootstrap {
 
   /** A comma-separated list setting: agent argument, then system property, then environment. */
   static List<String> listSetting(
-      final String agentArgs,
+      final @Nullable String agentArgs,
       final Map<String, String> environment,
       final String arg,
       final String property,
@@ -500,7 +502,7 @@ public final class ChaosAgentBootstrap {
 
   private static void activateLoadedPlan(
       final StartupConfigLoader.LoadedPlan loaded,
-      final String agentArgs,
+      final @Nullable String agentArgs,
       final Map<String, String> environment,
       final ChaosRuntime runtime) {
     if (loaded.filePath() != null) {
@@ -558,7 +560,8 @@ public final class ChaosAgentBootstrap {
    * system property {@code macstab.chaos.jmx.control=true} or environment variable {@code
    * MACSTAB_CHAOS_JMX_CONTROL=true}. Off by default.
    */
-  static boolean jmxControl(final String agentArgs, final Map<String, String> environment) {
+  static boolean jmxControl(
+      final @Nullable String agentArgs, final Map<String, String> environment) {
     return "true"
         .equalsIgnoreCase(
             AgentSettings.valueOrEmpty(

@@ -1,5 +1,7 @@
 package com.macstab.chaos.jvm.api;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * Thrown by HTTP client interceptors when an active chaos scenario requires the call to be
  * suppressed entirely.
@@ -29,7 +31,7 @@ public class ChaosHttpSuppressException extends RuntimeException {
    * @param message human-readable description
    * @param cause the root cause of the failure; may be null
    */
-  public ChaosHttpSuppressException(final String message, final Throwable cause) {
+  public ChaosHttpSuppressException(final String message, final @Nullable Throwable cause) {
     super(message, cause);
   }
 }

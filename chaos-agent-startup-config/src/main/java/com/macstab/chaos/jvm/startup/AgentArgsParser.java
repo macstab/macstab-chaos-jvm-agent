@@ -2,6 +2,7 @@ package com.macstab.chaos.jvm.startup;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Parses the raw {@code -javaagent:} argument string into an {@link AgentArgs} value object.
@@ -28,7 +29,7 @@ public final class AgentArgsParser {
    * @return parsed arguments, never null
    * @throws IllegalArgumentException if a token is malformed or the input exceeds safety limits
    */
-  public static AgentArgs parse(final String agentArgs) {
+  public static AgentArgs parse(final @Nullable String agentArgs) {
     if (agentArgs == null || agentArgs.isBlank()) {
       return new AgentArgs(Map.of());
     }

@@ -110,8 +110,8 @@ final class ReturnValueCorruptor {
    */
   static @Nullable Object corrupt(
       final ChaosEffect.ReturnValueStrategy strategy,
-      final Class<?> returnType,
-      final Object actualValue,
+      final @Nullable Class<?> returnType,
+      final @Nullable Object actualValue,
       final String scenarioId) {
     // ByteBuddy cannot always statically bind a declared return class at the advice site: void
     // methods, bridge methods, and dynamically-generated lambdas arrive here with returnType ==

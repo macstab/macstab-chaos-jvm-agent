@@ -5,6 +5,7 @@ import java.util.Map;
 import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentSkipListSet;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Records which matches of each scenario took effect, so a run can be replayed exactly with {@link
@@ -74,7 +75,7 @@ public final class ChaosDecisionRecorder implements ChaosEventListener {
    * @param sessionId the session id; {@code null} for a JVM-scoped scenario
    * @return the match numbers; empty when it never took effect there
    */
-  public List<Long> matches(final String scenarioId, final String sessionId) {
+  public List<Long> matches(final String scenarioId, final @Nullable String sessionId) {
     final Map<String, ConcurrentSkipListSet<Long>> bySession = fired.get(scenarioId);
     final ConcurrentSkipListSet<Long> matches =
         bySession == null ? null : bySession.get(sessionId == null ? "" : sessionId);

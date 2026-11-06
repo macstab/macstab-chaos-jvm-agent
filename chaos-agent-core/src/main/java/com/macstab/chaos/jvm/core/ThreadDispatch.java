@@ -2,6 +2,7 @@ package com.macstab.chaos.jvm.core;
 
 import com.macstab.chaos.jvm.api.Internal;
 import com.macstab.chaos.jvm.api.OperationType;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Dispatch of thread operations (starts, sleeps, parks, monitor entries, thread-local access) and
@@ -28,7 +29,8 @@ public final class ThreadDispatch {
    *     many tasks, each carrying its submitter's session, so it does not inherit the starter's
    * @throws Throwable if a matching scenario's terminal action mandates it
    */
-  public void beforeThreadStart(final Thread thread, final boolean poolWorker) throws Throwable {
+  public void beforeThreadStart(final @Nullable Thread thread, final boolean poolWorker)
+      throws Throwable {
     final OperationType operation =
         engine.featureSet.isVirtualThread(thread)
             ? OperationType.VIRTUAL_THREAD_START
@@ -90,7 +92,7 @@ public final class ThreadDispatch {
    *     site cannot bind the receiver
    * @throws Throwable if a matching scenario's terminal action mandates it
    */
-  public void beforeMonitorEnter(final Object lock) throws Throwable {
+  public void beforeMonitorEnter(final @Nullable Object lock) throws Throwable {
     // When Byte Buddy cannot bind `@Advice.This` (e.g. static synchronized blocks advised via a
     // proxy site, or interception points where the receiver is not a stack slot), `lock` is null
     // and we fall back to the synchronizer hierarchy as a coarse default so MonitorSelector still
@@ -182,7 +184,7 @@ public final class ThreadDispatch {
    * @return {@code true} to suppress the set; {@code false} for normal execution
    * @throws Throwable if an active scenario throws to simulate a failure
    */
-  public boolean beforeThreadLocalSet(final Object threadLocal, final Object value)
+  public boolean beforeThreadLocalSet(final Object threadLocal, final @Nullable Object value)
       throws Throwable {
     final RuntimeDecision decision =
         (engine.idle(OperationType.THREAD_LOCAL_SET)

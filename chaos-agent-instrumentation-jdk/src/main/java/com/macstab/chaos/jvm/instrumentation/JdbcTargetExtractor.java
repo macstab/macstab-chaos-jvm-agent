@@ -41,7 +41,7 @@ public final class JdbcTargetExtractor {
    * @return the pool name, or the class name as a fallback, or {@code null} when {@code pool} is
    *     {@code null}
    */
-  public static @Nullable String fromHikariPool(final Object pool) {
+  public static @Nullable String fromHikariPool(final @Nullable Object pool) {
     if (pool == null) {
       return null;
     }

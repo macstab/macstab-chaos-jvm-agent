@@ -135,7 +135,7 @@ public final class StartupConfigPoller implements AutoCloseable {
    * @return an unstarted poller, or empty if watching is not configured
    */
   public static Optional<StartupConfigPoller> createIfEnabled(
-      final String rawAgentArgs,
+      final @Nullable String rawAgentArgs,
       final Map<String, String> environment,
       final Path configPath,
       final ChaosRuntime runtime) {
@@ -565,7 +565,8 @@ public final class StartupConfigPoller implements AutoCloseable {
    */
   static final long MIN_WATCH_INTERVAL_MS = 50L;
 
-  static long resolveInterval(final String rawAgentArgs, final Map<String, String> environment) {
+  static long resolveInterval(
+      final @Nullable String rawAgentArgs, final Map<String, String> environment) {
     final long rawIntervalMs = resolveRawInterval(rawAgentArgs, environment);
     if (rawIntervalMs <= 0) {
       return 0L;
@@ -574,7 +575,7 @@ public final class StartupConfigPoller implements AutoCloseable {
   }
 
   private static long resolveRawInterval(
-      final String rawAgentArgs, final Map<String, String> environment) {
+      final @Nullable String rawAgentArgs, final Map<String, String> environment) {
     final long fromArg = AgentArgsParser.parse(rawAgentArgs).getLong(ARG_WATCH_INTERVAL, 0L);
     if (fromArg > 0) {
       return fromArg;

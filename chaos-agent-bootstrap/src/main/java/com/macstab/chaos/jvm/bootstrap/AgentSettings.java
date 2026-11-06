@@ -20,7 +20,7 @@ final class AgentSettings {
    * @return the first value found, or {@code null} when none is set
    */
   static @Nullable String value(
-      final String agentArgs,
+      final @Nullable String agentArgs,
       final Map<String, String> environment,
       final String arg,
       final String property,
@@ -44,7 +44,7 @@ final class AgentSettings {
    * @return the stripped value, or {@code ""}
    */
   static String valueOrEmpty(
-      final String agentArgs,
+      final @Nullable String agentArgs,
       final Map<String, String> environment,
       final String arg,
       final String property,

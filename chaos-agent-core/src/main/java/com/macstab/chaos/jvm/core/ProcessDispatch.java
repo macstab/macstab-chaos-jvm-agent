@@ -79,7 +79,7 @@ public final class ProcessDispatch {
    * @param command the program, the first element of the command; {@code null} if empty
    * @throws Throwable if an active scenario fails the start
    */
-  public void beforeProcessStart(final String command) throws Throwable {
+  public void beforeProcessStart(final @Nullable String command) throws Throwable {
     if (engine.idle(OperationType.PROCESS_START)) {
       return;
     }

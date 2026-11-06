@@ -495,7 +495,7 @@ final class DispatchEngine {
    * wrapper binds the session, so session-scoped EXECUTOR_WORKER_RUN and SCHEDULE_TICK scenarios
    * never matched work submitted from a session.
    */
-  @Nullable String taskSession(final Object task) {
+  @Nullable String taskSession(final @Nullable Object task) {
     final String bound = scopeContext.currentSessionId();
     return bound != null ? bound : ScopeContext.sessionOf(task);
   }
@@ -508,7 +508,7 @@ final class DispatchEngine {
    * become {@code com.example.MyService}. Matching only the older form would leave the hex suffix
    * on every lambda on the supported JDKs.
    */
-  static @Nullable String taskClassName(final Object task) {
+  static @Nullable String taskClassName(final @Nullable Object task) {
     if (task == null) {
       return null;
     }

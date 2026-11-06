@@ -208,7 +208,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @return the decorated runnable produced by the dispatcher
    */
   public Runnable decorateExecutorRunnable(
-      final String operation, final Object executor, final Runnable task) {
+      final String operation, final @Nullable Object executor, final Runnable task) {
     return executorDispatch.decorateExecutorRunnable(operation, executor, task);
   }
 
@@ -222,7 +222,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @return the decorated callable produced by the dispatcher
    */
   public <T> Callable<T> decorateExecutorCallable(
-      final String operation, final Object executor, final Callable<T> task) {
+      final String operation, final @Nullable Object executor, final Callable<T> task) {
     return executorDispatch.decorateExecutorCallable(operation, executor, task);
   }
 
@@ -255,8 +255,8 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @param task the task being run, or {@code null} if not yet known
    * @throws Throwable if an active scenario throws to simulate a failure
    */
-  public void beforeWorkerRun(final Object executor, final Thread worker, final Runnable task)
-      throws Throwable {
+  public void beforeWorkerRun(
+      final Object executor, final Thread worker, final @Nullable Runnable task) throws Throwable {
     executorDispatch.beforeWorkerRun(executor, worker, task);
   }
 
@@ -278,7 +278,8 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @param queue the queue being operated on
    * @throws Throwable if an active scenario throws to simulate a failure
    */
-  public void beforeQueueOperation(final String operation, final Object queue) throws Throwable {
+  public void beforeQueueOperation(final String operation, final @Nullable Object queue)
+      throws Throwable {
     executorDispatch.beforeQueueOperation(operation, queue);
   }
 
@@ -290,8 +291,8 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @return an override result from the queue operation, or {@code null} to proceed normally
    * @throws Throwable if an active scenario throws to simulate a failure
    */
-  public @Nullable Boolean beforeBooleanQueueOperation(final String operation, final Object queue)
-      throws Throwable {
+  public @Nullable Boolean beforeBooleanQueueOperation(
+      final String operation, final @Nullable Object queue) throws Throwable {
     return executorDispatch.beforeBooleanQueueOperation(operation, queue);
   }
 
@@ -306,7 +307,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @throws Throwable if an active scenario throws to simulate a failure
    */
   public @Nullable Boolean beforeCompletableFutureComplete(
-      final String operation, final CompletableFuture<?> future, final Object payload)
+      final String operation, final CompletableFuture<?> future, final @Nullable Object payload)
       throws Throwable {
     return executorDispatch.beforeCompletableFutureComplete(operation, future, payload);
   }
@@ -318,7 +319,8 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @param className the binary class name being loaded
    * @throws Throwable if an active scenario throws to simulate a failure
    */
-  public void beforeClassLoad(final ClassLoader loader, final String className) throws Throwable {
+  public void beforeClassLoad(final @Nullable ClassLoader loader, final String className)
+      throws Throwable {
     runtimeDispatch.beforeClassLoad(loader, className);
   }
 
@@ -332,7 +334,8 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @throws Throwable if an active scenario throws to simulate a failure
    */
   public @Nullable URL afterResourceLookup(
-      final ClassLoader loader, final String name, final URL currentValue) throws Throwable {
+      final @Nullable ClassLoader loader, final String name, final @Nullable URL currentValue)
+      throws Throwable {
     return runtimeDispatch.afterResourceLookup(loader, name, currentValue);
   }
 
@@ -380,7 +383,8 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @throws Throwable if an active scenario throws to simulate a failure
    */
   public boolean beforeScheduledTick(
-      final Object executor, final Object task, final boolean periodic) throws Throwable {
+      final @Nullable Object executor, final @Nullable Object task, final boolean periodic)
+      throws Throwable {
     return executorDispatch.beforeScheduledTick(executor, task, periodic);
   }
 
@@ -445,7 +449,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
       final Class<?> declaringType,
       final String methodName,
       final String descriptor,
-      final Object actualValue)
+      final @Nullable Object actualValue)
       throws Throwable {
     return methodDispatch.afterMethodExit(declaringType, methodName, descriptor, actualValue);
   }
@@ -483,7 +487,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   public @Nullable Object afterMethodExit(
       final String className,
       final String methodName,
-      final Class<?> returnType,
+      final @Nullable Class<?> returnType,
       final Object actualValue)
       throws Throwable {
     return methodDispatch.afterMethodExit(className, methodName, returnType, actualValue);
@@ -662,7 +666,8 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @param target the target object
    * @throws Throwable if a chaos effect injects an exception
    */
-  public void beforeReflectionInvoke(final Object method, final Object target) throws Throwable {
+  public void beforeReflectionInvoke(final Object method, final @Nullable Object target)
+      throws Throwable {
     runtimeDispatch.beforeReflectionInvoke(method, target);
   }
 
@@ -693,7 +698,8 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @param className the binary name of the class being defined
    * @throws Throwable if a chaos effect injects an exception
    */
-  public void beforeClassDefine(final Object loader, final String className) throws Throwable {
+  public void beforeClassDefine(final Object loader, final @Nullable String className)
+      throws Throwable {
     runtimeDispatch.beforeClassDefine(loader, className);
   }
 
@@ -703,7 +709,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @param lock the monitor object
    * @throws Throwable if a chaos effect injects an exception
    */
-  public void beforeMonitorEnter(final Object lock) throws Throwable {
+  public void beforeMonitorEnter(final @Nullable Object lock) throws Throwable {
     threadDispatch.beforeMonitorEnter(lock);
   }
 
@@ -787,7 +793,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   public int beforeSocketRead(
       final Object stream,
       final int len,
-      final Object remoteAddress,
+      final @Nullable Object remoteAddress,
       final int remotePort,
       final int soTimeoutMillis)
       throws Throwable {
@@ -818,7 +824,10 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @throws Throwable if an active scenario throws to simulate a failure
    */
   public int beforeSocketWrite(
-      final Object stream, final int len, final Object remoteAddress, final int remotePort)
+      final Object stream,
+      final int len,
+      final @Nullable Object remoteAddress,
+      final int remotePort)
       throws Throwable {
     return networkDispatch.beforeSocketWrite(stream, len, remoteAddress, remotePort);
   }
@@ -875,7 +884,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @throws Throwable if an active scenario fails the call
    */
   public int beforeDatagram(
-      final String operation, final Object channel, final Object peer, final int length)
+      final String operation, final Object channel, final @Nullable Object peer, final int length)
       throws Throwable {
     return networkDispatch.beforeDatagram(operation, channel, peer, length);
   }
@@ -902,7 +911,8 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @throws Throwable if an active scenario fails the shutdown
    */
   public void beforeSocketShutdown(
-      final Object endpoint, final Object remoteAddress, final int remotePort) throws Throwable {
+      final Object endpoint, final @Nullable Object remoteAddress, final int remotePort)
+      throws Throwable {
     networkDispatch.beforeSocketShutdown(endpoint, remoteAddress, remotePort);
   }
 
@@ -969,7 +979,8 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @param obj the object being serialized
    * @throws Throwable if a chaos effect injects an exception
    */
-  public void beforeObjectSerialize(final Object stream, final Object obj) throws Throwable {
+  public void beforeObjectSerialize(final Object stream, final @Nullable Object obj)
+      throws Throwable {
     runtimeDispatch.beforeObjectSerialize(stream, obj);
   }
 
@@ -1033,7 +1044,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @return {@code true} if the set should proceed
    * @throws Throwable if a chaos effect injects an exception
    */
-  public boolean beforeThreadLocalSet(final Object threadLocal, final Object value)
+  public boolean beforeThreadLocalSet(final Object threadLocal, final @Nullable Object value)
       throws Throwable {
     return threadDispatch.beforeThreadLocalSet(threadLocal, value);
   }
@@ -1072,7 +1083,8 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @return {@code true} if the request should proceed
    * @throws Throwable if a chaos effect injects an exception
    */
-  public boolean beforeHttpSend(final String url, final OperationType opType) throws Throwable {
+  public boolean beforeHttpSend(final @Nullable String url, final OperationType opType)
+      throws Throwable {
     return clientDispatch.beforeHttpSend(url, opType);
   }
 
@@ -1083,7 +1095,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @return {@code true} if connection acquisition should proceed
    * @throws Throwable if a chaos effect injects an exception
    */
-  public boolean beforeJdbcConnectionAcquire(final String poolName) throws Throwable {
+  public boolean beforeJdbcConnectionAcquire(final @Nullable String poolName) throws Throwable {
     return clientDispatch.beforeJdbcConnectionAcquire(poolName);
   }
 
@@ -1094,7 +1106,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @return {@code true} if execution should proceed
    * @throws Throwable if a chaos effect injects an exception
    */
-  public boolean beforeJdbcStatementExecute(final String sql) throws Throwable {
+  public boolean beforeJdbcStatementExecute(final @Nullable String sql) throws Throwable {
     return clientDispatch.beforeJdbcStatementExecute(sql);
   }
 
@@ -1105,7 +1117,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @return {@code true} if preparation should proceed
    * @throws Throwable if a chaos effect injects an exception
    */
-  public boolean beforeJdbcPreparedStatement(final String sql) throws Throwable {
+  public boolean beforeJdbcPreparedStatement(final @Nullable String sql) throws Throwable {
     return clientDispatch.beforeJdbcPreparedStatement(sql);
   }
 
@@ -1161,7 +1173,9 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @throws Throwable if a scenario rejects the lookup
    */
   public java.net.InetAddress @Nullable [] afterDnsAnswer(
-      final String hostname, final java.net.InetAddress[] answer, final Throwable failure)
+      final String hostname,
+      final java.net.InetAddress @Nullable [] answer,
+      final @Nullable Throwable failure)
       throws Throwable {
     return dnsDispatch.afterDnsAnswer(hostname, answer, failure);
   }
@@ -1189,9 +1203,9 @@ public final class ChaosRuntime implements ChaosControlPlane {
   public void beforeClientCall(
       final String operation,
       final Object client,
-      final String target,
-      final String detail,
-      final Object remoteAddress)
+      final @Nullable String target,
+      final @Nullable String detail,
+      final @Nullable Object remoteAddress)
       throws Throwable {
     clientDispatch.beforeClientCall(operation, client, target, detail, remoteAddress);
   }
@@ -1245,7 +1259,10 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @throws Throwable if a chaos effect injects an exception
    */
   public int beforeFileIo(
-      final String operation, final @Nullable Object stream, final String path, final int byteCount)
+      final String operation,
+      final @Nullable Object stream,
+      final @Nullable String path,
+      final int byteCount)
       throws Throwable {
     return fileDispatch.beforeFileIo(operation, stream, path, byteCount);
   }

@@ -1,5 +1,7 @@
 package com.macstab.chaos.jvm.api;
 
+import org.jspecify.annotations.Nullable;
+
 /**
  * Thrown when a chaos scenario or plan fails to activate due to a runtime conflict or precondition
  * violation that is not a configuration error.
@@ -34,7 +36,7 @@ public class ChaosActivationException extends RuntimeException {
    * @param message human-readable description of why activation failed
    * @param cause the root cause of the failure; may be null
    */
-  public ChaosActivationException(final String message, final Throwable cause) {
+  public ChaosActivationException(final String message, final @Nullable Throwable cause) {
     super(message, cause);
   }
 }

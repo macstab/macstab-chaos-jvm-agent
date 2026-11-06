@@ -45,7 +45,7 @@ public final class ExecutorDispatch {
    * @return a runnable to submit in place of {@code task}, possibly a no-op when suppressed
    */
   public Runnable decorateExecutorRunnable(
-      final String operation, final Object executor, final Runnable task) {
+      final String operation, final @Nullable Object executor, final Runnable task) {
     Objects.requireNonNull(task, "task");
     final String sessionId = engine.scopeContext.currentSessionId();
     final Runnable scoped = sessionId == null ? task : engine.scopeContext.wrap(sessionId, task);
@@ -100,7 +100,7 @@ public final class ExecutorDispatch {
    * @return a callable to submit in place of {@code task}, possibly a no-op when suppressed
    */
   public <T> Callable<T> decorateExecutorCallable(
-      final String operation, final Object executor, final Callable<T> task) {
+      final String operation, final @Nullable Object executor, final Callable<T> task) {
     Objects.requireNonNull(task, "task");
     final String sessionId = engine.scopeContext.currentSessionId();
     final Callable<T> scoped = sessionId == null ? task : engine.scopeContext.wrap(sessionId, task);
@@ -148,7 +148,8 @@ public final class ExecutorDispatch {
    * @param task the task that the worker is about to execute; may be {@code null}
    * @throws Throwable if a matching scenario's terminal action mandates it
    */
-  public void beforeWorkerRun(final Object executor, final Thread worker, final Runnable task)
+  public void beforeWorkerRun(
+      final Object executor, final @Nullable Thread worker, final @Nullable Runnable task)
       throws Throwable {
     engine.applyPreDecision(
         (engine.idle(OperationType.EXECUTOR_WORKER_RUN)
@@ -171,7 +172,7 @@ public final class ExecutorDispatch {
    * @param task the fork-join task about to execute; may be {@code null}
    * @throws Throwable if a matching scenario's terminal action mandates it
    */
-  public void beforeForkJoinTaskRun(final java.util.concurrent.ForkJoinTask<?> task)
+  public void beforeForkJoinTaskRun(final java.util.concurrent.@Nullable ForkJoinTask<?> task)
       throws Throwable {
     engine.applyPreDecision(
         (engine.idle(OperationType.FORK_JOIN_TASK_RUN)
@@ -195,7 +196,8 @@ public final class ExecutorDispatch {
    * @param queue the queue receiving the operation; may be {@code null} when unknown
    * @throws Throwable if a matching scenario's terminal action mandates it
    */
-  public void beforeQueueOperation(final String operation, final Object queue) throws Throwable {
+  public void beforeQueueOperation(final String operation, final @Nullable Object queue)
+      throws Throwable {
     final OperationType indexedOp = OperationType.valueOf(operation);
     engine.applyPreDecision(
         (engine.idle(indexedOp)
@@ -222,8 +224,8 @@ public final class ExecutorDispatch {
    *     result
    * @throws Throwable if a matching scenario's terminal action mandates it
    */
-  public @Nullable Boolean beforeBooleanQueueOperation(final String operation, final Object queue)
-      throws Throwable {
+  public @Nullable Boolean beforeBooleanQueueOperation(
+      final String operation, final @Nullable Object queue) throws Throwable {
     final OperationType indexedOp = OperationType.valueOf(operation);
     final RuntimeDecision decision =
         (engine.idle(indexedOp)
@@ -261,7 +263,7 @@ public final class ExecutorDispatch {
    * @throws Throwable if a matching scenario's terminal action mandates it
    */
   public @Nullable Boolean beforeCompletableFutureComplete(
-      final String operation, final CompletableFuture<?> future, final Object payload)
+      final String operation, final CompletableFuture<?> future, final @Nullable Object payload)
       throws Throwable {
     final OperationType indexedOp = OperationType.valueOf(operation);
     final RuntimeDecision decision =
@@ -383,7 +385,8 @@ public final class ExecutorDispatch {
    * @throws Throwable if a matching scenario's terminal action mandates it
    */
   public void beforeExecutorShutdown(
-      final String operation, final Object executor, final long timeoutMillis) throws Throwable {
+      final String operation, final @Nullable Object executor, final long timeoutMillis)
+      throws Throwable {
     final OperationType indexedOp = OperationType.valueOf(operation);
     engine.applyPreDecision(
         (engine.idle(indexedOp)
@@ -410,7 +413,8 @@ public final class ExecutorDispatch {
    * @throws Throwable if a matching scenario's terminal action mandates it
    */
   public boolean beforeScheduledTick(
-      final Object executor, final Object task, final boolean periodic) throws Throwable {
+      final @Nullable Object executor, final @Nullable Object task, final boolean periodic)
+      throws Throwable {
     final RuntimeDecision decision =
         (engine.idle(OperationType.SCHEDULE_TICK)
             ? RuntimeDecision.none()

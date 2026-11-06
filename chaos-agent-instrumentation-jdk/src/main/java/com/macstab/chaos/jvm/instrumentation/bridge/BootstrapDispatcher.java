@@ -577,7 +577,8 @@ public final class BootstrapDispatcher {
    * @throws Throwable if the delegate throws — propagated to the advice via sneaky-throw
    */
   public static Runnable decorateExecutorRunnable(
-      final String operation, final Object executor, final Runnable task) throws Throwable {
+      final String operation, final @Nullable Object executor, final Runnable task)
+      throws Throwable {
     final int[] depth = DEPTH.get();
     if (depth[0] > 0) {
       return task;
@@ -609,7 +610,8 @@ public final class BootstrapDispatcher {
    * @throws Throwable if the delegate throws
    */
   public static <T> Callable<T> decorateExecutorCallable(
-      final String operation, final Object executor, final Callable<T> task) throws Throwable {
+      final String operation, final @Nullable Object executor, final Callable<T> task)
+      throws Throwable {
     final int[] depth = DEPTH.get();
     if (depth[0] > 0) {
       return task;
@@ -667,13 +669,13 @@ public final class BootstrapDispatcher {
   /**
    * Called at the top of a thread-pool worker's run loop, before the next task is dequeued.
    *
-   * @param executor the thread pool owning this worker; may be {@code null}
+   * @param executor the thread pool owning this worker
    * @param worker the worker thread currently executing; never {@code null}
    * @param task the task about to run, when available from the framework; may be {@code null}
    * @throws Throwable if an active scenario injects an exception to stall or disrupt the worker
    */
   public static void beforeWorkerRun(
-      final Object executor, final Thread worker, final Runnable task) throws Throwable {
+      final Object executor, final Thread worker, final @Nullable Runnable task) throws Throwable {
     final int[] depth = DEPTH.get();
     if (depth[0] > 0) {
       return;
@@ -730,7 +732,8 @@ public final class BootstrapDispatcher {
    * @throws Throwable if the delegate throws
    */
   public static boolean beforeScheduledTick(
-      final Object executor, final Object task, final boolean periodic) throws Throwable {
+      final @Nullable Object executor, final @Nullable Object task, final boolean periodic)
+      throws Throwable {
     final int[] depth = DEPTH.get();
     if (depth[0] > 0) {
       return true;
@@ -757,7 +760,7 @@ public final class BootstrapDispatcher {
    * @param queue the queue instance; may be {@code null} if not available from the advice context
    * @throws Throwable if an active scenario injects an exception or decides to throw
    */
-  public static void beforeQueueOperation(final String operation, final Object queue)
+  public static void beforeQueueOperation(final String operation, final @Nullable Object queue)
       throws Throwable {
     final int[] depth = DEPTH.get();
     if (depth[0] > 0) {
@@ -788,7 +791,7 @@ public final class BootstrapDispatcher {
    * @throws Throwable if the delegate throws
    */
   public static @Nullable Boolean beforeBooleanQueueOperation(
-      final String operation, final Object queue) throws Throwable {
+      final String operation, final @Nullable Object queue) throws Throwable {
     final int[] depth = DEPTH.get();
     if (depth[0] > 0) {
       return null;
@@ -823,7 +826,7 @@ public final class BootstrapDispatcher {
    * @throws Throwable if the delegate throws
    */
   public static @Nullable Boolean beforeCompletableFutureComplete(
-      final String operation, final CompletableFuture<?> future, final Object payload)
+      final String operation, final CompletableFuture<?> future, final @Nullable Object payload)
       throws Throwable {
     final int[] depth = DEPTH.get();
     if (depth[0] > 0) {
@@ -885,8 +888,9 @@ public final class BootstrapDispatcher {
    *     currentValue} as the fallback
    * @throws Throwable if the delegate throws
    */
-  public static URL afterResourceLookup(
-      final ClassLoader loader, final String name, final URL currentValue) throws Throwable {
+  public static @Nullable URL afterResourceLookup(
+      final ClassLoader loader, final String name, final @Nullable URL currentValue)
+      throws Throwable {
     final int[] depth = DEPTH.get();
     if (depth[0] > 0) {
       return currentValue;
@@ -897,7 +901,7 @@ public final class BootstrapDispatcher {
       final Object d = delegate;
       return (d == null || h == null)
           ? currentValue
-          : (URL) h[AFTER_RESOURCE_LOOKUP].invoke(d, loader, name, currentValue);
+          : (@Nullable URL) h[AFTER_RESOURCE_LOOKUP].invoke(d, loader, name, currentValue);
     } catch (final Throwable throwable) {
       sneakyThrow(throwable);
       return currentValue;
@@ -1350,7 +1354,7 @@ public final class BootstrapDispatcher {
    * @param target the object on which the method is being invoked; {@code null} for static methods
    * @throws Throwable if an active scenario injects an exception to abort the reflective call
    */
-  public static void beforeReflectionInvoke(final Object method, final Object target)
+  public static void beforeReflectionInvoke(final Object method, final @Nullable Object target)
       throws Throwable {
     final int[] depth = DEPTH.get();
     if (depth[0] > 0) {
@@ -1431,7 +1435,7 @@ public final class BootstrapDispatcher {
    *     did not supply a name
    * @throws Throwable if an active scenario wants to simulate a class-definition failure
    */
-  public static void beforeClassDefine(final Object loader, final String className)
+  public static void beforeClassDefine(final Object loader, final @Nullable String className)
       throws Throwable {
     final int[] depth = DEPTH.get();
     if (depth[0] > 0) {
@@ -1460,7 +1464,7 @@ public final class BootstrapDispatcher {
    * @param lock the monitor object whose acquisition is about to occur
    * @throws Throwable if an active scenario injects an exception
    */
-  public static void beforeMonitorEnter(final Object lock) throws Throwable {
+  public static void beforeMonitorEnter(final @Nullable Object lock) throws Throwable {
     final int[] depth = DEPTH.get();
     if (depth[0] > 0) {
       return;
@@ -1682,7 +1686,10 @@ public final class BootstrapDispatcher {
    * @throws Throwable if an active scenario injects a failure to simulate a write error
    */
   public static int beforeSocketWrite(
-      final Object stream, final int len, final Object remoteAddress, final int remotePort)
+      final Object stream,
+      final int len,
+      final @Nullable Object remoteAddress,
+      final int remotePort)
       throws Throwable {
     final int[] depth = DEPTH.get();
     if (depth[0] > 0) {
@@ -1865,7 +1872,8 @@ public final class BootstrapDispatcher {
    *     valid)
    * @throws Throwable if an active scenario injects a failure to simulate a serialization error
    */
-  public static void beforeObjectSerialize(final Object stream, final Object obj) throws Throwable {
+  public static void beforeObjectSerialize(final Object stream, final @Nullable Object obj)
+      throws Throwable {
     final int[] depth = DEPTH.get();
     if (depth[0] > 0) {
       return;
@@ -2038,7 +2046,7 @@ public final class BootstrapDispatcher {
    *     false} as the fallback.
    * @throws Throwable if the delegate throws
    */
-  public static boolean beforeThreadLocalSet(final Object threadLocal, final Object value)
+  public static boolean beforeThreadLocalSet(final Object threadLocal, final @Nullable Object value)
       throws Throwable {
     final int[] depth = DEPTH.get();
     if (depth[0] > 0) {
@@ -2242,7 +2250,7 @@ public final class BootstrapDispatcher {
    *     Returns {@code false} as the fallback.
    * @throws Throwable if the delegate throws
    */
-  public static boolean beforeJdbcPreparedStatement(final String sql) throws Throwable {
+  public static boolean beforeJdbcPreparedStatement(final @Nullable String sql) throws Throwable {
     final int[] depth = DEPTH.get();
     if (depth[0] > 0) {
       return false;
@@ -2378,7 +2386,9 @@ public final class BootstrapDispatcher {
    * @throws Throwable if an active scenario rejects the lookup
    */
   public static java.net.InetAddress @Nullable [] afterDnsAnswer(
-      final String hostname, final java.net.InetAddress[] answer, final Throwable failure)
+      final String hostname,
+      final java.net.InetAddress @Nullable [] answer,
+      final @Nullable Throwable failure)
       throws Throwable {
     final int[] depth = DEPTH.get();
     if (depth[0] > 0) {
@@ -2785,7 +2795,7 @@ public final class BootstrapDispatcher {
   public static @Nullable ChannelBuffers beforeFileChannelIo(
       final String operation,
       final Object channel,
-      final String path,
+      final @Nullable String path,
       final java.nio.ByteBuffer[] buffers,
       final int offset,
       final int length)
@@ -2882,7 +2892,7 @@ public final class BootstrapDispatcher {
    * @param path the file path, or {@code null}
    * @return {@code true} for an archive
    */
-  public static boolean isArchive(final String path) {
+  public static boolean isArchive(final @Nullable String path) {
     return path != null
         && (path.endsWith(".jar") || path.endsWith(".zip") || path.endsWith(".jmod"));
   }

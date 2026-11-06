@@ -377,12 +377,14 @@ public sealed interface ChaosSelector
    * <p>Valid operations: {@link OperationType#DNS_RESOLVE}.
    *
    * @param operations set of DNS operations to intercept; must not be empty
-   * @param hostnamePattern pattern matched against the hostname being resolved; {@code null}
-   *     matches {@code InetAddress.getLocalHost()} (which has no hostname argument)
+   * @param hostnamePattern pattern matched against the hostname being resolved; {@code null} for
+   *     any host, including {@code InetAddress.getLocalHost()}, which names none
    * @return a DnsSelector
    */
-  static DnsSelector dns(final Set<OperationType> operations, final NamePattern hostnamePattern) {
-    return new DnsSelector(operations, hostnamePattern);
+  static DnsSelector dns(
+      final Set<OperationType> operations, final @Nullable NamePattern hostnamePattern) {
+    return new DnsSelector(
+        operations, hostnamePattern == null ? NamePattern.any() : hostnamePattern);
   }
 
   /**

@@ -84,7 +84,9 @@ public final class DnsDispatch {
    * @throws Throwable if a scenario rejects the lookup or a filter leaves no address
    */
   public java.net.InetAddress @Nullable [] afterDnsAnswer(
-      final String hostname, final java.net.InetAddress[] answer, final Throwable failure)
+      final String hostname,
+      final java.net.InetAddress @Nullable [] answer,
+      final @Nullable Throwable failure)
       throws Throwable {
     if (engine.idle(OperationType.DNS_ANSWER)) {
       return null;

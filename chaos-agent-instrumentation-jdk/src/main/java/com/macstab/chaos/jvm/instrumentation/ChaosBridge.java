@@ -53,7 +53,7 @@ final class ChaosBridge implements BridgeDelegate {
    */
   @Override
   public Runnable decorateExecutorRunnable(
-      final String operation, final Object executor, final Runnable task) {
+      final String operation, final @Nullable Object executor, final Runnable task) {
     return runtime.decorateExecutorRunnable(operation, executor, task);
   }
 
@@ -68,7 +68,7 @@ final class ChaosBridge implements BridgeDelegate {
    */
   @Override
   public <T> Callable<T> decorateExecutorCallable(
-      final String operation, final Object executor, final Callable<T> task) {
+      final String operation, final @Nullable Object executor, final Callable<T> task) {
     return runtime.decorateExecutorCallable(operation, executor, task);
   }
 
@@ -93,8 +93,8 @@ final class ChaosBridge implements BridgeDelegate {
    * @throws Throwable if the runtime decides to abort or delay execution
    */
   @Override
-  public void beforeWorkerRun(final Object executor, final Thread worker, final Runnable task)
-      throws Throwable {
+  public void beforeWorkerRun(
+      final Object executor, final Thread worker, final @Nullable Runnable task) throws Throwable {
     runtime.beforeWorkerRun(executor, worker, task);
   }
 
@@ -120,7 +120,8 @@ final class ChaosBridge implements BridgeDelegate {
    */
   @Override
   public boolean beforeScheduledTick(
-      final Object executor, final Object task, final boolean periodic) throws Throwable {
+      final @Nullable Object executor, final @Nullable Object task, final boolean periodic)
+      throws Throwable {
     return runtime.beforeScheduledTick(executor, task, periodic);
   }
 
@@ -132,7 +133,8 @@ final class ChaosBridge implements BridgeDelegate {
    * @throws Throwable if the runtime decides to abort or delay the operation
    */
   @Override
-  public void beforeQueueOperation(final String operation, final Object queue) throws Throwable {
+  public void beforeQueueOperation(final String operation, final @Nullable Object queue)
+      throws Throwable {
     runtime.beforeQueueOperation(operation, queue);
   }
 
@@ -146,8 +148,8 @@ final class ChaosBridge implements BridgeDelegate {
    * @throws Throwable if the runtime decides to abort the operation
    */
   @Override
-  public @Nullable Boolean beforeBooleanQueueOperation(final String operation, final Object queue)
-      throws Throwable {
+  public @Nullable Boolean beforeBooleanQueueOperation(
+      final String operation, final @Nullable Object queue) throws Throwable {
     return runtime.beforeBooleanQueueOperation(operation, queue);
   }
 
@@ -164,7 +166,7 @@ final class ChaosBridge implements BridgeDelegate {
    */
   @Override
   public @Nullable Boolean beforeCompletableFutureComplete(
-      final String operation, final CompletableFuture<?> future, final Object payload)
+      final String operation, final CompletableFuture<?> future, final @Nullable Object payload)
       throws Throwable {
     return runtime.beforeCompletableFutureComplete(operation, future, payload);
   }
@@ -192,7 +194,8 @@ final class ChaosBridge implements BridgeDelegate {
    */
   @Override
   public @Nullable URL afterResourceLookup(
-      final ClassLoader loader, final String name, final URL currentValue) throws Throwable {
+      final ClassLoader loader, final String name, final @Nullable URL currentValue)
+      throws Throwable {
     return runtime.afterResourceLookup(loader, name, currentValue);
   }
 
@@ -353,7 +356,8 @@ final class ChaosBridge implements BridgeDelegate {
    * @throws Throwable if the runtime decides to abort or delay the invocation
    */
   @Override
-  public void beforeReflectionInvoke(final Object method, final Object target) throws Throwable {
+  public void beforeReflectionInvoke(final Object method, final @Nullable Object target)
+      throws Throwable {
     runtime.beforeReflectionInvoke(method, target);
   }
 
@@ -388,7 +392,8 @@ final class ChaosBridge implements BridgeDelegate {
    * @throws Throwable if the runtime decides to abort or delay class definition
    */
   @Override
-  public void beforeClassDefine(final Object loader, final String className) throws Throwable {
+  public void beforeClassDefine(final Object loader, final @Nullable String className)
+      throws Throwable {
     runtime.beforeClassDefine(loader, className);
   }
 
@@ -401,7 +406,7 @@ final class ChaosBridge implements BridgeDelegate {
    * @throws Throwable if the runtime decides to abort or delay monitor acquisition
    */
   @Override
-  public void beforeMonitorEnter(final Object lock) throws Throwable {
+  public void beforeMonitorEnter(final @Nullable Object lock) throws Throwable {
     runtime.beforeMonitorEnter(lock);
   }
 
@@ -483,7 +488,7 @@ final class ChaosBridge implements BridgeDelegate {
   public int beforeSocketRead(
       final Object stream,
       final int len,
-      final Object remoteAddress,
+      final @Nullable Object remoteAddress,
       final int remotePort,
       final int soTimeoutMillis)
       throws Throwable {
@@ -502,7 +507,10 @@ final class ChaosBridge implements BridgeDelegate {
    */
   @Override
   public int beforeSocketWrite(
-      final Object stream, final int len, final Object remoteAddress, final int remotePort)
+      final Object stream,
+      final int len,
+      final @Nullable Object remoteAddress,
+      final int remotePort)
       throws Throwable {
     return runtime.beforeSocketWrite(stream, len, remoteAddress, remotePort);
   }
@@ -579,7 +587,7 @@ final class ChaosBridge implements BridgeDelegate {
 
   @Override
   public int beforeDatagram(
-      final String operation, final Object channel, final Object peer, final int length)
+      final String operation, final Object channel, final @Nullable Object peer, final int length)
       throws Throwable {
     return runtime.beforeDatagram(operation, channel, peer, length);
   }
@@ -597,7 +605,8 @@ final class ChaosBridge implements BridgeDelegate {
 
   @Override
   public void beforeSocketShutdown(
-      final Object endpoint, final Object remoteAddress, final int remotePort) throws Throwable {
+      final Object endpoint, final @Nullable Object remoteAddress, final int remotePort)
+      throws Throwable {
     runtime.beforeSocketShutdown(endpoint, remoteAddress, remotePort);
   }
 
@@ -631,7 +640,8 @@ final class ChaosBridge implements BridgeDelegate {
    * @throws Throwable if the runtime decides to abort or delay serialization
    */
   @Override
-  public void beforeObjectSerialize(final Object stream, final Object obj) throws Throwable {
+  public void beforeObjectSerialize(final Object stream, final @Nullable Object obj)
+      throws Throwable {
     runtime.beforeObjectSerialize(stream, obj);
   }
 
@@ -704,7 +714,7 @@ final class ChaosBridge implements BridgeDelegate {
    * @throws Throwable if the runtime decides to abort or delay the write
    */
   @Override
-  public boolean beforeThreadLocalSet(final Object threadLocal, final Object value)
+  public boolean beforeThreadLocalSet(final Object threadLocal, final @Nullable Object value)
       throws Throwable {
     return runtime.beforeThreadLocalSet(threadLocal, value);
   }
@@ -746,7 +756,7 @@ final class ChaosBridge implements BridgeDelegate {
    * @throws Throwable if the runtime decides to abort the call
    */
   @Override
-  public boolean beforeHttpSend(final String url) throws Throwable {
+  public boolean beforeHttpSend(final @Nullable String url) throws Throwable {
     return runtime.beforeHttpSend(url, com.macstab.chaos.jvm.api.OperationType.HTTP_CLIENT_SEND);
   }
 
@@ -759,7 +769,7 @@ final class ChaosBridge implements BridgeDelegate {
    * @throws Throwable if the runtime decides to abort the call
    */
   @Override
-  public boolean beforeHttpSendAsync(final String url) throws Throwable {
+  public boolean beforeHttpSendAsync(final @Nullable String url) throws Throwable {
     return runtime.beforeHttpSend(
         url, com.macstab.chaos.jvm.api.OperationType.HTTP_CLIENT_SEND_ASYNC);
   }
@@ -773,7 +783,7 @@ final class ChaosBridge implements BridgeDelegate {
    * @throws Throwable if the runtime decides to abort the call
    */
   @Override
-  public boolean beforeJdbcConnectionAcquire(final String poolName) throws Throwable {
+  public boolean beforeJdbcConnectionAcquire(final @Nullable String poolName) throws Throwable {
     return runtime.beforeJdbcConnectionAcquire(poolName);
   }
 
@@ -786,7 +796,7 @@ final class ChaosBridge implements BridgeDelegate {
    * @throws Throwable if the runtime decides to abort the call
    */
   @Override
-  public boolean beforeJdbcStatementExecute(final String sql) throws Throwable {
+  public boolean beforeJdbcStatementExecute(final @Nullable String sql) throws Throwable {
     return runtime.beforeJdbcStatementExecute(sql);
   }
 
@@ -799,7 +809,7 @@ final class ChaosBridge implements BridgeDelegate {
    * @throws Throwable if the runtime decides to abort the call
    */
   @Override
-  public boolean beforeJdbcPreparedStatement(final String sql) throws Throwable {
+  public boolean beforeJdbcPreparedStatement(final @Nullable String sql) throws Throwable {
     return runtime.beforeJdbcPreparedStatement(sql);
   }
 
@@ -848,7 +858,7 @@ final class ChaosBridge implements BridgeDelegate {
    * @throws Throwable if the runtime decides to abort the lookup
    */
   @Override
-  public @Nullable String beforeDnsResolve(final String hostname) throws Throwable {
+  public @Nullable String beforeDnsResolve(final @Nullable String hostname) throws Throwable {
     return runtime.beforeDnsResolve(hostname);
   }
 
@@ -863,7 +873,9 @@ final class ChaosBridge implements BridgeDelegate {
    */
   @Override
   public java.net.InetAddress @Nullable [] afterDnsAnswer(
-      final String hostname, final java.net.InetAddress[] answer, final Throwable failure)
+      final String hostname,
+      final java.net.InetAddress @Nullable [] answer,
+      final @Nullable Throwable failure)
       throws Throwable {
     return runtime.afterDnsAnswer(hostname, answer, failure);
   }
@@ -893,7 +905,7 @@ final class ChaosBridge implements BridgeDelegate {
    */
   @Override
   public int beforeFileIo(
-      final String operation, final Object stream, final String path, final int byteCount)
+      final String operation, final Object stream, final @Nullable String path, final int byteCount)
       throws Throwable {
     return runtime.beforeFileIo(operation, stream, path, byteCount);
   }
@@ -928,7 +940,7 @@ final class ChaosBridge implements BridgeDelegate {
       final Class<?> declaringType,
       final String methodName,
       final String descriptor,
-      final Object value)
+      final @Nullable Object value)
       throws Throwable {
     return runtime.afterMethodExit(declaringType, methodName, descriptor, value);
   }
@@ -947,9 +959,9 @@ final class ChaosBridge implements BridgeDelegate {
   public void beforeClientCall(
       final String operation,
       final Object client,
-      final String target,
-      final String detail,
-      final Object remoteAddress)
+      final @Nullable String target,
+      final @Nullable String detail,
+      final @Nullable Object remoteAddress)
       throws Throwable {
     runtime.beforeClientCall(operation, client, target, detail, remoteAddress);
   }

@@ -62,7 +62,7 @@ public final class HttpUrlExtractor {
    * @param call the {@code okhttp3.Call} instance; may be {@code null}
    * @return the URL string, or {@code null} if extraction fails
    */
-  public static @Nullable String fromOkHttpCall(final Object call) {
+  public static @Nullable String fromOkHttpCall(final @Nullable Object call) {
     if (call == null) {
       return null;
     }
@@ -86,7 +86,8 @@ public final class HttpUrlExtractor {
    * @param request an {@code org.apache.http.HttpRequest} instance; may be {@code null}
    * @return the combined URL string, or {@code null} if extraction fails
    */
-  public static @Nullable String fromApacheHc4Request(final Object host, final Object request) {
+  public static @Nullable String fromApacheHc4Request(
+      final @Nullable Object host, final @Nullable Object request) {
     try {
       final String hostPart = host == null ? "" : host.toString();
       final String requestPath = extractApacheHc4RequestPath(request);
@@ -97,7 +98,8 @@ public final class HttpUrlExtractor {
     }
   }
 
-  private static String extractApacheHc4RequestPath(final Object request) throws Throwable {
+  private static String extractApacheHc4RequestPath(final @Nullable Object request)
+      throws Throwable {
     if (request == null) {
       return "";
     }
@@ -118,7 +120,7 @@ public final class HttpUrlExtractor {
    *     {@code null}
    * @return the URL string, or {@code null} if extraction fails
    */
-  public static @Nullable String fromApacheHc4UriRequest(final Object request) {
+  public static @Nullable String fromApacheHc4UriRequest(final @Nullable Object request) {
     if (request == null) {
       return null;
     }
@@ -150,7 +152,7 @@ public final class HttpUrlExtractor {
    *     null}
    * @return the URI string, or {@code null} if extraction fails
    */
-  public static @Nullable String fromApacheHc5Request(final Object request) {
+  public static @Nullable String fromApacheHc5Request(final @Nullable Object request) {
     if (request == null) {
       return null;
     }
@@ -182,7 +184,8 @@ public final class HttpUrlExtractor {
    * @param request an {@code org.apache.hc.core5.http.ClassicHttpRequest}; may be {@code null}
    * @return the URL string, or {@code null} if extraction fails
    */
-  public static @Nullable String fromApacheHc5HostRequest(final Object host, final Object request) {
+  public static @Nullable String fromApacheHc5HostRequest(
+      final @Nullable Object host, final @Nullable Object request) {
     try {
       final Object target = request == null ? null : invoke(request, "getRequestUri");
       final String path = target == null ? "" : target.toString();
@@ -206,7 +209,7 @@ public final class HttpUrlExtractor {
    *     null}
    * @return the URI string, or {@code null} if extraction fails
    */
-  public static @Nullable String fromReactorNettyClient(final Object client) {
+  public static @Nullable String fromReactorNettyClient(final @Nullable Object client) {
     if (client == null) {
       return null;
     }

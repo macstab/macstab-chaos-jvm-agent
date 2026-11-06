@@ -37,9 +37,9 @@ public final class ClientDispatch {
   public void beforeClientCall(
       final String operation,
       final Object client,
-      final String target,
-      final String detail,
-      final Object remoteAddress)
+      final @Nullable String target,
+      final @Nullable String detail,
+      final @Nullable Object remoteAddress)
       throws Throwable {
     final OperationType operationType = OperationType.valueOf(operation);
     if (engine.idle(operationType)) {
@@ -81,7 +81,8 @@ public final class ClientDispatch {
    * @return {@code true} to suppress the call; {@code false} for normal execution
    * @throws Throwable if an active scenario throws to simulate a failure
    */
-  public boolean beforeHttpSend(final String url, final OperationType opType) throws Throwable {
+  public boolean beforeHttpSend(final @Nullable String url, final OperationType opType)
+      throws Throwable {
     final RuntimeDecision decision =
         (engine.idle(opType)
             ? RuntimeDecision.none()
@@ -116,7 +117,7 @@ public final class ClientDispatch {
    * @return {@code true} to suppress the acquire; {@code false} for normal execution
    * @throws Throwable if an active scenario throws to simulate a failure
    */
-  public boolean beforeJdbcConnectionAcquire(final String poolName) throws Throwable {
+  public boolean beforeJdbcConnectionAcquire(final @Nullable String poolName) throws Throwable {
     return evaluateJdbc(OperationType.JDBC_CONNECTION_ACQUIRE, "jdbc.pool", poolName);
   }
 
@@ -128,7 +129,7 @@ public final class ClientDispatch {
    * @return {@code true} to suppress the call; {@code false} for normal execution
    * @throws Throwable if an active scenario throws to simulate a failure
    */
-  public boolean beforeJdbcStatementExecute(final String sql) throws Throwable {
+  public boolean beforeJdbcStatementExecute(final @Nullable String sql) throws Throwable {
     return evaluateJdbc(OperationType.JDBC_STATEMENT_EXECUTE, "java.sql.Statement", snippet(sql));
   }
 
@@ -140,7 +141,7 @@ public final class ClientDispatch {
    * @return {@code true} to suppress the call; {@code false} for normal execution
    * @throws Throwable if an active scenario throws to simulate a failure
    */
-  public boolean beforeJdbcPreparedStatement(final String sql) throws Throwable {
+  public boolean beforeJdbcPreparedStatement(final @Nullable String sql) throws Throwable {
     return evaluateJdbc(OperationType.JDBC_PREPARED_STATEMENT, "java.sql.Connection", snippet(sql));
   }
 

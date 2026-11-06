@@ -82,7 +82,8 @@ public final class NetworkDispatch {
    * @throws Throwable if an active scenario fails the shutdown
    */
   public void beforeSocketShutdown(
-      final Object endpoint, final Object remoteAddress, final int remotePort) throws Throwable {
+      final Object endpoint, final @Nullable Object remoteAddress, final int remotePort)
+      throws Throwable {
     if (engine.idle(OperationType.SOCKET_SHUTDOWN)) {
       return;
     }
@@ -370,7 +371,7 @@ public final class NetworkDispatch {
    * @throws Throwable if an active scenario fails the call
    */
   public int beforeDatagram(
-      final String operation, final Object channel, final Object peer, final int length)
+      final String operation, final Object channel, final @Nullable Object peer, final int length)
       throws Throwable {
     final OperationType operationType =
         "DATAGRAM_SEND".equals(operation)

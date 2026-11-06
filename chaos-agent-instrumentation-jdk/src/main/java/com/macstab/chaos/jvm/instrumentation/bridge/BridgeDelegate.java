@@ -53,7 +53,7 @@ public interface BridgeDelegate {
    * @return the (possibly wrapped) runnable; equals {@code task} when no active scenario applies
    * @throws Throwable if the delegate throws
    */
-  Runnable decorateExecutorRunnable(String operation, Object executor, Runnable task)
+  Runnable decorateExecutorRunnable(String operation, @Nullable Object executor, Runnable task)
       throws Throwable;
 
   /**
@@ -67,8 +67,8 @@ public interface BridgeDelegate {
    * @return the (possibly wrapped) callable; equals {@code task} when no active scenario applies
    * @throws Throwable if the delegate throws
    */
-  <T> Callable<T> decorateExecutorCallable(String operation, Object executor, Callable<T> task)
-      throws Throwable;
+  <T> Callable<T> decorateExecutorCallable(
+      String operation, @Nullable Object executor, Callable<T> task) throws Throwable;
 
   /**
    * Called immediately before {@link Thread#start()} transfers the thread to the OS scheduler.
@@ -86,12 +86,12 @@ public interface BridgeDelegate {
   /**
    * Called at the top of a thread-pool worker's run loop, before the next task is dequeued.
    *
-   * @param executor the thread pool owning this worker; may be {@code null}
+   * @param executor the thread pool owning this worker
    * @param worker the worker thread currently executing; never {@code null}
    * @param task the task about to run, when available from the framework; may be {@code null}
    * @throws Throwable if an active scenario injects an exception to stall or disrupt the worker
    */
-  void beforeWorkerRun(Object executor, Thread worker, Runnable task) throws Throwable;
+  void beforeWorkerRun(Object executor, Thread worker, @Nullable Runnable task) throws Throwable;
 
   /**
    * Called before a {@link java.util.concurrent.ForkJoinTask} begins execution on a {@link
@@ -112,7 +112,8 @@ public interface BridgeDelegate {
    *     scenario has vetoed this tick
    * @throws Throwable if the delegate throws
    */
-  boolean beforeScheduledTick(Object executor, Object task, boolean periodic) throws Throwable;
+  boolean beforeScheduledTick(@Nullable Object executor, @Nullable Object task, boolean periodic)
+      throws Throwable;
 
   /**
    * Called before a blocking-queue operation such as {@code put}, {@code take}, or {@code offer}.
@@ -122,7 +123,7 @@ public interface BridgeDelegate {
    * @param queue the queue instance; may be {@code null} if not available from the advice context
    * @throws Throwable if an active scenario injects an exception or decides to throw
    */
-  void beforeQueueOperation(String operation, Object queue) throws Throwable;
+  void beforeQueueOperation(String operation, @Nullable Object queue) throws Throwable;
 
   /**
    * Called before a boolean-returning queue operation such as {@code offer(e, timeout, unit)}.
@@ -133,7 +134,8 @@ public interface BridgeDelegate {
    *     Boolean.FALSE} to force {@code false}, or {@code null} to let the original call proceed
    * @throws Throwable if the delegate throws
    */
-  @Nullable Boolean beforeBooleanQueueOperation(String operation, Object queue) throws Throwable;
+  @Nullable Boolean beforeBooleanQueueOperation(String operation, @Nullable Object queue)
+      throws Throwable;
 
   /**
    * Called before a {@link java.util.concurrent.CompletableFuture} completion method ({@code
@@ -149,7 +151,7 @@ public interface BridgeDelegate {
    * @throws Throwable if the delegate throws
    */
   @Nullable Boolean beforeCompletableFutureComplete(
-      String operation, CompletableFuture<?> future, Object payload) throws Throwable;
+      String operation, CompletableFuture<?> future, @Nullable Object payload) throws Throwable;
 
   /**
    * Called inside {@link ClassLoader#loadClass(String)} before class resolution begins.
@@ -173,7 +175,7 @@ public interface BridgeDelegate {
    *     when an active scenario is replacing or suppressing the resource
    * @throws Throwable if the delegate throws
    */
-  @Nullable URL afterResourceLookup(ClassLoader loader, String name, URL currentValue)
+  @Nullable URL afterResourceLookup(ClassLoader loader, String name, @Nullable URL currentValue)
       throws Throwable;
 
   /**
@@ -314,7 +316,7 @@ public interface BridgeDelegate {
    * @param target the object on which the method is being invoked; {@code null} for static methods
    * @throws Throwable if an active scenario injects an exception to abort the reflective call
    */
-  void beforeReflectionInvoke(Object method, Object target) throws Throwable;
+  void beforeReflectionInvoke(Object method, @Nullable Object target) throws Throwable;
 
   /**
    * Called before {@link java.nio.ByteBuffer#allocateDirect(int)}.
@@ -343,7 +345,7 @@ public interface BridgeDelegate {
    *     did not supply a name
    * @throws Throwable if an active scenario wants to simulate a class-definition failure
    */
-  void beforeClassDefine(Object loader, String className) throws Throwable;
+  void beforeClassDefine(Object loader, @Nullable String className) throws Throwable;
 
   /**
    * Called before {@code AbstractQueuedSynchronizer.acquire(int)} as a proxy for monitor-enter
@@ -355,7 +357,7 @@ public interface BridgeDelegate {
    *     available (e.g. instrumentation could not bind {@code @Advice.This})
    * @throws Throwable if an active scenario injects an exception
    */
-  void beforeMonitorEnter(Object lock) throws Throwable;
+  void beforeMonitorEnter(@Nullable Object lock) throws Throwable;
 
   /**
    * Called before {@code LockSupport.park(Object)}, {@code parkNanos}, or {@code parkUntil}.
@@ -423,7 +425,7 @@ public interface BridgeDelegate {
    * @throws Throwable if an active scenario injects a failure to simulate a read error or timeout
    */
   int beforeSocketRead(
-      Object stream, int len, Object remoteAddress, int remotePort, int soTimeoutMillis)
+      Object stream, int len, @Nullable Object remoteAddress, int remotePort, int soTimeoutMillis)
       throws Throwable;
 
   /**
@@ -436,7 +438,7 @@ public interface BridgeDelegate {
    * @return the bytes to write: {@code len}, or a shorter prefix under a torn write
    * @throws Throwable if an active scenario injects a failure to simulate a write error
    */
-  int beforeSocketWrite(Object stream, int len, Object remoteAddress, int remotePort)
+  int beforeSocketWrite(Object stream, int len, @Nullable Object remoteAddress, int remotePort)
       throws Throwable;
 
   /**
@@ -519,7 +521,8 @@ public interface BridgeDelegate {
    * @return {@code length}, {@code Integer.MIN_VALUE} to drop a send, or the corrupt flag
    * @throws Throwable if an active scenario fails the call
    */
-  int beforeDatagram(String operation, Object channel, Object peer, int length) throws Throwable;
+  int beforeDatagram(String operation, Object channel, @Nullable Object peer, int length)
+      throws Throwable;
 
   /**
    * Called before a reverse lookup.
@@ -547,7 +550,8 @@ public interface BridgeDelegate {
    * @param remotePort the peer port
    * @throws Throwable if an active scenario fails the shutdown
    */
-  void beforeSocketShutdown(Object endpoint, Object remoteAddress, int remotePort) throws Throwable;
+  void beforeSocketShutdown(Object endpoint, @Nullable Object remoteAddress, int remotePort)
+      throws Throwable;
 
   /**
    * Rewrites an instant read from the system {@code java.time.Clock} for clock skew.
@@ -586,7 +590,7 @@ public interface BridgeDelegate {
    *     valid)
    * @throws Throwable if an active scenario injects a failure to simulate a serialization error
    */
-  void beforeObjectSerialize(Object stream, Object obj) throws Throwable;
+  void beforeObjectSerialize(Object stream, @Nullable Object obj) throws Throwable;
 
   /**
    * Called before {@code System.loadLibrary(name)} or {@code System.load(path)}.
@@ -654,7 +658,7 @@ public interface BridgeDelegate {
    * @return {@code true} to suppress the set; {@code false} for normal execution
    * @throws Throwable if the delegate throws
    */
-  boolean beforeThreadLocalSet(Object threadLocal, Object value) throws Throwable;
+  boolean beforeThreadLocalSet(Object threadLocal, @Nullable Object value) throws Throwable;
 
   /**
    * Called before {@code MBeanServer.invoke(ObjectName, String, Object[], String[])}.
@@ -688,7 +692,7 @@ public interface BridgeDelegate {
    *     com.macstab.chaos.jvm.api.ChaosHttpSuppressException}); {@code false} for normal execution
    * @throws Throwable if the delegate throws
    */
-  boolean beforeHttpSend(String url) throws Throwable;
+  boolean beforeHttpSend(@Nullable String url) throws Throwable;
 
   /**
    * Called before an asynchronous HTTP client send (Java {@code HttpClient.sendAsync}, OkHttp
@@ -698,7 +702,7 @@ public interface BridgeDelegate {
    * @return {@code true} to suppress the send; {@code false} for normal execution
    * @throws Throwable if the delegate throws
    */
-  boolean beforeHttpSendAsync(String url) throws Throwable;
+  boolean beforeHttpSendAsync(@Nullable String url) throws Throwable;
 
   /**
    * Called before a JDBC connection is acquired from a pool (HikariCP, c3p0).
@@ -707,7 +711,7 @@ public interface BridgeDelegate {
    * @return {@code true} to suppress the acquisition; {@code false} for normal execution
    * @throws Throwable if the delegate throws
    */
-  boolean beforeJdbcConnectionAcquire(String poolName) throws Throwable;
+  boolean beforeJdbcConnectionAcquire(@Nullable String poolName) throws Throwable;
 
   /**
    * Called before a {@link java.sql.Statement} execute call.
@@ -716,7 +720,7 @@ public interface BridgeDelegate {
    * @return {@code true} to suppress the call; {@code false} for normal execution
    * @throws Throwable if the delegate throws
    */
-  boolean beforeJdbcStatementExecute(String sql) throws Throwable;
+  boolean beforeJdbcStatementExecute(@Nullable String sql) throws Throwable;
 
   /**
    * Called before a {@link java.sql.Connection#prepareStatement(String)} call.
@@ -725,7 +729,7 @@ public interface BridgeDelegate {
    * @return {@code true} to suppress the call; {@code false} for normal execution
    * @throws Throwable if the delegate throws
    */
-  boolean beforeJdbcPreparedStatement(String sql) throws Throwable;
+  boolean beforeJdbcPreparedStatement(@Nullable String sql) throws Throwable;
 
   /**
    * Called before a {@link java.sql.Connection#commit()} call.
@@ -760,7 +764,7 @@ public interface BridgeDelegate {
    * @return the name to resolve: {@code hostname}, or another under a {@code DnsRewriteEffect}
    * @throws Throwable if the delegate throws
    */
-  @Nullable String beforeDnsResolve(String hostname) throws Throwable;
+  @Nullable String beforeDnsResolve(@Nullable String hostname) throws Throwable;
 
   /**
    * Called when {@link java.net.InetAddress#getAllByName(String)} returns or fails.
@@ -772,7 +776,8 @@ public interface BridgeDelegate {
    * @throws Throwable if a scenario rejects the lookup
    */
   java.net.InetAddress @Nullable [] afterDnsAnswer(
-      String hostname, java.net.InetAddress[] answer, Throwable failure) throws Throwable;
+      String hostname, java.net.InetAddress @Nullable [] answer, @Nullable Throwable failure)
+      throws Throwable;
 
   /**
    * Called before {@link javax.net.ssl.SSLSocket#startHandshake()} or {@link
@@ -794,7 +799,8 @@ public interface BridgeDelegate {
    * @return {@code byteCount}, encoded as {@code -(count) - 1} to corrupt a read's bytes
    * @throws Throwable if the delegate throws
    */
-  int beforeFileIo(String operation, Object stream, String path, int byteCount) throws Throwable;
+  int beforeFileIo(String operation, Object stream, @Nullable String path, int byteCount)
+      throws Throwable;
 
   /**
    * Called on entry to a method woven for a {@code MethodSelector}.
@@ -818,7 +824,8 @@ public interface BridgeDelegate {
    * @throws Throwable if a scenario fails the call
    */
   @Nullable Object afterMethodExit(
-      Class<?> declaringType, String methodName, String descriptor, Object value) throws Throwable;
+      Class<?> declaringType, String methodName, String descriptor, @Nullable Object value)
+      throws Throwable;
 
   /**
    * Called before a call through a client library.
@@ -831,7 +838,11 @@ public interface BridgeDelegate {
    * @throws Throwable if a scenario rejects the call
    */
   void beforeClientCall(
-      String operation, Object client, String target, String detail, Object remoteAddress)
+      String operation,
+      Object client,
+      @Nullable String target,
+      @Nullable String detail,
+      @Nullable Object remoteAddress)
       throws Throwable;
 
   /**

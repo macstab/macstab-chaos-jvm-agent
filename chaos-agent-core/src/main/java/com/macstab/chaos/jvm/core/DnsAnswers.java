@@ -29,8 +29,8 @@ final class DnsAnswers {
   static InetAddress @Nullable [] shape(
       final ChaosEffect.DnsAnswerEffect effect,
       final String hostname,
-      final InetAddress[] answer,
-      final Throwable failure,
+      final InetAddress @Nullable [] answer,
+      final @Nullable Throwable failure,
       final java.util.Random random)
       throws UnknownHostException {
     final List<InetAddress> addresses = new ArrayList<>();

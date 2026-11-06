@@ -29,7 +29,8 @@ public final class RuntimeDispatch {
    * @param className the binary name of the class being loaded
    * @throws Throwable if a matching scenario's terminal action mandates it
    */
-  public void beforeClassLoad(final ClassLoader loader, final String className) throws Throwable {
+  public void beforeClassLoad(final @Nullable ClassLoader loader, final String className)
+      throws Throwable {
     engine.applyPreDecision(
         (engine.idle(OperationType.CLASS_LOAD)
             ? RuntimeDecision.none()
@@ -55,7 +56,8 @@ public final class RuntimeDispatch {
    * @throws Throwable if a matching scenario's terminal action mandates it
    */
   public @Nullable URL afterResourceLookup(
-      final ClassLoader loader, final String name, final URL currentValue) throws Throwable {
+      final @Nullable ClassLoader loader, final String name, final @Nullable URL currentValue)
+      throws Throwable {
     final RuntimeDecision decision =
         (engine.idle(OperationType.RESOURCE_LOAD)
             ? RuntimeDecision.none()
@@ -146,7 +148,8 @@ public final class RuntimeDispatch {
    * @param target the receiver of the reflective invocation (static methods pass {@code null})
    * @throws Throwable if a matching scenario's terminal action mandates it
    */
-  public void beforeReflectionInvoke(final Object method, final Object target) throws Throwable {
+  public void beforeReflectionInvoke(final @Nullable Object method, final @Nullable Object target)
+      throws Throwable {
     final String methodName;
     final String declaringClass;
     if (method instanceof java.lang.reflect.Method reflectMethod) {
@@ -204,7 +207,7 @@ public final class RuntimeDispatch {
    *     {@code null}
    * @throws Throwable if a matching scenario's terminal action mandates it
    */
-  public void beforeObjectDeserialize(final Object stream) throws Throwable {
+  public void beforeObjectDeserialize(final @Nullable Object stream) throws Throwable {
     engine.applyPreDecision(
         (engine.idle(OperationType.OBJECT_DESERIALIZE)
             ? RuntimeDecision.none()
@@ -227,7 +230,8 @@ public final class RuntimeDispatch {
    * @param className the binary name of the class being defined
    * @throws Throwable if a matching scenario's terminal action mandates it
    */
-  public void beforeClassDefine(final Object loader, final String className) throws Throwable {
+  public void beforeClassDefine(final @Nullable Object loader, final @Nullable String className)
+      throws Throwable {
     engine.applyPreDecision(
         (engine.idle(OperationType.CLASS_DEFINE)
             ? RuntimeDecision.none()
@@ -275,7 +279,8 @@ public final class RuntimeDispatch {
    * @param obj the object being serialized
    * @throws Throwable if an active scenario throws to simulate a failure
    */
-  public void beforeObjectSerialize(final Object stream, final Object obj) throws Throwable {
+  public void beforeObjectSerialize(final Object stream, final @Nullable Object obj)
+      throws Throwable {
     engine.applyPreDecision(
         (engine.idle(OperationType.OBJECT_SERIALIZE)
             ? RuntimeDecision.none()
