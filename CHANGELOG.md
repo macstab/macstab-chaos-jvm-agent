@@ -89,6 +89,7 @@ Migration steps for each change: [docs/migration-2.0.md](docs/migration-2.0.md).
 
 ### Bug Fixes
 
+* **instrumentation:** a scheduled `Callable` that threw `InterruptedException` left the pool worker interrupted, even with no scenario active: the wrapper re-set the interrupt flag for the task's own exception, so completion callbacks running on the worker saw an interrupted thread. Only an interrupt from the chaos hook is restored now.
 * **core:** a `rateLimit` permit was used up by a contribution that then did not take effect (an effect that does not apply to the call, a lost precedence, an exhausted `maxApplications`): with `trickle(16)` limited to one per hour, a short read the trickle could not shape took the hour's permit and the next large read was not shaped. A contribution that does not take effect now returns its permit.
 * **core:** a `delay` below a millisecond was truncated to no delay while counting as applied, and every delay lost its sub-millisecond part (1.5 ms slept 1 ms). Delays are drawn and slept to the nanosecond; the `delayMillis` event attribute is unchanged.
 * **core:** clock skew was applied to `Instant` and `java.time` reads in whole milliseconds: a skew below a millisecond was accepted but never moved them (only `nanoTime`), and a FREEZE kept the real sub-millisecond part, so frozen `Instant.now()` readings still moved and could run backwards within their millisecond. Wall-clock reads are skewed in nanoseconds now and a frozen instant is the same at every read; `currentTimeMillis` takes the offset floored to the millisecond.

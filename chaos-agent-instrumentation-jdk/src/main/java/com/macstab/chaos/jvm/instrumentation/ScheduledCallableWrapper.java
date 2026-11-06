@@ -39,34 +39,36 @@ public final class ScheduledCallableWrapper<T> implements Callable<T> {
 
   @Override
   public @Nullable T call() throws Exception {
+    final Object executor = executorRef.get();
+    final boolean proceed;
     try {
-      final Object executor = executorRef.get();
-      if (executor != null && !BootstrapDispatcher.beforeScheduledTick(executor, delegate, false)) {
-        // Suppression contract: the scenario has vetoed execution. A Callable<T> cannot
-        // honour that by silently returning null — the caller's Future.get() would then
-        // yield null and NPE on unboxing downstream (for Callable<Integer> etc.) with no
-        // chaos signal in the stack trace. Throwing CancellationException is the only
-        // honest option: the ScheduledFutureTask wraps it into ExecutionException whose
-        // cause clearly identifies the chaos scenario as the source. The Runnable path
-        // can no-op because it has no return value; Callable must not.
-        throw new CancellationException(
-            "chaos: scheduled callable suppressed by scenario (task="
-                + delegate.getClass().getName()
-                + ")");
-      }
-      return delegate.call();
-    } catch (final Throwable throwable) {
-      // Restore the interrupt flag before re-throwing. Without this, an InterruptedException
-      // thrown by delegate.call() (or by the chaos hook itself) would clear the worker
-      // thread's interrupt bit, defeating cooperative cancellation in the enclosing
-      // ScheduledThreadPoolExecutor — the worker keeps running subsequent tasks as if no
-      // interrupt had occurred.
-      if (throwable instanceof InterruptedException) {
+      proceed =
+          executor == null || BootstrapDispatcher.beforeScheduledTick(executor, delegate, false);
+    } catch (final Throwable chaosFailure) {
+      // Restore the interrupt flag before re-throwing: an InterruptedException thrown by the
+      // chaos hook clears the worker thread's interrupt bit, defeating cooperative cancellation
+      // in the enclosing ScheduledThreadPoolExecutor.
+      if (chaosFailure instanceof InterruptedException) {
         Thread.currentThread().interrupt();
       }
-      sneakyThrow(throwable);
+      sneakyThrow(chaosFailure);
       return null; // unreachable
     }
+    if (!proceed) {
+      // Suppression contract: the scenario has vetoed execution. A Callable<T> cannot
+      // honour that by silently returning null — the caller's Future.get() would then
+      // yield null and NPE on unboxing downstream (for Callable<Integer> etc.) with no
+      // chaos signal in the stack trace. Throwing CancellationException is the only
+      // honest option: the ScheduledFutureTask wraps it into ExecutionException whose
+      // cause clearly identifies the chaos scenario as the source. The Runnable path
+      // can no-op because it has no return value; Callable must not.
+      throw new CancellationException(
+          "chaos: scheduled callable suppressed by scenario (task="
+              + delegate.getClass().getName()
+              + ")");
+    }
+    // The delegate's own exceptions pass through untouched, its interrupt status as it left it.
+    return delegate.call();
   }
 
   /**

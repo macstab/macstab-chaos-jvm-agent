@@ -152,8 +152,9 @@ class ScheduledCallableWrapperTest {
     }
 
     @Test
-    @DisplayName("an interrupt from delegate.call() is rethrown with the interrupt flag restored")
-    void interruptFromDelegateRestoresTheFlag() throws Exception {
+    @DisplayName(
+        "an interrupt from delegate.call() is rethrown; the flag stays as the task left it")
+    void interruptFromDelegateLeavesTheFlag() throws Exception {
       installTickBridge((e, t, p) -> true);
       final InterruptedException interrupted = new InterruptedException("from-delegate");
       final ScheduledCallableWrapper<String> wrapper =
@@ -164,7 +165,9 @@ class ScheduledCallableWrapperTest {
               });
       try {
         assertThatThrownBy(wrapper::call).isSameAs(interrupted);
-        assertThat(Thread.currentThread().isInterrupted()).isTrue();
+        assertThat(Thread.currentThread().isInterrupted())
+            .as("the task consumed the interrupt; without chaos the worker is not interrupted")
+            .isFalse();
       } finally {
         Thread.interrupted();
       }
