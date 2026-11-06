@@ -129,11 +129,9 @@ class ChaosMeterBinderTest {
     } catch (final RuntimeException conflict) {
       // the id is taken: the second activation fails
     }
-    final long deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
-    while (registry.find("chaos.activation.failures").counter() == null
-        && System.nanoTime() < deadline) {
-      Thread.sleep(10L);
-    }
+    await()
+        .atMost(Duration.ofSeconds(5))
+        .until(() -> registry.find("chaos.activation.failures").counter() != null);
     assertThat(
             registry
                 .get("chaos.activation.failures")
@@ -144,8 +142,8 @@ class ChaosMeterBinderTest {
 
     binder.close();
     binder.close();
+    // close() removed the listener: this application is never handed to the binder.
     runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
-    Thread.sleep(50L);
     assertThat(registry.find("chaos.applications").counter()).isNull();
   }
 
