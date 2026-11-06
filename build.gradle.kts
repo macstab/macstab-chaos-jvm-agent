@@ -458,8 +458,7 @@ tasks.register("childJvmCoverage") {
     val source = project(":chaos-agent-bootstrap").layout.buildDirectory.file("jacoco/child-jvms.exec")
     val target = layout.buildDirectory.file("jacoco/child-jvms-remapped.exec")
     val classDirs = agentModules.map { project(":$it").layout.buildDirectory.dir("classes/java/main") }
-    // Both are inputs: without them the task counted as up to date and kept data remapped onto
-    // classes that no longer exist.
+    // Both are inputs, so new execution data or changed module classes remap again.
     inputs.files(source).withPropertyName("childExecutionData").optional()
     inputs.files(classDirs).withPropertyName("moduleClasses")
     outputs.file(target)
