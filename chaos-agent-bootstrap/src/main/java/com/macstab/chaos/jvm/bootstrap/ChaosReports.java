@@ -235,7 +235,13 @@ final class ChaosReports implements AutoCloseable {
                   + Long.toHexString(ThreadLocalRandom.current().nextLong())
                   + "-"
                   + name);
-      Files.writeString(staging, content, StandardCharsets.UTF_8);
+      // CREATE_NEW: never write through a file or link someone else placed in a shared directory.
+      Files.writeString(
+          staging,
+          content,
+          StandardCharsets.UTF_8,
+          java.nio.file.StandardOpenOption.CREATE_NEW,
+          java.nio.file.StandardOpenOption.WRITE);
       Files.move(
           staging,
           directory.resolve(name),
