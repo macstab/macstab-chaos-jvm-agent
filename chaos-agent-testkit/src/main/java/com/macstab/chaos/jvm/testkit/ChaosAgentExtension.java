@@ -3,11 +3,13 @@ package com.macstab.chaos.jvm.testkit;
 import com.macstab.chaos.jvm.api.ChaosControlPlane;
 import com.macstab.chaos.jvm.api.ChaosSession;
 import com.macstab.chaos.jvm.bootstrap.ChaosPlatform;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.extension.AfterEachCallback;
 import org.junit.jupiter.api.extension.BeforeEachCallback;
 import org.junit.jupiter.api.extension.ExtensionContext;
 import org.junit.jupiter.api.extension.ParameterContext;
 import org.junit.jupiter.api.extension.ParameterResolver;
+import org.junit.platform.commons.support.AnnotationSupport;
 
 /**
  * JUnit 5 extension that integrates the chaos agent into the JUnit lifecycle, providing per-test
@@ -37,8 +39,9 @@ import org.junit.jupiter.api.extension.ParameterResolver;
  *       (self-attaching if necessary via {@link ChaosPlatform#installLocally()}), then opens a
  *       fresh {@link ChaosSession} scoped to the test's display name. The {@link ChaosControlPlane}
  *       and {@link ChaosSession} are stored in the JUnit {@link ExtensionContext} store. Scenarios
- *       declared with {@link WithChaos} on the test class and method are then activated, and the
- *       test thread is bound to the session so session-scoped ones reach the test body.
+ *       declared with {@link WithChaos} on the test class, the classes a {@code @Nested} test class
+ *       runs inside, and the method are then activated, and the test thread is bound to the session
+ *       so session-scoped ones reach the test body.
  *   <li><b>After each test</b> ({@link #afterEach}): closes the session, which stops all
  *       session-scoped scenarios and releases any session-bound threads. The session is removed
  *       from the store to prevent cross-test leakage.
@@ -84,16 +87,34 @@ public final class ChaosAgentExtension
     final ChaosSession session = tracker.openSession(context.getDisplayName());
     context.getStore(NAMESPACE).put(ChaosControlPlane.class, tracker);
     context.getStore(NAMESPACE).put(ChaosSession.class, session);
-    // Both run: the class's and the method's scenarios are activated, whichever declares any.
-    final boolean onClass =
-        !WithChaosSupport.activate(context.getRequiredTestClass(), tracker, session).isEmpty();
-    final boolean onMethod =
+    // The scenarios of the classes and of the method are all activated, whichever declare any.
+    boolean declared = false;
+    for (final Class<?> testClass : testClasses(context.getRequiredTestClass())) {
+      declared |= !WithChaosSupport.activate(testClass, tracker, session).isEmpty();
+    }
+    declared |=
         !WithChaosSupport.activate(context.getRequiredTestMethod(), tracker, session).isEmpty();
-    final boolean declared = onClass || onMethod;
     if (declared) {
       // Declared session scenarios must reach the test body without a manual bind().
       context.getStore(NAMESPACE).put(ChaosSession.ScopeBinding.class, session.bind());
     }
+  }
+
+  /**
+   * Returns the test class and the classes enclosing it, outermost first: a {@code @Nested} test
+   * runs inside them, so their {@link WithChaos} scenarios apply to it.
+   */
+  private static java.util.List<Class<?>> testClasses(final Class<?> testClass) {
+    final java.util.Deque<Class<?>> classes = new java.util.ArrayDeque<>();
+    for (Class<?> current = testClass;
+        current != null;
+        current =
+            AnnotationSupport.isAnnotated(current, Nested.class)
+                ? current.getEnclosingClass()
+                : null) {
+      classes.addFirst(current);
+    }
+    return java.util.List.copyOf(classes);
   }
 
   /**

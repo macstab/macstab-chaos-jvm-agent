@@ -89,6 +89,7 @@ Migration steps for each change: [docs/migration-2.0.md](docs/migration-2.0.md).
 
 ### Bug Fixes
 
+* **testkit:** a `@Nested` test ran without the `@WithChaos` scenarios of the classes it is nested in, so it passed without the chaos it was meant to see. The enclosing classes' scenarios are activated for it, outermost first.
 * **spring:** with the application starter on the test classpath and `macstab.chaos.enabled=true`, a `@ChaosTest` context got the application starter's untracked control plane instead of the test starter's tracked one (both declare `chaosControlPlane`, and nothing ordered them), so JVM-scoped scenarios activated through the injected bean leaked into later test classes. The test configuration is ordered first.
 * **bootstrap:** the agent argument `configWatchInterval=0` did not turn watching off when `MACSTAB_CHAOS_WATCH_INTERVAL` was set: only a positive argument took precedence. The argument decides whenever it is given, as documented.
 * **bootstrap:** while a reloaded plan file named a scenario id that a scenario activated elsewhere held, every poll stopped the changed scenarios, failed on the conflict and started them again, resetting their counters, budgets and windows, and recorded one more activation failure. The conflict is now found before anything changes; the running scenarios keep running and the file is retried.

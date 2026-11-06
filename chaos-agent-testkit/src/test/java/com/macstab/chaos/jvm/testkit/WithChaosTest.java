@@ -64,6 +64,17 @@ class WithChaosTest {
   }
 
   @Nested
+  @DisplayName("in a @Nested class")
+  class InANestedClass {
+
+    @Test
+    @DisplayName("the outer class's scenarios apply to the nested test")
+    void outerScenariosApply(final ChaosControlPlane controlPlane) {
+      assertThat(controlPlane.diagnostics().scenario("wc-class-jvm")).isPresent();
+    }
+  }
+
+  @Nested
   @DisplayName("WithChaosSupport")
   class Support {
 

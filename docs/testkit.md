@@ -164,6 +164,8 @@ When each extension activates and stops them:
 | `ChaosMicronautExtension`                   | `beforeAll` → `afterAll`             | `beforeEach` → `afterEach`       | no (bind, or use `JVM` scope)    |
 | `ChaosQuarkusExtension`                     | `beforeAll` → `afterAll`             | `beforeEach` → `afterEach`       | no (bind, or use `JVM` scope)    |
 
+A class-level `@WithChaos` applies to the class's `@Nested` classes too: the testkit activates the enclosing classes' scenarios, outermost first, for each nested test; the other extensions keep the outer class's scenarios active, in the session the nested classes share, while they run.
+
 An annotation with neither or both of `value` and `resource`, a missing resource or invalid JSON fails the test before it runs (`IllegalArgumentException`, or the parser's `ConfigLoadException` with line and column); scenarios already activated for that test are stopped first. The Quarkus extension's older `@ChaosScenario` annotation still works but is deprecated for removal in 3.0: it knows only a few selectors and effect shorthands, while `@WithChaos` covers every selector, effect and policy field.
 
 `WithChaosSupport.activate(element, controlPlane, session)` does the work and is public, for extensions of other frameworks.
