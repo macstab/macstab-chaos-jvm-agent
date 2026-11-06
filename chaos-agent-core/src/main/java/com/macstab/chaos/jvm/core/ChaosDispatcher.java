@@ -147,7 +147,7 @@ public final class ChaosDispatcher {
   ChaosDispatcher(final ChaosControlPlaneImpl controlPlane) {
     this.engine = new DispatchEngine(controlPlane);
     this.thread = new ThreadDispatch(engine);
-    this.executor = new ExecutorDispatch(engine, controlPlane.shutdownHooks());
+    this.executor = new ExecutorDispatch(engine);
     this.method = new MethodDispatch(engine);
     this.clock = new ClockDispatch(engine);
     this.runtime = new RuntimeDispatch(engine);

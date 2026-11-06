@@ -891,12 +891,12 @@ public final class BootstrapDispatcher {
   }
 
   /**
-   * Wraps a shutdown hook thread before it is registered with the JVM, allowing a scenario to track
-   * or intercept JVM shutdown.
+   * Evaluates a shutdown hook before it is registered with the JVM: a scenario can delay or reject
+   * the registration. The hook itself is registered.
    *
    * @param hook the shutdown-hook thread submitted by the application; {@code null} when the
    *     application passed none (the JDK then throws)
-   * @return the (possibly wrapped) thread to register; equals {@code hook} as the fallback
+   * @return the thread to register: {@code hook}
    * @throws Throwable if the delegate throws
    */
   public static @Nullable Thread decorateShutdownHook(final @Nullable Thread hook)
@@ -921,14 +921,11 @@ public final class BootstrapDispatcher {
   }
 
   /**
-   * Resolves the original application hook from a previously wrapped hook thread.
-   *
-   * <p>Called when the JVM removes a shutdown hook (e.g. via {@code Runtime.removeShutdownHook}),
-   * so that the lookup key matches the wrapper registered by {@link #decorateShutdownHook}.
+   * Resolves the thread to remove when the application calls {@code Runtime.removeShutdownHook}.
+   * Hooks are registered as themselves, so this is the hook passed in.
    *
    * @param original the thread passed to {@code removeShutdownHook}; never {@code null}
-   * @return the registered wrapper thread, or {@code original} if no wrapping occurred or the
-   *     delegate is not installed
+   * @return the thread to remove: {@code original}
    */
   public static Thread resolveShutdownHook(final Thread original) {
     // Use a safe (non-sneaky-throwing) fallback path: any chaos exception here would propagate

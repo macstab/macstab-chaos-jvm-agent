@@ -47,7 +47,6 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
   private final ScopeContext scopeContext;
   private final ObservabilityBus observabilityBus;
   private final ScenarioRegistry registry;
-  private final Map<Thread, Thread> shutdownHooks = new ConcurrentHashMap<>();
   private final AtomicBoolean closed = new AtomicBoolean(false);
 
   /**
@@ -417,10 +416,6 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
 
   ObservabilityBus observabilityBus() {
     return observabilityBus;
-  }
-
-  Map<Thread, Thread> shutdownHooks() {
-    return shutdownHooks;
   }
 
   Clock clock() {

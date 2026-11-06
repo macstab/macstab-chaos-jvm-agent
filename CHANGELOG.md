@@ -89,6 +89,7 @@ Migration steps for each change: [docs/migration-2.0.md](docs/migration-2.0.md).
 
 ### Bug Fixes
 
+* **core:** once the shutdown-hook interception was woven, every `Runtime.addShutdownHook` registered a wrapper thread in place of the hook, even with no scenario active: a virtual-thread hook never ran, a hook already started was accepted, and the hook's context class loader, uncaught-exception handler and priority were lost. The hook itself is registered again; a scenario still delays or rejects the registration.
 * **bootstrap:** a config reload overtaken by the poller's `close()` applied nothing but still reconfigured observability, wrote an ok status and logged "config reloaded"; it now stops silently.
 * **instrumentation:** a bridge injection that failed with an unchecked exception left the bridge marked as injected, so every later install failed with "failed to install bridge delegate"; a retry now injects it.
 * **core:** `gcPressure` with a large rate of small objects wrapped the batch size to a negative count and allocated nothing while reporting itself running; the batch now saturates.

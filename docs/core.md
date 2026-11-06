@@ -25,7 +25,7 @@
 
 In scope:
 - `ChaosRuntime` — thin facade that composes the control-plane and dispatch halves. Implements `ChaosControlPlane` by delegation. Exists as a single entry point so downstream modules (`chaos-agent-bootstrap`, `chaos-agent-instrumentation-jdk`, testkit, benchmarks) bind to one type.
-- `ChaosControlPlaneImpl` (package-private) — actual control-plane implementation. Owns scenario registration, session lifecycle, diagnostics, event listeners, instrumentation handle, shutdown-hook tracking.
+- `ChaosControlPlaneImpl` (package-private) — actual control-plane implementation. Owns scenario registration, session lifecycle, diagnostics, event listeners, instrumentation handle.
 - `ChaosDispatcher` (package-private) — hot-path half. Owns the `before*` / `after*` / `adjust*` / `decorate*` interception methods invoked from `BootstrapDispatcher`.
 - `ScenarioController` — per-scenario runtime guard with the 9-step evaluation pipeline
 - `ScenarioRegistry` — thread-safe store of controllers plus an immutable `OperationType` → controllers index used by `match()`; implements `ChaosDiagnostics`

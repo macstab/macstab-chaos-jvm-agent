@@ -179,24 +179,22 @@ public interface BridgeDelegate {
       throws Throwable;
 
   /**
-   * Wraps a shutdown hook thread before it is registered with the JVM, allowing a scenario to track
-   * or intercept JVM shutdown.
+   * Evaluates a shutdown hook before it is registered with the JVM: a scenario can delay or reject
+   * the registration. The hook itself is registered.
    *
    * @param hook the shutdown-hook thread submitted by the application, or {@code null}
-   * @return the (possibly wrapped) thread to register; {@code null} for a {@code null} hook
+   * @return the thread to register: {@code hook}
    * @throws Throwable if the delegate throws
    */
   @Nullable Thread decorateShutdownHook(@Nullable Thread hook) throws Throwable;
 
   /**
-   * Resolves the original application hook from a previously wrapped hook thread.
-   *
-   * <p>Called when the JVM removes a shutdown hook (e.g. via {@code Runtime.removeShutdownHook}),
-   * so that the lookup key matches the wrapper registered by {@link #decorateShutdownHook}.
-   * Non-throwing: {@code RemoveShutdownHookAdvice} does not declare {@code throws Throwable}.
+   * Resolves the thread to remove when the application calls {@code Runtime.removeShutdownHook}.
+   * Hooks are registered as themselves, so this is the hook passed in. Non-throwing: {@code
+   * RemoveShutdownHookAdvice} does not declare {@code throws Throwable}.
    *
    * @param original the thread passed to {@code removeShutdownHook}; never {@code null}
-   * @return the registered wrapper thread, or {@code original} if no wrapping occurred
+   * @return the thread to remove: {@code original}
    */
   // Non-throwing: resolveShutdownHook is called from RemoveShutdownHookAdvice which does not
   // declare throws Throwable.

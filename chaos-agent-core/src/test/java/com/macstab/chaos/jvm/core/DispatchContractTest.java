@@ -146,23 +146,15 @@ class DispatchContractTest {
     }
 
     @Test
-    @DisplayName("a delayed hook is registered as a wrapper that runs the hook's body once")
-    void wrapper() throws Throwable {
+    @DisplayName("a delayed hook is registered as itself; the JDK runs it as the thread it is")
+    void registeredAsItself() throws Throwable {
       activate(
           ChaosSelector.shutdown(Set.of(OperationType.SHUTDOWN_HOOK_REGISTER)),
           ChaosEffect.delay(Duration.ofMillis(1)));
-      final Thread registered = runtime.decorateShutdownHook(hook);
-      assertThat(registered).isNotSameAs(hook);
-      assertThat(registered.getName()).contains("user-hook");
 
-      registered.start();
-      registered.join(5_000L);
-      assertThat(runs).as("the hook's body ran on the wrapper").hasValue(1);
-
-      assertThat(runtime.resolveShutdownHook(hook))
-          .as("removal finds the wrapper")
-          .isSameAs(registered);
-      assertThat(runtime.resolveShutdownHook(hook)).as("and forgets it").isSameAs(hook);
+      assertThat(runtime.decorateShutdownHook(hook)).isSameAs(hook);
+      assertThat(runtime.resolveShutdownHook(hook)).isSameAs(hook);
+      assertThat(runs).as("registering does not run the hook").hasValue(0);
     }
   }
 

@@ -432,7 +432,6 @@ flowchart TB
 - Delay execution (`Thread.sleep`)
 - Gate application (`ManualGate.await`)
 - Terminal action dispatch: throw, return-override, suppress, complete-exceptionally, corrupt-return
-- Shutdown hook wrapping and resolution map (`ConcurrentHashMap<Thread, Thread>`)
 - `ScopeContext` session-ID capture
 - `Instrumentation` reference for stressors needing retransformation
 

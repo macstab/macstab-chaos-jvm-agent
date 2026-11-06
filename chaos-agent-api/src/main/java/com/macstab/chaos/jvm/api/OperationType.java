@@ -188,8 +188,8 @@ public enum OperationType {
 
   /**
    * Fires when a shutdown hook thread is registered via {@link Runtime#addShutdownHook(Thread)}.
-   * Chaos here can delay registration, reject hooks, or substitute a wrapped implementation to
-   * observe shutdown sequencing.
+   * Chaos here can delay or reject the registration; the hook itself is registered and run by the
+   * JDK.
    */
   SHUTDOWN_HOOK_REGISTER,
 

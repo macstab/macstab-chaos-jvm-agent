@@ -2,7 +2,6 @@ package com.macstab.chaos.jvm.core;
 
 import com.macstab.chaos.jvm.api.Internal;
 import com.macstab.chaos.jvm.api.OperationType;
-import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
@@ -19,11 +18,9 @@ import org.jspecify.annotations.Nullable;
 public final class ExecutorDispatch {
 
   private final DispatchEngine engine;
-  private final Map<Thread, Thread> shutdownHooks;
 
-  ExecutorDispatch(final DispatchEngine engine, final Map<Thread, Thread> shutdownHooks) {
+  ExecutorDispatch(final DispatchEngine engine) {
     this.engine = engine;
-    this.shutdownHooks = shutdownHooks;
   }
 
   // Shared instances: replacing a suppressed task allocates nothing.
@@ -32,9 +29,6 @@ public final class ExecutorDispatch {
 
   @SuppressWarnings("UnnecessaryLambda")
   private static final Callable<?> NO_OP_CALLABLE = () -> null;
-
-  private final Map<Thread, java.util.concurrent.atomic.AtomicReference<@Nullable Thread>>
-      hookDelegateRefs = new java.util.concurrent.ConcurrentHashMap<>();
 
   /**
    * Returns a (possibly session-scoped or suppressed) wrapper for an executor-submitted runnable.
@@ -296,12 +290,12 @@ public final class ExecutorDispatch {
   }
 
   /**
-   * Wraps a shutdown hook thread before it is registered with {@link
-   * Runtime#addShutdownHook(Thread)}.
+   * Evaluates a shutdown hook before it is registered with {@link Runtime#addShutdownHook(Thread)}.
+   * The hook itself is registered: a delay or reject happens here, and the JDK keeps its own checks
+   * and runs the hook as the thread it is.
    *
    * @param hook the shutdown hook being registered; may be {@code null}
-   * @return the thread to register in place of {@code hook}: its wrapper (the same one when the
-   *     hook is already registered), or {@code null} for a {@code null} hook
+   * @return {@code hook}
    * @throws Throwable if a matching scenario's terminal action mandates it
    */
   public @Nullable Thread decorateShutdownHook(final @Nullable Thread hook) throws Throwable {
@@ -319,60 +313,19 @@ public final class ExecutorDispatch {
                     hook == null ? null : engine.featureSet.isVirtualThread(hook),
                     null)));
     // A throwing terminal (reject) unwinds here; suppress is rejected for this operation at
-    // activation (CompatibilityValidator), so every other decision registers the wrapper.
+    // activation (CompatibilityValidator), so every other decision registers the hook.
     engine.applyPreDecision(decision);
-    if (hook == null) {
-      return null; // Runtime.addShutdownHook throws its own NullPointerException
-    }
-    final Thread registered = shutdownHooks.get(hook);
-    if (registered != null) {
-      // The JDK rejects the wrapper it already holds ("Hook previously registered"), as it would
-      // reject the hook itself; a second wrapper would run the hook twice.
-      return registered;
-    }
-    final java.util.concurrent.atomic.AtomicReference<@Nullable Thread> hookRef =
-        new java.util.concurrent.atomic.AtomicReference<>(hook);
-    final Thread decorated =
-        new Thread(
-            () -> {
-              final Thread h = hookRef.getAndSet(null);
-              if (h != null) {
-                // The original hook is never started: its body runs on this wrapper thread,
-                // which the runtime starts at shutdown in its place.
-                runHookBody(h);
-              }
-            },
-            hook.getName() + "-macstab-chaos-wrapper");
-    decorated.setDaemon(hook.isDaemon());
-    final Thread raced = shutdownHooks.putIfAbsent(hook, decorated);
-    if (raced != null) {
-      return raced;
-    }
-    hookDelegateRefs.put(hook, hookRef);
-    return decorated;
+    return hook;
   }
 
   /**
-   * Resolves the registered wrapper thread for an original shutdown hook, removing the mapping on
-   * lookup.
+   * Resolves the thread to remove for a shutdown hook: the hook itself, as registered.
    *
-   * @param original the original user-supplied shutdown hook
-   * @return the decorated wrapper thread previously registered for {@code original}, or {@code
-   *     original} itself when no wrapper is recorded
+   * @param original the user-supplied shutdown hook
+   * @return {@code original}
    */
   public Thread resolveShutdownHook(final Thread original) {
-    // Destructive lookup: when Runtime.removeShutdownHook is called the JVM is about to drop its
-    // own reference to the decorated thread, so we must release ours too. Leaving the mapping in
-    // place would retain both the user hook and our wrapper for the life of the process — a slow
-    // leak for long-running JVMs that churn shutdown-hook registrations (e.g. integration-test
-    // suites that stop and restart embedded servers).
-    final Thread decorated = shutdownHooks.remove(original);
-    final java.util.concurrent.atomic.AtomicReference<@Nullable Thread> hookRef =
-        hookDelegateRefs.remove(original);
-    if (hookRef != null) {
-      hookRef.set(null);
-    }
-    return decorated == null ? original : decorated;
+    return original;
   }
 
   /**
@@ -487,11 +440,5 @@ public final class ExecutorDispatch {
       }
     }
     return false;
-  }
-
-  /** Runs a shutdown hook's body on the calling thread: the wrapper thread that replaced it. */
-  @SuppressWarnings("DoNotCall")
-  private static void runHookBody(final Thread hook) {
-    hook.run();
   }
 }

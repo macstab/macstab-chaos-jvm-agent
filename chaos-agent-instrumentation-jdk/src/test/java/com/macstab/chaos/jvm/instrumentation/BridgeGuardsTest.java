@@ -100,12 +100,7 @@ class BridgeGuardsTest {
   void passThroughWithoutScenario() throws Throwable {
     final ChaosRuntime runtime = new ChaosRuntime();
     try (AutoCloseable connected = JdkInstrumentationInstaller.connectDispatcher(runtime)) {
-      assertPassThrough("without a scenario", Set.of("decorateShutdownHook"));
-      // A registered hook is wrapped; removing the hook resolves to the wrapper registered.
-      final Thread hook = new Thread(() -> {});
-      final Thread registered = BootstrapDispatcher.decorateShutdownHook(hook);
-      assertThat(registered).isNotSameAs(hook);
-      assertThat(BootstrapDispatcher.resolveShutdownHook(hook)).isSameAs(registered);
+      assertPassThrough("without a scenario");
     } finally {
       runtime.close();
     }
@@ -207,17 +202,9 @@ class BridgeGuardsTest {
   }
 
   private static void assertPassThrough(final String situation) throws Exception {
-    assertPassThrough(situation, Set.of());
-  }
-
-  private static void assertPassThrough(final String situation, final Set<String> exempt)
-      throws Exception {
     final List<String> violations = new ArrayList<>();
     int checked = 0;
     for (final Method method : entryPoints()) {
-      if (exempt.contains(method.getName())) {
-        continue;
-      }
       checked++;
       final Object[] arguments = argumentsFor(method);
       final Object result;

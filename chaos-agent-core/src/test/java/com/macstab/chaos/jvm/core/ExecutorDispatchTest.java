@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.macstab.chaos.jvm.api.ActivationPolicy;
+import com.macstab.chaos.jvm.api.ChaosActivationHandle;
 import com.macstab.chaos.jvm.api.ChaosEffect;
 import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.ChaosSelector;
@@ -478,50 +479,23 @@ class ExecutorDispatchTest {
     }
 
     @Test
-    @DisplayName("a hook registered twice gets its first wrapper, so the JDK rejects the second")
-    void hookRegisteredTwice() throws Throwable {
-      activate(
-          "hooks",
-          ChaosSelector.shutdown(Set.of(OperationType.SHUTDOWN_HOOK_REGISTER)),
-          ChaosEffect.delay(Duration.ofMillis(1)));
-      final Thread hook = new Thread(runs::incrementAndGet, "twice-hook");
+    @DisplayName("a hook is registered as itself, with or without a scenario applied")
+    void hookIsRegisteredAsItself() throws Throwable {
+      final Thread idle = new Thread(runs::incrementAndGet, "idle-hook");
+      assertThat(runtime.decorateShutdownHook(idle)).isSameAs(idle);
 
-      final Thread first = runtime.decorateShutdownHook(hook);
-
-      assertThat(runtime.decorateShutdownHook(hook)).isSameAs(first);
-      assertThat(runtime.resolveShutdownHook(hook)).isSameAs(first);
-      assertThat(runtime.resolveShutdownHook(hook)).isSameAs(hook);
-    }
-
-    @Test
-    @DisplayName("the wrapper of a daemon hook is a daemon too")
-    void daemonWrapper() throws Throwable {
-      activate(
-          "hooks",
-          ChaosSelector.shutdown(Set.of(OperationType.SHUTDOWN_HOOK_REGISTER)),
-          ChaosEffect.delay(Duration.ofMillis(1)));
-      final Thread daemon = new Thread(runs::incrementAndGet, "daemon-hook");
-      daemon.setDaemon(true);
-      final Thread plain = new Thread(runs::incrementAndGet, "plain-hook");
-
-      assertThat(runtime.decorateShutdownHook(daemon).isDaemon()).isTrue();
-      assertThat(runtime.decorateShutdownHook(plain).isDaemon()).isFalse();
-    }
-
-    @Test
-    @DisplayName("a removed hook's wrapper no longer runs the hook's body")
-    void removedHookDoesNotRun() throws Throwable {
-      activate(
-          "hooks",
-          ChaosSelector.shutdown(Set.of(OperationType.SHUTDOWN_HOOK_REGISTER)),
-          ChaosEffect.delay(Duration.ofMillis(1)));
+      final ChaosActivationHandle handle =
+          runtime.activate(
+              ChaosScenario.builder("hooks")
+                  .selector(ChaosSelector.shutdown(Set.of(OperationType.SHUTDOWN_HOOK_REGISTER)))
+                  .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+                  .activationPolicy(ActivationPolicy.always())
+                  .build());
       final Thread hook = new Thread(runs::incrementAndGet, "user-hook");
-      final Thread wrapper = runtime.decorateShutdownHook(hook);
 
-      assertThat(runtime.resolveShutdownHook(hook)).isSameAs(wrapper);
-      wrapper.start();
-      wrapper.join(5_000L);
-
+      assertThat(runtime.decorateShutdownHook(hook)).isSameAs(hook);
+      assertThat(handle.appliedCount()).isEqualTo(1L);
+      assertThat(runtime.resolveShutdownHook(hook)).isSameAs(hook);
       assertThat(runs).hasValue(0);
     }
   }
