@@ -28,8 +28,8 @@ import org.eclipse.microprofile.config.ConfigProvider;
 public class ChaosQuarkusRecorder {
 
   /**
-   * System property / environment variable consulted at runtime-init time to decide whether to
-   * install the chaos agent. Matches the Spring Boot starter and Micronaut configurer gates.
+   * Property read through MicroProfile Config at runtime-init time to decide whether to install the
+   * chaos agent: a system property, environment variable or {@code application.properties} entry.
    */
   public static final String ENABLED_PROPERTY = "macstab.chaos.enabled";
 

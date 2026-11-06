@@ -18,7 +18,8 @@ final class NioAdvice {
   // ── B1: NIO ───────────────────────────────────────────────────────────────
 
   /**
-   * Intercepts {@code Selector.select()} and {@code Selector.selectNow()} (no-argument variants).
+   * Intercepts the blocking {@code Selector.select()} variants; {@code selectNow()} has its own
+   * advice below.
    *
    * <p><b>Skip semantics:</b> {@code enter()} is annotated with {@code skipOn =
    * Advice.OnNonDefaultValue.class}. When it returns {@code true} (spurious-wakeup scenario

@@ -362,8 +362,8 @@ final class FileIoAdvice {
   }
 
   /**
-   * Intercepts {@code AbstractFileSystemProvider.delete(Path)} and {@code deleteIfExists(Path)},
-   * which {@code Files.delete} and {@code Files.deleteIfExists} reach.
+   * Intercepts {@code AbstractFileSystemProvider.delete(Path)}, which {@code Files.delete} reaches;
+   * {@code deleteIfExists} has its own advice below.
    */
   static final class FilesDeleteAdvice {
     @Advice.OnMethodEnter

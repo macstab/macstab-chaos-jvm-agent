@@ -80,7 +80,7 @@ public final class ChaosOpenTelemetry {
   public static final AttributeKey<String> SCENARIO_STATE =
       AttributeKey.stringKey("chaos.scenario.state");
 
-  /** Span event attribute: the latency the application added, in milliseconds. */
+  /** Span event attribute: the latency chaos added, in milliseconds. */
   public static final AttributeKey<Long> DELAY_MILLIS = AttributeKey.longKey("chaos.delay_ms");
 
   /** The name of the span event added when chaos applies to a traced call. */

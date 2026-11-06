@@ -431,8 +431,8 @@ public final class JdkInstrumentationInstaller {
    * @param instrumentation the same {@link Instrumentation} handle originally passed to {@link
    *     #install}; required so the underlying JVMTI retransformation can see the previously
    *     transformed classes
-   * @return {@code true} if a transformer was reset; {@code false} if no transformer was recorded
-   *     (i.e. {@link #install} was never called or already uninstalled)
+   * @return {@code true} if a transformer was reset or this copy's delegate was cleared; {@code
+   *     false} if there was nothing to undo
    */
   public static boolean uninstall(final Instrumentation instrumentation) {
     final boolean delegateCleared = clearOwnDelegate();
@@ -778,10 +778,8 @@ public final class JdkInstrumentationInstaller {
    *   <li>Module access — granted automatically by {@link ModuleOpener#grantInternalModuleOpens}
    *       (programmatic {@code redefineModule}) plus the {@code Add-Opens} attribute in the agent
    *       JAR's {@code MANIFEST.MF}.
-   *   <li>A separate {@link AgentBuilder} pass — historically, mixing this transformation into the
-   *       same builder pass as the other Phase 2 transformations could cause silent corruption of
-   *       the retransformation pipeline. With the open already in place at install time the
-   *       transformation registers cleanly inside this method.
+   *   <li>Its own {@link AgentBuilder} pass, separate from the other transformations of its hook
+   *       group.
    * </ol>
    */
   private static AgentBuilder applyPhase2HttpClientInterception(AgentBuilder agentBuilder) {

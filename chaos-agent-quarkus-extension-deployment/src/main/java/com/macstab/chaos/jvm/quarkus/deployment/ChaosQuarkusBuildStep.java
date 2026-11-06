@@ -28,10 +28,9 @@ import io.quarkus.deployment.builditem.FeatureBuildItem;
  *       {@code void} and performs no build-item production, satisfying the recording contract.
  * </ul>
  *
- * <p>The original single-method form (returning {@link FeatureBuildItem} while annotated
- * {@code @Record(RUNTIME_INIT)}) caused {@code IllegalStateException} at build time: the deployment
- * engine tries to run the method twice — once for recording, once for the build-item output — and
- * the return-value semantics conflict with the recording proxy. Splitting removes the ambiguity.
+ * <p>The two are separate methods because one method returning {@link FeatureBuildItem} while
+ * annotated {@code @Record(RUNTIME_INIT)} fails the build: the deployment engine would run it both
+ * for recording and for the build-item output.
  */
 public final class ChaosQuarkusBuildStep {
 
@@ -53,9 +52,8 @@ public final class ChaosQuarkusBuildStep {
 
   /**
    * Registers {@link ChaosArcProducer} as a bean. The runtime jar carries no Jandex index and no
-   * {@code beans.xml}, so ArC never discovered the producer on its own and injecting {@code
-   * ChaosControlPlane} failed. Unremovable because the bean is typically injected only into test
-   * classes, which ArC does not see as injection points.
+   * {@code beans.xml}, so ArC would not discover the producer on its own. Unremovable because the
+   * bean is typically injected only into test classes, which ArC does not see as injection points.
    *
    * @return the additional-bean registration
    */

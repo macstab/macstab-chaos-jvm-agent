@@ -30,10 +30,11 @@ final class BridgeInjector {
    * classes references (the scheduled-task wrappers and the API exceptions it throws).
    *
    * <p>They are read from the agent classloader's resources (the same JAR that contains this class)
-   * and written verbatim into the temp JAR. The temp file is registered for deletion on JVM exit.
-   * After the JAR is written, {@link Instrumentation#appendToBootstrapClassLoaderSearch} makes its
-   * contents visible to the bootstrap classloader, allowing instrumented JDK classes — which are
-   * loaded by the bootstrap classloader — to call {@code BootstrapDispatcher} static methods.
+   * and written verbatim into the temp JAR, which is unlinked as soon as it is appended (on
+   * Windows, where an open file cannot be deleted, at exit or by the next start's sweep). After the
+   * JAR is written, {@link Instrumentation#appendToBootstrapClassLoaderSearch} makes its contents
+   * visible to the bootstrap classloader, allowing instrumented JDK classes — which are loaded by
+   * the bootstrap classloader — to call {@code BootstrapDispatcher} static methods.
    *
    * @param instrumentation the {@link Instrumentation} handle used to append to the bootstrap
    *     classpath
@@ -84,8 +85,8 @@ final class BridgeInjector {
       appended = true;
       // The bootstrap class path entry is opened when it is appended, and the JarFile above holds
       // its own handle, so on POSIX the file can be unlinked now and nothing is left in the temp
-      // directory, even when the JVM is killed. deleteOnExit alone left one jar per JVM start
-      // behind after kill -9. Windows refuses to delete an open file: there the jar stays until
+      // directory, even when the JVM is killed (deleteOnExit alone would leave one jar per kill
+      // -9). Windows refuses to delete an open file: there the jar stays until
       // a later start sweeps it (see sweepStaleBridgeJars).
       try {
         Files.deleteIfExists(bridgeJar);

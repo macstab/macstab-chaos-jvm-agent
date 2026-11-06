@@ -19,8 +19,9 @@ import java.util.logging.Logger;
  * <p>Installation is gated on the {@value #ENABLED_PROPERTY} system property / environment variable
  * (see {@link #chaosEnabled()}). When the application leaves this unset or sets it to {@code
  * false}, the configurer is a no-op — the integration jar can be left on the classpath in
- * production without triggering byte-code instrumentation. This mirrors the {@code
- * macstab.chaos.enabled} gate used by the Spring Boot starters.
+ * production without triggering byte-code instrumentation. The property is read from system
+ * properties and the environment only, because the configurer runs before Micronaut's own
+ * configuration is available.
  *
  * <p>{@link ChaosPlatform#installLocally()} is idempotent; invoking this configurer on a JVM that
  * already has the chaos agent installed (for example, via {@code -javaagent:}) is a no-op. Any

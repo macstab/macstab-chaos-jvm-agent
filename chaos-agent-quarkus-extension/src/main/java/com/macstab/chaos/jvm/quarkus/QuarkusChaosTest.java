@@ -15,10 +15,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
  * com.macstab.chaos.jvm.api.ChaosSession}, and reading any {@link ChaosScenario} annotations on the
  * class or test methods.
  *
- * <p>The {@code @QuarkusTest} reference is intentionally string-based (via {@link
- * io.quarkus.test.junit.QuarkusTest}): it is declared at compile time but only resolved at runtime
- * by the JUnit extension engine. The chaos agent itself does not require Quarkus on the classpath;
- * the dependency is {@code compileOnly}.
+ * <p>{@link io.quarkus.test.junit.QuarkusTest} is a {@code compileOnly} dependency: the test
+ * classpath that uses this annotation brings Quarkus, the agent itself does not need it.
  *
  * <h2>Example</h2>
  *

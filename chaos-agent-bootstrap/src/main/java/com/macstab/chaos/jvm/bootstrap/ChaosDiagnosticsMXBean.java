@@ -5,8 +5,8 @@ package com.macstab.chaos.jvm.bootstrap;
  * the object name {@code com.macstab.chaos.jvm:type=ChaosDiagnostics}.
  *
  * <p>This interface follows the JMX MXBean convention ({@code javax.management.MXBean}) and exposes
- * one operation that operators can invoke from any JMX client (JConsole, JMC, the {@code jmxterm}
- * CLI, or management tooling) to retrieve a human-readable diagnostics snapshot without attaching a
+ * operations that operators can invoke from any JMX client (JConsole, JMC, the {@code jmxterm} CLI,
+ * or management tooling) to retrieve a human-readable diagnostics snapshot without attaching a
  * debugger.
  *
  * <p>The MBean is registered automatically by {@link ChaosAgentBootstrap#initialize} during agent

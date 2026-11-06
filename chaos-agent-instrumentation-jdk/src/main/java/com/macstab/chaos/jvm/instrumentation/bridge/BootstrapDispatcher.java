@@ -246,7 +246,7 @@ public final class BootstrapDispatcher {
    */
   private static volatile MethodHandle @Nullable [] handles;
 
-  // ── Phase 1 handles (0-14): concurrency / scheduling interception points ────
+  // ── Phase 1 handles (0-13): concurrency / scheduling interception points ────
   /** Handle index for {@link #decorateExecutorRunnable(String, Object, Runnable)}. */
   public static final int DECORATE_EXECUTOR_RUNNABLE = 0;
 
@@ -291,7 +291,7 @@ public final class BootstrapDispatcher {
   /** Handle index for {@link #beforeExecutorShutdown(String, Object, long)}. */
   public static final int BEFORE_EXECUTOR_SHUTDOWN = 13;
 
-  // ── Phase 2 handles (15-45): JVM-level interception points ─────────────────
+  // ── Phase 2 handles (14-51): JVM-level interception points ─────────────────
   /** Handle index for {@link #adjustClockMillis(long)}. */
   public static final int ADJUST_CLOCK_MILLIS = 14;
 
@@ -406,7 +406,7 @@ public final class BootstrapDispatcher {
   /** Handle index for {@link #beforeJdbcTransactionRollback()}. */
   public static final int BEFORE_JDBC_TRANSACTION_ROLLBACK = 51;
 
-  // ── Phase 2 handles (53-56) ───────────────────────────────────────────────
+  // ── Later handles (52-76) ──────────────────────────────────────────────────
   /** Handle index for {@link #beforeThreadSleep(long)}. */
   public static final int BEFORE_THREAD_SLEEP = 52;
 

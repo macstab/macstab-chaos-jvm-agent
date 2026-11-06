@@ -57,9 +57,8 @@ final class HttpClientAdvice {
       if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_HTTP)) {
         return;
       }
-      // Inlined into HttpClientImpl (java.net.http), the advice calls HttpRequest.uri() directly.
-      // Reflection through the request's class (jdk.internal.net.http, not open to the agent)
-      // failed, so the URL was always null and URL filters never matched this client.
+      // Inlined into HttpClientImpl (java.net.http), the advice calls HttpRequest.uri() directly:
+      // the request's own class (jdk.internal.net.http) is not open to reflection by the agent.
       final String url =
           request instanceof java.net.http.HttpRequest httpRequest
               ? String.valueOf(httpRequest.uri())
@@ -113,9 +112,8 @@ final class HttpClientAdvice {
       if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_HTTP)) {
         return;
       }
-      // Inlined into HttpClientImpl (java.net.http), the advice calls HttpRequest.uri() directly.
-      // Reflection through the request's class (jdk.internal.net.http, not open to the agent)
-      // failed, so the URL was always null and URL filters never matched this client.
+      // Inlined into HttpClientImpl (java.net.http), the advice calls HttpRequest.uri() directly:
+      // the request's own class (jdk.internal.net.http) is not open to reflection by the agent.
       final String url =
           request instanceof java.net.http.HttpRequest httpRequest
               ? String.valueOf(httpRequest.uri())

@@ -10,9 +10,9 @@ import org.springframework.core.env.MapPropertySource;
  * {@link ApplicationContextInitializer} that ensures the chaos agent is installed before the Spring
  * application context is refreshed.
  *
- * <p>Registered as an initializer via {@code @SpringBootTest(initializers = ...)} or via the Spring
- * Boot 4 initializer discovery so that chaos interception is available for beans instantiated
- * during context startup.
+ * <p>Applied by {@code @ChaosTest} (through its {@code @ContextConfiguration}), or registered with
+ * {@code @SpringBootTest(initializers = ...)}, so that chaos interception is available for beans
+ * instantiated during context startup.
  */
 public final class ChaosAgentInitializer
     implements ApplicationContextInitializer<ConfigurableApplicationContext> {

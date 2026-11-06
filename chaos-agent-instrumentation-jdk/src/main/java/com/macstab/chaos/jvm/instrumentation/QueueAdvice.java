@@ -13,9 +13,8 @@ import org.jspecify.annotations.Nullable;
  * the outermost queue call on a thread is evaluated. Queues delegate internally (generic bridge
  * {@code put(Object)} → {@code put(Delayed)} → {@code offer(..)} in {@code DelayQueue} and {@code
  * DelayedWorkQueue}; {@code PriorityBlockingQueue.put} → {@code offer}). Evaluating the nested call
- * applied delays several times and, worse, let a rejecting QUEUE_OFFER decision skip the inner
- * {@code offer} while the outer {@code void put()} returned normally, silently dropping the
- * element.
+ * as well would apply delays several times and let a rejecting QUEUE_OFFER decision skip the inner
+ * {@code offer} while the outer {@code void put()} returns normally, silently dropping the element.
  */
 final class QueueAdvice {
   private QueueAdvice() {}

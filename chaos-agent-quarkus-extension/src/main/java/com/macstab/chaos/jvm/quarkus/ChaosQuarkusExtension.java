@@ -43,8 +43,9 @@ import org.junit.jupiter.api.extension.ParameterResolver;
  *       method. JVM-scoped activations are tracked per-method so {@code afterEach} can tear them
  *       down — otherwise the second test method that declared the same scenario id would hit an
  *       {@code "already active"} activation conflict.
- *   <li>{@code afterEach}: stop JVM-scoped scenarios activated by the current method's annotations.
- *       Session-scoped scenarios remain active for the whole class.
+ *   <li>{@code afterEach}: stop the scenarios activated by the current method's annotations (its
+ *       {@code @WithChaos} ones of either scope); class-level session-scoped scenarios remain
+ *       active for the whole class.
  *   <li>{@code afterAll}: close the session (which stops every session-scoped scenario activated
  *       during the class) and stop any JVM-scoped scenarios activated by class-level annotations.
  * </ul>

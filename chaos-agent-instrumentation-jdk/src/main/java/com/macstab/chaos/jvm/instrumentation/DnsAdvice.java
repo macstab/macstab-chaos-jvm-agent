@@ -16,8 +16,9 @@ final class DnsAdvice {
   // ── Reverse DNS (DNS_REVERSE) ────────────────────────────────────────────
 
   /**
-   * Intercepts {@code InetAddress.getHostFromNameService(InetAddress, boolean)}: a failed reverse
-   * lookup returns the IP literal, as the JDK reports one.
+   * Intercepts {@code InetAddress.getHostFromNameService(InetAddress[, boolean])} (the {@code
+   * boolean} is gone in JDK 25): a failed reverse lookup returns the IP literal, as the JDK reports
+   * one.
    */
   static final class DnsReverseAdvice {
     @Advice.OnMethodEnter(skipOn = Advice.OnNonDefaultValue.class)

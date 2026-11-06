@@ -47,8 +47,8 @@ public class ChaosTestAutoConfiguration {
   @ConditionalOnMissingBean(ChaosControlPlane.class)
   @ConditionalOnProperty(name = TEST_ENABLED_PROPERTY, havingValue = "true")
   public ChaosControlPlane chaosControlPlane() {
-    // ChaosAgentInitializer.initialize() has already called installLocally() and set
-    // the guard property; current() returns the same singleton without a second attach.
+    // ChaosAgentInitializer.initialize() has already installed the agent and set the guard
+    // property; installLocally() returns the same singleton without a second attach.
     return ChaosAgentExtension.contextPlane(ChaosPlatform.installLocally());
   }
 }

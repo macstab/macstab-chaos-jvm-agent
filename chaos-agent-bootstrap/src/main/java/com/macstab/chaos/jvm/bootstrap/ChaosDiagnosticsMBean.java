@@ -19,7 +19,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * directly by callers outside this package.
  *
  * <p>The adapter is intentionally thin: it delegates every operation to the {@link
- * ChaosDiagnostics} object and adds no state of its own.
+ * ChaosDiagnostics} object; its one piece of state is the handles of the plans activated through
+ * it, so they can be stopped through it.
  */
 final class ChaosDiagnosticsMBean implements ChaosDiagnosticsMXBean {
   private final ChaosDiagnostics diagnostics;

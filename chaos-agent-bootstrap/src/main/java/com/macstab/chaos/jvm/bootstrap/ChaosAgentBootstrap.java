@@ -208,10 +208,10 @@ public final class ChaosAgentBootstrap {
    * Installs the chaos agent into the current JVM using {@link ByteBuddyAgent#install()}, without
    * requiring the {@code -javaagent:} command-line flag.
    *
-   * <p>This method is intended exclusively for use in unit and integration test environments where
-   * adding {@code -javaagent:} to every test runner invocation is inconvenient. It performs a
-   * self-attach via the JVM Attach API, which may require the JVM to be started with {@code
-   * -Djdk.attach.allowAttachSelf=true} on some JDK versions.
+   * <p>Used by the test extensions and by the framework integrations when chaos is enabled without
+   * {@code -javaagent:} on the command line. It performs a self-attach via the JVM Attach API,
+   * which may require the JVM to be started with {@code -Djdk.attach.allowAttachSelf=true} on some
+   * JDK versions.
    *
    * <p>If the agent is already installed, the existing {@link ChaosControlPlane} is returned
    * immediately without reinitializing.
