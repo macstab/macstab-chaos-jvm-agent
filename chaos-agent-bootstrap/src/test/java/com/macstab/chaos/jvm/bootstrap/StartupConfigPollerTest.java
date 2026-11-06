@@ -83,7 +83,6 @@ class StartupConfigPollerTest {
       final Optional<StartupConfigPoller> result =
           StartupConfigPoller.createIfEnabled("configWatchInterval=500", Map.of(), config, runtime);
       assertThat(result).isPresent();
-      assertThat(result.get().intervalMs()).isEqualTo(500L);
       result.get().close();
     }
 
@@ -96,23 +95,6 @@ class StartupConfigPollerTest {
           StartupConfigPoller.createIfEnabled(
               null, Map.of(StartupConfigPoller.ENV_WATCH_INTERVAL, "1000"), config, runtime);
       assertThat(result).isPresent();
-      assertThat(result.get().intervalMs()).isEqualTo(1000L);
-      result.get().close();
-    }
-
-    @Test
-    @DisplayName("agent arg takes precedence over env var")
-    void agentArgTakesPrecedenceOverEnvVar() throws IOException {
-      final Path config = tempDir.resolve("plan.json");
-      Files.writeString(config, "{}");
-      final Optional<StartupConfigPoller> result =
-          StartupConfigPoller.createIfEnabled(
-              "configWatchInterval=200",
-              Map.of(StartupConfigPoller.ENV_WATCH_INTERVAL, "9999"),
-              config,
-              runtime);
-      assertThat(result).isPresent();
-      assertThat(result.get().intervalMs()).isEqualTo(200L);
       result.get().close();
     }
   }

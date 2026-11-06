@@ -57,8 +57,8 @@ import org.jspecify.annotations.Nullable;
  */
 public final class BootstrapDispatcher {
   /**
-   * Per-thread reentrancy depth counter. Private to prevent external mutation; exposed via {@link
-   * #depthThreadLocal()} for the sole purpose of identity-comparison in {@code
+   * Per-thread reentrancy depth counter. Private to prevent external mutation; {@link
+   * #isDepthThreadLocal(Object)} exists for the sole purpose of identity-comparison in {@code
    * ThreadLocalGetAdvice} / {@code ThreadLocalSetAdvice} to break the instrumentation recursion
    * that would otherwise occur when {@code ThreadLocal.get()} is intercepted. See {@code
    * JvmRuntimeAdvice.ThreadLocalGetAdvice} for the full reentrancy analysis.
@@ -216,26 +216,6 @@ public final class BootstrapDispatcher {
     if (counters[0] > 0) {
       counters[0]--;
     }
-  }
-
-  /**
-   * Returns the {@link ThreadLocal} instance used internally as the reentrancy depth counter.
-   *
-   * <p>This method exists solely to allow advice classes ({@code ThreadLocalGetAdvice}, {@code
-   * ThreadLocalSetAdvice}) to perform an identity check:
-   *
-   * <pre>{@code
-   * if (threadLocal == BootstrapDispatcher.depthThreadLocal()) return false;
-   * }</pre>
-   *
-   * <p>That check prevents infinite recursion when {@code ThreadLocal.get()} is globally
-   * instrumented: the dispatcher's own depth counter read would otherwise re-trigger the advice.
-   * The returned reference must never be mutated by callers.
-   *
-   * @return the depth {@code ThreadLocal}; never null
-   */
-  public static ThreadLocal<int[]> depthThreadLocal() {
-    return DEPTH;
   }
 
   /**

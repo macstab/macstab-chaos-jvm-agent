@@ -50,7 +50,6 @@ class BridgeGuardsTest {
       Set.of(
           "install",
           "installedDelegate",
-          "depthThreadLocal",
           "isDepthThreadLocal",
           "beginInternalCall",
           "endInternalCall",

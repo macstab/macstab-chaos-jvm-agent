@@ -1,6 +1,9 @@
 package com.macstab.chaos.jvm.core;
 
 import com.macstab.chaos.jvm.api.Internal;
+import java.lang.invoke.MethodHandle;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.MethodType;
 import java.time.Instant;
 import org.jspecify.annotations.Nullable;
 
@@ -29,69 +32,75 @@ import org.jspecify.annotations.Nullable;
 public final class ChaosDispatcher {
 
   /**
-   * Resolved lazily on first use; {@code null} until resolution succeeds.
-   *
-   * <p>Accessed from {@link #incrementDispatchDepth()} / {@link #decrementDispatchDepth()} which
-   * are called by {@link ScenarioController#start()} to suppress clock-skew interception during
-   * startup clock reads. BootstrapDispatcher lives in the bootstrap classpath (not a compile-time
-   * dependency of this module), so reflection is the only way to reach it.
+   * The bootstrap dispatcher's {@code beginInternalCall} / {@code endInternalCall}, resolved on
+   * first use; holds {@code null} without the agent (a plain runtime in a unit test). The
+   * dispatcher lives on the bootstrap class path, not a compile-time dependency of this module, so
+   * it is reached through method handles.
    */
   private static volatile java.util.concurrent.atomic.@Nullable AtomicReference<
-          @Nullable ThreadLocal<int[]>>
-      bootstrapDepthRef = null;
+          @Nullable InternalCalls>
+      internalCalls = null;
 
-  private static @Nullable ThreadLocal<int[]> resolveBootstrapDepth() {
-    if (bootstrapDepthRef != null) {
-      return bootstrapDepthRef.get();
+  private record InternalCalls(MethodHandle begin, MethodHandle end) {}
+
+  private static @Nullable InternalCalls resolveInternalCalls() {
+    final var resolved = internalCalls;
+    if (resolved != null) {
+      return resolved.get();
     }
     synchronized (ChaosDispatcher.class) {
-      if (bootstrapDepthRef != null) {
-        return bootstrapDepthRef.get();
+      if (internalCalls != null) {
+        return internalCalls.get();
       }
+      InternalCalls calls;
       try {
-        final Class<?> cls =
+        final Class<?> dispatcher =
             Class.forName(
                 "com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher",
                 false,
                 ClassLoader.getPlatformClassLoader());
-        @SuppressWarnings("unchecked")
-        final ThreadLocal<int[]> tl =
-            (ThreadLocal<int[]>) cls.getMethod("depthThreadLocal").invoke(null);
-        bootstrapDepthRef = new java.util.concurrent.atomic.AtomicReference<>(tl);
-        return tl;
-      } catch (final Throwable ignored) {
-        // Bootstrap dispatcher not yet installed (unit-test mode without agent).
-        // Store null reference so subsequent callers skip the guard rather than
-        // retrying reflection on every call.
-        bootstrapDepthRef = new java.util.concurrent.atomic.AtomicReference<>(null);
-        return null;
+        final MethodType noArgs = MethodType.methodType(void.class);
+        final MethodHandles.Lookup lookup = MethodHandles.publicLookup();
+        calls =
+            new InternalCalls(
+                lookup.findStatic(dispatcher, "beginInternalCall", noArgs),
+                lookup.findStatic(dispatcher, "endInternalCall", noArgs));
+      } catch (final ReflectiveOperationException notInstalled) {
+        calls = null;
       }
+      internalCalls = new java.util.concurrent.atomic.AtomicReference<>(calls);
+      return calls;
     }
   }
 
   /**
-   * Increments the bootstrap dispatcher's DEPTH counter on the current thread, suppressing any
-   * active chaos interception on subsequent JVM calls (clock reads, park, sleep, …) until the
-   * matching {@link #decrementDispatchDepth()} is called.
-   *
-   * <p>Designed to be called from {@code ScenarioController.start()} so that {@code
-   * clock.instant()}, {@code System.currentTimeMillis()}, and {@code System.nanoTime()} during
-   * scenario startup are not skewed by a concurrently active {@code ClockSkewEffect} scenario —
-   * which would silently shift the {@code startedAt} anchor and corrupt the {@code activeFor}
-   * window calculation.
+   * Raises the bootstrap dispatcher's depth on the current thread, so no chaos interception applies
+   * to the agent's own calls (clock reads, park, sleep, …) until the matching {@link
+   * #decrementDispatchDepth()}. {@code ScenarioController.start()} uses it so a concurrently active
+   * clock skew cannot shift the {@code startedAt} anchor of the {@code activeFor} window.
    */
   static void incrementDispatchDepth() {
-    final ThreadLocal<int[]> depth = resolveBootstrapDepth();
-    if (depth != null) {
-      depth.get()[0]++;
+    final InternalCalls calls = resolveInternalCalls();
+    if (calls != null) {
+      invoke(calls.begin());
     }
   }
 
   /** Paired decrement for {@link #incrementDispatchDepth()}. Always call in a {@code finally}. */
   static void decrementDispatchDepth() {
-    final ThreadLocal<int[]> depth = resolveBootstrapDepth();
-    if (depth != null) {
-      depth.get()[0]--;
+    final InternalCalls calls = resolveInternalCalls();
+    if (calls != null) {
+      invoke(calls.end());
+    }
+  }
+
+  private static void invoke(final MethodHandle handle) {
+    try {
+      handle.invokeExact();
+    } catch (final RuntimeException | Error unchecked) {
+      throw unchecked;
+    } catch (final Throwable checked) {
+      throw new IllegalStateException(checked);
     }
   }
 

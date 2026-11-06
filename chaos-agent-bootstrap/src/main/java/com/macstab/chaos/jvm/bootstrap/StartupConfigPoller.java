@@ -172,16 +172,6 @@ public final class StartupConfigPoller implements AutoCloseable {
   }
 
   /**
-   * Returns the configured poll interval in milliseconds.
-   *
-   * @return poll interval in milliseconds; always {@code >= MIN_WATCH_INTERVAL_MS} when watching is
-   *     enabled
-   */
-  public long intervalMs() {
-    return intervalMs;
-  }
-
-  /**
    * Stops the polling scheduler and fully unregisters all scenarios currently managed by this
    * poller.
    *
@@ -552,9 +542,6 @@ public final class StartupConfigPoller implements AutoCloseable {
     }
     return sanitised.toString();
   }
-
-  /** Maximum config file size on the hot-reload path: 1 MiB. Matches StartupConfigLoader. */
-  static final long MAX_FILE_SIZE_BYTES = 1_048_576L;
 
   /**
    * Lower bound on the poll interval. Values below this are clamped up to protect against a

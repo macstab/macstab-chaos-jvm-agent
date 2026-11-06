@@ -311,12 +311,10 @@ public final class ChaosQuarkusExtension
     }
     final String normalized = selector.trim();
     return switch (normalized) {
-      case "executor" ->
-          ChaosSelector.executor(
-              EnumSet.of(OperationType.EXECUTOR_SUBMIT, OperationType.EXECUTOR_WORKER_RUN));
-      // The clock reads that are actually instrumented. SYSTEM_CLOCK_MILLIS
-      // (System.currentTimeMillis) is a JIT intrinsic that is never woven, so mapping to it made
-      // effect="freeze" silently do nothing.
+      case "executor" -> ChaosSelector.executor(defaultExecutorOperations());
+      // The clock reads that are actually instrumented: SYSTEM_CLOCK_MILLIS
+      // (System.currentTimeMillis) is a JIT intrinsic that is never woven, so effect="freeze" on
+      // it would do nothing.
       case "jvmRuntime" ->
           ChaosSelector.jvmRuntime(
               EnumSet.of(
