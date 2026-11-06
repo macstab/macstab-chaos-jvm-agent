@@ -33,7 +33,7 @@ Modules whose public API is recorded in `api/<module>.api` and checked by `apiCh
 
 - `chaos-agent-api` — the stable contract for callers and configuration producers
 - `chaos-agent-startup-config`, `chaos-agent-testkit`
-- the framework integrations: `chaos-agent-spring-boot*`, `chaos-agent-quarkus-*`, `chaos-agent-micronaut-integration`, `chaos-agent-micrometer`, `chaos-agent-opentelemetry`
+- the framework integrations: `chaos-agent-spring-boot*`, `chaos-agent-quarkus-extension`, `chaos-agent-quarkus-management`, `chaos-agent-micronaut-integration`, `chaos-agent-micrometer`, `chaos-agent-opentelemetry` (the Quarkus `-deployment` modules hold build steps only Quarkus calls and are not API)
 
 Implementation modules that should be treated as internal unless the project explicitly commits otherwise:
 

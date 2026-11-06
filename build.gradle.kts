@@ -499,11 +499,21 @@ tasks.register("childJvmCoverage") {
 // protected class, field, constructor and method its class files expose, with JVM descriptors (so a
 // change of a parameter, return or field type shows), and the permitted subtypes of sealed types
 // (adding one breaks exhaustive switches). `check` runs `apiCheck`, which fails when the compiled
-// API differs from the file; `./gradlew apiDump` records an intended change, which then shows in
-// review. Types annotated @Internal are left out. The internal implementation modules (core,
-// instrumentation, the agent jar) are not API (docs/configuration-reference.md §14.2).
-val internalModules = setOf("chaos-agent-core", "chaos-agent-instrumentation-jdk", "chaos-agent-bootstrap")
+// API differs from the file and lists the difference per type; `./gradlew apiDump` records an
+// intended change, which then shows in review. Types and members annotated @Internal are left out.
+// Not API: the internal implementation modules (core, instrumentation, the agent jar;
+// docs/configuration-reference.md §14.2) and the Quarkus deployment modules, whose build steps only
+// Quarkus calls.
+val nonApiModules = setOf(
+    "chaos-agent-core",
+    "chaos-agent-instrumentation-jdk",
+    "chaos-agent-bootstrap",
+    "chaos-agent-quarkus-extension-deployment",
+    "chaos-agent-quarkus-management-deployment",
+)
 
+// The API of the class files in classesDir: one block per type, its header line first, the blocks
+// separated by a blank line and sorted by type name.
 fun renderApi(classesDir: File): String {
     val internal = "Lcom/macstab/chaos/jvm/api/Internal;"
     val access = { flags: Int ->
@@ -543,14 +553,30 @@ fun renderApi(classesDir: File): String {
                 permits += permittedSubclass
             }
             override fun visitField(fieldAccess: Int, name: String, descriptor: String, signature: String?, value: Any?): org.objectweb.asm.FieldVisitor? {
-                if (visible(fieldAccess)) lines += "  ${access(fieldAccess)} field $name $descriptor"
-                return null
+                if (!visible(fieldAccess)) return null
+                var memberInternal = false
+                return object : org.objectweb.asm.FieldVisitor(org.objectweb.asm.Opcodes.ASM9) {
+                    override fun visitAnnotation(descriptor: String, visible: Boolean): org.objectweb.asm.AnnotationVisitor? {
+                        if (descriptor == internal) memberInternal = true
+                        return null
+                    }
+                    override fun visitEnd() {
+                        if (!memberInternal) lines += "  ${access(fieldAccess)} field $name $descriptor"
+                    }
+                }
             }
             override fun visitMethod(methodAccess: Int, name: String, descriptor: String, signature: String?, exceptions: Array<out String>?): org.objectweb.asm.MethodVisitor? {
-                if (visible(methodAccess) && methodAccess and org.objectweb.asm.Opcodes.ACC_BRIDGE == 0) {
-                    lines += "  ${access(methodAccess)} method $name$descriptor"
+                if (!visible(methodAccess) || methodAccess and org.objectweb.asm.Opcodes.ACC_BRIDGE != 0) return null
+                var memberInternal = false
+                return object : org.objectweb.asm.MethodVisitor(org.objectweb.asm.Opcodes.ASM9) {
+                    override fun visitAnnotation(descriptor: String, visible: Boolean): org.objectweb.asm.AnnotationVisitor? {
+                        if (descriptor == internal) memberInternal = true
+                        return null
+                    }
+                    override fun visitEnd() {
+                        if (!memberInternal) lines += "  ${access(methodAccess)} method $name$descriptor"
+                    }
                 }
-                return null
             }
         }, org.objectweb.asm.ClassReader.SKIP_CODE)
         val kind = when {
@@ -575,8 +601,34 @@ fun renderApi(classesDir: File): String {
     return types.values.filter(::exported).sortedBy { it.name }.joinToString("\n\n", postfix = "\n") { it.text }
 }
 
+// The difference between two renderings, per type: a type only in one of them, or the header of a
+// type whose signatures differ followed by its removed (-) and added (+) lines.
+fun apiDifference(committed: String, actual: String): String {
+    fun blocks(api: String): Map<String, List<String>> =
+        api.trim().split("\n\n").filter { it.isNotBlank() }.associate { block ->
+            val lines = block.lines()
+            lines.first().split(" ").let { it[it.indexOfFirst { word -> word in setOf("class", "interface", "enum", "record", "@interface") } + 1] } to lines
+        }
+    val before = blocks(committed)
+    val after = blocks(actual)
+    return (before.keys + after.keys).sorted().mapNotNull { name ->
+        val old = before[name]
+        val new = after[name]
+        when {
+            old == new -> null
+            old == null -> new!!.joinToString("\n") { "+ $it" }
+            new == null -> old.joinToString("\n") { "- $it" }
+            else -> buildList {
+                if (old.first() == new.first()) add("  ${new.first()}") else { add("- ${old.first()}"); add("+ ${new.first()}") }
+                (old.drop(1) - new.drop(1).toSet()).forEach { add("- $it") }
+                (new.drop(1) - old.drop(1).toSet()).forEach { add("+ $it") }
+            }.joinToString("\n")
+        }
+    }.joinToString("\n\n")
+}
+
 subprojects {
-    if (name in nonPublishableModules || name in internalModules) return@subprojects
+    if (name in nonPublishableModules || name in nonApiModules) return@subprojects
     val module = name
     plugins.withType<JavaPlugin> {
         val classes = layout.buildDirectory.dir("classes/java/main")
@@ -603,14 +655,11 @@ subprojects {
             doLast {
                 val committed = apiFile.asFile
                 val actual = renderApi(classes.get().asFile)
-                if (!committed.isFile || committed.readText() != actual) {
-                    val expectedLines = if (committed.isFile) committed.readLines().toSet() else emptySet()
-                    val actualLines = actual.lines().toSet()
-                    val removed = (expectedLines - actualLines).take(20).joinToString("\n") { "- $it" }
-                    val added = (actualLines - expectedLines).take(20).joinToString("\n") { "+ $it" }
+                val expected = if (committed.isFile) committed.readText() else ""
+                if (expected != actual) {
                     throw GradleException(
-                        "The public API of $module changed. If intended, record it with " +
-                            "./gradlew :$module:apiDump and review the diff of api/$module.api.\n$removed\n$added",
+                        "The public API of $module differs from api/$module.api. If intended, record it " +
+                            "with ./gradlew :$module:apiDump and review the diff.\n\n" + apiDifference(expected, actual),
                     )
                 }
                 marker.get().asFile.apply { parentFile.mkdirs(); writeText("ok") }

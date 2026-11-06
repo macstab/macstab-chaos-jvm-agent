@@ -1,5 +1,0 @@
-public final class com/macstab/chaos/jvm/quarkus/deployment/ChaosQuarkusBuildStep
-  public method <init>()V
-  public method feature()Lio/quarkus/deployment/builditem/FeatureBuildItem;
-  public method installChaosAgent(Lcom/macstab/chaos/jvm/quarkus/ChaosQuarkusRecorder;)V
-  public method producerBean()Lio/quarkus/arc/deployment/AdditionalBeanBuildItem;
