@@ -40,8 +40,8 @@ Configure at `Settings -> Secrets and variables -> Actions`:
 | Secret | Used by | Purpose |
 |--------|---------|---------|
 | `BOT_GITHUB_TOKEN` | semantic-release, publish-snapshot | Push tags, create releases, manage GitHub Packages |
-| `BOT_USER_NAME` | semantic-release (main->develop merge) | Git config for bot commits |
-| `BOT_USER_EMAIL` | semantic-release (main->develop merge) | Git config for bot commits |
+| `BOT_USER_NAME` | semantic-release (back-merge of the release commit to develop) | Git config for bot commits |
+| `BOT_USER_EMAIL` | semantic-release (back-merge of the release commit to develop) | Git config for bot commits |
 | `NPM_TOKEN` | semantic-release | Optional, only if publishing to npm |
 
 ## Required GitHub Pages setting
@@ -80,11 +80,12 @@ the bundled ASM).
 
 ## Workflows
 
-- `build.yml` - spotless + `./gradlew build jacocoAggregatedReport` on PRs and pushes to main/develop
+- `build.yml` - spotless + `./gradlew build jacocoAggregatedReport` on PRs and pushes to main/develop,
+  the tests on JDK 21 and 25 on amd64 and arm64 (`jdk-matrix`), and the demos (`demos`)
 - `publish-snapshot.yml` - publishes `X.Y.Z-SNAPSHOT` to GitHub Packages
   after a successful build on develop
-- `semantic-release.yml` - tags the release and cherry-picks back to develop
-  after a successful build on main
+- `semantic-release.yml` - tags the release after a successful build of a push to main, and
+  cherry-picks the tagged release commit back to develop (a conflict fails the job)
 - `publish-release.yml` - publishes `X.Y.Z` to GitHub Packages on tag push
 - `deploy-javadoc.yml` - builds the aggregated Javadoc and deploys it to
   GitHub Pages on tag push
@@ -98,7 +99,7 @@ Semantic-release reads commit messages to pick the version bump:
 | `feat:`  | MINOR        | `feat: add JMX reset hook`      |
 | `fix:`   | PATCH        | `fix: bootstrap resource lookup`|
 | `perf:`  | PATCH        | `perf: reduce advice overhead`  |
-| `chore:` | PATCH        | `chore: bump deps`              |
+| `chore:` | none         | `chore: bump deps`              |
 | `docs:`  | none         | `docs: fix README recipe`       |
 | `feat!:` | MAJOR        | `feat!: remove legacy API`      |
 

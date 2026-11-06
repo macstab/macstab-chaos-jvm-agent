@@ -455,7 +455,7 @@ flowchart TB
 
 **Responsibility**: Per-scenario runtime guard. Evaluates a 9-step pipeline for every `InvocationContext` and either returns a `ScenarioContribution` or `null`.
 
-**Evaluation pipeline**: the nine steps, their order and which of them count a match are law L6 in [semantics.md §3](semantics.md#3-the-policy-of-one-scenario); what each step costs is in [internals.md](internals.md#evaluation-pipeline).
+**Evaluation pipeline**: the nine steps, their order and which of them count a match are set out in [semantics.md §3](semantics.md#3-the-policy-of-one-scenario); what each step costs is in [internals.md](internals.md#evaluation-pipeline).
 
 **Why a reservation for maxApplications**: committed applications plus outstanding reservations never exceed the cap, so concurrent threads cannot overshoot it. The dispatcher commits the reservation (incrementing `appliedCount` and publishing `APPLIED`) only for contributions that take effect; a scenario that loses on precedence releases it and keeps its budget.
 
@@ -933,11 +933,11 @@ Internal modules (`chaos-agent-core`, `chaos-agent-instrumentation-jdk`, `chaos-
 
 ## Versioning
 
-Current version: `1.0.0`. No GA release. API stability guarantees are aspirational at this stage.
+The public API (`chaos-agent-api`, recorded in `api/*.api`) follows semantic versioning; `@Internal` types can change in any release.
 
 ## Migration Notes
 
-None at this time (pre-1.0).
+Upgrading from 1.x: [migration-2.0.md](migration-2.0.md).
 
 ---
 

@@ -6,7 +6,7 @@ The layers under the [README](../README.md)'s architecture overview: how one cal
 
 ### Evaluation Pipeline
 
-Every intercepted operation that some scenario is indexed under runs through `ScenarioController.evaluate()`: nine checks in a fixed order, the first failing one ends the evaluation. The order, and which steps count as a match, is law L6 in [semantics.md §3](semantics.md#3-the-policy-of-one-scenario); what each costs:
+Every intercepted operation that some scenario is indexed under runs through `ScenarioController.evaluate()`: nine checks in a fixed order, the first failing one ends the evaluation. The order, and which steps count as a match, is set out in [semantics.md §3](semantics.md#3-the-policy-of-one-scenario); what each costs:
 
 1. Started: `AtomicBoolean.get()`, a volatile read.
 2. Session: `String.equals()` against the scenario's session; a JVM-scoped scenario has none and passes.

@@ -20,7 +20,7 @@ This directory is organized by architectural boundary, not by package inventory.
 
 ## Understand how it works
 
-- Read [Semantics](semantics.md) for the rules every evaluation follows, stated as numbered laws, each traced to its tests.
+- Read [Semantics](semantics.md) for the rules every evaluation follows, stated as numbered laws.
 - Start with [Overall Agent](overall-agent.md) for system purpose, runtime flow, trust boundaries, concurrency model, failure model, and operational caveats.
 - Read [API](api.md) for the stable contract boundary exposed to callers and configuration producers.
 - Read [Bootstrap](bootstrap.md), [Core](core.md), and [Instrumentation](instrumentation.md) for the internal mechanics that make the agent behave the way it does at runtime.

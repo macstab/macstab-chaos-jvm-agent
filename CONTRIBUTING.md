@@ -68,12 +68,15 @@ The release workflow runs `semantic-release` automatically after a successful bu
 | `chaos-agent-instrumentation-jdk` | ByteBuddy advice classes, bootstrap bridge, `JdkInstrumentationInstaller` |
 | `chaos-agent-bootstrap` | `premain`/`agentmain`, self-attach, MBean, config poller |
 | `chaos-agent-startup-config` | JSON config loading and file-path hardening |
-| `chaos-agent-testkit` | JUnit 5 `@ChaosTest` extension and `ChaosSession` injection |
+| `chaos-agent-testkit` | JUnit 5 `ChaosAgentExtension`, `@WithChaos`, `ChaosAssertions` |
 | `chaos-agent-spring-boot3/4-starter` | Runtime Spring Boot integration and Actuator endpoint |
 | `chaos-agent-spring-boot3/4-test-starter` | `@ChaosTest` for Spring Boot tests |
 | `chaos-agent-spring-boot-common` | Shared Spring logic (one source, two compile targets) |
-| `chaos-agent-micronaut-integration` | Micronaut integration |
+| `chaos-agent-micronaut-integration` | Micronaut integration and `/chaos` management endpoint |
+| `chaos-agent-micrometer` | `ChaosMeterBinder`: the chaos metrics in Micrometer |
+| `chaos-agent-opentelemetry` | `ChaosOpenTelemetry`: the chaos metrics and span events in OpenTelemetry |
 | `chaos-agent-quarkus-extension` | Quarkus extension (runtime + deployment modules) |
+| `chaos-agent-quarkus-management` | Optional Quarkus `/q/chaos` route (runtime + deployment modules) |
 | `chaos-agent-benchmarks` | JMH benchmarks — not published |
 | `chaos-agent-examples` | Reference applications — not published |
 

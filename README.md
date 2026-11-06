@@ -113,9 +113,11 @@ Every one of those becomes a `@ChaosTest` method that runs on every PR. No game 
 
 ### 1. Add the dependency
 
+`<version>` is the latest release ([releases](https://github.com/macstab/macstab-chaos-jvm-agent/releases)).
+
 ```kotlin
 // build.gradle.kts
-testImplementation("com.macstab.chaos.jvm:chaos-agent-testkit:1.0.0")
+testImplementation("com.macstab.chaos.jvm:chaos-agent-testkit:<version>")
 ```
 
 ### 2. Annotate your test
@@ -144,7 +146,7 @@ class MyServiceTest {
 ### 3. Or attach at startup for production-like testing
 
 ```bash
-java -javaagent:chaos-agent-bootstrap-1.0.0.jar=configFile=/etc/chaos/plan.json \
+java -javaagent:chaos-agent-bootstrap-<version>.jar=configFile=/etc/chaos/plan.json \
      -jar your-app.jar
 ```
 
@@ -292,7 +294,7 @@ Inline effects act on the calling thread inside the intercepted call (delays, ga
 
 ## Activation Policy
 
-`ActivationPolicy` is a record. Use the static factories for the common cases, or construct the canonical record directly for fine-grained control. Probability must be in `(0.0, 1.0]` — pass `null` / omit the JSON field for the `1.0` default; omit the scenario entirely to disable it.
+`ActivationPolicy` is a record. Use the static factories for the common cases, or construct the canonical record directly for fine-grained control. Probability must be in `(0.0, 1.0]` — the builder and the JSON default it to `1.0`; omit the scenario entirely to disable it.
 
 ```java
 // Always fire (default)
@@ -375,7 +377,7 @@ session.activate(slowDownstream);
 // The retry policy under test sees a realistic mixed-failure signal.
 ```
 
-**What this exercises.** Delays accumulate across matching scenarios, but terminal actions resolve by precedence — the `reject` (precedence=10) wins over the default `delay`, so the 30 % of calls that lose the probability roll see `reject` *after* the latency jitter is applied. `randomSeed=42L` makes the pattern reproducible across runs — same input produces same failure sequence, so a failing test bisects cleanly.
+**What this exercises.** Delays accumulate across matching scenarios, but terminal actions resolve by precedence — the `reject` (precedence=10) wins over the default `delay`, so the 30 % of calls that win the probability roll see `reject` *after* the latency jitter is applied. `randomSeed=42L` makes the pattern reproducible across runs — same input produces same failure sequence, so a failing test bisects cleanly.
 
 ### Recipe 2 — Circuit breaker verification under sustained failure
 
@@ -410,7 +412,7 @@ for (int i = 0; i < 25; i++) {
 }
 ```
 
-**What this exercises.** `maxApplications=20L` caps the chaos at exactly 20 effect applications — the 21st matched call passes through uninstrumented, so the circuit-breaker's fast-reject behaviour is observable on real calls instead of being masked by further injected failures. The CAS loop on `appliedCount` (Floor -2, step 8) guarantees the cap holds even under concurrent test threads hitting the connection pool in parallel.
+**What this exercises.** `maxApplications=20L` caps the chaos at exactly 20 effect applications — the 21st matched call passes through uninstrumented, so the circuit-breaker's fast-reject behaviour is observable on real calls instead of being masked by further injected failures. The `maxApplications` reservation (the evaluation's last step, [internals](docs/internals.md#evaluation-pipeline)) guarantees the cap holds even under concurrent test threads hitting the connection pool in parallel.
 
 ### Recipe 3 — Memory pressure soak without crashing CI
 

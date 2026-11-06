@@ -43,7 +43,7 @@ Before (1.x): every `java.net.Socket` connect is failed.
 ChaosSelector.network(Set.of(OperationType.SOCKET_CONNECT))
 ```
 
-After: name the peer the fault is meant for. Compiled:
+After: name the peer the fault is meant for.
 
 ```java
 import com.macstab.chaos.jvm.api.ChaosEffect;
@@ -78,7 +78,7 @@ com.macstab.chaos.core.ChaosRuntime      →  com.macstab.chaos.jvm.core.ChaosRu
 
 ## 3. Plans parse only through `ChaosPlanMapper`
 
-`chaos-agent-api` no longer depends on `jackson-annotations`: the JSON shape of plans (the `type` discriminators, the creators of `ActivationPolicy` and `NamePattern`) lives in mix-ins of `chaos-agent-startup-config`. A plain `ObjectMapper` no longer knows the discriminators. Compiled:
+`chaos-agent-api` no longer depends on `jackson-annotations`: the JSON shape of plans (the `type` discriminators, the creators of `ActivationPolicy` and `NamePattern`) lives in mix-ins of `chaos-agent-startup-config`. A plain `ObjectMapper` no longer knows the discriminators.
 
 ```java
 import com.macstab.chaos.jvm.api.ChaosPlan;
@@ -98,7 +98,7 @@ public final class ReadPlan {
 
 ## 4. Clock-skew policies are validated
 
-1.x ignored `probability`, `maxApplications`, `rateLimit` and `activateAfterMatches` on a clock skew: a clock read is not an event to sample. 2.0 rejects such a scenario with `ChaosValidationException`. A time window still applies. Compiled:
+1.x ignored `probability`, `maxApplications`, `rateLimit` and `activateAfterMatches` on a clock skew: a clock read is not an event to sample. 2.0 rejects such a scenario with `ChaosValidationException`. A time window still applies.
 
 ```java
 import com.macstab.chaos.jvm.api.ActivationPolicy;

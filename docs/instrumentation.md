@@ -575,7 +575,7 @@ See [overall-agent.md §11] for full hot-path cost breakdown.
 
 ---
 
-# 12. HTTP Client Selectors (roadmap 2.3)
+# 12. HTTP Client Selectors
 
 ## 12.1 Plain-English Overview
 
@@ -744,7 +744,7 @@ sequenceDiagram
 
 ---
 
-# 13. JDBC and Connection Pool Selectors (roadmap 2.4)
+# 13. JDBC and Connection Pool Selectors
 
 ## 13.1 Plain-English Overview
 
