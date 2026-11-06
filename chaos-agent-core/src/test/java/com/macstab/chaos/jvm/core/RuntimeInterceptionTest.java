@@ -18,11 +18,12 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 /**
- * Integration tests for the Phase 2 {@link ChaosRuntime} interception points. Tests call {@code
- * before*()} methods directly — no ByteBuddy install required.
+ * Tests of the {@link ChaosRuntime} interception points for GC and exit requests, selectors and
+ * future cancellation. Tests call {@code before*()} methods directly — no ByteBuddy install
+ * required.
  */
-@DisplayName("Phase 2 ChaosRuntime interception")
-class PhaseTwo_RuntimeIntegrationTest {
+@DisplayName("GC, exit, selector and future interception")
+class RuntimeInterceptionTest {
 
   private static final long DELAY_MS = 50L;
   private static final long DELAY_MIN_MS = (long) (DELAY_MS * 0.8);

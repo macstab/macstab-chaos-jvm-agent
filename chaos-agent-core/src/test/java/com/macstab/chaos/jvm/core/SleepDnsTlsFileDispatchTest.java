@@ -17,14 +17,14 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 /**
- * Integration tests for Phase 4 runtime dispatch methods: {@code beforeThreadSleep}, {@code
- * beforeDnsResolve}, {@code beforeSslHandshake}, and {@code beforeFileIo}.
+ * Tests of the runtime dispatch methods {@code beforeThreadSleep}, {@code beforeDnsResolve}, {@code
+ * beforeSslHandshake}, and {@code beforeFileIo}.
  *
  * <p>Each test drives the dispatcher directly through {@link ChaosRuntime}, verifying suppress,
  * delay, passthrough, and selector isolation behaviour without requiring a JVM agent.
  */
-@DisplayName("Phase 4 runtime dispatch")
-class Phase4RuntimeTest {
+@DisplayName("Thread sleep, DNS, TLS and file I/O dispatch")
+class SleepDnsTlsFileDispatchTest {
 
   private static ChaosActivationHandle activate(
       final ChaosRuntime runtime,

@@ -25,14 +25,14 @@ import org.junit.jupiter.api.io.TempDir;
 
 /**
  * End-to-end instrumentation tests that launch a child JVM with {@code -javaagent:} and verify that
- * Phase 4 ByteBuddy advice actually intercepts {@link Thread#sleep}, file I/O, and DNS resolution
+ * the ByteBuddy advice actually intercepts {@link Thread#sleep}, file I/O, and DNS resolution
  * through the full instrumentation pipeline.
  *
  * <p>Each test writes a {@link ChaosPlan} to a temp file, forks a JVM that loads the agent, runs a
  * targeted probe action, and asserts on the observed timing or behaviour.
  */
-@DisplayName("Phase 4 bytecode instrumentation (end-to-end)")
-class Phase4InstrumentationIntegrationTest {
+@DisplayName("Bytecode instrumentation (end-to-end)")
+class InstrumentationIntegrationTest {
 
   private static final long DELAY_MS = 200L;
   private static final long DELAY_MIN_MS = (long) (DELAY_MS * 0.8);

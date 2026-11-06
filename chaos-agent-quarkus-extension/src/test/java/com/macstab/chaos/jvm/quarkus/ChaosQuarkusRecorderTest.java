@@ -3,6 +3,7 @@ package com.macstab.chaos.jvm.quarkus;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -10,9 +11,21 @@ import org.junit.jupiter.api.Test;
 @DisplayName("ChaosQuarkusRecorder")
 class ChaosQuarkusRecorderTest {
 
-  @AfterEach
+  private String previous;
+
+  @BeforeEach
   void clearProperty() {
+    previous = System.getProperty(ChaosQuarkusRecorder.ENABLED_PROPERTY);
     System.clearProperty(ChaosQuarkusRecorder.ENABLED_PROPERTY);
+  }
+
+  @AfterEach
+  void restoreProperty() {
+    if (previous == null) {
+      System.clearProperty(ChaosQuarkusRecorder.ENABLED_PROPERTY);
+    } else {
+      System.setProperty(ChaosQuarkusRecorder.ENABLED_PROPERTY, previous);
+    }
   }
 
   @Test

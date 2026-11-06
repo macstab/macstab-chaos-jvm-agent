@@ -72,7 +72,7 @@ public final class AgentProcessProbeMain {
 
   public static void main(final String[] args) throws Exception {
     switch (args[0]) {
-      // ── legacy / non-timing probes ──────────────────────────────────────────
+      // ── behaviour probes ──────────────────────────────────────────────────────────
       case "executor" -> executor();
       case "resource" -> resource();
       case "thread" -> thread();
@@ -161,7 +161,7 @@ public final class AgentProcessProbeMain {
     }
   }
 
-  // ── legacy / non-timing probes ──────────────────────────────────────────────
+  // ── behaviour probes ──────────────────────────────────────────────────────────────
 
   private static void executor() throws Exception {
     final ThreadPoolExecutor executor =

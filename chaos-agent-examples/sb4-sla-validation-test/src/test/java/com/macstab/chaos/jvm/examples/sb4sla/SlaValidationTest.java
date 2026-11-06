@@ -52,8 +52,8 @@ class SlaValidationTest {
 
   /**
    * Lower bound on the P99 increment we expect per stacked scenario. {@code 0.8 × STEP_NANOS}
-   * mirrors the absorption ratio used in {@code Phase4InstrumentationIntegrationTest.DELAY_MIN_MS}
-   * and accounts for {@code Thread.sleep} returning slightly early on every supported platform.
+   * mirrors the absorption ratio used in {@code InstrumentationIntegrationTest.DELAY_MIN_MS} and
+   * accounts for {@code Thread.sleep} returning slightly early on every supported platform.
    */
   private static final long STEP_MIN_NANOS = (long) (STEP_NANOS * 0.8);
 
@@ -144,7 +144,7 @@ class SlaValidationTest {
    * <p><b>Threshold:</b> assertions use {@link #STEP_MIN_NANOS} (96 ms) rather than the full
    * configured delay. The chaos agent applies the delay via {@code Thread.sleep(120)}, and OS
    * scheduler granularity (especially on macOS and Windows) can return slightly under the requested
-   * duration. The 0.8× factor mirrors {@code Phase4InstrumentationIntegrationTest} and gives 24 ms
+   * duration. The 0.8× factor mirrors {@code InstrumentationIntegrationTest} and gives 24 ms
    * absolute headroom — large enough to absorb one Windows timer tick or a young-gen GC pause
    * without producing false negatives.
    *

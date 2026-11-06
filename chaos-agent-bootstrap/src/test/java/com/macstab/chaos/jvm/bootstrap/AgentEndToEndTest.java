@@ -23,12 +23,12 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * End-to-end regression tests for defects in the 1.0.0 instrumentation. Every test runs {@link
- * DefectProbeMain} in a child JVM started with the agent jar and asserts on what the probe
- * observed, so the full advice → bridge → dispatcher path is exercised.
+ * End-to-end tests of the agent: each runs {@link DefectProbeMain} in a child JVM started with the
+ * agent jar and asserts on what the probe observed, so the full advice → bridge → dispatcher path
+ * is exercised.
  */
-@DisplayName("1.0.0 defect regressions (end-to-end)")
-class DefectRegressionIntegrationTest {
+@DisplayName("Agent in a child JVM (end-to-end)")
+class AgentEndToEndTest {
 
   @TempDir Path tempDir;
 
@@ -307,8 +307,8 @@ class DefectRegressionIntegrationTest {
   }
 
   @Nested
-  @DisplayName("call paths that 1.0.0 never intercepted")
-  class PreviouslyUnhooked {
+  @DisplayName("call paths intercepted end to end")
+  class CallPaths {
 
     private final String httpClasspath = System.getProperty("chaos.test.httpClasspath");
 
@@ -442,7 +442,7 @@ class DefectRegressionIntegrationTest {
     }
 
     @Test
-    @DisplayName("a URL filter matches JDK HttpClient requests (the URL used to be read as null)")
+    @DisplayName("a URL filter matches JDK HttpClient requests")
     void jdkHttpClientUrlFilter() throws Exception {
       final ChildJvmProbe.ProbeResult result =
           probe.run(
@@ -1795,7 +1795,7 @@ class DefectRegressionIntegrationTest {
   }
 
   private static ChaosPlan plan(final ChaosScenario... scenarios) {
-    return new ChaosPlan(new ChaosPlan.Metadata("defect-regression", ""), null, List.of(scenarios));
+    return new ChaosPlan(new ChaosPlan.Metadata("end-to-end", ""), null, List.of(scenarios));
   }
 
   private static ChaosScenario scenario(

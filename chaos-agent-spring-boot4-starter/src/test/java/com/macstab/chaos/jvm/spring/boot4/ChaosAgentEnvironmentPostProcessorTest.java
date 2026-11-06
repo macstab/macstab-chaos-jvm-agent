@@ -36,7 +36,7 @@ class ChaosAgentEnvironmentPostProcessorTest {
 
   @Test
   @DisplayName(
-      "Phase 2 socket chaos fires after early attach via EnvironmentPostProcessor — macstab.chaos.enabled=true")
+      "socket chaos fires after early attach via EnvironmentPostProcessor — macstab.chaos.enabled=true")
   void socketChaosFiresAfterEarlyAttach() throws Exception {
     final ConfigurableApplicationContext ctx =
         new SpringApplication(MinimalApp.class)

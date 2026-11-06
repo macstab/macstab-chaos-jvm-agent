@@ -54,10 +54,10 @@ import javax.management.MBeanServer;
 import javax.management.ObjectName;
 
 /**
- * Probe main for {@link DefectRegressionIntegrationTest}. Each mode exercises one instrumented call
- * path inside a JVM started with {@code -javaagent:} and prints {@code key=value} lines that the
- * test asserts on. Every mode ends with {@link #printCounts()}, which prints each scenario's
- * matched and applied counters as {@code matched.<id>} / {@code applied.<id>}.
+ * Probe main for {@link AgentEndToEndTest}. Each mode exercises one instrumented call path inside a
+ * JVM started with {@code -javaagent:} and prints {@code key=value} lines that the test asserts on.
+ * Every mode ends with {@link #printCounts()}, which prints each scenario's matched and applied
+ * counters as {@code matched.<id>} / {@code applied.<id>}.
  */
 public final class DefectProbeMain {
 
