@@ -341,6 +341,11 @@ tasks.wrapper {
 // One coverage report over the modules with a coverage floor, built from their own reports, so it
 // counts what the floors count (child-JVM and starter data included, inlined advice excluded).
 // XML and HTML land in build/reports/jacoco/aggregated/; CI uploads them as an artifact.
+apply(plugin = "jacoco")
+extensions.configure<JacocoPluginExtension> {
+    toolVersion = jacocoVersion
+}
+
 tasks.register<JacocoReport>("jacocoAggregatedReport") {
     group = "verification"
     description = "Aggregates the coverage reports of the modules that have a coverage floor."
