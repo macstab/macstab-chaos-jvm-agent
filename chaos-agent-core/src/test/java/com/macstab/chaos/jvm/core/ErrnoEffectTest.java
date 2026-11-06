@@ -41,12 +41,33 @@ class ErrnoEffectTest {
   }
 
   @Test
-  @DisplayName("ETIMEDOUT is a ConnectException on connect")
-  void timeoutOnConnect() {
+  @DisplayName(
+      "ETIMEDOUT is a ConnectException on connect and a dead connection, not SO_TIMEOUT, on a read")
+  void timeoutOnConnectAndRead() {
     assertThat(FailureFactory.errno(Errno.ETIMEDOUT, OperationType.SOCKET_CONNECT, null, false))
         .isExactlyInstanceOf(java.net.ConnectException.class);
-    assertThat(FailureFactory.errno(Errno.ETIMEDOUT, OperationType.SOCKET_READ, null, false))
-        .isExactlyInstanceOf(java.net.SocketTimeoutException.class);
+    for (final OperationType read :
+        Set.of(OperationType.SOCKET_READ, OperationType.NIO_CHANNEL_READ)) {
+      assertThat(FailureFactory.errno(Errno.ETIMEDOUT, read, null, false))
+          .isExactlyInstanceOf(java.net.SocketException.class)
+          .hasMessage("Connection timed out");
+    }
+  }
+
+  @Test
+  @DisplayName("refused and unreachable on an established connection are socket errors")
+  void connectErrorsOnTransfer() {
+    for (final OperationType transfer :
+        Set.of(OperationType.SOCKET_READ, OperationType.SOCKET_WRITE)) {
+      assertThat(FailureFactory.errno(Errno.ECONNREFUSED, transfer, null, false))
+          .isExactlyInstanceOf(java.net.SocketException.class);
+      assertThat(FailureFactory.errno(Errno.EHOSTUNREACH, transfer, null, false))
+          .isExactlyInstanceOf(java.net.SocketException.class);
+    }
+    assertThat(FailureFactory.errno(Errno.ECONNREFUSED, OperationType.SOCKET_CONNECT, null, false))
+        .isExactlyInstanceOf(java.net.ConnectException.class);
+    assertThat(FailureFactory.errno(Errno.EHOSTUNREACH, OperationType.SOCKET_CONNECT, null, false))
+        .isExactlyInstanceOf(java.net.NoRouteToHostException.class);
   }
 
   @Test

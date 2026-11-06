@@ -1369,10 +1369,10 @@ ChaosEffect.delay(Duration.ofSeconds(2))  // deterministic
 
 | `errno`        | Family  | Exception                                                                 |
 |----------------|---------|---------------------------------------------------------------------------|
-| `ECONNREFUSED` | network | `ConnectException("Connection refused")`                                  |
-| `ETIMEDOUT`    | network | `ConnectException("Connection timed out")` on connect, else `SocketTimeoutException("Read timed out")` |
+| `ECONNREFUSED` | network | `ConnectException("Connection refused")`; `PortUnreachableException` on a datagram, `SocketException` on a read or write |
+| `ETIMEDOUT`    | network | `ConnectException("Connection timed out")` on connect, else `SocketException("Connection timed out")` (a dead connection; `timeout` is the `SO_TIMEOUT` read timeout) |
 | `ECONNRESET`   | network | `SocketException("Connection reset")`                                     |
-| `EHOSTUNREACH` | network | `NoRouteToHostException("No route to host")`                              |
+| `EHOSTUNREACH` | network | `NoRouteToHostException("No route to host")`; `SocketException` on a read or write |
 | `ENETUNREACH`  | network | `SocketException("Network is unreachable")`                               |
 | `EPIPE`        | network | `SocketException("Broken pipe")`                                          |
 | `EADDRINUSE`   | network | `BindException("Address already in use")`                                 |

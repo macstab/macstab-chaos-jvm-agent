@@ -896,16 +896,24 @@ public sealed interface ChaosEffect
 
   /** The errors an {@link ErrnoEffect} can raise, with the Java exception each becomes. */
   enum Errno {
-    /** Connection refused: {@link java.net.ConnectException}. */
+    /**
+     * Connection refused: {@link java.net.ConnectException}; {@link
+     * java.net.PortUnreachableException} on a datagram, {@link java.net.SocketException} on a read
+     * or write.
+     */
     ECONNREFUSED(Family.NETWORK, 111, 61, "Connection refused"),
     /**
-     * Timed out: {@link java.net.SocketTimeoutException} on a read, {@link
-     * java.net.ConnectException} on a connect.
+     * Timed out: {@link java.net.ConnectException} on a connect, else {@link
+     * java.net.SocketException}: the kernel gave up on the connection. A read that waits out {@code
+     * SO_TIMEOUT} is {@link ChaosEffect#timeout()}.
      */
     ETIMEDOUT(Family.NETWORK, 110, 60, "Connection timed out"),
     /** Connection reset by peer: {@link java.net.SocketException}. */
     ECONNRESET(Family.NETWORK, 104, 54, "Connection reset"),
-    /** No route to host: {@link java.net.NoRouteToHostException}. */
+    /**
+     * No route to host: {@link java.net.NoRouteToHostException}; {@link java.net.SocketException}
+     * on a read or write.
+     */
     EHOSTUNREACH(Family.NETWORK, 113, 65, "No route to host"),
     /** Network is unreachable: {@link java.net.SocketException}. */
     ENETUNREACH(Family.NETWORK, 101, 51, "Network is unreachable"),

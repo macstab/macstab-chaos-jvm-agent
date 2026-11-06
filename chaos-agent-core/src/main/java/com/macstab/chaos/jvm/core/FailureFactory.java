@@ -165,22 +165,33 @@ final class FailureFactory {
   /** The {@code java.net} failure of a socket call, as the JDK's {@code Net.c} maps errors. */
   private static Throwable networkErrno(
       final ChaosEffect.Errno errno, final OperationType operationType, final String reason) {
+    // A read or write of an established connection reports the errno text as a SocketException
+    // (the JDK wraps the native IOException); the specific java.net types belong to connecting.
+    // A kernel ETIMEDOUT there means the connection is dead, unlike SocketTimeoutException
+    // (SO_TIMEOUT expired, socket still usable), which ChaosEffect.timeout() raises.
+    final boolean transfer =
+        switch (operationType) {
+          case SOCKET_READ, SOCKET_WRITE, NIO_CHANNEL_READ, NIO_CHANNEL_WRITE -> true;
+          default -> false;
+        };
     return switch (errno) {
       // A connected UDP socket reports an ICMP port unreachable as PortUnreachableException.
       case ECONNREFUSED ->
           operationType == OperationType.DATAGRAM_SEND
                   || operationType == OperationType.DATAGRAM_RECEIVE
               ? new java.net.PortUnreachableException(reason)
-              : new java.net.ConnectException(reason);
+              : transfer
+                  ? new java.net.SocketException(reason)
+                  : new java.net.ConnectException(reason);
       case ETIMEDOUT ->
           switch (operationType) {
             case SOCKET_CONNECT, NIO_CHANNEL_CONNECT -> new java.net.ConnectException(reason);
-            case SOCKET_READ, NIO_CHANNEL_READ ->
-                new java.net.SocketTimeoutException("Read timed out");
-            // A write or close that times out reports the errno text, as the JDK does.
             default -> new java.net.SocketException(reason);
           };
-      case EHOSTUNREACH -> new java.net.NoRouteToHostException(reason);
+      case EHOSTUNREACH ->
+          transfer
+              ? new java.net.SocketException(reason)
+              : new java.net.NoRouteToHostException(reason);
       case EADDRINUSE, EADDRNOTAVAIL, EACCES -> new java.net.BindException(reason);
       // An accept that cannot get a descriptor fails with a plain IOException in the JDK.
       case EMFILE, ENFILE ->
