@@ -134,8 +134,8 @@ public final class TrustedChaosEnablement {
    * Finds the source that wins for {@code propertyName} the way Spring Boot resolves it: sources in
    * precedence order, each matched under every spelling relaxed binding accepts ({@code
    * macstab.chaos.Enabled}, {@code MACSTAB_CHAOS_ENABLED}, ...). The value and the trust verdict
-   * come from that one source. Matching the exact name only let an untrusted source with another
-   * spelling set the value while a trusted source holding the exact name vouched for it.
+   * come from that one source: matching only the exact name would let an untrusted source with
+   * another spelling set the value while a trusted source holding the exact name vouches for it.
    */
   private static @Nullable Winner winner(
       final ConfigurableEnvironment environment, final String propertyName) {
