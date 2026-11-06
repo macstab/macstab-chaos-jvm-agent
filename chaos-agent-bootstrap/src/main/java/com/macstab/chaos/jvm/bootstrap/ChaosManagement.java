@@ -98,8 +98,10 @@ public final class ChaosManagement implements AutoCloseable {
       previous.close();
     }
     // A close() that ran meanwhile either found this handle and stopped it, or is seen here.
-    if (closed && handles.remove(handle.id(), handle)) {
-      handle.close();
+    if (closed) {
+      if (handles.remove(handle.id(), handle)) {
+        handle.close();
+      }
       return new ActivationResponse("rejected", null, "plan rejected: the endpoint is closing");
     }
     return new ActivationResponse("activated", handle.id(), null);
