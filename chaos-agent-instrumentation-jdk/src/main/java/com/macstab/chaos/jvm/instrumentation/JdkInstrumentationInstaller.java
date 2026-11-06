@@ -121,8 +121,7 @@ public final class JdkInstrumentationInstaller {
     BridgeInjector.injectBridge(instrumentation);
     rejectForeignDelegate();
     installDelegate(new ChaosBridge(runtime));
-    com.macstab.chaos.jvm.instrumentation.bridge.SessionHeaderPolicy.setExtraHosts(
-        sessionHeaderHosts);
+    setSessionHeaderHosts(sessionHeaderHosts);
     try {
       runtime.setHookDemand(
           new HookDemand() {
@@ -491,6 +490,21 @@ public final class JdkInstrumentationInstaller {
   private static Class<?> bootstrapDispatcherClass() throws ClassNotFoundException {
     return Class.forName(
         "com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher", true, null);
+  }
+
+  /**
+   * Hands the session-header hosts to the bootstrap copy of {@code SessionHeaderPolicy}, the one
+   * the woven HTTP advice reads: under a child-first class loader a direct call would reach this
+   * loader's own copy instead.
+   */
+  private static void setSessionHeaderHosts(final List<String> hosts) {
+    try {
+      Class.forName("com.macstab.chaos.jvm.instrumentation.bridge.SessionHeaderPolicy", true, null)
+          .getMethod("setExtraHosts", List.class)
+          .invoke(null, hosts);
+    } catch (final ReflectiveOperationException exception) {
+      throw new IllegalStateException("failed to set the session header hosts", exception);
+    }
   }
 
   private static void installDelegateRaw(
