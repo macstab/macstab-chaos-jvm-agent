@@ -57,6 +57,9 @@ class ChaosSelectorFactoriesTest {
               new ChaosSelector.HttpClientSelector(Set.of(OperationType.HTTP_CLIENT_SEND), GIVEN));
       assertThat(ChaosSelector.dns(Set.of(OperationType.DNS_REVERSE), GIVEN))
           .isEqualTo(new ChaosSelector.DnsSelector(Set.of(OperationType.DNS_REVERSE), GIVEN));
+      assertThat(ChaosSelector.dns(Set.of(OperationType.DNS_RESOLVE), null).hostnamePattern())
+          .as("no pattern matches any host")
+          .isEqualTo(NamePattern.any());
       assertThat(ChaosSelector.messaging(Set.of(OperationType.MESSAGE_SEND), GIVEN))
           .isEqualTo(
               new ChaosSelector.MessagingSelector(Set.of(OperationType.MESSAGE_SEND), GIVEN));

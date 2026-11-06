@@ -113,6 +113,48 @@ class ChaosReportsTest {
   }
 
   @Test
+  @DisplayName("reports=true switches the files on like reports=on")
+  void trueSwitchesOn() {
+    final ChaosReports enabled = create("reports=true;reportsDir=" + tempDir, Map.of());
+    enabled.statusOk(1, "inline");
+    assertThat(tempDir.resolve(ChaosReports.STATUS_FILE)).exists();
+  }
+
+  @Test
+  @DisplayName("a report directory that cannot be written is reported once, not on every write")
+  void writeFailureLoggedOnce() throws Exception {
+    final Path notADirectory = Files.writeString(tempDir.resolve("not-a-directory"), "x");
+    final ChaosReports blocked = create("reports=on;reportsDir=" + notADirectory, Map.of());
+    final java.util.logging.Logger logger =
+        java.util.logging.Logger.getLogger(ChaosReports.class.getName());
+    final List<java.util.logging.LogRecord> warnings = new ArrayList<>();
+    final java.util.logging.Handler capture =
+        new java.util.logging.Handler() {
+          @Override
+          public void publish(final java.util.logging.LogRecord record) {
+            if (record.getLevel() == java.util.logging.Level.WARNING) {
+              warnings.add(record);
+            }
+          }
+
+          @Override
+          public void flush() {}
+
+          @Override
+          public void close() {}
+        };
+    logger.addHandler(capture);
+    try {
+      blocked.statusOk(1, "inline");
+      blocked.statusOk(2, "inline");
+    } finally {
+      logger.removeHandler(capture);
+    }
+
+    assertThat(warnings).hasSize(1);
+  }
+
+  @Test
   @DisplayName("an unwritable report directory or status path leaves no file behind and no error")
   void unwritableReports() throws Exception {
     final Path notADirectory = Files.writeString(tempDir.resolve("plain-file"), "x");

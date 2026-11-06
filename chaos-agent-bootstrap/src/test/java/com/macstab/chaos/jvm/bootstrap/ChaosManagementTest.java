@@ -225,6 +225,43 @@ class ChaosManagementTest {
   }
 
   @Test
+  @DisplayName("a plan stopped by a close() during its own activation is answered as rejected")
+  void closeDuringActivationIsRejected() {
+    final java.util.concurrent.atomic.AtomicInteger closed =
+        new java.util.concurrent.atomic.AtomicInteger();
+    final java.util.concurrent.atomic.AtomicReference<ChaosManagement> self =
+        new java.util.concurrent.atomic.AtomicReference<>();
+    // Replacing the first plan closes it; that close() closes the endpoint, which then stops the
+    // second plan before its activation returns.
+    final com.macstab.chaos.jvm.api.ChaosActivationHandle first =
+        (com.macstab.chaos.jvm.api.ChaosActivationHandle)
+            java.lang.reflect.Proxy.newProxyInstance(
+                ChaosManagementTest.class.getClassLoader(),
+                new Class<?>[] {com.macstab.chaos.jvm.api.ChaosActivationHandle.class},
+                (proxy, method, args) ->
+                    switch (method.getName()) {
+                      case "id" -> "plan:mgmt";
+                      case "close" -> {
+                        self.get().close();
+                        yield null;
+                      }
+                      case "equals" -> proxy == args[0];
+                      case "hashCode" -> System.identityHashCode(proxy);
+                      default -> null;
+                    });
+    final java.util.Iterator<com.macstab.chaos.jvm.api.ChaosActivationHandle> plans =
+        java.util.List.of(first, handle("plan:mgmt", closed)).iterator();
+    final ChaosManagement racing = new ChaosManagement(scriptedControlPlane(plans::next));
+    self.set(racing);
+    racing.activate(PLAN);
+
+    final ChaosManagement.ActivationResponse response = racing.activate(PLAN);
+
+    assertThat(response.status()).isEqualTo("rejected");
+    assertThat(closed).as("stopped once, by close()").hasValue(1);
+  }
+
+  @Test
   @DisplayName("stopping all plans continues past one that fails to stop")
   void stopAllContinuesPastAFailure() {
     final java.util.concurrent.atomic.AtomicInteger closed =

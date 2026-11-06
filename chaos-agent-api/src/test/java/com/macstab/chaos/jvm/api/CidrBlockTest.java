@@ -58,11 +58,25 @@ class CidrBlockTest {
   void asciiDigitsOnly() {
     // U+0661 U+0660 are ARABIC-INDIC DIGIT ONE and ZERO, U+0968 is DEVANAGARI DIGIT EIGHT.
     for (final String text :
-        new String[] {"\u0661\u0660.0.0.1", "fe80::\u0661", "10.0.0.0/\u0968", "10.0.0.0/+8"}) {
+        new String[] {
+          "\u0661\u0660.0.0.1",
+          "fe80::\u0661",
+          "10.0.0.0/\u0968",
+          "10.0.0.0/+8",
+          "10.0.0.0/",
+          "10.0.0.0/0008"
+        }) {
       assertThatThrownBy(() -> CidrBlock.parse(text))
           .as(text)
           .isInstanceOf(IllegalArgumentException.class);
     }
+  }
+
+  @Test
+  @DisplayName("IPv6 hex digits are accepted in either case")
+  void hexDigitsInEitherCase() throws Exception {
+    assertThat(CidrBlock.parse("FE80::AB/64").contains(java.net.InetAddress.getByName("fe80::ab")))
+        .isTrue();
   }
 
   @Test
