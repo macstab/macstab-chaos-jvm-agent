@@ -37,6 +37,23 @@ class ChaosTestAutoConfigurationTest {
   }
 
   @Test
+  @DisplayName("with the application starter enabled too, the tracked control plane is the bean")
+  void trackedPlaneWinsOverTheApplicationStarter() {
+    new ApplicationContextRunner()
+        .withConfiguration(
+            AutoConfigurations.of(
+                com.macstab.chaos.jvm.spring.boot.common.ChaosAutoConfiguration.class,
+                ChaosTestAutoConfiguration.class))
+        .withPropertyValues(
+            "macstab.chaos.enabled=true",
+            ChaosTestAutoConfiguration.TEST_ENABLED_PROPERTY + "=true")
+        .run(
+            context ->
+                assertThat(context.getBean(ChaosControlPlane.class))
+                    .isInstanceOf(com.macstab.chaos.jvm.testkit.TrackingChaosControlPlane.class));
+  }
+
+  @Test
   @DisplayName("in any other context there is no control plane bean")
   void absentOtherwise() {
     runner.run(context -> assertThat(context).doesNotHaveBean(ChaosControlPlane.class));

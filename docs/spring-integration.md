@@ -166,24 +166,25 @@ The initializer is **not** registered globally (the test starters' `META-INF/spr
 `ChaosTestAutoConfiguration` is an `@AutoConfiguration` that exposes `ChaosControlPlane` as a Spring bean in contexts opted in by `@ChaosTest`:
 
 ```java
-@AutoConfiguration
-@ConditionalOnClass(ChaosAgentExtension.class)
+@AutoConfiguration(before = ChaosAutoConfiguration.class)
 public class ChaosTestAutoConfiguration {
 
     @Bean(destroyMethod = "")
     @ConditionalOnMissingBean(ChaosControlPlane.class)
     @ConditionalOnProperty(name = "macstab.chaos.test.enabled", havingValue = "true")
     public ChaosControlPlane chaosControlPlane() {
-        return ChaosPlatform.installLocally();
+        return ChaosAgentExtension.contextPlane(ChaosPlatform.installLocally());
     }
 }
 ```
 
+The bean is a tracking control plane: what a test activates through it is released when the last running chaos test class ends.
+
+`before = ChaosAutoConfiguration.class` orders it ahead of the application starter's configuration, which declares a `chaosControlPlane` bean too: with `macstab.chaos.enabled=true` in a test, the tracked plane is the one registered, also for the actuator endpoint and the startup plan of that context.
+
 `@ConditionalOnProperty(name = "macstab.chaos.test.enabled")` matches only in contexts where `ChaosAgentInitializer` added its per-context property source, i.e. contexts of `@ChaosTest` classes. A plain `@SpringBootTest` context never self-attaches the agent through this configuration.
 
 `destroyMethod = ""` is required: `ChaosControlPlane` is `AutoCloseable`, so Spring's inferred destroy method would call `close()` whenever any test context shuts down and tear down the JVM-wide runtime shared by every context.
-
-`@ConditionalOnClass(ChaosAgentExtension.class)` is an existence guard. If somehow the test classpath lacks `ChaosAgentExtension`, the configuration silently does nothing rather than failing with `ClassNotFoundException`.
 
 `@ConditionalOnMissingBean(ChaosControlPlane.class)` is the standard back-off contract. If a test configuration already declares a `ChaosControlPlane` bean — for example a stub implementation for isolated unit testing without agent attachment — the auto-configuration steps aside. This is the same pattern used by `ChaosAutoConfiguration` in the runtime starters, keeping the override contract consistent across all four modules.
 

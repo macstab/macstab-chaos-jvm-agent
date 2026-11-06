@@ -2,6 +2,7 @@ package com.macstab.chaos.jvm.spring.boot3.test;
 
 import com.macstab.chaos.jvm.api.ChaosControlPlane;
 import com.macstab.chaos.jvm.bootstrap.ChaosPlatform;
+import com.macstab.chaos.jvm.spring.boot.common.ChaosAutoConfiguration;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -22,7 +23,9 @@ import org.springframework.context.annotation.Bean;
  * annotations, so the bean is reliably present for test code using {@code @Autowired
  * ChaosControlPlane}.
  */
-@AutoConfiguration
+// Before the application starter's ChaosAutoConfiguration: both declare chaosControlPlane with
+// @ConditionalOnMissingBean, and in a chaos test the tracked plane must be the one registered.
+@AutoConfiguration(before = ChaosAutoConfiguration.class)
 public class ChaosTestAutoConfiguration {
 
   /**
