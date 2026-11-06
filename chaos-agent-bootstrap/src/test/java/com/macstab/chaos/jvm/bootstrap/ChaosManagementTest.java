@@ -195,6 +195,54 @@ class ChaosManagementTest {
   }
 
   @Test
+  @DisplayName("of two activations of one name racing, the second to claim it is refused")
+  void racingActivationsOfOneName() {
+    final java.util.concurrent.atomic.AtomicInteger closed =
+        new java.util.concurrent.atomic.AtomicInteger();
+    final java.util.concurrent.atomic.AtomicReference<ChaosManagement> self =
+        new java.util.concurrent.atomic.AtomicReference<>();
+    final java.util.concurrent.atomic.AtomicReference<ChaosManagement.ActivationResponse> inner =
+        new java.util.concurrent.atomic.AtomicReference<>();
+    final java.util.concurrent.atomic.AtomicInteger activations =
+        new java.util.concurrent.atomic.AtomicInteger();
+    // The first activation passes the name check; while it runs, a second one of the same name
+    // completes and claims the name first.
+    final ChaosManagement racing =
+        new ChaosManagement(
+            scriptedControlPlane(
+                () -> {
+                  if (activations.incrementAndGet() == 1) {
+                    inner.set(self.get().activate(PLAN));
+                  }
+                  return handle("plan:mgmt", closed);
+                }));
+    self.set(racing);
+
+    final ChaosManagement.ActivationResponse outer = racing.activate(PLAN);
+
+    assertThat(inner.get().status()).isEqualTo("activated");
+    assertThat(outer.status()).isEqualTo("conflict");
+    assertThat(closed).as("the refused plan is stopped again, the running one kept").hasValue(1);
+  }
+
+  @Test
+  @DisplayName("a plan that expired (INACTIVE) is replaced like a stopped one")
+  void expiredPlanIsReplaced() {
+    final java.util.concurrent.atomic.AtomicInteger closed =
+        new java.util.concurrent.atomic.AtomicInteger();
+    final java.util.Iterator<com.macstab.chaos.jvm.api.ChaosActivationHandle> plans =
+        java.util.List.of(
+                handle("plan:mgmt", closed, ChaosDiagnostics.ScenarioState.INACTIVE),
+                handle("plan:mgmt", closed))
+            .iterator();
+    final ChaosManagement replacing = new ChaosManagement(scriptedControlPlane(plans::next));
+    replacing.activate(PLAN);
+
+    assertThat(replacing.activate(PLAN).status()).isEqualTo("activated");
+    assertThat(closed).as("the expired plan is closed").hasValue(1);
+  }
+
+  @Test
   @DisplayName("a null plan is invalid; a rejection is 422 and an unmanaged stop 409 over HTTP")
   void nullPlanAndHttpStatuses() {
     assertThat(management.activate(null).status()).isEqualTo("invalid");
