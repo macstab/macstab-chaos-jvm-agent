@@ -11,6 +11,7 @@ import com.macstab.chaos.jvm.api.ChaosSelector;
 import com.macstab.chaos.jvm.api.ChaosSession;
 import com.macstab.chaos.jvm.api.NamePattern;
 import com.macstab.chaos.jvm.api.OperationType;
+import java.time.Duration;
 import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.FutureTask;
@@ -303,27 +304,27 @@ class ThreadAndSessionDispatchTest {
     void workerRunSeesTheSubmittersSession() throws Throwable {
       final FutureTask<String> task = new FutureTask<>(new Charge());
       try (ChaosSession session = runtime.openSession("wrap")) {
-        session.activate(
-            ChaosScenario.builder("worker")
-                .scope(ChaosScenario.ScenarioScope.SESSION)
-                .selector(
-                    new ChaosSelector.ExecutorSelector(
-                        Set.of(OperationType.EXECUTOR_WORKER_RUN),
-                        NamePattern.any(),
-                        NamePattern.exact(FutureTask.class.getName()),
-                        null))
-                .effect(ChaosEffect.reject("worker down"))
-                .activationPolicy(ActivationPolicy.always())
-                .build());
+        final com.macstab.chaos.jvm.api.ChaosActivationHandle handle =
+            session.activate(
+                ChaosScenario.builder("worker")
+                    .scope(ChaosScenario.ScenarioScope.SESSION)
+                    .selector(
+                        new ChaosSelector.ExecutorSelector(
+                            Set.of(OperationType.EXECUTOR_WORKER_RUN),
+                            NamePattern.any(),
+                            NamePattern.exact(FutureTask.class.getName()),
+                            null))
+                    .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+                    .activationPolicy(ActivationPolicy.always())
+                    .build());
         final Runnable submitted = runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, task);
 
         try (ChaosSession.ScopeBinding outside = runtime.bindSession(null)) {
           assertThat(runtime.currentSessionId()).isNull();
-          assertThatThrownBy(() -> runtime.beforeWorkerRun(this, null, submitted))
-              .hasMessageContaining("worker down");
-          assertThatCode(() -> runtime.beforeWorkerRun(this, null, task))
-              .as("the bare task carries no session")
-              .doesNotThrowAnyException();
+          runtime.beforeWorkerRun(this, null, submitted);
+          assertThat(handle.appliedCount()).isEqualTo(1L);
+          runtime.beforeWorkerRun(this, null, task);
+          assertThat(handle.appliedCount()).as("the bare task carries no session").isEqualTo(1L);
         }
       }
     }

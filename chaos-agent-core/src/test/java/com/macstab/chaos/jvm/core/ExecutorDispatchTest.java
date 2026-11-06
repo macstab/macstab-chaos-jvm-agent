@@ -1,7 +1,6 @@
 package com.macstab.chaos.jvm.core;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.macstab.chaos.jvm.api.ActivationPolicy;
@@ -186,30 +185,47 @@ class ExecutorDispatchTest {
 
     @Test
     @DisplayName("a worker run without a known worker thread is still evaluated")
-    void unknownWorker() {
+    void unknownWorker() throws Throwable {
       activate(
           "worker",
           ChaosSelector.executor(Set.of(OperationType.EXECUTOR_WORKER_RUN)),
-          ChaosEffect.reject("worker down"));
+          ChaosEffect.delay(Duration.ofMillis(1)));
 
-      assertThatThrownBy(() -> runtime.beforeWorkerRun(this, null, () -> {}))
-          .hasMessageContaining("worker down");
+      runtime.beforeWorkerRun(this, null, () -> {});
+
+      assertThat(runtime.diagnostics().scenario("worker").orElseThrow().appliedCount())
+          .isEqualTo(1L);
     }
 
     @Test
-    @DisplayName("a fork-join task run fails under reject and proceeds without a scenario")
-    void forkJoinTaskRun() {
-      final java.util.concurrent.ForkJoinTask<?> task =
-          java.util.concurrent.ForkJoinTask.adapt(() -> {});
-      assertThatCode(() -> runtime.beforeForkJoinTaskRun(task)).doesNotThrowAnyException();
-
+    @DisplayName("a fork-join task run is evaluated")
+    void forkJoinTaskRun() throws Throwable {
       activate(
           "fork-join",
           ChaosSelector.executor(Set.of(OperationType.FORK_JOIN_TASK_RUN)),
-          ChaosEffect.reject("no forks"));
+          ChaosEffect.delay(Duration.ofMillis(1)));
 
-      assertThatThrownBy(() -> runtime.beforeForkJoinTaskRun(task))
-          .hasMessageContaining("no forks");
+      runtime.beforeForkJoinTaskRun(java.util.concurrent.ForkJoinTask.adapt(() -> {}));
+
+      assertThat(runtime.diagnostics().scenario("fork-join").orElseThrow().appliedCount())
+          .isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("a reject on a worker or fork-join run is refused: the pool cannot fail the task")
+    void rejectRefused() {
+      for (final OperationType operation :
+          Set.of(OperationType.EXECUTOR_WORKER_RUN, OperationType.FORK_JOIN_TASK_RUN)) {
+        assertThatThrownBy(
+                () ->
+                    activate(
+                        "reject-" + operation,
+                        ChaosSelector.executor(Set.of(operation)),
+                        ChaosEffect.reject("no")))
+            .isInstanceOf(com.macstab.chaos.jvm.api.ChaosValidationException.class)
+            .hasMessageContaining(operation.name());
+      }
+      assertThat(runtime.diagnostics().snapshot().scenarios()).isEmpty();
     }
   }
 

@@ -97,7 +97,8 @@ public enum OperationType {
 
   /**
    * Fires just before a worker thread in an executor pool runs a submitted task. Chaos here applies
-   * latency or rejections to the execution phase, independent of submission.
+   * latency (delay, gate) to the execution phase, independent of submission. A reject is refused at
+   * activation: the pool cannot fail the task at this point.
    */
   EXECUTOR_WORKER_RUN,
 
@@ -119,7 +120,8 @@ public enum OperationType {
    * Fires before a {@link java.util.concurrent.ForkJoinTask} executes within a {@link
    * java.util.concurrent.ForkJoinPool}. Covers tasks submitted via {@code
    * ForkJoinPool.commonPool()} as well as custom pools, including the pool backing parallel
-   * streams.
+   * streams. Chaos here applies latency (delay, gate); a reject is refused at activation, because
+   * the pool cannot fail the task at this point.
    */
   FORK_JOIN_TASK_RUN,
 

@@ -830,6 +830,8 @@ All selectors use `"type"` as the JSON discriminator.
 **Operations:** `EXECUTOR_SUBMIT`, `EXECUTOR_WORKER_RUN`, `EXECUTOR_SHUTDOWN`, `EXECUTOR_AWAIT_TERMINATION`, `FORK_JOIN_TASK_RUN`  
 **Purpose:** Intercept task submission, worker execution, and executor shutdown across `ThreadPoolExecutor`, `ForkJoinPool`, and `ScheduledThreadPoolExecutor`.
 
+`reject` is refused on `EXECUTOR_WORKER_RUN` and `FORK_JOIN_TASK_RUN`: a worker evaluates the run before the pool records the task's outcome, so a throwable there would kill the worker and leave the task's future incomplete. Delay or gate the run, or reject `EXECUTOR_SUBMIT`.
+
 **Fields:**
 
 | Field                  | Type                 | Default       | Description                                   |

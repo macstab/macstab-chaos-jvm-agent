@@ -639,6 +639,16 @@ final class CompatibilityValidator {
           "RejectEffect is not supported for NETTY_CHANNEL_READ; delay or gate the read, or"
               + " reject NETTY_CHANNEL_WRITE, which fails through the pipeline");
     }
+    if (effect instanceof ChaosEffect.RejectEffect
+        && (operations.contains(OperationType.EXECUTOR_WORKER_RUN)
+            || operations.contains(OperationType.FORK_JOIN_TASK_RUN))) {
+      // A worker evaluates the run before the pool records the task's outcome: a throwable there
+      // kills the worker and leaves the task's future incomplete for good.
+      throw new ChaosValidationException(
+          "RejectEffect is not supported for EXECUTOR_WORKER_RUN or FORK_JOIN_TASK_RUN: the pool"
+              + " cannot fail the task there (its future never completes and the worker dies);"
+              + " delay or gate the run, or reject EXECUTOR_SUBMIT");
+    }
     if (effect instanceof ChaosEffect.ClockSkewEffect) {
       for (final OperationType operation : operations) {
         if (!CLOCK_READ_OPS.contains(operation)) {
