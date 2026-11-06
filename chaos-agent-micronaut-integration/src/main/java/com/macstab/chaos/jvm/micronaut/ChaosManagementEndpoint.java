@@ -84,7 +84,11 @@ public class ChaosManagementEndpoint {
    */
   @Delete(produces = MediaType.APPLICATION_JSON)
   public HttpResponse<String> stop(@Selector final String id) {
-    return answer("DELETE", "/" + id, null);
+    // Micronaut has decoded the selector already; handle() decodes its sub-path once more.
+    return answer(
+        "DELETE",
+        "/" + java.net.URLEncoder.encode(id, java.nio.charset.StandardCharsets.UTF_8),
+        null);
   }
 
   /**

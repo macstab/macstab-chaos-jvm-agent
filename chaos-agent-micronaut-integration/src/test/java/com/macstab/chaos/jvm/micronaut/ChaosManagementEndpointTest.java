@@ -52,6 +52,21 @@ class ChaosManagementEndpointTest {
   }
 
   @Test
+  @DisplayName("stops a plan whose name holds characters a URL escapes")
+  void stopsAnEscapedName() {
+    ChaosPlatform.installLocally();
+    try (ApplicationContext context =
+        ApplicationContext.run(Map.of("macstab.chaos.management.enabled", "true"))) {
+      final ChaosManagementEndpoint endpoint = context.getBean(ChaosManagementEndpoint.class);
+      assertThat(endpoint.activate(PLAN.replace("\"mn-mgmt\"", "\"50%+off\"")).code())
+          .isEqualTo(200);
+
+      // Micronaut hands the endpoint the decoded selector.
+      assertThat(endpoint.stop("50%+off").code()).isEqualTo(200);
+    }
+  }
+
+  @Test
   @DisplayName("answers 503 instead of installing the agent")
   void neverInstallsTheAgent() {
     final ChaosManagementEndpoint endpoint =

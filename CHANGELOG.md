@@ -89,6 +89,7 @@ Migration steps for each change: [docs/migration-2.0.md](docs/migration-2.0.md).
 
 ### Bug Fixes
 
+* **micronaut:** `DELETE /chaos/{id}` decoded the id twice (Micronaut decodes the path variable, the shared handler decoded it again): a plan named with `%` answered 400 and one with `+` was looked up under a different name. The id is decoded once, as in Spring and Quarkus.
 * **micronaut:** a `@MicronautChaosTest` with `@TestInstance(PER_CLASS)` that injected `ChaosControlPlane` failed with "chaos agent is not installed" when it was the first chaos test of its JVM: Micronaut injects such a test instance before the chaos extension installs the agent. The test control-plane bean installs the agent itself.
 * **testkit:** a `ChaosSession` or `ChaosControlPlane` parameter of a static `@BeforeAll` method or of a `PER_CLASS` test constructor was injected as `null` (the session is opened per test), so the test failed later with a `NullPointerException`. It fails at injection with a `ParameterResolutionException` saying where the parameter is available, like the Spring, Micronaut and Quarkus extensions.
 * **testkit:** a `@Nested` test ran without the `@WithChaos` scenarios of the classes it is nested in, so it passed without the chaos it was meant to see. The enclosing classes' scenarios are activated for it, outermost first.
