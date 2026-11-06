@@ -8,6 +8,7 @@ import org.junit.jupiter.api.extension.AfterEachCallback;
 import org.junit.jupiter.api.extension.BeforeEachCallback;
 import org.junit.jupiter.api.extension.ExtensionContext;
 import org.junit.jupiter.api.extension.ParameterContext;
+import org.junit.jupiter.api.extension.ParameterResolutionException;
 import org.junit.jupiter.api.extension.ParameterResolver;
 import org.junit.platform.commons.support.AnnotationSupport;
 
@@ -179,12 +180,22 @@ public final class ChaosAgentExtension
    *
    * @param parameterContext the context for the parameter to be resolved
    * @param extensionContext the JUnit extension context for the test
-   * @return the resolved parameter value; never null if {@link #beforeEach} completed successfully
+   * @return the resolved parameter value
+   * @throws ParameterResolutionException outside a test, its {@code @BeforeEach} and
+   *     {@code @AfterEach} methods: the session is opened per test
    */
   @Override
   public Object resolveParameter(
       final ParameterContext parameterContext, final ExtensionContext extensionContext) {
     final Class<?> parameterType = parameterContext.getParameter().getType();
-    return extensionContext.getStore(NAMESPACE).get(parameterType, parameterType);
+    final Object resolved = extensionContext.getStore(NAMESPACE).get(parameterType, parameterType);
+    if (resolved != null) {
+      return resolved;
+    }
+    throw new ParameterResolutionException(
+        "ChaosAgentExtension: no "
+            + parameterType.getSimpleName()
+            + " available — the session is opened per test: inject it into a test, @BeforeEach or"
+            + " @AfterEach method");
   }
 }

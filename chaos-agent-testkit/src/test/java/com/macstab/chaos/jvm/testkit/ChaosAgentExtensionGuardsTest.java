@@ -2,6 +2,7 @@ package com.macstab.chaos.jvm.testkit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.macstab.chaos.jvm.api.ChaosControlPlane;
 import com.macstab.chaos.jvm.api.ChaosSession;
@@ -41,6 +42,16 @@ class ChaosAgentExtensionGuardsTest {
     assertThat(extension.supportsParameter(parameter(ChaosSession.class), context)).isTrue();
     assertThat(extension.supportsParameter(parameter(ChaosControlPlane.class), context)).isTrue();
     assertThat(extension.supportsParameter(parameter(String.class), context)).isFalse();
+  }
+
+  @Test
+  @DisplayName("outside a test (a static @BeforeAll, a constructor) a parameter fails, not null")
+  void noSessionNoParameter() {
+    assertThatThrownBy(
+            () ->
+                extension.resolveParameter(parameter(ChaosSession.class), context(new HashMap<>())))
+        .isInstanceOf(org.junit.jupiter.api.extension.ParameterResolutionException.class)
+        .hasMessageContaining("no ChaosSession available");
   }
 
   @SuppressWarnings("unused")
