@@ -89,6 +89,7 @@ Migration steps for each change: [docs/migration-2.0.md](docs/migration-2.0.md).
 
 ### Bug Fixes
 
+* **bootstrap:** the agent argument `configWatchInterval=0` did not turn watching off when `MACSTAB_CHAOS_WATCH_INTERVAL` was set: only a positive argument took precedence. The argument decides whenever it is given, as documented.
 * **bootstrap:** while a reloaded plan file named a scenario id that a scenario activated elsewhere held, every poll stopped the changed scenarios, failed on the conflict and started them again, resetting their counters, budgets and windows, and recorded one more activation failure. The conflict is now found before anything changes; the running scenarios keep running and the file is retried.
 * **bootstrap:** the reports status file stayed at `state=error` when the config file went back to the plan already applied — a broken edit reverted, or a read that failed while a Kubernetes ConfigMap swapped its files — because unchanged content is not reloaded. It reports `state=ok` again, and the broken content, should it return, is reported again.
 * **bootstrap (management):** a plan posted under the name of a running plan silently stopped that plan and took its place; every plan without `metadata.name` is named `default`, so a second unnamed plan replaced the first. It is now a 409 `conflict`; stop the running plan first. A plan that has finished is still replaced.

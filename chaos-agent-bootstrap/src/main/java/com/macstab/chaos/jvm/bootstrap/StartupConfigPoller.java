@@ -4,6 +4,7 @@ import com.macstab.chaos.jvm.api.ChaosActivationHandle;
 import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.core.ChaosRuntime;
 import com.macstab.chaos.jvm.core.DefaultChaosActivationHandle;
+import com.macstab.chaos.jvm.startup.AgentArgs;
 import com.macstab.chaos.jvm.startup.AgentArgsParser;
 import com.macstab.chaos.jvm.startup.ChaosPlanMapper;
 import com.macstab.chaos.jvm.startup.ConfigLoadException;
@@ -593,9 +594,10 @@ public final class StartupConfigPoller implements AutoCloseable {
 
   private static long resolveRawInterval(
       final @Nullable String rawAgentArgs, final Map<String, String> environment) {
-    final long fromArg = AgentArgsParser.parse(rawAgentArgs).getLong(ARG_WATCH_INTERVAL, 0L);
-    if (fromArg > 0) {
-      return fromArg;
+    final AgentArgs args = AgentArgsParser.parse(rawAgentArgs);
+    if (args.get(ARG_WATCH_INTERVAL) != null) {
+      // A present argument decides, also configWatchInterval=0 (off) over the environment.
+      return args.getLong(ARG_WATCH_INTERVAL, 0L);
     }
     final String envValue = environment.get(ENV_WATCH_INTERVAL);
     if (envValue != null && !envValue.isBlank()) {

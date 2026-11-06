@@ -130,6 +130,15 @@ class StartupConfigPollerTest {
     }
 
     @Test
+    @DisplayName("an agent arg of 0 turns watching off over the env var")
+    void zeroArgOverridesEnvVar() {
+      assertThat(
+              StartupConfigPoller.resolveInterval(
+                  "configWatchInterval=0", Map.of(StartupConfigPoller.ENV_WATCH_INTERVAL, "500")))
+          .isEqualTo(0L);
+    }
+
+    @Test
     @DisplayName("agent arg overrides env var")
     void argOverridesEnvVar() {
       assertThat(
