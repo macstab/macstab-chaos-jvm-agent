@@ -99,3 +99,7 @@ spring-boot4-dependencies = { module = "org.springframework.boot:spring-boot-dep
 
 [plugins]
 spring-boot3 = { id = "org.springframework.boot", version.ref = "springBoot3" }
+shadow = { id = "com.gradleup.shadow", version = "8.3.9" }
+pitest = { id = "info.solidsoft.pitest", version = "1.19.0" }
+cyclonedx = { id = "org.cyclonedx.bom", version = "3.5.1" }
+errorprone = { id = "net.ltgt.errorprone", version = "5.2.0" }

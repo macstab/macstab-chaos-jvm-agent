@@ -17,10 +17,10 @@ buildscript {
 
 plugins {
     base
-    id("com.gradleup.shadow") version "8.3.9" apply false
-    id("info.solidsoft.pitest") version "1.19.0" apply false
-    id("org.cyclonedx.bom") version "3.5.1" apply false
-    id("net.ltgt.errorprone") version "5.2.0" apply false
+    alias(libs.plugins.shadow) apply false
+    alias(libs.plugins.pitest) apply false
+    alias(libs.plugins.cyclonedx) apply false
+    alias(libs.plugins.errorprone) apply false
 }
 
 apply(plugin = "com.diffplug.spotless")
