@@ -3,11 +3,13 @@ package com.macstab.chaos.jvm.spring.boot.common;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.macstab.chaos.jvm.api.ChaosDiagnostics;
+import com.macstab.chaos.jvm.bootstrap.ChaosManagement;
 import com.macstab.chaos.jvm.core.ChaosRuntime;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.actuate.endpoint.web.WebEndpointResponse;
 
 /** Actuator endpoint behaviour against a real (non-instrumenting) {@link ChaosRuntime}. */
 @DisplayName("ChaosActuatorEndpoint lifecycle")
@@ -29,34 +31,31 @@ class ChaosActuatorLifecycleTest {
       """;
 
   private ChaosRuntime runtime;
-  private ChaosHandleRegistry registry;
   private ChaosActuatorEndpoint endpoint;
 
   @BeforeEach
   void setUp() {
     runtime = new ChaosRuntime();
-    registry = new ChaosHandleRegistry();
-    endpoint = new ChaosActuatorEndpoint(runtime, registry);
+    endpoint = new ChaosActuatorEndpoint(runtime);
   }
 
   @AfterEach
   void tearDown() {
-    registry.destroy();
+    endpoint.close();
     runtime.close();
   }
 
   @Test
   @DisplayName("activations after stopAll() stay active")
   void activationAfterStopAllStaysActive() {
-    // Arrange
     endpoint.activate(PLAN);
     endpoint.stopAll();
 
-    // Act
-    final ChaosActuatorEndpoint.ActivationResponse response = endpoint.activate(PLAN);
+    final WebEndpointResponse<ChaosManagement.ActivationResponse> response =
+        endpoint.activate(PLAN);
 
-    // Assert
-    assertThat(response.status()).isEqualTo("activated");
+    assertThat(response.getStatus()).isEqualTo(200);
+    assertThat(response.getBody().status()).isEqualTo("activated");
     assertThat(runtime.diagnostics().scenario("executor-latency"))
         .get()
         .extracting(ChaosDiagnostics.ScenarioReport::state)
@@ -64,68 +63,72 @@ class ChaosActuatorLifecycleTest {
   }
 
   @Test
-  @DisplayName("a missing, blank or malformed body is answered with an error, nothing activated")
+  @DisplayName("a missing, blank or malformed body is a 400, nothing activated")
   void unusableBodies() {
-    assertThat(endpoint.activate(null))
-        .isEqualTo(
-            new ChaosActuatorEndpoint.ActivationResponse(
-                "error", null, "plan JSON must not be blank"));
-    assertThat(endpoint.activate("  "))
-        .isEqualTo(
-            new ChaosActuatorEndpoint.ActivationResponse(
-                "error", null, "plan JSON must not be blank"));
-    // The parser's detail stays in the server log; the response does not echo the input.
-    assertThat(endpoint.activate("{\"scenarios\": [secret"))
-        .isEqualTo(new ChaosActuatorEndpoint.ActivationResponse("error", null, "invalid plan"));
+    assertThat(endpoint.activate(null).getStatus()).isEqualTo(400);
+    assertThat(endpoint.activate("  ").getBody().status()).isEqualTo("invalid");
+    final WebEndpointResponse<ChaosManagement.ActivationResponse> malformed =
+        endpoint.activate("{\"scenarios\": [secret");
+    assertThat(malformed.getStatus()).isEqualTo(400);
+    assertThat(malformed.getBody().message()).doesNotContain("secret");
     assertThat(runtime.diagnostics().snapshot().scenarios()).isEmpty();
-    assertThat(registry.ids()).isEmpty();
   }
 
   @Test
   @DisplayName("a stopped plan can be activated again")
   void planCanBeReactivatedAfterStop() {
-    // Arrange
-    final String handleId = endpoint.activate(PLAN).handleId();
+    final String handleId = endpoint.activate(PLAN).getBody().handleId();
     endpoint.stop(handleId);
 
-    // Act
-    final ChaosActuatorEndpoint.ActivationResponse response = endpoint.activate(PLAN);
-
-    // Assert
-    assertThat(response.status()).isEqualTo("activated");
+    assertThat(endpoint.activate(PLAN).getBody().status()).isEqualTo("activated");
   }
 
   @Test
   @DisplayName("stop() accepts the plan handle id and the plan name")
   void stopAcceptsHandleIdAndPlanName() {
-    final String handleId = endpoint.activate(PLAN).handleId();
-    assertThat(endpoint.stop(handleId).status()).isEqualTo("stopped");
+    final String handleId = endpoint.activate(PLAN).getBody().handleId();
+    assertThat(endpoint.stop(handleId).getStatus()).isEqualTo(200);
 
     endpoint.activate(PLAN);
-    assertThat(endpoint.stop("latency").status()).isEqualTo("stopped");
+    assertThat(endpoint.stop("latency").getBody().status()).isEqualTo("stopped");
   }
 
   @Test
-  @DisplayName("stop() by scenario id of a plan points to the plan instead of failing silently")
-  void stopByScenarioIdExplainsPlanStop() {
+  @DisplayName("a scenario not activated as a plan here is a 409 that says where to stop it")
+  void stopByScenarioIdIsUnmanaged() {
     endpoint.activate(PLAN);
 
-    final ChaosActuatorEndpoint.StopResponse response = endpoint.stop("executor-latency");
+    final WebEndpointResponse<ChaosManagement.StopResponse> response =
+        endpoint.stop("executor-latency");
 
-    assertThat(response.status()).isEqualTo("unmanaged");
-    assertThat(response.message()).contains("plan:<name>");
+    assertThat(response.getStatus()).isEqualTo(409);
+    assertThat(response.getBody().status()).isEqualTo("unmanaged");
   }
 
   @Test
-  @DisplayName("an invalid scenario is rejected with a redacted error instead of an exception")
+  @DisplayName("an invalid scenario is a 400 with the validation reason")
   void invalidScenarioIsRejected() {
     final String invalid =
         PLAN.replace(
             "\"type\": \"delay\", \"minDelay\": \"PT0.001S\", \"maxDelay\": \"PT0.001S\"",
             "\"type\": \"spuriousWakeup\"");
 
-    final ChaosActuatorEndpoint.ActivationResponse response = endpoint.activate(invalid);
+    final WebEndpointResponse<ChaosManagement.ActivationResponse> response =
+        endpoint.activate(invalid);
 
-    assertThat(response.status()).isEqualTo("error");
+    assertThat(response.getStatus()).isEqualTo(400);
+    assertThat(response.getBody().status()).isEqualTo("invalid");
+  }
+
+  @Test
+  @DisplayName("closing the endpoint stops the plans activated through it")
+  void closeStopsItsPlans() {
+    endpoint.activate(PLAN);
+
+    endpoint.close();
+
+    assertThat(runtime.diagnostics().scenario("executor-latency"))
+        .map(ChaosDiagnostics.ScenarioReport::state)
+        .isNotEqualTo(java.util.Optional.of(ChaosDiagnostics.ScenarioState.ACTIVE));
   }
 }

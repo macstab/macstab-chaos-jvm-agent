@@ -1,34 +1,10 @@
-public class com/macstab/chaos/jvm/spring/boot/common/ChaosActuatorEndpoint
-  public method <init>(Lcom/macstab/chaos/jvm/api/ChaosControlPlane;Lcom/macstab/chaos/jvm/spring/boot/common/ChaosHandleRegistry;)V
-  public method activate(Ljava/lang/String;)Lcom/macstab/chaos/jvm/spring/boot/common/ChaosActuatorEndpoint$ActivationResponse;
+public class com/macstab/chaos/jvm/spring/boot/common/ChaosActuatorEndpoint implements java/lang/AutoCloseable
+  public method <init>(Lcom/macstab/chaos/jvm/api/ChaosControlPlane;)V
+  public method activate(Ljava/lang/String;)Lorg/springframework/boot/actuate/endpoint/web/WebEndpointResponse;
+  public method close()V
   public method snapshot()Lcom/macstab/chaos/jvm/api/ChaosDiagnostics$Snapshot;
-  public method stop(Ljava/lang/String;)Lcom/macstab/chaos/jvm/spring/boot/common/ChaosActuatorEndpoint$StopResponse;
-  public method stopAll()Lcom/macstab/chaos/jvm/spring/boot/common/ChaosActuatorEndpoint$StopAllResponse;
-
-public static final record com/macstab/chaos/jvm/spring/boot/common/ChaosActuatorEndpoint$ActivationResponse
-  public final method equals(Ljava/lang/Object;)Z
-  public final method hashCode()I
-  public final method toString()Ljava/lang/String;
-  public method <init>(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V
-  public method handleId()Ljava/lang/String;
-  public method message()Ljava/lang/String;
-  public method status()Ljava/lang/String;
-
-public static final record com/macstab/chaos/jvm/spring/boot/common/ChaosActuatorEndpoint$StopAllResponse
-  public final method equals(Ljava/lang/Object;)Z
-  public final method hashCode()I
-  public final method toString()Ljava/lang/String;
-  public method <init>(I)V
-  public method stoppedCount()I
-
-public static final record com/macstab/chaos/jvm/spring/boot/common/ChaosActuatorEndpoint$StopResponse
-  public final method equals(Ljava/lang/Object;)Z
-  public final method hashCode()I
-  public final method toString()Ljava/lang/String;
-  public method <init>(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V
-  public method message()Ljava/lang/String;
-  public method scenarioId()Ljava/lang/String;
-  public method status()Ljava/lang/String;
+  public method stop(Ljava/lang/String;)Lorg/springframework/boot/actuate/endpoint/web/WebEndpointResponse;
+  public method stopAll()Lcom/macstab/chaos/jvm/bootstrap/ChaosManagement$StopAllResponse;
 
 public class com/macstab/chaos/jvm/spring/boot/common/ChaosAutoConfiguration
   public method <init>()V
@@ -38,15 +14,12 @@ public class com/macstab/chaos/jvm/spring/boot/common/ChaosAutoConfiguration
 
 public static class com/macstab/chaos/jvm/spring/boot/common/ChaosAutoConfiguration$ActuatorConfiguration
   public method <init>()V
-  public method chaosActuatorEndpoint(Lcom/macstab/chaos/jvm/api/ChaosControlPlane;Lcom/macstab/chaos/jvm/spring/boot/common/ChaosHandleRegistry;)Lcom/macstab/chaos/jvm/spring/boot/common/ChaosActuatorEndpoint;
+  public method chaosActuatorEndpoint(Lcom/macstab/chaos/jvm/api/ChaosControlPlane;)Lcom/macstab/chaos/jvm/spring/boot/common/ChaosActuatorEndpoint;
 
 public final class com/macstab/chaos/jvm/spring/boot/common/ChaosHandleRegistry implements org/springframework/beans/factory/DisposableBean
   public method <init>()V
   public method destroy()V
-  public method ids()Ljava/util/Collection;
   public method register(Lcom/macstab/chaos/jvm/api/ChaosActivationHandle;)V
-  public method stop(Ljava/lang/String;)Z
-  public method stopAll()I
 
 public class com/macstab/chaos/jvm/spring/boot/common/ChaosProperties
   public method <init>()V

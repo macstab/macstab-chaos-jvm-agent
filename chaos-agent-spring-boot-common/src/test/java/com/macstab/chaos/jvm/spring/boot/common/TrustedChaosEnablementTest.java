@@ -52,6 +52,38 @@ class TrustedChaosEnablementTest {
     }
 
     @Test
+    @DisplayName("allow-remote-enable=false from a trusted source admits nothing")
+    void remoteNotAllowed() {
+      final var environment =
+          environmentWith(
+              source("configserver:app", ACTUATOR, "true"),
+              source("systemProperties", "macstab.chaos.allow-remote-enable", "false"));
+      assertThat(TrustedChaosEnablement.rejected(environment, ACTUATOR)).isTrue();
+    }
+
+    @Test
+    @DisplayName("the actuator condition does not match without a configurable environment")
+    void conditionNeedsConfigurableEnvironment() {
+      final org.springframework.core.env.Environment plain =
+          (org.springframework.core.env.Environment)
+              java.lang.reflect.Proxy.newProxyInstance(
+                  getClass().getClassLoader(),
+                  new Class<?>[] {org.springframework.core.env.Environment.class},
+                  (proxy, method, args) -> null);
+      final org.springframework.context.annotation.ConditionContext context =
+          (org.springframework.context.annotation.ConditionContext)
+              java.lang.reflect.Proxy.newProxyInstance(
+                  getClass().getClassLoader(),
+                  new Class<?>[] {org.springframework.context.annotation.ConditionContext.class},
+                  (proxy, method, args) ->
+                      method.getName().equals("getEnvironment") ? plain : null);
+
+      assertThat(
+              new OnTrustedActuatorEnablementCondition().getMatchOutcome(context, null).isMatch())
+          .isFalse();
+    }
+
+    @Test
     @DisplayName("an absent property is neither set nor rejected")
     void absent() {
       final var environment = environmentWith();

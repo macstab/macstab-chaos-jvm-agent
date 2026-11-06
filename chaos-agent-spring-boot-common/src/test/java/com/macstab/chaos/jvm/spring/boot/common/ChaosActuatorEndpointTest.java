@@ -84,16 +84,16 @@ class ChaosActuatorEndpointTest {
   }
 
   @Test
-  @DisplayName("stop() reports not-found for an unknown scenario ID")
+  @DisplayName("stop() answers 404 not-found for an unknown id")
   void stopReportsNotFoundForUnknownScenario() {
     runner
         .withPropertyValues("macstab.chaos.enabled=true", "macstab.chaos.actuator.enabled=true")
         .run(
             context -> {
               final ChaosActuatorEndpoint endpoint = context.getBean(ChaosActuatorEndpoint.class);
-              final ChaosActuatorEndpoint.StopResponse response = endpoint.stop("unknown-id");
-              assertThat(response.status()).isEqualTo("not-found");
-              assertThat(response.scenarioId()).isEqualTo("unknown-id");
+              final var response = endpoint.stop("unknown-id");
+              assertThat(response.getStatus()).isEqualTo(404);
+              assertThat(response.getBody().status()).isEqualTo("not-found");
             });
   }
 
@@ -105,7 +105,7 @@ class ChaosActuatorEndpointTest {
         .run(
             context -> {
               final ChaosActuatorEndpoint endpoint = context.getBean(ChaosActuatorEndpoint.class);
-              final ChaosActuatorEndpoint.StopAllResponse response = endpoint.stopAll();
+              final var response = endpoint.stopAll();
               assertThat(response.stoppedCount()).isZero();
             });
   }

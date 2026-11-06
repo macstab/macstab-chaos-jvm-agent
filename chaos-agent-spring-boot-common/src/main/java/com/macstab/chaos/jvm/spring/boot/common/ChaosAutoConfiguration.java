@@ -209,13 +209,11 @@ public class ChaosAutoConfiguration {
      * controls (reverse proxy auth, private management port, etc.).
      *
      * @param controlPlane the chaos control plane bean
-     * @param handleRegistry the starter-local handle registry
      * @return the Actuator endpoint bean
      */
     @Bean
     @ConditionalOnMissingBean
-    public ChaosActuatorEndpoint chaosActuatorEndpoint(
-        final ChaosControlPlane controlPlane, final ChaosHandleRegistry handleRegistry) {
+    public ChaosActuatorEndpoint chaosActuatorEndpoint(final ChaosControlPlane controlPlane) {
       if (!isSpringSecurityOnClasspath()) {
         LOGGER.log(
             Level.WARNING,
@@ -223,7 +221,7 @@ public class ChaosAutoConfiguration {
                 + " classpath. The endpoint exposes chaos activation/state; protect it with"
                 + " Security or network-level controls before using in production.");
       }
-      return new ChaosActuatorEndpoint(controlPlane, handleRegistry);
+      return new ChaosActuatorEndpoint(controlPlane);
     }
 
     private static boolean isSpringSecurityOnClasspath() {

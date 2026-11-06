@@ -604,7 +604,7 @@ curl http://localhost:8080/actuator/chaos
 curl -X POST http://localhost:8080/actuator/chaos \
   -H "Content-Type: application/json" \
   -d '{"planJson": "{\"metadata\":{\"name\":\"live-delay\"},\"scenarios\":[{\"id\":\"jdbc-delay\",\"scope\":\"JVM\",\"selector\":{\"type\":\"jdbc\",\"operations\":[\"JDBC_STATEMENT_EXECUTE\"]},\"effect\":{\"type\":\"delay\",\"minDelay\":\"PT0.2S\",\"maxDelay\":\"PT0.2S\"}}]}"}'
-# → {"status":"activated","handleId":"plan:live-delay",...}; on failure status "error" with a redacted message
+# → {"status":"activated","handleId":"plan:live-delay",...}; on failure 400 invalid, 409 conflict or 422 rejected (see observability.md §4a)
 
 # Stop that plan (by handle id "plan:live-delay" or by plan name)
 curl -X DELETE http://localhost:8080/actuator/chaos/live-delay

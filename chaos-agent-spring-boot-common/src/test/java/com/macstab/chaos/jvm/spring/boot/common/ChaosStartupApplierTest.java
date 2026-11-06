@@ -89,9 +89,10 @@ class ChaosStartupApplierTest {
               ready(context);
               final ChaosRuntime runtime = context.getBean(ChaosRuntime.class);
               assertThat(runtime.diagnostics().scenario("startup-delay")).isPresent();
-              assertThat(context.getBean(ChaosHandleRegistry.class).stop("plan:" + "default"))
-                  .as("the plan's handle is tracked under its id")
-                  .isTrue();
+              context.getBean(ChaosHandleRegistry.class).destroy();
+              assertThat(runtime.diagnostics().scenario("startup-delay"))
+                  .as("the plan's handle is tracked and stops with the context")
+                  .isEmpty();
             });
   }
 

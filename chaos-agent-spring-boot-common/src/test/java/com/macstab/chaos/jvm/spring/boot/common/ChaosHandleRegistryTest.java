@@ -9,8 +9,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 /**
- * The registry of handles the starter activated: one handle per id, stopping never fails the caller
- * (an endpoint or the context shutdown), and nothing registered during shutdown outlives it.
+ * The registry of handles the starter activated: one handle per id, stopping never fails the
+ * context shutdown, and nothing registered during shutdown outlives it.
  */
 @DisplayName("Handle registry")
 class ChaosHandleRegistryTest {
@@ -27,7 +27,8 @@ class ChaosHandleRegistryTest {
 
     assertThat(first.closed).hasValue(1);
     assertThat(second.closed).hasValue(0);
-    assertThat(registry.ids()).containsExactly("plan:a");
+    registry.destroy();
+    assertThat(second.closed).as("the replacement is tracked").hasValue(1);
   }
 
   @Test
@@ -40,27 +41,17 @@ class ChaosHandleRegistryTest {
   }
 
   @Test
-  @DisplayName("stop reports whether a tracked handle was stopped, and forgets it either way")
-  void stop() {
-    registry.register(new FakeHandle("ok"));
-    registry.register(new FakeHandle("failing", true));
+  @DisplayName("closing the context stops every handle, continuing past one that fails")
+  void destroyStopsAll() {
+    final FakeHandle failing = new FakeHandle("failing", true);
+    final FakeHandle ok = new FakeHandle("ok");
+    registry.register(failing);
+    registry.register(ok);
 
-    assertThat(registry.stop("ok")).isTrue();
-    assertThat(registry.stop("ok")).as("already gone").isFalse();
-    assertThat(registry.stop("unknown")).isFalse();
-    assertThat(registry.stop("failing")).as("its close threw").isFalse();
-    assertThat(registry.ids()).isEmpty();
-  }
+    registry.destroy();
 
-  @Test
-  @DisplayName("stopAll stops every handle and counts the ones that stopped cleanly")
-  void stopAll() {
-    registry.register(new FakeHandle("a"));
-    registry.register(new FakeHandle("b"));
-    registry.register(new FakeHandle("c", true));
-
-    assertThat(registry.stopAll()).isEqualTo(2);
-    assertThat(registry.ids()).isEmpty();
+    assertThat(failing.closed).hasValue(1);
+    assertThat(ok.closed).hasValue(1);
   }
 
   @Test
@@ -78,7 +69,8 @@ class ChaosHandleRegistryTest {
 
     assertThat(late.closed).hasValue(1);
     assertThat(lateFailing.closed).as("its failure is logged, not thrown").hasValue(1);
-    assertThat(registry.ids()).isEmpty();
+    registry.destroy();
+    assertThat(late.closed).as("not tracked, so not stopped again").hasValue(1);
   }
 
   @Test
@@ -87,9 +79,8 @@ class ChaosHandleRegistryTest {
     registry.register(new FakeHandle("plan:a", true));
     final FakeHandle replacement = new FakeHandle("plan:a");
     registry.register(replacement);
-    assertThat(registry.ids()).containsExactly("plan:a");
-    assertThat(registry.stop("plan:a")).isTrue();
-    assertThat(replacement.closed).hasValue(1);
+    registry.destroy();
+    assertThat(replacement.closed).as("the replacement is tracked").hasValue(1);
   }
 
   @Test
@@ -104,7 +95,8 @@ class ChaosHandleRegistryTest {
       racing.register(handle);
 
       assertThat(handle.closed).hasValue(1);
-      assertThat(racing.ids()).isEmpty();
+      racing.destroy();
+      assertThat(handle.closed).as("not tracked, so not stopped again").hasValue(1);
     }
   }
 

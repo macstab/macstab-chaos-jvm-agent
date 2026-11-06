@@ -173,7 +173,7 @@ public final class ChaosManagement implements AutoCloseable {
           return new HttpResult(404, error("unknown path"));
         }
         final ActivationResponse response = activate(body);
-        return new HttpResult(statusOf(response.status()), ChaosPlanMapper.toJson(response));
+        return new HttpResult(httpStatus(response.status()), ChaosPlanMapper.toJson(response));
       }
       case "DELETE" -> {
         if (path.isEmpty()) {
@@ -186,7 +186,7 @@ public final class ChaosManagement implements AutoCloseable {
           return new HttpResult(400, error("malformed id"));
         }
         final StopResponse response = stop(id);
-        return new HttpResult(statusOf(response.status()), ChaosPlanMapper.toJson(response));
+        return new HttpResult(httpStatus(response.status()), ChaosPlanMapper.toJson(response));
       }
       default -> {
         return new HttpResult(405, error("use GET, POST or DELETE"));
@@ -197,8 +197,11 @@ public final class ChaosManagement implements AutoCloseable {
   /**
    * The HTTP status of an outcome: 200 done, 400 invalid, 404 not found, 409 conflict (an id
    * already active, or a scenario not activated here), 422 rejected by the runtime.
+   *
+   * @param outcome the {@code status} of a response
+   * @return the HTTP status to answer with
    */
-  private static int statusOf(final String outcome) {
+  public static int httpStatus(final String outcome) {
     return switch (outcome) {
       case "activated", "stopped" -> 200;
       case "invalid" -> 400;

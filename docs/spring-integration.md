@@ -315,7 +315,7 @@ Every other source — Spring Cloud Config, Consul, Vault, any remote or runtime
 - Expose `ChaosControlPlane` as an injectable bean for application code and the Actuator endpoint.
 - Back off via `@ConditionalOnMissingBean` when user code provides its own control plane.
 
-The bean is never closed with the context (`destroyMethod = ""`). Per-context cleanup is done by `ChaosHandleRegistry`, which stops only the handles this starter registered.
+The bean is never closed with the context (`destroyMethod = ""`). Per-context cleanup stops only what the context activated: the startup plan (`ChaosHandleRegistry`) and the plans activated through the actuator endpoint.
 
 Both registrations call `ChaosPlatform.installLocally()`, which is idempotent — whichever runs first performs the actual attach; the second returns the already-installed instance in nanoseconds.
 
@@ -394,7 +394,7 @@ public ChaosHandleRegistry chaosHandleRegistry() {
 }
 ```
 
-`ChaosHandleRegistry` is discussed in detail in section 3.6. Its presence here as a distinct Spring bean serves two purposes: it participates in the normal Spring lifecycle and is injectable wherever needed, and it is the only coupling point between `ChaosAutoConfiguration` and `ChaosActuatorEndpoint` — the endpoint depends on both the registry and the control plane, but not on anything Spring-internal.
+`ChaosHandleRegistry` (section 3.6) holds the startup plan's handle until the context closes.
 
 #### `chaosStartupApplier` — `ApplicationReadyEvent` listener
 
@@ -404,8 +404,9 @@ public ChaosHandleRegistry chaosHandleRegistry() {
 public ApplicationListener<ApplicationReadyEvent> chaosStartupApplier(
         final ChaosControlPlane controlPlane,
         final ChaosProperties properties,
-        final ChaosHandleRegistry handleRegistry) {
-    return event -> applyStartup(controlPlane, properties, handleRegistry);
+        final ChaosHandleRegistry handleRegistry,
+        final ConfigurableEnvironment environment) {
+    return event -> applyStartup(controlPlane, properties, handleRegistry, environment);
 }
 ```
 
@@ -413,7 +414,7 @@ public ApplicationListener<ApplicationReadyEvent> chaosStartupApplier(
 
 The startup logic (`applyStartup`) performs two independent operations:
 
-1. **Startup plan activation**: if `macstab.chaos.config-file` is non-blank, reads the file via `StartupConfigLoader.loadPlanFromFile(configFile)` (the same hardening as the agent's `configFile`: symlink rejection, 1 MiB cap, world-writable rejection), calls `controlPlane.activate(plan)`, and registers the resulting `ChaosActivationHandle` in `handleRegistry`. `ConfigLoadException` and other `RuntimeException`s are caught and logged at `SEVERE` without propagating — a missing or malformed chaos plan file does not crash the application.
+1. **Startup plan activation**: if `macstab.chaos.config-file` is non-blank and comes from a trusted property source (an untrusted one is ignored with a warning), reads the file via `StartupConfigLoader.loadPlanFromFile(configFile)` (the same hardening as the agent's `configFile`: symlink rejection, 1 MiB cap, world-writable rejection), calls `controlPlane.activate(plan)`, and registers the resulting `ChaosActivationHandle` in `handleRegistry`. `ConfigLoadException` and other `RuntimeException`s are caught and logged at `SEVERE` without propagating — a missing or malformed chaos plan file does not crash the application.
 
 2. **Diagnostics dump**: if `macstab.chaos.debug-dump-on-start` is true, calls `controlPlane.diagnostics().debugDump()` and logs the full text at `INFO`. This snapshot captures the activated scenario list, their states and counters, and JVM runtime details. It is intended as a one-shot startup confirmation that the plan loaded and the scenarios are in `ACTIVE` state.
 
@@ -440,8 +441,10 @@ This double-guard is the minimum safe design for an endpoint that can activate a
 
 ```java
 @Endpoint(id = "chaos")
-public class ChaosActuatorEndpoint { ... }
+public class ChaosActuatorEndpoint implements AutoCloseable { ... }
 ```
+
+The endpoint is a thin adapter over `ChaosManagement` (in the agent), the same implementation the Micronaut endpoint and the Quarkus route use: the three answer with the same outcomes and HTTP statuses, and only plans activated through the endpoint can be stopped through it. Spring closes the endpoint with the context, which stops those plans.
 
 `@Endpoint(id = "chaos")` registers the endpoint under the path `/actuator/chaos`. Spring Boot Actuator's endpoint infrastructure maps the operation annotations to HTTP verbs automatically:
 
@@ -449,55 +452,21 @@ public class ChaosActuatorEndpoint { ... }
 |-------------------------------|-------------|------------------------|-------------------------------------------------------------|
 | `@ReadOperation`              | `GET`       | `/actuator/chaos`      | Returns `ChaosDiagnostics.Snapshot`                         |
 | `@WriteOperation`             | `POST`      | `/actuator/chaos`      | Activates a plan; body `{"planJson": "<escaped plan JSON>"}` |
-| `@DeleteOperation` (stopAll)  | `DELETE`    | `/actuator/chaos`      | Stops all starter-managed plans                             |
+| `@DeleteOperation` (stopAll)  | `DELETE`    | `/actuator/chaos`      | Stops all plans activated through the endpoint              |
 | `@DeleteOperation` (selector) | `DELETE`    | `/actuator/chaos/{id}` | Stops one plan by handle id (`plan:<name>`) or plan name    |
 
 Both delete operations are `@DeleteOperation`s; the `@Selector` path segment keeps them routable. (Two `@WriteOperation`s without distinguishing selectors would collide on the same verb and path, and Actuator refuses to start.)
 
-#### `snapshot()` — `GET /actuator/chaos`
+#### Operations
 
-```java
-@ReadOperation
-public ChaosDiagnostics.Snapshot snapshot() {
-    return controlPlane.diagnostics().snapshot();
-}
-```
+| Operation | Answer |
+|-----------|--------|
+| `GET /actuator/chaos` | 200, the `ChaosDiagnostics.Snapshot`: every scenario with its state and counters, the activation failures and the runtime details |
+| `POST /actuator/chaos` | 200 `activated` with `handleId` (`plan:<name>`); 400 `invalid` (blank, malformed or failing validation); 409 `conflict` (a scenario id is already active); 422 `rejected` (the runtime could not run it; the detail is logged, not returned) |
+| `DELETE /actuator/chaos/{id}` | 200 `stopped`; 404 `not-found`; 409 `unmanaged` (a scenario activated elsewhere, or a scenario of a plan: stop the plan by its handle id); 400 for an id with a malformed escape |
+| `DELETE /actuator/chaos` | 200 with `stoppedCount`, the plans stopped (one that fails to stop is logged and skipped) |
 
-Returns a `ChaosDiagnostics.Snapshot` record containing:
-- `capturedAt()` — `java.time.Instant` of the snapshot
-- `scenarios()` — `List<ScenarioReport>` with id, state, matchedCount, appliedCount, reason per scenario
-- `failures()` — `List<ActivationFailure>` for activation-time errors
-- `runtimeDetails()` — `Map<String, String>` with JVM version, virtual thread support status, current session ID
-
-This is a point-in-time snapshot — not a live stream. All counts reflect the state at the moment of the `GET` call.
-
-#### `activate(planJson)` — `POST /actuator/chaos`
-
-```java
-@WriteOperation
-public ActivationResponse activate(final String planJson) {
-    if (planJson == null || planJson.isBlank()) {
-        return new ActivationResponse("error", null, "plan JSON must not be blank");
-    }
-    final ChaosPlan plan;
-    try {
-        plan = ChaosPlanMapper.read(planJson);
-    } catch (final ConfigLoadException | IllegalArgumentException parseFailure) {
-        // full cause logged server-side at WARNING
-        return new ActivationResponse("error", null, "invalid plan");
-    }
-    try {
-        final ChaosActivationHandle handle = controlPlane.activate(plan);
-        handleRegistry.register(handle);
-        return new ActivationResponse("activated", handle.id(), null);
-    } catch (final RuntimeException activationFailure) {
-        // full cause logged server-side at WARNING
-        return new ActivationResponse("error", null, "plan rejected");
-    }
-}
-```
-
-Actuator binds the `String planJson` parameter **by name** from a JSON object body, so the request body is `{"planJson": "<plan JSON as an escaped string>"}` — not the raw plan document:
+Actuator binds the `String planJson` parameter **by name** from a JSON object body, so the request body is `{"planJson": "<plan JSON as an escaped string>"}`, not the raw plan document:
 
 ```bash
 curl -X POST http://localhost:8080/actuator/chaos \
@@ -505,62 +474,7 @@ curl -X POST http://localhost:8080/actuator/chaos \
   -d '{"planJson": "{\"metadata\":{\"name\":\"soak\"},\"scenarios\":[...]}"}'
 ```
 
-`ChaosPlanMapper.read(planJson)` deserializes the plan using Jackson with strict unknown-field policy — a typo in the JSON is rejected rather than silently ignored. The resulting `ChaosActivationHandle` is registered in `ChaosHandleRegistry` so that the DELETE operation can stop it later.
-
-Parse and activation failures (duplicate active id, validation failure, unsupported feature) are logged server-side with the full cause and answered with `status = "error"` and a redacted message, never a stack trace or Jackson detail.
-
-Response record:
-
-```java
-public record ActivationResponse(String status, String handleId, String message) {}
-```
-
-On success: `status = "activated"`, `handleId = "plan:<name>"` (the plan handle id), `message = null`.
-On blank body: `status = "error"`, `handleId = null`, `message = "plan JSON must not be blank"`.
-On malformed plan: `status = "error"`, `message = "invalid plan"`. On activation failure: `status = "error"`, `message = "plan rejected"`.
-
-#### `stop(id)` — `DELETE /actuator/chaos/{id}`
-
-```java
-@DeleteOperation
-public StopResponse stop(@Selector final String id) {
-    if (handleRegistry.stop(id) || handleRegistry.stop("plan:" + id)) {
-        return new StopResponse("stopped", id, null);
-    }
-    if (controlPlane.diagnostics().scenario(id).isPresent()) {
-        return new StopResponse("unmanaged", id,
-            "scenario was not activated through this endpoint, or is part of a plan; stop the plan"
-                + " by its handle id (plan:<name>), or the scenario via its activation handle");
-    }
-    return new StopResponse("not-found", id, "no plan or scenario with id " + id);
-}
-```
-
-`@Selector` binds `id` to the path segment. `id` is the `handleId` returned by `activate` (`plan:<name>`) or the plan name alone. Plans are activated atomically, so an individual scenario of a plan cannot be stopped on its own. The three-state response is deliberate:
-
-- `"stopped"` — the plan handle was in the registry and was closed (its scenarios are stopped and unregistered, so the same plan can be activated again).
-- `"unmanaged"` — `id` is a scenario id known to the JVM's `ScenarioRegistry`, either a scenario of a plan (stop the plan by its handle id instead) or one registered by another activation path (agent startup config, a direct API call). The message carries that hint; the endpoint never stops it silently.
-- `"not-found"` — `id` is unknown to both the handle registry and the diagnostic snapshot.
-
-```java
-public record StopResponse(String status, String scenarioId, String message) {}
-```
-
-#### `stopAll()` — `DELETE /actuator/chaos`
-
-```java
-@DeleteOperation
-public StopAllResponse stopAll() {
-    final int stoppedCount = handleRegistry.stopAll();
-    return new StopAllResponse(stoppedCount);
-}
-```
-
-Stops every scenario in `ChaosHandleRegistry` — specifically, every scenario activated through this starter (startup plan or Actuator calls). Scenarios activated via other paths (direct API, agent startup args, test sessions) are unaffected. The response carries the count of handles successfully stopped. `stopAll()` does not close the registry: later `POST /actuator/chaos` activations work normally.
-
-```java
-public record StopAllResponse(int stoppedCount) {}
-```
+The plan is read with `ChaosPlanMapper`, which rejects unknown fields, so a typo fails instead of being ignored. Parse failures report a position and reason without quoting the input.
 
 #### Security note
 
@@ -586,44 +500,9 @@ http.requestMatcher(EndpointRequest.to(ChaosActuatorEndpoint.class))
     .authorizeHttpRequests(a -> a.anyRequest().hasRole("CHAOS_OPERATOR"));
 ```
 
-### 3.6 `ChaosHandleRegistry` — Why It Exists
+### 3.6 `ChaosHandleRegistry`
 
-`ChaosControlPlane` is the public API. `ScenarioRegistry` is an internal implementation class in `chaos-agent-core`. The Actuator endpoint needs to stop individual scenarios by ID — but `ScenarioRegistry` is package-private and not a dependency of the Spring starter module, nor should it be.
-
-`ChaosHandleRegistry` is the decoupling layer:
-
-```java
-public final class ChaosHandleRegistry implements DisposableBean {
-    private final Map<String, ChaosActivationHandle> handles = new ConcurrentHashMap<>();
-
-    public void register(final ChaosActivationHandle handle) { ... }
-    public boolean stop(final String id) { ... }
-    public Collection<String> ids() { ... }
-    public int stopAll() { ... }
-}
-```
-
-Every `ChaosActivationHandle` returned by `controlPlane.activate()` from within the starter's scope (startup plan load, Actuator activate call) is registered here, keyed by `handle.id()`. The registry holds only the handles that this starter produced. When `stop(id)` is called, the registry removes the handle and calls `handle.close()`, which stops and unregisters its scenarios — it never reaches into `ScenarioRegistry` or calls any `chaos-agent-core` internal API. Registering a handle under an id that is already tracked closes the previous handle.
-
-The `ConcurrentHashMap` backing is intentional. Both `register()` and `stop()` can be called concurrently — `register` from the startup event listener thread, `stop` from an HTTP thread serving a DELETE request. `ConcurrentHashMap` provides the necessary thread safety without requiring explicit locking in the registry methods.
-
-`stopAll()` iterates over a snapshot of the ids:
-
-```java
-public int stopAll() {
-    int stoppedCount = 0;
-    for (final String handleId : List.copyOf(handles.keySet())) {
-        if (stop(handleId)) {   // stop() catches and logs a RuntimeException from close()
-            stoppedCount++;
-        }
-    }
-    return stoppedCount;
-}
-```
-
-`stopAll` is a bulk best-effort operation: `stop(id)` catches and logs a `RuntimeException` from `handle.close()` (e.g., stressor teardown failing), so the remaining handles are still attempted. The count reflects successful stops only.
-
-The registry is a `DisposableBean`. On context close, `destroy()` sets a closing flag (a `register()` racing the shutdown closes its handle immediately instead of tracking it) and drains the map. Only context close sets this flag; `stopAll()` does not.
+The registry holds the handle of the startup plan (`macstab.chaos.config-file`), so that plan stops when the application context closes. It is a `DisposableBean`: `destroy()` sets a closing flag, so a registration racing the shutdown stops its own handle instead of outliving the context, and stops every held handle, continuing past one whose `close()` fails. The startup plan is not managed by the actuator endpoint, which stops only the plans activated through it.
 
 ### 3.7 Sequence Diagram — POST `/actuator/chaos`
 
@@ -634,20 +513,20 @@ sequenceDiagram
   participant Endpoint as ChaosActuatorEndpoint
   participant Mapper as ChaosPlanMapper
   participant CP as ChaosControlPlane<br/>(ChaosRuntime)
+  participant Mgmt as ChaosManagement
   participant Registry as ScenarioRegistry
-  participant HandleReg as ChaosHandleRegistry
   Op->>HTTP: POST /actuator/chaos<br/>Body: {"planJson": "#lt;escaped plan JSON#gt;"}
   HTTP->>Endpoint: activate(planJson)
-  Endpoint->>Endpoint: null/blank check
-  Endpoint->>Mapper: read(planJson)
-  Mapper-->>Endpoint: ChaosPlan
-  Endpoint->>CP: activate(plan)
+  Endpoint->>Mgmt: activate(planJson)
+  Mgmt->>Mapper: read(planJson)
+  Mapper-->>Mgmt: ChaosPlan
+  Mgmt->>CP: activate(plan)
   CP->>Registry: registerScenario(controller) per scenario
   Registry-->>CP: ScenarioController registered
   CP->>CP: controller.start()<br/>(AUTOMATIC start mode)
-  CP-->>Endpoint: ChaosActivationHandle
-  Endpoint->>HandleReg: register(handle)
-  Endpoint-->>HTTP: ActivationResponse("activated", handleId, null)
+  CP-->>Mgmt: ChaosActivationHandle
+  Mgmt-->>Endpoint: ActivationResponse("activated", handleId, null)
+  Endpoint-->>HTTP: WebEndpointResponse(200)
   HTTP-->>Op: 200 OK<br/>{"status":"activated","handleId":"plan:#lt;name#gt;","message":null}
   Note over Registry: ScenarioController is now ACTIVE.<br/>Every subsequent instrumented JDK call<br/>on any thread runs through the 9-step<br/>evaluation pipeline against this scenario.
 ```
