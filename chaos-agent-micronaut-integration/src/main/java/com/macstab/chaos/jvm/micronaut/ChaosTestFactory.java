@@ -11,8 +11,8 @@ import jakarta.inject.Singleton;
 /**
  * In Micronaut's {@code test} environment ({@code @MicronautTest}), replaces the control-plane bean
  * of {@link ChaosFactory} with one that tracks what it activates: JVM-scoped scenarios activated
- * through the injected bean are released at the end of each test class by {@link
- * ChaosMicronautExtension}, like those activated through its parameter.
+ * through the injected bean are released by {@link ChaosMicronautExtension} when the last running
+ * chaos test class ends; a context can serve several classes at once.
  */
 @Factory
 @Requires(env = Environment.TEST)
@@ -22,7 +22,7 @@ class ChaosTestFactory {
   ChaosTestFactory() {}
 
   /**
-   * Exposes the JVM's control plane, tracked for the end of each test class.
+   * Exposes the JVM's control plane, tracked until the last running chaos test class ends.
    *
    * @return the tracked control plane
    */

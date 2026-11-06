@@ -71,8 +71,13 @@ class ChaosAgentExtensionGuardsTest {
   }
 
   @Test
-  @DisplayName("scenarios activated through a test context's control plane bean end with the class")
-  void contextBeanActivationEndsWithTheClass() {
+  @DisplayName(
+      "scenarios activated through a context bean end when the last running chaos class ends")
+  void contextBeanActivationEndsWithTheLastClass() {
+    final ExtensionContext first = context();
+    final ExtensionContext second = context();
+    extension.beforeAll(first);
+    extension.beforeAll(second);
     final ChaosControlPlane bean =
         ChaosAgentExtension.contextPlane(
             com.macstab.chaos.jvm.bootstrap.ChaosPlatform.installLocally());
@@ -84,13 +89,17 @@ class ChaosAgentExtensionGuardsTest {
             .effect(com.macstab.chaos.jvm.api.ChaosEffect.delay(java.time.Duration.ofMillis(1)))
             .build());
 
-    new ChaosAgentExtension().afterAll(context());
+    extension.afterAll(first);
+    assertThat(beanScenario()).as("a class still running uses it").isPresent();
 
-    assertThat(
-            com.macstab.chaos.jvm.bootstrap.ChaosPlatform.current()
-                .diagnostics()
-                .scenario("context-bean-jvm"))
-        .isEmpty();
+    extension.afterAll(second);
+    assertThat(beanScenario()).isEmpty();
+  }
+
+  private static Optional<?> beanScenario() {
+    return com.macstab.chaos.jvm.bootstrap.ChaosPlatform.current()
+        .diagnostics()
+        .scenario("context-bean-jvm");
   }
 
   @SuppressWarnings("unused")
@@ -142,6 +151,7 @@ class ChaosAgentExtensionGuardsTest {
                 switch (method.getName()) {
                   case "getStore" -> store;
                   case "getParent" -> Optional.empty();
+                  case "getRequiredTestClass" -> ChaosAgentExtensionGuardsTest.class;
                   case "getRequiredTestMethod" ->
                       ChaosAgentExtensionGuardsTest.class.getDeclaredMethod(
                           "noSessionNoActivation");

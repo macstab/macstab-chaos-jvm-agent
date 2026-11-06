@@ -67,25 +67,19 @@ The `@Inherited` meta-annotation on `@ChaosTest` means it propagates to subclass
 
 ### 2.3 `ChaosAgentExtension` — JUnit 5 Lifecycle
 
-`ChaosAgentExtension` implements three JUnit 5 interfaces:
+`ChaosAgentExtension` implements five JUnit 5 interfaces:
 
 ```
 BeforeAllCallback
 AfterAllCallback
+BeforeEachCallback
+AfterEachCallback
 ParameterResolver
 ```
 
 #### `beforeAll` — agent installation and session open
 
-```java
-public void beforeAll(final ExtensionContext context) {
-    final TrackingChaosControlPlane tracker =
-        new TrackingChaosControlPlane(ChaosPlatform.installLocally());
-    final ChaosSession session = tracker.openSession(context.getDisplayName());
-    context.getStore(NAMESPACE).put(ChaosControlPlane.class, tracker);
-    context.getStore(NAMESPACE).put(ChaosSession.class, session);
-}
-```
+JUnit calls `beforeAll` for the test class and again for each of its `@Nested` classes. The outermost class installs the agent, wraps the control plane in a `TrackingChaosControlPlane`, opens the session and puts both into its store. A nested class finds them in its outer class's store and reuses them. Every class then activates its own class-level `@WithChaos` scenarios and keeps their handles in its own store.
 
 `ChaosPlatform.installLocally()` is idempotent — it uses a JVM-wide lock and returns the same `ChaosControlPlane` instance on every call within the same JVM process. The first call triggers dynamic self-attach of the chaos agent via the JVM Attach API. Subsequent calls, from subsequent `@ChaosTest` classes or nested tests in the same forked JVM, return the already-installed instance without attempting re-attachment.
 
@@ -104,25 +98,9 @@ This is a deliberate design choice. JUnit's `ExtensionContext.Namespace` creates
 
 #### `afterAll` — session close and JVM-scoped handle cleanup
 
-```java
-public void afterAll(final ExtensionContext context) {
-    final ChaosSession session =
-        context.getStore(NAMESPACE).remove(ChaosSession.class, ChaosSession.class);
-    final ChaosControlPlane controlPlane =
-        context.getStore(NAMESPACE).remove(ChaosControlPlane.class, ChaosControlPlane.class);
-    try {
-        if (session != null) {
-            session.close();
-        }
-    } finally {
-        if (controlPlane instanceof TrackingChaosControlPlane tracker) {
-            tracker.stopTracked();
-        }
-    }
-}
-```
+`afterAll` first stops the class's own class-level `@WithChaos` scenarios. A nested class stops nothing else: the session and the tracker belong to its outer class. The outermost class then closes the session, which stops every session-scoped scenario, and calls `tracker.stopTracked()` in a `finally` block, which stops the JVM-scoped scenarios the class activated through the injected control plane. JVM-scoped scenarios not created through it are unaffected.
 
-`remove()` is atomic with respect to the store — it retrieves and removes in one operation, preventing double-close races. `session.close()` stops every session-scoped `ScenarioController` and unregisters them from `ScenarioRegistry`. `tracker.stopTracked()` runs in the `finally` block to ensure it executes even if `session.close()` throws — stopping any JVM-scoped handles the test class activated via `controlPlane.activate()`. JVM-scoped scenarios not created through the injected control plane are unaffected.
+Scenarios activated through an injected `ChaosControlPlane` bean are released when the last running chaos test class ends. Spring caches an application context across test classes, so one bean serves every class that uses the context. Releasing at the end of one class would stop what another class, nested or running in parallel, still depends on.
 
 #### `ParameterResolver` — `ChaosSession` and `ChaosControlPlane` injection
 
@@ -154,7 +132,7 @@ public Object resolveParameter(ParameterContext parameterContext,
 }
 ```
 
-Walking upward through `current.getParent()` is what makes `@Nested` classes work. In JUnit 5, a `@Nested` class has its own `ExtensionContext`, which is a child of the outer class's context. If the outer class registered the extension, the inner class's `ExtensionContext` does not have an entry in its own store — but the parent does. The walk finds it there and returns the same session instance. This means all `@Nested` classes within a single `@ChaosTest` class share one session, one session ID, and one cleanup event in `afterAll`.
+Walking upward through `current.getParent()` is what makes `@Nested` classes work. In JUnit 5, a `@Nested` class has its own `ExtensionContext`, which is a child of the outer class's context. Its `beforeAll` stores no session of its own, so the walk finds the outer class's session and returns the same instance. All `@Nested` classes within a single `@ChaosTest` class share one session, one session ID, and one cleanup in the outer class's `afterAll`.
 
 This is the only correct design for nested tests. Alternatives would either require each nested class to redeclare the extension (defeating the purpose of `@ChaosTest`) or open multiple sessions per outer-class lifecycle (making cleanup ambiguous). The walk ensures the model is: one `@ChaosTest` outer class = one session, regardless of nesting depth.
 

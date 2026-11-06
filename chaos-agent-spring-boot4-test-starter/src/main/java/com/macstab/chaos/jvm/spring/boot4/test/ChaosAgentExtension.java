@@ -31,9 +31,9 @@ import org.junit.jupiter.api.extension.ParameterResolver;
  *
  * <ul>
  *   <li>{@code beforeAll}: self-attach the agent (idempotent) and open one session for the whole
- *       class.
+ *       class. A {@code @Nested} class runs inside its outer class and shares its session.
  *   <li>{@code afterAll}: close the session, stopping every session-scoped scenario activated
- *       during the class.
+ *       during the class; a {@code @Nested} class only stops its own class-level scenarios.
  * </ul>
  *
  * <h2>Parameter injection</h2>
@@ -52,18 +52,23 @@ public final class ChaosAgentExtension
 
   /**
    * The control planes chaos test contexts expose as beans ({@link ChaosTestAutoConfiguration}).
-   * Spring caches a context across test classes, so what a class activates through an injected bean
-   * is released when that class ends.
+   * Spring caches a context across test classes and one bean serves every class using it, so what
+   * is activated through an injected bean is released when the last running chaos test class ends.
    */
   private static final Set<TrackingChaosControlPlane> CONTEXT_PLANES =
       ConcurrentHashMap.newKeySet();
+
+  private static final Object RUNNING_LOCK = new Object();
+
+  /** Outermost chaos test classes running now (several in a parallel run); guarded by the lock. */
+  private static int runningClasses;
 
   /** Default constructor invoked by JUnit when the extension is registered. */
   public ChaosAgentExtension() {}
 
   /**
-   * Returns a tracking control plane for a test context's bean, released at the end of each test
-   * class.
+   * Returns a tracking control plane for a test context's bean, released when the last running
+   * chaos test class ends.
    *
    * @param delegate the JVM-wide control plane
    * @return the tracking control plane
@@ -76,19 +81,28 @@ public final class ChaosAgentExtension
 
   @Override
   public void beforeAll(final ExtensionContext context) {
-    // Wrap the JVM-wide control plane in a tracking decorator so any JVM-scoped scenarios the
-    // test class activates through the injected control-plane parameter are released in afterAll.
-    // Without tracking, a test calling controlPlane.activate(jvmScopedScenario) would leak the
-    // handle into subsequent test classes — session close() only stops session-scoped scenarios.
-    final TrackingChaosControlPlane tracker =
-        new TrackingChaosControlPlane(ChaosPlatform.installLocally());
-    final ChaosSession session = tracker.openSession(context.getDisplayName());
     final ExtensionContext.Store store = context.getStore(NAMESPACE);
-    store.put(ChaosControlPlane.class, tracker);
-    store.put(ChaosSession.class, session);
-    // Class-level @WithChaos: JVM-scoped handles are tracked, session-scoped ones end with the
-    // session, so afterAll releases both without keeping the handles here.
-    WithChaosSupport.activate(context.getRequiredTestClass(), tracker, session);
+    ChaosControlPlane controlPlane =
+        (ChaosControlPlane) findInContextHierarchy(context, ChaosControlPlane.class);
+    ChaosSession session = (ChaosSession) findInContextHierarchy(context, ChaosSession.class);
+    if (controlPlane == null || session == null) {
+      // The outermost class owns the session. It wraps the JVM-wide control plane in a tracking
+      // decorator, so JVM-scoped scenarios activated through the injected parameter are released
+      // in afterAll: session close() only stops session-scoped scenarios.
+      final TrackingChaosControlPlane tracker =
+          new TrackingChaosControlPlane(ChaosPlatform.installLocally());
+      controlPlane = tracker;
+      session = tracker.openSession(context.getDisplayName());
+      store.put(ChaosControlPlane.class, tracker);
+      store.put(ChaosSession.class, session);
+      synchronized (RUNNING_LOCK) {
+        runningClasses++;
+      }
+    }
+    // Class-level @WithChaos ends with its own class: a nested class's before its outer class's.
+    store.put(
+        WithChaosSupport.class,
+        WithChaosSupport.activate(context.getRequiredTestClass(), controlPlane, session));
   }
 
   @Override
@@ -116,23 +130,42 @@ public final class ChaosAgentExtension
   }
 
   @Override
+  @SuppressWarnings("unchecked")
   public void afterAll(final ExtensionContext context) {
     final ExtensionContext.Store store = context.getStore(NAMESPACE);
+    final List<ChaosActivationHandle> classHandles =
+        (List<ChaosActivationHandle>) store.remove(WithChaosSupport.class, List.class);
+    // Present only in the class that opened them: a nested class leaves them to its outer class.
     final ChaosSession session = store.remove(ChaosSession.class, ChaosSession.class);
     final ChaosControlPlane controlPlane =
         store.remove(ChaosControlPlane.class, ChaosControlPlane.class);
     // Close the session first so session-scoped scenarios stop via their owning session's
     // lifecycle, then drain any JVM-scoped handles the test class activated via the tracker.
-    // try/finally ensures stopTracked() runs even if session.close() throws.
+    // try/finally ensures each step runs even if an earlier one throws.
     try {
-      if (session != null) {
-        session.close();
-      }
+      WithChaosSupport.close(classHandles);
     } finally {
-      if (controlPlane instanceof TrackingChaosControlPlane tracker) {
-        tracker.stopTracked();
+      try {
+        if (session != null) {
+          session.close();
+        }
+      } finally {
+        if (controlPlane instanceof TrackingChaosControlPlane tracker) {
+          tracker.stopTracked();
+        }
+        if (session != null) {
+          releaseContextPlanesIfLast();
+        }
       }
-      CONTEXT_PLANES.forEach(TrackingChaosControlPlane::stopTracked);
+    }
+  }
+
+  /** Releases what the context beans activated once no chaos test class is running any more. */
+  private static void releaseContextPlanesIfLast() {
+    synchronized (RUNNING_LOCK) {
+      if (--runningClasses == 0) {
+        CONTEXT_PLANES.forEach(TrackingChaosControlPlane::stopTracked);
+      }
     }
   }
 

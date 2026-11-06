@@ -36,8 +36,8 @@ public class ChaosTestAutoConfiguration {
 
   /**
    * Exposes the installed {@link ChaosControlPlane} as a Spring bean. Scenarios activated through
-   * it are tracked and released at the end of each test class, like those activated through the
-   * {@link ChaosAgentExtension} parameter.
+   * it are tracked and released when the last running chaos test class ends: a cached context
+   * serves several classes.
    *
    * @return the JVM-wide control plane, tracked
    */

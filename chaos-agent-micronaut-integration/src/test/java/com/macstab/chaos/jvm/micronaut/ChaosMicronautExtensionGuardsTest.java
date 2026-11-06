@@ -56,8 +56,13 @@ class ChaosMicronautExtensionGuardsTest {
   }
 
   @Test
-  @DisplayName("scenarios activated through a test context's control plane bean end with the class")
-  void contextBeanActivationEndsWithTheClass() {
+  @DisplayName(
+      "scenarios activated through a context bean end when the last running chaos class ends")
+  void contextBeanActivationEndsWithTheLastClass() {
+    final ExtensionContext first = context(new HashMap<>(), null);
+    final ExtensionContext second = context(new HashMap<>(), null);
+    extension.beforeAll(first);
+    extension.beforeAll(second);
     final ChaosControlPlane bean =
         ChaosMicronautExtension.contextPlane(
             com.macstab.chaos.jvm.bootstrap.ChaosPlatform.installLocally());
@@ -69,13 +74,17 @@ class ChaosMicronautExtensionGuardsTest {
             .effect(com.macstab.chaos.jvm.api.ChaosEffect.delay(java.time.Duration.ofMillis(1)))
             .build());
 
-    extension.afterAll(context(new HashMap<>(), null));
+    extension.afterAll(first);
+    assertThat(beanScenario()).as("a class still running uses it").isPresent();
 
-    assertThat(
-            com.macstab.chaos.jvm.bootstrap.ChaosPlatform.current()
-                .diagnostics()
-                .scenario("mn-context-bean-jvm"))
-        .isEmpty();
+    extension.afterAll(second);
+    assertThat(beanScenario()).isEmpty();
+  }
+
+  private static Optional<?> beanScenario() {
+    return com.macstab.chaos.jvm.bootstrap.ChaosPlatform.current()
+        .diagnostics()
+        .scenario("mn-context-bean-jvm");
   }
 
   @Test
@@ -168,6 +177,7 @@ class ChaosMicronautExtensionGuardsTest {
                   case "getStore" -> store;
                   case "getParent" -> Optional.ofNullable(parent);
                   case "getTestClass" -> Optional.empty();
+                  case "getRequiredTestClass" -> ChaosMicronautExtensionGuardsTest.class;
                   case "getRequiredTestMethod" ->
                       ChaosMicronautExtensionGuardsTest.class.getDeclaredMethod(
                           "noSessionNoActivation");

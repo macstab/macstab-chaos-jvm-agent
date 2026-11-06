@@ -38,7 +38,8 @@ import org.junit.jupiter.api.extension.ParameterResolver;
  *
  * <ul>
  *   <li>{@code beforeAll}: self-attach the agent (idempotent), open one session for the whole test
- *       class, and activate every {@link ChaosScenario} annotation present on the class.
+ *       class, and activate every {@link ChaosScenario} annotation present on the class. A
+ *       {@code @Nested} class runs inside its outer class and shares its session.
  *   <li>{@code beforeEach}: activate every {@link ChaosScenario} annotation present on the test
  *       method. JVM-scoped activations are tracked per-method so {@code afterEach} can tear them
  *       down — otherwise the second test method that declared the same scenario id would hit an
@@ -86,14 +87,20 @@ public final class ChaosQuarkusExtension
 
   @Override
   public void beforeAll(final ExtensionContext context) {
-    // The tracker records every scenario activated through the injected control plane, so
-    // afterAll releases JVM-scoped ones however the test activated them.
-    final TrackingChaosControlPlane controlPlane =
-        new TrackingChaosControlPlane(ChaosPlatform.installLocally());
-    final ChaosSession session = controlPlane.openSession(context.getDisplayName());
     final ExtensionContext.Store store = context.getStore(NAMESPACE);
-    store.put(ChaosControlPlane.class, controlPlane);
-    store.put(ChaosSession.class, session);
+    ChaosControlPlane controlPlane = lookupControlPlane(context);
+    ChaosSession session = lookupSession(context);
+    if (controlPlane == null || session == null) {
+      // The outermost class owns the session; a @Nested class runs inside it and shares it. The
+      // tracker records every scenario activated through the injected control plane, so afterAll
+      // releases JVM-scoped ones however the test activated them.
+      final TrackingChaosControlPlane tracker =
+          new TrackingChaosControlPlane(ChaosPlatform.installLocally());
+      controlPlane = tracker;
+      session = tracker.openSession(context.getDisplayName());
+      store.put(ChaosControlPlane.class, tracker);
+      store.put(ChaosSession.class, session);
+    }
     // Class-scoped list of handles for JVM-scoped scenarios activated via @ChaosScenario.
     // Session-scoped scenarios are torn down by session.close(); JVM-scoped ones outlive any
     // session, so afterAll stops them to keep them from leaking into subsequent tests.

@@ -12,6 +12,7 @@ import com.macstab.chaos.jvm.api.ChaosSession;
 import com.macstab.chaos.jvm.api.OperationType;
 import java.time.Duration;
 import java.util.Set;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -25,6 +26,24 @@ import org.junit.jupiter.api.extension.ExtendWith;
 @DisplayName("ChaosQuarkusExtension")
 @SuppressWarnings("removal")
 class ChaosQuarkusExtensionTest {
+
+  private static ChaosSession outerSession;
+
+  @BeforeAll
+  static void captureOuterSession(final ChaosSession session) {
+    outerSession = session;
+  }
+
+  @Nested
+  @DisplayName("nested classes")
+  class NestedClasses {
+
+    @Test
+    @DisplayName("a nested class shares the outer class's session")
+    void sharesTheOuterSession(final ChaosSession session) {
+      assertThat(session).isSameAs(outerSession);
+    }
+  }
 
   @Nested
   @DisplayName("parameter injection")

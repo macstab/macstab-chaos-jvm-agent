@@ -10,8 +10,11 @@ import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.ChaosSelector;
 import com.macstab.chaos.jvm.api.ChaosSession;
 import com.macstab.chaos.jvm.api.OperationType;
+import com.macstab.chaos.jvm.bootstrap.ChaosPlatform;
 import java.time.Duration;
 import java.util.Set;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -21,6 +24,38 @@ import org.junit.jupiter.api.extension.ExtendWith;
 @ExtendWith(ChaosAgentExtension.class)
 @DisplayName("ChaosAgentExtension (Spring Boot 3)")
 class ChaosAgentExtensionTest {
+
+  private static ChaosSession outerSession;
+  private static ChaosActivationHandle beanScenario;
+
+  @BeforeAll
+  static void arm(final ChaosSession session) {
+    outerSession = session;
+    // What a context bean activates must outlive the nested classes of a class still running.
+    beanScenario =
+        ChaosAgentExtension.contextPlane(ChaosPlatform.installLocally())
+            .activate(
+                ChaosScenario.builder("outer-bean")
+                    .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+                    .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+                    .build());
+  }
+
+  @AfterAll
+  static void beanScenarioOutlivesTheNestedClasses() {
+    assertThat(beanScenario.state()).isEqualTo(ChaosDiagnostics.ScenarioState.ACTIVE);
+  }
+
+  @Nested
+  @DisplayName("nested classes")
+  class NestedClasses {
+
+    @Test
+    @DisplayName("a nested class shares the outer class's session")
+    void sharesTheOuterSession(final ChaosSession session) {
+      assertThat(session).isSameAs(outerSession);
+    }
+  }
 
   @Nested
   @DisplayName("parameter injection")
