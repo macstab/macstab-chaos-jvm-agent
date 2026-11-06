@@ -797,9 +797,8 @@ public final class ChaosRuntime implements ChaosControlPlane {
       final int remotePort,
       final int soTimeoutMillis)
       throws Throwable {
-    return dispatcher
-        .network()
-        .beforeSocketRead(stream, len, remoteAddress, remotePort, soTimeoutMillis);
+    return networkDispatch.beforeSocketRead(
+        stream, len, remoteAddress, remotePort, soTimeoutMillis);
   }
 
   /**
