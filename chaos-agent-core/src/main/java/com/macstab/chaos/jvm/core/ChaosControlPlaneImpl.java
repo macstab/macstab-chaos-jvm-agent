@@ -136,6 +136,11 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
     CompatibilityValidator.validate(scenario, featureSet);
   }
 
+  /** Whether the JVM-scoped key of {@code scenarioId} is held by a live controller. */
+  boolean isLive(final String scenarioId) {
+    return registry.isLive("jvm::" + scenarioId);
+  }
+
   private static ChaosActivationException outsideSession(final ChaosScenario scenario) {
     return new ChaosActivationException(
         "session-scoped scenario "

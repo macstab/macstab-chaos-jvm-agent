@@ -213,12 +213,23 @@ class ConfigReloadTest {
     start(file);
     final com.macstab.chaos.jvm.api.ChaosActivationHandle elsewhere =
         runtime.activate(ChaosPlanMapper.read(plan("taken")).scenarios().get(0));
+    final java.util.concurrent.atomic.AtomicInteger restarts =
+        new java.util.concurrent.atomic.AtomicInteger();
+    runtime.addEventListener(
+        event -> {
+          if (event.type() == com.macstab.chaos.jvm.api.ChaosEvent.Type.STARTED
+              && "a".equals(event.scenarioId())) {
+            restarts.incrementAndGet();
+          }
+        });
 
     Files.writeString(file, plan("taken"));
+    poller.pollOnce();
     poller.pollOnce();
     assertThat(state("a"))
         .as("the old plan stays")
         .isEqualTo(ChaosDiagnostics.ScenarioState.ACTIVE);
+    assertThat(restarts).as("and is not stopped and restarted on each tick").hasValue(0);
 
     elsewhere.close();
     poller.pollOnce();

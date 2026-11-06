@@ -115,6 +115,17 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
+   * Returns whether a JVM-scoped scenario with this id is live (registered and not finished): an
+   * activation of the same id would be a conflict.
+   *
+   * @param scenarioId the scenario id
+   * @return {@code true} when the id is taken
+   */
+  public boolean isActive(final String scenarioId) {
+    return controlPlane.isLive(scenarioId);
+  }
+
+  /**
    * Applies a plan's observability settings to scenarios activated one by one (the plan-file
    * reloader does this); {@link #activate(ChaosPlan)} applies them itself.
    *

@@ -468,6 +468,16 @@ public final class StartupConfigPoller implements AutoCloseable {
               "plan not applied, previous scenarios kept: " + invalid.getMessage(), invalid);
         }
       }
+      // An id taken by a scenario activated elsewhere would fail the activation below after the
+      // changed scenarios were stopped, and every retry would stop and restart them again
+      // (resetting their counters, budgets and windows). Refuse before anything changes; the
+      // conflict stays retryable.
+      if (!activeScenarios.containsKey(scenario.id()) && runtime.isActive(scenario.id())) {
+        final String conflict = "scenario key already active: jvm::" + scenario.id();
+        throw new IllegalStateException(
+            "plan not applied, previous scenarios kept: " + conflict,
+            new com.macstab.chaos.jvm.api.ChaosActivationConflictException(conflict));
+      }
     }
 
     final Map<String, ChaosScenario> replaced = new java.util.LinkedHashMap<>();
