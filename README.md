@@ -84,7 +84,7 @@ A chaos tool that is wrong about its own behaviour is worse than none. Each clai
 | The faults are the JDK's own: real exceptions, messages, short writes and resets, raised inside the real call | child-JVM integration tests against the real JDK, on JDK 21 and 25 ([ADR 0005](docs/adr/0005-real-faults.md)) |
 | The plan format is one definition: the parser and its published JSON Schema agree | `PlanSchemaTest` generates the schema from the parser and fails when the published one differs |
 | The parser and validator never crash or hang, whatever the input | `PlanFuzzTest`: mutated plans and schema-generated plans, seeded and replayable |
-| The public API cannot change by accident | `apiCheck` against the committed JVM signatures in `api/*.api` |
+| The public API cannot change by accident | `apiCheck` against the committed JVM signatures in `api/*.api`; `japicmp` against the last release, so a binary break needs a major release |
 | The architecture holds: the bootstrap bridge is closed, inlined advice uses only public members | `ArchitectureTest` |
 | No known bug patterns in any line that compiles | Error Prone on every compilation, warnings as errors |
 | No unchecked null in production code | NullAway proves every dereference; optional values are `@Nullable` in the types ([ADR 0008](docs/adr/0008-nullness-in-the-types.md)) |

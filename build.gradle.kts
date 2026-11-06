@@ -21,6 +21,7 @@ plugins {
     alias(libs.plugins.pitest) apply false
     alias(libs.plugins.cyclonedx) apply false
     alias(libs.plugins.errorprone) apply false
+    alias(libs.plugins.japicmp) apply false
 }
 
 apply(plugin = "com.diffplug.spotless")
@@ -666,6 +667,36 @@ subprojects {
             }
         }
         tasks.named("check") { dependsOn(apiCheck) }
+
+        // Binary compatibility with the release named by apiBaseline (gradle.properties), checked by
+        // japicmp; the report lands in build/reports/japicmp/. A module the baseline release did not
+        // contain is skipped. A binary-incompatible change fails the build unless apiBreaksAccepted is
+        // true, which a major release sets while it breaks the baseline's API on purpose.
+        apply(plugin = "me.champeau.gradle.japicmp")
+        val baselineVersion = rootProject.property("apiBaseline").toString()
+        val baselineArtifact = "${project.group}:$module:$baselineVersion"
+        val baselineJar = configurations.detachedConfiguration(dependencies.create("$baselineArtifact@jar"))
+            .incoming.artifactView { lenient(true) }.files
+        val baselineClasspath = configurations.detachedConfiguration(dependencies.create(baselineArtifact))
+            .incoming.artifactView { lenient(true) }.files
+        val breaksAccepted = rootProject.property("apiBreaksAccepted").toString().toBoolean()
+        val jar = tasks.named<Jar>("jar")
+        val japicmp = tasks.register<me.champeau.gradle.japicmp.JapicmpTask>("japicmp") {
+            group = "verification"
+            description = "Compares the binary API of $module with release $baselineVersion."
+            oldArchives.from(baselineJar)
+            oldClasspath.from(baselineClasspath)
+            newArchives.from(jar)
+            newClasspath.from(jar, configurations.named("runtimeClasspath"))
+            onlyBinaryIncompatibleModified.set(true)
+            failOnModification.set(!breaksAccepted)
+            ignoreMissingClasses.set(true)
+            annotationExcludes.add("@com.macstab.chaos.jvm.api.Internal")
+            txtOutputFile.set(layout.buildDirectory.file("reports/japicmp/$module.txt"))
+            htmlOutputFile.set(layout.buildDirectory.file("reports/japicmp/$module.html"))
+            onlyIf("the baseline release contains $module") { !baselineJar.isEmpty }
+        }
+        tasks.named("check") { dependsOn(japicmp) }
     }
 }
 

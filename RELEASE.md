@@ -67,6 +67,13 @@ The `deploy-javadoc` workflow pushes the aggregated Javadoc on every release.
   release. The tag push then triggers `publish-release.yml` (GitHub Packages)
   and `deploy-javadoc.yml` (GitHub Pages).
 
+## API baseline
+
+`japicmp` compares every API module with the release named by `apiBaseline` in
+`gradle.properties` and fails on a binary-incompatible change unless
+`apiBreaksAccepted = true`. After a release, set `apiBaseline` to it; after a
+major release, also set `apiBreaksAccepted = false`.
+
 ## Code coverage (Jacoco)
 
 Every test task is finalized by `jacocoTestReport` (XML + HTML). The

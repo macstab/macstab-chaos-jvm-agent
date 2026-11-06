@@ -24,6 +24,7 @@ Tests for the instrumentation and bootstrap modules start a real agent (self-att
 | Gate | Guards | Record an intended change |
 |------|--------|---------------------------|
 | `apiCheck` | the public API of every API module (`api/<module>.api`, JVM signatures) | `./gradlew apiDump` |
+| `japicmp` | binary compatibility of every API module with the release named by `apiBaseline` (`gradle.properties`); report in `<module>/build/reports/japicmp/` | a major release that breaks it on purpose sets `apiBreaksAccepted = true` |
 | `PlanSchemaTest` | the published plan schema is the parser's | `./gradlew :chaos-agent-startup-config:test --tests '*PlanSchemaTest*' -PupdatePlanSchema` |
 | `ArchitectureTest` | the bridge jar is closed, advice uses only public members, layering | — |
 | Error Prone (`-Werror`) | static analysis of every compilation; a finding fails the build | fix it, or suppress it where it stands with the reason |
