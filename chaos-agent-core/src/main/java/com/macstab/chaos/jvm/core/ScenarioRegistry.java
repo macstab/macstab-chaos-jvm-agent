@@ -105,10 +105,9 @@ final class ScenarioRegistry implements ChaosDiagnostics {
    * <p>A controller registered under the same key that has finished — {@link
    * ChaosDiagnostics.ScenarioState#STOPPED} or {@link ChaosDiagnostics.ScenarioState#INACTIVE}
    * (expired or out of applications) — is replaced and returned so the caller can destroy it. A
-   * stopped scenario can never run again ({@code start()} is a no-op after {@code stop()}), so
-   * keeping it registered only blocked re-activating the same id: the next test of a suite, a
-   * re-posted plan or a reloaded config failed with "already active". The check and the replacement
-   * are one atomic step.
+   * stopped scenario can never run again ({@code start()} is a no-op after {@code stop()}), so its
+   * id is free for the next test of a suite, a re-posted plan or a reloaded config. The check and
+   * the replacement are one atomic step.
    *
    * @param controller the controller to register; must not be {@code null}
    * @return the finished controller that was replaced, or {@code null}
