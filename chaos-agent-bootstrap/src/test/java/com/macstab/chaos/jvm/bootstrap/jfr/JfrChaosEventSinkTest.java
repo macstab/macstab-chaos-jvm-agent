@@ -99,24 +99,14 @@ class JfrChaosEventSinkTest {
               .activationPolicy(ActivationPolicy.always())
               .build());
     }
-    final List<RecordedEvent> events;
-    try (JfrChaosEventSink sink = new JfrChaosEventSink(runtime.diagnostics());
-        Recording recording = new Recording()) {
-      recording.enable(SNAPSHOT).withPeriod(Duration.ofMillis(50));
-      recording.start();
-      Thread.sleep(400);
-      recording.stop();
-      events = read(recording);
-    }
-
     // Other runtimes' sinks in this JVM (from other tests) emit their own snapshots; this one's
     // is the snapshot of 40 active scenarios.
-    assertThat(events.stream().filter(e -> e.getEventType().getName().equals(SNAPSHOT)))
-        .anySatisfy(
-            snapshot -> {
-              assertThat(snapshot.getInt("activeScenarioCount")).isEqualTo(40);
-              assertThat(snapshot.getString("activeScenarioIds")).hasSize(1024);
-            });
+    try (JfrChaosEventSink sink = new JfrChaosEventSink(runtime.diagnostics())) {
+      awaitSnapshot(
+          snapshot ->
+              snapshot.getInt("activeScenarioCount") == 40
+                  && snapshot.getString("activeScenarioIds").length() == 1024);
+    }
   }
 
   @Test
@@ -124,22 +114,12 @@ class JfrChaosEventSinkTest {
   void snapshotSkipsStoppedScenarios() throws Exception {
     runtime.activate(snapshotScenario("snapshot-running"));
     runtime.activate(snapshotScenario("snapshot-stopped")).stop();
-    final List<RecordedEvent> events;
-    try (JfrChaosEventSink sink = new JfrChaosEventSink(runtime.diagnostics());
-        Recording recording = new Recording()) {
-      recording.enable(SNAPSHOT).withPeriod(Duration.ofMillis(50));
-      recording.start();
-      Thread.sleep(400);
-      recording.stop();
-      events = read(recording);
+    try (JfrChaosEventSink sink = new JfrChaosEventSink(runtime.diagnostics())) {
+      awaitSnapshot(
+          snapshot ->
+              snapshot.getInt("activeScenarioCount") == 1
+                  && "snapshot-running".equals(snapshot.getString("activeScenarioIds")));
     }
-
-    assertThat(events.stream().filter(e -> e.getEventType().getName().equals(SNAPSHOT)))
-        .anySatisfy(
-            snapshot -> {
-              assertThat(snapshot.getInt("activeScenarioCount")).isEqualTo(1);
-              assertThat(snapshot.getString("activeScenarioIds")).isEqualTo("snapshot-running");
-            });
   }
 
   private static ChaosScenario snapshotScenario(final String id) {
@@ -157,6 +137,26 @@ class JfrChaosEventSinkTest {
     try (JfrChaosEventSink sink = new JfrChaosEventSink(runtime.diagnostics())) {
       sink.onEvent(event(ChaosEvent.Type.STARTED, "s1", Map.of()));
       sink.onEvent(event(ChaosEvent.Type.APPLIED, "s1", Map.of()));
+    }
+  }
+
+  /** Streams periodic snapshots until one that {@code wanted} accepts arrives. */
+  private static void awaitSnapshot(final java.util.function.Predicate<RecordedEvent> wanted)
+      throws InterruptedException {
+    final java.util.concurrent.CountDownLatch seen = new java.util.concurrent.CountDownLatch(1);
+    try (jdk.jfr.consumer.RecordingStream stream = new jdk.jfr.consumer.RecordingStream()) {
+      stream.enable(SNAPSHOT).withPeriod(Duration.ofMillis(50));
+      stream.onEvent(
+          SNAPSHOT,
+          event -> {
+            if (wanted.test(event)) {
+              seen.countDown();
+            }
+          });
+      stream.startAsync();
+      assertThat(seen.await(10, java.util.concurrent.TimeUnit.SECONDS))
+          .as("a matching snapshot was recorded")
+          .isTrue();
     }
   }
 
