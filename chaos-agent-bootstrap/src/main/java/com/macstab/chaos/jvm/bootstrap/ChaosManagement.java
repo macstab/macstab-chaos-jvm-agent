@@ -21,7 +21,9 @@ import org.jspecify.annotations.Nullable;
  *
  * <ul>
  *   <li>snapshot — the diagnostics: every scenario with its state and counters;
- *   <li>activate — activates a plan given as JSON; the plan's handle id is {@code plan:<name>};
+ *   <li>activate — activates a plan given as JSON; the plan's handle id is {@code plan:<name>}, and
+ *       a plan whose name belongs to a running plan is a conflict (every plan without a name is
+ *       named {@code default});
  *   <li>stop — stops a plan activated here, by its handle id or plan name;
  *   <li>stop all — stops every plan activated here.
  * </ul>
@@ -64,8 +66,8 @@ public final class ChaosManagement implements AutoCloseable {
    *
    * @param planJson the plan, in the startup-config JSON format
    * @return {@code activated} with the plan's handle id; otherwise {@code invalid} (malformed or
-   *     failing validation), {@code conflict} (a scenario id is already active) or {@code rejected}
-   *     (the runtime could not run it), with the reason
+   *     failing validation), {@code conflict} (a scenario id is already active, or a running plan
+   *     has the plan's name) or {@code rejected} (the runtime could not run it), with the reason
    */
   public ActivationResponse activate(final @Nullable String planJson) {
     if (planJson == null || planJson.isBlank()) {
@@ -77,6 +79,11 @@ public final class ChaosManagement implements AutoCloseable {
     } catch (final ConfigLoadException | IllegalArgumentException invalid) {
       LOGGER.log(Level.WARNING, invalid, () -> "chaos-agent: rejecting malformed plan JSON");
       return new ActivationResponse("invalid", null, "invalid plan: " + invalid.getMessage());
+    }
+    // Checked before activating, so a refused plan never injects a fault; the claim below decides.
+    final ChaosActivationHandle running = handles.get(PLAN_PREFIX + plan.metadata().name());
+    if (running != null && !finished(running)) {
+      return nameConflict(running.id());
     }
     final ChaosActivationHandle handle;
     try {
@@ -93,9 +100,28 @@ public final class ChaosManagement implements AutoCloseable {
       return new ActivationResponse(
           "rejected", null, "plan rejected: the runtime could not activate it (see the log)");
     }
-    final ChaosActivationHandle previous = handles.put(handle.id(), handle);
-    if (previous != null && !previous.equals(handle)) {
-      previous.close();
+    // Claim the id atomically: a running plan keeps it, a finished one is replaced.
+    final ChaosActivationHandle[] kept = new ChaosActivationHandle[1];
+    final ChaosActivationHandle[] replaced = new ChaosActivationHandle[1];
+    handles.compute(
+        handle.id(),
+        (id, existing) -> {
+          if (existing == null || existing.equals(handle)) {
+            return handle;
+          }
+          if (!finished(existing)) {
+            kept[0] = existing;
+            return existing;
+          }
+          replaced[0] = existing;
+          return handle;
+        });
+    if (kept[0] != null) {
+      handle.close();
+      return nameConflict(handle.id());
+    }
+    if (replaced[0] != null) {
+      replaced[0].close();
     }
     // A close() that ran meanwhile either found this handle and stopped it, or is seen here.
     if (closed) {
@@ -105,6 +131,18 @@ public final class ChaosManagement implements AutoCloseable {
       return new ActivationResponse("rejected", null, "plan rejected: the endpoint is closing");
     }
     return new ActivationResponse("activated", handle.id(), null);
+  }
+
+  /** A plan that has finished (stopped, or expired) no longer holds its name. */
+  private static boolean finished(final ChaosActivationHandle handle) {
+    final ChaosDiagnostics.ScenarioState state = handle.state();
+    return state == ChaosDiagnostics.ScenarioState.STOPPED
+        || state == ChaosDiagnostics.ScenarioState.INACTIVE;
+  }
+
+  private static ActivationResponse nameConflict(final String id) {
+    return new ActivationResponse(
+        "conflict", null, "plan rejected: a running plan has its name (" + id + "); stop it first");
   }
 
   /**

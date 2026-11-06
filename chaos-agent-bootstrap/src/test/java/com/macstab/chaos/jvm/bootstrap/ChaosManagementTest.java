@@ -147,10 +147,11 @@ class ChaosManagementTest {
                         ? java.lang.reflect.InvocationHandler.invokeDefault(proxy, method, args)
                         : null;
                   }
-                  if (activations.incrementAndGet() == 1) {
-                    throw new IllegalStateException("agent busy");
-                  }
-                  return handle("plan:mgmt", closed);
+                  return switch (activations.incrementAndGet()) {
+                    case 1 -> throw new IllegalStateException("agent busy");
+                    case 2 -> handle("plan:mgmt", closed, ChaosDiagnostics.ScenarioState.STOPPED);
+                    default -> handle("plan:mgmt", closed);
+                  };
                 });
     final ChaosManagement scriptedManagement = new ChaosManagement(scripted);
 
@@ -163,8 +164,34 @@ class ChaosManagementTest {
     assertThat(scriptedManagement.handle(null, null, null).status()).isEqualTo(405);
 
     scriptedManagement.activate(PLAN);
-    scriptedManagement.activate(PLAN);
-    assertThat(closed).as("the handle it replaced is closed").hasValue(1);
+    assertThat(scriptedManagement.activate(PLAN).status()).isEqualTo("activated");
+    assertThat(closed).as("the finished plan it replaced is closed").hasValue(1);
+  }
+
+  @Test
+  @DisplayName("a plan named like a running plan is a conflict and leaves the running plan alone")
+  void runningPlanNameIsAConflict() {
+    management.activate(PLAN);
+
+    final ChaosManagement.ActivationResponse second =
+        management.activate(PLAN.replace("mgmt-delay", "other-delay"));
+
+    assertThat(second.status()).isEqualTo("conflict");
+    assertThat(runtime.diagnostics().scenario("mgmt-delay").orElseThrow().state())
+        .isEqualTo(ChaosDiagnostics.ScenarioState.ACTIVE);
+    assertThat(runtime.diagnostics().scenario("other-delay")).isEmpty();
+  }
+
+  @Test
+  @DisplayName("two plans without a name: the second is a 409 conflict, not a replacement")
+  void namelessPlansConflict() {
+    final String nameless = PLAN.replace("\"metadata\":{\"name\":\"mgmt\"},", "");
+    assertThat(management.handle("POST", "", nameless).status()).isEqualTo(200);
+
+    assertThat(
+            management.handle("POST", "", nameless.replace("mgmt-delay", "other-delay")).status())
+        .isEqualTo(409);
+    assertThat(runtime.diagnostics().scenario("mgmt-delay")).isPresent();
   }
 
   @Test
@@ -241,6 +268,7 @@ class ChaosManagementTest {
                 (proxy, method, args) ->
                     switch (method.getName()) {
                       case "id" -> "plan:mgmt";
+                      case "state" -> ChaosDiagnostics.ScenarioState.STOPPED;
                       case "close" -> {
                         self.get().close();
                         yield null;
@@ -362,6 +390,13 @@ class ChaosManagementTest {
 
   private static com.macstab.chaos.jvm.api.ChaosActivationHandle handle(
       final String id, final java.util.concurrent.atomic.AtomicInteger closed) {
+    return handle(id, closed, ChaosDiagnostics.ScenarioState.ACTIVE);
+  }
+
+  private static com.macstab.chaos.jvm.api.ChaosActivationHandle handle(
+      final String id,
+      final java.util.concurrent.atomic.AtomicInteger closed,
+      final ChaosDiagnostics.ScenarioState state) {
     return new com.macstab.chaos.jvm.api.ChaosActivationHandle() {
       @Override
       public String id() {
@@ -379,7 +414,7 @@ class ChaosManagementTest {
 
       @Override
       public ChaosDiagnostics.ScenarioState state() {
-        return ChaosDiagnostics.ScenarioState.ACTIVE;
+        return state;
       }
 
       @Override
