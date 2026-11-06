@@ -21,14 +21,19 @@ class ChaosTestAutoConfigurationTest {
           .withConfiguration(AutoConfigurations.of(ChaosTestAutoConfiguration.class));
 
   @Test
-  @DisplayName("in a chaos-test context the control plane bean is the installed one")
+  @DisplayName("in a chaos-test context the control plane bean tracks the installed one")
   void exposesInstalledControlPlane() {
     runner
         .withPropertyValues(ChaosTestAutoConfiguration.TEST_ENABLED_PROPERTY + "=true")
         .run(
-            context ->
-                assertThat(context.getBean(ChaosControlPlane.class))
-                    .isSameAs(ChaosPlatform.installLocally()));
+            context -> {
+              final ChaosControlPlane bean = context.getBean(ChaosControlPlane.class);
+              assertThat(bean)
+                  .isInstanceOf(com.macstab.chaos.jvm.testkit.TrackingChaosControlPlane.class);
+              assertThat(bean.diagnostics().snapshot().runtimeDetails())
+                  .isEqualTo(
+                      ChaosPlatform.installLocally().diagnostics().snapshot().runtimeDetails());
+            });
   }
 
   @Test

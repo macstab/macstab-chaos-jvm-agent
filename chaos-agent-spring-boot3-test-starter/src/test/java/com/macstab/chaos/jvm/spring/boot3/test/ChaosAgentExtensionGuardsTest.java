@@ -70,6 +70,29 @@ class ChaosAgentExtensionGuardsTest {
         .hasMessageContaining("no ChaosSession available");
   }
 
+  @Test
+  @DisplayName("scenarios activated through a test context's control plane bean end with the class")
+  void contextBeanActivationEndsWithTheClass() {
+    final ChaosControlPlane bean =
+        ChaosAgentExtension.contextPlane(
+            com.macstab.chaos.jvm.bootstrap.ChaosPlatform.installLocally());
+    bean.activate(
+        com.macstab.chaos.jvm.api.ChaosScenario.builder("context-bean-jvm")
+            .selector(
+                com.macstab.chaos.jvm.api.ChaosSelector.executor(
+                    java.util.Set.of(com.macstab.chaos.jvm.api.OperationType.EXECUTOR_SUBMIT)))
+            .effect(com.macstab.chaos.jvm.api.ChaosEffect.delay(java.time.Duration.ofMillis(1)))
+            .build());
+
+    new ChaosAgentExtension().afterAll(context());
+
+    assertThat(
+            com.macstab.chaos.jvm.bootstrap.ChaosPlatform.current()
+                .diagnostics()
+                .scenario("context-bean-jvm"))
+        .isEmpty();
+  }
+
   @SuppressWarnings("unused")
   private static void target(
       final ChaosSession session, final ChaosControlPlane plane, final String other) {}

@@ -37,9 +37,11 @@ public class ChaosTestAutoConfiguration {
   public ChaosTestAutoConfiguration() {}
 
   /**
-   * Exposes the installed {@link ChaosControlPlane} as a Spring bean.
+   * Exposes the installed {@link ChaosControlPlane} as a Spring bean. Scenarios activated through
+   * it are tracked and released at the end of each test class, like those activated through the
+   * {@link ChaosAgentExtension} parameter.
    *
-   * @return the JVM-wide control plane
+   * @return the JVM-wide control plane, tracked
    */
   // destroyMethod = "": the control plane is the JVM-wide runtime shared by every test context;
   // Spring's inferred destroy method would close() it whenever any context shuts down.
@@ -49,6 +51,6 @@ public class ChaosTestAutoConfiguration {
   public ChaosControlPlane chaosControlPlane() {
     // ChaosAgentInitializer.initialize() has already called installLocally() and set
     // the guard property; current() returns the same singleton without a second attach.
-    return ChaosPlatform.installLocally();
+    return ChaosAgentExtension.contextPlane(ChaosPlatform.installLocally());
   }
 }

@@ -7,6 +7,8 @@ import com.macstab.chaos.jvm.bootstrap.ChaosPlatform;
 import com.macstab.chaos.jvm.testkit.TrackingChaosControlPlane;
 import com.macstab.chaos.jvm.testkit.WithChaosSupport;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.extension.AfterAllCallback;
 import org.junit.jupiter.api.extension.AfterEachCallback;
@@ -48,8 +50,29 @@ public final class ChaosAgentExtension
   static final ExtensionContext.Namespace NAMESPACE =
       ExtensionContext.Namespace.create(ChaosAgentExtension.class);
 
+  /**
+   * The control planes chaos test contexts expose as beans ({@link ChaosTestAutoConfiguration}).
+   * Spring caches a context across test classes, so what a class activates through an injected bean
+   * is released when that class ends.
+   */
+  private static final Set<TrackingChaosControlPlane> CONTEXT_PLANES =
+      ConcurrentHashMap.newKeySet();
+
   /** Default constructor invoked by JUnit when the extension is registered. */
   public ChaosAgentExtension() {}
+
+  /**
+   * Returns a tracking control plane for a test context's bean, released at the end of each test
+   * class.
+   *
+   * @param delegate the JVM-wide control plane
+   * @return the tracking control plane
+   */
+  static TrackingChaosControlPlane contextPlane(final ChaosControlPlane delegate) {
+    final TrackingChaosControlPlane plane = new TrackingChaosControlPlane(delegate);
+    CONTEXT_PLANES.add(plane);
+    return plane;
+  }
 
   @Override
   public void beforeAll(final ExtensionContext context) {
@@ -109,6 +132,7 @@ public final class ChaosAgentExtension
       if (controlPlane instanceof TrackingChaosControlPlane tracker) {
         tracker.stopTracked();
       }
+      CONTEXT_PLANES.forEach(TrackingChaosControlPlane::stopTracked);
     }
   }
 
