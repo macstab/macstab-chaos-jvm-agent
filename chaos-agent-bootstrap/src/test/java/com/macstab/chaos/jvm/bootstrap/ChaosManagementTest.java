@@ -156,7 +156,9 @@ class ChaosManagementTest {
 
     final ChaosManagement.ActivationResponse busy = scriptedManagement.activate(PLAN);
     assertThat(busy.status()).isEqualTo("rejected");
-    assertThat(busy.message()).isEqualTo("plan rejected: agent busy");
+    assertThat(busy.message())
+        .as("the runtime's own message stays in the log")
+        .isEqualTo("plan rejected: the runtime could not activate it (see the log)");
     assertThat(scriptedManagement.handle("PATCH", null, null).status()).isEqualTo(405);
     assertThat(scriptedManagement.handle(null, null, null).status()).isEqualTo(405);
 
@@ -205,6 +207,42 @@ class ChaosManagementTest {
 
     assertThat(response.status()).isEqualTo("invalid");
     assertThat(response.message()).isEqualTo("plan rejected: null");
+  }
+
+  @Test
+  @DisplayName("a plan whose activation completes after close() is stopped again at once")
+  void activationAfterCloseIsStopped() {
+    final java.util.concurrent.atomic.AtomicInteger closed =
+        new java.util.concurrent.atomic.AtomicInteger();
+    final ChaosManagement closing =
+        new ChaosManagement(scriptedControlPlane(() -> handle("plan:late", closed)));
+    closing.close();
+
+    final ChaosManagement.ActivationResponse response = closing.activate(PLAN);
+
+    assertThat(response.status()).isEqualTo("rejected");
+    assertThat(closed).hasValue(1);
+  }
+
+  @Test
+  @DisplayName("stopping all plans continues past one that fails to stop")
+  void stopAllContinuesPastAFailure() {
+    final java.util.concurrent.atomic.AtomicInteger closed =
+        new java.util.concurrent.atomic.AtomicInteger();
+    final java.util.Iterator<com.macstab.chaos.jvm.api.ChaosActivationHandle> plans =
+        java.util.List.of(failingHandle("plan:a"), handle("plan:b", closed)).iterator();
+    final ChaosManagement two = new ChaosManagement(scriptedControlPlane(plans::next));
+    two.activate(PLAN);
+    two.activate(PLAN);
+
+    assertThat(two.stopAll().stoppedCount()).isEqualTo(1);
+    assertThat(closed).hasValue(1);
+  }
+
+  @Test
+  @DisplayName("an id with a malformed escape is a bad request")
+  void malformedIdIsBadRequest() {
+    assertThat(management.handle("DELETE", "/%zz", null).status()).isEqualTo(400);
   }
 
   @Test
@@ -322,5 +360,21 @@ class ChaosManagementTest {
         closed.incrementAndGet();
       }
     };
+  }
+
+  /** A handle whose close() fails. */
+  private static com.macstab.chaos.jvm.api.ChaosActivationHandle failingHandle(final String id) {
+    return (com.macstab.chaos.jvm.api.ChaosActivationHandle)
+        java.lang.reflect.Proxy.newProxyInstance(
+            ChaosManagementTest.class.getClassLoader(),
+            new Class<?>[] {com.macstab.chaos.jvm.api.ChaosActivationHandle.class},
+            (proxy, method, args) ->
+                switch (method.getName()) {
+                  case "id" -> id;
+                  case "close" -> throw new IllegalStateException("cannot stop");
+                  case "equals" -> proxy == args[0];
+                  case "hashCode" -> System.identityHashCode(proxy);
+                  default -> null;
+                });
   }
 }

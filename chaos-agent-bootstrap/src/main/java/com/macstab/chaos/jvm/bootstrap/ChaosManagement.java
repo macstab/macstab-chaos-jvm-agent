@@ -38,6 +38,9 @@ public final class ChaosManagement implements AutoCloseable {
   private final ChaosControlPlane controlPlane;
   private final Map<String, ChaosActivationHandle> handles = new ConcurrentHashMap<>();
 
+  /** Set by {@link #close()}; a plan activated after it is stopped again at once. */
+  private volatile boolean closed;
+
   /**
    * Creates the operations for {@code controlPlane}.
    *
@@ -85,12 +88,19 @@ public final class ChaosManagement implements AutoCloseable {
     } catch (final com.macstab.chaos.jvm.api.ChaosActivationException failed) {
       return new ActivationResponse("invalid", null, "plan rejected: " + failed.getMessage());
     } catch (final RuntimeException rejected) {
+      // The runtime's own failure: the detail goes to the log, not to the caller.
       LOGGER.log(Level.WARNING, rejected, () -> "chaos-agent: plan activation rejected");
-      return new ActivationResponse("rejected", null, "plan rejected: " + rejected.getMessage());
+      return new ActivationResponse(
+          "rejected", null, "plan rejected: the runtime could not activate it (see the log)");
     }
     final ChaosActivationHandle previous = handles.put(handle.id(), handle);
     if (previous != null && !previous.equals(handle)) {
       previous.close();
+    }
+    // A close() that ran meanwhile either found this handle and stopped it, or is seen here.
+    if (closed && handles.remove(handle.id(), handle)) {
+      handle.close();
+      return new ActivationResponse("rejected", null, "plan rejected: the endpoint is closing");
     }
     return new ActivationResponse("activated", handle.id(), null);
   }
@@ -126,9 +136,15 @@ public final class ChaosManagement implements AutoCloseable {
     int stopped = 0;
     for (final String id : List.copyOf(handles.keySet())) {
       final ChaosActivationHandle handle = handles.remove(id);
-      if (handle != null) {
+      if (handle == null) {
+        continue;
+      }
+      try {
         handle.close();
         stopped++;
+      } catch (final RuntimeException failure) {
+        // One plan that fails to stop must not keep the others running.
+        LOGGER.log(Level.WARNING, failure, () -> "chaos-agent: could not stop plan " + id);
       }
     }
     return new StopAllResponse(stopped);
@@ -163,8 +179,13 @@ public final class ChaosManagement implements AutoCloseable {
         if (path.isEmpty()) {
           return new HttpResult(200, ChaosPlanMapper.toJson(stopAll()));
         }
-        final StopResponse response =
-            stop(java.net.URLDecoder.decode(path, java.nio.charset.StandardCharsets.UTF_8));
+        final String id;
+        try {
+          id = java.net.URLDecoder.decode(path, java.nio.charset.StandardCharsets.UTF_8);
+        } catch (final IllegalArgumentException malformed) {
+          return new HttpResult(400, error("malformed id"));
+        }
+        final StopResponse response = stop(id);
         return new HttpResult(statusOf(response.status()), ChaosPlanMapper.toJson(response));
       }
       default -> {
@@ -191,9 +212,12 @@ public final class ChaosManagement implements AutoCloseable {
     return ChaosPlanMapper.toJson(Map.of("status", "error", "message", message));
   }
 
-  /** Stops every plan activated here. */
+  /**
+   * Stops every plan activated here; a plan whose activation completes afterwards is stopped too.
+   */
   @Override
   public void close() {
+    closed = true;
     stopAll();
   }
 
