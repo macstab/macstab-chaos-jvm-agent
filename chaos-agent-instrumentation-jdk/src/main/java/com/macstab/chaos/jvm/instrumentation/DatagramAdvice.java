@@ -58,13 +58,23 @@ final class DatagramAdvice {
 
   /**
    * Intercepts {@code DatagramChannelImpl.blockingSend(DatagramPacket)}: {@code DatagramSocket}.
+   * One send, although the JDK carries it out through the channel's own {@code send} ({@link
+   * BootstrapDispatcher#SCOPE_DATAGRAM_SEND}).
    */
   static final class DatagramPacketSendAdvice {
     @Advice.OnMethodEnter(skipOn = Advice.OnNonDefaultValue.class)
     static boolean enter(
         @Advice.This final Object channel, @Advice.Argument(0) final java.net.DatagramPacket packet)
         throws Throwable {
-      return BootstrapDispatcher.dropDatagramPacket(channel, packet);
+      final boolean drop = BootstrapDispatcher.dropDatagramPacket(channel, packet);
+      // Entered after the dispatch: when it throws, no exit advice runs to leave the scope.
+      BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_DATAGRAM_SEND);
+      return drop;
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit() {
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_DATAGRAM_SEND);
     }
   }
 

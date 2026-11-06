@@ -1081,6 +1081,18 @@ public final class DefectProbeMain {
           "udpFirst=" + new String(first.getData(), 0, first.getLength(), StandardCharsets.UTF_8));
       printApplied(drop);
 
+      // One DatagramSocket.send is one DATAGRAM_SEND, although the JDK sends it through the
+      // channel's own send(ByteBuffer, SocketAddress).
+      final ChaosActivationHandle sendOnce =
+          plane.activate(
+              ChaosScenario.builder("udp-send-once")
+                  .selector(toReceiver.apply(OperationType.DATAGRAM_SEND))
+                  .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+                  .build());
+      sender.send(new java.net.DatagramPacket("once".getBytes(StandardCharsets.UTF_8), 4, to));
+      receiver.receive(new java.net.DatagramPacket(new byte[16], 16));
+      printApplied(sendOnce);
+
       final ChaosActivationHandle corrupt =
           plane.activate(
               ChaosScenario.builder("udp-corrupt")

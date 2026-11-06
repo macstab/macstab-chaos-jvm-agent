@@ -1613,6 +1613,7 @@ class AgentEndToEndTest {
       // the first datagram was dropped on the way, the second arrived
       assertThat(result.value("udpFirst")).isEqualTo("two");
       assertThat(result.longValue("applied.jvm::udp-drop-first")).isEqualTo(1L);
+      assertThat(result.longValue("applied.jvm::udp-send-once")).isEqualTo(1L);
       assertThat(result.longValue("udpSocketBits")).isEqualTo(1L);
       assertThat(result.longValue("udpChannelBits")).isEqualTo(1L);
       assertThat(result.longValue("applied.jvm::udp-corrupt")).isEqualTo(2L);

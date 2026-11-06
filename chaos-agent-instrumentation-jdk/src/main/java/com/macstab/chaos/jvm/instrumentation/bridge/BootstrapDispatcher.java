@@ -166,8 +166,14 @@ public final class BootstrapDispatcher {
    */
   public static final int SCOPE_FILE_CLOSE = 22;
 
+  /**
+   * Scope of a {@code DatagramSocket.send}: one datagram send, also when the JDK carries it out
+   * through the channel's own {@code send(ByteBuffer, SocketAddress)}.
+   */
+  public static final int SCOPE_DATAGRAM_SEND = 23;
+
   /** Size of the per-thread counter array: index 0 is the reentrancy depth, then the scopes. */
-  static final int SCOPE_COUNT = 23;
+  static final int SCOPE_COUNT = 24;
 
   /**
    * Enters a call-depth scope on the current thread.
@@ -2481,6 +2487,9 @@ public final class BootstrapDispatcher {
   public static int beforeDatagramSend(
       final Object channel, final java.nio.ByteBuffer source, final @Nullable Object target)
       throws Throwable {
+    if (DEPTH.get()[SCOPE_DATAGRAM_SEND] > 0) {
+      return 0; // inside a DatagramSocket.send, which was evaluated already
+    }
     final int length = source == null ? 0 : source.remaining();
     if (datagram(OperationTags.DATAGRAM_SEND, channel, target, length) != Integer.MIN_VALUE) {
       return 0;
