@@ -196,6 +196,29 @@ class ChaosRuntimeActivationPolicyTest {
   class RateLimitEnforcement {
 
     @Test
+    @DisplayName("a contribution that does not take effect gives its permit back")
+    void permitOfAnInapplicableContributionIsReturned() throws Throwable {
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
+        runtime.activate(
+            ChaosScenario.builder("trickle-limited")
+                .selector(ChaosSelector.network(Set.of(OperationType.SOCKET_READ)))
+                .effect(ChaosEffect.trickle(16))
+                .activationPolicy(
+                    ActivationPolicy.builder()
+                        .rateLimit(new ActivationPolicy.RateLimit(1L, Duration.ofHours(1)))
+                        .build())
+                .build());
+
+        // A read no longer than the trickle cap cannot be trickled: it must not use the permit.
+        assertThat(runtime.beforeSocketRead(this, 8, null, 0, 0)).isEqualTo(8);
+        assertThat(runtime.beforeSocketRead(this, 100, null, 0, 0)).isEqualTo(16);
+        assertThat(runtime.beforeSocketRead(this, 100, null, 0, 0))
+            .as("the window's one permit is used")
+            .isEqualTo(100);
+      }
+    }
+
+    @Test
     @DisplayName("rateLimit=1/window allows only one application per window")
     void rateLimitOnePerWindowAllowsOneApplication() {
       ChaosRuntime runtime = new ChaosRuntime();

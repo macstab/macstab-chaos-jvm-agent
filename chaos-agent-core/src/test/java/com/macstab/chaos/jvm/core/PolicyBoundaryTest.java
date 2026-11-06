@@ -272,13 +272,14 @@ class PolicyBoundaryTest {
     return decisions;
   }
 
+  /** Evaluates {@code calls} times, applying every contribution, and counts the contributions. */
   private int granted(final ScenarioController controller, final int calls) {
     int granted = 0;
     for (int call = 0; call < calls; call++) {
       final ScenarioContribution contribution = controller.evaluate(SUBMIT);
       if (contribution != null) {
         granted++;
-        contribution.release();
+        contribution.commit();
       }
     }
     return granted;

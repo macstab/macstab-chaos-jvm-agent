@@ -463,7 +463,8 @@ final class ScenarioController {
     if (!passesProbability(matchCount)) {
       return skipped("probability", context);
     }
-    if (!passesRateLimit()) {
+    final long ratePermitWindow = takeRatePermit();
+    if (ratePermitWindow == RATE_DENIED) {
       return skipped("rateLimit", context);
     }
     // Re-check the started flag before we commit to applying the effect. stop() can flip
@@ -473,9 +474,11 @@ final class ScenarioController {
     // the user gets a chaos effect after they explicitly turned the scenario off. The recheck
     // does not need a barrier beyond the volatile semantics of AtomicBoolean.
     if (!started.get()) {
+      releaseRatePermit(ratePermitWindow);
       return null;
     }
     if (!reserveApplication()) {
+      releaseRatePermit(ratePermitWindow);
       return skipped("maxApplications", context);
     }
     return new ScenarioContribution(
@@ -485,16 +488,18 @@ final class ScenarioController {
         sampleDelayNanos(matchCount),
         gateTimeout(),
         context,
-        matchCount);
+        matchCount,
+        ratePermitWindow);
   }
 
   /**
    * Reserves one application against {@code maxApplications} for a contribution that has not yet
    * been chosen. The dispatcher decides afterwards which contributions take effect (every delay,
    * the winning gate and the winning terminal action by precedence) and calls {@link
-   * #commitApplication(InvocationContext, long, long)} for those and {@link #releaseApplication()}
-   * for the rest. Nothing is counted or published as {@code APPLIED} here, so a scenario that loses
-   * on precedence neither reports itself as applied nor uses up its budget.
+   * #commitApplication(InvocationContext, long, long)} for those and {@link
+   * #releaseApplication(long)} for the rest. Nothing is counted or published as {@code APPLIED}
+   * here, so a scenario that loses on precedence neither reports itself as applied nor uses up its
+   * budget.
    *
    * <p>Committed applications plus outstanding reservations never exceed the cap. The scenario is
    * marked {@code INACTIVE} only once committed applications reach the cap, so a reservation that
@@ -545,8 +550,14 @@ final class ScenarioController {
     publishAppliedEvent(context, delayNanos, matchNumber);
   }
 
-  /** Returns a reservation taken by {@link #reserveApplication()} that was not applied. */
-  void releaseApplication() {
+  /**
+   * Returns what a contribution that was not applied took: its reservation from {@link
+   * #reserveApplication()} and its rate-limit permit.
+   *
+   * @param ratePermitWindow the window the contribution's permit was taken in
+   */
+  void releaseApplication(final long ratePermitWindow) {
+    releaseRatePermit(ratePermitWindow);
     if (scenario.activationPolicy().maxApplications() == null) {
       return;
     }
@@ -824,10 +835,22 @@ final class ScenarioController {
     return window == Window.OPEN;
   }
 
-  private boolean passesRateLimit() {
+  /** {@link #takeRatePermit()}: the scenario has no rate limit, so there is no permit. */
+  private static final long NO_RATE_LIMIT = Long.MIN_VALUE;
+
+  /** {@link #takeRatePermit()}: the window's permits are used up. */
+  private static final long RATE_DENIED = Long.MAX_VALUE;
+
+  /**
+   * Takes a rate-limit permit for a contribution that may still not take effect.
+   *
+   * @return the start of the window the permit was taken in, {@link #NO_RATE_LIMIT} without a rate
+   *     limit, or {@code RATE_DENIED} when the window has no permit left
+   */
+  private long takeRatePermit() {
     final ActivationPolicy.RateLimit rateLimit = scenario.activationPolicy().rateLimit();
     if (rateLimit == null) {
-      return true;
+      return NO_RATE_LIMIT;
     }
     synchronized (this) {
       final long nowMillis = clock.millis();
@@ -853,10 +876,25 @@ final class ScenarioController {
         rateWindowPermits = 0;
       }
       if (rateWindowPermits >= rateLimit.permits()) {
-        return false;
+        return RATE_DENIED;
       }
       rateWindowPermits++;
-      return true;
+      return rateWindowStartMillis;
+    }
+  }
+
+  /**
+   * Gives back a permit whose contribution did not take effect, unless its window has rolled over:
+   * a permit of a past window must not enlarge the current one.
+   */
+  private void releaseRatePermit(final long ratePermitWindow) {
+    if (ratePermitWindow == NO_RATE_LIMIT) {
+      return;
+    }
+    synchronized (this) {
+      if (rateWindowStartMillis == ratePermitWindow && rateWindowPermits > 0) {
+        rateWindowPermits--;
+      }
     }
   }
 

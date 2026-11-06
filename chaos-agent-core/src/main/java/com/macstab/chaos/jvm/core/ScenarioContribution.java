@@ -26,6 +26,8 @@ import org.jspecify.annotations.Nullable;
  *     ScenarioController#commitApplication(InvocationContext, long, long)} when the contribution
  *     takes effect
  * @param matchNumber the scenario's 1-based match number for this call
+ * @param ratePermitWindow the rate-limit window the contribution's permit was taken in, returned
+ *     with the reservation when the contribution does not take effect
  */
 record ScenarioContribution(
     ScenarioController controller,
@@ -34,7 +36,8 @@ record ScenarioContribution(
     long delayNanos,
     @Nullable Duration gateTimeout,
     InvocationContext context,
-    long matchNumber) {
+    long matchNumber,
+    long ratePermitWindow) {
 
   /** Records this contribution as applied. */
   void commit() {
@@ -43,6 +46,6 @@ record ScenarioContribution(
 
   /** Returns this contribution's reservation without applying it. */
   void release() {
-    controller.releaseApplication();
+    controller.releaseApplication(ratePermitWindow);
   }
 }
