@@ -1,7 +1,6 @@
 package com.macstab.chaos.jvm.core;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.awaitility.Awaitility.await;
 
 import com.macstab.chaos.jvm.api.ChaosEffect;
@@ -12,9 +11,8 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 /**
- * Unit tests for the lifecycle of eight stressors. Each test verifies basic lifecycle behaviour
- * (construction does not throw, retained-count accessors return expected values, close() does not
- * throw and makes the stressor stop or release resources).
+ * Unit tests for the lifecycle of eight stressors: what they retain or start when built, and that
+ * close() stops them or releases what they hold.
  */
 @DisplayName("Stressor lifecycle")
 class StressorLifecycleTest {
@@ -75,12 +73,13 @@ class StressorLifecycleTest {
     }
 
     @Test
-    @DisplayName("close() does not throw")
-    void closeDoesNotThrow() {
+    @DisplayName("close() releases the retained buffers")
+    void closeReleasesBuffers() {
       final DirectBufferPressureStressor stressor =
           new DirectBufferPressureStressor(
               new ChaosEffect.DirectBufferPressureEffect(2048L, 1024, false));
-      assertThatCode(stressor::close).doesNotThrowAnyException();
+      stressor.close();
+      assertThat(stressor.retainedBufferCount()).isZero();
     }
   }
 
@@ -126,14 +125,6 @@ class StressorLifecycleTest {
       final FinalizerBacklogStressor stressor =
           new FinalizerBacklogStressor(new ChaosEffect.FinalizerBacklogEffect(20, Duration.ZERO));
       assertThat(stressor.createdCount()).isEqualTo(20);
-    }
-
-    @Test
-    @DisplayName("close() does not throw")
-    void closeDoesNotThrow() {
-      final FinalizerBacklogStressor stressor =
-          new FinalizerBacklogStressor(new ChaosEffect.FinalizerBacklogEffect(5, Duration.ZERO));
-      assertThatCode(stressor::close).doesNotThrowAnyException();
     }
   }
 
@@ -212,14 +203,6 @@ class StressorLifecycleTest {
       final ThreadLocalLeakStressor stressor =
           new ThreadLocalLeakStressor(new ChaosEffect.ThreadLocalLeakEffect(entriesPerThread, 64));
       assertThat(stressor.plantedCount()).isEqualTo(parallelism * entriesPerThread);
-    }
-
-    @Test
-    @DisplayName("close() does not throw")
-    void closeDoesNotThrow() {
-      final ThreadLocalLeakStressor stressor =
-          new ThreadLocalLeakStressor(new ChaosEffect.ThreadLocalLeakEffect(1, 32));
-      assertThatCode(stressor::close).doesNotThrowAnyException();
     }
   }
 

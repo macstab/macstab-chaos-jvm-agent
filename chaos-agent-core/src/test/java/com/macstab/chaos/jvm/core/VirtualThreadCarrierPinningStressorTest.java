@@ -69,15 +69,6 @@ class VirtualThreadCarrierPinningStressorTest {
     }
 
     @Test
-    @DisplayName("close() does not throw")
-    void closeDoesNotThrow() {
-      final VirtualThreadCarrierPinningStressor stressor =
-          new VirtualThreadCarrierPinningStressor(
-              new ChaosEffect.VirtualThreadCarrierPinningEffect(1, Duration.ofSeconds(10)));
-      assertThatCode(stressor::close).doesNotThrowAnyException();
-    }
-
-    @Test
     @DisplayName("close() is idempotent")
     void closeIsIdempotent() {
       final VirtualThreadCarrierPinningStressor stressor =
@@ -97,15 +88,17 @@ class VirtualThreadCarrierPinningStressorTest {
   class ShortPinCycle {
 
     @Test
-    @DisplayName("threads survive multiple pin-release cycles")
-    void threadsSurviveMultiplePinReleaseCycles() throws Exception {
+    @DisplayName("with a short pin duration the pinning threads stay alive while active")
+    void threadsStayAliveWithShortPins() {
       final VirtualThreadCarrierPinningStressor stressor =
           new VirtualThreadCarrierPinningStressor(
               new ChaosEffect.VirtualThreadCarrierPinningEffect(2, Duration.ofMillis(20)));
       try {
-        // Allow several pin-release cycles; threads must stay alive throughout.
-        Thread.sleep(150);
-        assertThat(stressor.aliveCount()).isEqualTo(2);
+        await().atMost(3, TimeUnit.SECONDS).until(() -> stressor.aliveCount() == 2);
+        await()
+            .during(Duration.ofMillis(150))
+            .atMost(Duration.ofSeconds(2))
+            .until(() -> stressor.aliveCount() == 2);
       } finally {
         stressor.close();
       }

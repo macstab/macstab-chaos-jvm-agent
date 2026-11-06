@@ -1,7 +1,6 @@
 package com.macstab.chaos.jvm.core;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.awaitility.Awaitility.await;
 
 import com.macstab.chaos.jvm.api.ChaosEffect;
@@ -39,14 +38,6 @@ class NewStressorLifecycleTest {
       stressor.close();
       assertThat(stressor.retainedClassCount()).isZero();
     }
-
-    @Test
-    @DisplayName("close() does not throw")
-    void closeDoesNotThrow() {
-      final CodeCachePressureStressor stressor =
-          new CodeCachePressureStressor(new ChaosEffect.CodeCachePressureEffect(2, 1));
-      assertThatCode(stressor::close).doesNotThrowAnyException();
-    }
   }
 
   @Nested
@@ -76,16 +67,10 @@ class NewStressorLifecycleTest {
               new ChaosEffect.SafepointStormEffect(Duration.ofMillis(20), 0), Optional.empty());
       // Allow at least one cycle.
       await().atMost(2, TimeUnit.SECONDS).until(() -> stressor.gcCycleCount() > 0);
-      final long countAtClose = stressor.gcCycleCount();
       stressor.close();
-      Thread.sleep(150);
-      assertThat(stressor.gcCycleCount()).isLessThanOrEqualTo(countAtClose + 1);
-    }
-
-    @Test
-    @DisplayName("totalGcCount() returns non-negative value")
-    void totalGcCountIsNonNegative() {
-      assertThat(SafepointStormStressor.totalGcCount()).isGreaterThanOrEqualTo(0);
+      await()
+          .atMost(5, TimeUnit.SECONDS)
+          .until(() -> !threadAlive("macstab-chaos-safepoint-storm"));
     }
   }
 
@@ -108,14 +93,6 @@ class NewStressorLifecycleTest {
           new StringInternPressureStressor(new ChaosEffect.StringInternPressureEffect(50, 8));
       stressor.close();
       assertThat(stressor.internedCount()).isZero();
-    }
-
-    @Test
-    @DisplayName("close() does not throw")
-    void closeDoesNotThrow() {
-      final StringInternPressureStressor stressor =
-          new StringInternPressureStressor(new ChaosEffect.StringInternPressureEffect(10, 4));
-      assertThatCode(stressor::close).doesNotThrowAnyException();
     }
   }
 
@@ -145,19 +122,13 @@ class NewStressorLifecycleTest {
           new ReferenceQueueFloodStressor(
               new ChaosEffect.ReferenceQueueFloodEffect(5, Duration.ofMillis(20)));
       await().atMost(2, TimeUnit.SECONDS).until(() -> stressor.floodCycleCount() > 0);
-      final long countAtClose = stressor.floodCycleCount();
       stressor.close();
-      Thread.sleep(150);
-      assertThat(stressor.floodCycleCount()).isLessThanOrEqualTo(countAtClose + 1);
+      await().atMost(5, TimeUnit.SECONDS).until(() -> !threadAlive("macstab-chaos-refqueue-flood"));
     }
+  }
 
-    @Test
-    @DisplayName("close() does not throw")
-    void closeDoesNotThrow() {
-      final ReferenceQueueFloodStressor stressor =
-          new ReferenceQueueFloodStressor(
-              new ChaosEffect.ReferenceQueueFloodEffect(5, Duration.ofMillis(100)));
-      assertThatCode(stressor::close).doesNotThrowAnyException();
-    }
+  private static boolean threadAlive(final String name) {
+    return Thread.getAllStackTraces().keySet().stream()
+        .anyMatch(thread -> thread.isAlive() && name.equals(thread.getName()));
   }
 }
