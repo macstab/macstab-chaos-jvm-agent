@@ -33,13 +33,15 @@ import org.jspecify.annotations.Nullable;
 
 /**
  * Control-plane half of the chaos runtime. Owns scenario lifecycle, session management,
- * diagnostics, event listeners, instrumentation handle, and the shutdown-hook tracking map. Paired
- * with {@link ChaosDispatcher} which owns the hot-path interception logic.
+ * diagnostics, event listeners and the instrumentation handle. Paired with {@link ChaosDispatcher}
+ * which owns the hot-path interception logic.
  *
  * <h2>Thread safety</h2>
  *
  * <p>All methods are fully thread-safe. Shared mutable state uses {@code volatile}, {@link
- * java.util.concurrent.ConcurrentHashMap}, and CAS primitives.
+ * java.util.concurrent.ConcurrentHashMap}, and CAS primitives. {@link #close()} and the steps that
+ * add a scenario or listener hold {@code lifecycleLock}, so nothing is added once {@code close()}
+ * has taken its snapshot; the dispatch path never takes it.
  */
 final class ChaosControlPlaneImpl implements ChaosControlPlane {
   private final Clock clock;
@@ -48,6 +50,12 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
   private final ObservabilityBus observabilityBus;
   private final ScenarioRegistry registry;
   private final AtomicBoolean closed = new AtomicBoolean(false);
+
+  /**
+   * Orders {@link #close()} against registering a scenario or adding a listener: either the
+   * addition happens first and close() finds it, or it sees the plane closed and is refused.
+   */
+  private final Object lifecycleLock = new Object();
 
   /**
    * Which plan's observability settings a scenario id carries: only that owner may clear them, so a
@@ -346,8 +354,10 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
   @Override
   public void addEventListener(final ChaosEventListener listener) {
     Objects.requireNonNull(listener, "listener");
-    ensureOpen();
-    observabilityBus.addListener(listener);
+    synchronized (lifecycleLock) {
+      ensureOpen();
+      observabilityBus.addListener(listener);
+    }
   }
 
   @Override
@@ -363,14 +373,17 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
     // JUnit @AfterAll, Quarkus shutdown + main-thread close, test suites asserting exact event
     // counts) frequently call close() more than once; without this guard every controller fires
     // a second STOPPED event via its ObservabilityBus on the repeat pass.
-    if (!closed.compareAndSet(false, true)) {
-      return;
-    }
     // Destroy *and* unregister each controller: destroy() alone only stops it, and a closed
     // runtime must hold no controllers. Snapshot the controllers into a list first — unregister()
     // mutates the registry, so iterating the live view and mutating
     // concurrently risks ConcurrentModificationException from non-ConcurrentMap backing.
-    final List<ScenarioController> toUnregister = new ArrayList<>(registry.controllers());
+    final List<ScenarioController> toUnregister;
+    synchronized (lifecycleLock) {
+      if (!closed.compareAndSet(false, true)) {
+        return;
+      }
+      toUnregister = new ArrayList<>(registry.controllers());
+    }
     for (final ScenarioController controller : toUnregister) {
       try {
         controller.destroy();
@@ -452,7 +465,13 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
       // it back with a STOPPED event carrying the id of the scenario that is still running. A
       // registered but not yet started controller is invisible to the dispatch path, because
       // evaluate() returns null until start() has set the started flag.
-      final ScenarioController replaced = registry.register(controller);
+      final ScenarioController replaced;
+      synchronized (lifecycleLock) {
+        // A close() that ran since the check on entry has taken its snapshot: refuse, rather
+        // than register a controller nothing would ever stop.
+        ensureOpen();
+        replaced = registry.register(controller);
+      }
       registeredInRegistry = true;
       // The finished controller this one replaces reports its end before the new one begins.
       if (replaced != null) {

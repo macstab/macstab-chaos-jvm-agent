@@ -529,6 +529,71 @@ class ControlPlaneLifecycleTest {
       assertThat(closing.events).as("no event reaches a detached listener").hasValue(seen);
       assertThat(runtime.removeEventListener(closing)).isFalse();
     }
+
+    @Test
+    @DisplayName("an activation overtaken by close() is refused and leaves nothing running")
+    void activationOvertakenByClose() throws Exception {
+      final Throwable failure =
+          raceWithClose(() -> runtime.activate(submitScenario("late", ActivationPolicy.always())));
+
+      assertThat(failure)
+          .isInstanceOf(IllegalStateException.class)
+          .hasMessage("chaos control plane is closed");
+      assertThat(runtime.diagnostics().snapshot().scenarios()).isEmpty();
+      assertThat(submissionRejected()).as("no fault is injected after close").isFalse();
+    }
+
+    @Test
+    @DisplayName("a session activation overtaken by close() is refused and leaves nothing running")
+    void sessionActivationOvertakenByClose() throws Exception {
+      final ChaosSession session = runtime.openSession("racing");
+      final ChaosScenario scenario =
+          ChaosScenario.builder("late")
+              .scope(ChaosScenario.ScenarioScope.SESSION)
+              .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+              .effect(ChaosEffect.reject("late"))
+              .activationPolicy(ActivationPolicy.always())
+              .build();
+
+      final Throwable failure = raceWithClose(() -> session.activate(scenario));
+
+      assertThat(failure).isInstanceOf(IllegalStateException.class);
+      assertThat(runtime.diagnostics().snapshot().scenarios()).isEmpty();
+    }
+
+    /**
+     * Runs {@code activation} on another thread, holds it inside the weaving step, closes the
+     * runtime meanwhile and lets the activation continue; returns what the activation threw.
+     */
+    private Throwable raceWithClose(final Callable<?> activation) throws Exception {
+      final CountDownLatch inWeaving = new CountDownLatch(1);
+      final CountDownLatch closed = new CountDownLatch(1);
+      runtime.setHookDemand(
+          operations -> {
+            inWeaving.countDown();
+            try {
+              closed.await(5, TimeUnit.SECONDS);
+            } catch (final InterruptedException interrupted) {
+              Thread.currentThread().interrupt();
+            }
+          });
+      final AtomicReference<Throwable> thrown = new AtomicReference<>();
+      final Thread activating =
+          new Thread(
+              () -> {
+                try {
+                  activation.call();
+                } catch (final Throwable failure) {
+                  thrown.set(failure);
+                }
+              });
+      activating.start();
+      assertThat(inWeaving.await(5, TimeUnit.SECONDS)).isTrue();
+      runtime.close();
+      closed.countDown();
+      activating.join(5_000L);
+      return thrown.get();
+    }
   }
 
   @Nested
