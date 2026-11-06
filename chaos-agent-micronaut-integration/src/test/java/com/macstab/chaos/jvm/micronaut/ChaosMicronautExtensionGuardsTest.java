@@ -88,6 +88,23 @@ class ChaosMicronautExtensionGuardsTest {
   }
 
   @Test
+  @DisplayName("before all, a control plane without a session is no outer class: one is opened")
+  void controlPlaneWithoutSessionBeforeAll() {
+    final Map<Object, Object> values = new HashMap<>();
+    values.put(ChaosControlPlane.class, unused(ChaosControlPlane.class));
+    final ExtensionContext lone = context(values, null);
+
+    extension.beforeAll(lone);
+    try {
+      assertThat(values.get(ChaosSession.class)).isNotNull();
+      assertThat(values.get(ChaosControlPlane.class))
+          .isInstanceOf(com.macstab.chaos.jvm.testkit.TrackingChaosControlPlane.class);
+    } finally {
+      extension.afterAll(lone);
+    }
+  }
+
+  @Test
   @DisplayName("a session and control plane held by a parent context are found")
   void stateFromParentContext() {
     final Map<Object, Object> parentValues = new HashMap<>();
