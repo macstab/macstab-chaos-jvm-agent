@@ -86,14 +86,12 @@ class StopDuringEvaluationTest {
           .isGreaterThanOrEqualTo(60L);
 
       handle.stop();
+      final long appliedAtStop = handle.appliedCount();
 
-      // All subsequent evaluations should NOT be delayed.
       for (int i = 0; i < 5; i++) {
-        final long after =
-            measureMillis(
-                () -> runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {}));
-        assertThat(after).as("call %d after stop() must not be delayed", i + 1).isLessThan(50L);
+        runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
       }
+      assertThat(handle.appliedCount()).as("nothing applies after stop()").isEqualTo(appliedAtStop);
     }
   }
 

@@ -171,12 +171,8 @@ class Phase4RuntimeTest {
                   Set.of(OperationType.DNS_RESOLVE), NamePattern.prefix("internal.")),
               ChaosEffect.delay(Duration.ofMillis(200)));
       try {
-        final long start = System.nanoTime();
         runtime.beforeDnsResolve("external.example.com");
-        final long elapsedMs = (System.nanoTime() - start) / 1_000_000L;
-        assertThat(elapsedMs)
-            .as("mismatch must not introduce delay (got %dms)", elapsedMs)
-            .isLessThan(50L);
+        assertThat(handle.matchedCount()).as("a host outside the pattern is not matched").isZero();
       } finally {
         handle.stop();
       }
@@ -217,12 +213,8 @@ class Phase4RuntimeTest {
               ChaosSelector.dns(Set.of(OperationType.DNS_RESOLVE)),
               ChaosEffect.delay(Duration.ofMillis(200)));
       try {
-        final long start = System.nanoTime();
         runtime.beforeFileIo("FILE_IO_READ", new Object());
-        final long elapsedMs = (System.nanoTime() - start) / 1_000_000L;
-        assertThat(elapsedMs)
-            .as("DNS scenario must not delay FILE_IO_READ (got %dms)", elapsedMs)
-            .isLessThan(50L);
+        assertThat(handle.matchedCount()).as("a DNS scenario never sees a file read").isZero();
       } finally {
         handle.stop();
       }
@@ -293,12 +285,8 @@ class Phase4RuntimeTest {
               ChaosSelector.ssl(Set.of(OperationType.SSL_HANDSHAKE)),
               ChaosEffect.delay(Duration.ofMillis(200)));
       handle.stop();
-      final long start = System.nanoTime();
       runtime.beforeSslHandshake(new Object());
-      final long elapsedMs = (System.nanoTime() - start) / 1_000_000L;
-      assertThat(elapsedMs)
-          .as("stopped scenario must not delay (got %dms)", elapsedMs)
-          .isLessThan(50L);
+      assertThat(handle.appliedCount()).as("a stopped scenario applies nothing").isZero();
     }
   }
 
@@ -365,12 +353,8 @@ class Phase4RuntimeTest {
               ChaosSelector.fileIo(Set.of(OperationType.FILE_IO_READ)),
               ChaosEffect.delay(Duration.ofMillis(200)));
       try {
-        final long start = System.nanoTime();
         runtime.beforeFileIo("FILE_IO_WRITE", new Object());
-        final long elapsedMs = (System.nanoTime() - start) / 1_000_000L;
-        assertThat(elapsedMs)
-            .as("READ-only scenario must not delay WRITE (got %dms)", elapsedMs)
-            .isLessThan(50L);
+        assertThat(handle.matchedCount()).as("a read scenario never sees a write").isZero();
       } finally {
         handle.stop();
       }

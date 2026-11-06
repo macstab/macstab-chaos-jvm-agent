@@ -226,6 +226,15 @@ class SessionIsolationParallelTest {
     @DisplayName("effects applied before close() are observed; after close(), the effect stops")
     void effectObservedBeforeCloseAndAbsentAfterClose() {
       final ChaosRuntime runtime = new ChaosRuntime();
+      final java.util.concurrent.atomic.AtomicInteger applied =
+          new java.util.concurrent.atomic.AtomicInteger();
+      runtime.addEventListener(
+          event -> {
+            if (event.type() == com.macstab.chaos.jvm.api.ChaosEvent.Type.APPLIED
+                && event.scenarioId().equals("close-scenario")) {
+              applied.incrementAndGet();
+            }
+          });
       final ChaosSession session = runtime.openSession("close-test");
       session.activate(
           ChaosScenario.builder("close-scenario")
@@ -243,16 +252,13 @@ class SessionIsolationParallelTest {
           .isGreaterThanOrEqualTo(60L);
 
       session.close();
+      final int appliedAtClose = applied.get();
 
       // Post-close: session is gone; thread no longer bound; effect must not apply.
       for (int i = 0; i < 5; i++) {
-        final long afterClose =
-            measureMillis(
-                () -> runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {}));
-        assertThat(afterClose)
-            .as("call %d after close() must not be delayed", i + 1)
-            .isLessThan(50L);
+        runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
       }
+      assertThat(applied).as("nothing applies after close()").hasValue(appliedAtClose);
     }
   }
 
