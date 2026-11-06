@@ -1,6 +1,6 @@
 package com.macstab.chaos.jvm.api;
 
-import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.Set;
@@ -13,8 +13,8 @@ class SelectorBoundaryTest {
 
   @Test
   void portsFromZeroTo65535AreAccepted() {
-    assertThatCode(() -> network(0, null, null)).doesNotThrowAnyException();
-    assertThatCode(() -> network(65_535, null, null)).doesNotThrowAnyException();
+    assertThat(network(0, null, null).remotePort()).isZero();
+    assertThat(network(65_535, null, null).remotePort()).isEqualTo(65_535);
     assertThatThrownBy(() -> network(-1, null, null)).isInstanceOf(IllegalArgumentException.class);
     assertThatThrownBy(() -> network(65_536, null, null))
         .isInstanceOf(IllegalArgumentException.class);
@@ -22,10 +22,22 @@ class SelectorBoundaryTest {
 
   @Test
   void sizeRangesAreInclusiveAndNonNegative() {
-    assertThatCode(() -> network(null, 0L, 0L)).doesNotThrowAnyException();
-    assertThatCode(() -> network(null, 7L, 7L)).doesNotThrowAnyException();
-    assertThatCode(() -> network(null, 0L, null)).doesNotThrowAnyException();
-    assertThatCode(() -> network(null, null, 0L)).doesNotThrowAnyException();
+    assertThat(network(null, 0L, 0L))
+        .extracting(
+            ChaosSelector.NetworkSelector::minBytes, ChaosSelector.NetworkSelector::maxBytes)
+        .containsExactly(0L, 0L);
+    assertThat(network(null, 7L, 7L))
+        .extracting(
+            ChaosSelector.NetworkSelector::minBytes, ChaosSelector.NetworkSelector::maxBytes)
+        .containsExactly(7L, 7L);
+    assertThat(network(null, 0L, null))
+        .extracting(
+            ChaosSelector.NetworkSelector::minBytes, ChaosSelector.NetworkSelector::maxBytes)
+        .containsExactly(0L, null);
+    assertThat(network(null, null, 0L))
+        .extracting(
+            ChaosSelector.NetworkSelector::minBytes, ChaosSelector.NetworkSelector::maxBytes)
+        .containsExactly(null, 0L);
     assertThatThrownBy(() -> network(null, -1L, null)).isInstanceOf(IllegalArgumentException.class);
     assertThatThrownBy(() -> network(null, null, -1L)).isInstanceOf(IllegalArgumentException.class);
     assertThatThrownBy(() -> network(null, 8L, 7L)).isInstanceOf(IllegalArgumentException.class);

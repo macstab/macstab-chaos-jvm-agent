@@ -1,7 +1,6 @@
 package com.macstab.chaos.jvm.api;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.Duration;
@@ -177,14 +176,17 @@ class ChaosEffectFactoriesTest {
     @Test
     @DisplayName("a class in any allowed package is accepted")
     void allowedPackages() {
-      assertThatCode(
-              () -> {
-                new ChaosEffect.ExceptionInjectionEffect("java.io.IOException", "m", true);
-                new ChaosEffect.ExceptionInjectionEffect("javax.net.ssl.SSLException", "m", true);
-                new ChaosEffect.ExceptionInjectionEffect("jakarta.ws.Boom", "m", true);
-                new ChaosEffect.ExceptionInjectionEffect("com.macstab.chaos.jvm.X", "m", true);
-              })
-          .doesNotThrowAnyException();
+      final List<String> accepted =
+          List.of(
+              "java.io.IOException",
+              "javax.net.ssl.SSLException",
+              "jakarta.ws.Boom",
+              "com.macstab.chaos.jvm.X");
+      assertThat(accepted)
+          .map(
+              name ->
+                  new ChaosEffect.ExceptionInjectionEffect(name, "m", true).exceptionClassName())
+          .containsExactlyElementsOf(accepted);
     }
   }
 
@@ -227,19 +229,22 @@ class ChaosEffectFactoriesTest {
     @Test
     @DisplayName("heap pressure accepts exactly the maximum total and chunk size")
     void heapPressureMaxima() {
-      assertThatCode(
-              () ->
-                  ChaosEffect.heapPressure(
-                      ChaosEffect.HeapPressureEffect.MAX_BYTES,
-                      ChaosEffect.HeapPressureEffect.MAX_CHUNK_SIZE_BYTES))
-          .doesNotThrowAnyException();
+      final ChaosEffect.HeapPressureEffect effect =
+          ChaosEffect.heapPressure(
+              ChaosEffect.HeapPressureEffect.MAX_BYTES,
+              ChaosEffect.HeapPressureEffect.MAX_CHUNK_SIZE_BYTES);
+      assertThat(effect.bytes()).isEqualTo(ChaosEffect.HeapPressureEffect.MAX_BYTES);
+      assertThat(effect.chunkSizeBytes())
+          .isEqualTo(ChaosEffect.HeapPressureEffect.MAX_CHUNK_SIZE_BYTES);
     }
 
     @Test
     @DisplayName("direct buffer pressure: one buffer may span the total, a zero total is named")
     void directBufferPressure() {
-      assertThatCode(() -> ChaosEffect.directBufferPressure(4096L, 4096))
-          .doesNotThrowAnyException();
+      final ChaosEffect.DirectBufferPressureEffect effect =
+          ChaosEffect.directBufferPressure(4096L, 4096);
+      assertThat(effect.totalBytes()).isEqualTo(4096L);
+      assertThat(effect.bufferSizeBytes()).isEqualTo(4096);
       assertThatThrownBy(() -> ChaosEffect.directBufferPressure(0L, 1))
           .isInstanceOf(IllegalArgumentException.class)
           .hasMessage("totalBytes must be > 0");
@@ -251,18 +256,26 @@ class ChaosEffectFactoriesTest {
     @Test
     @DisplayName("the count limits of the stressors are inclusive")
     void inclusiveMaxima() {
-      assertThatCode(
-              () -> {
-                ChaosEffect.finalizerBacklog(
-                    ChaosEffect.FinalizerBacklogEffect.MAX_OBJECT_COUNT, Duration.ZERO);
-                ChaosEffect.deadlock(ChaosEffect.DeadlockEffect.MAX_PARTICIPANT_COUNT);
-                ChaosEffect.monitorContention(
-                    Duration.ofMillis(1),
-                    ChaosEffect.MonitorContentionEffect.MAX_CONTENDING_THREAD_COUNT);
-                new ChaosEffect.ThreadLeakEffect(
-                    ChaosEffect.ThreadLeakEffect.MAX_THREAD_COUNT, "leak-", true, null);
-              })
-          .doesNotThrowAnyException();
+      assertThat(
+              ChaosEffect.finalizerBacklog(
+                      ChaosEffect.FinalizerBacklogEffect.MAX_OBJECT_COUNT, Duration.ZERO)
+                  .objectCount())
+          .isEqualTo(ChaosEffect.FinalizerBacklogEffect.MAX_OBJECT_COUNT);
+      assertThat(
+              ChaosEffect.deadlock(ChaosEffect.DeadlockEffect.MAX_PARTICIPANT_COUNT)
+                  .participantCount())
+          .isEqualTo(ChaosEffect.DeadlockEffect.MAX_PARTICIPANT_COUNT);
+      assertThat(
+              ChaosEffect.monitorContention(
+                      Duration.ofMillis(1),
+                      ChaosEffect.MonitorContentionEffect.MAX_CONTENDING_THREAD_COUNT)
+                  .contendingThreadCount())
+          .isEqualTo(ChaosEffect.MonitorContentionEffect.MAX_CONTENDING_THREAD_COUNT);
+      assertThat(
+              new ChaosEffect.ThreadLeakEffect(
+                      ChaosEffect.ThreadLeakEffect.MAX_THREAD_COUNT, "leak-", true, null)
+                  .threadCount())
+          .isEqualTo(ChaosEffect.ThreadLeakEffect.MAX_THREAD_COUNT);
     }
 
     @Test

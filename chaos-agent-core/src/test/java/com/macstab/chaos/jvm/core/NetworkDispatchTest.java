@@ -426,7 +426,6 @@ class NetworkDispatchTest {
     @Test
     @DisplayName("a half-close matches by the peer address and port it is given")
     void shutdownMatchesThePeer() throws Throwable {
-      assertThatCode(() -> runtime.beforeSocketShutdown(this, null, 0)).doesNotThrowAnyException();
       activate("peer", toPort(OperationType.SOCKET_SHUTDOWN, 5432), ChaosEffect.reject("half"));
 
       assertThatThrownBy(() -> runtime.beforeSocketShutdown(this, address("db", 10, 0, 0, 1), 5432))

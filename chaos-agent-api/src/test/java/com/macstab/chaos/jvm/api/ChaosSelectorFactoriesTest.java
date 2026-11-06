@@ -1,7 +1,6 @@
 package com.macstab.chaos.jvm.api;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.Set;
@@ -246,13 +245,18 @@ class ChaosSelectorFactoriesTest {
     @Test
     @DisplayName("ports 0 to 65535 and any peer are accepted")
     void acceptedPeers() {
-      assertThatCode(
-              () -> {
-                new ChaosSelector.NettySelector(READS, null, null);
-                new ChaosSelector.NettySelector(READS, "10.0.0.0/8", 0);
-                new ChaosSelector.NettySelector(READS, "::1", 65_535);
-              })
-          .doesNotThrowAnyException();
+      assertThat(new ChaosSelector.NettySelector(READS, null, null))
+          .extracting(
+              ChaosSelector.NettySelector::remoteCidr, ChaosSelector.NettySelector::remotePort)
+          .containsExactly(null, null);
+      assertThat(new ChaosSelector.NettySelector(READS, "10.0.0.0/8", 0))
+          .extracting(
+              ChaosSelector.NettySelector::remoteCidr, ChaosSelector.NettySelector::remotePort)
+          .containsExactly("10.0.0.0/8", 0);
+      assertThat(new ChaosSelector.NettySelector(READS, "::1", 65_535))
+          .extracting(
+              ChaosSelector.NettySelector::remoteCidr, ChaosSelector.NettySelector::remotePort)
+          .containsExactly("::1", 65_535);
     }
 
     @Test

@@ -1,7 +1,6 @@
 package com.macstab.chaos.jvm.spring.boot4.test;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.macstab.chaos.jvm.api.ChaosControlPlane;
@@ -31,13 +30,14 @@ class ChaosAgentExtensionGuardsTest {
   @Test
   @DisplayName("before and after each test, nothing happens without a session")
   void noSessionNoActivation() {
-    assertThatCode(
-            () -> {
-              extension.beforeEach(context);
-              extension.afterEach(context);
-              extension.afterAll(context);
-            })
-        .doesNotThrowAnyException();
+    final Map<Object, Object> values = new HashMap<>();
+    final ExtensionContext empty = context(values);
+
+    extension.beforeEach(empty);
+    extension.afterEach(empty);
+    extension.afterAll(empty);
+
+    assertThat(values).isEmpty();
   }
 
   @Test
@@ -130,7 +130,11 @@ class ChaosAgentExtensionGuardsTest {
 
   /** A context with an empty store and no parent: the state before beforeAll. */
   private static ExtensionContext context() {
-    final Map<Object, Object> values = new HashMap<>();
+    return context(new HashMap<>());
+  }
+
+  /** A context with no parent whose store is backed by {@code values}. */
+  private static ExtensionContext context(final Map<Object, Object> values) {
     final ExtensionContext.Store store =
         (ExtensionContext.Store)
             Proxy.newProxyInstance(

@@ -1,7 +1,6 @@
 package com.macstab.chaos.jvm.core;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.macstab.chaos.jvm.api.ActivationPolicy;
@@ -132,8 +131,9 @@ class CompositionAndLifecycleLawsTest {
     handle.start();
 
     assertThat(handle.state()).isEqualTo(ChaosDiagnostics.ScenarioState.STOPPED);
-    assertThatCode(() -> runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {}))
-        .doesNotThrowAnyException();
+    final Runnable task = () -> {};
+    assertThat(runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, task)).isSameAs(task);
+    assertThat(applied).extracting(ChaosEvent::scenarioId).doesNotContain("stopped");
   }
 
   @Test

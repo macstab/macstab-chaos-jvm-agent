@@ -1,7 +1,6 @@
 package com.macstab.chaos.jvm.core;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.macstab.chaos.jvm.api.ActivationPolicy;
@@ -115,7 +114,7 @@ class ControlPlaneLifecycleTest {
 
     @Test
     @DisplayName("a plan handle starts, counts and stops every scenario of the plan together")
-    void compositeHandle() {
+    void compositeHandle() throws Throwable {
       final ChaosActivationHandle handle =
           runtime.activate(
               plan(
@@ -134,8 +133,7 @@ class ControlPlaneLifecycleTest {
       handle.start();
       assertThat(handle.state()).isEqualTo(ChaosDiagnostics.ScenarioState.ACTIVE);
       assertThat(submissionRejected()).isTrue();
-      assertThatCode(() -> runtime.beforeQueueOperation("QUEUE_PUT", this))
-          .doesNotThrowAnyException();
+      runtime.beforeQueueOperation("QUEUE_PUT", this);
       assertThat(handle.matchedCount()).isEqualTo(2L);
       assertThat(handle.appliedCount()).isEqualTo(2L);
 
@@ -325,12 +323,11 @@ class ControlPlaneLifecycleTest {
 
     @Test
     @DisplayName("re-activating a spent scenario replaces it and releases the old one")
-    void spentScenarioIsReplaced() {
+    void spentScenarioIsReplaced() throws Throwable {
       final ActivationPolicy once = ActivationPolicy.builder().maxApplications(1L).build();
       runtime.activate(
           scenario("gate", OperationType.QUEUE_PUT, ChaosEffect.gate(Duration.ofMillis(1)), once));
-      assertThatCode(() -> runtime.beforeQueueOperation("QUEUE_PUT", this))
-          .doesNotThrowAnyException();
+      runtime.beforeQueueOperation("QUEUE_PUT", this);
       assertThat(runtime.diagnostics().scenario("gate").orElseThrow().state())
           .isEqualTo(ChaosDiagnostics.ScenarioState.INACTIVE);
 

@@ -1,7 +1,6 @@
 package com.macstab.chaos.jvm.api;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.Instant;
@@ -73,8 +72,16 @@ class ChaosDiagnosticsTest {
     @Test
     @DisplayName("zero counters and applied equal to matched are valid")
     void boundaries() {
-      assertThatCode(() -> report(0, 0)).doesNotThrowAnyException();
-      assertThatCode(() -> report(5, 5)).doesNotThrowAnyException();
+      assertThat(report(0, 0))
+          .extracting(
+              ChaosDiagnostics.ScenarioReport::matchedCount,
+              ChaosDiagnostics.ScenarioReport::appliedCount)
+          .containsExactly(0L, 0L);
+      assertThat(report(5, 5))
+          .extracting(
+              ChaosDiagnostics.ScenarioReport::matchedCount,
+              ChaosDiagnostics.ScenarioReport::appliedCount)
+          .containsExactly(5L, 5L);
     }
 
     @Test

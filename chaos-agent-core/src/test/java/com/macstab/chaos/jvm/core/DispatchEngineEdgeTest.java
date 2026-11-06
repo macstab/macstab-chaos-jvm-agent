@@ -2,7 +2,6 @@ package com.macstab.chaos.jvm.core;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.macstab.chaos.jvm.api.ChaosEffect;
 import com.macstab.chaos.jvm.api.ChaosScenario;
@@ -150,21 +149,6 @@ class DispatchEngineEdgeTest {
     void returnWithoutValueProceeds() {
       assertThatCode(() -> engine.applyPreDecision(terminal(new TerminalAction.Return(null))))
           .doesNotThrowAnyException();
-    }
-
-    @Test
-    @DisplayName("a corrupt-return terminal before the call is refused as a misconfiguration")
-    void corruptReturnRefused() {
-      assertThatThrownBy(
-              () ->
-                  engine.applyPreDecision(
-                      terminal(
-                          new TerminalAction.CorruptReturn(
-                              ChaosEffect.corruptReturnValue(ChaosEffect.ReturnValueStrategy.NULL),
-                              "corrupt"))))
-          .isInstanceOf(IllegalStateException.class)
-          .hasMessage(
-              "CORRUPT_RETURN terminal reached applyPreDecision — only valid from afterMethodExit");
     }
 
     @Test

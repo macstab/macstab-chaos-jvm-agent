@@ -1,7 +1,6 @@
 package com.macstab.chaos.jvm.api;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.Duration;
@@ -32,12 +31,13 @@ class ApiBoundaryValuesTest {
     @Test
     @DisplayName("heap pressure accepts its maxima and rejects one past each")
     void heapPressure() {
-      assertThatCode(
-              () ->
-                  new ChaosEffect.HeapPressureEffect(
-                      ChaosEffect.HeapPressureEffect.MAX_BYTES,
-                      ChaosEffect.HeapPressureEffect.MAX_CHUNK_SIZE_BYTES))
-          .doesNotThrowAnyException();
+      final ChaosEffect.HeapPressureEffect atMaxima =
+          new ChaosEffect.HeapPressureEffect(
+              ChaosEffect.HeapPressureEffect.MAX_BYTES,
+              ChaosEffect.HeapPressureEffect.MAX_CHUNK_SIZE_BYTES);
+      assertThat(atMaxima.bytes()).isEqualTo(ChaosEffect.HeapPressureEffect.MAX_BYTES);
+      assertThat(atMaxima.chunkSizeBytes())
+          .isEqualTo(ChaosEffect.HeapPressureEffect.MAX_CHUNK_SIZE_BYTES);
       assertThatThrownBy(() -> new ChaosEffect.HeapPressureEffect(Long.MAX_VALUE, 1024))
           .isInstanceOf(IllegalArgumentException.class)
           .hasMessage(
