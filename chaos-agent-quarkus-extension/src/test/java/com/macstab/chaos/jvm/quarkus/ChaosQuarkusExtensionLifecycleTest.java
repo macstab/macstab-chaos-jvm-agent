@@ -45,6 +45,36 @@ class ChaosQuarkusExtensionLifecycleTest {
   }
 
   @Nested
+  @ExtendWith(ChaosQuarkusExtension.class)
+  @DisplayName("a method-level session-scoped scenario ends with the method")
+  class MethodScopedSession {
+
+    // Both methods declare the same session-scoped id in the class-long session: the second could
+    // only activate it if the first method's activation was stopped when that method ended.
+    @Test
+    @ChaosScenario(
+        id = "method-scoped-session",
+        selector = "executor",
+        effect = "delay:PT0.001S",
+        scope = "SESSION")
+    @DisplayName("first activation of the id")
+    void first(final ChaosControlPlane controlPlane) {
+      assertThat(controlPlane.diagnostics().scenario("method-scoped-session")).isPresent();
+    }
+
+    @Test
+    @ChaosScenario(
+        id = "method-scoped-session",
+        selector = "executor",
+        effect = "delay:PT0.001S",
+        scope = "SESSION")
+    @DisplayName("second activation of the same id")
+    void second(final ChaosControlPlane controlPlane) {
+      assertThat(controlPlane.diagnostics().scenario("method-scoped-session")).isPresent();
+    }
+  }
+
+  @Nested
   @DisplayName("identifier parsing")
   class Parsing {
 

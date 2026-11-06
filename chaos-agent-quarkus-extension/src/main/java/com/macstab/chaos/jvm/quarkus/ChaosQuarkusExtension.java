@@ -41,14 +41,13 @@ import org.junit.jupiter.api.extension.ParameterResolver;
  *       class, and activate every {@link ChaosScenario} annotation present on the class. A
  *       {@code @Nested} class runs inside its outer class and shares its session.
  *   <li>{@code beforeEach}: activate every {@link ChaosScenario} annotation present on the test
- *       method. JVM-scoped activations are tracked per-method so {@code afterEach} can tear them
- *       down — otherwise the second test method that declared the same scenario id would hit an
- *       {@code "already active"} activation conflict.
- *   <li>{@code afterEach}: stop the scenarios activated by the current method's annotations (its
- *       {@code @WithChaos} ones of either scope); class-level session-scoped scenarios remain
- *       active for the whole class.
- *   <li>{@code afterAll}: close the session (which stops every session-scoped scenario activated
- *       during the class) and stop any JVM-scoped scenarios activated by class-level annotations.
+ *       method. The activations of either scope are tracked per method so {@code afterEach} can
+ *       tear them down — otherwise the second test method that declared the same scenario id would
+ *       hit an {@code "already active"} activation conflict.
+ *   <li>{@code afterEach}: stop the scenarios activated by the current method's annotations;
+ *       class-level scenarios remain active for the whole class.
+ *   <li>{@code afterAll}: stop the scenarios activated by class-level annotations and close the
+ *       session (which stops every session-scoped scenario activated during the class).
  * </ul>
  *
  * <h2>Parameter injection</h2>
@@ -67,20 +66,20 @@ public final class ChaosQuarkusExtension
   static final ExtensionContext.Namespace NAMESPACE =
       ExtensionContext.Namespace.create(ChaosQuarkusExtension.class);
 
-  /** Store key for the per-class list of JVM-scoped handles that must be stopped in afterAll. */
-  private static final String JVM_HANDLES_KEY = "jvmScopedHandles";
+  /** Store key for the per-class list of annotation handles that must be stopped in afterAll. */
+  private static final String CLASS_HANDLES_KEY = "classHandles";
 
   /** Prefix that identifies a delay effect in the {@link ChaosScenario#effect()} string. */
   private static final String DELAY_EFFECT_PREFIX = "delay:";
 
   /**
-   * Store key, scoped to the per-test-method {@link ExtensionContext.Store}, for JVM-scoped handles
+   * Store key, scoped to the per-test-method {@link ExtensionContext.Store}, for the handles
    * activated from annotations on the test method itself. These must be stopped in afterEach —
-   * otherwise a {@code @ChaosScenario(id="x", scope="JVM")} on two different test methods causes
-   * the second method to throw {@code IllegalStateException("scenario x already active")} because
-   * the first method's handle is still registered.
+   * otherwise a {@code @ChaosScenario(id="x")} on two different test methods causes the second
+   * method to fail with an activation conflict because the first method's handle is still
+   * registered.
    */
-  private static final String METHOD_JVM_HANDLES_KEY = "methodJvmScopedHandles";
+  private static final String METHOD_HANDLES_KEY = "methodHandles";
 
   /** Default constructor invoked by JUnit when the extension is registered. */
   public ChaosQuarkusExtension() {}
@@ -101,11 +100,11 @@ public final class ChaosQuarkusExtension
       store.put(ChaosControlPlane.class, tracker);
       store.put(ChaosSession.class, session);
     }
-    // Class-scoped list of handles for JVM-scoped scenarios activated via @ChaosScenario.
-    // Session-scoped scenarios are torn down by session.close(); JVM-scoped ones outlive any
-    // session, so afterAll stops them to keep them from leaking into subsequent tests.
+    // Class-scoped list of handles for the scenarios the class's annotations activate. JVM-scoped
+    // ones outlive any session, so afterAll stops them to keep them from leaking into subsequent
+    // tests; a nested class's session-scoped ones end with the nested class.
     final List<ChaosActivationHandle> classHandles = new ArrayList<>();
-    store.put(JVM_HANDLES_KEY, classHandles);
+    store.put(CLASS_HANDLES_KEY, classHandles);
     final Class<?> testClass = context.getTestClass().orElse(null);
     if (testClass != null) {
       activateAnnotations(
@@ -126,33 +125,28 @@ public final class ChaosQuarkusExtension
     if (session == null || controlPlane == null) {
       return;
     }
-    // Track JVM-scoped activations from *this method's* annotations in a method-scoped list so
+    // Track the activations from *this method's* annotations in a method-scoped list so
     // afterEach can stop exactly them. context.getStore(NAMESPACE) in beforeEach/afterEach is
     // scoped to the test-method context, so values written here are isolated per method and do
-    // not bleed into sibling tests. Class-level JVM-scoped annotations keep using the class-
-    // scoped list populated by beforeAll (see JVM_HANDLES_KEY above).
-    final List<ChaosActivationHandle> methodJvmHandles = new ArrayList<>();
-    context.getStore(NAMESPACE).put(METHOD_JVM_HANDLES_KEY, methodJvmHandles);
+    // not bleed into sibling tests. Class-level annotations keep using the class-scoped list
+    // populated by beforeAll (see CLASS_HANDLES_KEY above).
+    final List<ChaosActivationHandle> methodHandles = new ArrayList<>();
+    context.getStore(NAMESPACE).put(METHOD_HANDLES_KEY, methodHandles);
     activateAnnotations(
-        controlPlane,
-        session,
-        testMethod.getAnnotationsByType(ChaosScenario.class),
-        methodJvmHandles);
+        controlPlane, session, testMethod.getAnnotationsByType(ChaosScenario.class), methodHandles);
     // Method-level @WithChaos scenarios of either scope end with the method.
-    methodJvmHandles.addAll(WithChaosSupport.activate(testMethod, controlPlane, session));
+    methodHandles.addAll(WithChaosSupport.activate(testMethod, controlPlane, session));
   }
 
   @Override
   public void afterEach(final ExtensionContext context) {
-    // Stop JVM-scoped scenarios activated by annotations on the current test method. Without
-    // this, a second test method declaring the same scenario id would collide with the still-
-    // active handle from the previous method and throw "scenario already active". Session-scoped
-    // scenarios remain untouched here — they are intentionally class-long and are torn down by
-    // session.close() in afterAll.
+    // Stop the scenarios activated by annotations on the current test method. Without this, a
+    // second test method declaring the same scenario id would collide with the still-active
+    // handle from the previous method and fail with "scenario already active".
     @SuppressWarnings("unchecked")
     final List<ChaosActivationHandle> methodHandles =
         (List<ChaosActivationHandle>)
-            context.getStore(NAMESPACE).remove(METHOD_JVM_HANDLES_KEY, List.class);
+            context.getStore(NAMESPACE).remove(METHOD_HANDLES_KEY, List.class);
     stopHandlesSafely(methodHandles);
   }
 
@@ -162,17 +156,17 @@ public final class ChaosQuarkusExtension
     final ChaosSession session = store.remove(ChaosSession.class, ChaosSession.class);
     final ChaosControlPlane controlPlane =
         store.remove(ChaosControlPlane.class, ChaosControlPlane.class);
-    // try/finally ensures JVM-scoped handles are always stopped even if session.close() throws.
+    // try/finally ensures the class's handles are always stopped even if session.close() throws.
     try {
       if (session != null) {
         session.close();
       }
     } finally {
-      // Stop every JVM-scoped handle we captured during the class; otherwise JVM-scoped
+      // Stop every handle the class's annotations activated; otherwise JVM-scoped
       // @ChaosScenario activations leak into every subsequent test in this JVM.
       @SuppressWarnings("unchecked")
       final List<ChaosActivationHandle> classHandles =
-          (List<ChaosActivationHandle>) store.remove(JVM_HANDLES_KEY, List.class);
+          (List<ChaosActivationHandle>) store.remove(CLASS_HANDLES_KEY, List.class);
       stopHandlesSafely(classHandles);
       if (controlPlane instanceof TrackingChaosControlPlane tracker) {
         tracker.stopTracked();
@@ -250,20 +244,19 @@ public final class ChaosQuarkusExtension
       final ChaosControlPlane controlPlane,
       final ChaosSession session,
       final ChaosScenario[] annotations,
-      final List<ChaosActivationHandle> jvmHandles) {
+      final List<ChaosActivationHandle> handles) {
     if (annotations == null) {
       return;
     }
     for (final ChaosScenario annotation : annotations) {
       final com.macstab.chaos.jvm.api.ChaosScenario scenario = toScenario(annotation);
-      if (scenario.scope() == com.macstab.chaos.jvm.api.ChaosScenario.ScenarioScope.JVM) {
-        // Capture the handle so afterAll can stop it; without this, JVM-scope scenarios leak
-        // across tests in the same JVM and the default scope ("JVM") silently pollutes the
-        // entire test suite.
-        jvmHandles.add(controlPlane.activate(scenario));
-      } else {
-        session.activate(scenario);
-      }
+      // Capture the handle of either scope so the annotated element's end stops it: a JVM-scoped
+      // one would leak across tests in the same JVM, and a session-scoped one declared on a
+      // method would outlive the method in the class-long session.
+      handles.add(
+          scenario.scope() == com.macstab.chaos.jvm.api.ChaosScenario.ScenarioScope.JVM
+              ? controlPlane.activate(scenario)
+              : session.activate(scenario));
     }
   }
 
