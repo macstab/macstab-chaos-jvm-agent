@@ -2,6 +2,7 @@ package com.macstab.chaos.jvm.core;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 
 import com.macstab.chaos.jvm.api.ChaosEffect;
 import java.time.Duration;
@@ -203,6 +204,38 @@ class StressorLifecycleTest {
       final ThreadLocalLeakStressor stressor =
           new ThreadLocalLeakStressor(new ChaosEffect.ThreadLocalLeakEffect(entriesPerThread, 64));
       assertThat(stressor.plantedCount()).isEqualTo(parallelism * entriesPerThread);
+    }
+
+    @Test
+    @DisplayName("close() releases every planted value, even while every pool worker is busy")
+    void closeReleasesValuesOnBusyPool() throws Exception {
+      final ThreadLocalLeakStressor stressor =
+          new ThreadLocalLeakStressor(new ChaosEffect.ThreadLocalLeakEffect(1, 1024));
+      assertThat(stressor.retainedBytes()).isPositive();
+      final java.util.concurrent.ForkJoinPool pool = java.util.concurrent.ForkJoinPool.commonPool();
+      final java.util.concurrent.CountDownLatch release =
+          new java.util.concurrent.CountDownLatch(1);
+      final java.util.concurrent.CountDownLatch busy =
+          new java.util.concurrent.CountDownLatch(pool.getParallelism());
+      try {
+        for (int i = 0; i < pool.getParallelism(); i++) {
+          pool.execute(
+              () -> {
+                busy.countDown();
+                try {
+                  release.await();
+                } catch (final InterruptedException interrupted) {
+                  Thread.currentThread().interrupt();
+                }
+              });
+        }
+        assertThat(busy.await(5, TimeUnit.SECONDS)).isTrue();
+
+        assertTimeoutPreemptively(Duration.ofSeconds(5), stressor::close);
+        assertThat(stressor.retainedBytes()).isZero();
+      } finally {
+        release.countDown();
+      }
     }
   }
 

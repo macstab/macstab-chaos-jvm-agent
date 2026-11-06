@@ -486,14 +486,16 @@ public sealed interface ChaosEffect
   }
 
   /**
-   * Returns a ThreadLocal leak stressor that plants {@code entriesPerThread} ThreadLocal entries of
-   * {@code valueSizeBytes} each in threads from the common pool, simulating large request-scoped
-   * objects retained across requests in a pool thread.
+   * Returns a ThreadLocal leak stressor that plants {@code entriesPerThread} × the common pool's
+   * parallelism ThreadLocal entries of {@code valueSizeBytes} each in threads from the common pool,
+   * simulating large request-scoped objects retained across requests in a pool thread. The pool
+   * spreads the entries over its workers.
    *
    * <p>Use with {@link ChaosSelector.StressSelector} targeting {@link
    * ChaosSelector.StressTarget#THREAD_LOCAL_LEAK}.
    *
-   * @param entriesPerThread number of ThreadLocal entries per pool thread; must be &gt; 0
+   * @param entriesPerThread ThreadLocal entries planted per unit of the pool's parallelism; must be
+   *     &gt; 0
    * @param valueSizeBytes size of each entry's byte-array value; must be &gt; 0
    * @return a ThreadLocalLeakEffect
    */
@@ -1474,9 +1476,11 @@ public sealed interface ChaosEffect
    * common form of ThreadLocal memory leak in production: pool threads retaining large
    * request-scoped objects across requests.
    *
-   * <p>Planted entries are removed when the activation handle is closed.
+   * <p>The pool spreads the entries over its workers. Closing the activation handle releases the
+   * planted values, whichever worker holds them.
    *
-   * @param entriesPerThread number of ThreadLocal entries planted per pool thread; {@code > 0}
+   * @param entriesPerThread ThreadLocal entries planted per unit of the common pool's parallelism;
+   *     {@code > 0}
    * @param valueSizeBytes retained size per planted value; must be {@code > 0}
    */
   record ThreadLocalLeakEffect(int entriesPerThread, int valueSizeBytes) implements ChaosEffect {

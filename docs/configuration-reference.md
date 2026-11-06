@@ -1753,10 +1753,10 @@ Stressor effects are used exclusively with `StressSelector`. They launch backgro
 
 | Field              | Type | Constraint | Description                                   |
 |--------------------|------|------------|-----------------------------------------------|
-| `entriesPerThread` | int  | > 0        | Number of ThreadLocal entries per pool thread |
+| `entriesPerThread` | int  | > 0        | ThreadLocal entries per unit of the common pool's parallelism; the pool spreads them over its workers |
 | `valueSizeBytes`   | int  | > 0        | Size of each entry's byte-array value         |
 
-**Cleanup:** planted entries are removed when the handle is closed.
+**Cleanup:** closing the handle releases the planted values, whichever worker holds them.
 
 ---
 
