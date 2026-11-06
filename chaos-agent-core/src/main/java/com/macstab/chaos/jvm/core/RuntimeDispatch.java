@@ -103,17 +103,7 @@ public final class RuntimeDispatch {
                     null,
                     null,
                     engine.scopeContext.currentSessionId())));
-    engine.applyDelayAndGate(decision);
-    if (decision.terminalAction() != null) {
-      final TerminalAction terminalAction = decision.terminalAction();
-      if (terminalAction instanceof TerminalAction.Throw thrown) {
-        throw thrown.failure();
-      }
-      if (terminalAction.kind() == TerminalKind.SUPPRESS) {
-        return true;
-      }
-    }
-    return false;
+    return engine.suppressed(decision);
   }
 
   /**

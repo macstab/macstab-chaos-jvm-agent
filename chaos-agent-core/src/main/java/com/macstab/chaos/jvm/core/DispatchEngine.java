@@ -32,6 +32,23 @@ final class DispatchEngine {
   }
 
   /**
+   * Applies the decision of a call that can be delayed, failed or suppressed: delay and gate run
+   * first, then a throwing terminal throws.
+   *
+   * @param decision the decision for the call
+   * @return {@code true} when the call is suppressed
+   * @throws Throwable the failure a throwing terminal carries
+   */
+  boolean suppressed(final RuntimeDecision decision) throws Throwable {
+    applyDelayAndGate(decision);
+    final TerminalAction terminal = decision.terminalAction();
+    if (terminal instanceof TerminalAction.Throw thrown) {
+      throw thrown.failure();
+    }
+    return terminal instanceof TerminalAction.Suppress;
+  }
+
+  /**
    * Applies a read's or write's decision and returns the byte count to transfer, flagging a
    * corrupting read. Delay and gate run first; a throwing terminal throws; {@code TrickleEffect}
    * and a torn write lower the count.
