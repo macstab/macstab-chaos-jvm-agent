@@ -249,6 +249,8 @@ final class SocketAdvice {
         @Advice.Argument(2) final int len)
         throws Throwable {
       if (requested >= 0) {
+        // The agent's own reflection and close: no scenario applies to them.
+        BootstrapDispatcher.beginInternalCall();
         try {
           impl.getClass()
               .getDeclaredMethod("setOption", java.net.SocketOption.class, Object.class)
@@ -256,6 +258,8 @@ final class SocketAdvice {
           impl.getClass().getDeclaredMethod("close").invoke(impl);
         } catch (final Throwable ignored) {
           // The failure below is still thrown; only the peer's view degrades to a plain close.
+        } finally {
+          BootstrapDispatcher.endInternalCall();
         }
         throw BootstrapDispatcher.tornWriteFailure(len, requested);
       }
