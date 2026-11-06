@@ -41,45 +41,66 @@ public final class ClockDispatch {
     if (candidates.length == 0) {
       return realValue;
     }
-    final InvocationContext context =
-        new InvocationContext(clockType, "java.lang.System", null, null, false, null, null, null);
+    final InvocationContext context = context(clockType);
     final boolean isNanos = clockType == OperationType.SYSTEM_CLOCK_NANOS;
     long result = realValue;
-    String currentSession = null;
-    boolean currentSessionResolved = false;
     for (final ScenarioController controller : candidates) {
       final ClockSkewState state = controller.clockSkewState();
-      if (state == null) {
+      if (state == null || !applies(controller, context)) {
         continue;
       }
-      // The time bounds (activeFor, activeFrom, activeUntil) apply to a clock skew like to any
-      // scenario. They are checked here because clock reads bypass engine.evaluate().
-      if (!controller.withinWindow()) {
-        continue;
-      }
-      if (!SelectorMatcher.matches(controller.scenario().selector(), context)) {
-        continue;
-      }
-      // A session-scoped clock skew applies only on threads bound to its session, never to every
-      // thread in the JVM. The current session is resolved once, and only when a
-      // session-scoped skew is active, to keep the common clock-read path free of the lookup.
-      if (controller.sessionId() != null) {
-        if (!currentSessionResolved) {
-          currentSession = engine.scopeContext.currentSessionId();
-          currentSessionResolved = true;
-        }
-        if (!controller.sessionId().equals(currentSession)) {
-          continue;
-        }
-      }
-      final ChaosEffect.ClockSkewEffect skewEffect =
-          (ChaosEffect.ClockSkewEffect) controller.scenario().effect();
-      result =
-          isNanos
-              ? state.applyNanos(skewEffect.mode(), result)
-              : state.applyMillis(skewEffect.mode(), result);
+      final ChaosEffect.ClockSkewMode mode = mode(controller);
+      result = isNanos ? state.applyNanos(mode, result) : state.applyMillis(mode, result);
     }
     return result;
+  }
+
+  /**
+   * Applies any active clock-skew scenarios to an instant read, to the nanosecond.
+   *
+   * @param realInstant the instant the clock read
+   * @param clockType the {@link OperationType} identifying which clock source was read
+   * @return the (possibly skewed) instant
+   */
+  private java.time.Instant skewInstant(
+      final java.time.Instant realInstant, final OperationType clockType) {
+    // See applyClockSkew: clock reads bypass engine.evaluate() and its policy accounting.
+    final ScenarioController[] candidates = engine.registry.candidates(clockType);
+    if (candidates.length == 0) {
+      return realInstant;
+    }
+    final InvocationContext context = context(clockType);
+    java.time.Instant result = realInstant;
+    for (final ScenarioController controller : candidates) {
+      final ClockSkewState state = controller.clockSkewState();
+      if (state != null && applies(controller, context)) {
+        result = state.applyInstant(mode(controller), result);
+      }
+    }
+    return result;
+  }
+
+  private static InvocationContext context(final OperationType clockType) {
+    return new InvocationContext(
+        clockType, "java.lang.System", null, null, false, null, null, null);
+  }
+
+  private static ChaosEffect.ClockSkewMode mode(final ScenarioController controller) {
+    return ((ChaosEffect.ClockSkewEffect) controller.scenario().effect()).mode();
+  }
+
+  private boolean applies(final ScenarioController controller, final InvocationContext context) {
+    // The time bounds (activeFor, activeFrom, activeUntil) apply to a clock skew like to any
+    // scenario. They are checked here because clock reads bypass engine.evaluate().
+    if (!controller.withinWindow()
+        || !SelectorMatcher.matches(controller.scenario().selector(), context)) {
+      return false;
+    }
+    // A session-scoped clock skew applies only on threads bound to its session, never to every
+    // thread in the JVM. The current session is looked up only when a session-scoped skew is
+    // active, to keep the common clock-read path free of the lookup.
+    final String sessionId = controller.sessionId();
+    return sessionId == null || sessionId.equals(engine.scopeContext.currentSessionId());
   }
 
   /**
@@ -109,10 +130,7 @@ public final class ClockDispatch {
    * @return the (possibly skewed) instant to return to the caller
    */
   public java.time.Instant adjustInstantNow(final java.time.Instant realInstant) {
-    final long realMillis = realInstant.toEpochMilli();
-    final long skewed = applyClockSkew(realMillis, OperationType.INSTANT_NOW);
-    final long delta = skewed - realMillis;
-    return delta == 0L ? realInstant : realInstant.plusMillis(delta);
+    return skewInstant(realInstant, OperationType.INSTANT_NOW);
   }
 
   /**
@@ -122,9 +140,7 @@ public final class ClockDispatch {
    * @return the (possibly skewed) instant
    */
   public java.time.Instant adjustClockInstant(final java.time.Instant realInstant) {
-    final long realMillis = realInstant.toEpochMilli();
-    final long delta = applyClockSkew(realMillis, OperationType.CLOCK_READ) - realMillis;
-    return delta == 0L ? realInstant : realInstant.plusMillis(delta);
+    return skewInstant(realInstant, OperationType.CLOCK_READ);
   }
 
   /**
@@ -152,8 +168,8 @@ public final class ClockDispatch {
    * Returns the (possibly skewed) {@link java.time.LocalDateTime} for {@code
    * LocalDateTime.now(ZoneId)}.
    *
-   * <p>The skew (in milliseconds) is added to the real instant, so the sub-millisecond part of the
-   * real value is kept; rebuilding the value from epoch milliseconds would drop it.
+   * <p>The skew is applied to the real instant to the nanosecond; rebuilding the value from epoch
+   * milliseconds would drop its sub-millisecond part.
    *
    * @param realValue the real local date-time
    * @param zone the zone the local date-time was produced in
@@ -162,12 +178,8 @@ public final class ClockDispatch {
   public java.time.LocalDateTime adjustLocalDateTimeNowInZone(
       final java.time.LocalDateTime realValue, final java.time.ZoneId zone) {
     final java.time.Instant realInstant = realValue.atZone(zone).toInstant();
-    final long realMillis = realInstant.toEpochMilli();
-    final long skewed = applyClockSkew(realMillis, OperationType.LOCAL_DATE_TIME_NOW);
-    if (skewed == realMillis) {
-      return realValue;
-    }
-    return java.time.LocalDateTime.ofInstant(realInstant.plusMillis(skewed - realMillis), zone);
+    final java.time.Instant skewed = skewInstant(realInstant, OperationType.LOCAL_DATE_TIME_NOW);
+    return skewed.equals(realInstant) ? realValue : java.time.LocalDateTime.ofInstant(skewed, zone);
   }
 
   /**
@@ -178,12 +190,8 @@ public final class ClockDispatch {
    */
   public java.time.ZonedDateTime adjustZonedDateTimeNow(final java.time.ZonedDateTime realValue) {
     final java.time.Instant realInstant = realValue.toInstant();
-    final long realMillis = realInstant.toEpochMilli();
-    final long skewed = applyClockSkew(realMillis, OperationType.ZONED_DATE_TIME_NOW);
-    if (skewed == realMillis) {
-      return realValue;
-    }
-    return realInstant.plusMillis(skewed - realMillis).atZone(realValue.getZone());
+    final java.time.Instant skewed = skewInstant(realInstant, OperationType.ZONED_DATE_TIME_NOW);
+    return skewed.equals(realInstant) ? realValue : skewed.atZone(realValue.getZone());
   }
 
   /**

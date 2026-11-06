@@ -260,6 +260,45 @@ class ClockSkewRuntimeTest {
     }
 
     @Test
+    @DisplayName("a skew below a millisecond moves Instant reads by exactly that much")
+    void subMillisecondSkew() {
+      final ChaosRuntime runtime = new ChaosRuntime();
+      final java.time.Instant real = java.time.Instant.ofEpochSecond(1_700_000_000L, 123_456_789);
+      runtime.activate(instantSkew(Duration.ofNanos(500_000), ChaosEffect.ClockSkewMode.FIXED));
+      try {
+        assertThat(runtime.adjustInstantNow(real)).isEqualTo(real.plusNanos(500_000));
+      } finally {
+        runtime.close();
+      }
+    }
+
+    @Test
+    @DisplayName("a frozen Instant is the same at every read, whatever its sub-millisecond part")
+    void freezeIsStableBelowTheMillisecond() {
+      final ChaosRuntime runtime = new ChaosRuntime();
+      runtime.activate(instantSkew(Duration.ofSeconds(1), ChaosEffect.ClockSkewMode.FREEZE));
+      try {
+        final java.time.Instant late =
+            runtime.adjustInstantNow(java.time.Instant.ofEpochSecond(1_700_000_000L, 900_000));
+        final java.time.Instant early =
+            runtime.adjustInstantNow(java.time.Instant.ofEpochSecond(1_700_000_001L, 100_000));
+        assertThat(early).isEqualTo(late);
+      } finally {
+        runtime.close();
+      }
+    }
+
+    private static ChaosScenario instantSkew(
+        final Duration amount, final ChaosEffect.ClockSkewMode mode) {
+      return ChaosScenario.builder("instant-skew")
+          .scope(ChaosScenario.ScenarioScope.JVM)
+          .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.INSTANT_NOW)))
+          .effect(ChaosEffect.skewClock(amount, mode))
+          .activationPolicy(ActivationPolicy.always())
+          .build();
+    }
+
+    @Test
     @DisplayName("adjustInstantNow returns the real instant when no scenario matches")
     void adjustInstantNowPassthroughWithoutScenario() {
       final ChaosRuntime runtime = new ChaosRuntime();

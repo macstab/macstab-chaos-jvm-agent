@@ -484,24 +484,15 @@ The cast to `java.util.Date` happens at runtime inside the advice body — not i
 
 When `ZonedDateTimeNowAdvice` rewrites the returned value, the implementation in `ChaosRuntime.adjustZonedDateTimeNow()` does not simply add milliseconds to the `ZonedDateTime`. Instead:
 
-1. Extract the epoch-millisecond value: `realValue.toInstant().toEpochMilli()`
-2. Pass it through `applyClockSkew()` to get the skewed millisecond value
-3. Reconstruct via `Instant.ofEpochMilli(skewed).atZone(realValue.getZone())`
+1. Take the instant: `realValue.toInstant()`
+2. Skew it to the nanosecond (`skewInstant`)
+3. Reconstruct via `skewed.atZone(realValue.getZone())`
 
 Step 3 explicitly carries the original `ZoneId` into the result. The zone is never lost or replaced with the system default. A test in `ClockSkewRuntimeTest$HigherLevelTimeApis` ("`adjustZonedDateTimeNowShiftsAndPreservesZone`") verifies that a `ZonedDateTime` in `America/New_York` retains that zone identity after skewing.
 
-### Nanosecond sub-millisecond precision for `Instant`
+### Nanosecond precision for `Instant`
 
-`Instant` carries both an epoch-second count and a nanosecond-of-second field. The millisecond resolution of `applyClockSkew()` could, in principle, destroy the sub-millisecond nanosecond component if the implementation reconstructed the `Instant` from scratch. `ChaosRuntime.adjustInstantNow()` avoids this by applying the skew as a delta via `Instant.plusMillis(delta)`:
-
-```java
-final long realMillis = realInstant.toEpochMilli();
-final long skewed = applyClockSkew(realMillis, OperationType.INSTANT_NOW);
-final long delta = skewed - realMillis;
-return delta == 0L ? realInstant : realInstant.plusMillis(delta);
-```
-
-`Instant.plusMillis()` adds exactly the specified number of milliseconds (converted to seconds + nanoseconds internally) without touching the existing nanosecond-of-second remainder. A test in `ClockSkewRuntimeTest$HigherLevelTimeApis` ("`adjustInstantNowShiftsWhenActive`") constructs a real `Instant` with a 123 456 789 ns nanosecond field and asserts that `adjusted.getNano() % 1_000_000 == real.getNano() % 1_000_000` after a 30-second fixed skew.
+`Instant` carries both an epoch-second count and a nanosecond-of-second field. The skew is applied to the instant itself, in nanoseconds: a FIXED or DRIFT skew is added with `Instant.plusNanos`, so a skew below a millisecond moves the instant exactly and the real sub-millisecond part is kept; a FREEZE returns the same frozen instant on every read, so a frozen clock never moves within its millisecond. `ClockSkewRuntimeTest$HigherLevelTimeApis` covers a 500 µs skew and two frozen reads in different sub-milliseconds.
 
 ---
 

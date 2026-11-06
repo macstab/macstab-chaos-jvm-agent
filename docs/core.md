@@ -426,18 +426,16 @@ Backed by `ReentrantLock + Condition`. State is a `volatile boolean open`.
 
 ## ClockSkewState
 
-Holds reference timestamps captured at `ScenarioController.start()`:
-- `referenceMillis`: `System.currentTimeMillis()` at start
-- `referenceNanos`: `System.nanoTime()` at start
+Holds the skew in nanoseconds and the reference timestamps captured at `ScenarioController.start()` (`System.currentTimeMillis()` and `System.nanoTime()`). Wall-clock reads (`Instant`, `java.time`, `currentTimeMillis`) are skewed in nanoseconds; a millisecond read takes the offset floored to the millisecond, so it agrees with `Instant.toEpochMilli()`.
 
 Mode semantics:
-- **FIXED**: adds a constant offset (`skewEffect.offsetMillis()`) to every clock read
-- **DRIFT**: adds `offset * callCount` — the skew grows monotonically with each clock invocation; `callCount` is a per-state `AtomicLong`
-- **FREEZE**: always returns the reference value; time appears stopped at the moment the scenario started
+- **FIXED**: adds the skew to every clock read
+- **DRIFT**: adds the skew once more on every read — the offset grows monotonically; the wall clock and `nanoTime` each accumulate in an `AtomicLong`
+- **FREEZE**: always returns the reference value plus the skew, the same `Instant` on every read; time appears stopped at the moment the scenario started
 
 `ClockSkewState` is `volatile` in `ScenarioController`. On `stop()`, it is set to `null`; `applyClockSkew()` in `ChaosRuntime` checks for null before calling state methods.
 
-`applyClockSkew()` is the single generalised entry point that handles all seven clock operation types: `SYSTEM_CLOCK_MILLIS`, `SYSTEM_CLOCK_NANOS`, `INSTANT_NOW`, `CLOCK_READ`, `LOCAL_DATE_TIME_NOW`, `ZONED_DATE_TIME_NOW`, and `DATE_NEW`. Only `SYSTEM_CLOCK_NANOS` routes through the nanosecond skew channel; every other type routes through the millisecond channel. The higher-level type-specific wrappers (`adjustInstantNow`, `adjustLocalDateTimeNow`, `adjustZonedDateTimeNow`, `adjustDateNew`) each extract the underlying millisecond value, pass it to `applyClockSkew()` with the appropriate `OperationType`, then reconstruct the high-level time object — preserving zone identity for `ZonedDateTime` and nanosecond sub-millisecond precision for `Instant`.
+`applyClockSkew()` skews the `long` readings (`SYSTEM_CLOCK_MILLIS`, `SYSTEM_CLOCK_NANOS`, the clock's `millis()`, `DATE_NEW`); only `SYSTEM_CLOCK_NANOS` uses the `nanoTime` channel. The `Instant`-based wrappers (`adjustInstantNow`, `adjustClockInstant`, `adjustLocalDateTimeNow`, `adjustZonedDateTimeNow`) skew the instant itself to the nanosecond and rebuild the high-level time object from it, keeping the zone of a `ZonedDateTime`.
 
 Test coverage: `ClockSkewRuntimeTest$HigherLevelTimeApis` (8 tests) covers FIXED skew on `Instant.now`, `LocalDateTime.now`, `ZonedDateTime.now`, and `Date`; FREEZE mode on `Instant.now`; isolation between `INSTANT_NOW` and `DATE_NEW` operation types; and passthrough when no scenario matches.
 

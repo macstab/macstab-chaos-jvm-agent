@@ -673,8 +673,9 @@ public sealed interface ChaosEffect
   /** Mode for {@link ClockSkewEffect}. Controls how the skew evolves over time. */
   enum ClockSkewMode {
     /**
-     * Apply a constant fixed offset to every clock read. System.currentTimeMillis() returns real +
-     * skewAmount.toMillis().
+     * Apply a constant fixed offset to every clock read. {@code Instant} and {@code java.time}
+     * reads move by {@code skewAmount} to the nanosecond; millisecond clocks such as {@code
+     * System.currentTimeMillis()} by {@code skewAmount} floored to the millisecond.
      */
     FIXED,
     /**
@@ -683,8 +684,9 @@ public sealed interface ChaosEffect
      */
     DRIFT,
     /**
-     * Freeze the clock. Every call returns the same timestamp captured at activation. Simulates a
-     * hung NTP daemon or failed clock source.
+     * Freeze the clock. Every call returns the same timestamp captured at activation, plus {@code
+     * skewAmount}, down to the nanosecond of an {@code Instant}. Simulates a hung NTP daemon or
+     * failed clock source.
      */
     FREEZE,
     /**

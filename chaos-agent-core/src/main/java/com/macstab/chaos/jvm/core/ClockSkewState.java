@@ -11,15 +11,20 @@ import java.util.concurrent.atomic.AtomicLong;
  * timestamp captured at scenario activation (for {@link ChaosEffect.ClockSkewMode#FREEZE}). All
  * state mutations are thread-safe via {@link AtomicLong}.
  *
+ * <p>The wall clock (milliseconds and {@link java.time.Instant}) is skewed in nanoseconds, so a
+ * skew below a millisecond moves {@code Instant} reads exactly; a millisecond read takes the
+ * nanosecond offset floored to the millisecond, as {@link java.time.Instant#toEpochMilli()} does,
+ * so both kinds of read agree.
+ *
  * <p>One instance is created per active {@link ChaosScenario} whose effect is {@link
  * ChaosEffect.ClockSkewEffect}. The instance is created in {@link ScenarioController#start()} and
  * discarded when the scenario stops.
  */
 final class ClockSkewState {
 
-  private final long skewMillis;
   private final long skewNanos;
   private final long frozenMillis;
+  private final java.time.Instant frozenInstant;
   private final long frozenNanos;
 
   /** REGRESS: no read yet. */
@@ -35,10 +40,10 @@ final class ClockSkewState {
   private final java.util.concurrent.atomic.AtomicInteger regressState =
       new java.util.concurrent.atomic.AtomicInteger(UNARMED);
 
-  /** Accumulated offset in milliseconds added to each call in DRIFT mode. */
-  private final AtomicLong accumulatedDriftMillis = new AtomicLong(0L);
+  /** Accumulated wall-clock offset in nanoseconds added to each wall-clock read in DRIFT mode. */
+  private final AtomicLong accumulatedDriftWallNanos = new AtomicLong(0L);
 
-  /** Accumulated offset in nanoseconds added to each call in DRIFT mode. */
+  /** Accumulated offset in nanoseconds added to each {@code nanoTime} read in DRIFT mode. */
   private final AtomicLong accumulatedDriftNanos = new AtomicLong(0L);
 
   /**
@@ -54,7 +59,6 @@ final class ClockSkewState {
       final ChaosEffect.ClockSkewEffect effect,
       final long capturedMillis,
       final long capturedNanos) {
-    this.skewMillis = effect.skewAmount().toMillis();
     // ClockSkewEffect rejects an amount past the nanosecond range, so this cannot overflow.
     this.skewNanos = effect.skewAmount().toNanos();
     // Saturate FREEZE-mode captures so a large positive skewAmount applied to a near-MAX
@@ -62,9 +66,13 @@ final class ClockSkewState {
     // ~292M years in the past and break every downstream timestamp comparison (JWT exp, cache
     // TTLs, log ordering). Same reasoning for nanos; monotonicity is already documented as
     // intentionally violated, but wraparound is never what the operator asked for.
-    this.frozenMillis = saturatingAdd(capturedMillis, skewMillis);
+    this.frozenMillis = saturatingAdd(capturedMillis, Math.floorDiv(skewNanos, NANOS_PER_MILLI));
+    // Every long millisecond value, plus or minus the nanosecond range, is a valid Instant.
+    this.frozenInstant = java.time.Instant.ofEpochMilli(capturedMillis).plusNanos(skewNanos);
     this.frozenNanos = saturatingAdd(capturedNanos, skewNanos);
   }
+
+  private static final long NANOS_PER_MILLI = 1_000_000L;
 
   /**
    * Applies the skew to a millisecond clock value.
@@ -74,11 +82,35 @@ final class ClockSkewState {
    * @return the skewed millisecond timestamp
    */
   long applyMillis(final ChaosEffect.ClockSkewMode mode, final long realMillis) {
+    if (mode == ChaosEffect.ClockSkewMode.FREEZE) {
+      return frozenMillis;
+    }
+    return saturatingAdd(realMillis, Math.floorDiv(wallOffsetNanos(mode), NANOS_PER_MILLI));
+  }
+
+  /**
+   * Applies the skew to a wall-clock instant, to the nanosecond.
+   *
+   * @param mode the skew evolution mode
+   * @param realInstant the instant the clock read
+   * @return the skewed instant; under FREEZE always the same one
+   */
+  java.time.Instant applyInstant(
+      final ChaosEffect.ClockSkewMode mode, final java.time.Instant realInstant) {
+    if (mode == ChaosEffect.ClockSkewMode.FREEZE) {
+      return frozenInstant;
+    }
+    final long offset = wallOffsetNanos(mode);
+    return offset == 0L ? realInstant : realInstant.plusNanos(offset);
+  }
+
+  /** The wall-clock offset of one read in nanoseconds; advances DRIFT and REGRESS. */
+  private long wallOffsetNanos(final ChaosEffect.ClockSkewMode mode) {
     return switch (mode) {
-      case FIXED -> saturatingAdd(realMillis, skewMillis);
-      case DRIFT -> saturatingAdd(realMillis, addSaturating(accumulatedDriftMillis, skewMillis));
-      case FREEZE -> frozenMillis;
-      case REGRESS -> regressed() ? saturatingAdd(realMillis, -skewMillis) : realMillis;
+      case FIXED -> skewNanos;
+      case DRIFT -> addSaturating(accumulatedDriftWallNanos, skewNanos);
+      case REGRESS -> regressed() ? -skewNanos : 0L;
+      case FREEZE -> throw new IllegalStateException("a frozen clock has no offset");
     };
   }
 
