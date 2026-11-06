@@ -56,6 +56,29 @@ class ChaosMicronautExtensionGuardsTest {
   }
 
   @Test
+  @DisplayName("scenarios activated through a test context's control plane bean end with the class")
+  void contextBeanActivationEndsWithTheClass() {
+    final ChaosControlPlane bean =
+        ChaosMicronautExtension.contextPlane(
+            com.macstab.chaos.jvm.bootstrap.ChaosPlatform.installLocally());
+    bean.activate(
+        com.macstab.chaos.jvm.api.ChaosScenario.builder("mn-context-bean-jvm")
+            .selector(
+                com.macstab.chaos.jvm.api.ChaosSelector.executor(
+                    java.util.Set.of(com.macstab.chaos.jvm.api.OperationType.EXECUTOR_SUBMIT)))
+            .effect(com.macstab.chaos.jvm.api.ChaosEffect.delay(java.time.Duration.ofMillis(1)))
+            .build());
+
+    extension.afterAll(context(new HashMap<>(), null));
+
+    assertThat(
+            com.macstab.chaos.jvm.bootstrap.ChaosPlatform.current()
+                .diagnostics()
+                .scenario("mn-context-bean-jvm"))
+        .isEmpty();
+  }
+
+  @Test
   @DisplayName("a session and control plane held by a parent context are found")
   void stateFromParentContext() {
     final Map<Object, Object> parentValues = new HashMap<>();

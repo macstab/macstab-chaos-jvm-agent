@@ -27,7 +27,9 @@ class MicronautChaosTestIntegrationTest {
   @DisplayName("ChaosControlPlane is a bean of the application context")
   void controlPlaneIsABean() {
     assertThat(applicationContext.containsBean(ChaosControlPlane.class)).isTrue();
-    assertThat(injectedControlPlane).isNotNull();
+    // The test environment's bean tracks its activations, released when the class ends.
+    assertThat(injectedControlPlane)
+        .isInstanceOf(com.macstab.chaos.jvm.testkit.TrackingChaosControlPlane.class);
   }
 
   @Test
