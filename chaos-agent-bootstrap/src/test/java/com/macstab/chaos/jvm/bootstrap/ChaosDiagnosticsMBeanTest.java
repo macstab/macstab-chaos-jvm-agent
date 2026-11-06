@@ -126,6 +126,11 @@ class ChaosDiagnosticsMBeanTest {
     assertThat(ChaosAgentBootstrap.jmxControl("", Map.of("MACSTAB_CHAOS_JMX_CONTROL", "true")))
         .isTrue();
     assertThat(ChaosAgentBootstrap.jmxControl("", Map.of())).isFalse();
+    // The standard boolean literals of every other switch.
+    assertThat(ChaosAgentBootstrap.jmxControl("jmxControl=on", Map.of())).isTrue();
+    assertThat(ChaosAgentBootstrap.jmxControl("", Map.of("MACSTAB_CHAOS_JMX_CONTROL", "1")))
+        .isTrue();
+    assertThat(ChaosAgentBootstrap.jmxControl("jmxControl=off", Map.of())).isFalse();
   }
 
   @Test

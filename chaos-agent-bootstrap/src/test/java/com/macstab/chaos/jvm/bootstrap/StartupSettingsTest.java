@@ -51,4 +51,19 @@ class StartupSettingsTest {
     assertThat(ChaosAgentBootstrap.clockCallSites("clockCallSites=com.example", Map.of()))
         .containsExactly("com.example");
   }
+
+  @Test
+  @DisplayName("dynamic attach is opted into with any standard true literal")
+  void dynamicAttachLiterals() {
+    assertThat(
+            ChaosAgentBootstrap.dynamicAttachAllowed(
+                new java.util.Properties(),
+                Map.of(ChaosAgentBootstrap.ALLOW_DYNAMIC_ATTACH_ENV, "yes")))
+        .isTrue();
+    final java.util.Properties properties = new java.util.Properties();
+    properties.setProperty(ChaosAgentBootstrap.ALLOW_DYNAMIC_ATTACH_PROPERTY, "1");
+    assertThat(ChaosAgentBootstrap.dynamicAttachAllowed(properties, Map.of())).isTrue();
+    assertThat(ChaosAgentBootstrap.dynamicAttachAllowed(new java.util.Properties(), Map.of()))
+        .isFalse();
+  }
 }

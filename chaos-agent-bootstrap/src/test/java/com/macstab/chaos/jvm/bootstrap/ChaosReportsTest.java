@@ -113,6 +113,14 @@ class ChaosReportsTest {
   }
 
   @Test
+  @DisplayName("reports takes the standard boolean literals: yes on, 0 off")
+  void booleanLiterals() {
+    create("reports=yes;reportsDir=" + tempDir, Map.of()).statusOk(1, "inline");
+    assertThat(tempDir.resolve(ChaosReports.STATUS_FILE)).exists();
+    assertThat(ChaosReports.createIfEnabled("reports=0", Map.of(), runtime)).isEmpty();
+  }
+
+  @Test
   @DisplayName("reports=true switches the files on like reports=on")
   void trueSwitchesOn() {
     final ChaosReports enabled = create("reports=true;reportsDir=" + tempDir, Map.of());

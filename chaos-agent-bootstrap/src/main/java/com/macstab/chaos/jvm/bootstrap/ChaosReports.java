@@ -4,6 +4,7 @@ import com.macstab.chaos.jvm.api.ChaosDiagnostics;
 import com.macstab.chaos.jvm.api.ChaosEvent;
 import com.macstab.chaos.jvm.core.ChaosRuntime;
 import com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher;
+import com.macstab.chaos.jvm.startup.AgentArgs;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -96,7 +97,7 @@ final class ChaosReports implements AutoCloseable {
     final String enabled =
         AgentSettings.valueOrEmpty(
             agentArgs, environment, REPORTS_ARG, REPORTS_PROPERTY, REPORTS_ENV);
-    if (!"on".equalsIgnoreCase(enabled) && !"true".equalsIgnoreCase(enabled)) {
+    if (!AgentArgs.parseBoolean(REPORTS_ARG, enabled, false)) {
       return Optional.empty();
     }
     final String dir =

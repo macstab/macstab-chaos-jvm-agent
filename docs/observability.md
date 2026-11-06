@@ -6,7 +6,7 @@
 
 ## 1. Status and hits files
 
-The same two files the native chaos libraries write, in the same format, so one tool reads every layer. They are written only when switched on with `reports=on`; the first write that fails is logged once as a warning naming the directory.
+The same two files the native chaos libraries write, in the same format, so one tool reads every layer. They are written only when switched on with `reports=on` (or any other true literal: `true`, `1`, `yes`); the first write that fails is logged once as a warning naming the directory.
 
 **Status file** `<dir>/.chaos-jvm.status`, rewritten after every load of the startup plan and every reload:
 
@@ -101,7 +101,7 @@ The MBean `com.macstab.chaos:type=ChaosDiagnostics` offers:
 | `stopScenario(id)`        | no               | Stops a scenario activated through `activatePlan`                   |
 | `stopAll()`               | no               | Stops every scenario activated through `activatePlan`               |
 
-The control operations are off by default — anyone who can reach the MBean server could otherwise inject faults. Enable them with the agent argument `jmxControl=true`, `-Dmacstab.chaos.jmx.control=true` or `MACSTAB_CHAOS_JMX_CONTROL=true`, and secure the JMX connector.
+The control operations are off by default — anyone who can reach the MBean server could otherwise inject faults. Enable them with the agent argument `jmxControl=true`, `-Dmacstab.chaos.jmx.control=true` or `MACSTAB_CHAOS_JMX_CONTROL=true` (any of `true|false|1|0|yes|no|on|off`, like every switch), and secure the JMX connector.
 
 ## 4a. Management endpoints
 

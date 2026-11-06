@@ -89,6 +89,7 @@ Migration steps for each change: [docs/migration-2.0.md](docs/migration-2.0.md).
 
 ### Bug Fixes
 
+* **bootstrap:** `jmxControl`, `reports` and the dynamic-attach opt-in accepted only `true` (and `on` for reports), while every other switch accepts `true|false|1|0|yes|no|on|off`: `jmxControl=on` or `MACSTAB_CHAOS_ALLOW_DYNAMIC_ATTACH=1` stayed off without a word. They parse like the other switches now, and an unrecognised value is reported.
 * **micronaut:** `DELETE /chaos/{id}` decoded the id twice (Micronaut decodes the path variable, the shared handler decoded it again): a plan named with `%` answered 400 and one with `+` was looked up under a different name. The id is decoded once, as in Spring and Quarkus.
 * **micronaut:** a `@MicronautChaosTest` with `@TestInstance(PER_CLASS)` that injected `ChaosControlPlane` failed with "chaos agent is not installed" when it was the first chaos test of its JVM: Micronaut injects such a test instance before the chaos extension installs the agent. The test control-plane bean installs the agent itself.
 * **testkit:** a `ChaosSession` or `ChaosControlPlane` parameter of a static `@BeforeAll` method or of a `PER_CLASS` test constructor was injected as `null` (the session is opened per test), so the test failed later with a `NullPointerException`. It fails at injection with a `ParameterResolutionException` saying where the parameter is available, like the Spring, Micronaut and Quarkus extensions.

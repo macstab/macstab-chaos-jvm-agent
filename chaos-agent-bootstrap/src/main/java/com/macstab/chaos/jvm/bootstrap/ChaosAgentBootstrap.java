@@ -4,6 +4,7 @@ import com.macstab.chaos.jvm.api.ChaosControlPlane;
 import com.macstab.chaos.jvm.bootstrap.jfr.JfrIntegration;
 import com.macstab.chaos.jvm.core.ChaosRuntime;
 import com.macstab.chaos.jvm.instrumentation.JdkInstrumentationInstaller;
+import com.macstab.chaos.jvm.startup.AgentArgs;
 import com.macstab.chaos.jvm.startup.ConfigLoadException;
 import com.macstab.chaos.jvm.startup.StartupConfigLoader;
 import java.lang.instrument.Instrumentation;
@@ -195,13 +196,14 @@ public final class ChaosAgentBootstrap {
     initialize(agentArgs, instrumentation, System.getenv());
   }
 
-  private static boolean dynamicAttachAllowed(
+  static boolean dynamicAttachAllowed(
       final java.util.Properties systemProperties, final Map<String, String> environment) {
-    if (Boolean.parseBoolean(systemProperties.getProperty(ALLOW_DYNAMIC_ATTACH_PROPERTY))) {
-      return true;
-    }
-    final String envValue = environment.get(ALLOW_DYNAMIC_ATTACH_ENV);
-    return envValue != null && Boolean.parseBoolean(envValue);
+    return AgentArgs.parseBoolean(
+            ALLOW_DYNAMIC_ATTACH_PROPERTY,
+            systemProperties.getProperty(ALLOW_DYNAMIC_ATTACH_PROPERTY),
+            false)
+        || AgentArgs.parseBoolean(
+            ALLOW_DYNAMIC_ATTACH_ENV, environment.get(ALLOW_DYNAMIC_ATTACH_ENV), false);
   }
 
   /**
@@ -562,10 +564,11 @@ public final class ChaosAgentBootstrap {
    */
   static boolean jmxControl(
       final @Nullable String agentArgs, final Map<String, String> environment) {
-    return "true"
-        .equalsIgnoreCase(
-            AgentSettings.valueOrEmpty(
-                agentArgs, environment, JMX_CONTROL_ARG, JMX_CONTROL_PROPERTY, JMX_CONTROL_ENV));
+    return AgentArgs.parseBoolean(
+        JMX_CONTROL_ARG,
+        AgentSettings.valueOrEmpty(
+            agentArgs, environment, JMX_CONTROL_ARG, JMX_CONTROL_PROPERTY, JMX_CONTROL_ENV),
+        false);
   }
 
   private static final String JMX_CONTROL_ARG = "jmxControl";
