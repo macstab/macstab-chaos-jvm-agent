@@ -94,15 +94,18 @@ public final class ChaosManagementHandler implements Handler<RoutingContext>, Au
         status = 404;
         json = "{\"status\":\"error\",\"message\":\"unknown path\"}";
       } else {
-        final ChaosManagement.HttpResult result =
-            management()
-                .handle(context.request().method().name(), path.substring(root.length()), body);
-        status = result.status();
-        json = result.json();
+        final ChaosManagement current = management();
+        if (current == null) {
+          status = 503;
+          json = "{\"status\":\"error\",\"message\":\"the chaos agent is not installed\"}";
+        } else {
+          final ChaosManagement.HttpResult result =
+              current.handle(
+                  context.request().method().name(), path.substring(root.length()), body);
+          status = result.status();
+          json = result.json();
+        }
       }
-    } catch (final IllegalStateException notInstalled) {
-      status = 503;
-      json = "{\"status\":\"error\",\"message\":\"the chaos agent is not installed\"}";
     } catch (final RuntimeException failed) {
       status = 500;
       json = "{\"status\":\"error\",\"message\":\"chaos management failed\"}";
@@ -114,13 +117,20 @@ public final class ChaosManagementHandler implements Handler<RoutingContext>, Au
         .end(json);
   }
 
-  private ChaosManagement management() {
+  /** The management over the installed control plane; {@code null} while no agent is installed. */
+  private @Nullable ChaosManagement management() {
     ChaosManagement current = management;
     if (current == null) {
       synchronized (this) {
         current = management;
         if (current == null) {
-          current = new ChaosManagement(controlPlane.get());
+          final ChaosControlPlane installed;
+          try {
+            installed = controlPlane.get();
+          } catch (final IllegalStateException notInstalled) {
+            return null;
+          }
+          current = new ChaosManagement(installed);
           management = current;
         }
       }
