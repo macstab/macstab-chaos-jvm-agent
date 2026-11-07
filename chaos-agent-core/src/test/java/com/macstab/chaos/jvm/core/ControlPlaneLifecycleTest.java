@@ -225,6 +225,25 @@ class ControlPlaneLifecycleTest {
     }
 
     @Test
+    @DisplayName("hooks that cannot be woven fail the activation as an instrumentation failure")
+    void weavingFailureIsAnInstrumentationFailure() {
+      runtime.setHookDemand(
+          operations -> {
+            throw new IllegalStateException("cannot weave executors");
+          });
+
+      assertThatThrownBy(() -> runtime.activate(submitScenario("x", ActivationPolicy.always())))
+          .isInstanceOf(com.macstab.chaos.jvm.api.ChaosInstrumentationException.class)
+          .hasMessageContaining("x")
+          .hasRootCauseMessage("cannot weave executors");
+
+      assertThat(failures())
+          .extracting(ChaosDiagnostics.ActivationFailure::category)
+          .containsExactly(ChaosDiagnostics.FailureCategory.INSTRUMENTATION_FAILURE);
+      assertThat(runtime.diagnostics().scenario("x")).isEmpty();
+    }
+
+    @Test
     @DisplayName("hooks woven ahead of an activation: the scenario's operations, nothing activated")
     void requireHooksWeavesWithoutActivating() {
       final List<Set<OperationType>> woven = new java.util.concurrent.CopyOnWriteArrayList<>();
@@ -248,7 +267,7 @@ class ControlPlaneLifecycleTest {
                           OperationType.QUEUE_PUT,
                           ChaosEffect.reject("q"),
                           ActivationPolicy.always())))
-          .isInstanceOf(ChaosActivationException.class)
+          .isInstanceOf(com.macstab.chaos.jvm.api.ChaosInstrumentationException.class)
           .hasMessageContaining("queues")
           .hasRootCauseMessage("cannot weave queues");
     }
@@ -275,8 +294,8 @@ class ControlPlaneLifecycleTest {
                               OperationType.QUEUE_PUT,
                               ChaosEffect.reject("q"),
                               ActivationPolicy.always()))))
-          .isInstanceOf(IllegalStateException.class)
-          .hasMessage("cannot weave queues");
+          .isInstanceOf(com.macstab.chaos.jvm.api.ChaosInstrumentationException.class)
+          .hasRootCauseMessage("cannot weave queues");
 
       assertThat(submissionRejected()).as("the first scenario was rolled back").isFalse();
       assertThat(runtime.jmxVisible("first")).as("its plan settings were cleared").isTrue();

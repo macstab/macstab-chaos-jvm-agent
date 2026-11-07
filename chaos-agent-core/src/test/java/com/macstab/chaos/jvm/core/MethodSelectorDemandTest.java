@@ -104,7 +104,8 @@ class MethodSelectorDemandTest {
       runtime.setHookDemand(recording(new IllegalStateException("cannot weave")));
 
       assertThatThrownBy(() -> runtime.activate(scenario("broken", selector("c.Third"))))
-          .isInstanceOf(IllegalStateException.class);
+          .isInstanceOf(com.macstab.chaos.jvm.api.ChaosInstrumentationException.class)
+          .hasRootCauseMessage("cannot weave");
 
       assertThat(runtime.diagnostics().scenario("broken")).isEmpty();
       assertThat(runtime.diagnostics().snapshot().failures())

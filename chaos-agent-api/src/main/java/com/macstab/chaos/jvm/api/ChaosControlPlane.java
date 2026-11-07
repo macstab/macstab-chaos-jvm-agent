@@ -38,6 +38,7 @@ public interface ChaosControlPlane extends AutoCloseable {
    * @throws ChaosUnsupportedFeatureException if the scenario requires a JVM feature not available
    *     at runtime
    * @throws ChaosActivationException if a scenario with the same ID is already active
+   * @throws ChaosInstrumentationException if the instrumentation the scenario needs cannot be woven
    */
   ChaosActivationHandle activate(ChaosScenario scenario);
 

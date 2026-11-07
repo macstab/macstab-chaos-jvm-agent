@@ -92,6 +92,11 @@ public final class ChaosManagement implements AutoCloseable {
       return new ActivationResponse("invalid", null, "invalid plan: " + invalid.getMessage());
     } catch (final com.macstab.chaos.jvm.api.ChaosActivationConflictException conflict) {
       return new ActivationResponse("conflict", null, "plan rejected: " + conflict.getMessage());
+    } catch (final com.macstab.chaos.jvm.api.ChaosInstrumentationException notWoven) {
+      // The runtime's own failure, like the catch-all below: the detail goes to the log.
+      LOGGER.log(Level.WARNING, notWoven, () -> "chaos-agent: plan activation rejected");
+      return new ActivationResponse(
+          "rejected", null, "plan rejected: the runtime could not activate it (see the log)");
     } catch (final com.macstab.chaos.jvm.api.ChaosActivationException failed) {
       return new ActivationResponse("invalid", null, "plan rejected: " + failed.getMessage());
     } catch (final RuntimeException rejected) {

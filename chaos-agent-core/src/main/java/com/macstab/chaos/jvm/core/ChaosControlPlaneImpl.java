@@ -150,9 +150,9 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
   }
 
   /**
-   * The failure {@link #requireHooks} reports: the API's own exceptions (an unsupported runtime) as
-   * they are, anything else as a {@link ChaosActivationException} with the weaving failure as its
-   * cause.
+   * The failure an activation or {@link #requireHooks} reports when hooks cannot be woven: the
+   * API's own exceptions (an unsupported runtime) as they are, anything else as a {@link
+   * com.macstab.chaos.jvm.api.ChaosInstrumentationException} with the weaving failure as its cause.
    */
   private static RuntimeException weavingFailed(
       final ChaosScenario scenario, final RuntimeException weavingFailure) {
@@ -160,7 +160,7 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
         || weavingFailure instanceof ChaosActivationException) {
       return weavingFailure;
     }
-    return new ChaosActivationException(
+    return new com.macstab.chaos.jvm.api.ChaosInstrumentationException(
         "the hooks of scenario "
             + scenario.id()
             + " could not be woven: "
@@ -490,7 +490,7 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
         }
       } catch (final RuntimeException weavingFailure) {
         weavingFailed = true;
-        throw weavingFailure;
+        throw weavingFailed(scenario, weavingFailure);
       }
       controller =
           new ScenarioController(
@@ -531,15 +531,17 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
           unsupported.getMessage());
       throw unsupported;
     } catch (final ChaosActivationException activationFailure) {
-      // Thrown by the validator (e.g. destructive effect without opt-in) or by the registry for a
-      // duplicate id; only the latter is an activation conflict.
-      final boolean conflict = validated && !registeredInRegistry;
+      // Thrown by the validator (e.g. destructive effect without opt-in), for hooks that cannot be
+      // woven, or by the registry for a duplicate id; only the last is an activation conflict.
+      final boolean conflict = validated && !weavingFailed && !registeredInRegistry;
       unregisterAndDestroyQuietly(controller, registeredInRegistry);
       recordFailure(
           scenario.id(),
-          conflict
-              ? ChaosDiagnostics.FailureCategory.ACTIVATION_CONFLICT
-              : ChaosDiagnostics.FailureCategory.INVALID_CONFIGURATION,
+          weavingFailed
+              ? ChaosDiagnostics.FailureCategory.INSTRUMENTATION_FAILURE
+              : conflict
+                  ? ChaosDiagnostics.FailureCategory.ACTIVATION_CONFLICT
+                  : ChaosDiagnostics.FailureCategory.INVALID_CONFIGURATION,
           activationFailure.getMessage());
       throw activationFailure;
     } catch (final RuntimeException runtimeException) {

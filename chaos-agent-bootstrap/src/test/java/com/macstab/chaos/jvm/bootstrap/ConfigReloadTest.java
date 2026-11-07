@@ -280,6 +280,56 @@ class ConfigReloadTest {
   }
 
   @Test
+  @DisplayName("a plan whose method selector cannot be woven is not retried on every tick")
+  void methodWeavingFailureNotRetried() throws Exception {
+    final Path file = tempDir.resolve("plan.json");
+    Files.writeString(file, plan("a"));
+    backdate(file);
+    start(file);
+    final java.util.concurrent.atomic.AtomicInteger weaves =
+        new java.util.concurrent.atomic.AtomicInteger();
+    runtime.setHookDemand(
+        new com.macstab.chaos.jvm.core.HookDemand() {
+          @Override
+          public void require(final java.util.Set<com.macstab.chaos.jvm.api.OperationType> ops) {}
+
+          @Override
+          public void methods(
+              final java.util.Set<com.macstab.chaos.jvm.api.ChaosSelector.MethodSelector> all) {
+            if (!all.isEmpty()) {
+              weaves.incrementAndGet();
+              throw new IllegalStateException("weaving failed");
+            }
+          }
+        });
+    final java.util.concurrent.atomic.AtomicInteger restarts =
+        new java.util.concurrent.atomic.AtomicInteger();
+    runtime.addEventListener(
+        event -> {
+          if (event.type() == ChaosEvent.Type.STARTED && "a".equals(event.scenarioId())) {
+            restarts.incrementAndGet();
+          }
+        });
+
+    Files.writeString(
+        file,
+        """
+        {"metadata":{"name":"p"},"scenarios":[{"id":"m","scope":"JVM",
+         "selector":{"type":"method","operations":["METHOD_ENTER"],
+          "classPattern":{"mode":"EXACT","value":"com.example.Service"},
+          "methodNamePattern":{"mode":"ANY"}},
+         "effect":{"type":"delay","minDelay":"PT0.001S","maxDelay":"PT0.001S"}}]}
+        """);
+    poller.pollOnce();
+    poller.pollOnce();
+
+    assertThat(state("a")).isEqualTo(ChaosDiagnostics.ScenarioState.ACTIVE);
+    assertThat(state("m")).isNull();
+    assertThat(weaves).as("the same content is not woven again").hasValue(1);
+    assertThat(restarts).as("restored once, not on every tick").hasValue(1);
+  }
+
+  @Test
   @DisplayName("a file missing for one tick keeps its scenarios; missing for two stops them")
   void missingGracePeriod() throws Exception {
     final Path file = tempDir.resolve("plan.json");

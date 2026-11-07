@@ -119,8 +119,8 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * activating it; a method selector's weaving is left to the activation.
    *
    * @param scenario the scenario
-   * @throws com.macstab.chaos.jvm.api.ChaosActivationException if its hooks cannot be woven (the
-   *     weaving failure is the cause)
+   * @throws com.macstab.chaos.jvm.api.ChaosInstrumentationException if its hooks cannot be woven
+   *     (the weaving failure is the cause)
    * @throws com.macstab.chaos.jvm.api.ChaosUnsupportedFeatureException if the runtime cannot weave
    */
   public void requireHooks(final ChaosScenario scenario) {

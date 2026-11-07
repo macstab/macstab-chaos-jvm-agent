@@ -58,6 +58,21 @@ class ChaosManagementTest {
   }
 
   @Test
+  @DisplayName("a plan whose hooks cannot be woven is rejected; the detail goes to the log")
+  void weavingFailureRejected() {
+    runtime.setHookDemand(
+        operations -> {
+          throw new IllegalStateException("internal weaving detail");
+        });
+
+    final ChaosManagement.ActivationResponse rejected = management.activate(PLAN);
+
+    assertThat(rejected.status()).isEqualTo("rejected");
+    assertThat(rejected.message()).doesNotContain("internal weaving detail");
+    assertThat(state("mgmt-delay")).isNull();
+  }
+
+  @Test
   @DisplayName("rejects blank, malformed and invalid plans with a reason")
   void rejects() {
     assertThat(management.activate(" ").status()).isEqualTo("invalid");
