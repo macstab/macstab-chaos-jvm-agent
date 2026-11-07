@@ -225,6 +225,35 @@ class ControlPlaneLifecycleTest {
     }
 
     @Test
+    @DisplayName("hooks woven ahead of an activation: the scenario's operations, nothing activated")
+    void requireHooksWeavesWithoutActivating() {
+      final List<Set<OperationType>> woven = new java.util.concurrent.CopyOnWriteArrayList<>();
+      runtime.setHookDemand(
+          operations -> {
+            woven.add(Set.copyOf(operations));
+            if (operations.contains(OperationType.QUEUE_PUT)) {
+              throw new IllegalStateException("cannot weave queues");
+            }
+          });
+
+      runtime.requireHooks(submitScenario("ahead", ActivationPolicy.always()));
+      assertThat(woven).containsExactly(Set.of(OperationType.EXECUTOR_SUBMIT));
+      assertThat(runtime.diagnostics().scenario("ahead")).isEmpty();
+
+      assertThatThrownBy(
+              () ->
+                  runtime.requireHooks(
+                      scenario(
+                          "queues",
+                          OperationType.QUEUE_PUT,
+                          ChaosEffect.reject("q"),
+                          ActivationPolicy.always())))
+          .isInstanceOf(ChaosActivationException.class)
+          .hasMessageContaining("queues")
+          .hasRootCauseMessage("cannot weave queues");
+    }
+
+    @Test
     @DisplayName("a plan whose second scenario fails to weave rolls back the first")
     void weavingFailureRollsBack() {
       runtime.setHookDemand(

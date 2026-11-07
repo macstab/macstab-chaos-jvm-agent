@@ -457,13 +457,15 @@ public final class StartupConfigPoller implements AutoCloseable {
       }
     }
 
-    // Validate every new or changed scenario before touching the active set: an invalid plan then
-    // leaves the running scenarios running, instead of stopping the changed ones, activating part
-    // of the new plan and rolling back.
+    // Validate every new or changed scenario, and weave its hooks, before touching the active set:
+    // an invalid plan, or one whose hooks cannot be woven, then leaves the running scenarios
+    // running, instead of stopping the changed ones, activating part of the new plan and rolling
+    // back (which restarts them, resetting their counters, budgets and windows).
     for (final ChaosScenario scenario : newById.values()) {
       if (!scenario.equals(activeScenarios.get(scenario.id()))) {
         try {
           runtime.validate(scenario);
+          runtime.requireHooks(scenario);
         } catch (final RuntimeException invalid) {
           throw new IllegalStateException(
               "plan not applied, previous scenarios kept: " + invalid.getMessage(), invalid);

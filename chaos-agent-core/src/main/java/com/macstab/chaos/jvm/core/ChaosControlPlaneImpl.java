@@ -136,6 +136,38 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
     CompatibilityValidator.validate(scenario, featureSet);
   }
 
+  /**
+   * Weaves the hook groups {@code scenario}'s operations need, without activating it. Groups stay
+   * woven, as after an activation. A method selector's weaving belongs to its registration and is
+   * not done here.
+   */
+  void requireHooks(final ChaosScenario scenario) {
+    try {
+      hookDemand.require(SelectorOperations.of(scenario.selector()));
+    } catch (final RuntimeException weavingFailure) {
+      throw weavingFailed(scenario, weavingFailure);
+    }
+  }
+
+  /**
+   * The failure {@link #requireHooks} reports: the API's own exceptions (an unsupported runtime) as
+   * they are, anything else as a {@link ChaosActivationException} with the weaving failure as its
+   * cause.
+   */
+  private static RuntimeException weavingFailed(
+      final ChaosScenario scenario, final RuntimeException weavingFailure) {
+    if (weavingFailure instanceof com.macstab.chaos.jvm.api.ChaosUnsupportedFeatureException
+        || weavingFailure instanceof ChaosActivationException) {
+      return weavingFailure;
+    }
+    return new ChaosActivationException(
+        "the hooks of scenario "
+            + scenario.id()
+            + " could not be woven: "
+            + weavingFailure.getMessage(),
+        weavingFailure);
+  }
+
   /** Whether the JVM-scoped key of {@code scenarioId} is held by a live controller. */
   boolean isLive(final String scenarioId) {
     return registry.isLive("jvm::" + scenarioId);

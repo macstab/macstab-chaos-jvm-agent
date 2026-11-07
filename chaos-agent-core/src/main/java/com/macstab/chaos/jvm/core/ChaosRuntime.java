@@ -115,6 +115,19 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
+   * Weaves the hooks a scenario needs, as {@link #activate(ChaosScenario)} would, without
+   * activating it; a method selector's weaving is left to the activation.
+   *
+   * @param scenario the scenario
+   * @throws com.macstab.chaos.jvm.api.ChaosActivationException if its hooks cannot be woven (the
+   *     weaving failure is the cause)
+   * @throws com.macstab.chaos.jvm.api.ChaosUnsupportedFeatureException if the runtime cannot weave
+   */
+  public void requireHooks(final ChaosScenario scenario) {
+    controlPlane.requireHooks(scenario);
+  }
+
+  /**
    * Returns whether a JVM-scoped scenario with this id is live (registered and not finished): an
    * activation of the same id would be a conflict.
    *

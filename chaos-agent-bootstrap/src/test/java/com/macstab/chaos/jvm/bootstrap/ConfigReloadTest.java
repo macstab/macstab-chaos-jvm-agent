@@ -237,6 +237,49 @@ class ConfigReloadTest {
   }
 
   @Test
+  @DisplayName("a plan whose hooks cannot be woven leaves the running plan untouched on every tick")
+  void weavingFailureKeepsPlan() throws Exception {
+    final Path file = tempDir.resolve("plan.json");
+    Files.writeString(file, plan("a"));
+    backdate(file);
+    start(file);
+    final java.util.concurrent.atomic.AtomicInteger weaves =
+        new java.util.concurrent.atomic.AtomicInteger();
+    runtime.setHookDemand(
+        operations -> {
+          if (operations.contains(com.macstab.chaos.jvm.api.OperationType.QUEUE_PUT)) {
+            weaves.incrementAndGet();
+            throw new IllegalStateException("weaving failed");
+          }
+        });
+    final java.util.concurrent.atomic.AtomicInteger restarts =
+        new java.util.concurrent.atomic.AtomicInteger();
+    runtime.addEventListener(
+        event -> {
+          if (event.type() == ChaosEvent.Type.STARTED && "a".equals(event.scenarioId())) {
+            restarts.incrementAndGet();
+          }
+        });
+
+    Files.writeString(
+        file,
+        """
+        {"metadata":{"name":"p"},"scenarios":[{"id":"b","scope":"JVM",
+         "selector":{"type":"queue","operations":["QUEUE_PUT"]},
+         "effect":{"type":"delay","minDelay":"PT0.001S","maxDelay":"PT0.001S"}}]}
+        """);
+    poller.pollOnce();
+    poller.pollOnce();
+
+    assertThat(state("a"))
+        .as("the old plan stays")
+        .isEqualTo(ChaosDiagnostics.ScenarioState.ACTIVE);
+    assertThat(restarts).as("and is not stopped and restarted on each tick").hasValue(0);
+    assertThat(state("b")).isNull();
+    assertThat(weaves).as("the same content is not woven again").hasValue(1);
+  }
+
+  @Test
   @DisplayName("a file missing for one tick keeps its scenarios; missing for two stops them")
   void missingGracePeriod() throws Exception {
     final Path file = tempDir.resolve("plan.json");
