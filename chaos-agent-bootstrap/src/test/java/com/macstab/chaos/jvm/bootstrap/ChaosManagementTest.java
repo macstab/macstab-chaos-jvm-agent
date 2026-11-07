@@ -101,6 +101,42 @@ class ChaosManagementTest {
   }
 
   @Test
+  @DisplayName("while a plan is being activated, its name answers conflict to activate and stop")
+  void nameInActivationAnswersConflict() throws Exception {
+    final java.util.concurrent.CountDownLatch inActivation =
+        new java.util.concurrent.CountDownLatch(1);
+    final java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
+    final java.util.concurrent.atomic.AtomicBoolean first =
+        new java.util.concurrent.atomic.AtomicBoolean(true);
+    runtime.setHookDemand(
+        operations -> {
+          if (first.getAndSet(false)) {
+            inActivation.countDown();
+            try {
+              release.await();
+            } catch (final InterruptedException interrupted) {
+              Thread.currentThread().interrupt();
+            }
+          }
+        });
+
+    final java.util.concurrent.CompletableFuture<ChaosManagement.ActivationResponse> activation =
+        java.util.concurrent.CompletableFuture.supplyAsync(() -> management.activate(PLAN));
+    assertThat(inActivation.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+    final ChaosManagement.ActivationResponse second = management.activate(PLAN);
+    final ChaosManagement.StopResponse stop = management.stop("mgmt");
+    release.countDown();
+
+    assertThat(second.status()).isEqualTo("conflict");
+    assertThat(second.message()).contains("in progress");
+    assertThat(stop.status()).isEqualTo("conflict");
+    assertThat(stop.message()).contains("in progress");
+    assertThat(activation.get(5, java.util.concurrent.TimeUnit.SECONDS).status())
+        .isEqualTo("activated");
+    assertThat(management.stop("mgmt").status()).isEqualTo("stopped");
+  }
+
+  @Test
   @DisplayName("a plan whose hooks cannot be woven is rejected; the detail goes to the log")
   void weavingFailureRejected() {
     runtime.setHookDemand(

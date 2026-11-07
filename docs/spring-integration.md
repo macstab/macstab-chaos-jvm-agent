@@ -441,8 +441,8 @@ Both delete operations are `@DeleteOperation`s; the `@Selector` path segment kee
 | Operation | Answer |
 |-----------|--------|
 | `GET /actuator/chaos` | 200, the `ChaosDiagnostics.Snapshot`: every scenario with its state and counters, the activation failures and the runtime details |
-| `POST /actuator/chaos` | 200 `activated` with `handleId` (`plan:<name>`); 400 `invalid` (blank, malformed or failing validation); 409 `conflict` (a scenario id is already active, or a running plan has the plan's name; every plan without a name is named `default`); 422 `rejected` (the runtime could not run it; the detail is logged, not returned) |
-| `DELETE /actuator/chaos/{id}` | 200 `stopped`; 404 `not-found`; 409 `unmanaged` (a scenario activated elsewhere, or a scenario of a plan: stop the plan by its handle id); 400 for an id with a malformed escape |
+| `POST /actuator/chaos` | 200 `activated` with `handleId` (`plan:<name>`); 400 `invalid` (blank, malformed or failing validation); 409 `conflict` (a scenario id is already active, a running plan has the plan's name, or a plan of that name is being activated; every plan without a name is named `default`); 422 `rejected` (the runtime could not run it; the detail is logged, not returned) |
+| `DELETE /actuator/chaos/{id}` | 200 `stopped`; 404 `not-found`; 409 `conflict` (the plan is being activated; stop it once it is) or `unmanaged` (a scenario activated elsewhere, or a scenario of a plan: stop the plan by its handle id); 400 for an id with a malformed escape |
 | `DELETE /actuator/chaos` | 200 with `stoppedCount`, the plans stopped (one that fails to stop is logged and skipped) |
 
 Actuator binds the `String planJson` parameter **by name** from a JSON object body, so the request body is `{"planJson": "<plan JSON as an escaped string>"}`, not the raw plan document:

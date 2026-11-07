@@ -90,6 +90,7 @@ Migration steps for each change: [docs/migration-2.0.md](docs/migration-2.0.md).
 
 ### Bug Fixes
 
+* **bootstrap:** a stop of a plan that was still being activated answered 404 `not-found`, and the plan started afterwards; a second activation of that name was told a running plan had it. Both answer 409 `conflict`: an activation of the plan is in progress.
 * **spring, micronaut:** the control plane of every test context stayed registered for the rest of the run, one per Micronaut test class, and what it activated was released only when the last running chaos test class ended. It is released, and what it activated stops, when its context closes.
 * **core:** an activation whose hooks cannot be woven failed with an undocumented `IllegalStateException`. It fails with the new `ChaosInstrumentationException` (a `ChaosActivationException`, the weaving failure as its cause) and is recorded as `INSTRUMENTATION_FAILURE`; the management endpoints answer it as before with 422 `rejected` and log the detail. A reloaded plan whose method selector cannot be woven restores the running plan once and is not tried again until the file changes.
 * **bootstrap:** a reloaded plan whose hooks could not be woven stopped and restarted the running scenarios on every poll (resetting their counters, budgets and windows) and was retried each time. Its hooks are now woven before anything changes, so the running plan stays untouched, and the same content is not tried again until the file changes.

@@ -86,7 +86,7 @@ public final class ChaosManagement implements AutoCloseable {
     // The name is claimed before activating, so a plan refused for its name never injects a fault.
     final String id = PLAN_PREFIX + plan.metadata().name();
     if (!activating.add(id)) {
-      return nameConflict(id);
+      return new ActivationResponse("conflict", null, inProgress(id));
     }
     try {
       return activateClaimed(plan, id);
@@ -143,6 +143,10 @@ public final class ChaosManagement implements AutoCloseable {
         || state == ChaosDiagnostics.ScenarioState.INACTIVE;
   }
 
+  private static String inProgress(final String id) {
+    return "an activation of " + id + " is in progress; try again once it completed";
+  }
+
   private static ActivationResponse nameConflict(final String id) {
     return new ActivationResponse(
         "conflict", null, "plan rejected: a running plan has its name (" + id + "); stop it first");
@@ -152,7 +156,8 @@ public final class ChaosManagement implements AutoCloseable {
    * Stops a plan activated here.
    *
    * @param id the plan's handle id ({@code plan:<name>}) or its name
-   * @return {@code stopped}, {@code unmanaged} (a scenario not activated here) or {@code not-found}
+   * @return {@code stopped}, {@code conflict} (the plan is being activated), {@code unmanaged} (a
+   *     scenario not activated here) or {@code not-found}
    */
   public StopResponse stop(final String id) {
     ChaosActivationHandle handle = handles.remove(id);
@@ -162,6 +167,11 @@ public final class ChaosManagement implements AutoCloseable {
     if (handle != null) {
       handle.close();
       return new StopResponse("stopped", id, null);
+    }
+    // A plan being activated has no handle yet: stopping it now would answer not-found and the
+    // plan would start afterwards.
+    if (activating.contains(id) || activating.contains(PLAN_PREFIX + id)) {
+      return new StopResponse("conflict", id, inProgress(id));
     }
     if (controlPlane.diagnostics().scenario(id).isPresent()) {
       return new StopResponse(
