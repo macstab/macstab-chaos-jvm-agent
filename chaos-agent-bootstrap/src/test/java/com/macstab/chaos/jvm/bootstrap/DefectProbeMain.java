@@ -115,6 +115,7 @@ public final class DefectProbeMain {
       case "redirect" -> redirect();
       case "udp-dns" -> udpAndReverseDns();
       case "pool-queue-reject" -> poolQueueReject();
+      case "queue-poll-suppress" -> queuePollSuppress();
       case "file-map-transfer" -> fileMapAndTransfer();
       case "socket-bind" -> socketBind();
       case "thread-eagain" -> threadEagain();
@@ -1689,6 +1690,71 @@ public final class DefectProbeMain {
     System.out.println("delay.threadsCreated=" + created.get());
     System.out.println("delay.applied=" + (delay.appliedCount() > 0));
     delay.close();
+    pool.shutdownNow();
+  }
+
+  /**
+   * SUPPRESS on QUEUE_POLL: how long a timed poll takes to return null, and what a thread pool
+   * whose workers poll with a keep-alive does while the scenario is active.
+   */
+  private static void queuePollSuppress() throws Exception {
+    final ChaosControlPlane plane = ChaosPlatform.current();
+    final ChaosActivationHandle handle =
+        plane.activate(
+            ChaosScenario.builder("poll-suppress")
+                .selector(
+                    new ChaosSelector.QueueSelector(
+                        Set.of(OperationType.QUEUE_POLL),
+                        NamePattern.exact(PoolWorkQueue.class.getName())))
+                .effect(ChaosEffect.suppress())
+                .build());
+    final PoolWorkQueue direct = new PoolWorkQueue();
+    final long start = System.nanoTime();
+    final Runnable polled = direct.poll(200, TimeUnit.MILLISECONDS);
+    System.out.println("timedPollNull=" + (polled == null));
+    System.out.println(
+        "timedPollMillis=" + TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start));
+    Thread.currentThread().interrupt();
+    try {
+      direct.poll(1, TimeUnit.SECONDS);
+      System.out.println("interruptedPoll=returned");
+    } catch (final InterruptedException interrupted) {
+      System.out.println("interruptedPoll=InterruptedException");
+    }
+    final java.util.concurrent.atomic.AtomicInteger created =
+        new java.util.concurrent.atomic.AtomicInteger();
+    final java.util.concurrent.ThreadPoolExecutor pool =
+        new java.util.concurrent.ThreadPoolExecutor(
+            1,
+            1,
+            50,
+            TimeUnit.MILLISECONDS,
+            new PoolWorkQueue(),
+            task -> {
+              created.incrementAndGet();
+              final Thread thread = new Thread(task);
+              thread.setDaemon(true);
+              return thread;
+            });
+    pool.allowCoreThreadTimeOut(true);
+    final CountDownLatch release = new CountDownLatch(1);
+    final CountDownLatch ran = new CountDownLatch(1);
+    final long before = handle.appliedCount();
+    // the first task holds the only worker, so the second one waits in the queue
+    pool.execute(
+        () -> {
+          try {
+            release.await();
+          } catch (final InterruptedException e) {
+            Thread.currentThread().interrupt();
+          }
+        });
+    pool.execute(ran::countDown);
+    release.countDown();
+    System.out.println("poolRanWhileActive=" + ran.await(300, TimeUnit.MILLISECONDS));
+    System.out.println("poolPollsIn300ms=" + (handle.appliedCount() - before));
+    System.out.println("poolThreadsCreated=" + created.get());
+    handle.close();
     pool.shutdownNow();
   }
 

@@ -217,7 +217,17 @@ final class ConcurrencyHooks {
                 typeBuilder
                     .visit(advise(QueueAdvice.PutAdvice.class, ElementMatchers.named("put")))
                     .visit(advise(QueueAdvice.TakeAdvice.class, ElementMatchers.named("take")))
-                    .visit(advise(QueueAdvice.PollAdvice.class, ElementMatchers.named("poll")))
+                    .visit(
+                        advise(
+                            QueueAdvice.PollAdvice.class,
+                            ElementMatchers.named("poll").and(ElementMatchers.takesArguments(0))))
+                    .visit(
+                        advise(
+                            QueueAdvice.TimedPollAdvice.class,
+                            ElementMatchers.named("poll")
+                                .and(
+                                    ElementMatchers.takesArguments(
+                                        long.class, java.util.concurrent.TimeUnit.class))))
                     .visit(
                         advise(
                             QueueAdvice.OfferAdvice.class,

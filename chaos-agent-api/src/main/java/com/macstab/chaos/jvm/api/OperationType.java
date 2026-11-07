@@ -162,8 +162,9 @@ public enum OperationType {
   QUEUE_TAKE,
 
   /**
-   * Fires before a non-blocking {@link java.util.concurrent.BlockingQueue#poll} call. Chaos here
-   * can simulate an empty queue by returning {@code null} or introducing polling delays.
+   * Fires before a {@link java.util.concurrent.BlockingQueue#poll} call, with or without a timeout.
+   * Chaos here can simulate an empty queue by returning {@code null} (a poll with a timeout first
+   * waits it out, as on a real empty queue) or introduce polling delays.
    */
   QUEUE_POLL,
 

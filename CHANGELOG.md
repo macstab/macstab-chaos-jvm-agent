@@ -90,6 +90,7 @@ Migration steps for each change: [docs/migration-2.0.md](docs/migration-2.0.md).
 
 ### Bug Fixes
 
+* **instrumentation:** a suppressed `poll(timeout, unit)` returned `null` at once instead of after its timeout, as a real poll of an empty queue does: a consumer polling in a loop spun, and a thread pool's worker polled about 290,000 times in 300 ms instead of once per keep-alive. It now waits its timeout (an interrupt ends the wait with `InterruptedException`); `poll()` without a timeout still returns `null` at once.
 * **bootstrap:** `jmxControl`, `reports` and the dynamic-attach opt-in accepted only `true` (and `on` for reports), while every other switch accepts `true|false|1|0|yes|no|on|off`: `jmxControl=on` or `MACSTAB_CHAOS_ALLOW_DYNAMIC_ATTACH=1` stayed off without a word. They parse like the other switches now, and an unrecognised value is reported.
 * **micronaut:** `DELETE /chaos/{id}` decoded the id twice (Micronaut decodes the path variable, the shared handler decoded it again): a plan named with `%` answered 400 and one with `+` was looked up under a different name. The id is decoded once, as in Spring and Quarkus.
 * **micronaut:** a `@MicronautChaosTest` with `@TestInstance(PER_CLASS)` that injected `ChaosControlPlane` failed with "chaos agent is not installed" when it was the first chaos test of its JVM: Micronaut injects such a test instance before the chaos extension installs the agent. The test control-plane bean installs the agent itself.

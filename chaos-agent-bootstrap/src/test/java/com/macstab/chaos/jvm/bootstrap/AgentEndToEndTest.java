@@ -1637,6 +1637,19 @@ class AgentEndToEndTest {
     }
 
     @Test
+    @DisplayName("a suppressed timed poll waits its timeout: a polling worker does not spin")
+    void suppressedTimedPollWaits() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.runWithoutPlan(DefectProbeMain.class, "queue-poll-suppress");
+      assertThat(result.value("timedPollNull")).isEqualTo("true");
+      assertThat(result.longValue("timedPollMillis")).isGreaterThanOrEqualTo(200L);
+      assertThat(result.value("interruptedPoll")).isEqualTo("InterruptedException");
+      // keep-alive 50 ms over 300 ms: a handful of polls, not hundreds of thousands
+      assertThat(result.longValue("poolPollsIn300ms")).isBetween(1L, 20L);
+      assertThat(result.longValue("poolThreadsCreated")).isEqualTo(1L);
+    }
+
+    @Test
     @DisplayName("redirect sends a socket's and a channel's connect to another endpoint")
     void redirectsConnects() throws Exception {
       final ChildJvmProbe.ProbeResult result =

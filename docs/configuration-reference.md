@@ -858,6 +858,8 @@ All selectors use `"type"` as the JSON discriminator.
 
 A thread pool's own work queue is a `BlockingQueue` too: its workers take their next task with `take()` or `poll(keepAlive)`, so a queue scenario reaches them unless `queueClassPattern` excludes the pool's queue. `reject` is refused on `QUEUE_TAKE` and `QUEUE_POLL`, which the JDK fails only by interruption; on the producer side, `QUEUE_PUT` and `QUEUE_OFFER` accept it.
 
+`suppress` on `QUEUE_POLL` returns `null` as an empty queue does: `poll()` at once, `poll(timeout, unit)` after waiting its timeout (an interrupt ends the wait with `InterruptedException`).
+
 ---
 
 ### `async` — AsyncSelector

@@ -80,6 +80,46 @@ final class QueueAdvice {
     }
   }
 
+  /**
+   * {@code poll(timeout, unit)}: as {@link PollAdvice}, but a suppressed poll first waits out its
+   * timeout, as a real poll of an empty queue does, so a consumer polling in a loop does not spin.
+   * The wait is agent-internal work (no scenario sees it as a sleep) and ends early with {@code
+   * InterruptedException} when the thread is interrupted, like the real wait.
+   */
+  static final class TimedPollAdvice {
+    @Advice.OnMethodEnter(skipOn = Advice.OnNonDefaultValue.class)
+    static @Nullable Boolean enter(
+        @Advice.This final Object queue,
+        @Advice.Argument(0) final long timeout,
+        @Advice.Argument(1) final java.util.concurrent.TimeUnit unit)
+        throws Throwable {
+      if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_QUEUE)) {
+        return null;
+      }
+      try {
+        final Boolean decision =
+            BootstrapDispatcher.beforeBooleanQueueOperation(OperationTags.QUEUE_POLL, queue);
+        if (decision != null) {
+          BootstrapDispatcher.beginInternalCall();
+          try {
+            unit.sleep(timeout);
+          } finally {
+            BootstrapDispatcher.endInternalCall();
+          }
+        }
+        return decision;
+      } catch (final Throwable throwable) {
+        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_QUEUE);
+        throw throwable;
+      }
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit() {
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_QUEUE);
+    }
+  }
+
   static final class OfferAdvice {
     // skipOn = OnNonDefaultValue with a reference-typed Boolean enter value: the original offer
     // body is skipped when the dispatcher has decided an outcome (non-null decision), and the
