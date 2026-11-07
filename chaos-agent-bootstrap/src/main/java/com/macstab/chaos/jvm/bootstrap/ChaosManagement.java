@@ -40,6 +40,9 @@ public final class ChaosManagement implements AutoCloseable {
   private final ChaosControlPlane controlPlane;
   private final Map<String, ChaosActivationHandle> handles = new ConcurrentHashMap<>();
 
+  /** Plan names an activation holds until it has stored its handle or failed. */
+  private final java.util.Set<String> activating = ConcurrentHashMap.newKeySet();
+
   /** Set by {@link #close()}; a plan activated after it is stopped again at once. */
   private volatile boolean closed;
 
@@ -80,10 +83,23 @@ public final class ChaosManagement implements AutoCloseable {
       LOGGER.log(Level.WARNING, invalid, () -> "chaos-agent: rejecting malformed plan JSON");
       return new ActivationResponse("invalid", null, "invalid plan: " + invalid.getMessage());
     }
-    // Checked before activating, so a refused plan never injects a fault; the claim below decides.
-    final ChaosActivationHandle running = handles.get(PLAN_PREFIX + plan.metadata().name());
+    // The name is claimed before activating, so a plan refused for its name never injects a fault.
+    final String id = PLAN_PREFIX + plan.metadata().name();
+    if (!activating.add(id)) {
+      return nameConflict(id);
+    }
+    try {
+      return activateClaimed(plan, id);
+    } finally {
+      activating.remove(id);
+    }
+  }
+
+  /** Activates {@code plan} while this call holds its name {@code id}. */
+  private ActivationResponse activateClaimed(final ChaosPlan plan, final String id) {
+    final ChaosActivationHandle running = handles.get(id);
     if (running != null && !finished(running)) {
-      return nameConflict(running.id());
+      return nameConflict(id);
     }
     final ChaosActivationHandle handle;
     try {
@@ -105,28 +121,10 @@ public final class ChaosManagement implements AutoCloseable {
       return new ActivationResponse(
           "rejected", null, "plan rejected: the runtime could not activate it (see the log)");
     }
-    // Claim the id atomically: a running plan keeps it, a finished one is replaced.
-    final ChaosActivationHandle[] kept = new ChaosActivationHandle[1];
-    final ChaosActivationHandle[] replaced = new ChaosActivationHandle[1];
-    handles.compute(
-        handle.id(),
-        (id, existing) -> {
-          if (existing == null || existing.equals(handle)) {
-            return handle;
-          }
-          if (!finished(existing)) {
-            kept[0] = existing;
-            return existing;
-          }
-          replaced[0] = existing;
-          return handle;
-        });
-    if (kept[0] != null) {
-      handle.close();
-      return nameConflict(handle.id());
-    }
-    if (replaced[0] != null) {
-      replaced[0].close();
+    // A finished plan of the same name is replaced.
+    final ChaosActivationHandle replaced = handles.put(handle.id(), handle);
+    if (replaced != null && !replaced.equals(handle)) {
+      replaced.close();
     }
     // A close() that ran meanwhile either found this handle and stopped it, or is seen here.
     if (closed) {

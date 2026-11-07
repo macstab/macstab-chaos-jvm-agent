@@ -58,6 +58,49 @@ class ChaosManagementTest {
   }
 
   @Test
+  @DisplayName("of two plans with one name activated at once, the refused one never starts")
+  void concurrentSameNameNeverStartsTheLoser() throws Exception {
+    final java.util.concurrent.CountDownLatch inActivation =
+        new java.util.concurrent.CountDownLatch(1);
+    final java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
+    final java.util.concurrent.atomic.AtomicBoolean first =
+        new java.util.concurrent.atomic.AtomicBoolean(true);
+    runtime.setHookDemand(
+        operations -> {
+          if (first.getAndSet(false)) {
+            inActivation.countDown();
+            try {
+              release.await();
+            } catch (final InterruptedException interrupted) {
+              Thread.currentThread().interrupt();
+            }
+          }
+        });
+    final java.util.Map<String, Integer> started = new java.util.concurrent.ConcurrentHashMap<>();
+    runtime.addEventListener(
+        event -> {
+          if (event.type() == com.macstab.chaos.jvm.api.ChaosEvent.Type.STARTED) {
+            started.merge(event.scenarioId(), 1, Integer::sum);
+          }
+        });
+    final String planA = PLAN.replace("mgmt-delay", "a-delay");
+    final String planB = PLAN.replace("mgmt-delay", "b-delay");
+
+    final java.util.concurrent.CompletableFuture<ChaosManagement.ActivationResponse> a =
+        java.util.concurrent.CompletableFuture.supplyAsync(() -> management.activate(planA));
+    assertThat(inActivation.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+    final ChaosManagement.ActivationResponse b = management.activate(planB);
+    release.countDown();
+    final ChaosManagement.ActivationResponse answeredA =
+        a.get(5, java.util.concurrent.TimeUnit.SECONDS);
+
+    assertThat(answeredA.status()).isEqualTo("activated");
+    assertThat(b.status()).isEqualTo("conflict");
+    assertThat(started).as("the refused plan injected nothing").doesNotContainKey("b-delay");
+    assertThat(state("a-delay")).isEqualTo(ChaosDiagnostics.ScenarioState.ACTIVE);
+  }
+
+  @Test
   @DisplayName("a plan whose hooks cannot be woven is rejected; the detail goes to the log")
   void weavingFailureRejected() {
     runtime.setHookDemand(
@@ -210,7 +253,7 @@ class ChaosManagementTest {
   }
 
   @Test
-  @DisplayName("of two activations of one name racing, the second to claim it is refused")
+  @DisplayName("an activation of a name another activation holds is refused without activating")
   void racingActivationsOfOneName() {
     final java.util.concurrent.atomic.AtomicInteger closed =
         new java.util.concurrent.atomic.AtomicInteger();
@@ -220,8 +263,8 @@ class ChaosManagementTest {
         new java.util.concurrent.atomic.AtomicReference<>();
     final java.util.concurrent.atomic.AtomicInteger activations =
         new java.util.concurrent.atomic.AtomicInteger();
-    // The first activation passes the name check; while it runs, a second one of the same name
-    // completes and claims the name first.
+    // While the first activation runs, a second one of the same name arrives: the first holds the
+    // name, so the second is refused before it activates anything.
     final ChaosManagement racing =
         new ChaosManagement(
             scriptedControlPlane(
@@ -235,9 +278,10 @@ class ChaosManagementTest {
 
     final ChaosManagement.ActivationResponse outer = racing.activate(PLAN);
 
-    assertThat(inner.get().status()).isEqualTo("activated");
-    assertThat(outer.status()).isEqualTo("conflict");
-    assertThat(closed).as("the refused plan is stopped again, the running one kept").hasValue(1);
+    assertThat(inner.get().status()).isEqualTo("conflict");
+    assertThat(outer.status()).isEqualTo("activated");
+    assertThat(activations).as("the refused plan was never activated").hasValue(1);
+    assertThat(closed).as("nothing was activated only to be stopped again").hasValue(0);
   }
 
   @Test
