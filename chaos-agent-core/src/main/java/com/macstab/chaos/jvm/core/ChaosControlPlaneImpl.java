@@ -549,12 +549,15 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
       throw activationFailure;
     } catch (final RuntimeException runtimeException) {
       unregisterAndDestroyQuietly(controller, registeredInRegistry);
-      recordFailure(
-          scenario.id(),
-          weavingFailed
-              ? ChaosDiagnostics.FailureCategory.INSTRUMENTATION_FAILURE
-              : ChaosDiagnostics.FailureCategory.INVALID_CONFIGURATION,
-          runtimeException.getMessage());
+      // A refusal because the plane closed is no failure of the scenario, and the bus is closing.
+      if (!closed.get()) {
+        recordFailure(
+            scenario.id(),
+            weavingFailed
+                ? ChaosDiagnostics.FailureCategory.INSTRUMENTATION_FAILURE
+                : ChaosDiagnostics.FailureCategory.INVALID_CONFIGURATION,
+            runtimeException.getMessage());
+      }
       throw runtimeException;
     }
   }

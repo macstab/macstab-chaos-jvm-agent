@@ -586,6 +586,7 @@ class ControlPlaneLifecycleTest {
           .hasMessage("chaos control plane is closed");
       assertThat(runtime.diagnostics().snapshot().scenarios()).isEmpty();
       assertThat(submissionRejected()).as("no fault is injected after close").isFalse();
+      assertThat(failures()).as("closing is not a failure of the scenario").isEmpty();
     }
 
     @Test
@@ -603,6 +604,7 @@ class ControlPlaneLifecycleTest {
           .hasMessage("chaos control plane is closed");
       assertThat(runtime.diagnostics().snapshot().scenarios()).isEmpty();
       assertThat(submissionRejected()).as("no fault is injected after close").isFalse();
+      assertThat(failures()).as("closing is not a failure of the scenario").isEmpty();
     }
 
     @Test
