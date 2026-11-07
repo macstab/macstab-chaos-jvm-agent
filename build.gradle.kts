@@ -749,11 +749,6 @@ subprojects {
                         extension = "json"
                         builtBy(bom)
                     }
-                    artifact(bom.flatMap { it.xmlOutput }) {
-                        classifier = "cyclonedx"
-                        extension = "xml"
-                        builtBy(bom)
-                    }
                 }
             }
         }
