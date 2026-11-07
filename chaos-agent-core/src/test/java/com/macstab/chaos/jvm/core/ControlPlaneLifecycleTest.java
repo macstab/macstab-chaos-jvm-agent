@@ -589,6 +589,23 @@ class ControlPlaneLifecycleTest {
     }
 
     @Test
+    @DisplayName("an activation whose close() came after registering is refused, not a dead handle")
+    void activationClosedAfterRegistering() {
+      runtime.addEventListener(
+          event -> {
+            if (event.type() == ChaosEvent.Type.REGISTERED && "late".equals(event.scenarioId())) {
+              runtime.close();
+            }
+          });
+
+      assertThatThrownBy(() -> runtime.activate(submitScenario("late", ActivationPolicy.always())))
+          .isInstanceOf(IllegalStateException.class)
+          .hasMessage("chaos control plane is closed");
+      assertThat(runtime.diagnostics().snapshot().scenarios()).isEmpty();
+      assertThat(submissionRejected()).as("no fault is injected after close").isFalse();
+    }
+
+    @Test
     @DisplayName("a session activation overtaken by close() is refused and leaves nothing running")
     void sessionActivationOvertakenByClose() throws Exception {
       final ChaosSession session = runtime.openSession("racing");

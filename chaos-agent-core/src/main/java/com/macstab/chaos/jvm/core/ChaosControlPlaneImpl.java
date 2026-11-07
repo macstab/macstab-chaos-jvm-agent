@@ -522,6 +522,9 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
       if (scenario.activationPolicy().startMode() == ActivationPolicy.StartMode.AUTOMATIC) {
         handle.start();
       }
+      // A close() after the registration above has stopped the controller already: refuse,
+      // rather than hand out a handle of a scenario that never runs.
+      ensureOpen();
       return handle;
     } catch (final ChaosUnsupportedFeatureException unsupported) {
       unregisterAndDestroyQuietly(controller, registeredInRegistry);
