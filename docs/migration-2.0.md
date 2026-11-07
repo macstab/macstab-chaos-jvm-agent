@@ -172,9 +172,11 @@ Before (1.x): `NamePattern.glob("a*b")` does not match `"a\nb"`. Now it does; `N
 
 The Spring actuator endpoint answers like the Micronaut and Quarkus endpoints: a failed activation is 400 `invalid`, 409 `conflict` or 422 `rejected` instead of 200 with `status = "error"`; a stop is 404 `not-found` or 409 `unmanaged`. Clients that read `status = "error"` from a 200 must check the HTTP status (or the `invalid`, `conflict`, `rejected` outcomes). The startup plan (`macstab.chaos.config-file`) is no longer stoppable through the endpoint, which stops only the plans activated through it.
 
-## 13. `reject` on worker and fork-join runs is refused
+## 13. `reject` on worker and fork-join runs, and on queue take and poll, is refused
 
 A `RejectEffect` on `EXECUTOR_WORKER_RUN` or `FORK_JOIN_TASK_RUN` fails activation with `ChaosValidationException`. In 1.x it threw on the pool worker before the pool recorded the task's outcome: the worker died and the task's future never completed (`Future.get()` and `CompletableFuture.get()` hung). Reject `EXECUTOR_SUBMIT` to fail the submission, or delay or gate the run.
+
+The same holds for `QUEUE_TAKE` and `QUEUE_POLL`: a `RejectEffect` on them fails activation. The JDK's `take()` and `poll()` fail only by interruption; in 1.x a thread pool's worker taking its next task died on the injected exception and was replaced at once, thousands of times a second, while no task ran. Delay or gate them, suppress `QUEUE_POLL`, or reject `QUEUE_PUT` / `QUEUE_OFFER` on the producer side.
 
 ---
 

@@ -1624,6 +1624,19 @@ class AgentEndToEndTest {
     }
 
     @Test
+    @DisplayName(
+        "a reject on a pool's take or poll is refused; a delay slows the worker, not kills it")
+    void poolWorkQueueReject() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.runWithoutPlan(DefectProbeMain.class, "pool-queue-reject");
+      assertThat(result.value("queue_take.reject")).isEqualTo("ChaosValidationException");
+      assertThat(result.value("queue_poll.reject")).isEqualTo("ChaosValidationException");
+      assertThat(result.value("delay.ran")).isEqualTo("true");
+      assertThat(result.longValue("delay.threadsCreated")).isEqualTo(1L);
+      assertThat(result.value("delay.applied")).isEqualTo("true");
+    }
+
+    @Test
     @DisplayName("redirect sends a socket's and a channel's connect to another endpoint")
     void redirectsConnects() throws Exception {
       final ChildJvmProbe.ProbeResult result =

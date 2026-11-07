@@ -649,6 +649,16 @@ final class CompatibilityValidator {
               + " cannot fail the task there (its future never completes and the worker dies);"
               + " delay or gate the run, or reject EXECUTOR_SUBMIT");
     }
+    if (effect instanceof ChaosEffect.RejectEffect
+        && (operations.contains(OperationType.QUEUE_TAKE)
+            || operations.contains(OperationType.QUEUE_POLL))) {
+      // take() and poll() fail only by interruption: no consumer handles another exception, and a
+      // thread pool's worker dies on it and is replaced, over and over.
+      throw new ChaosValidationException(
+          "RejectEffect is not supported for QUEUE_TAKE or QUEUE_POLL: the JDK's take() and poll()"
+              + " do not fail that way (a pool worker dies on it); delay or gate them, suppress"
+              + " QUEUE_POLL, or reject QUEUE_PUT or QUEUE_OFFER");
+    }
     if (effect instanceof ChaosEffect.ClockSkewEffect) {
       for (final OperationType operation : operations) {
         if (!CLOCK_READ_OPS.contains(operation)) {

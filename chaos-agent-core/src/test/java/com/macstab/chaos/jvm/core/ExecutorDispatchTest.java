@@ -240,6 +240,27 @@ class ExecutorDispatchTest {
     }
 
     @Test
+    @DisplayName("a reject on take or poll is refused: the JDK's take() and poll() do not fail so")
+    void takeAndPollRejectRefused() throws Throwable {
+      for (final OperationType operation :
+          Set.of(OperationType.QUEUE_TAKE, OperationType.QUEUE_POLL)) {
+        assertThatThrownBy(
+                () ->
+                    activate(
+                        "reject-" + operation, queue(operation, NamePattern.any()), reject("no")))
+            .isInstanceOf(com.macstab.chaos.jvm.api.ChaosValidationException.class)
+            .hasMessageContaining(operation.name());
+      }
+      activate(
+          "slow-take",
+          queue(OperationType.QUEUE_TAKE, NamePattern.any()),
+          ChaosEffect.delay(Duration.ofMillis(1)));
+      runtime.beforeQueueOperation("QUEUE_TAKE", new ArrayBlockingQueue<>(1));
+      assertThat(runtime.diagnostics().scenario("slow-take").orElseThrow().appliedCount())
+          .isEqualTo(1L);
+    }
+
+    @Test
     @DisplayName("a queue-class pattern matches the queue; an unknown queue is \"unknown\"")
     void queueClassIsTheTarget() throws Throwable {
       activate(
@@ -247,12 +268,12 @@ class ExecutorDispatchTest {
           queue(OperationType.QUEUE_PUT, NamePattern.exact(OrdersQueue.class.getName())),
           ChaosEffect.reject("orders full"));
       activate(
-          "unknown", queue(OperationType.QUEUE_TAKE, NamePattern.exact("unknown")), reject("?"));
+          "unknown", queue(OperationType.QUEUE_PUT, NamePattern.exact("unknown")), reject("?"));
 
       assertThatThrownBy(() -> runtime.beforeQueueOperation("QUEUE_PUT", new OrdersQueue()))
           .hasMessageContaining("orders full");
       runtime.beforeQueueOperation("QUEUE_PUT", new ArrayBlockingQueue<>(1));
-      assertThatThrownBy(() -> runtime.beforeQueueOperation("QUEUE_TAKE", null))
+      assertThatThrownBy(() -> runtime.beforeQueueOperation("QUEUE_PUT", null))
           .hasMessageContaining("?");
     }
 

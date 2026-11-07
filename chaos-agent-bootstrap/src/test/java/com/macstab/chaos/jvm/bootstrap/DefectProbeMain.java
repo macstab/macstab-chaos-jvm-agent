@@ -114,6 +114,7 @@ public final class DefectProbeMain {
       case "close-shutdown-wait" -> closeShutdownAndWait();
       case "redirect" -> redirect();
       case "udp-dns" -> udpAndReverseDns();
+      case "pool-queue-reject" -> poolQueueReject();
       case "file-map-transfer" -> fileMapAndTransfer();
       case "socket-bind" -> socketBind();
       case "thread-eagain" -> threadEagain();
@@ -1628,6 +1629,67 @@ public final class DefectProbeMain {
       java.nio.file.Files.deleteIfExists(path);
       java.nio.file.Files.deleteIfExists(dir);
     }
+  }
+
+  /** The work queue of the pools in these probes, so a selector matches only it. */
+  static final class PoolWorkQueue extends java.util.concurrent.LinkedBlockingQueue<Runnable> {
+    private static final long serialVersionUID = 1L;
+  }
+
+  /**
+   * A thread pool's own work queue: a reject on QUEUE_TAKE or QUEUE_POLL is refused at activation;
+   * a delay on QUEUE_TAKE applies to the worker's take without killing it, and the task runs.
+   */
+  private static void poolQueueReject() throws Exception {
+    final ChaosControlPlane plane = ChaosPlatform.current();
+    for (final OperationType operation :
+        java.util.List.of(OperationType.QUEUE_TAKE, OperationType.QUEUE_POLL)) {
+      final String name = operation.name().toLowerCase(java.util.Locale.ROOT);
+      try {
+        plane.activate(
+            ChaosScenario.builder("pool-reject-" + name)
+                .selector(
+                    new ChaosSelector.QueueSelector(
+                        Set.of(operation), NamePattern.exact(PoolWorkQueue.class.getName())))
+                .effect(ChaosEffect.reject("queue refused"))
+                .build());
+        System.out.println(name + ".reject=activated");
+      } catch (final RuntimeException refused) {
+        System.out.println(name + ".reject=" + refused.getClass().getSimpleName());
+      }
+    }
+    final ChaosActivationHandle delay =
+        plane.activate(
+            ChaosScenario.builder("pool-slow-take")
+                .selector(
+                    new ChaosSelector.QueueSelector(
+                        Set.of(OperationType.QUEUE_TAKE),
+                        NamePattern.exact(PoolWorkQueue.class.getName())))
+                .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+                .build());
+    final java.util.concurrent.atomic.AtomicInteger created =
+        new java.util.concurrent.atomic.AtomicInteger();
+    final java.util.concurrent.ThreadPoolExecutor pool =
+        new java.util.concurrent.ThreadPoolExecutor(
+            1,
+            1,
+            0,
+            TimeUnit.MILLISECONDS,
+            new PoolWorkQueue(),
+            task -> {
+              created.incrementAndGet();
+              final Thread thread = new Thread(task);
+              thread.setDaemon(true);
+              return thread;
+            });
+    final CountDownLatch ran = new CountDownLatch(2);
+    pool.execute(ran::countDown);
+    pool.execute(ran::countDown);
+    System.out.println("delay.ran=" + ran.await(2, TimeUnit.SECONDS));
+    System.out.println("delay.threadsCreated=" + created.get());
+    System.out.println("delay.applied=" + (delay.appliedCount() > 0));
+    delay.close();
+    pool.shutdownNow();
   }
 
   /** Prints each handle's applied count, then closes it. */

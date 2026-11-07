@@ -19,6 +19,7 @@ Migration steps for each change: [docs/migration-2.0.md](docs/migration-2.0.md).
 * **api:** a GLOB is matched by code points: `*` matches any sequence, line terminators included (in 1.x it stopped at a line break while `?` did not), and `?` exactly one character, a surrogate pair counting as one. Globs no longer compile a regex; they match without allocating. Use a REGEX where a pattern must not cross a line break.
 * **spring:** `/actuator/chaos` answers with the outcomes and HTTP statuses of the Micronaut and Quarkus endpoints (400 `invalid`, 409 `conflict`, 422 `rejected`, 404 `not-found`, 409 `unmanaged`) instead of 200 with `status = "error"`, and stops only the plans activated through it, not the startup plan.
 * **core:** a `reject` on `EXECUTOR_WORKER_RUN` or `FORK_JOIN_TASK_RUN` is refused at activation. It threw on the pool worker before the pool recorded the task: the worker died and the task's future never completed.
+* **core:** a `reject` on `QUEUE_TAKE` or `QUEUE_POLL` is refused at activation. `take()` and `poll()` fail only by interruption, and a thread pool's worker taking its next task died on the thrown exception and was replaced, over and over: thousands of threads a second, and no task ran. Delay or gate them, suppress `QUEUE_POLL`, or reject `QUEUE_PUT` / `QUEUE_OFFER`.
 * **api:** the legacy duplicate package tree `com.macstab.chaos.*` (everything outside `com.macstab.chaos.jvm.*`) was removed. Use the `com.macstab.chaos.jvm.*` types.
 
 

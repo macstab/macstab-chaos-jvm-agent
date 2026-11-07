@@ -856,6 +856,8 @@ All selectors use `"type"` as the JSON discriminator.
 | `operations`        | Set\<OperationType\> | required | Subset of valid operations                      |
 | `queueClassPattern` | NamePattern          | `ANY`    | Matched against queue implementation class name |
 
+A thread pool's own work queue is a `BlockingQueue` too: its workers take their next task with `take()` or `poll(keepAlive)`, so a queue scenario reaches them unless `queueClassPattern` excludes the pool's queue. `reject` is refused on `QUEUE_TAKE` and `QUEUE_POLL`, which the JDK fails only by interruption; on the producer side, `QUEUE_PUT` and `QUEUE_OFFER` accept it.
+
 ---
 
 ### `async` — AsyncSelector
@@ -1271,7 +1273,7 @@ Each interceptor effect applies to the operations below, with any selector that 
 |--------|--------------------------|
 | `delay` | every operation except `SYSTEM_CLOCK_MILLIS`, `SYSTEM_CLOCK_NANOS`, `INSTANT_NOW`, `CLOCK_READ`, `LOCAL_DATE_TIME_NOW`, `ZONED_DATE_TIME_NOW`, `DATE_NEW` |
 | `gate` | every operation except `SYSTEM_CLOCK_MILLIS`, `SYSTEM_CLOCK_NANOS`, `INSTANT_NOW`, `CLOCK_READ`, `LOCAL_DATE_TIME_NOW`, `ZONED_DATE_TIME_NOW`, `DATE_NEW` |
-| `reject` | every operation except `SYSTEM_CLOCK_MILLIS`, `SYSTEM_CLOCK_NANOS`, `INSTANT_NOW`, `CLOCK_READ`, `LOCAL_DATE_TIME_NOW`, `ZONED_DATE_TIME_NOW`, `DATE_NEW`, `NETTY_CHANNEL_READ` |
+| `reject` | every operation except `SYSTEM_CLOCK_MILLIS`, `SYSTEM_CLOCK_NANOS`, `INSTANT_NOW`, `CLOCK_READ`, `LOCAL_DATE_TIME_NOW`, `ZONED_DATE_TIME_NOW`, `DATE_NEW`, `NETTY_CHANNEL_READ`, `EXECUTOR_WORKER_RUN`, `FORK_JOIN_TASK_RUN`, `QUEUE_TAKE`, `QUEUE_POLL` |
 | `errno` | `THREAD_START`, `NIO_CHANNEL_READ`, `NIO_CHANNEL_WRITE`, `NIO_CHANNEL_CONNECT`, `NIO_CHANNEL_ACCEPT`, `SOCKET_CONNECT`, `SOCKET_ACCEPT`, `SOCKET_READ`, `SOCKET_WRITE`, `SOCKET_CLOSE`, `SOCKET_BIND`, `SOCKET_SHUTDOWN`, `DATAGRAM_SEND`, `DATAGRAM_RECEIVE`, `FILE_IO_READ`, `FILE_IO_WRITE`, `FILE_IO_SYNC`, `FILE_IO_TRUNCATE`, `FILE_IO_DELETE`, `FILE_IO_MOVE`, `FILE_IO_OPEN`, `FILE_IO_MAP`, `FILE_IO_CLOSE`, `FILE_IO_MOVE_TARGET`, `PROCESS_START` |
 | `trickle` | `SOCKET_READ` |
 | `corruptRead` | `SOCKET_READ`, `DATAGRAM_RECEIVE`, `FILE_IO_READ` |
