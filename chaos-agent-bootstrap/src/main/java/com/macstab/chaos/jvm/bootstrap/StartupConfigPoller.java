@@ -298,8 +298,10 @@ public final class StartupConfigPoller implements AutoCloseable {
       }
       applyObservability(newPlan);
     } catch (final RuntimeException failure) {
-      // Remember content that can never apply (malformed, invalid) so it is not parsed again;
-      // a conflict with a scenario activated elsewhere or a weaving failure is retried.
+      // Remember content that can never apply (malformed, invalid, hooks that cannot be woven) so
+      // it
+      // is not tried again; a conflict with a scenario activated elsewhere may clear and is
+      // retried.
       if (isDeterministic(failure)) {
         failedDigest = digest;
       }
