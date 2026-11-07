@@ -132,7 +132,14 @@ class ConfigReloadTortureTest {
 
     assertThat(violations).isEmpty();
     assertThat(activeIds()).containsExactlyInAnyOrderElementsOf(ids(lastValid));
-    final String status = Files.readString(tempDir.resolve(ChaosReports.STATUS_FILE));
+    // The poller writes the status after the scenarios are active: wait for it.
+    final Path statusFile = tempDir.resolve(ChaosReports.STATUS_FILE);
+    final long statusDeadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
+    String status = Files.readString(statusFile);
+    while (!status.contains("state=ok") && System.nanoTime() < statusDeadline) {
+      Thread.sleep(POLL_MILLIS);
+      status = Files.readString(statusFile);
+    }
     assertThat(status).contains("state=ok").contains("scenarios=3");
   }
 
