@@ -119,7 +119,7 @@ public interface ChaosControlPlane {
 }
 ```
 
-**`activate(ChaosScenario)`**: Requires `scenario.scope() == JVM`. Weaves the hook groups serving the selector's operations if they are not woven yet (the first activation of a group pays its one-time retransformation cost; a weaving failure throws `IllegalStateException` and is recorded as `INSTRUMENTATION_FAILURE`), registers the scenario with `ScenarioRegistry`, starts it if `startMode == AUTOMATIC`, returns a handle. Throws `ChaosActivationException` when a scenario with the same id is still `REGISTERED` or `ACTIVE`, or on incompatible configuration. A previous scenario with the same id that is `STOPPED` or `INACTIVE` is replaced, so re-activating an id after `stop()` or `close()` works.
+**`activate(ChaosScenario)`**: Requires `scenario.scope() == JVM`. Weaves the hook groups serving the selector's operations if they are not woven yet (the first activation of a group pays its one-time retransformation cost; a weaving failure throws `ChaosInstrumentationException` and is recorded as `INSTRUMENTATION_FAILURE`), registers the scenario with `ScenarioRegistry`, starts it if `startMode == AUTOMATIC`, returns a handle. Throws `ChaosActivationException` when a scenario with the same id is still `REGISTERED` or `ACTIVE`, or on incompatible configuration. A previous scenario with the same id that is `STOPPED` or `INACTIVE` is replaced, so re-activating an id after `stop()` or `close()` works.
 
 **`activate(ChaosPlan)`**: Rejects any session-scoped scenario in the plan with `ChaosActivationException`. Activation is atomic: if any scenario fails, the ones already registered are removed again before the exception propagates.
 
@@ -695,6 +695,7 @@ record ChaosEvent(
 |-----------|--------|-------------|
 | `ChaosActivationException` | `chaos-agent-api` | Scenario activation fails: scope mismatch, invalid configuration |
 | `ChaosActivationConflictException` | `chaos-agent-api` | A `ChaosActivationException`: a scenario with the same id is already active (a retry may succeed once it stops) |
+| `ChaosInstrumentationException` | `chaos-agent-api` | A `ChaosActivationException`: the hooks the scenario needs cannot be woven into the running JVM; the cause is the weaving failure, and the same scenario fails the same way again |
 | `ChaosValidationException` | `chaos-agent-api` | A scenario's effect, selector and policy do not fit together (`CompatibilityValidator`) |
 | `ChaosUnsupportedFeatureException` | `chaos-agent-api` | Scenario requires a JVM feature not available on the running JVM (e.g., JFR absent on a stripped JRE) |
 | `ConfigLoadException` | `chaos-agent-startup-config` | Startup configuration cannot be read or parsed. Not part of the core API surface — only thrown from `StartupConfigLoader.load()` and only visible to code that imports the startup-config module. |

@@ -210,7 +210,7 @@ The `INITIALIZATION` future is the authoritative reference. Once completed succe
 | Config file not found / parse error          | `ConfigLoadException` thrown; agent startup fails; JVM may not start (depends on JVM's `-javaagent` error policy) |
 | ByteBuddy transformation failure for a class | Warning logged; specific class uninstrumented; agent continues                                                    |
 | Bootstrap bridge injection failure           | `IllegalStateException`; agent startup fails                                                                      |
-| Hook group weaving failure                   | `IllegalStateException` from the `activate()` needing the group; recorded as `INSTRUMENTATION_FAILURE`            |
+| Hook group weaving failure                   | `ChaosInstrumentationException` from the `activate()` needing the group; recorded as `INSTRUMENTATION_FAILURE`    |
 | MBean registration failure                   | Warning logged; diagnostics accessible only via API; agent continues                                              |
 | `installLocally()` self-attach failure       | `IllegalStateException` propagated to `ChaosTestKit.install()` caller                                             |
 
