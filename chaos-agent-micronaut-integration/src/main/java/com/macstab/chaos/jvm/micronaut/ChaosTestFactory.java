@@ -2,12 +2,15 @@ package com.macstab.chaos.jvm.micronaut;
 
 import com.macstab.chaos.jvm.api.ChaosControlPlane;
 import com.macstab.chaos.jvm.bootstrap.ChaosPlatform;
+import com.macstab.chaos.jvm.testkit.TrackingChaosControlPlane;
 import io.micronaut.context.annotation.Bean;
 import io.micronaut.context.annotation.Factory;
 import io.micronaut.context.annotation.Replaces;
 import io.micronaut.context.annotation.Requires;
 import io.micronaut.context.env.Environment;
+import jakarta.annotation.PreDestroy;
 import jakarta.inject.Singleton;
+import org.jspecify.annotations.Nullable;
 
 /**
  * In Micronaut's {@code test} environment ({@code @MicronautTest}), replaces the control-plane bean
@@ -19,11 +22,15 @@ import jakarta.inject.Singleton;
 @Requires(env = Environment.TEST)
 class ChaosTestFactory {
 
+  /** The control plane this context's factory created, released when the context closes. */
+  private volatile @Nullable TrackingChaosControlPlane created;
+
   /** Default constructor invoked by Micronaut when the factory bean is instantiated. */
   ChaosTestFactory() {}
 
   /**
-   * Exposes the JVM's control plane, tracked until the last running chaos test class ends.
+   * Exposes the JVM's control plane, tracked until its context closes or the last running chaos
+   * test class ends.
    *
    * @return the tracked control plane
    */
@@ -34,6 +41,18 @@ class ChaosTestFactory {
     // Installs the agent itself: Micronaut can create the bean before ChaosMicronautExtension's
     // beforeAll ran (a PER_CLASS test instance is injected in Micronaut's own beforeAll, an eager
     // bean when the context starts).
-    return ChaosMicronautExtension.contextPlane(ChaosPlatform.installLocally());
+    final TrackingChaosControlPlane plane =
+        ChaosMicronautExtension.contextPlane(ChaosPlatform.installLocally());
+    created = plane;
+    return plane;
+  }
+
+  /** Releases the context's control plane when the context closes: what it activated stops. */
+  @PreDestroy
+  void release() {
+    final TrackingChaosControlPlane plane = created;
+    if (plane != null) {
+      ChaosMicronautExtension.releaseContextPlane(plane);
+    }
   }
 }

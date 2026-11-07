@@ -54,6 +54,72 @@ class ChaosTestAutoConfigurationTest {
   }
 
   @Test
+  @DisplayName("closing the context releases its control plane and stops what it activated")
+  void closingTheContextReleasesItsPlane() {
+    final java.util.concurrent.atomic.AtomicReference<ChaosControlPlane> plane =
+        new java.util.concurrent.atomic.AtomicReference<>();
+    runner
+        .withPropertyValues(ChaosTestAutoConfiguration.TEST_ENABLED_PROPERTY + "=true")
+        .run(
+            context -> {
+              plane.set(context.getBean(ChaosControlPlane.class));
+              plane
+                  .get()
+                  .activate(
+                      com.macstab.chaos.jvm.api.ChaosScenario.builder("context-scoped")
+                          .selector(
+                              com.macstab.chaos.jvm.api.ChaosSelector.executor(
+                                  java.util.Set.of(
+                                      com.macstab.chaos.jvm.api.OperationType.EXECUTOR_SUBMIT)))
+                          .effect(
+                              com.macstab.chaos.jvm.api.ChaosEffect.delay(
+                                  java.time.Duration.ofMillis(1)))
+                          .build());
+              assertThat(ChaosAgentExtension.CONTEXT_PLANES)
+                  .contains((com.macstab.chaos.jvm.testkit.TrackingChaosControlPlane) plane.get());
+            });
+
+    assertThat(ChaosAgentExtension.CONTEXT_PLANES)
+        .doesNotContain((com.macstab.chaos.jvm.testkit.TrackingChaosControlPlane) plane.get());
+    assertThat(ChaosPlatform.installLocally().diagnostics().scenario("context-scoped")).isEmpty();
+  }
+
+  @Test
+  @DisplayName("an application's own control plane bean is left alone when the context closes")
+  void ownControlPlaneIsNotReleased() {
+    final ChaosControlPlane jvm = ChaosPlatform.installLocally();
+    // The application's bean: the JVM plane behind a close() that does nothing, so closing the
+    // context (Spring closes AutoCloseable beans) does not close the JVM-wide runtime.
+    final ChaosControlPlane own =
+        (ChaosControlPlane)
+            java.lang.reflect.Proxy.newProxyInstance(
+                ChaosControlPlane.class.getClassLoader(),
+                new Class<?>[] {ChaosControlPlane.class},
+                (proxy, method, args) -> {
+                  if (method.getName().equals("close")) {
+                    return null;
+                  }
+                  try {
+                    return method.invoke(jvm, args);
+                  } catch (final java.lang.reflect.InvocationTargetException failure) {
+                    throw failure.getCause();
+                  }
+                });
+    final int registered = ChaosAgentExtension.CONTEXT_PLANES.size();
+
+    runner
+        .withBean(ChaosControlPlane.class, () -> own)
+        .withPropertyValues(ChaosTestAutoConfiguration.TEST_ENABLED_PROPERTY + "=true")
+        .run(
+            context -> {
+              assertThat(context).hasNotFailed();
+              assertThat(context.getBean(ChaosControlPlane.class)).isSameAs(own);
+            });
+
+    assertThat(ChaosAgentExtension.CONTEXT_PLANES).hasSize(registered);
+  }
+
+  @Test
   @DisplayName("in any other context there is no control plane bean")
   void absentOtherwise() {
     runner.run(context -> assertThat(context).doesNotHaveBean(ChaosControlPlane.class));

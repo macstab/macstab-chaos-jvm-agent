@@ -3,6 +3,8 @@ package com.macstab.chaos.jvm.spring.boot3.test;
 import com.macstab.chaos.jvm.api.ChaosControlPlane;
 import com.macstab.chaos.jvm.bootstrap.ChaosPlatform;
 import com.macstab.chaos.jvm.spring.boot.common.ChaosAutoConfiguration;
+import com.macstab.chaos.jvm.testkit.TrackingChaosControlPlane;
+import org.springframework.beans.factory.DisposableBean;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -53,5 +55,21 @@ public class ChaosTestAutoConfiguration {
     // ChaosAgentInitializer.initialize() has already installed the agent and set the guard
     // property; installLocally() returns the same singleton without a second attach.
     return ChaosAgentExtension.contextPlane(ChaosPlatform.installLocally());
+  }
+
+  /**
+   * Releases the context's control plane when the context closes: what it activated stops.
+   *
+   * @param chaosControlPlane the context's control plane
+   * @return the release, run by Spring when it destroys the context
+   */
+  @Bean
+  @ConditionalOnProperty(name = TEST_ENABLED_PROPERTY, havingValue = "true")
+  DisposableBean chaosControlPlaneRelease(final ChaosControlPlane chaosControlPlane) {
+    return () -> {
+      if (chaosControlPlane instanceof TrackingChaosControlPlane tracked) {
+        ChaosAgentExtension.releaseContextPlane(tracked);
+      }
+    };
   }
 }

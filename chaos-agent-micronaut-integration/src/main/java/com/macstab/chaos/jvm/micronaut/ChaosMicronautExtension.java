@@ -70,8 +70,7 @@ public final class ChaosMicronautExtension
    * context may serve several test classes, so what is activated through an injected bean is
    * released when the last running chaos test class ends.
    */
-  private static final Set<TrackingChaosControlPlane> CONTEXT_PLANES =
-      ConcurrentHashMap.newKeySet();
+  static final Set<TrackingChaosControlPlane> CONTEXT_PLANES = ConcurrentHashMap.newKeySet();
 
   private static final Object RUNNING_LOCK = new Object();
 
@@ -82,8 +81,8 @@ public final class ChaosMicronautExtension
   public ChaosMicronautExtension() {}
 
   /**
-   * Returns a tracking control plane for a test context's bean, released when the last running
-   * chaos test class ends.
+   * Returns a tracking control plane for a test context's bean, released when its context closes or
+   * when the last running chaos test class ends.
    *
    * @param delegate the JVM-wide control plane
    * @return the tracking control plane
@@ -92,6 +91,17 @@ public final class ChaosMicronautExtension
     final TrackingChaosControlPlane plane = new TrackingChaosControlPlane(delegate);
     CONTEXT_PLANES.add(plane);
     return plane;
+  }
+
+  /**
+   * Releases a context's control plane when its context closes: what it activated stops, and it is
+   * no longer released with the others.
+   *
+   * @param plane the plane {@link #contextPlane} returned for the closing context
+   */
+  static void releaseContextPlane(final TrackingChaosControlPlane plane) {
+    CONTEXT_PLANES.remove(plane);
+    plane.stopTracked();
   }
 
   @Override

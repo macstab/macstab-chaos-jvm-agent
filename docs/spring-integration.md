@@ -100,7 +100,7 @@ This is a deliberate design choice. JUnit's `ExtensionContext.Namespace` creates
 
 `afterAll` first stops the class's own class-level `@WithChaos` scenarios. A nested class stops nothing else: the session and the tracker belong to its outer class. The outermost class then closes the session, which stops every session-scoped scenario, and calls `tracker.stopTracked()` in a `finally` block, which stops the JVM-scoped scenarios the class activated through the injected control plane. JVM-scoped scenarios not created through it are unaffected.
 
-Scenarios activated through an injected `ChaosControlPlane` bean are released when the last running chaos test class ends. Spring caches an application context across test classes, so one bean serves every class that uses the context. Releasing at the end of one class would stop what another class, nested or running in parallel, still depends on.
+Scenarios activated through an injected `ChaosControlPlane` bean are released when the last running chaos test class ends. Spring caches an application context across test classes, so one bean serves every class that uses the context. Releasing at the end of one class would stop what another class, nested or running in parallel, still depends on. They are also released when their context closes. In a parallel run, what classes sharing one cached context activate through its bean stays active until the last of them ends: they share the bean, so its activations cannot be told apart per class.
 
 #### `ParameterResolver` — `ChaosSession` and `ChaosControlPlane` injection
 
@@ -178,7 +178,7 @@ public class ChaosTestAutoConfiguration {
 }
 ```
 
-The bean is a tracking control plane: what a test activates through it is released when the last running chaos test class ends.
+The bean is a tracking control plane: what a test activates through it is released when its context closes (by default each `@MicronautTest` class has its own) or when the last running chaos test class ends.
 
 `before = ChaosAutoConfiguration.class` orders it ahead of the application starter's configuration, which declares a `chaosControlPlane` bean too: with `macstab.chaos.enabled=true` in a test, the tracked plane is the one registered, also for the actuator endpoint and the startup plan of that context.
 
