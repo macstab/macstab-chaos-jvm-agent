@@ -99,7 +99,7 @@ class ChaosReportsTest {
   void errorStatusText() throws Exception {
     final ChaosReports reports = create("reports=on;reportsDir=" + tempDir, Map.of());
 
-    reports.statusError(0, "x".repeat(300), 3, 7, null);
+    reports.statusError("x".repeat(300), 3, 7, null);
     final Map<String, String> missingReason = status(tempDir);
     assertThat(missingReason)
         .containsEntry("state", "error")
@@ -108,7 +108,7 @@ class ChaosReportsTest {
         .containsEntry("reason", "");
     assertThat(missingReason.get("source")).isEqualTo("x".repeat(200));
 
-    reports.statusError(0, "inline", 1, 1, "bad\nreason\tbelow");
+    reports.statusError("inline", 1, 1, "bad\nreason\tbelow");
     assertThat(status(tempDir)).containsEntry("reason", "bad reason below");
   }
 

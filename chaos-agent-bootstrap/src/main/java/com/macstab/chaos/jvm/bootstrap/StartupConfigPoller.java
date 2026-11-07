@@ -524,24 +524,18 @@ public final class StartupConfigPoller implements AutoCloseable {
   }
 
   private void reportReloadFailure(final Throwable failure) {
-    // A rejected reload keeps the previous plan running.
-    final int scenarios;
-    synchronized (this) {
-      scenarios = activeScenarios.size();
-    }
     ChaosReports.current()
         .ifPresent(
             reports -> {
               if (failure instanceof ConfigLoadException loadFailure) {
                 reports.statusError(
-                    scenarios,
                     "file:" + configPath,
                     loadFailure.line(),
                     loadFailure.column(),
                     loadFailure.reason());
               } else {
                 reports.statusError(
-                    scenarios, "file:" + configPath, 0, 0, String.valueOf(failure.getMessage()));
+                    "file:" + configPath, 0, 0, String.valueOf(failure.getMessage()));
               }
             });
   }

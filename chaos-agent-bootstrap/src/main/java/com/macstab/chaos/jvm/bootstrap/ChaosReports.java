@@ -26,9 +26,9 @@ import org.jspecify.annotations.Nullable;
  * <ul>
  *   <li><b>Status file</b> {@code <dir>/.chaos-jvm.status}, rewritten after every load of the
  *       startup plan and every reload: {@code state=ok} with {@code scenarios=<n>}, or {@code
- *       state=error} with the scenarios still running, {@code line} and {@code column} (1-based,
- *       {@code 0} without a position) and {@code reason}; then {@code source} and {@code pid}.
- *       Without a startup plan it is not written.
+ *       state=error} with {@code line} and {@code column} (1-based, {@code 0} without a position)
+ *       and {@code reason}; then {@code source} and {@code pid}. Without a startup plan it is not
+ *       written.
  *   <li><b>Hits file</b> {@code <dir>/.chaos-jvm.hits.<pid>}, one line per scenario: {@code
  *       <applied count>\t<scenario id>}. Written after each of the first 64 applications, then at
  *       most every 100 ms while applications happen, and at exit; not at all in a JVM where no
@@ -155,24 +155,16 @@ final class ChaosReports implements AutoCloseable {
   /**
    * Reports a plan that could not be loaded or activated.
    *
-   * @param scenarios the scenarios still running: {@code 0} for a startup plan, the previous plan's
-   *     for a rejected reload
    * @param source where the plan came from
    * @param line 1-based line of the failure; {@code 0} without a position
    * @param column 1-based column of the failure; {@code 0} without a position
    * @param reason what is wrong; {@code null} when the failure carried no message
    */
   void statusError(
-      final int scenarios,
-      final String source,
-      final int line,
-      final int column,
-      final @Nullable String reason) {
+      final String source, final int line, final int column, final @Nullable String reason) {
     writeAtomically(
         STATUS_FILE,
-        "state=error\nscenarios="
-            + scenarios
-            + "\nline="
+        "state=error\nscenarios=0\nline="
             + line
             + "\ncolumn="
             + column
