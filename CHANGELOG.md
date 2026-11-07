@@ -90,6 +90,7 @@ Migration steps for each change: [docs/migration-2.0.md](docs/migration-2.0.md).
 
 ### Bug Fixes
 
+* **bootstrap:** the status file reported `scenarios=0` for a rejected reload although the previous plan kept running. It reports the scenarios still running; a rejected startup plan still reports 0.
 * **core:** an activation whose hooks cannot be woven failed with an undocumented `IllegalStateException`. It fails with the new `ChaosInstrumentationException` (a `ChaosActivationException`, the weaving failure as its cause) and is recorded as `INSTRUMENTATION_FAILURE`; the management endpoints answer it as before with 422 `rejected` and log the detail. A reloaded plan whose method selector cannot be woven restores the running plan once and is not tried again until the file changes.
 * **bootstrap:** a reloaded plan whose hooks could not be woven stopped and restarted the running scenarios on every poll (resetting their counters, budgets and windows) and was retried each time. Its hooks are now woven before anything changes, so the running plan stays untouched, and the same content is not tried again until the file changes.
 * **instrumentation:** a suppressed `poll(timeout, unit)` returned `null` at once instead of after its timeout, as a real poll of an empty queue does: a consumer polling in a loop spun, and a thread pool's worker polled about 290,000 times in 300 ms instead of once per keep-alive. It now waits its timeout (an interrupt ends the wait with `InterruptedException`); `poll()` without a timeout still returns `null` at once.

@@ -144,7 +144,7 @@ class ConfigReloadTortureTest {
   }
 
   @Test
-  @DisplayName("a broken plan reports its line and column in the status file")
+  @DisplayName("a broken plan reports its line and column, and the scenarios still running")
   void statusReportsPosition() throws Exception {
     reports =
         ChaosReports.createIfEnabled("reports=on;reportsDir=" + tempDir, Map.of(), runtime)
@@ -164,6 +164,7 @@ class ConfigReloadTortureTest {
     final String status = Files.readString(tempDir.resolve(ChaosReports.STATUS_FILE));
     assertThat(status).contains("state=error").contains("line=3").contains("column=");
     assertThat(activeIds()).containsExactlyInAnyOrderElementsOf(ids("ok"));
+    assertThat(status).as("the previous plan still runs").contains("scenarios=3");
   }
 
   @Test

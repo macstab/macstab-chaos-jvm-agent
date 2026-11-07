@@ -402,6 +402,7 @@ public final class ChaosAgentBootstrap {
         report.ifPresent(
             r ->
                 r.statusError(
+                    0,
                     loadFailure.getSource(),
                     loadFailure.line(),
                     loadFailure.column(),
@@ -416,7 +417,11 @@ public final class ChaosAgentBootstrap {
               report.ifPresent(
                   r ->
                       r.statusError(
-                          loaded.source(), 0, 0, String.valueOf(activationFailure.getMessage())));
+                          0,
+                          loaded.source(),
+                          0,
+                          0,
+                          String.valueOf(activationFailure.getMessage())));
               throw activationFailure;
             }
             report.ifPresent(r -> r.statusOk(loaded.plan().scenarios().size(), loaded.source()));

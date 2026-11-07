@@ -21,7 +21,7 @@ pid=4711
 ```
 
 - `state=ok` with `scenarios=<n>`, `source` and `pid` on success.
-- On a rejected plan: `line` and `column` (1-based; `0` when the failure has no position, e.g. a validation error at activation), `reason` (what is wrong, without input values), `source`, `pid`. The agent refuses to start with a rejected startup plan; a rejected reload keeps the previous plan active.
+- On a rejected plan: `scenarios` (the scenarios still running), `line` and `column` (1-based; `0` when the failure has no position, e.g. a validation error at activation), `reason` (what is wrong, without input values), `source`, `pid`. The agent refuses to start with a rejected startup plan (`scenarios=0`); a rejected reload keeps the previous plan active, and `scenarios` counts it.
 - Without a startup plan the status file is not written.
 
 **Hits file** `<dir>/.chaos-jvm.hits.<pid>`, one line per scenario:
