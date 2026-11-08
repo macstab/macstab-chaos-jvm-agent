@@ -348,7 +348,7 @@ Not diagrammed — tabular representation is clearer. See [Section 13.4 — Comp
 
 **Stressors** are started as background tasks (daemon threads, allocating loops, deadlock sequences) when the scenario activates. They are independent of any specific operation and continue until the activation handle is closed or the policy expires.
 
-**Destructive effects:** `DeadlockEffect` and `ThreadLeakEffect` create non-recoverable JVM state. They require `ActivationPolicy.allowDestructiveEffects = true`. Activation without this flag throws `ChaosActivationException` immediately at registration time, not on first application.
+**Destructive effects:** `DeadlockEffect` and `ThreadLeakEffect` hold deadlocked or leaked threads, with their locks and memory, until the scenario is stopped (leaked non-daemon threads also keep the JVM from exiting until then). They require `ActivationPolicy.allowDestructiveEffects = true`. Activation without this flag throws `ChaosValidationException` immediately at registration time, not on first application.
 
 ---
 
@@ -388,7 +388,7 @@ Not diagrammed — tabular representation is clearer. See [Section 13.4 — Comp
 
 **Thread binding:** the thread that opens the session is bound to it; `session.bind()` binds another thread and returns a `ScopeBinding` whose `close()` removes it. Tasks submitted to executors or schedulers from a bound thread run bound to the same session once the session has a scenario; activate before you submit. Threads that are not bound to any session are only eligible for JVM-scoped scenarios.
 
-**Restriction:** SESSION-scoped scenarios cannot use JVM-global selectors: `ThreadSelector`, `ShutdownSelector`, `ClassLoadingSelector`, `StressSelector`. These selectors target JVM-wide events that cannot be attributed to a single test thread.
+**Restriction:** a SESSION-scoped scenario cannot select `CLASS_LOAD`, `CLASS_DEFINE`, `RESOURCE_LOAD` or `SHUTDOWN_HOOK_REGISTER`: the JVM evaluates them without a session, so the scenario could never apply. A stressor (`StressSelector`) runs beside the whole JVM and must be JVM scoped. Thread starts and sleeps (`ThreadSelector`) and executor shutdowns (`ShutdownSelector` on `EXECUTOR_SHUTDOWN` / `EXECUTOR_AWAIT_TERMINATION`) run on the calling thread and can be session scoped.
 
 ---
 
@@ -534,7 +534,7 @@ Interceptors run on the calling virtual thread if the application uses Project L
 |------------------------------------------------------------|------------------------------------|--------------------------------------------|
 | Selector ↔ effect mismatch                                 | `ChaosValidationException`         | At `activate()` call                       |
 | Duplicate scenario ID                                      | `ChaosActivationException`         | At `activate()` call                       |
-| Destructive effect without `allowDestructiveEffects`       | `ChaosActivationException`         | At `activate()` call                       |
+| Destructive effect without `allowDestructiveEffects`       | `ChaosValidationException`         | At `activate()` call                       |
 | Feature not available (e.g., virtual threads on JDK 17)    | `ChaosUnsupportedFeatureException` | At `activate()` call                       |
 | Invalid `ActivationPolicy` field                           | `IllegalArgumentException`         | At `ActivationPolicy` construction         |
 | Invalid `NamePattern` regex                                | `IllegalArgumentException`         | At `NamePattern` construction              |
@@ -840,7 +840,7 @@ All selectors use `"type"` as the JSON discriminator.
 **Operations:** `EXECUTOR_SUBMIT`, `EXECUTOR_WORKER_RUN`, `EXECUTOR_SHUTDOWN`, `EXECUTOR_AWAIT_TERMINATION`, `FORK_JOIN_TASK_RUN`  
 **Purpose:** Intercept task submission, worker execution, and executor shutdown across `ThreadPoolExecutor`, `ForkJoinPool`, and `ScheduledThreadPoolExecutor`.
 
-`reject` is refused on `EXECUTOR_WORKER_RUN` and `FORK_JOIN_TASK_RUN`: a worker evaluates the run before the pool records the task's outcome, so a throwable there would kill the worker and leave the task's future incomplete. Delay or gate the run, or reject `EXECUTOR_SUBMIT`.
+`reject` is refused on `EXECUTOR_WORKER_RUN` and `FORK_JOIN_TASK_RUN`: a worker evaluates the run before the pool records the task's outcome, so a throwable there would kill the worker and leave the task's future incomplete. Delay or gate the run, or reject `EXECUTOR_SUBMIT`. It is refused on `EXECUTOR_SHUTDOWN` too: `shutdown()` and `shutdownNow()` never fail; delay or gate them.
 
 `FORK_JOIN_TASK_RUN` is not evaluated on the carrier threads of the JDK's virtual-thread scheduler: every start and wake-up of a virtual thread runs a fork-join task there, and a delay would hold every virtual thread of the JVM. A virtual thread with a custom scheduler is still evaluated.
 
@@ -1289,7 +1289,7 @@ Each interceptor effect applies to the operations below, with any selector that 
 |--------|--------------------------|
 | `delay` | every operation except `SYSTEM_CLOCK_MILLIS`, `SYSTEM_CLOCK_NANOS`, `INSTANT_NOW`, `CLOCK_READ`, `LOCAL_DATE_TIME_NOW`, `ZONED_DATE_TIME_NOW`, `DATE_NEW` |
 | `gate` | every operation except `SYSTEM_CLOCK_MILLIS`, `SYSTEM_CLOCK_NANOS`, `INSTANT_NOW`, `CLOCK_READ`, `LOCAL_DATE_TIME_NOW`, `ZONED_DATE_TIME_NOW`, `DATE_NEW` |
-| `reject` | every operation except `SYSTEM_CLOCK_MILLIS`, `SYSTEM_CLOCK_NANOS`, `INSTANT_NOW`, `CLOCK_READ`, `LOCAL_DATE_TIME_NOW`, `ZONED_DATE_TIME_NOW`, `DATE_NEW`, `NETTY_CHANNEL_READ`, `EXECUTOR_WORKER_RUN`, `FORK_JOIN_TASK_RUN`, `QUEUE_TAKE`, `QUEUE_POLL` |
+| `reject` | every operation whose real call can fail, so a reject raises what the call raises: every operation except `SYSTEM_CLOCK_MILLIS`, `SYSTEM_CLOCK_NANOS`, `INSTANT_NOW`, `CLOCK_READ`, `LOCAL_DATE_TIME_NOW`, `ZONED_DATE_TIME_NOW`, `DATE_NEW`, `NETTY_CHANNEL_READ`, `EXECUTOR_WORKER_RUN`, `FORK_JOIN_TASK_RUN`, `EXECUTOR_SHUTDOWN`, `QUEUE_TAKE`, `QUEUE_POLL`, `THREAD_PARK`, `MONITOR_ENTER`, `SYSTEM_GC_REQUEST`, `SYSTEM_EXIT_REQUEST`, `THREAD_LOCAL_GET`, `THREAD_LOCAL_SET`, `ASYNC_CANCEL`, `ZIP_DEFLATE` (no real call of these fails that way; the refusal names what to use instead). `METHOD_ENTER`, `METHOD_EXIT` and `SCHEDULE_TICK` take a reject: user code there may throw any unchecked exception |
 | `errno` | `THREAD_START`, `NIO_CHANNEL_READ`, `NIO_CHANNEL_WRITE`, `NIO_CHANNEL_CONNECT`, `NIO_CHANNEL_ACCEPT`, `SOCKET_CONNECT`, `SOCKET_ACCEPT`, `SOCKET_READ`, `SOCKET_WRITE`, `SOCKET_CLOSE`, `SOCKET_BIND`, `SOCKET_SHUTDOWN`, `DATAGRAM_SEND`, `DATAGRAM_RECEIVE`, `FILE_IO_READ`, `FILE_IO_WRITE`, `FILE_IO_SYNC`, `FILE_IO_TRUNCATE`, `FILE_IO_DELETE`, `FILE_IO_MOVE`, `FILE_IO_OPEN`, `FILE_IO_MAP`, `FILE_IO_CLOSE`, `FILE_IO_MOVE_TARGET`, `PROCESS_START` |
 | `trickle` | `SOCKET_READ` |
 | `corruptRead` | `SOCKET_READ`, `DATAGRAM_RECEIVE`, `FILE_IO_READ` |

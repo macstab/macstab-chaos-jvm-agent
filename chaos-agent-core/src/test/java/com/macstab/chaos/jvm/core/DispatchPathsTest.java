@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.macstab.chaos.jvm.api.ChaosActivationHandle;
 import com.macstab.chaos.jvm.api.ChaosEffect;
 import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.ChaosSelector;
@@ -154,14 +155,19 @@ class DispatchPathsTest {
 
     @Test
     @DisplayName("a monitor entry without a lock is matched as an AQS acquire")
-    void monitorWithoutLock() {
-      activate(
-          "aqs",
-          new ChaosSelector.MonitorSelector(
-              Set.of(OperationType.MONITOR_ENTER),
-              NamePattern.exact("java.util.concurrent.locks.AbstractQueuedSynchronizer")),
-          ChaosEffect.reject("contended"));
-      assertThatThrownBy(() -> runtime.beforeMonitorEnter(null)).hasMessage("contended");
+    void monitorWithoutLock() throws Throwable {
+      final ChaosActivationHandle handle =
+          runtime.activate(
+              ChaosScenario.builder("aqs")
+                  .selector(
+                      new ChaosSelector.MonitorSelector(
+                          Set.of(OperationType.MONITOR_ENTER),
+                          NamePattern.exact(
+                              "java.util.concurrent.locks.AbstractQueuedSynchronizer")))
+                  .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+                  .build());
+      runtime.beforeMonitorEnter(null);
+      assertThat(handle.appliedCount()).isEqualTo(1);
     }
 
     @Test

@@ -1,7 +1,6 @@
 package com.macstab.chaos.jvm.core;
 
 import com.macstab.chaos.jvm.api.ActivationPolicy;
-import com.macstab.chaos.jvm.api.ChaosActivationException;
 import com.macstab.chaos.jvm.api.ChaosEffect;
 import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.ChaosSelector;
@@ -23,11 +22,12 @@ import java.util.Set;
  * <p>Constraints checked include:
  *
  * <ul>
- *   <li>Scope / selector compatibility (e.g. session-scoped scenarios must not use selectors that
- *       are meaningless in a session context).
- *   <li>Stress-effect binding (e.g. {@code HEAP_PRESSURE} effect requires sufficient available
- *       heap).
- *   <li>Interceptor availability (e.g. virtual-thread selectors require JDK 21+).
+ *   <li>Scope / operation compatibility (a session-scoped scenario must not select an operation
+ *       that never runs in a session).
+ *   <li>Stress-effect binding (each stress target takes its own effect type) and the direct memory
+ *       limit.
+ *   <li>Effect / operation support (an effect is refused where the real call cannot carry it out,
+ *       for example a reject where no real call fails).
  * </ul>
  *
  * <h2>Thread safety</h2>
@@ -37,6 +37,14 @@ import java.util.Set;
 final class CompatibilityValidator {
   private CompatibilityValidator() {}
 
+  /** Operations evaluated without a session: their calls carry none, whatever thread makes them. */
+  private static final Set<OperationType> SESSIONLESS_OPS =
+      EnumSet.of(
+          OperationType.CLASS_LOAD,
+          OperationType.CLASS_DEFINE,
+          OperationType.RESOURCE_LOAD,
+          OperationType.SHUTDOWN_HOOK_REGISTER);
+
   /**
    * Validates {@code scenario} against {@code featureSet} and the internal chaos model invariants.
    *
@@ -45,10 +53,8 @@ final class CompatibilityValidator {
    *
    * <ol>
    *   <li><b>Session-scope exclusions</b> — {@link ChaosScenario.ScenarioScope#SESSION} scenarios
-   *       may not use JVM-global selectors ({@code ThreadSelector}, {@code ShutdownSelector},
-   *       {@code ClassLoadingSelector}, {@code StressSelector}).
-   *   <li><b>Virtual-thread availability</b> — a {@code ThreadSelector} with {@link
-   *       ChaosSelector.ThreadKind#VIRTUAL} requires JDK 21+ at runtime.
+   *       may not select an operation that runs outside any session (class loading, class
+   *       definition, resource loading and shutdown-hook registration).
    *   <li><b>Stress-scope constraint</b> — stress scenarios must use {@link
    *       ChaosScenario.ScenarioScope#JVM} scope.
    *   <li><b>Stress-effect binding</b> — each {@link ChaosSelector.StressTarget} value must be
@@ -57,7 +63,7 @@ final class CompatibilityValidator {
    *       -XX:MaxDirectMemorySize} ({@link ChaosUnsupportedFeatureException}).
    *   <li><b>Interceptor constraints</b> — effect/selector combinations must be semantically
    *       compatible (e.g. {@code ExceptionInjectionEffect} requires {@code MethodSelector} with
-   *       {@code METHOD_ENTER} only; {@code GateEffect} is not valid with {@code StressSelector}).
+   *       {@code METHOD_ENTER} only; a reject only where the real call can fail).
    * </ol>
    *
    * @param scenario the scenario to validate; must not be {@code null}
@@ -65,19 +71,19 @@ final class CompatibilityValidator {
    *     {@code null}
    * @throws com.macstab.chaos.jvm.api.ChaosValidationException if any structural or semantic
    *     constraint is violated
-   * @throws com.macstab.chaos.jvm.api.ChaosUnsupportedFeatureException if the scenario requires a
-   *     JVM capability (e.g. virtual threads) that is not available at runtime
+   * @throws com.macstab.chaos.jvm.api.ChaosUnsupportedFeatureException if the scenario needs more
+   *     than the runtime provides (direct-buffer pressure above the direct memory limit)
    */
   static void validate(final ChaosScenario scenario, final FeatureSet featureSet) {
     if (scenario.scope() == ChaosScenario.ScenarioScope.SESSION) {
-      if (scenario.selector() instanceof ChaosSelector.ThreadSelector
-          || scenario.selector() instanceof ChaosSelector.ShutdownSelector
-          || scenario.selector() instanceof ChaosSelector.ClassLoadingSelector
-          || scenario.selector() instanceof ChaosSelector.StressSelector) {
-        throw new ChaosValidationException(
-            "selector "
-                + scenario.selector().getClass().getSimpleName()
-                + " is JVM-global and cannot be session scoped");
+      for (final OperationType operation : SelectorOperations.of(scenario.selector())) {
+        if (SESSIONLESS_OPS.contains(operation)) {
+          throw new ChaosValidationException(
+              operation
+                  + " never runs in a session (the JVM loads classes and registers shutdown"
+                  + " hooks for every thread), so a session-scoped scenario could never apply;"
+                  + " scope it JVM");
+        }
       }
     }
     if (scenario.selector() instanceof ChaosSelector.StressSelector stressSelector) {
@@ -272,8 +278,6 @@ final class CompatibilityValidator {
    * <ul>
    *   <li>Stressor effects (heap, metaspace, GC, etc.) must use {@link
    *       ChaosSelector.StressSelector}.
-   *   <li>{@link ChaosEffect.GateEffect} is incompatible with {@link ChaosSelector.StressSelector}
-   *       because stressors activate on lifecycle events, not per-invocation gates.
    *   <li>{@link ChaosEffect.ExceptionalCompletionEffect} requires {@link
    *       ChaosSelector.AsyncSelector}.
    *   <li>{@link ChaosEffect.ExceptionInjectionEffect} requires {@link
@@ -299,7 +303,6 @@ final class CompatibilityValidator {
 
     validateDestructiveEffectGuard(effect, scenario);
     validateStressorEffectRequiresStressSelector(effect, selector);
-    validateGateEffectNotWithStressSelector(effect, selector);
     validateEffectSelectorAffinity(effect, selector);
     validateEffectOperationSupport(effect, selector);
     validateNetworkHostFilter(selector);
@@ -315,12 +318,12 @@ final class CompatibilityValidator {
     if ((effect instanceof ChaosEffect.DeadlockEffect
             || effect instanceof ChaosEffect.ThreadLeakEffect)
         && !scenario.activationPolicy().allowDestructiveEffects()) {
-      throw new ChaosActivationException(
+      throw new ChaosValidationException(
           effect.getClass().getSimpleName()
-              + " creates non-recoverable JVM state (deadlocked or permanently-parked threads "
-              + "that cannot be terminated without JVM restart). "
-              + "Activate only with ActivationPolicy.withDestructiveEffects() or "
-              + "allowDestructiveEffects=true in your JSON plan.");
+              + " holds deadlocked or leaked threads, with their locks and memory, until the"
+              + " scenario is stopped (leaked non-daemon threads also keep the JVM from exiting"
+              + " until then). Activate only with ActivationPolicy.withDestructiveEffects() or"
+              + " allowDestructiveEffects=true in your JSON plan.");
     }
   }
 
@@ -360,20 +363,6 @@ final class CompatibilityValidator {
 
   private static boolean isStressorEffect(final ChaosEffect effect) {
     return STRESSOR_EFFECTS.contains(effect.getClass());
-  }
-
-  /**
-   * Rejects {@link ChaosEffect.GateEffect} paired with {@link ChaosSelector.StressSelector} because
-   * stressors activate on lifecycle events, not per-invocation gates.
-   */
-  private static void validateGateEffectNotWithStressSelector(
-      final ChaosEffect effect, final ChaosSelector selector) {
-    if (effect instanceof ChaosEffect.GateEffect
-        && selector instanceof ChaosSelector.StressSelector) {
-      throw new ChaosValidationException(
-          "GateEffect is not valid with StressSelector — stressors activate independently of the"
-              + " gate mechanism");
-    }
   }
 
   /**
@@ -653,13 +642,86 @@ final class CompatibilityValidator {
           OperationType.SYSTEM_CLOCK_NANOS);
 
   /**
-   * Rejects effects the selected operations cannot carry out: SUPPRESS on an operation that does
-   * not honour it, any effect other than a clock skew on clock reads, and a clock skew on
-   * operations that are not clock reads. These combinations validated before but had no effect.
+   * Why a reject is refused on an operation, for each operation no real call of which fails that
+   * way: the failure would be one the caller never sees from the real call (ADR 0005). Each reason
+   * names what to use instead.
+   */
+  private static final java.util.Map<OperationType, String> REJECT_REFUSALS =
+      new java.util.EnumMap<>(OperationType.class);
+
+  static {
+    // The read loop runs on the event loop outside the pipeline's exception handling: a throwable
+    // there reaches the event loop, not the channel's handlers.
+    REJECT_REFUSALS.put(
+        OperationType.NETTY_CHANNEL_READ,
+        "the read runs outside the pipeline's exception handling; delay or gate the read, or"
+            + " reject NETTY_CHANNEL_WRITE, which fails through the pipeline");
+    // A worker evaluates the run before the pool records the task's outcome: a throwable there
+    // kills the worker and leaves the task's future incomplete for good.
+    final String workerRun =
+        "the pool cannot fail the task there (its future never completes and the worker dies);"
+            + " delay or gate the run, or reject EXECUTOR_SUBMIT";
+    REJECT_REFUSALS.put(OperationType.EXECUTOR_WORKER_RUN, workerRun);
+    REJECT_REFUSALS.put(OperationType.FORK_JOIN_TASK_RUN, workerRun);
+    // take() and poll() fail only by interruption: no consumer handles another exception, and a
+    // thread pool's worker dies on it and is replaced, over and over.
+    final String queueRead =
+        "the JDK's take() and poll() do not fail that way (a pool worker dies on it); delay or"
+            + " gate them, suppress QUEUE_POLL, or reject QUEUE_PUT or QUEUE_OFFER on a bounded"
+            + " queue";
+    REJECT_REFUSALS.put(OperationType.QUEUE_TAKE, queueRead);
+    REJECT_REFUSALS.put(OperationType.QUEUE_POLL, queueRead);
+    REJECT_REFUSALS.put(
+        OperationType.THREAD_PARK, "LockSupport.park never fails; delay or gate the park");
+    REJECT_REFUSALS.put(
+        OperationType.MONITOR_ENTER,
+        "entering a monitor never fails; delay or gate it, or use a monitorContention stressor");
+    REJECT_REFUSALS.put(
+        OperationType.SYSTEM_GC_REQUEST, "System.gc() never fails; suppress or delay the request");
+    final String threadLocal = "ThreadLocal.get() and set() never fail; suppress or delay them";
+    REJECT_REFUSALS.put(OperationType.THREAD_LOCAL_GET, threadLocal);
+    REJECT_REFUSALS.put(OperationType.THREAD_LOCAL_SET, threadLocal);
+    REJECT_REFUSALS.put(
+        OperationType.ASYNC_CANCEL,
+        "CompletableFuture.cancel never fails; suppress or delay it, or fail the future with"
+            + " exceptionalCompletion");
+    REJECT_REFUSALS.put(
+        OperationType.ZIP_DEFLATE,
+        "Deflater.deflate never fails; delay it, or reject ZIP_INFLATE, which fails with"
+            + " DataFormatException");
+    REJECT_REFUSALS.put(
+        OperationType.SYSTEM_EXIT_REQUEST,
+        "System.exit and Runtime.halt never fail; suppress the exit (it is refused with the"
+            + " documented exception) or delay it");
+    REJECT_REFUSALS.put(
+        OperationType.EXECUTOR_SHUTDOWN,
+        "ExecutorService.shutdown() and shutdownNow() never fail; delay or gate them");
+  }
+
+  /**
+   * Operations a reject applies to: every operation whose real call can fail, so the reject raises
+   * what the call raises ({@code FailureFactory}) or returns what a refused call returns. Clock
+   * reads take only a skew, and the stressors' lifecycle is not selectable.
+   */
+  private static final Set<OperationType> REJECT_OPS = rejectOps();
+
+  private static Set<OperationType> rejectOps() {
+    final Set<OperationType> operations = EnumSet.complementOf(EnumSet.of(OperationType.LIFECYCLE));
+    operations.removeAll(REJECT_REFUSALS.keySet());
+    operations.removeAll(CLOCK_READ_OPS);
+    return operations;
+  }
+
+  /**
+   * Rejects effects the selected operations cannot carry out: any effect other than a clock skew on
+   * clock reads and a clock skew on operations that are not clock reads, SUPPRESS on an operation
+   * that does not honour it, and a reject where no real call fails. These combinations validated
+   * before but had no effect, or one no real call has.
    */
   private static void validateEffectOperationSupport(
       final ChaosEffect effect, final ChaosSelector selector) {
     final Set<OperationType> operations = SelectorOperations.of(selector);
+    validateClockReads(effect, operations);
     if (effect instanceof ChaosEffect.SuppressEffect) {
       for (final OperationType operation : operations) {
         if (REJECT_INSTEAD_OF_SUPPRESS_OPS.contains(operation)) {
@@ -674,8 +736,9 @@ final class CompatibilityValidator {
           throw new ChaosValidationException(
               "SuppressEffect is not supported for "
                   + operation
-                  + "; this interception point can only delay or throw (use delay or reject)."
-                  + " Operations supporting suppress: "
+                  + "; this call cannot be skipped (use "
+                  + (REJECT_OPS.contains(operation) ? "delay or reject" : "delay")
+                  + "). Operations supporting suppress: "
                   + SUPPRESS_OPS);
         }
       }
@@ -704,34 +767,26 @@ final class CompatibilityValidator {
         }
       }
     }
-    if (effect instanceof ChaosEffect.RejectEffect
-        && operations.contains(OperationType.NETTY_CHANNEL_READ)) {
-      // The read loop runs on the event loop outside the pipeline's exception handling: a
-      // throwable there reaches the event loop, not the channel's handlers.
-      throw new ChaosValidationException(
-          "RejectEffect is not supported for NETTY_CHANNEL_READ; delay or gate the read, or"
-              + " reject NETTY_CHANNEL_WRITE, which fails through the pipeline");
+    if (effect instanceof ChaosEffect.RejectEffect) {
+      for (final OperationType operation : operations) {
+        if (!REJECT_OPS.contains(operation)) {
+          throw new ChaosValidationException(
+              "RejectEffect is not supported for "
+                  + operation
+                  + ": "
+                  + REJECT_REFUSALS.getOrDefault(operation, "no real call of it fails"));
+        }
+      }
     }
-    if (effect instanceof ChaosEffect.RejectEffect
-        && (operations.contains(OperationType.EXECUTOR_WORKER_RUN)
-            || operations.contains(OperationType.FORK_JOIN_TASK_RUN))) {
-      // A worker evaluates the run before the pool records the task's outcome: a throwable there
-      // kills the worker and leaves the task's future incomplete for good.
-      throw new ChaosValidationException(
-          "RejectEffect is not supported for EXECUTOR_WORKER_RUN or FORK_JOIN_TASK_RUN: the pool"
-              + " cannot fail the task there (its future never completes and the worker dies);"
-              + " delay or gate the run, or reject EXECUTOR_SUBMIT");
-    }
-    if (effect instanceof ChaosEffect.RejectEffect
-        && (operations.contains(OperationType.QUEUE_TAKE)
-            || operations.contains(OperationType.QUEUE_POLL))) {
-      // take() and poll() fail only by interruption: no consumer handles another exception, and a
-      // thread pool's worker dies on it and is replaced, over and over.
-      throw new ChaosValidationException(
-          "RejectEffect is not supported for QUEUE_TAKE or QUEUE_POLL: the JDK's take() and poll()"
-              + " do not fail that way (a pool worker dies on it); delay or gate them, suppress"
-              + " QUEUE_POLL, or reject QUEUE_PUT or QUEUE_OFFER on a bounded queue");
-    }
+  }
+
+  /**
+   * Clock reads only return a (possibly skewed) time: they take a clock skew and nothing else, and
+   * a clock skew applies to nothing else. Checked first, so no other rule recommends an effect a
+   * clock read refuses.
+   */
+  private static void validateClockReads(
+      final ChaosEffect effect, final Set<OperationType> operations) {
     if (effect instanceof ChaosEffect.ClockSkewEffect) {
       for (final OperationType operation : operations) {
         if (!CLOCK_READ_OPS.contains(operation)) {

@@ -381,22 +381,21 @@ Key matching rules:
 
 ## CompatibilityValidator
 
-Validates selector/effect combinations before registration. Throws `ChaosActivationException` on violation. All checks run at activation time, not at match time.
+Validates selector/effect combinations before registration. Throws `ChaosValidationException` on violation (`ChaosUnsupportedFeatureException` for direct-buffer pressure above the direct memory limit). All checks run at activation time, not at match time.
 
 Key checks:
 
-- Virtual thread selector requires `FeatureSet.supportsVirtualThreads()` (JDK 21+)
-- Stressor effects require `StressSelector`; non-stress effects must not use `StressSelector`
-- `GateEffect` requires a stress-compatible or appropriate operation selector
+- Stressor effects require `StressSelector`, each stress target its own effect type; stress scenarios must be JVM scoped
+- A `reject` only where the real call can fail: refused on `THREAD_PARK`, `MONITOR_ENTER`, `SYSTEM_GC_REQUEST`, `SYSTEM_EXIT_REQUEST`, `THREAD_LOCAL_GET` / `SET`, `ASYNC_CANCEL`, `ZIP_DEFLATE`, `EXECUTOR_SHUTDOWN`, `EXECUTOR_WORKER_RUN`, `FORK_JOIN_TASK_RUN`, `QUEUE_TAKE`, `QUEUE_POLL`, `NETTY_CHANNEL_READ` and the clock reads, each with the alternative to use
 - `SpuriousWakeupEffect` requires `NioSelector`
 - `ReturnValueCorruptionEffect` requires `MethodSelector` with `METHOD_EXIT` operation
 - `ExceptionInjectionEffect` requires `MethodSelector` with `METHOD_ENTER` operation
 - `ExceptionalCompletionEffect` requires `AsyncSelector`
 - `ClockSkewEffect` requires `JvmRuntimeSelector` with one of: `SYSTEM_CLOCK_MILLIS`, `SYSTEM_CLOCK_NANOS`, `INSTANT_NOW`, `CLOCK_READ`, `LOCAL_DATE_TIME_NOW`, `ZONED_DATE_TIME_NOW`, or `DATE_NEW`
-- Session-scope scenarios may not use JVM-global selectors (clock, GC, exit, class loading, native library)
-- **Destructive effects guard**: `DeadlockEffect` and `ThreadLeakEffect` require `activationPolicy.allowDestructiveEffects() == true`; activation without the flag throws `ChaosActivationException` at registration time
+- Session-scope scenarios may not select an operation the JVM evaluates without a session (`CLASS_LOAD`, `CLASS_DEFINE`, `RESOURCE_LOAD`, `SHUTDOWN_HOOK_REGISTER`)
+- **Destructive effects guard**: `DeadlockEffect` and `ThreadLeakEffect` require `activationPolicy.allowDestructiveEffects() == true`; activation without the flag throws `ChaosValidationException` at registration time
 
-The destructive effects guard exists because deadlocked threads and leaked non-daemon threads cannot be cleaned up within the running process. The check is intentionally fail-fast and unconditional — there is no way to bypass it short of constructing an `ActivationPolicy` with `allowDestructiveEffects=true`.
+The destructive effects guard exists because deadlocked and leaked threads hold their locks and memory until the scenario is stopped, and leaked non-daemon threads keep the JVM from exiting until then. The check is intentionally fail-fast and unconditional — there is no way to bypass it short of constructing an `ActivationPolicy` with `allowDestructiveEffects=true`.
 
 ## ScopeContext
 

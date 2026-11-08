@@ -471,7 +471,7 @@ All guards compose as AND: a scenario fires only if every configured guard passe
 
 `DeadlockEffect` and `ThreadLeakEffect` create JVM state that cannot be recovered within a running process — deadlocked threads cannot be interrupted; leaked non-daemon threads prevent JVM exit until the process is killed.
 
-`CompatibilityValidator` rejects any scenario using these effects unless `allowDestructiveEffects == true`. The rejection is a `ChaosActivationException` thrown at registration time, not at effect application time. This is an opt-in correctness guard, not a security boundary — the calling code is trusted.
+`CompatibilityValidator` rejects any scenario using these effects unless `allowDestructiveEffects == true`. The rejection is a `ChaosValidationException` thrown at registration time, not at effect application time. This is an opt-in correctness guard, not a security boundary — the calling code is trusted.
 
 ```java
 // Correct: explicit opt-in

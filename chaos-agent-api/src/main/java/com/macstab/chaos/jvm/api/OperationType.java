@@ -104,7 +104,8 @@ public enum OperationType {
 
   /**
    * Fires when {@link java.util.concurrent.ExecutorService#shutdown()} or {@code shutdownNow()} is
-   * called. Chaos here can delay or prevent orderly shutdown of executor services.
+   * called. Chaos here can delay or gate the shutdown of executor services. A reject is refused at
+   * activation: a shutdown never fails.
    */
   EXECUTOR_SHUTDOWN,
 
@@ -279,7 +280,7 @@ public enum OperationType {
   /**
    * Fires before a thread acquires a {@code synchronized} monitor or calls {@link Object#wait()}.
    * Chaos here can inject latency before lock acquisition to simulate lock contention and convoy
-   * effects.
+   * effects. A reject is refused at activation: entering a monitor never fails.
    *
    * <p>Used exclusively with {@link ChaosSelector.MonitorSelector}.
    */
@@ -287,8 +288,8 @@ public enum OperationType {
 
   /**
    * Fires before a thread parks itself via {@link java.util.concurrent.locks.LockSupport#park}.
-   * Chaos here can delay the park or skip it to simulate spurious wake-ups and expose threading
-   * bugs in lock-based data structures.
+   * Chaos here can delay or gate the park to expose threading bugs in lock-based data structures. A
+   * reject is refused at activation: a park never fails.
    *
    * <p>Used exclusively with {@link ChaosSelector.MonitorSelector}.
    */
@@ -396,7 +397,7 @@ public enum OperationType {
   /**
    * Fires when {@link System#gc()} or {@link Runtime#gc()} is called. Chaos here can suppress
    * explicit GC requests or inject delays, testing code that relies on GC hints for memory
-   * management.
+   * management. A reject is refused at activation: a GC request never fails.
    *
    * <p>Used exclusively with {@link ChaosSelector.JvmRuntimeSelector}.
    */
@@ -405,7 +406,7 @@ public enum OperationType {
   /**
    * Fires when {@link System#exit(int)} or {@link Runtime#halt(int)} is called. Chaos here can
    * delay or suppress process exit, allowing assertions to run after code that calls {@code
-   * System.exit} in error paths.
+   * System.exit} in error paths. A reject is refused at activation: an exit never fails.
    *
    * <p>Used exclusively with {@link ChaosSelector.JvmRuntimeSelector}.
    */
@@ -617,7 +618,8 @@ public enum OperationType {
 
   /**
    * Fires before {@link java.util.zip.Deflater#deflate} compresses data. Chaos here can add latency
-   * to simulate slow compression on the response path.
+   * to simulate slow compression on the response path. A reject is refused at activation: {@code
+   * deflate} never fails.
    *
    * <p>Use with {@link ChaosSelector.JvmRuntimeSelector}.
    */
@@ -627,7 +629,8 @@ public enum OperationType {
 
   /**
    * Fires before {@link java.util.concurrent.CompletableFuture#cancel} is called. Chaos here can
-   * suppress the cancellation (pretend it succeeded without cancelling) or delay it.
+   * suppress the cancellation (pretend it succeeded without cancelling) or delay it. A reject is
+   * refused at activation: a cancel never fails.
    *
    * <p>Use with {@link ChaosSelector.AsyncSelector}.
    */
@@ -638,7 +641,7 @@ public enum OperationType {
   /**
    * Fires before {@link ThreadLocal#get()} returns a value. Chaos here can return null to simulate
    * missing request context (e.g., Spring {@code RequestContextHolder}, SLF4J MDC) or delay the
-   * lookup.
+   * lookup. A reject is refused at activation: {@code get()} never fails.
    *
    * <p>Use with {@link ChaosSelector.ThreadLocalSelector}.
    */
@@ -646,7 +649,8 @@ public enum OperationType {
 
   /**
    * Fires before {@link ThreadLocal#set(Object)} stores a value. Chaos here can suppress the set so
-   * that subsequent gets return the old or null value.
+   * that subsequent gets return the old or null value. A reject is refused at activation: {@code
+   * set} never fails.
    *
    * <p>Use with {@link ChaosSelector.ThreadLocalSelector}.
    */

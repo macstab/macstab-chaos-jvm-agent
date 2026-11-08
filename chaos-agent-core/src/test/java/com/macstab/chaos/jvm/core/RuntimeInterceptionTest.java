@@ -189,16 +189,18 @@ class RuntimeInterceptionTest {
     }
 
     @Test
-    @DisplayName("RejectEffect throws")
-    void rejectEffectThrows() {
-      final ChaosRuntime runtime =
-          runtimeWith(
-              ChaosScenario.builder("async-fail")
-                  .selector(ChaosSelector.async(Set.of(OperationType.ASYNC_CANCEL)))
-                  .effect(ChaosEffect.reject("cancel rejected by chaos"))
-                  .activationPolicy(ActivationPolicy.always())
-                  .build());
-      assertThatThrownBy(() -> runtime.beforeAsyncCancel(null, true)).isInstanceOf(Throwable.class);
+    @DisplayName("RejectEffect is refused at activation: a cancel never fails")
+    void rejectEffectIsRefused() {
+      assertThatThrownBy(
+              () ->
+                  runtimeWith(
+                      ChaosScenario.builder("async-fail")
+                          .selector(ChaosSelector.async(Set.of(OperationType.ASYNC_CANCEL)))
+                          .effect(ChaosEffect.reject("cancel rejected by chaos"))
+                          .activationPolicy(ActivationPolicy.always())
+                          .build()))
+          .isExactlyInstanceOf(com.macstab.chaos.jvm.api.ChaosValidationException.class)
+          .hasMessageContaining("ASYNC_CANCEL");
     }
   }
 

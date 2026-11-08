@@ -513,7 +513,7 @@ class ExecutorDispatchTest {
       activate(
           "payments",
           new ChaosSelector.ShutdownSelector(
-              Set.of(OperationType.EXECUTOR_SHUTDOWN),
+              Set.of(OperationType.EXECUTOR_AWAIT_TERMINATION),
               NamePattern.exact(PaymentsExecutor.class.getName())),
           ChaosEffect.reject("stay up"));
       activate(
@@ -523,9 +523,11 @@ class ExecutorDispatchTest {
           ChaosEffect.reject("unknown executor"));
 
       assertThatThrownBy(
-              () -> runtime.beforeExecutorShutdown("EXECUTOR_SHUTDOWN", new PaymentsExecutor(), 0L))
+              () ->
+                  runtime.beforeExecutorShutdown(
+                      "EXECUTOR_AWAIT_TERMINATION", new PaymentsExecutor(), 10L))
           .hasMessageContaining("stay up");
-      runtime.beforeExecutorShutdown("EXECUTOR_SHUTDOWN", this, 0L);
+      runtime.beforeExecutorShutdown("EXECUTOR_AWAIT_TERMINATION", this, 10L);
       assertThatThrownBy(
               () -> runtime.beforeExecutorShutdown("EXECUTOR_AWAIT_TERMINATION", null, 10L))
           .hasMessageContaining("unknown executor");

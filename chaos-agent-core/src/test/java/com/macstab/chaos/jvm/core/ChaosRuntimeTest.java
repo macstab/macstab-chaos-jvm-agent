@@ -76,19 +76,19 @@ class ChaosRuntimeTest {
     }
 
     @Test
-    @DisplayName("SESSION-scoped thread chaos is rejected")
-    void sessionScopedThreadChaosIsRejected() {
+    @DisplayName("SESSION-scoped class-loading chaos is rejected: a class load carries no session")
+    void sessionScopedClassLoadingChaosIsRejected() {
       ChaosRuntime runtime = new ChaosRuntime();
       try (var session = runtime.openSession("invalid")) {
         assertThatThrownBy(
                 () ->
                     session.activate(
-                        ChaosScenario.builder("thread")
+                        ChaosScenario.builder("class-load")
                             .scope(ChaosScenario.ScenarioScope.SESSION)
                             .selector(
-                                ChaosSelector.thread(
-                                    Set.of(OperationType.THREAD_START),
-                                    ChaosSelector.ThreadKind.ANY))
+                                ChaosSelector.classLoading(
+                                    Set.of(OperationType.CLASS_LOAD),
+                                    com.macstab.chaos.jvm.api.NamePattern.any()))
                             .effect(ChaosEffect.delay(Duration.ofMillis(1)))
                             .activationPolicy(ActivationPolicy.always())
                             .build()))

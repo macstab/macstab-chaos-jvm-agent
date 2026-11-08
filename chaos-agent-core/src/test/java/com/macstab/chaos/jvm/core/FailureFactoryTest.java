@@ -7,6 +7,7 @@ import com.macstab.chaos.jvm.api.ActivationPolicy;
 import com.macstab.chaos.jvm.api.ChaosEffect;
 import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.ChaosSelector;
+import com.macstab.chaos.jvm.api.ChaosValidationException;
 import com.macstab.chaos.jvm.api.OperationType;
 import java.io.FileDescriptor;
 import java.io.FileInputStream;
@@ -270,6 +271,44 @@ class FailureFactoryTest {
       assertThat(classified).isEqualTo(EnumSet.allOf(OperationType.class));
       assertThat(THROWS.size() + RETURNS.size() + REFUSED.size())
           .isEqualTo(OperationType.values().length);
+    }
+
+    static Stream<OperationType> refusedOperations() {
+      return REFUSED.stream().filter(operation -> operation != OperationType.LIFECYCLE);
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("refusedOperations")
+    @DisplayName("a reject the factory has no real type for is refused at activation")
+    void refusedOperationIsRefusedAtActivation(final OperationType operation) {
+      for (final ChaosSelector selector :
+          EffectReachesTheCallTest.selectorsByOperation().get(operation)) {
+        try (ChaosRuntime runtime = new ChaosRuntime()) {
+          assertThatThrownBy(
+                  () ->
+                      runtime.activate(
+                          ChaosScenario.builder("reject")
+                              .scope(ChaosScenario.ScenarioScope.JVM)
+                              .selector(selector)
+                              .effect(ChaosEffect.reject("chaos"))
+                              .activationPolicy(ActivationPolicy.always())
+                              .build()))
+              .as("%s through %s", operation, selector.getClass().getSimpleName())
+              .isExactlyInstanceOf(ChaosValidationException.class);
+        }
+      }
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("refusedOperations")
+    @DisplayName("the factory's arm for a refused reject keeps the message, as its contract says")
+    void refusedArmKeepsTheMessage(final OperationType operation) {
+      final InvocationContext context =
+          new InvocationContext(operation, null, null, null, false, null, null, null);
+
+      assertThat(FailureFactory.reject(context, "chaos"))
+          .isExactlyInstanceOf(IllegalStateException.class)
+          .hasMessage("chaos");
     }
 
     @Test

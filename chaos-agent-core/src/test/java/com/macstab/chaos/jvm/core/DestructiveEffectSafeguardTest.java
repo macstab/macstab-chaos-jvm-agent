@@ -5,10 +5,10 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.macstab.chaos.jvm.api.ActivationPolicy;
-import com.macstab.chaos.jvm.api.ChaosActivationException;
 import com.macstab.chaos.jvm.api.ChaosEffect;
 import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.ChaosSelector;
+import com.macstab.chaos.jvm.api.ChaosValidationException;
 import java.time.Duration;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -18,8 +18,8 @@ import org.junit.jupiter.api.Test;
  * Full coverage for the destructive-effect safeguard introduced in {@link
  * ActivationPolicy#allowDestructiveEffects()}.
  *
- * <p>{@link ChaosEffect.DeadlockEffect} and {@link ChaosEffect.ThreadLeakEffect} create
- * non-recoverable JVM state. The safeguard requires explicit opt-in via {@link
+ * <p>{@link ChaosEffect.DeadlockEffect} and {@link ChaosEffect.ThreadLeakEffect} hold deadlocked or
+ * leaked threads until the scenario is stopped. The safeguard requires explicit opt-in via {@link
  * ActivationPolicy#withDestructiveEffects()} or {@code allowDestructiveEffects=true} in the JSON
  * plan. Validation fires at registration time in {@link CompatibilityValidator#validate}, not at
  * effect-application time.
@@ -85,19 +85,19 @@ class DestructiveEffectSafeguardTest {
   class DeadlockEffectTests {
 
     @Test
-    @DisplayName("throws ChaosActivationException without allowDestructiveEffects flag")
+    @DisplayName("throws ChaosValidationException without allowDestructiveEffects flag")
     void deadlockWithoutFlagThrows() {
       final ChaosScenario scenario = deadlockScenario(ActivationPolicy.always());
       assertThatThrownBy(() -> CompatibilityValidator.validate(scenario, FEATURE_SET))
-          .isInstanceOf(ChaosActivationException.class);
+          .isExactlyInstanceOf(ChaosValidationException.class);
     }
 
     @Test
-    @DisplayName("error message mentions non-recoverable state")
-    void deadlockErrorMessageMentionsNonRecoverable() {
+    @DisplayName("error message says what lasts until the scenario is stopped")
+    void deadlockErrorMessageSaysUntilStopped() {
       final ChaosScenario scenario = deadlockScenario(ActivationPolicy.always());
       assertThatThrownBy(() -> CompatibilityValidator.validate(scenario, FEATURE_SET))
-          .hasMessageContaining("non-recoverable");
+          .hasMessageContaining("until the scenario is stopped");
     }
 
     @Test
@@ -124,19 +124,19 @@ class DestructiveEffectSafeguardTest {
   class ThreadLeakEffectTests {
 
     @Test
-    @DisplayName("throws ChaosActivationException without allowDestructiveEffects flag")
+    @DisplayName("throws ChaosValidationException without allowDestructiveEffects flag")
     void threadLeakWithoutFlagThrows() {
       final ChaosScenario scenario = threadLeakScenario(ActivationPolicy.always());
       assertThatThrownBy(() -> CompatibilityValidator.validate(scenario, FEATURE_SET))
-          .isInstanceOf(ChaosActivationException.class);
+          .isExactlyInstanceOf(ChaosValidationException.class);
     }
 
     @Test
-    @DisplayName("error message mentions non-recoverable state")
-    void threadLeakErrorMessageMentionsNonRecoverable() {
+    @DisplayName("error message says what lasts until the scenario is stopped")
+    void threadLeakErrorMessageSaysUntilStopped() {
       final ChaosScenario scenario = threadLeakScenario(ActivationPolicy.always());
       assertThatThrownBy(() -> CompatibilityValidator.validate(scenario, FEATURE_SET))
-          .hasMessageContaining("non-recoverable");
+          .hasMessageContaining("until the scenario is stopped");
     }
 
     @Test
@@ -231,8 +231,8 @@ class DestructiveEffectSafeguardTest {
     void chaosRuntimeRejectsDeadlockWithoutFlag() {
       final ChaosRuntime runtime = new ChaosRuntime();
       assertThatThrownBy(() -> runtime.activate(deadlockScenario(ActivationPolicy.always())))
-          .isInstanceOf(ChaosActivationException.class)
-          .hasMessageContaining("non-recoverable");
+          .isExactlyInstanceOf(ChaosValidationException.class)
+          .hasMessageContaining("until the scenario is stopped");
     }
 
     @Test
@@ -240,8 +240,8 @@ class DestructiveEffectSafeguardTest {
     void chaosRuntimeRejectsThreadLeakWithoutFlag() {
       final ChaosRuntime runtime = new ChaosRuntime();
       assertThatThrownBy(() -> runtime.activate(threadLeakScenario(ActivationPolicy.always())))
-          .isInstanceOf(ChaosActivationException.class)
-          .hasMessageContaining("non-recoverable");
+          .isExactlyInstanceOf(ChaosValidationException.class)
+          .hasMessageContaining("until the scenario is stopped");
     }
 
     @Test
@@ -250,7 +250,7 @@ class DestructiveEffectSafeguardTest {
       final ChaosRuntime runtime = new ChaosRuntime();
       try {
         runtime.activate(deadlockScenario(ActivationPolicy.always()));
-      } catch (ChaosActivationException ignored) {
+      } catch (ChaosValidationException ignored) {
         // expected
       }
       assertThat(runtime.diagnostics().snapshot().scenarios()).isEmpty();

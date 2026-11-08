@@ -1,10 +1,10 @@
 package com.macstab.chaos.jvm.core;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.macstab.chaos.jvm.api.ActivationPolicy;
-import com.macstab.chaos.jvm.api.ChaosActivationException;
 import com.macstab.chaos.jvm.api.ChaosEffect;
 import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.ChaosSelector;
@@ -13,10 +13,15 @@ import com.macstab.chaos.jvm.api.ChaosValidationException;
 import com.macstab.chaos.jvm.api.NamePattern;
 import com.macstab.chaos.jvm.api.OperationType;
 import java.time.Duration;
+import java.util.EnumSet;
+import java.util.List;
 import java.util.Set;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 @DisplayName("CompatibilityValidator")
 class CompatibilityValidatorTest {
@@ -24,66 +29,82 @@ class CompatibilityValidatorTest {
   private final FeatureSet featureSet = new FeatureSet();
 
   @Nested
-  @DisplayName("SESSION scope with global selectors throws")
-  class SessionScopeGlobalSelectors {
+  @DisplayName("SESSION scope: refused only for operations that never run in a session")
+  class SessionScope {
 
-    @Test
-    @DisplayName("ThreadSelector throws")
-    void sessionScopeWithThreadSelectorThrows() {
-      ChaosScenario scenario =
-          ChaosScenario.builder("s")
-              .scope(ChaosScenario.ScenarioScope.SESSION)
-              .selector(
-                  ChaosSelector.thread(
-                      Set.of(OperationType.THREAD_START), ChaosSelector.ThreadKind.ANY))
-              .effect(ChaosEffect.delay(Duration.ofMillis(1)))
-              .activationPolicy(ActivationPolicy.always())
-              .build();
-      assertThatThrownBy(() -> CompatibilityValidator.validate(scenario, featureSet))
-          .isInstanceOf(ChaosValidationException.class);
+    private ChaosScenario session(final ChaosSelector selector, final ChaosEffect effect) {
+      return ChaosScenario.builder("s")
+          .scope(ChaosScenario.ScenarioScope.SESSION)
+          .selector(selector)
+          .effect(effect)
+          .activationPolicy(ActivationPolicy.always())
+          .build();
     }
 
     @Test
-    @DisplayName("ShutdownSelector throws")
-    void sessionScopeWithShutdownSelectorThrows() {
-      ChaosScenario scenario =
-          ChaosScenario.builder("s")
-              .scope(ChaosScenario.ScenarioScope.SESSION)
-              .selector(ChaosSelector.shutdown(Set.of(OperationType.SHUTDOWN_HOOK_REGISTER)))
-              .effect(ChaosEffect.delay(Duration.ofMillis(1)))
-              .activationPolicy(ActivationPolicy.always())
-              .build();
-      assertThatThrownBy(() -> CompatibilityValidator.validate(scenario, featureSet))
-          .isInstanceOf(ChaosValidationException.class);
+    @DisplayName(
+        "a ThreadSelector on THREAD_SLEEP is accepted: a sleep runs on the session's thread")
+    void threadSleepInSessionIsAccepted() {
+      final ChaosScenario scenario =
+          session(
+              ChaosSelector.thread(
+                  Set.of(OperationType.THREAD_SLEEP), ChaosSelector.ThreadKind.ANY),
+              ChaosEffect.delay(Duration.ofMillis(1)));
+
+      assertThatCode(() -> CompatibilityValidator.validate(scenario, featureSet))
+          .doesNotThrowAnyException();
     }
 
     @Test
-    @DisplayName("ClassLoadingSelector throws")
-    void sessionScopeWithClassLoadingSelectorThrows() {
-      ChaosScenario scenario =
-          ChaosScenario.builder("s")
-              .scope(ChaosScenario.ScenarioScope.SESSION)
-              .selector(
-                  ChaosSelector.classLoading(Set.of(OperationType.CLASS_LOAD), NamePattern.any()))
-              .effect(ChaosEffect.delay(Duration.ofMillis(1)))
-              .activationPolicy(ActivationPolicy.always())
-              .build();
-      assertThatThrownBy(() -> CompatibilityValidator.validate(scenario, featureSet))
-          .isInstanceOf(ChaosValidationException.class);
+    @DisplayName(
+        "a ShutdownSelector on EXECUTOR_SHUTDOWN is accepted: it runs on the caller's thread")
+    void executorShutdownInSessionIsAccepted() {
+      final ChaosScenario scenario =
+          session(
+              ChaosSelector.shutdown(Set.of(OperationType.EXECUTOR_SHUTDOWN)),
+              ChaosEffect.delay(Duration.ofMillis(1)));
+
+      assertThatCode(() -> CompatibilityValidator.validate(scenario, featureSet))
+          .doesNotThrowAnyException();
     }
 
     @Test
-    @DisplayName("StressSelector throws")
-    void sessionScopeWithStressSelectorThrows() {
-      ChaosScenario scenario =
-          ChaosScenario.builder("s")
-              .scope(ChaosScenario.ScenarioScope.SESSION)
-              .selector(ChaosSelector.stress(ChaosSelector.StressTarget.HEAP))
-              .effect(new ChaosEffect.HeapPressureEffect(1024L, 512))
-              .activationPolicy(ActivationPolicy.always())
-              .build();
+    @DisplayName("SHUTDOWN_HOOK_REGISTER is refused: a hook registration carries no session")
+    void shutdownHookInSessionIsRefused() {
+      final ChaosScenario scenario =
+          session(
+              ChaosSelector.shutdown(Set.of(OperationType.SHUTDOWN_HOOK_REGISTER)),
+              ChaosEffect.delay(Duration.ofMillis(1)));
+
       assertThatThrownBy(() -> CompatibilityValidator.validate(scenario, featureSet))
-          .isInstanceOf(ChaosValidationException.class);
+          .isExactlyInstanceOf(ChaosValidationException.class)
+          .hasMessageContaining("SHUTDOWN_HOOK_REGISTER");
+    }
+
+    @Test
+    @DisplayName("class loading is refused: a class load carries no session")
+    void classLoadingInSessionIsRefused() {
+      final ChaosScenario scenario =
+          session(
+              ChaosSelector.classLoading(Set.of(OperationType.CLASS_LOAD), NamePattern.any()),
+              ChaosEffect.delay(Duration.ofMillis(1)));
+
+      assertThatThrownBy(() -> CompatibilityValidator.validate(scenario, featureSet))
+          .isExactlyInstanceOf(ChaosValidationException.class)
+          .hasMessageContaining("CLASS_LOAD");
+    }
+
+    @Test
+    @DisplayName("a StressSelector is refused: stress scenarios must be JVM scoped")
+    void stressInSessionIsRefused() {
+      final ChaosScenario scenario =
+          session(
+              ChaosSelector.stress(ChaosSelector.StressTarget.HEAP),
+              new ChaosEffect.HeapPressureEffect(1024L, 512));
+
+      assertThatThrownBy(() -> CompatibilityValidator.validate(scenario, featureSet))
+          .isExactlyInstanceOf(ChaosValidationException.class)
+          .hasMessage("stress scenarios must be JVM scoped");
     }
   }
 
@@ -610,7 +631,7 @@ class CompatibilityValidatorTest {
     }
 
     @Test
-    @DisplayName("ThreadLeakEffect without allowDestructiveEffects throws ChaosActivationException")
+    @DisplayName("ThreadLeakEffect without allowDestructiveEffects throws ChaosValidationException")
     void threadLeakEffectWithNonStressSelectorThrows() {
       ChaosScenario scenario =
           ChaosScenario.builder("s")
@@ -619,8 +640,8 @@ class CompatibilityValidatorTest {
               .build();
       // Destructive-effect guard fires first (before stressor-requires-StressSelector check)
       assertThatThrownBy(() -> CompatibilityValidator.validate(scenario, featureSet))
-          .isInstanceOf(ChaosActivationException.class)
-          .hasMessageContaining("non-recoverable");
+          .isExactlyInstanceOf(ChaosValidationException.class)
+          .hasMessageContaining("until the scenario is stopped");
     }
 
     @Test
@@ -636,7 +657,7 @@ class CompatibilityValidatorTest {
     }
 
     @Test
-    @DisplayName("DeadlockEffect without allowDestructiveEffects throws ChaosActivationException")
+    @DisplayName("DeadlockEffect without allowDestructiveEffects throws ChaosValidationException")
     void deadlockEffectWithNonStressSelectorThrows() {
       ChaosScenario scenario =
           ChaosScenario.builder("s")
@@ -645,8 +666,8 @@ class CompatibilityValidatorTest {
               .build();
       // Destructive-effect guard fires first (before stressor-requires-StressSelector check)
       assertThatThrownBy(() -> CompatibilityValidator.validate(scenario, featureSet))
-          .isInstanceOf(ChaosActivationException.class)
-          .hasMessageContaining("non-recoverable");
+          .isExactlyInstanceOf(ChaosValidationException.class)
+          .hasMessageContaining("until the scenario is stopped");
     }
 
     @Test
@@ -1178,6 +1199,120 @@ class CompatibilityValidatorTest {
       return ChaosScenario.builder("support")
           .scope(ChaosScenario.ScenarioScope.JVM)
           .selector(selector)
+          .effect(effect)
+          .activationPolicy(ActivationPolicy.always())
+          .build();
+    }
+  }
+
+  @Nested
+  @DisplayName("reject is accepted exactly where the real call can fail")
+  class RejectTable {
+
+    /** The operations no real call of which fails: a reject there is refused at activation. */
+    private static final Set<OperationType> NO_REAL_FAILURE =
+        EnumSet.of(
+            OperationType.NETTY_CHANNEL_READ,
+            OperationType.EXECUTOR_WORKER_RUN,
+            OperationType.FORK_JOIN_TASK_RUN,
+            OperationType.QUEUE_TAKE,
+            OperationType.QUEUE_POLL,
+            OperationType.THREAD_PARK,
+            OperationType.MONITOR_ENTER,
+            OperationType.SYSTEM_GC_REQUEST,
+            OperationType.THREAD_LOCAL_GET,
+            OperationType.THREAD_LOCAL_SET,
+            OperationType.ASYNC_CANCEL,
+            OperationType.ZIP_DEFLATE,
+            OperationType.SYSTEM_EXIT_REQUEST,
+            OperationType.EXECUTOR_SHUTDOWN);
+
+    /** Clock reads take only a skew, and the stressors' lifecycle is not selectable. */
+    private static final Set<OperationType> NOT_REJECTABLE =
+        EnumSet.of(
+            OperationType.SYSTEM_CLOCK_MILLIS,
+            OperationType.SYSTEM_CLOCK_NANOS,
+            OperationType.INSTANT_NOW,
+            OperationType.CLOCK_READ,
+            OperationType.LOCAL_DATE_TIME_NOW,
+            OperationType.ZONED_DATE_TIME_NOW,
+            OperationType.DATE_NEW,
+            OperationType.LIFECYCLE);
+
+    @ParameterizedTest(name = "{0}")
+    @EnumSource(OperationType.class)
+    @DisplayName("a reject on each operation")
+    void rejectOnEachOperation(final OperationType operation) {
+      if (operation == OperationType.LIFECYCLE) {
+        assertThat(selectorOf(operation)).as("no selector selects LIFECYCLE").isNull();
+        return;
+      }
+      final ChaosScenario scenario = jvm(selectorOf(operation), ChaosEffect.reject("down"));
+
+      if (NO_REAL_FAILURE.contains(operation)) {
+        assertThatThrownBy(() -> CompatibilityValidator.validate(scenario, featureSet))
+            .isExactlyInstanceOf(ChaosValidationException.class)
+            .hasMessageContaining("RejectEffect is not supported for")
+            .hasMessageContaining(operation.name());
+      } else if (NOT_REJECTABLE.contains(operation)) {
+        assertThatThrownBy(() -> CompatibilityValidator.validate(scenario, featureSet))
+            .isExactlyInstanceOf(ChaosValidationException.class);
+      } else {
+        assertThatCode(() -> CompatibilityValidator.validate(scenario, featureSet))
+            .as("METHOD_ENTER, METHOD_EXIT and SCHEDULE_TICK included")
+            .doesNotThrowAnyException();
+      }
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @EnumSource(OperationType.class)
+    @DisplayName("the suppress hint names no effect the operation refuses")
+    void suppressHintNamesNoRefusedEffect(final OperationType operation) {
+      final ChaosSelector selector = selectorOf(operation);
+      if (selector == null) {
+        return;
+      }
+      final String hint;
+      try {
+        CompatibilityValidator.validate(jvm(selector, ChaosEffect.suppress()), featureSet);
+        return;
+      } catch (final ChaosValidationException refused) {
+        hint = refused.getMessage();
+      }
+      final int use = hint.indexOf("use ");
+      if (use < 0) {
+        return;
+      }
+      final String named = hint.substring(use);
+      if (named.contains("delay")) {
+        assertThatCode(
+                () ->
+                    CompatibilityValidator.validate(
+                        jvm(selector, ChaosEffect.delay(Duration.ofMillis(1))), featureSet))
+            .as("hint %s", hint)
+            .doesNotThrowAnyException();
+      }
+      if (named.contains("reject")) {
+        assertThatCode(
+                () ->
+                    CompatibilityValidator.validate(
+                        jvm(selector, ChaosEffect.reject("down")), featureSet))
+            .as("hint %s", hint)
+            .doesNotThrowAnyException();
+      }
+    }
+
+    /** A selector of {@code operation} alone, or {@code null} when no selector takes it. */
+    private static @Nullable ChaosSelector selectorOf(final OperationType operation) {
+      final List<ChaosSelector> selectors =
+          EffectReachesTheCallTest.selectorsByOperation().get(operation);
+      return selectors == null ? null : selectors.get(0);
+    }
+
+    private ChaosScenario jvm(final @Nullable ChaosSelector selector, final ChaosEffect effect) {
+      return ChaosScenario.builder("reject-table")
+          .scope(ChaosScenario.ScenarioScope.JVM)
+          .selector(java.util.Objects.requireNonNull(selector))
           .effect(effect)
           .activationPolicy(ActivationPolicy.always())
           .build();

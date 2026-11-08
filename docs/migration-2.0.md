@@ -22,7 +22,7 @@
 | 1 | Socket scenarios also match socket channels | a `NetworkSelector` has no peer filter | add `remoteCidr` / `remotePort` (§1) |
 | 2 | Legacy packages removed | you import `com.macstab.chaos.*` outside `.jvm` | switch to `com.macstab.chaos.jvm.*` (§2) |
 | 3 | Plans parse only through `ChaosPlanMapper` | you parse plans with your own `ObjectMapper` | use `ChaosPlanMapper` (§3) |
-| 4 | Clock-skew policies are validated | a clock skew sets probability, a budget or a rate limit | remove them, use a time window (§4) |
+| 4 | Clock-skew and stressor policies are validated; clock reads take only a skew | a clock skew sets probability, a budget or a rate limit; a stressor sets per-call policy fields; a clock read has another effect | remove them, use a time window (§4) |
 | 5 | Hooks are woven on demand | you rely on hooks being in place before activation, or on start-up cost | nothing, or `instrumentation=eager` (§5) |
 | 6 | The agent JAR is self-contained and shades its libraries | your code used the agent's ByteBuddy or Jackson | depend on them yourself (§6) |
 | 7 | New abstract methods on API interfaces | you implement `ChaosControlPlane` or `ChaosActivationHandle` | implement them (§7) |
@@ -30,12 +30,14 @@
 | 9 | `OperationType` gained constants between existing ones | you persist ordinals | persist names (§9) |
 | 10 | Bridge handle slots renumbered | you call `BootstrapDispatcher` directly | none for applications (§10) |
 | 11 | A glob's `*` also matches line terminators | a GLOB must not match across a line break | use a REGEX (§11) |
+| 13 | `reject` is refused where no real call fails | a plan rejects `THREAD_PARK`, `MONITOR_ENTER`, `SYSTEM_GC_REQUEST`, `SYSTEM_EXIT_REQUEST`, `THREAD_LOCAL_*`, `ASYNC_CANCEL`, `ZIP_DEFLATE`, `EXECUTOR_SHUTDOWN`, a worker or fork-join run, or a queue take or poll | use the effect the refusal names (§13) |
 | 14 | Enabling switches are honoured only from local sources on Quarkus and Micronaut | a config server sets `macstab.chaos.enabled` or a management switch | set `macstab.chaos.allow-remote-enable=true` locally (§14) |
 | 15 | `reject` / `suppress` on `QUEUE_OFFER` skip queues without a capacity limit | you saturate a pool on an unbounded queue through `QUEUE_OFFER` | reject `EXECUTOR_SUBMIT`, or give the queue a capacity (§15) |
 | 16 | A pool task carries a session only once the session has a scenario | another service relies on `X-Chaos-Session` from pool tasks of a session without local scenarios | activate a scenario in the session first, or set the header from `session.id()` (§16) |
 | 17 | Direct-buffer pressure above the direct memory limit is refused | a `directBufferPressure` asks for more than `-XX:MaxDirectMemorySize` (by default the maximum heap) | lower `totalBytes` or raise the limit (§17) |
 | 18 | `suppress` on HTTP and JDBC is refused; `ChaosHttpSuppressException` / `ChaosJdbcSuppressException` are removed | a plan suppresses `HTTP_CLIENT_*` or `JDBC_*`, or code catches those exceptions | use `reject` and catch `IOException` / `SQLException` (§18) |
 | 19 | `reject` and `errno` raise the real call's exception; errnos apply per operation | a test catches the 1.x type of a reject or a file errno, reads its top stack frame, or applies a file errno to a call the kernel never reports it for | catch the type in §19; pick an errno the call can report (§19) |
+| 20 | The destructive-effect refusal is a `ChaosValidationException`; `suppress` is refused where a call cannot be skipped | code catches `ChaosActivationException` for a deadlock or thread leak without `allowDestructiveEffects`, or matches `plan rejected:` in the HTTP/JMX answer; a plan suppresses an operation outside the suppress list | catch `ChaosValidationException`, match `invalid plan:`; delay or reject instead (§20) |
 
 ---
 
@@ -128,6 +130,10 @@ public final class ClockSkewForFiveMinutes {
 }
 ```
 
+A stress scenario is validated the same way. A stressor runs from its start until it is stopped or its `activeFor` / `activeUntil` ends; it is never evaluated per call, so `maxApplications`, `rateLimit`, `activateAfterMatches`, `probability < 1.0`, `activeFrom` and `replayMatches` never applied to it. 2.0 refuses them with `ChaosValidationException`: remove them, and bound the stressor with `activeFor` or `activeUntil`.
+
+A clock read (`SYSTEM_CLOCK_MILLIS`, `SYSTEM_CLOCK_NANOS`, `INSTANT_NOW`, `CLOCK_READ`, `LOCAL_DATE_TIME_NOW`, `ZONED_DATE_TIME_NOW`, `DATE_NEW`) takes only a clock skew; a delay, reject or suppress on it never applied and is refused, as is a clock skew on any other operation.
+
 ## 5. Hooks are woven on demand
 
 1.x wove every hook at start. 2.0 weaves a hook group the first time an activated scenario (or an opened session) needs one of its operations: a JVM without scenarios runs unmodified JDK classes. Two consequences:
@@ -178,11 +184,24 @@ Before (1.x): `NamePattern.glob("a*b")` does not match `"a\nb"`. Now it does; `N
 
 The Spring actuator endpoint answers like the Micronaut and Quarkus endpoints: a failed activation is 400 `invalid`, 409 `conflict` or 422 `rejected` instead of 200 with `status = "error"`; a stop is 404 `not-found` or 409 `unmanaged`. Clients that read `status = "error"` from a 200 must check the HTTP status (or the `invalid`, `conflict`, `rejected` outcomes). The startup plan (`macstab.chaos.config-file`) is no longer stoppable through the endpoint, which stops only the plans activated through it.
 
-## 13. `reject` on worker and fork-join runs, and on queue take and poll, is refused
+## 13. `reject` is refused where no real call fails
 
 A `RejectEffect` on `EXECUTOR_WORKER_RUN` or `FORK_JOIN_TASK_RUN` fails activation with `ChaosValidationException`. In 1.x it threw on the pool worker before the pool recorded the task's outcome: the worker died and the task's future never completed (`Future.get()` and `CompletableFuture.get()` hung). Reject `EXECUTOR_SUBMIT` to fail the submission, or delay or gate the run.
 
 The same holds for `QUEUE_TAKE` and `QUEUE_POLL`: a `RejectEffect` on them fails activation. The JDK's `take()` and `poll()` fail only by interruption; in 1.x a thread pool's worker taking its next task died on the injected exception and was replaced at once, thousands of times a second, while no task ran. Delay or gate them, suppress `QUEUE_POLL`, or reject `QUEUE_PUT` / `QUEUE_OFFER` on the producer side.
+
+A `RejectEffect` is refused the same way wherever no real call fails: on `THREAD_PARK`, `MONITOR_ENTER`, `SYSTEM_GC_REQUEST`, `SYSTEM_EXIT_REQUEST`, `THREAD_LOCAL_GET`, `THREAD_LOCAL_SET`, `ASYNC_CANCEL`, `ZIP_DEFLATE` and `EXECUTOR_SHUTDOWN`. In 1.x it threw an `IllegalStateException` (a `RuntimeException` on a park) that the real call never throws. The refusal names what to use instead:
+
+| Operation | Use instead |
+|-----------|-------------|
+| `THREAD_PARK`, `MONITOR_ENTER` | `delay` or `gate`; a `monitorContention` stressor for contended locks |
+| `SYSTEM_GC_REQUEST`, `THREAD_LOCAL_GET`, `THREAD_LOCAL_SET` | `suppress` or `delay` |
+| `SYSTEM_EXIT_REQUEST` | `suppress` (the exit is refused) or `delay` |
+| `ASYNC_CANCEL` | `suppress` or `delay`; `exceptionalCompletion` to fail the future |
+| `ZIP_DEFLATE` | `delay`; `reject` on `ZIP_INFLATE` fails with `DataFormatException` |
+| `EXECUTOR_SHUTDOWN` | `delay` or `gate` |
+
+`METHOD_ENTER`, `METHOD_EXIT` and `SCHEDULE_TICK` still take a reject.
 
 ## 14. Where enabling switches may come from
 
@@ -245,6 +264,17 @@ An `ErrnoEffect` on a call on an open file — `FILE_IO_READ`, `FILE_IO_WRITE`, 
 
 - In tests: catch the 2.0 type (`IOException` covers the file and socket rows), and read the reason from `getMessage()` instead of `FileSystemException.getReason()`.
 - In plans: an errno a call cannot report becomes one it can: `EIO` for a failing read or truncate, `ENOENT` / `EACCES` on `FILE_IO_OPEN`.
+
+## 20. The destructive-effect refusal is a validation error; `suppress` is refused where a call cannot be skipped
+
+A `DeadlockEffect` or `ThreadLeakEffect` without `allowDestructiveEffects` fails activation with `ChaosValidationException`, like every other validation error; 1.x threw `ChaosActivationException`. Over HTTP and JMX the outcome stays `invalid`, and the message now starts with `invalid plan:` instead of `plan rejected:`.
+
+- In code: catch `ChaosValidationException` where you caught `ChaosActivationException` for this refusal.
+- In scripts that read the management answer: match `invalid plan:`.
+
+A `SuppressEffect` applies only to operations whose call can be skipped or answered empty (the `suppress` row of the configuration reference's compatibility matrix). 1.x accepted it everywhere and it did nothing on the other operations; 2.0 refuses it with `ChaosValidationException`, naming `delay` (and `reject` where the call can fail) instead.
+
+Sessions gained the other way: a session-scoped scenario may now select thread starts and sleeps and executor shutdowns. Only `CLASS_LOAD`, `CLASS_DEFINE`, `RESOURCE_LOAD`, `SHUTDOWN_HOOK_REGISTER` and stressors are refused in a session.
 
 ---
 

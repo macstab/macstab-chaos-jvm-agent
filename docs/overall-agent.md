@@ -696,7 +696,7 @@ The following effects are inherently destabilizing and should only be used in co
 
 ## Destructive Effects Safeguard
 
-`DeadlockEffect` and `ThreadLeakEffect` require an explicit opt-in flag in `ActivationPolicy`. Any attempt to activate a scenario using either effect without `allowDestructiveEffects = true` throws `ChaosActivationException` at registration time — before any stressor thread or lock is created.
+`DeadlockEffect` and `ThreadLeakEffect` require an explicit opt-in flag in `ActivationPolicy`. Any attempt to activate a scenario using either effect without `allowDestructiveEffects = true` throws `ChaosValidationException` at registration time — before any stressor thread or lock is created.
 
 This is enforced by `CompatibilityValidator.validateDestructiveEffects()`. It is a correctness guard, not a security boundary: the calling code is trusted. The guard prevents accidental activation in scenarios that were copied from test suites into long-running processes without adjusting the policy.
 
