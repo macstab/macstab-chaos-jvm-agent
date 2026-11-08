@@ -435,6 +435,7 @@ public final class StartupConfigLoader {
    * @param size the file's size in bytes
    * @param fileKey the file system's key of the file (inode), or {@code null}
    */
+  @Internal
   public record PlanFile(
       Path target,
       String json,
@@ -450,6 +451,7 @@ public final class StartupConfigLoader {
    * @return the file and its contents, or empty when the configured path does not exist
    * @throws ConfigLoadException if the path is unsafe or unreadable
    */
+  @Internal
   public static Optional<PlanFile> readPlanFile(final String filePath) {
     final Path path = Path.of(filePath).toAbsolutePath().normalize();
     if (!Files.exists(path, LinkOption.NOFOLLOW_LINKS)) {
@@ -590,7 +592,11 @@ public final class StartupConfigLoader {
       String source,
       boolean debugDumpOnStart,
       @Nullable Path filePath,
-      @Nullable PlanFile planFile) {
+      @Internal @Nullable PlanFile planFile) {
+
+    /** The canonical constructor, with the reloader's file read: internal to the agent. */
+    @Internal
+    public LoadedPlan {}
 
     /**
      * Creates a loaded plan without a file read.

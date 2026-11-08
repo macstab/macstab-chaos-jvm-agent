@@ -93,6 +93,7 @@ public final class CidrBlock {
    * @return the block
    * @throws IllegalArgumentException if {@code text} is not a valid block
    */
+  @Internal
   public static CidrBlock cached(final String text) {
     return cached(CACHE, text);
   }
@@ -120,6 +121,7 @@ public final class CidrBlock {
    * @return its bytes (4 or 16)
    * @throws IllegalArgumentException if {@code literal} is not an address literal
    */
+  @Internal
   public static byte[] parseAddress(final String literal) {
     final byte[] address =
         literal == null

@@ -935,7 +935,7 @@ Internal modules (`chaos-agent-core`, `chaos-agent-instrumentation-jdk`, `chaos-
 
 ## Versioning
 
-The public API (`chaos-agent-api`, recorded in `api/*.api`) follows semantic versioning; `@Internal` types can change in any release.
+The public API of every published module (`chaos-agent-api`, `chaos-agent-startup-config`, the framework integrations and the testkit, each recorded in its module's `api/*.api`) follows semantic versioning. `@Internal` types and members are left out of those records and can change in any release.
 
 Records of the API grow components (`ActivationPolicy` keeps 8- and 10-argument constructors from its earlier shapes). The compatibility policy for their constructors: when a record gains a component, its previous canonical signature stays as a delegating constructor until the next major release, so positional callers keep compiling and keep their meaning. Construct records through their factories and builders (`ActivationPolicy.count(1)`, `ActivationPolicy.builder()…build()`, `ChaosScenario.builder(id)`), not positionally: a positional call is easy to misplace (a value in the `randomSeed` slot instead of `maxApplications` compiles silently).
 

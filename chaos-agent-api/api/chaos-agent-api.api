@@ -936,9 +936,7 @@ public final class com/macstab/chaos/jvm/api/CidrBlock
   public method hashCode()I
   public method prefixLength()I
   public method toString()Ljava/lang/String;
-  public static method cached(Ljava/lang/String;)Lcom/macstab/chaos/jvm/api/CidrBlock;
   public static method parse(Ljava/lang/String;)Lcom/macstab/chaos/jvm/api/CidrBlock;
-  public static method parseAddress(Ljava/lang/String;)[B
 
 public @interface com/macstab/chaos/jvm/api/Internal implements java/lang/annotation/Annotation
 

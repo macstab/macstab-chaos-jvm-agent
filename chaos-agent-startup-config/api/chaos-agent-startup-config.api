@@ -38,27 +38,13 @@ public final class com/macstab/chaos/jvm/startup/StartupConfigLoader
   public static final field PROPERTY_DEBUG_DUMP Ljava/lang/String;
   public static method load(Ljava/lang/String;Ljava/util/Map;)Ljava/util/Optional;
   public static method loadPlanFromFile(Ljava/lang/String;)Lcom/macstab/chaos/jvm/api/ChaosPlan;
-  public static method readPlanFile(Ljava/lang/String;)Ljava/util/Optional;
 
 public static final record com/macstab/chaos/jvm/startup/StartupConfigLoader$LoadedPlan
   public final method equals(Ljava/lang/Object;)Z
   public final method hashCode()I
   public final method toString()Ljava/lang/String;
   public method <init>(Lcom/macstab/chaos/jvm/api/ChaosPlan;Ljava/lang/String;ZLjava/nio/file/Path;)V
-  public method <init>(Lcom/macstab/chaos/jvm/api/ChaosPlan;Ljava/lang/String;ZLjava/nio/file/Path;Lcom/macstab/chaos/jvm/startup/StartupConfigLoader$PlanFile;)V
   public method debugDumpOnStart()Z
   public method filePath()Ljava/nio/file/Path;
   public method plan()Lcom/macstab/chaos/jvm/api/ChaosPlan;
-  public method planFile()Lcom/macstab/chaos/jvm/startup/StartupConfigLoader$PlanFile;
   public method source()Ljava/lang/String;
-
-public static final record com/macstab/chaos/jvm/startup/StartupConfigLoader$PlanFile
-  public final method equals(Ljava/lang/Object;)Z
-  public final method hashCode()I
-  public final method toString()Ljava/lang/String;
-  public method <init>(Ljava/nio/file/Path;Ljava/lang/String;Ljava/nio/file/attribute/FileTime;JLjava/lang/Object;)V
-  public method fileKey()Ljava/lang/Object;
-  public method json()Ljava/lang/String;
-  public method lastModified()Ljava/nio/file/attribute/FileTime;
-  public method size()J
-  public method target()Ljava/nio/file/Path;
