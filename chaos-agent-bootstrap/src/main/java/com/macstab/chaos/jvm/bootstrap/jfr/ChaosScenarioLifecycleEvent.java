@@ -10,7 +10,7 @@ import org.jspecify.annotations.Nullable;
 
 /**
  * JFR event emitted on every chaos scenario state transition: REGISTERED, STARTED, STOPPED,
- * RELEASED.
+ * INACTIVE, RELEASED.
  *
  * <p>Enabled by default — lifecycle transitions are infrequent (one per test phase boundary) so the
  * overhead is negligible. Correlate with {@link ChaosEffectAppliedEvent} via {@code scenarioId} to
@@ -36,7 +36,7 @@ public final class ChaosScenarioLifecycleEvent extends Event {
 
   /**
    * Lifecycle transition: one of {@code REGISTERED}, {@code STARTED}, {@code STOPPED}, {@code
-   * RELEASED}.
+   * INACTIVE}, {@code RELEASED}.
    */
   @Label("Event Type")
   public @Nullable String eventType;

@@ -797,7 +797,8 @@ The agent uses `java.util.logging` (`java.util.logging.Logger`). Log output goes
 
 `ChaosEventListener` receives:
 - `STARTED`: scenario started
-- `STOPPED`: scenario stopped
+- `STOPPED`: scenario stopped (once per transition)
+- `INACTIVE`: scenario ended on its own, with `reason` `expired` or `max applications reached`
 - `RELEASED`: gate manually released
 - `APPLIED`: a contribution took effect — every matching delay, the winning gate, the winning terminal action (on the hot path — listeners must be non-blocking)
 

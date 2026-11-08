@@ -52,7 +52,8 @@ Both files are written to a staging file and renamed, so a reader never sees a p
 | `APPLIED`    | an effect took effect                                                                                                        | `operation`, `scope`, `effectType`, `match` (the scenario's 1-based match number), `delayMillis` (when it added a delay), `sessionId` (session scenarios) |
 | `SKIPPED`    | the selector matched but the policy kept the effect from applying — published only while a listener is registered           | `reason` (`notYetActive`, `warmUp`, `probability`, `rateLimit`, `maxApplications`), `operation`, `scope` |
 | `RELEASED`   | a gate was released                                                                                                          | `scope`                                      |
-| `STOPPED`    | the scenario stopped                                                                                                         | `scope`                                      |
+| `INACTIVE`   | the scenario ended on its own (`ACTIVE → INACTIVE`), once                                                                    | `scope`, `reason` (`expired`, `max applications reached`) |
+| `STOPPED`    | the scenario stopped: once per transition into `STOPPED` (a second `stop()`, or `close()` after `stop()`, publishes nothing) | `scope`                                      |
 | `FAILED`     | an activation failed (also recorded in the diagnostics)                                                                     | `category` (`INVALID_CONFIGURATION`, `UNSUPPORTED_RUNTIME`, `ACTIVATION_CONFLICT`, `INSTRUMENTATION_FAILURE`) |
 
 ## 3. Metrics

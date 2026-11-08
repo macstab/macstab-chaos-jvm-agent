@@ -75,12 +75,15 @@ public record ChaosEvent(
     /**
      * The scenario transitioned to {@link ChaosDiagnostics.ScenarioState#ACTIVE ACTIVE} and will
      * now match operations. For stressor effects, the background stressor task has been launched.
+     * Published before the scenario fires: a call made while this event is being delivered is
+     * neither matched nor applied.
      */
     STARTED,
 
     /**
      * The scenario was stopped: no further effects will fire. Stressor resources have been cleaned
-     * up.
+     * up. Published once, on the transition into {@link ChaosDiagnostics.ScenarioState#STOPPED
+     * STOPPED}; stopping or closing a stopped scenario again publishes nothing.
      */
     STOPPED,
 
@@ -112,5 +115,15 @@ public record ChaosEvent(
      * ChaosDiagnostics.FailureCategory}; the failure is also recorded in the diagnostics.
      */
     FAILED,
+
+    /**
+     * The scenario ended on its own and transitioned from {@link
+     * ChaosDiagnostics.ScenarioState#ACTIVE ACTIVE} to {@link
+     * ChaosDiagnostics.ScenarioState#INACTIVE INACTIVE}: no further effects fire. The {@code
+     * reason} attribute is {@code expired} ({@code activeFor} or {@code activeUntil} passed) or
+     * {@code max applications reached}. Published once per transition; stopping the scenario
+     * afterwards still publishes {@link #STOPPED}.
+     */
+    INACTIVE,
   }
 }

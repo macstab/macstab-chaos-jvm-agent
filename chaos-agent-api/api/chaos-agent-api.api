@@ -545,6 +545,7 @@ public final record com/macstab/chaos/jvm/api/ChaosEvent
 public static final enum com/macstab/chaos/jvm/api/ChaosEvent$Type
   public static final field APPLIED Lcom/macstab/chaos/jvm/api/ChaosEvent$Type;
   public static final field FAILED Lcom/macstab/chaos/jvm/api/ChaosEvent$Type;
+  public static final field INACTIVE Lcom/macstab/chaos/jvm/api/ChaosEvent$Type;
   public static final field REGISTERED Lcom/macstab/chaos/jvm/api/ChaosEvent$Type;
   public static final field RELEASED Lcom/macstab/chaos/jvm/api/ChaosEvent$Type;
   public static final field SKIPPED Lcom/macstab/chaos/jvm/api/ChaosEvent$Type;

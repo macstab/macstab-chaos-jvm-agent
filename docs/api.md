@@ -694,7 +694,8 @@ record ChaosEvent(
         SKIPPED,     // the selector matched, the policy kept the effect (only while a listener is registered)
         FAILED,      // an activation failed
         RELEASED,    // gate-effect release() unblocked waiters
-        STOPPED      // scenario transitioned to STOPPED
+        STOPPED,     // scenario transitioned to STOPPED (once per transition)
+        INACTIVE     // scenario ended on its own (expired, max applications reached); attribute reason
     }
 }
 ```

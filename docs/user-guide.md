@@ -667,7 +667,8 @@ Published event types:
 | `STARTED`  | Scenario transitions to ACTIVE                                                                                                        |
 | `APPLIED`  | A contribution took effect on an intercepted call — every matching delay, the winning gate, the winning terminal action by precedence |
 | `RELEASED` | `GateEffect` gate opened via `handle.release()`                                                                                       |
-| `STOPPED`  | `handle.stop()`, `handle.close()` or `controlPlane.close()`                                                                           |
+| `STOPPED`  | `handle.stop()`, `handle.close()` or `controlPlane.close()`, once per scenario                                                        |
+| `INACTIVE` | The scenario ended on its own: `reason` is `expired` (`activeFor`, `activeUntil`) or `max applications reached`                       |
 
 The runtime also publishes `REGISTERED` (before a scenario starts), `SKIPPED` (the policy kept a matched effect, with the check as `reason`; only while a listener is registered) and `FAILED` (an activation failed, with its `category`); see [observability.md §2](observability.md#2-events). A scenario that loses on precedence publishes no `APPLIED` event and does not consume its `maxApplications` budget.
 

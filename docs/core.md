@@ -702,7 +702,7 @@ Key invariants enforced at construction time by the builder API or `Compatibilit
 # 13. Extension Points
 
 - `ChaosMetricsSink`: implement to forward `chaos.effect.applied` metrics to a custom sink
-- `ChaosEventListener`: implement to subscribe to STARTED/STOPPED/RELEASED/APPLIED events
+- `ChaosEventListener`: implement to subscribe to STARTED/STOPPED/INACTIVE/RELEASED/APPLIED events
 - Both are registered on `ChaosRuntime` at construction time or via `addEventListener()`
 
 ---

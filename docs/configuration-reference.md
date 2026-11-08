@@ -654,7 +654,7 @@ Access via `jconsole`, `jmc`, or any JMX client. `Observability.jmxEnabled = fal
 
 ## 12.2 Structured Logging
 
-Chaos events are written to `java.util.logging` (logger `com.macstab.chaos.jvm`): `FAILED` at `WARNING`, `STARTED`/`STOPPED` at `INFO`, `REGISTERED`/`APPLIED`/`RELEASED` at `FINE`, `SKIPPED` at `FINER`. Configure with `-Djava.util.logging.config.file=logging.properties` or programmatically. Each line carries the event type, scenario ID, message and attributes (for `APPLIED`: operation, scope, effect type and, for session scenarios, session ID).
+Chaos events are written to `java.util.logging` (logger `com.macstab.chaos.jvm`): `FAILED` at `WARNING`, `STARTED`/`STOPPED`/`INACTIVE` at `INFO`, `REGISTERED`/`APPLIED`/`RELEASED` at `FINE`, `SKIPPED` at `FINER`. Configure with `-Djava.util.logging.config.file=logging.properties` or programmatically. Each line carries the event type, scenario ID, message and attributes (for `APPLIED`: operation, scope, effect type and, for session scenarios, session ID).
 
 ## 12.3 JFR Integration
 

@@ -71,6 +71,14 @@ import org.jspecify.annotations.Nullable;
  * <p>Observability-bus publishes happen strictly <em>outside</em> the monitor: callbacks are
  * untrusted code that may block, throw, or re-enter controller methods, so holding the lock across
  * them would stall every concurrent {@code evaluate()} caller and risk listener-induced deadlock.
+ *
+ * <p>Lifecycle events are published once per transition, by the thread that made it: {@code
+ * STARTED} on {@code REGISTERED → ACTIVE}, {@code INACTIVE} (with its {@code reason}) on {@code
+ * ACTIVE → INACTIVE}, {@code STOPPED} on every transition into {@code STOPPED} (from {@code
+ * REGISTERED}, {@code ACTIVE} or {@code INACTIVE}). A repeated {@code stop()} publishes nothing. A
+ * stop racing an expiry therefore yields {@code STOPPED} alone or {@code INACTIVE} and {@code
+ * STOPPED}, never two of the same; the two come from different threads, so a listener may receive
+ * them in either order.
  */
 final class ScenarioController {
   /** The policy's replay log as a sorted array, or {@code null} without replay. */
@@ -161,7 +169,9 @@ final class ScenarioController {
             : ThreadLocalRandom.current().nextLong();
     // Always start REGISTERED regardless of start mode. The start() call
     // transitions to ACTIVE. Setting ACTIVE here while started=false produces a
-    // diagnostic state that is observably wrong (ACTIVE but evaluating returns null).
+    // diagnostic state that is observably wrong (ACTIVE but evaluating returns null). The one
+    // window where a controller is ACTIVE with started=false is while start() delivers STARTED:
+    // a call evaluated then is neither matched nor applied, so no effect precedes STARTED.
     this.state = ChaosDiagnostics.ScenarioState.REGISTERED;
   }
 
@@ -260,7 +270,10 @@ final class ScenarioController {
    *   <li>Resets the {@link ManualGate} so that any threads waiting on a previous run are
    *       unblocked.
    *   <li>Records {@code startedAt} for activation-window calculations.
-   *   <li>Sets {@code started} to {@code true} and {@code state} to {@code ACTIVE}.
+   *   <li>Sets {@code state} to {@code ACTIVE}, publishes {@code STARTED}, and only then sets
+   *       {@code started} to {@code true} (unless a {@code stop()} or an expiry ended the scenario
+   *       meanwhile): a call evaluated while {@code STARTED} is delivered is neither matched nor
+   *       applied, so no {@code APPLIED} precedes {@code STARTED}.
    *   <li>Creates and starts a background {@link ManagedStressor} if the scenario's effect requires
    *       one (e.g., heap pressure, deadlock, thread leak). A stressor that cannot get its
    *       resources ({@link OutOfMemoryError}, also a thread the JVM cannot start) fails the start
@@ -268,8 +281,7 @@ final class ScenarioController {
    *       REGISTERED}.
    *   <li>Initialises {@link ClockSkewState} if the effect is a {@link
    *       com.macstab.chaos.jvm.api.ChaosEffect.ClockSkewEffect}.
-   *   <li>Publishes a {@link com.macstab.chaos.jvm.api.ChaosEvent.Type#STARTED} event to the {@link
-   *       ObservabilityBus}.
+   *   <li>Schedules the end of a stressor with a lifetime, once {@code STARTED} is delivered.
    * </ul>
    */
   void start() {
@@ -312,6 +324,11 @@ final class ScenarioController {
     } finally {
       ChaosDispatcher.decrementDispatchDepth();
     }
+    // Carried from phase 1 to phase 2: the stressor's lifetime, counted from startNanos, and the
+    // clock skew, which takes effect only in phase 2 like every other effect.
+    long startNanos = 0L;
+    Duration lifetime = null;
+    ClockSkewState newClockSkewState = null;
     synchronized (this) {
       if (state == ChaosDiagnostics.ScenarioState.STOPPED) {
         if (newStressor != null) {
@@ -338,6 +355,7 @@ final class ScenarioController {
       // a 5-minute activeFor window into 65 minutes; a -1h skew would make it expire instantly.
       ChaosDispatcher.incrementDispatchDepth();
       try {
+        startNanos = System.nanoTime();
         startedAt = clock.instant();
         // Anchor the rate-limit window at activation, so the first window ends one window after
         // start rather than at an epoch-aligned instant.
@@ -349,7 +367,6 @@ final class ScenarioController {
       // Construct ClockSkewState before setting started/state so that if the constructor
       // throws (e.g. Duration.toNanos() overflow), started remains false and the controller
       // does not enter a half-initialised ACTIVE state with a null clockSkewState.
-      final ClockSkewState newClockSkewState;
       if (scenario.effect() instanceof ChaosEffect.ClockSkewEffect skewEffect) {
         ChaosDispatcher.incrementDispatchDepth();
         final long wallMillis;
@@ -363,28 +380,38 @@ final class ScenarioController {
         newClockSkewState =
             new ClockSkewState(
                 skewEffect, wallMillis, nanoRef, scenario.activationPolicy().activeFrom());
-      } else {
-        newClockSkewState = null;
       }
-      clockSkewState = newClockSkewState;
       stressor = newStressor;
-      started.set(true);
+      // A skew left from an earlier run must not apply before phase 2 sets the new one.
+      clockSkewState = null;
+      // Phase 1: ACTIVE, but evaluate() still returns null until phase 2 sets the started flag.
       state = ChaosDiagnostics.ScenarioState.ACTIVE;
       reason = "started";
+      lifetime = newStressor == null ? null : stressorLifetime();
+    }
+    observabilityBus.publish(
+        ChaosEvent.Type.STARTED, scenario.id(), "scenario started", Map.of("scope", scopeKey));
+    // Phase 2, after STARTED: re-check the state, because evaluate() checks only the started flag
+    // and a stop() or an expiry since phase 1 must not be revived. The started flag also tells a
+    // second start() that ran phase 1 again (INACTIVE → ACTIVE) not to schedule a second expiry.
+    synchronized (this) {
+      if (state != ChaosDiagnostics.ScenarioState.ACTIVE || started.get()) {
+        return;
+      }
+      started.set(true);
+      // Clock reads bypass evaluate(): a clock skew takes effect when its state is set.
+      clockSkewState = newClockSkewState;
       // Under the monitor: a stop() that runs once start() has left it then finds the expiry
       // thread and cancels it, instead of a thread scheduled afterwards parking for activeFor.
-      final Duration lifetime = stressorLifetime();
-      if (newStressor != null && lifetime != null) {
+      if (stressor != null && lifetime != null) {
         ChaosDispatcher.incrementDispatchDepth();
         try {
-          scheduleStressorExpiry(lifetime);
+          scheduleStressorExpiry(lifetime, startNanos);
         } finally {
           ChaosDispatcher.decrementDispatchDepth();
         }
       }
     }
-    observabilityBus.publish(
-        ChaosEvent.Type.STARTED, scenario.id(), "scenario started", Map.of("scope", scopeKey));
   }
 
   /**
@@ -400,18 +427,20 @@ final class ScenarioController {
    *       resource stress.
    *   <li>Clears {@link ClockSkewState} so the clock is no longer skewed.
    *   <li>Publishes a {@link com.macstab.chaos.jvm.api.ChaosEvent.Type#STOPPED} event to the {@link
-   *       ObservabilityBus}.
+   *       ObservabilityBus}, on the transition into {@code STOPPED} only.
    * </ul>
    *
-   * <p>Once stopped, calls to {@link #evaluate(InvocationContext)} always return {@code null}.
-   * Calling {@code stop()} on an already-stopped controller is safe and has no additional effect
-   * beyond re-publishing the event.
+   * <p>Once stopped, calls to {@link #evaluate(InvocationContext)} always return {@code null}; a
+   * call already decided before {@code stop()} returned completes. Calling {@code stop()} on an
+   * already-stopped controller is safe and has no effect, and publishes nothing.
    */
   void stop() {
     // Mirror start(): mutate state under the monitor, publish the STOPPED event after release so
     // listener code cannot stall concurrent evaluate() callers or deadlock by re-entering
     // synchronized methods on this controller.
+    final boolean transitioned;
     synchronized (this) {
+      transitioned = state != ChaosDiagnostics.ScenarioState.STOPPED;
       started.set(false);
       state = ChaosDiagnostics.ScenarioState.STOPPED;
       reason = "stopped";
@@ -420,8 +449,10 @@ final class ScenarioController {
       cancelStressorExpiry();
       clockSkewState = null;
     }
-    observabilityBus.publish(
-        ChaosEvent.Type.STOPPED, scenario.id(), "scenario stopped", Map.of("scope", scopeKey));
+    if (transitioned) {
+      observabilityBus.publish(
+          ChaosEvent.Type.STOPPED, scenario.id(), "scenario stopped", Map.of("scope", scopeKey));
+    }
   }
 
   /**
@@ -508,7 +539,7 @@ final class ScenarioController {
     }
     final Window window = window();
     if (window == Window.EXPIRED) {
-      markInactive("expired");
+      endOnItsOwn("expired");
       return null;
     }
     if (window == Window.NOT_YET) {
@@ -574,17 +605,22 @@ final class ScenarioController {
     if (maxApplications == null) {
       return true;
     }
+    final boolean ended;
     synchronized (applicationBudgetLock) {
-      if (appliedCount.get() >= maxApplications) {
-        markInactive("max applications reached");
-        return false;
+      if (appliedCount.get() < maxApplications) {
+        if (appliedCount.get() + reservedApplications >= maxApplications) {
+          return false;
+        }
+        reservedApplications++;
+        return true;
       }
-      if (appliedCount.get() + reservedApplications >= maxApplications) {
-        return false;
-      }
-      reservedApplications++;
-      return true;
+      ended = markInactive(MAX_APPLICATIONS_REACHED);
     }
+    // Published after leaving the budget lock: listeners are untrusted code.
+    if (ended) {
+      publishInactive(MAX_APPLICATIONS_REACHED);
+    }
+    return false;
   }
 
   /**
@@ -597,19 +633,20 @@ final class ScenarioController {
   void commitApplication(
       final InvocationContext context, final long delayNanos, final long matchNumber) {
     final Long maxApplications = scenario.activationPolicy().maxApplications();
+    boolean capReached = false;
     if (maxApplications == null) {
       appliedCount.incrementAndGet();
     } else {
-      final boolean capReached;
       synchronized (applicationBudgetLock) {
         reservedApplications--;
         capReached = appliedCount.incrementAndGet() >= maxApplications;
       }
-      if (capReached) {
-        markInactive("max applications reached");
-      }
     }
+    // The application is reported before the end it causes: APPLIED, then INACTIVE.
     publishAppliedEvent(context, delayNanos, matchNumber);
+    if (capReached) {
+      endOnItsOwn(MAX_APPLICATIONS_REACHED);
+    }
   }
 
   /**
@@ -726,8 +763,13 @@ final class ScenarioController {
    *
    * The write is performed under the same monitor that guards {@code start()} / {@code stop()} so
    * the transition is linearisable with respect to all lifecycle edges.
+   *
+   * <p>Publishes nothing: the caller publishes {@code INACTIVE} ({@link #publishInactive}) when
+   * this returns {@code true}, after leaving every lock it holds.
+   *
+   * @return {@code true} when this call made the transition
    */
-  private void markInactive(final String newReason) {
+  private boolean markInactive(final String newReason) {
     synchronized (this) {
       if (state == ChaosDiagnostics.ScenarioState.ACTIVE) {
         state = ChaosDiagnostics.ScenarioState.INACTIVE;
@@ -741,8 +783,28 @@ final class ScenarioController {
           gate.release();
         }
         closeStressor();
+        return true;
       }
+      return false;
     }
+  }
+
+  /**
+   * Ends an active scenario on its own ({@link #markInactive}) and publishes {@code INACTIVE} when
+   * this call made the transition. The caller must hold no lock.
+   */
+  private void endOnItsOwn(final String newReason) {
+    if (markInactive(newReason)) {
+      publishInactive(newReason);
+    }
+  }
+
+  private void publishInactive(final String newReason) {
+    observabilityBus.publish(
+        ChaosEvent.Type.INACTIVE,
+        scenario.id(),
+        "scenario inactive: " + newReason,
+        Map.of("scope", scopeKey, "reason", newReason));
   }
 
   /**
@@ -775,14 +837,14 @@ final class ScenarioController {
    * so user scenarios (thread start, park, sleep) never apply to it. It ends early when the
    * scenario is stopped.
    */
-  private void scheduleStressorExpiry(final Duration activeFor) {
+  private void scheduleStressorExpiry(final Duration activeFor, final long fromNanos) {
     long timeoutNanos;
     try {
       timeoutNanos = activeFor.toNanos();
     } catch (final ArithmeticException overflow) {
       return; // beyond ~292 years: effectively never expires
     }
-    final long deadline = System.nanoTime() + timeoutNanos;
+    final long deadline = fromNanos + timeoutNanos;
     expiryThread =
         AgentThreads.start(
             "macstab-chaos-expiry-" + scenario.id(),
@@ -795,7 +857,7 @@ final class ScenarioController {
                   return;
                 }
               }
-              markInactive("expired");
+              endOnItsOwn("expired");
             });
   }
 
@@ -883,11 +945,14 @@ final class ScenarioController {
   boolean withinWindow() {
     final Window window = window();
     if (window == Window.EXPIRED) {
-      markInactive("expired");
+      endOnItsOwn("expired");
       return false;
     }
     return window == Window.OPEN;
   }
+
+  /** The reason of the INACTIVE transition when committed applications reach the cap. */
+  private static final String MAX_APPLICATIONS_REACHED = "max applications reached";
 
   /** {@link #takeRatePermit()}: the scenario has no rate limit, so there is no permit. */
   private static final long NO_RATE_LIMIT = Long.MIN_VALUE;

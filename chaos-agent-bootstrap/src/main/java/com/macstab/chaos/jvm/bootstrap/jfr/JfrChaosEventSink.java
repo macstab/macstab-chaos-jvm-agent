@@ -39,7 +39,7 @@ final class JfrChaosEventSink implements ChaosEventListener, AutoCloseable {
   @Override
   public void onEvent(final ChaosEvent event) {
     switch (event.type()) {
-      case REGISTERED, STARTED, STOPPED, RELEASED -> emitLifecycle(event);
+      case REGISTERED, STARTED, STOPPED, INACTIVE, RELEASED -> emitLifecycle(event);
       case APPLIED -> {
         appliedTotal.increment();
         emitEffectApplied(event);

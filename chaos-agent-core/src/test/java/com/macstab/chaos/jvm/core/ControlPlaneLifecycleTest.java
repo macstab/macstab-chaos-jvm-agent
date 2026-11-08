@@ -821,12 +821,16 @@ class ControlPlaneLifecycleTest {
                 }
               });
       runtime.addEventListener(blocked);
-      final ChaosActivationHandle handle =
-          runtime.activate(submitScenario("a", ActivationPolicy.always()));
+      runtime.activate(
+          scenario(
+              "a",
+              OperationType.EXECUTOR_SUBMIT,
+              ChaosEffect.delay(Duration.ZERO),
+              ActivationPolicy.always()));
       try {
-        // Each stop re-publishes STOPPED: far more than the delivery queue holds.
-        for (int stop = 0; stop < 10_100; stop++) {
-          handle.stop();
+        // Each call publishes APPLIED: far more than the delivery queue holds.
+        for (int call = 0; call < 10_100; call++) {
+          runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
         }
 
         assertThat(

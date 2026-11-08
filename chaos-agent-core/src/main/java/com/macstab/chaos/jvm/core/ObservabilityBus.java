@@ -59,8 +59,9 @@ final class ObservabilityBus {
    * Creates a new bus backed by the given metrics sink.
    *
    * <p>A default logging listener is registered immediately; it routes {@link
-   * ChaosEvent.Type#STARTED}/{@link ChaosEvent.Type#STOPPED} to {@code INFO} and {@link
-   * ChaosEvent.Type#APPLIED}/{@link ChaosEvent.Type#RELEASED} to {@code FINE}.
+   * ChaosEvent.Type#STARTED}/{@link ChaosEvent.Type#STOPPED}/{@link ChaosEvent.Type#INACTIVE} to
+   * {@code INFO} and {@link ChaosEvent.Type#APPLIED}/{@link ChaosEvent.Type#RELEASED} to {@code
+   * FINE}.
    *
    * @param metricsSink the sink to which metric increments are forwarded; must not be {@code null}
    */
@@ -333,8 +334,9 @@ final class ObservabilityBus {
    * Default listener that routes events to the JUL logger at an appropriate level.
    *
    * <ul>
-   *   <li>{@link ChaosEvent.Type#STARTED} and {@link ChaosEvent.Type#STOPPED} are lifecycle
-   *       milestones worth seeing in normal operation and are emitted at {@code INFO}.
+   *   <li>{@link ChaosEvent.Type#STARTED}, {@link ChaosEvent.Type#STOPPED} and {@link
+   *       ChaosEvent.Type#INACTIVE} are lifecycle milestones worth seeing in normal operation and
+   *       are emitted at {@code INFO}.
    *   <li>{@link ChaosEvent.Type#APPLIED} and {@link ChaosEvent.Type#RELEASED} are high-frequency
    *       per-invocation events and are emitted at {@code FINE} to avoid flooding production logs.
    * </ul>
@@ -355,7 +357,7 @@ final class ObservabilityBus {
             + "\" attributes="
             + event.attributes();
     switch (event.type()) {
-      case STARTED, STOPPED -> LOGGER.info(formatted);
+      case STARTED, STOPPED, INACTIVE -> LOGGER.info(formatted);
       case APPLIED, RELEASED -> LOGGER.fine(formatted);
       // FAILED is visibility-critical: this is how operators see that a scenario's effect
       // application itself errored. Log at WARNING so it surfaces above normal INFO traffic.

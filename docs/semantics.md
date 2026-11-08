@@ -72,7 +72,7 @@ All scenarios that pass §3 for a call contribute. They are ordered by descendin
 
 ## 6. Lifecycle
 
-**L19 — Stop is final for a handle.** A stopped or expired scenario never fires again; `start()` on it is a no-op.
+**L19 — Stop is final for a handle.** A stopped or expired scenario never fires again; `start()` on it is a no-op. A call decided before `stop()` returned completes. Each lifecycle transition publishes one event, from the thread that made it: `STARTED` on `REGISTERED → ACTIVE`; `INACTIVE` on `ACTIVE → INACTIVE`, when the scenario ends on its own, with `reason` `expired` (`activeFor`, `activeUntil`) or `max applications reached` (after the `APPLIED` that spent the budget); `STOPPED` on every transition into `STOPPED` (from `REGISTERED`, `ACTIVE` or `INACTIVE`), so a second `stop()` or a `close()` after `stop()` publishes nothing. A stop racing an expiry yields `STOPPED` alone or `INACTIVE` and `STOPPED`, never two of the same; they come from different threads, so a listener may receive them in either order. `STARTED` is published before the scenario fires: a call made while `STARTED` is being delivered is neither matched nor applied (the diagnostics already report `ACTIVE`), and a `stop()` or an expiry during that delivery is final.
 
 **L20 — A finished scenario can be replaced.** Activating an id whose scenario is `STOPPED` or `INACTIVE` replaces it atomically; activating an id whose scenario is still `REGISTERED` or `ACTIVE` throws `ChaosActivationException` and changes nothing.
 

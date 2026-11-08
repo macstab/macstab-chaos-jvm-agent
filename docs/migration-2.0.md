@@ -46,6 +46,7 @@
 | 26 | A name pattern is no longer canonicalised | a pattern has a mode without a value (`{"mode": "GLOB"}`, `NamePattern.glob(null)`), a value without a mode, or `ANY` with a value other than `"*"` | give the mode its value, or use `ANY` (`NamePattern.any()`) (§26) |
 | 27 | The API's nullness is published (`@NullMarked`) | Kotlin code passes `null` where a type is non-null, or treats a non-null result as nullable | pass a value, or use the parameters marked `@Nullable` (§27) |
 | 29 | `chaos-agent-testkit` no longer brings JUnit | you get `junit-jupiter-api` (or the JUnit BOM's versions) only through the testkit or a starter that depends on it | declare JUnit in your test dependencies (§29) |
+| 30 | `ChaosEvent.Type.INACTIVE`; lifecycle events once per transition | a `switch` over `ChaosEvent.Type` has no `default`; a listener counts `STOPPED` per `stop()` / `close()` call, or waits for `STOPPED` to learn that a scenario expired or used up `maxApplications` | add `case INACTIVE`; count one `STOPPED` per scenario; wait for `INACTIVE` (§30) |
 
 ---
 
@@ -359,6 +360,15 @@ Before (1.x): `assertThat(handle).applied().within(Duration.ofSeconds(5)).never(
 `chaos-agent-testkit` compiles against `junit-jupiter-api` but no longer exports it, nor the JUnit BOM: its POM has no JUnit dependency. The same holds for the modules built on it (`chaos-agent-spring-boot3-test-starter`, `chaos-agent-spring-boot4-test-starter`, `chaos-agent-quarkus-extension`, `chaos-agent-micronaut-integration`), so JUnit no longer reaches the production class path of an application that ships the Quarkus or Micronaut module, and the testkit no longer pins your JUnit version.
 
 Before (1.x): the testkit brought `junit-jupiter-api` and imported the JUnit BOM into every consumer. Now declare JUnit where your tests run (`spring-boot-starter-test`, `quarkus-junit5` and `micronaut-test-junit5` already bring it); with Gradle, for example, `testImplementation(platform("org.junit:junit-bom:<version>"))` and `testImplementation("org.junit.jupiter:junit-jupiter")`.
+
+## 30. `ChaosEvent.Type.INACTIVE` and one event per transition
+
+`ChaosEvent.Type` has a new constant, `INACTIVE`: a scenario that ends on its own publishes it once, with the attribute `reason` (`expired` when `activeFor` or `activeUntil` passed, `max applications reached` after the `APPLIED` that spent the budget). Stopping it afterwards still publishes `STOPPED`.
+
+- A `switch` over `ChaosEvent.Type` without a `default` branch no longer compiles (switch expression) or misses the new type: add `case INACTIVE`.
+- A listener that counted `STOPPED` per `stop()` or `close()` call: `STOPPED` is now published once per scenario, on the transition into `STOPPED`; a second `stop()`, or `close()` after `stop()`, publishes nothing.
+- A listener that waited for `STOPPED` to learn that a scenario expired or used up `maxApplications`: wait for `INACTIVE`.
+- `STARTED` is published before the scenario fires; a call made while a listener still handles `STARTED` is neither matched nor applied.
 
 ---
 
