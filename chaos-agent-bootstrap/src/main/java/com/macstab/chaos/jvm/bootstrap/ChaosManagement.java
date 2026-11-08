@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import org.jspecify.annotations.Nullable;
@@ -48,12 +49,33 @@ public final class ChaosManagement implements AutoCloseable {
   private volatile boolean closed;
 
   /**
+   * Bumped by {@link #stopAll()} before it looks at the handles: an activation that sees it changed
+   * after storing its handle was missed by that stop-all and stops its plan itself.
+   */
+  private final AtomicLong stopAllGeneration = new AtomicLong();
+
+  /** Runs between {@link #stop(String)}'s two lookups; a test seam, a no-op otherwise. */
+  private final Runnable betweenStopLookups;
+
+  /**
    * Creates the operations for {@code controlPlane}.
    *
    * @param controlPlane the control plane they act on
    */
   public ChaosManagement(final ChaosControlPlane controlPlane) {
+    this(controlPlane, () -> {});
+  }
+
+  /**
+   * Test seam: creates the operations with {@code betweenStopLookups} run between the two lookups
+   * of {@link #stop(String)}, so a test can complete an activation exactly there.
+   *
+   * @param controlPlane the control plane they act on
+   * @param betweenStopLookups run between the two lookups of a stop
+   */
+  ChaosManagement(final ChaosControlPlane controlPlane, final Runnable betweenStopLookups) {
     this.controlPlane = Objects.requireNonNull(controlPlane, "controlPlane");
+    this.betweenStopLookups = Objects.requireNonNull(betweenStopLookups, "betweenStopLookups");
   }
 
   /**
@@ -71,7 +93,8 @@ public final class ChaosManagement implements AutoCloseable {
    * @param planJson the plan, in the startup-config JSON format
    * @return {@code activated} with the plan's handle id; otherwise {@code invalid} (malformed or
    *     failing validation), {@code conflict} (a scenario id is already active, or a running plan
-   *     has the plan's name) or {@code rejected} (the runtime could not run it), with the reason
+   *     has the plan's name) or {@code rejected} (the runtime could not run it, or a stop-all or
+   *     close ran during the activation and stopped the plan), with the reason
    */
   public ActivationResponse activate(final @Nullable String planJson) {
     if (planJson == null || planJson.isBlank()) {
@@ -107,6 +130,7 @@ public final class ChaosManagement implements AutoCloseable {
     if (running != null && !finished(running)) {
       return nameConflict(id);
     }
+    final long generation = stopAllGeneration.get();
     final ChaosActivationHandle handle;
     try {
       handle = controlPlane.activate(plan);
@@ -132,18 +156,24 @@ public final class ChaosManagement implements AutoCloseable {
     if (replaced != null && !replaced.equals(handle)) {
       replaced.close();
     }
-    // A close() that ran meanwhile either found this handle and stopped it, or is seen here.
-    if (closed) {
+    // A close() or stopAll() that ran meanwhile either found this handle and stopped it, or is seen
+    // here; whichever removes the handle closes it.
+    if (closed || stopAllGeneration.get() != generation) {
       if (handles.remove(handle.id(), handle)) {
         handle.close();
       }
-      return new ActivationResponse("rejected", null, "plan rejected: the endpoint is closing");
+      return new ActivationResponse(
+          "rejected",
+          null,
+          closed
+              ? "plan rejected: the endpoint is closing"
+              : "plan rejected: stopped by a concurrent stop-all");
     }
     return new ActivationResponse("activated", handle.id(), null);
   }
 
   /** A plan that has finished (stopped, or expired) no longer holds its name. */
-  private static boolean finished(final ChaosActivationHandle handle) {
+  static boolean finished(final ChaosActivationHandle handle) {
     final ChaosDiagnostics.ScenarioState state = handle.state();
     return state == ChaosDiagnostics.ScenarioState.STOPPED
         || state == ChaosDiagnostics.ScenarioState.INACTIVE;
@@ -162,10 +192,17 @@ public final class ChaosManagement implements AutoCloseable {
    * Stops a plan activated here.
    *
    * @param id the plan's handle id ({@code plan:<name>}) or its name
-   * @return {@code stopped}, {@code conflict} (the plan is being activated), {@code unmanaged} (a
-   *     scenario not activated here) or {@code not-found}
+   * @return {@code stopped}, {@code conflict} (the plan is being activated; it is not stopped),
+   *     {@code unmanaged} (a scenario not activated here) or {@code not-found}
    */
   public StopResponse stop(final String id) {
+    // The claim first: an activation stores its handle before it releases its claim, so a plan
+    // whose claim is gone already has its handle stored. Looked up the other way round, a plan
+    // stored between the two lookups would answer not-found and run.
+    if (activating.contains(id) || activating.contains(PLAN_PREFIX + id)) {
+      return new StopResponse("conflict", id, inProgress(id));
+    }
+    betweenStopLookups.run();
     ChaosActivationHandle handle = handles.remove(id);
     if (handle == null) {
       handle = handles.remove(PLAN_PREFIX + id);
@@ -173,11 +210,6 @@ public final class ChaosManagement implements AutoCloseable {
     if (handle != null) {
       handle.close();
       return new StopResponse("stopped", id, null);
-    }
-    // A plan being activated has no handle yet: stopping it now would answer not-found and the
-    // plan would start afterwards.
-    if (activating.contains(id) || activating.contains(PLAN_PREFIX + id)) {
-      return new StopResponse("conflict", id, inProgress(id));
     }
     if (controlPlane.diagnostics().scenario(id).isPresent()) {
       return new StopResponse(
@@ -187,11 +219,13 @@ public final class ChaosManagement implements AutoCloseable {
   }
 
   /**
-   * Stops every plan activated here.
+   * Stops every plan activated here, including a plan whose activation is in progress: that
+   * activation stops its plan once stored and answers {@code rejected}.
    *
    * @return how many plans were stopped
    */
   public StopAllResponse stopAll() {
+    stopAllGeneration.incrementAndGet();
     int stopped = 0;
     for (final String id : List.copyOf(handles.keySet())) {
       final ChaosActivationHandle handle = handles.remove(id);
@@ -296,7 +330,7 @@ public final class ChaosManagement implements AutoCloseable {
   /**
    * The outcome of {@link #stop(String)}.
    *
-   * @param status {@code stopped}, {@code unmanaged} or {@code not-found}
+   * @param status {@code stopped}, {@code conflict}, {@code unmanaged} or {@code not-found}
    * @param id the id asked for
    * @param message details when not stopped
    */

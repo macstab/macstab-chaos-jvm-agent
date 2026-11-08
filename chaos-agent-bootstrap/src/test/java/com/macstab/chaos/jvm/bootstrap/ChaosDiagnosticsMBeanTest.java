@@ -120,6 +120,44 @@ class ChaosDiagnosticsMBeanTest {
   }
 
   @Test
+  @DisplayName("a plan that finished on its own is pruned: stopAll does not count it")
+  void finishedPlansArePruned() throws Throwable {
+    final ChaosDiagnosticsMBean bean = new ChaosDiagnosticsMBean(runtime, true);
+    bean.activatePlan(
+        """
+        {"metadata":{"name":"once"},"scenarios":[{"id":"gc-once","scope":"JVM",
+         "selector":{"type":"jvmRuntime","operations":["SYSTEM_GC_REQUEST"]},
+         "effect":{"type":"suppress"},"activationPolicy":{"maxApplications":1}}]}
+        """);
+    assertThat(runtime.beforeGcRequest()).as("the one application").isTrue();
+
+    assertThat(bean.stopAll()).as("the exhausted plan is not running").isZero();
+    assertThat(bean.listScenarios()).as("its controller left the registry").isEmpty();
+  }
+
+  @Test
+  @DisplayName("a finished plan of several scenarios is closed once; running plans are kept")
+  void finishedPlanOfSeveralScenariosIsClosedOnce() throws Throwable {
+    final ChaosDiagnosticsMBean bean = new ChaosDiagnosticsMBean(runtime, true);
+    bean.activatePlan(
+        """
+        {"metadata":{"name":"twice"},"scenarios":[
+          {"id":"gc-a","scope":"JVM","selector":{"type":"jvmRuntime","operations":["SYSTEM_GC_REQUEST"]},
+           "effect":{"type":"suppress"},"activationPolicy":{"maxApplications":1}},
+          {"id":"gc-b","scope":"JVM","selector":{"type":"jvmRuntime","operations":["SYSTEM_GC_REQUEST"]},
+           "effect":{"type":"suppress"},"activationPolicy":{"maxApplications":1}}]}
+        """);
+    bean.activatePlan(PLAN);
+    // Each request applies at least one scenario that is still active: two spend both.
+    runtime.beforeGcRequest();
+    runtime.beforeGcRequest();
+
+    assertThat(bean.stopScenario("gc-a")).as("pruned, not stopped").isFalse();
+    assertThat(bean.listScenarios()).singleElement().asString().startsWith("jmx-delay ");
+    assertThat(bean.stopAll()).as("only the running plan").isEqualTo(1);
+  }
+
+  @Test
   @DisplayName("jmxControl is read from the agent args, then the property and environment")
   void controlSetting() {
     assertThat(ChaosAgentBootstrap.jmxControl("jmxControl=true", Map.of())).isTrue();

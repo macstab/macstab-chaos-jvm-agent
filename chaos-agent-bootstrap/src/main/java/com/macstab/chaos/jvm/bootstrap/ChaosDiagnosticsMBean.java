@@ -9,6 +9,8 @@ import com.macstab.chaos.jvm.startup.ChaosPlanMapper;
 import com.macstab.chaos.jvm.startup.ConfigLoadException;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * Package-private JMX adapter that bridges the {@link ChaosDiagnosticsMXBean} interface to the
@@ -23,6 +25,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * it, so they can be stopped through it.
  */
 final class ChaosDiagnosticsMBean implements ChaosDiagnosticsMXBean {
+  private static final Logger LOGGER = Logger.getLogger(ChaosDiagnosticsMBean.class.getName());
+
   private final ChaosDiagnostics diagnostics;
   private final ChaosControlPlane controlPlane;
   private final boolean controlEnabled;
@@ -72,6 +76,7 @@ final class ChaosDiagnosticsMBean implements ChaosDiagnosticsMXBean {
   @Override
   public String activatePlan(final String planJson) {
     final ChaosControlPlane control = requireControl();
+    pruneFinished();
     final ChaosPlan plan;
     try {
       plan = ChaosPlanMapper.read(planJson);
@@ -99,6 +104,7 @@ final class ChaosDiagnosticsMBean implements ChaosDiagnosticsMXBean {
   @SuppressWarnings("ReferenceEquality") // one handle per activation: identity names the plan
   public boolean stopScenario(final String scenarioId) {
     requireControl();
+    pruneFinished();
     final ChaosActivationHandle handle = activated.remove(scenarioId);
     if (handle == null) {
       return false;
@@ -112,6 +118,7 @@ final class ChaosDiagnosticsMBean implements ChaosDiagnosticsMXBean {
   @Override
   public int stopAll() {
     requireControl();
+    pruneFinished();
     int stopped = 0;
     for (final String id : java.util.List.copyOf(activated.keySet())) {
       if (stopScenario(id)) {
@@ -119,6 +126,24 @@ final class ChaosDiagnosticsMBean implements ChaosDiagnosticsMXBean {
       }
     }
     return stopped;
+  }
+
+  /**
+   * Forgets the plans that finished on their own (spent or expired) and closes them, so their
+   * controllers leave the registry; they are not counted as stopped.
+   */
+  @SuppressWarnings("ReferenceEquality") // one handle per activation: identity names the plan
+  private void pruneFinished() {
+    for (final ChaosActivationHandle handle : java.util.List.copyOf(activated.values())) {
+      if (ChaosManagement.finished(handle)
+          && activated.values().removeIf(other -> other == handle)) {
+        try {
+          handle.close();
+        } catch (final RuntimeException failure) {
+          LOGGER.log(Level.WARNING, failure, () -> "chaos-agent: could not close a finished plan");
+        }
+      }
+    }
   }
 
   /** Returns the control plane, or fails when the control operations are disabled. */

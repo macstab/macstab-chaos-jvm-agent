@@ -474,6 +474,161 @@ class ChaosManagementTest {
   }
 
   @Test
+  @DisplayName("a stop racing an activation answers conflict, never not-found for a running plan")
+  void stopRacingAnActivationIsAConflict() throws Exception {
+    final java.util.concurrent.CountDownLatch inActivation =
+        new java.util.concurrent.CountDownLatch(1);
+    final java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
+    final java.util.concurrent.atomic.AtomicBoolean first =
+        new java.util.concurrent.atomic.AtomicBoolean(true);
+    runtime.setHookDemand(
+        operations -> {
+          if (first.getAndSet(false)) {
+            inActivation.countDown();
+            try {
+              release.await();
+            } catch (final InterruptedException interrupted) {
+              Thread.currentThread().interrupt();
+            }
+          }
+        });
+    final java.util.concurrent.atomic.AtomicReference<
+            java.util.concurrent.CompletableFuture<ChaosManagement.ActivationResponse>>
+        activation = new java.util.concurrent.atomic.AtomicReference<>();
+    // Between the stop's two lookups the activation stores its handle and releases its name.
+    final ChaosManagement racing =
+        new ChaosManagement(
+            runtime,
+            () -> {
+              release.countDown();
+              activation.get().join();
+            });
+    try {
+      activation.set(
+          java.util.concurrent.CompletableFuture.supplyAsync(() -> racing.activate(PLAN)));
+      assertThat(inActivation.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+
+      final ChaosManagement.StopResponse stop = racing.stop("mgmt");
+      release.countDown();
+
+      assertThat(stop.status()).as("the plan is running: never not-found").isEqualTo("conflict");
+      assertThat(activation.get().get(5, java.util.concurrent.TimeUnit.SECONDS).status())
+          .isEqualTo("activated");
+      assertThat(state("mgmt-delay")).isEqualTo(ChaosDiagnostics.ScenarioState.ACTIVE);
+    } finally {
+      release.countDown();
+      racing.close();
+    }
+  }
+
+  @Test
+  @DisplayName("a stop after the store but before the name is released answers conflict")
+  void stopBetweenStoreAndReleaseIsAConflict() throws Exception {
+    final java.util.concurrent.atomic.AtomicInteger closed =
+        new java.util.concurrent.atomic.AtomicInteger();
+    final java.util.concurrent.CountDownLatch stored = new java.util.concurrent.CountDownLatch(1);
+    final java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
+    final ChaosManagement racing =
+        new ChaosManagement(
+            scriptedControlPlane(() -> blockingSecondId("plan:mgmt", closed, stored, release)));
+    try {
+      final java.util.concurrent.CompletableFuture<ChaosManagement.ActivationResponse> activation =
+          java.util.concurrent.CompletableFuture.supplyAsync(() -> racing.activate(PLAN));
+      assertThat(stored.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+
+      final ChaosManagement.StopResponse stop = racing.stop("mgmt");
+      final ChaosManagement.StopResponse stopById = racing.stop("plan:mgmt");
+      release.countDown();
+
+      assertThat(stop.status()).isEqualTo("conflict");
+      assertThat(stopById.status()).isEqualTo("conflict");
+      assertThat(activation.get(5, java.util.concurrent.TimeUnit.SECONDS).status())
+          .isEqualTo("activated");
+      assertThat(closed).as("the plan runs (U-13: a stop in activation is a 409)").hasValue(0);
+    } finally {
+      release.countDown();
+    }
+  }
+
+  @Test
+  @DisplayName("stopAll during an activation stops the plan once it is stored; it is rejected")
+  void stopAllDuringActivationStopsThePlan() throws Exception {
+    final java.util.concurrent.CountDownLatch inActivation =
+        new java.util.concurrent.CountDownLatch(1);
+    final java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
+    final java.util.concurrent.atomic.AtomicBoolean first =
+        new java.util.concurrent.atomic.AtomicBoolean(true);
+    runtime.setHookDemand(
+        operations -> {
+          if (first.getAndSet(false)) {
+            inActivation.countDown();
+            try {
+              release.await();
+            } catch (final InterruptedException interrupted) {
+              Thread.currentThread().interrupt();
+            }
+          }
+        });
+    try {
+      final java.util.concurrent.CompletableFuture<ChaosManagement.ActivationResponse> activation =
+          java.util.concurrent.CompletableFuture.supplyAsync(() -> management.activate(PLAN));
+      assertThat(inActivation.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+
+      final ChaosManagement.StopAllResponse stopAll = management.stopAll();
+      release.countDown();
+      final ChaosManagement.ActivationResponse response =
+          activation.get(5, java.util.concurrent.TimeUnit.SECONDS);
+
+      assertThat(stopAll.stoppedCount()).as("nothing stored yet").isZero();
+      assertThat(response.status()).isEqualTo("rejected");
+      assertThat(response.message()).isEqualTo("plan rejected: stopped by a concurrent stop-all");
+      assertThat(state("mgmt-delay")).as("stopped once stored").isNull();
+      assertThat(management.stop("mgmt").status()).isEqualTo("not-found");
+    } finally {
+      release.countDown();
+    }
+  }
+
+  @Test
+  @DisplayName("a plan a concurrent stopAll already stopped is rejected and not closed twice")
+  void stopAllAfterTheStoreClosesOnce() {
+    final java.util.concurrent.atomic.AtomicInteger closed =
+        new java.util.concurrent.atomic.AtomicInteger();
+    final java.util.concurrent.atomic.AtomicReference<ChaosManagement> self =
+        new java.util.concurrent.atomic.AtomicReference<>();
+    // Replacing the first plan closes it; that close() runs stopAll, which stops the second plan
+    // after its store, before its activation returns.
+    final com.macstab.chaos.jvm.api.ChaosActivationHandle first =
+        (com.macstab.chaos.jvm.api.ChaosActivationHandle)
+            java.lang.reflect.Proxy.newProxyInstance(
+                ChaosManagementTest.class.getClassLoader(),
+                new Class<?>[] {com.macstab.chaos.jvm.api.ChaosActivationHandle.class},
+                (proxy, method, args) ->
+                    switch (method.getName()) {
+                      case "id" -> "plan:mgmt";
+                      case "state" -> ChaosDiagnostics.ScenarioState.STOPPED;
+                      case "close" -> {
+                        self.get().stopAll();
+                        yield null;
+                      }
+                      case "equals" -> proxy == args[0];
+                      case "hashCode" -> System.identityHashCode(proxy);
+                      default -> null;
+                    });
+    final java.util.Iterator<com.macstab.chaos.jvm.api.ChaosActivationHandle> plans =
+        java.util.List.of(first, handle("plan:mgmt", closed)).iterator();
+    final ChaosManagement racing = new ChaosManagement(scriptedControlPlane(plans::next));
+    self.set(racing);
+    racing.activate(PLAN);
+
+    final ChaosManagement.ActivationResponse response = racing.activate(PLAN);
+
+    assertThat(response.status()).isEqualTo("rejected");
+    assertThat(response.message()).isEqualTo("plan rejected: stopped by a concurrent stop-all");
+    assertThat(closed).as("stopped once, by stopAll").hasValue(1);
+  }
+
+  @Test
   @DisplayName("stopping all plans continues past one that fails to stop")
   void stopAllContinuesPastAFailure() {
     final java.util.concurrent.atomic.AtomicInteger closed =
@@ -616,6 +771,41 @@ class ChaosManagementTest {
         closed.incrementAndGet();
       }
     };
+  }
+
+  /**
+   * A handle whose second {@code id()} call, the activation's answer after its store and before it
+   * releases the plan's name, signals {@code stored} and waits for {@code release}.
+   */
+  private static com.macstab.chaos.jvm.api.ChaosActivationHandle blockingSecondId(
+      final String id,
+      final java.util.concurrent.atomic.AtomicInteger closed,
+      final java.util.concurrent.CountDownLatch stored,
+      final java.util.concurrent.CountDownLatch release) {
+    final java.util.concurrent.atomic.AtomicInteger idCalls =
+        new java.util.concurrent.atomic.AtomicInteger();
+    return (com.macstab.chaos.jvm.api.ChaosActivationHandle)
+        java.lang.reflect.Proxy.newProxyInstance(
+            ChaosManagementTest.class.getClassLoader(),
+            new Class<?>[] {com.macstab.chaos.jvm.api.ChaosActivationHandle.class},
+            (proxy, method, args) ->
+                switch (method.getName()) {
+                  case "id" -> {
+                    if (idCalls.incrementAndGet() == 2) {
+                      stored.countDown();
+                      release.await();
+                    }
+                    yield id;
+                  }
+                  case "state" -> ChaosDiagnostics.ScenarioState.ACTIVE;
+                  case "close" -> {
+                    closed.incrementAndGet();
+                    yield null;
+                  }
+                  case "equals" -> proxy == args[0];
+                  case "hashCode" -> System.identityHashCode(proxy);
+                  default -> null;
+                });
   }
 
   /** A handle whose close() fails. */
