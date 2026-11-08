@@ -64,7 +64,8 @@ class EventModelTest {
                         .effect(ChaosEffect.connectionReset())
                         .activationPolicy(ActivationPolicy.always())
                         .build()))
-        .isInstanceOf(RuntimeException.class);
+        .isInstanceOf(com.macstab.chaos.jvm.api.ChaosValidationException.class)
+        .hasMessageContaining("ConnectionResetEffect applies only to");
 
     assertThat(events)
         .filteredOn(event -> event.type() == ChaosEvent.Type.FAILED)

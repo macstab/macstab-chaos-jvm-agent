@@ -48,12 +48,7 @@ class ChaosReportsTest {
   }
 
   private Map<String, String> status(final Path directory) throws Exception {
-    final Map<String, String> values = new java.util.LinkedHashMap<>();
-    for (final String line : Files.readAllLines(directory.resolve(ChaosReports.STATUS_FILE))) {
-      final int separator = line.indexOf('=');
-      values.put(line.substring(0, separator), line.substring(separator + 1));
-    }
-    return values;
+    return ChildJvmProbe.parse(Files.readAllLines(directory.resolve(ChaosReports.STATUS_FILE)));
   }
 
   @Test

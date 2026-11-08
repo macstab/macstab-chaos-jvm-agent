@@ -303,7 +303,11 @@ final class ChildJvmProbe {
     return new ProbeResult(output, parse(lines));
   }
 
-  private static Map<String, String> parse(final List<String> lines) {
+  /**
+   * Reads the {@code key=value} lines a probe printed, the one parser of probe output; later keys
+   * overwrite earlier ones, and indented or bracketed lines (stack traces, agent logs) are skipped.
+   */
+  static Map<String, String> parse(final List<String> lines) {
     final Map<String, String> values = new LinkedHashMap<>();
     for (final String line : lines) {
       final int separator = line.indexOf('=');

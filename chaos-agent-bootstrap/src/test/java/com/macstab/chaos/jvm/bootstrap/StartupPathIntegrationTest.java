@@ -8,7 +8,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -383,14 +382,7 @@ class StartupPathIntegrationTest {
         .as("probe JVM must finish within %d s: %s", TIMEOUT_SECONDS, output)
         .isTrue();
     assertThat(process.exitValue()).as("probe JVM exit value, output:\n%s", output).isZero();
-    final Map<String, String> values = new LinkedHashMap<>();
-    for (final String line : lines) {
-      final int separator = line.indexOf('=');
-      if (separator > 0 && !line.startsWith(" ") && !line.startsWith("[")) {
-        values.put(line.substring(0, separator), line.substring(separator + 1).trim());
-      }
-    }
-    return new Result(output, values);
+    return new Result(output, ChildJvmProbe.parse(lines));
   }
 
   /** Output of one probe run. */

@@ -27,7 +27,6 @@ import org.junit.jupiter.api.io.TempDir;
 class StartupAgentIntegrationTest {
 
   private static final long DELAY_MS = 70L;
-  private static final long DELAY_MIN_MS = (long) (DELAY_MS * 0.8);
 
   @TempDir Path tempDir;
 
@@ -55,15 +54,11 @@ class StartupAgentIntegrationTest {
                       .activationPolicy(ActivationPolicy.always())
                       .build()));
 
-      final String output = runProbe(plan, "executor");
-      final long elapsed =
-          Long.parseLong(
-              output
-                  .substring(output.indexOf("elapsedMillis=") + "elapsedMillis=".length())
-                  .trim());
-      assertThat(elapsed)
-          .as("delay effect should add at least 80%% of configured %dms", DELAY_MS)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      final ChildJvmProbe.ProbeResult result = runProbe(plan, "executor");
+      assertThat(result.longValue("applied.startup-delay")).isEqualTo(1L);
+      assertThat(result.longValue("elapsedMillis"))
+          .as("the submission takes the whole configured %d ms", DELAY_MS)
+          .isGreaterThanOrEqualTo(DELAY_MS);
     }
   }
 
@@ -89,7 +84,7 @@ class StartupAgentIntegrationTest {
                       .activationPolicy(ActivationPolicy.always())
                       .build()));
 
-      final String output = runProbe(plan, "resource");
+      final String output = runProbe(plan, "resource").output();
       assertThat(output).contains("resource=missing");
     }
   }
@@ -118,7 +113,7 @@ class StartupAgentIntegrationTest {
                       .activationPolicy(ActivationPolicy.always())
                       .build()));
 
-      final String output = runProbe(plan, "thread");
+      final String output = runProbe(plan, "thread").output();
       assertThat(output).contains("thread=rejected");
     }
   }
@@ -145,7 +140,7 @@ class StartupAgentIntegrationTest {
                       .activationPolicy(ActivationPolicy.always())
                       .build()));
 
-      final String output = runProbe(plan, "classload");
+      final String output = runProbe(plan, "classload").output();
       assertThat(output).contains("classload=rejected");
     }
   }
@@ -169,7 +164,7 @@ class StartupAgentIntegrationTest {
                       .activationPolicy(ActivationPolicy.always())
                       .build()));
 
-      final String output = runProbe(plan, "gc");
+      final String output = runProbe(plan, "gc").output();
       assertThat(output).contains("gc=returned");
     }
   }
@@ -193,7 +188,7 @@ class StartupAgentIntegrationTest {
                       .activationPolicy(ActivationPolicy.always())
                       .build()));
 
-      final String output = runProbe(plan, "exit");
+      final String output = runProbe(plan, "exit").output();
       assertThat(output).contains("exit=suppressed");
     }
   }
@@ -314,7 +309,8 @@ class StartupAgentIntegrationTest {
     }
   }
 
-  private String runProbe(final ChaosPlan plan, final String mode) throws Exception {
+  private ChildJvmProbe.ProbeResult runProbe(final ChaosPlan plan, final String mode)
+      throws Exception {
     final Path configFile = tempDir.resolve(mode + "-plan.json");
     Files.writeString(configFile, ChaosPlanMapper.write(plan));
     final String agentJar = System.getProperty("chaos.bootstrap.agentJar");
@@ -334,9 +330,10 @@ class StartupAgentIntegrationTest {
         new BufferedReader(
             new InputStreamReader(
                 process.getInputStream(), java.nio.charset.StandardCharsets.UTF_8))) {
-      final String output = reader.lines().reduce("", (left, right) -> left + right);
+      final List<String> lines = reader.lines().toList();
+      final String output = String.join("\n", lines);
       assertThat(process.exitValue()).as("probe JVM exit value: " + output).isZero();
-      return output;
+      return new ChildJvmProbe.ProbeResult(output, ChildJvmProbe.parse(lines));
     }
   }
 }

@@ -146,7 +146,8 @@ class JdbcRuntimeTest {
             .as(
                 "delay effect must pause the call for at least %dms (got %dms)",
                 DELAY_MS, elapsedMs)
-            .isGreaterThanOrEqualTo((long) (DELAY_MS * 0.8));
+            .isGreaterThanOrEqualTo(DELAY_MS);
+        assertThat(applied(runtime)).as("the scenario applied").isPositive();
       } finally {
         handle.stop();
       }
@@ -260,5 +261,12 @@ class JdbcRuntimeTest {
       assertThatCode(() -> runtime.beforeJdbcConnectionAcquire("hikari-primary"))
           .doesNotThrowAnyException();
     }
+  }
+
+  /** How often the runtime's scenarios applied, all together. */
+  private static long applied(final ChaosRuntime runtime) {
+    return runtime.diagnostics().snapshot().scenarios().stream()
+        .mapToLong(com.macstab.chaos.jvm.api.ChaosDiagnostics.ScenarioReport::appliedCount)
+        .sum();
   }
 }

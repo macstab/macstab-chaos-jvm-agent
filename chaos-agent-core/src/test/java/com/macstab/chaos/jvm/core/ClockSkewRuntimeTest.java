@@ -152,7 +152,7 @@ class ClockSkewRuntimeTest {
                   .build());
       try {
         final long skewed = runtime.adjustClockMillis(realMillis);
-        assertThat(skewed).isGreaterThanOrEqualTo(realMillis + 25_000L);
+        assertThat(skewed).isEqualTo(realMillis + 30_000L);
       } finally {
         handle.stop();
       }
@@ -175,7 +175,7 @@ class ClockSkewRuntimeTest {
                   .build());
       try {
         final long skewed = runtime.adjustClockNanos(realNanos);
-        assertThat(skewed).isGreaterThanOrEqualTo(realNanos + 9_000_000_000L);
+        assertThat(skewed).isEqualTo(realNanos + 10_000_000_000L);
       } finally {
         handle.stop();
       }

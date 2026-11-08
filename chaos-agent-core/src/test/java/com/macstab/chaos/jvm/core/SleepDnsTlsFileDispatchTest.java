@@ -105,7 +105,8 @@ class SleepDnsTlsFileDispatchTest {
         final long elapsedMs = (System.nanoTime() - start) / 1_000_000L;
         assertThat(elapsedMs)
             .as("delay effect must pause for at least %dms (got %dms)", delayMs, elapsedMs)
-            .isGreaterThanOrEqualTo((long) (delayMs * 0.8));
+            .isGreaterThanOrEqualTo(delayMs);
+        assertThat(applied(runtime)).as("the scenario applied").isPositive();
       } finally {
         handle.stop();
       }
@@ -153,7 +154,8 @@ class SleepDnsTlsFileDispatchTest {
         final long elapsedMs = (System.nanoTime() - start) / 1_000_000L;
         assertThat(elapsedMs)
             .as("delay effect must pause for at least %dms (got %dms)", delayMs, elapsedMs)
-            .isGreaterThanOrEqualTo((long) (delayMs * 0.8));
+            .isGreaterThanOrEqualTo(delayMs);
+        assertThat(applied(runtime)).as("the scenario applied").isPositive();
       } finally {
         handle.stop();
       }
@@ -244,7 +246,8 @@ class SleepDnsTlsFileDispatchTest {
         final long elapsedMs = (System.nanoTime() - start) / 1_000_000L;
         assertThat(elapsedMs)
             .as("delay effect must pause for at least %dms (got %dms)", delayMs, elapsedMs)
-            .isGreaterThanOrEqualTo((long) (delayMs * 0.8));
+            .isGreaterThanOrEqualTo(delayMs);
+        assertThat(applied(runtime)).as("the scenario applied").isPositive();
       } finally {
         handle.stop();
       }
@@ -313,7 +316,8 @@ class SleepDnsTlsFileDispatchTest {
         final long elapsedMs = (System.nanoTime() - start) / 1_000_000L;
         assertThat(elapsedMs)
             .as("delay effect must pause for at least %dms (got %dms)", delayMs, elapsedMs)
-            .isGreaterThanOrEqualTo((long) (delayMs * 0.8));
+            .isGreaterThanOrEqualTo(delayMs);
+        assertThat(applied(runtime)).as("the scenario applied").isPositive();
       } finally {
         handle.stop();
       }
@@ -336,7 +340,8 @@ class SleepDnsTlsFileDispatchTest {
         final long elapsedMs = (System.nanoTime() - start) / 1_000_000L;
         assertThat(elapsedMs)
             .as("delay effect must pause for at least %dms (got %dms)", delayMs, elapsedMs)
-            .isGreaterThanOrEqualTo((long) (delayMs * 0.8));
+            .isGreaterThanOrEqualTo(delayMs);
+        assertThat(applied(runtime)).as("the scenario applied").isPositive();
       } finally {
         handle.stop();
       }
@@ -432,5 +437,12 @@ class SleepDnsTlsFileDispatchTest {
         handle.stop();
       }
     }
+  }
+
+  /** How often the runtime's scenarios applied, all together. */
+  private static long applied(final ChaosRuntime runtime) {
+    return runtime.diagnostics().snapshot().scenarios().stream()
+        .mapToLong(com.macstab.chaos.jvm.api.ChaosDiagnostics.ScenarioReport::appliedCount)
+        .sum();
   }
 }

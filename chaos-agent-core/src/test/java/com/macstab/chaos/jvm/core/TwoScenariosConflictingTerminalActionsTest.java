@@ -99,7 +99,8 @@ class TwoScenariosConflictingTerminalActionsTest {
 
       assertThat(elapsed)
           .as("two %dms delay scenarios must accumulate to at least %dms", DELAY_MS, 2 * DELAY_MS)
-          .isGreaterThanOrEqualTo((long) (2 * DELAY_MS * 0.8));
+          .isGreaterThanOrEqualTo(2 * DELAY_MS);
+      assertThat(applied(runtime)).as("the scenario applied").isPositive();
     }
 
     @Test
@@ -221,5 +222,12 @@ class TwoScenariosConflictingTerminalActionsTest {
     final long start = System.nanoTime();
     runnable.run();
     return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+  }
+
+  /** How often the runtime's scenarios applied, all together. */
+  private static long applied(final ChaosRuntime runtime) {
+    return runtime.diagnostics().snapshot().scenarios().stream()
+        .mapToLong(com.macstab.chaos.jvm.api.ChaosDiagnostics.ScenarioReport::appliedCount)
+        .sum();
   }
 }

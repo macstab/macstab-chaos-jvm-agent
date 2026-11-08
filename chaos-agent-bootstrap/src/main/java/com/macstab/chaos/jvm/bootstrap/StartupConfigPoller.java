@@ -79,6 +79,9 @@ public final class StartupConfigPoller implements AutoCloseable {
   private final long intervalMs;
   private final ScheduledExecutorService scheduler;
 
+  /** Runs after a read and before its re-stat; a no-op outside tests (U-72 c1). */
+  private final Runnable afterRead;
+
   // Shared with close(); guarded by synchronized(this).
   private final Map<String, ChaosScenario> activeScenarios = new HashMap<>();
   private final Map<String, ChaosActivationHandle> activeHandles = new HashMap<>();
@@ -124,9 +127,23 @@ public final class StartupConfigPoller implements AutoCloseable {
 
   private StartupConfigPoller(
       final Path configPath, final ChaosRuntime runtime, final long intervalMs) {
+    this(configPath, runtime, intervalMs, () -> {});
+  }
+
+  /**
+   * Creates a poller that runs {@code afterRead} between reading the file and re-checking its
+   * attributes. Test seam (U-72 c1): a test changes the file there, which a real writer does only
+   * by chance.
+   */
+  StartupConfigPoller(
+      final Path configPath,
+      final ChaosRuntime runtime,
+      final long intervalMs,
+      final Runnable afterRead) {
     this.configPath = configPath;
     this.runtime = runtime;
     this.intervalMs = intervalMs;
+    this.afterRead = afterRead;
     this.scheduler =
         Executors.newSingleThreadScheduledExecutor(
             runnable -> {
@@ -298,6 +315,7 @@ public final class StartupConfigPoller implements AutoCloseable {
     }
     // Re-stat after the read: if the file changed while it was being read, the bytes may be
     // torn. Skip and retry on the next tick, which sees the settled file.
+    afterRead.run();
     final java.nio.file.attribute.BasicFileAttributes after;
     try {
       after =

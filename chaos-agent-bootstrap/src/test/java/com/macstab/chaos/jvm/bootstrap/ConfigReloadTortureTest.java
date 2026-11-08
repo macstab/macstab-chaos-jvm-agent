@@ -3,6 +3,7 @@ package com.macstab.chaos.jvm.bootstrap;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.macstab.chaos.jvm.api.ChaosDiagnostics;
+import com.macstab.chaos.jvm.api.ChaosEvent;
 import com.macstab.chaos.jvm.core.ChaosRuntime;
 import com.macstab.chaos.jvm.startup.AgentSettings;
 import com.macstab.chaos.jvm.startup.ChaosPlanMapper;
@@ -96,6 +97,7 @@ class ConfigReloadTortureTest {
       while (System.nanoTime() < deadline) {
         round++;
         generation++;
+        // Each invalid plan follows a valid one, so its error status is a change the poller made.
         switch (round % 4) {
           case 0 -> {
             // A syntax error after a well-formed scenario: nothing of it may apply.
@@ -103,12 +105,12 @@ class ConfigReloadTortureTest {
             publish(volume, generation, broken.substring(0, broken.length() - 3));
             assertStillActive(lastValid, violations);
           }
-          case 1 -> {
+          case 2 -> {
             // Well-formed JSON whose second scenario fails validation: the first may not apply.
             publish(volume, generation, halfInvalidPlan("half-" + round));
             assertStillActive(lastValid, violations);
           }
-          case 2 -> {
+          case 3 -> {
             // An editor rewriting the target in place, in chunks: torn reads must not apply.
             lastValid = "g" + round;
             rewriteInPlace(volume, validPlan(lastValid));
@@ -201,6 +203,51 @@ class ConfigReloadTortureTest {
     assertThat(activeIds()).containsExactlyInAnyOrderElementsOf(ids("ok"));
   }
 
+  @Test
+  @DisplayName("a file that changes between its read and its re-check is not applied until re-read")
+  void changeDuringReadIsSkipped() throws Exception {
+    final Path file = tempDir.resolve("plan.json");
+    write(file, validPlan("g1"), 60);
+    final List<ChaosEvent> events = new CopyOnWriteArrayList<>();
+    runtime.addEventListener(events::add);
+    final AtomicBoolean rewrite = new AtomicBoolean(true);
+    // Between the read of g1 and its re-check, a writer replaces it with g2: same length, valid,
+    // a newer modification time.
+    poller =
+        new StartupConfigPoller(
+            file,
+            runtime,
+            3_600_000L,
+            () -> {
+              if (rewrite.getAndSet(false)) {
+                try {
+                  write(file, validPlan("g2"), 30);
+                } catch (final java.io.IOException failure) {
+                  throw new java.io.UncheckedIOException(failure);
+                }
+              }
+            });
+    poller.startWithInitialPlan(ChaosPlanMapper.read(validPlan("g0")), null);
+
+    poller.pollOnce();
+
+    assertThat(started(events, "g1")).as("the bytes read before the change").isEmpty();
+    assertThat(activeIds()).containsExactlyInAnyOrderElementsOf(ids("g0"));
+
+    poller.pollOnce();
+
+    assertThat(activeIds()).containsExactlyInAnyOrderElementsOf(ids("g2"));
+    assertThat(started(events, "g1")).isEmpty();
+  }
+
+  private static List<String> started(final List<ChaosEvent> events, final String group) {
+    return events.stream()
+        .filter(event -> event.type() == ChaosEvent.Type.STARTED)
+        .map(ChaosEvent::scenarioId)
+        .filter(id -> id.startsWith(group + "-"))
+        .toList();
+  }
+
   /** Writes {@code content}, dated {@code secondsAgo} so that it is not read as mid-write. */
   private static void write(final Path file, final String content, final int secondsAgo)
       throws java.io.IOException {
@@ -211,19 +258,43 @@ class ConfigReloadTortureTest {
             System.currentTimeMillis() - secondsAgo * 1_000L));
   }
 
+  /** Once the poller has reported the invalid plan, the previous plan is still active. */
   private void assertStillActive(final String group, final List<String> violations)
-      throws InterruptedException {
-    Thread.sleep(3 * POLL_MILLIS);
+      throws Exception {
+    if (!awaitStatus("state=error")) {
+      violations.add("invalid plan after " + group + " not reported; status=" + status());
+    }
     final Set<String> active = activeIds();
     if (!active.containsAll(ids(group))) {
       violations.add("previous plan " + group + " interrupted; active=" + active);
     }
   }
 
-  private void requireApplied(final String group, final List<String> violations)
-      throws InterruptedException {
+  private void requireApplied(final String group, final List<String> violations) throws Exception {
     if (!awaitActive(group)) {
       violations.add("valid plan " + group + " not applied; active=" + activeIds());
+    }
+    // The status is written after the scenarios are active: the next invalid plan's error must
+    // replace this ok, not an older error.
+    if (!awaitStatus("state=ok")) {
+      violations.add("valid plan " + group + " not reported; status=" + status());
+    }
+  }
+
+  private boolean awaitStatus(final String state) throws Exception {
+    final long deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
+    while (!status().contains(state) && System.nanoTime() < deadline) {
+      Thread.sleep(5L);
+    }
+    return status().contains(state);
+  }
+
+  /** The status file, or empty before the poller first wrote it. */
+  private String status() throws java.io.IOException {
+    try {
+      return Files.readString(tempDir.resolve(ChaosReports.STATUS_FILE));
+    } catch (final java.nio.file.NoSuchFileException notYetWritten) {
+      return "";
     }
   }
 

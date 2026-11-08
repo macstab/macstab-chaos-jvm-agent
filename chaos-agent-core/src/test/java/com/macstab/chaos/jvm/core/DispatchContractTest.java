@@ -186,7 +186,8 @@ class DispatchContractTest {
       activate(
           ChaosSelector.scheduling(Set.of(OperationType.SCHEDULE_TICK)), ChaosEffect.reject("no"));
       assertThatThrownBy(() -> runtime.beforeScheduledTick(this, (Runnable) () -> {}, false))
-          .isInstanceOf(RuntimeException.class);
+          .isInstanceOf(IllegalStateException.class)
+          .hasMessage("no");
     }
   }
 

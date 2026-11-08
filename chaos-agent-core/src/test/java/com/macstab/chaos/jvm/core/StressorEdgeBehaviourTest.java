@@ -3,7 +3,6 @@ package com.macstab.chaos.jvm.core;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.assertj.core.api.Assumptions.assumeThat;
 import static org.awaitility.Awaitility.await;
 
 import com.macstab.chaos.jvm.api.ChaosEffect;
@@ -19,7 +18,6 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -531,17 +529,13 @@ class StressorEdgeBehaviourTest {
     @Test
     @DisplayName("a total entry count beyond int is rejected before anything is planted")
     void rejectsOverflowingTotal() {
-      final int parallelism = ForkJoinPool.commonPool().getParallelism();
-      assumeThat(parallelism).isGreaterThan(1);
       assertThatThrownBy(
               () ->
                   new ThreadLocalLeakStressor(
-                      new ChaosEffect.ThreadLocalLeakEffect(Integer.MAX_VALUE, 1)))
+                      new ChaosEffect.ThreadLocalLeakEffect(Integer.MAX_VALUE, 1), 2))
           .isInstanceOf(IllegalArgumentException.class)
           .hasMessage(
-              "thread-local-leak total entries (parallelism * entriesPerThread) overflows int: "
-                  + parallelism
-                  + " * "
+              "thread-local-leak total entries (parallelism * entriesPerThread) overflows int: 2 * "
                   + Integer.MAX_VALUE)
           .hasCauseInstanceOf(ArithmeticException.class);
     }

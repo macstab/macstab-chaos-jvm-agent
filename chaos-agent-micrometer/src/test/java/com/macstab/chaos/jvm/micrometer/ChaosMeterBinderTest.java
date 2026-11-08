@@ -140,11 +140,24 @@ class ChaosMeterBinderTest {
                 .count())
         .isEqualTo(1.0);
 
+    // Counted while bound; the listener delivers asynchronously.
+    runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
+    await().atMost(Duration.ofSeconds(5)).until(() -> applications() == 1.0);
+
     binder.close();
     binder.close();
     // close() removed the listener: this application is never handed to the binder.
     runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
-    assertThat(registry.find("chaos.applications").counter()).isNull();
+    await()
+        .during(Duration.ofMillis(500))
+        .atMost(Duration.ofSeconds(2))
+        .until(() -> applications() == 1.0);
+  }
+
+  private double applications() {
+    final io.micrometer.core.instrument.Counter counter =
+        registry.find("chaos.applications").tags("scenario", "twice").counter();
+    return counter == null ? 0.0 : counter.count();
   }
 
   @Test

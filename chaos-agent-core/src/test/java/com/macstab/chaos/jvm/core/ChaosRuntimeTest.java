@@ -28,8 +28,11 @@ import org.junit.jupiter.api.Test;
 @DisplayName("ChaosRuntime")
 class ChaosRuntimeTest {
 
-  private static final long DELAY_MIN_MS = 40L;
-  private static final long NO_DELAY_MAX_MS = 150L;
+  /**
+   * The delay of the timed scenarios. A check asserts the applied count first, then the time
+   * against the delay itself: a delayed call takes all of it, an undelayed one less than half.
+   */
+  private static final Duration DELAY = Duration.ofMillis(200);
 
   @Nested
   @DisplayName("session scope isolation")
@@ -41,25 +44,17 @@ class ChaosRuntimeTest {
       ChaosRuntime runtime = new ChaosRuntime();
       try (var delayedSession = runtime.openSession("delayed");
           var plainSession = runtime.openSession("plain")) {
-        delayedSession.activate(
-            ChaosScenario.builder("session-delay")
-                .scope(ChaosScenario.ScenarioScope.SESSION)
-                .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
-                .effect(ChaosEffect.delay(Duration.ofMillis(80)))
-                .activationPolicy(ActivationPolicy.always())
-                .build());
+        final ChaosActivationHandle delayed =
+            delayedSession.activate(
+                ChaosScenario.builder("session-delay")
+                    .scope(ChaosScenario.ScenarioScope.SESSION)
+                    .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+                    .effect(ChaosEffect.delay(DELAY))
+                    .activationPolicy(ActivationPolicy.always())
+                    .build());
 
-        long delayedMillis =
-            measureMillis(
-                () ->
-                    delayedSession
-                        .wrap(
-                            () -> {
-                              runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
-                            })
-                        .run());
-        long plainMillis =
-            measureMillis(
+        final long plainNanos =
+            measureNanos(
                 () ->
                     plainSession
                         .wrap(
@@ -67,11 +62,22 @@ class ChaosRuntimeTest {
                               runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
                             })
                         .run());
+        assertThat(delayed.appliedCount()).as("the plain session's call is not delayed").isZero();
+        final long delayedNanos =
+            measureNanos(
+                () ->
+                    delayedSession
+                        .wrap(
+                            () -> {
+                              runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
+                            })
+                        .run());
 
-        assertThat(delayedMillis).isGreaterThanOrEqualTo(60);
-        assertThat(plainMillis)
+        assertThat(delayed.appliedCount()).as("the delayed session's call is").isEqualTo(1L);
+        assertThat(delayedNanos).isGreaterThanOrEqualTo(DELAY.toNanos());
+        assertThat(plainNanos)
             .as("plain session should not experience delay")
-            .isLessThan(NO_DELAY_MAX_MS);
+            .isLessThan(DELAY.toNanos() / 2);
       }
     }
 
@@ -105,28 +111,32 @@ class ChaosRuntimeTest {
     @DisplayName("multiple matching JVM scenarios accumulate delay")
     void jvmGlobalDelayCompositionAccumulates() {
       ChaosRuntime runtime = new ChaosRuntime();
-      runtime.activate(
-          ChaosScenario.builder("slow-a")
-              .scope(ChaosScenario.ScenarioScope.JVM)
-              .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
-              .effect(ChaosEffect.delay(Duration.ofMillis(30)))
-              .activationPolicy(ActivationPolicy.always())
-              .precedence(10)
-              .build());
-      runtime.activate(
-          ChaosScenario.builder("slow-b")
-              .scope(ChaosScenario.ScenarioScope.JVM)
-              .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
-              .effect(ChaosEffect.delay(Duration.ofMillis(20)))
-              .activationPolicy(ActivationPolicy.always())
-              .precedence(5)
-              .build());
+      final ChaosActivationHandle slowA =
+          runtime.activate(
+              ChaosScenario.builder("slow-a")
+                  .scope(ChaosScenario.ScenarioScope.JVM)
+                  .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+                  .effect(ChaosEffect.delay(Duration.ofMillis(30)))
+                  .activationPolicy(ActivationPolicy.always())
+                  .precedence(10)
+                  .build());
+      final ChaosActivationHandle slowB =
+          runtime.activate(
+              ChaosScenario.builder("slow-b")
+                  .scope(ChaosScenario.ScenarioScope.JVM)
+                  .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+                  .effect(ChaosEffect.delay(Duration.ofMillis(20)))
+                  .activationPolicy(ActivationPolicy.always())
+                  .precedence(5)
+                  .build());
 
-      long elapsed =
-          measureMillis(() -> runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {}));
+      final long elapsed =
+          measureNanos(() -> runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {}));
+      assertThat(slowA.appliedCount()).isEqualTo(1L);
+      assertThat(slowB.appliedCount()).isEqualTo(1L);
       assertThat(elapsed)
-          .as("accumulated JVM delay should add at least 80%% of total configured delay")
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+          .as("both delays are added")
+          .isGreaterThanOrEqualTo(Duration.ofMillis(50).toNanos());
     }
   }
 
@@ -225,17 +235,18 @@ class ChaosRuntimeTest {
               ChaosScenario.builder("stoppable")
                   .scope(ChaosScenario.ScenarioScope.JVM)
                   .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
-                  .effect(ChaosEffect.delay(Duration.ofMillis(80)))
+                  .effect(ChaosEffect.delay(DELAY))
                   .activationPolicy(ActivationPolicy.always())
                   .build());
 
       handle.stop();
 
-      long elapsed =
-          measureMillis(() -> runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {}));
-      assertThat(elapsed)
+      final long elapsed =
+          measureNanos(() -> runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {}));
+      assertThat(handle.appliedCount())
           .as("after stop(), effect must no longer be applied")
-          .isLessThan(NO_DELAY_MAX_MS);
+          .isZero();
+      assertThat(elapsed).as("and the call is not delayed").isLessThan(DELAY.toNanos() / 2);
     }
   }
 
@@ -307,14 +318,14 @@ class ChaosRuntimeTest {
     }
   }
 
-  private long measureMillis(ThrowingRunnable runnable) {
+  private long measureNanos(ThrowingRunnable runnable) {
     long start = System.nanoTime();
     try {
       runnable.run();
     } catch (Throwable throwable) {
       throw new IllegalStateException(throwable);
     }
-    return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+    return System.nanoTime() - start;
   }
 
   @FunctionalInterface

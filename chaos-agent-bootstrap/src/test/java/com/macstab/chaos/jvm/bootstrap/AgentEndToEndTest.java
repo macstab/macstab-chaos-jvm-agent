@@ -2472,14 +2472,7 @@ class AgentEndToEndTest {
   class Reports {
 
     private Map<String, String> readKeyValues(final Path file) throws Exception {
-      final Map<String, String> values = new java.util.LinkedHashMap<>();
-      for (final String line : Files.readAllLines(file)) {
-        final int separator = line.indexOf('=');
-        if (separator > 0) {
-          values.put(line.substring(0, separator), line.substring(separator + 1));
-        }
-      }
-      return values;
+      return ChildJvmProbe.parse(Files.readAllLines(file));
     }
 
     @Test

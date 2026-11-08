@@ -121,7 +121,8 @@ class WithChaosTest {
                 () ->
                     WithChaosSupport.activate(
                         Fixtures.class.getDeclaredMethod("secondInvalid"), controlPlane, session))
-            .isInstanceOf(RuntimeException.class);
+            .isInstanceOf(com.macstab.chaos.jvm.startup.ConfigLoadException.class)
+            .hasMessageContaining("missing or null value: selector");
         // Rolled back: unregistered, or at least no longer active.
         assertThat(
                 controlPlane

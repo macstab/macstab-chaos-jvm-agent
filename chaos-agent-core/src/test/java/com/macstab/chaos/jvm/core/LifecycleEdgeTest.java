@@ -3,7 +3,6 @@ package com.macstab.chaos.jvm.core;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.assertj.core.api.Assumptions.assumeThat;
 import static org.awaitility.Awaitility.await;
 
 import com.macstab.chaos.jvm.api.ActivationPolicy;
@@ -32,7 +31,6 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.logging.Level;
@@ -288,27 +286,52 @@ class LifecycleEdgeTest {
     @Test
     @DisplayName("a stressor that fails to start leaves nothing registered")
     void failingStartIsRolledBack() {
-      assumeThat(ForkJoinPool.commonPool().getParallelism()).isGreaterThan(1);
-      final ChaosScenario overflowing =
-          ChaosScenario.builder("overflow")
-              .scope(ChaosScenario.ScenarioScope.JVM)
-              .selector(ChaosSelector.stress(ChaosSelector.StressTarget.THREAD_LOCAL_LEAK))
-              .effect(new ChaosEffect.ThreadLocalLeakEffect(Integer.MAX_VALUE, 1))
-              .build();
+      // Parallelism 2 whatever the machine: the overflow needs more than one worker.
+      final List<ChaosEvent> planeEvents = new CopyOnWriteArrayList<>();
+      try (ChaosControlPlaneImpl plane =
+          new ChaosControlPlaneImpl(
+              java.time.Clock.systemUTC(),
+              com.macstab.chaos.jvm.api.ChaosMetricsSink.NOOP,
+              new StressorFactory(java.util.Optional::empty) {
+                @Override
+                ManagedStressor createIfNeeded(
+                    final ChaosEffect effect,
+                    final boolean allowDestructiveEffects,
+                    final java.util.function.Consumer<String> onEnd) {
+                  return effect instanceof ChaosEffect.ThreadLocalLeakEffect leak
+                      ? new ThreadLocalLeakStressor(leak, 2)
+                      : super.createIfNeeded(effect, allowDestructiveEffects, onEnd);
+                }
+              })) {
+        plane.addEventListener(planeEvents::add);
+        final ChaosScenario overflowing =
+            ChaosScenario.builder("overflow")
+                .scope(ChaosScenario.ScenarioScope.JVM)
+                .selector(ChaosSelector.stress(ChaosSelector.StressTarget.THREAD_LOCAL_LEAK))
+                .effect(new ChaosEffect.ThreadLocalLeakEffect(Integer.MAX_VALUE, 1))
+                .build();
 
-      assertThatThrownBy(() -> runtime.activate(overflowing))
-          .isInstanceOf(IllegalArgumentException.class)
-          .hasMessageStartingWith("thread-local-leak total entries");
+        assertThatThrownBy(() -> plane.activate(overflowing))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageStartingWith("thread-local-leak total entries");
 
-      assertThat(runtime.registry().isLive("jvm::overflow")).isFalse();
-      assertThat(runtime.diagnostics().snapshot().failures())
-          .extracting(
-              ChaosDiagnostics.ActivationFailure::scenarioId,
-              ChaosDiagnostics.ActivationFailure::category)
-          .contains(
-              org.assertj.core.groups.Tuple.tuple(
-                  "overflow", ChaosDiagnostics.FailureCategory.INVALID_CONFIGURATION));
-      assertThat(eventsOf(ChaosEvent.Type.STOPPED, "overflow")).isEqualTo(1);
+        assertThat(plane.registry().isLive("jvm::overflow")).isFalse();
+        assertThat(plane.diagnostics().snapshot().failures())
+            .extracting(
+                ChaosDiagnostics.ActivationFailure::scenarioId,
+                ChaosDiagnostics.ActivationFailure::category)
+            .contains(
+                org.assertj.core.groups.Tuple.tuple(
+                    "overflow", ChaosDiagnostics.FailureCategory.INVALID_CONFIGURATION));
+        assertThat(
+                planeEvents.stream()
+                    .filter(
+                        event ->
+                            event.type() == ChaosEvent.Type.STOPPED
+                                && event.scenarioId().equals("overflow"))
+                    .count())
+            .isEqualTo(1);
+      }
     }
   }
 
@@ -818,7 +841,7 @@ class LifecycleEdgeTest {
           new CompositeActivationHandle(
               "two", List.of(new FailingHandle("a"), new FailingHandle("b")));
       assertThatThrownBy(composite::start)
-          .isInstanceOf(RuntimeException.class)
+          .isExactlyInstanceOf(RuntimeException.class)
           .hasMessage("one or more delegates failed during composite start")
           .hasCauseInstanceOf(IllegalStateException.class)
           .satisfies(

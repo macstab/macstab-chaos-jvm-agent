@@ -26,7 +26,6 @@ import org.junit.jupiter.api.Test;
 class RuntimeInterceptionTest {
 
   private static final long DELAY_MS = 50L;
-  private static final long DELAY_MIN_MS = (long) (DELAY_MS * 0.8);
 
   // ---------------------------------------------------------------------------
   // GC request
@@ -73,8 +72,9 @@ class RuntimeInterceptionTest {
       final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
       assertThat(result).isFalse();
       assertThat(elapsedMs)
-          .as("delay effect should add at least 80%% of configured %dms", DELAY_MS)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+          .as("delay effect should add the whole configured %dms", DELAY_MS)
+          .isGreaterThanOrEqualTo(DELAY_MS);
+      assertThat(applied(runtime)).as("the scenario applied").isPositive();
     }
   }
 
@@ -155,8 +155,9 @@ class RuntimeInterceptionTest {
       final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
       assertThat(result).isFalse();
       assertThat(elapsedMs)
-          .as("delay effect should add at least 80%% of configured %dms", DELAY_MS)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+          .as("delay effect should add the whole configured %dms", DELAY_MS)
+          .isGreaterThanOrEqualTo(DELAY_MS);
+      assertThat(applied(runtime)).as("the scenario applied").isPositive();
     }
   }
 
@@ -247,8 +248,9 @@ class RuntimeInterceptionTest {
       runtime.beforeObjectDeserialize(null);
       final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
       assertThat(elapsedMs)
-          .as("delay effect should add at least 80%% of configured %dms", DELAY_MS)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+          .as("delay effect should add the whole configured %dms", DELAY_MS)
+          .isGreaterThanOrEqualTo(DELAY_MS);
+      assertThat(applied(runtime)).as("the scenario applied").isPositive();
     }
   }
 
@@ -304,8 +306,9 @@ class RuntimeInterceptionTest {
       runtime.beforeZipInflate();
       final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
       assertThat(elapsedMs)
-          .as("delay effect should add at least 80%% of configured %dms", DELAY_MS)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+          .as("delay effect should add the whole configured %dms", DELAY_MS)
+          .isGreaterThanOrEqualTo(DELAY_MS);
+      assertThat(applied(runtime)).as("the scenario applied").isPositive();
     }
 
     @Test
@@ -334,8 +337,9 @@ class RuntimeInterceptionTest {
       runtime.beforeZipDeflate();
       final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
       assertThat(elapsedMs)
-          .as("delay effect should add at least 80%% of configured %dms", DELAY_MS)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+          .as("delay effect should add the whole configured %dms", DELAY_MS)
+          .isGreaterThanOrEqualTo(DELAY_MS);
+      assertThat(applied(runtime)).as("the scenario applied").isPositive();
     }
 
     @Test
@@ -398,8 +402,9 @@ class RuntimeInterceptionTest {
       runtime.beforeReflectionInvoke(null, null);
       final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
       assertThat(elapsedMs)
-          .as("delay effect should add at least 80%% of configured %dms", DELAY_MS)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+          .as("delay effect should add the whole configured %dms", DELAY_MS)
+          .isGreaterThanOrEqualTo(DELAY_MS);
+      assertThat(applied(runtime)).as("the scenario applied").isPositive();
     }
 
     @Test
@@ -457,8 +462,9 @@ class RuntimeInterceptionTest {
       runtime.beforeSocketConnect(null, null, 0);
       final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
       assertThat(elapsedMs)
-          .as("delay effect should add at least 80%% of configured %dms", DELAY_MS)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+          .as("delay effect should add the whole configured %dms", DELAY_MS)
+          .isGreaterThanOrEqualTo(DELAY_MS);
+      assertThat(applied(runtime)).as("the scenario applied").isPositive();
     }
   }
 
@@ -520,8 +526,9 @@ class RuntimeInterceptionTest {
       runtime.beforeSocketAccept(null);
       final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
       assertThat(elapsedMs)
-          .as("delay effect should add at least 80%% of configured %dms", DELAY_MS)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+          .as("delay effect should add the whole configured %dms", DELAY_MS)
+          .isGreaterThanOrEqualTo(DELAY_MS);
+      assertThat(applied(runtime)).as("the scenario applied").isPositive();
     }
 
     @Test
@@ -536,7 +543,9 @@ class RuntimeInterceptionTest {
                   .effect(ChaosEffect.reject("chaos accept rejection"))
                   .activationPolicy(ActivationPolicy.always())
                   .build());
-      assertThatThrownBy(() -> runtime.beforeSocketAccept(null)).isInstanceOf(Throwable.class);
+      assertThatThrownBy(() -> runtime.beforeSocketAccept(null))
+          .isInstanceOf(java.io.IOException.class)
+          .hasMessage("chaos accept rejection");
     }
 
     @Test
@@ -571,8 +580,9 @@ class RuntimeInterceptionTest {
       runtime.beforeSocketRead(null, InvocationContext.UNKNOWN, null, 0, 0);
       final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
       assertThat(elapsedMs)
-          .as("delay effect should add at least 80%% of configured %dms", DELAY_MS)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+          .as("delay effect should add the whole configured %dms", DELAY_MS)
+          .isGreaterThanOrEqualTo(DELAY_MS);
+      assertThat(applied(runtime)).as("the scenario applied").isPositive();
     }
 
     @Test
@@ -625,8 +635,9 @@ class RuntimeInterceptionTest {
       runtime.beforeSocketWrite(null, 64, null, 0);
       final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
       assertThat(elapsedMs)
-          .as("delay effect should add at least 80%% of configured %dms", DELAY_MS)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+          .as("delay effect should add the whole configured %dms", DELAY_MS)
+          .isGreaterThanOrEqualTo(DELAY_MS);
+      assertThat(applied(runtime)).as("the scenario applied").isPositive();
     }
 
     @Test
@@ -677,8 +688,9 @@ class RuntimeInterceptionTest {
       runtime.beforeSocketClose(null);
       final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
       assertThat(elapsedMs)
-          .as("delay effect should add at least 80%% of configured %dms", DELAY_MS)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+          .as("delay effect should add the whole configured %dms", DELAY_MS)
+          .isGreaterThanOrEqualTo(DELAY_MS);
+      assertThat(applied(runtime)).as("the scenario applied").isPositive();
     }
 
     @Test
@@ -698,7 +710,7 @@ class RuntimeInterceptionTest {
   class JndiLookupTests {
 
     @Test
-    @DisplayName("RejectEffect throws NamingException (or RuntimeException if javax.naming absent)")
+    @DisplayName("RejectEffect throws NamingException")
     void rejectEffectThrowsNamingException() {
       final ChaosRuntime runtime =
           runtimeWith(
@@ -709,7 +721,8 @@ class RuntimeInterceptionTest {
                   .activationPolicy(ActivationPolicy.always())
                   .build());
       assertThatThrownBy(() -> runtime.beforeJndiLookup(null, "java:comp/env/test"))
-          .isInstanceOf(Throwable.class);
+          .isInstanceOf(javax.naming.NamingException.class)
+          .hasMessage("chaos jndi rejection");
     }
 
     @Test
@@ -727,8 +740,9 @@ class RuntimeInterceptionTest {
       runtime.beforeJndiLookup(null, "java:comp/env/test");
       final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
       assertThat(elapsedMs)
-          .as("delay effect should add at least 80%% of configured %dms", DELAY_MS)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+          .as("delay effect should add the whole configured %dms", DELAY_MS)
+          .isGreaterThanOrEqualTo(DELAY_MS);
+      assertThat(applied(runtime)).as("the scenario applied").isPositive();
     }
 
     @Test
@@ -762,8 +776,9 @@ class RuntimeInterceptionTest {
       runtime.beforeJmxGetAttr(null, null, "VmName");
       final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
       assertThat(elapsedMs)
-          .as("delay effect should add at least 80%% of configured %dms", DELAY_MS)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+          .as("delay effect should add the whole configured %dms", DELAY_MS)
+          .isGreaterThanOrEqualTo(DELAY_MS);
+      assertThat(applied(runtime)).as("the scenario applied").isPositive();
     }
 
     @Test
@@ -781,8 +796,9 @@ class RuntimeInterceptionTest {
       runtime.beforeJmxInvoke(null, null, "gc");
       final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
       assertThat(elapsedMs)
-          .as("delay effect should add at least 80%% of configured %dms", DELAY_MS)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+          .as("delay effect should add the whole configured %dms", DELAY_MS)
+          .isGreaterThanOrEqualTo(DELAY_MS);
+      assertThat(applied(runtime)).as("the scenario applied").isPositive();
     }
 
     @Test
@@ -839,8 +855,9 @@ class RuntimeInterceptionTest {
       runtime.beforeNativeLibraryLoad("nonexistent_chaos_lib_xyz");
       final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
       assertThat(elapsedMs)
-          .as("delay effect should add at least 80%% of configured %dms", DELAY_MS)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+          .as("delay effect should add the whole configured %dms", DELAY_MS)
+          .isGreaterThanOrEqualTo(DELAY_MS);
+      assertThat(applied(runtime)).as("the scenario applied").isPositive();
     }
 
     @Test
@@ -859,5 +876,12 @@ class RuntimeInterceptionTest {
     final ChaosRuntime runtime = new ChaosRuntime();
     runtime.activate(scenario);
     return runtime;
+  }
+
+  /** How often the runtime's scenarios applied, all together. */
+  private static long applied(final ChaosRuntime runtime) {
+    return runtime.diagnostics().snapshot().scenarios().stream()
+        .mapToLong(com.macstab.chaos.jvm.api.ChaosDiagnostics.ScenarioReport::appliedCount)
+        .sum();
   }
 }

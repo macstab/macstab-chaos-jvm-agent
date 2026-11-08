@@ -35,7 +35,6 @@ import org.junit.jupiter.api.io.TempDir;
 class InstrumentationIntegrationTest {
 
   private static final long DELAY_MS = 200L;
-  private static final long DELAY_MIN_MS = (long) (DELAY_MS * 0.8);
 
   @TempDir Path tempDir;
 
@@ -55,9 +54,10 @@ class InstrumentationIntegrationTest {
                   Set.of(OperationType.THREAD_SLEEP), ChaosSelector.ThreadKind.ANY),
               ChaosEffect.suppress());
 
-      final long elapsed = parseElapsed(runProbe(plan, "sleep-suppress"));
-      assertThat(elapsed)
-          .as("suppressed Thread.sleep(2000) should return in <300 ms (got %d ms)", elapsed)
+      final ChildJvmProbe.ProbeResult result = runProbe(plan, "sleep-suppress");
+      assertThat(result.longValue("applied.sleep-suppress")).isPositive();
+      assertThat(result.longValue("elapsedMillis"))
+          .as("suppressed Thread.sleep(2000) should return in <300 ms")
           .isLessThan(300L);
     }
 
@@ -71,12 +71,7 @@ class InstrumentationIntegrationTest {
                   Set.of(OperationType.THREAD_SLEEP), ChaosSelector.ThreadKind.ANY),
               ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
 
-      final long elapsed = parseElapsed(runProbe(plan, "sleep-delay"));
-      assertThat(elapsed)
-          .as(
-              "delay effect must add ≥%d ms before Thread.sleep(10) (got %d ms)",
-              DELAY_MIN_MS, elapsed)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      assertDelayed(plan, runProbe(plan, "sleep-delay"));
     }
   }
 
@@ -98,14 +93,8 @@ class InstrumentationIntegrationTest {
               ChaosSelector.fileIo(Set.of(OperationType.FILE_IO_READ)),
               ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
 
-      final long elapsed =
-          parseElapsed(
-              runProbe(plan, "fileread-delay", "-Dprobe.file=" + probeFile.toAbsolutePath()));
-      assertThat(elapsed)
-          .as(
-              "delay effect must add ≥%d ms before FileInputStream.read() (got %d ms)",
-              DELAY_MIN_MS, elapsed)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      assertDelayed(
+          plan, runProbe(plan, "fileread-delay", "-Dprobe.file=" + probeFile.toAbsolutePath()));
     }
 
     @Test
@@ -119,14 +108,8 @@ class InstrumentationIntegrationTest {
               ChaosSelector.fileIo(Set.of(OperationType.FILE_IO_WRITE)),
               ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
 
-      final long elapsed =
-          parseElapsed(
-              runProbe(plan, "filewrite-delay", "-Dprobe.file=" + probeFile.toAbsolutePath()));
-      assertThat(elapsed)
-          .as(
-              "delay effect must add ≥%d ms before FileOutputStream.write() (got %d ms)",
-              DELAY_MIN_MS, elapsed)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      assertDelayed(
+          plan, runProbe(plan, "filewrite-delay", "-Dprobe.file=" + probeFile.toAbsolutePath()));
     }
 
     @Test
@@ -140,12 +123,13 @@ class InstrumentationIntegrationTest {
               ChaosSelector.fileIo(Set.of(OperationType.FILE_IO_READ)),
               ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
 
-      final long elapsed =
-          parseElapsed(
-              runProbe(plan, "filewrite-delay", "-Dprobe.file=" + probeFile.toAbsolutePath()));
-      assertThat(elapsed)
-          .as("READ-only selector must NOT delay write (got %d ms)", elapsed)
-          .isLessThan(DELAY_MIN_MS);
+      final ChildJvmProbe.ProbeResult result =
+          runProbe(plan, "filewrite-delay", "-Dprobe.file=" + probeFile.toAbsolutePath());
+      // The scenario applies to the JVM's own file reads, so its count is not 0; the write is
+      // not delayed: a delayed call takes at least the whole delay.
+      assertThat(result.longValue("elapsedMillis"))
+          .as("READ-only selector must NOT delay write")
+          .isLessThan(DELAY_MS);
     }
   }
 
@@ -164,12 +148,7 @@ class InstrumentationIntegrationTest {
               ChaosSelector.dns(Set.of(OperationType.DNS_RESOLVE)),
               ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
 
-      final long elapsed = parseElapsed(runProbe(plan, "dns-delay"));
-      assertThat(elapsed)
-          .as(
-              "delay effect must add ≥%d ms before InetAddress.getByName() (got %d ms)",
-              DELAY_MIN_MS, elapsed)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      assertDelayed(plan, runProbe(plan, "dns-delay"));
     }
   }
 
@@ -188,12 +167,7 @@ class InstrumentationIntegrationTest {
               ChaosSelector.ssl(Set.of(OperationType.SSL_HANDSHAKE)),
               ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
 
-      final long elapsed = parseElapsed(runProbe(plan, "ssl-delay"));
-      assertThat(elapsed)
-          .as(
-              "delay effect must add ≥%d ms before SSLEngine.beginHandshake() (got %d ms)",
-              DELAY_MIN_MS, elapsed)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      assertDelayed(plan, runProbe(plan, "ssl-delay"));
     }
   }
 
@@ -211,12 +185,7 @@ class InstrumentationIntegrationTest {
               "executor-submit-delay",
               ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)),
               ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
-      final long elapsed = parseElapsed(runProbe(plan, "executor-submit-delay"));
-      assertThat(elapsed)
-          .as(
-              "EXECUTOR_SUBMIT delay must add ≥%d ms to execute() (got %d ms)",
-              DELAY_MIN_MS, elapsed)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      assertDelayed(plan, runProbe(plan, "executor-submit-delay"));
     }
 
     @Test
@@ -227,12 +196,7 @@ class InstrumentationIntegrationTest {
               "executor-worker-delay",
               ChaosSelector.executor(Set.of(OperationType.EXECUTOR_WORKER_RUN)),
               ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
-      final long elapsed = parseElapsed(runProbe(plan, "executor-worker-delay"));
-      assertThat(elapsed)
-          .as(
-              "EXECUTOR_WORKER_RUN delay must add ≥%d ms to task execution (got %d ms)",
-              DELAY_MIN_MS, elapsed)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      assertDelayed(plan, runProbe(plan, "executor-worker-delay"));
     }
   }
 
@@ -250,10 +214,7 @@ class InstrumentationIntegrationTest {
               "queue-put-delay",
               ChaosSelector.queue(Set.of(OperationType.QUEUE_PUT)),
               ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
-      final long elapsed = parseElapsed(runProbe(plan, "queue-put-delay"));
-      assertThat(elapsed)
-          .as("QUEUE_PUT delay must add ≥%d ms to put() (got %d ms)", DELAY_MIN_MS, elapsed)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      assertDelayed(plan, runProbe(plan, "queue-put-delay"));
     }
 
     @Test
@@ -264,10 +225,7 @@ class InstrumentationIntegrationTest {
               "queue-take-delay",
               ChaosSelector.queue(Set.of(OperationType.QUEUE_TAKE)),
               ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
-      final long elapsed = parseElapsed(runProbe(plan, "queue-take-delay"));
-      assertThat(elapsed)
-          .as("QUEUE_TAKE delay must add ≥%d ms to take() (got %d ms)", DELAY_MIN_MS, elapsed)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      assertDelayed(plan, runProbe(plan, "queue-take-delay"));
     }
   }
 
@@ -285,12 +243,7 @@ class InstrumentationIntegrationTest {
               "async-complete-delay",
               ChaosSelector.async(Set.of(OperationType.ASYNC_COMPLETE)),
               ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
-      final long elapsed = parseElapsed(runProbe(plan, "async-complete-delay"));
-      assertThat(elapsed)
-          .as(
-              "ASYNC_COMPLETE delay must add ≥%d ms to complete() (got %d ms)",
-              DELAY_MIN_MS, elapsed)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      assertDelayed(plan, runProbe(plan, "async-complete-delay"));
     }
   }
 
@@ -308,12 +261,7 @@ class InstrumentationIntegrationTest {
               "reflection-invoke-delay",
               ChaosSelector.jvmRuntime(Set.of(OperationType.REFLECTION_INVOKE)),
               ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
-      final long elapsed = parseElapsed(runProbe(plan, "reflection-invoke-delay"));
-      assertThat(elapsed)
-          .as(
-              "REFLECTION_INVOKE delay must add ≥%d ms to Method.invoke() (got %d ms)",
-              DELAY_MIN_MS, elapsed)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      assertDelayed(plan, runProbe(plan, "reflection-invoke-delay"));
     }
 
     @Test
@@ -324,12 +272,7 @@ class InstrumentationIntegrationTest {
               "zip-deflate-delay",
               ChaosSelector.jvmRuntime(Set.of(OperationType.ZIP_DEFLATE)),
               ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
-      final long elapsed = parseElapsed(runProbe(plan, "zip-deflate-delay"));
-      assertThat(elapsed)
-          .as(
-              "ZIP_DEFLATE delay must add ≥%d ms to Deflater.deflate() (got %d ms)",
-              DELAY_MIN_MS, elapsed)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      assertDelayed(plan, runProbe(plan, "zip-deflate-delay"));
     }
 
     @Test
@@ -340,12 +283,7 @@ class InstrumentationIntegrationTest {
               "zip-inflate-delay",
               ChaosSelector.jvmRuntime(Set.of(OperationType.ZIP_INFLATE)),
               ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
-      final long elapsed = parseElapsed(runProbe(plan, "zip-inflate-delay"));
-      assertThat(elapsed)
-          .as(
-              "ZIP_INFLATE delay must add ≥%d ms to Inflater.inflate() (got %d ms)",
-              DELAY_MIN_MS, elapsed)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      assertDelayed(plan, runProbe(plan, "zip-inflate-delay"));
     }
   }
 
@@ -364,12 +302,7 @@ class InstrumentationIntegrationTest {
               ChaosSelector.thread(
                   Set.of(OperationType.THREAD_START), ChaosSelector.ThreadKind.ANY),
               ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
-      final long elapsed = parseElapsed(runProbe(plan, "thread-start-delay"));
-      assertThat(elapsed)
-          .as(
-              "THREAD_START delay must add ≥%d ms to Thread.start() (got %d ms)",
-              DELAY_MIN_MS, elapsed)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      assertDelayed(plan, runProbe(plan, "thread-start-delay"));
     }
 
     @Test
@@ -384,12 +317,7 @@ class InstrumentationIntegrationTest {
               ChaosSelector.thread(
                   Set.of(OperationType.VIRTUAL_THREAD_START), ChaosSelector.ThreadKind.VIRTUAL),
               ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
-      final long elapsed = parseElapsed(runProbe(plan, "virtual-thread-start-delay"));
-      assertThat(elapsed)
-          .as(
-              "VIRTUAL_THREAD_START delay must add ≥%d ms to virtual Thread.start() (got %d ms)",
-              DELAY_MIN_MS, elapsed)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      assertDelayed(plan, runProbe(plan, "virtual-thread-start-delay"));
     }
   }
 
@@ -407,12 +335,7 @@ class InstrumentationIntegrationTest {
               "nio-read-delay",
               ChaosSelector.nio(Set.of(OperationType.NIO_CHANNEL_READ)),
               ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
-      final long elapsed = parseElapsed(runProbe(plan, "nio-read-delay"));
-      assertThat(elapsed)
-          .as(
-              "NIO_CHANNEL_READ delay must add ≥%d ms to channel.read() (got %d ms)",
-              DELAY_MIN_MS, elapsed)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      assertDelayed(plan, runProbe(plan, "nio-read-delay"));
     }
 
     @Test
@@ -423,12 +346,7 @@ class InstrumentationIntegrationTest {
               "nio-write-delay",
               ChaosSelector.nio(Set.of(OperationType.NIO_CHANNEL_WRITE)),
               ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
-      final long elapsed = parseElapsed(runProbe(plan, "nio-write-delay"));
-      assertThat(elapsed)
-          .as(
-              "NIO_CHANNEL_WRITE delay must add ≥%d ms to channel.write() (got %d ms)",
-              DELAY_MIN_MS, elapsed)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      assertDelayed(plan, runProbe(plan, "nio-write-delay"));
     }
   }
 
@@ -446,12 +364,7 @@ class InstrumentationIntegrationTest {
               "thread-local-get-delay",
               ChaosSelector.threadLocal(Set.of(OperationType.THREAD_LOCAL_GET)),
               ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
-      final long elapsed = parseElapsed(runProbe(plan, "thread-local-get-delay"));
-      assertThat(elapsed)
-          .as(
-              "THREAD_LOCAL_GET delay must add ≥%d ms to ThreadLocal.get() (got %d ms)",
-              DELAY_MIN_MS, elapsed)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      assertDelayed(plan, runProbe(plan, "thread-local-get-delay"));
     }
   }
 
@@ -469,12 +382,7 @@ class InstrumentationIntegrationTest {
               "schedule-submit-delay",
               ChaosSelector.scheduling(Set.of(OperationType.SCHEDULE_SUBMIT)),
               ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
-      final long elapsed = parseElapsed(runProbe(plan, "schedule-submit-delay"));
-      assertThat(elapsed)
-          .as(
-              "SCHEDULE_SUBMIT delay must add ≥%d ms to schedule() (got %d ms)",
-              DELAY_MIN_MS, elapsed)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      assertDelayed(plan, runProbe(plan, "schedule-submit-delay"));
     }
 
     @Test
@@ -485,12 +393,7 @@ class InstrumentationIntegrationTest {
               "schedule-tick-delay",
               ChaosSelector.scheduling(Set.of(OperationType.SCHEDULE_TICK)),
               ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
-      final long elapsed = parseElapsed(runProbe(plan, "schedule-tick-delay"));
-      assertThat(elapsed)
-          .as(
-              "SCHEDULE_TICK delay must add ≥%d ms to scheduled-task execution (got %d ms)",
-              DELAY_MIN_MS, elapsed)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      assertDelayed(plan, runProbe(plan, "schedule-tick-delay"));
     }
   }
 
@@ -508,10 +411,7 @@ class InstrumentationIntegrationTest {
               "executor-shutdown-delay",
               ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SHUTDOWN)),
               ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
-      final long elapsed = parseElapsed(runProbe(plan, "executor-shutdown-delay"));
-      assertThat(elapsed)
-          .as("EXECUTOR_SHUTDOWN delay must add ≥%d ms (got %d ms)", DELAY_MIN_MS, elapsed)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      assertDelayed(plan, runProbe(plan, "executor-shutdown-delay"));
     }
 
     @Test
@@ -522,10 +422,7 @@ class InstrumentationIntegrationTest {
               "executor-await-termination-delay",
               ChaosSelector.executor(Set.of(OperationType.EXECUTOR_AWAIT_TERMINATION)),
               ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
-      final long elapsed = parseElapsed(runProbe(plan, "executor-await-termination-delay"));
-      assertThat(elapsed)
-          .as("EXECUTOR_AWAIT_TERMINATION delay must add ≥%d ms (got %d ms)", DELAY_MIN_MS, elapsed)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      assertDelayed(plan, runProbe(plan, "executor-await-termination-delay"));
     }
   }
 
@@ -543,10 +440,7 @@ class InstrumentationIntegrationTest {
               "fork-join-delay",
               ChaosSelector.executor(Set.of(OperationType.FORK_JOIN_TASK_RUN)),
               ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
-      final long elapsed = parseElapsed(runProbe(plan, "fork-join-delay"));
-      assertThat(elapsed)
-          .as("FORK_JOIN_TASK_RUN delay must add ≥%d ms (got %d ms)", DELAY_MIN_MS, elapsed)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      assertDelayed(plan, runProbe(plan, "fork-join-delay"));
     }
   }
 
@@ -564,10 +458,7 @@ class InstrumentationIntegrationTest {
               "queue-offer-delay",
               ChaosSelector.queue(Set.of(OperationType.QUEUE_OFFER)),
               ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
-      final long elapsed = parseElapsed(runProbe(plan, "queue-offer-delay"));
-      assertThat(elapsed)
-          .as("QUEUE_OFFER delay must add ≥%d ms (got %d ms)", DELAY_MIN_MS, elapsed)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      assertDelayed(plan, runProbe(plan, "queue-offer-delay"));
     }
 
     @Test
@@ -578,10 +469,7 @@ class InstrumentationIntegrationTest {
               "queue-poll-delay",
               ChaosSelector.queue(Set.of(OperationType.QUEUE_POLL)),
               ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
-      final long elapsed = parseElapsed(runProbe(plan, "queue-poll-delay"));
-      assertThat(elapsed)
-          .as("QUEUE_POLL delay must add ≥%d ms (got %d ms)", DELAY_MIN_MS, elapsed)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      assertDelayed(plan, runProbe(plan, "queue-poll-delay"));
     }
   }
 
@@ -600,12 +488,7 @@ class InstrumentationIntegrationTest {
               "async-complete-exceptionally-delay",
               ChaosSelector.async(Set.of(OperationType.ASYNC_COMPLETE_EXCEPTIONALLY)),
               ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
-      final long elapsed = parseElapsed(runProbe(plan, "async-complete-exceptionally-delay"));
-      assertThat(elapsed)
-          .as(
-              "ASYNC_COMPLETE_EXCEPTIONALLY delay must add ≥%d ms (got %d ms)",
-              DELAY_MIN_MS, elapsed)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      assertDelayed(plan, runProbe(plan, "async-complete-exceptionally-delay"));
     }
 
     @Test
@@ -616,10 +499,7 @@ class InstrumentationIntegrationTest {
               "async-cancel-delay",
               ChaosSelector.async(Set.of(OperationType.ASYNC_CANCEL)),
               ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
-      final long elapsed = parseElapsed(runProbe(plan, "async-cancel-delay"));
-      assertThat(elapsed)
-          .as("ASYNC_CANCEL delay must add ≥%d ms (got %d ms)", DELAY_MIN_MS, elapsed)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      assertDelayed(plan, runProbe(plan, "async-cancel-delay"));
     }
   }
 
@@ -642,7 +522,7 @@ class InstrumentationIntegrationTest {
               ChaosEffect.skewClock(
                   java.time.Duration.ofSeconds(CLOCK_SKEW_SECONDS),
                   ChaosEffect.ClockSkewMode.FIXED));
-      final long skewSeconds = parseSkewSeconds(runProbe(plan, "instant-now-delay"));
+      final long skewSeconds = runProbe(plan, "instant-now-delay").longValue("skewSeconds");
       assertThat(skewSeconds)
           .as(
               "INSTANT_NOW skew must shift returned value by ≥%d s (got %d s)",
@@ -660,7 +540,7 @@ class InstrumentationIntegrationTest {
               ChaosEffect.skewClock(
                   java.time.Duration.ofSeconds(CLOCK_SKEW_SECONDS),
                   ChaosEffect.ClockSkewMode.FIXED));
-      final long skewSeconds = parseSkewSeconds(runProbe(plan, "local-datetime-now-delay"));
+      final long skewSeconds = runProbe(plan, "local-datetime-now-delay").longValue("skewSeconds");
       assertThat(skewSeconds)
           .as(
               "LOCAL_DATE_TIME_NOW skew must shift returned value by ≥%d s (got %d s)",
@@ -678,7 +558,7 @@ class InstrumentationIntegrationTest {
               ChaosEffect.skewClock(
                   java.time.Duration.ofSeconds(CLOCK_SKEW_SECONDS),
                   ChaosEffect.ClockSkewMode.FIXED));
-      final long skewSeconds = parseSkewSeconds(runProbe(plan, "zoned-datetime-now-delay"));
+      final long skewSeconds = runProbe(plan, "zoned-datetime-now-delay").longValue("skewSeconds");
       assertThat(skewSeconds)
           .as(
               "ZONED_DATE_TIME_NOW skew must shift returned value by ≥%d s (got %d s)",
@@ -696,7 +576,7 @@ class InstrumentationIntegrationTest {
               ChaosEffect.skewClock(
                   java.time.Duration.ofSeconds(CLOCK_SKEW_SECONDS),
                   ChaosEffect.ClockSkewMode.FIXED));
-      final long skewSeconds = parseSkewSeconds(runProbe(plan, "date-new-delay"));
+      final long skewSeconds = runProbe(plan, "date-new-delay").longValue("skewSeconds");
       assertThat(skewSeconds)
           .as(
               "DATE_NEW skew must shift returned value by ≥%d s (got %d s)",
@@ -719,10 +599,7 @@ class InstrumentationIntegrationTest {
               "system-gc-delay",
               ChaosSelector.jvmRuntime(Set.of(OperationType.SYSTEM_GC_REQUEST)),
               ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
-      final long elapsed = parseElapsed(runProbe(plan, "system-gc-delay"));
-      assertThat(elapsed)
-          .as("SYSTEM_GC_REQUEST delay must add ≥%d ms (got %d ms)", DELAY_MIN_MS, elapsed)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      assertDelayed(plan, runProbe(plan, "system-gc-delay"));
     }
 
     @Test
@@ -733,7 +610,7 @@ class InstrumentationIntegrationTest {
               "system-exit-suppress",
               ChaosSelector.jvmRuntime(Set.of(OperationType.SYSTEM_EXIT_REQUEST)),
               ChaosEffect.suppress());
-      final String output = runProbe(plan, "system-exit-suppress");
+      final String output = runProbe(plan, "system-exit-suppress").output();
       assertThat(output)
           .as("System.exit() must be suppressed so JVM continues and prints exit=suppressed")
           .contains("exit=suppressed");
@@ -754,10 +631,7 @@ class InstrumentationIntegrationTest {
               "direct-buffer-delay",
               ChaosSelector.jvmRuntime(Set.of(OperationType.DIRECT_BUFFER_ALLOCATE)),
               ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
-      final long elapsed = parseElapsed(runProbe(plan, "direct-buffer-delay"));
-      assertThat(elapsed)
-          .as("DIRECT_BUFFER_ALLOCATE delay must add ≥%d ms (got %d ms)", DELAY_MIN_MS, elapsed)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      assertDelayed(plan, runProbe(plan, "direct-buffer-delay"));
     }
   }
 
@@ -775,10 +649,7 @@ class InstrumentationIntegrationTest {
               "object-serialize-delay",
               ChaosSelector.jvmRuntime(Set.of(OperationType.OBJECT_SERIALIZE)),
               ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
-      final long elapsed = parseElapsed(runProbe(plan, "object-serialize-delay"));
-      assertThat(elapsed)
-          .as("OBJECT_SERIALIZE delay must add ≥%d ms (got %d ms)", DELAY_MIN_MS, elapsed)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      assertDelayed(plan, runProbe(plan, "object-serialize-delay"));
     }
 
     @Test
@@ -789,10 +660,7 @@ class InstrumentationIntegrationTest {
               "object-deserialize-delay",
               ChaosSelector.jvmRuntime(Set.of(OperationType.OBJECT_DESERIALIZE)),
               ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
-      final long elapsed = parseElapsed(runProbe(plan, "object-deserialize-delay"));
-      assertThat(elapsed)
-          .as("OBJECT_DESERIALIZE delay must add ≥%d ms (got %d ms)", DELAY_MIN_MS, elapsed)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      assertDelayed(plan, runProbe(plan, "object-deserialize-delay"));
     }
   }
 
@@ -810,10 +678,7 @@ class InstrumentationIntegrationTest {
               "native-lib-load-delay",
               ChaosSelector.jvmRuntime(Set.of(OperationType.NATIVE_LIBRARY_LOAD)),
               ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
-      final long elapsed = parseElapsed(runProbe(plan, "native-lib-load-delay"));
-      assertThat(elapsed)
-          .as("NATIVE_LIBRARY_LOAD delay must add ≥%d ms (got %d ms)", DELAY_MIN_MS, elapsed)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      assertDelayed(plan, runProbe(plan, "native-lib-load-delay"));
     }
 
     @Test
@@ -824,10 +689,7 @@ class InstrumentationIntegrationTest {
               "jndi-lookup-delay",
               ChaosSelector.jvmRuntime(Set.of(OperationType.JNDI_LOOKUP)),
               ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
-      final long elapsed = parseElapsed(runProbe(plan, "jndi-lookup-delay"));
-      assertThat(elapsed)
-          .as("JNDI_LOOKUP delay must add ≥%d ms (got %d ms)", DELAY_MIN_MS, elapsed)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      assertDelayed(plan, runProbe(plan, "jndi-lookup-delay"));
     }
   }
 
@@ -845,10 +707,7 @@ class InstrumentationIntegrationTest {
               "jmx-get-attr-delay",
               ChaosSelector.jvmRuntime(Set.of(OperationType.JMX_GET_ATTR)),
               ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
-      final long elapsed = parseElapsed(runProbe(plan, "jmx-get-attr-delay"));
-      assertThat(elapsed)
-          .as("JMX_GET_ATTR delay must add ≥%d ms (got %d ms)", DELAY_MIN_MS, elapsed)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      assertDelayed(plan, runProbe(plan, "jmx-get-attr-delay"));
     }
 
     @Test
@@ -859,10 +718,7 @@ class InstrumentationIntegrationTest {
               "jmx-invoke-delay",
               ChaosSelector.jvmRuntime(Set.of(OperationType.JMX_INVOKE)),
               ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
-      final long elapsed = parseElapsed(runProbe(plan, "jmx-invoke-delay"));
-      assertThat(elapsed)
-          .as("JMX_INVOKE delay must add ≥%d ms (got %d ms)", DELAY_MIN_MS, elapsed)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      assertDelayed(plan, runProbe(plan, "jmx-invoke-delay"));
     }
   }
 
@@ -880,10 +736,7 @@ class InstrumentationIntegrationTest {
               "monitor-enter-delay",
               ChaosSelector.monitor(Set.of(OperationType.MONITOR_ENTER)),
               ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
-      final long elapsed = parseElapsed(runProbe(plan, "monitor-enter-delay"));
-      assertThat(elapsed)
-          .as("MONITOR_ENTER delay must add ≥%d ms (got %d ms)", DELAY_MIN_MS, elapsed)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      assertDelayed(plan, runProbe(plan, "monitor-enter-delay"));
     }
 
     @Test
@@ -894,10 +747,7 @@ class InstrumentationIntegrationTest {
               "thread-park-delay",
               ChaosSelector.monitor(Set.of(OperationType.THREAD_PARK)),
               ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
-      final long elapsed = parseElapsed(runProbe(plan, "thread-park-delay"));
-      assertThat(elapsed)
-          .as("THREAD_PARK delay must add ≥%d ms (got %d ms)", DELAY_MIN_MS, elapsed)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      assertDelayed(plan, runProbe(plan, "thread-park-delay"));
     }
   }
 
@@ -915,10 +765,7 @@ class InstrumentationIntegrationTest {
               "thread-local-set-delay",
               ChaosSelector.threadLocal(Set.of(OperationType.THREAD_LOCAL_SET)),
               ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
-      final long elapsed = parseElapsed(runProbe(plan, "thread-local-set-delay"));
-      assertThat(elapsed)
-          .as("THREAD_LOCAL_SET delay must add ≥%d ms (got %d ms)", DELAY_MIN_MS, elapsed)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      assertDelayed(plan, runProbe(plan, "thread-local-set-delay"));
     }
   }
 
@@ -936,10 +783,7 @@ class InstrumentationIntegrationTest {
               "shutdown-hook-delay",
               ChaosSelector.shutdown(Set.of(OperationType.SHUTDOWN_HOOK_REGISTER)),
               ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
-      final long elapsed = parseElapsed(runProbe(plan, "shutdown-hook-delay"));
-      assertThat(elapsed)
-          .as("SHUTDOWN_HOOK_REGISTER delay must add ≥%d ms (got %d ms)", DELAY_MIN_MS, elapsed)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      assertDelayed(plan, runProbe(plan, "shutdown-hook-delay"));
     }
   }
 
@@ -958,10 +802,7 @@ class InstrumentationIntegrationTest {
               ChaosSelector.classLoading(
                   Set.of(OperationType.CLASS_LOAD), NamePattern.regex(".*AgentProcessProbeMain")),
               ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
-      final long elapsed = parseElapsed(runProbe(plan, "class-load-delay"));
-      assertThat(elapsed)
-          .as("CLASS_LOAD delay must add ≥%d ms (got %d ms)", DELAY_MIN_MS, elapsed)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      assertDelayed(plan, runProbe(plan, "class-load-delay"));
     }
 
     @Test
@@ -973,10 +814,7 @@ class InstrumentationIntegrationTest {
               ChaosSelector.classLoading(
                   Set.of(OperationType.CLASS_DEFINE), NamePattern.regex(".*AgentProcessProbeMain")),
               ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
-      final long elapsed = parseElapsed(runProbe(plan, "class-define-delay"));
-      assertThat(elapsed)
-          .as("CLASS_DEFINE delay must add ≥%d ms (got %d ms)", DELAY_MIN_MS, elapsed)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      assertDelayed(plan, runProbe(plan, "class-define-delay"));
     }
 
     @Test
@@ -988,10 +826,7 @@ class InstrumentationIntegrationTest {
               ChaosSelector.classLoading(
                   Set.of(OperationType.RESOURCE_LOAD), NamePattern.regex("probe-chaos-resource.*")),
               ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
-      final long elapsed = parseElapsed(runProbe(plan, "resource-load-delay"));
-      assertThat(elapsed)
-          .as("RESOURCE_LOAD delay must add ≥%d ms (got %d ms)", DELAY_MIN_MS, elapsed)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      assertDelayed(plan, runProbe(plan, "resource-load-delay"));
     }
   }
 
@@ -1009,10 +844,7 @@ class InstrumentationIntegrationTest {
               "nio-selector-select-delay",
               ChaosSelector.nio(Set.of(OperationType.NIO_SELECTOR_SELECT)),
               ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
-      final long elapsed = parseElapsed(runProbe(plan, "nio-selector-select-delay"));
-      assertThat(elapsed)
-          .as("NIO_SELECTOR_SELECT delay must add ≥%d ms (got %d ms)", DELAY_MIN_MS, elapsed)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      assertDelayed(plan, runProbe(plan, "nio-selector-select-delay"));
     }
 
     @Test
@@ -1023,10 +855,7 @@ class InstrumentationIntegrationTest {
               "nio-channel-connect-delay",
               ChaosSelector.nio(Set.of(OperationType.NIO_CHANNEL_CONNECT)),
               ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
-      final long elapsed = parseElapsed(runProbe(plan, "nio-channel-connect-delay"));
-      assertThat(elapsed)
-          .as("NIO_CHANNEL_CONNECT delay must add ≥%d ms (got %d ms)", DELAY_MIN_MS, elapsed)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      assertDelayed(plan, runProbe(plan, "nio-channel-connect-delay"));
     }
 
     @Test
@@ -1037,10 +866,7 @@ class InstrumentationIntegrationTest {
               "nio-channel-accept-delay",
               ChaosSelector.nio(Set.of(OperationType.NIO_CHANNEL_ACCEPT)),
               ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
-      final long elapsed = parseElapsed(runProbe(plan, "nio-channel-accept-delay"));
-      assertThat(elapsed)
-          .as("NIO_CHANNEL_ACCEPT delay must add ≥%d ms (got %d ms)", DELAY_MIN_MS, elapsed)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      assertDelayed(plan, runProbe(plan, "nio-channel-accept-delay"));
     }
   }
 
@@ -1058,10 +884,7 @@ class InstrumentationIntegrationTest {
               "socket-connect-delay",
               ChaosSelector.network(Set.of(OperationType.SOCKET_CONNECT)),
               ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
-      final long elapsed = parseElapsed(runProbe(plan, "socket-connect-delay"));
-      assertThat(elapsed)
-          .as("SOCKET_CONNECT delay must add ≥%d ms (got %d ms)", DELAY_MIN_MS, elapsed)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      assertDelayed(plan, runProbe(plan, "socket-connect-delay"));
     }
 
     @Test
@@ -1072,10 +895,7 @@ class InstrumentationIntegrationTest {
               "socket-accept-delay",
               ChaosSelector.network(Set.of(OperationType.SOCKET_ACCEPT)),
               ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
-      final long elapsed = parseElapsed(runProbe(plan, "socket-accept-delay"));
-      assertThat(elapsed)
-          .as("SOCKET_ACCEPT delay must add ≥%d ms (got %d ms)", DELAY_MIN_MS, elapsed)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      assertDelayed(plan, runProbe(plan, "socket-accept-delay"));
     }
 
     @Test
@@ -1086,10 +906,7 @@ class InstrumentationIntegrationTest {
               "socket-read-delay",
               ChaosSelector.network(Set.of(OperationType.SOCKET_READ)),
               ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
-      final long elapsed = parseElapsed(runProbe(plan, "socket-read-delay"));
-      assertThat(elapsed)
-          .as("SOCKET_READ delay must add ≥%d ms (got %d ms)", DELAY_MIN_MS, elapsed)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      assertDelayed(plan, runProbe(plan, "socket-read-delay"));
     }
 
     @Test
@@ -1100,10 +917,7 @@ class InstrumentationIntegrationTest {
               "socket-write-delay",
               ChaosSelector.network(Set.of(OperationType.SOCKET_WRITE)),
               ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
-      final long elapsed = parseElapsed(runProbe(plan, "socket-write-delay"));
-      assertThat(elapsed)
-          .as("SOCKET_WRITE delay must add ≥%d ms (got %d ms)", DELAY_MIN_MS, elapsed)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      assertDelayed(plan, runProbe(plan, "socket-write-delay"));
     }
 
     @Test
@@ -1114,10 +928,7 @@ class InstrumentationIntegrationTest {
               "socket-close-delay",
               ChaosSelector.network(Set.of(OperationType.SOCKET_CLOSE)),
               ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
-      final long elapsed = parseElapsed(runProbe(plan, "socket-close-delay"));
-      assertThat(elapsed)
-          .as("SOCKET_CLOSE delay must add ≥%d ms (got %d ms)", DELAY_MIN_MS, elapsed)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      assertDelayed(plan, runProbe(plan, "socket-close-delay"));
     }
   }
 
@@ -1135,10 +946,7 @@ class InstrumentationIntegrationTest {
               "http-client-send-delay",
               ChaosSelector.httpClient(Set.of(OperationType.HTTP_CLIENT_SEND)),
               ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
-      final long elapsed = parseElapsed(runProbe(plan, "http-client-send-delay"));
-      assertThat(elapsed)
-          .as("HTTP_CLIENT_SEND delay must add ≥%d ms (got %d ms)", DELAY_MIN_MS, elapsed)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      assertDelayed(plan, runProbe(plan, "http-client-send-delay"));
     }
 
     @Test
@@ -1149,10 +957,7 @@ class InstrumentationIntegrationTest {
               "http-client-send-async-delay",
               ChaosSelector.httpClient(Set.of(OperationType.HTTP_CLIENT_SEND_ASYNC)),
               ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
-      final long elapsed = parseElapsed(runProbe(plan, "http-client-send-async-delay"));
-      assertThat(elapsed)
-          .as("HTTP_CLIENT_SEND_ASYNC delay must add ≥%d ms (got %d ms)", DELAY_MIN_MS, elapsed)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      assertDelayed(plan, runProbe(plan, "http-client-send-async-delay"));
     }
   }
 
@@ -1170,10 +975,7 @@ class InstrumentationIntegrationTest {
               "jdbc-statement-delay",
               ChaosSelector.jdbc(OperationType.JDBC_STATEMENT_EXECUTE),
               ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
-      final long elapsed = parseElapsed(runJdbcProbe(plan, "jdbc-statement-delay"));
-      assertThat(elapsed)
-          .as("JDBC_STATEMENT_EXECUTE delay must add ≥%d ms (got %d ms)", DELAY_MIN_MS, elapsed)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      assertDelayed(plan, runJdbcProbe(plan, "jdbc-statement-delay"));
     }
 
     @Test
@@ -1184,10 +986,7 @@ class InstrumentationIntegrationTest {
               "jdbc-prepared-statement-delay",
               ChaosSelector.jdbc(OperationType.JDBC_PREPARED_STATEMENT),
               ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
-      final long elapsed = parseElapsed(runJdbcProbe(plan, "jdbc-prepared-statement-delay"));
-      assertThat(elapsed)
-          .as("JDBC_PREPARED_STATEMENT delay must add ≥%d ms (got %d ms)", DELAY_MIN_MS, elapsed)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      assertDelayed(plan, runJdbcProbe(plan, "jdbc-prepared-statement-delay"));
     }
 
     @Test
@@ -1198,10 +997,7 @@ class InstrumentationIntegrationTest {
               "jdbc-commit-delay",
               ChaosSelector.jdbc(OperationType.JDBC_TRANSACTION_COMMIT),
               ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
-      final long elapsed = parseElapsed(runJdbcProbe(plan, "jdbc-commit-delay"));
-      assertThat(elapsed)
-          .as("JDBC_TRANSACTION_COMMIT delay must add ≥%d ms (got %d ms)", DELAY_MIN_MS, elapsed)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      assertDelayed(plan, runJdbcProbe(plan, "jdbc-commit-delay"));
     }
 
     @Test
@@ -1212,10 +1008,7 @@ class InstrumentationIntegrationTest {
               "jdbc-rollback-delay",
               ChaosSelector.jdbc(OperationType.JDBC_TRANSACTION_ROLLBACK),
               ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
-      final long elapsed = parseElapsed(runJdbcProbe(plan, "jdbc-rollback-delay"));
-      assertThat(elapsed)
-          .as("JDBC_TRANSACTION_ROLLBACK delay must add ≥%d ms (got %d ms)", DELAY_MIN_MS, elapsed)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      assertDelayed(plan, runJdbcProbe(plan, "jdbc-rollback-delay"));
     }
 
     @Test
@@ -1226,10 +1019,7 @@ class InstrumentationIntegrationTest {
               "jdbc-connection-acquire-delay",
               ChaosSelector.jdbc(OperationType.JDBC_CONNECTION_ACQUIRE),
               ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
-      final long elapsed = parseElapsed(runJdbcProbe(plan, "jdbc-connection-acquire-delay"));
-      assertThat(elapsed)
-          .as("JDBC_CONNECTION_ACQUIRE delay must add ≥%d ms (got %d ms)", DELAY_MIN_MS, elapsed)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+      assertDelayed(plan, runJdbcProbe(plan, "jdbc-connection-acquire-delay"));
     }
   }
 
@@ -1249,17 +1039,18 @@ class InstrumentationIntegrationTest {
                 .build()));
   }
 
-  private String runProbe(final ChaosPlan plan, final String mode, final String... extraJvmArgs)
-      throws Exception {
+  private ChildJvmProbe.ProbeResult runProbe(
+      final ChaosPlan plan, final String mode, final String... extraJvmArgs) throws Exception {
     return runProbeInternal(plan, mode, null, extraJvmArgs);
   }
 
   /** Runs a JDBC probe with H2 and HikariCP added to the child JVM classpath. */
-  private String runJdbcProbe(final ChaosPlan plan, final String mode) throws Exception {
+  private ChildJvmProbe.ProbeResult runJdbcProbe(final ChaosPlan plan, final String mode)
+      throws Exception {
     return runProbeInternal(plan, mode, System.getProperty("chaos.test.jdbcClasspath"));
   }
 
-  private String runProbeInternal(
+  private ChildJvmProbe.ProbeResult runProbeInternal(
       final ChaosPlan plan,
       final String mode,
       final String extraClasspath,
@@ -1301,20 +1092,23 @@ class InstrumentationIntegrationTest {
               Files.readString(log), threads)
           .isTrue();
     }
-    final String output = String.join("", Files.readAllLines(log));
+    final List<String> lines = Files.readAllLines(log);
+    final String output = String.join("\n", lines);
     assertThat(process.exitValue()).as("probe JVM exit value: " + output).isZero();
-    return output;
+    return new ChildJvmProbe.ProbeResult(output, ChildJvmProbe.parse(lines));
   }
 
-  private static long parseElapsed(final String output) {
-    final int idx = output.indexOf("elapsedMillis=");
-    assertThat(idx).as("output must contain elapsedMillis=: " + output).isNotNegative();
-    return Long.parseLong(output.substring(idx + "elapsedMillis=".length()).trim());
-  }
-
-  private static long parseSkewSeconds(final String output) {
-    final int idx = output.indexOf("skewSeconds=");
-    assertThat(idx).as("output must contain skewSeconds=: " + output).isNotNegative();
-    return Long.parseLong(output.substring(idx + "skewSeconds=".length()).trim());
+  /**
+   * The probe's operation was delayed: the plan's scenario applied (a hook that matches but does
+   * not apply counts 0), and the measured call took the whole delay.
+   */
+  private static void assertDelayed(final ChaosPlan plan, final ChildJvmProbe.ProbeResult result) {
+    final String id = plan.scenarios().get(0).id();
+    assertThat(result.longValue("applied." + id))
+        .as("applications of %s, output:%n%s", id, result.output())
+        .isPositive();
+    assertThat(result.longValue("elapsedMillis"))
+        .as("the delayed call of %s, output:%n%s", id, result.output())
+        .isGreaterThanOrEqualTo(DELAY_MS);
   }
 }

@@ -135,13 +135,15 @@ class ChaosOpenTelemetryTest {
       submit();
       submit();
       org.assertj.core.api.Assertions.assertThatThrownBy(
-          () ->
-              runtime.activate(
-                  ChaosScenario.builder("otel-invalid")
-                      .scope(ChaosScenario.ScenarioScope.JVM)
-                      .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
-                      .effect(ChaosEffect.tornWrite())
-                      .build()));
+              () ->
+                  runtime.activate(
+                      ChaosScenario.builder("otel-invalid")
+                          .scope(ChaosScenario.ScenarioScope.JVM)
+                          .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+                          .effect(ChaosEffect.tornWrite())
+                          .build()))
+          .isInstanceOf(com.macstab.chaos.jvm.api.ChaosValidationException.class)
+          .hasMessageContaining("TornWriteEffect applies only to");
 
       final MetricData skips = metric("chaos.skips");
       assertThat(skips.getLongSumData().getPoints())

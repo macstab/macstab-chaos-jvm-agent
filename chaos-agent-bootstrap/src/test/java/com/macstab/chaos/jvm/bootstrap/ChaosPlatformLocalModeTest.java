@@ -20,7 +20,6 @@ import org.junit.jupiter.api.Test;
 class ChaosPlatformLocalModeTest {
 
   private static final long DELAY_MS = 60L;
-  private static final long DELAY_MIN_MS = (long) (DELAY_MS * 0.8);
 
   @Test
   @DisplayName("session-scoped executor delay is applied when installed locally")
@@ -43,7 +42,7 @@ class ChaosPlatformLocalModeTest {
         final long elapsed = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
         assertThat(elapsed)
             .as("execute() must be delayed by session-scoped chaos")
-            .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+            .isGreaterThanOrEqualTo(DELAY_MS);
       } finally {
         executor.shutdownNow();
       }

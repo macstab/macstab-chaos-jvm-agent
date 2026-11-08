@@ -88,7 +88,8 @@ class ActivationIntegrityTest {
                         null,
                         scenario("first", ChaosScenario.ScenarioScope.JVM),
                         invalid("second"))))
-        .isInstanceOf(RuntimeException.class);
+        .isInstanceOf(com.macstab.chaos.jvm.api.ChaosValidationException.class)
+        .hasMessageContaining("TornWriteEffect applies only to");
 
     assertThat(started).isEmpty();
     assertThat(runtime.diagnostics().scenario("first")).isEmpty();

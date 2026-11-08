@@ -56,7 +56,15 @@ final class ThreadLocalLeakStressor implements ManagedStressor {
   private final List<Planted> planted;
 
   ThreadLocalLeakStressor(final ChaosEffect.ThreadLocalLeakEffect effect) {
-    final int parallelism = ForkJoinPool.commonPool().getParallelism();
+    this(effect, ForkJoinPool.commonPool().getParallelism());
+  }
+
+  /**
+   * Plants {@code parallelism} × {@code entriesPerThread} entries. Test seam (U-72 c6): a test
+   * fixes the parallelism, so its result does not depend on the processor count of the machine it
+   * runs on.
+   */
+  ThreadLocalLeakStressor(final ChaosEffect.ThreadLocalLeakEffect effect, final int parallelism) {
     final int totalLocals;
     try {
       // Math.multiplyExact rejects overflow. Without this guard, `parallelism *

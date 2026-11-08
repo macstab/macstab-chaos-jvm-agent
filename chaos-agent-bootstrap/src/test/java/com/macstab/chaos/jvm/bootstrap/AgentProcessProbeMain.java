@@ -158,6 +158,22 @@ public final class AgentProcessProbeMain {
       case "jdbc-connection-acquire-delay" -> jdbcConnectionAcquireDelay();
       default -> throw new IllegalArgumentException("unknown mode " + args[0]);
     }
+    printApplied();
+  }
+
+  /**
+   * Prints {@code applied.<id>=<count>} for each scenario of the installed runtime, so a test sees
+   * whether the probed call applied its effect, not only how long it took.
+   */
+  private static void printApplied() {
+    final com.macstab.chaos.jvm.core.ChaosRuntime runtime = ChaosAgentBootstrap.installedRuntime();
+    if (runtime == null) {
+      return;
+    }
+    for (final com.macstab.chaos.jvm.api.ChaosDiagnostics.ScenarioReport report :
+        runtime.diagnostics().snapshot().scenarios()) {
+      System.out.println("applied." + report.id() + "=" + report.appliedCount());
+    }
   }
 
   // ── behaviour probes ──────────────────────────────────────────────────────────────

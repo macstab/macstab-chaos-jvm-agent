@@ -34,7 +34,6 @@ class ThreadLocalChaosIntegrationTest {
       NamePattern.prefix("com.macstab.chaos.jvm.core.ThreadLocalChaosIntegrationTest");
 
   private static final long DELAY_MS = 50L;
-  private static final long DELAY_MIN_MS = (long) (DELAY_MS * 0.8);
 
   // ---------------------------------------------------------------------------
   // GET suppression
@@ -148,8 +147,9 @@ class ThreadLocalChaosIntegrationTest {
       final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
       assertThat(result).isFalse();
       assertThat(elapsedMs)
-          .as("delay effect should add at least 80%% of configured %dms", DELAY_MS)
-          .isGreaterThanOrEqualTo(DELAY_MIN_MS);
+          .as("delay effect should add the whole configured %dms", DELAY_MS)
+          .isGreaterThanOrEqualTo(DELAY_MS);
+      assertThat(applied(runtime)).as("the scenario applied").isPositive();
     }
   }
 
@@ -210,5 +210,12 @@ class ThreadLocalChaosIntegrationTest {
       }
       assertThat(runtime.beforeThreadLocalGet(tl)).isFalse();
     }
+  }
+
+  /** How often the runtime's scenarios applied, all together. */
+  private static long applied(final ChaosRuntime runtime) {
+    return runtime.diagnostics().snapshot().scenarios().stream()
+        .mapToLong(com.macstab.chaos.jvm.api.ChaosDiagnostics.ScenarioReport::appliedCount)
+        .sum();
   }
 }
