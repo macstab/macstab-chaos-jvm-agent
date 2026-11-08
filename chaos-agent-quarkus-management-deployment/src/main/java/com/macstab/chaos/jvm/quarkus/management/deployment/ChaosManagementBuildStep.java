@@ -14,7 +14,9 @@ import io.vertx.ext.web.RoutingContext;
 
 /**
  * Registers the {@code /q/chaos} routes. Adding the extension is the build-time opt-in; the runtime
- * property {@code macstab.chaos.management.enabled} switches the route on.
+ * property {@code macstab.chaos.management.enabled} switches the route on. With the Quarkus
+ * management interface enabled ({@code quarkus.management.enabled}), the route is served there,
+ * under its root, and no longer on the HTTP port.
  */
 public final class ChaosManagementBuildStep {
 
@@ -35,7 +37,8 @@ public final class ChaosManagementBuildStep {
   }
 
   /**
-   * Registers the route at {@code chaos} and below under the non-application root ({@code /q}).
+   * Registers the route at {@code chaos} and below under the management interface's root when that
+   * interface is enabled, and under the non-application root ({@code /q}) otherwise.
    *
    * @param recorder the recorder providing the handler
    * @param nonApplicationRootPath where Quarkus serves its own endpoints
@@ -49,11 +52,15 @@ public final class ChaosManagementBuildStep {
       final NonApplicationRootPathBuildItem nonApplicationRootPath,
       final ShutdownContextBuildItem shutdown,
       final BuildProducer<RouteBuildItem> routes) {
+    // The root the builder mounts a management route at: the management interface's root when it is
+    // enabled, the non-application root otherwise.
     final Handler<RoutingContext> handler =
-        recorder.handler(nonApplicationRootPath.resolvePath("chaos"), shutdown);
+        recorder.handler(nonApplicationRootPath.getManagementRootPath() + "chaos", shutdown);
+    // management() before route(): the builder reads it when the route is added.
     routes.produce(
         nonApplicationRootPath
             .routeBuilder()
+            .management()
             .route("chaos")
             .handler(handler)
             .blockingRoute()
@@ -61,6 +68,7 @@ public final class ChaosManagementBuildStep {
     routes.produce(
         nonApplicationRootPath
             .routeBuilder()
+            .management()
             .route("chaos/*")
             .handler(handler)
             .blockingRoute()
