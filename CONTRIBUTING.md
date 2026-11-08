@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- JDK 21 or later at runtime (JDK 25 recommended for building — the toolchain downloads it automatically via Gradle)
+- JDK 25 installed for building (the Gradle toolchain; Gradle finds installed JDKs but does not download one), JDK 21 or later to run the agent; `-PtestJavaVersion=21` needs JDK 21 installed too
 - No other installation required; `./gradlew` bootstraps everything
 
 ## Build & test
@@ -23,8 +23,8 @@ Tests for the instrumentation and bootstrap modules start a real agent (self-att
 
 | Gate | Guards | Record an intended change |
 |------|--------|---------------------------|
-| `apiCheck` | the public API of every API module (`api/<module>.api`, JVM signatures) | `./gradlew apiDump` |
-| `japicmp` | binary compatibility of every API module with the release named by `apiBaseline` (`gradle.properties`); report in `<module>/build/reports/japicmp/` | a major release that breaks it on purpose sets `apiBreaksAccepted = true` |
+| `apiCheck` | the public API of every API module (`api/<module>.api`, erased JVM signatures: generic type arguments, annotations and enum constant order are not recorded) | `./gradlew apiDump` |
+| `japicmp` | binary compatibility of every API module with the release named by `apiBaseline` (`gradle.properties`); report in `<module>/build/reports/japicmp/`. A baseline that cannot be resolved fails the check, except for the modules listed in `apiBaselineAbsentModules` | a major release that breaks it on purpose sets `apiBreaksAccepted = true`; a module new since the baseline goes into `apiBaselineAbsentModules` |
 | `PlanSchemaTest` | the published plan schema is the parser's; its `required`, `minItems` and non-blank constraints are probed with the samples in `PlanSchemaTest.SAMPLES` | `./gradlew :chaos-agent-startup-config:test --tests '*PlanSchemaTest*' -PupdatePlanSchema`; a new plan-model type needs a sample (the test names it), and a rule that makes a property required in only some shapes needs a sample of each shape |
 | `ArchitectureTest` | the bridge jar is closed, advice uses only public members, layering | — |
 | Error Prone (`-Werror`) | static analysis of every compilation; a finding fails the build | fix it, or suppress it where it stands with the reason |

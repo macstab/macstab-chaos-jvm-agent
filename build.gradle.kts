@@ -10,8 +10,6 @@ buildscript {
     dependencies {
         classpath(libs.spotless.plugin)
         classpath(libs.jacoco.core)
-        // apiDump reads the class files with ASM.
-        classpath(libs.asm)
     }
 }
 
@@ -537,12 +535,13 @@ tasks.register("childJvmCoverage") {
 // Each API module commits the signatures of its public API in api/<module>.api: every public or
 // protected class, field, constructor and method its class files expose, with JVM descriptors (so a
 // change of a parameter, return or field type shows), and the permitted subtypes of sealed types
-// (adding one breaks exhaustive switches). `check` runs `apiCheck`, which fails when the compiled
-// API differs from the file and lists the difference per type; `./gradlew apiDump` records an
-// intended change, which then shows in review. Types and members annotated @Internal are left out.
-// Not API: the internal implementation modules (core, instrumentation, the agent jar;
-// docs/configuration-reference.md §14.2) and the Quarkus deployment modules, whose build steps only
-// Quarkus calls.
+// (adding one breaks exhaustive switches). The descriptors are erased: generic type arguments,
+// annotations and the order of enum constants are not recorded. `check` runs `apiCheck`, which fails
+// when the compiled API differs from the file and lists the difference per type; `./gradlew apiDump`
+// records an intended change, which then shows in review. Types and members annotated @Internal are
+// left out. The tasks live in buildSrc (com.macstab.chaos.gradle). Not API: the internal
+// implementation modules (core, instrumentation, the agent jar; docs/configuration-reference.md
+// §14.2) and the Quarkus deployment modules, whose build steps only Quarkus calls.
 val nonApiModules = setOf(
     "chaos-agent-core",
     "chaos-agent-instrumentation-jdk",
@@ -551,165 +550,39 @@ val nonApiModules = setOf(
     "chaos-agent-quarkus-management-deployment",
 )
 
-// The API of the class files in classesDir: one block per type, its header line first, the blocks
-// separated by a blank line and sorted by type name.
-fun renderApi(classesDir: File): String {
-    val internal = "Lcom/macstab/chaos/jvm/api/Internal;"
-    val access = { flags: Int ->
-        buildList {
-            if (flags and org.objectweb.asm.Opcodes.ACC_PUBLIC != 0) add("public")
-            if (flags and org.objectweb.asm.Opcodes.ACC_PROTECTED != 0) add("protected")
-            if (flags and org.objectweb.asm.Opcodes.ACC_STATIC != 0) add("static")
-            if (flags and org.objectweb.asm.Opcodes.ACC_FINAL != 0) add("final")
-            if (flags and org.objectweb.asm.Opcodes.ACC_ABSTRACT != 0) add("abstract")
-        }.joinToString(" ")
-    }
-    val visible = { flags: Int ->
-        flags and (org.objectweb.asm.Opcodes.ACC_PUBLIC or org.objectweb.asm.Opcodes.ACC_PROTECTED) != 0 &&
-            flags and org.objectweb.asm.Opcodes.ACC_SYNTHETIC == 0
-    }
-    class Type(val name: String, val text: String, val outer: String?, var flags: Int, val internal: Boolean)
-    val types = mutableMapOf<String, Type>()
-    classesDir.walk().filter { it.isFile && it.name.endsWith(".class") && it.name != "module-info.class" }.forEach { file ->
-        val reader = org.objectweb.asm.ClassReader(file.readBytes())
-        val lines = mutableListOf<String>()
-        var flags = reader.access
-        var outer: String? = null
-        var isInternal = false
-        val permits = mutableListOf<String>()
-        reader.accept(object : org.objectweb.asm.ClassVisitor(org.objectweb.asm.Opcodes.ASM9) {
-            override fun visitAnnotation(descriptor: String, visible: Boolean): org.objectweb.asm.AnnotationVisitor? {
-                if (descriptor == internal) isInternal = true
-                return null
-            }
-            override fun visitInnerClass(name: String, outerName: String?, innerName: String?, innerAccess: Int) {
-                if (name == reader.className) {
-                    flags = innerAccess
-                    outer = outerName
-                }
-            }
-            override fun visitPermittedSubclass(permittedSubclass: String) {
-                permits += permittedSubclass
-            }
-            override fun visitField(fieldAccess: Int, name: String, descriptor: String, signature: String?, value: Any?): org.objectweb.asm.FieldVisitor? {
-                if (!visible(fieldAccess)) return null
-                var memberInternal = false
-                return object : org.objectweb.asm.FieldVisitor(org.objectweb.asm.Opcodes.ASM9) {
-                    override fun visitAnnotation(descriptor: String, visible: Boolean): org.objectweb.asm.AnnotationVisitor? {
-                        if (descriptor == internal) memberInternal = true
-                        return null
-                    }
-                    override fun visitEnd() {
-                        if (!memberInternal) lines += "  ${access(fieldAccess)} field $name $descriptor"
-                    }
-                }
-            }
-            override fun visitMethod(methodAccess: Int, name: String, descriptor: String, signature: String?, exceptions: Array<out String>?): org.objectweb.asm.MethodVisitor? {
-                if (!visible(methodAccess) || methodAccess and org.objectweb.asm.Opcodes.ACC_BRIDGE != 0) return null
-                var memberInternal = false
-                return object : org.objectweb.asm.MethodVisitor(org.objectweb.asm.Opcodes.ASM9) {
-                    override fun visitAnnotation(descriptor: String, visible: Boolean): org.objectweb.asm.AnnotationVisitor? {
-                        if (descriptor == internal) memberInternal = true
-                        return null
-                    }
-                    override fun visitEnd() {
-                        if (!memberInternal) lines += "  ${access(methodAccess)} method $name$descriptor"
-                    }
-                }
-            }
-        }, org.objectweb.asm.ClassReader.SKIP_CODE)
-        val kind = when {
-            flags and org.objectweb.asm.Opcodes.ACC_ANNOTATION != 0 -> "@interface"
-            flags and org.objectweb.asm.Opcodes.ACC_INTERFACE != 0 -> "interface"
-            flags and org.objectweb.asm.Opcodes.ACC_ENUM != 0 -> "enum"
-            reader.superName == "java/lang/Record" -> "record"
-            else -> "class"
-        }
-        val header = buildString {
-            append(access(flags and org.objectweb.asm.Opcodes.ACC_INTERFACE.inv() and org.objectweb.asm.Opcodes.ACC_ABSTRACT.let { if (kind == "interface" || kind == "@interface") it.inv() else -1 }))
-            append(" ").append(kind).append(" ").append(reader.className)
-            if (reader.superName != null && reader.superName != "java/lang/Object" && kind == "class") append(" extends ").append(reader.superName)
-            if (reader.interfaces.isNotEmpty()) append(" implements ").append(reader.interfaces.sorted().joinToString(", "))
-            if (permits.isNotEmpty()) append(" permits ").append(permits.sorted().joinToString(", "))
-        }
-        types[reader.className] = Type(reader.className, (listOf(header) + lines.sorted()).joinToString("\n"), outer, flags, isInternal)
-    }
-    // A type is API when it and every type enclosing it are visible and not @Internal.
-    fun exported(type: Type): Boolean =
-        visible(type.flags) && !type.internal && (type.outer == null || types[type.outer]?.let(::exported) ?: false)
-    return types.values.filter(::exported).sortedBy { it.name }.joinToString("\n\n", postfix = "\n") { it.text }
-}
-
-// The difference between two renderings, per type: a type only in one of them, or the header of a
-// type whose signatures differ followed by its removed (-) and added (+) lines.
-fun apiDifference(committed: String, actual: String): String {
-    fun blocks(api: String): Map<String, List<String>> =
-        api.trim().split("\n\n").filter { it.isNotBlank() }.associate { block ->
-            val lines = block.lines()
-            lines.first().split(" ").let { it[it.indexOfFirst { word -> word in setOf("class", "interface", "enum", "record", "@interface") } + 1] } to lines
-        }
-    val before = blocks(committed)
-    val after = blocks(actual)
-    return (before.keys + after.keys).sorted().mapNotNull { name ->
-        val old = before[name]
-        val new = after[name]
-        when {
-            old == new -> null
-            old == null -> new!!.joinToString("\n") { "+ $it" }
-            new == null -> old.joinToString("\n") { "- $it" }
-            else -> buildList {
-                if (old.first() == new.first()) add("  ${new.first()}") else { add("- ${old.first()}"); add("+ ${new.first()}") }
-                (old.drop(1) - new.drop(1).toSet()).forEach { add("- $it") }
-                (new.drop(1) - old.drop(1).toSet()).forEach { add("+ $it") }
-            }.joinToString("\n")
-        }
-    }.joinToString("\n\n")
-}
+// The API modules the release named by apiBaseline did not contain yet (gradle.properties): their
+// japicmp check is skipped. Every other module's baseline must resolve.
+val absentFromBaseline =
+    rootProject.property("apiBaselineAbsentModules").toString().split(",").map { it.trim() }.filter { it.isNotEmpty() }.toSet()
 
 subprojects {
     if (name in nonPublishableModules || name in nonApiModules) return@subprojects
     val module = name
     plugins.withType<JavaPlugin> {
-        val classes = layout.buildDirectory.dir("classes/java/main")
+        val classes = tasks.named<JavaCompile>("compileJava").flatMap { it.destinationDirectory }
         val apiFile = layout.projectDirectory.file("api/$module.api")
-        tasks.register("apiDump") {
+        tasks.register<com.macstab.chaos.gradle.ApiDumpTask>("apiDump") {
             group = "verification"
             description = "Records the public API signatures in api/$module.api."
-            dependsOn("classes")
-            inputs.dir(classes).withPropertyName("classes")
-            outputs.file(apiFile)
-            doLast {
-                apiFile.asFile.parentFile.mkdirs()
-                apiFile.asFile.writeText(renderApi(classes.get().asFile))
-            }
+            this.classes.set(classes)
+            this.apiFile.set(apiFile)
         }
-        val apiCheck = tasks.register("apiCheck") {
+        val apiCheck = tasks.register<com.macstab.chaos.gradle.ApiCheckTask>("apiCheck") {
             group = "verification"
             description = "Fails when the public API differs from api/$module.api."
-            dependsOn("classes")
-            inputs.dir(classes).withPropertyName("classes")
-            inputs.file(apiFile).withPropertyName("committedApi").optional()
-            val marker = layout.buildDirectory.file("api/checked")
-            outputs.file(marker)
-            doLast {
-                val committed = apiFile.asFile
-                val actual = renderApi(classes.get().asFile)
-                val expected = if (committed.isFile) committed.readText() else ""
-                if (expected != actual) {
-                    throw GradleException(
-                        "The public API of $module differs from api/$module.api. If intended, record it " +
-                            "with ./gradlew :$module:apiDump and review the diff.\n\n" + apiDifference(expected, actual),
-                    )
-                }
-                marker.get().asFile.apply { parentFile.mkdirs(); writeText("ok") }
-            }
+            this.classes.set(classes)
+            committedApi.from(apiFile)
+            moduleName.set(module)
+            marker.set(layout.buildDirectory.file("api/checked"))
         }
         tasks.named("check") { dependsOn(apiCheck) }
 
         // Binary compatibility with the release named by apiBaseline (gradle.properties), checked by
         // japicmp; the report lands in build/reports/japicmp/. A module the baseline release did not
-        // contain is skipped. A binary-incompatible change fails the build unless apiBreaksAccepted is
-        // true, which a major release sets while it breaks the baseline's API on purpose.
+        // contain is listed in apiBaselineAbsentModules and skipped; for every other module a baseline
+        // that cannot be resolved fails the check instead of skipping it. A binary-incompatible change
+        // fails the build unless apiBreaksAccepted is true, which a major release sets while it breaks
+        // the baseline's API on purpose. Source compatibility is apiCheck's part.
         apply(plugin = "me.champeau.gradle.japicmp")
         val baselineVersion = rootProject.property("apiBaseline").toString()
         val baselineArtifact = "${project.group}:$module:$baselineVersion"
@@ -718,6 +591,7 @@ subprojects {
         val baselineClasspath = configurations.detachedConfiguration(dependencies.create(baselineArtifact))
             .incoming.artifactView { lenient(true) }.files
         val breaksAccepted = rootProject.property("apiBreaksAccepted").toString().toBoolean()
+        val absent = module in absentFromBaseline
         val jar = tasks.named<Jar>("jar")
         val japicmp = tasks.register<me.champeau.gradle.japicmp.JapicmpTask>("japicmp") {
             group = "verification"
@@ -732,7 +606,15 @@ subprojects {
             annotationExcludes.add("@com.macstab.chaos.jvm.api.Internal")
             txtOutputFile.set(layout.buildDirectory.file("reports/japicmp/$module.txt"))
             htmlOutputFile.set(layout.buildDirectory.file("reports/japicmp/$module.html"))
-            onlyIf("the baseline release contains $module") { !baselineJar.isEmpty }
+            onlyIf("release $baselineVersion contains $module (apiBaselineAbsentModules)") { !absent }
+            doFirst {
+                if (baselineJar.isEmpty) {
+                    throw GradleException(
+                        "The baseline $baselineArtifact could not be resolved. If release $baselineVersion " +
+                            "did not contain $module, add it to apiBaselineAbsentModules (gradle.properties).",
+                    )
+                }
+            }
         }
         tasks.named("check") { dependsOn(japicmp) }
     }
