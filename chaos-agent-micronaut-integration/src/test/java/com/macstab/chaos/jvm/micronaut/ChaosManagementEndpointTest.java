@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.macstab.chaos.jvm.api.ChaosControlPlane;
 import com.macstab.chaos.jvm.bootstrap.ChaosPlatform;
 import io.micronaut.context.ApplicationContext;
+import io.micronaut.context.env.PropertySource;
 import io.micronaut.http.HttpResponse;
 import java.util.Map;
 import org.junit.jupiter.api.DisplayName;
@@ -24,6 +25,18 @@ class ChaosManagementEndpointTest {
   @DisplayName("is off unless macstab.chaos.management.enabled=true")
   void offByDefault() {
     try (ApplicationContext context = ApplicationContext.run()) {
+      assertThat(context.containsBean(ChaosManagementEndpoint.class)).isFalse();
+    }
+  }
+
+  @Test
+  @DisplayName("stays off when the switch comes from a remote source (consul)")
+  void offFromRemoteSource() {
+    try (ApplicationContext context =
+        ApplicationContext.builder()
+            .propertySources(
+                PropertySource.of("consul", Map.of("macstab.chaos.management.enabled", "true")))
+            .start()) {
       assertThat(context.containsBean(ChaosManagementEndpoint.class)).isFalse();
     }
   }

@@ -1,5 +1,6 @@
 package com.macstab.chaos.jvm.startup;
 
+import com.macstab.chaos.jvm.api.Internal;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
@@ -88,19 +89,12 @@ public record AgentArgs(Map<String, String> values) {
    */
   public static boolean parseBoolean(
       final String name, final @Nullable String raw, final boolean defaultValue) {
-    if (raw == null) {
+    if (raw == null || raw.isBlank()) {
       return defaultValue;
     }
-    final String stripped = raw.strip();
-    if (stripped.isEmpty()) {
-      return defaultValue;
-    }
-    final String normalized = stripped.toLowerCase(Locale.ROOT);
-    if (TRUE_LITERALS.contains(normalized)) {
-      return true;
-    }
-    if (FALSE_LITERALS.contains(normalized)) {
-      return false;
+    final Boolean parsed = parseBooleanQuietly(raw);
+    if (parsed != null) {
+      return parsed;
     }
     // Without this warning the operator who wrote `enabled=tru` (or pasted an inline
     // `enabled=yeah` from a config management tool) sees no indication that the flag was
@@ -114,5 +108,29 @@ public record AgentArgs(Map<String, String> values) {
             + "'; expected true|false|1|0|yes|no|on|off. Using default: "
             + defaultValue);
     return defaultValue;
+  }
+
+  /**
+   * Parses a boolean the way {@link #parseBoolean(String, String, boolean)} does, without printing
+   * anything: for callers that report an unrecognised value through their own log.
+   *
+   * @param raw the raw value
+   * @return {@code true} or {@code false} for {@code true|false|1|0|yes|no|on|off} (case
+   *     insensitive, surrounding whitespace ignored); {@code null} for {@code null}, blank or any
+   *     other text
+   */
+  @Internal
+  public static @Nullable Boolean parseBooleanQuietly(final @Nullable String raw) {
+    if (raw == null) {
+      return null;
+    }
+    final String normalized = raw.strip().toLowerCase(Locale.ROOT);
+    if (TRUE_LITERALS.contains(normalized)) {
+      return Boolean.TRUE;
+    }
+    if (FALSE_LITERALS.contains(normalized)) {
+      return Boolean.FALSE;
+    }
+    return null;
   }
 }

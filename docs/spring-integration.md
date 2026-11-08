@@ -284,11 +284,11 @@ On a successful attach the processor prepends a single-entry property source `ma
 
 Attaching a JVM agent is a launch-time decision, so `macstab.chaos.enabled=true` is honoured only when the property source that wins for the key is a local, launch-time source (`TrustedChaosEnablement`):
 
-- JVM system properties, environment variables, command-line arguments
-- config data bundled on the classpath (`application.properties` / `.yml`, including profile-specific variants)
+- JVM system properties, environment variables, command-line arguments, `SPRING_APPLICATION_JSON`
+- config data bundled on the classpath (`application.properties` / `.yml`, including profile-specific variants), read from a local file (`./config/application.yml`, `spring.config.location=file:…`; the source `Config resource 'file […]' via location '…'`) or from a config tree (`configtree:`, Kubernetes ConfigMap and Secret mounts; the source `Config tree '…'`)
 - property sources created by Spring's test support (`@SpringBootTest(properties)`, `@TestPropertySource(properties)`, `@DynamicPropertySource`, `TestPropertyValues`)
 
-Every other source — Spring Cloud Config, Consul, Vault, any remote or runtime override, and config files outside the classpath — is ignored with a warning. To allow such sources, set `macstab.chaos.allow-remote-enable=true` through a trusted source (the opt-in is itself subject to the same check). The same decision gates **both** this processor and `ChaosAutoConfiguration` (via `OnTrustedChaosEnablementCondition`), so an untrusted source cannot attach the agent through the auto-configuration either.
+Every other source — Spring Cloud Config, Consul, Vault, a config file fetched from a URL, any remote or runtime override — is ignored with a warning. The value is read as Spring binds a boolean: `true|false|1|0|yes|no|on|off`; any other value leaves chaos off with a warning. To allow such sources, set `macstab.chaos.allow-remote-enable=true` through a trusted source (the opt-in is itself subject to the same check). The same decision gates **both** this processor and `ChaosAutoConfiguration` (via `OnTrustedChaosEnablementCondition`), so an untrusted source cannot attach the agent through the auto-configuration either.
 
 **Why the `ChaosAutoConfiguration.chaosControlPlane()` bean still exists**: `ChaosAgentEnvironmentPostProcessor` attaches the agent but does not register the `ChaosControlPlane` as a Spring bean. The bean in `ChaosAutoConfiguration` is still needed to:
 - Expose `ChaosControlPlane` as an injectable bean for application code and the Actuator endpoint.
@@ -404,7 +404,7 @@ The startup logic (`applyStartup`) performs two independent operations:
 ```java
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnClass(Endpoint.class)
-@ConditionalOnProperty(prefix = "macstab.chaos.actuator", name = "enabled", havingValue = "true")
+@Conditional(OnTrustedActuatorEnablementCondition.class)
 public static class ActuatorConfiguration { ... }
 ```
 
@@ -412,7 +412,7 @@ Two independent conditions must both be true:
 
 1. `@ConditionalOnClass(Endpoint.class)` — Spring Boot Actuator must be on the classpath. If the host application does not include `spring-boot-actuator`, the entire nested configuration is skipped at class-presence check time, before any property resolution.
 
-2. `@ConditionalOnProperty("macstab.chaos.actuator.enabled", havingValue = "true")` — explicit operator opt-in. Even with Actuator present, the chaos endpoint does not appear unless deliberately enabled.
+2. `OnTrustedActuatorEnablementCondition` — explicit operator opt-in: `macstab.chaos.actuator.enabled=true`, honoured only from a trusted source as `macstab.chaos.enabled` is (§3.2). Even with Actuator present, the chaos endpoint does not appear unless deliberately enabled.
 
 This double-guard is the minimum safe design for an endpoint that can activate arbitrary fault injection. Classpath presence prevents `NoClassDefFoundError` on environments without Actuator; the property guard prevents accidental endpoint exposure on environments that have Actuator for other reasons (health checks, metrics) but don't intend to expose chaos operations.
 
@@ -581,7 +581,7 @@ macstab:
     enabled: true
 ```
 
-All properties participate in Spring's full environment abstraction — they can be set via `application.yml`, `application.properties`, system properties (`-Dmacstab.chaos.enabled=true`), environment variables (`MACSTAB_CHAOS_ENABLED=true` using Spring's relaxed binding), or any `PropertySource` registered in the context. The exception is `macstab.chaos.enabled` (and `macstab.chaos.allow-remote-enable`): they take effect only from system properties, environment variables, command-line arguments, classpath config data or Spring test property sources — see §3.2.
+All properties participate in Spring's full environment abstraction — they can be set via `application.yml`, `application.properties`, system properties (`-Dmacstab.chaos.enabled=true`), environment variables (`MACSTAB_CHAOS_ENABLED=true` using Spring's relaxed binding), or any `PropertySource` registered in the context. The exceptions are the switches that inject faults — `macstab.chaos.enabled`, `macstab.chaos.allow-remote-enable`, `macstab.chaos.actuator.enabled` and `macstab.chaos.config-file`: they take effect only from system properties, environment variables, command-line arguments, `SPRING_APPLICATION_JSON`, config data from the classpath, a local file or a config tree, or Spring test property sources — see §3.2.
 
 ---
 

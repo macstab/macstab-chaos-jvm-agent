@@ -127,6 +127,56 @@ class TrustedChaosEnablementTest {
     }
 
     @Test
+    @DisplayName(
+        "is ENABLED for launch-time local files: a config file, a config tree,"
+            + " SPRING_APPLICATION_JSON")
+    void enabledFromLocalFiles() {
+      for (final String name :
+          new String[] {
+            "Config resource 'file [/srv/app/config/application.yml]' via location"
+                + " 'optional:file:./config/'",
+            "Config tree '/etc/config/'",
+            "spring.application.json"
+          }) {
+        assertThat(
+                TrustedChaosEnablement.evaluate(
+                    environmentWith(source(name, "macstab.chaos.enabled", "true"))))
+            .as(name)
+            .isEqualTo(TrustedChaosEnablement.Decision.ENABLED);
+      }
+    }
+
+    @Test
+    @DisplayName("is REJECTED for a config file fetched from a URL")
+    void rejectedFromUrlResource() {
+      assertThat(
+              TrustedChaosEnablement.evaluate(
+                  environmentWith(
+                      source(
+                          "Config resource 'URL [https://config/application.yml]' via location"
+                              + " 'https://config/application.yml'",
+                          "macstab.chaos.enabled",
+                          "true"))))
+          .isEqualTo(TrustedChaosEnablement.Decision.REJECTED_UNTRUSTED_SOURCE);
+    }
+
+    @Test
+    @DisplayName("reads the flag as Spring binds it: on and yes are true, a typo is off")
+    void booleanSpellings() {
+      for (final String value : new String[] {"on", "yes", "1", "TRUE"}) {
+        assertThat(
+                TrustedChaosEnablement.evaluate(
+                    environmentWith(source("systemProperties", "macstab.chaos.enabled", value))))
+            .as(value)
+            .isEqualTo(TrustedChaosEnablement.Decision.ENABLED);
+      }
+      assertThat(
+              TrustedChaosEnablement.evaluate(
+                  environmentWith(source("systemProperties", "macstab.chaos.enabled", "tru"))))
+          .isEqualTo(TrustedChaosEnablement.Decision.DISABLED);
+    }
+
+    @Test
     @DisplayName("is REJECTED when the winning source is a remote config source")
     void rejectedFromRemoteSource() {
       assertThat(

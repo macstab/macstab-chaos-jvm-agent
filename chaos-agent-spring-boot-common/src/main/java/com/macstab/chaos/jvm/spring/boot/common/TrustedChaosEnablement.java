@@ -1,5 +1,6 @@
 package com.macstab.chaos.jvm.spring.boot.common;
 
+import com.macstab.chaos.jvm.startup.TrustedSources;
 import java.util.Set;
 import org.jspecify.annotations.Nullable;
 import org.springframework.boot.context.properties.source.ConfigurationProperty;
@@ -17,9 +18,12 @@ import org.springframework.core.env.PropertySource;
  * source that wins for {@code macstab.chaos.enabled} is a local, launch-time source:
  *
  * <ul>
- *   <li>JVM system properties, environment variables and command-line arguments;
+ *   <li>JVM system properties, environment variables, command-line arguments and {@code
+ *       SPRING_APPLICATION_JSON};
  *   <li>config data bundled on the classpath ({@code application.properties} / {@code .yml},
- *       including profile-specific variants);
+ *       including profile-specific variants), read from a local file ({@code
+ *       ./config/application.yml}, {@code spring.config.location=file:…}) or from a config tree
+ *       (Kubernetes ConfigMap and Secret mounts, {@code configtree:});
  *   <li>property sources created by Spring's test support ({@code @SpringBootTest(properties)},
  *       {@code @TestPropertySource(properties)}, {@code @DynamicPropertySource}, {@code
  *       TestPropertyValues}), which exist only in test contexts.
@@ -30,6 +34,9 @@ import org.springframework.core.env.PropertySource;
  * JVM. Operators who need remote enablement opt in by setting {@code
  * macstab.chaos.allow-remote-enable=true} through a trusted source, which is itself subject to the
  * same check.
+ *
+ * <p>Booleans are read as Spring binds them: {@code true|false|1|0|yes|no|on|off}; any other value
+ * is off, with one warning.
  *
  * <p>The same decision gates both the early self-attach in the version-specific {@code
  * EnvironmentPostProcessor} and {@link ChaosAutoConfiguration}. Gating only the former would let
@@ -43,13 +50,19 @@ public final class TrustedChaosEnablement {
   /** Property that, set through a trusted source, allows any source to switch chaos on. */
   public static final String ALLOW_REMOTE_ENABLE_PROPERTY = "macstab.chaos.allow-remote-enable";
 
-  /** Name prefix of config-data property sources loaded from the classpath. */
-  static final String CLASSPATH_CONFIG_SOURCE_PREFIX = "Config resource 'class path resource";
+  /**
+   * Name prefixes of config-data property sources read from the classpath, from a local file and
+   * from a config tree. A file resource is named {@code Config resource 'file [<path>]' via
+   * location '<location>'}, a config tree {@code Config tree '<path>'}; a resource fetched from a
+   * URL ({@code Config resource 'URL [...]'}) is not among them.
+   */
+  static final Set<String> TRUSTED_SOURCE_PREFIXES =
+      Set.of("Config resource 'class path resource", "Config resource 'file [", "Config tree '");
 
   /**
    * Property-source names treated as launch-time sources. {@code "Inlined Test Properties"}, {@code
    * "Dynamic Test Properties"} and {@code "test"} are the names Spring's test support gives to the
-   * sources it creates.
+   * sources it creates; {@code "spring.application.json"} holds {@code SPRING_APPLICATION_JSON}.
    */
   static final Set<String> TRUSTED_SOURCE_NAMES =
       Set.of(
@@ -58,7 +71,8 @@ public final class TrustedChaosEnablement {
           "commandLineArgs",
           "Inlined Test Properties",
           "Dynamic Test Properties",
-          "test");
+          "test",
+          "spring.application.json");
 
   private TrustedChaosEnablement() {}
 
@@ -80,7 +94,7 @@ public final class TrustedChaosEnablement {
    */
   public static Decision evaluate(final ConfigurableEnvironment environment) {
     final Winner enabled = winner(environment, ENABLED_PROPERTY);
-    if (enabled == null || !Boolean.parseBoolean(enabled.value())) {
+    if (enabled == null || !TrustedSources.isTrue(ENABLED_PROPERTY, enabled.value())) {
       return Decision.DISABLED;
     }
     if (enabled.trusted()) {
@@ -124,7 +138,7 @@ public final class TrustedChaosEnablement {
     final Winner allowRemote = winner(environment, ALLOW_REMOTE_ENABLE_PROPERTY);
     return allowRemote != null
         && allowRemote.trusted()
-        && Boolean.parseBoolean(allowRemote.value());
+        && TrustedSources.isTrue(ALLOW_REMOTE_ENABLE_PROPERTY, allowRemote.value());
   }
 
   /** The value of a property and whether the source it came from is trusted. */
@@ -151,7 +165,7 @@ public final class TrustedChaosEnablement {
       return new Winner(
           String.valueOf(property.getValue()),
           TRUSTED_SOURCE_NAMES.contains(sourceName)
-              || sourceName.startsWith(CLASSPATH_CONFIG_SOURCE_PREFIX));
+              || TRUSTED_SOURCE_PREFIXES.stream().anyMatch(sourceName::startsWith));
     }
     return null;
   }

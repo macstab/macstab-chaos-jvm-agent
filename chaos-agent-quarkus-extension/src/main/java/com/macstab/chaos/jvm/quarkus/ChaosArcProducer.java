@@ -3,7 +3,6 @@ package com.macstab.chaos.jvm.quarkus;
 import com.macstab.chaos.jvm.api.ChaosControlPlane;
 import com.macstab.chaos.jvm.bootstrap.ChaosPlatform;
 import io.quarkus.arc.DefaultBean;
-import io.quarkus.arc.properties.IfBuildProperty;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Produces;
 
@@ -15,16 +14,14 @@ import jakarta.enterprise.inject.Produces;
  * bean is marked {@link DefaultBean} so user code can override it by declaring a higher-priority
  * producer or a {@code @Priority}-annotated {@code @Produces} method.
  *
- * <h2>Build-time gate</h2>
+ * <h2>Run-time switch</h2>
  *
- * <p>The producer is gated by the {@code macstab.chaos.enabled} build-time property and is
- * <b>opt-in</b>: when the property is absent the producer is <i>not</i> registered and {@link
- * ChaosPlatform#installLocally()} is never invoked. Dropping the extension jar onto a production
- * classpath therefore does not silently self-attach a JVM-wide chaos plane; an operator must
- * explicitly set {@code macstab.chaos.enabled=true} at build time. This matches the default chosen
- * by the recorder side of the extension and the Spring Boot starter, so the behaviour across
- * frameworks is consistent: chaos is never active-by-default, only by affirmative build-time
- * opt-in.
+ * <p>The producer is always registered; whether it attaches the agent is decided at run time by
+ * {@code macstab.chaos.enabled}, honoured only from a launch-time local source (see {@link
+ * ChaosQuarkusRecorder}). Without the switch {@link ChaosPlatform#installLocally()} is never
+ * invoked, so dropping the extension jar onto a production classpath does not self-attach a
+ * JVM-wide chaos plane; injecting the bean then fails on first use unless an agent is already
+ * installed ({@code -javaagent:}, the test extension).
  *
  * <h2>Usage</h2>
  *
@@ -52,15 +49,9 @@ public class ChaosArcProducer {
   /**
    * Produces the singleton {@link ChaosControlPlane}.
    *
-   * <p>Only registered when {@code macstab.chaos.enabled=true} is set at build time. When the
-   * property is unset or {@code false}, the producer is excluded from the CDI container and
-   * injection of {@link ChaosControlPlane} will fail with an unsatisfied-dependency error unless
-   * the application provides its own producer — exactly the behaviour we want so that merely
-   * shipping the extension on the classpath does not self-attach chaos in production.
-   *
-   * <p>The build-time property only registers the producer; the agent is attached only while {@code
-   * macstab.chaos.enabled} is also true at run time. Otherwise the bean is an agent already
-   * installed ({@code -javaagent:}, the test extension), and injecting it without one fails.
+   * <p>The agent is attached only while {@code macstab.chaos.enabled} is true at run time.
+   * Otherwise the bean is an agent already installed ({@code -javaagent:}, the test extension), and
+   * using it without one fails with {@link IllegalStateException}.
    *
    * @return the active {@link ChaosControlPlane}
    * @throws IllegalStateException when chaos is disabled at run time and no agent is installed
@@ -68,7 +59,6 @@ public class ChaosArcProducer {
   @Produces
   @ApplicationScoped
   @DefaultBean
-  @IfBuildProperty(name = "macstab.chaos.enabled", stringValue = "true", enableIfMissing = false)
   public ChaosControlPlane chaosControlPlane() {
     return ChaosQuarkusRecorder.chaosEnabled()
         ? ChaosPlatform.installLocally()

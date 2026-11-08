@@ -5,7 +5,7 @@ public class com/macstab/chaos/jvm/micronaut/ChaosContextConfigurer implements i
 
 public class com/macstab/chaos/jvm/micronaut/ChaosFactory
   public method <init>()V
-  public method chaosControlPlane()Lcom/macstab/chaos/jvm/api/ChaosControlPlane;
+  public method chaosControlPlane(Lio/micronaut/context/env/Environment;)Lcom/macstab/chaos/jvm/api/ChaosControlPlane;
 
 public class com/macstab/chaos/jvm/micronaut/ChaosManagementEndpoint
   public method <init>()V
@@ -25,3 +25,8 @@ public final class com/macstab/chaos/jvm/micronaut/ChaosMicronautExtension imple
   public method supportsParameter(Lorg/junit/jupiter/api/extension/ParameterContext;Lorg/junit/jupiter/api/extension/ExtensionContext;)Z
 
 public @interface com/macstab/chaos/jvm/micronaut/MicronautChaosTest implements java/lang/annotation/Annotation
+
+public final class com/macstab/chaos/jvm/micronaut/TrustedManagementEnablement implements io/micronaut/context/condition/Condition
+  public method <init>()V
+  public method matches(Lio/micronaut/context/condition/ConditionContext;)Z
+  public static final field PROPERTY Ljava/lang/String;

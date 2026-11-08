@@ -1,5 +1,6 @@
 package com.macstab.chaos.jvm.spring.boot.common;
 
+import com.macstab.chaos.jvm.startup.TrustedSources;
 import org.springframework.boot.autoconfigure.condition.ConditionOutcome;
 import org.springframework.boot.autoconfigure.condition.SpringBootCondition;
 import org.springframework.context.annotation.ConditionContext;
@@ -24,7 +25,8 @@ final class OnTrustedActuatorEnablementCondition extends SpringBootCondition {
     if (!(context.getEnvironment() instanceof ConfigurableEnvironment environment)) {
       return ConditionOutcome.noMatch("environment is not a ConfigurableEnvironment");
     }
-    if (Boolean.parseBoolean(TrustedChaosEnablement.trustedValue(environment, PROPERTY))) {
+    if (TrustedSources.isTrue(
+        PROPERTY, TrustedChaosEnablement.trustedValue(environment, PROPERTY))) {
       return ConditionOutcome.match(PROPERTY + "=true");
     }
     return TrustedChaosEnablement.rejected(environment, PROPERTY)

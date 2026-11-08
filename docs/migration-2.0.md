@@ -30,6 +30,7 @@
 | 9 | `OperationType` gained constants between existing ones | you persist ordinals | persist names (§9) |
 | 10 | Bridge handle slots renumbered | you call `BootstrapDispatcher` directly | none for applications (§10) |
 | 11 | A glob's `*` also matches line terminators | a GLOB must not match across a line break | use a REGEX (§11) |
+| 14 | Enabling switches are honoured only from local sources on Quarkus and Micronaut | a config server sets `macstab.chaos.enabled` or a management switch | set `macstab.chaos.allow-remote-enable=true` locally (§14) |
 
 ---
 
@@ -177,6 +178,16 @@ The Spring actuator endpoint answers like the Micronaut and Quarkus endpoints: a
 A `RejectEffect` on `EXECUTOR_WORKER_RUN` or `FORK_JOIN_TASK_RUN` fails activation with `ChaosValidationException`. In 1.x it threw on the pool worker before the pool recorded the task's outcome: the worker died and the task's future never completed (`Future.get()` and `CompletableFuture.get()` hung). Reject `EXECUTOR_SUBMIT` to fail the submission, or delay or gate the run.
 
 The same holds for `QUEUE_TAKE` and `QUEUE_POLL`: a `RejectEffect` on them fails activation. The JDK's `take()` and `poll()` fail only by interruption; in 1.x a thread pool's worker taking its next task died on the injected exception and was replaced at once, thousands of times a second, while no task ran. Delay or gate them, suppress `QUEUE_POLL`, or reject `QUEUE_PUT` / `QUEUE_OFFER` on the producer side.
+
+## 14. Where enabling switches may come from
+
+Quarkus and Micronaut follow the rule the Spring starters already applied: a switch that enables fault injection or a management endpoint (`macstab.chaos.enabled`, `macstab.chaos.management.enabled`, `macstab.chaos.management.allow-anonymous`) is honoured only from a launch-time local source — system properties, environment variables, the application's own config files, test properties ([configuration-reference §10.1](configuration-reference.md#101-configuration-trust) lists them per framework). A switch from a config server (Consul, a Kubernetes config client, Spring Cloud Config) is ignored with a log line naming the source.
+
+- Keep the switch where it comes from and set `macstab.chaos.allow-remote-enable=true` through a system property, an environment variable or the application's config file; or move the switch there.
+- Quarkus: the switch is read at run time only. It is no longer needed when the application is built, and the `ChaosControlPlane` bean is always registered: injecting it without the switch and without an installed agent fails on first use with `IllegalStateException` instead of failing the build. Quarkus' `application.yaml` is not a local source; use `application.properties`, a system property or an environment variable.
+- Micronaut: `macstab.chaos.enabled` in `application.yml` switches chaos on, as in 1.x. A test that composes `@MicronautTest` and `@ExtendWith(ChaosMicronautExtension.class)` itself, instead of `@MicronautChaosTest`, adds `@Property(name = "macstab.chaos.test.enabled", value = "true")` to get the tracking control plane; a plain `@MicronautTest` gets the application's bean.
+- Every switch reads `true|false|1|0|yes|no|on|off`; any other value leaves it off with a warning (Spring read `on` and `yes` as off).
+- Spring: `SPRING_APPLICATION_JSON`, config files read from a local path (`./config/application.yml`, `spring.config.location=file:…`) and config trees (`configtree:`) now count as local.
 
 ---
 

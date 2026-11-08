@@ -13,14 +13,20 @@ import jakarta.inject.Singleton;
 import org.jspecify.annotations.Nullable;
 
 /**
- * In Micronaut's {@code test} environment ({@code @MicronautTest}), replaces the control-plane bean
- * of {@link ChaosFactory} with one that tracks what it activates: JVM-scoped scenarios activated
- * through the injected bean are released by {@link ChaosMicronautExtension} when the last running
- * chaos test class ends; a context can serve several classes at once.
+ * In a chaos test's context ({@code @MicronautChaosTest}, which sets {@value #PROPERTY}), replaces
+ * the control-plane bean of {@link ChaosFactory} with one that tracks what it activates: JVM-scoped
+ * scenarios activated through the injected bean are released by {@link ChaosMicronautExtension}
+ * when the last running chaos test class ends; a context can serve several classes at once. A plain
+ * {@code @MicronautTest} keeps {@link ChaosFactory}'s bean, which attaches nothing unless chaos is
+ * switched on.
  */
 @Factory
 @Requires(env = Environment.TEST)
+@Requires(property = ChaosTestFactory.PROPERTY, value = "true")
 class ChaosTestFactory {
+
+  /** Marks a chaos test's context; set by {@link MicronautChaosTest}. */
+  static final String PROPERTY = "macstab.chaos.test.enabled";
 
   /** The control plane this context's factory created, released when the context closes. */
   private volatile @Nullable TrackingChaosControlPlane created;

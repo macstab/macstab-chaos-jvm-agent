@@ -230,6 +230,21 @@ class AgentArgsParserTest {
           .contains("'tru'")
           .contains("Using default: false");
     }
+
+    @Test
+    @DisplayName("the quiet parser is tri-state and prints nothing")
+    void quietParser() {
+      final String printed =
+          stderrOf(
+              () -> {
+                assertThat(AgentArgs.parseBooleanQuietly(" On ")).isTrue();
+                assertThat(AgentArgs.parseBooleanQuietly("0")).isFalse();
+                assertThat(AgentArgs.parseBooleanQuietly("tru")).isNull();
+                assertThat(AgentArgs.parseBooleanQuietly(" ")).isNull();
+                assertThat(AgentArgs.parseBooleanQuietly(null)).isNull();
+              });
+      assertThat(printed).isEmpty();
+    }
   }
 
   @Nested

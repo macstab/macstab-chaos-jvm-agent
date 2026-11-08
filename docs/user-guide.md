@@ -591,12 +591,19 @@ implementation("com.macstab.chaos.jvm:chaos-agent-spring-boot3-starter:<version>
 
 ```yaml
 # application.yml
+macstab:
+  chaos:
+    enabled: true
+    actuator:
+      enabled: true
 management:
   endpoints:
     web:
       exposure:
         include: chaos
 ```
+
+Both switches are honoured only from a launch-time local source (the application's own config files, system properties, environment variables, the command line); from a config server only once `macstab.chaos.allow-remote-enable=true` comes from such a source. See [SECURITY.md](../SECURITY.md#where-enabling-switches-may-come-from).
 
 ```bash
 # Get current scenario state

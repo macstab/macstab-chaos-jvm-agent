@@ -1,6 +1,7 @@
 package com.macstab.chaos.jvm.micronaut;
 
 import com.macstab.chaos.jvm.bootstrap.ChaosPlatform;
+import com.macstab.chaos.jvm.startup.TrustedSources;
 import io.micronaut.context.ApplicationContextBuilder;
 import io.micronaut.context.ApplicationContextConfigurer;
 import java.util.logging.Level;
@@ -76,10 +77,8 @@ public class ChaosContextConfigurer implements ApplicationContextConfigurer {
    */
   static boolean chaosEnabled() {
     final String sysProp = System.getProperty(ENABLED_PROPERTY);
-    if (sysProp != null) {
-      return Boolean.parseBoolean(sysProp);
-    }
-    final String envVar = System.getenv(ENABLED_ENV_VAR);
-    return Boolean.parseBoolean(envVar);
+    return sysProp != null
+        ? TrustedSources.isTrue(ENABLED_PROPERTY, sysProp)
+        : TrustedSources.isTrue(ENABLED_ENV_VAR, System.getenv(ENABLED_ENV_VAR));
   }
 }

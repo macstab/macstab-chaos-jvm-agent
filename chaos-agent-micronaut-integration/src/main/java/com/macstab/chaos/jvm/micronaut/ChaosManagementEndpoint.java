@@ -27,14 +27,15 @@ import org.jspecify.annotations.Nullable;
  *   <li>{@code DELETE /chaos} — stops every plan activated here.
  * </ul>
  *
- * <p>Off unless {@code macstab.chaos.management.enabled=true}, and sensitive by default: anyone who
- * reaches it can inject faults. It uses the agent if one is installed and never installs it (503
- * otherwise); answers carry the operation's status (400 invalid, 404 not found, 409 conflict, 422
- * rejected) and a JSON body.
+ * <p>Off unless {@code macstab.chaos.management.enabled=true} comes from a launch-time local source
+ * ({@link TrustedManagementEnablement}), and sensitive by default: anyone who reaches it can inject
+ * faults. It uses the agent if one is installed and never installs it (503 otherwise); answers
+ * carry the operation's status (400 invalid, 404 not found, 409 conflict, 422 rejected) and a JSON
+ * body.
  */
 @Endpoint(id = "chaos", defaultSensitive = true)
 @Requires(classes = Endpoint.class)
-@Requires(property = "macstab.chaos.management.enabled", value = "true")
+@Requires(condition = TrustedManagementEnablement.class)
 public class ChaosManagementEndpoint {
 
   private final Supplier<ChaosControlPlane> controlPlane;

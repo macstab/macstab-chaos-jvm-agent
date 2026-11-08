@@ -4,7 +4,7 @@ dependencies {
     api(project(":chaos-agent-api"))
     implementation(project(":chaos-agent-bootstrap"))
     api(libs.quarkus.vertx.http)
-    // Only for the plan size cap, a compile-time constant javac inlines.
+    // The plan size cap, and the trust rule for the switches (inside the agent jar at runtime).
     compileOnly(project(":chaos-agent-startup-config"))
 
     compileOnly(platform(libs.quarkus.bom))

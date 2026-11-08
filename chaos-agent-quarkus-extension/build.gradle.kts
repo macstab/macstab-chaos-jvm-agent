@@ -2,6 +2,9 @@ dependencies {
     api(project(":chaos-agent-api"))
     api(project(":chaos-agent-testkit"))
     implementation(project(":chaos-agent-bootstrap"))
+    // Inside the agent jar (chaos-agent-bootstrap) at runtime: the trust rule for the switches.
+    compileOnly(project(":chaos-agent-startup-config"))
+    testImplementation(project(":chaos-agent-startup-config"))
 
     compileOnly(platform(libs.quarkus.bom))
     compileOnly("io.quarkus:quarkus-core")
@@ -19,6 +22,7 @@ dependencies {
     testImplementation(libs.assertj)
     // The recorder runs against Quarkus's runtime types and MicroProfile Config.
     testImplementation("io.quarkus:quarkus-core")
+    testImplementation("io.quarkus:quarkus-arc")
 }
 
 // Quarkus bootstrap discovers an extension through META-INF/quarkus-extension.properties in the

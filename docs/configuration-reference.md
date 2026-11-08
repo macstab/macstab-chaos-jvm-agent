@@ -569,6 +569,16 @@ Exceptions produced on purpose by an effect (`reject`, `exceptionInjection`, exc
 
 **Environment variables** are trusted at the OS process level. In container deployments, restrict access to the environment via Kubernetes RBAC and secret management.
 
+**Enabling switches** in the framework integrations (`macstab.chaos.enabled`, `macstab.chaos.actuator.enabled`, `macstab.chaos.config-file`, `macstab.chaos.management.enabled`, `macstab.chaos.management.allow-anonymous`) follow one rule: plan authors are trusted, and a switch is honoured only when it comes from a launch-time local source, unless `macstab.chaos.allow-remote-enable=true` itself comes from one. A switch from any other source is ignored (fails closed) with one log line naming the source, also when a framework release renames one of the sources below. Booleans accept `true|false|1|0|yes|no|on|off`; any other value leaves the switch off with one warning. The local sources:
+
+| Framework | Launch-time local sources |
+|---|---|
+| Spring Boot | system properties, environment variables, command-line arguments, `SPRING_APPLICATION_JSON`; config data from the class path, from a local file (`Config resource 'file […]'`) and from a config tree (`configtree:`, Kubernetes ConfigMap and Secret mounts); Spring's test property sources |
+| Quarkus (SmallRye Config) | system properties, environment variables, `.env`, `application.properties` in the application and in `config/`, `META-INF/microprofile-config.properties`, the files of `quarkus.config.locations` (not a location fetched over HTTP), values recorded at build time; in tests the `@TestProfile` overrides (system properties) and the `QuarkusTestResource` properties |
+| Micronaut | system properties (`system`), environment variables (`env`), the command line (`cli`), `ApplicationContext.run(Map)` (`context`), the `application` and active `application-<env>` files, the files of `micronaut.config.files`, Micronaut Test's `@Property` values |
+
+Quarkus reads the switches at run time; the switch is no longer needed when the application is built, and the `ChaosControlPlane` bean is always registered (using it without the switch and without an installed agent fails with `IllegalStateException`). Quarkus' `application.yaml` (`quarkus-config-yaml`) is not among the local sources: set the switches in `application.properties`, a system property or an environment variable. In a Micronaut AOT build the bean definitions follow the decision taken at build time, while the agent attaches from the run-time configuration.
+
 **Config files** receive path safety checks to prevent symlink traversal and directory escape. Only files within a configured safe root are readable. This prevents a hostile config file reference from reading `/etc/passwd` or other sensitive paths.
 
 ## 10.2 Exception Class Injection Safety

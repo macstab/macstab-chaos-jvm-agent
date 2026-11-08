@@ -3,6 +3,7 @@ package com.macstab.chaos.jvm.quarkus;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.macstab.chaos.jvm.bootstrap.ChaosPlatform;
+import io.quarkus.arc.properties.IfBuildProperty;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -33,6 +34,17 @@ class ChaosArcProducerTest {
     } finally {
       restore(previous);
     }
+  }
+
+  @Test
+  @DisplayName(
+      "is registered whatever the build-time configuration: the switch is read at run time")
+  void noBuildTimeGate() throws NoSuchMethodException {
+    assertThat(
+            ChaosArcProducer.class
+                .getMethod("chaosControlPlane")
+                .isAnnotationPresent(IfBuildProperty.class))
+        .isFalse();
   }
 
   private static void restore(final String previous) {
