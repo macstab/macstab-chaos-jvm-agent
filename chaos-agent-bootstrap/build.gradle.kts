@@ -1,3 +1,5 @@
+import com.github.jengelman.gradle.plugins.shadow.transformers.ApacheNoticeResourceTransformer
+
 plugins {
     id("com.gradleup.shadow")
 }
@@ -101,12 +103,25 @@ tasks.shadowJar {
     relocate("net.bytebuddy", "com.macstab.chaos.jvm.shaded.net.bytebuddy")
     relocate("com.fasterxml.jackson", "com.macstab.chaos.jvm.shaded.com.fasterxml.jackson")
     mergeServiceFiles()
+    // The NOTICE files of the bundled libraries (ByteBuddy, Jackson) merge into one
+    // META-INF/NOTICE. The organisation fields name this project: the transformer's defaults
+    // would credit the Apache Software Foundation.
+    transform(ApacheNoticeResourceTransformer::class.java) {
+        projectName = "Macstab Chaos JVM Agent"
+        organizationName = "Macstab GmbH"
+        organizationURL = "https://macstab.com"
+        inceptionYear = "2026"
+    }
+    // The libraries' own LICENSE files stay out (ByteBuddy's ASM licence is kept under
+    // META-INF/licenses); META-INF/LICENSE is the project's licence.
+    into("META-INF") {
+        from(rootProject.file("LICENSE"))
+    }
     exclude(
         "META-INF/*.RSA",
         "META-INF/*.SF",
         "META-INF/*.DSA",
         "META-INF/LICENSE*",
-        "META-INF/NOTICE*",
         "META-INF/maven/**",
         "META-INF/versions/**",
         "**/module-info.class",

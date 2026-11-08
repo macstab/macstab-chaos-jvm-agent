@@ -207,6 +207,11 @@ subprojects {
     tasks.withType<Jar>().configureEach {
         isReproducibleFileOrder = true
         isPreserveFileTimestamps = false
+        // Every jar carries the project licence. The shaded agent jar adds it through its own spec
+        // (chaos-agent-bootstrap), next to the merged NOTICE of its bundled libraries.
+        if (this !is com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
+            metaInf { from(rootProject.file("LICENSE")) }
+        }
     }
 
     // Publishing + signing for library modules only.
