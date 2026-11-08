@@ -842,6 +842,8 @@ All selectors use `"type"` as the JSON discriminator.
 
 `reject` is refused on `EXECUTOR_WORKER_RUN` and `FORK_JOIN_TASK_RUN`: a worker evaluates the run before the pool records the task's outcome, so a throwable there would kill the worker and leave the task's future incomplete. Delay or gate the run, or reject `EXECUTOR_SUBMIT`.
 
+`FORK_JOIN_TASK_RUN` is not evaluated on the carrier threads of the JDK's virtual-thread scheduler: every start and wake-up of a virtual thread runs a fork-join task there, and a delay would hold every virtual thread of the JVM. A virtual thread with a custom scheduler is still evaluated.
+
 **Fields:**
 
 | Field                  | Type                 | Default       | Description                                   |

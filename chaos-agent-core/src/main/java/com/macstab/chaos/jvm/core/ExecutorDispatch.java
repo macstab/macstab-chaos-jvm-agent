@@ -24,6 +24,21 @@ public final class ExecutorDispatch {
     this.engine = engine;
   }
 
+  /**
+   * {@code jdk.internal.misc.CarrierThread}, the worker of the virtual-thread scheduler; {@code
+   * null} when this JDK has none. Every start and wake-up of a virtual thread runs a fork-join task
+   * on one.
+   */
+  private static final @Nullable Class<?> CARRIER_THREAD = carrierThreadClass();
+
+  private static @Nullable Class<?> carrierThreadClass() {
+    try {
+      return Class.forName("jdk.internal.misc.CarrierThread", false, null);
+    } catch (final ClassNotFoundException | LinkageError absent) {
+      return null;
+    }
+  }
+
   // Shared instances: replacing a suppressed task allocates nothing.
   @SuppressWarnings("UnnecessaryLambda")
   private static final Runnable NO_OP_RUNNABLE = () -> {};
@@ -191,6 +206,9 @@ public final class ExecutorDispatch {
       throws Throwable {
     if (engine.idle(OperationType.FORK_JOIN_TASK_RUN) || task instanceof AgentOwned) {
       return; // idle first; an agent-owned task is the agent's own work (L3)
+    }
+    if (CARRIER_THREAD != null && CARRIER_THREAD.isInstance(Thread.currentThread())) {
+      return; // a virtual thread mounting on its carrier: the JDK's scheduling, not a user task
     }
     engine.applyPreDecision(
         engine.evaluate(

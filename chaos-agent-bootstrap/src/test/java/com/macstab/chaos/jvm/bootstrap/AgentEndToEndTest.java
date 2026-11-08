@@ -2005,6 +2005,46 @@ class AgentEndToEndTest {
   }
 
   @Nested
+  @DisplayName("FORK_JOIN_TASK_RUN")
+  class ForkJoinTaskRun {
+
+    @Test
+    @DisplayName("is not evaluated when a virtual thread mounts on its carrier")
+    void virtualThreadMountsAreNotEvaluated() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.run(
+              plan(
+                  scenario(
+                      "fj",
+                      ChaosSelector.executor(Set.of(OperationType.FORK_JOIN_TASK_RUN)),
+                      ChaosEffect.delay(Duration.ofMillis(200)))),
+              DefectProbeMain.class,
+              "virtual-thread-resumes",
+              null);
+
+      assertThat(result.longValue("matched.fj")).isZero();
+    }
+
+    @Test
+    @DisplayName("is evaluated for the tasks of a parallel stream")
+    void parallelStreamTasksAreEvaluated() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.run(
+              plan(
+                  scenario(
+                      "fj",
+                      ChaosSelector.executor(Set.of(OperationType.FORK_JOIN_TASK_RUN)),
+                      ChaosEffect.delay(Duration.ofMillis(1)))),
+              DefectProbeMain.class,
+              "parallel-stream",
+              null);
+
+      assertThat(result.longValue("parallelSum")).isEqualTo(4_999_950_000L);
+      assertThat(result.longValue("matched.fj")).isPositive();
+    }
+  }
+
+  @Nested
   @DisplayName("The agent's own work (L3)")
   class AgentOwnedWork {
 

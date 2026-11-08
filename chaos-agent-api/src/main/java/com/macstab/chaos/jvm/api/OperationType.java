@@ -121,7 +121,9 @@ public enum OperationType {
    * java.util.concurrent.ForkJoinPool}. Covers tasks submitted via {@code
    * ForkJoinPool.commonPool()} as well as custom pools, including the pool backing parallel
    * streams. Chaos here applies latency (delay, gate); a reject is refused at activation, because
-   * the pool cannot fail the task at this point.
+   * the pool cannot fail the task at this point. Not evaluated on the carrier threads of the JDK's
+   * virtual-thread scheduler, where every start and wake-up of a virtual thread runs as a fork-join
+   * task; a virtual thread with a custom scheduler is still evaluated.
    */
   FORK_JOIN_TASK_RUN,
 

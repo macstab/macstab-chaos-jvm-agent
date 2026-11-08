@@ -138,6 +138,8 @@ public final class DefectProbeMain {
       case "session-thread-local-suppress" -> sessionThreadLocalSuppress();
       case "direct-buffer-above-limit" -> directBufferAboveLimit();
       case "completion-dependents" -> completionDependents();
+      case "virtual-thread-resumes" -> virtualThreadResumes();
+      case "parallel-stream" -> parallelStream();
       default -> throw new IllegalArgumentException("unknown probe mode: " + args[0]);
     }
     printCounts();
@@ -2570,6 +2572,35 @@ public final class DefectProbeMain {
     public int compareTo(final Delayed other) {
       return Long.compare(getDelay(TimeUnit.NANOSECONDS), other.getDelay(TimeUnit.NANOSECONDS));
     }
+  }
+
+  /**
+   * 50 virtual threads that each sleep 1 ms: every start and every wake-up mounts the thread on a
+   * carrier through a fork-join task of the virtual-thread scheduler.
+   */
+  private static void virtualThreadResumes() throws InterruptedException {
+    final java.util.List<Thread> threads = new java.util.ArrayList<>();
+    for (int index = 0; index < 50; index++) {
+      threads.add(
+          Thread.ofVirtual()
+              .start(
+                  () -> {
+                    try {
+                      Thread.sleep(1L);
+                    } catch (final InterruptedException interrupted) {
+                      Thread.currentThread().interrupt();
+                    }
+                  }));
+    }
+    for (final Thread thread : threads) {
+      thread.join();
+    }
+  }
+
+  /** A parallel stream: its tasks run in the common fork-join pool. */
+  private static void parallelStream() {
+    System.out.println(
+        "parallelSum=" + java.util.stream.LongStream.range(0L, 100_000L).parallel().sum());
   }
 
   static void printCounts() {
