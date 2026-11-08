@@ -142,7 +142,6 @@ extensions.configure<PublishingExtension> {
 }
 
 tasks.test {
-    dependsOn(tasks.shadowJar)
     // Probe mains run in child JVMs whose classpath carries libraries (HTTP clients, JDBC) that
     // the test JVM does not have; keep them out of test discovery, which would have to load and
     // verify them.
@@ -150,21 +149,36 @@ tasks.test {
     // PlanFuzzTest replays a run with -PfuzzSeed=<seed> -PfuzzIterations=<n>.
     providers.gradleProperty("fuzzSeed").orNull?.let { systemProperty("chaos.fuzz.seed", it) }
     providers.gradleProperty("fuzzIterations").orNull?.let { systemProperty("chaos.fuzz.iterations", it) }
-    systemProperty("chaos.bootstrap.agentJar", tasks.shadowJar.flatMap { it.archiveFile }.get().asFile.absolutePath)
 
-    // Expose the H2 and HikariCP JAR paths so JDBC fork-probes can extend their child-JVM
-    // classpath without polluting the general test classpath (see testCompileOnly above).
-    val jdbcClasspath = configurations["testCompileClasspath"].resolvedConfiguration.resolvedArtifacts
-        .filter { it.name in listOf("h2", "HikariCP", "slf4j-api") }
-        .joinToString(File.pathSeparator) { it.file.absolutePath }
-    systemProperty("chaos.test.jdbcClasspath", jdbcClasspath)
-    systemProperty("chaos.test.httpClasspath", httpClientProbe.asPath)
-    systemProperty("chaos.test.clientClasspath", clientLibraryProbe.asPath)
-    systemProperty("chaos.test.coverageClasspath", coverageProbe.asPath)
+    // What the child JVMs run, passed as system properties: the shaded agent jar, the JaCoCo agent,
+    // and the libraries that stay off the test classpath (the H2 and HikariCP jars for the JDBC
+    // probes, see testCompileOnly above; the HTTP, client and coverage probe libraries). Each is an
+    // input, so a rebuilt agent jar reruns the tests instead of reusing a cached result, and each
+    // is resolved when the tests start, not when the build is configured.
+    val jdbcProbe = configurations.testCompileClasspath.get().incoming.artifactView {
+        componentFilter {
+            it is ModuleComponentIdentifier && it.module in setOf("h2", "HikariCP", "slf4j-api")
+        }
+    }.files
+    val childJvmFiles = listOf(
+        Triple("agentJar", "chaos.bootstrap.agentJar", files(tasks.shadowJar)),
+        Triple("jdbcClasspath", "chaos.test.jdbcClasspath", jdbcProbe),
+        Triple("httpClasspath", "chaos.test.httpClasspath", httpClientProbe),
+        Triple("clientClasspath", "chaos.test.clientClasspath", clientLibraryProbe),
+        Triple("coverageClasspath", "chaos.test.coverageClasspath", coverageProbe),
+        Triple("jacocoAgent", "chaos.test.jacocoAgent", jacocoChildAgent),
+    )
+    childJvmFiles.forEach { (property, _, files) ->
+        inputs.files(files).withPropertyName(property).withNormalizer(ClasspathNormalizer::class)
+    }
+    jvmArgumentProviders.add(
+        CommandLineArgumentProvider {
+            childJvmFiles.map { (_, systemProperty, files) -> "-D$systemProperty=${files.asPath}" }
+        },
+    )
 
     // Every child JVM records its coverage of the agent's classes into one file, started afresh.
     val childExec = layout.buildDirectory.file("jacoco/child-jvms.exec").get().asFile
-    systemProperty("chaos.test.jacocoAgent", jacocoChildAgent.singleFile.absolutePath)
     systemProperty("chaos.test.jacocoExec", childExec.absolutePath)
     outputs.file(childExec)
     doFirst { childExec.delete() }

@@ -17,11 +17,21 @@ dependencies {
     testImplementation(libs.assertj)
 }
 
-val agentJar =
-    project(":chaos-agent-bootstrap").tasks.named<Jar>("shadowJar").flatMap { it.archiveFile }
+val agentJar = project(":chaos-agent-bootstrap").tasks.named<Jar>("shadowJar")
 
 tasks.test {
-    dependsOn(tasks.bootJar, ":chaos-agent-bootstrap:shadowJar")
-    systemProperty("chaos.fatjar.app", tasks.bootJar.flatMap { it.archiveFile }.get().asFile.absolutePath)
-    systemProperty("chaos.bootstrap.agentJar", agentJar.get().asFile.absolutePath)
+    // Both jars are inputs: a rebuilt agent or application reruns the test instead of reusing a
+    // cached result. Their paths reach the test JVM when it starts.
+    val appJar = files(tasks.bootJar)
+    val agentJarFile = files(agentJar)
+    inputs.files(appJar).withPropertyName("fatJar").withNormalizer(ClasspathNormalizer::class)
+    inputs.files(agentJarFile).withPropertyName("agentJar").withNormalizer(ClasspathNormalizer::class)
+    jvmArgumentProviders.add(
+        CommandLineArgumentProvider {
+            listOf(
+                "-Dchaos.fatjar.app=${appJar.singleFile.absolutePath}",
+                "-Dchaos.bootstrap.agentJar=${agentJarFile.singleFile.absolutePath}",
+            )
+        },
+    )
 }

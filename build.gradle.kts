@@ -147,6 +147,10 @@ subprojects {
             )
         }
         useJUnitPlatform()
+        // A hung test fails after 5 minutes (a test or lifecycle method without its own @Timeout),
+        // and a hung test task after 25, instead of holding CI until the job's limit.
+        systemProperty("junit.jupiter.execution.timeout.default", "5m")
+        timeout.set(java.time.Duration.ofMinutes(25))
         jvmArgs(
             "-Djdk.attach.allowAttachSelf=true",
             "-XX:+EnableDynamicAgentLoading",
