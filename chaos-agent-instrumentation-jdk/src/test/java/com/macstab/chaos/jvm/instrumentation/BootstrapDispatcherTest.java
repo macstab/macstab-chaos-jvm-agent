@@ -430,8 +430,7 @@ class BootstrapDispatcherTest {
             BootstrapDispatcher.BEFORE_GC_REQUEST,
             BootstrapDispatcher.BEFORE_ASYNC_CANCEL,
             BootstrapDispatcher.BEFORE_THREAD_LOCAL_GET,
-            BootstrapDispatcher.BEFORE_THREAD_LOCAL_SET,
-            BootstrapDispatcher.BEFORE_HTTP_SEND_ASYNC
+            BootstrapDispatcher.BEFORE_THREAD_LOCAL_SET
           }) {
         handles[slot] = answering(slot, true);
       }
@@ -441,7 +440,6 @@ class BootstrapDispatcherTest {
       assertThat(BootstrapDispatcher.beforeAsyncCancel(new Object(), true)).isTrue();
       assertThat(BootstrapDispatcher.beforeThreadLocalGet(new ThreadLocal<>())).isTrue();
       assertThat(BootstrapDispatcher.beforeThreadLocalSet(new ThreadLocal<>(), "v")).isTrue();
-      assertThat(BootstrapDispatcher.beforeHttpSendAsync("https://api.example.com/")).isTrue();
     }
 
     @Test

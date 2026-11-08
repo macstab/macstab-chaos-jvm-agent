@@ -2124,31 +2124,29 @@ public final class BootstrapDispatcher {
 
   /**
    * Called before a synchronous HTTP client {@code send} (Java {@code HttpClient.send}, {@code
-   * okhttp3.RealCall.execute}, Apache HttpComponents {@code CloseableHttpClient.execute}).
-   *
-   * <p>Returning {@code true} causes the advice to skip the real send call. The advice is
-   * responsible for throwing {@link com.macstab.chaos.jvm.api.ChaosHttpSuppressException} when the
-   * call is suppressed so the caller observes a terminal failure instead of a dropped request.
+   * okhttp3.RealCall.execute}, Apache HttpComponents {@code CloseableHttpClient.execute}, the JDK's
+   * {@code HttpURLConnection}).
    *
    * @param url the request URL in {@code scheme://host/path} form; may be {@code null} when the
    *     advice cannot extract a URL
-   * @return {@code true} if the send should be suppressed; {@code false} for normal execution.
-   *     Returns {@code false} as the fallback.
+   *     <p>A reject throws the client's own exception from here; the advice then lets the real call
+   *     run.
    * @throws Throwable if the delegate throws
    */
-  public static boolean beforeHttpSend(final @Nullable String url) throws Throwable {
+  public static void beforeHttpSend(final @Nullable String url) throws Throwable {
     final int[] depth = DEPTH.get();
     if (depth[0] > 0) {
-      return false;
+      return;
     }
     depth[0]++;
     try {
       final MethodHandle[] h = handles;
       final Object d = delegate;
-      return (d != null && h != null) && (boolean) h[BEFORE_HTTP_SEND].invoke(d, url);
+      if (d != null && h != null) {
+        h[BEFORE_HTTP_SEND].invoke(d, url);
+      }
     } catch (final Throwable throwable) {
       sneakyThrow(throwable);
-      return false;
     } finally {
       depth[0]--;
     }
@@ -2158,26 +2156,25 @@ public final class BootstrapDispatcher {
    * Called before an asynchronous HTTP client send (Java {@code HttpClient.sendAsync}, {@code
    * okhttp3.RealCall.enqueue}, Spring WebClient {@code HttpClientConnect.connect}).
    *
-   * <p>Returning {@code true} causes the advice to skip the real send call.
-   *
    * @param url the request URL in {@code scheme://host/path} form; may be {@code null}
-   * @return {@code true} if the send should be suppressed; {@code false} for normal execution.
-   *     Returns {@code false} as the fallback.
+   *     <p>A reject throws the client's own exception from here; the advice then lets the real call
+   *     run.
    * @throws Throwable if the delegate throws
    */
-  public static boolean beforeHttpSendAsync(final @Nullable String url) throws Throwable {
+  public static void beforeHttpSendAsync(final @Nullable String url) throws Throwable {
     final int[] depth = DEPTH.get();
     if (depth[0] > 0) {
-      return false;
+      return;
     }
     depth[0]++;
     try {
       final MethodHandle[] h = handles;
       final Object d = delegate;
-      return (d != null && h != null) && (boolean) h[BEFORE_HTTP_SEND_ASYNC].invoke(d, url);
+      if (d != null && h != null) {
+        h[BEFORE_HTTP_SEND_ASYNC].invoke(d, url);
+      }
     } catch (final Throwable throwable) {
       sneakyThrow(throwable);
-      return false;
     } finally {
       depth[0]--;
     }
@@ -2186,29 +2183,25 @@ public final class BootstrapDispatcher {
   /**
    * Called before a JDBC connection is acquired from a pool (HikariCP, c3p0).
    *
-   * <p>Returning {@code true} causes the advice to throw {@link
-   * com.macstab.chaos.jvm.api.ChaosJdbcSuppressException}.
-   *
    * @param poolName the pool identifier; may be {@code null}
-   * @return {@code true} if acquisition should be suppressed; {@code false} for normal execution.
-   *     Returns {@code false} as the fallback.
+   *     <p>A reject throws the client's own exception from here; the advice then lets the real call
+   *     run.
    * @throws Throwable if the delegate throws
    */
-  public static boolean beforeJdbcConnectionAcquire(final @Nullable String poolName)
-      throws Throwable {
+  public static void beforeJdbcConnectionAcquire(final @Nullable String poolName) throws Throwable {
     final int[] depth = DEPTH.get();
     if (depth[0] > 0) {
-      return false;
+      return;
     }
     depth[0]++;
     try {
       final MethodHandle[] h = handles;
       final Object d = delegate;
-      return (d != null && h != null)
-          && (boolean) h[BEFORE_JDBC_CONNECTION_ACQUIRE].invoke(d, poolName);
+      if (d != null && h != null) {
+        h[BEFORE_JDBC_CONNECTION_ACQUIRE].invoke(d, poolName);
+      }
     } catch (final Throwable throwable) {
       sneakyThrow(throwable);
-      return false;
     } finally {
       depth[0]--;
     }
@@ -2218,23 +2211,24 @@ public final class BootstrapDispatcher {
    * Called before a {@link java.sql.Statement} execute call.
    *
    * @param sql the SQL statement; may be {@code null}
-   * @return {@code true} if the statement should be suppressed; {@code false} for normal execution.
-   *     Returns {@code false} as the fallback.
+   *     <p>A reject throws the client's own exception from here; the advice then lets the real call
+   *     run.
    * @throws Throwable if the delegate throws
    */
-  public static boolean beforeJdbcStatementExecute(final @Nullable String sql) throws Throwable {
+  public static void beforeJdbcStatementExecute(final @Nullable String sql) throws Throwable {
     final int[] depth = DEPTH.get();
     if (depth[0] > 0) {
-      return false;
+      return;
     }
     depth[0]++;
     try {
       final MethodHandle[] h = handles;
       final Object d = delegate;
-      return (d != null && h != null) && (boolean) h[BEFORE_JDBC_STATEMENT_EXECUTE].invoke(d, sql);
+      if (d != null && h != null) {
+        h[BEFORE_JDBC_STATEMENT_EXECUTE].invoke(d, sql);
+      }
     } catch (final Throwable throwable) {
       sneakyThrow(throwable);
-      return false;
     } finally {
       depth[0]--;
     }
@@ -2244,23 +2238,24 @@ public final class BootstrapDispatcher {
    * Called before a {@link java.sql.Connection#prepareStatement(String)} call.
    *
    * @param sql the SQL statement being prepared; may be {@code null}
-   * @return {@code true} if preparation should be suppressed; {@code false} for normal execution.
-   *     Returns {@code false} as the fallback.
+   *     <p>A reject throws the client's own exception from here; the advice then lets the real call
+   *     run.
    * @throws Throwable if the delegate throws
    */
-  public static boolean beforeJdbcPreparedStatement(final @Nullable String sql) throws Throwable {
+  public static void beforeJdbcPreparedStatement(final @Nullable String sql) throws Throwable {
     final int[] depth = DEPTH.get();
     if (depth[0] > 0) {
-      return false;
+      return;
     }
     depth[0]++;
     try {
       final MethodHandle[] h = handles;
       final Object d = delegate;
-      return (d != null && h != null) && (boolean) h[BEFORE_JDBC_PREPARED_STATEMENT].invoke(d, sql);
+      if (d != null && h != null) {
+        h[BEFORE_JDBC_PREPARED_STATEMENT].invoke(d, sql);
+      }
     } catch (final Throwable throwable) {
       sneakyThrow(throwable);
-      return false;
     } finally {
       depth[0]--;
     }
@@ -2269,23 +2264,25 @@ public final class BootstrapDispatcher {
   /**
    * Called before a {@link java.sql.Connection#commit()} call.
    *
-   * @return {@code true} if the commit should be suppressed; {@code false} for normal execution.
-   *     Returns {@code false} as the fallback.
+   * <p>A reject throws the client's own exception from here; the advice then lets the real call
+   * run.
+   *
    * @throws Throwable if the delegate throws
    */
-  public static boolean beforeJdbcTransactionCommit() throws Throwable {
+  public static void beforeJdbcTransactionCommit() throws Throwable {
     final int[] depth = DEPTH.get();
     if (depth[0] > 0) {
-      return false;
+      return;
     }
     depth[0]++;
     try {
       final MethodHandle[] h = handles;
       final Object d = delegate;
-      return (d != null && h != null) && (boolean) h[BEFORE_JDBC_TRANSACTION_COMMIT].invoke(d);
+      if (d != null && h != null) {
+        h[BEFORE_JDBC_TRANSACTION_COMMIT].invoke(d);
+      }
     } catch (final Throwable throwable) {
       sneakyThrow(throwable);
-      return false;
     } finally {
       depth[0]--;
     }
@@ -2294,23 +2291,25 @@ public final class BootstrapDispatcher {
   /**
    * Called before a {@link java.sql.Connection#rollback()} call.
    *
-   * @return {@code true} if the rollback should be suppressed; {@code false} for normal execution.
-   *     Returns {@code false} as the fallback.
+   * <p>A reject throws the client's own exception from here; the advice then lets the real call
+   * run.
+   *
    * @throws Throwable if the delegate throws
    */
-  public static boolean beforeJdbcTransactionRollback() throws Throwable {
+  public static void beforeJdbcTransactionRollback() throws Throwable {
     final int[] depth = DEPTH.get();
     if (depth[0] > 0) {
-      return false;
+      return;
     }
     depth[0]++;
     try {
       final MethodHandle[] h = handles;
       final Object d = delegate;
-      return (d != null && h != null) && (boolean) h[BEFORE_JDBC_TRANSACTION_ROLLBACK].invoke(d);
+      if (d != null && h != null) {
+        h[BEFORE_JDBC_TRANSACTION_ROLLBACK].invoke(d);
+      }
     } catch (final Throwable throwable) {
       sneakyThrow(throwable);
-      return false;
     } finally {
       depth[0]--;
     }

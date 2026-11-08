@@ -229,28 +229,22 @@ public class HttpClientBenchmark {
    * Measures dispatcher overhead on the HTTP-send path when no scenarios are active.
    *
    * @param state the benchmark state holding the runtime and dispatcher
-   * @param bh the JMH blackhole used to consume results
    * @throws Throwable if the dispatcher surfaces an unexpected failure
    */
   @Benchmark
-  public void agentInstalled_zeroScenarios(ZeroScenariosState state, Blackhole bh)
-      throws Throwable {
-    bh.consume(
-        state.dispatcher.client().beforeHttpSend(BENCHMARK_URL, OperationType.HTTP_CLIENT_SEND));
+  public void agentInstalled_zeroScenarios(ZeroScenariosState state) throws Throwable {
+    state.dispatcher.client().beforeHttpSend(BENCHMARK_URL, OperationType.HTTP_CLIENT_SEND);
   }
 
   /**
    * Measures dispatcher overhead on the HTTP-send path when one non-matching scenario is active.
    *
    * @param state the benchmark state holding the runtime and dispatcher
-   * @param bh the JMH blackhole used to consume results
    * @throws Throwable if the dispatcher surfaces an unexpected failure
    */
   @Benchmark
-  public void agentInstalled_oneScenario_noMatch(OneScenarioNoMatchState state, Blackhole bh)
-      throws Throwable {
-    bh.consume(
-        state.dispatcher.client().beforeHttpSend(BENCHMARK_URL, OperationType.HTTP_CLIENT_SEND));
+  public void agentInstalled_oneScenario_noMatch(OneScenarioNoMatchState state) throws Throwable {
+    state.dispatcher.client().beforeHttpSend(BENCHMARK_URL, OperationType.HTTP_CLIENT_SEND);
   }
 
   /**
@@ -258,14 +252,11 @@ public class HttpClientBenchmark {
    * active.
    *
    * @param state the benchmark state holding the runtime and dispatcher
-   * @param bh the JMH blackhole used to consume results
    * @throws Throwable if the dispatcher surfaces an unexpected failure
    */
   @Benchmark
-  public void agentInstalled_oneMatch_noEffect(OneMatchNoEffectState state, Blackhole bh)
-      throws Throwable {
-    bh.consume(
-        state.dispatcher.client().beforeHttpSend(BENCHMARK_URL, OperationType.HTTP_CLIENT_SEND));
+  public void agentInstalled_oneMatch_noEffect(OneMatchNoEffectState state) throws Throwable {
+    state.dispatcher.client().beforeHttpSend(BENCHMARK_URL, OperationType.HTTP_CLIENT_SEND);
   }
 
   /**
@@ -273,13 +264,11 @@ public class HttpClientBenchmark {
    * session.
    *
    * @param state the benchmark state holding the runtime and dispatcher
-   * @param bh the JMH blackhole used to consume results
    * @throws Throwable if the dispatcher surfaces an unexpected failure
    */
   @Benchmark
-  public void sessionIdMiss(SessionMissState state, Blackhole bh) throws Throwable {
-    bh.consume(
-        state.dispatcher.client().beforeHttpSend(BENCHMARK_URL, OperationType.HTTP_CLIENT_SEND));
+  public void sessionIdMiss(SessionMissState state) throws Throwable {
+    state.dispatcher.client().beforeHttpSend(BENCHMARK_URL, OperationType.HTTP_CLIENT_SEND);
   }
 
   /**
@@ -287,12 +276,10 @@ public class HttpClientBenchmark {
    * matches.
    *
    * @param state the benchmark state holding the runtime and dispatcher
-   * @param bh the JMH blackhole used to consume results
    * @throws Throwable if the dispatcher surfaces an unexpected failure
    */
   @Benchmark
-  public void tenScenarios_oneMatch(TenScenariosState state, Blackhole bh) throws Throwable {
-    bh.consume(
-        state.dispatcher.client().beforeHttpSend(BENCHMARK_URL, OperationType.HTTP_CLIENT_SEND));
+  public void tenScenarios_oneMatch(TenScenariosState state) throws Throwable {
+    state.dispatcher.client().beforeHttpSend(BENCHMARK_URL, OperationType.HTTP_CLIENT_SEND);
   }
 }

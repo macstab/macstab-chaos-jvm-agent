@@ -1102,7 +1102,7 @@ Once the hook is wired, the matcher, effect, and activation policy behave like e
 
 **JSON type:** `"httpClient"`  
 **Operations:** `HTTP_CLIENT_SEND`, `HTTP_CLIENT_SEND_ASYNC`  
-**Purpose:** Intercept HTTP client requests across `java.net.http.HttpClient` (`send`, 2- and 3-arg `sendAsync`), `java.net.HttpURLConnection` / `HttpsURLConnection` (Spring `RestTemplate`'s default transport; a suppressed request throws `java.net.ConnectException`), OkHttp 3 and 4, Apache HttpComponents 4/5 (including HC5 `execute(request)` and the host-first `execute` overloads), and Spring WebClient (Reactor Netty — the URI is taken from the client configuration). Nested or delegating client calls are evaluated once, at the outermost call.
+**Purpose:** Intercept HTTP client requests across `java.net.http.HttpClient` (`send`, 2- and 3-arg `sendAsync`), `java.net.HttpURLConnection` / `HttpsURLConnection` (Spring `RestTemplate`'s default transport), OkHttp 3 and 4, Apache HttpComponents 4/5 (including HC5 `execute(request)` and the host-first `execute` overloads), and Spring WebClient (Reactor Netty — the URI is taken from the client configuration). Nested or delegating client calls are evaluated once, at the outermost call.
 
 **Fields:**
 
@@ -1299,7 +1299,7 @@ Each interceptor effect applies to the operations below, with any selector that 
 | `dnsAnswer` | `DNS_ANSWER` |
 | `dnsRewrite` | `DNS_RESOLVE` |
 | `redirect` | `SOCKET_CONNECT` |
-| `suppress` | `THREAD_START`, `VIRTUAL_THREAD_START`, `EXECUTOR_SUBMIT`, `SCHEDULE_SUBMIT`, `SCHEDULE_TICK`, `QUEUE_OFFER`, `QUEUE_POLL`, `ASYNC_COMPLETE`, `ASYNC_COMPLETE_EXCEPTIONALLY`, `RESOURCE_LOAD`, `SYSTEM_GC_REQUEST`, `SYSTEM_EXIT_REQUEST`, `NIO_SELECTOR_SELECT`, `DATAGRAM_SEND`, `ASYNC_CANCEL`, `THREAD_LOCAL_GET`, `THREAD_LOCAL_SET`, `HTTP_CLIENT_SEND`, `HTTP_CLIENT_SEND_ASYNC`, `JDBC_CONNECTION_ACQUIRE`, `JDBC_STATEMENT_EXECUTE`, `JDBC_PREPARED_STATEMENT`, `JDBC_TRANSACTION_COMMIT`, `JDBC_TRANSACTION_ROLLBACK`, `THREAD_SLEEP` |
+| `suppress` | `THREAD_START`, `VIRTUAL_THREAD_START`, `EXECUTOR_SUBMIT`, `SCHEDULE_SUBMIT`, `SCHEDULE_TICK`, `QUEUE_OFFER`, `QUEUE_POLL`, `ASYNC_COMPLETE`, `ASYNC_COMPLETE_EXCEPTIONALLY`, `RESOURCE_LOAD`, `SYSTEM_GC_REQUEST`, `SYSTEM_EXIT_REQUEST`, `NIO_SELECTOR_SELECT`, `DATAGRAM_SEND`, `ASYNC_CANCEL`, `THREAD_LOCAL_GET`, `THREAD_LOCAL_SET`, `THREAD_SLEEP` (not HTTP or JDBC: no real client skips a call without failing it, so a suppress there is refused with "use reject"; a reject throws the client's own `IOException` / `SQLException`) |
 | `exceptionalCompletion` | `ASYNC_COMPLETE`, `ASYNC_COMPLETE_EXCEPTIONALLY`, `ASYNC_CANCEL` |
 | `exceptionInjection` | `METHOD_ENTER` |
 | `returnValueCorruption` | `METHOD_EXIT` |
@@ -1478,7 +1478,7 @@ The native library's DNS answer effects. `DNS_RESOLVE` fires before a lookup (de
 
 **Accepted operations:** only the operations listed under \*\*\* in §13.4; any other operation in the selector is rejected at activation.
 
-**Use cases:** suppress `QUEUE_OFFER` to simulate a full bounded queue; suppress `RESOURCE_LOAD` to simulate a missing resource; suppress HTTP calls (see also `ChaosHttpSuppressException`).
+**Use cases:** suppress `QUEUE_OFFER` to simulate a full bounded queue; suppress `RESOURCE_LOAD` to simulate a missing resource. HTTP and JDBC calls take a reject (the client's own `IOException` / `SQLException`), not a suppress.
 
 ---
 

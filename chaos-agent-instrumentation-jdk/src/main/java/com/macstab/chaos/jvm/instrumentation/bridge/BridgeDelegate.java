@@ -682,68 +682,61 @@ public interface BridgeDelegate {
 
   /**
    * Called before a synchronous HTTP client send (Java {@code HttpClient.send}, OkHttp {@code
-   * RealCall.execute}, Apache HttpComponents {@code CloseableHttpClient.execute}).
+   * RealCall.execute}, Apache HttpComponents {@code CloseableHttpClient.execute}, the JDK's {@code
+   * HttpURLConnection}).
    *
    * @param url the request URL in {@code scheme://host/path} form; may be {@code null} when
    *     extraction fails
-   * @return {@code true} to suppress the send (advice throws {@link
-   *     com.macstab.chaos.jvm.api.ChaosHttpSuppressException}); {@code false} for normal execution
-   * @throws Throwable if the delegate throws
+   * @throws Throwable the client's own exception when a scenario rejects the send
    */
-  boolean beforeHttpSend(@Nullable String url) throws Throwable;
+  void beforeHttpSend(@Nullable String url) throws Throwable;
 
   /**
    * Called before an asynchronous HTTP client send (Java {@code HttpClient.sendAsync}, OkHttp
    * {@code RealCall.enqueue}, Spring WebClient {@code HttpClientConnect.connect}).
    *
    * @param url the request URL in {@code scheme://host/path} form; may be {@code null}
-   * @return {@code true} to suppress the send; {@code false} for normal execution
-   * @throws Throwable if the delegate throws
+   * @throws Throwable the client's own exception when a scenario rejects the send
    */
-  boolean beforeHttpSendAsync(@Nullable String url) throws Throwable;
+  void beforeHttpSendAsync(@Nullable String url) throws Throwable;
 
   /**
    * Called before a JDBC connection is acquired from a pool (HikariCP, c3p0).
    *
    * @param poolName the pool identifier; may be {@code null}
-   * @return {@code true} to suppress the acquisition; {@code false} for normal execution
-   * @throws Throwable if the delegate throws
+   * @throws Throwable an {@link java.sql.SQLException} when a scenario rejects the acquisition
    */
-  boolean beforeJdbcConnectionAcquire(@Nullable String poolName) throws Throwable;
+  void beforeJdbcConnectionAcquire(@Nullable String poolName) throws Throwable;
 
   /**
    * Called before a {@link java.sql.Statement} execute call.
    *
    * @param sql the SQL statement; may be {@code null}
-   * @return {@code true} to suppress the call; {@code false} for normal execution
-   * @throws Throwable if the delegate throws
+   * @throws Throwable an {@link java.sql.SQLException} when a scenario rejects the call
    */
-  boolean beforeJdbcStatementExecute(@Nullable String sql) throws Throwable;
+  void beforeJdbcStatementExecute(@Nullable String sql) throws Throwable;
 
   /**
    * Called before a {@link java.sql.Connection#prepareStatement(String)} call.
    *
    * @param sql the SQL statement being prepared; may be {@code null}
-   * @return {@code true} to suppress the call; {@code false} for normal execution
-   * @throws Throwable if the delegate throws
+   * @throws Throwable an {@link java.sql.SQLException} when a scenario rejects the call
    */
-  boolean beforeJdbcPreparedStatement(@Nullable String sql) throws Throwable;
+  void beforeJdbcPreparedStatement(@Nullable String sql) throws Throwable;
 
   /**
    * Called before a {@link java.sql.Connection#commit()} call.
    *
-   * @return {@code true} to suppress the commit; {@code false} for normal execution
-   * @throws Throwable if the delegate throws
+   * @throws Throwable an {@link java.sql.SQLException} when a scenario rejects the commit
    */
-  boolean beforeJdbcTransactionCommit() throws Throwable;
+  void beforeJdbcTransactionCommit() throws Throwable;
 
   /**
    * Called before a {@link java.sql.Connection#rollback()} call.
    *
-   * @return {@code true} to suppress the rollback; {@code false} for normal execution
-   * @throws Throwable if the delegate throws
+   * @throws Throwable an {@link java.sql.SQLException} when a scenario rejects the rollback
    */
-  boolean beforeJdbcTransactionRollback() throws Throwable;
+  void beforeJdbcTransactionRollback() throws Throwable;
 
   /**
    * Called before {@link Thread#sleep(long)}.

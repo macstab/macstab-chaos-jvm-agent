@@ -531,29 +531,46 @@ class EffectReachesTheCallTest {
     // HTTP and JDBC clients
     INVOKERS.put(
         OperationType.HTTP_CLIENT_SEND,
-        runtime ->
-            "skip " + runtime.beforeHttpSend("http://probe.test/", OperationType.HTTP_CLIENT_SEND));
+        runtime -> {
+          runtime.beforeHttpSend("http://probe.test/", OperationType.HTTP_CLIENT_SEND);
+          return "sent";
+        });
     INVOKERS.put(
         OperationType.HTTP_CLIENT_SEND_ASYNC,
-        runtime ->
-            "skip "
-                + runtime.beforeHttpSend(
-                    "http://probe.test/", OperationType.HTTP_CLIENT_SEND_ASYNC));
+        runtime -> {
+          runtime.beforeHttpSend("http://probe.test/", OperationType.HTTP_CLIENT_SEND_ASYNC);
+          return "sent";
+        });
     INVOKERS.put(
         OperationType.JDBC_CONNECTION_ACQUIRE,
-        runtime -> "skip " + runtime.beforeJdbcConnectionAcquire("probe-pool"));
+        runtime -> {
+          runtime.beforeJdbcConnectionAcquire("probe-pool");
+          return "acquired";
+        });
     INVOKERS.put(
         OperationType.JDBC_STATEMENT_EXECUTE,
-        runtime -> "skip " + runtime.beforeJdbcStatementExecute("select 1"));
+        runtime -> {
+          runtime.beforeJdbcStatementExecute("select 1");
+          return "executed";
+        });
     INVOKERS.put(
         OperationType.JDBC_PREPARED_STATEMENT,
-        runtime -> "skip " + runtime.beforeJdbcPreparedStatement("select 1"));
+        runtime -> {
+          runtime.beforeJdbcPreparedStatement("select 1");
+          return "prepared";
+        });
     INVOKERS.put(
         OperationType.JDBC_TRANSACTION_COMMIT,
-        runtime -> "skip " + runtime.beforeJdbcTransactionCommit());
+        runtime -> {
+          runtime.beforeJdbcTransactionCommit();
+          return "committed";
+        });
     INVOKERS.put(
         OperationType.JDBC_TRANSACTION_ROLLBACK,
-        runtime -> "skip " + runtime.beforeJdbcTransactionRollback());
+        runtime -> {
+          runtime.beforeJdbcTransactionRollback();
+          return "rolled back";
+        });
 
     // Client libraries
     for (final OperationType client :

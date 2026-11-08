@@ -31,6 +31,8 @@ public final class HttpLibraryProbeMain {
     try (okhttp3.Response response =
         client.newCall(new okhttp3.Request.Builder().url(url).build()).execute()) {
       System.out.println("status=" + response.code());
+    } catch (final java.io.IOException rejected) {
+      System.out.println("rejected=" + rejected.getClass().getName());
     } finally {
       client.dispatcher().executorService().shutdown();
       client.connectionPool().evictAll();

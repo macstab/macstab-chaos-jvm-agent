@@ -1086,6 +1086,28 @@ class CompatibilityValidatorTest {
     }
 
     @Test
+    @DisplayName(
+        "SUPPRESS on HTTP client sends and JDBC statements is rejected: no real client skips the"
+            + " call without failing it, so use reject")
+    void suppressOnHttpAndJdbcIsRejected() {
+      final ChaosScenario http =
+          jvm(
+              ChaosSelector.httpClient(Set.of(OperationType.HTTP_CLIENT_SEND)),
+              ChaosEffect.suppress());
+      final ChaosScenario jdbc =
+          jvm(ChaosSelector.jdbc(OperationType.JDBC_STATEMENT_EXECUTE), ChaosEffect.suppress());
+
+      assertThatThrownBy(() -> CompatibilityValidator.validate(http, featureSet))
+          .isInstanceOf(ChaosValidationException.class)
+          .hasMessageContaining("HTTP_CLIENT_SEND")
+          .hasMessageContaining("use reject");
+      assertThatThrownBy(() -> CompatibilityValidator.validate(jdbc, featureSet))
+          .isInstanceOf(ChaosValidationException.class)
+          .hasMessageContaining("JDBC_STATEMENT_EXECUTE")
+          .hasMessageContaining("use reject");
+    }
+
+    @Test
     @DisplayName("SUPPRESS on Thread.sleep is accepted")
     void suppressOnSleepIsAccepted() {
       final ChaosScenario scenario =

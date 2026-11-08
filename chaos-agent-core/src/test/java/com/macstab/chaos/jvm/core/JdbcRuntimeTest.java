@@ -2,14 +2,17 @@ package com.macstab.chaos.jvm.core;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.macstab.chaos.jvm.api.ActivationPolicy;
 import com.macstab.chaos.jvm.api.ChaosActivationHandle;
 import com.macstab.chaos.jvm.api.ChaosEffect;
 import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.ChaosSelector;
+import com.macstab.chaos.jvm.api.ChaosValidationException;
 import com.macstab.chaos.jvm.api.NamePattern;
 import com.macstab.chaos.jvm.api.OperationType;
+import java.sql.SQLException;
 import java.time.Duration;
 import java.util.Set;
 import org.junit.jupiter.api.DisplayName;
@@ -33,120 +36,89 @@ class JdbcRuntimeTest {
             .build());
   }
 
+  private static ChaosSelector selectStatements(final String sqlGlob) {
+    return new ChaosSelector.JdbcSelector(
+        Set.of(OperationType.JDBC_STATEMENT_EXECUTE), NamePattern.glob(sqlGlob));
+  }
+
   @Nested
-  @DisplayName("SuppressEffect terminal semantics")
-  class SuppressSemantics {
+  @DisplayName("RejectEffect: the driver's SQLException")
+  class RejectSemantics {
 
     @Test
-    @DisplayName("beforeJdbcConnectionAcquire suppresses when SUPPRESS scenario is active")
-    void connectionAcquireSuppressed() throws Throwable {
+    @DisplayName("beforeJdbcConnectionAcquire throws SQLException when a reject is active")
+    void connectionAcquireRejected() {
       final ChaosRuntime runtime = new ChaosRuntime();
       final ChaosActivationHandle handle =
           activate(
               runtime,
-              "jdbc-conn-suppress",
+              "jdbc-conn-reject",
               ChaosSelector.jdbc(OperationType.JDBC_CONNECTION_ACQUIRE),
-              ChaosEffect.suppress());
+              ChaosEffect.reject("db down"));
       try {
-        assertThat(runtime.beforeJdbcConnectionAcquire("hikari-primary")).isTrue();
+        assertThatThrownBy(() -> runtime.beforeJdbcConnectionAcquire("hikari-primary"))
+            .isInstanceOf(SQLException.class)
+            .hasMessage("db down");
       } finally {
         handle.stop();
       }
     }
 
     @Test
-    @DisplayName("beforeJdbcStatementExecute suppresses SQL matching the target pattern")
-    void statementExecuteSuppressedOnMatch() throws Throwable {
+    @DisplayName("beforeJdbcStatementExecute rejects SQL matching the target pattern only")
+    void statementExecuteRejectedOnMatchOnly() {
       final ChaosRuntime runtime = new ChaosRuntime();
       final ChaosActivationHandle handle =
-          runtime.activate(
-              ChaosScenario.builder("jdbc-select-suppress")
-                  .scope(ChaosScenario.ScenarioScope.JVM)
-                  .selector(
-                      new ChaosSelector.JdbcSelector(
-                          Set.of(OperationType.JDBC_STATEMENT_EXECUTE),
-                          NamePattern.glob("SELECT*")))
-                  .effect(ChaosEffect.suppress())
-                  .activationPolicy(ActivationPolicy.always())
-                  .build());
+          activate(
+              runtime, "jdbc-select-reject", selectStatements("SELECT*"), ChaosEffect.reject("x"));
       try {
-        assertThat(runtime.beforeJdbcStatementExecute("SELECT 1")).isTrue();
+        assertThatThrownBy(() -> runtime.beforeJdbcStatementExecute("SELECT 1"))
+            .isInstanceOf(SQLException.class);
+        assertThatCode(() -> runtime.beforeJdbcStatementExecute("INSERT INTO foo VALUES (1)"))
+            .doesNotThrowAnyException();
       } finally {
         handle.stop();
       }
     }
 
     @Test
-    @DisplayName("beforeJdbcStatementExecute does NOT suppress when SQL pattern does not match")
-    void statementExecuteNotSuppressedOnMismatch() throws Throwable {
-      final ChaosRuntime runtime = new ChaosRuntime();
-      final ChaosActivationHandle handle =
-          runtime.activate(
-              ChaosScenario.builder("jdbc-select-only")
-                  .scope(ChaosScenario.ScenarioScope.JVM)
-                  .selector(
-                      new ChaosSelector.JdbcSelector(
-                          Set.of(OperationType.JDBC_STATEMENT_EXECUTE),
-                          NamePattern.glob("SELECT*")))
-                  .effect(ChaosEffect.suppress())
-                  .activationPolicy(ActivationPolicy.always())
-                  .build());
-      try {
-        assertThat(runtime.beforeJdbcStatementExecute("INSERT INTO foo VALUES (1)")).isFalse();
-      } finally {
-        handle.stop();
-      }
-    }
-
-    @Test
-    @DisplayName("beforeJdbcTransactionCommit suppresses when SUPPRESS scenario is active")
-    void commitSuppressed() throws Throwable {
+    @DisplayName("prepare, commit and rollback throw SQLException when a reject is active")
+    void prepareCommitRollbackRejected() {
       final ChaosRuntime runtime = new ChaosRuntime();
       final ChaosActivationHandle handle =
           activate(
               runtime,
-              "jdbc-commit-suppress",
-              ChaosSelector.jdbc(OperationType.JDBC_TRANSACTION_COMMIT),
-              ChaosEffect.suppress());
+              "jdbc-tx-reject",
+              new ChaosSelector.JdbcSelector(
+                  Set.of(
+                      OperationType.JDBC_PREPARED_STATEMENT,
+                      OperationType.JDBC_TRANSACTION_COMMIT,
+                      OperationType.JDBC_TRANSACTION_ROLLBACK),
+                  NamePattern.any()),
+              ChaosEffect.reject("db down"));
       try {
-        assertThat(runtime.beforeJdbcTransactionCommit()).isTrue();
+        assertThatThrownBy(() -> runtime.beforeJdbcPreparedStatement("SELECT ?"))
+            .isInstanceOf(SQLException.class);
+        assertThatThrownBy(runtime::beforeJdbcTransactionCommit).isInstanceOf(SQLException.class);
+        assertThatThrownBy(runtime::beforeJdbcTransactionRollback).isInstanceOf(SQLException.class);
       } finally {
         handle.stop();
       }
     }
 
     @Test
-    @DisplayName("beforeJdbcTransactionRollback suppresses when SUPPRESS scenario is active")
-    void rollbackSuppressed() throws Throwable {
+    @DisplayName("a suppress on JDBC is refused at activation: no driver skips a call silently")
+    void suppressIsRefused() {
       final ChaosRuntime runtime = new ChaosRuntime();
-      final ChaosActivationHandle handle =
-          activate(
-              runtime,
-              "jdbc-rollback-suppress",
-              ChaosSelector.jdbc(OperationType.JDBC_TRANSACTION_ROLLBACK),
-              ChaosEffect.suppress());
-      try {
-        assertThat(runtime.beforeJdbcTransactionRollback()).isTrue();
-      } finally {
-        handle.stop();
-      }
-    }
-
-    @Test
-    @DisplayName("beforeJdbcPreparedStatement suppresses when SUPPRESS scenario is active")
-    void preparedStatementSuppressed() throws Throwable {
-      final ChaosRuntime runtime = new ChaosRuntime();
-      final ChaosActivationHandle handle =
-          activate(
-              runtime,
-              "jdbc-prepare-suppress",
-              ChaosSelector.jdbc(OperationType.JDBC_PREPARED_STATEMENT),
-              ChaosEffect.suppress());
-      try {
-        assertThat(runtime.beforeJdbcPreparedStatement("SELECT ?")).isTrue();
-      } finally {
-        handle.stop();
-      }
+      assertThatThrownBy(
+              () ->
+                  activate(
+                      runtime,
+                      "jdbc-suppress",
+                      ChaosSelector.jdbc(OperationType.JDBC_STATEMENT_EXECUTE),
+                      ChaosEffect.suppress()))
+          .isInstanceOf(ChaosValidationException.class)
+          .hasMessageContaining("use reject");
     }
   }
 
@@ -168,7 +140,7 @@ class JdbcRuntimeTest {
               ChaosEffect.delay(Duration.ofMillis(DELAY_MS)));
       try {
         final long start = System.nanoTime();
-        assertThat(runtime.beforeJdbcConnectionAcquire("hikari-primary")).isFalse();
+        runtime.beforeJdbcConnectionAcquire("hikari-primary");
         final long elapsedMs = (System.nanoTime() - start) / 1_000_000L;
         assertThat(elapsedMs)
             .as(
@@ -186,8 +158,8 @@ class JdbcRuntimeTest {
   class RateLimiting {
 
     @Test
-    @DisplayName("maxApplications(3) suppresses exactly 3 times, then passthrough")
-    void maxApplicationsCapsSuppressionCount() throws Throwable {
+    @DisplayName("maxApplications(3) rejects exactly 3 times, then passthrough")
+    void maxApplicationsCapsRejectionCount() {
       final ChaosRuntime runtime = new ChaosRuntime();
       final long cap = 3L;
       final ChaosActivationHandle handle =
@@ -195,7 +167,7 @@ class JdbcRuntimeTest {
               ChaosScenario.builder("jdbc-stmt-capped")
                   .scope(ChaosScenario.ScenarioScope.JVM)
                   .selector(ChaosSelector.jdbc(OperationType.JDBC_STATEMENT_EXECUTE))
-                  .effect(ChaosEffect.suppress())
+                  .effect(ChaosEffect.reject("db down"))
                   .activationPolicy(
                       new ActivationPolicy(
                           ActivationPolicy.StartMode.AUTOMATIC,
@@ -208,17 +180,19 @@ class JdbcRuntimeTest {
                           false))
                   .build());
       try {
-        int suppressed = 0;
+        int rejected = 0;
         int passthrough = 0;
         for (int i = 0; i < 8; i++) {
-          if (runtime.beforeJdbcStatementExecute("SELECT " + i)) {
-            suppressed++;
-          } else {
+          try {
+            runtime.beforeJdbcStatementExecute("SELECT " + i);
             passthrough++;
+          } catch (final Throwable failure) {
+            assertThat(failure).isInstanceOf(SQLException.class);
+            rejected++;
           }
         }
-        assertThat(suppressed)
-            .as("maxApplications=%d must cap suppression count", cap)
+        assertThat(rejected)
+            .as("maxApplications=%d must cap rejection count", cap)
             .isEqualTo((int) cap);
         assertThat(passthrough).isEqualTo(8 - (int) cap);
       } finally {
@@ -232,76 +206,59 @@ class JdbcRuntimeTest {
   class SelectorIsolation {
 
     @Test
-    @DisplayName("JDBC_CONNECTION_ACQUIRE scenario does NOT suppress JDBC_STATEMENT_EXECUTE")
-    void connectionAcquireDoesNotAffectStatementExecute() throws Throwable {
+    @DisplayName("a JDBC_CONNECTION_ACQUIRE scenario does NOT reach the other JDBC operations")
+    void connectionAcquireDoesNotAffectStatementExecute() {
       final ChaosRuntime runtime = new ChaosRuntime();
       final ChaosActivationHandle handle =
           activate(
               runtime,
               "jdbc-conn-only",
               ChaosSelector.jdbc(OperationType.JDBC_CONNECTION_ACQUIRE),
-              ChaosEffect.suppress());
+              ChaosEffect.reject("db down"));
       try {
-        assertThat(runtime.beforeJdbcStatementExecute("SELECT 1")).isFalse();
-        assertThat(runtime.beforeJdbcPreparedStatement("SELECT ?")).isFalse();
-        assertThat(runtime.beforeJdbcTransactionCommit()).isFalse();
-        assertThat(runtime.beforeJdbcTransactionRollback()).isFalse();
+        assertThatCode(
+                () -> {
+                  runtime.beforeJdbcStatementExecute("SELECT 1");
+                  runtime.beforeJdbcPreparedStatement("SELECT ?");
+                  runtime.beforeJdbcTransactionCommit();
+                  runtime.beforeJdbcTransactionRollback();
+                })
+            .doesNotThrowAnyException();
       } finally {
         handle.stop();
       }
     }
 
     @Test
-    @DisplayName("SQL pattern \"SELECT*\" does NOT match \"INSERT INTO orders\"")
-    void selectPatternDoesNotMatchInsert() throws Throwable {
-      final ChaosRuntime runtime = new ChaosRuntime();
-      final ChaosActivationHandle handle =
-          runtime.activate(
-              ChaosScenario.builder("jdbc-select-pattern")
-                  .scope(ChaosScenario.ScenarioScope.JVM)
-                  .selector(
-                      new ChaosSelector.JdbcSelector(
-                          Set.of(OperationType.JDBC_STATEMENT_EXECUTE),
-                          NamePattern.glob("SELECT*")))
-                  .effect(ChaosEffect.suppress())
-                  .activationPolicy(ActivationPolicy.always())
-                  .build());
-      try {
-        assertThat(runtime.beforeJdbcStatementExecute("INSERT INTO orders (id) VALUES (1)"))
-            .isFalse();
-      } finally {
-        handle.stop();
-      }
-    }
-
-    @Test
-    @DisplayName("no active scenario — all JDBC dispatch methods return false / passthrough")
+    @DisplayName("no active scenario — every JDBC dispatch method passes through")
     void noActiveScenarioPassthrough() {
       final ChaosRuntime runtime = new ChaosRuntime();
       assertThatCode(
               () -> {
-                assertThat(runtime.beforeJdbcConnectionAcquire("hikari-primary")).isFalse();
-                assertThat(runtime.beforeJdbcStatementExecute("SELECT 1")).isFalse();
-                assertThat(runtime.beforeJdbcPreparedStatement("SELECT ?")).isFalse();
-                assertThat(runtime.beforeJdbcTransactionCommit()).isFalse();
-                assertThat(runtime.beforeJdbcTransactionRollback()).isFalse();
+                runtime.beforeJdbcConnectionAcquire("hikari-primary");
+                runtime.beforeJdbcStatementExecute("SELECT 1");
+                runtime.beforeJdbcPreparedStatement("SELECT ?");
+                runtime.beforeJdbcTransactionCommit();
+                runtime.beforeJdbcTransactionRollback();
               })
           .doesNotThrowAnyException();
     }
 
     @Test
-    @DisplayName("after handle.stop() — no suppression observed on subsequent calls")
-    void afterStopNoSuppression() throws Throwable {
+    @DisplayName("after handle.stop() — no rejection on subsequent calls")
+    void afterStopNoRejection() {
       final ChaosRuntime runtime = new ChaosRuntime();
       final ChaosActivationHandle handle =
           activate(
               runtime,
               "jdbc-conn-stop",
               ChaosSelector.jdbc(OperationType.JDBC_CONNECTION_ACQUIRE),
-              ChaosEffect.suppress());
-      assertThat(runtime.beforeJdbcConnectionAcquire("hikari-primary")).isTrue();
+              ChaosEffect.reject("db down"));
+      assertThatThrownBy(() -> runtime.beforeJdbcConnectionAcquire("hikari-primary"))
+          .isInstanceOf(SQLException.class);
       handle.stop();
-      assertThat(runtime.beforeJdbcConnectionAcquire("hikari-primary")).isFalse();
+      assertThatCode(() -> runtime.beforeJdbcConnectionAcquire("hikari-primary"))
+          .doesNotThrowAnyException();
     }
   }
 }

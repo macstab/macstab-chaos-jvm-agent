@@ -34,6 +34,7 @@
 | 15 | `reject` / `suppress` on `QUEUE_OFFER` skip queues without a capacity limit | you saturate a pool on an unbounded queue through `QUEUE_OFFER` | reject `EXECUTOR_SUBMIT`, or give the queue a capacity (§15) |
 | 16 | A pool task carries a session only once the session has a scenario | another service relies on `X-Chaos-Session` from pool tasks of a session without local scenarios | activate a scenario in the session first, or set the header from `session.id()` (§16) |
 | 17 | Direct-buffer pressure above the direct memory limit is refused | a `directBufferPressure` asks for more than `-XX:MaxDirectMemorySize` (by default the maximum heap) | lower `totalBytes` or raise the limit (§17) |
+| 18 | `suppress` on HTTP and JDBC is refused; `ChaosHttpSuppressException` / `ChaosJdbcSuppressException` are removed | a plan suppresses `HTTP_CLIENT_*` or `JDBC_*`, or code catches those exceptions | use `reject` and catch `IOException` / `SQLException` (§18) |
 
 ---
 
@@ -209,6 +210,14 @@ Before (1.x): a test opened a session without activating anything in it, and the
 A `DirectBufferPressureEffect` whose `totalBytes` exceeds the JVM's direct memory limit (`-XX:MaxDirectMemorySize`; when it is not set, the maximum heap) is refused at activation with `ChaosUnsupportedFeatureException`, recorded as `UNSUPPORTED_RUNTIME`. A stressor that runs out of memory or cannot start a thread while it starts fails the same way, after freeing what it took.
 
 Before (1.x): the activation allocated until the JVM threw `OutOfMemoryError: Cannot reserve … direct buffer memory`, which escaped unrecorded and left a registered scenario and the buffers already allocated behind. Lower `totalBytes`, or raise `-XX:MaxDirectMemorySize` on the JVM under test; catch `ChaosUnsupportedFeatureException` where you caught `OutOfMemoryError`.
+
+## 18. `suppress` on HTTP and JDBC is refused
+
+A `SuppressEffect` on `HTTP_CLIENT_SEND`, `HTTP_CLIENT_SEND_ASYNC`, `JDBC_CONNECTION_ACQUIRE`, `JDBC_STATEMENT_EXECUTE`, `JDBC_PREPARED_STATEMENT`, `JDBC_TRANSACTION_COMMIT` or `JDBC_TRANSACTION_ROLLBACK` fails activation with `ChaosValidationException` ("use reject"). In 1.x it threw the agent's `ChaosHttpSuppressException` / `ChaosJdbcSuppressException` (the JDK's `HttpURLConnection` threw `ConnectException`), which no real client throws, so the application's error handling met a failure it never sees in production (ADR 0005). Both classes are removed from `chaos-agent-api`.
+
+- In plans: replace `{"type": "suppress"}` on these operations with `{"type": "reject", "message": "…"}`; in code, `ChaosEffect.suppress()` with `ChaosEffect.reject("…")`.
+- In tests: catch `java.io.IOException` for HTTP (an `UncheckedIOException` or your client's wrapper where it wraps one) and `java.sql.SQLException` for JDBC (Spring: `DataAccessException`, `CannotGetJdbcConnectionException`) instead of `ChaosHttpSuppressException` / `ChaosJdbcSuppressException`.
+- Code that calls `BootstrapDispatcher` or `BridgeDelegate` directly: `beforeHttpSend`, `beforeHttpSendAsync` and the five `beforeJdbc*` return `void`; a reject throws from them.
 
 ---
 

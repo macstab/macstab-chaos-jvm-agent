@@ -1,6 +1,5 @@
 package com.macstab.chaos.jvm.instrumentation;
 
-import com.macstab.chaos.jvm.api.ChaosHttpSuppressException;
 import com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher;
 import net.bytebuddy.asm.Advice;
 
@@ -25,10 +24,8 @@ final class HttpClientAdvice {
   private HttpClientAdvice() {}
 
   /**
-   * Intercepts {@code jdk.internal.net.http.HttpClientImpl.send(HttpRequest, BodyHandler)}.
-   *
-   * <p>When the dispatcher returns {@code true} (SUPPRESS), the advice throws {@link
-   * ChaosHttpSuppressException} to abort the call with a terminal failure.
+   * Intercepts {@code jdk.internal.net.http.HttpClientImpl.send(HttpRequest, BodyHandler)}. A
+   * rejected send fails with the {@link java.io.IOException} the dispatcher throws.
    */
   static final class JavaHttpClientSendAdvice {
     @Advice.OnMethodEnter
@@ -63,16 +60,11 @@ final class HttpClientAdvice {
           request instanceof java.net.http.HttpRequest httpRequest
               ? String.valueOf(httpRequest.uri())
               : null;
-      final boolean suppressed;
       try {
-        suppressed = BootstrapDispatcher.beforeHttpSend(url);
+        BootstrapDispatcher.beforeHttpSend(url);
       } catch (final Throwable throwable) {
         BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
         throw throwable;
-      }
-      if (suppressed) {
-        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
-        throw new ChaosHttpSuppressException("HTTP send suppressed by chaos agent: " + url);
       }
     }
 
@@ -118,16 +110,11 @@ final class HttpClientAdvice {
           request instanceof java.net.http.HttpRequest httpRequest
               ? String.valueOf(httpRequest.uri())
               : null;
-      final boolean suppressed;
       try {
-        suppressed = BootstrapDispatcher.beforeHttpSendAsync(url);
+        BootstrapDispatcher.beforeHttpSendAsync(url);
       } catch (final Throwable throwable) {
         BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
         throw throwable;
-      }
-      if (suppressed) {
-        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
-        throw new ChaosHttpSuppressException("HTTP sendAsync suppressed by chaos agent: " + url);
       }
     }
 
@@ -145,10 +132,6 @@ final class HttpClientAdvice {
    * evaluated once however it is driven. This is the transport of Spring's {@code
    * SimpleClientHttpRequestFactory} ({@code RestTemplate}'s default) and of the AWS SDK's URL
    * connection client.
-   *
-   * <p>A suppressed request fails with {@link java.net.ConnectException}: callers of {@code
-   * URLConnection} handle {@link java.io.IOException}, and a refused connection is what they expect
-   * to see.
    */
   static final class HttpUrlConnectionConnectAdvice {
     @Advice.OnMethodEnter
@@ -158,16 +141,11 @@ final class HttpClientAdvice {
       }
       // URL.toString() formats the URL; unlike equals()/hashCode() it never resolves the host.
       final String target = url == null ? null : url.toString();
-      final boolean suppressed;
       try {
-        suppressed = BootstrapDispatcher.beforeHttpSend(target);
+        BootstrapDispatcher.beforeHttpSend(target);
       } catch (final Throwable throwable) {
         BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
         throw throwable;
-      }
-      if (suppressed) {
-        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
-        throw new java.net.ConnectException("HTTP connect suppressed by chaos agent: " + target);
       }
     }
 
@@ -209,7 +187,6 @@ final class HttpClientAdvice {
         return;
       }
       final String url;
-      final boolean suppressed;
       try {
         BootstrapDispatcher.beginInternalCall();
         try {
@@ -217,14 +194,10 @@ final class HttpClientAdvice {
         } finally {
           BootstrapDispatcher.endInternalCall();
         }
-        suppressed = BootstrapDispatcher.beforeHttpSend(url);
+        BootstrapDispatcher.beforeHttpSend(url);
       } catch (final Throwable throwable) {
         BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
         throw throwable;
-      }
-      if (suppressed) {
-        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
-        throw new ChaosHttpSuppressException("HTTP execute suppressed by chaos agent: " + url);
       }
     }
 
@@ -242,7 +215,6 @@ final class HttpClientAdvice {
         return;
       }
       final String url;
-      final boolean suppressed;
       try {
         BootstrapDispatcher.beginInternalCall();
         try {
@@ -250,14 +222,10 @@ final class HttpClientAdvice {
         } finally {
           BootstrapDispatcher.endInternalCall();
         }
-        suppressed = BootstrapDispatcher.beforeHttpSendAsync(url);
+        BootstrapDispatcher.beforeHttpSendAsync(url);
       } catch (final Throwable throwable) {
         BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
         throw throwable;
-      }
-      if (suppressed) {
-        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
-        throw new ChaosHttpSuppressException("HTTP enqueue suppressed by chaos agent: " + url);
       }
     }
 
@@ -282,7 +250,6 @@ final class HttpClientAdvice {
         return;
       }
       final String url;
-      final boolean suppressed;
       try {
         BootstrapDispatcher.beginInternalCall();
         try {
@@ -290,17 +257,10 @@ final class HttpClientAdvice {
         } finally {
           BootstrapDispatcher.endInternalCall();
         }
-        suppressed = BootstrapDispatcher.beforeHttpSend(url);
+        BootstrapDispatcher.beforeHttpSend(url);
       } catch (final Throwable throwable) {
         BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
         throw throwable;
-      }
-      if (suppressed) {
-        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
-        // HttpClient 4 class files are Java 6: inlined advice must not use invokedynamic, which
-        // string concatenation with + compiles to.
-        throw new ChaosHttpSuppressException(
-            "HTTP execute suppressed by chaos agent: ".concat(String.valueOf(url)));
       }
     }
 
@@ -325,7 +285,6 @@ final class HttpClientAdvice {
         return;
       }
       final String url;
-      final boolean suppressed;
       try {
         BootstrapDispatcher.beginInternalCall();
         try {
@@ -333,17 +292,10 @@ final class HttpClientAdvice {
         } finally {
           BootstrapDispatcher.endInternalCall();
         }
-        suppressed = BootstrapDispatcher.beforeHttpSend(url);
+        BootstrapDispatcher.beforeHttpSend(url);
       } catch (final Throwable throwable) {
         BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
         throw throwable;
-      }
-      if (suppressed) {
-        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
-        // HttpClient 4 class files are Java 6: inlined advice must not use invokedynamic, which
-        // string concatenation with + compiles to.
-        throw new ChaosHttpSuppressException(
-            "HTTP execute suppressed by chaos agent: ".concat(String.valueOf(url)));
       }
     }
 
@@ -364,7 +316,6 @@ final class HttpClientAdvice {
         return;
       }
       final String url;
-      final boolean suppressed;
       try {
         BootstrapDispatcher.beginInternalCall();
         try {
@@ -372,14 +323,10 @@ final class HttpClientAdvice {
         } finally {
           BootstrapDispatcher.endInternalCall();
         }
-        suppressed = BootstrapDispatcher.beforeHttpSend(url);
+        BootstrapDispatcher.beforeHttpSend(url);
       } catch (final Throwable throwable) {
         BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
         throw throwable;
-      }
-      if (suppressed) {
-        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
-        throw new ChaosHttpSuppressException("HTTP execute suppressed by chaos agent: " + url);
       }
     }
 
@@ -403,7 +350,6 @@ final class HttpClientAdvice {
         return;
       }
       final String url;
-      final boolean suppressed;
       try {
         BootstrapDispatcher.beginInternalCall();
         try {
@@ -411,14 +357,10 @@ final class HttpClientAdvice {
         } finally {
           BootstrapDispatcher.endInternalCall();
         }
-        suppressed = BootstrapDispatcher.beforeHttpSend(url);
+        BootstrapDispatcher.beforeHttpSend(url);
       } catch (final Throwable throwable) {
         BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
         throw throwable;
-      }
-      if (suppressed) {
-        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
-        throw new ChaosHttpSuppressException("HTTP execute suppressed by chaos agent: " + url);
       }
     }
 
@@ -439,7 +381,6 @@ final class HttpClientAdvice {
         return;
       }
       final String url;
-      final boolean suppressed;
       try {
         BootstrapDispatcher.beginInternalCall();
         try {
@@ -447,14 +388,10 @@ final class HttpClientAdvice {
         } finally {
           BootstrapDispatcher.endInternalCall();
         }
-        suppressed = BootstrapDispatcher.beforeHttpSendAsync(url);
+        BootstrapDispatcher.beforeHttpSendAsync(url);
       } catch (final Throwable throwable) {
         BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
         throw throwable;
-      }
-      if (suppressed) {
-        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
-        throw new ChaosHttpSuppressException("HTTP connect suppressed by chaos agent: " + url);
       }
     }
 

@@ -748,93 +748,78 @@ final class ChaosBridge implements BridgeDelegate {
   }
 
   /**
-   * Invoked before a synchronous HTTP client send; returns {@code true} when the runtime decides to
-   * suppress the call.
+   * Invoked before a synchronous HTTP client send.
    *
    * @param url the request URL
-   * @return {@code true} to suppress; {@code false} for normal execution
-   * @throws Throwable if the runtime decides to abort the call
+   * @throws Throwable the failure of a scenario that rejects the call
    */
   @Override
-  public boolean beforeHttpSend(final @Nullable String url) throws Throwable {
-    return runtime.beforeHttpSend(url, com.macstab.chaos.jvm.api.OperationType.HTTP_CLIENT_SEND);
+  public void beforeHttpSend(final @Nullable String url) throws Throwable {
+    runtime.beforeHttpSend(url, com.macstab.chaos.jvm.api.OperationType.HTTP_CLIENT_SEND);
   }
 
   /**
-   * Invoked before an asynchronous HTTP client send; returns {@code true} when the runtime decides
-   * to suppress the call.
+   * Invoked before an asynchronous HTTP client send.
    *
    * @param url the request URL
-   * @return {@code true} to suppress; {@code false} for normal execution
-   * @throws Throwable if the runtime decides to abort the call
+   * @throws Throwable the failure of a scenario that rejects the call
    */
   @Override
-  public boolean beforeHttpSendAsync(final @Nullable String url) throws Throwable {
-    return runtime.beforeHttpSend(
-        url, com.macstab.chaos.jvm.api.OperationType.HTTP_CLIENT_SEND_ASYNC);
+  public void beforeHttpSendAsync(final @Nullable String url) throws Throwable {
+    runtime.beforeHttpSend(url, com.macstab.chaos.jvm.api.OperationType.HTTP_CLIENT_SEND_ASYNC);
   }
 
   /**
-   * Invoked before a JDBC connection is acquired from a pool; returns {@code true} when the runtime
-   * decides to suppress the call.
+   * Invoked before a JDBC connection is acquired from a pool.
    *
    * @param poolName the pool identifier
-   * @return {@code true} to suppress; {@code false} for normal execution
-   * @throws Throwable if the runtime decides to abort the call
+   * @throws Throwable the failure of a scenario that rejects the call
    */
   @Override
-  public boolean beforeJdbcConnectionAcquire(final @Nullable String poolName) throws Throwable {
-    return runtime.beforeJdbcConnectionAcquire(poolName);
+  public void beforeJdbcConnectionAcquire(final @Nullable String poolName) throws Throwable {
+    runtime.beforeJdbcConnectionAcquire(poolName);
   }
 
   /**
-   * Invoked before a {@link java.sql.Statement} execute call; returns {@code true} when the runtime
-   * decides to suppress the call.
+   * Invoked before a {@link java.sql.Statement} execute call.
    *
    * @param sql the SQL statement
-   * @return {@code true} to suppress; {@code false} for normal execution
-   * @throws Throwable if the runtime decides to abort the call
+   * @throws Throwable the failure of a scenario that rejects the call
    */
   @Override
-  public boolean beforeJdbcStatementExecute(final @Nullable String sql) throws Throwable {
-    return runtime.beforeJdbcStatementExecute(sql);
+  public void beforeJdbcStatementExecute(final @Nullable String sql) throws Throwable {
+    runtime.beforeJdbcStatementExecute(sql);
   }
 
   /**
-   * Invoked before a {@link java.sql.Connection#prepareStatement(String)} call; returns {@code
-   * true} when the runtime decides to suppress the call.
+   * Invoked before a {@link java.sql.Connection#prepareStatement(String)} call.
    *
    * @param sql the SQL statement being prepared
-   * @return {@code true} to suppress; {@code false} for normal execution
-   * @throws Throwable if the runtime decides to abort the call
+   * @throws Throwable the failure of a scenario that rejects the call
    */
   @Override
-  public boolean beforeJdbcPreparedStatement(final @Nullable String sql) throws Throwable {
-    return runtime.beforeJdbcPreparedStatement(sql);
+  public void beforeJdbcPreparedStatement(final @Nullable String sql) throws Throwable {
+    runtime.beforeJdbcPreparedStatement(sql);
   }
 
   /**
-   * Invoked before a {@link java.sql.Connection#commit()} call; returns {@code true} when the
-   * runtime decides to suppress the commit.
+   * Invoked before a {@link java.sql.Connection#commit()} call.
    *
-   * @return {@code true} to suppress; {@code false} for normal execution
-   * @throws Throwable if the runtime decides to abort the call
+   * @throws Throwable the failure of a scenario that rejects the call
    */
   @Override
-  public boolean beforeJdbcTransactionCommit() throws Throwable {
-    return runtime.beforeJdbcTransactionCommit();
+  public void beforeJdbcTransactionCommit() throws Throwable {
+    runtime.beforeJdbcTransactionCommit();
   }
 
   /**
-   * Invoked before a {@link java.sql.Connection#rollback()} call; returns {@code true} when the
-   * runtime decides to suppress the rollback.
+   * Invoked before a {@link java.sql.Connection#rollback()} call.
    *
-   * @return {@code true} to suppress; {@code false} for normal execution
-   * @throws Throwable if the runtime decides to abort the call
+   * @throws Throwable the failure of a scenario that rejects the call
    */
   @Override
-  public boolean beforeJdbcTransactionRollback() throws Throwable {
-    return runtime.beforeJdbcTransactionRollback();
+  public void beforeJdbcTransactionRollback() throws Throwable {
+    runtime.beforeJdbcTransactionRollback();
   }
 
   /**

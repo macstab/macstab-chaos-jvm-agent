@@ -80,7 +80,7 @@ Both mechanisms grant the same set of opens to the unnamed module of the system 
 | `java.base/sun.nio.ch`                | `DirectBuffer.cleaner()` reflection (`DirectBufferPressureStressor`).                         |
 | `java.base/jdk.internal.ref`          | Modern `Cleaner` mechanism (Java 9+ replacement for `sun.misc.Cleaner`).                      |
 
-**Adding a new internal**: when a new feature requires access to another non-exported package, add it to **both** the manifest in `chaos-agent-bootstrap/build.gradle.kts` and the list inside `ModuleOpener#grantInternalModuleOpens`. Same pattern applies if a new advice class references additional helper types: those types must be injected into the bootstrap classloader from `injectBridge(...)` (see `ChaosHttpSuppressException` and `HttpUrlExtractor` for prior art).
+**Adding a new internal**: when a new feature requires access to another non-exported package, add it to **both** the manifest in `chaos-agent-bootstrap/build.gradle.kts` and the list inside `ModuleOpener#grantInternalModuleOpens`. Same pattern applies if a new advice class references additional helper types: those types must be injected into the bootstrap classloader from `injectBridge(...)` (see `HttpUrlExtractor` and `JdbcTargetExtractor` for prior art).
 
 ---
 
@@ -416,13 +416,13 @@ If the bridge is not installed (`BootstrapDispatcher.handles == null`), the wrap
 | 42    | `ADJUST_LOCAL_DATE_TIME_NOW`         | `LocalDateTime.now()` (no-arg static)                                                                                                                                           | exit (`LocalDateTime` rewrite)               |
 | 43    | `ADJUST_ZONED_DATE_TIME_NOW`         | `ZonedDateTime.now()`, `now(ZoneId)` (static)                                                                                                                                   | exit (`ZonedDateTime` rewrite)               |
 | 44    | `ADJUST_DATE_NEW`                    | `Date()` (no-arg constructor)                                                                                                                                                   | exit (embedded millis rewrite via `setTime`) |
-| 45    | `BEFORE_HTTP_SEND`                   | `HttpClientImpl.send`, `HttpURLConnection.plainConnect0()`, OkHttp 3/4 `RealCall.execute()`, Apache HC 4/5 `CloseableHttpClient.execute(...)` (request-first and host-first)                                         | enter (boolean suppress)                     |
-| 46    | `BEFORE_HTTP_SEND_ASYNC`             | `HttpClientImpl.sendAsync` (2- and 3-arg), OkHttp 3/4 `RealCall.enqueue(Callback)`, Reactor Netty `HttpClientConnect.connect()`                                                 | enter (boolean suppress)                     |
-| 47    | `BEFORE_JDBC_CONNECTION_ACQUIRE`     | `HikariPool.getConnection(long)`, c3p0 `checkoutPooledConnection()`                                                                                                             | enter (boolean suppress)                     |
-| 48    | `BEFORE_JDBC_STATEMENT_EXECUTE`      | `Statement.execute*(String, …)`; `PreparedStatement.execute()`, `executeQuery()`, `executeUpdate()`, `executeLargeUpdate()` (target `null`)                                     | enter (boolean suppress)                     |
-| 49    | `BEFORE_JDBC_PREPARED_STATEMENT`     | `Connection.prepareStatement(String, …)`, `prepareCall(String, …)`                                                                                                              | enter (boolean suppress)                     |
-| 50    | `BEFORE_JDBC_TRANSACTION_COMMIT`     | `Connection.commit()`                                                                                                                                                           | enter (boolean suppress)                     |
-| 51    | `BEFORE_JDBC_TRANSACTION_ROLLBACK`   | `Connection.rollback()`                                                                                                                                                         | enter (boolean suppress)                     |
+| 45    | `BEFORE_HTTP_SEND`                   | `HttpClientImpl.send`, `HttpURLConnection.plainConnect0()`, OkHttp 3/4 `RealCall.execute()`, Apache HC 4/5 `CloseableHttpClient.execute(...)` (request-first and host-first)                                         | enter (`void`; a reject throws)              |
+| 46    | `BEFORE_HTTP_SEND_ASYNC`             | `HttpClientImpl.sendAsync` (2- and 3-arg), OkHttp 3/4 `RealCall.enqueue(Callback)`, Reactor Netty `HttpClientConnect.connect()`                                                 | enter (`void`; a reject throws)              |
+| 47    | `BEFORE_JDBC_CONNECTION_ACQUIRE`     | `HikariPool.getConnection(long)`, c3p0 `checkoutPooledConnection()`                                                                                                             | enter (`void`; a reject throws)              |
+| 48    | `BEFORE_JDBC_STATEMENT_EXECUTE`      | `Statement.execute*(String, …)`; `PreparedStatement.execute()`, `executeQuery()`, `executeUpdate()`, `executeLargeUpdate()` (target `null`)                                     | enter (`void`; a reject throws)              |
+| 49    | `BEFORE_JDBC_PREPARED_STATEMENT`     | `Connection.prepareStatement(String, …)`, `prepareCall(String, …)`                                                                                                              | enter (`void`; a reject throws)              |
+| 50    | `BEFORE_JDBC_TRANSACTION_COMMIT`     | `Connection.commit()`                                                                                                                                                           | enter (`void`; a reject throws)              |
+| 51    | `BEFORE_JDBC_TRANSACTION_ROLLBACK`   | `Connection.rollback()`                                                                                                                                                         | enter (`void`; a reject throws)              |
 | 52    | `BEFORE_THREAD_SLEEP`                | `Thread.sleep(long)`, `sleep(long, int)`, `sleep(Duration)`                                                                                                                     | enter (boolean suppress)                     |
 | 53    | `BEFORE_DNS_RESOLVE`                 | `InetAddress.getByName(String)`, `getAllByName(String)`, `getLocalHost()`                                                                                                       | enter                                        |
 | 54    | `BEFORE_SSL_HANDSHAKE`               | `SSLSocket.startHandshake()` and implicit handshakes (`startHandshake(boolean)`), `SSLEngine.beginHandshake()`                                                                  | enter                                        |
@@ -579,7 +579,7 @@ See [overall-agent.md §11] for full hot-path cost breakdown.
 
 ## 12.1 Plain-English Overview
 
-When your application fires an HTTP request through the JDK `HttpClient`, OkHttp, Apache HttpComponents, or Spring WebClient, the agent intercepts it before the bytes leave the process. You write a scenario with `ChaosSelector.httpClient(...)`, give it a URL glob like `"https://payments.internal/*"`, and every call to that endpoint goes through the chaos pipeline first — delays, suppression, or your own exception. The application never knows the agent is present unless a scenario fires.
+When your application fires an HTTP request through the JDK `HttpClient`, OkHttp, Apache HttpComponents, or Spring WebClient, the agent intercepts it before the bytes leave the process. You write a scenario with `ChaosSelector.httpClient(...)`, give it a URL glob like `"https://payments.internal/*"`, and every call to that endpoint goes through the chaos pipeline first — a delay, or a reject that fails the call with the client's own `IOException`. The application never knows the agent is present unless a scenario fires.
 
 ## 12.2 The Wired Clients
 
@@ -589,7 +589,7 @@ The agent instruments the JDK `HttpClient` plus four third-party HTTP client lib
 |----------------------------------|-----------------------------------------------------------|------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------|
 | JDK `HttpClient` synchronous     | JDK 11+                                                   | `jdk.internal.net.http.HttpClientImpl`                                 | `send(HttpRequest, BodyHandler)` (2-arg)                                                                                                                          | `BEFORE_HTTP_SEND` (sync)        |
 | JDK `HttpClient` asynchronous    | JDK 11+                                                   | `jdk.internal.net.http.HttpClientImpl`                                 | `sendAsync(...)` (2-arg and 3-arg with `PushPromiseHandler`)                                                                                                      | `BEFORE_HTTP_SEND_ASYNC` (async) |
-| JDK `HttpURLConnection` (and HTTPS) | JDK                                                    | `sun.net.www.protocol.http.HttpURLConnection`                          | `plainConnect0()` — once per request, however it is driven (`connect`, `getResponseCode`, `getInputStream`, `getOutputStream`); suppress throws `ConnectException` | `BEFORE_HTTP_SEND` (sync)        |
+| JDK `HttpURLConnection` (and HTTPS) | JDK                                                    | `sun.net.www.protocol.http.HttpURLConnection`                          | `plainConnect0()` — once per request, however it is driven (`connect`, `getResponseCode`, `getInputStream`, `getOutputStream`)                                     | `BEFORE_HTTP_SEND` (sync)        |
 | OkHttp synchronous               | `com.squareup.okhttp3:okhttp:4.12.0` (3.x also supported) | `okhttp3.RealCall` (3.x), `okhttp3.internal.connection.RealCall` (4.x) | `execute()` (0-arg)                                                                                                                                               | `BEFORE_HTTP_SEND` (sync)        |
 | OkHttp asynchronous              | same                                                      | same                                                                   | `enqueue(Callback)` (1-arg)                                                                                                                                       | `BEFORE_HTTP_SEND_ASYNC` (async) |
 | Apache HC 4.x                    | `org.apache.httpcomponents:httpclient:4.5.14`             | `org.apache.http.impl.client.CloseableHttpClient`                      | every `execute(HttpHost, HttpRequest, …)` and `execute(HttpUriRequest, …)` overload                                                                               | `BEFORE_HTTP_SEND` (sync)        |
@@ -605,7 +605,7 @@ The handle slots in `BootstrapDispatcher` are:
 - `BEFORE_HTTP_SEND = 45` — synchronous send (JDK `send()`, `HttpURLConnection`, OkHttp `execute()`, Apache HC 4/5 `execute()`)
 - `BEFORE_HTTP_SEND_ASYNC = 46` — asynchronous / reactive send (JDK `sendAsync()`, OkHttp `enqueue()`, Reactor Netty `connect()`)
 
-Both slots carry the URL string as a single `String` argument and return `boolean` (`true` = suppress).
+Both slots carry the URL string as a single `String` argument and return nothing: a reject throws the client's own `IOException` from the dispatch, a delay sleeps there, and the real call then runs or not. A suppress is refused at activation (ADR 0005): no real client skips a request without failing it.
 
 ## 12.3 `HttpUrlExtractor` — Reflective URL Extraction
 
@@ -628,15 +628,9 @@ When any step in the chain returns `null`, or when any reflective call throws, t
 
 The reflection approach has one observable warm-up cost: the first call for each new client class incurs a full hierarchy walk. After the `Method` object is cached, subsequent calls are a single `ConcurrentHashMap.get()` plus `Method.invoke()` — cheap but not zero. At JIT saturation the JIT may inline through the `MethodHandle` and `Method.invoke` layers, though the reflective dispatch path is generally not inlined by C2.
 
-## 12.4 `ChaosHttpSuppressException` — Why Unchecked, How It Propagates
+## 12.4 How a Rejected Request Fails
 
-`ChaosHttpSuppressException extends RuntimeException`. The unchecked choice is deliberate on two counts.
-
-First, OkHttp's `Call.execute()` declares `throws IOException`. If the advice threw a checked exception that is not `IOException`, the JVM verifier would reject the woven method — the inlined advice body must declare or catch all checked exceptions that could escape it. An unchecked exception escapes any checked-exception declaration without violating the verifier.
-
-Second, the async path (`enqueue`, `connect`) does not return a value — it dispatches onto a callback. If suppression is required, the only way to prevent the underlying I/O from being scheduled is to throw before the real method body runs. An unchecked exception thrown from `@Advice.OnMethodEnter` propagates out of the method entry, unwinding the entire call stack to wherever the caller catches exceptions. For OkHttp's `enqueue()` this means the caller never registers the `Callback` with the dispatcher; for Reactor Netty's `connect()` the reactive subscriber never sees an `onSubscribe`. The caller's existing error handling — Resilience4j circuit breakers, Spring's `ExchangeFilterFunction`, OkHttp's `Interceptor` chain — processes it as a runtime failure, which is the correct chaos semantic.
-
-`ChaosHttpSuppressException` is declared in `chaos-agent-api` (not in `chaos-agent-instrumentation-jdk`) so that downstream code can `catch (ChaosHttpSuppressException e)` in integration tests without depending on the instrumentation module.
+A reject on `HTTP_CLIENT_SEND` / `HTTP_CLIENT_SEND_ASYNC` throws `java.io.IOException(message)` (built by `FailureFactory`) from `BootstrapDispatcher.beforeHttpSend` / `beforeHttpSendAsync`, inside the advice, before the real method body runs. Every wired client declares or tolerates `IOException` on these paths, so the caller's own error handling — retries, circuit breakers, `ExchangeFilterFunction`s, OkHttp interceptors — sees what a refused or reset connection produces. 1.x also had a suppress that threw the agent's `ChaosHttpSuppressException`; no real client throws it, so 2.0 refuses a suppress on HTTP at activation and the class is gone.
 
 ## 12.5 The `instrumentOptional` Guard
 
@@ -659,7 +653,7 @@ The advice classes `JavaHttpClientSendAdvice` and `JavaHttpClientSendAsyncAdvice
 `jdk.internal.net.http.HttpClientImpl` lives in the non-exported package `jdk.internal.net.http` inside the `java.net.http` module. The agent self-grants the required reflective open at install time — see [Module access strategy](#module-access-strategy) — so users never need to set `--add-opens` JVM flags. Two pieces are involved:
 
 1. **Module open** — `Instrumentation#redefineModule(...)` is called from `ModuleOpener#grantInternalModuleOpens` as the first step of `install`, and the agent JAR's `MANIFEST.MF` carries an `Add-Opens` line for the same packages (the manifest attribute is honoured on `-javaagent:` premain attach; `redefineModule` covers `agentmain` / runtime self-attach).
-2. **Bootstrap-classpath types** — types referenced by woven advice (`ChaosHttpSuppressException`, `HttpUrlExtractor`) are injected into the bootstrap classloader's classpath alongside `BootstrapDispatcher`. Without this the JVM verifier raises `NoClassDefFoundError` because `HttpClientImpl` is loaded by the platform classloader and cannot resolve agent-classloader types directly.
+2. **Bootstrap-classpath types** — types referenced by woven advice (`HttpUrlExtractor`, `JdbcTargetExtractor`) are injected into the bootstrap classloader's classpath alongside `BootstrapDispatcher`. Without this the JVM verifier raises `NoClassDefFoundError` because `HttpClientImpl` is loaded by the platform classloader and cannot resolve agent-classloader types directly.
 
 ## 12.7 URL Pattern Matching in `SelectorMatcher`
 
@@ -678,7 +672,7 @@ The `HttpClientSelectorTest` (`agentInstalled_zeroScenarios` through `sessionIdM
 
 ## 12.8 Sequence Diagram — OkHttp Synchronous Path
 
-*OkHttp RealCall.execute() → chaos pipeline → suppression or passthrough*
+*OkHttp RealCall.execute() → chaos pipeline → rejection or passthrough*
 
 ```mermaid
 sequenceDiagram
@@ -714,26 +708,25 @@ sequenceDiagram
   SR-->>CD: List#lt;ScenarioContribution#gt;
   deactivate SR
   alt no matching scenario
-  CD-->>CB: false (no suppress)
-  CB-->>BD: false
-  BD-->>Advice: false
-  Advice-->>RC: (no throw — passthrough)
+  CD-->>CB: (returns)
+  CB-->>BD: (returns)
+  BD-->>Advice: (returns)
+  Advice-->>RC: (passthrough)
   RC->>RC: real OkHttp I/O executes
   RC-->>App: Response
-  else SUPPRESS scenario matched
-  CD-->>CB: true (suppress)
-  CB-->>BD: true
-  BD-->>Advice: true
-  Advice->>Advice: throw new ChaosHttpSuppressException(<br/>  "HTTP execute suppressed: " + url)
+  else REJECT scenario matched
+  CD-->>CB: throw IOException(message)
+  CB-->>BD: IOException
+  BD-->>Advice: IOException (sneaky-thrown)
   deactivate Advice
-  Advice-->>App: ChaosHttpSuppressException<br/>(propagates as unchecked)
+  Advice-->>App: IOException<br/>(as a failed connection)
   deactivate RC
   else DELAY scenario matched
   CD->>CD: Thread.sleep(delayMillis)
-  CD-->>CB: false
-  CB-->>BD: false
-  BD-->>Advice: false
-  Advice-->>RC: (no throw — passthrough after delay)
+  CD-->>CB: (returns)
+  CB-->>BD: (returns)
+  BD-->>Advice: (returns)
+  Advice-->>RC: (passthrough after delay)
   RC->>RC: real OkHttp I/O executes
   RC-->>App: Response (delayed)
   end
@@ -748,7 +741,7 @@ sequenceDiagram
 
 ## 13.1 Plain-English Overview
 
-The JDBC layer sits at the boundary between application code and the database driver. The agent intercepts two distinct surfaces: the connection pool (so you can make connection acquisition fail or slow down) and the JDBC statement API (so you can suppress specific SQL, slow down commits, or make rollbacks throw). A scenario targeting HikariCP's pool name `"payments-db"` with a `SuppressEffect` will make every attempt to borrow a connection from that pool throw a `ChaosJdbcSuppressException` — which Spring's `JdbcTemplate`, Hibernate, and plain JDBC code will all observe as an immediate failure, exercising the exact same failure path as a real database outage.
+The JDBC layer sits at the boundary between application code and the database driver. The agent intercepts two distinct surfaces: the connection pool (so you can make connection acquisition fail or slow down) and the JDBC statement API (so you can fail specific SQL, slow down commits, or make rollbacks throw). A scenario targeting HikariCP's pool name `"payments-db"` with a `RejectEffect` makes every attempt to borrow a connection from that pool throw an `SQLException` — which Spring's `JdbcTemplate`, Hibernate, and plain JDBC code all observe as the failure a real database outage produces. A suppress on JDBC is refused at activation: no driver skips a call without failing it (ADR 0005).
 
 ## 13.2 The Instrumented Methods
 
@@ -830,58 +823,54 @@ final String poolName = pool == null ? null : pool.getClass().getName();
 
 c3p0 does not expose a named-pool API at the level that the advice can reflectively reach without version-specific knowledge. The class name is sufficient for pattern matching when the application uses a single c3p0 pool type.
 
-## 13.6 `ChaosJdbcSuppressException` — Propagation Through HikariCP
+## 13.6 How a Rejected JDBC Call Fails
 
-`ChaosJdbcSuppressException extends RuntimeException`. When `HikariPool.getConnection(long)` advice throws it, HikariCP's calling code — `HikariDataSource.getConnection()` — does not catch `RuntimeException`. The exception propagates up through HikariCP's call stack to the application's `DataSource.getConnection()` call. Spring's `DataSourceUtils.getConnection()` wraps `RuntimeException`s that are not `DataAccessException` subtypes into a `CannotGetJdbcConnectionException`, which is what application code observes. Plain JDBC callers using `dataSource.getConnection()` directly see the `ChaosJdbcSuppressException` itself.
+A reject throws `java.sql.SQLException` (built by `FailureFactory`) from the dispatch, inside the advice, before the pool's or driver's method body runs. Spring's `DataSourceUtils.getConnection()` translates it into a `CannotGetJdbcConnectionException`, `JdbcTemplate` into a `DataAccessException`, and plain JDBC callers see the `SQLException` itself — exactly as for a database that refuses the call. 1.x also had a suppress that threw the agent's `ChaosJdbcSuppressException`; no driver throws it, so 2.0 refuses a suppress on JDBC at activation and the class is gone.
 
-The same propagation logic applies to all other JDBC advice methods: `Statement.execute()` advice throws before the driver's execute method runs; `Connection.commit()` advice throws before the driver flushes the transaction. Every layer above in the call stack — transaction managers, Hibernate sessions, `JdbcTemplate` — receives the exception as if the driver itself had thrown it.
-
-`ChaosJdbcSuppressException` is declared in `chaos-agent-api` for the same reason as `ChaosHttpSuppressException`: so that integration tests and application code can catch it precisely without depending on the instrumentation module.
+The advice holds no string concatenation (which compiles to `invokedynamic`): it is inlined into drivers and pools compiled for Java 6 (class file version 50), where `invokedynamic` is not allowed.
 
 ## 13.7 The `evaluateJdbc` Shared Pipeline
 
 All five JDBC dispatch methods in `ClientDispatch` funnel through a single private helper:
 
 ```java
-private boolean evaluateJdbc(
+private void evaluateJdbc(
         final OperationType opType,
         final String targetClassName,
-        final String targetName) throws Throwable {
-    final InvocationContext context = new InvocationContext(
-            opType, targetClassName, null, targetName, false, null, null,
-            scopeContext.currentSessionId());
-    final RuntimeDecision decision = evaluate(context);
-    applyDelayAndGate(decision);   // delay first, then gate; the delay is never dropped
-    if (decision.terminalAction() != null) {
-        final TerminalAction terminalAction = decision.terminalAction();
-        if (terminalAction.kind() == TerminalKind.THROW) {
-            throw terminalAction.throwable();
-        }
-        if (terminalAction.kind() == TerminalKind.SUPPRESS) {
-            return true;
-        }
+        final @Nullable String targetName) throws Throwable {
+    if (engine.idle(opType)) {
+        return;
     }
-    return false;
+    apply(engine.evaluate(new InvocationContext(
+            opType, targetClassName, null, targetName, false, null, null,
+            engine.scopeContext.currentSessionId())));
+}
+
+private void apply(final RuntimeDecision decision) throws Throwable {
+    engine.applyDelayAndGate(decision);   // delay first, then gate; the delay is never dropped
+    if (decision.terminalAction() instanceof TerminalAction.Throw thrown) {
+        throw thrown.failure();           // the SQLException of a reject
+    }
 }
 ```
 
 The five callers:
 
 ```java
-public boolean beforeJdbcConnectionAcquire(String poolName) throws Throwable {
-    return evaluateJdbc(JDBC_CONNECTION_ACQUIRE, "jdbc.pool", poolName);
+public void beforeJdbcConnectionAcquire(String poolName) throws Throwable {
+    evaluateJdbc(JDBC_CONNECTION_ACQUIRE, "jdbc.pool", poolName);
 }
-public boolean beforeJdbcStatementExecute(String sql) throws Throwable {
-    return evaluateJdbc(JDBC_STATEMENT_EXECUTE, "java.sql.Statement", snippet(sql));
+public void beforeJdbcStatementExecute(String sql) throws Throwable {
+    evaluateJdbc(JDBC_STATEMENT_EXECUTE, "java.sql.Statement", snippet(sql));
 }
-public boolean beforeJdbcPreparedStatement(String sql) throws Throwable {
-    return evaluateJdbc(JDBC_PREPARED_STATEMENT, "java.sql.Connection", snippet(sql));
+public void beforeJdbcPreparedStatement(String sql) throws Throwable {
+    evaluateJdbc(JDBC_PREPARED_STATEMENT, "java.sql.Connection", snippet(sql));
 }
-public boolean beforeJdbcTransactionCommit() throws Throwable {
-    return evaluateJdbc(JDBC_TRANSACTION_COMMIT, "java.sql.Connection", null);
+public void beforeJdbcTransactionCommit() throws Throwable {
+    evaluateJdbc(JDBC_TRANSACTION_COMMIT, "java.sql.Connection", null);
 }
-public boolean beforeJdbcTransactionRollback() throws Throwable {
-    return evaluateJdbc(JDBC_TRANSACTION_ROLLBACK, "java.sql.Connection", null);
+public void beforeJdbcTransactionRollback() throws Throwable {
+    evaluateJdbc(JDBC_TRANSACTION_ROLLBACK, "java.sql.Connection", null);
 }
 ```
 
@@ -889,7 +878,7 @@ Each caller sets the `targetClassName` to the JDBC API class that semantically o
 
 `OperationType` drives which scenarios participate in the match. A `JdbcSelector` with `operations = {JDBC_STATEMENT_EXECUTE}` will not appear in the `List<ScenarioContribution>` returned by `registry.match()` when `evaluateJdbc` is called with `JDBC_CONNECTION_ACQUIRE`. The `ScenarioRegistry.match()` method filters first by `operationType`, then by the selector's remaining predicates. This guarantees selector isolation: a scenario targeting connection acquisition never affects statement execution and vice versa.
 
-The return value contract: `evaluateJdbc` returns `true` when a `SUPPRESS` decision was reached. The advice class checks this boolean and throws `ChaosJdbcSuppressException` if `true`. `evaluateJdbc` returns `false` in all other cases: no scenario, delay only, gate only, or after an injected exception (in which case the exception was already thrown by `throw terminalAction.throwable()`). The advice does nothing further when `false` is returned, and the real JDBC method body proceeds.
+The contract: `evaluateJdbc` returns nothing. It throws the `SQLException` of a reject; in every other case (no scenario, delay only, gate only) it returns after the delay and gate, and the real JDBC method body proceeds.
 
 ## 13.8 Integration Test Design — Why `ChaosPlatform.installLocally()` Was Not Used
 
@@ -908,11 +897,11 @@ void installBridge() throws Exception {
 
 `ChaosPlatform.installLocally()` — the self-attach mechanism used by the Spring test starter — calls `JdkInstrumentationInstaller.install(instrumentation, runtime, eager)`, which weaves every hook group (JDBC included) on demand exactly as a `-javaagent:` start does. The `chaos-agent-instrumentation-jdk` module already depends on `chaos-agent-bootstrap` for the `ChaosPlatform` type. `chaos-agent-bootstrap` in turn depends on `chaos-agent-instrumentation-jdk`. Calling `ChaosPlatform.installLocally()` from within `chaos-agent-instrumentation-jdk`'s own test scope would create a module dependency cycle: the module-under-test would need its own outputs on the classpath at test time in a way that the Gradle project structure does not support without forking a child process with `-javaagent:`.
 
-The manual `BootstrapDispatcher.install(bridge, handles)` approach bypasses ByteBuddy entirely. The test calls the `BootstrapDispatcher` static dispatch methods (`beforeJdbcStatementExecute`, `beforeJdbcConnectionAcquire`, etc.) directly, simulating what the ByteBuddy-woven advice would call at production runtime. The real `ChaosRuntime` → `ChaosDispatcher` → `ScenarioRegistry` → `SelectorMatcher` pipeline executes in full. The real H2 in-memory database and HikariCP connection pool are used. The only missing piece is the ByteBuddy weaving — which is a concern for `JdkInstrumentationInstaller` to test, not for `JdbcIntegrationTest`. The test covers the dispatch path, the suppression signal, the exception throw, and the passthrough path; it leaves the bytecode transformation mechanics to the installer's own test scope.
+The manual `BootstrapDispatcher.install(bridge, handles)` approach bypasses ByteBuddy entirely. The test calls the `BootstrapDispatcher` static dispatch methods (`beforeJdbcStatementExecute`, `beforeJdbcConnectionAcquire`, etc.) directly, simulating what the ByteBuddy-woven advice would call at production runtime. The real `ChaosRuntime` → `ChaosDispatcher` → `ScenarioRegistry` → `SelectorMatcher` pipeline executes in full. The real H2 in-memory database and HikariCP connection pool are used. The only missing piece is the ByteBuddy weaving — which is a concern for `JdkInstrumentationInstaller` to test, not for `JdbcIntegrationTest`. The test covers the dispatch path, the `SQLException` of a reject, the refusal of a suppress at activation, and the passthrough path; it leaves the bytecode transformation mechanics to the installer's own test scope.
 
 ## 13.9 Sequence Diagram — HikariCP Connection Acquire
 
-*HikariPool.getConnection(long) → chaos pipeline → suppress or passthrough*
+*HikariPool.getConnection(long) → chaos pipeline → reject or passthrough*
 
 ```mermaid
 sequenceDiagram
@@ -944,29 +933,28 @@ sequenceDiagram
   SR-->>EJ: List#lt;ScenarioContribution#gt;
   deactivate SR
   alt no matching scenario
-  EJ-->>CD: false
-  CD-->>CB: false
-  CB-->>BD: false
-  BD-->>Advice: false
-  Advice-->>HP: (no throw — passthrough)
+  EJ-->>CD: (returns)
+  CD-->>CB: (returns)
+  CB-->>BD: (returns)
+  BD-->>Advice: (returns)
+  Advice-->>HP: (passthrough)
   HP->>HP: real connection borrowed from pool
   HP-->>App: Connection
-  else SUPPRESS scenario matched
-  EJ-->>CD: true (suppress)
-  CD-->>CB: true
-  CB-->>BD: true
-  BD-->>Advice: true
-  Advice->>Advice: throw new ChaosJdbcSuppressException(<br/>  "JDBC connection acquire suppressed: " + poolName)
+  else REJECT scenario matched
+  EJ-->>CD: throw SQLException(message)
+  CD-->>CB: SQLException
+  CB-->>BD: SQLException
+  BD-->>Advice: SQLException (sneaky-thrown)
   deactivate Advice
-  Advice-->>App: ChaosJdbcSuppressException<br/>(propagates unchecked through HikariCP)
+  Advice-->>App: SQLException<br/>(as from a refusing database)
   deactivate HP
   else DELAY scenario matched
   EJ->>EJ: Thread.sleep(delayMillis)
-  EJ-->>CD: false
-  CD-->>CB: false
-  CB-->>BD: false
-  BD-->>Advice: false
-  Advice-->>HP: (no throw — passthrough after delay)
+  EJ-->>CD: (returns)
+  CD-->>CB: (returns)
+  CB-->>BD: (returns)
+  BD-->>Advice: (returns)
+  Advice-->>HP: (passthrough after delay)
   HP->>HP: real connection borrowed from pool
   HP-->>App: Connection (delayed)
   end

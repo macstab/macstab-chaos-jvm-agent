@@ -6,9 +6,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.macstab.chaos.jvm.api.ActivationPolicy;
 import com.macstab.chaos.jvm.api.ChaosActivationHandle;
 import com.macstab.chaos.jvm.api.ChaosEffect;
-import com.macstab.chaos.jvm.api.ChaosJdbcSuppressException;
 import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.ChaosSelector;
+import com.macstab.chaos.jvm.api.ChaosValidationException;
 import com.macstab.chaos.jvm.api.OperationType;
 import com.macstab.chaos.jvm.core.ChaosRuntime;
 import com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher;
@@ -19,6 +19,7 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Statement;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -67,14 +68,41 @@ class JdbcIntegrationTest {
     }
   }
 
-  private ChaosActivationHandle activateSuppress(final String id, final OperationType op) {
+  private ChaosActivationHandle activate(
+      final String id, final OperationType op, final ChaosEffect effect) {
     return runtime.activate(
         ChaosScenario.builder(id)
             .scope(ChaosScenario.ScenarioScope.JVM)
             .selector(ChaosSelector.jdbc(op))
-            .effect(ChaosEffect.suppress())
+            .effect(effect)
             .activationPolicy(ActivationPolicy.always())
             .build());
+  }
+
+  private ChaosActivationHandle activateReject(final String id, final OperationType op) {
+    return activate(id, op, ChaosEffect.reject("db down"));
+  }
+
+  @Nested
+  @DisplayName("Suppress")
+  class Suppress {
+
+    @Test
+    @DisplayName("a suppress on any JDBC operation is refused at activation: use reject")
+    void suppressIsRefusedAtActivation() {
+      for (final OperationType op :
+          new OperationType[] {
+            OperationType.JDBC_CONNECTION_ACQUIRE,
+            OperationType.JDBC_STATEMENT_EXECUTE,
+            OperationType.JDBC_PREPARED_STATEMENT,
+            OperationType.JDBC_TRANSACTION_COMMIT,
+            OperationType.JDBC_TRANSACTION_ROLLBACK
+          }) {
+        assertThatThrownBy(() -> activate("it-suppress-" + op, op, ChaosEffect.suppress()))
+            .isInstanceOf(ChaosValidationException.class)
+            .hasMessageContaining("use reject");
+      }
+    }
   }
 
   @Nested
@@ -82,18 +110,16 @@ class JdbcIntegrationTest {
   class StatementInterception {
 
     @Test
-    @DisplayName(
-        "SUPPRESS on JDBC_STATEMENT_EXECUTE throws ChaosJdbcSuppressException via"
-            + " StatementExecuteAdvice")
-    void statementExecuteIsSuppressed() throws Exception {
+    @DisplayName("REJECT on JDBC_STATEMENT_EXECUTE throws SQLException via StatementExecuteAdvice")
+    void statementExecuteIsRejected() throws Exception {
       try (Connection connection = DriverManager.getConnection(H2_URL);
           Statement statement = connection.createStatement()) {
         final ChaosActivationHandle handle =
-            activateSuppress("it-stmt-suppress", OperationType.JDBC_STATEMENT_EXECUTE);
+            activateReject("it-stmt-reject", OperationType.JDBC_STATEMENT_EXECUTE);
         try {
           assertThatThrownBy(() -> runStatementExecuteAdvice(statement, "SELECT 1"))
-              .isInstanceOf(ChaosJdbcSuppressException.class)
-              .hasMessageContaining("statement execute suppressed");
+              .isInstanceOf(SQLException.class)
+              .hasMessage("db down");
         } finally {
           handle.stop();
         }
@@ -102,10 +128,7 @@ class JdbcIntegrationTest {
 
     private void runStatementExecuteAdvice(final Statement statement, final String sql)
         throws Throwable {
-      if (BootstrapDispatcher.beforeJdbcStatementExecute(sql)) {
-        throw new ChaosJdbcSuppressException(
-            "JDBC statement execute suppressed by chaos agent: " + sql);
-      }
+      BootstrapDispatcher.beforeJdbcStatementExecute(sql);
       statement.execute(sql);
     }
   }
@@ -115,17 +138,15 @@ class JdbcIntegrationTest {
   class PrepareStatementInterception {
 
     @Test
-    @DisplayName(
-        "SUPPRESS on JDBC_PREPARED_STATEMENT throws ChaosJdbcSuppressException via"
-            + " PrepareStatementAdvice")
-    void prepareStatementIsSuppressed() throws Exception {
+    @DisplayName("REJECT on JDBC_PREPARED_STATEMENT throws SQLException via PrepareStatementAdvice")
+    void prepareStatementIsRejected() throws Exception {
       try (Connection connection = DriverManager.getConnection(H2_URL)) {
         final ChaosActivationHandle handle =
-            activateSuppress("it-prepare-suppress", OperationType.JDBC_PREPARED_STATEMENT);
+            activateReject("it-prepare-reject", OperationType.JDBC_PREPARED_STATEMENT);
         try {
           assertThatThrownBy(() -> runPrepareAdvice(connection, "SELECT ?"))
-              .isInstanceOf(ChaosJdbcSuppressException.class)
-              .hasMessageContaining("prepareStatement suppressed");
+              .isInstanceOf(SQLException.class)
+              .hasMessage("db down");
         } finally {
           handle.stop();
         }
@@ -133,10 +154,7 @@ class JdbcIntegrationTest {
     }
 
     private void runPrepareAdvice(final Connection connection, final String sql) throws Throwable {
-      if (BootstrapDispatcher.beforeJdbcPreparedStatement(sql)) {
-        throw new ChaosJdbcSuppressException(
-            "JDBC prepareStatement suppressed by chaos agent: " + sql);
-      }
+      BootstrapDispatcher.beforeJdbcPreparedStatement(sql);
       try (PreparedStatement ignored = connection.prepareStatement(sql)) {
         // passthrough
       }
@@ -148,16 +166,16 @@ class JdbcIntegrationTest {
   class CommitInterception {
 
     @Test
-    @DisplayName("SUPPRESS on JDBC_TRANSACTION_COMMIT throws ChaosJdbcSuppressException")
-    void commitIsSuppressed() throws Exception {
+    @DisplayName("REJECT on JDBC_TRANSACTION_COMMIT throws SQLException")
+    void commitIsRejected() throws Exception {
       try (Connection connection = DriverManager.getConnection(H2_URL)) {
         connection.setAutoCommit(false);
         final ChaosActivationHandle handle =
-            activateSuppress("it-commit-suppress", OperationType.JDBC_TRANSACTION_COMMIT);
+            activateReject("it-commit-reject", OperationType.JDBC_TRANSACTION_COMMIT);
         try {
           assertThatThrownBy(() -> runCommitAdvice(connection))
-              .isInstanceOf(ChaosJdbcSuppressException.class)
-              .hasMessageContaining("commit suppressed");
+              .isInstanceOf(SQLException.class)
+              .hasMessage("db down");
         } finally {
           handle.stop();
         }
@@ -165,9 +183,7 @@ class JdbcIntegrationTest {
     }
 
     private void runCommitAdvice(final Connection connection) throws Throwable {
-      if (BootstrapDispatcher.beforeJdbcTransactionCommit()) {
-        throw new ChaosJdbcSuppressException("JDBC commit suppressed by chaos agent");
-      }
+      BootstrapDispatcher.beforeJdbcTransactionCommit();
       connection.commit();
     }
   }
@@ -177,16 +193,16 @@ class JdbcIntegrationTest {
   class RollbackInterception {
 
     @Test
-    @DisplayName("SUPPRESS on JDBC_TRANSACTION_ROLLBACK throws ChaosJdbcSuppressException")
-    void rollbackIsSuppressed() throws Exception {
+    @DisplayName("REJECT on JDBC_TRANSACTION_ROLLBACK throws SQLException")
+    void rollbackIsRejected() throws Exception {
       try (Connection connection = DriverManager.getConnection(H2_URL)) {
         connection.setAutoCommit(false);
         final ChaosActivationHandle handle =
-            activateSuppress("it-rollback-suppress", OperationType.JDBC_TRANSACTION_ROLLBACK);
+            activateReject("it-rollback-reject", OperationType.JDBC_TRANSACTION_ROLLBACK);
         try {
           assertThatThrownBy(() -> runRollbackAdvice(connection))
-              .isInstanceOf(ChaosJdbcSuppressException.class)
-              .hasMessageContaining("rollback suppressed");
+              .isInstanceOf(SQLException.class)
+              .hasMessage("db down");
         } finally {
           handle.stop();
         }
@@ -194,9 +210,7 @@ class JdbcIntegrationTest {
     }
 
     private void runRollbackAdvice(final Connection connection) throws Throwable {
-      if (BootstrapDispatcher.beforeJdbcTransactionRollback()) {
-        throw new ChaosJdbcSuppressException("JDBC rollback suppressed by chaos agent");
-      }
+      BootstrapDispatcher.beforeJdbcTransactionRollback();
       connection.rollback();
     }
   }
@@ -211,7 +225,7 @@ class JdbcIntegrationTest {
     void statementExecuteSucceedsWithoutScenario() throws Throwable {
       try (Connection connection = DriverManager.getConnection(H2_URL);
           Statement statement = connection.createStatement()) {
-        assertThat(BootstrapDispatcher.beforeJdbcStatementExecute("SELECT 1")).isFalse();
+        BootstrapDispatcher.beforeJdbcStatementExecute("SELECT 1");
         final boolean hasResultSet = statement.execute("SELECT 1");
         assertThat(hasResultSet).isTrue();
         try (ResultSet resultSet = statement.getResultSet()) {
@@ -227,7 +241,7 @@ class JdbcIntegrationTest {
     void preparedStatementSucceedsWithoutScenario() throws Throwable {
       try (Connection connection = DriverManager.getConnection(H2_URL);
           PreparedStatement preparedStatement = connection.prepareStatement("SELECT ?")) {
-        assertThat(BootstrapDispatcher.beforeJdbcPreparedStatement("SELECT ?")).isFalse();
+        BootstrapDispatcher.beforeJdbcPreparedStatement("SELECT ?");
         preparedStatement.setInt(1, 42);
         try (ResultSet resultSet = preparedStatement.executeQuery()) {
           assertThat(resultSet.next()).isTrue();
@@ -243,20 +257,19 @@ class JdbcIntegrationTest {
 
     @Test
     @DisplayName(
-        "SUPPRESS on JDBC_CONNECTION_ACQUIRE throws ChaosJdbcSuppressException via"
-            + " HikariGetConnectionAdvice")
-    void hikariGetConnectionIsSuppressed() throws Exception {
+        "REJECT on JDBC_CONNECTION_ACQUIRE throws SQLException via HikariGetConnectionAdvice")
+    void hikariGetConnectionIsRejected() throws Exception {
       final HikariConfig config = new HikariConfig();
       config.setJdbcUrl(H2_URL);
       config.setMaximumPoolSize(1);
       config.setPoolName("chaos-jdbc-it-pool");
       try (HikariDataSource dataSource = new HikariDataSource(config)) {
         final ChaosActivationHandle handle =
-            activateSuppress("it-hikari-suppress", OperationType.JDBC_CONNECTION_ACQUIRE);
+            activateReject("it-hikari-reject", OperationType.JDBC_CONNECTION_ACQUIRE);
         try {
           assertThatThrownBy(() -> runHikariAcquireAdvice(dataSource))
-              .isInstanceOf(ChaosJdbcSuppressException.class)
-              .hasMessageContaining("connection acquire suppressed");
+              .isInstanceOf(SQLException.class)
+              .hasMessage("db down");
         } finally {
           handle.stop();
         }
@@ -282,10 +295,7 @@ class JdbcIntegrationTest {
 
     private void runHikariAcquireAdvice(final HikariDataSource dataSource) throws Throwable {
       final String poolName = dataSource.getPoolName();
-      if (BootstrapDispatcher.beforeJdbcConnectionAcquire(poolName)) {
-        throw new ChaosJdbcSuppressException(
-            "JDBC connection acquire suppressed by chaos agent: " + poolName);
-      }
+      BootstrapDispatcher.beforeJdbcConnectionAcquire(poolName);
       try (Connection ignored = dataSource.getConnection()) {
         // passthrough
       }

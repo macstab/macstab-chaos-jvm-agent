@@ -1105,65 +1105,59 @@ public final class ChaosRuntime implements ChaosControlPlane {
    *
    * @param url the request URL
    * @param opType the HTTP operation type
-   * @return {@code true} if the request should proceed
-   * @throws Throwable if a chaos effect injects an exception
+   * @throws Throwable if a scenario rejects the call
    */
-  public boolean beforeHttpSend(final @Nullable String url, final OperationType opType)
+  public void beforeHttpSend(final @Nullable String url, final OperationType opType)
       throws Throwable {
-    return clientDispatch.beforeHttpSend(url, opType);
+    clientDispatch.beforeHttpSend(url, opType);
   }
 
   /**
    * Delegates to {@link ClientDispatch#beforeJdbcConnectionAcquire}.
    *
    * @param poolName the connection pool name
-   * @return {@code true} if connection acquisition should proceed
-   * @throws Throwable if a chaos effect injects an exception
+   * @throws Throwable if a scenario rejects the call
    */
-  public boolean beforeJdbcConnectionAcquire(final @Nullable String poolName) throws Throwable {
-    return clientDispatch.beforeJdbcConnectionAcquire(poolName);
+  public void beforeJdbcConnectionAcquire(final @Nullable String poolName) throws Throwable {
+    clientDispatch.beforeJdbcConnectionAcquire(poolName);
   }
 
   /**
    * Delegates to {@link ClientDispatch#beforeJdbcStatementExecute}.
    *
    * @param sql the SQL statement
-   * @return {@code true} if execution should proceed
-   * @throws Throwable if a chaos effect injects an exception
+   * @throws Throwable if a scenario rejects the call
    */
-  public boolean beforeJdbcStatementExecute(final @Nullable String sql) throws Throwable {
-    return clientDispatch.beforeJdbcStatementExecute(sql);
+  public void beforeJdbcStatementExecute(final @Nullable String sql) throws Throwable {
+    clientDispatch.beforeJdbcStatementExecute(sql);
   }
 
   /**
    * Delegates to {@link ClientDispatch#beforeJdbcPreparedStatement}.
    *
    * @param sql the SQL statement being prepared
-   * @return {@code true} if preparation should proceed
-   * @throws Throwable if a chaos effect injects an exception
+   * @throws Throwable if a scenario rejects the call
    */
-  public boolean beforeJdbcPreparedStatement(final @Nullable String sql) throws Throwable {
-    return clientDispatch.beforeJdbcPreparedStatement(sql);
+  public void beforeJdbcPreparedStatement(final @Nullable String sql) throws Throwable {
+    clientDispatch.beforeJdbcPreparedStatement(sql);
   }
 
   /**
    * Delegates to {@link ClientDispatch#beforeJdbcTransactionCommit}.
    *
-   * @return {@code true} if the commit should proceed
-   * @throws Throwable if a chaos effect injects an exception
+   * @throws Throwable if a scenario rejects the call
    */
-  public boolean beforeJdbcTransactionCommit() throws Throwable {
-    return clientDispatch.beforeJdbcTransactionCommit();
+  public void beforeJdbcTransactionCommit() throws Throwable {
+    clientDispatch.beforeJdbcTransactionCommit();
   }
 
   /**
    * Delegates to {@link ClientDispatch#beforeJdbcTransactionRollback}.
    *
-   * @return {@code true} if the rollback should proceed
-   * @throws Throwable if a chaos effect injects an exception
+   * @throws Throwable if a scenario rejects the call
    */
-  public boolean beforeJdbcTransactionRollback() throws Throwable {
-    return clientDispatch.beforeJdbcTransactionRollback();
+  public void beforeJdbcTransactionRollback() throws Throwable {
+    clientDispatch.beforeJdbcTransactionRollback();
   }
 
   /**

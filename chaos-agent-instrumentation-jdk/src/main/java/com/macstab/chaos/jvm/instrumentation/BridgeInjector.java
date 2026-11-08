@@ -188,12 +188,10 @@ final class BridgeInjector {
           // Advice woven into JDK module classes (e.g. jdk.internal.net.http.HttpClientImpl in
           // the platform class loader) references these types; without them the verifier raises
           // NoClassDefFoundError when the JDK class is first used.
-          "com/macstab/chaos/jvm/api/ChaosHttpSuppressException.class",
           "com/macstab/chaos/jvm/instrumentation/HttpUrlExtractor.class",
           "com/macstab/chaos/jvm/instrumentation/HttpUrlExtractor$1.class",
           // JDBC advice woven into HikariPool, c3p0 and java.sql types references these: the
           // inlined references resolve through the bootstrap class path.
-          "com/macstab/chaos/jvm/api/ChaosJdbcSuppressException.class",
           "com/macstab/chaos/jvm/instrumentation/JdbcTargetExtractor.class",
           "com/macstab/chaos/jvm/instrumentation/JdbcTargetExtractor$1.class");
 

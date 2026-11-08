@@ -560,9 +560,9 @@ final class CompatibilityValidator {
   /**
    * Operations whose interception point can carry out a {@link ChaosEffect.SuppressEffect}: it
    * skips the call, substitutes a no-op or returns an empty result, or — where skipping cannot be
-   * expressed (thread start, exit, HTTP, JDBC) — fails the call with the documented exception.
-   * Every other interception point can only delay or throw, so SUPPRESS is rejected there instead
-   * of being silently ignored.
+   * expressed (thread start, exit) — fails the call with the documented exception. Every other
+   * interception point can only delay or throw, so SUPPRESS is rejected there instead of being
+   * silently ignored.
    */
   private static final Set<OperationType> SUPPRESS_OPS =
       EnumSet.of(
@@ -583,15 +583,22 @@ final class CompatibilityValidator {
           OperationType.NIO_SELECTOR_SELECT,
           OperationType.THREAD_LOCAL_GET,
           OperationType.THREAD_LOCAL_SET,
+          // a dropped datagram: the send reports success, nothing goes on the wire
+          OperationType.DATAGRAM_SEND);
+
+  /**
+   * HTTP client and JDBC operations, which took a suppress in 1.x that threw an agent exception no
+   * real client throws (ADR 0005). A reject fails them with the client's own exception.
+   */
+  private static final Set<OperationType> REJECT_INSTEAD_OF_SUPPRESS_OPS =
+      EnumSet.of(
           OperationType.HTTP_CLIENT_SEND,
           OperationType.HTTP_CLIENT_SEND_ASYNC,
           OperationType.JDBC_CONNECTION_ACQUIRE,
           OperationType.JDBC_STATEMENT_EXECUTE,
           OperationType.JDBC_PREPARED_STATEMENT,
           OperationType.JDBC_TRANSACTION_COMMIT,
-          OperationType.JDBC_TRANSACTION_ROLLBACK,
-          // a dropped datagram: the send reports success, nothing goes on the wire
-          OperationType.DATAGRAM_SEND);
+          OperationType.JDBC_TRANSACTION_ROLLBACK);
 
   /** Clock reads: they only return a (possibly skewed) time and cannot be delayed or failed. */
   private static final Set<OperationType> CLOCK_READ_OPS =
@@ -614,6 +621,14 @@ final class CompatibilityValidator {
     final Set<OperationType> operations = SelectorOperations.of(selector);
     if (effect instanceof ChaosEffect.SuppressEffect) {
       for (final OperationType operation : operations) {
+        if (REJECT_INSTEAD_OF_SUPPRESS_OPS.contains(operation)) {
+          throw new ChaosValidationException(
+              "SuppressEffect is not supported for "
+                  + operation
+                  + ": no real client skips the call without failing it; use reject, which fails"
+                  + " it with the client's own exception (IOException for HTTP, SQLException for"
+                  + " JDBC)");
+        }
         if (!SUPPRESS_OPS.contains(operation)) {
           throw new ChaosValidationException(
               "SuppressEffect is not supported for "

@@ -9,7 +9,7 @@
 
 # 0005 — Faults are the JDK's own failures, raised in the real call
 
-**Status:** Accepted
+**Status:** Accepted; amended in 2.0: the HTTP and JDBC suppress, which threw the agent's own `ChaosHttpSuppressException` / `ChaosJdbcSuppressException`, is refused at activation ("use reject") and both classes are removed
 
 ## Context
 

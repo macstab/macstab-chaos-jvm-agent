@@ -1,6 +1,7 @@
 package com.macstab.chaos.jvm.core;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.macstab.chaos.jvm.api.ActivationPolicy;
@@ -238,16 +239,19 @@ class DispatchContractTest {
   class HttpSends {
 
     @Test
-    @DisplayName("suppress tells the advice to skip the send; a URL filter decides which")
-    void suppressByUrl() throws Throwable {
+    @DisplayName("reject fails the send with the client's IOException; a URL filter decides which")
+    void rejectByUrl() throws Throwable {
       activate(
           ChaosSelector.httpClient(
               Set.of(OperationType.HTTP_CLIENT_SEND), NamePattern.glob("https://payments/*")),
-          ChaosEffect.suppress());
-      assertThat(runtime.beforeHttpSend("https://payments/charge", OperationType.HTTP_CLIENT_SEND))
-          .isTrue();
-      assertThat(runtime.beforeHttpSend("https://catalog/items", OperationType.HTTP_CLIENT_SEND))
-          .isFalse();
+          ChaosEffect.reject("payments down"));
+      assertThatThrownBy(
+              () ->
+                  runtime.beforeHttpSend("https://payments/charge", OperationType.HTTP_CLIENT_SEND))
+          .isInstanceOf(java.io.IOException.class);
+      assertThatCode(
+              () -> runtime.beforeHttpSend("https://catalog/items", OperationType.HTTP_CLIENT_SEND))
+          .doesNotThrowAnyException();
     }
   }
 

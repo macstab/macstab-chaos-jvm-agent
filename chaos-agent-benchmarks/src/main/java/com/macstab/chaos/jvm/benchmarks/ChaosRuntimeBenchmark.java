@@ -248,39 +248,33 @@ public class ChaosRuntimeBenchmark {
    * Measures dispatcher overhead when the runtime is installed but has no active scenarios.
    *
    * @param state the benchmark state holding the runtime and dispatcher
-   * @param bh the JMH blackhole used to consume results
    * @throws Throwable if the dispatcher surfaces an unexpected failure
    */
   @Benchmark
-  public void agentInstalled_zeroScenarios(ZeroScenariosState state, Blackhole bh)
-      throws Throwable {
-    bh.consume(state.dispatcher.client().beforeJdbcStatementExecute(BENCHMARK_SQL));
+  public void agentInstalled_zeroScenarios(ZeroScenariosState state) throws Throwable {
+    state.dispatcher.client().beforeJdbcStatementExecute(BENCHMARK_SQL);
   }
 
   /**
    * Measures dispatcher overhead when exactly one non-matching scenario is active.
    *
    * @param state the benchmark state holding the runtime and dispatcher
-   * @param bh the JMH blackhole used to consume results
    * @throws Throwable if the dispatcher surfaces an unexpected failure
    */
   @Benchmark
-  public void agentInstalled_oneScenario_noMatch(OneScenarioNoMatchState state, Blackhole bh)
-      throws Throwable {
-    bh.consume(state.dispatcher.client().beforeJdbcStatementExecute(BENCHMARK_SQL));
+  public void agentInstalled_oneScenario_noMatch(OneScenarioNoMatchState state) throws Throwable {
+    state.dispatcher.client().beforeJdbcStatementExecute(BENCHMARK_SQL);
   }
 
   /**
    * Measures dispatcher overhead when exactly one matching scenario applies a no-op effect.
    *
    * @param state the benchmark state holding the runtime and dispatcher
-   * @param bh the JMH blackhole used to consume results
    * @throws Throwable if the dispatcher surfaces an unexpected failure
    */
   @Benchmark
-  public void agentInstalled_oneMatch_noEffect(OneMatchNoEffectState state, Blackhole bh)
-      throws Throwable {
-    bh.consume(state.dispatcher.client().beforeJdbcStatementExecute(BENCHMARK_SQL));
+  public void agentInstalled_oneMatch_noEffect(OneMatchNoEffectState state) throws Throwable {
+    state.dispatcher.client().beforeJdbcStatementExecute(BENCHMARK_SQL);
   }
 
   /**
@@ -288,23 +282,21 @@ public class ChaosRuntimeBenchmark {
    * session.
    *
    * @param state the benchmark state holding the runtime and dispatcher
-   * @param bh the JMH blackhole used to consume results
    * @throws Throwable if the dispatcher surfaces an unexpected failure
    */
   @Benchmark
-  public void sessionIdMiss(SessionMissState state, Blackhole bh) throws Throwable {
-    bh.consume(state.dispatcher.client().beforeJdbcStatementExecute(BENCHMARK_SQL));
+  public void sessionIdMiss(SessionMissState state) throws Throwable {
+    state.dispatcher.client().beforeJdbcStatementExecute(BENCHMARK_SQL);
   }
 
   /**
    * Measures dispatcher overhead when ten scenarios are registered but only one matches.
    *
    * @param state the benchmark state holding the runtime and dispatcher
-   * @param bh the JMH blackhole used to consume results
    * @throws Throwable if the dispatcher surfaces an unexpected failure
    */
   @Benchmark
-  public void tenScenarios_oneMatch(TenScenariosState state, Blackhole bh) throws Throwable {
-    bh.consume(state.dispatcher.client().beforeJdbcStatementExecute(BENCHMARK_SQL));
+  public void tenScenarios_oneMatch(TenScenariosState state) throws Throwable {
+    state.dispatcher.client().beforeJdbcStatementExecute(BENCHMARK_SQL);
   }
 }

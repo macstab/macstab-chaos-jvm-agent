@@ -657,9 +657,9 @@ public enum OperationType {
   /**
    * Fires before a synchronous HTTP client request is dispatched. Covers {@code
    * java.net.http.HttpClient.send}, {@code okhttp3.RealCall.execute}, and Apache HttpComponents
-   * {@code CloseableHttpClient.execute}. Chaos here can inject latency, throw to simulate
-   * connection failures, or suppress the call entirely via {@link
-   * com.macstab.chaos.jvm.api.ChaosHttpSuppressException}.
+   * {@code CloseableHttpClient.execute}. Chaos here can inject latency or reject the call with the
+   * client's own {@link java.io.IOException}; a suppress is refused at activation (no real client
+   * skips a request without failing it).
    *
    * <p>The {@code targetName} field of the invocation context carries the request URL ({@code
    * scheme://host/path}). Use with {@link ChaosSelector.HttpClientSelector}.
@@ -669,8 +669,8 @@ public enum OperationType {
   /**
    * Fires before an asynchronous HTTP client request is dispatched. Covers {@code
    * java.net.http.HttpClient.sendAsync}, {@code okhttp3.RealCall.enqueue}, and Spring WebClient's
-   * Reactor Netty client. Chaos here can inject latency, throw to simulate connection failures, or
-   * suppress the call entirely.
+   * Reactor Netty client. Chaos here can inject latency or reject the call with the client's own
+   * {@link java.io.IOException}; a suppress is refused at activation.
    *
    * <p>The {@code targetName} field of the invocation context carries the request URL. Use with
    * {@link ChaosSelector.HttpClientSelector}.

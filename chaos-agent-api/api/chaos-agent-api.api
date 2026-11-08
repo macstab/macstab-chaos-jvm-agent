@@ -556,15 +556,7 @@ public interface com/macstab/chaos/jvm/api/ChaosEventListener
   public abstract method onEvent(Lcom/macstab/chaos/jvm/api/ChaosEvent;)V
   public static method async(Lcom/macstab/chaos/jvm/api/ChaosEventListener;)Lcom/macstab/chaos/jvm/api/ChaosEventListener;
 
-public class com/macstab/chaos/jvm/api/ChaosHttpSuppressException extends java/lang/RuntimeException
-  public method <init>(Ljava/lang/String;)V
-  public method <init>(Ljava/lang/String;Ljava/lang/Throwable;)V
-
 public class com/macstab/chaos/jvm/api/ChaosInstrumentationException extends com/macstab/chaos/jvm/api/ChaosActivationException
-  public method <init>(Ljava/lang/String;Ljava/lang/Throwable;)V
-
-public class com/macstab/chaos/jvm/api/ChaosJdbcSuppressException extends java/lang/RuntimeException
-  public method <init>(Ljava/lang/String;)V
   public method <init>(Ljava/lang/String;Ljava/lang/Throwable;)V
 
 public interface com/macstab/chaos/jvm/api/ChaosMetricsSink

@@ -1,6 +1,5 @@
 package com.macstab.chaos.jvm.instrumentation;
 
-import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 
 import com.macstab.chaos.jvm.core.ChaosRuntime;
@@ -25,15 +24,17 @@ class HttpClientAdviceTest {
   class HttpSendPassthrough {
 
     @Test
-    @DisplayName("returns false when no bridge installed (fallback)")
-    void returnsFalseWithoutBridge() throws Throwable {
-      assertThat(BootstrapDispatcher.beforeHttpSend("https://api.example.com/")).isFalse();
+    @DisplayName("passes through when no bridge is installed (fallback)")
+    void passesWithoutBridge() {
+      assertThatCode(() -> BootstrapDispatcher.beforeHttpSend("https://api.example.com/"))
+          .doesNotThrowAnyException();
     }
 
     @Test
-    @DisplayName("returns false when no scenarios match")
-    void returnsFalseWithoutScenarios() throws Throwable {
-      assertThat(bridge.beforeHttpSend("https://api.example.com/")).isFalse();
+    @DisplayName("passes through when no scenario matches")
+    void passesWithoutScenarios() {
+      assertThatCode(() -> bridge.beforeHttpSend("https://api.example.com/"))
+          .doesNotThrowAnyException();
     }
 
     @Test
@@ -48,15 +49,17 @@ class HttpClientAdviceTest {
   class HttpSendAsyncPassthrough {
 
     @Test
-    @DisplayName("returns false when no bridge installed (fallback)")
-    void returnsFalseWithoutBridge() throws Throwable {
-      assertThat(BootstrapDispatcher.beforeHttpSendAsync("https://api.example.com/")).isFalse();
+    @DisplayName("passes through when no bridge is installed (fallback)")
+    void passesWithoutBridge() {
+      assertThatCode(() -> BootstrapDispatcher.beforeHttpSendAsync("https://api.example.com/"))
+          .doesNotThrowAnyException();
     }
 
     @Test
-    @DisplayName("returns false when no scenarios match")
-    void returnsFalseWithoutScenarios() throws Throwable {
-      assertThat(bridge.beforeHttpSendAsync("https://api.example.com/")).isFalse();
+    @DisplayName("passes through when no scenario matches")
+    void passesWithoutScenarios() {
+      assertThatCode(() -> bridge.beforeHttpSendAsync("https://api.example.com/"))
+          .doesNotThrowAnyException();
     }
   }
 }

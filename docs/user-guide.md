@@ -306,7 +306,7 @@ class PaymentGatewayResilienceTest {
     @Test
     @DisplayName("HTTP send to payment gateway retries on transient 5xx")
     void shouldRetryOnTransient5xx(ChaosSession session) throws Exception {
-        // Fire a suppress effect on the first HTTP call (simulates a 5xx that causes IOException)
+        // Reject the first HTTP call: the client sees an IOException, as for a failed connection
         session.activate(ChaosScenario.builder("payment-5xx")
             .selector(ChaosSelector.httpClient(
                 Set.of(OperationType.HTTP_CLIENT_SEND),
@@ -327,7 +327,7 @@ class PaymentGatewayResilienceTest {
     @Test
     @DisplayName("Database connection exhaustion triggers circuit-breaker open")
     void shouldOpenCircuitBreakerOnConnectionExhaustion(ChaosSession session) {
-        // Suppress all JDBC connection acquisitions continuously
+        // Reject every JDBC connection acquisition: the pool's caller sees an SQLException
         session.activate(ChaosScenario.builder("db-pool-exhausted")
             .selector(ChaosSelector.jdbc(
                 Set.of(OperationType.JDBC_CONNECTION_ACQUIRE), NamePattern.any()))

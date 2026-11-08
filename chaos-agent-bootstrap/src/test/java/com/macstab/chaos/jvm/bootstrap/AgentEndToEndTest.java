@@ -434,6 +434,23 @@ class AgentEndToEndTest {
     }
 
     @Test
+    @DisplayName("a JDBC reject on Statement.execute fails with the driver's SQLException type")
+    void jdbcRejectIsSqlException() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.run(
+              plan(
+                  scenario(
+                      "reject",
+                      ChaosSelector.jdbc(OperationType.JDBC_STATEMENT_EXECUTE),
+                      ChaosEffect.reject("database unavailable"))),
+              DefectProbeMain.class,
+              "jdbc-statement-reject",
+              System.getProperty("chaos.test.jdbcClasspath"));
+      assertThat(result.value("sqlException")).isEqualTo("true");
+      assertThat(result.longValue("applied.reject")).isEqualTo(1L);
+    }
+
+    @Test
     @DisplayName("threads started by newVirtualThreadPerTaskExecutor are intercepted")
     void virtualThreadPerTaskExecutor() throws Exception {
       assertSingleMatch(
@@ -521,19 +538,19 @@ class AgentEndToEndTest {
     }
 
     @Test
-    @DisplayName("a suppressed HttpURLConnection request fails with ConnectException")
-    void httpUrlConnectionSuppressed() throws Exception {
+    @DisplayName("a rejected HttpURLConnection request fails with IOException")
+    void httpUrlConnectionRejected() throws Exception {
       final ChildJvmProbe.ProbeResult result =
           probe.run(
               plan(
                   scenario(
-                      "url-connection-suppressed",
+                      "url-connection-rejected",
                       ChaosSelector.httpClient(Set.of(OperationType.HTTP_CLIENT_SEND)),
-                      ChaosEffect.suppress())),
+                      ChaosEffect.reject("service down"))),
               DefectProbeMain.class,
               "http-url-connection",
               null);
-      assertThat(result.value("connectException")).contains("suppressed by chaos agent");
+      assertThat(result.value("ioException")).isEqualTo("java.io.IOException: service down");
     }
 
     @Test
@@ -580,11 +597,11 @@ class AgentEndToEndTest {
                   scenario(
                       "okhttp",
                       ChaosSelector.httpClient(Set.of(OperationType.HTTP_CLIENT_SEND)),
-                      ChaosEffect.suppress())),
+                      ChaosEffect.reject("service down"))),
               HttpLibraryProbeMain.class,
               "okhttp-execute",
               httpClasspath);
-      assertThat(result.value("suppressed")).isEqualTo("true");
+      assertThat(result.value("rejected")).isEqualTo("java.io.IOException");
       assertThat(result.longValue("matched.okhttp")).isEqualTo(1L);
     }
 

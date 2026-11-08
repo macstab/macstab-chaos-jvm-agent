@@ -1,6 +1,5 @@
 package com.macstab.chaos.jvm.instrumentation;
 
-import com.macstab.chaos.jvm.api.ChaosJdbcSuppressException;
 import com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher;
 import net.bytebuddy.asm.Advice;
 
@@ -20,8 +19,9 @@ import net.bytebuddy.asm.Advice;
  * </ul>
  *
  * <p>All advice classes route through {@link BootstrapDispatcher} so they require no compile-time
- * dependency on HikariCP or c3p0. When a scenario suppresses the call, the advice throws {@link
- * ChaosJdbcSuppressException} so the caller observes a terminal failure.
+ * dependency on HikariCP or c3p0. A rejected call fails with the {@link java.sql.SQLException} the
+ * dispatcher throws. The advice holds no string concatenation ({@code invokedynamic}): it is
+ * inlined into drivers and pools compiled for Java 6.
  */
 final class JdbcAdvice {
   private JdbcAdvice() {}
@@ -41,10 +41,7 @@ final class JdbcAdvice {
       } finally {
         BootstrapDispatcher.endInternalCall();
       }
-      if (BootstrapDispatcher.beforeJdbcConnectionAcquire(poolName)) {
-        throw new ChaosJdbcSuppressException(
-            "JDBC connection acquire suppressed by chaos agent: " + poolName);
-      }
+      BootstrapDispatcher.beforeJdbcConnectionAcquire(poolName);
     }
   }
 
@@ -56,10 +53,7 @@ final class JdbcAdvice {
     @Advice.OnMethodEnter
     static void enter(@Advice.This final Object pool) throws Throwable {
       final String poolName = pool == null ? null : pool.getClass().getName();
-      if (BootstrapDispatcher.beforeJdbcConnectionAcquire(poolName)) {
-        throw new ChaosJdbcSuppressException(
-            "JDBC connection acquire suppressed by chaos agent: " + poolName);
-      }
+      BootstrapDispatcher.beforeJdbcConnectionAcquire(poolName);
     }
   }
 
@@ -75,17 +69,11 @@ final class JdbcAdvice {
       if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_JDBC_EXECUTE)) {
         return;
       }
-      final boolean suppressed;
       try {
-        suppressed = BootstrapDispatcher.beforeJdbcStatementExecute(sql);
+        BootstrapDispatcher.beforeJdbcStatementExecute(sql);
       } catch (final Throwable throwable) {
         BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_JDBC_EXECUTE);
         throw throwable;
-      }
-      if (suppressed) {
-        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_JDBC_EXECUTE);
-        throw new ChaosJdbcSuppressException(
-            "JDBC statement execute suppressed by chaos agent: " + sql);
       }
     }
 
@@ -109,17 +97,11 @@ final class JdbcAdvice {
       if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_JDBC_EXECUTE)) {
         return;
       }
-      final boolean suppressed;
       try {
-        suppressed = BootstrapDispatcher.beforeJdbcStatementExecute(null);
+        BootstrapDispatcher.beforeJdbcStatementExecute(null);
       } catch (final Throwable throwable) {
         BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_JDBC_EXECUTE);
         throw throwable;
-      }
-      if (suppressed) {
-        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_JDBC_EXECUTE);
-        throw new ChaosJdbcSuppressException(
-            "JDBC prepared statement execute suppressed by chaos agent");
       }
     }
 
@@ -142,17 +124,11 @@ final class JdbcAdvice {
       if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_JDBC_PREPARE)) {
         return;
       }
-      final boolean suppressed;
       try {
-        suppressed = BootstrapDispatcher.beforeJdbcPreparedStatement(sql);
+        BootstrapDispatcher.beforeJdbcPreparedStatement(sql);
       } catch (final Throwable throwable) {
         BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_JDBC_PREPARE);
         throw throwable;
-      }
-      if (suppressed) {
-        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_JDBC_PREPARE);
-        throw new ChaosJdbcSuppressException(
-            "JDBC prepareStatement suppressed by chaos agent: " + sql);
       }
     }
 
@@ -169,16 +145,11 @@ final class JdbcAdvice {
       if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_JDBC_COMMIT)) {
         return;
       }
-      final boolean suppressed;
       try {
-        suppressed = BootstrapDispatcher.beforeJdbcTransactionCommit();
+        BootstrapDispatcher.beforeJdbcTransactionCommit();
       } catch (final Throwable throwable) {
         BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_JDBC_COMMIT);
         throw throwable;
-      }
-      if (suppressed) {
-        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_JDBC_COMMIT);
-        throw new ChaosJdbcSuppressException("JDBC commit suppressed by chaos agent");
       }
     }
 
@@ -195,16 +166,11 @@ final class JdbcAdvice {
       if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_JDBC_ROLLBACK)) {
         return;
       }
-      final boolean suppressed;
       try {
-        suppressed = BootstrapDispatcher.beforeJdbcTransactionRollback();
+        BootstrapDispatcher.beforeJdbcTransactionRollback();
       } catch (final Throwable throwable) {
         BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_JDBC_ROLLBACK);
         throw throwable;
-      }
-      if (suppressed) {
-        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_JDBC_ROLLBACK);
-        throw new ChaosJdbcSuppressException("JDBC rollback suppressed by chaos agent");
       }
     }
 

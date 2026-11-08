@@ -5,7 +5,6 @@ import com.macstab.chaos.jvm.api.ChaosActivationHandle;
 import com.macstab.chaos.jvm.api.ChaosControlPlane;
 import com.macstab.chaos.jvm.api.ChaosDiagnostics;
 import com.macstab.chaos.jvm.api.ChaosEffect;
-import com.macstab.chaos.jvm.api.ChaosHttpSuppressException;
 import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.ChaosSelector;
 import com.macstab.chaos.jvm.api.ChaosSession;
@@ -82,6 +81,7 @@ public final class DefectProbeMain {
       case "park-until-in-session" -> parkUntilInSession();
       case "jdbc-hikari-execute" -> jdbcHikariExecute();
       case "jdbc-prepared-execute" -> jdbcPreparedExecute();
+      case "jdbc-statement-reject" -> jdbcStatementReject();
       case "virtual-thread-executor" -> virtualThreadExecutor();
       case "initialize-retry" -> initializeRetry();
       case "second-agent-copy" -> secondAgentCopy();
@@ -394,6 +394,18 @@ public final class DefectProbeMain {
         final PreparedStatement statement = connection.prepareStatement("SELECT 1");
         final ResultSet resultSet = statement.executeQuery()) {
       System.out.println("row=" + resultSet.next());
+    }
+  }
+
+  /** A {@code Statement.execute} on H2; prints the failure the woven advice raised, if any. */
+  private static void jdbcStatementReject() throws Exception {
+    try (final Connection connection = DriverManager.getConnection("jdbc:h2:mem:reject");
+        final Statement statement = connection.createStatement()) {
+      statement.execute("SELECT 1");
+      System.out.println("failure=none");
+    } catch (final java.sql.SQLException rejected) {
+      System.out.println("failure=" + rejected.getClass().getName());
+      System.out.println("sqlException=true");
     }
   }
 
@@ -2340,8 +2352,6 @@ public final class DefectProbeMain {
     server.start();
     try {
       client.call("http://127.0.0.1:" + server.getAddress().getPort() + "/probe");
-    } catch (final ChaosHttpSuppressException suppressed) {
-      System.out.println("suppressed=true");
     } finally {
       server.stop(0);
     }
@@ -2364,8 +2374,9 @@ public final class DefectProbeMain {
               + new String(
                   connection.getInputStream().readAllBytes(),
                   java.nio.charset.StandardCharsets.UTF_8));
-    } catch (final java.net.ConnectException suppressed) {
-      System.out.println("connectException=" + suppressed.getMessage());
+    } catch (final java.io.IOException rejected) {
+      System.out.println(
+          "ioException=" + rejected.getClass().getName() + ": " + rejected.getMessage());
     } finally {
       connection.disconnect();
     }

@@ -74,104 +74,104 @@ public final class ClientDispatch {
   }
 
   /**
-   * Called before an HTTP client send; returns {@code true} to suppress the call.
+   * Called before an HTTP client send. A reject throws the client's own {@link java.io.IOException}
+   * (ADR 0005: there is no suppress, which no real client does).
    *
    * @param url the target URL of the HTTP request
    * @param opType the specific {@link OperationType} for this send
-   * @return {@code true} to suppress the call; {@code false} for normal execution
-   * @throws Throwable if an active scenario throws to simulate a failure
+   * @throws Throwable if an active scenario rejects the send
    */
-  public boolean beforeHttpSend(final @Nullable String url, final OperationType opType)
+  public void beforeHttpSend(final @Nullable String url, final OperationType opType)
       throws Throwable {
-    final RuntimeDecision decision =
-        (engine.idle(opType)
-            ? RuntimeDecision.none()
-            : engine.evaluate(
-                new InvocationContext(
-                    opType,
-                    "http.client",
-                    null,
-                    url,
-                    false,
-                    null,
-                    null,
-                    engine.scopeContext.currentSessionId())));
-    return engine.suppressed(decision);
+    if (engine.idle(opType)) {
+      return;
+    }
+    apply(
+        engine.evaluate(
+            new InvocationContext(
+                opType,
+                "http.client",
+                null,
+                url,
+                false,
+                null,
+                null,
+                engine.scopeContext.currentSessionId())));
   }
 
   /**
-   * Called before acquiring a JDBC connection from a pool; returns {@code true} to suppress the
-   * acquire.
+   * Called before acquiring a JDBC connection from a pool.
    *
    * @param poolName the name of the JDBC connection pool
-   * @return {@code true} to suppress the acquire; {@code false} for normal execution
-   * @throws Throwable if an active scenario throws to simulate a failure
+   * @throws Throwable an {@link java.sql.SQLException} if an active scenario rejects the acquire
    */
-  public boolean beforeJdbcConnectionAcquire(final @Nullable String poolName) throws Throwable {
-    return evaluateJdbc(OperationType.JDBC_CONNECTION_ACQUIRE, "jdbc.pool", poolName);
+  public void beforeJdbcConnectionAcquire(final @Nullable String poolName) throws Throwable {
+    evaluateJdbc(OperationType.JDBC_CONNECTION_ACQUIRE, "jdbc.pool", poolName);
   }
 
   /**
-   * Called before executing a JDBC {@link java.sql.Statement}; returns {@code true} to suppress the
-   * call.
+   * Called before executing a JDBC {@link java.sql.Statement}.
    *
    * @param sql the SQL statement being executed
-   * @return {@code true} to suppress the call; {@code false} for normal execution
-   * @throws Throwable if an active scenario throws to simulate a failure
+   * @throws Throwable an {@link java.sql.SQLException} if an active scenario rejects the call
    */
-  public boolean beforeJdbcStatementExecute(final @Nullable String sql) throws Throwable {
-    return evaluateJdbc(OperationType.JDBC_STATEMENT_EXECUTE, "java.sql.Statement", snippet(sql));
+  public void beforeJdbcStatementExecute(final @Nullable String sql) throws Throwable {
+    evaluateJdbc(OperationType.JDBC_STATEMENT_EXECUTE, "java.sql.Statement", snippet(sql));
   }
 
   /**
-   * Called before preparing a JDBC {@link java.sql.PreparedStatement}; returns {@code true} to
-   * suppress the call.
+   * Called before preparing a JDBC {@link java.sql.PreparedStatement}.
    *
    * @param sql the SQL being prepared
-   * @return {@code true} to suppress the call; {@code false} for normal execution
-   * @throws Throwable if an active scenario throws to simulate a failure
+   * @throws Throwable an {@link java.sql.SQLException} if an active scenario rejects the call
    */
-  public boolean beforeJdbcPreparedStatement(final @Nullable String sql) throws Throwable {
-    return evaluateJdbc(OperationType.JDBC_PREPARED_STATEMENT, "java.sql.Connection", snippet(sql));
+  public void beforeJdbcPreparedStatement(final @Nullable String sql) throws Throwable {
+    evaluateJdbc(OperationType.JDBC_PREPARED_STATEMENT, "java.sql.Connection", snippet(sql));
   }
 
   /**
-   * Called before a JDBC transaction commit; returns {@code true} to suppress the commit.
+   * Called before a JDBC transaction commit.
    *
-   * @return {@code true} to suppress the commit; {@code false} for normal execution
-   * @throws Throwable if an active scenario throws to simulate a failure
+   * @throws Throwable an {@link java.sql.SQLException} if an active scenario rejects the commit
    */
-  public boolean beforeJdbcTransactionCommit() throws Throwable {
-    return evaluateJdbc(OperationType.JDBC_TRANSACTION_COMMIT, "java.sql.Connection", null);
+  public void beforeJdbcTransactionCommit() throws Throwable {
+    evaluateJdbc(OperationType.JDBC_TRANSACTION_COMMIT, "java.sql.Connection", null);
   }
 
   /**
-   * Called before a JDBC transaction rollback; returns {@code true} to suppress the rollback.
+   * Called before a JDBC transaction rollback.
    *
-   * @return {@code true} to suppress the rollback; {@code false} for normal execution
-   * @throws Throwable if an active scenario throws to simulate a failure
+   * @throws Throwable an {@link java.sql.SQLException} if an active scenario rejects the rollback
    */
-  public boolean beforeJdbcTransactionRollback() throws Throwable {
-    return evaluateJdbc(OperationType.JDBC_TRANSACTION_ROLLBACK, "java.sql.Connection", null);
+  public void beforeJdbcTransactionRollback() throws Throwable {
+    evaluateJdbc(OperationType.JDBC_TRANSACTION_ROLLBACK, "java.sql.Connection", null);
   }
 
-  private boolean evaluateJdbc(
+  private void evaluateJdbc(
       final OperationType opType, final String targetClassName, final @Nullable String targetName)
       throws Throwable {
-    final RuntimeDecision decision =
-        (engine.idle(opType)
-            ? RuntimeDecision.none()
-            : engine.evaluate(
-                new InvocationContext(
-                    opType,
-                    targetClassName,
-                    null,
-                    targetName,
-                    false,
-                    null,
-                    null,
-                    engine.scopeContext.currentSessionId())));
-    return engine.suppressed(decision);
+    if (engine.idle(opType)) {
+      return;
+    }
+    apply(
+        engine.evaluate(
+            new InvocationContext(
+                opType,
+                targetClassName,
+                null,
+                targetName,
+                false,
+                null,
+                null,
+                engine.scopeContext.currentSessionId())));
+  }
+
+  /** Applies the delay and gate of an HTTP or JDBC decision, then throws its rejection. */
+  private void apply(final RuntimeDecision decision) throws Throwable {
+    engine.applyDelayAndGate(decision);
+    if (decision.terminalAction() instanceof TerminalAction.Throw thrown) {
+      throw thrown.failure();
+    }
   }
 
   private static @Nullable String snippet(final @Nullable String sql) {
