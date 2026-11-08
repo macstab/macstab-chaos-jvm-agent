@@ -122,6 +122,32 @@ class JfrChaosEventSinkTest {
     }
   }
 
+  @Test
+  @DisplayName("the snapshot's total keeps closed scenarios and counts unrecorded applications")
+  void totalKeepsClosedScenarios() throws Throwable {
+    try (JfrChaosEventSink sink = new JfrChaosEventSink(runtime.diagnostics())) {
+      runtime.addEventListener(sink);
+      final com.macstab.chaos.jvm.api.ChaosActivationHandle handle =
+          runtime.activate(
+              ChaosScenario.builder("jfr-closed")
+                  .scope(ChaosScenario.ScenarioScope.JVM)
+                  .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.SYSTEM_GC_REQUEST)))
+                  .effect(ChaosEffect.suppress())
+                  .activationPolicy(ActivationPolicy.always())
+                  .build());
+      // No recording enables EffectApplied: the applications are counted all the same.
+      for (int i = 0; i < 7; i++) {
+        assertThat(runtime.beforeGcRequest()).as("suppressed").isTrue();
+      }
+      handle.close();
+
+      awaitSnapshot(
+          snapshot ->
+              snapshot.getLong("totalAppliedCount") == 7
+                  && snapshot.getInt("activeScenarioCount") == 0);
+    }
+  }
+
   private static ChaosScenario snapshotScenario(final String id) {
     return ChaosScenario.builder(id)
         .scope(ChaosScenario.ScenarioScope.JVM)

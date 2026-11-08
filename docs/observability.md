@@ -24,14 +24,14 @@ pid=4711
 - On a rejected plan: `line` and `column` (1-based; `0` when the failure has no position, e.g. a validation error at activation), `reason` (what is wrong, without input values), `source`, `pid`. The agent refuses to start with a rejected startup plan; a rejected reload keeps the previous plan active.
 - Without a startup plan the status file is not written.
 
-**Hits file** `<dir>/.chaos-jvm.hits.<pid>`, one line per scenario:
+**Hits file** `<dir>/.chaos-jvm.hits.<pid>`, one line per scenario id that applied, sorted by id:
 
 ```text
+5	reject-orders
 2	slow-writes
-0	reject-orders
 ```
 
-- `<applied count><TAB><scenario id>`; the count is the scenario's `appliedCount`.
+- `<applied count><TAB><scenario id>`; the count is cumulative since the agent started: a stopped, expired or reloaded scenario keeps its count, and the same id in several sessions is one line with their sum.
 - Written after each of the first 64 applications, then at most every 100 ms while applications happen, and at exit. A JVM in which nothing was ever applied writes none. Files of finished JVMs stay: sum all `.chaos-jvm.hits.<pid>` files for totals and remove them between runs.
 
 Both files are written to a staging file and renamed, so a reader never sees a partial report; the writes run with the dispatch depth raised, so a file I/O scenario never applies to them.

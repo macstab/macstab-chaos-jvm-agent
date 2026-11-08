@@ -5,6 +5,7 @@ import com.macstab.chaos.jvm.api.ChaosEvent;
 import com.macstab.chaos.jvm.api.ChaosEventListener;
 import java.util.List;
 import java.util.StringJoiner;
+import java.util.concurrent.atomic.LongAdder;
 import jdk.jfr.FlightRecorder;
 
 /**
@@ -26,6 +27,9 @@ final class JfrChaosEventSink implements ChaosEventListener, AutoCloseable {
   private final ChaosDiagnostics diagnostics;
   private final Runnable periodicHook;
 
+  /** Every application since this sink was registered, recorded or not, closed scenarios too. */
+  private final LongAdder appliedTotal = new LongAdder();
+
   JfrChaosEventSink(final ChaosDiagnostics diagnostics) {
     this.diagnostics = diagnostics;
     this.periodicHook = this::emitStressorSnapshot;
@@ -36,7 +40,10 @@ final class JfrChaosEventSink implements ChaosEventListener, AutoCloseable {
   public void onEvent(final ChaosEvent event) {
     switch (event.type()) {
       case REGISTERED, STARTED, STOPPED, RELEASED -> emitLifecycle(event);
-      case APPLIED -> emitEffectApplied(event);
+      case APPLIED -> {
+        appliedTotal.increment();
+        emitEffectApplied(event);
+      }
       default -> {
         /* SKIPPED, FAILED — not emitted as discrete JFR events */
       }
@@ -84,10 +91,8 @@ final class JfrChaosEventSink implements ChaosEventListener, AutoCloseable {
     final List<ChaosDiagnostics.ScenarioReport> scenarios = snapshot.scenarios();
 
     int activeCount = 0;
-    long totalApplied = 0L;
     final StringJoiner ids = new StringJoiner(",");
     for (final ChaosDiagnostics.ScenarioReport report : scenarios) {
-      totalApplied += report.appliedCount();
       if (report.state() == ChaosDiagnostics.ScenarioState.ACTIVE) {
         activeCount++;
         ids.add(report.id());
@@ -95,7 +100,7 @@ final class JfrChaosEventSink implements ChaosEventListener, AutoCloseable {
     }
 
     jfrEvent.activeScenarioCount = activeCount;
-    jfrEvent.totalAppliedCount = totalApplied;
+    jfrEvent.totalAppliedCount = appliedTotal.sum();
     final String idsString = ids.toString();
     jfrEvent.activeScenarioIds =
         idsString.length() > MAX_IDS_LENGTH ? idsString.substring(0, MAX_IDS_LENGTH) : idsString;

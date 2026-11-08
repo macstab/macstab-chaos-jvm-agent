@@ -1,6 +1,5 @@
 package com.macstab.chaos.jvm.bootstrap;
 
-import com.macstab.chaos.jvm.api.ChaosDiagnostics;
 import com.macstab.chaos.jvm.api.ChaosEvent;
 import com.macstab.chaos.jvm.core.ChaosRuntime;
 import com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher;
@@ -12,10 +11,13 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.Map;
 import java.util.Optional;
+import java.util.TreeMap;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.LongAdder;
 import java.util.concurrent.locks.LockSupport;
 import org.jspecify.annotations.Nullable;
 
@@ -29,10 +31,12 @@ import org.jspecify.annotations.Nullable;
  *       state=error} with {@code line} and {@code column} (1-based, {@code 0} without a position)
  *       and {@code reason}; then {@code source} and {@code pid}. Without a startup plan it is not
  *       written.
- *   <li><b>Hits file</b> {@code <dir>/.chaos-jvm.hits.<pid>}, one line per scenario: {@code
- *       <applied count>\t<scenario id>}. Written after each of the first 64 applications, then at
- *       most every 100 ms while applications happen, and at exit; not at all in a JVM where no
- *       scenario ever applied.
+ *   <li><b>Hits file</b> {@code <dir>/.chaos-jvm.hits.<pid>}, one line per scenario id that
+ *       applied, sorted by id: {@code <applied count>\t<scenario id>}. The count is cumulative
+ *       since the reports started: a stopped or reloaded scenario keeps its count, and the same id
+ *       in several sessions is one line with their sum. Written after each of the first 64
+ *       applications, then at most every 100 ms while applications happen, and at exit; not at all
+ *       in a JVM where no scenario ever applied.
  * </ul>
  *
  * <p>Both are written to a staging file and renamed over the report, so a reader never sees a
@@ -65,6 +69,10 @@ final class ChaosReports implements AutoCloseable {
   private final ChaosRuntime runtime;
   private final AtomicBoolean hitsDirty = new AtomicBoolean();
   private final AtomicLong applications = new AtomicLong();
+
+  /** Applications per scenario id since these reports started; never reset. */
+  private final Map<String, LongAdder> hits = new ConcurrentHashMap<>();
+
   private final AtomicBoolean closed = new AtomicBoolean();
   private final Thread hitsWriter;
   private final Thread shutdownHook;
@@ -133,6 +141,7 @@ final class ChaosReports implements AutoCloseable {
 
   private void countHit(final ChaosEvent event) {
     if (event.type() == ChaosEvent.Type.APPLIED) {
+      hits.computeIfAbsent(event.scenarioId(), id -> new LongAdder()).increment();
       hitsDirty.set(true);
       if (applications.incrementAndGet() <= IMMEDIATE_HITS) {
         LockSupport.unpark(hitsWriter);
@@ -199,12 +208,14 @@ final class ChaosReports implements AutoCloseable {
     }
   }
 
-  /** Writes the hits file now. */
-  void writeHits() {
+  /**
+   * Writes the hits file now. Rendering and writing are one step: the counts only grow, so the
+   * writer that writes last also rendered last and leaves the largest counts.
+   */
+  synchronized void writeHits() {
     final StringBuilder lines = new StringBuilder();
-    for (final ChaosDiagnostics.ScenarioReport report :
-        runtime.diagnostics().snapshot().scenarios()) {
-      lines.append(report.appliedCount()).append('\t').append(oneLine(report.id())).append('\n');
+    for (final Map.Entry<String, LongAdder> hit : new TreeMap<>(hits).entrySet()) {
+      lines.append(hit.getValue().sum()).append('\t').append(oneLine(hit.getKey())).append('\n');
     }
     writeAtomically(HITS_FILE_PREFIX + pid, lines.toString());
   }
