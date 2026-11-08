@@ -70,11 +70,26 @@ final class JvmRuntimeAdvice {
 
   // ── A6: Deserialization ───────────────────────────────────────────────────
 
-  /** Intercepts {@code ObjectInputStream.readObject()}. */
+  /**
+   * Intercepts {@code ObjectInputStream.readObject()}: one deserialization of the object graph, not
+   * one per nested object ({@link BootstrapDispatcher#SCOPE_SERIALIZATION}).
+   */
   static final class ObjectDeserializeAdvice {
     @Advice.OnMethodEnter
     static void enter(@Advice.This final Object stream) throws Throwable {
-      BootstrapDispatcher.beforeObjectDeserialize(stream);
+      if (BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_SERIALIZATION)) {
+        try {
+          BootstrapDispatcher.beforeObjectDeserialize(stream);
+        } catch (final Throwable throwable) {
+          BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_SERIALIZATION);
+          throw throwable;
+        }
+      }
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit() {
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_SERIALIZATION);
     }
   }
 
@@ -156,12 +171,27 @@ final class JvmRuntimeAdvice {
 
   // ── B6: Serialization ─────────────────────────────────────────────────────
 
-  /** Intercepts {@code ObjectOutputStream.writeObject(Object)}. */
+  /**
+   * Intercepts {@code ObjectOutputStream.writeObject(Object)}: one serialization of the object
+   * graph, not one per nested object ({@link BootstrapDispatcher#SCOPE_SERIALIZATION}).
+   */
   static final class ObjectSerializeAdvice {
     @Advice.OnMethodEnter
     static void enter(@Advice.This final Object stream, @Advice.Argument(0) final Object obj)
         throws Throwable {
-      BootstrapDispatcher.beforeObjectSerialize(stream, obj);
+      if (BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_SERIALIZATION)) {
+        try {
+          BootstrapDispatcher.beforeObjectSerialize(stream, obj);
+        } catch (final Throwable throwable) {
+          BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_SERIALIZATION);
+          throw throwable;
+        }
+      }
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit() {
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_SERIALIZATION);
     }
   }
 

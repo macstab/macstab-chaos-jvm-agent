@@ -91,6 +91,62 @@ final class FileIoAdvice {
   }
 
   /**
+   * Intercepts {@link java.io.FileInputStream#readAllBytes()}: one read of the bytes returned, also
+   * when the stream fills them through several of its own reads ({@link
+   * BootstrapDispatcher#SCOPE_FILE_TRANSFER}). The bytes requested are unbounded ({@link
+   * Integer#MAX_VALUE}, as {@code readNBytes(Integer.MAX_VALUE)}). A corrupted read flips one bit
+   * of the returned array.
+   */
+  static final class FileReadAllBytesAdvice {
+    @Advice.OnMethodEnter
+    static boolean enter(
+        @Advice.This final Object stream, @Advice.FieldValue("path") final String path)
+        throws Throwable {
+      final boolean corrupt =
+          BootstrapDispatcher.beforeFileIo(
+                  OperationTags.FILE_IO_READ, stream, path, Integer.MAX_VALUE)
+              < 0;
+      // Entered after the dispatch: when it throws, no exit advice runs to leave the scope.
+      BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_FILE_TRANSFER);
+      return corrupt;
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit(@Advice.Enter final boolean corrupt, @Advice.Return final byte[] bytes) {
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_FILE_TRANSFER);
+      if (corrupt && bytes != null) {
+        BootstrapDispatcher.corruptBytes(bytes, 0, bytes.length);
+      }
+    }
+  }
+
+  /**
+   * Intercepts {@link java.io.FileInputStream#readNBytes(int)} ({@code len} requested), as {@link
+   * FileReadAllBytesAdvice}.
+   */
+  static final class FileReadNBytesAdvice {
+    @Advice.OnMethodEnter
+    static boolean enter(
+        @Advice.This final Object stream,
+        @Advice.Argument(0) final int len,
+        @Advice.FieldValue("path") final String path)
+        throws Throwable {
+      final boolean corrupt =
+          BootstrapDispatcher.beforeFileIo(OperationTags.FILE_IO_READ, stream, path, len) < 0;
+      BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_FILE_TRANSFER);
+      return corrupt;
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit(@Advice.Enter final boolean corrupt, @Advice.Return final byte[] bytes) {
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_FILE_TRANSFER);
+      if (corrupt && bytes != null) {
+        BootstrapDispatcher.corruptBytes(bytes, 0, bytes.length);
+      }
+    }
+  }
+
+  /**
    * Intercepts the single-byte {@link java.io.FileOutputStream#write(int)}.
    *
    * <p>Passes {@code "FILE_IO_WRITE"} as the operation tag so the dispatcher can route to the
@@ -418,15 +474,29 @@ final class FileIoAdvice {
   }
 
   /**
-   * Intercepts a platform file system provider's {@code newByteChannel} / {@code newFileChannel}.
+   * Intercepts a platform file system provider's {@code newByteChannel} / {@code newFileChannel}:
+   * one open, also when {@code newByteChannel} opens through {@code newFileChannel} ({@link
+   * BootstrapDispatcher#SCOPE_FILE_OPEN}).
    */
   static final class FilesOpenAdvice {
     @Advice.OnMethodEnter
     static void enter(
         @Advice.This final Object provider, @Advice.Argument(0) final java.nio.file.Path path)
         throws Throwable {
-      BootstrapDispatcher.beforeFileIo(
-          OperationTags.FILE_IO_OPEN, provider, path == null ? null : path.toString(), -1);
+      if (BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_FILE_OPEN)) {
+        try {
+          BootstrapDispatcher.beforeFileIo(
+              OperationTags.FILE_IO_OPEN, provider, path == null ? null : path.toString(), -1);
+        } catch (final Throwable throwable) {
+          BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_FILE_OPEN);
+          throw throwable;
+        }
+      }
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit() {
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_FILE_OPEN);
     }
   }
 
@@ -581,6 +651,39 @@ final class FileIoAdvice {
         @Advice.Enter final boolean corrupt, @Advice.Return(readOnly = false) int value) {
       if (corrupt) {
         value = BootstrapDispatcher.corruptByte(value);
+      }
+    }
+  }
+
+  /**
+   * Intercepts {@code RandomAccessFile.readLine()}: one read of the line, also when the file reads
+   * it byte by byte ({@link BootstrapDispatcher#SCOPE_FILE_TRANSFER}). The bytes requested are
+   * unbounded ({@link Integer#MAX_VALUE}). A corrupted read flips one bit of the line's bytes, each
+   * of which {@code readLine} returns as one {@code char}. Reads of archives are skipped: see
+   * {@link BootstrapDispatcher#isArchive(String)}.
+   */
+  static final class RandomAccessReadLineAdvice {
+    @Advice.OnMethodEnter
+    static boolean enter(
+        @Advice.This final Object file, @Advice.FieldValue("path") final String path)
+        throws Throwable {
+      final boolean corrupt =
+          !BootstrapDispatcher.isArchive(path)
+              && BootstrapDispatcher.beforeFileIo(
+                      OperationTags.FILE_IO_READ, file, path, Integer.MAX_VALUE)
+                  < 0;
+      BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_FILE_TRANSFER);
+      return corrupt;
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit(
+        @Advice.Enter final boolean corrupt, @Advice.Return(readOnly = false) String line) {
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_FILE_TRANSFER);
+      if (corrupt && line != null) {
+        final byte[] bytes = line.getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);
+        BootstrapDispatcher.corruptBytes(bytes, 0, bytes.length);
+        line = new String(bytes, java.nio.charset.StandardCharsets.ISO_8859_1);
       }
     }
   }

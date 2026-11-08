@@ -155,8 +155,10 @@ public final class BootstrapDispatcher {
   public static final int SCOPE_CLOCK_API = 20;
 
   /**
-   * Scope of a {@code FileChannel.transferTo} / {@code transferFrom}: one file event, also when the
-   * JDK carries it out through the channel's own reads and writes.
+   * Scope of a {@code FileChannel.transferTo} / {@code transferFrom} and of a compound {@code
+   * java.io} read ({@code FileInputStream.readAllBytes} / {@code readNBytes(int)}, {@code
+   * RandomAccessFile.readLine}): one file event, also when the JDK carries it out through the
+   * stream's or channel's own reads and writes.
    */
   public static final int SCOPE_FILE_TRANSFER = 21;
 
@@ -172,8 +174,21 @@ public final class BootstrapDispatcher {
    */
   public static final int SCOPE_DATAGRAM_SEND = 23;
 
+  /**
+   * Scope of a file system provider's {@code newByteChannel} / {@code newFileChannel}: one open,
+   * also when {@code newByteChannel} opens through {@code newFileChannel} (JDK 24 and later).
+   */
+  public static final int SCOPE_FILE_OPEN = 24;
+
+  /**
+   * Scope of {@code ObjectOutputStream.writeObject} / {@code ObjectInputStream.readObject}: one
+   * serialization of the object graph, not one per nested object a class's own {@code writeObject}
+   * / {@code readObject} writes or reads.
+   */
+  public static final int SCOPE_SERIALIZATION = 25;
+
   /** Size of the per-thread counter array: index 0 is the reentrancy depth, then the scopes. */
-  static final int SCOPE_COUNT = 24;
+  static final int SCOPE_COUNT = 26;
 
   /**
    * Enters a call-depth scope on the current thread.

@@ -293,6 +293,111 @@ class AgentEndToEndTest {
       assertThat(result.longValue("matched.other-pool")).isZero();
     }
 
+    @Test
+    @DisplayName("Files.newInputStream is one FILE_IO_OPEN match (newByteChannel → newFileChannel)")
+    void filesNewInputStream() throws Exception {
+      assertSingleFileMatch(OperationType.FILE_IO_OPEN, "files-new-input-stream");
+    }
+
+    @Test
+    @DisplayName("a truncate through SeekableByteChannel is one FILE_IO_TRUNCATE match (bridge)")
+    void seekableTruncate() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          assertSingleFileMatch(OperationType.FILE_IO_TRUNCATE, "seekable-truncate");
+      assertThat(result.longValue("size")).isEqualTo(4L);
+    }
+
+    @Test
+    @DisplayName("FileInputStream.readAllBytes is one FILE_IO_READ match")
+    void fileInputStreamReadAllBytes() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          assertSingleFileMatch(OperationType.FILE_IO_READ, "fis-read-all-bytes");
+      assertThat(result.longValue("length")).isEqualTo(20_000L);
+    }
+
+    @Test
+    @DisplayName("FileInputStream.readNBytes(int) is one FILE_IO_READ match")
+    void fileInputStreamReadNBytes() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          assertSingleFileMatch(OperationType.FILE_IO_READ, "fis-read-n-bytes");
+      assertThat(result.longValue("length")).isEqualTo(15_000L);
+    }
+
+    @Test
+    @DisplayName("RandomAccessFile.readLine is one FILE_IO_READ match")
+    void randomAccessFileReadLine() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          assertSingleFileMatch(OperationType.FILE_IO_READ, "raf-read-line");
+      assertThat(result.value("line")).isEqualTo("0123456789");
+    }
+
+    @Test
+    @DisplayName(
+        "writing and reading a list of 100 elements is one OBJECT_SERIALIZE and one"
+            + " OBJECT_DESERIALIZE match")
+    void serializeList() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.run(
+              plan(
+                  scenario(
+                      "serialize",
+                      ChaosSelector.jvmRuntime(Set.of(OperationType.OBJECT_SERIALIZE)),
+                      ChaosEffect.delay(Duration.ofMillis(1))),
+                  scenario(
+                      "deserialize",
+                      ChaosSelector.jvmRuntime(Set.of(OperationType.OBJECT_DESERIALIZE)),
+                      ChaosEffect.delay(Duration.ofMillis(1)))),
+              DefectProbeMain.class,
+              "serialize-list",
+              null);
+      assertThat(result.longValue("size")).isEqualTo(100L);
+      assertThat(result.longValue("matched.serialize")).isEqualTo(1L);
+      assertThat(result.longValue("matched.deserialize")).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("a put into a scheduled pool's queue through its bridge is one QUEUE_PUT match")
+    void delayedWorkQueuePutThroughBridge() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.run(
+              plan(
+                  scenario(
+                      "put",
+                      new ChaosSelector.QueueSelector(
+                          Set.of(OperationType.QUEUE_PUT),
+                          NamePattern.exact(
+                              "java.util.concurrent.ScheduledThreadPoolExecutor$DelayedWorkQueue")),
+                      ChaosEffect.delay(Duration.ofMillis(1)))),
+              DefectProbeMain.class,
+              "delayed-work-queue-put",
+              null);
+      assertThat(result.longValue("matched.put")).isEqualTo(1L);
+      assertThat(result.longValue("queueSize")).isEqualTo(1L);
+    }
+
+    /**
+     * One call of {@code mode} on a file under the probe's directory is one match of {@code op}.
+     */
+    private ChildJvmProbe.ProbeResult assertSingleFileMatch(
+        final OperationType operation, final String mode) throws Exception {
+      final Path root = Files.createDirectories(tempDir.resolve("single-" + mode));
+      final ChildJvmProbe.ProbeResult result =
+          probe.run(
+              plan(
+                  scenario(
+                      "file",
+                      new ChaosSelector.FileIoSelector(
+                          Set.of(operation), PathPattern.under(root.toString()), null, null),
+                      ChaosEffect.delay(Duration.ofMillis(1)))),
+              DefectProbeMain.class,
+              mode,
+              null,
+              "-Dchaos.test.dir=" + root);
+      assertThat(result.longValue("matched.file")).as("matches of one call").isEqualTo(1L);
+      assertThat(result.longValue("applied.file")).isEqualTo(1L);
+      return result;
+    }
+
     private void assertSingleMatch(final String id, final ChaosSelector selector, final String mode)
         throws Exception {
       final ChildJvmProbe.ProbeResult result =
@@ -1526,6 +1631,9 @@ class AgentEndToEndTest {
       assertThat(result.longValue("differingBits")).isEqualTo(1L);
       // the single-byte and the channel read paths flip one bit too
       assertThat(result.longValue("singleByteDifferingBits")).isEqualTo(1L);
+      // a compound read is one read: one bit of all the bytes it returns
+      assertThat(result.longValue("readAllBytesDifferingBits")).isEqualTo(1L);
+      assertThat(result.longValue("readLineDifferingBits")).isEqualTo(1L);
       assertThat(result.longValue("channelRead")).isEqualTo(64L);
       assertThat(result.longValue("channelDifferingBits")).isEqualTo(1L);
     }

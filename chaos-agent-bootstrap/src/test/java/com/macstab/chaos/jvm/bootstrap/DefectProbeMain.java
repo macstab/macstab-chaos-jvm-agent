@@ -140,6 +140,13 @@ public final class DefectProbeMain {
       case "completion-dependents" -> completionDependents();
       case "virtual-thread-resumes" -> virtualThreadResumes();
       case "parallel-stream" -> parallelStream();
+      case "files-new-input-stream" -> filesNewInputStream();
+      case "seekable-truncate" -> seekableTruncate();
+      case "serialize-list" -> serializeList();
+      case "fis-read-all-bytes" -> fisReadAllBytes();
+      case "fis-read-n-bytes" -> fisReadNBytes();
+      case "raf-read-line" -> rafReadLine();
+      case "delayed-work-queue-put" -> delayedWorkQueuePut();
       default -> throw new IllegalArgumentException("unknown probe mode: " + args[0]);
     }
     printCounts();
@@ -239,6 +246,100 @@ public final class DefectProbeMain {
     final BlockingQueue<Delayed> queue = new DelayQueue<>();
     queue.put(new ImmediateDelayed());
     System.out.println("queueSize=" + queue.size());
+  }
+
+  /** The file {@code name} under {@code chaos.test.dir}, holding {@code content}. */
+  private static java.nio.file.Path testFile(final String name, final byte[] content)
+      throws Exception {
+    final java.nio.file.Path file =
+        java.nio.file.Path.of(System.getProperty("chaos.test.dir")).resolve(name);
+    java.nio.file.Files.write(file, content);
+    return file;
+  }
+
+  /**
+   * {@code Files.newInputStream}: on JDK 24+ the provider's newByteChannel calls newFileChannel.
+   */
+  private static void filesNewInputStream() throws Exception {
+    final java.nio.file.Path file =
+        java.nio.file.Path.of(System.getProperty("chaos.test.dir")).resolve("open");
+    // Created through File.createNewFile, which is not an open.
+    file.toFile().createNewFile();
+    try (java.io.InputStream in = java.nio.file.Files.newInputStream(file)) {
+      System.out.println("read=" + in.read());
+    }
+  }
+
+  /** A truncate through {@code SeekableByteChannel}, the type the bridge method returns. */
+  private static void seekableTruncate() throws Exception {
+    final java.nio.file.Path file = testFile("truncate", new byte[16]);
+    try (java.nio.channels.SeekableByteChannel channel =
+        java.nio.file.Files.newByteChannel(file, java.nio.file.StandardOpenOption.WRITE)) {
+      channel.truncate(4L);
+    }
+    System.out.println("size=" + java.nio.file.Files.size(file));
+  }
+
+  /** One writeObject and one readObject of a list of 100 elements. */
+  private static void serializeList() throws Exception {
+    final java.util.List<Integer> list = new java.util.ArrayList<>();
+    for (int i = 0; i < 100; i++) {
+      list.add(i);
+    }
+    final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+    try (java.io.ObjectOutputStream out = new java.io.ObjectOutputStream(bytes)) {
+      out.writeObject(list);
+    }
+    try (java.io.ObjectInputStream in =
+        new java.io.ObjectInputStream(new java.io.ByteArrayInputStream(bytes.toByteArray()))) {
+      System.out.println("size=" + ((java.util.List<?>) in.readObject()).size());
+    }
+  }
+
+  /** {@code FileInputStream.readAllBytes} of a file larger than one internal read. */
+  private static void fisReadAllBytes() throws Exception {
+    final java.nio.file.Path file = testFile("all", new byte[20_000]);
+    try (java.io.FileInputStream in = new java.io.FileInputStream(file.toFile())) {
+      System.out.println("length=" + in.readAllBytes().length);
+    }
+  }
+
+  /** {@code FileInputStream.readNBytes(int)} of more than one internal read. */
+  private static void fisReadNBytes() throws Exception {
+    final java.nio.file.Path file = testFile("n", new byte[20_000]);
+    try (java.io.FileInputStream in = new java.io.FileInputStream(file.toFile())) {
+      System.out.println("length=" + in.readNBytes(15_000).length);
+    }
+  }
+
+  /** {@code RandomAccessFile.readLine} of a ten-character line. */
+  private static void rafReadLine() throws Exception {
+    final java.nio.file.Path file =
+        testFile("line", "0123456789\nrest".getBytes(StandardCharsets.ISO_8859_1));
+    try (java.io.RandomAccessFile in = new java.io.RandomAccessFile(file.toFile(), "r")) {
+      System.out.println("line=" + in.readLine());
+    }
+  }
+
+  /**
+   * One {@code put} into a {@code ScheduledThreadPoolExecutor}'s queue through the {@code
+   * BlockingQueue} interface: the generic bridge {@code put(Object)} of {@code DelayedWorkQueue}
+   * calls its {@code put(Runnable)}.
+   */
+  @SuppressWarnings("unchecked")
+  private static void delayedWorkQueuePut() throws Exception {
+    final java.util.concurrent.ScheduledThreadPoolExecutor executor =
+        new java.util.concurrent.ScheduledThreadPoolExecutor(1);
+    try {
+      final ScheduledFuture<?> future = executor.schedule(() -> {}, 1L, TimeUnit.HOURS);
+      final BlockingQueue<Object> queue =
+          (BlockingQueue<Object>) (BlockingQueue<?>) executor.getQueue();
+      queue.remove(future);
+      queue.put(future);
+      System.out.println("queueSize=" + queue.size());
+    } finally {
+      executor.shutdownNow();
+    }
   }
 
   private static void urlClassLoaderLoad() throws Exception {
@@ -785,6 +886,22 @@ public final class DefectProbeMain {
       try (java.io.FileInputStream in = new java.io.FileInputStream(file.toFile())) {
         System.out.println(
             "singleByteDifferingBits=" + Integer.bitCount((in.read() ^ sent[0]) & 0xFF));
+      }
+      try (java.io.FileInputStream in = new java.io.FileInputStream(file.toFile())) {
+        final byte[] all = in.readAllBytes();
+        int differingBits = 0;
+        for (int i = 0; i < all.length; i++) {
+          differingBits += Integer.bitCount((all[i] ^ sent[i]) & 0xFF);
+        }
+        System.out.println("readAllBytesDifferingBits=" + differingBits);
+      }
+      try (java.io.RandomAccessFile in = new java.io.RandomAccessFile(file.toFile(), "r")) {
+        final String line = in.readLine();
+        int differingBits = 0;
+        for (int i = 0; i < line.length(); i++) {
+          differingBits += Integer.bitCount((line.charAt(i) ^ sent[i]) & 0xFF);
+        }
+        System.out.println("readLineDifferingBits=" + differingBits);
       }
       try (java.nio.channels.FileChannel channel = java.nio.channels.FileChannel.open(file)) {
         final java.nio.ByteBuffer buffer = java.nio.ByteBuffer.allocate(64);
