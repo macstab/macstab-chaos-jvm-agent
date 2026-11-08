@@ -80,7 +80,12 @@ Both mechanisms grant the same set of opens to the unnamed module of the system 
 | `java.base/sun.nio.ch`                | `DirectBuffer.cleaner()` reflection (`DirectBufferPressureStressor`).                         |
 | `java.base/jdk.internal.ref`          | Modern `Cleaner` mechanism (Java 9+ replacement for `sun.misc.Cleaner`).                      |
 
-**Adding a new internal**: when a new feature requires access to another non-exported package, add it to **both** the manifest in `chaos-agent-bootstrap/build.gradle.kts` and the list inside `ModuleOpener#grantInternalModuleOpens`. Same pattern applies if a new advice class references additional helper types: those types must be injected into the bootstrap classloader from `injectBridge(...)` (see `HttpUrlExtractor` and `JdbcTargetExtractor` for prior art).
+**Adding a new internal**: when a new feature requires access to another non-exported package, add it to **both** the manifest in `chaos-agent-bootstrap/build.gradle.kts` and the list inside `ModuleOpener#grantInternalModuleOpens`. Same pattern applies if a new advice class references additional helper types: those types must be injected into the bootstrap classloader from `injectBridge(...)` (see `HttpUrlExtractor`, `JdbcTargetExtractor` and `ClientCallExtractor` for prior art).
+
+**Advice rules** (checked by `ArchitectureTest`): advice is inlined into classes of any loader, so
+- every agent type an `*Advice` class references is listed in `BridgeInjector.BRIDGE_CLASSES`, and the bridge references no agent class outside the list. A library defined by a loader that cannot see the agent's (one whose parent is the platform loader) resolves those types through the bootstrap class path; any other agent type is a `NoClassDefFoundError` in application code;
+- advice accesses only public members of public agent classes (it runs in other packages);
+- advice holds no `invokedynamic`: no `+` on strings (use `"…".concat(String.valueOf(x))`), no lambdas or method references. Drivers, pools and clients compiled for Java 6 (class file version 50) do not allow it. Bridge classes are not inlined and may use both.
 
 ---
 

@@ -1526,6 +1526,30 @@ class AgentEndToEndTest {
     }
 
     @Test
+    @DisplayName(
+        "Kafka in a loader that reaches only the platform and boot loaders: the hook links and"
+            + " matches")
+    void kafkaInIsolatedLoader() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.run(
+              plan(
+                  scenario(
+                      "kafka",
+                      ChaosSelector.messaging(
+                          Set.of(OperationType.MESSAGE_SEND), NamePattern.exact("orders")),
+                      ChaosEffect.delay(Duration.ofMillis(1)))),
+              DefectProbeMain.class,
+              "kafka-isolated-loader",
+              null,
+              "-Dchaos.test.isolatedClasspath=" + clientClasspath);
+      assertThat(result.value("loader.isolated")).isEqualTo("true");
+      assertThat(result.value("orders.type"))
+          .as("the advice inlined into KafkaProducer.send resolves every agent class it names")
+          .isEqualTo("sent");
+      assertThat(result.longValue("matched.kafka")).isEqualTo(1L);
+    }
+
+    @Test
     @DisplayName("Kafka poll: matched by subscribed topic")
     void kafkaPoll() throws Exception {
       final ChildJvmProbe.ProbeResult result =

@@ -26,8 +26,9 @@ final class BridgeInjector {
    * Packages the bootstrap bridge classes into a temporary JAR and appends it to the bootstrap
    * classpath.
    *
-   * <p>The classes written are {@code BootstrapDispatcher} and the types that advice woven into JDK
-   * classes references (the scheduled-task wrappers and the API exceptions it throws).
+   * <p>The classes written are {@code BootstrapDispatcher} and every other agent type that inlined
+   * advice references (the scheduled-task wrappers and the URL, JDBC and client-call extractors):
+   * see {@link #BRIDGE_CLASSES}.
    *
    * <p>They are read from the agent classloader's resources (the same JAR that contains this class)
    * and written verbatim into the temp JAR, which is unlinked as soon as it is appended (on
@@ -174,8 +175,9 @@ final class BridgeInjector {
 
   /**
    * The class files of the bootstrap bridge jar. JDK classes woven by the agent resolve the types
-   * their advice references through the bootstrap class loader, so every agent type the bridge
-   * references must be in this list; {@code ArchitectureTest} checks that it is closed.
+   * their advice references through the bootstrap class loader, and so do library classes whose
+   * loader cannot see the agent's, so every agent type that inlined advice or the bridge itself
+   * references must be in this list; {@code ArchitectureTest} checks both.
    */
   static final java.util.List<String> BRIDGE_CLASSES =
       java.util.List.of(
@@ -193,7 +195,12 @@ final class BridgeInjector {
           // JDBC advice woven into HikariPool, c3p0 and java.sql types references these: the
           // inlined references resolve through the bootstrap class path.
           "com/macstab/chaos/jvm/instrumentation/JdbcTargetExtractor.class",
-          "com/macstab/chaos/jvm/instrumentation/JdbcTargetExtractor$1.class");
+          "com/macstab/chaos/jvm/instrumentation/JdbcTargetExtractor$1.class",
+          // Client-library advice (Kafka, gRPC, Redis, AWS SDK, Netty) references this. A library
+          // defined by a loader that reaches only the platform and boot loaders (a plugin or module
+          // loader) cannot see the agent's loader, so it must come from the bootstrap class path.
+          "com/macstab/chaos/jvm/instrumentation/ClientCallExtractor.class",
+          "com/macstab/chaos/jvm/instrumentation/ClientCallExtractor$1.class");
 
   private static void writeClass(final JarOutputStream jarOutputStream, final String resourcePath)
       throws IOException {

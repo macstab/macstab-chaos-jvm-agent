@@ -19,10 +19,11 @@ import org.jspecify.annotations.Nullable;
  * agent's own reflection is not evaluated as application reflection.
  *
  * <p>Public because the advice that calls it is inlined into the library classes, which live in
- * other packages; a package-private class there fails with {@link IllegalAccessError}. It carries
- * its own reflection helper rather than sharing {@code HttpUrlExtractor}'s: that class is injected
- * into the bootstrap class loader, so to this class (loaded with the application) it is in a
- * different runtime package and its package-private members are inaccessible.
+ * other packages; a package-private class there fails with {@link IllegalAccessError}. Part of the
+ * bootstrap bridge ({@code BridgeInjector.BRIDGE_CLASSES}): the library classes resolve it through
+ * the bootstrap class loader, so a library defined by a loader that cannot see the agent's (one
+ * whose parent is the platform loader) still links. Like every bridge class it references no agent
+ * class outside the bridge.
  */
 public final class ClientCallExtractor {
 

@@ -78,6 +78,7 @@ public final class DefectProbeMain {
       case "priority-queue-put" -> new PriorityBlockingQueue<String>().put("item");
       case "url-class-loader-load" -> urlClassLoaderLoad();
       case "get-resource" -> getResource();
+      case "kafka-isolated-loader" -> kafkaIsolatedLoader();
       case "park-until-in-session" -> parkUntilInSession();
       case "jdbc-hikari-execute" -> jdbcHikariExecute();
       case "jdbc-prepared-execute" -> jdbcPreparedExecute();
@@ -2962,6 +2963,57 @@ public final class DefectProbeMain {
         .scenario(scenarioId)
         .map(ChaosDiagnostics.ScenarioReport::appliedCount)
         .orElse(-1L);
+  }
+
+  /**
+   * Kafka defined by a loader whose parent is the platform loader, as in a plugin or an isolated
+   * module: it reaches the boot path but not the application class path, so every agent class the
+   * inlined advice references must come from the bootstrap bridge. The libraries come from {@code
+   * chaos.test.isolatedClasspath} and are not on this JVM's class path.
+   */
+  private static void kafkaIsolatedLoader() throws Exception {
+    final java.util.List<URL> urls = new java.util.ArrayList<>();
+    for (final String entry :
+        Arrays.stream(
+                System.getProperty("chaos.test.isolatedClasspath")
+                    .split(java.io.File.pathSeparator))
+            .toList()) {
+      urls.add(java.nio.file.Path.of(entry).toUri().toURL());
+    }
+    final Thread current = Thread.currentThread();
+    final ClassLoader previous = current.getContextClassLoader();
+    try (URLClassLoader isolated =
+        new URLClassLoader(urls.toArray(new URL[0]), ClassLoader.getPlatformClassLoader())) {
+      // Kafka resolves the configured serializers through the context class loader.
+      current.setContextClassLoader(isolated);
+      final java.util.Properties config = new java.util.Properties();
+      config.put("bootstrap.servers", "127.0.0.1:1");
+      // No broker: the send waits this long for metadata, not the default 60 s.
+      config.put("max.block.ms", "100");
+      config.put("key.serializer", "org.apache.kafka.common.serialization.StringSerializer");
+      config.put("value.serializer", "org.apache.kafka.common.serialization.StringSerializer");
+      final Class<?> producerType =
+          Class.forName("org.apache.kafka.clients.producer.KafkaProducer", true, isolated);
+      final Class<?> recordType =
+          Class.forName("org.apache.kafka.clients.producer.ProducerRecord", true, isolated);
+      System.out.println("loader.isolated=" + (producerType.getClassLoader() == isolated));
+      try (AutoCloseable producer =
+          (AutoCloseable)
+              producerType.getConstructor(java.util.Properties.class).newInstance(config)) {
+        final Object record =
+            recordType
+                .getConstructor(String.class, Object.class, Object.class)
+                .newInstance("orders", "k", "v");
+        try {
+          producerType.getMethod("send", recordType).invoke(producer, record);
+          System.out.println("orders.type=sent");
+        } catch (final java.lang.reflect.InvocationTargetException failure) {
+          System.out.println("orders.type=" + failure.getCause().getClass().getName());
+        }
+      }
+    } finally {
+      current.setContextClassLoader(previous);
+    }
   }
 
   static void printCounts() {
