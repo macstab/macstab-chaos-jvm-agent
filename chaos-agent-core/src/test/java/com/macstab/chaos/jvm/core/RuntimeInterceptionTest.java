@@ -568,7 +568,7 @@ class RuntimeInterceptionTest {
                   .activationPolicy(ActivationPolicy.always())
                   .build());
       final long start = System.nanoTime();
-      runtime.beforeSocketRead(null);
+      runtime.beforeSocketRead(null, InvocationContext.UNKNOWN, null, 0, 0);
       final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
       assertThat(elapsedMs)
           .as("delay effect should add at least 80%% of configured %dms", DELAY_MS)
@@ -587,7 +587,9 @@ class RuntimeInterceptionTest {
                   .effect(ChaosEffect.reject("chaos read rejection"))
                   .activationPolicy(ActivationPolicy.always())
                   .build());
-      final Throwable thrown = catchThrowable(() -> runtime.beforeSocketRead(null));
+      final Throwable thrown =
+          catchThrowable(
+              () -> runtime.beforeSocketRead(null, InvocationContext.UNKNOWN, null, 0, 0));
       assertThat(thrown).isExactlyInstanceOf(java.net.SocketException.class);
     }
 
@@ -595,7 +597,7 @@ class RuntimeInterceptionTest {
     @DisplayName("no scenario — does not throw")
     void noScenarioDoesNotThrow() throws Throwable {
       final ChaosRuntime runtime = new ChaosRuntime();
-      runtime.beforeSocketRead(null);
+      runtime.beforeSocketRead(null, InvocationContext.UNKNOWN, null, 0, 0);
     }
   }
 
@@ -620,7 +622,7 @@ class RuntimeInterceptionTest {
                   .activationPolicy(ActivationPolicy.always())
                   .build());
       final long start = System.nanoTime();
-      runtime.beforeSocketWrite(null, 64);
+      runtime.beforeSocketWrite(null, 64, null, 0);
       final long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
       assertThat(elapsedMs)
           .as("delay effect should add at least 80%% of configured %dms", DELAY_MS)
@@ -639,7 +641,7 @@ class RuntimeInterceptionTest {
                   .effect(ChaosEffect.reject("chaos write rejection"))
                   .activationPolicy(ActivationPolicy.always())
                   .build());
-      final Throwable thrown = catchThrowable(() -> runtime.beforeSocketWrite(null, 64));
+      final Throwable thrown = catchThrowable(() -> runtime.beforeSocketWrite(null, 64, null, 0));
       assertThat(thrown).isInstanceOf(java.io.IOException.class);
     }
 
@@ -647,7 +649,7 @@ class RuntimeInterceptionTest {
     @DisplayName("no scenario — does not throw")
     void noScenarioDoesNotThrow() throws Throwable {
       final ChaosRuntime runtime = new ChaosRuntime();
-      runtime.beforeSocketWrite(null, 64);
+      runtime.beforeSocketWrite(null, 64, null, 0);
     }
   }
 

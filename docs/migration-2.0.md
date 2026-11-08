@@ -39,6 +39,7 @@
 | 19 | `reject` and `errno` raise the real call's exception; errnos apply per operation | a test catches the 1.x type of a reject or a file errno, reads its top stack frame, or applies a file errno to a call the kernel never reports it for | catch the type in §19; pick an errno the call can report (§19) |
 | 20 | The destructive-effect refusal is a `ChaosValidationException`; `suppress` is refused where a call cannot be skipped | code catches `ChaosActivationException` for a deadlock or thread leak without `allowDestructiveEffects`, or matches `plan rejected:` in the HTTP/JMX answer; a plan suppresses an operation outside the suppress list | catch `ChaosValidationException`, match `invalid plan:`; delay or reject instead (§20) |
 | 21 | Stressor parameters are refused instead of reduced | a `heapPressure` asks for more than the free heap; a `stringInternPressure` exceeds its caps or its length's distinct strings; a `floodInterval`, `gcInterval` or `heartbeat` is below 1 ms | lower the value or raise `-Xmx`, lengthen the strings, use 1 ms or more (§21) |
+| 22 | Unused `@Internal` `ChaosRuntime` overloads removed | code calls `beforeThreadStart(Thread)`, `beforeSocketRead(Object)`, `beforeSocketWrite(Object, int)` or `beforeFileIo(String, Object)` on `ChaosRuntime` | call the full forms (§22) |
 
 ---
 
@@ -293,6 +294,19 @@ Sessions gained the other way: a session-scoped scenario may now select thread s
 - Use an interval of 1 ms or more.
 
 `gcPressure` now allocates at its rate instead of rounding up to one object per 50 ms: a low rate of large objects, which allocated far more than asked in 1.x, now allocates what it asks for. Raise `allocationRateBytesPerSecond` if a test relied on the extra load.
+
+## 22. Unused `@Internal` `ChaosRuntime` overloads are removed
+
+`ChaosRuntime` is `@Internal`: the agent's bridge calls it, applications do not. Four short overloads that nothing in the agent called are removed; a test harness that drove the runtime directly calls the full forms:
+
+| Removed | Call instead |
+|---------|--------------|
+| `beforeThreadStart(thread)` | `beforeThreadStart(thread, false)` |
+| `beforeSocketRead(stream)` | `beforeSocketRead(stream, -1, null, 0, 0)` (unknown length, no peer, no `SO_TIMEOUT`) |
+| `beforeSocketWrite(stream, len)` | `beforeSocketWrite(stream, len, null, 0)` |
+| `beforeFileIo(operation, stream)` | `beforeFileIo(operation, stream, null, -1)` (no path, unknown byte count) |
+
+The documented manual method hooks, `beforeMethodEnter(className, methodName)` and `afterMethodExit(className, methodName, returnType, value)`, stay.
 
 ---
 

@@ -113,6 +113,79 @@ class ReturnValueCorruptorTest {
     void fallsBackToZeroForPrimitive() {
       assertThat(corrupt(ChaosEffect.ReturnValueStrategy.EMPTY, int.class, 5)).isEqualTo(0);
     }
+
+    @Test
+    @DisplayName(
+        "returns the empty primitive optionals for OptionalInt, OptionalLong, OptionalDouble")
+    void returnsEmptyPrimitiveOptionals() {
+      assertThat(
+              corrupt(
+                  ChaosEffect.ReturnValueStrategy.EMPTY,
+                  java.util.OptionalInt.class,
+                  java.util.OptionalInt.of(1)))
+          .isEqualTo(java.util.OptionalInt.empty());
+      assertThat(
+              corrupt(
+                  ChaosEffect.ReturnValueStrategy.EMPTY,
+                  java.util.OptionalLong.class,
+                  java.util.OptionalLong.of(1L)))
+          .isEqualTo(java.util.OptionalLong.empty());
+      assertThat(
+              corrupt(
+                  ChaosEffect.ReturnValueStrategy.EMPTY,
+                  java.util.OptionalDouble.class,
+                  java.util.OptionalDouble.of(1d)))
+          .isEqualTo(java.util.OptionalDouble.empty());
+    }
+
+    @Test
+    @DisplayName("returns an empty string for CharSequence")
+    void returnsEmptyStringForCharSequence() {
+      assertThat(corrupt(ChaosEffect.ReturnValueStrategy.EMPTY, CharSequence.class, "abc"))
+          .isEqualTo("");
+    }
+
+    @Test
+    @DisplayName("returns a zero-length array of the declared component type")
+    void returnsZeroLengthArrays() {
+      assertThat(corrupt(ChaosEffect.ReturnValueStrategy.EMPTY, int[].class, new int[] {1}))
+          .isInstanceOfSatisfying(int[].class, array -> assertThat(array).isEmpty());
+      assertThat(corrupt(ChaosEffect.ReturnValueStrategy.EMPTY, String[].class, new String[] {"a"}))
+          .isInstanceOfSatisfying(String[].class, array -> assertThat(array).isEmpty());
+    }
+
+    @Test
+    @DisplayName("returns empty streams for Stream, IntStream, LongStream and DoubleStream")
+    void returnsEmptyStreams() {
+      assertThat(
+              corrupt(
+                  ChaosEffect.ReturnValueStrategy.EMPTY,
+                  java.util.stream.Stream.class,
+                  java.util.stream.Stream.of(1)))
+          .isInstanceOfSatisfying(
+              java.util.stream.Stream.class, stream -> assertThat(stream.count()).isZero());
+      assertThat(
+              corrupt(
+                  ChaosEffect.ReturnValueStrategy.EMPTY,
+                  java.util.stream.IntStream.class,
+                  java.util.stream.IntStream.of(1)))
+          .isInstanceOfSatisfying(
+              java.util.stream.IntStream.class, stream -> assertThat(stream.count()).isZero());
+      assertThat(
+              corrupt(
+                  ChaosEffect.ReturnValueStrategy.EMPTY,
+                  java.util.stream.LongStream.class,
+                  java.util.stream.LongStream.of(1L)))
+          .isInstanceOfSatisfying(
+              java.util.stream.LongStream.class, stream -> assertThat(stream.count()).isZero());
+      assertThat(
+              corrupt(
+                  ChaosEffect.ReturnValueStrategy.EMPTY,
+                  java.util.stream.DoubleStream.class,
+                  java.util.stream.DoubleStream.of(1d)))
+          .isInstanceOfSatisfying(
+              java.util.stream.DoubleStream.class, stream -> assertThat(stream.count()).isZero());
+    }
   }
 
   @Nested

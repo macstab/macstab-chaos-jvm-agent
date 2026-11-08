@@ -342,8 +342,8 @@ were added in the roadmap 4.x instrumentation wave. The benchmark entry points m
 | `threadSleep_*`   | `beforeThreadSleep(long millis)`        | `Thread.sleep(long)`                                                |
 | `dnsResolve_*`    | `beforeDnsResolve(String hostname)`     | `InetAddress.getByName(String)`                                     |
 | `sslHandshake_*`  | `beforeSslHandshake(Object engine)`     | `SSLEngineImpl.beginHandshake()` / `SSLSocketImpl.startHandshake()` |
-| `fileIoRead_*`    | `beforeFileIo("FILE_IO_READ", Object)`  | `FileInputStream.read()`                                            |
-| `fileIoWrite_*`   | `beforeFileIo("FILE_IO_WRITE", Object)` | `FileOutputStream.write(int)`                                       |
+| `fileIoRead_*`    | `beforeFileIo("FILE_IO_READ", stream, path, byteCount)`  | `FileInputStream.read()`                                            |
+| `fileIoWrite_*`   | `beforeFileIo("FILE_IO_WRITE", stream, path, byteCount)` | `FileOutputStream.write(int)`                                       |
 
 Like the JDBC and HTTP benchmarks in sections 3–4, the measurement does **not** include
 `BootstrapDispatcher` bridge overhead (~5–15 ns) or ByteBuddy advice prolog cost. It isolates the

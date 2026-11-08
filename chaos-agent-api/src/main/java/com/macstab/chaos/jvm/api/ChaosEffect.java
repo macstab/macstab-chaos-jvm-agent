@@ -656,8 +656,10 @@ public sealed interface ChaosEffect
     /** Return zero or false. For numeric types: 0. For boolean: false. */
     ZERO,
     /**
-     * Return an empty collection, Optional, or String. Applicable to Collection, Map, Optional, and
-     * String return types.
+     * Return an empty value: an empty collection or map, an empty {@code Optional}, {@code
+     * OptionalInt}, {@code OptionalLong} or {@code OptionalDouble}, {@code ""} for {@code String}
+     * and {@code CharSequence}, a zero-length array, or an empty {@code Stream}, {@code IntStream},
+     * {@code LongStream} or {@code DoubleStream}.
      */
     EMPTY,
     /**

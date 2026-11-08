@@ -213,7 +213,7 @@ class SleepDnsTlsFileDispatchTest {
               ChaosSelector.dns(Set.of(OperationType.DNS_RESOLVE)),
               ChaosEffect.delay(Duration.ofMillis(200)));
       try {
-        runtime.beforeFileIo("FILE_IO_READ", new Object());
+        runtime.beforeFileIo("FILE_IO_READ", new Object(), null, InvocationContext.UNKNOWN);
         assertThat(handle.matchedCount()).as("a DNS scenario never sees a file read").isZero();
       } finally {
         handle.stop();
@@ -309,7 +309,7 @@ class SleepDnsTlsFileDispatchTest {
               ChaosEffect.delay(Duration.ofMillis(delayMs)));
       try {
         final long start = System.nanoTime();
-        runtime.beforeFileIo("FILE_IO_READ", new Object());
+        runtime.beforeFileIo("FILE_IO_READ", new Object(), null, InvocationContext.UNKNOWN);
         final long elapsedMs = (System.nanoTime() - start) / 1_000_000L;
         assertThat(elapsedMs)
             .as("delay effect must pause for at least %dms (got %dms)", delayMs, elapsedMs)
@@ -332,7 +332,7 @@ class SleepDnsTlsFileDispatchTest {
               ChaosEffect.delay(Duration.ofMillis(delayMs)));
       try {
         final long start = System.nanoTime();
-        runtime.beforeFileIo("FILE_IO_WRITE", new Object());
+        runtime.beforeFileIo("FILE_IO_WRITE", new Object(), null, InvocationContext.UNKNOWN);
         final long elapsedMs = (System.nanoTime() - start) / 1_000_000L;
         assertThat(elapsedMs)
             .as("delay effect must pause for at least %dms (got %dms)", delayMs, elapsedMs)
@@ -353,7 +353,7 @@ class SleepDnsTlsFileDispatchTest {
               ChaosSelector.fileIo(Set.of(OperationType.FILE_IO_READ)),
               ChaosEffect.delay(Duration.ofMillis(200)));
       try {
-        runtime.beforeFileIo("FILE_IO_WRITE", new Object());
+        runtime.beforeFileIo("FILE_IO_WRITE", new Object(), null, InvocationContext.UNKNOWN);
         assertThat(handle.matchedCount()).as("a read scenario never sees a write").isZero();
       } finally {
         handle.stop();
@@ -364,7 +364,10 @@ class SleepDnsTlsFileDispatchTest {
     @DisplayName("no active scenario — beforeFileIo does not throw")
     void noScenarioDoesNotThrow() {
       final ChaosRuntime runtime = new ChaosRuntime();
-      assertThatCode(() -> runtime.beforeFileIo("FILE_IO_READ", new Object()))
+      assertThatCode(
+              () ->
+                  runtime.beforeFileIo(
+                      "FILE_IO_READ", new Object(), null, InvocationContext.UNKNOWN))
           .doesNotThrowAnyException();
     }
 
@@ -373,7 +376,9 @@ class SleepDnsTlsFileDispatchTest {
     void unknownOperationTagThrows() {
       final ChaosRuntime runtime = new ChaosRuntime();
       org.assertj.core.api.Assertions.assertThatThrownBy(
-              () -> runtime.beforeFileIo("UNKNOWN_TAG", new Object()))
+              () ->
+                  runtime.beforeFileIo(
+                      "UNKNOWN_TAG", new Object(), null, InvocationContext.UNKNOWN))
           .isInstanceOf(IllegalArgumentException.class)
           .hasMessageContaining("UNKNOWN_TAG");
     }
@@ -382,7 +387,9 @@ class SleepDnsTlsFileDispatchTest {
     @DisplayName("null stream argument is tolerated")
     void nullStreamIsTolerated() {
       final ChaosRuntime runtime = new ChaosRuntime();
-      assertThatCode(() -> runtime.beforeFileIo("FILE_IO_READ", null)).doesNotThrowAnyException();
+      assertThatCode(
+              () -> runtime.beforeFileIo("FILE_IO_READ", null, null, InvocationContext.UNKNOWN))
+          .doesNotThrowAnyException();
     }
   }
 
@@ -401,8 +408,9 @@ class SleepDnsTlsFileDispatchTest {
                 assertThat(runtime.beforeThreadSleep(100L)).isFalse();
                 runtime.beforeDnsResolve("example.com");
                 runtime.beforeSslHandshake(new Object());
-                runtime.beforeFileIo("FILE_IO_READ", new Object());
-                runtime.beforeFileIo("FILE_IO_WRITE", new Object());
+                runtime.beforeFileIo("FILE_IO_READ", new Object(), null, InvocationContext.UNKNOWN);
+                runtime.beforeFileIo(
+                    "FILE_IO_WRITE", new Object(), null, InvocationContext.UNKNOWN);
               })
           .doesNotThrowAnyException();
     }

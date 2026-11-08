@@ -75,6 +75,7 @@ public final class MethodDispatch {
       return actualValue;
     }
     final String className = declaringType.getName();
+    final Class<?> returnType = MethodDescriptors.returnType(declaringType, descriptor);
     return afterMethodExit(
         new InvocationContext(
             OperationType.METHOD_EXIT,
@@ -91,7 +92,7 @@ public final class MethodDispatch {
             InvocationContext.UNKNOWN,
             descriptor,
             InvocationContext.UNKNOWN),
-        MethodDescriptors.returnType(declaringType, descriptor),
+        returnType != MethodDescriptors.UNRESOLVED ? returnType : null,
         actualValue);
   }
 
@@ -123,7 +124,8 @@ public final class MethodDispatch {
    *
    * @param className the fully qualified name of the class containing the advised method
    * @param methodName the name of the advised method
-   * @param returnType the declared return type used to guide corruption strategies
+   * @param returnType the declared return type used to guide corruption strategies; {@code null} or
+   *     {@code void.class} for a method without a value, which no corruption applies to
    * @param actualValue the real return value produced by the method; may be {@code null}
    * @return the (possibly corrupted) value to return to the caller
    * @throws Throwable if a matching scenario's terminal action mandates it
@@ -156,7 +158,8 @@ public final class MethodDispatch {
       final @Nullable Class<?> returnType,
       final @Nullable Object actualValue)
       throws Throwable {
-    final RuntimeDecision decision = engine.evaluate(context);
+    final RuntimeDecision decision =
+        engine.evaluate(context, returnType != null && returnType != void.class);
     engine.applyDelayAndGate(decision);
     if (decision.terminalAction() instanceof TerminalAction.Throw thrown) {
       // A reject on METHOD_EXIT fails the call after its body ran (side effects done, result

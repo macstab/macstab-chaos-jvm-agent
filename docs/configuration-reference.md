@@ -1571,11 +1571,11 @@ The native library's DNS answer effects. `DNS_RESOLVE` fires before a lookup (de
 |----------------|----------------------------------------------|------------------------------------------------------------------|
 | `NULL`         | `null`                                       | Reference types                                                  |
 | `ZERO`         | `0` / `false`                                | All primitives; fallback for reference when `EMPTY` inapplicable |
-| `EMPTY`        | Empty collection / `Optional.empty()` / `""` | `Collection`, `Map`, `Optional`, `String`                        |
+| `EMPTY`        | Empty collection / `Optional.empty()` / `""` / zero-length array / empty stream | `Collection`, `Map`, `Optional`, `OptionalInt`, `OptionalLong`, `OptionalDouble`, `String`, `CharSequence`, arrays, `Stream`, `IntStream`, `LongStream`, `DoubleStream` |
 | `BOUNDARY_MAX` | `Integer.MAX_VALUE`, `Long.MAX_VALUE`, etc.  | Numeric primitives                                               |
 | `BOUNDARY_MIN` | `Integer.MIN_VALUE`, `Long.MIN_VALUE`, etc.  | Numeric primitives                                               |
 
-If `strategy` is inapplicable to the actual return type (e.g., `EMPTY` on a primitive), the runtime falls back to `ZERO` and emits a `ChaosEvent.APPLIED` noting the substitution.
+If `strategy` is inapplicable to the actual return type (e.g., `EMPTY` on a primitive), the runtime falls back to `ZERO` and emits a `ChaosEvent.APPLIED` noting the substitution. A `void` method, or one whose declared return type cannot be loaded, has no value to corrupt: the corruption does not apply and does not count as an application (no `APPLIED` event, no use of `maxApplications`).
 
 **JSON example:**
 ```json

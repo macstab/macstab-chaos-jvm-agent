@@ -62,7 +62,7 @@ class ThreadAndSessionDispatchTest {
     @Test
     @DisplayName("a thread-name pattern matches the thread being started")
     void threadName() throws Throwable {
-      runtime.beforeThreadStart(new Thread(() -> {}, "worker-1"));
+      runtime.beforeThreadStart(new Thread(() -> {}, "worker-1"), false);
       activate(
           new ChaosSelector.ThreadSelector(
               Set.of(OperationType.THREAD_START),
@@ -72,10 +72,10 @@ class ThreadAndSessionDispatchTest {
           ChaosEffect.reject("no workers"));
 
       // the JVM's own failure to create the native thread, whatever the scenario's message
-      assertThatThrownBy(() -> runtime.beforeThreadStart(new Thread(() -> {}, "worker-1")))
+      assertThatThrownBy(() -> runtime.beforeThreadStart(new Thread(() -> {}, "worker-1"), false))
           .isExactlyInstanceOf(OutOfMemoryError.class)
           .hasMessageStartingWith("unable to create native thread");
-      assertThatCode(() -> runtime.beforeThreadStart(new Thread(() -> {}, "main-loop")))
+      assertThatCode(() -> runtime.beforeThreadStart(new Thread(() -> {}, "main-loop"), false))
           .doesNotThrowAnyException();
     }
 
@@ -92,10 +92,10 @@ class ThreadAndSessionDispatchTest {
       final Thread daemon = new Thread(() -> {});
       daemon.setDaemon(true);
 
-      assertThatThrownBy(() -> runtime.beforeThreadStart(daemon))
+      assertThatThrownBy(() -> runtime.beforeThreadStart(daemon, false))
           .isInstanceOf(RejectedExecutionException.class)
           .hasMessage("thread start suppressed by chaos agent");
-      assertThatCode(() -> runtime.beforeThreadStart(new Thread(() -> {})))
+      assertThatCode(() -> runtime.beforeThreadStart(new Thread(() -> {}), false))
           .doesNotThrowAnyException();
     }
 
@@ -107,9 +107,10 @@ class ThreadAndSessionDispatchTest {
               Set.of(OperationType.VIRTUAL_THREAD_START), ChaosSelector.ThreadKind.VIRTUAL),
           ChaosEffect.reject("no virtual threads"));
 
-      assertThatThrownBy(() -> runtime.beforeThreadStart(Thread.ofVirtual().unstarted(() -> {})))
+      assertThatThrownBy(
+              () -> runtime.beforeThreadStart(Thread.ofVirtual().unstarted(() -> {}), false))
           .hasMessage("no virtual threads");
-      assertThatCode(() -> runtime.beforeThreadStart(new Thread(() -> {})))
+      assertThatCode(() -> runtime.beforeThreadStart(new Thread(() -> {}), false))
           .doesNotThrowAnyException();
     }
 
@@ -122,9 +123,9 @@ class ThreadAndSessionDispatchTest {
               ChaosSelector.ThreadKind.PLATFORM),
           ChaosEffect.reject("no platform threads"));
 
-      assertThatCode(() -> runtime.beforeThreadStart(Thread.ofVirtual().unstarted(() -> {})))
+      assertThatCode(() -> runtime.beforeThreadStart(Thread.ofVirtual().unstarted(() -> {}), false))
           .doesNotThrowAnyException();
-      assertThatThrownBy(() -> runtime.beforeThreadStart(new Thread(() -> {})))
+      assertThatThrownBy(() -> runtime.beforeThreadStart(new Thread(() -> {}), false))
           .isExactlyInstanceOf(OutOfMemoryError.class);
     }
 
@@ -135,7 +136,7 @@ class ThreadAndSessionDispatchTest {
           ChaosSelector.thread(Set.of(OperationType.THREAD_START), ChaosSelector.ThreadKind.ANY),
           ChaosEffect.reject("no threads"));
 
-      assertThatThrownBy(() -> runtime.beforeThreadStart(null))
+      assertThatThrownBy(() -> runtime.beforeThreadStart(null, false))
           .isExactlyInstanceOf(OutOfMemoryError.class);
     }
   }
@@ -160,7 +161,7 @@ class ThreadAndSessionDispatchTest {
               },
               "started");
       try (ChaosSession session = runtime.openSession("handoff")) {
-        runtime.beforeThreadStart(started[0]);
+        runtime.beforeThreadStart(started[0], false);
         started[0].start();
         started[0].join(10_000L);
 
@@ -197,7 +198,7 @@ class ThreadAndSessionDispatchTest {
       final Thread notStarted = new Thread(() -> {}, "not-started");
       final AtomicReference<String> elsewhere = new AtomicReference<>("unset");
       try (ChaosSession session = runtime.openSession("handoff")) {
-        runtime.beforeThreadStart(notStarted);
+        runtime.beforeThreadStart(notStarted, false);
         onOtherThread(
             () -> {
               runtime.enterSession(notStarted);

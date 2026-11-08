@@ -80,7 +80,7 @@ class DispatchEngineEdgeTest {
               OperationType.SOCKET_READ, "java.net.Socket", null, null, false, null, null, null);
       final ChaosEffect.TrickleEffect trickle = new ChaosEffect.TrickleEffect(8);
       final TerminalAction action =
-          engine.terminalActionFor(unknownSize, trickle, scenario(trickle), null, 1L);
+          engine.terminalActionFor(unknownSize, trickle, scenario(trickle), null, 1L, true);
       assertThat(action)
           .isInstanceOfSatisfying(
               TerminalAction.CapLength.class, cap -> assertThat(cap.limit()).isEqualTo(8L));
@@ -107,7 +107,7 @@ class DispatchEngineEdgeTest {
               InvocationContext.UNKNOWN);
       final ChaosEffect.ErrnoEffect errno = ChaosEffect.errno(ChaosEffect.Errno.ENOENT);
       final TerminalAction action =
-          engine.terminalActionFor(noOwner, errno, scenario(errno), null, 1L);
+          engine.terminalActionFor(noOwner, errno, scenario(errno), null, 1L, true);
       assertThat(action)
           .isInstanceOfSatisfying(
               TerminalAction.Throw.class,

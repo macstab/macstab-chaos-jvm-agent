@@ -251,16 +251,6 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link ThreadDispatch#beforeThreadStart}.
-   *
-   * @param thread the thread being started
-   * @throws Throwable if an active scenario throws to simulate a failure
-   */
-  public void beforeThreadStart(final Thread thread) throws Throwable {
-    threadDispatch.beforeThreadStart(thread, false);
-  }
-
-  /**
    * Delegates to {@link ThreadDispatch#beforeThreadStart(Thread, boolean)}.
    *
    * @param thread the thread being started
@@ -796,16 +786,6 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Delegates to {@link NetworkDispatch#beforeSocketRead}.
-   *
-   * @param stream the socket input stream
-   * @throws Throwable if a chaos effect injects an exception
-   */
-  public void beforeSocketRead(final Object stream) throws Throwable {
-    networkDispatch.beforeSocketRead(stream, InvocationContext.UNKNOWN, null, 0, 0);
-  }
-
-  /**
    * Delegates to {@link NetworkDispatch#beforeSocketRead(Object, int, Object, int, int)}.
    *
    * @param stream the socket implementation being read from
@@ -825,17 +805,6 @@ public final class ChaosRuntime implements ChaosControlPlane {
       throws Throwable {
     return networkDispatch.beforeSocketRead(
         stream, len, remoteAddress, remotePort, soTimeoutMillis);
-  }
-
-  /**
-   * Delegates to {@link NetworkDispatch#beforeSocketWrite}.
-   *
-   * @param stream the socket output stream
-   * @param len number of bytes to write
-   * @throws Throwable if a chaos effect injects an exception
-   */
-  public void beforeSocketWrite(final Object stream, final int len) throws Throwable {
-    networkDispatch.beforeSocketWrite(stream, len, null, 0);
   }
 
   /**
@@ -1254,17 +1223,6 @@ public final class ChaosRuntime implements ChaosControlPlane {
    */
   public void exitSession(final Object carrier) {
     threadDispatch.exitSession(carrier);
-  }
-
-  /**
-   * Delegates to {@link FileDispatch#beforeFileIo}.
-   *
-   * @param operation the file I/O operation name
-   * @param stream the file stream
-   * @throws Throwable if a chaos effect injects an exception
-   */
-  public void beforeFileIo(final String operation, final @Nullable Object stream) throws Throwable {
-    fileDispatch.beforeFileIo(operation, stream, null, InvocationContext.UNKNOWN);
   }
 
   /**

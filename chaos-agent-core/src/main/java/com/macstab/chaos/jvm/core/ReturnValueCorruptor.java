@@ -113,12 +113,9 @@ final class ReturnValueCorruptor {
       final @Nullable Class<?> returnType,
       final @Nullable Object actualValue,
       final String scenarioId) {
-    // ByteBuddy cannot always statically bind a declared return class at the advice site: void
-    // methods, bridge methods, and dynamically-generated lambdas arrive here with returnType ==
-    // null. Every strategy below dereferences returnType (isPrimitive, getName, map lookup), so
-    // without this guard we NPE from inside chaos advice — indistinguishable from a bug in the
-    // instrumented method. Pass the value through unchanged: nothing to corrupt for a void
-    // return, and the caller sees "no chaos applied" rather than an inexplicable crash.
+    // The dispatch decides a void or unknown return type is not applicable before it counts the
+    // corruption (DispatchEngine.terminalActionFor), so no such call reaches here; a direct caller
+    // passing null gets the value back unchanged instead of a NullPointerException.
     if (returnType == null) {
       return actualValue;
     }
@@ -157,6 +154,15 @@ final class ReturnValueCorruptor {
     if ((result = tryEmptyString(returnType)) != null) {
       return result;
     }
+    if (returnType.isArray()) {
+      return java.lang.reflect.Array.newInstance(returnType.getComponentType(), 0);
+    }
+    if ((result = EMPTY_VALUES.get(returnType)) != null) {
+      return result;
+    }
+    if ((result = tryEmptyStream(returnType)) != null) {
+      return result;
+    }
     if ((result = tryEmptyContainer(returnType)) != null) {
       return result;
     }
@@ -175,13 +181,23 @@ final class ReturnValueCorruptor {
     return corruptZero(returnType);
   }
 
-  /** Empty String fallback. Returns {@code ""} for {@code String.class}, else {@code null}. */
+  /**
+   * Empty String fallback. Returns {@code ""} for {@code String} and {@code CharSequence}, else
+   * {@code null}.
+   */
   private static @Nullable Object tryEmptyString(final Class<?> returnType) {
-    if (returnType == String.class) {
+    if (returnType == String.class || returnType == CharSequence.class) {
       return "";
     }
     return null;
   }
+
+  /** The empty primitive optionals: final value types, so one shared instance each. */
+  private static final Map<Class<?>, Object> EMPTY_VALUES =
+      Map.of(
+          java.util.OptionalInt.class, java.util.OptionalInt.empty(),
+          java.util.OptionalLong.class, java.util.OptionalLong.empty(),
+          java.util.OptionalDouble.class, java.util.OptionalDouble.empty());
 
   /**
    * Fresh, mutable, empty containers in order of preference. For an interface or abstract return
@@ -234,6 +250,23 @@ final class ReturnValueCorruptor {
       if (returnType.isInstance(empty)) {
         return empty;
       }
+    }
+    return null;
+  }
+
+  /** A fresh empty stream for each stream type, or {@code null}. */
+  private static @Nullable Object tryEmptyStream(final Class<?> returnType) {
+    if (returnType == java.util.stream.Stream.class) {
+      return java.util.stream.Stream.empty();
+    }
+    if (returnType == java.util.stream.IntStream.class) {
+      return java.util.stream.IntStream.empty();
+    }
+    if (returnType == java.util.stream.LongStream.class) {
+      return java.util.stream.LongStream.empty();
+    }
+    if (returnType == java.util.stream.DoubleStream.class) {
+      return java.util.stream.DoubleStream.empty();
     }
     return null;
   }

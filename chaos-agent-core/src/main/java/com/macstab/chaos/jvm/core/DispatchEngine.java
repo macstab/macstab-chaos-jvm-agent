@@ -135,6 +135,19 @@ final class DispatchEngine {
   }
 
   RuntimeDecision evaluate(final InvocationContext context) {
+    return evaluate(context, true);
+  }
+
+  /**
+   * Evaluates a call whose return value may have nothing to corrupt.
+   *
+   * @param context the intercepted call
+   * @param returnCorruptible whether the call returns a value of a known type; when not (a void
+   *     method, a return type that cannot be loaded), a return-value corruption neither applies nor
+   *     counts
+   * @return the decision
+   */
+  RuntimeDecision evaluate(final InvocationContext context, final boolean returnCorruptible) {
     final List<ScenarioContribution> contributions = registry.match(context);
     if (contributions.isEmpty()) {
       return RuntimeDecision.none();
@@ -181,7 +194,8 @@ final class DispatchEngine {
                 contribution.effect(),
                 contribution.scenario(),
                 contribution.controller(),
-                contribution.matchNumber());
+                contribution.matchNumber(),
+                returnCorruptible);
         if (candidate != null && candidate.kind() == TerminalKind.NOT_APPLICABLE) {
           // Neither takes effect nor counts: the contribution is released below.
           continue;
@@ -234,7 +248,8 @@ final class DispatchEngine {
       final ChaosEffect effect,
       final ChaosScenario scenario,
       final ScenarioController controller,
-      final long matchNumber) {
+      final long matchNumber,
+      final boolean returnCorruptible) {
     final OperationType operationType = context.operationType();
     if (effect instanceof ChaosEffect.ConnectionResetEffect) {
       return new TerminalAction.AbortiveClose();
@@ -326,6 +341,10 @@ final class DispatchEngine {
       return new TerminalAction.Throw(() -> FailureFactory.injected(injectionEffect));
     }
     if (effect instanceof ChaosEffect.ReturnValueCorruptionEffect corruptEffect) {
+      // A void method, or a return type that cannot be loaded, has no value to corrupt.
+      if (!returnCorruptible) {
+        return new TerminalAction.NotApplicable();
+      }
       return new TerminalAction.CorruptReturn(corruptEffect, scenario.id());
     }
     if (effect instanceof ChaosEffect.SpuriousWakeupEffect) {

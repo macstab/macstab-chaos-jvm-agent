@@ -18,11 +18,23 @@ final class MethodDescriptors {
         }
       };
 
+  /**
+   * The return type of a method whose declared return type cannot be loaded: a value of it cannot
+   * be corrupted safely, so the corruption is not applicable. Distinct from every real type, {@code
+   * Object.class} included.
+   */
+  static final Class<?> UNRESOLVED = Unresolved.class;
+
+  /** The type behind {@link #UNRESOLVED}; never instantiated. */
+  private static final class Unresolved {
+    private Unresolved() {}
+  }
+
   private MethodDescriptors() {}
 
   /**
    * Returns the return type named by {@code descriptor}, loaded through the declaring type's class
-   * loader, or {@code Object.class} when it cannot be loaded.
+   * loader, or {@link #UNRESOLVED} when it cannot be loaded.
    *
    * @param declaringType the class declaring the method
    * @param descriptor the method descriptor, e.g. {@code (Ljava/lang/String;)I}
@@ -60,7 +72,7 @@ final class MethodDescriptors {
     try {
       return Class.forName(binaryName, false, declaringType.getClassLoader());
     } catch (final ClassNotFoundException | LinkageError notLoadable) {
-      return Object.class;
+      return UNRESOLVED;
     }
   }
 }

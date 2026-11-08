@@ -3,6 +3,7 @@ package com.macstab.chaos.jvm.core;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.macstab.chaos.jvm.api.ActivationPolicy;
+import com.macstab.chaos.jvm.api.ChaosActivationHandle;
 import com.macstab.chaos.jvm.api.ChaosEffect;
 import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.ChaosSelector;
@@ -60,6 +61,50 @@ class ReturnValueCorruptionRuntimeTest {
     final Object result =
         runtime.afterMethodExit("com.example.Service", "getName", String.class, "unchanged");
     assertThat(result).isEqualTo("unchanged");
+  }
+
+  @Test
+  @DisplayName("a void method has no value to corrupt: the corruption does not count as applied")
+  void voidMethodIsNotApplied() throws Throwable {
+    final ChaosRuntime runtime = new ChaosRuntime();
+    final ChaosActivationHandle manual =
+        runtime.activate(corrupting("manual", "com.example.Service"));
+    final ChaosActivationHandle woven = runtime.activate(corrupting("woven", WOVEN));
+
+    assertThat(runtime.afterMethodExit("com.example.Service", "run", void.class, null)).isNull();
+    assertThat(runtime.afterMethodExit("com.example.Service", "run", null, null)).isNull();
+    assertThat(runtime.afterMethodExit(ReturnValueCorruptionRuntimeTest.class, "run", "()V", null))
+        .isNull();
+
+    assertThat(manual.appliedCount()).isZero();
+    assertThat(woven.appliedCount()).isZero();
+  }
+
+  @Test
+  @DisplayName("a return type that cannot be loaded is not corrupted and does not count as applied")
+  void unresolvableReturnTypeIsNotApplied() throws Throwable {
+    final ChaosRuntime runtime = new ChaosRuntime();
+    final ChaosActivationHandle woven = runtime.activate(corrupting("woven", WOVEN));
+
+    assertThat(
+            runtime.afterMethodExit(
+                ReturnValueCorruptionRuntimeTest.class, "get", "()Lno/such/Type;", "kept"))
+        .isEqualTo("kept");
+
+    assertThat(woven.appliedCount()).isZero();
+  }
+
+  private static final String WOVEN = ReturnValueCorruptionRuntimeTest.class.getName();
+
+  private static ChaosScenario corrupting(final String id, final String className) {
+    return ChaosScenario.builder(id)
+        .scope(ChaosScenario.ScenarioScope.JVM)
+        .selector(
+            ChaosSelector.method(
+                Set.of(OperationType.METHOD_EXIT), NamePattern.exact(className), NamePattern.any()))
+        .effect(ChaosEffect.corruptReturnValue(ChaosEffect.ReturnValueStrategy.NULL))
+        .activationPolicy(ActivationPolicy.always())
+        .build();
   }
 
   private static ChaosRuntime runtimeWithStrategy(final ChaosEffect.ReturnValueStrategy strategy) {

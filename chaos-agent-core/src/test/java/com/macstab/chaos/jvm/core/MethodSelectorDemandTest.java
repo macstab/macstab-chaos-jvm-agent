@@ -165,7 +165,8 @@ class MethodSelectorDemandTest {
   }
 
   @Test
-  @DisplayName("MethodDescriptors resolves primitives, arrays and classes")
+  @DisplayName(
+      "MethodDescriptors resolves primitives, arrays and classes; an unloadable one is UNRESOLVED")
   void descriptorResolution() {
     assertThat(MethodDescriptors.returnType(String.class, "()V")).isEqualTo(void.class);
     assertThat(MethodDescriptors.returnType(String.class, "(I)Z")).isEqualTo(boolean.class);
@@ -173,7 +174,7 @@ class MethodSelectorDemandTest {
     assertThat(MethodDescriptors.returnType(String.class, "()Ljava/util/List;"))
         .isEqualTo(List.class);
     assertThat(MethodDescriptors.returnType(String.class, "()Lno/such/Type;"))
-        .isEqualTo(Object.class);
+        .isSameAs(MethodDescriptors.UNRESOLVED);
   }
 
   private HookDemand recording(final RuntimeException failure) {
