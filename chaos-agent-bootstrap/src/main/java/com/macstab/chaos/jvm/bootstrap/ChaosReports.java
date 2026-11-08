@@ -294,7 +294,10 @@ final class ChaosReports implements AutoCloseable {
     return flat.length() > 200 ? flat.substring(0, 200) : flat;
   }
 
-  /** Writes the hits file a last time and stops the writer thread. */
+  /**
+   * Stops the writer thread and waits for it, then writes the hits file a last time: once this
+   * returns, no write of these reports is still running or still to come.
+   */
   @Override
   public void close() {
     if (!closed.compareAndSet(false, true)) {
@@ -302,6 +305,11 @@ final class ChaosReports implements AutoCloseable {
     }
     runtime.removeEventListener(hitCounter);
     LockSupport.unpark(hitsWriter);
+    try {
+      hitsWriter.join();
+    } catch (final InterruptedException interrupted) {
+      Thread.currentThread().interrupt();
+    }
     writeFinalHits();
     if (current == this) {
       current = null;

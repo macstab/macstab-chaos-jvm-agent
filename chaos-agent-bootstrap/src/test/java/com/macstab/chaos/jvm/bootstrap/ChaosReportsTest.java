@@ -334,6 +334,57 @@ class ChaosReportsTest {
     assertThat(ChaosReports.current()).isEmpty();
   }
 
+  @Test
+  @DisplayName("close returns only after the hits writer has stopped, so no write follows it")
+  void closeJoinsTheHitsWriter() throws Exception {
+    final ChaosReports reports = create("reports=on;reportsDir=" + tempDir, Map.of());
+    final Thread writer = (Thread) privateField(reports, "hitsWriter");
+    final java.util.concurrent.atomic.AtomicBoolean writerAliveAfterClose =
+        new java.util.concurrent.atomic.AtomicBoolean(true);
+    final Thread closer;
+    // Holding the reports' monitor parks the writer inside writeHits, mid-batch.
+    synchronized (reports) {
+      ((java.util.concurrent.atomic.AtomicBoolean) privateField(reports, "hitsDirty")).set(true);
+      java.util.concurrent.locks.LockSupport.unpark(writer);
+      awaitState(writer, Thread.State.BLOCKED);
+
+      closer =
+          Thread.ofPlatform()
+              .start(
+                  () -> {
+                    reports.close();
+                    writerAliveAfterClose.set(writer.isAlive());
+                  });
+      // Unjoined, close returns at once; joining, it waits for the writer and so for this monitor.
+      final long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(10);
+      while (closer.getState() != Thread.State.WAITING
+          && closer.getState() != Thread.State.TERMINATED
+          && System.nanoTime() < deadline) {
+        Thread.onSpinWait();
+      }
+    }
+    closer.join();
+
+    assertThat(writerAliveAfterClose).as("the writer is joined by close").isFalse();
+  }
+
+  private static Object privateField(final ChaosReports reports, final String name)
+      throws ReflectiveOperationException {
+    final java.lang.reflect.Field field = ChaosReports.class.getDeclaredField(name);
+    field.setAccessible(true);
+    return field.get(reports);
+  }
+
+  private static void awaitState(final Thread thread, final Thread.State state) {
+    final long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(10);
+    while (thread.getState() != state) {
+      assertThat(System.nanoTime())
+          .as("%s reaches %s", thread.getName(), state)
+          .isLessThan(deadline);
+      Thread.onSpinWait();
+    }
+  }
+
   private static ChaosScenario gcSuppress(final String id) {
     return ChaosScenario.builder(id)
         .scope(ChaosScenario.ScenarioScope.JVM)
