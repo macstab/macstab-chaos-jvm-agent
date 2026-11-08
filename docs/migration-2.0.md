@@ -42,6 +42,7 @@
 | 22 | Unused `@Internal` `ChaosRuntime` overloads removed | code calls `beforeThreadStart(Thread)`, `beforeSocketRead(Object)`, `beforeSocketWrite(Object, int)` or `beforeFileIo(String, Object)` on `ChaosRuntime` | call the full forms (§22) |
 | 23 | `@WithChaos` is active around the test method only | a `@BeforeEach` / `@AfterEach` method relies on a method-level (testkit: any) `@WithChaos` scenario | activate it in the set-up method instead (§23) |
 | 24 | `ActivationPolicy.fromJson` is no longer public | you call it from code | use the constructor or `ActivationPolicy.builder()`, or read JSON with `ChaosPlanMapper` (§24) |
+| 25 | Plan JSON is read strictly and written in ISO-8601 | a plan gives a duration or instant as a number, a number as a string, a fraction for an integer, `0`/`1` for a boolean, an ordinal for an enum or a field twice; or you read `GET /q/chaos` (`/chaos`, `/actuator/chaos`) or `ChaosPlanMapper.toJson` output as numbers | write ISO-8601 strings and plain JSON values; read `capturedAt` and durations as ISO-8601 strings (§25) |
 
 ---
 
@@ -323,6 +324,14 @@ Before (1.x): a `@BeforeEach` method that warmed a cache through a call the test
 `ActivationPolicy.fromJson` was the JSON creator of the policy and public in 1.x. It is private in 2.0: the JSON mix-in in `chaos-agent-startup-config` still binds it, and the effect records and `ChaosPlan.Observability` gained private JSON constructors of the same kind, so an omitted field takes its documented default (`withStackTrace` and `retain` `true`, `objectSizeBytes` 1024, `acquisitionDelay` one second, the observability switches `true`, `true`, `false`) instead of `false` or `0`.
 
 Before (1.x): `ActivationPolicy.fromJson(null, null, 0L, …)` built a policy with the JSON defaults. Now build it with `new ActivationPolicy(…)` or `ActivationPolicy.builder()`, or read the JSON with `ChaosPlanMapper`.
+
+## 25. Plan JSON is read strictly and written in ISO-8601
+
+`ChaosPlanMapper` (every plan source: agent arguments, plan files, the poller, the management endpoints, the MBean, `@WithChaos`) refuses what 1.x coerced: a duration or an instant given as a number (`"minDelay": 1` was one second, `1e100` silently zero, `"activeFrom": 1700000000` an epoch second), a fraction for an integer (`"maxApplications": 1.5` was 1), a number in a string (`"5"`), `0`/`1` for a boolean, an enum ordinal (`"scope": 0`), and a field given twice (the last value won). Each fails with `ConfigLoadException`.
+
+Its JSON output changed too: durations and instants are ISO-8601 strings (`"PT0.005S"`, `"capturedAt": "2026-11-08T10:15:30Z"`) instead of decimal seconds, in `ChaosPlanMapper.write`, `toJson` and the diagnostics the management endpoints return; `write` leaves out absent (`null`) values.
+
+Before (1.x): `"minDelay": 0.005` was read as 5 ms and the diagnostics snapshot carried `"capturedAt": 1794132930.000000000`. Now write `"minDelay": "PT0.005S"`, and read `capturedAt` and durations as ISO-8601 strings.
 
 ---
 

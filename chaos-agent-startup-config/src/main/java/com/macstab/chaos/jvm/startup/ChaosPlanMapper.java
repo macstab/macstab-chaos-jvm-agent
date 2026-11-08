@@ -1,18 +1,32 @@
 package com.macstab.chaos.jvm.startup;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.core.JsonFactory;
+import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.JsonToken;
 import com.fasterxml.jackson.core.StreamReadConstraints;
+import com.fasterxml.jackson.core.StreamReadFeature;
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.DeserializationContext;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.MapperFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.databind.deser.std.StdScalarDeserializer;
 import com.fasterxml.jackson.databind.json.JsonMapper;
+import com.fasterxml.jackson.databind.module.SimpleModule;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.macstab.chaos.jvm.api.ChaosPlan;
 import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.Internal;
+import java.io.IOException;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.format.DateTimeParseException;
 import java.util.List;
+import java.util.function.Function;
 
 /**
  * Jackson-based serialisation bridge between JSON and {@link ChaosPlan}.
@@ -22,13 +36,22 @@ import java.util.List;
  * <ul>
  *   <li>{@link DeserializationFeature#FAIL_ON_UNKNOWN_PROPERTIES} — rejects unexpected fields
  *   <li>{@link DeserializationFeature#FAIL_ON_TRAILING_TOKENS} — rejects JSON with trailing garbage
+ *   <li>{@link StreamReadFeature#STRICT_DUPLICATE_DETECTION} — rejects a property given twice
+ *       instead of keeping the last value
+ *   <li>no coercion: a number is not a boolean, a string or a fraction is not an integer, and an
+ *       enum is read by name only
+ *   <li>durations and instants are ISO-8601 strings only ({@code "PT0.1S"}, {@code
+ *       "2026-11-01T08:00:00Z"}); a number is refused (Jackson's own deserializers read one as
+ *       seconds whatever their leniency)
  *   <li>{@link StreamReadConstraints} — caps nesting depth and single-string length at the
  *       streaming parser level; a pathological payload like {@code "[[[[...]}]]]...] }} cannot
  *       exhaust the stack or allocate an arbitrarily large String before the outer size gate sees
  *       it
  * </ul>
  *
- * <p>Input size is validated before parsing to prevent OOM from oversized payloads.
+ * <p>Input size is validated before parsing to prevent OOM from oversized payloads. Durations and
+ * instants are written in ISO-8601; {@link #write(ChaosPlan)} leaves out absent ({@code null})
+ * values.
  */
 public final class ChaosPlanMapper {
 
@@ -77,6 +100,10 @@ public final class ChaosPlanMapper {
 
   private static final ObjectMapper OBJECT_MAPPER = buildObjectMapper();
 
+  /** The mapper {@link #write(ChaosPlan)} uses: absent values are left out of a plan. */
+  private static final ObjectMapper PLAN_WRITER =
+      OBJECT_MAPPER.copy().setDefaultPropertyInclusion(JsonInclude.Include.NON_NULL);
+
   private ChaosPlanMapper() {}
 
   /** The configured mapper: the plan schema is derived from it ({@code PlanSchemaTest}). */
@@ -92,12 +119,57 @@ public final class ChaosPlanMapper {
                     .maxNestingDepth(MAX_NESTING_DEPTH)
                     .maxStringLength(MAX_STRING_LENGTH)
                     .build())
+            .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
             .build();
     return ApiJsonMixins.register(JsonMapper.builder(factory))
         .addModule(new JavaTimeModule())
+        // After JavaTimeModule: a module added later replaces its Duration and Instant readers.
+        .addModule(
+            new SimpleModule("chaos-plan-iso-time")
+                .addDeserializer(
+                    Duration.class,
+                    new IsoStringDeserializer<>(Duration.class, Duration::parse, "duration"))
+                .addDeserializer(
+                    Instant.class,
+                    new IsoStringDeserializer<>(Instant.class, Instant::parse, "instant")))
         .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
         .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+        .enable(DeserializationFeature.FAIL_ON_NUMBERS_FOR_ENUMS)
+        .disable(DeserializationFeature.ACCEPT_FLOAT_AS_INT)
+        .disable(MapperFeature.ALLOW_COERCION_OF_SCALARS)
+        .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
+        .disable(SerializationFeature.WRITE_DURATIONS_AS_TIMESTAMPS)
         .build();
+  }
+
+  /** Reads a value from an ISO-8601 string only; a number or any other token is refused. */
+  private static final class IsoStringDeserializer<T> extends StdScalarDeserializer<T> {
+
+    private static final long serialVersionUID = 1L;
+
+    private final transient Function<String, T> parse;
+    private final String kind;
+
+    IsoStringDeserializer(final Class<T> type, final Function<String, T> parse, final String kind) {
+      super(type);
+      this.parse = parse;
+      this.kind = kind;
+    }
+
+    @Override
+    @SuppressWarnings("unchecked")
+    public T deserialize(final JsonParser parser, final DeserializationContext context)
+        throws IOException {
+      if (!parser.hasToken(JsonToken.VALUE_STRING)) {
+        return (T) context.handleUnexpectedToken(handledType(), parser);
+      }
+      final String text = parser.getText().trim();
+      try {
+        return parse.apply(text);
+      } catch (final DateTimeParseException invalid) {
+        return (T) context.handleWeirdStringValue(handledType(), text, "invalid " + kind);
+      }
+    }
   }
 
   /**
@@ -347,7 +419,7 @@ public final class ChaosPlanMapper {
   }
 
   /**
-   * Serialises a {@link ChaosPlan} to a pretty-printed JSON string.
+   * Serialises a {@link ChaosPlan} to a pretty-printed JSON string, leaving out absent values.
    *
    * @param plan non-null plan to serialise
    * @return JSON representation
@@ -355,7 +427,7 @@ public final class ChaosPlanMapper {
    */
   public static String write(final ChaosPlan plan) {
     try {
-      return OBJECT_MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(plan);
+      return PLAN_WRITER.writerWithDefaultPrettyPrinter().writeValueAsString(plan);
     } catch (JsonProcessingException exception) {
       throw new IllegalStateException("failed to serialize chaos plan", exception);
     }

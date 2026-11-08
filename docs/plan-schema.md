@@ -72,6 +72,8 @@ Every source (the agent's `configFile` / `configJson` / `configBase64`, the Spri
 
 - **Unknown fields are rejected** everywhere (`additionalProperties: false`): a misspelled field is an error, not a silently ignored setting.
 - **Trailing content is rejected**: a file is one JSON value.
+- **A field given twice is rejected**, instead of the last value winning.
+- **No coercion**: a duration or an instant is an ISO-8601 string (a number such as `1` or `1e100` is refused, not read as seconds), an integer field takes an integer (not `1.5`, not `"5"`), a boolean `true` or `false` (not `1`), and an enum its name (not its ordinal).
 - **All or nothing**: a plan with one invalid scenario applies no scenario at all; a reloaded plan replaces the previous one only when the whole new plan is valid.
 - **Syntax, then meaning**: the schema decides what is well formed; `ChaosValidationException` then rejects what is well formed but meaningless (an effect on an operation it cannot act on, a clock skew with a probability, a bound out of range), naming the scenario.
 

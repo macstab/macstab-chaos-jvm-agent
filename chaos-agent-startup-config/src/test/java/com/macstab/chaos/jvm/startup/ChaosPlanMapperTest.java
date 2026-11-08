@@ -136,6 +136,25 @@ class ChaosPlanMapperTest {
       assertThat(parsed.activeFrom()).isEqualTo(Instant.parse("2026-11-01T08:00:00Z"));
       assertThat(parsed.activeUntil()).isEqualTo(Instant.parse("2026-11-01T09:30:00Z"));
     }
+
+    @Test
+    @DisplayName("writes durations and instants in ISO-8601 and leaves out absent values")
+    void isoWithoutNulls() {
+      final String json = ChaosPlanMapper.write(samplePlan("iso", 100));
+
+      assertThat(json).contains("\"PT0.1S\"").doesNotContain("null");
+    }
+
+    @Test
+    @DisplayName("serialises a diagnostics snapshot's capturedAt in ISO-8601")
+    void isoSnapshot() {
+      final String json =
+          ChaosPlanMapper.toJson(
+              new com.macstab.chaos.jvm.api.ChaosDiagnostics.Snapshot(
+                  Instant.parse("2026-11-08T10:15:30Z"), List.of(), List.of(), java.util.Map.of()));
+
+      assertThat(json).contains("\"capturedAt\":\"2026-11-08T10:15:30Z\"");
+    }
   }
 
   @Nested
@@ -180,6 +199,66 @@ class ChaosPlanMapperTest {
           }
           """;
       assertThatThrownBy(() -> ChaosPlanMapper.read(json)).isInstanceOf(ConfigLoadException.class);
+    }
+
+    /** One scenario with {@code effect} and {@code policy} (a JSON object's members). */
+    private static String scenario(final String effect, final String policy) {
+      return """
+          {"metadata":{"name":"p"},"scenarios":[{"id":"s","scope":"JVM",
+           "selector":{"type":"executor","operations":["EXECUTOR_SUBMIT"]},
+           "effect":{"type":"delay",%s},
+           "activationPolicy":{%s}}]}
+          """
+          .formatted(effect, policy);
+    }
+
+    private static final String DELAY = "\"minDelay\":\"PT0.005S\",\"maxDelay\":\"PT0.005S\"";
+
+    @Test
+    @DisplayName("refuses a number for a duration, also one that overflows")
+    void numericDurations() {
+      assertThatThrownBy(
+              () -> ChaosPlanMapper.read(scenario("\"minDelay\":1,\"maxDelay\":\"PT1S\"", "")))
+          .isInstanceOf(ConfigLoadException.class);
+      assertThatThrownBy(
+              () -> ChaosPlanMapper.read(scenario("\"minDelay\":\"PT0S\",\"maxDelay\":1e100", "")))
+          .isInstanceOf(ConfigLoadException.class);
+    }
+
+    @Test
+    @DisplayName("refuses a number for an instant")
+    void numericInstant() {
+      assertThatThrownBy(() -> ChaosPlanMapper.read(scenario(DELAY, "\"activeFrom\":1700000000")))
+          .isInstanceOf(ConfigLoadException.class);
+    }
+
+    @Test
+    @DisplayName("refuses a fraction for an integer and a string for a number")
+    void noNumberCoercion() {
+      assertThatThrownBy(() -> ChaosPlanMapper.read(scenario(DELAY, "\"maxApplications\":1.5")))
+          .isInstanceOf(ConfigLoadException.class);
+      assertThatThrownBy(() -> ChaosPlanMapper.read(scenario(DELAY, "\"maxApplications\":\"5\"")))
+          .isInstanceOf(ConfigLoadException.class);
+    }
+
+    @Test
+    @DisplayName("refuses a number for a boolean and for an enum")
+    void noScalarCoercion() {
+      assertThatThrownBy(
+              () -> ChaosPlanMapper.read(scenario(DELAY, "\"allowDestructiveEffects\":1")))
+          .isInstanceOf(ConfigLoadException.class);
+      assertThatThrownBy(() -> ChaosPlanMapper.read(scenario(DELAY, "").replace("\"JVM\"", "0")))
+          .isInstanceOf(ConfigLoadException.class);
+    }
+
+    @Test
+    @DisplayName("refuses a duplicate property instead of keeping the last value")
+    void duplicateProperty() {
+      assertThatThrownBy(
+              () ->
+                  ChaosPlanMapper.read(
+                      scenario(DELAY, "").replace("\"id\":\"s\",", "\"id\":\"s\",\"id\":\"t\",")))
+          .isInstanceOf(ConfigLoadException.class);
     }
   }
 
