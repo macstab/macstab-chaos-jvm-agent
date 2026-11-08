@@ -52,6 +52,8 @@ The most novel capability is **CI/CD pipeline integration**: chaos scenarios run
 
 ### 2.1 Gradle (Kotlin DSL)
 
+`chaos-agent-bom` aligns the versions of all modules: import it once, then leave the versions out (`testImplementation(platform("com.macstab.chaos.jvm:chaos-agent-bom:<version>"))`, or a Maven `<dependencyManagement>` import with `<type>pom</type>` and `<scope>import</scope>`).
+
 ```kotlin
 dependencies {
     // Required for all usage — the API types and agent bootstrap

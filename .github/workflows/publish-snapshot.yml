@@ -79,6 +79,7 @@ jobs:
           # Benchmarks and examples are intentionally excluded.
           ARTIFACTS=(
             "com.macstab.chaos.jvm.chaos-agent-api"
+            "com.macstab.chaos.jvm.chaos-agent-bom"
             "com.macstab.chaos.jvm.chaos-agent-bootstrap"
             "com.macstab.chaos.jvm.chaos-agent-core"
             "com.macstab.chaos.jvm.chaos-agent-instrumentation-jdk"

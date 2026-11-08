@@ -57,6 +57,7 @@ val nonPublishableModules = setOf(
 // build.
 val moduleDescriptions = mapOf(
     "chaos-agent-api" to "Macstab chaos agent: the public API (plans, scenarios, selectors, effects, the control plane)",
+    "chaos-agent-bom" to "Macstab chaos agent: the bill of materials that aligns the versions of every published module",
     "chaos-agent-bootstrap" to "Macstab chaos agent: the Java agent jar (-javaagent or self-attach), with its dependencies shaded",
     "chaos-agent-core" to "Macstab chaos agent: the runtime that matches scenarios and applies their effects (internal)",
     "chaos-agent-instrumentation-jdk" to "Macstab chaos agent: the JDK and library hooks the agent weaves (internal)",
@@ -120,7 +121,15 @@ val coverageFloors = mapOf(
     "chaos-agent-testkit" to (0.99 to 0.99),
 )
 
+// The BOM (chaos-agent-bom) is a java-platform: it has no code, so none of the Java configuration
+// below applies to it, only the publishing further down.
+val bomModule = "chaos-agent-bom"
+
 subprojects {
+    if (name == bomModule) {
+        apply(plugin = "java-platform")
+        return@subprojects
+    }
     apply(plugin = "java-library")
     apply(plugin = "jacoco")
 
@@ -236,7 +245,10 @@ subprojects {
         }
     }
 
-    // Publishing + signing for library modules only.
+}
+
+// Publishing + signing for library modules (and the BOM) only.
+subprojects {
     if (project.name !in nonPublishableModules) {
         apply(plugin = "maven-publish")
         apply(plugin = "signing")
@@ -245,8 +257,10 @@ subprojects {
             publications {
                 create<MavenPublication>("maven") {
                     // The agent jar publishes its shaded jar instead (see chaos-agent-bootstrap).
-                    if (project.name != "chaos-agent-bootstrap") {
-                        from(components["java"])
+                    when (project.name) {
+                        bomModule -> from(components["javaPlatform"])
+                        "chaos-agent-bootstrap" -> {}
+                        else -> from(components["java"])
                     }
 
                     pom {
@@ -429,6 +443,14 @@ tasks.register<JacocoReport>("jacocoAggregatedReport") {
 // build/docs/aggregated-javadoc. Consumed by .github/workflows/deploy-javadoc.yml
 // to publish API docs to GitHub Pages.
 val publishableSubprojects = subprojects.filter { it.name !in nonPublishableModules }
+
+// The BOM constrains every other published module to this build's version.
+project(":$bomModule") {
+    val bom = this
+    dependencies.constraints {
+        publishableSubprojects.filter { it != bom }.forEach { add("api", it) }
+    }
+}
 
 tasks.register<Javadoc>("aggregatedJavadoc") {
     group = "documentation"

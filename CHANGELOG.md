@@ -44,6 +44,7 @@ Migration steps for each change: [docs/migration-2.0.md](docs/migration-2.0.md).
 ### Features
 
 * **core:** a session-scoped scenario may select thread starts and sleeps (`ThreadSelector`) and executor shutdowns (`ShutdownSelector` on `EXECUTOR_SHUTDOWN` / `EXECUTOR_AWAIT_TERMINATION`): they run on the session's thread. Only the operations the JVM evaluates without a session (`CLASS_LOAD`, `CLASS_DEFINE`, `RESOURCE_LOAD`, `SHUTDOWN_HOOK_REGISTER`) and stressors are refused in a session.
+* **build:** `chaos-agent-bom` aligns the versions of every published module: import it as a platform (Gradle) or in `dependencyManagement` (Maven) and declare the modules without versions.
 * **spring:** built and tested against Spring Boot 3.5.16 and 4.1.2 (were 3.5.13 and 4.0.5).
 * **instrumentation:** hook health in the diagnostics: `unmatchedHooks` lists hooks woven into a type that matched none of its methods (a JDK or library release changed the method, so the hook is inactive), `hookFailures` the types whose weaving failed.
 
