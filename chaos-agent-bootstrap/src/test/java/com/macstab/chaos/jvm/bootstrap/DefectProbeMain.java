@@ -137,6 +137,7 @@ public final class DefectProbeMain {
       case "thread-local-leak-set-delay" -> threadLocalLeakSetDelay();
       case "session-thread-local-suppress" -> sessionThreadLocalSuppress();
       case "direct-buffer-above-limit" -> directBufferAboveLimit();
+      case "completion-dependents" -> completionDependents();
       default -> throw new IllegalArgumentException("unknown probe mode: " + args[0]);
     }
     printCounts();
@@ -2495,6 +2496,67 @@ public final class DefectProbeMain {
                 .map(failure -> failure.category().name())
                 .findFirst()
                 .orElse("none"));
+  }
+
+  /**
+   * An exceptional-completion effect on ASYNC_COMPLETE, with a dependent registered before the
+   * completion so it runs inside the agent's own completeExceptionally. Row one: the dependent
+   * sleeps 1 ms under a 200 ms THREAD_SLEEP delay of this thread; prints the delay's applied count
+   * and how long the completion took. Row two: the dependent completes another future, matched by
+   * the same scenario capped at one application; prints its applied count and how the other future
+   * ended.
+   */
+  private static void completionDependents() throws Exception {
+    final ChaosControlPlane plane = ChaosPlatform.current();
+    final ChaosScenario.Builder failCompletion =
+        ChaosScenario.builder("fail-completion")
+            .selector(ChaosSelector.async(Set.of(OperationType.ASYNC_COMPLETE)))
+            .effect(
+                ChaosEffect.exceptionalCompletion(
+                    ChaosEffect.FailureKind.ILLEGAL_STATE, "injected"));
+    try (ChaosActivationHandle completion =
+            plane.activate(failCompletion.activationPolicy(ActivationPolicy.always()).build());
+        ChaosActivationHandle sleep =
+            plane.activate(
+                ChaosScenario.builder("slow-dependent")
+                    .selector(
+                        new ChaosSelector.ThreadSelector(
+                            Set.of(OperationType.THREAD_SLEEP),
+                            ChaosSelector.ThreadKind.ANY,
+                            NamePattern.exact(Thread.currentThread().getName()),
+                            null))
+                    .effect(ChaosEffect.delay(Duration.ofMillis(200)))
+                    .activationPolicy(ActivationPolicy.always())
+                    .build())) {
+      final java.util.concurrent.CompletableFuture<String> future =
+          new java.util.concurrent.CompletableFuture<>();
+      future.whenComplete((value, failure) -> sleepOneMillisecond());
+      final long start = System.nanoTime();
+      future.complete("value");
+      System.out.println(
+          "completionMillis=" + TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start));
+      System.out.println("completedExceptionally=" + future.isCompletedExceptionally());
+      System.out.println("sleepApplied=" + sleep.appliedCount());
+    }
+    try (ChaosActivationHandle once =
+        plane.activate(failCompletion.activationPolicy(ActivationPolicy.count(1)).build())) {
+      final java.util.concurrent.CompletableFuture<String> future =
+          new java.util.concurrent.CompletableFuture<>();
+      final java.util.concurrent.CompletableFuture<String> other =
+          new java.util.concurrent.CompletableFuture<>();
+      future.whenComplete((value, failure) -> other.complete("other"));
+      future.complete("value");
+      System.out.println("onceApplied=" + once.appliedCount());
+      System.out.println("other=" + (other.isCompletedExceptionally() ? "failed" : other.join()));
+    }
+  }
+
+  private static void sleepOneMillisecond() {
+    try {
+      Thread.sleep(1L);
+    } catch (final InterruptedException interrupted) {
+      Thread.currentThread().interrupt();
+    }
   }
 
   /** A {@link Delayed} that is due immediately. */

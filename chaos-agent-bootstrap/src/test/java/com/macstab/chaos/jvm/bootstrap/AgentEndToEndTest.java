@@ -1849,6 +1849,25 @@ class AgentEndToEndTest {
   }
 
   @Nested
+  @DisplayName("Completion effects")
+  class CompletionEffects {
+
+    @Test
+    @DisplayName("the dependents of a future the agent completes exceptionally are evaluated")
+    void dependentsOfAnInjectedCompletionAreEvaluated() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.runWithoutPlan(DefectProbeMain.class, "completion-dependents");
+      assertThat(result.value("completedExceptionally")).isEqualTo("true");
+      assertThat(result.longValue("sleepApplied")).isEqualTo(1L);
+      assertThat(result.longValue("completionMillis")).isGreaterThanOrEqualTo(150L);
+      // The outer application was committed before the dependent ran, so the dependent's
+      // completion finds the budget of one spent and completes normally.
+      assertThat(result.longValue("onceApplied")).isEqualTo(1L);
+      assertThat(result.value("other")).isEqualTo("other");
+    }
+  }
+
+  @Nested
   @DisplayName("Stressor resources")
   class StressorResources {
 

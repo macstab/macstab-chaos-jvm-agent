@@ -300,23 +300,31 @@ public final class ExecutorDispatch {
    *     result
    * @throws Throwable if a matching scenario's terminal action mandates it
    */
+  @SuppressWarnings("ReferenceEquality") // the marker holds the very future being completed
   public @Nullable Boolean beforeCompletableFutureComplete(
       final String operation, final CompletableFuture<?> future, final @Nullable Object payload)
       throws Throwable {
     final OperationType indexedOp = OperationType.valueOf(operation);
+    if (engine.idle(indexedOp)) {
+      return null;
+    }
+    if (COMPLETING.get() == future) {
+      // The agent's own completeExceptionally below, re-entering through the hook: it passes
+      // unevaluated, once (idle first: an idle nested call never reaches this read).
+      COMPLETING.remove();
+      return null;
+    }
     final RuntimeDecision decision =
-        (engine.idle(indexedOp)
-            ? RuntimeDecision.none()
-            : engine.evaluate(
-                new InvocationContext(
-                    indexedOp,
-                    CompletableFuture.class.getName(),
-                    payload == null ? null : payload.getClass().getName(),
-                    null,
-                    false,
-                    null,
-                    null,
-                    engine.scopeContext.currentSessionId())));
+        engine.evaluate(
+            new InvocationContext(
+                indexedOp,
+                CompletableFuture.class.getName(),
+                payload == null ? null : payload.getClass().getName(),
+                null,
+                false,
+                null,
+                null,
+                engine.scopeContext.currentSessionId()));
     engine.applyDelayAndGate(decision);
     if (decision.terminalAction() != null) {
       final TerminalAction terminalAction = decision.terminalAction();
@@ -327,10 +335,40 @@ public final class ExecutorDispatch {
         return returned.value();
       }
       if (terminalAction instanceof TerminalAction.CompleteExceptionally completing) {
-        return future.completeExceptionally(completing.failure());
+        return completeExceptionallyOutsideDispatch(future, completing.failure());
       }
     }
     return null;
+  }
+
+  /**
+   * The future the current thread is completing exceptionally for a scenario, so the hook on that
+   * nested call lets it pass once; agent-owned, so no ThreadLocal scenario sees it (L3).
+   */
+  private static final ThreadLocal<@Nullable Object> COMPLETING = new Completing();
+
+  /** {@link #COMPLETING}'s type. */
+  private static final class Completing extends ThreadLocal<@Nullable Object>
+      implements AgentOwned {}
+
+  /**
+   * Completes {@code future} exceptionally with the dispatch depth lowered, so the dependent stages
+   * that run inside the completion ({@code postComplete}) are evaluated like any other call. The
+   * scenario's application was committed before this runs (the evaluation's commit), so a dependent
+   * that reaches the same scenario finds its budget already spent. The nested call on {@code
+   * future} itself passes unevaluated through the {@link #COMPLETING} marker; the marker is cleared
+   * and the depth restored on every path, also when the hook was not woven.
+   */
+  private static boolean completeExceptionallyOutsideDispatch(
+      final CompletableFuture<?> future, final Throwable failure) {
+    COMPLETING.set(future);
+    ChaosDispatcher.decrementDispatchDepth();
+    try {
+      return future.completeExceptionally(failure);
+    } finally {
+      ChaosDispatcher.incrementDispatchDepth();
+      COMPLETING.remove();
+    }
   }
 
   /**
@@ -477,7 +515,7 @@ public final class ExecutorDispatch {
       // semantic, so the terminal action is applied here and the real cancel() does not run.
       if (terminalAction instanceof TerminalAction.CompleteExceptionally completing
           && future instanceof CompletableFuture<?> completable) {
-        completable.completeExceptionally(completing.failure());
+        completeExceptionallyOutsideDispatch(completable, completing.failure());
         // Report "cancel succeeded" so the call site short-circuits and does not invoke the
         // real cancel (which would race against our completeExceptionally).
         return true;
