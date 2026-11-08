@@ -302,19 +302,42 @@ subprojects {
             }
         }
 
+        // A release is signed with an in-memory key (signingKey / signingPassword, ASCII-armoured;
+        // the release workflow passes them as ORG_GRADLE_PROJECT_* variables) or with the key ring
+        // named by signing.keyId / signing.password / signing.secretKeyRingFile. Snapshots are not
+        // signed.
+        val signingKey = providers.gradleProperty("signingKey").orNull?.takeIf { it.isNotBlank() }
+        val signingPassword = providers.gradleProperty("signingPassword").orNull.orEmpty()
+        val keyRing = listOf("signing.keyId", "signing.password", "signing.secretKeyRingFile")
+            .all { providers.gradleProperty(it).isPresent }
+        val signed = signingKey != null || keyRing
+        val snapshot = version.toString().endsWith("SNAPSHOT")
         extensions.configure<SigningExtension> {
-            val signingKeyId = project.findProperty("signing.keyId") as String?
-            val signingPassword = project.findProperty("signing.password") as String?
-            val signingSecretKeyRingFile = project.findProperty("signing.secretKeyRingFile") as String?
-
-            if (signingKeyId != null && signingPassword != null && signingSecretKeyRingFile != null) {
-                val publishing = extensions.getByType(PublishingExtension::class)
-                sign(publishing.publications["maven"])
+            if (signingKey != null) {
+                useInMemoryPgpKeys(signingKey, signingPassword)
+            }
+            if (signed) {
+                sign(extensions.getByType(PublishingExtension::class).publications["maven"])
             }
         }
 
         tasks.withType<Sign>().configureEach {
-            onlyIf { !version.toString().endsWith("SNAPSHOT") }
+            onlyIf("a release, not a snapshot") { !snapshot }
+        }
+
+        // Maven Central takes signed releases only: an unsigned release is refused here, before
+        // anything is uploaded.
+        tasks.withType<PublishToMavenRepository>().configureEach {
+            if (name.endsWith("ToOSSRHRepository")) {
+                doFirst {
+                    if (!snapshot && !signed) {
+                        throw GradleException(
+                            "A release to Maven Central must be signed: set signingKey and signingPassword, " +
+                                "or signing.keyId, signing.password and signing.secretKeyRingFile (RELEASE.md).",
+                        )
+                    }
+                }
+            }
         }
     }
 }
@@ -342,6 +365,8 @@ configure<SpotlessExtension> {
 tasks.wrapper {
     gradleVersion = "9.4.0"
     distributionType = DistributionType.ALL
+    // The wrapper refuses a downloaded distribution with another checksum.
+    distributionSha256Sum = "b21468753cb43c167738ee04f10c706c46459cf8f8ae6ea132dc9ce589a261f2"
 }
 
 // One coverage report over the modules with a coverage floor, built from their own reports, so it
@@ -408,10 +433,15 @@ tasks.register<Javadoc>("aggregatedJavadoc") {
 tasks.register("releaseToCentral") {
     group = "publishing"
     description = "Publish staged deployment to Maven Central via the Central Portal API."
+    // Read when the task is configured: the action below touches no project state.
+    val centralUsername = providers.gradleProperty("ossrhUsername")
+    val centralPassword = providers.gradleProperty("ossrhPassword")
+    val releaseGroup = project.group.toString()
+    val releaseVersion = project.version.toString()
 
     doLast {
-        val username = project.findProperty("ossrhUsername") as String?
-        val password = project.findProperty("ossrhPassword") as String?
+        val username = centralUsername.orNull
+        val password = centralPassword.orNull
 
         if (username.isNullOrBlank() || password.isNullOrBlank()) {
             logger.warn("Maven Central credentials not configured.")
@@ -420,8 +450,8 @@ tasks.register("releaseToCentral") {
         }
 
         logger.lifecycle("Triggering Central Portal manual upload API...")
-        logger.lifecycle("  Group:   ${project.group}")
-        logger.lifecycle("  Version: ${project.version}")
+        logger.lifecycle("  Group:   $releaseGroup")
+        logger.lifecycle("  Version: $releaseVersion")
 
         val apiUrl = "https://ossrh-staging-api.central.sonatype.com/manual/upload/defaultRepository/com.macstab"
 
@@ -441,11 +471,11 @@ tasks.register("releaseToCentral") {
         if (exitCode == 0) {
             logger.lifecycle("Triggered publish to Maven Central.")
             logger.lifecycle("Artifacts sync to Maven Central in ~10-30 minutes.")
-            logger.lifecycle("Check: https://central.sonatype.com/artifact/${project.group}")
+            logger.lifecycle("Check: https://central.sonatype.com/artifact/$releaseGroup")
         } else {
             logger.error("Failed to publish. Manual fallback:")
             logger.error("  1. https://central.sonatype.com/ -> Deployments")
-            logger.error("  2. Find ${project.group}")
+            logger.error("  2. Find $releaseGroup")
             logger.error("  3. Click Publish")
             throw GradleException("Failed to publish to Maven Central (exit code: $exitCode)")
         }

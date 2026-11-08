@@ -2,8 +2,10 @@ name: Deploy Javadoc to GitHub Pages
 
 on:
   push:
+    # Release tags are bare versions (publish-release.yml).
     tags:
-      - 'v*'
+      - '[0-9]+.[0-9]+.[0-9]+'
+  # Rebuilds latest/ from the newest release tag, never from a branch.
   workflow_dispatch:
 
 concurrency:
@@ -11,16 +13,27 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  deploy:
+  # Gradle and its plugins run without write access; the deploy job below only pushes the result.
+  build:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    outputs:
+      version: ${{ steps.version.outputs.VERSION }}
+      versioned: ${{ steps.version.outputs.VERSIONED }}
+      latest: ${{ steps.version.outputs.LATEST }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate the Gradle wrapper
+        uses: gradle/actions/wrapper-validation@v4
 
       - name: Set up JDK 25
         uses: actions/setup-java@v4
@@ -32,31 +45,67 @@ jobs:
       - name: Resolve version
         id: version
         run: |
-          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            echo "VERSION=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
-            echo "IS_TAG=true" >> "$GITHUB_OUTPUT"
+          NEWEST=$(git tag --list '[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n1)
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/}"
+            echo "VERSIONED=true" >> "$GITHUB_OUTPUT"
           else
-            # Manual dispatch: no tag available, only refresh latest/ from current HEAD.
-            echo "IS_TAG=false" >> "$GITHUB_OUTPUT"
+            if [[ -z "${NEWEST}" ]]; then
+              echo "ERROR: no release tag to document"
+              exit 1
+            fi
+            VERSION="${NEWEST}"
+            git checkout --quiet "refs/tags/${VERSION}"
+            echo "VERSIONED=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "VERSION=${VERSION}" >> "$GITHUB_OUTPUT"
+          # latest/ always shows the newest release: a patch of an older line leaves it alone.
+          if [[ "${VERSION}" == "${NEWEST}" ]]; then
+            echo "LATEST=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "LATEST=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Build aggregated Javadoc
-        # A tag documents its own version; a manual run documents the branch's.
-        run: ./gradlew aggregatedJavadoc --no-daemon --stacktrace ${{ steps.version.outputs.IS_TAG == 'true' && format('-Pversion={0}', steps.version.outputs.VERSION) || '' }}
+        run: ./gradlew aggregatedJavadoc --no-daemon --stacktrace -Pversion=${{ steps.version.outputs.VERSION }}
+
+      - name: Hand the Javadoc to the deploy job
+        uses: actions/upload-artifact@v4
+        with:
+          name: aggregated-javadoc
+          path: build/docs/aggregated-javadoc
+          retention-days: 1
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      - name: Fetch the Javadoc
+        uses: actions/download-artifact@v4
+        with:
+          name: aggregated-javadoc
+          path: aggregated-javadoc
 
       - name: Deploy versioned Javadoc
-        if: steps.version.outputs.IS_TAG == 'true'
+        if: needs.build.outputs.versioned == 'true'
         uses: peaceiris/actions-gh-pages@84c30a85c19949d7eee79c4ff27748b70285e453 # v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./build/docs/aggregated-javadoc
-          destination_dir: ${{ steps.version.outputs.VERSION }}
-          keep_files: true
+          publish_dir: ./aggregated-javadoc
+          destination_dir: ${{ needs.build.outputs.version }}
+          # Replaces only this directory, so no file of an earlier build stays behind.
+          keep_files: false
 
       - name: Deploy latest alias
+        if: needs.build.outputs.latest == 'true'
         uses: peaceiris/actions-gh-pages@84c30a85c19949d7eee79c4ff27748b70285e453 # v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./build/docs/aggregated-javadoc
+          publish_dir: ./aggregated-javadoc
           destination_dir: latest
-          keep_files: true
+          # Replaces only this directory, so no file of an earlier build stays behind.
+          keep_files: false

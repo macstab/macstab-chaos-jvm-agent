@@ -21,6 +21,7 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     # Only a push to this repository's main: a pull request from a fork can use a branch named
     # main too, and its code must never run with the release token.
     if: >-
@@ -46,7 +47,8 @@ jobs:
           fi
 
       - name: Run semantic-release
-        uses: docker://macstab/semantic-release-maven-gradle-nodejs-python-git-jq:1.5.2-slim
+        # Pinned by digest: a re-pushed tag cannot change what runs with the release token.
+        uses: docker://macstab/semantic-release-maven-gradle-nodejs-python-git-jq@sha256:9416a77355c013996df7bef6dd6825160b093bfca818337bf6a0a8797b6278f3 # 1.5.2-slim
         if: github.ref == 'refs/heads/main'
         with:
           entrypoint: /bin/sh
@@ -61,19 +63,21 @@ jobs:
           CONFIG_FILE: .releaserc-gradle.json
           DEBUG: semantic-release:*
 
-      - name: Merge main -> develop
-        uses: docker://macstab/semantic-release-maven-gradle-nodejs-python-git-jq:1.5.2-slim
-        if: ${{!startsWith(github.ref, 'refs/tags/') && github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
+      - name: Merge the release back into develop
+        uses: docker://macstab/semantic-release-maven-gradle-nodejs-python-git-jq@sha256:9416a77355c013996df7bef6dd6825160b093bfca818337bf6a0a8797b6278f3 # 1.5.2-slim
+        if: ${{ github.ref == 'refs/heads/main' }}
         with:
           entrypoint: /bin/sh
           workdir: /home/runner/work/${{ github.repository }}/${{ github.repository }}
-          # Only a release commit (tagged HEAD of main) goes back to develop; a conflict fails the job.
-          args: "-c \"git config --global --add safe.directory $GITHUB_WORKSPACE && git config --global user.email '${{ secrets.BOT_USER_EMAIL }}' && git config --global user.name '${{ secrets.BOT_USER_NAME }}' && git remote set-url origin https://$GH_USERNAME:$GH_PASSWORD@github.com/${{ github.repository }}.git && git fetch --all --tags && git checkout ${INPUT_FROM_BRANCH} && git pull origin ${INPUT_FROM_BRANCH} && { TAG_NAME=`git describe --exact-match --tags HEAD 2>/dev/null` || { echo No release on HEAD; exit 0; }; } && echo Release tag is $TAG_NAME && COMMIT_HASH=`git rev-parse HEAD` && git checkout ${INPUT_TARGET_BRANCH} && git pull origin ${INPUT_TARGET_BRANCH} && git cherry-pick -Xtheirs --allow-empty $COMMIT_HASH && git push origin ${INPUT_TARGET_BRANCH}\""
+          # A release commit (tagged HEAD of main) is merged; develop keeps its gradle.properties
+          # (its -SNAPSHOT version), and any other conflict fails the job.
+          args: .github/scripts/back-merge.sh
         env:
-          INPUT_FROM_BRANCH: 'main'
-          INPUT_TARGET_BRANCH: 'develop'
-          GH_USERNAME: ${{ secrets.BOT_USER_NAME }}
-          GH_PASSWORD: ${{ secrets.BOT_GITHUB_TOKEN }}
+          FROM_BRANCH: 'main'
+          TARGET_BRANCH: 'develop'
+          GH_TOKEN: ${{ secrets.BOT_GITHUB_TOKEN }}
+          BOT_USER_NAME: ${{ secrets.BOT_USER_NAME }}
+          BOT_USER_EMAIL: ${{ secrets.BOT_USER_EMAIL }}
           GIT_AUTHOR_NAME: github-actions[bot]
           GIT_AUTHOR_EMAIL: github-actions[bot]@users.noreply.github.com
           GIT_COMMITTER_NAME: github-actions[bot]
