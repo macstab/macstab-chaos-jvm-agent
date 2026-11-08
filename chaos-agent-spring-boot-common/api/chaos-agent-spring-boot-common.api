@@ -56,6 +56,7 @@ public final class com/macstab/chaos/jvm/spring/boot/common/OnTrustedChaosEnable
 
 public final class com/macstab/chaos/jvm/spring/boot/common/TrustedChaosEnablement
   public static final field ALLOW_REMOTE_ENABLE_PROPERTY Ljava/lang/String;
+  public static final field ATTACH_FAILED_PROPERTY Ljava/lang/String;
   public static final field ENABLED_PROPERTY Ljava/lang/String;
   public static method evaluate(Lorg/springframework/core/env/ConfigurableEnvironment;)Lcom/macstab/chaos/jvm/spring/boot/common/TrustedChaosEnablement$Decision;
 

@@ -51,6 +51,12 @@ public final class TrustedChaosEnablement {
   public static final String ALLOW_REMOTE_ENABLE_PROPERTY = "macstab.chaos.allow-remote-enable";
 
   /**
+   * Property the early self-attach sets to {@code true} when the agent failed to attach; chaos then
+   * stays off for the application ({@link OnTrustedChaosEnablementCondition}).
+   */
+  public static final String ATTACH_FAILED_PROPERTY = "macstab.chaos.agent.attach-failed";
+
+  /**
    * Name prefixes of config-data property sources read from the classpath, from a local file and
    * from a config tree. A file resource is named {@code Config resource 'file [<path>]' via
    * location '<location>'}, a config tree {@code Config tree '<path>'}; a resource fetched from a

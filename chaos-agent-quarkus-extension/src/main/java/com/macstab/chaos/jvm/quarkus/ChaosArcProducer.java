@@ -53,6 +53,10 @@ public class ChaosArcProducer {
    * Otherwise the bean is an agent already installed ({@code -javaagent:}, the test extension), and
    * using it without one fails with {@link IllegalStateException}.
    *
+   * <p>When the attach failed at runtime-init ({@code ChaosQuarkusRecorder} logs it and the
+   * application starts), creating this bean attaches again and fails with the same error: inject
+   * {@code Instance<ChaosControlPlane>} where the application must run without the agent.
+   *
    * @return the active {@link ChaosControlPlane}
    * @throws IllegalStateException when chaos is disabled at run time and no agent is installed
    */

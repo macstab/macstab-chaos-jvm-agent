@@ -1,6 +1,7 @@
 package com.macstab.chaos.jvm.micronaut;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 
 import io.micronaut.context.ApplicationContextBuilder;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -72,5 +73,20 @@ class ChaosContextConfigurerTest {
               throw new IllegalStateException("attach unavailable");
             })
         .configure((ApplicationContextBuilder) null);
+  }
+
+  @Test
+  @DisplayName("an install failing with a LinkageError is logged and does not abort the context")
+  void linkageErrorDoesNotAbort() {
+    System.setProperty(ChaosContextConfigurer.ENABLED_PROPERTY, "true");
+
+    assertThatCode(
+            () ->
+                new ChaosContextConfigurer(
+                        () -> {
+                          throw new UnsatisfiedLinkError("no attach library");
+                        })
+                    .configure((ApplicationContextBuilder) null))
+        .doesNotThrowAnyException();
   }
 }

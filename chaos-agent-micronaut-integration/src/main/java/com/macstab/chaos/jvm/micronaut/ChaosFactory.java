@@ -34,7 +34,11 @@ public class ChaosFactory {
    * attached here only when {@value ChaosContextConfigurer#ENABLED_PROPERTY} is true in the
    * application's configuration and comes from a launch-time local source (see {@link
    * #chaosEnabled(Environment)}); otherwise the bean is the agent already installed ({@code
-   * -javaagent:}, a chaos test extension), and injecting it without one fails.
+   * -javaagent:}, a chaos test extension), and injecting it without one fails. When the attach
+   * failed during the context bootstrap ({@link ChaosContextConfigurer} logs it and the context
+   * starts), creating this bean attaches again and fails with the same error: inject {@code
+   * Optional<ChaosControlPlane>} or {@code BeanProvider<ChaosControlPlane>} where the application
+   * must run without the agent.
    *
    * @param environment the application's environment
    * @return the JVM-wide control plane

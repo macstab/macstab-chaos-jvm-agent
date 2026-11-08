@@ -26,9 +26,9 @@ import java.util.logging.Logger;
  *
  * <p>{@link ChaosPlatform#installLocally()} is idempotent; invoking this configurer on a JVM that
  * already has the chaos agent installed (for example, via {@code -javaagent:}) is a no-op. Any
- * {@link RuntimeException} thrown by the installation path is logged and swallowed so a failure to
- * attach does not abort Micronaut startup — production traffic must be able to serve even when the
- * chaos platform is unavailable.
+ * {@link RuntimeException} or {@link LinkageError} thrown by the installation path is logged and
+ * swallowed so a failure to attach does not abort Micronaut startup — production traffic must be
+ * able to serve even when the chaos platform is unavailable.
  */
 public class ChaosContextConfigurer implements ApplicationContextConfigurer {
 
@@ -62,7 +62,9 @@ public class ChaosContextConfigurer implements ApplicationContextConfigurer {
     }
     try {
       install.run();
-    } catch (final RuntimeException exception) {
+    } catch (final RuntimeException | LinkageError exception) {
+      // LinkageError: the attach mechanism or a class the agent needs is missing; that must not
+      // abort the context bootstrap.
       LOGGER.log(
           Level.WARNING,
           exception,

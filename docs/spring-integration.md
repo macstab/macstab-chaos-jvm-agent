@@ -265,7 +265,8 @@ public class ChaosAgentEnvironmentPostProcessor implements EnvironmentPostProces
         if (decision != TrustedChaosEnablement.Decision.ENABLED) {
             return;
         }
-        ChaosPlatform.installLocally();   // failures are logged at WARNING, startup continues
+        ChaosPlatform.installLocally();   // a failure (also a LinkageError) is logged at WARNING,
+                                          // startup continues without chaos beans
         environment.getPropertySources().addFirst(/* macstab.chaos.agent.attach-phase marker */);
     }
 
@@ -279,6 +280,8 @@ public class ChaosAgentEnvironmentPostProcessor implements EnvironmentPostProces
 `EnvironmentPostProcessor` is the earliest Spring Boot extension point that has access to the resolved environment. This processor runs **directly after `ConfigDataEnvironmentPostProcessor`** (`ORDER = ConfigDataEnvironmentPostProcessor.ORDER + 1`), so `application.properties` / `application.yml` (including profile-specific variants) are already loaded and visible, but the `ApplicationContext` does not yet exist — no bean constructors, `@PostConstruct` callbacks, or Tomcat binding have run. When the context is subsequently created and refreshed, all instrumented JDK classes are already rewritten.
 
 On a successful attach the processor prepends a single-entry property source `macstabChaosAgentAttachMarker` with `macstab.chaos.agent.attach-phase=spring-boot-3` (or `spring-boot-4`), so integration tests can assert that the early attach fired.
+
+When the attach fails — a `RuntimeException`, or a `LinkageError` such as a missing attach mechanism or native library — the processor logs one `WARNING` with the reason and startup continues. It prepends `macstabChaosAgentAttachFailure` with `macstab.chaos.agent.attach-failed=true`, and `OnTrustedChaosEnablementCondition` then does not match: no chaos bean exists and nothing attaches again. A bean that injects `ChaosControlPlane` directly then fails the context with `NoSuchBeanDefinitionException`; inject `ObjectProvider<ChaosControlPlane>` or `Optional<ChaosControlPlane>` where the application must start without the agent.
 
 #### Trusted sources for `macstab.chaos.enabled`
 
