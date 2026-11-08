@@ -53,6 +53,29 @@ val nonPublishableModules = setOf(
     "sb4-virtual-thread-pinning",
 )
 
+// The description each published module's POM carries; a published module without one fails the
+// build.
+val moduleDescriptions = mapOf(
+    "chaos-agent-api" to "Macstab chaos agent: the public API (plans, scenarios, selectors, effects, the control plane)",
+    "chaos-agent-bootstrap" to "Macstab chaos agent: the Java agent jar (-javaagent or self-attach), with its dependencies shaded",
+    "chaos-agent-core" to "Macstab chaos agent: the runtime that matches scenarios and applies their effects (internal)",
+    "chaos-agent-instrumentation-jdk" to "Macstab chaos agent: the JDK and library hooks the agent weaves (internal)",
+    "chaos-agent-micrometer" to "Macstab chaos agent: Micrometer metrics for chaos events",
+    "chaos-agent-micronaut-integration" to "Macstab chaos agent: Micronaut integration (management endpoint, test extension)",
+    "chaos-agent-opentelemetry" to "Macstab chaos agent: OpenTelemetry spans and metrics for chaos events",
+    "chaos-agent-quarkus-extension" to "Macstab chaos agent: Quarkus extension (runtime and test support)",
+    "chaos-agent-quarkus-extension-deployment" to "Macstab chaos agent: the build steps of the Quarkus extension",
+    "chaos-agent-quarkus-management" to "Macstab chaos agent: the Quarkus /q/chaos management route",
+    "chaos-agent-quarkus-management-deployment" to "Macstab chaos agent: the build steps of the Quarkus management route",
+    "chaos-agent-spring-boot-common" to "Macstab chaos agent: Spring Boot support shared by the Boot 3 and Boot 4 starters",
+    "chaos-agent-spring-boot3-starter" to "Macstab chaos agent: Spring Boot 3 starter",
+    "chaos-agent-spring-boot3-test-starter" to "Macstab chaos agent: Spring Boot 3 test starter",
+    "chaos-agent-spring-boot4-starter" to "Macstab chaos agent: Spring Boot 4 starter",
+    "chaos-agent-spring-boot4-test-starter" to "Macstab chaos agent: Spring Boot 4 test starter",
+    "chaos-agent-startup-config" to "Macstab chaos agent: the plan format (JSON reader, writer and schema) and the startup configuration",
+    "chaos-agent-testkit" to "Macstab chaos agent: JUnit 5 test kit (@WithChaos, sessions, assertions)",
+)
+
 // The modules whose classes run in the child JVMs of chaos-agent-bootstrap's tests, inside the
 // shaded agent jar. Their coverage includes what those JVMs executed (see childJvmCoverage).
 val agentModules =
@@ -229,7 +252,8 @@ subprojects {
                     pom {
                         name.set(project.name)
                         description.set(
-                            "JVM in-process chaos engineering agent - bytecode-level fault injection for Java applications",
+                            moduleDescriptions[project.name]
+                                ?: throw GradleException("${project.name} is published: add its POM description to moduleDescriptions"),
                         )
                         url.set("https://github.com/macstab/macstab-chaos-jvm-agent")
 
@@ -251,8 +275,8 @@ subprojects {
                         }
 
                         scm {
-                            connection.set("scm:git:git://github.com/macstab/macstab-chaos-jvm-agent.git")
-                            developerConnection.set("scm:git:ssh://github.com/macstab/macstab-chaos-jvm-agent.git")
+                            connection.set("scm:git:https://github.com/macstab/macstab-chaos-jvm-agent.git")
+                            developerConnection.set("scm:git:ssh://git@github.com/macstab/macstab-chaos-jvm-agent.git")
                             url.set("https://github.com/macstab/macstab-chaos-jvm-agent")
                         }
                     }
