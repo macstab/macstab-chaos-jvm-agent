@@ -201,13 +201,17 @@ ChaosAssertions.assertThat(chaos.diagnostics()).hasNoFailuresFor("slow-db").scen
 |-----------------------------------|---------------------------------------------------------------------------------------|
 | `applied()` / `matched()`         | selects the counter: effects that took effect (L14 in [semantics.md](semantics.md)) or selector matches |
 | `atLeast(n)` / `exactly(n)`       | the counter is ≥ n / = n; after `within(d)`, retried every 10 ms until it holds or `d` elapses |
-| `atMost(n)` / `never()`           | the counter is ≤ n / 0, checked once (waiting cannot make an upper bound hold)        |
+| `atMost(n)` / `never()`           | the counter is ≤ n / 0; after `within(d)`, it must stay so for the whole of `d` (checked every 10 ms, failing at the first violation) |
 | `hasState(s)`                     | the scenario is in state `s`                                                          |
 | `hasNoFailures()`                 | no activation has failed since the agent started (JVM-wide; prefer the next one)      |
-| `hasNoFailuresFor(ids...)`        | no activation of these scenario ids has failed                                        |
+| `hasNoFailuresFor(id, more...)`   | no activation of these scenario ids has failed (at least one id; a repeated id counts once) |
 | `scenario(id)`                    | starts scenario assertions read from diagnostics; fails if no scenario has the id     |
 
-Failures are `org.opentest4j.AssertionFailedError`, which every JUnit and IDE renders as a test failure, with the scenario id, the expectation and the actual count in the message.
+Failures are `org.opentest4j.AssertionFailedError`, which every JUnit and IDE renders as a test failure, with the scenario's key (`<scopeKey>::<id>`, e.g. `jvm::slow-db` or `session:<id>::slow-db`, for a handle and for `scenario(id)` alike), the expectation and the actual count in the message; a count failure also carries the expectation and the count as its expected and actual values, for the IDE's comparison view.
+
+Bounds and timeouts are checked by one rule: a negative bound (`atLeast(-1)`, `atMost(-1)`, `exactly(-1)`) or a negative `within` timeout throws `IllegalArgumentException`, a `null` one `NullPointerException` naming it. A `within` timeout of any length is accepted (a timeout beyond what `System.nanoTime` can count waits without limit).
+
+The waiting under `within` is agent-internal work: when the agent is installed, the assertion's pauses run as an internal call, so a `THREAD_SLEEP` scenario neither delays nor counts them. Without the agent nothing is hooked and the bridge is never touched.
 
 ---
 

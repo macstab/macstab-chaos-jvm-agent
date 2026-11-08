@@ -24,7 +24,7 @@ public static final class com/macstab/chaos/jvm/testkit/ChaosAssertions$CountAss
 
 public static final class com/macstab/chaos/jvm/testkit/ChaosAssertions$DiagnosticsAssert
   public method hasNoFailures()Lcom/macstab/chaos/jvm/testkit/ChaosAssertions$DiagnosticsAssert;
-  public method hasNoFailuresFor([Ljava/lang/String;)Lcom/macstab/chaos/jvm/testkit/ChaosAssertions$DiagnosticsAssert;
+  public method hasNoFailuresFor(Ljava/lang/String;[Ljava/lang/String;)Lcom/macstab/chaos/jvm/testkit/ChaosAssertions$DiagnosticsAssert;
   public method scenario(Ljava/lang/String;)Lcom/macstab/chaos/jvm/testkit/ChaosAssertions$ScenarioAssert;
 
 public static final class com/macstab/chaos/jvm/testkit/ChaosAssertions$ScenarioAssert

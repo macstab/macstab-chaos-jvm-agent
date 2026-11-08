@@ -347,6 +347,12 @@ Every production package is JSpecify `@NullMarked`: a type is non-null unless it
 
 Before (1.x): Kotlin let `selector.destinationPattern()` be treated as nullable and accepted `null` for any parameter. Now pass a value where the type is non-null, and drop the null checks on non-null results.
 
+## 28. Testkit count assertions under `within` hold for the whole duration
+
+`ChaosAssertions`: `within(t).never()` and `within(t).atMost(n)` now hold for the whole of `t` and fail at the first count past the bound; in 1.x they checked once, at once. `hasNoFailuresFor` takes at least one id (`hasNoFailuresFor(String, String...)`), and a repeated id no longer throws. Negative bounds and negative `within` timeouts throw `IllegalArgumentException`. Messages name a scenario from `scenario(id)` by its key, `jvm::<id>` or `session:<id>::<id>`, as the handle assertions already did.
+
+Before (1.x): `assertThat(handle).applied().within(Duration.ofSeconds(5)).never()` returned at once. Now it takes 5 s; drop `within` for an instant check. A call `hasNoFailuresFor()` without ids, which passed, no longer compiles: pass the ids, or use `hasNoFailures()`.
+
 ---
 
 <div align="center">

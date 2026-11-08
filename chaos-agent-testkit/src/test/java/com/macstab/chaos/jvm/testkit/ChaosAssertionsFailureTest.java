@@ -108,7 +108,130 @@ class ChaosAssertionsFailureTest {
 
     assertThatThrownBy(() -> scenario.matched().exactly(4))
         .isInstanceOf(AssertionFailedError.class)
-        .hasMessage("scenario fixed is gone");
+        .hasMessage("scenario jvm::fixed is gone");
+  }
+
+  @Test
+  @DisplayName("within(t).never() holds for t: a count that rises during t fails")
+  void neverHoldsForTheDuration() {
+    final long started = System.nanoTime();
+    final ChaosActivationHandle rising =
+        handle(
+            ChaosDiagnostics.ScenarioState.ACTIVE,
+            () -> System.nanoTime() - started > Duration.ofMillis(200).toNanos() ? 1L : 0L);
+
+    assertThatThrownBy(
+            () ->
+                ChaosAssertions.assertThat(rising).applied().within(Duration.ofSeconds(1)).never())
+        .isInstanceOf(AssertionFailedError.class)
+        .hasMessage("expected applications of fixed to be never (0) but was 1 within PT1S");
+    assertThatThrownBy(
+            () ->
+                ChaosAssertions.assertThat(rising)
+                    .applied()
+                    .within(Duration.ofSeconds(1))
+                    .atMost(0))
+        .isInstanceOf(AssertionFailedError.class)
+        .hasMessage("expected applications of fixed to be at most 0 but was 1 within PT1S");
+  }
+
+  @Test
+  @DisplayName("an interrupted hold fails at once and keeps the interrupt")
+  void interruptedHold() {
+    final ChaosActivationHandle handle = handle(ChaosDiagnostics.ScenarioState.ACTIVE, 0L, 0L);
+
+    Thread.currentThread().interrupt();
+    try {
+      assertThatThrownBy(
+              () ->
+                  ChaosAssertions.assertThat(handle)
+                      .applied()
+                      .within(Duration.ofMinutes(1))
+                      .never())
+          .isInstanceOf(AssertionFailedError.class)
+          .hasMessage("interrupted while checking that applications of fixed stays never (0)");
+      assertThat(Thread.currentThread().isInterrupted()).isTrue();
+    } finally {
+      Thread.interrupted();
+    }
+  }
+
+  @Test
+  @DisplayName("without the bridge on the boot path the wait is a plain sleep")
+  void withoutTheAgent() {
+    assertThat(ChaosAssertions.CountAssert.onBootPath("com.example.NoSuchDispatcher")).isFalse();
+    assertThat(ChaosAssertions.CountAssert.onBootPath("java.lang.Thread")).isTrue();
+    assertThat(ChaosAssertions.CountAssert.pause(false)).isTrue();
+    Thread.currentThread().interrupt();
+    try {
+      assertThat(ChaosAssertions.CountAssert.pause(false)).isFalse();
+      assertThat(Thread.currentThread().isInterrupted()).isTrue();
+    } finally {
+      Thread.interrupted();
+    }
+  }
+
+  @Test
+  @DisplayName("a count failure carries the expected and the actual value")
+  void expectedAndActual() {
+    final ChaosActivationHandle handle = handle(ChaosDiagnostics.ScenarioState.ACTIVE, 3L, 3L);
+
+    final AssertionFailedError failure =
+        org.assertj.core.api.Assertions.catchThrowableOfType(
+            AssertionFailedError.class,
+            () -> ChaosAssertions.assertThat(handle).matched().atMost(2));
+
+    assertThat(failure.isExpectedDefined()).isTrue();
+    assertThat(failure.getExpected().getValue()).isEqualTo("at most 2");
+    assertThat(failure.isActualDefined()).isTrue();
+    assertThat(failure.getActual().getValue()).isEqualTo(3L);
+  }
+
+  @Test
+  @DisplayName("a timeout of 400,000 years is accepted; a negative or null one is refused")
+  void timeoutBounds() {
+    final ChaosActivationHandle handle = handle(ChaosDiagnostics.ScenarioState.ACTIVE, 0L, 0L);
+
+    assertThatCode(
+            () ->
+                ChaosAssertions.assertThat(handle)
+                    .applied()
+                    .within(Duration.ofDays(400_000L * 365))
+                    .atLeast(0))
+        .doesNotThrowAnyException();
+    assertThatThrownBy(
+            () -> ChaosAssertions.assertThat(handle).applied().within(Duration.ofMillis(-1)))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("timeout must not be negative: PT-0.001S");
+    assertThatThrownBy(() -> ChaosAssertions.assertThat(handle).applied().within(null))
+        .isInstanceOf(NullPointerException.class)
+        .hasMessage("timeout");
+  }
+
+  @Test
+  @DisplayName("every bound is checked by one rule with one message")
+  void oneBoundRule() {
+    final ChaosAssertions.CountAssert count =
+        ChaosAssertions.assertThat(handle(ChaosDiagnostics.ScenarioState.ACTIVE, 0L, 0L)).applied();
+
+    assertThatThrownBy(() -> count.atLeast(-1))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("the bound must not be negative: -1");
+    assertThatThrownBy(() -> count.atMost(-1))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("the bound must not be negative: -1");
+    assertThatThrownBy(() -> count.exactly(-1))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("the bound must not be negative: -1");
+  }
+
+  @Test
+  @DisplayName("hasNoFailuresFor tolerates a repeated id")
+  void repeatedIds() {
+    final FixedDiagnostics none = new FixedDiagnostics(List.of());
+
+    assertThatCode(() -> ChaosAssertions.assertThat(none).hasNoFailuresFor("a", "a"))
+        .doesNotThrowAnyException();
   }
 
   private static ChaosDiagnostics.ScenarioReport report(final long matched) {
@@ -125,6 +248,18 @@ class ChaosAssertionsFailureTest {
 
   private static ChaosActivationHandle handle(
       final ChaosDiagnostics.ScenarioState state, final long matched, final long applied) {
+    return handle(state, matched, () -> applied);
+  }
+
+  private static ChaosActivationHandle handle(
+      final ChaosDiagnostics.ScenarioState state, final java.util.function.LongSupplier applied) {
+    return handle(state, 0L, applied);
+  }
+
+  private static ChaosActivationHandle handle(
+      final ChaosDiagnostics.ScenarioState state,
+      final long matched,
+      final java.util.function.LongSupplier applied) {
     return new ChaosActivationHandle() {
       @Override
       public String id() {
@@ -152,7 +287,7 @@ class ChaosAssertionsFailureTest {
 
       @Override
       public long appliedCount() {
-        return applied;
+        return applied.getAsLong();
       }
     };
   }

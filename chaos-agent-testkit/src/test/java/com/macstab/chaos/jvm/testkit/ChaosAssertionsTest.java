@@ -93,6 +93,50 @@ class ChaosAssertionsTest {
         .hasMessageContaining("ca-unknown");
   }
 
+  @Test
+  @DisplayName("the waiting of an assertion is not seen by a THREAD_SLEEP scenario")
+  void waitingIsUnobserved(final ChaosControlPlane controlPlane, final ChaosSession session)
+      throws Exception {
+    final String pollerName = "ca-unobserved-poller-" + System.nanoTime();
+    final ChaosActivationHandle sleeps =
+        controlPlane.activate(
+            ChaosScenario.builder("ca-unobserved")
+                .scope(ChaosScenario.ScenarioScope.JVM)
+                .selector(
+                    new ChaosSelector.ThreadSelector(
+                        Set.of(OperationType.THREAD_SLEEP),
+                        null,
+                        com.macstab.chaos.jvm.api.NamePattern.exact(pollerName),
+                        null))
+                .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+                .activationPolicy(ActivationPolicy.always())
+                .build());
+    final java.util.concurrent.atomic.AtomicReference<Throwable> outcome =
+        new java.util.concurrent.atomic.AtomicReference<>();
+    // A session scenario no thread binds: it never applies, so the poller waits the full 300 ms.
+    final ChaosActivationHandle never = session.activate(submitDelay("ca-never"));
+
+    final Thread poller =
+        new Thread(
+            () ->
+                outcome.set(
+                    org.assertj.core.api.Assertions.catchThrowable(
+                        () ->
+                            ChaosAssertions.assertThat(never)
+                                .applied()
+                                .within(Duration.ofMillis(300))
+                                .atLeast(1))),
+            pollerName);
+    poller.start();
+    poller.join(TimeUnit.SECONDS.toMillis(10));
+
+    org.assertj.core.api.Assertions.assertThat(outcome.get())
+        .isInstanceOf(AssertionFailedError.class);
+    org.assertj.core.api.Assertions.assertThat(sleeps.matchedCount())
+        .as("the poller's own sleeps")
+        .isZero();
+  }
+
   private static void submitTwice() throws Exception {
     final ExecutorService executor = Executors.newSingleThreadExecutor();
     try {
