@@ -1,23 +1,27 @@
 package com.macstab.chaos.jvm.bootstrap;
 
 import com.macstab.chaos.jvm.api.ChaosControlPlane;
+import java.util.Optional;
 
 /**
- * Convenience facade over {@link ChaosAgentBootstrap} for consumer code that does not need to
- * depend directly on the bootstrap internals.
+ * The supported entry point of the agent's bootstrap module: framework integrations, test code and
+ * applications reach the agent through this class, not through {@link ChaosAgentBootstrap} or the
+ * other bootstrap types, whose signatures may change in any release.
  *
- * <p>This class exposes only the two operations that external callers (test code, framework
- * integrations) typically need:
+ * <p>This class exposes the three operations that external callers (test code, framework
+ * integrations) need:
  *
  * <ul>
  *   <li>{@link #installLocally()} — ensure the agent is installed and return the control plane.
  *       Safe to call multiple times; idempotent.
  *   <li>{@link #current()} — retrieve the already-installed control plane, or throw if the agent
  *       has not been installed.
+ *   <li>{@link #installed()} — the already-installed control plane, or empty: the probe for "is the
+ *       agent installed?", which never throws.
  * </ul>
  *
- * <p>Both methods delegate directly to {@link ChaosAgentBootstrap} without adding any state of
- * their own.
+ * <p>The methods delegate directly to {@link ChaosAgentBootstrap} without adding any state of their
+ * own.
  */
 public final class ChaosPlatform {
   private ChaosPlatform() {}
@@ -47,5 +51,16 @@ public final class ChaosPlatform {
    */
   public static ChaosControlPlane current() {
     return ChaosAgentBootstrap.current();
+  }
+
+  /**
+   * Returns the {@link ChaosControlPlane} of the installed chaos runtime, or empty when the agent
+   * is not (yet) installed. Never installs the agent and never throws: use it to ask whether the
+   * agent is installed, instead of catching the exception of {@link #current()}.
+   *
+   * @return the active {@link ChaosControlPlane}, or empty
+   */
+  public static Optional<ChaosControlPlane> installed() {
+    return Optional.ofNullable(ChaosAgentBootstrap.installedRuntime());
   }
 }

@@ -324,7 +324,7 @@ public final class ChaosAgentBootstrap {
   }
 
   /** Returns the fully installed runtime, or {@code null} when none is (yet) installed. */
-  private static @Nullable ChaosRuntime installedRuntime() {
+  static @Nullable ChaosRuntime installedRuntime() {
     final CompletableFuture<ChaosRuntime> initialization = INITIALIZATION.get();
     if (initialization == null
         || !initialization.isDone()

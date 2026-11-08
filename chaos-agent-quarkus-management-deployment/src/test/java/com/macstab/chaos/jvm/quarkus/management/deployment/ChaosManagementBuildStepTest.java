@@ -32,7 +32,8 @@ class ChaosManagementBuildStepTest {
               public io.vertx.core.Handler<io.vertx.ext.web.RoutingContext> handler(
                   final String root, final io.quarkus.runtime.ShutdownContext shutdown) {
                 roots.add(root);
-                return new ChaosManagementHandler(root, () -> true, () -> false, () -> null);
+                return new ChaosManagementHandler(
+                    root, () -> true, () -> false, java.util.Optional::empty);
               }
             },
             paths,

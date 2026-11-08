@@ -1,6 +1,7 @@
 package com.macstab.chaos.jvm.micronaut;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.macstab.chaos.jvm.api.ChaosControlPlane;
 import com.macstab.chaos.jvm.bootstrap.ChaosPlatform;
@@ -82,12 +83,27 @@ class ChaosManagementEndpointTest {
   @Test
   @DisplayName("answers 503 instead of installing the agent")
   void neverInstallsTheAgent() {
-    final ChaosManagementEndpoint endpoint =
-        new ChaosManagementEndpoint(
-            () -> {
-              throw new IllegalStateException("not installed");
-            });
+    final ChaosManagementEndpoint endpoint = new ChaosManagementEndpoint(java.util.Optional::empty);
     assertThat(endpoint.snapshot().code()).isEqualTo(503);
     endpoint.close();
+  }
+
+  @Test
+  @DisplayName("lets an IllegalStateException of an installed control plane through, not as 503")
+  void installedPlaneFailureIsNotNotInstalled() {
+    final ChaosControlPlane closed =
+        (ChaosControlPlane)
+            java.lang.reflect.Proxy.newProxyInstance(
+                ChaosControlPlane.class.getClassLoader(),
+                new Class<?>[] {ChaosControlPlane.class},
+                (proxy, method, args) -> {
+                  throw new IllegalStateException("control plane is closed");
+                });
+    final ChaosManagementEndpoint endpoint =
+        new ChaosManagementEndpoint(() -> java.util.Optional.of(closed));
+
+    assertThatThrownBy(endpoint::snapshot)
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessage("control plane is closed");
   }
 }

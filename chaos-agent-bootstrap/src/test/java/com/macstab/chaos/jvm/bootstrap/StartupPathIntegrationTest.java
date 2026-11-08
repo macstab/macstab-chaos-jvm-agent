@@ -81,6 +81,10 @@ class StartupPathIntegrationTest {
           .contains(
               "[chaos-agent] ignoring dynamic attach: set -Dmacstab.chaos.allow-dynamic-attach");
       assertThat(result.value("installedAfterOptIn")).isEqualTo("true");
+      assertThat(result.value("probeBefore"))
+          .as("installed() is empty, without an exception, before the agent is installed")
+          .isEqualTo("false");
+      assertThat(result.value("probeAfterOptIn")).isEqualTo("true");
     }
 
     @Test

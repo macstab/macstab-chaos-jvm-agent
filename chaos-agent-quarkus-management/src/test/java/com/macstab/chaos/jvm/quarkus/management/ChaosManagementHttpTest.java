@@ -26,12 +26,7 @@ class ChaosManagementHttpTest {
   private final AtomicBoolean allowAnonymous = new AtomicBoolean(false);
   private final ChaosManagementHandler handler =
       new ChaosManagementHandler(
-          "/q/chaos",
-          () -> true,
-          allowAnonymous::get,
-          () -> {
-            throw new IllegalStateException("chaos agent is not installed");
-          });
+          "/q/chaos", () -> true, allowAnonymous::get, java.util.Optional::empty);
   private final Vertx vertx = Vertx.vertx();
   private int port;
 

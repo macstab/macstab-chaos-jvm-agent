@@ -59,12 +59,16 @@ public final class StartupPathProbeMain {
   /** Attaches the agent jar to this JVM; agentmain installs only when dynamic attach is allowed. */
   private static void agentmain() {
     System.out.println("installedBefore=" + describe(ChaosAgentBootstrap::current));
+    System.out.println("probeBefore=" + ChaosPlatform.installed().isPresent());
     attachAgentJar();
     System.out.println("installedAfterAttach=" + installed());
     if (!installed()) {
       System.setProperty(ChaosAgentBootstrap.ALLOW_DYNAMIC_ATTACH_PROPERTY, "true");
       attachAgentJar();
       System.out.println("installedAfterOptIn=" + installed());
+      System.out.println(
+          "probeAfterOptIn="
+              + (ChaosPlatform.installed().orElseThrow() == ChaosPlatform.current()));
     }
   }
 

@@ -40,7 +40,7 @@ public class ChaosManagementRecorder {
             root,
             () -> flag(ENABLED_PROPERTY),
             () -> flag(ALLOW_ANONYMOUS_PROPERTY),
-            ChaosPlatform::current);
+            ChaosPlatform::installed);
     shutdown.addShutdownTask(handler::close);
     return handler;
   }

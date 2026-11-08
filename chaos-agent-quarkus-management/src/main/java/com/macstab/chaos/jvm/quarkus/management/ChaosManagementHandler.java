@@ -13,6 +13,7 @@ import io.vertx.core.http.HttpMethod;
 import io.vertx.core.http.HttpServerRequest;
 import io.vertx.ext.web.RequestBody;
 import io.vertx.ext.web.RoutingContext;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
@@ -40,7 +41,7 @@ public final class ChaosManagementHandler implements Handler<RoutingContext>, Au
   private final String root;
   private final BooleanSupplier enabled;
   private final BooleanSupplier allowAnonymous;
-  private final Supplier<ChaosControlPlane> controlPlane;
+  private final Supplier<Optional<ChaosControlPlane>> controlPlane;
   private volatile @Nullable ChaosManagement management;
 
   private static final ChaosManagement.HttpResult TOO_LARGE =
@@ -63,14 +64,13 @@ public final class ChaosManagementHandler implements Handler<RoutingContext>, Au
    * @param enabled whether management is switched on, read per request
    * @param allowAnonymous whether requests without an authenticated user are served, read per
    *     request
-   * @param controlPlane the installed control plane; throws {@link IllegalStateException} when the
-   *     agent is not installed
+   * @param controlPlane the installed control plane; empty while the agent is not installed
    */
   public ChaosManagementHandler(
       final String root,
       final BooleanSupplier enabled,
       final BooleanSupplier allowAnonymous,
-      final Supplier<ChaosControlPlane> controlPlane) {
+      final Supplier<Optional<ChaosControlPlane>> controlPlane) {
     this.root = root;
     this.enabled = enabled;
     this.allowAnonymous = allowAnonymous;
@@ -278,13 +278,11 @@ public final class ChaosManagementHandler implements Handler<RoutingContext>, Au
       synchronized (this) {
         current = management;
         if (current == null) {
-          final ChaosControlPlane installed;
-          try {
-            installed = controlPlane.get();
-          } catch (final IllegalStateException notInstalled) {
+          final Optional<ChaosControlPlane> installed = controlPlane.get();
+          if (installed.isEmpty()) {
             return null;
           }
-          current = new ChaosManagement(installed);
+          current = new ChaosManagement(installed.get());
           management = current;
         }
       }

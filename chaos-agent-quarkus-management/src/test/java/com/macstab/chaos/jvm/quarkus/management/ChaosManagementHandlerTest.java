@@ -48,7 +48,8 @@ class ChaosManagementHandlerTest {
   private final AtomicReference<Uni<SecurityIdentity>> deferredIdentity = new AtomicReference<>();
   private final Vertx vertx = Vertx.vertx();
   private final ChaosManagementHandler handler =
-      new ChaosManagementHandler("/q/chaos", enabled::get, allowAnonymous::get, () -> runtime);
+      new ChaosManagementHandler(
+          "/q/chaos", enabled::get, allowAnonymous::get, () -> java.util.Optional.of(runtime));
 
   @AfterEach
   void tearDown() throws Exception {
@@ -408,13 +409,7 @@ class ChaosManagementHandlerTest {
     enabled.set(true);
     assertThat(call(HttpMethod.DELETE, "/q/chaosx", null).status()).isEqualTo(404);
     final ChaosManagementHandler withoutAgent =
-        new ChaosManagementHandler(
-            "/q/chaos",
-            () -> true,
-            () -> true,
-            () -> {
-              throw new IllegalStateException("not installed");
-            });
+        new ChaosManagementHandler("/q/chaos", () -> true, () -> true, java.util.Optional::empty);
     final AtomicInteger status = new AtomicInteger();
     final HttpServerRequest get =
         (HttpServerRequest)

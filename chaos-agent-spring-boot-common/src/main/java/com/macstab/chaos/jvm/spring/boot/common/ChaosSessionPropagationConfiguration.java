@@ -40,10 +40,6 @@ public class ChaosSessionPropagationConfiguration {
   }
 
   private static @Nullable ChaosControlPlane installedControlPlane() {
-    try {
-      return ChaosPlatform.current();
-    } catch (final IllegalStateException notInstalled) {
-      return null;
-    }
+    return ChaosPlatform.installed().orElse(null);
   }
 }

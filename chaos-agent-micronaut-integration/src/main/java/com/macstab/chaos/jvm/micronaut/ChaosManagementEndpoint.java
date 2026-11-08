@@ -13,6 +13,7 @@ import io.micronaut.management.endpoint.annotation.Read;
 import io.micronaut.management.endpoint.annotation.Selector;
 import io.micronaut.management.endpoint.annotation.Write;
 import jakarta.annotation.PreDestroy;
+import java.util.Optional;
 import java.util.function.Supplier;
 import org.jspecify.annotations.Nullable;
 
@@ -38,21 +39,20 @@ import org.jspecify.annotations.Nullable;
 @Requires(condition = TrustedManagementEnablement.class)
 public class ChaosManagementEndpoint {
 
-  private final Supplier<ChaosControlPlane> controlPlane;
+  private final Supplier<Optional<ChaosControlPlane>> controlPlane;
   private volatile @Nullable ChaosManagement management;
 
   /** Creates the endpoint for the installed agent. */
   public ChaosManagementEndpoint() {
-    this(ChaosPlatform::current);
+    this(ChaosPlatform::installed);
   }
 
   /**
    * Creates the endpoint for a control plane.
    *
-   * @param controlPlane supplies the control plane; throws {@link IllegalStateException} when no
-   *     agent is installed
+   * @param controlPlane supplies the control plane; empty while no agent is installed
    */
-  ChaosManagementEndpoint(final Supplier<ChaosControlPlane> controlPlane) {
+  ChaosManagementEndpoint(final Supplier<Optional<ChaosControlPlane>> controlPlane) {
     this.controlPlane = controlPlane;
   }
 
@@ -104,23 +104,28 @@ public class ChaosManagementEndpoint {
 
   private HttpResponse<String> answer(
       final String method, final String path, final @Nullable String body) {
-    final ChaosManagement.HttpResult result;
-    try {
-      result = management().handle(method, path, body);
-    } catch (final IllegalStateException notInstalled) {
+    final ChaosManagement current = management();
+    if (current == null) {
       return HttpResponse.<String>status(HttpStatus.SERVICE_UNAVAILABLE)
           .body("{\"status\":\"error\",\"message\":\"the chaos agent is not installed\"}");
     }
+    // Any other failure, an IllegalStateException of an installed plane included, is a 500.
+    final ChaosManagement.HttpResult result = current.handle(method, path, body);
     return HttpResponse.<String>status(HttpStatus.valueOf(result.status())).body(result.json());
   }
 
-  private ChaosManagement management() {
+  /** The management over the installed control plane; {@code null} while no agent is installed. */
+  private @Nullable ChaosManagement management() {
     ChaosManagement current = management;
     if (current == null) {
       synchronized (this) {
         current = management;
         if (current == null) {
-          current = new ChaosManagement(controlPlane.get());
+          final Optional<ChaosControlPlane> installed = controlPlane.get();
+          if (installed.isEmpty()) {
+            return null;
+          }
+          current = new ChaosManagement(installed.get());
           management = current;
         }
       }

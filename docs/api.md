@@ -87,7 +87,7 @@ public final class SlowDatabaseExample {
 
 # 2. ChaosControlPlane
 
-Entry point to the chaos agent, obtained via `ChaosAgentBootstrap.current()` or `ChaosTestKit.install()`.
+Entry point to the chaos agent, obtained via `ChaosPlatform.current()` (or `ChaosPlatform.installed()`, an `Optional` that is empty while no agent is installed) or `ChaosTestKit.install()`. `ChaosPlatform` is the supported entry point of `chaos-agent-bootstrap`.
 
 ```java
 public interface ChaosControlPlane {

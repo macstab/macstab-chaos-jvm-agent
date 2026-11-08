@@ -6,8 +6,8 @@ import org.jspecify.annotations.Nullable;
  * Primary entry point to the chaos agent runtime.
  *
  * <p>A single instance is installed per JVM when the agent attaches, accessible via {@code
- * ChaosAgentBootstrap.current()} or injected in test code via {@code
- * ChaosAgentBootstrap.installForLocalTests()}.
+ * ChaosPlatform.current()} (or {@code ChaosPlatform.installed()}, empty while no agent is
+ * installed) or installed in test code via {@code ChaosPlatform.installLocally()}.
  *
  * <p>Core operations:
  *
