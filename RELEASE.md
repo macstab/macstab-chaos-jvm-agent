@@ -101,8 +101,12 @@ major release, also set `apiBreaksAccepted = false`.
 
 `jacocoTestReport` writes a module's report (XML + HTML) when it is asked for; it runs the
 module's tests first, but a test run alone does not produce it. `check` enforces each module's
-coverage floor (`coverageFloors` in `build.gradle.kts`). The root-level `jacocoAggregatedReport`
-task combines the reports of the modules with a floor into
+coverage floor (`coverageFloors` in `build.gradle.kts`). The floors of the modules inside the agent
+jar (api, core, instrumentation-jdk, startup-config, bootstrap) also count what the bootstrap tests'
+child JVMs executed (`childJvmCoverage`), so they are verified by the root project's `check`
+(`<module>CoverageVerification`), and `:<module>:check` runs only the module's own tests. The
+root-level `jacocoAggregatedReport` task combines the reports of the modules with a floor and the
+child JVMs' data into
 `build/reports/jacoco/aggregated/{html,jacoco.xml}`; CI runs it and uploads the result as a
 workflow artifact named `jacoco-coverage`.
 

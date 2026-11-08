@@ -174,20 +174,17 @@ subprojects {
         }
     }
 
-    if (name in agentModules) {
-        val childCoverage = rootProject.layout.buildDirectory.file("jacoco/child-jvms-remapped.exec")
+    if (name == "chaos-agent-instrumentation-jdk") {
         tasks.withType<JacocoReportBase>().configureEach {
-            dependsOn(":childJvmCoverage")
-            executionData(childCoverage)
-            if (project.name == "chaos-agent-instrumentation-jdk") {
-                classDirectories.setFrom(
-                    classDirectories.files.map { fileTree(it) { exclude(inlinedAdvice) } },
-                )
-            }
+            classDirectories.setFrom(
+                classDirectories.files.map { fileTree(it) { exclude(inlinedAdvice) } },
+            )
         }
     }
 
-    coverageFloors[name]?.let { (line, branch) ->
+    // The agent modules' floors count what the child JVMs executed too: they are verified in the
+    // root project (below), so `:<module>:check` runs only the module's own tests.
+    coverageFloors[name]?.takeIf { name !in agentModules }?.let { (line, branch) ->
         val verification = tasks.named<JacocoCoverageVerification>("jacocoTestCoverageVerification") {
             dependsOn(tasks.named("test"))
             violationRules {
@@ -371,13 +368,16 @@ tasks.wrapper {
     distributionSha256Sum = "b21468753cb43c167738ee04f10c706c46459cf8f8ae6ea132dc9ce589a261f2"
 }
 
-// One coverage report over the modules with a coverage floor, built from their own reports, so it
-// counts what the floors count (child-JVM and starter data included, inlined advice excluded).
+// One coverage report over the modules with a coverage floor, built from their own reports and the
+// child JVMs' execution data, so it counts what the floors count (inlined advice excluded).
 // XML and HTML land in build/reports/jacoco/aggregated/; CI uploads them as an artifact.
 apply(plugin = "jacoco")
 extensions.configure<JacocoPluginExtension> {
     toolVersion = jacocoVersion
 }
+
+// What the child JVMs executed, keyed to the module classes (childJvmCoverage below).
+val childCoverage = layout.buildDirectory.file("jacoco/child-jvms-remapped.exec")
 
 tasks.register<JacocoReport>("jacocoAggregatedReport") {
     group = "verification"
@@ -389,6 +389,9 @@ tasks.register<JacocoReport>("jacocoAggregatedReport") {
         classDirectories.from(report.map { it.classDirectories })
         sourceDirectories.from(report.map { it.sourceDirectories })
     }
+    // The agent modules' share of what the bootstrap tests' child JVMs executed.
+    dependsOn(":childJvmCoverage")
+    executionData.from(childCoverage)
     reports {
         xml.required.set(true)
         html.required.set(true)
@@ -482,6 +485,35 @@ tasks.register("releaseToCentral") {
             throw GradleException("Failed to publish to Maven Central (exit code: $exitCode)")
         }
     }
+}
+
+// The agent modules' coverage floors, verified here with what the child JVMs of the bootstrap tests
+// executed: those JVMs run the agent jar, so its modules' floors count both. `./gradlew check` (and
+// `build`) runs them; `:<module>:check` does not start the child-JVM suite.
+agentModules.forEach { module ->
+    val (line, branch) = coverageFloors.getValue(module)
+    val report = project(":$module").tasks.named<JacocoReport>("jacocoTestReport")
+    val verification = tasks.register<JacocoCoverageVerification>("${module}CoverageVerification") {
+        group = "verification"
+        description = "Checks the coverage floor of $module, child-JVM execution included."
+        dependsOn(report, ":childJvmCoverage")
+        executionData.from(report.map { it.executionData }, childCoverage)
+        classDirectories.from(report.map { it.classDirectories })
+        sourceDirectories.from(report.map { it.sourceDirectories })
+        violationRules {
+            rule {
+                limit {
+                    counter = "LINE"
+                    minimum = line.toBigDecimal()
+                }
+                limit {
+                    counter = "BRANCH"
+                    minimum = branch.toBigDecimal()
+                }
+            }
+        }
+    }
+    tasks.named("check") { dependsOn(verification) }
 }
 
 // The child JVMs run the shaded agent jar. Shading re-encodes every class (the constant pool is

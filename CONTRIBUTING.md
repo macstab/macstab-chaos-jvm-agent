@@ -179,6 +179,6 @@ Stressors are simpler — they live entirely in `chaos-agent-core` and have no B
 
 - One logical change per PR
 - Tests required for new interception points and stressors
-- `./gradlew build` must pass locally before opening a PR. It enforces a line and branch coverage floor per module (`coverageFloors` in `build.gradle.kts`); raise a floor when your tests raise coverage, never lower one to make a change pass
+- `./gradlew build` must pass locally before opening a PR. It enforces a line and branch coverage floor per module (`coverageFloors` in `build.gradle.kts`; the floors of the agent jar's modules count the bootstrap tests' child JVMs and are checked by the root project's `check`, not by `:<module>:check`); raise a floor when your tests raise coverage, never lower one to make a change pass
 - A change to the dispatch path is compared against its base with `BridgeDispatchBenchmark` (`docs/benchmarks.md` §8.3)
 - For breaking API changes, add a `BREAKING CHANGE:` footer to the commit message
