@@ -33,8 +33,11 @@ class SuppressedSubmitTest {
       final FutureTask<String> submitted = new FutureTask<>(() -> "ran");
 
       // What the executor runs in place of the submitted task.
-      runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, submitted).run();
+      final Runnable queued = runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, submitted);
 
+      assertThat(queued).as("the pool keeps the task it was given").isSameAs(submitted);
+      assertThat(submitted.isCancelled()).isTrue();
+      queued.run();
       assertThat(submitted.isDone()).isTrue();
       assertThatThrownBy(() -> submitted.get(1, TimeUnit.SECONDS))
           .isInstanceOf(CancellationException.class);

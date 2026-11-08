@@ -11,10 +11,12 @@ import com.macstab.chaos.jvm.api.OperationType;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Set;
+import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 /** Session-scoped scenarios on operations whose dispatch must honour the session. */
@@ -73,11 +75,17 @@ class SessionPropagationTest {
   @Test
   @DisplayName("a FutureTask submitted from a session is still a Future the caller can cancel")
   void sessionWrappedFutureStaysAFuture() {
+    session.activate(
+        sessionScenario(
+            "worker-run",
+            ChaosSelector.executor(Set.of(OperationType.EXECUTOR_WORKER_RUN)),
+            ChaosEffect.delay(Duration.ofMillis(1))));
     final java.util.concurrent.FutureTask<String> task =
         new java.util.concurrent.FutureTask<>(() -> "result");
 
     final Runnable queued = runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, task);
 
+    assertThat(queued).as("wrapped for the session").isNotSameAs(task);
     assertThat(queued).isInstanceOf(java.util.concurrent.Future.class);
     assertThat(((java.util.concurrent.Future<?>) queued).cancel(true)).isTrue();
     assertThat(task.isCancelled()).as("cancelling the wrapper cancels the submitted task").isTrue();
@@ -134,6 +142,68 @@ class SessionPropagationTest {
 
     assertThat(suppressedOutside).isFalse();
     assertThat(suppressedInside).isTrue();
+  }
+
+  @Nested
+  @DisplayName("a session without scenarios")
+  class NoScenarioNoWrap {
+
+    @Test
+    @DisplayName("hands a submitted runnable and callable to the pool unchanged")
+    void submittedTaskIsNotWrapped() {
+      // Arrange
+      final Runnable runnable = () -> {};
+      final Callable<String> callable = () -> "result";
+
+      // Act
+      final Runnable queuedRunnable =
+          runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, runnable);
+      final Callable<String> queuedCallable =
+          runtime.decorateExecutorCallable("EXECUTOR_SUBMIT", this, callable);
+
+      // Assert
+      assertThat(queuedRunnable).isSameAs(runnable);
+      assertThat(queuedCallable).isSameAs(callable);
+    }
+
+    @Test
+    @DisplayName("hands a task to the pool unchanged while a JVM scenario selects the submission")
+    void jvmScenarioDoesNotWrap() {
+      // Arrange
+      runtime.activate(
+          ChaosScenario.builder("jvm-submit")
+              .scope(ChaosScenario.ScenarioScope.JVM)
+              .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+              .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+              .activationPolicy(ActivationPolicy.always())
+              .build());
+      final Runnable runnable = () -> {};
+
+      // Act
+      final Runnable queued = runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, runnable);
+
+      // Assert
+      assertThat(queued).isSameAs(runnable);
+    }
+
+    @Test
+    @DisplayName("wraps a task submitted after the session's first scenario is activated")
+    void wrapsOnceTheSessionHasAScenario() {
+      // Arrange
+      final Runnable before = runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
+      session.activate(
+          sessionScenario(
+              "worker-run",
+              ChaosSelector.executor(Set.of(OperationType.EXECUTOR_WORKER_RUN)),
+              ChaosEffect.delay(Duration.ofMillis(1))));
+
+      // Act
+      final Runnable after = runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
+
+      // Assert
+      assertThat(ScopeContext.sessionOf(before)).isNull();
+      assertThat(ScopeContext.sessionOf(after)).isEqualTo(session.id());
+    }
   }
 
   private static ChaosScenario sessionScenario(

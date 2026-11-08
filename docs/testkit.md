@@ -205,6 +205,8 @@ A session follows the test's own threads and the work they hand off. To reach th
 - the JDK `HttpClient` and `HttpURLConnection` (and so `TestRestTemplate`, `RestTemplate`, `RestClient` on those transports) add `X-Chaos-Session: <id>` to requests sent from a thread in a session;
 - the Spring Boot starters' `ChaosSessionFilter` (test starters always, runtime starters with `macstab.chaos.enabled`) binds the request thread to that session; elsewhere call `controlPlane.bindSession(header)` in your own filter.
 
+A task the test submits to a thread pool carries the session (and so the header on the calls it makes) only once the session has a scenario: activate the session's scenarios before submitting work. A pool task submitted from a session without scenarios runs outside any session and its requests carry no `X-Chaos-Session`.
+
 The header decides per request, so a server whose worker threads inherited a session (started while one was bound) still runs a request from another session — or with an unknown id, from none — accordingly. `SessionAcrossHttpTest` in the `sb3-retry-resilience-test` example shows a session-scoped downstream failure that hits only the requests from the test's session.
 
 ---
@@ -357,6 +359,7 @@ void gateBlocksAndReleasesCorrectly(ChaosSession session) throws Exception {
 |----------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------|
 | Activating JVM-scoped scenario without closing the handle                  | Scenario leaks across tests; chaos remains active for subsequent tests in the same JVM                       | Always call `handle.close()` in `finally`                                                            |
 | Not binding session before submitting work to an executor                  | Session context not propagated; executor tasks not affected by session-scoped chaos                          | Use `session.bind()` before submitting, or `session.wrap(task)` to create a context-carrying wrapper |
+| Submitting pool work before the session's first scenario is activated     | The task runs outside the session: session-scoped chaos and `X-Chaos-Session` do not reach it                | Activate the session's scenarios before submitting                                                   |
 | Using `ChaosTestKit.install()` without `-Djdk.attach.allowAttachSelf=true` | `IllegalStateException` at runtime                                                                           | Add the JVM arg to test config                                                                       |
 | Checking `appliedCount` without waiting for scenarios to fire              | Race condition: the scenario may not have fired yet                                                          | Use event listeners or explicit synchronization points                                               |
 | Registering the same scenario ID twice in the same scope                   | `ChaosActivationException("scenario key already active")` (only while the previous one is REGISTERED/ACTIVE) | Use unique IDs per test; let `ChaosAgentExtension` manage session lifecycle                          |

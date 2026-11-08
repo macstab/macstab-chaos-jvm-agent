@@ -107,6 +107,8 @@ public final class DefectProbeMain {
       case "clock-call-sites" -> clockCallSites();
       case "session-header" -> sessionHeader();
       case "pool-worker-session" -> poolWorkerSession();
+      case "session-priority-pool" -> sessionPriorityPool();
+      case "session-schedule-tick" -> sessionScheduleTick();
       case "socket-torn-write" -> socketTornWrite();
       case "socket-channel" -> socketChannel();
       case "file-open" -> fileOpen();
@@ -1950,6 +1952,93 @@ public final class DefectProbeMain {
       return new String(in.readAllBytes(), StandardCharsets.UTF_8).replace(sessionId, "session");
     } finally {
       connection.disconnect();
+    }
+  }
+
+  /** A Comparable task of a priority pool. */
+  private record PrioritizedTask(int priority, Runnable body)
+      implements Runnable, Comparable<PrioritizedTask> {
+
+    @Override
+    public void run() {
+      body.run();
+    }
+
+    @Override
+    public int compareTo(final PrioritizedTask other) {
+      return Integer.compare(priority, other.priority);
+    }
+  }
+
+  /**
+   * A pool on a PriorityBlockingQueue used from inside a session without scenarios: the first task
+   * holds the only worker, so the second is queued and must be Comparable. Prints {@code
+   * queued=ran} or the failure.
+   */
+  private static void sessionPriorityPool() throws Exception {
+    final java.util.concurrent.ThreadPoolExecutor pool =
+        new java.util.concurrent.ThreadPoolExecutor(
+            1, 1, 0L, TimeUnit.MILLISECONDS, new PriorityBlockingQueue<>());
+    final CountDownLatch holding = new CountDownLatch(1);
+    final CountDownLatch ran = new CountDownLatch(1);
+    try (ChaosSession session = ChaosPlatform.current().openSession("priority")) {
+      pool.execute(
+          new PrioritizedTask(
+              0,
+              () -> {
+                try {
+                  holding.await();
+                } catch (final InterruptedException interrupted) {
+                  Thread.currentThread().interrupt();
+                }
+              }));
+      try {
+        pool.execute(new PrioritizedTask(1, ran::countDown));
+        holding.countDown();
+        System.out.println("queued=" + (ran.await(5L, TimeUnit.SECONDS) ? "ran" : "timeout"));
+      } catch (final RuntimeException failed) {
+        System.out.println("queued=" + failed.getClass().getName());
+      }
+    } finally {
+      holding.countDown();
+      pool.shutdownNow();
+    }
+  }
+
+  /**
+   * A session-scoped SCHEDULE_TICK delay and a fixed-rate task scheduled in the session: prints how
+   * many times the task ran and how many ticks the scenario was applied to.
+   */
+  private static void sessionScheduleTick() throws Exception {
+    final ScheduledExecutorService executor = Executors.newScheduledThreadPool(1);
+    final AtomicLong runs = new AtomicLong();
+    final CountDownLatch fiveRuns = new CountDownLatch(5);
+    try (ChaosSession session = ChaosPlatform.current().openSession("tick")) {
+      final ChaosActivationHandle tick =
+          session.activate(
+              ChaosScenario.builder("session-tick")
+                  .scope(ChaosScenario.ScenarioScope.SESSION)
+                  .selector(ChaosSelector.scheduling(Set.of(OperationType.SCHEDULE_TICK)))
+                  .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+                  .activationPolicy(ActivationPolicy.always())
+                  .build());
+      final ScheduledFuture<?> periodic =
+          executor.scheduleAtFixedRate(
+              () -> {
+                runs.incrementAndGet();
+                fiveRuns.countDown();
+              },
+              0L,
+              10L,
+              TimeUnit.MILLISECONDS);
+      System.out.println("fiveRuns=" + fiveRuns.await(5L, TimeUnit.SECONDS));
+      periodic.cancel(false);
+      executor.shutdown();
+      executor.awaitTermination(5L, TimeUnit.SECONDS);
+      System.out.println("runs=" + runs.get());
+      System.out.println("ticks=" + tick.appliedCount());
+    } finally {
+      executor.shutdownNow();
     }
   }
 

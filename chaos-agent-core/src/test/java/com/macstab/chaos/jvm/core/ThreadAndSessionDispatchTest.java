@@ -233,6 +233,17 @@ class ThreadAndSessionDispatchTest {
   @DisplayName("session wrappers of executor submissions")
   class Wrappers {
 
+    /** A task is wrapped for its session only once the session has a scenario. */
+    private void activateInSession(final ChaosSession session) {
+      session.activate(
+          ChaosScenario.builder("session-has-scenario")
+              .scope(ChaosScenario.ScenarioScope.SESSION)
+              .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_WORKER_RUN)))
+              .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+              .activationPolicy(ActivationPolicy.always())
+              .build());
+    }
+
     @Test
     @DisplayName("a callable submitted in a session runs in it on another thread")
     void callableRunsInTheSession() throws Throwable {
@@ -240,6 +251,7 @@ class ThreadAndSessionDispatchTest {
       final AtomicReference<Object> result = new AtomicReference<>();
       final AtomicReference<String> after = new AtomicReference<>("unset");
       try (ChaosSession session = runtime.openSession("wrap")) {
+        activateInSession(session);
         final Callable<String> submitted =
             runtime.decorateExecutorCallable(
                 "EXECUTOR_SUBMIT",
@@ -276,6 +288,7 @@ class ThreadAndSessionDispatchTest {
               });
       final FutureTask<String> cancelled = new FutureTask<>(() -> "never");
       try (ChaosSession session = runtime.openSession("wrap")) {
+        activateInSession(session);
         final Runnable submitted = runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, task);
         final Runnable toCancel =
             runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, cancelled);

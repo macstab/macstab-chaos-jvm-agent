@@ -32,6 +32,7 @@
 | 11 | A glob's `*` also matches line terminators | a GLOB must not match across a line break | use a REGEX (§11) |
 | 14 | Enabling switches are honoured only from local sources on Quarkus and Micronaut | a config server sets `macstab.chaos.enabled` or a management switch | set `macstab.chaos.allow-remote-enable=true` locally (§14) |
 | 15 | `reject` / `suppress` on `QUEUE_OFFER` skip queues without a capacity limit | you saturate a pool on an unbounded queue through `QUEUE_OFFER` | reject `EXECUTOR_SUBMIT`, or give the queue a capacity (§15) |
+| 16 | A pool task carries a session only once the session has a scenario | another service relies on `X-Chaos-Session` from pool tasks of a session without local scenarios | activate a scenario in the session first, or set the header from `session.id()` (§16) |
 
 ---
 
@@ -195,6 +196,12 @@ Quarkus and Micronaut follow the rule the Spring starters already applied: a swi
 A queue whose `remainingCapacity()` is `Integer.MAX_VALUE` (an unbounded `LinkedBlockingQueue`, a `PriorityBlockingQueue`, a `ScheduledThreadPoolExecutor`'s delay queue) is never full, so a `RejectEffect` or `SuppressEffect` on `QUEUE_OFFER` no longer answers `false` from it: the offer runs and counts no application. In 1.x every scheduled pool silently dropped its tasks under such a scenario. A delay or gate on the offer still applies.
 
 Before (1.x): a reject on `QUEUE_OFFER` made `Executors.newFixedThreadPool(n)` throw `RejectedExecutionException` once its workers were busy. Now it does not, because that pool's queue is unbounded. To fail submissions, reject `EXECUTOR_SUBMIT`; to model a full queue, build the pool on a bounded one (`new ThreadPoolExecutor(n, n, 0, MILLISECONDS, new ArrayBlockingQueue<>(capacity))`).
+
+## 16. A pool task carries a session only once the session has a scenario
+
+A task submitted to a thread pool from a thread bound to a session is wrapped to carry the session only while the session has a registered scenario. In 1.x every task submitted inside an open session was wrapped, which broke priority pools (the wrapper is not `Comparable`) and `remove(task)`.
+
+Before (1.x): a test opened a session without activating anything in it, and the HTTP calls its pool tasks made carried `X-Chaos-Session`, so another service could scope its own scenarios to the session. Now those tasks run outside any session and their calls carry no header. Activate a scenario in the session before submitting, or add the header yourself from `session.id()`.
 
 ---
 

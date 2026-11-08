@@ -937,6 +937,23 @@ class AgentEndToEndTest {
     }
 
     @Test
+    @DisplayName("a session without scenarios leaves a priority pool's Comparable tasks unwrapped")
+    void sessionWithoutScenariosKeepsPriorityPoolTasks() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.runWithoutPlan(DefectProbeMain.class, "session-priority-pool");
+      assertThat(result.value("queued")).isEqualTo("ran");
+    }
+
+    @Test
+    @DisplayName("a session-scoped SCHEDULE_TICK reaches every tick of a fixed-rate task")
+    void sessionScheduleTickReachesEveryTick() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.runWithoutPlan(DefectProbeMain.class, "session-schedule-tick");
+      assertThat(result.value("fiveRuns")).isEqualTo("true");
+      assertThat(result.longValue("ticks")).isGreaterThanOrEqualTo(result.longValue("runs"));
+    }
+
+    @Test
     @DisplayName("X-Chaos-Session carries a session to the server handling the request")
     void sessionHeader() throws Exception {
       final ChildJvmProbe.ProbeResult result =

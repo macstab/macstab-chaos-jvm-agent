@@ -70,6 +70,13 @@ final class ScenarioRegistry implements ChaosDiagnostics {
   private final Object indexLock = new Object();
   private volatile Map<OperationType, ScenarioController[]> index =
       new EnumMap<>(OperationType.class);
+
+  /**
+   * The ids of the sessions with at least one registered controller; replaced, never changed, by
+   * {@link #rebuildIndex()}.
+   */
+  private volatile Set<String> sessionsWithScenarios = Set.of();
+
   private volatile Consumer<Set<ChaosSelector.MethodSelector>> methodSelectorListener =
       selectors -> {};
 
@@ -166,15 +173,30 @@ final class ScenarioRegistry implements ChaosDiagnostics {
   }
 
   /**
-   * Replaces the operation index with one built from the current controllers. Every change to
-   * {@link #controllers} is followed by a rebuild, and rebuilds are serialised, so the last rebuild
-   * always sees every change made before it.
+   * Returns whether at least one controller of the session {@code sessionId} is registered.
+   *
+   * @param sessionId the session id
+   * @return {@code true} when the session has a registered scenario
+   */
+  boolean hasScenarios(final String sessionId) {
+    return sessionsWithScenarios.contains(sessionId);
+  }
+
+  /**
+   * Replaces the operation index and the set of sessions with scenarios with ones built from the
+   * current controllers. Every change to {@link #controllers} is followed by a rebuild, and
+   * rebuilds are serialised, so the last rebuild always sees every change made before it.
    */
   private void rebuildIndex() {
     synchronized (indexLock) {
       final EnumMap<OperationType, List<ScenarioController>> byOperation =
           new EnumMap<>(OperationType.class);
+      final Set<String> sessions = new HashSet<>();
       for (final ScenarioController controller : controllers.values()) {
+        final String sessionId = controller.sessionId();
+        if (sessionId != null) {
+          sessions.add(sessionId);
+        }
         for (final OperationType operation :
             SelectorOperations.of(controller.scenario().selector())) {
           byOperation.computeIfAbsent(operation, ignored -> new ArrayList<>()).add(controller);
@@ -187,6 +209,7 @@ final class ScenarioRegistry implements ChaosDiagnostics {
             next.put(operation, list.toArray(NO_CONTROLLERS));
           });
       index = next;
+      sessionsWithScenarios = Set.copyOf(sessions);
     }
     reconcileMethodSelectors();
   }

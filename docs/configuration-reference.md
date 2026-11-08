@@ -386,7 +386,7 @@ Not diagrammed — tabular representation is clearer. See [Section 13.4 — Comp
 
 **Responsibility:** Create an isolated scope where SESSION-scoped scenarios fire only for threads explicitly bound to the session. Enables multiple tests to run concurrently in the same JVM without interfering with each other's chaos state.
 
-**Thread binding:** the thread that opens the session is bound to it; `session.bind()` binds another thread and returns a `ScopeBinding` whose `close()` removes it. Tasks submitted to executors or schedulers from a bound thread run bound to the same session. Threads that are not bound to any session are only eligible for JVM-scoped scenarios.
+**Thread binding:** the thread that opens the session is bound to it; `session.bind()` binds another thread and returns a `ScopeBinding` whose `close()` removes it. Tasks submitted to executors or schedulers from a bound thread run bound to the same session once the session has a scenario; activate before you submit. Threads that are not bound to any session are only eligible for JVM-scoped scenarios.
 
 **Restriction:** SESSION-scoped scenarios cannot use JVM-global selectors: `ThreadSelector`, `ShutdownSelector`, `ClassLoadingSelector`, `StressSelector`. These selectors target JVM-wide events that cannot be attributed to a single test thread.
 
@@ -510,7 +510,7 @@ A `ThreadLocal<int[]> DEPTH` in `BootstrapDispatcher` prevents re-entrant dispat
 
 ## 8.3 Session Scope Thread Binding
 
-`ChaosSession.bind()` pushes the session id onto a per-thread stack in `ScopeContext` (a plain, non-inheritable `ThreadLocal`). The `ChaosDispatcher` reads it on every SESSION-scoped scenario evaluation; closing the returned binding pops it. Tasks submitted to an executor or scheduler from a bound thread are wrapped so their worker runs (and every scheduled tick of a periodic task) execute bound to the same session. Threads started directly with `new Thread(...)` are **not** bound automatically — call `bind()` there explicitly. A session-scoped clock skew applies only on bound threads.
+`ChaosSession.bind()` pushes the session id onto a per-thread stack in `ScopeContext` (a plain, non-inheritable `ThreadLocal`). The `ChaosDispatcher` reads it on every SESSION-scoped scenario evaluation; closing the returned binding pops it. Tasks submitted to an executor or scheduler from a bound thread are wrapped so their worker runs (and every scheduled tick of a periodic task) execute bound to the same session — once the session has a registered scenario; a task submitted before that is not wrapped. Threads started directly with `new Thread(...)` are **not** bound automatically — call `bind()` there explicitly. A session-scoped clock skew applies only on bound threads.
 
 **JMM relevance (JSR-133):** `ThreadLocal` reads/writes are always visible to the owning thread only. No cross-thread visibility concern applies to session binding state.
 

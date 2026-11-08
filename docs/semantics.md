@@ -6,7 +6,7 @@
 
 ## 1. Identity
 
-**L1 — No scenario, no change.** With no active scenario the agent weaves no JDK class (hooks are woven per hook group on the first activation that needs them, `JdkInstrumentationInstaller.HookGroup`) and alters no call. With `instrumentation=eager` the hooks are woven at start, and each intercepted call returns its unmodified result after one index lookup.
+**L1 — No scenario, no change.** With no active scenario and no open session the agent weaves no JDK class (hooks are woven per hook group on the first activation or `openSession` that needs them, `JdkInstrumentationInstaller.HookGroup`) and alters no call. A session without scenarios alters no call either: a task submitted to a pool from it reaches the pool unchanged, and is wrapped to carry the session only once the session has a registered scenario. With `instrumentation=eager` the hooks are woven at start, and each intercepted call returns its unmodified result after one index lookup.
 
 **L2 — An empty plan is no plan.** A plan whose scenarios all fail to match behaves exactly like no plan for every call they do not match. Woven hook groups stay woven until the agent is uninstalled, but a woven hook with no matching scenario returns the call unmodified. Method hooks (`METHODS`) are the exception: removing the last method scenario restores the original bytecode.
 

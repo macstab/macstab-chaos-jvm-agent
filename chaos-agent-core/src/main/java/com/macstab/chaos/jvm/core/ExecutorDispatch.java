@@ -34,6 +34,10 @@ public final class ExecutorDispatch {
   /**
    * Returns a (possibly session-scoped or suppressed) wrapper for an executor-submitted runnable.
    *
+   * <p>The task is wrapped to carry the bound session only when that session has a registered
+   * scenario; otherwise, and for a suppressed {@link java.util.concurrent.Future}, the executor
+   * keeps the task it was given.
+   *
    * @param operation the {@link OperationType} name describing the submission site
    * @param executor the executor receiving the task; may be {@code null} when unknown
    * @param task the submitted runnable; must not be {@code null}
@@ -43,7 +47,12 @@ public final class ExecutorDispatch {
       final String operation, final @Nullable Object executor, final Runnable task) {
     Objects.requireNonNull(task, "task");
     final String sessionId = engine.scopeContext.currentSessionId();
-    final Runnable scoped = sessionId == null ? task : engine.scopeContext.wrap(sessionId, task);
+    // Only a session with a registered scenario is carried: a task submitted before the session's
+    // first scenario is activated stays unwrapped.
+    final Runnable scoped =
+        sessionId != null && engine.registry.hasScenarios(sessionId)
+            ? engine.scopeContext.wrap(sessionId, task)
+            : task;
     final OperationType indexedOp = OperationType.valueOf(operation);
     if (engine.idle(indexedOp)) {
       // Before any decision: escape analysis does not remove one on this path (32 B per call).
@@ -73,9 +82,14 @@ public final class ExecutorDispatch {
       }
       // A submitted FutureTask must still complete, or Future.get() blocks forever: cancel it
       // instead of dropping it, so callers observe the suppression as a CancellationException.
-      return task instanceof java.util.concurrent.Future<?> future
-          ? () -> future.cancel(false)
-          : NO_OP_RUNNABLE;
+      // The pool keeps the task it was given (a cancelled FutureTask runs as a no-op), so a
+      // priority queue can still order it and remove(task) still finds it. Any other runnable is
+      // replaced by a no-op.
+      if (task instanceof java.util.concurrent.Future<?> future) {
+        future.cancel(false);
+        return task;
+      }
+      return NO_OP_RUNNABLE;
     }
     try {
       engine.applyPreDecision(decision);
@@ -88,6 +102,9 @@ public final class ExecutorDispatch {
   /**
    * Returns a (possibly session-scoped or suppressed) wrapper for an executor-submitted callable.
    *
+   * <p>The task is wrapped to carry the bound session only when that session has a registered
+   * scenario.
+   *
    * @param <T> the result type produced by the callable
    * @param operation the {@link OperationType} name describing the submission site
    * @param executor the executor receiving the task; may be {@code null} when unknown
@@ -98,7 +115,10 @@ public final class ExecutorDispatch {
       final String operation, final @Nullable Object executor, final Callable<T> task) {
     Objects.requireNonNull(task, "task");
     final String sessionId = engine.scopeContext.currentSessionId();
-    final Callable<T> scoped = sessionId == null ? task : engine.scopeContext.wrap(sessionId, task);
+    final Callable<T> scoped =
+        sessionId != null && engine.registry.hasScenarios(sessionId)
+            ? engine.scopeContext.wrap(sessionId, task)
+            : task;
     final OperationType indexedOp = OperationType.valueOf(operation);
     if (engine.idle(indexedOp)) {
       return scoped;
