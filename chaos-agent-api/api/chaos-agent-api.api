@@ -19,7 +19,6 @@ public final record com/macstab/chaos/jvm/api/ActivationPolicy
   public static method always()Lcom/macstab/chaos/jvm/api/ActivationPolicy;
   public static method builder()Lcom/macstab/chaos/jvm/api/ActivationPolicy$Builder;
   public static method count(J)Lcom/macstab/chaos/jvm/api/ActivationPolicy;
-  public static method fromJson(Lcom/macstab/chaos/jvm/api/ActivationPolicy$StartMode;Ljava/lang/Double;JLjava/lang/Long;Ljava/time/Duration;Lcom/macstab/chaos/jvm/api/ActivationPolicy$RateLimit;Ljava/lang/Long;ZLjava/time/Instant;Ljava/time/Instant;Ljava/util/List;)Lcom/macstab/chaos/jvm/api/ActivationPolicy;
   public static method manual()Lcom/macstab/chaos/jvm/api/ActivationPolicy;
   public static method window(Ljava/time/Instant;Ljava/time/Instant;)Lcom/macstab/chaos/jvm/api/ActivationPolicy;
   public static method withDestructiveEffects()Lcom/macstab/chaos/jvm/api/ActivationPolicy;

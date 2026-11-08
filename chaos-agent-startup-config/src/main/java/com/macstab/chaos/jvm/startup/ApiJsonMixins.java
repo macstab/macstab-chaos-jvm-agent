@@ -7,6 +7,7 @@ import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.macstab.chaos.jvm.api.ActivationPolicy;
 import com.macstab.chaos.jvm.api.ChaosEffect;
+import com.macstab.chaos.jvm.api.ChaosPlan;
 import com.macstab.chaos.jvm.api.ChaosSelector;
 import com.macstab.chaos.jvm.api.NamePattern;
 import java.time.Duration;
@@ -37,7 +38,12 @@ final class ApiJsonMixins {
         .addMixIn(ChaosSelector.class, SelectorMixin.class)
         .addMixIn(ChaosEffect.class, EffectMixin.class)
         .addMixIn(ActivationPolicy.class, ActivationPolicyMixin.class)
-        .addMixIn(NamePattern.class, NamePatternMixin.class);
+        .addMixIn(NamePattern.class, NamePatternMixin.class)
+        .addMixIn(ChaosEffect.ExceptionInjectionEffect.class, ExceptionInjectionMixin.class)
+        .addMixIn(ChaosEffect.MetaspacePressureEffect.class, MetaspacePressureMixin.class)
+        .addMixIn(ChaosEffect.GcPressureEffect.class, GcPressureMixin.class)
+        .addMixIn(ChaosEffect.DeadlockEffect.class, DeadlockMixin.class)
+        .addMixIn(ChaosPlan.Observability.class, ObservabilityMixin.class);
   }
 
   @JsonTypeInfo(use = JsonTypeInfo.Id.NAME, include = JsonTypeInfo.As.PROPERTY, property = "type")
@@ -157,5 +163,53 @@ final class ApiJsonMixins {
     NamePatternMixin(
         @JsonProperty("mode") final NamePattern.MatchMode mode,
         @JsonProperty("value") final String value) {}
+  }
+
+  // The private JSON constructors of the records, which apply the documented defaults to omitted
+  // fields (a primitive component would read an omitted field as false or 0).
+
+  @SuppressWarnings("UnusedVariable")
+  private abstract static class ExceptionInjectionMixin {
+    @JsonCreator
+    ExceptionInjectionMixin(
+        @JsonProperty("exceptionClassName") final String exceptionClassName,
+        @JsonProperty("message") final String message,
+        @JsonProperty("withStackTrace") final Boolean withStackTrace) {}
+  }
+
+  @SuppressWarnings("UnusedVariable")
+  private abstract static class MetaspacePressureMixin {
+    @JsonCreator
+    MetaspacePressureMixin(
+        @JsonProperty("generatedClassCount") final int generatedClassCount,
+        @JsonProperty("fieldsPerClass") final int fieldsPerClass,
+        @JsonProperty("retain") final Boolean retain) {}
+  }
+
+  @SuppressWarnings("UnusedVariable")
+  private abstract static class GcPressureMixin {
+    @JsonCreator
+    GcPressureMixin(
+        @JsonProperty("allocationRateBytesPerSecond") final long allocationRateBytesPerSecond,
+        @JsonProperty("objectSizeBytes") final Integer objectSizeBytes,
+        @JsonProperty("promoteToOldGen") final boolean promoteToOldGen,
+        @JsonProperty("duration") final Duration duration) {}
+  }
+
+  @SuppressWarnings("UnusedVariable")
+  private abstract static class DeadlockMixin {
+    @JsonCreator
+    DeadlockMixin(
+        @JsonProperty("participantCount") final Integer participantCount,
+        @JsonProperty("acquisitionDelay") final Duration acquisitionDelay) {}
+  }
+
+  @SuppressWarnings("UnusedVariable")
+  private abstract static class ObservabilityMixin {
+    @JsonCreator
+    ObservabilityMixin(
+        @JsonProperty("jmxEnabled") final Boolean jmxEnabled,
+        @JsonProperty("structuredLoggingEnabled") final Boolean structuredLoggingEnabled,
+        @JsonProperty("debugDumpOnStart") final Boolean debugDumpOnStart) {}
   }
 }

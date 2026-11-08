@@ -213,7 +213,7 @@ public record ActivationPolicy(
   }
 
   /**
-   * Jackson deserialization factory.
+   * The JSON creator, bound by the mix-in in {@code chaos-agent-startup-config}.
    *
    * <p>{@code probability} accepts a boxed {@link Double} so that an absent JSON field (which
    * Jackson maps to {@code null}) is distinguished from an explicit {@code 0.0}. A {@code null}
@@ -242,7 +242,9 @@ public record ActivationPolicy(
    *     {@code null}
    * @return a new {@link ActivationPolicy} built from the parsed JSON values
    */
-  public static ActivationPolicy fromJson(
+  @SuppressWarnings(
+      "UnusedMethod") // bound by the JSON mix-in in chaos-agent-startup-config (ApiJsonMixins)
+  private static ActivationPolicy fromJson(
       final @Nullable StartMode startMode,
       final @Nullable Double probability,
       final long activateAfterMatches,

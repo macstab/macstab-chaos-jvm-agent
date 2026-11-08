@@ -9,7 +9,7 @@
 
 # 0004 — The API carries no JSON annotations; the plan format is defined by mix-ins
 
-**Status:** Accepted (2.0); its "no dependencies" consequence is amended by [0008](0008-nullness-in-the-types.md)
+**Status:** Accepted (2.0); its "no dependencies" consequence is amended by [0008](0008-nullness-in-the-types.md); amended (2.0): a record whose documented default differs from Java's (`withStackTrace`, `retain`, `objectSizeBytes`, `acquisitionDelay`, `Observability`) has a private JSON constructor with boxed parameters that applies the defaults, and `ActivationPolicy.fromJson` is private; the mix-ins name them as the creators, so the API stays free of Jackson
 
 ## Context
 

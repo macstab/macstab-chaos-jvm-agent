@@ -468,6 +468,13 @@ public final class DefectProbeMain {
         "{\"metadata\":{\"name\":\"failing\"},\"scenarios\":[{\"id\":\"deadlock\","
             + "\"scope\":\"JVM\",\"selector\":{\"type\":\"stress\",\"target\":\"DEADLOCK\"},"
             + "\"effect\":{\"type\":\"deadlock\",\"participantCount\":2}}]}";
+    // A plan that does not parse fails first, without the parser's cause (it quotes the input).
+    try {
+      ChaosAgentBootstrap.initialize("configJson={\"scenarios\": [", instrumentation, Map.of());
+      System.out.println("malformedFailed=false");
+    } catch (final com.macstab.chaos.jvm.startup.ConfigLoadException malformed) {
+      System.out.println("malformedFailed=" + (malformed.getCause() == null));
+    }
     try {
       ChaosAgentBootstrap.initialize("configJson=" + failingPlan, instrumentation, Map.of());
       System.out.println("firstFailed=false");

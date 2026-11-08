@@ -4,6 +4,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import org.jspecify.annotations.Nullable;
 
 /**
  * An ordered, named collection of chaos scenarios that activate as a unit.
@@ -109,5 +110,22 @@ public record ChaosPlan(
    *     when this plan is activated; useful during initial agent configuration
    */
   public record Observability(
-      boolean jmxEnabled, boolean structuredLoggingEnabled, boolean debugDumpOnStart) {}
+      boolean jmxEnabled, boolean structuredLoggingEnabled, boolean debugDumpOnStart) {
+
+    /**
+     * The JSON creator: an omitted {@code jmxEnabled} or {@code structuredLoggingEnabled} is {@code
+     * true}, an omitted {@code debugDumpOnStart} {@code false}.
+     */
+    @SuppressWarnings(
+        "UnusedMethod") // bound by the JSON mix-in in chaos-agent-startup-config (ApiJsonMixins)
+    private Observability(
+        final @Nullable Boolean jmxEnabled,
+        final @Nullable Boolean structuredLoggingEnabled,
+        final @Nullable Boolean debugDumpOnStart) {
+      this(
+          jmxEnabled == null || jmxEnabled,
+          structuredLoggingEnabled == null || structuredLoggingEnabled,
+          debugDumpOnStart != null && debugDumpOnStart);
+    }
+  }
 }

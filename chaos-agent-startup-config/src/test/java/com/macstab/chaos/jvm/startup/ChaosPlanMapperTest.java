@@ -554,6 +554,99 @@ class ChaosPlanMapperTest {
   }
 
   @Nested
+  @DisplayName("documented defaults")
+  class DocumentedDefaults {
+
+    private ChaosEffect effect(final String json) {
+      return ChaosPlanMapper.read(
+              "{\"id\": \"defaults\", \"selector\": {\"type\": \"executor\", \"operations\":"
+                  + " [\"EXECUTOR_SUBMIT\"]}, \"effect\": "
+                  + json
+                  + "}")
+          .scenarios()
+          .get(0)
+          .effect();
+    }
+
+    @Test
+    @DisplayName("an injected exception has a stack trace unless withStackTrace says otherwise")
+    void withStackTrace() {
+      assertThat(
+              effect(
+                  "{\"type\": \"exceptionInjection\", \"exceptionClassName\":"
+                      + " \"java.lang.IllegalStateException\", \"message\": \"boom\"}"))
+          .isEqualTo(
+              new ChaosEffect.ExceptionInjectionEffect(
+                  "java.lang.IllegalStateException", "boom", true));
+    }
+
+    @Test
+    @DisplayName("metaspace pressure retains its classes by default")
+    void retain() {
+      assertThat(effect("{\"type\": \"metaspacePressure\", \"generatedClassCount\": 10}"))
+          .isEqualTo(new ChaosEffect.MetaspacePressureEffect(10, 0, true));
+    }
+
+    @Test
+    @DisplayName("GC pressure allocates 1 KiB objects by default")
+    void objectSizeBytes() {
+      assertThat(
+              effect(
+                  "{\"type\": \"gcPressure\", \"allocationRateBytesPerSecond\": 1000,"
+                      + " \"duration\": \"PT1S\"}"))
+          .isEqualTo(
+              new ChaosEffect.GcPressureEffect(
+                  1000L,
+                  ChaosEffect.GcPressureEffect.DEFAULT_OBJECT_SIZE_BYTES,
+                  false,
+                  Duration.ofSeconds(1)));
+    }
+
+    @Test
+    @DisplayName("a deadlock waits one second between its lock acquisitions by default")
+    void acquisitionDelay() {
+      assertThat(effect("{\"type\": \"deadlock\", \"participantCount\": 2}"))
+          .isEqualTo(new ChaosEffect.DeadlockEffect(2, Duration.ofSeconds(1)));
+    }
+
+    @Test
+    @DisplayName("a missing required count keeps its message")
+    void missingRequiredCount() {
+      assertThatThrownBy(() -> effect("{\"type\": \"deadlock\"}"))
+          .isInstanceOf(ConfigLoadException.class)
+          .hasMessageContaining("participantCount must be >= 2");
+    }
+
+    @Test
+    @DisplayName("a partial observability block keeps the other switches at their defaults")
+    void partialObservability() {
+      final ChaosPlan plan =
+          ChaosPlanMapper.read(
+              "{\"observability\": {\"debugDumpOnStart\": true}, \"scenarios\": [{\"id\": \"o\","
+                  + " \"selector\": {\"type\": \"executor\", \"operations\":"
+                  + " [\"EXECUTOR_SUBMIT\"]}, \"effect\": {\"type\": \"suppress\"}}]}");
+
+      assertThat(plan.observability()).isEqualTo(new ChaosPlan.Observability(true, true, true));
+    }
+
+    @Test
+    @DisplayName("a policy without start mode and probability starts automatically, always firing")
+    void policyDefaults() {
+      final ActivationPolicy policy =
+          ChaosPlanMapper.read(
+                  "{\"id\": \"p\", \"selector\": {\"type\": \"executor\", \"operations\":"
+                      + " [\"EXECUTOR_SUBMIT\"]}, \"effect\": {\"type\": \"suppress\"},"
+                      + " \"activationPolicy\": {}}")
+              .scenarios()
+              .get(0)
+              .activationPolicy();
+
+      assertThat(policy.startMode()).isEqualTo(ActivationPolicy.StartMode.AUTOMATIC);
+      assertThat(policy.probability()).isEqualTo(1.0d);
+    }
+  }
+
+  @Nested
   @DisplayName("accepted shapes")
   class AcceptedShapes {
 

@@ -432,7 +432,7 @@ ChaosPlan {
 - Duplicate `scenario.id` values within the list are rejected at construction.
 - All scenarios in a plan must be JVM-scoped when activated via `ChaosControlPlane.activate(ChaosPlan)`. SESSION-scoped plan activation is via `ChaosSession.activate(ChaosPlan)`.
 
-**`Observability` defaults:** `jmxEnabled=true, structuredLoggingEnabled=true, debugDumpOnStart=false`. These fields are parsed and validated but **not read by the runtime**: the MBean is registered and events are logged regardless of their values. To print a diagnostics dump at startup, use the `debugDumpOnStart` agent arg or `MACSTAB_CHAOS_DEBUG_DUMP_ON_START` (see §13.1).
+**`Observability` defaults:** `jmxEnabled=true, structuredLoggingEnabled=true, debugDumpOnStart=false`; each omitted field (or explicit `null`) takes its own default, so `{"debugDumpOnStart": true}` keeps the other two `true`. These fields are parsed and validated but **not read by the runtime**: the MBean is registered and events are logged regardless of their values. To print a diagnostics dump at startup, use the `debugDumpOnStart` agent arg or `MACSTAB_CHAOS_DEBUG_DUMP_ON_START` (see §13.1).
 
 ---
 
@@ -1757,7 +1757,7 @@ The rate is held over time, not rounded per batch: every 50 ms the stressor allo
 | Field              | Type     | Constraint            | Description                                     |
 |--------------------|----------|-----------------------|-------------------------------------------------|
 | `participantCount` | int      | ≥ 2, ≤ 1024           | Number of threads to deadlock                   |
-| `acquisitionDelay` | Duration | ≥ 0; default 1 second | Pause between first and second lock acquisition |
+| `acquisitionDelay` | Duration | ≥ 0; default 1 second (also for an explicit `null`) | Pause between first and second lock acquisition |
 
 **Requires:** `ActivationPolicy.allowDestructiveEffects = true`  
 **Cleanup:** threads are interrupted and locks released on `handle.close()`.

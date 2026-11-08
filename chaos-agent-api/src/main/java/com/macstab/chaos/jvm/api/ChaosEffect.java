@@ -1133,6 +1133,16 @@ public sealed interface ChaosEffect
       }
     }
 
+    /** The JSON creator: an omitted {@code withStackTrace} is {@code true}. */
+    @SuppressWarnings(
+        "UnusedMethod") // bound by the JSON mix-in in chaos-agent-startup-config (ApiJsonMixins)
+    private ExceptionInjectionEffect(
+        final String exceptionClassName,
+        final String message,
+        final @Nullable Boolean withStackTrace) {
+      this(exceptionClassName, message, withStackTrace == null || withStackTrace);
+    }
+
     private static boolean isValidBinaryClassName(final String name) {
       return BINARY_CLASS_NAME_PATTERN.matcher(name).matches();
     }
@@ -1295,6 +1305,14 @@ public sealed interface ChaosEffect
         throw new IllegalArgumentException("fieldsPerClass must be >= 0");
       }
     }
+
+    /** The JSON creator: an omitted {@code retain} is {@code true}. */
+    @SuppressWarnings(
+        "UnusedMethod") // bound by the JSON mix-in in chaos-agent-startup-config (ApiJsonMixins)
+    private MetaspacePressureEffect(
+        final int generatedClassCount, final int fieldsPerClass, final @Nullable Boolean retain) {
+      this(generatedClassCount, fieldsPerClass, retain == null || retain);
+    }
   }
 
   /**
@@ -1362,6 +1380,23 @@ public sealed interface ChaosEffect
       if (duration == null || duration.isZero() || duration.isNegative()) {
         throw new IllegalArgumentException("duration must be positive");
       }
+    }
+
+    /**
+     * The JSON creator: an omitted {@code objectSizeBytes} is {@value #DEFAULT_OBJECT_SIZE_BYTES}.
+     */
+    @SuppressWarnings(
+        "UnusedMethod") // bound by the JSON mix-in in chaos-agent-startup-config (ApiJsonMixins)
+    private GcPressureEffect(
+        final long allocationRateBytesPerSecond,
+        final @Nullable Integer objectSizeBytes,
+        final boolean promoteToOldGen,
+        final Duration duration) {
+      this(
+          allocationRateBytesPerSecond,
+          objectSizeBytes == null ? DEFAULT_OBJECT_SIZE_BYTES : objectSizeBytes,
+          promoteToOldGen,
+          duration);
     }
   }
 
@@ -1450,6 +1485,19 @@ public sealed interface ChaosEffect
       if (acquisitionDelay == null || acquisitionDelay.isNegative()) {
         throw new IllegalArgumentException("acquisitionDelay must be >= 0");
       }
+    }
+
+    /**
+     * The JSON creator: an omitted {@code acquisitionDelay} is {@link #DEFAULT_ACQUISITION_DELAY};
+     * an omitted {@code participantCount} is refused as {@code 0}.
+     */
+    @SuppressWarnings(
+        "UnusedMethod") // bound by the JSON mix-in in chaos-agent-startup-config (ApiJsonMixins)
+    private DeadlockEffect(
+        final @Nullable Integer participantCount, final @Nullable Duration acquisitionDelay) {
+      this(
+          participantCount == null ? 0 : participantCount,
+          acquisitionDelay == null ? DEFAULT_ACQUISITION_DELAY : acquisitionDelay);
     }
   }
 

@@ -41,6 +41,7 @@
 | 21 | Stressor parameters are refused instead of reduced | a `heapPressure` asks for more than the free heap; a `stringInternPressure` exceeds its caps or its length's distinct strings; a `floodInterval`, `gcInterval` or `heartbeat` is below 1 ms | lower the value or raise `-Xmx`, lengthen the strings, use 1 ms or more (§21) |
 | 22 | Unused `@Internal` `ChaosRuntime` overloads removed | code calls `beforeThreadStart(Thread)`, `beforeSocketRead(Object)`, `beforeSocketWrite(Object, int)` or `beforeFileIo(String, Object)` on `ChaosRuntime` | call the full forms (§22) |
 | 23 | `@WithChaos` is active around the test method only | a `@BeforeEach` / `@AfterEach` method relies on a method-level (testkit: any) `@WithChaos` scenario | activate it in the set-up method instead (§23) |
+| 24 | `ActivationPolicy.fromJson` is no longer public | you call it from code | use the constructor or `ActivationPolicy.builder()`, or read JSON with `ChaosPlanMapper` (§24) |
 
 ---
 
@@ -316,6 +317,12 @@ The test extensions activate `@WithChaos` scenarios right before the test method
 The testkit also binds the thread that runs the test method rather than the thread of `beforeEach`: a body on the separate thread of `@Timeout(threadMode = SEPARATE_THREAD)` and each dynamic test of a `@TestFactory` now run in the session. Under concurrent execution a dynamic test may run after its factory's teardown, outside the session. `ChaosAgentExtension` (testkit, Spring Boot 3/4), `ChaosMicronautExtension` and `ChaosQuarkusExtension` implement `BeforeTestExecutionCallback` / `AfterTestExecutionCallback` (the framework ones no longer implement `BeforeEachCallback` / `AfterEachCallback`), and the testkit one implements `InvocationInterceptor`.
 
 Before (1.x): a `@BeforeEach` method that warmed a cache through a call the test's `@WithChaos` delays was delayed too. Now it is not. Where set-up must run under a scenario, activate it there yourself with the injected `ChaosSession` or `ChaosControlPlane` (and bind the thread for a session-scoped one).
+
+## 24. `ActivationPolicy.fromJson` is no longer public
+
+`ActivationPolicy.fromJson` was the JSON creator of the policy and public in 1.x. It is private in 2.0: the JSON mix-in in `chaos-agent-startup-config` still binds it, and the effect records and `ChaosPlan.Observability` gained private JSON constructors of the same kind, so an omitted field takes its documented default (`withStackTrace` and `retain` `true`, `objectSizeBytes` 1024, `acquisitionDelay` one second, the observability switches `true`, `true`, `false`) instead of `false` or `0`.
+
+Before (1.x): `ActivationPolicy.fromJson(null, null, 0L, …)` built a policy with the JSON defaults. Now build it with `new ActivationPolicy(…)` or `ActivationPolicy.builder()`, or read the JSON with `ChaosPlanMapper`.
 
 ---
 

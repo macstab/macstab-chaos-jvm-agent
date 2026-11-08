@@ -17,6 +17,129 @@ import org.junit.jupiter.api.Test;
 @DisplayName("API contracts")
 class ApiContractsTest {
 
+  /**
+   * The private JSON creators the plan mapper binds (through mix-ins in chaos-agent-startup-config,
+   * whose tests read the JSON): a null argument, an omitted field, takes the documented default.
+   */
+  @Nested
+  @DisplayName("JSON creators")
+  class JsonCreators {
+
+    private <T> T create(final Class<T> type, final Class<?>[] types, final Object... args)
+        throws ReflectiveOperationException {
+      final java.lang.reflect.Constructor<T> creator = type.getDeclaredConstructor(types);
+      creator.setAccessible(true);
+      return creator.newInstance(args);
+    }
+
+    @Test
+    @DisplayName("effects take their documented defaults for null and keep given values")
+    void effectDefaults() throws ReflectiveOperationException {
+      final Class<?>[] injection = {String.class, String.class, Boolean.class};
+      assertThat(
+              create(
+                      ChaosEffect.ExceptionInjectionEffect.class,
+                      injection,
+                      "java.lang.IllegalStateException",
+                      "m",
+                      null)
+                  .withStackTrace())
+          .isTrue();
+      assertThat(
+              create(
+                      ChaosEffect.ExceptionInjectionEffect.class,
+                      injection,
+                      "java.lang.IllegalStateException",
+                      "m",
+                      false)
+                  .withStackTrace())
+          .isFalse();
+
+      final Class<?>[] metaspace = {int.class, int.class, Boolean.class};
+      assertThat(create(ChaosEffect.MetaspacePressureEffect.class, metaspace, 1, 0, null).retain())
+          .isTrue();
+      assertThat(create(ChaosEffect.MetaspacePressureEffect.class, metaspace, 1, 0, false).retain())
+          .isFalse();
+
+      final Class<?>[] gc = {long.class, Integer.class, boolean.class, java.time.Duration.class};
+      final java.time.Duration second = java.time.Duration.ofSeconds(1);
+      assertThat(
+              create(ChaosEffect.GcPressureEffect.class, gc, 1L, null, false, second)
+                  .objectSizeBytes())
+          .isEqualTo(ChaosEffect.GcPressureEffect.DEFAULT_OBJECT_SIZE_BYTES);
+      assertThat(
+              create(ChaosEffect.GcPressureEffect.class, gc, 1L, 7, false, second)
+                  .objectSizeBytes())
+          .isEqualTo(7);
+
+      final Class<?>[] deadlock = {Integer.class, java.time.Duration.class};
+      assertThat(create(ChaosEffect.DeadlockEffect.class, deadlock, 2, null).acquisitionDelay())
+          .isEqualTo(ChaosEffect.DeadlockEffect.DEFAULT_ACQUISITION_DELAY);
+      assertThat(
+              create(ChaosEffect.DeadlockEffect.class, deadlock, 2, java.time.Duration.ZERO)
+                  .acquisitionDelay())
+          .isZero();
+      assertThatThrownBy(() -> create(ChaosEffect.DeadlockEffect.class, deadlock, null, null))
+          .hasRootCauseMessage(
+              "participantCount must be >= 2 — a deadlock requires at least two participants");
+    }
+
+    @Test
+    @DisplayName("observability takes true, true, false for null and keeps given values")
+    void observabilityDefaults() throws ReflectiveOperationException {
+      final Class<?>[] types = {Boolean.class, Boolean.class, Boolean.class};
+      assertThat(create(ChaosPlan.Observability.class, types, null, null, null))
+          .isEqualTo(new ChaosPlan.Observability(true, true, false));
+      assertThat(create(ChaosPlan.Observability.class, types, false, false, true))
+          .isEqualTo(new ChaosPlan.Observability(false, false, true));
+    }
+
+    @Test
+    @DisplayName("the policy starts automatically and always fires for null, else as given")
+    void policyDefaults() throws ReflectiveOperationException {
+      final java.lang.reflect.Method fromJson =
+          ActivationPolicy.class.getDeclaredMethod(
+              "fromJson",
+              ActivationPolicy.StartMode.class,
+              Double.class,
+              long.class,
+              Long.class,
+              java.time.Duration.class,
+              ActivationPolicy.RateLimit.class,
+              Long.class,
+              boolean.class,
+              Instant.class,
+              Instant.class,
+              List.class);
+      fromJson.setAccessible(true);
+
+      final ActivationPolicy defaults =
+          (ActivationPolicy)
+              fromJson.invoke(
+                  null, null, null, 0L, null, null, null, null, false, null, null, null);
+      assertThat(defaults.startMode()).isEqualTo(ActivationPolicy.StartMode.AUTOMATIC);
+      assertThat(defaults.probability()).isEqualTo(1.0d);
+
+      final ActivationPolicy given =
+          (ActivationPolicy)
+              fromJson.invoke(
+                  null,
+                  ActivationPolicy.StartMode.MANUAL,
+                  0.5d,
+                  0L,
+                  null,
+                  null,
+                  null,
+                  null,
+                  false,
+                  null,
+                  null,
+                  null);
+      assertThat(given.startMode()).isEqualTo(ActivationPolicy.StartMode.MANUAL);
+      assertThat(given.probability()).isEqualTo(0.5d);
+    }
+  }
+
   @Nested
   @DisplayName("replay matches")
   class ReplayMatches {
@@ -49,22 +172,6 @@ class ApiContractsTest {
                   .build()
                   .replayMatches())
           .containsExactly(4L, 6L);
-    }
-  }
-
-  @Nested
-  @DisplayName("ActivationPolicy construction")
-  class PolicyConstruction {
-
-    @Test
-    @DisplayName("fromJson fills a missing start mode and probability with the defaults")
-    void fromJsonDefaults() {
-      final ActivationPolicy policy =
-          ActivationPolicy.fromJson(
-              null, null, 0L, null, null, null, null, false, null, null, null);
-
-      assertThat(policy.startMode()).isEqualTo(ActivationPolicy.StartMode.AUTOMATIC);
-      assertThat(policy.probability()).isEqualTo(1.0d);
     }
   }
 

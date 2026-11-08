@@ -903,6 +903,9 @@ class AgentEndToEndTest {
       final ChildJvmProbe.ProbeResult result =
           probe.runWithoutAgent(DefectProbeMain.class, "initialize-retry");
 
+      assertThat(result.value("malformedFailed"))
+          .as("a malformed plan fails with a ConfigLoadException without the parser's cause")
+          .isEqualTo("true");
       assertThat(result.value("firstFailed")).isEqualTo("true");
       // Two sets of transformers would evaluate the sleep twice.
       assertThat(result.longValue("applied.sleep-delay"))
