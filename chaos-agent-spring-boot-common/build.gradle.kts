@@ -54,3 +54,26 @@ tasks.withType<JacocoReportBase>().configureEach {
     dependsOn(starterTests.map { "$it:test" })
     executionData(starterTests.map { project(it).layout.buildDirectory.file("jacoco/test.exec") })
 }
+
+// The module is compiled against Spring Boot 3 and runs on Boot 3 or 4, whichever the consumer's
+// starter brings, so its tests run on both: `test` on Boot 3, `testBoot4` on the same test classes
+// with Boot 4 on the class path (its platform raises every Spring artifact to Boot 4's version).
+val testBoot4Runtime: Configuration by configurations.creating {
+    isCanBeConsumed = false
+    extendsFrom(configurations.testImplementation.get(), configurations.testRuntimeOnly.get())
+}
+dependencies {
+    testBoot4Runtime(platform(libs.spring.boot4.dependencies))
+}
+val testBoot4 = tasks.register<Test>("testBoot4") {
+    description = "Runs the tests on Spring Boot 4."
+    group = "verification"
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    classpath = sourceSets.test.get().output + sourceSets.main.get().output + testBoot4Runtime
+    shouldRunAfter(tasks.test)
+}
+tasks.check { dependsOn(testBoot4) }
+tasks.withType<JacocoReportBase>().configureEach {
+    dependsOn(testBoot4)
+    executionData(testBoot4.get())
+}
