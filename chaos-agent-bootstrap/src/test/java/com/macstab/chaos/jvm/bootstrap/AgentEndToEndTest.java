@@ -398,6 +398,67 @@ class AgentEndToEndTest {
       return result;
     }
 
+    @Test
+    @DisplayName("an IP literal is not a DNS lookup; names the JDK looks up are evaluated")
+    void dnsLiteralIsNotALookup() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.run(
+              plan(
+                  scenario(
+                      "dns-down",
+                      ChaosSelector.dns(Set.of(OperationType.DNS_RESOLVE)),
+                      ChaosEffect.reject("dns down"))),
+              DefectProbeMain.class,
+              "dns-literal",
+              null);
+      for (final String literal : List.of("127.0.0.1", "::1", "[::1]")) {
+        assertThat(result.value("resolve." + literal)).as(literal).isEqualTo("ok");
+      }
+      assertThat(result.value("connect")).isEqualTo("true");
+      for (final String name : List.of("localhost", "1.2.3.4.5", "999.1.1.1")) {
+        assertThat(result.value("resolve." + name))
+            .as(name)
+            .isEqualTo("java.net.UnknownHostException");
+      }
+      // localhost, 1.2.3.4.5 and 999.1.1.1 (all looked up by the JDK), and 0x7f.0.0.1, which the
+      // JDK refuses without a lookup but which is still evaluated (documented)
+      assertThat(result.longValue("matched.dns-down")).isEqualTo(4L);
+    }
+
+    @Test
+    @DisplayName("the answer of an IP literal is not a DNS_ANSWER")
+    void dnsLiteralAnswerIsNotEvaluated() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.run(
+              plan(
+                  scenario(
+                      "answers",
+                      ChaosSelector.dns(Set.of(OperationType.DNS_ANSWER)),
+                      ChaosEffect.dnsOverride("10.9.9.9"))),
+              DefectProbeMain.class,
+              "dns-literal-answers",
+              null);
+      assertThat(result.value("answer.127.0.0.1")).isEqualTo("127.0.0.1");
+      assertThat(result.longValue("matched.answers")).isZero();
+    }
+
+    @Test
+    @DisplayName("closing a closed socket again is not a SOCKET_CLOSE")
+    void socketDoubleClose() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.run(
+              plan(
+                  scenario(
+                      "close",
+                      ChaosSelector.network(Set.of(OperationType.SOCKET_CLOSE)),
+                      ChaosEffect.delay(Duration.ofMillis(1)))),
+              DefectProbeMain.class,
+              "socket-double-close",
+              null);
+      assertThat(result.value("closed")).isEqualTo("true");
+      assertThat(result.longValue("matched.close")).isEqualTo(1L);
+    }
+
     private void assertSingleMatch(final String id, final ChaosSelector selector, final String mode)
         throws Exception {
       final ChildJvmProbe.ProbeResult result =
@@ -1493,6 +1554,27 @@ class AgentEndToEndTest {
       assertThat(result.value("set.type"))
           .isEqualTo("redis.clients.jedis.exceptions.JedisConnectionException");
       assertThat(result.value("ping")).isEqualTo("PONG");
+    }
+
+    @Test
+    @DisplayName("Jedis: a pool's connection set-up and validation PING are not REDIS_COMMAND")
+    void jedisPooledSetUpIsNotACommand() throws Exception {
+      for (final String mode : List.of("jedis-pooled-set", "jedis-pool-set")) {
+        final ChildJvmProbe.ProbeResult result =
+            probe.run(
+                plan(
+                    scenario(
+                        "redis",
+                        ChaosSelector.redis(NamePattern.any()),
+                        ChaosEffect.delay(Duration.ofMillis(1)))),
+                ClientLibraryProbeMain.class,
+                mode,
+                clientClasspath);
+        assertThat(result.value("set")).isEqualTo("OK");
+        assertThat(result.longValue("matched.redis"))
+            .as("commands of one set (%s)", mode)
+            .isEqualTo(1L);
+      }
     }
 
     @Test

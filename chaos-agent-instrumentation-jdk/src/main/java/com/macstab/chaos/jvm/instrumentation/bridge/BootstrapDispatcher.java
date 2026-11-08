@@ -187,8 +187,16 @@ public final class BootstrapDispatcher {
    */
   public static final int SCOPE_SERIALIZATION = 25;
 
+  /**
+   * Scope of a Jedis connection's own set-up and of a pool's validation ({@code
+   * Connection.initializeFromClientConfig}, {@code Connection.ping}, {@code validateObject} /
+   * {@code activateObject} of the connection factories): the commands sent inside it are the
+   * client's, not the application's, and are not {@code REDIS_COMMAND}s.
+   */
+  public static final int SCOPE_REDIS_SETUP = 26;
+
   /** Size of the per-thread counter array: index 0 is the reentrancy depth, then the scopes. */
-  static final int SCOPE_COUNT = 26;
+  static final int SCOPE_COUNT = 27;
 
   /**
    * Enters a call-depth scope on the current thread.
@@ -204,6 +212,17 @@ public final class BootstrapDispatcher {
    */
   public static boolean enterScope(final int scope) {
     return DEPTH.get()[scope]++ == 0;
+  }
+
+  /**
+   * Whether the current thread is inside a call-depth scope, without entering it: for advice that
+   * only asks where it runs.
+   *
+   * @param scope one of the {@code SCOPE_*} constants
+   * @return {@code true} when a call of the scope is on the current thread's stack
+   */
+  public static boolean inScope(final int scope) {
+    return DEPTH.get()[scope] > 0;
   }
 
   /**

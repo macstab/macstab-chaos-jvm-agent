@@ -496,6 +496,20 @@ class BootstrapDispatcherTest {
     }
 
     @Test
+    @DisplayName("inScope reports an entered scope without entering it")
+    void inScopePeeks() {
+      assertThat(BootstrapDispatcher.inScope(BootstrapDispatcher.SCOPE_REDIS_SETUP)).isFalse();
+      BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_REDIS_SETUP);
+      try {
+        assertThat(BootstrapDispatcher.inScope(BootstrapDispatcher.SCOPE_REDIS_SETUP)).isTrue();
+        assertThat(BootstrapDispatcher.inScope(BootstrapDispatcher.SCOPE_REDIS_SETUP)).isTrue();
+      } finally {
+        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_REDIS_SETUP);
+      }
+      assertThat(BootstrapDispatcher.inScope(BootstrapDispatcher.SCOPE_REDIS_SETUP)).isFalse();
+    }
+
+    @Test
     @DisplayName("ending an internal call that was not begun keeps dispatching to the bridge")
     void unbalancedEndInternalCall() throws Throwable {
       final AtomicInteger calls = new AtomicInteger();

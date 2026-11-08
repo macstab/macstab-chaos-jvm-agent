@@ -265,7 +265,8 @@ public final class AgentProcessProbeMain {
   private static void dnsDelay() {
     final long start = System.nanoTime();
     try {
-      InetAddress.getByName("127.0.0.1");
+      // A name, not an IP literal: a literal is not looked up and never evaluated.
+      InetAddress.getByName("localhost");
     } catch (final Exception ignored) {
     }
     System.out.println("elapsedMillis=" + TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start));

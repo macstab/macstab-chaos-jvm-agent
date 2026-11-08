@@ -488,6 +488,11 @@ public final class NetworkDispatch {
     if (engine.idle(OperationType.SOCKET_CLOSE)) {
       return;
     }
+    // Closing a closed socket closes nothing. Channels are guarded by isOpen() in
+    // AbstractInterruptibleChannel.close and file streams by their closed field.
+    if (socket instanceof java.net.Socket closing && closing.isClosed()) {
+      return;
+    }
     final RuntimeDecision decision =
         engine.evaluate(
             socketContext(

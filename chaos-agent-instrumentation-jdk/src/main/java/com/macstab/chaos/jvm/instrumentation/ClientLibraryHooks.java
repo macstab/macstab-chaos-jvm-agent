@@ -51,17 +51,37 @@ final class ClientLibraryHooks {
         .type(ElementMatchers.named("redis.clients.jedis.Connection"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder
+                    .visit(
+                        advise(
+                            ClientCallAdvice.JedisSendCommand.class,
+                            ElementMatchers.named("sendCommand")
+                                .and(
+                                    ElementMatchers.takesArguments(1)
+                                        .and(
+                                            ElementMatchers.takesArgument(
+                                                0,
+                                                ElementMatchers.named(
+                                                    "redis.clients.jedis.CommandArguments"))))))
+                    // The connection's own set-up and liveness check, not application commands.
+                    .visit(
+                        advise(
+                            ClientCallAdvice.JedisSetup.class,
+                            ElementMatchers.named("initializeFromClientConfig")
+                                .or(
+                                    ElementMatchers.named("ping")
+                                        .and(ElementMatchers.takesArguments(0))))))
+        // Pool validation and activation of a borrowed connection (PING, SELECT).
+        .type(
+            ElementMatchers.namedOneOf(
+                "redis.clients.jedis.ConnectionFactory", "redis.clients.jedis.JedisFactory"))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder.visit(
                     advise(
-                        ClientCallAdvice.JedisSendCommand.class,
-                        ElementMatchers.named("sendCommand")
-                            .and(
-                                ElementMatchers.takesArguments(1)
-                                    .and(
-                                        ElementMatchers.takesArgument(
-                                            0,
-                                            ElementMatchers.named(
-                                                "redis.clients.jedis.CommandArguments")))))))
+                        ClientCallAdvice.JedisSetup.class,
+                        ElementMatchers.namedOneOf("validateObject", "activateObject")
+                            .and(ElementMatchers.takesArguments(1)))))
         .type(ElementMatchers.named("io.lettuce.core.RedisChannelHandler"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->

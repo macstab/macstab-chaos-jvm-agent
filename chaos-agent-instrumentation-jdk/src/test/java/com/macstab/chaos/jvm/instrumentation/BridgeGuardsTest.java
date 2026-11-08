@@ -55,6 +55,7 @@ class BridgeGuardsTest {
           "endInternalCall",
           "enterScope",
           "exitScope",
+          "inScope",
           "tornWriteFailure",
           "corruptBytes",
           "corruptByte",

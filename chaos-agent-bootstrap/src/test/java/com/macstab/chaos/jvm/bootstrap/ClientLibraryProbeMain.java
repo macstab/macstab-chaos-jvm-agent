@@ -28,6 +28,8 @@ public final class ClientLibraryProbeMain {
       case "kafka-poll" -> kafkaPoll();
       case "grpc-call" -> grpcCall();
       case "jedis-set" -> jedisSet();
+      case "jedis-pooled-set" -> jedisPooledSet();
+      case "jedis-pool-set" -> jedisPoolSet();
       case "lettuce-set" -> lettuceSet();
       case "r2dbc-execute" -> r2dbcExecute();
       case "aws-list-buckets" -> awsListBuckets();
@@ -143,6 +145,38 @@ public final class ClientLibraryProbeMain {
         report("set", failure);
       }
       System.out.println("ping=" + jedis.ping());
+    }
+  }
+
+  /**
+   * One {@code set} through a pooled {@code RedisClient} whose pool validates on borrow: the pool's
+   * connection set-up and its {@code PING} are the client's own, not the application's.
+   */
+  private static void jedisPooledSet() throws Exception {
+    final org.apache.commons.pool2.impl.GenericObjectPoolConfig<redis.clients.jedis.Connection>
+        pool = new org.apache.commons.pool2.impl.GenericObjectPoolConfig<>();
+    pool.setTestOnBorrow(true);
+    try (FakeRedis fake = new FakeRedis();
+        redis.clients.jedis.RedisClient client =
+            redis.clients.jedis.RedisClient.builder()
+                .hostAndPort("127.0.0.1", fake.port())
+                .poolConfig(pool)
+                .build()) {
+      System.out.println("set=" + client.set("k", "v"));
+    }
+  }
+
+  /** One {@code set} through a {@code JedisPool} (deprecated in Jedis 8, still common). */
+  @SuppressWarnings("deprecation")
+  private static void jedisPoolSet() throws Exception {
+    final org.apache.commons.pool2.impl.GenericObjectPoolConfig<redis.clients.jedis.Jedis> config =
+        new org.apache.commons.pool2.impl.GenericObjectPoolConfig<>();
+    config.setTestOnBorrow(true);
+    try (FakeRedis fake = new FakeRedis();
+        redis.clients.jedis.JedisPool pool =
+            new redis.clients.jedis.JedisPool(config, "127.0.0.1", fake.port());
+        redis.clients.jedis.Jedis jedis = pool.getResource()) {
+      System.out.println("set=" + jedis.set("k", "v"));
     }
   }
 

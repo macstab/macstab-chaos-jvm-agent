@@ -63,12 +63,18 @@ final class ClientCallAdvice {
     }
   }
 
-  /** Jedis {@code Connection.sendCommand(CommandArguments)}: every command funnels through it. */
+  /**
+   * Jedis {@code Connection.sendCommand(CommandArguments)}: every command funnels through it. The
+   * commands of the client's own set-up and pool validation ({@link JedisSetup}) are skipped.
+   */
   static final class JedisSendCommand {
     @Advice.OnMethodEnter
     static void enter(
         @Advice.This final Object connection, @Advice.Argument(0) final Object arguments)
         throws Throwable {
+      if (BootstrapDispatcher.inScope(BootstrapDispatcher.SCOPE_REDIS_SETUP)) {
+        return;
+      }
       final String command;
       BootstrapDispatcher.beginInternalCall();
       try {
@@ -78,6 +84,25 @@ final class ClientCallAdvice {
       }
       BootstrapDispatcher.beforeClientCall(
           OperationTags.REDIS_COMMAND, connection, command, null, null);
+    }
+  }
+
+  /**
+   * Jedis set-up and pool validation: {@code Connection.initializeFromClientConfig} (both
+   * overloads) and {@code ping()}, and {@code validateObject} / {@code activateObject} of {@code
+   * ConnectionFactory} and {@code JedisFactory}. Scope-only ({@link
+   * BootstrapDispatcher#SCOPE_REDIS_SETUP}): the {@code HELLO}, {@code AUTH}, {@code CLIENT
+   * SETINFO}, {@code SELECT} and {@code PING} they send are not the application's commands.
+   */
+  static final class JedisSetup {
+    @Advice.OnMethodEnter
+    static void enter() {
+      BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_REDIS_SETUP);
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit() {
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_REDIS_SETUP);
     }
   }
 

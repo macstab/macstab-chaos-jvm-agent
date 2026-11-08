@@ -147,6 +147,9 @@ public final class DefectProbeMain {
       case "fis-read-n-bytes" -> fisReadNBytes();
       case "raf-read-line" -> rafReadLine();
       case "delayed-work-queue-put" -> delayedWorkQueuePut();
+      case "dns-literal" -> dnsLiteral();
+      case "dns-literal-answers" -> dnsLiteralAnswers();
+      case "socket-double-close" -> socketDoubleClose();
       default -> throw new IllegalArgumentException("unknown probe mode: " + args[0]);
     }
     printCounts();
@@ -339,6 +342,49 @@ public final class DefectProbeMain {
       System.out.println("queueSize=" + queue.size());
     } finally {
       executor.shutdownNow();
+    }
+  }
+
+  /**
+   * Resolves IP literals, which the JDK never looks up, and names it does look up; connects to a
+   * loopback server by its literal. Prints each outcome: {@code ok} or the exception class.
+   */
+  private static void dnsLiteral() throws Exception {
+    for (final String name :
+        new String[] {
+          "127.0.0.1", "::1", "[::1]", "localhost", "1.2.3.4.5", "999.1.1.1", "0x7f.0.0.1"
+        }) {
+      try {
+        InetAddress.getByName(name);
+        System.out.println("resolve." + name + "=ok");
+      } catch (final java.net.UnknownHostException failed) {
+        System.out.println("resolve." + name + "=" + failed.getClass().getName());
+      }
+    }
+    try (java.net.ServerSocket server =
+            new java.net.ServerSocket(0, 1, InetAddress.getLoopbackAddress());
+        java.net.Socket client = new java.net.Socket("127.0.0.1", server.getLocalPort())) {
+      System.out.println("connect=" + client.isConnected());
+    }
+  }
+
+  /** Resolves only IP literals: no answer is looked up, so none is reshaped. */
+  private static void dnsLiteralAnswers() throws Exception {
+    for (final String name : new String[] {"127.0.0.1", "::1"}) {
+      System.out.println(
+          "answer." + name + "=" + InetAddress.getAllByName(name)[0].getHostAddress());
+    }
+  }
+
+  /** Closes a connected socket twice: the second close closes nothing. */
+  private static void socketDoubleClose() throws Exception {
+    try (java.net.ServerSocket server =
+        new java.net.ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
+      final java.net.Socket client =
+          new java.net.Socket(InetAddress.getLoopbackAddress(), server.getLocalPort());
+      client.close();
+      client.close();
+      System.out.println("closed=" + client.isClosed());
     }
   }
 
@@ -1535,6 +1581,8 @@ public final class DefectProbeMain {
       "org.apache.tomcat.util.threads.ThreadPoolExecutor",
       "reactor.netty.http.client.HttpClientConnect",
       "redis.clients.jedis.Connection",
+      "redis.clients.jedis.ConnectionFactory",
+      "redis.clients.jedis.JedisFactory",
       "software.amazon.awssdk.core.internal.handler.BaseAsyncClientHandler",
       "software.amazon.awssdk.core.internal.handler.BaseSyncClientHandler",
     };
