@@ -3,6 +3,7 @@ package com.macstab.chaos.jvm.core;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
@@ -49,7 +50,23 @@ final class AgentThreads {
    * @return the unstarted thread
    */
   static Thread platform(final String name, final boolean daemon, final Runnable body) {
-    final Thread thread = new Thread(owned(body), name);
+    return platform(Thread::new, name, daemon, body);
+  }
+
+  /**
+   * As {@link #platform(String, boolean, Runnable)}, with the thread made by {@code threads} (a
+   * stressor thread factory, test seam U-72 c3).
+   *
+   * @param threads makes the thread for the owned body
+   * @param name the thread name
+   * @param daemon whether the thread is a daemon
+   * @param body the thread's work
+   * @return the unstarted thread
+   */
+  static Thread platform(
+      final ThreadFactory threads, final String name, final boolean daemon, final Runnable body) {
+    final Thread thread = threads.newThread(owned(body));
+    thread.setName(name);
     thread.setDaemon(daemon);
     return thread;
   }

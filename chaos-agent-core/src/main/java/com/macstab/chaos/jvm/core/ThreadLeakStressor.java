@@ -29,6 +29,18 @@ final class ThreadLeakStressor implements ManagedStressor {
   private final AtomicBoolean stopped = new AtomicBoolean(false);
 
   ThreadLeakStressor(final ChaosEffect.ThreadLeakEffect effect) {
+    this(effect, Thread::new);
+  }
+
+  /**
+   * Creates the stressor with its threads made by {@code threadFactory} (test seam, U-72 c3).
+   *
+   * @param effect the effect parameters
+   * @param threadFactory makes each leaked thread
+   */
+  ThreadLeakStressor(
+      final ChaosEffect.ThreadLeakEffect effect,
+      final java.util.concurrent.ThreadFactory threadFactory) {
     final List<Thread> threads = new ArrayList<>(effect.threadCount());
     // Compute deadline without overflow: when lifespan is null, use Long.MAX_VALUE directly
     // rather than currentTimeMillis + Long.MAX_VALUE which would overflow to a negative number.
@@ -41,6 +53,7 @@ final class ThreadLeakStressor implements ManagedStressor {
       final String name = effect.namePrefix() + i;
       threads.add(
           AgentThreads.platform(
+              threadFactory,
               name,
               effect.daemon(),
               () -> {

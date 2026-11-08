@@ -49,6 +49,7 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
   private final ScopeContext scopeContext;
   private final ObservabilityBus observabilityBus;
   private final ScenarioRegistry registry;
+  private final StressorFactory stressorFactory;
   private final AtomicBoolean closed = new AtomicBoolean(false);
 
   /**
@@ -90,7 +91,20 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
   private final Map<String, DefaultChaosSession> openSessions = new ConcurrentHashMap<>();
 
   ChaosControlPlaneImpl(final Clock clock, final ChaosMetricsSink metricsSink) {
+    this(clock, metricsSink, null);
+  }
+
+  /**
+   * Creates a control plane whose stressors come from {@code stressorFactory}, or from the standard
+   * factory when it is {@code null} (test seam, U-72 c2).
+   */
+  ChaosControlPlaneImpl(
+      final Clock clock,
+      final ChaosMetricsSink metricsSink,
+      final @Nullable StressorFactory stressorFactory) {
     this.clock = clock;
+    this.stressorFactory =
+        stressorFactory != null ? stressorFactory : new StressorFactory(() -> instrumentation);
     this.featureSet = new FeatureSet();
     this.scopeContext = new ScopeContext();
     this.observabilityBus = new ObservabilityBus(metricsSink);
@@ -494,9 +508,10 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
       }
       controller =
           new ScenarioController(
-              scenario, scopeKey, sessionId, clock, observabilityBus, () -> instrumentation);
+              scenario, scopeKey, sessionId, clock, observabilityBus, stressorFactory);
       final DefaultChaosActivationHandle handle =
-          new DefaultChaosActivationHandle(controller, registry);
+          new DefaultChaosActivationHandle(
+              controller, registry, failure -> recordStartFailure(scenario.id(), failure));
       // Register before starting. A duplicate id is rejected here, before any side effect;
       // starting first would spawn the new controller's stressor and publish STARTED, then roll
       // it back with a STOPPED event carrying the id of the scenario that is still running. A
@@ -520,7 +535,8 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
           "scenario registered",
           Map.of("scope", scopeKey));
       if (scenario.activationPolicy().startMode() == ActivationPolicy.StartMode.AUTOMATIC) {
-        handle.start();
+        // The controller, not the handle: a failure here is recorded once, by the catches below.
+        controller.start();
       }
       // A close() after the registration above has stopped the controller already: refuse,
       // rather than hand out a handle of a scenario that never runs.
@@ -559,7 +575,40 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
             runtimeException.getMessage());
       }
       throw runtimeException;
+    } catch (final Error error) {
+      // A linkage error or the like from a stressor or a listener: the same rollback, so no
+      // REGISTERED controller is left behind, then the Error itself.
+      try {
+        unregisterAndDestroyQuietly(controller, registeredInRegistry);
+      } catch (final Error rollbackFailure) {
+        error.addSuppressed(rollbackFailure);
+      }
+      if (!closed.get()) {
+        recordFailure(
+            scenario.id(), ChaosDiagnostics.FailureCategory.INTERNAL_ERROR, error.toString());
+      }
+      throw error;
     }
+  }
+
+  /**
+   * Records a failed {@link ChaosActivationHandle#start()} of a {@code MANUAL} scenario, with the
+   * category an activation would record for the same failure.
+   */
+  private void recordStartFailure(final String scenarioId, final Throwable failure) {
+    if (closed.get()) {
+      return;
+    }
+    final ChaosDiagnostics.FailureCategory category;
+    if (failure instanceof ChaosUnsupportedFeatureException) {
+      category = ChaosDiagnostics.FailureCategory.UNSUPPORTED_RUNTIME;
+    } else if (failure instanceof Error) {
+      category = ChaosDiagnostics.FailureCategory.INTERNAL_ERROR;
+    } else {
+      category = ChaosDiagnostics.FailureCategory.INVALID_CONFIGURATION;
+    }
+    recordFailure(
+        scenarioId, category, failure instanceof Error ? failure.toString() : failure.getMessage());
   }
 
   private void weaveMethods(final Set<ChaosSelector.MethodSelector> selectors) {

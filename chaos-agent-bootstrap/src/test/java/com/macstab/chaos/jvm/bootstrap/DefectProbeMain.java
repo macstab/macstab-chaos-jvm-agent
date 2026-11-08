@@ -136,6 +136,7 @@ public final class DefectProbeMain {
       case "thread-local-leak-fork-join-gate" -> threadLocalLeakForkJoinGate();
       case "thread-local-leak-set-delay" -> threadLocalLeakSetDelay();
       case "session-thread-local-suppress" -> sessionThreadLocalSuppress();
+      case "direct-buffer-above-limit" -> directBufferAboveLimit();
       default -> throw new IllegalArgumentException("unknown probe mode: " + args[0]);
     }
     printCounts();
@@ -2467,6 +2468,33 @@ public final class DefectProbeMain {
       }
       System.out.println("sessionVisible=" + (session.id().equals(seen) ? "true" : seen));
     }
+  }
+
+  /**
+   * Run with {@code -XX:MaxDirectMemorySize=8m}: activates 64 MiB of direct-buffer pressure and
+   * prints what the activation threw ({@code directBuffer=}) and the recorded failure category.
+   */
+  private static void directBufferAboveLimit() {
+    final ChaosControlPlane plane = ChaosPlatform.current();
+    try (ChaosActivationHandle handle =
+        plane.activate(
+            ChaosScenario.builder("direct-64m")
+                .selector(ChaosSelector.stress(ChaosSelector.StressTarget.DIRECT_BUFFER))
+                .effect(
+                    new ChaosEffect.DirectBufferPressureEffect(
+                        64L * 1024 * 1024, 1024 * 1024, false))
+                .activationPolicy(ActivationPolicy.always())
+                .build())) {
+      System.out.println("directBuffer=" + handle.state());
+    } catch (final RuntimeException | Error failed) {
+      System.out.println("directBuffer=" + failed.getClass().getSimpleName());
+    }
+    System.out.println(
+        "category="
+            + plane.diagnostics().snapshot().failures().stream()
+                .map(failure -> failure.category().name())
+                .findFirst()
+                .orElse("none"));
   }
 
   /** A {@link Delayed} that is due immediately. */

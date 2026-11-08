@@ -33,6 +33,7 @@
 | 14 | Enabling switches are honoured only from local sources on Quarkus and Micronaut | a config server sets `macstab.chaos.enabled` or a management switch | set `macstab.chaos.allow-remote-enable=true` locally (§14) |
 | 15 | `reject` / `suppress` on `QUEUE_OFFER` skip queues without a capacity limit | you saturate a pool on an unbounded queue through `QUEUE_OFFER` | reject `EXECUTOR_SUBMIT`, or give the queue a capacity (§15) |
 | 16 | A pool task carries a session only once the session has a scenario | another service relies on `X-Chaos-Session` from pool tasks of a session without local scenarios | activate a scenario in the session first, or set the header from `session.id()` (§16) |
+| 17 | Direct-buffer pressure above the direct memory limit is refused | a `directBufferPressure` asks for more than `-XX:MaxDirectMemorySize` (by default the maximum heap) | lower `totalBytes` or raise the limit (§17) |
 
 ---
 
@@ -202,6 +203,12 @@ Before (1.x): a reject on `QUEUE_OFFER` made `Executors.newFixedThreadPool(n)` t
 A task submitted to a thread pool from a thread bound to a session is wrapped to carry the session only while the session has a registered scenario. In 1.x every task submitted inside an open session was wrapped, which broke priority pools (the wrapper is not `Comparable`) and `remove(task)`.
 
 Before (1.x): a test opened a session without activating anything in it, and the HTTP calls its pool tasks made carried `X-Chaos-Session`, so another service could scope its own scenarios to the session. Now those tasks run outside any session and their calls carry no header. Activate a scenario in the session before submitting, or add the header yourself from `session.id()`.
+
+## 17. Direct-buffer pressure above the direct memory limit is refused
+
+A `DirectBufferPressureEffect` whose `totalBytes` exceeds the JVM's direct memory limit (`-XX:MaxDirectMemorySize`; when it is not set, the maximum heap) is refused at activation with `ChaosUnsupportedFeatureException`, recorded as `UNSUPPORTED_RUNTIME`. A stressor that runs out of memory or cannot start a thread while it starts fails the same way, after freeing what it took.
+
+Before (1.x): the activation allocated until the JVM threw `OutOfMemoryError: Cannot reserve … direct buffer memory`, which escaped unrecorded and left a registered scenario and the buffers already allocated behind. Lower `totalBytes`, or raise `-XX:MaxDirectMemorySize` on the JVM under test; catch `ChaosUnsupportedFeatureException` where you caught `OutOfMemoryError`.
 
 ---
 

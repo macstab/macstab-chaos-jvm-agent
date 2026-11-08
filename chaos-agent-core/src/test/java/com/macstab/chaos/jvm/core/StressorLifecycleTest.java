@@ -82,6 +82,42 @@ class StressorLifecycleTest {
       stressor.close();
       assertThat(stressor.retainedBufferCount()).isZero();
     }
+
+    @Test
+    @DisplayName("running out of direct memory frees what it allocated and rethrows")
+    void outOfDirectMemoryFreesWhatItAllocated() throws Exception {
+      final Process process =
+          new ProcessBuilder(
+                  java.nio.file.Path.of(System.getProperty("java.home"), "bin", "java").toString(),
+                  "-XX:MaxDirectMemorySize=8m",
+                  // The packages the agent jar's manifest opens for the eager free.
+                  "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED",
+                  "--add-opens=java.base/jdk.internal.ref=ALL-UNNAMED",
+                  "-cp",
+                  System.getProperty("java.class.path"),
+                  DirectBufferOomProbeMain.class.getName())
+              .redirectErrorStream(true)
+              .start();
+      final String output;
+      try {
+        output =
+            new String(
+                process.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+        assertThat(process.waitFor(60, TimeUnit.SECONDS)).isTrue();
+      } finally {
+        process.destroyForcibly();
+      }
+
+      assertThat(output).contains("thrown=OutOfMemoryError");
+      final long used =
+          output
+              .lines()
+              .filter(line -> line.startsWith("directUsedAfter="))
+              .mapToLong(line -> Long.parseLong(line.substring("directUsedAfter=".length())))
+              .findFirst()
+              .orElseThrow(() -> new AssertionError("no directUsedAfter= line in:\n" + output));
+      assertThat(used).as(output).isLessThan(1024L * 1024L);
+    }
   }
 
   @Nested

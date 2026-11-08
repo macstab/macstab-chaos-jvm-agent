@@ -5,6 +5,7 @@ import com.macstab.chaos.jvm.api.ChaosActivationException;
 import com.macstab.chaos.jvm.api.ChaosEffect;
 import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.ChaosSelector;
+import com.macstab.chaos.jvm.api.ChaosUnsupportedFeatureException;
 import com.macstab.chaos.jvm.api.ChaosValidationException;
 import com.macstab.chaos.jvm.api.NamePattern;
 import com.macstab.chaos.jvm.api.OperationType;
@@ -52,6 +53,8 @@ final class CompatibilityValidator {
    *       ChaosScenario.ScenarioScope#JVM} scope.
    *   <li><b>Stress-effect binding</b> — each {@link ChaosSelector.StressTarget} value must be
    *       paired with its corresponding {@link ChaosEffect} subtype.
+   *   <li><b>Direct memory limit</b> — direct-buffer pressure must fit under {@code
+   *       -XX:MaxDirectMemorySize} ({@link ChaosUnsupportedFeatureException}).
    *   <li><b>Interceptor constraints</b> — effect/selector combinations must be semantically
    *       compatible (e.g. {@code ExceptionInjectionEffect} requires {@code MethodSelector} with
    *       {@code METHOD_ENTER} only; {@code GateEffect} is not valid with {@code StressSelector}).
@@ -83,11 +86,32 @@ final class CompatibilityValidator {
       }
       validateStressBinding(stressSelector.target(), scenario.effect());
       validateStressActivationPolicy(scenario.activationPolicy());
+      validateDirectMemoryLimit(scenario.effect(), featureSet);
     }
     if (scenario.effect() instanceof ChaosEffect.ClockSkewEffect) {
       validateClockSkewActivationPolicy(scenario.activationPolicy());
     }
     validateInterceptorConstraints(scenario);
+  }
+
+  /**
+   * Refuses direct-buffer pressure above the JVM's direct memory limit: the allocation could only
+   * fail. An unknown limit allows it. Memory already reserved by the application makes a size under
+   * the limit no guarantee; the stressor frees what it took when it runs out.
+   */
+  private static void validateDirectMemoryLimit(
+      final ChaosEffect effect, final FeatureSet featureSet) {
+    if (effect instanceof ChaosEffect.DirectBufferPressureEffect direct) {
+      final long limit = featureSet.directMemoryLimit();
+      if (limit != FeatureSet.UNKNOWN_LIMIT && direct.totalBytes() > limit) {
+        throw new ChaosUnsupportedFeatureException(
+            "direct-buffer pressure of "
+                + direct.totalBytes()
+                + " bytes exceeds the JVM's direct memory limit of "
+                + limit
+                + " bytes (-XX:MaxDirectMemorySize)");
+      }
+    }
   }
 
   /**

@@ -639,10 +639,23 @@ public interface ChaosDiagnostics {
         INVALID_CONFIGURATION,
         UNSUPPORTED_RUNTIME,
         INSTRUMENTATION_FAILURE,   // the hook group the selector needs could not be woven
-        ACTIVATION_CONFLICT
+        ACTIVATION_CONFLICT,
+        INTERNAL_ERROR
     }
 }
 ```
+
+**Activation failure categories**: every failed activation is recorded once, as an `ActivationFailure` and a `FAILED` event, and the original exception is rethrown.
+
+| Category | Recorded when | Thrown |
+|----------|---------------|--------|
+| `INVALID_CONFIGURATION` | the scenario breaks a rule of the validator, or a stressor fails to start for another reason | `ChaosValidationException`, `ChaosActivationException`, or the stressor's `RuntimeException` |
+| `UNSUPPORTED_RUNTIME` | the runtime cannot run the scenario: a missing JVM feature, direct-buffer pressure above `-XX:MaxDirectMemorySize` (refused before anything is allocated; the default limit `0` is the maximum heap), or a stressor that could not get its resources at start (an `OutOfMemoryError`, which is also how the JVM reports a thread it cannot start) | `ChaosUnsupportedFeatureException` |
+| `INSTRUMENTATION_FAILURE` | the hooks the selector needs could not be woven | `ChaosInstrumentationException` |
+| `ACTIVATION_CONFLICT` | a running scenario already has the id | `ChaosActivationConflictException` |
+| `INTERNAL_ERROR` | any other `Error` while the scenario registers or starts (a `LinkageError`, for instance) | the `Error` itself |
+
+A failed activation leaves no scenario registered. A failed `start()` of a `MANUAL` scenario is recorded the same way, closes what the stressor had started, and leaves the scenario `REGISTERED`: the handle stays yours to retry or close.
 
 **`runtimeDetails`**: key/value runtime metadata. Includes `wovenHookGroups` — the comma-separated, sorted names of the hook groups woven so far (empty when none; hooks are woven on demand) — and two health keys, both empty when all is well: `unmatchedHooks`, the hooks woven into a type that matched none of its methods (the JDK changed the method and the hook is inactive), and `hookFailures`, the types whose weaving failed (none of their hooks applies).
 

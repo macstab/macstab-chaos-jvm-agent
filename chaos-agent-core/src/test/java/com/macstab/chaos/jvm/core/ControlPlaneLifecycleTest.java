@@ -661,6 +661,115 @@ class ControlPlaneLifecycleTest {
   }
 
   @Nested
+  @DisplayName("A failure while a scenario starts")
+  class StartFailures {
+
+    private final List<ChaosEvent> planeEvents = new CopyOnWriteArrayList<>();
+
+    /** A control plane whose stressor factory throws {@code failure} once, then works. */
+    private ChaosControlPlaneImpl planeFailingOnce(final Error failure) {
+      final AtomicInteger calls = new AtomicInteger();
+      final ChaosControlPlaneImpl plane =
+          new ChaosControlPlaneImpl(
+              Clock.systemUTC(),
+              com.macstab.chaos.jvm.api.ChaosMetricsSink.NOOP,
+              new StressorFactory(java.util.Optional::empty) {
+                @Override
+                ManagedStressor createIfNeeded(
+                    final ChaosEffect effect, final boolean allowDestructiveEffects) {
+                  if (calls.getAndIncrement() == 0) {
+                    throw failure;
+                  }
+                  return super.createIfNeeded(effect, allowDestructiveEffects);
+                }
+              });
+      plane.addEventListener(planeEvents::add);
+      return plane;
+    }
+
+    private static ChaosScenario keepAlive(final ActivationPolicy policy) {
+      return ChaosScenario.builder("keep-alive")
+          .selector(ChaosSelector.stress(ChaosSelector.StressTarget.KEEPALIVE))
+          .effect(
+              new ChaosEffect.KeepAliveEffect("start-failure-keepalive", true, Duration.ofHours(1)))
+          .activationPolicy(policy)
+          .build();
+    }
+
+    private List<ChaosDiagnostics.FailureCategory> categories(final ChaosControlPlaneImpl plane) {
+      return plane.diagnostics().snapshot().failures().stream()
+          .map(ChaosDiagnostics.ActivationFailure::category)
+          .toList();
+    }
+
+    @Test
+    @DisplayName("an Error rolls the activation back, is recorded as INTERNAL_ERROR and rethrown")
+    void errorDuringStart() {
+      final ChaosControlPlaneImpl plane = planeFailingOnce(new NoClassDefFoundError("x"));
+      try {
+        assertThatThrownBy(() -> plane.activate(keepAlive(ActivationPolicy.always())))
+            .isInstanceOf(NoClassDefFoundError.class)
+            .hasMessage("x");
+
+        assertThat(plane.diagnostics().snapshot().scenarios()).isEmpty();
+        assertThat(categories(plane))
+            .containsExactly(ChaosDiagnostics.FailureCategory.INTERNAL_ERROR);
+        assertThat(planeEvents)
+            .filteredOn(event -> event.type() == ChaosEvent.Type.FAILED)
+            .hasSize(1);
+        try (ChaosActivationHandle again = plane.activate(keepAlive(ActivationPolicy.always()))) {
+          assertThat(again.state()).isEqualTo(ChaosDiagnostics.ScenarioState.ACTIVE);
+        }
+      } finally {
+        plane.close();
+      }
+    }
+
+    @Test
+    @DisplayName("an OutOfMemoryError while the stressor starts is an unsupported runtime")
+    void oomDuringStart() {
+      final ChaosControlPlaneImpl plane =
+          planeFailingOnce(new OutOfMemoryError("unable to create native thread"));
+      try {
+        assertThatThrownBy(() -> plane.activate(keepAlive(ActivationPolicy.always())))
+            .isInstanceOf(ChaosUnsupportedFeatureException.class)
+            .hasMessageContaining("unable to create native thread");
+
+        assertThat(plane.diagnostics().snapshot().scenarios()).isEmpty();
+        assertThat(categories(plane))
+            .containsExactly(ChaosDiagnostics.FailureCategory.UNSUPPORTED_RUNTIME);
+      } finally {
+        plane.close();
+      }
+    }
+
+    @Test
+    @DisplayName("a failing manual start is recorded and leaves the scenario registered")
+    void manualStartFailure() {
+      final ChaosControlPlaneImpl plane =
+          planeFailingOnce(new OutOfMemoryError("unable to create native thread"));
+      try {
+        final ChaosActivationHandle handle = plane.activate(keepAlive(ActivationPolicy.manual()));
+
+        assertThatThrownBy(handle::start).isInstanceOf(ChaosUnsupportedFeatureException.class);
+
+        assertThat(handle.state()).isEqualTo(ChaosDiagnostics.ScenarioState.REGISTERED);
+        assertThat(categories(plane))
+            .containsExactly(ChaosDiagnostics.FailureCategory.UNSUPPORTED_RUNTIME);
+        assertThat(
+                Thread.getAllStackTraces().keySet().stream()
+                    .anyMatch(thread -> thread.getName().equals("start-failure-keepalive")))
+            .isFalse();
+        handle.start();
+        assertThat(handle.state()).isEqualTo(ChaosDiagnostics.ScenarioState.ACTIVE);
+        handle.close();
+      } finally {
+        plane.close();
+      }
+    }
+  }
+
+  @Nested
   @DisplayName("listeners")
   class Listeners {
 

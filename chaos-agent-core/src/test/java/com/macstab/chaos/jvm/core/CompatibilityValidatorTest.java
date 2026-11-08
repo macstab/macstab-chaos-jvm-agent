@@ -8,6 +8,7 @@ import com.macstab.chaos.jvm.api.ChaosActivationException;
 import com.macstab.chaos.jvm.api.ChaosEffect;
 import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.ChaosSelector;
+import com.macstab.chaos.jvm.api.ChaosUnsupportedFeatureException;
 import com.macstab.chaos.jvm.api.ChaosValidationException;
 import com.macstab.chaos.jvm.api.NamePattern;
 import com.macstab.chaos.jvm.api.OperationType;
@@ -1130,6 +1131,59 @@ class CompatibilityValidatorTest {
           .effect(effect)
           .activationPolicy(ActivationPolicy.always())
           .build();
+    }
+  }
+
+  @Nested
+  @DisplayName("direct-buffer pressure and the direct memory limit")
+  class DirectMemoryLimit {
+
+    private static final long MIB = 1024L * 1024L;
+
+    private ChaosScenario directBuffer(final long totalBytes) {
+      return ChaosScenario.builder("direct")
+          .selector(ChaosSelector.stress(ChaosSelector.StressTarget.DIRECT_BUFFER))
+          .effect(new ChaosEffect.DirectBufferPressureEffect(totalBytes, (int) MIB, false))
+          .activationPolicy(ActivationPolicy.always())
+          .build();
+    }
+
+    @Test
+    @DisplayName("more than the limit is refused as an unsupported runtime")
+    void aboveTheLimitIsRefused() {
+      assertThatThrownBy(
+              () ->
+                  CompatibilityValidator.validate(
+                      directBuffer(64 * MIB), new FeatureSet(21, true, 8 * MIB)))
+          .isInstanceOf(ChaosUnsupportedFeatureException.class)
+          .hasMessageContaining("MaxDirectMemorySize");
+    }
+
+    @Test
+    @DisplayName("up to the limit is accepted")
+    void upToTheLimitIsAccepted() {
+      assertThatCode(
+              () ->
+                  CompatibilityValidator.validate(
+                      directBuffer(8 * MIB), new FeatureSet(21, true, 8 * MIB)))
+          .doesNotThrowAnyException();
+    }
+
+    @Test
+    @DisplayName("an unknown limit allows any size")
+    void unknownLimitAllows() {
+      assertThatCode(
+              () ->
+                  CompatibilityValidator.validate(
+                      directBuffer(64 * MIB), new FeatureSet(21, true, -1L)))
+          .doesNotThrowAnyException();
+    }
+
+    @Test
+    @DisplayName("the default limit (MaxDirectMemorySize=0) is the maximum heap")
+    void defaultLimitIsTheMaximumHeap() {
+      org.assertj.core.api.Assertions.assertThat(new FeatureSet().directMemoryLimit())
+          .isEqualTo(Runtime.getRuntime().maxMemory());
     }
   }
 }

@@ -5,6 +5,7 @@ import com.macstab.chaos.jvm.api.ChaosDiagnostics;
 import com.macstab.chaos.jvm.api.ChaosEffect;
 import com.macstab.chaos.jvm.api.ChaosEvent;
 import com.macstab.chaos.jvm.api.ChaosScenario;
+import com.macstab.chaos.jvm.api.ChaosUnsupportedFeatureException;
 import java.lang.instrument.Instrumentation;
 import java.time.Clock;
 import java.time.Duration;
@@ -115,6 +116,26 @@ final class ScenarioController {
       final Clock clock,
       final ObservabilityBus observabilityBus,
       final Supplier<Optional<Instrumentation>> instrumentationSupplier) {
+    this(
+        scenario,
+        scopeKey,
+        sessionId,
+        clock,
+        observabilityBus,
+        new StressorFactory(instrumentationSupplier));
+  }
+
+  /**
+   * Creates a controller whose stressors come from {@code stressorFactory}; the control plane
+   * shares one factory, and tests pass an overriding one (test seam, U-72 c2).
+   */
+  ScenarioController(
+      final ChaosScenario scenario,
+      final String scopeKey,
+      final @Nullable String sessionId,
+      final Clock clock,
+      final ObservabilityBus observabilityBus,
+      final StressorFactory stressorFactory) {
     this.replayMatches =
         scenario.activationPolicy().replayMatches() == null
             ? null
@@ -126,7 +147,7 @@ final class ScenarioController {
     this.sessionId = sessionId;
     this.clock = clock;
     this.observabilityBus = observabilityBus;
-    this.stressorFactory = new StressorFactory(instrumentationSupplier);
+    this.stressorFactory = stressorFactory;
     // randomSeed==null must mean "non-deterministic sampling", not "seed 0". Seeding with 0 would
     // make splittableRandom(matched) collapse to baseSeed ^ matched ^ scenario.id().hashCode() — a
     // function of scenario ID and match count only, so every JVM run would reproduce the exact
@@ -241,7 +262,10 @@ final class ScenarioController {
    *   <li>Records {@code startedAt} for activation-window calculations.
    *   <li>Sets {@code started} to {@code true} and {@code state} to {@code ACTIVE}.
    *   <li>Creates and starts a background {@link ManagedStressor} if the scenario's effect requires
-   *       one (e.g., heap pressure, deadlock, thread leak).
+   *       one (e.g., heap pressure, deadlock, thread leak). A stressor that cannot get its
+   *       resources ({@link OutOfMemoryError}, also a thread the JVM cannot start) fails the start
+   *       with {@link ChaosUnsupportedFeatureException}, and the controller stays {@code
+   *       REGISTERED}.
    *   <li>Initialises {@link ClockSkewState} if the effect is a {@link
    *       com.macstab.chaos.jvm.api.ChaosEffect.ClockSkewEffect}.
    *   <li>Publishes a {@link com.macstab.chaos.jvm.api.ChaosEvent.Type#STARTED} event to the {@link
@@ -273,6 +297,18 @@ final class ScenarioController {
       newStressor =
           stressorFactory.createIfNeeded(
               scenario.effect(), scenario.activationPolicy().allowDestructiveEffects());
+    } catch (final OutOfMemoryError exhausted) {
+      // The stressor could not get its resources: heap, direct memory, or a native thread (the
+      // JVM reports a thread it cannot start as an OutOfMemoryError). The runtime cannot run it,
+      // which is not a configuration error. Any other failure keeps its own type.
+      final ChaosUnsupportedFeatureException unsupported =
+          new ChaosUnsupportedFeatureException(
+              "stressor "
+                  + scenario.effect().getClass().getSimpleName()
+                  + " could not get its resources at start: "
+                  + exhausted.getMessage());
+      unsupported.addSuppressed(exhausted);
+      throw unsupported;
     } finally {
       ChaosDispatcher.decrementDispatchDepth();
     }

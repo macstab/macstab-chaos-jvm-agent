@@ -30,6 +30,7 @@ import com.macstab.chaos.jvm.api.ChaosDiagnostics;
 public final class DefaultChaosActivationHandle implements ChaosActivationHandle {
   private final ScenarioController controller;
   private final ScenarioRegistry registry;
+  private final java.util.function.Consumer<Throwable> startFailure;
   private final java.util.concurrent.atomic.AtomicBoolean destroyed =
       new java.util.concurrent.atomic.AtomicBoolean(false);
 
@@ -38,11 +39,15 @@ public final class DefaultChaosActivationHandle implements ChaosActivationHandle
    *
    * @param controller the scenario controller that manages the scenario's lifecycle state machine
    * @param registry the registry from which the scenario will be removed on {@link #destroy()}
+   * @param startFailure records a failure of {@link #start()}
    */
   DefaultChaosActivationHandle(
-      final ScenarioController controller, final ScenarioRegistry registry) {
+      final ScenarioController controller,
+      final ScenarioRegistry registry,
+      final java.util.function.Consumer<Throwable> startFailure) {
     this.controller = controller;
     this.registry = registry;
+    this.startFailure = startFailure;
   }
 
   /**
@@ -55,10 +60,19 @@ public final class DefaultChaosActivationHandle implements ChaosActivationHandle
     return controller.key();
   }
 
-  /** Transitions the underlying scenario to the ACTIVE state, enabling chaos injection. */
+  /**
+   * Transitions the underlying scenario to the ACTIVE state, enabling chaos injection. A failure is
+   * recorded as an activation failure and rethrown; the scenario stays {@code REGISTERED} and the
+   * handle stays the caller's to close.
+   */
   @Override
   public void start() {
-    controller.start();
+    try {
+      controller.start();
+    } catch (final RuntimeException | Error failure) {
+      startFailure.accept(failure);
+      throw failure;
+    }
   }
 
   /** Transitions the underlying scenario to the STOPPED state, suspending chaos injection. */

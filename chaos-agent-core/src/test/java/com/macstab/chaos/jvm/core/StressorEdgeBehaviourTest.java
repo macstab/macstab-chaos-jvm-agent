@@ -22,6 +22,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.LockSupport;
 import java.util.function.Consumer;
 import org.jspecify.annotations.Nullable;
@@ -700,6 +701,39 @@ class StressorEdgeBehaviourTest {
     private static boolean threadNamed(final String name) {
       return Thread.getAllStackTraces().keySet().stream()
           .anyMatch(thread -> thread.getName().equals(name) && thread.isAlive());
+    }
+  }
+
+  @Nested
+  @DisplayName("a partial start")
+  class PartialStart {
+
+    @Test
+    @DisplayName("a thread that cannot start stops the threads already started")
+    void failedThirdStartLeavesNoThread() {
+      final AtomicInteger made = new AtomicInteger();
+      final java.util.concurrent.ThreadFactory failingThird =
+          body ->
+              made.incrementAndGet() == 3
+                  ? new Thread(body) {
+                    @Override
+                    public void start() {
+                      throw new OutOfMemoryError("unable to create native thread");
+                    }
+                  }
+                  : new Thread(body);
+
+      assertThatThrownBy(
+              () ->
+                  new ThreadLeakStressor(
+                      new ChaosEffect.ThreadLeakEffect(5, "edge-partial-", true, null),
+                      failingThird))
+          .isInstanceOf(OutOfMemoryError.class);
+
+      assertThat(
+              Thread.getAllStackTraces().keySet().stream()
+                  .anyMatch(thread -> thread.getName().startsWith("edge-partial-")))
+          .isFalse();
     }
   }
 

@@ -81,6 +81,21 @@ final class DirectBufferPressureStressor implements ManagedStressor {
 
   DirectBufferPressureStressor(final ChaosEffect.DirectBufferPressureEffect effect) {
     final List<ByteBuffer> buffers = new ArrayList<>();
+    try {
+      allocate(effect, buffers);
+    } catch (final OutOfMemoryError exhausted) {
+      // Out of direct memory (memory reserved elsewhere makes the activation-time limit check no
+      // guarantee): free what this stressor took, so the failed start leaves nothing behind.
+      for (final ByteBuffer buffer : buffers) {
+        freeDirectBuffer(buffer);
+      }
+      throw exhausted;
+    }
+    this.retainedBuffers = List.copyOf(buffers);
+  }
+
+  private void allocate(
+      final ChaosEffect.DirectBufferPressureEffect effect, final List<ByteBuffer> buffers) {
     long remaining = effect.totalBytes();
     while (remaining > 0) {
       final int size = (int) Math.min(effect.bufferSizeBytes(), remaining);
@@ -98,7 +113,6 @@ final class DirectBufferPressureStressor implements ManagedStressor {
       }
       remaining -= size;
     }
-    this.retainedBuffers = List.copyOf(buffers);
   }
 
   @Override

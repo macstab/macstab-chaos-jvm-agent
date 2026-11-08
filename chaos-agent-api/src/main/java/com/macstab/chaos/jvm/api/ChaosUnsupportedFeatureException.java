@@ -14,6 +14,10 @@ package com.macstab.chaos.jvm.api;
  * <ul>
  *   <li>{@link ChaosSelector.ThreadSelector} with {@link ChaosSelector.ThreadKind#VIRTUAL} on JDK
  *       17 or 18 (virtual threads require JDK 21+).
+ *   <li>{@link ChaosEffect.DirectBufferPressureEffect} asking for more than the JVM's direct memory
+ *       limit ({@code -XX:MaxDirectMemorySize}, by default the maximum heap).
+ *   <li>A stressor that cannot get its resources at start: an {@link OutOfMemoryError}, which is
+ *       also how the JVM reports a thread it cannot start.
  * </ul>
  */
 public class ChaosUnsupportedFeatureException extends RuntimeException {

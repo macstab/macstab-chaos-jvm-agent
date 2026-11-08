@@ -19,8 +19,11 @@ import org.jspecify.annotations.Nullable;
  *
  * <p>The registry map is populated once at class-load time and never mutated afterwards; reads are
  * inherently thread-safe.
+ *
+ * <p>Not final: a test seam (U-72 c2) overrides {@link #createIfNeeded} and hands the subclass to
+ * {@link ChaosControlPlaneImpl} or {@link ScenarioController}.
  */
-final class StressorFactory {
+class StressorFactory {
 
   /**
    * Functional interface for a factory that constructs a {@link ManagedStressor} from a {@link

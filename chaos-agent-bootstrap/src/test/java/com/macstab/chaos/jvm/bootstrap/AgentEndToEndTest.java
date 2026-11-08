@@ -1849,6 +1849,21 @@ class AgentEndToEndTest {
   }
 
   @Nested
+  @DisplayName("Stressor resources")
+  class StressorResources {
+
+    @Test
+    @DisplayName("direct-buffer pressure above MaxDirectMemorySize is refused as unsupported")
+    void directBufferAboveTheLimitIsRefused() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.runWithoutPlan(
+              DefectProbeMain.class, "direct-buffer-above-limit", "-XX:MaxDirectMemorySize=8m");
+      assertThat(result.value("directBuffer")).isEqualTo("ChaosUnsupportedFeatureException");
+      assertThat(result.value("category")).isEqualTo("UNSUPPORTED_RUNTIME");
+    }
+  }
+
+  @Nested
   @DisplayName("The agent's own work (L3)")
   class AgentOwnedWork {
 

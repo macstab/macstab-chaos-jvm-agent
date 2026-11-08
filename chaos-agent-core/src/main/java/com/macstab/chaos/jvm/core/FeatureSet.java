@@ -1,5 +1,6 @@
 package com.macstab.chaos.jvm.core;
 
+import java.util.function.LongSupplier;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -15,6 +16,8 @@ import org.jspecify.annotations.Nullable;
  *   <li><b>runtimeFeatureVersion</b> — {@code Runtime.version().feature()} (always available).
  *   <li><b>jfrSupported</b> — {@code Class.forName("jdk.jfr.FlightRecorder")} probe; {@code true}
  *       if JFR is available.
+ *   <li><b>directMemoryLimit</b> — {@code -XX:MaxDirectMemorySize}, read lazily at first use, never
+ *       at construction.
  * </ul>
  *
  * <h2>Thread safety</h2>
@@ -23,12 +26,79 @@ import org.jspecify.annotations.Nullable;
  * threads.
  */
 final class FeatureSet {
+  /** {@link #directMemoryLimit()} when the limit cannot be read. */
+  static final long UNKNOWN_LIMIT = -1L;
+
+  /** {@link #directMemoryLimit} before the first probe. */
+  private static final long NOT_PROBED = Long.MIN_VALUE;
+
   private final int runtimeFeatureVersion;
   private final boolean jfrSupported;
+  private final LongSupplier directMemoryProbe;
+  private volatile long directMemoryLimit = NOT_PROBED;
 
   FeatureSet() {
-    this.runtimeFeatureVersion = Runtime.version().feature();
-    this.jfrSupported = probeJfr();
+    this(Runtime.version().feature(), probeJfr(), FeatureSet::probeDirectMemoryLimit);
+  }
+
+  /**
+   * Creates a feature set with fixed values instead of probing the JVM (test seam, U-72 c7).
+   *
+   * @param runtimeFeatureVersion the JDK feature release
+   * @param jfrSupported whether JFR is available
+   * @param directMemoryLimit the direct memory limit in bytes, or {@code -1} when unknown
+   */
+  FeatureSet(
+      final int runtimeFeatureVersion, final boolean jfrSupported, final long directMemoryLimit) {
+    this(runtimeFeatureVersion, jfrSupported, () -> directMemoryLimit);
+  }
+
+  private FeatureSet(
+      final int runtimeFeatureVersion,
+      final boolean jfrSupported,
+      final LongSupplier directMemoryProbe) {
+    this.runtimeFeatureVersion = runtimeFeatureVersion;
+    this.jfrSupported = jfrSupported;
+    this.directMemoryProbe = directMemoryProbe;
+  }
+
+  /**
+   * Returns the JVM's direct memory limit in bytes, or {@link #UNKNOWN_LIMIT}. Read lazily, at the
+   * first call (the first direct-buffer pressure validation), and memoised: the feature set is
+   * built in {@code premain}, where the agent must not touch the management API.
+   *
+   * @return the limit, or {@link #UNKNOWN_LIMIT}
+   */
+  long directMemoryLimit() {
+    long limit = directMemoryLimit;
+    if (limit == NOT_PROBED) {
+      limit = directMemoryProbe.getAsLong();
+      directMemoryLimit = limit;
+    }
+    return limit;
+  }
+
+  /**
+   * Reads {@code -XX:MaxDirectMemorySize} through the HotSpot diagnostic MXBean (no platform MBean
+   * server is created). {@code 0}, the default, means the JVM's maximum heap, as the JDK reads it.
+   * The read runs with the dispatch depth raised, so no scenario applies to it (L3).
+   */
+  private static long probeDirectMemoryLimit() {
+    ChaosDispatcher.incrementDispatchDepth();
+    try {
+      final long configured =
+          Long.parseLong(
+              java.lang.management.ManagementFactory.getPlatformMXBean(
+                      com.sun.management.HotSpotDiagnosticMXBean.class)
+                  .getVMOption("MaxDirectMemorySize")
+                  .getValue());
+      return configured == 0L ? Runtime.getRuntime().maxMemory() : configured;
+    } catch (final RuntimeException | LinkageError unavailable) {
+      // jdk.management absent, not a HotSpot JVM, or an unexpected value: allow.
+      return UNKNOWN_LIMIT;
+    } finally {
+      ChaosDispatcher.decrementDispatchDepth();
+    }
   }
 
   /**
