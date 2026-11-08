@@ -245,6 +245,8 @@ chaos.activate(recorder.replay(flakyDbScenario));
 
 Match numbers count the scenario's selector matches since it started; replay reproduces the run when the calls arrive in the same order (single-threaded paths, or a deterministic test). See law L9a in [semantics.md](semantics.md).
 
+The recorder keeps one log per scenario and scope: `replay(scenario)` replays the JVM-scoped run, `replay(scenario, sessionId)` the run in that session, and neither mixes in the other's matches. A scenario that starts again (a new activation, a reload) starts a new log, since its match numbers start again from 1. A log keeps at most `ChaosDecisionRecorder.MAX_DECISIONS` (1,000,000) numbers; past that `replay` throws `IllegalStateException` ("decision log truncated"), since the run could not be reproduced.
+
 ---
 
 # 6. Self-Attach Requirements

@@ -45,15 +45,18 @@ public final class SlowDatabaseExample {
 
     final ChaosDecisionRecorder recorder = new ChaosDecisionRecorder();
     chaos.addEventListener(recorder);
+    final String recordedSession;
     try (ChaosSession session = chaos.openSession("slow-db test")) {
+      recordedSession = session.id();
       session.activate(slowDb);
       callTheService.run();
     }
     chaos.removeEventListener(recorder);
 
-    // The same decisions again, without drawing:
+    // The same decisions again, without drawing (a session scenario replays its session's log;
+    // recorder.replay(scenario) replays the JVM-scoped log):
     try (ChaosSession replay = chaos.openSession("slow-db replay")) {
-      replay.activate(recorder.replay(slowDb));
+      replay.activate(recorder.replay(slowDb, recordedSession));
       callTheService.run();
     }
   }

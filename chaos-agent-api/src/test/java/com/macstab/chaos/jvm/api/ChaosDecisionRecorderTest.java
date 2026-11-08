@@ -43,6 +43,65 @@ class ChaosDecisionRecorderTest {
   }
 
   @Test
+  @DisplayName("keeps one log per scope and starts it again when the scenario starts again")
+  void logsPerScope() {
+    final ChaosDecisionRecorder recorder = new ChaosDecisionRecorder();
+    recorder.onEvent(event(ChaosEvent.Type.STARTED, Map.of("scope", "jvm")));
+    recorder.onEvent(event(ChaosEvent.Type.APPLIED, Map.of("match", "2", "scope", "jvm")));
+    recorder.onEvent(event(ChaosEvent.Type.APPLIED, Map.of("match", "1", "scope", "session:s1")));
+    recorder.onEvent(event(ChaosEvent.Type.APPLIED, Map.of("match", "5", "sessionId", "s2")));
+    final ChaosScenario scenario =
+        ChaosScenario.builder("a")
+            .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+            .effect(ChaosEffect.reject("x"))
+            .build();
+
+    assertThat(recorder.replay(scenario).activationPolicy().replayMatches()).containsExactly(2L);
+    assertThat(recorder.replay(scenario, "s1").activationPolicy().replayMatches())
+        .containsExactly(1L);
+    assertThat(recorder.matches("a", "s2")).as("scope taken from sessionId").containsExactly(5L);
+    assertThat(recorder.matches("a")).containsExactly(1L, 2L, 5L);
+
+    recorder.onEvent(event(ChaosEvent.Type.STARTED, Map.of("scope", "session:s1")));
+
+    assertThat(recorder.matches("a", "s1")).isEmpty();
+    assertThat(recorder.matches("a", null)).containsExactly(2L);
+    assertThat(recorder.replay(scenario, "none").activationPolicy().replayMatches()).isEmpty();
+  }
+
+  private static ChaosEvent event(
+      final ChaosEvent.Type type, final Map<String, String> attributes) {
+    return new ChaosEvent(Instant.EPOCH, type, "a", type.name(), attributes);
+  }
+
+  @Test
+  @DisplayName("beyond 1,000,000 decisions of one scenario the log is truncated and replay refuses")
+  void capped() {
+    // Heap: the stored 1,000,000 numbers take about 60-80 MB in the skip-list set; past the cap
+    // nothing more is stored, only a counter grows, so the test's heap need stays at that level.
+    final ChaosDecisionRecorder recorder = new ChaosDecisionRecorder();
+    for (long match = 1L; match <= 1_000_001L; match++) {
+      recorder.onEvent(
+          new ChaosEvent(
+              Instant.EPOCH,
+              ChaosEvent.Type.APPLIED,
+              "busy",
+              "applied",
+              Map.of("match", Long.toString(match), "scope", "jvm")));
+    }
+    final ChaosScenario scenario =
+        ChaosScenario.builder("busy")
+            .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+            .effect(ChaosEffect.reject("x"))
+            .build();
+
+    assertThat(recorder.matches("busy")).hasSize(1_000_000);
+    assertThatThrownBy(() -> recorder.replay(scenario))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("decision log truncated");
+  }
+
+  @Test
   @DisplayName("replay keeps the scenario and every policy field but the draw")
   void replay() {
     final ChaosScenario scenario =

@@ -44,7 +44,7 @@ For a matching call, the scenario's `ActivationPolicy` is checked in this order;
 
 **L9 — Draws are reproducible.** With a fixed `randomSeed`, the probability draw and the sampled delay of the *n*-th match are fixed: both derive from `seed ^ n ^ id.hashCode()`, the delay from an independent split stream, so they are not correlated. So are the effects' own choices of that match: the length of a torn write, the bit a corrupted read flips and the order of a shuffled DNS answer each derive from the same seed, salted per kind of choice.
 
-**L9a — A replay log replaces the draw.** With `replayMatches`, step 7 passes exactly on the listed match numbers (counted from 1 over every match since the scenario started, warm-up included, as step 6 counts them). `ChaosDecisionRecorder` records the numbers from the `match` attribute of `APPLIED` events, so a run — seeded or not — replays decision by decision as long as the calls arrive in the same order.
+**L9a — A replay log replaces the draw.** With `replayMatches`, step 7 passes exactly on the listed match numbers (counted from 1 over every match since the scenario started, warm-up included, as step 6 counts them). `ChaosDecisionRecorder` records the numbers from the `match` attribute of `APPLIED` events, so a run — seeded or not — replays decision by decision as long as the calls arrive in the same order. Its log is per scenario and scope (the event's `scope` attribute: `jvm` or `session:<id>`), restarts with each `STARTED` of that scenario in that scope, and holds at most 1,000,000 numbers; a truncated log is not replayed.
 
 **L10 — A rate-limit window starts at activation.** Windows are fixed, anchored at the scenario's start (not at an epoch boundary); a clock that steps back re-anchors the window.
 

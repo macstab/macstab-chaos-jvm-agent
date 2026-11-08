@@ -86,6 +86,84 @@ class DecisionReplayTest {
         .containsExactly(2L, 9L);
   }
 
+  @Test
+  @DisplayName("a scenario started again replays only its latest run")
+  void reactivationStartsANewLog() {
+    final ChaosDecisionRecorder recorder = new ChaosDecisionRecorder();
+    try (ChaosRuntime runtime = new ChaosRuntime()) {
+      runtime.addEventListener(recorder);
+      submitAll(runtime, runtime.activate(fixed("again", List.of(2L, 4L))), 5);
+      submitAll(runtime, runtime.activate(fixed("again", List.of(3L))), 5);
+    }
+
+    assertThat(recorder.replay(fixed("again", List.of())).activationPolicy().replayMatches())
+        .as("the first run's 2 and 4 belong to an earlier activation")
+        .containsExactly(3L);
+  }
+
+  @Test
+  @DisplayName("replay of a JVM scenario leaves a session's matches out; a session replays its own")
+  void replayKeepsScopesApart() {
+    final ChaosDecisionRecorder recorder = new ChaosDecisionRecorder();
+    try (ChaosRuntime runtime = new ChaosRuntime()) {
+      runtime.addEventListener(recorder);
+      runtime.activate(fixed("shared", List.of(2L, 4L)));
+      for (int i = 0; i < 5; i++) {
+        submit(runtime);
+      }
+      try (com.macstab.chaos.jvm.api.ChaosSession session = runtime.openSession("s1")) {
+        session.activate(fixed("shared", List.of(1L, 3L), ChaosScenario.ScenarioScope.SESSION));
+        try (com.macstab.chaos.jvm.api.ChaosSession.ScopeBinding bound = session.bind()) {
+          for (int i = 0; i < 5; i++) {
+            submit(runtime);
+          }
+        }
+        final String sessionId = session.id();
+
+        assertThat(recorder.replay(fixed("shared", List.of())).activationPolicy().replayMatches())
+            .containsExactly(2L, 4L);
+        assertThat(
+                recorder
+                    .replay(fixed("shared", List.of()), sessionId)
+                    .activationPolicy()
+                    .replayMatches())
+            .containsExactly(1L, 3L);
+      }
+    }
+  }
+
+  private static ChaosScenario fixed(final String id, final List<Long> matches) {
+    return fixed(id, matches, ChaosScenario.ScenarioScope.JVM);
+  }
+
+  private static ChaosScenario fixed(
+      final String id, final List<Long> matches, final ChaosScenario.ScenarioScope scope) {
+    return ChaosScenario.builder(id)
+        .scope(scope)
+        .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+        .effect(ChaosEffect.reject(id))
+        .activationPolicy(ActivationPolicy.builder().replayMatches(matches).build())
+        .build();
+  }
+
+  private static void submitAll(
+      final ChaosRuntime runtime,
+      final com.macstab.chaos.jvm.api.ChaosActivationHandle handle,
+      final int calls) {
+    for (int i = 0; i < calls; i++) {
+      submit(runtime);
+    }
+    handle.stop();
+  }
+
+  private static void submit(final ChaosRuntime runtime) {
+    try {
+      runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", runtime, () -> {});
+    } catch (final RuntimeException rejected) {
+      // the scenario's decision
+    }
+  }
+
   private static boolean[] run(final ChaosScenario scenario, final ChaosDecisionRecorder recorder) {
     final boolean[] rejected = new boolean[CALLS];
     try (ChaosRuntime runtime = new ChaosRuntime()) {

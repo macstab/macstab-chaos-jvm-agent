@@ -92,6 +92,8 @@ public final class com/macstab/chaos/jvm/api/ChaosDecisionRecorder implements co
   public method matches(Ljava/lang/String;Ljava/lang/String;)Ljava/util/List;
   public method onEvent(Lcom/macstab/chaos/jvm/api/ChaosEvent;)V
   public method replay(Lcom/macstab/chaos/jvm/api/ChaosScenario;)Lcom/macstab/chaos/jvm/api/ChaosScenario;
+  public method replay(Lcom/macstab/chaos/jvm/api/ChaosScenario;Ljava/lang/String;)Lcom/macstab/chaos/jvm/api/ChaosScenario;
+  public static final field MAX_DECISIONS I
 
 public interface com/macstab/chaos/jvm/api/ChaosDiagnostics
   public abstract method debugDump()Ljava/lang/String;
