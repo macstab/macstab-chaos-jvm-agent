@@ -23,7 +23,10 @@ import java.util.logging.Logger;
  * simultaneously.
  *
  * <p>The stressor runs on a daemon thread that repeats the flood cycle every {@code floodInterval}.
- * {@link #close()} stops the thread and drains the reference queue.
+ * After each cycle it drains the references the collector has enqueued so far, so the queue holds
+ * at most about one cycle's references and the stressor does not exhaust the heap itself; a
+ * reference enqueued late is drained in the next cycle. {@link #close()} stops the thread and
+ * drains what is left.
  */
 final class ReferenceQueueFloodStressor implements ManagedStressor {
 
@@ -32,6 +35,7 @@ final class ReferenceQueueFloodStressor implements ManagedStressor {
 
   private final AtomicBoolean running = new AtomicBoolean(true);
   private final AtomicLong floodCycleCount = new AtomicLong();
+  private final AtomicLong drainedCount = new AtomicLong();
   private final ReferenceQueue<byte[]> queue = new ReferenceQueue<>();
   private final Thread floodThread;
 
@@ -44,6 +48,7 @@ final class ReferenceQueueFloodStressor implements ManagedStressor {
             () -> {
               while (running.get()) {
                 flood(referenceCount);
+                drain();
                 floodCycleCount.incrementAndGet();
                 if (!running.get()) {
                   break;
@@ -76,10 +81,7 @@ final class ReferenceQueueFloodStressor implements ManagedStressor {
     } catch (final InterruptedException interruptedException) {
       Thread.currentThread().interrupt();
     }
-    // Drain the queue so we do not leave the ReferenceHandler with a large backlog.
-    while (queue.poll() != null) {
-      // drain
-    }
+    drain();
     LOGGER.fine(
         "ReferenceQueueFloodStressor stopped after " + floodCycleCount.get() + " flood cycles");
   }
@@ -87,6 +89,20 @@ final class ReferenceQueueFloodStressor implements ManagedStressor {
   /** Returns the number of completed flood cycles so far. */
   long floodCycleCount() {
     return floodCycleCount.get();
+  }
+
+  /** Returns the number of enqueued references drained from the queue so far. */
+  long drainedCount() {
+    return drainedCount.get();
+  }
+
+  /** Removes every reference enqueued so far, so the queue does not retain them. */
+  private void drain() {
+    long drained = 0;
+    while (queue.poll() != null) {
+      drained++;
+    }
+    drainedCount.addAndGet(drained);
   }
 
   private void flood(final int count) {

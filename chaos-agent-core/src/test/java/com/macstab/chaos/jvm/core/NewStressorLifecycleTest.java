@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
 import com.macstab.chaos.jvm.api.ChaosEffect;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
@@ -125,6 +127,58 @@ class NewStressorLifecycleTest {
       stressor.close();
       await().atMost(5, TimeUnit.SECONDS).until(() -> !threadAlive("macstab-chaos-refqueue-flood"));
     }
+
+    @Test
+    @DisplayName("drains the enqueued references while it floods")
+    void drainsEnqueuedReferencesWhileFlooding() {
+      final ReferenceQueueFloodStressor stressor =
+          new ReferenceQueueFloodStressor(
+              new ChaosEffect.ReferenceQueueFloodEffect(100, Duration.ofMillis(10)));
+      try {
+        await()
+            .atMost(10, TimeUnit.SECONDS)
+            .untilAsserted(() -> assertThat(stressor.drainedCount()).isGreaterThan(0));
+        final long drained = stressor.drainedCount();
+        await()
+            .atMost(10, TimeUnit.SECONDS)
+            .untilAsserted(() -> assertThat(stressor.drainedCount()).isGreaterThan(drained));
+      } finally {
+        stressor.close();
+      }
+    }
+
+    @Test
+    @DisplayName("keeps flooding for 30 s in a 64 MB heap without running out of memory")
+    void keepsFloodingInASmallHeap() throws Exception {
+      final Process process =
+          new ProcessBuilder(
+                  Path.of(System.getProperty("java.home"), "bin", "java").toString(),
+                  "-Xmx64m",
+                  "-cp",
+                  System.getProperty("java.class.path"),
+                  ReferenceQueueFloodProbeMain.class.getName())
+              .redirectErrorStream(true)
+              .start();
+      final String output;
+      try {
+        output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        assertThat(process.waitFor(60, TimeUnit.SECONDS)).isTrue();
+      } finally {
+        process.destroyForcibly();
+      }
+
+      assertThat(output).doesNotContain("OutOfMemoryError");
+      assertThat(probeValue(output, "late")).isGreaterThan(probeValue(output, "early"));
+    }
+  }
+
+  private static long probeValue(final String output, final String key) {
+    return output
+        .lines()
+        .filter(line -> line.startsWith(key + "="))
+        .map(line -> Long.parseLong(line.substring(key.length() + 1)))
+        .findFirst()
+        .orElseThrow(() -> new AssertionError("no " + key + "= line in:\n" + output));
   }
 
   private static boolean threadAlive(final String name) {
