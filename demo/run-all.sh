@@ -4,7 +4,8 @@
 #
 # Usage:  demo/run-all.sh [agent.jar]
 #         (default: chaos-agent-bootstrap/build/libs/chaos-agent-bootstrap-<version>.jar)
-# Exit status: 0 when every demo printed what it expects, 1 otherwise.
+# Exit status: 0 when every demo printed what it expects, 1 otherwise. A demo that runs longer than
+# DEMO_TIMEOUT seconds (default 120) fails; timeout(1) (coreutils; gtimeout on macOS) enforces it.
 set -euo pipefail
 
 DEMO_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -19,6 +20,21 @@ if [[ ! -f "$AGENT" ]]; then
   exit 1
 fi
 JAVA="${JAVA_HOME:+$JAVA_HOME/bin/}java"
+DEMO_TIMEOUT="${DEMO_TIMEOUT:-120}"
+if command -v timeout >/dev/null; then
+  LIMIT=(timeout "$DEMO_TIMEOUT")
+elif command -v gtimeout >/dev/null; then
+  LIMIT=(gtimeout "$DEMO_TIMEOUT")
+else
+  echo "warning: no timeout(1) found; the demos run without a time limit" >&2
+  LIMIT=()
+fi
+
+# The scratch copy of the demo running now; removed on exit, also when interrupted.
+work=""
+trap 'if [[ -n "$work" ]]; then rm -rf "$work"; fi' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 pass=0
 fail=0
@@ -26,8 +42,9 @@ for demo in "$DEMO_DIR"/[0-9][0-9]-*/; do
   name="$(basename "$demo")"
   work="$(mktemp -d)"
   cp "$demo"/Demo.java "$demo"/plan.json "$work"/
-  if actual="$(cd "$work" && "$JAVA" -javaagent:"$AGENT"=configFile="$work/plan.json" \
-      Demo.java 2>"$work/stderr")" && [[ "$actual" == "$(cat "$demo/expected.txt")" ]]; then
+  if actual="$(cd "$work" && ${LIMIT[@]+"${LIMIT[@]}"} "$JAVA" \
+      "-javaagent:$AGENT=configFile=$work/plan.json" Demo.java 2>"$work/stderr")" \
+      && [[ "$actual" == "$(cat "$demo/expected.txt")" ]]; then
     echo "[PASS] $name"
     pass=$((pass + 1))
   else
@@ -38,6 +55,7 @@ for demo in "$DEMO_DIR"/[0-9][0-9]-*/; do
     fail=$((fail + 1))
   fi
   rm -rf "$work"
+  work=""
 done
 echo "$pass passed, $fail failed"
 [[ "$fail" -eq 0 ]]

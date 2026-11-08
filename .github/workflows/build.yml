@@ -113,9 +113,14 @@ jobs:
           name: test-results-${{ matrix.os }}-jdk${{ matrix.java }}
           path: '**/build/test-results/**/*.xml'
 
+  # Every demo on both supported JDKs; run-all.sh gives each demo 120 s.
   demos:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        java: [21, 25]
 
     steps:
       - name: Checkout code
@@ -123,15 +128,22 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up JDK 25
+      # The JDK listed last is the one on the PATH: the demos run on the matrix JDK, Gradle builds
+      # with the JDK 25 toolchain.
+      - name: Set up the JDK 25 toolchain and JDK ${{ matrix.java }}
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '25'
+          java-version: |
+            25
+            ${{ matrix.java }}
           cache: 'gradle'
 
       - name: Build the agent jar
-        run: ./gradlew :chaos-agent-bootstrap:shadowJar --no-daemon
+        run: >
+          ./gradlew :chaos-agent-bootstrap:shadowJar --no-daemon
+          -Porg.gradle.java.installations.auto-download=false
+          -Porg.gradle.java.installations.fromEnv=JAVA_HOME_21_X64,JAVA_HOME_25_X64
 
-      - name: Run the demos
+      - name: Run the demos on JDK ${{ matrix.java }}
         run: demo/run-all.sh

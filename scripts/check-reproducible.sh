@@ -5,9 +5,25 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# sha256sum (coreutils) where present, as on minimal Linux images; shasum elsewhere (macOS).
+if command -v sha256sum >/dev/null; then
+  SHA256=(sha256sum)
+else
+  SHA256=(shasum -a 256)
+fi
+
+# Fails when the build produced no jar: comparing two empty lists would prove nothing.
 checksums() {
-  find . -path '*/build/libs/*.jar' -not -path './chaos-agent-examples/*' \
-    -not -path './chaos-agent-benchmarks/*' -print0 | sort -z | xargs -0 shasum -a 256
+  local jars
+  jars=$(find . -path '*/build/libs/*.jar' -not -path './chaos-agent-examples/*' \
+    -not -path './chaos-agent-benchmarks/*' | LC_ALL=C sort)
+  if [[ -z "$jars" ]]; then
+    echo "no jars found under */build/libs: nothing to compare" >&2
+    exit 1
+  fi
+  while IFS= read -r jar; do
+    "${SHA256[@]}" "$jar"
+  done <<<"$jars"
 }
 
 build() {

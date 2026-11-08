@@ -19,4 +19,4 @@ cd demo/03-disk-full && java -javaagent:../../chaos-agent-bootstrap/build/libs/c
 | `07-http-reject`      | requests to one URL prefix fail before they are sent (`reject`)      |
 | `08-slow-executor`    | every executor submission starts 200 ms late (`delay`)                |
 
-CI runs `demo/run-all.sh` on every push. The plans are the same JSON the agent reads from a file, an agent argument or an environment variable ([startup-config.md](../docs/startup-config.md)).
+CI runs `demo/run-all.sh` on JDK 21 and JDK 25 (Linux, amd64) for every push to `main` and `develop` and every pull request into them; each demo has 120 seconds (`DEMO_TIMEOUT`). The plans are the same JSON the agent reads from a file, an agent argument or an environment variable ([startup-config.md](../docs/startup-config.md)).
