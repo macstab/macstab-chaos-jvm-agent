@@ -2,10 +2,13 @@ package com.macstab.chaos.jvm.startup;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.BeanDescription;
 import com.fasterxml.jackson.databind.DeserializationConfig;
 import com.fasterxml.jackson.databind.JavaType;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.introspect.AnnotatedClassResolver;
 import com.fasterxml.jackson.databind.introspect.BeanPropertyDefinition;
@@ -17,7 +20,9 @@ import com.macstab.chaos.jvm.api.ChaosEffect;
 import com.macstab.chaos.jvm.api.ChaosPlan;
 import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.ChaosSelector;
+import com.macstab.chaos.jvm.api.NamePattern;
 import com.macstab.chaos.jvm.api.OperationType;
+import com.macstab.chaos.jvm.api.PathPattern;
 import java.io.IOException;
 import java.io.InputStream;
 import java.lang.reflect.Field;
@@ -33,6 +38,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.function.Consumer;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -49,17 +55,272 @@ class PlanSchemaTest {
 
   static final String RESOURCE = "com/macstab/chaos/jvm/startup/chaos-plan.schema.json";
 
-  /** The properties a plan cannot do without; the mapper rejects their absence (checked below). */
-  private static final Map<Class<?>, List<String>> REQUIRED =
-      Map.of(
-          ChaosPlan.class,
-          List.of("scenarios"),
-          ChaosPlan.Metadata.class,
-          List.of("name"),
-          ChaosScenario.class,
-          List.of("id", "selector", "effect"),
-          ActivationPolicy.RateLimit.class,
-          List.of("permits", "window"));
+  private static final String EXACT = "{'mode': 'EXACT', 'value': 'x'}";
+
+  private static final String SCENARIO =
+      "{'id': 's', 'selector': {'type': 'executor', 'operations': ['EXECUTOR_SUBMIT']},"
+          + " 'effect': {'type': 'suppress'}}";
+
+  /**
+   * Valid JSON for every type of the plan model, in each shape that needs a different set of
+   * properties (single quotes stand for double quotes). The schema's {@code required}, {@code
+   * minItems} and non-blank constraints are probed against the mapper with these samples: a
+   * constraint is declared only if the mapper rejects its violation in <em>every</em> sample, so
+   * the schema is never stricter than the agent. A new type needs a sample here (the generator
+   * names it); a new rule that makes a property required only in some shapes needs a sample of each
+   * shape.
+   */
+  private static final Map<Class<?>, List<String>> SAMPLES =
+      Map.ofEntries(
+          samples(
+              ChaosPlan.class,
+              "{'scenarios': [" + SCENARIO + "]}",
+              "{'metadata': {'name': 'p', 'description': 'd'}, 'observability': {'jmxEnabled':"
+                  + " true, 'structuredLoggingEnabled': true, 'debugDumpOnStart': false},"
+                  + " 'scenarios': ["
+                  + SCENARIO
+                  + "]}"),
+          samples(ChaosPlan.Metadata.class, "{'name': 'p', 'description': 'd'}", "{'name': 'p'}"),
+          samples(
+              ChaosPlan.Observability.class,
+              "{'jmxEnabled': true, 'structuredLoggingEnabled': false, 'debugDumpOnStart': true}",
+              "{}"),
+          samples(
+              ChaosScenario.class,
+              "{'id': 's', 'description': 'd', 'scope': 'SESSION', 'precedence': 1,"
+                  + " 'tags': {'k': 'v'}, 'activationPolicy': {'probability': 0.5},"
+                  + " 'selector': {'type': 'executor', 'operations': ['EXECUTOR_SUBMIT']},"
+                  + " 'effect': {'type': 'suppress'}}"),
+          samples(
+              ActivationPolicy.class,
+              "{'probability': 0.5, 'activateAfterMatches': 1, 'maxApplications': 2, 'activeFor':"
+                  + " 'PT1M', 'activeFrom': '2026-01-01T00:00:00Z', 'activeUntil':"
+                  + " '2027-01-01T00:00:00Z', 'rateLimit': {'permits': 1, 'window': 'PT1S'},"
+                  + " 'randomSeed': 7, 'allowDestructiveEffects': true, 'startMode': 'MANUAL'}",
+              "{'replayMatches': [1, 2]}",
+              "{}"),
+          samples(ActivationPolicy.RateLimit.class, "{'permits': 1, 'window': 'PT1S'}"),
+          samples(
+              NamePattern.class,
+              "{'mode': 'EXACT', 'value': 'x'}",
+              "{'mode': 'REGEX', 'value': 'x.*'}",
+              "{'mode': 'ANY'}",
+              "{'mode': 'ANY', 'value': '*'}",
+              "{}"),
+          samples(PathPattern.class, "{'prefix': '/tmp'}"),
+          // Selectors.
+          samples(
+              ChaosSelector.AsyncSelector.class,
+              "{'type': 'async', 'operations': ['ASYNC_CANCEL']}"),
+          samples(
+              ChaosSelector.AwsSdkSelector.class,
+              "{'type': 'awsSdk', 'operations': ['AWS_SDK_CALL'], 'servicePattern': "
+                  + EXACT
+                  + ","
+                  + " 'operationPattern': "
+                  + EXACT
+                  + "}"),
+          samples(
+              ChaosSelector.ClassLoadingSelector.class,
+              "{'type': 'classLoading', 'operations': ['CLASS_LOAD'], 'targetNamePattern': "
+                  + EXACT
+                  + ", 'loaderClassPattern': "
+                  + EXACT
+                  + "}"),
+          samples(
+              ChaosSelector.DnsSelector.class,
+              "{'type': 'dns', 'operations': ['DNS_RESOLVE'], 'hostnamePattern': " + EXACT + "}"),
+          samples(
+              ChaosSelector.ExecutorSelector.class,
+              "{'type': 'executor', 'operations': ['EXECUTOR_SUBMIT'], 'executorClassPattern': "
+                  + EXACT
+                  + ", 'taskClassPattern': "
+                  + EXACT
+                  + ", 'scheduledOnly': true}"),
+          samples(
+              ChaosSelector.FileIoSelector.class,
+              "{'type': 'fileIo', 'operations': ['FILE_IO_READ'], 'pathPattern': {'prefix':"
+                  + " '/tmp'}, 'minBytes': 1, 'maxBytes': 2}"),
+          samples(
+              ChaosSelector.HttpClientSelector.class,
+              "{'type': 'httpClient', 'operations': ['HTTP_CLIENT_SEND'], 'urlPattern': "
+                  + EXACT
+                  + "}"),
+          samples(
+              ChaosSelector.JdbcSelector.class,
+              "{'type': 'jdbc', 'operations': ['JDBC_STATEMENT_EXECUTE'], 'targetPattern': "
+                  + EXACT
+                  + "}"),
+          samples(
+              ChaosSelector.JvmRuntimeSelector.class,
+              "{'type': 'jvmRuntime', 'operations': ['INSTANT_NOW']}"),
+          samples(
+              ChaosSelector.MessagingSelector.class,
+              "{'type': 'messaging', 'operations': ['MESSAGE_SEND'], 'destinationPattern': "
+                  + EXACT
+                  + "}"),
+          // A method selector needs one pattern other than ANY: either one.
+          samples(
+              ChaosSelector.MethodSelector.class,
+              "{'type': 'method', 'operations': ['METHOD_ENTER'], 'classPattern': "
+                  + EXACT
+                  + ", 'signaturePattern': "
+                  + EXACT
+                  + "}",
+              "{'type': 'method', 'operations': ['METHOD_ENTER'], 'methodNamePattern': "
+                  + EXACT
+                  + "}"),
+          samples(
+              ChaosSelector.MonitorSelector.class,
+              "{'type': 'monitor', 'operations': ['MONITOR_ENTER'], 'monitorClassPattern': "
+                  + EXACT
+                  + "}"),
+          samples(
+              ChaosSelector.NettySelector.class,
+              "{'type': 'netty', 'operations': ['NETTY_CHANNEL_WRITE'], 'remoteCidr':"
+                  + " '10.0.0.0/8', 'remotePort': 80}"),
+          samples(
+              ChaosSelector.NetworkSelector.class,
+              "{'type': 'network', 'operations': ['SOCKET_READ'], 'remoteHostPattern': "
+                  + EXACT
+                  + ", 'remoteCidr': '10.0.0.0/8', 'remotePort': 80, 'minBytes': 1, 'maxBytes':"
+                  + " 2}"),
+          samples(
+              ChaosSelector.NioSelector.class,
+              "{'type': 'nio', 'operations': ['NIO_CHANNEL_READ'], 'channelClassPattern': "
+                  + EXACT
+                  + "}"),
+          samples(
+              ChaosSelector.ProcessSelector.class,
+              "{'type': 'process', 'operations': ['PROCESS_START'], 'commandPattern': "
+                  + EXACT
+                  + "}"),
+          samples(
+              ChaosSelector.QueueSelector.class,
+              "{'type': 'queue', 'operations': ['QUEUE_PUT'], 'queueClassPattern': " + EXACT + "}"),
+          samples(
+              ChaosSelector.RedisSelector.class,
+              "{'type': 'redis', 'operations': ['REDIS_COMMAND'], 'commandPattern': "
+                  + EXACT
+                  + "}"),
+          samples(
+              ChaosSelector.RpcSelector.class,
+              "{'type': 'rpc', 'operations': ['RPC_CALL'], 'methodPattern': " + EXACT + "}"),
+          samples(
+              ChaosSelector.SchedulingSelector.class,
+              "{'type': 'scheduling', 'operations': ['SCHEDULE_SUBMIT'], 'executorClassPattern': "
+                  + EXACT
+                  + ", 'periodicOnly': true}"),
+          samples(
+              ChaosSelector.ShutdownSelector.class,
+              "{'type': 'shutdown', 'operations': ['EXECUTOR_SHUTDOWN'], 'targetClassPattern': "
+                  + EXACT
+                  + "}"),
+          samples(
+              ChaosSelector.SslSelector.class, "{'type': 'ssl', 'operations': ['SSL_HANDSHAKE']}"),
+          samples(ChaosSelector.StressSelector.class, "{'type': 'stress', 'target': 'HEAP'}"),
+          samples(
+              ChaosSelector.ThreadSelector.class,
+              "{'type': 'thread', 'operations': ['THREAD_START'], 'kind': 'PLATFORM',"
+                  + " 'threadNamePattern': "
+                  + EXACT
+                  + ", 'daemon': true}"),
+          samples(
+              ChaosSelector.ThreadLocalSelector.class,
+              "{'type': 'threadLocal', 'operations': ['THREAD_LOCAL_GET'],"
+                  + " 'threadLocalClassPattern': "
+                  + EXACT
+                  + "}"),
+          // Effects.
+          samples(
+              ChaosEffect.ClockSkewEffect.class,
+              "{'type': 'clockSkew', 'skewAmount': 'PT1S', 'mode': 'FIXED'}"),
+          samples(
+              ChaosEffect.CodeCachePressureEffect.class,
+              "{'type': 'codeCachePressure', 'classCount': 1, 'methodsPerClass': 1}"),
+          samples(ChaosEffect.ConnectionResetEffect.class, "{'type': 'connectionReset'}"),
+          samples(ChaosEffect.CorruptReadEffect.class, "{'type': 'corruptRead'}"),
+          samples(
+              ChaosEffect.DeadlockEffect.class,
+              "{'type': 'deadlock', 'participantCount': 2, 'acquisitionDelay': 'PT0.01S'}"),
+          samples(
+              ChaosEffect.DelayEffect.class,
+              "{'type': 'delay', 'minDelay': 'PT0.001S', 'maxDelay': 'PT0.002S'}"),
+          samples(
+              ChaosEffect.DirectBufferPressureEffect.class,
+              "{'type': 'directBufferPressure', 'totalBytes': 2048, 'bufferSizeBytes': 1024,"
+                  + " 'registerCleaner': true}"),
+          // A DNS answer needs one of its four settings: any one.
+          samples(
+              ChaosEffect.DnsAnswerEffect.class,
+              "{'type': 'dnsAnswer', 'override': ['10.0.0.1'], 'family': 'IPV4', 'shuffle': true,"
+                  + " 'limit': 1}",
+              "{'type': 'dnsAnswer', 'override': ['10.0.0.1']}",
+              "{'type': 'dnsAnswer', 'family': 'IPV6'}",
+              "{'type': 'dnsAnswer', 'shuffle': true}",
+              "{'type': 'dnsAnswer', 'limit': 1}"),
+          samples(ChaosEffect.DnsRewriteEffect.class, "{'type': 'dnsRewrite', 'host': 'h'}"),
+          samples(ChaosEffect.ErrnoEffect.class, "{'type': 'errno', 'errno': 'ECONNREFUSED'}"),
+          samples(
+              ChaosEffect.ExceptionInjectionEffect.class,
+              "{'type': 'exceptionInjection', 'exceptionClassName':"
+                  + " 'java.lang.IllegalStateException', 'message': 'm', 'withStackTrace': false}"),
+          samples(
+              ChaosEffect.ExceptionalCompletionEffect.class,
+              "{'type': 'exceptionalCompletion', 'failureKind': 'IO', 'message': 'm'}"),
+          samples(
+              ChaosEffect.FinalizerBacklogEffect.class,
+              "{'type': 'finalizerBacklog', 'objectCount': 1, 'finalizerDelay': 'PT0.01S'}"),
+          samples(ChaosEffect.GateEffect.class, "{'type': 'gate', 'maxBlock': 'PT1S'}"),
+          samples(
+              ChaosEffect.GcPressureEffect.class,
+              "{'type': 'gcPressure', 'allocationRateBytesPerSecond': 1024, 'objectSizeBytes': 64,"
+                  + " 'promoteToOldGen': true, 'duration': 'PT1S'}"),
+          samples(
+              ChaosEffect.HeapPressureEffect.class,
+              "{'type': 'heapPressure', 'bytes': 1024, 'chunkSizeBytes': 512}"),
+          samples(
+              ChaosEffect.KeepAliveEffect.class,
+              "{'type': 'keepAlive', 'threadName': 't', 'daemon': true, 'heartbeat': 'PT1S'}"),
+          samples(
+              ChaosEffect.MetaspacePressureEffect.class,
+              "{'type': 'metaspacePressure', 'generatedClassCount': 1, 'fieldsPerClass': 1,"
+                  + " 'retain': false}"),
+          samples(
+              ChaosEffect.MonitorContentionEffect.class,
+              "{'type': 'monitorContention', 'lockHoldDuration': 'PT0.01S',"
+                  + " 'contendingThreadCount': 2, 'unfair': true}"),
+          samples(
+              ChaosEffect.RedirectEffect.class, "{'type': 'redirect', 'host': 'h', 'port': 8080}"),
+          samples(
+              ChaosEffect.ReferenceQueueFloodEffect.class,
+              "{'type': 'referenceQueueFlood', 'referenceCount': 1, 'floodInterval': 'PT1S'}"),
+          samples(ChaosEffect.RejectEffect.class, "{'type': 'reject', 'message': 'm'}"),
+          samples(
+              ChaosEffect.ReturnValueCorruptionEffect.class,
+              "{'type': 'returnValueCorruption', 'strategy': 'NULL'}"),
+          samples(
+              ChaosEffect.SafepointStormEffect.class,
+              "{'type': 'safepointStorm', 'gcInterval': 'PT1S', 'retransformClassCount': 1}"),
+          samples(ChaosEffect.SpuriousWakeupEffect.class, "{'type': 'spuriousWakeup'}"),
+          samples(
+              ChaosEffect.StringInternPressureEffect.class,
+              "{'type': 'stringInternPressure', 'internCount': 1, 'stringLengthBytes': 1}"),
+          samples(ChaosEffect.SuppressEffect.class, "{'type': 'suppress'}"),
+          samples(
+              ChaosEffect.ThreadLeakEffect.class,
+              "{'type': 'threadLeak', 'threadCount': 1, 'namePrefix': 'leak-', 'daemon': true,"
+                  + " 'lifespan': 'PT1S'}"),
+          samples(
+              ChaosEffect.ThreadLocalLeakEffect.class,
+              "{'type': 'threadLocalLeak', 'entriesPerThread': 1, 'valueSizeBytes': 1}"),
+          samples(ChaosEffect.TimeoutEffect.class, "{'type': 'timeout'}"),
+          samples(ChaosEffect.TornWriteEffect.class, "{'type': 'tornWrite'}"),
+          samples(ChaosEffect.TrickleEffect.class, "{'type': 'trickle', 'maxBytes': 1}"),
+          samples(
+              ChaosEffect.VirtualThreadCarrierPinningEffect.class,
+              "{'type': 'virtualThreadCarrierPinning', 'pinnedThreadCount': 1, 'pinDuration':"
+                  + " 'PT0.01S'}"));
 
   private final ObjectMapper mapper = ChaosPlanMapper.objectMapper();
   private final DeserializationConfig config = mapper.getDeserializationConfig();
@@ -89,41 +350,52 @@ class PlanSchemaTest {
   }
 
   @Test
-  @DisplayName("every property the schema requires is required by the mapper")
-  void requiredPropertiesAreRequired() {
-    final String scenario =
-        "{\"id\": \"s\", \"selector\": {\"type\": \"executor\", \"operations\": [\"EXECUTOR_SUBMIT\"]},"
-            + " \"effect\": {\"type\": \"delay\", \"minDelay\": \"PT0.001S\", \"maxDelay\": \"PT0.001S\"}}";
-    assertThat(ChaosPlanMapper.read("{\"scenarios\": [" + scenario + "]}").scenarios()).hasSize(1);
-    assertThatThrownBy(() -> ChaosPlanMapper.read("{\"metadata\": {\"name\": \"p\"}}"))
-        .as("a plan without scenarios")
-        .isInstanceOf(ConfigLoadException.class);
-    for (final String field : REQUIRED.get(ChaosScenario.class)) {
-      final String without =
-          scenario.replaceFirst("\"" + field + "\": (\\{[^}]*\\}|\"[^\"]*\"),? ?", "");
-      assertThatThrownBy(() -> ChaosPlanMapper.read("{\"scenarios\": [" + without + "]}"))
-          .as("a scenario without %s", field)
-          .isInstanceOf(ConfigLoadException.class);
+  @DisplayName(
+      "the published schema requires, and keeps non-empty and non-blank, what the mapper does")
+  void derivedConstraintsAreTheMappersRules() throws IOException {
+    // While the schema is rewritten, the class path still holds the previous copy.
+    assumeFalse(Boolean.getBoolean("chaos.schema.update"));
+    final JsonNode defs;
+    try (InputStream in = getClass().getClassLoader().getResourceAsStream(RESOURCE)) {
+      assertThat(in).as("%s on the class path", RESOURCE).isNotNull();
+      defs = mapper.readTree(in).get("$defs");
     }
-    assertThatThrownBy(
-            () ->
-                ChaosPlanMapper.read(
-                    "{\"scenarios\": [" + scenario.replace("\"type\": \"delay\", ", "") + "]}"))
-        .as("an effect without its type")
-        .isInstanceOf(ConfigLoadException.class);
-    assertThatThrownBy(
-            () ->
-                ChaosPlanMapper.read(
-                    "{\"metadata\": {\"description\": \"d\"}, \"scenarios\": [" + scenario + "]}"))
-        .as("metadata without a name")
-        .hasMessageContaining("name");
-    for (final String rateLimit : List.of("{\"window\": \"PT1S\"}", "{\"permits\": 1}")) {
-      final String limited =
-          scenario.replace("}}", "}, \"activationPolicy\": {\"rateLimit\": " + rateLimit + "}}");
-      assertThatThrownBy(() -> ChaosPlanMapper.read("{\"scenarios\": [" + limited + "]}"))
-          .as("a rate limit %s", rateLimit)
-          .isInstanceOf(ConfigLoadException.class);
-    }
+    assertThat(defs.at("/RejectEffect/required"))
+        .as("a reject without a message is refused")
+        .extracting(JsonNode::asText)
+        .contains("message");
+    assertThat(defs.at("/ChaosPlan/required"))
+        .extracting(JsonNode::asText)
+        .containsExactly("scenarios");
+    assertThat(defs.at("/ChaosPlan/properties/scenarios/minItems").asInt())
+        .as("a plan without scenarios is refused")
+        .isEqualTo(1);
+    assertThat(defs.at("/Metadata/properties/name/pattern").asText()).isEqualTo("\\S");
+    assertThat(defs.at("/ChaosScenario/required"))
+        .extracting(JsonNode::asText)
+        .containsExactly("effect", "id", "selector");
+    assertThat(defs.at("/RateLimit/required"))
+        .extracting(JsonNode::asText)
+        .containsExactly("permits", "window");
+    // {} and {"mode": "ANY"} are valid patterns: nothing is required, and ANY takes a blank value.
+    assertThat(defs.at("/NamePattern/required").isMissingNode()).isTrue();
+    assertThat(defs.at("/NamePattern/properties/value/pattern").isMissingNode()).isTrue();
+    // Any one of the four settings makes a DNS answer: none of them is required on its own.
+    assertThat(defs.at("/DnsAnswerEffect/required"))
+        .extracting(JsonNode::asText)
+        .containsExactly("type");
+    assertThat(defs.at("/DnsAnswerEffect/properties/override/minItems").asInt()).isEqualTo(1);
+    assertThat(defs.at("/ExecutorSelector/required"))
+        .extracting(JsonNode::asText)
+        .containsExactly("type", "operations");
+  }
+
+  @Test
+  @DisplayName("a type of the plan model without a sample is named")
+  void aTypeWithoutASampleIsNamed() {
+    assertThatThrownBy(() -> variants(Duration.class))
+        .isInstanceOf(AssertionError.class)
+        .hasMessageContaining("add a sample for Duration");
   }
 
   @Test
@@ -174,10 +446,11 @@ class PlanSchemaTest {
   @Test
   @DisplayName("unknown properties are rejected, as additionalProperties false declares")
   void unknownPropertiesAreRejected() {
-    assertThatThrownBy(
-        () ->
-            ChaosPlanMapper.read(
-                "{\"scenarios\": [{\"id\": \"s\", \"selectr\": {\"type\": \"executor\"}}]}"));
+    final String valid = json("{'scenarios': [" + SCENARIO + "]}");
+    assertThat(ChaosPlanMapper.read(valid).scenarios()).hasSize(1);
+    assertThatThrownBy(() -> ChaosPlanMapper.read(valid.replace("\"selector\"", "\"selectr\"")))
+        .isInstanceOf(ConfigLoadException.class)
+        .hasMessageContaining("unknown property 'selectr'");
   }
 
   // ── generator ─────────────────────────────────────────────────────────────
@@ -285,26 +558,104 @@ class PlanSchemaTest {
       properties.putObject("type").put("const", discriminator);
       required.add("type");
     }
+    final Class<?> raw = type.getRawClass();
+    final List<ObjectNode> variants = variants(raw);
     final BeanDescription description = config.introspect(type);
+    final Set<OperationType> operations = validOperations(raw);
     description.findProperties().stream()
         .sorted(Comparator.comparing(BeanPropertyDefinition::getName))
         .forEach(
-            property -> properties.set(property.getName(), schemaOf(property.getPrimaryType())));
-    final Set<OperationType> operations = validOperations(type.getRawClass());
-    if (operations != null) {
-      final ObjectNode schema = properties.putObject("operations");
-      schema.put("type", "array").put("minItems", 1).put("uniqueItems", true);
-      final ArrayNode values = schema.putObject("items").put("type", "string").putArray("enum");
-      operations.stream().sorted().forEach(operation -> values.add(operation.name()));
-      required.add("operations");
-    }
-    for (final String name : REQUIRED.getOrDefault(type.getRawClass(), List.of())) {
-      required.add(name);
-    }
+            property -> {
+              final String name = property.getName();
+              if (discriminator != null && name.equals("type")) {
+                return;
+              }
+              final ObjectNode schema = schemaOf(property.getPrimaryType());
+              if (name.equals("operations") && operations != null) {
+                // The items are the operations the selector supports.
+                final ArrayNode values =
+                    schema.putObject("items").put("type", "string").putArray("enum");
+                operations.stream().sorted().forEach(operation -> values.add(operation.name()));
+              }
+              if (rejectedInEvery(raw, variants, variant -> variant.remove(name))) {
+                required.add(name);
+              }
+              if ("array".equals(schema.path("type").asText())
+                  && rejectedInEvery(raw, variants, variant -> variant.putArray(name))) {
+                schema.put("minItems", 1);
+              }
+              if (schema.size() == 1
+                  && "string".equals(schema.path("type").asText())
+                  && rejectedInEvery(raw, variants, variant -> variant.put(name, ""))
+                  && rejectedInEvery(raw, variants, variant -> variant.put(name, " "))) {
+                schema.put("pattern", "\\S");
+              }
+              properties.set(name, schema);
+            });
     if (!required.isEmpty()) {
       definition.set("required", required);
     }
     definition.put("additionalProperties", false);
+  }
+
+  /** The samples of {@code raw}, each checked to be accepted by the mapper. */
+  private List<ObjectNode> variants(final Class<?> raw) {
+    final List<String> samples = SAMPLES.get(raw);
+    if (samples == null) {
+      throw new AssertionError(
+          "add a sample for " + raw.getSimpleName() + " to PlanSchemaTest.SAMPLES");
+    }
+    return samples.stream()
+        .map(
+            sample -> {
+              final ObjectNode variant;
+              try {
+                variant = (ObjectNode) mapper.readTree(json(sample));
+                mapper.readValue(variant.toString(), readAs(raw));
+              } catch (final JsonProcessingException refused) {
+                throw new AssertionError(
+                    "the sample of " + raw.getSimpleName() + " is refused: " + sample, refused);
+              }
+              return variant;
+            })
+        .toList();
+  }
+
+  /**
+   * Whether the mapper rejects every variant of {@code raw} once {@code change} is applied to it: a
+   * constraint the schema may then declare without refusing a plan the agent accepts.
+   */
+  private boolean rejectedInEvery(
+      final Class<?> raw, final List<ObjectNode> variants, final Consumer<ObjectNode> change) {
+    for (final ObjectNode variant : variants) {
+      final ObjectNode changed = variant.deepCopy();
+      change.accept(changed);
+      try {
+        mapper.readValue(changed.toString(), readAs(raw));
+        return false;
+      } catch (final JsonProcessingException rejected) {
+        // Rejected in this variant; try the next.
+      }
+    }
+    return true;
+  }
+
+  /** A selector or an effect is read through its interface, which knows the {@code type} names. */
+  private static Class<?> readAs(final Class<?> raw) {
+    if (ChaosSelector.class.isAssignableFrom(raw)) {
+      return ChaosSelector.class;
+    }
+    return ChaosEffect.class.isAssignableFrom(raw) ? ChaosEffect.class : raw;
+  }
+
+  private static Map.Entry<Class<?>, List<String>> samples(
+      final Class<?> type, final String... json) {
+    return Map.entry(type, List.of(json));
+  }
+
+  /** Writes JSON with single quotes for readability; they stand for double quotes. */
+  private static String json(final String singleQuoted) {
+    return singleQuoted.replace('\'', '"');
   }
 
   /**

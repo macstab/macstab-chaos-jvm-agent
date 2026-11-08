@@ -25,7 +25,7 @@ Tests for the instrumentation and bootstrap modules start a real agent (self-att
 |------|--------|---------------------------|
 | `apiCheck` | the public API of every API module (`api/<module>.api`, JVM signatures) | `./gradlew apiDump` |
 | `japicmp` | binary compatibility of every API module with the release named by `apiBaseline` (`gradle.properties`); report in `<module>/build/reports/japicmp/` | a major release that breaks it on purpose sets `apiBreaksAccepted = true` |
-| `PlanSchemaTest` | the published plan schema is the parser's | `./gradlew :chaos-agent-startup-config:test --tests '*PlanSchemaTest*' -PupdatePlanSchema` |
+| `PlanSchemaTest` | the published plan schema is the parser's; its `required`, `minItems` and non-blank constraints are probed with the samples in `PlanSchemaTest.SAMPLES` | `./gradlew :chaos-agent-startup-config:test --tests '*PlanSchemaTest*' -PupdatePlanSchema`; a new plan-model type needs a sample (the test names it), and a rule that makes a property required in only some shapes needs a sample of each shape |
 | `ArchitectureTest` | the bridge jar is closed, advice uses only public members, layering | — |
 | Error Prone (`-Werror`) | static analysis of every compilation; a finding fails the build | fix it, or suppress it where it stands with the reason |
 | NullAway | every reference is non-null unless `@Nullable` (JSpecify) says otherwise, proven per dereference, inside generic type arguments too (JSpecify mode) | annotate what may be absent; state an invariant with `Objects.requireNonNull` and its reason |

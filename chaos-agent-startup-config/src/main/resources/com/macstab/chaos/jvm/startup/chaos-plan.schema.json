@@ -59,12 +59,12 @@
         },
         "operations" : {
           "type" : "array",
-          "minItems" : 1,
           "uniqueItems" : true,
           "items" : {
             "type" : "string",
             "enum" : [ "ASYNC_COMPLETE", "ASYNC_COMPLETE_EXCEPTIONALLY", "ASYNC_CANCEL" ]
-          }
+          },
+          "minItems" : 1
         }
       },
       "required" : [ "type", "operations" ],
@@ -81,12 +81,12 @@
         },
         "operations" : {
           "type" : "array",
-          "minItems" : 1,
           "uniqueItems" : true,
           "items" : {
             "type" : "string",
             "enum" : [ "AWS_SDK_CALL" ]
-          }
+          },
+          "minItems" : 1
         },
         "servicePattern" : {
           "$ref" : "#/$defs/NamePattern"
@@ -177,7 +177,8 @@
           "type" : "array",
           "items" : {
             "$ref" : "#/$defs/ChaosScenario"
-          }
+          },
+          "minItems" : 1
         }
       },
       "required" : [ "scenarios" ],
@@ -196,7 +197,8 @@
           "$ref" : "#/$defs/ChaosEffect"
         },
         "id" : {
-          "type" : "string"
+          "type" : "string",
+          "pattern" : "\\S"
         },
         "precedence" : {
           "type" : "integer"
@@ -215,7 +217,7 @@
           }
         }
       },
-      "required" : [ "id", "selector", "effect" ],
+      "required" : [ "effect", "id", "selector" ],
       "additionalProperties" : false
     },
     "ChaosSelector" : {
@@ -282,12 +284,12 @@
         },
         "operations" : {
           "type" : "array",
-          "minItems" : 1,
           "uniqueItems" : true,
           "items" : {
             "type" : "string",
             "enum" : [ "CLASS_LOAD", "CLASS_DEFINE", "RESOURCE_LOAD" ]
-          }
+          },
+          "minItems" : 1
         },
         "targetNamePattern" : {
           "$ref" : "#/$defs/NamePattern"
@@ -311,7 +313,7 @@
           "format" : "duration"
         }
       },
-      "required" : [ "type" ],
+      "required" : [ "type", "mode", "skewAmount" ],
       "additionalProperties" : false
     },
     "CodeCachePressureEffect" : {
@@ -327,7 +329,7 @@
           "type" : "integer"
         }
       },
-      "required" : [ "type" ],
+      "required" : [ "type", "classCount", "methodsPerClass" ],
       "additionalProperties" : false
     },
     "ConnectionResetEffect" : {
@@ -364,7 +366,7 @@
           "type" : "integer"
         }
       },
-      "required" : [ "type" ],
+      "required" : [ "type", "participantCount" ],
       "additionalProperties" : false
     },
     "DelayEffect" : {
@@ -382,7 +384,7 @@
           "format" : "duration"
         }
       },
-      "required" : [ "type" ],
+      "required" : [ "type", "maxDelay", "minDelay" ],
       "additionalProperties" : false
     },
     "DirectBufferPressureEffect" : {
@@ -401,7 +403,7 @@
           "type" : "integer"
         }
       },
-      "required" : [ "type" ],
+      "required" : [ "type", "bufferSizeBytes", "totalBytes" ],
       "additionalProperties" : false
     },
     "DnsAnswerEffect" : {
@@ -421,7 +423,8 @@
           "type" : "array",
           "items" : {
             "type" : "string"
-          }
+          },
+          "minItems" : 1
         },
         "shuffle" : {
           "type" : "boolean"
@@ -437,10 +440,11 @@
           "const" : "dnsRewrite"
         },
         "host" : {
-          "type" : "string"
+          "type" : "string",
+          "pattern" : "\\S"
         }
       },
-      "required" : [ "type" ],
+      "required" : [ "type", "host" ],
       "additionalProperties" : false
     },
     "DnsSelector" : {
@@ -454,12 +458,12 @@
         },
         "operations" : {
           "type" : "array",
-          "minItems" : 1,
           "uniqueItems" : true,
           "items" : {
             "type" : "string",
             "enum" : [ "DNS_RESOLVE", "DNS_ANSWER", "DNS_REVERSE" ]
-          }
+          },
+          "minItems" : 1
         }
       },
       "required" : [ "type", "operations" ],
@@ -476,7 +480,7 @@
           "enum" : [ "ECONNREFUSED", "ETIMEDOUT", "ECONNRESET", "EHOSTUNREACH", "ENETUNREACH", "EPIPE", "EADDRINUSE", "EADDRNOTAVAIL", "ENOTCONN", "ENOBUFS", "EINVAL", "EOPNOTSUPP", "EAFNOSUPPORT", "EPROTONOSUPPORT", "ENOSPC", "EDQUOT", "EROFS", "EACCES", "ENOENT", "EIO", "EMFILE", "ENFILE", "EAGAIN", "ENOMEM" ]
         }
       },
-      "required" : [ "type" ],
+      "required" : [ "type", "errno" ],
       "additionalProperties" : false
     },
     "ExceptionInjectionEffect" : {
@@ -486,16 +490,18 @@
           "const" : "exceptionInjection"
         },
         "exceptionClassName" : {
-          "type" : "string"
+          "type" : "string",
+          "pattern" : "\\S"
         },
         "message" : {
-          "type" : "string"
+          "type" : "string",
+          "pattern" : "\\S"
         },
         "withStackTrace" : {
           "type" : "boolean"
         }
       },
-      "required" : [ "type" ],
+      "required" : [ "type", "exceptionClassName", "message" ],
       "additionalProperties" : false
     },
     "ExceptionalCompletionEffect" : {
@@ -509,10 +515,11 @@
           "enum" : [ "REJECTED", "TIMEOUT", "ILLEGAL_STATE", "CLASS_NOT_FOUND", "IO", "INTERRUPTED", "RUNTIME", "SECURITY" ]
         },
         "message" : {
-          "type" : "string"
+          "type" : "string",
+          "pattern" : "\\S"
         }
       },
-      "required" : [ "type" ],
+      "required" : [ "type", "failureKind", "message" ],
       "additionalProperties" : false
     },
     "ExecutorSelector" : {
@@ -526,12 +533,12 @@
         },
         "operations" : {
           "type" : "array",
-          "minItems" : 1,
           "uniqueItems" : true,
           "items" : {
             "type" : "string",
             "enum" : [ "EXECUTOR_SUBMIT", "EXECUTOR_WORKER_RUN", "EXECUTOR_SHUTDOWN", "EXECUTOR_AWAIT_TERMINATION", "FORK_JOIN_TASK_RUN" ]
-          }
+          },
+          "minItems" : 1
         },
         "scheduledOnly" : {
           "type" : "boolean"
@@ -557,12 +564,12 @@
         },
         "operations" : {
           "type" : "array",
-          "minItems" : 1,
           "uniqueItems" : true,
           "items" : {
             "type" : "string",
             "enum" : [ "FILE_IO_READ", "FILE_IO_WRITE", "FILE_IO_SYNC", "FILE_IO_TRUNCATE", "FILE_IO_DELETE", "FILE_IO_MOVE", "FILE_IO_OPEN", "FILE_IO_MAP", "FILE_IO_CLOSE", "FILE_IO_MOVE_TARGET" ]
-          }
+          },
+          "minItems" : 1
         },
         "pathPattern" : {
           "$ref" : "#/$defs/PathPattern"
@@ -585,7 +592,7 @@
           "type" : "integer"
         }
       },
-      "required" : [ "type" ],
+      "required" : [ "type", "finalizerDelay", "objectCount" ],
       "additionalProperties" : false
     },
     "GateEffect" : {
@@ -622,7 +629,7 @@
           "type" : "boolean"
         }
       },
-      "required" : [ "type" ],
+      "required" : [ "type", "allocationRateBytesPerSecond", "duration" ],
       "additionalProperties" : false
     },
     "HeapPressureEffect" : {
@@ -638,7 +645,7 @@
           "type" : "integer"
         }
       },
-      "required" : [ "type" ],
+      "required" : [ "type", "bytes", "chunkSizeBytes" ],
       "additionalProperties" : false
     },
     "HttpClientSelector" : {
@@ -649,12 +656,12 @@
         },
         "operations" : {
           "type" : "array",
-          "minItems" : 1,
           "uniqueItems" : true,
           "items" : {
             "type" : "string",
             "enum" : [ "HTTP_CLIENT_SEND", "HTTP_CLIENT_SEND_ASYNC" ]
-          }
+          },
+          "minItems" : 1
         },
         "urlPattern" : {
           "$ref" : "#/$defs/NamePattern"
@@ -671,12 +678,12 @@
         },
         "operations" : {
           "type" : "array",
-          "minItems" : 1,
           "uniqueItems" : true,
           "items" : {
             "type" : "string",
             "enum" : [ "JDBC_CONNECTION_ACQUIRE", "JDBC_STATEMENT_EXECUTE", "JDBC_PREPARED_STATEMENT", "JDBC_TRANSACTION_COMMIT", "JDBC_TRANSACTION_ROLLBACK", "R2DBC_STATEMENT_EXECUTE" ]
-          }
+          },
+          "minItems" : 1
         },
         "targetPattern" : {
           "$ref" : "#/$defs/NamePattern"
@@ -693,12 +700,12 @@
         },
         "operations" : {
           "type" : "array",
-          "minItems" : 1,
           "uniqueItems" : true,
           "items" : {
             "type" : "string",
             "enum" : [ "SYSTEM_CLOCK_MILLIS", "SYSTEM_CLOCK_NANOS", "INSTANT_NOW", "CLOCK_READ", "LOCAL_DATE_TIME_NOW", "ZONED_DATE_TIME_NOW", "DATE_NEW", "SYSTEM_GC_REQUEST", "SYSTEM_EXIT_REQUEST", "REFLECTION_INVOKE", "DIRECT_BUFFER_ALLOCATE", "OBJECT_DESERIALIZE", "OBJECT_SERIALIZE", "NATIVE_LIBRARY_LOAD", "JNDI_LOOKUP", "JMX_INVOKE", "JMX_GET_ATTR", "ZIP_INFLATE", "ZIP_DEFLATE" ]
-          }
+          },
+          "minItems" : 1
         }
       },
       "required" : [ "type", "operations" ],
@@ -718,10 +725,11 @@
           "format" : "duration"
         },
         "threadName" : {
-          "type" : "string"
+          "type" : "string",
+          "pattern" : "\\S"
         }
       },
-      "required" : [ "type" ],
+      "required" : [ "type", "heartbeat", "threadName" ],
       "additionalProperties" : false
     },
     "MessagingSelector" : {
@@ -735,12 +743,12 @@
         },
         "operations" : {
           "type" : "array",
-          "minItems" : 1,
           "uniqueItems" : true,
           "items" : {
             "type" : "string",
             "enum" : [ "MESSAGE_SEND", "MESSAGE_RECEIVE" ]
-          }
+          },
+          "minItems" : 1
         }
       },
       "required" : [ "type", "operations" ],
@@ -753,7 +761,8 @@
           "type" : "string"
         },
         "name" : {
-          "type" : "string"
+          "type" : "string",
+          "pattern" : "\\S"
         }
       },
       "required" : [ "name" ],
@@ -775,7 +784,7 @@
           "type" : "boolean"
         }
       },
-      "required" : [ "type" ],
+      "required" : [ "type", "generatedClassCount" ],
       "additionalProperties" : false
     },
     "MethodSelector" : {
@@ -792,12 +801,12 @@
         },
         "operations" : {
           "type" : "array",
-          "minItems" : 1,
           "uniqueItems" : true,
           "items" : {
             "type" : "string",
             "enum" : [ "METHOD_ENTER", "METHOD_EXIT" ]
-          }
+          },
+          "minItems" : 1
         },
         "signaturePattern" : {
           "$ref" : "#/$defs/NamePattern"
@@ -823,7 +832,7 @@
           "type" : "boolean"
         }
       },
-      "required" : [ "type" ],
+      "required" : [ "type", "contendingThreadCount", "lockHoldDuration" ],
       "additionalProperties" : false
     },
     "MonitorSelector" : {
@@ -837,12 +846,12 @@
         },
         "operations" : {
           "type" : "array",
-          "minItems" : 1,
           "uniqueItems" : true,
           "items" : {
             "type" : "string",
             "enum" : [ "MONITOR_ENTER", "THREAD_PARK" ]
-          }
+          },
+          "minItems" : 1
         }
       },
       "required" : [ "type", "operations" ],
@@ -869,15 +878,16 @@
         },
         "operations" : {
           "type" : "array",
-          "minItems" : 1,
           "uniqueItems" : true,
           "items" : {
             "type" : "string",
             "enum" : [ "NETTY_CHANNEL_WRITE", "NETTY_CHANNEL_READ" ]
-          }
+          },
+          "minItems" : 1
         },
         "remoteCidr" : {
-          "type" : "string"
+          "type" : "string",
+          "pattern" : "\\S"
         },
         "remotePort" : {
           "type" : "integer"
@@ -900,15 +910,16 @@
         },
         "operations" : {
           "type" : "array",
-          "minItems" : 1,
           "uniqueItems" : true,
           "items" : {
             "type" : "string",
             "enum" : [ "SOCKET_CONNECT", "SOCKET_ACCEPT", "SOCKET_READ", "SOCKET_WRITE", "SOCKET_CLOSE", "SOCKET_BIND", "SOCKET_SHUTDOWN", "DATAGRAM_SEND", "DATAGRAM_RECEIVE" ]
-          }
+          },
+          "minItems" : 1
         },
         "remoteCidr" : {
-          "type" : "string"
+          "type" : "string",
+          "pattern" : "\\S"
         },
         "remoteHostPattern" : {
           "$ref" : "#/$defs/NamePattern"
@@ -931,12 +942,12 @@
         },
         "operations" : {
           "type" : "array",
-          "minItems" : 1,
           "uniqueItems" : true,
           "items" : {
             "type" : "string",
             "enum" : [ "NIO_SELECTOR_SELECT", "NIO_CHANNEL_READ", "NIO_CHANNEL_WRITE", "NIO_CHANNEL_CONNECT", "NIO_CHANNEL_ACCEPT" ]
-          }
+          },
+          "minItems" : 1
         }
       },
       "required" : [ "type", "operations" ],
@@ -961,9 +972,11 @@
       "type" : "object",
       "properties" : {
         "prefix" : {
-          "type" : "string"
+          "type" : "string",
+          "pattern" : "\\S"
         }
       },
+      "required" : [ "prefix" ],
       "additionalProperties" : false
     },
     "ProcessSelector" : {
@@ -977,12 +990,12 @@
         },
         "operations" : {
           "type" : "array",
-          "minItems" : 1,
           "uniqueItems" : true,
           "items" : {
             "type" : "string",
             "enum" : [ "PROCESS_START", "PROCESS_WAIT" ]
-          }
+          },
+          "minItems" : 1
         }
       },
       "required" : [ "type", "operations" ],
@@ -996,12 +1009,12 @@
         },
         "operations" : {
           "type" : "array",
-          "minItems" : 1,
           "uniqueItems" : true,
           "items" : {
             "type" : "string",
             "enum" : [ "QUEUE_PUT", "QUEUE_OFFER", "QUEUE_TAKE", "QUEUE_POLL" ]
-          }
+          },
+          "minItems" : 1
         },
         "queueClassPattern" : {
           "$ref" : "#/$defs/NamePattern"
@@ -1031,13 +1044,14 @@
           "const" : "redirect"
         },
         "host" : {
-          "type" : "string"
+          "type" : "string",
+          "pattern" : "\\S"
         },
         "port" : {
           "type" : "integer"
         }
       },
-      "required" : [ "type" ],
+      "required" : [ "type", "host" ],
       "additionalProperties" : false
     },
     "RedisSelector" : {
@@ -1051,12 +1065,12 @@
         },
         "operations" : {
           "type" : "array",
-          "minItems" : 1,
           "uniqueItems" : true,
           "items" : {
             "type" : "string",
             "enum" : [ "REDIS_COMMAND" ]
-          }
+          },
+          "minItems" : 1
         }
       },
       "required" : [ "type", "operations" ],
@@ -1076,7 +1090,7 @@
           "type" : "integer"
         }
       },
-      "required" : [ "type" ],
+      "required" : [ "type", "floodInterval", "referenceCount" ],
       "additionalProperties" : false
     },
     "RejectEffect" : {
@@ -1086,10 +1100,11 @@
           "const" : "reject"
         },
         "message" : {
-          "type" : "string"
+          "type" : "string",
+          "pattern" : "\\S"
         }
       },
-      "required" : [ "type" ],
+      "required" : [ "type", "message" ],
       "additionalProperties" : false
     },
     "ReturnValueCorruptionEffect" : {
@@ -1103,7 +1118,7 @@
           "enum" : [ "NULL", "ZERO", "EMPTY", "BOUNDARY_MAX", "BOUNDARY_MIN" ]
         }
       },
-      "required" : [ "type" ],
+      "required" : [ "type", "strategy" ],
       "additionalProperties" : false
     },
     "RpcSelector" : {
@@ -1117,12 +1132,12 @@
         },
         "operations" : {
           "type" : "array",
-          "minItems" : 1,
           "uniqueItems" : true,
           "items" : {
             "type" : "string",
             "enum" : [ "RPC_CALL" ]
-          }
+          },
+          "minItems" : 1
         }
       },
       "required" : [ "type", "operations" ],
@@ -1142,7 +1157,7 @@
           "type" : "integer"
         }
       },
-      "required" : [ "type" ],
+      "required" : [ "type", "gcInterval" ],
       "additionalProperties" : false
     },
     "SchedulingSelector" : {
@@ -1156,12 +1171,12 @@
         },
         "operations" : {
           "type" : "array",
-          "minItems" : 1,
           "uniqueItems" : true,
           "items" : {
             "type" : "string",
             "enum" : [ "SCHEDULE_SUBMIT", "SCHEDULE_TICK" ]
-          }
+          },
+          "minItems" : 1
         },
         "periodicOnly" : {
           "type" : "boolean"
@@ -1178,12 +1193,12 @@
         },
         "operations" : {
           "type" : "array",
-          "minItems" : 1,
           "uniqueItems" : true,
           "items" : {
             "type" : "string",
             "enum" : [ "EXECUTOR_SHUTDOWN", "EXECUTOR_AWAIT_TERMINATION", "SHUTDOWN_HOOK_REGISTER" ]
-          }
+          },
+          "minItems" : 1
         },
         "targetClassPattern" : {
           "$ref" : "#/$defs/NamePattern"
@@ -1210,12 +1225,12 @@
         },
         "operations" : {
           "type" : "array",
-          "minItems" : 1,
           "uniqueItems" : true,
           "items" : {
             "type" : "string",
             "enum" : [ "SSL_HANDSHAKE" ]
-          }
+          },
+          "minItems" : 1
         }
       },
       "required" : [ "type", "operations" ],
@@ -1232,7 +1247,7 @@
           "enum" : [ "HEAP", "METASPACE", "DIRECT_BUFFER", "GC_PRESSURE", "FINALIZER_BACKLOG", "KEEPALIVE", "THREAD_LEAK", "THREAD_LOCAL_LEAK", "DEADLOCK", "MONITOR_CONTENTION", "VIRTUAL_THREAD_CARRIER_PINNING", "CODE_CACHE_PRESSURE", "SAFEPOINT_STORM", "STRING_INTERN_PRESSURE", "REFERENCE_QUEUE_FLOOD" ]
         }
       },
-      "required" : [ "type" ],
+      "required" : [ "type", "target" ],
       "additionalProperties" : false
     },
     "StringInternPressureEffect" : {
@@ -1248,7 +1263,7 @@
           "type" : "integer"
         }
       },
-      "required" : [ "type" ],
+      "required" : [ "type", "internCount", "stringLengthBytes" ],
       "additionalProperties" : false
     },
     "SuppressEffect" : {
@@ -1275,13 +1290,14 @@
           "format" : "duration"
         },
         "namePrefix" : {
-          "type" : "string"
+          "type" : "string",
+          "pattern" : "\\S"
         },
         "threadCount" : {
           "type" : "integer"
         }
       },
-      "required" : [ "type" ],
+      "required" : [ "type", "namePrefix", "threadCount" ],
       "additionalProperties" : false
     },
     "ThreadLocalLeakEffect" : {
@@ -1297,7 +1313,7 @@
           "type" : "integer"
         }
       },
-      "required" : [ "type" ],
+      "required" : [ "type", "entriesPerThread", "valueSizeBytes" ],
       "additionalProperties" : false
     },
     "ThreadLocalSelector" : {
@@ -1308,12 +1324,12 @@
         },
         "operations" : {
           "type" : "array",
-          "minItems" : 1,
           "uniqueItems" : true,
           "items" : {
             "type" : "string",
             "enum" : [ "THREAD_LOCAL_GET", "THREAD_LOCAL_SET" ]
-          }
+          },
+          "minItems" : 1
         },
         "threadLocalClassPattern" : {
           "$ref" : "#/$defs/NamePattern"
@@ -1337,12 +1353,12 @@
         },
         "operations" : {
           "type" : "array",
-          "minItems" : 1,
           "uniqueItems" : true,
           "items" : {
             "type" : "string",
             "enum" : [ "THREAD_START", "VIRTUAL_THREAD_START", "THREAD_SLEEP" ]
-          }
+          },
+          "minItems" : 1
         },
         "threadNamePattern" : {
           "$ref" : "#/$defs/NamePattern"
@@ -1381,7 +1397,7 @@
           "type" : "integer"
         }
       },
-      "required" : [ "type" ],
+      "required" : [ "type", "maxBytes" ],
       "additionalProperties" : false
     },
     "VirtualThreadCarrierPinningEffect" : {
@@ -1398,7 +1414,7 @@
           "type" : "integer"
         }
       },
-      "required" : [ "type" ],
+      "required" : [ "type", "pinDuration", "pinnedThreadCount" ],
       "additionalProperties" : false
     }
   }

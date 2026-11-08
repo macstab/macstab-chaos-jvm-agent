@@ -25,7 +25,7 @@ chaos-agent-startup-config.jar!/com/macstab/chaos/jvm/startup/chaos-plan.schema.
 
 and identified as `https://macstab.com/schemas/chaos-plan.schema.json`. Point an editor at it to get completion and validation while writing a plan.
 
-The schema is not written by hand: `PlanSchemaTest` derives it from the plan mapper (`ChaosPlanMapper`) — the record components and creators the mapper binds, the `type` names of selectors and effects, its rejection of unknown fields — and fails the build when the committed file differs. The schema and the parser therefore cannot disagree. After changing the plan model, regenerate it:
+The schema is not written by hand: `PlanSchemaTest` derives it from the plan mapper (`ChaosPlanMapper`) — the record components and creators the mapper binds, the `type` names of selectors and effects, its rejection of unknown fields — and fails the build when the committed file differs. Its constraints are probed, not listed: a property is `required`, an array has `minItems: 1` and a string the non-blank `pattern: "\\S"` only if the mapper rejects the violation in every sample of the type (`PlanSchemaTest.SAMPLES` holds valid JSON for each type, one sample per shape that needs different properties). The schema therefore never refuses a plan the agent accepts, and the two cannot disagree. A new type of the plan model needs a sample; the test names the type that lacks one. After changing the plan model, regenerate it:
 
 ```text
 ./gradlew :chaos-agent-startup-config:test --tests '*PlanSchemaTest*' -PupdatePlanSchema
@@ -77,6 +77,7 @@ An enum is matched exactly: `"jvm"` is refused with the constants it may be ("un
 - **A field given twice is rejected**, instead of the last value winning.
 - **No coercion**: a duration or an instant is an ISO-8601 string (a number such as `1` or `1e100` is refused, not read as seconds), an integer field takes an integer (not `1.5`, not `"5"`), a boolean `true` or `false` (not `1`), and an enum its name (not its ordinal).
 - **All or nothing**: a plan with one invalid scenario applies no scenario at all; a reloaded plan replaces the previous one only when the whole new plan is valid.
+- **What the schema cannot say**: a rule across fields is the mapper's, not the schema's. A method selector needs a `classPattern` or a `methodNamePattern` other than `ANY`, a `dnsAnswer` one of `override`, `family`, `shuffle` and `limit`, a pattern in mode `ANY` takes no value other than a blank or `"*"`; ranges (a count above 0, a port up to 65535) are checked by the mapper too. A plan the schema accepts can still be refused by the mapper, never the reverse.
 - **Syntax, then meaning**: the schema decides what is well formed; `ChaosValidationException` then rejects what is well formed but meaningless (an effect on an operation it cannot act on, a clock skew with a probability, a bound out of range), naming the scenario.
 
 ## 5. Selector types
