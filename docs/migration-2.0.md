@@ -44,6 +44,7 @@
 | 24 | `ActivationPolicy.fromJson` is no longer public | you call it from code | use the constructor or `ActivationPolicy.builder()`, or read JSON with `ChaosPlanMapper` (§24) |
 | 25 | Plan JSON is read strictly and written in ISO-8601 | a plan gives a duration or instant as a number, a number as a string, a fraction for an integer, `0`/`1` for a boolean, an ordinal for an enum or a field twice; or you read `GET /q/chaos` (`/chaos`, `/actuator/chaos`) or `ChaosPlanMapper.toJson` output as numbers | write ISO-8601 strings and plain JSON values; read `capturedAt` and durations as ISO-8601 strings (§25) |
 | 26 | A name pattern is no longer canonicalised | a pattern has a mode without a value (`{"mode": "GLOB"}`, `NamePattern.glob(null)`), a value without a mode, or `ANY` with a value other than `"*"` | give the mode its value, or use `ANY` (`NamePattern.any()`) (§26) |
+| 27 | The API's nullness is published (`@NullMarked`) | Kotlin code passes `null` where a type is non-null, or treats a non-null result as nullable | pass a value, or use the parameters marked `@Nullable` (§27) |
 
 ---
 
@@ -339,6 +340,12 @@ Before (1.x): `"minDelay": 0.005` was read as 5 ms and the diagnostics snapshot 
 `NamePattern` refuses with `IllegalArgumentException` (through the plan reader, `ConfigLoadException`) what 1.x silently turned into a pattern that matches everything: a mode other than `ANY` without a value (`{"mode": "GLOB"}`, `NamePattern.glob(null)`), a value without a mode (`{"value": "com.example.*"}`), and `ANY` with a value other than blank or `"*"` (`new NamePattern(ANY, "x")`). A pattern without both mode and value is still `ANY`, and `ANY` with `"*"` (what `NamePattern.any()` and every written plan carry) still works.
 
 Before (1.x): `{"mode": "GLOB"}` without a value matched every name, so a selector meant to narrow its scenario applied it everywhere. Now give the mode its value, or write `{"mode": "ANY"}`.
+
+## 27. The API's nullness is published
+
+Every production package is JSpecify `@NullMarked`: a type is non-null unless it is annotated `@Nullable`, and `chaos-agent-api` brings the annotations to the consumer's class path. Kotlin reads them, so the API's types are no longer platform types (`String!`) but non-null (`String`) or nullable (`String?`). The parameters a constructor or factory normalises from `null` (a selector's patterns, `ChaosScenario`'s description, scope and policy, `ChaosPlan`'s metadata and observability, `NamePattern`'s mode and value) are `@Nullable`; the accessors returning the normalised values are not.
+
+Before (1.x): Kotlin let `selector.destinationPattern()` be treated as nullable and accepted `null` for any parameter. Now pass a value where the type is non-null, and drop the null checks on non-null results.
 
 ---
 

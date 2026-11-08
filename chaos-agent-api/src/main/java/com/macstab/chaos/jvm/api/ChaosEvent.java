@@ -3,6 +3,7 @@ package com.macstab.chaos.jvm.api;
 import java.time.Instant;
 import java.util.Map;
 import java.util.Objects;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Immutable event published to {@link ChaosEventListener} subscribers on every chaos lifecycle
@@ -39,18 +40,27 @@ public record ChaosEvent(
     Map<String, String> attributes) {
 
   /**
-   * Compact constructor — enforces null-safety on every required field and takes an immutable
+   * Canonical constructor — enforces null-safety on every required field and takes an immutable
    * snapshot of the attribute map. Without the copy, a listener could hold a reference to the
    * original {@code Map} and mutate it long after the event has been published, breaking the
    * published immutability contract. {@code Map.copyOf} additionally rejects null keys/values,
    * which keeps downstream serialisation (Jackson, JFR commit) from tripping on them later.
    */
-  public ChaosEvent {
+  public ChaosEvent(
+      final Instant timestamp,
+      final Type type,
+      final String scenarioId,
+      final String message,
+      final @Nullable Map<String, String> attributes) {
     Objects.requireNonNull(timestamp, "timestamp");
     Objects.requireNonNull(type, "type");
     Objects.requireNonNull(scenarioId, "scenarioId");
     Objects.requireNonNull(message, "message");
-    attributes = attributes == null ? Map.of() : Map.copyOf(attributes);
+    this.attributes = attributes == null ? Map.of() : Map.copyOf(attributes);
+    this.timestamp = timestamp;
+    this.type = type;
+    this.scenarioId = scenarioId;
+    this.message = message;
   }
 
   /** Discriminates the kind of chaos event delivered to {@link ChaosEventListener}. */

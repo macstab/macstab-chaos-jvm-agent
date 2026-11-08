@@ -97,7 +97,7 @@ public record NamePattern(MatchMode mode, String value) {
    *     {@code null} or blank, if the mode is {@link MatchMode#ANY} and the value is other than
    *     {@code null}, blank or {@code "*"}, or if a value is given without a mode
    */
-  public NamePattern(final MatchMode mode, final String value) {
+  public NamePattern(final @Nullable MatchMode mode, final @Nullable String value) {
     if (mode == null && value != null) {
       throw new IllegalArgumentException("name pattern value needs a mode");
     }

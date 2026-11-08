@@ -9,7 +9,7 @@
 
 # 0008 — Nullness is part of the types, and the compiler proves it
 
-**Status:** Accepted (2.0); amends [0004](0004-plan-json-by-mixins.md): the API now has one dependency
+**Status:** Accepted (2.0); amends [0004](0004-plan-json-by-mixins.md): the API now has one dependency; amended (2.0): every production package is `@NullMarked` (a `package-info.java` each, which an API test requires of every new package), so the non-null default is in the bytecode and not only a NullAway option; a record component that the constructor normalises from `null` (a selector's patterns, `ChaosScenario` description, scope and policy, `ChaosPlan` metadata and observability, `NamePattern` mode and value) has an explicit canonical constructor whose parameter is `@Nullable` while the accessor is not
 
 ## Context
 

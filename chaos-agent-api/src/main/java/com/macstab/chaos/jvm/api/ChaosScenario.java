@@ -61,16 +61,28 @@ public record ChaosScenario(
     Map<String, String> tags) {
 
   /** Validates and normalises the ChaosScenario fields. */
-  public ChaosScenario {
+  public ChaosScenario(
+      final String id,
+      final @Nullable String description,
+      final @Nullable ScenarioScope scope,
+      final ChaosSelector selector,
+      final ChaosEffect effect,
+      final @Nullable ActivationPolicy activationPolicy,
+      final int precedence,
+      final Map<String, String> tags) {
     if (id == null || id.isBlank()) {
       throw new IllegalArgumentException("id must be non-blank");
     }
-    description = description == null ? "" : description;
-    scope = scope == null ? ScenarioScope.JVM : scope;
+    this.description = description == null ? "" : description;
+    this.scope = scope == null ? ScenarioScope.JVM : scope;
     Objects.requireNonNull(selector, "selector");
     Objects.requireNonNull(effect, "effect");
-    activationPolicy = activationPolicy == null ? ActivationPolicy.always() : activationPolicy;
-    tags = copyTagsPreservingOrder(tags);
+    this.activationPolicy = activationPolicy == null ? ActivationPolicy.always() : activationPolicy;
+    this.tags = copyTagsPreservingOrder(tags);
+    this.id = id;
+    this.selector = selector;
+    this.effect = effect;
+    this.precedence = precedence;
   }
 
   private static Map<String, String> copyTagsPreservingOrder(final Map<String, String> tags) {
@@ -136,11 +148,11 @@ public record ChaosScenario(
    */
   public static final class Builder {
     private final String id;
-    private String description = "";
-    private ScenarioScope scope = ScenarioScope.JVM;
+    private @Nullable String description = "";
+    private @Nullable ScenarioScope scope = ScenarioScope.JVM;
     private @Nullable ChaosSelector selector;
     private @Nullable ChaosEffect effect;
-    private ActivationPolicy activationPolicy = ActivationPolicy.always();
+    private @Nullable ActivationPolicy activationPolicy = ActivationPolicy.always();
     private int precedence;
     private final Map<String, String> tags = new LinkedHashMap<>();
 
@@ -152,10 +164,10 @@ public record ChaosScenario(
      * Human-readable description of what this scenario tests. Appears in diagnostics and debug
      * dumps.
      *
-     * @param description free-form description text
+     * @param description free-form description text; {@code null} is {@code ""}
      * @return this builder for chaining
      */
-    public Builder description(final String description) {
+    public Builder description(final @Nullable String description) {
       this.description = description;
       return this;
     }
@@ -163,11 +175,11 @@ public record ChaosScenario(
     /**
      * Sets the scope. Defaults to {@link ScenarioScope#JVM} when not called.
      *
-     * @param scope visibility scope for this scenario
+     * @param scope visibility scope for this scenario; {@code null} is {@link ScenarioScope#JVM}
      * @return this builder for chaining
      * @see ScenarioScope
      */
-    public Builder scope(final ScenarioScope scope) {
+    public Builder scope(final @Nullable ScenarioScope scope) {
       this.scope = scope;
       return this;
     }
@@ -200,11 +212,12 @@ public record ChaosScenario(
      * Sets the activation policy controlling when and how often the effect fires. Defaults to
      * {@link ActivationPolicy#always()} when not called.
      *
-     * @param activationPolicy activation policy governing when the effect fires
+     * @param activationPolicy activation policy governing when the effect fires; {@code null} is
+     *     {@link ActivationPolicy#always()}
      * @return this builder for chaining
      * @see ActivationPolicy
      */
-    public Builder activationPolicy(final ActivationPolicy activationPolicy) {
+    public Builder activationPolicy(final @Nullable ActivationPolicy activationPolicy) {
       this.activationPolicy = activationPolicy;
       return this;
     }

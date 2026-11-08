@@ -18,6 +18,66 @@ import org.junit.jupiter.api.Test;
 class ApiContractsTest {
 
   /**
+   * Nullness is in the types (ADR 0008): every production package is {@code @NullMarked}, and a
+   * parameter that accepts {@code null} says so while the accessor of the value it normalises does
+   * not.
+   */
+  @Nested
+  @DisplayName("nullness")
+  class Nullness {
+
+    @Test
+    @DisplayName("every production package of every module is @NullMarked")
+    void everyPackageNullMarked() throws java.io.IOException {
+      // The tests run in the module's directory; its parent is the build's root.
+      final java.nio.file.Path root = java.nio.file.Path.of("").toAbsolutePath().getParent();
+      final List<java.nio.file.Path> packages;
+      try (java.util.stream.Stream<java.nio.file.Path> files = java.nio.file.Files.walk(root)) {
+        packages =
+            files
+                .filter(file -> file.toString().endsWith(".java"))
+                .filter(file -> root.relativize(file).toString().startsWith("chaos-agent-"))
+                .filter(file -> file.toString().contains("/src/main/java/"))
+                .map(java.nio.file.Path::getParent)
+                .distinct()
+                .toList();
+      }
+      assertThat(packages).isNotEmpty();
+      for (final java.nio.file.Path directory : packages) {
+        final java.nio.file.Path info = directory.resolve("package-info.java");
+        assertThat(info).as("%s", root.relativize(directory)).exists();
+        assertThat(java.nio.file.Files.readString(info))
+            .as("%s", root.relativize(info))
+            .contains("@NullMarked");
+      }
+      assertThat(
+              ChaosSelector.class
+                  .getPackage()
+                  .isAnnotationPresent(org.jspecify.annotations.NullMarked.class))
+          .isTrue();
+    }
+
+    @Test
+    @DisplayName("a pattern a selector normalises is @Nullable as a parameter, not as a value")
+    void nullableParameterNonNullAccessor() throws NoSuchMethodException {
+      final java.lang.reflect.Constructor<ChaosSelector.MessagingSelector> constructor =
+          ChaosSelector.MessagingSelector.class.getDeclaredConstructor(
+              java.util.Set.class, NamePattern.class);
+
+      assertThat(
+              constructor.getAnnotatedParameterTypes()[1].isAnnotationPresent(
+                  org.jspecify.annotations.Nullable.class))
+          .isTrue();
+      assertThat(
+              ChaosSelector.MessagingSelector.class
+                  .getMethod("destinationPattern")
+                  .getAnnotatedReturnType()
+                  .isAnnotationPresent(org.jspecify.annotations.Nullable.class))
+          .isFalse();
+    }
+  }
+
+  /**
    * The private JSON creators the plan mapper binds (through mix-ins in chaos-agent-startup-config,
    * whose tests read the JSON): a null argument, an omitted field, takes the documented default.
    */

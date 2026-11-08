@@ -144,7 +144,7 @@ public sealed interface ChaosSelector
    * @return a ClassLoadingSelector
    */
   static ClassLoadingSelector classLoading(
-      final Set<OperationType> operations, final NamePattern targetPattern) {
+      final Set<OperationType> operations, final @Nullable NamePattern targetPattern) {
     return new ClassLoadingSelector(operations, targetPattern, NamePattern.any());
   }
 
@@ -172,8 +172,8 @@ public sealed interface ChaosSelector
    */
   static MethodSelector method(
       final Set<OperationType> operations,
-      final NamePattern classPattern,
-      final NamePattern methodNamePattern) {
+      final @Nullable NamePattern classPattern,
+      final @Nullable NamePattern methodNamePattern) {
     return new MethodSelector(operations, classPattern, methodNamePattern, NamePattern.any());
   }
 
@@ -235,7 +235,7 @@ public sealed interface ChaosSelector
    * @return a NioSelector
    */
   static NioSelector nio(
-      final Set<OperationType> operations, final NamePattern channelClassPattern) {
+      final Set<OperationType> operations, final @Nullable NamePattern channelClassPattern) {
     return new NioSelector(operations, channelClassPattern);
   }
 
@@ -261,7 +261,7 @@ public sealed interface ChaosSelector
    * @return a NetworkSelector
    */
   static NetworkSelector network(
-      final Set<OperationType> operations, final NamePattern remoteHostPattern) {
+      final Set<OperationType> operations, final @Nullable NamePattern remoteHostPattern) {
     return new NetworkSelector(operations, remoteHostPattern);
   }
 
@@ -288,7 +288,7 @@ public sealed interface ChaosSelector
    * @return a ThreadLocalSelector
    */
   static ThreadLocalSelector threadLocal(
-      final Set<OperationType> operations, final NamePattern threadLocalClassPattern) {
+      final Set<OperationType> operations, final @Nullable NamePattern threadLocalClassPattern) {
     return new ThreadLocalSelector(operations, threadLocalClassPattern);
   }
 
@@ -315,7 +315,7 @@ public sealed interface ChaosSelector
    * @return an HttpClientSelector
    */
   static HttpClientSelector httpClient(
-      final Set<OperationType> operations, final NamePattern urlPattern) {
+      final Set<OperationType> operations, final @Nullable NamePattern urlPattern) {
     return new HttpClientSelector(operations, urlPattern);
   }
 
@@ -422,7 +422,7 @@ public sealed interface ChaosSelector
    * @return a new {@link MessagingSelector}
    */
   static MessagingSelector messaging(
-      final Set<OperationType> operations, final NamePattern destinationPattern) {
+      final Set<OperationType> operations, final @Nullable NamePattern destinationPattern) {
     return new MessagingSelector(operations, destinationPattern);
   }
 
@@ -433,7 +433,7 @@ public sealed interface ChaosSelector
    * @param methodPattern pattern matched against {@code package.Service/Method}
    * @return a new {@link RpcSelector}
    */
-  static RpcSelector rpc(final NamePattern methodPattern) {
+  static RpcSelector rpc(final @Nullable NamePattern methodPattern) {
     return new RpcSelector(Set.of(OperationType.RPC_CALL), methodPattern);
   }
 
@@ -443,7 +443,7 @@ public sealed interface ChaosSelector
    * @param commandPattern pattern matched against the upper-case command name
    * @return a new {@link RedisSelector}
    */
-  static RedisSelector redis(final NamePattern commandPattern) {
+  static RedisSelector redis(final @Nullable NamePattern commandPattern) {
     return new RedisSelector(Set.of(OperationType.REDIS_COMMAND), commandPattern);
   }
 
@@ -455,7 +455,7 @@ public sealed interface ChaosSelector
    * @return a new {@link AwsSdkSelector}
    */
   static AwsSdkSelector awsSdk(
-      final NamePattern servicePattern, final NamePattern operationPattern) {
+      final @Nullable NamePattern servicePattern, final @Nullable NamePattern operationPattern) {
     return new AwsSdkSelector(Set.of(OperationType.AWS_SDK_CALL), servicePattern, operationPattern);
   }
 
@@ -468,7 +468,7 @@ public sealed interface ChaosSelector
    *     NamePattern.exact("/usr/bin/ffmpeg")})
    * @return a new {@link ProcessSelector}
    */
-  static ProcessSelector process(final NamePattern commandPattern) {
+  static ProcessSelector process(final @Nullable NamePattern commandPattern) {
     return new ProcessSelector(Set.of(OperationType.PROCESS_START), commandPattern);
   }
 
@@ -574,10 +574,15 @@ public sealed interface ChaosSelector
             OperationType.THREAD_SLEEP);
 
     /** Validates the ThreadSelector parameters. */
-    public ThreadSelector {
-      operations = validatedOperations(operations, VALID_OPS, "ThreadSelector");
-      kind = kind == null ? ThreadKind.ANY : kind;
-      threadNamePattern = threadNamePattern == null ? NamePattern.any() : threadNamePattern;
+    public ThreadSelector(
+        final Set<OperationType> operations,
+        final @Nullable ThreadKind kind,
+        final @Nullable NamePattern threadNamePattern,
+        final @Nullable Boolean daemon) {
+      this.operations = validatedOperations(operations, VALID_OPS, "ThreadSelector");
+      this.kind = kind == null ? ThreadKind.ANY : kind;
+      this.threadNamePattern = threadNamePattern == null ? NamePattern.any() : threadNamePattern;
+      this.daemon = daemon;
     }
   }
 
@@ -606,11 +611,16 @@ public sealed interface ChaosSelector
             OperationType.FORK_JOIN_TASK_RUN);
 
     /** Validates the ExecutorSelector parameters. */
-    public ExecutorSelector {
-      operations = validatedOperations(operations, VALID_OPS, "ExecutorSelector");
-      executorClassPattern =
+    public ExecutorSelector(
+        final Set<OperationType> operations,
+        final @Nullable NamePattern executorClassPattern,
+        final @Nullable NamePattern taskClassPattern,
+        final @Nullable Boolean scheduledOnly) {
+      this.operations = validatedOperations(operations, VALID_OPS, "ExecutorSelector");
+      this.executorClassPattern =
           executorClassPattern == null ? NamePattern.any() : executorClassPattern;
-      taskClassPattern = taskClassPattern == null ? NamePattern.any() : taskClassPattern;
+      this.taskClassPattern = taskClassPattern == null ? NamePattern.any() : taskClassPattern;
+      this.scheduledOnly = scheduledOnly;
     }
   }
 
@@ -630,9 +640,10 @@ public sealed interface ChaosSelector
             OperationType.QUEUE_POLL);
 
     /** Validates the QueueSelector parameters. */
-    public QueueSelector {
-      operations = validatedOperations(operations, VALID_OPS, "QueueSelector");
-      queueClassPattern = queueClassPattern == null ? NamePattern.any() : queueClassPattern;
+    public QueueSelector(
+        final Set<OperationType> operations, final @Nullable NamePattern queueClassPattern) {
+      this.operations = validatedOperations(operations, VALID_OPS, "QueueSelector");
+      this.queueClassPattern = queueClassPattern == null ? NamePattern.any() : queueClassPattern;
     }
   }
 
@@ -670,10 +681,14 @@ public sealed interface ChaosSelector
         EnumSet.of(OperationType.SCHEDULE_SUBMIT, OperationType.SCHEDULE_TICK);
 
     /** Validates the SchedulingSelector parameters. */
-    public SchedulingSelector {
-      operations = validatedOperations(operations, VALID_OPS, "SchedulingSelector");
-      executorClassPattern =
+    public SchedulingSelector(
+        final Set<OperationType> operations,
+        final @Nullable NamePattern executorClassPattern,
+        final @Nullable Boolean periodicOnly) {
+      this.operations = validatedOperations(operations, VALID_OPS, "SchedulingSelector");
+      this.executorClassPattern =
           executorClassPattern == null ? NamePattern.any() : executorClassPattern;
+      this.periodicOnly = periodicOnly;
     }
   }
 
@@ -692,9 +707,10 @@ public sealed interface ChaosSelector
             OperationType.EXECUTOR_AWAIT_TERMINATION);
 
     /** Validates the ShutdownSelector parameters. */
-    public ShutdownSelector {
-      operations = validatedOperations(operations, VALID_OPS, "ShutdownSelector");
-      targetClassPattern = targetClassPattern == null ? NamePattern.any() : targetClassPattern;
+    public ShutdownSelector(
+        final Set<OperationType> operations, final @Nullable NamePattern targetClassPattern) {
+      this.operations = validatedOperations(operations, VALID_OPS, "ShutdownSelector");
+      this.targetClassPattern = targetClassPattern == null ? NamePattern.any() : targetClassPattern;
     }
   }
 
@@ -713,10 +729,13 @@ public sealed interface ChaosSelector
             OperationType.CLASS_LOAD, OperationType.CLASS_DEFINE, OperationType.RESOURCE_LOAD);
 
     /** Validates the ClassLoadingSelector parameters. */
-    public ClassLoadingSelector {
-      operations = validatedOperations(operations, VALID_OPS, "ClassLoadingSelector");
-      targetNamePattern = targetNamePattern == null ? NamePattern.any() : targetNamePattern;
-      loaderClassPattern = loaderClassPattern == null ? NamePattern.any() : loaderClassPattern;
+    public ClassLoadingSelector(
+        final Set<OperationType> operations,
+        final @Nullable NamePattern targetNamePattern,
+        final @Nullable NamePattern loaderClassPattern) {
+      this.operations = validatedOperations(operations, VALID_OPS, "ClassLoadingSelector");
+      this.targetNamePattern = targetNamePattern == null ? NamePattern.any() : targetNamePattern;
+      this.loaderClassPattern = loaderClassPattern == null ? NamePattern.any() : loaderClassPattern;
     }
   }
 
@@ -765,17 +784,21 @@ public sealed interface ChaosSelector
         EnumSet.of(OperationType.METHOD_ENTER, OperationType.METHOD_EXIT);
 
     /** Validates the MethodSelector parameters. */
-    public MethodSelector {
-      operations = validatedOperations(operations, VALID_OPS, "MethodSelector");
-      classPattern = classPattern == null ? NamePattern.any() : classPattern;
-      methodNamePattern = methodNamePattern == null ? NamePattern.any() : methodNamePattern;
-      if (classPattern.mode() == NamePattern.MatchMode.ANY
-          && methodNamePattern.mode() == NamePattern.MatchMode.ANY) {
+    public MethodSelector(
+        final Set<OperationType> operations,
+        final @Nullable NamePattern classPattern,
+        final @Nullable NamePattern methodNamePattern,
+        final @Nullable NamePattern signaturePattern) {
+      this.operations = validatedOperations(operations, VALID_OPS, "MethodSelector");
+      this.classPattern = classPattern == null ? NamePattern.any() : classPattern;
+      this.methodNamePattern = methodNamePattern == null ? NamePattern.any() : methodNamePattern;
+      if (this.classPattern.mode() == NamePattern.MatchMode.ANY
+          && this.methodNamePattern.mode() == NamePattern.MatchMode.ANY) {
         throw new IllegalArgumentException(
             "MethodSelector requires at least one non-ANY pattern to prevent "
                 + "accidental global method instrumentation");
       }
-      signaturePattern = signaturePattern == null ? NamePattern.any() : signaturePattern;
+      this.signaturePattern = signaturePattern == null ? NamePattern.any() : signaturePattern;
     }
   }
 
@@ -795,9 +818,11 @@ public sealed interface ChaosSelector
         EnumSet.of(OperationType.MONITOR_ENTER, OperationType.THREAD_PARK);
 
     /** Validates the MonitorSelector parameters. */
-    public MonitorSelector {
-      operations = validatedOperations(operations, VALID_OPS, "MonitorSelector");
-      monitorClassPattern = monitorClassPattern == null ? NamePattern.any() : monitorClassPattern;
+    public MonitorSelector(
+        final Set<OperationType> operations, final @Nullable NamePattern monitorClassPattern) {
+      this.operations = validatedOperations(operations, VALID_OPS, "MonitorSelector");
+      this.monitorClassPattern =
+          monitorClassPattern == null ? NamePattern.any() : monitorClassPattern;
     }
   }
 
@@ -870,9 +895,11 @@ public sealed interface ChaosSelector
             OperationType.NIO_CHANNEL_ACCEPT);
 
     /** Validates the NioSelector parameters. */
-    public NioSelector {
-      operations = validatedOperations(operations, VALID_OPS, "NioSelector");
-      channelClassPattern = channelClassPattern == null ? NamePattern.any() : channelClassPattern;
+    public NioSelector(
+        final Set<OperationType> operations, final @Nullable NamePattern channelClassPattern) {
+      this.operations = validatedOperations(operations, VALID_OPS, "NioSelector");
+      this.channelClassPattern =
+          channelClassPattern == null ? NamePattern.any() : channelClassPattern;
     }
   }
 
@@ -937,16 +964,26 @@ public sealed interface ChaosSelector
             OperationType.DATAGRAM_RECEIVE);
 
     /** Validates the NetworkSelector parameters. */
-    public NetworkSelector {
-      operations = validatedOperations(operations, VALID_OPS, "NetworkSelector");
-      remoteHostPattern = remoteHostPattern == null ? NamePattern.any() : remoteHostPattern;
+    public NetworkSelector(
+        final Set<OperationType> operations,
+        final @Nullable NamePattern remoteHostPattern,
+        final @Nullable String remoteCidr,
+        final @Nullable Integer remotePort,
+        final @Nullable Long minBytes,
+        final @Nullable Long maxBytes) {
+      this.operations = validatedOperations(operations, VALID_OPS, "NetworkSelector");
+      this.remoteHostPattern = remoteHostPattern == null ? NamePattern.any() : remoteHostPattern;
       if (remoteCidr != null) {
         CidrBlock.parse(remoteCidr);
       }
       if (remotePort != null && (remotePort < 0 || remotePort > 65_535)) {
         throw new IllegalArgumentException("remotePort must be in [0, 65535], got " + remotePort);
       }
-      validateSizeRange(minBytes, maxBytes, operations, SIZED_OPS, "NetworkSelector");
+      validateSizeRange(minBytes, maxBytes, this.operations, SIZED_OPS, "NetworkSelector");
+      this.remoteCidr = remoteCidr;
+      this.remotePort = remotePort;
+      this.minBytes = minBytes;
+      this.maxBytes = maxBytes;
     }
 
     /**
@@ -956,7 +993,7 @@ public sealed interface ChaosSelector
      * @param remoteHostPattern pattern matched against the remote host name or IP string
      */
     public NetworkSelector(
-        final Set<OperationType> operations, final NamePattern remoteHostPattern) {
+        final Set<OperationType> operations, final @Nullable NamePattern remoteHostPattern) {
       this(operations, remoteHostPattern, null, null, null, null);
     }
   }
@@ -983,9 +1020,10 @@ public sealed interface ChaosSelector
         EnumSet.of(OperationType.THREAD_LOCAL_GET, OperationType.THREAD_LOCAL_SET);
 
     /** Validates the ThreadLocalSelector parameters. */
-    public ThreadLocalSelector {
-      operations = validatedOperations(operations, VALID_OPS, "ThreadLocalSelector");
-      threadLocalClassPattern =
+    public ThreadLocalSelector(
+        final Set<OperationType> operations, final @Nullable NamePattern threadLocalClassPattern) {
+      this.operations = validatedOperations(operations, VALID_OPS, "ThreadLocalSelector");
+      this.threadLocalClassPattern =
           threadLocalClassPattern == null ? NamePattern.any() : threadLocalClassPattern;
     }
   }
@@ -1010,9 +1048,10 @@ public sealed interface ChaosSelector
         EnumSet.of(OperationType.HTTP_CLIENT_SEND, OperationType.HTTP_CLIENT_SEND_ASYNC);
 
     /** Validates the HttpClientSelector parameters. */
-    public HttpClientSelector {
-      operations = validatedOperations(operations, VALID_OPS, "HttpClientSelector");
-      urlPattern = urlPattern == null ? NamePattern.any() : urlPattern;
+    public HttpClientSelector(
+        final Set<OperationType> operations, final @Nullable NamePattern urlPattern) {
+      this.operations = validatedOperations(operations, VALID_OPS, "HttpClientSelector");
+      this.urlPattern = urlPattern == null ? NamePattern.any() : urlPattern;
     }
   }
 
@@ -1051,9 +1090,10 @@ public sealed interface ChaosSelector
             OperationType.R2DBC_STATEMENT_EXECUTE);
 
     /** Validates the JdbcSelector parameters. */
-    public JdbcSelector {
-      operations = validatedOperations(operations, VALID_OPS, "JdbcSelector");
-      targetPattern = targetPattern == null ? NamePattern.any() : targetPattern;
+    public JdbcSelector(
+        final Set<OperationType> operations, final @Nullable NamePattern targetPattern) {
+      this.operations = validatedOperations(operations, VALID_OPS, "JdbcSelector");
+      this.targetPattern = targetPattern == null ? NamePattern.any() : targetPattern;
     }
   }
 
@@ -1078,9 +1118,10 @@ public sealed interface ChaosSelector
         EnumSet.of(OperationType.DNS_RESOLVE, OperationType.DNS_ANSWER, OperationType.DNS_REVERSE);
 
     /** Validates the DnsSelector parameters. */
-    public DnsSelector {
-      operations = validatedOperations(operations, VALID_OPS, "DnsSelector");
-      hostnamePattern = hostnamePattern == null ? NamePattern.any() : hostnamePattern;
+    public DnsSelector(
+        final Set<OperationType> operations, final @Nullable NamePattern hostnamePattern) {
+      this.operations = validatedOperations(operations, VALID_OPS, "DnsSelector");
+      this.hostnamePattern = hostnamePattern == null ? NamePattern.any() : hostnamePattern;
     }
   }
 
@@ -1177,9 +1218,10 @@ public sealed interface ChaosSelector
         EnumSet.of(OperationType.MESSAGE_SEND, OperationType.MESSAGE_RECEIVE);
 
     /** Validates the MessagingSelector parameters. */
-    public MessagingSelector {
-      operations = validatedOperations(operations, VALID_OPS, "MessagingSelector");
-      destinationPattern = destinationPattern == null ? NamePattern.any() : destinationPattern;
+    public MessagingSelector(
+        final Set<OperationType> operations, final @Nullable NamePattern destinationPattern) {
+      this.operations = validatedOperations(operations, VALID_OPS, "MessagingSelector");
+      this.destinationPattern = destinationPattern == null ? NamePattern.any() : destinationPattern;
     }
   }
 
@@ -1196,9 +1238,10 @@ public sealed interface ChaosSelector
     static final Set<OperationType> VALID_OPS = EnumSet.of(OperationType.RPC_CALL);
 
     /** Validates the RpcSelector parameters. */
-    public RpcSelector {
-      operations = validatedOperations(operations, VALID_OPS, "RpcSelector");
-      methodPattern = methodPattern == null ? NamePattern.any() : methodPattern;
+    public RpcSelector(
+        final Set<OperationType> operations, final @Nullable NamePattern methodPattern) {
+      this.operations = validatedOperations(operations, VALID_OPS, "RpcSelector");
+      this.methodPattern = methodPattern == null ? NamePattern.any() : methodPattern;
     }
   }
 
@@ -1216,9 +1259,10 @@ public sealed interface ChaosSelector
     static final Set<OperationType> VALID_OPS = EnumSet.of(OperationType.REDIS_COMMAND);
 
     /** Validates the RedisSelector parameters. */
-    public RedisSelector {
-      operations = validatedOperations(operations, VALID_OPS, "RedisSelector");
-      commandPattern = commandPattern == null ? NamePattern.any() : commandPattern;
+    public RedisSelector(
+        final Set<OperationType> operations, final @Nullable NamePattern commandPattern) {
+      this.operations = validatedOperations(operations, VALID_OPS, "RedisSelector");
+      this.commandPattern = commandPattern == null ? NamePattern.any() : commandPattern;
     }
   }
 
@@ -1239,10 +1283,13 @@ public sealed interface ChaosSelector
     static final Set<OperationType> VALID_OPS = EnumSet.of(OperationType.AWS_SDK_CALL);
 
     /** Validates the AwsSdkSelector parameters. */
-    public AwsSdkSelector {
-      operations = validatedOperations(operations, VALID_OPS, "AwsSdkSelector");
-      servicePattern = servicePattern == null ? NamePattern.any() : servicePattern;
-      operationPattern = operationPattern == null ? NamePattern.any() : operationPattern;
+    public AwsSdkSelector(
+        final Set<OperationType> operations,
+        final @Nullable NamePattern servicePattern,
+        final @Nullable NamePattern operationPattern) {
+      this.operations = validatedOperations(operations, VALID_OPS, "AwsSdkSelector");
+      this.servicePattern = servicePattern == null ? NamePattern.any() : servicePattern;
+      this.operationPattern = operationPattern == null ? NamePattern.any() : operationPattern;
     }
   }
 
@@ -1292,9 +1339,10 @@ public sealed interface ChaosSelector
         EnumSet.of(OperationType.PROCESS_START, OperationType.PROCESS_WAIT);
 
     /** Validates the ProcessSelector parameters. */
-    public ProcessSelector {
-      operations = validatedOperations(operations, VALID_OPS, "ProcessSelector");
-      commandPattern = commandPattern == null ? NamePattern.any() : commandPattern;
+    public ProcessSelector(
+        final Set<OperationType> operations, final @Nullable NamePattern commandPattern) {
+      this.operations = validatedOperations(operations, VALID_OPS, "ProcessSelector");
+      this.commandPattern = commandPattern == null ? NamePattern.any() : commandPattern;
     }
   }
 

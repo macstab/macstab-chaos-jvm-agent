@@ -44,9 +44,13 @@ public record ChaosPlan(
    * @param scenarios the chaos scenarios to activate; must be non-empty
    * @throws IllegalArgumentException if {@code scenarios} is null or empty
    */
-  public ChaosPlan {
-    metadata = metadata == null ? new Metadata("default", "") : metadata;
-    observability = observability == null ? new Observability(true, true, false) : observability;
+  public ChaosPlan(
+      final @Nullable Metadata metadata,
+      final @Nullable Observability observability,
+      final List<ChaosScenario> scenarios) {
+    this.metadata = metadata == null ? new Metadata("default", "") : metadata;
+    this.observability =
+        observability == null ? new Observability(true, true, false) : observability;
     if (scenarios == null || scenarios.isEmpty()) {
       throw new IllegalArgumentException("scenarios must not be empty");
     }
@@ -69,7 +73,7 @@ public record ChaosPlan(
             "duplicate scenario id in plan: '" + scenario.id() + "'");
       }
     }
-    scenarios = List.copyOf(scenarios);
+    this.scenarios = List.copyOf(scenarios);
   }
 
   /**
@@ -89,11 +93,12 @@ public record ChaosPlan(
      * @param description optional free-text description; null is normalised to {@code ""}
      * @throws IllegalArgumentException if {@code name} is null or blank
      */
-    public Metadata {
+    public Metadata(final String name, final @Nullable String description) {
       if (name == null || name.isBlank()) {
         throw new IllegalArgumentException("plan name must be non-blank");
       }
-      description = description == null ? "" : description;
+      this.description = description == null ? "" : description;
+      this.name = name;
     }
   }
 

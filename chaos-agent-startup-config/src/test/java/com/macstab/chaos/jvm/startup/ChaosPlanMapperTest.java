@@ -24,6 +24,16 @@ import org.junit.jupiter.api.Test;
 @DisplayName("ChaosPlanMapper")
 class ChaosPlanMapperTest {
 
+  @Test
+  @DisplayName("publishes its nullness: the package is @NullMarked")
+  void nullMarked() {
+    assertThat(
+            ChaosPlanMapper.class
+                .getPackage()
+                .isAnnotationPresent(org.jspecify.annotations.NullMarked.class))
+        .isTrue();
+  }
+
   @Nested
   @DisplayName("round-trip serialisation")
   class RoundTrip {

@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Read-only runtime view of all registered chaos scenarios and agent health.
@@ -148,16 +149,21 @@ public interface ChaosDiagnostics {
       List<ActivationFailure> failures,
       Map<String, String> runtimeDetails) {
     /**
-     * Compact constructor — rejects nulls on the required scalar and takes immutable snapshots of
+     * Canonical constructor — rejects nulls on the required scalar and takes immutable snapshots of
      * the list/map fields. Without the copies, a caller who kept the list returned from the
      * registry could mutate it after publishing the snapshot, breaking the "point in time" name.
      * {@code List.copyOf}/{@code Map.copyOf} additionally reject null elements.
      */
-    public Snapshot {
+    public Snapshot(
+        final Instant capturedAt,
+        final @Nullable List<ScenarioReport> scenarios,
+        final @Nullable List<ActivationFailure> failures,
+        final @Nullable Map<String, String> runtimeDetails) {
       Objects.requireNonNull(capturedAt, "capturedAt");
-      scenarios = scenarios == null ? List.of() : List.copyOf(scenarios);
-      failures = failures == null ? List.of() : List.copyOf(failures);
-      runtimeDetails = runtimeDetails == null ? Map.of() : Map.copyOf(runtimeDetails);
+      this.scenarios = scenarios == null ? List.of() : List.copyOf(scenarios);
+      this.failures = failures == null ? List.of() : List.copyOf(failures);
+      this.runtimeDetails = runtimeDetails == null ? Map.of() : Map.copyOf(runtimeDetails);
+      this.capturedAt = capturedAt;
     }
   }
 
