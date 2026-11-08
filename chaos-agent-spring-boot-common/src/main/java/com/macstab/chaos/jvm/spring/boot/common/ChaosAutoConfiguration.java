@@ -5,6 +5,7 @@ import com.macstab.chaos.jvm.api.ChaosControlPlane;
 import com.macstab.chaos.jvm.api.ChaosPlan;
 import com.macstab.chaos.jvm.bootstrap.ChaosPlatform;
 import com.macstab.chaos.jvm.startup.ConfigLoadException;
+import com.macstab.chaos.jvm.startup.LogText;
 import com.macstab.chaos.jvm.startup.StartupConfigLoader;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -111,12 +112,12 @@ public class ChaosAutoConfiguration {
               + CONFIG_FILE_PROPERTY
               + " comes from an untrusted property source and is ignored");
     } else if (configFile != null && !configFile.isBlank()) {
-      // Strip CR/LF/NUL from the operator-supplied path before it enters any log record.
+      // Strip line breaks and controls from the operator-supplied path before it is logged.
       // Without this, a property value like "/etc/plan.json\n2026-04-20 FORGED: chaos
       // deactivated" forges a second log line downstream in structured-log pipelines (CRLF
       // injection / log-entry splitting). Audit integrity depends on every emitted line
       // being attributable to a single log call.
-      final String safeConfigFile = sanitizeForLog(configFile);
+      final String safeConfigFile = LogText.sanitize(configFile);
       try {
         final ChaosPlan plan = StartupConfigLoader.loadPlanFromFile(configFile);
         final ChaosActivationHandle handle = controlPlane.activate(plan);
@@ -126,17 +127,15 @@ public class ChaosAutoConfiguration {
             "chaos-agent: activated startup plan \"{0}\" from {1}",
             new Object[] {handle.id(), safeConfigFile});
       } catch (final ConfigLoadException exception) {
-        // Do not include the Jackson cause chain message: it can echo raw excerpts of the
-        // file contents, which for attacker-influenced paths leaks credential bytes into stdout.
-        // Log the stack trace (safe) via the Throwable overload; the message is sanitised.
+        // Only the sanitised message, never the exception: its cause chain (Jackson's own
+        // message) quotes an excerpt of the file, which can hold credentials.
         LOGGER.log(
             Level.SEVERE,
-            exception,
             () ->
                 "chaos-agent: failed to load startup config file "
                     + safeConfigFile
                     + " (reason: "
-                    + exception.getMessage()
+                    + LogText.sanitize(exception.getMessage())
                     + ")");
       } catch (final RuntimeException exception) {
         LOGGER.log(
@@ -150,41 +149,6 @@ public class ChaosAutoConfiguration {
           Level.INFO,
           () -> "chaos-agent: startup diagnostics\n" + controlPlane.diagnostics().debugDump());
     }
-  }
-
-  /**
-   * Strips control characters (CR, LF, NUL, and other C0 control codes) from operator-supplied
-   * strings before they enter log records. Callers should pass values whose provenance is untrusted
-   * — config paths, user-supplied IDs. Values are truncated at 1 KiB to bound the expense of
-   * pathological inputs on hot paths.
-   */
-  private static final int LOG_SANITIZE_MAX_LENGTH = 1024;
-
-  static String sanitizeForLog(final String value) {
-    if (value == null) {
-      return "";
-    }
-    final String truncated =
-        value.length() > LOG_SANITIZE_MAX_LENGTH
-            ? value.substring(0, LOG_SANITIZE_MAX_LENGTH)
-            : value;
-    final StringBuilder sanitized = new StringBuilder(truncated.length());
-    for (int i = 0; i < truncated.length(); i++) {
-      final char character = truncated.charAt(i);
-      if (isControlCharacter(character)) {
-        sanitized.append('_');
-      } else {
-        sanitized.append(character);
-      }
-    }
-    return sanitized.toString();
-  }
-
-  private static boolean isControlCharacter(final char character) {
-    return character == '\r'
-        || character == '\n'
-        || character == '\u0000'
-        || (character < 0x20 && character != '\t');
   }
 
   /**

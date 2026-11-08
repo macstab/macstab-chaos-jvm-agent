@@ -328,6 +328,40 @@ class ChaosPlanMapperTest {
     }
 
     @Test
+    @DisplayName("relay the validation message without control characters and capped")
+    void sanitiseValidationMessage() {
+      final String scenario =
+          """
+          {"id": "%s", "scope": "JVM",
+            "selector": {"type": "executor", "operations": ["EXECUTOR_SUBMIT"]},
+            "effect": {"type": "delay", "minDelay": "PT0.1S", "maxDelay": "PT0.1S"}}
+          """;
+      final String escaped = "a\\u001b[2Jforged";
+      final String escapedPlan =
+          "{\"scenarios\": ["
+              + scenario.formatted(escaped)
+              + ","
+              + scenario.formatted(escaped)
+              + "]}";
+      final String longId = "x".repeat(500);
+      final String longPlan =
+          "{\"scenarios\": ["
+              + scenario.formatted(longId)
+              + ","
+              + scenario.formatted(longId)
+              + "]}";
+
+      assertThatThrownBy(() -> ChaosPlanMapper.read(escapedPlan))
+          .isInstanceOf(ConfigLoadException.class)
+          .hasMessageContaining("invalid value: duplicate scenario id in plan")
+          .hasMessageNotContaining("\u001b");
+      assertThatThrownBy(() -> ChaosPlanMapper.read(longPlan))
+          .isInstanceOf(ConfigLoadException.class)
+          .hasMessageContaining("invalid value: duplicate scenario id in plan")
+          .hasMessageNotContaining(longId);
+    }
+
+    @Test
     @DisplayName("never echo values from the input")
     void doNotEchoValues() {
       final String json =

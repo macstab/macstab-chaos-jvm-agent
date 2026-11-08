@@ -453,7 +453,7 @@ curl -X POST http://localhost:8080/actuator/chaos \
   -d '{"planJson": "{\"metadata\":{\"name\":\"soak\"},\"scenarios\":[...]}"}'
 ```
 
-The plan is read with `ChaosPlanMapper`, which rejects unknown fields, so a typo fails instead of being ignored. Parse failures report a position and reason without quoting the input.
+The plan is read with `ChaosPlanMapper`, which rejects unknown fields, so a typo fails instead of being ignored. Parse failures report a position and reason, never the parser's excerpt of the input; a validation message may quote the offending field value, sanitised and capped.
 
 #### Security note
 

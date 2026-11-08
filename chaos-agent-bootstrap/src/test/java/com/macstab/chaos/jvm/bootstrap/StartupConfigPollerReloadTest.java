@@ -126,13 +126,8 @@ class StartupConfigPollerReloadTest {
   }
 
   @Test
-  @DisplayName("log text is single-line and bounded")
-  void sanitising() {
-    assertThat(StartupConfigPoller.sanitiseForLog(null)).isEqualTo("null");
-    assertThat(StartupConfigPoller.sanitiseForLog("a\nb\u007fc")).isEqualTo("a�b�c");
-    assertThat(StartupConfigPoller.sanitiseForLog("x".repeat(600)))
-        .hasSize(StartupConfigPoller.MAX_LOG_MESSAGE_LENGTH + "...[truncated]".length())
-        .endsWith("...[truncated]");
+  @DisplayName("a blank interval is no interval; a tiny one is raised to the minimum")
+  void intervalBounds() {
     assertThat(
             StartupConfigPoller.resolveInterval(null, Map.of("MACSTAB_CHAOS_WATCH_INTERVAL", " ")))
         .isZero();

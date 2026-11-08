@@ -31,8 +31,8 @@ import org.springframework.context.annotation.Configuration;
 /**
  * What the auto-configuration does once the application is ready: activate the startup plan from
  * {@code macstab.chaos.config-file} and track its handle, survive a missing, malformed or rejected
- * plan with a log line instead of failing the application, print the diagnostics when asked, and
- * keep an operator-supplied path from forging log lines.
+ * plan with a log line instead of failing the application, keep the parser's excerpt of a malformed
+ * plan out of the log, and print the diagnostics when asked.
  */
 @DisplayName("Startup plan applier")
 class ChaosStartupApplierTest {
@@ -147,6 +147,28 @@ class ChaosStartupApplierTest {
   }
 
   @Test
+  @DisplayName("a malformed plan is logged without the parser's excerpt of the file")
+  void badPlanLogCarriesNoInput() throws IOException {
+    final Path malformed =
+        Files.writeString(directory.resolve("secret.json"), "{\"scenarios\":SECRET123}");
+
+    runner
+        .withPropertyValues("macstab.chaos.config-file=" + malformed)
+        .run(ChaosStartupApplierTest::ready);
+
+    assertThat(logged)
+        .filteredOn(record -> record.getMessage().contains("failed to load startup config file"))
+        .singleElement()
+        .satisfies(
+            record -> {
+              assertThat(record.getThrown()).as("no cause chain in the log").isNull();
+              assertThat(record.getMessage())
+                  .contains("malformed JSON")
+                  .doesNotContain("SECRET123");
+            });
+  }
+
+  @Test
   @DisplayName("a blank config-file is no plan: nothing is loaded and nothing logged")
   void blankConfigFileIsIgnored() {
     runner
@@ -185,17 +207,6 @@ class ChaosStartupApplierTest {
         .run(ChaosStartupApplierTest::ready);
     assertThat(logged)
         .anySatisfy(record -> assertThat(record.getMessage()).contains("startup diagnostics"));
-  }
-
-  @Test
-  @DisplayName("an operator-supplied path cannot forge log lines")
-  void pathsAreSanitisedForTheLog() {
-    assertThat(ChaosAutoConfiguration.sanitizeForLog("/etc/plan.json\n2026 FORGED\r\u0000"))
-        .isEqualTo("/etc/plan.json_2026 FORGED__");
-    assertThat(ChaosAutoConfiguration.sanitizeForLog("a\tb")).isEqualTo("a\tb");
-    assertThat(ChaosAutoConfiguration.sanitizeForLog("a\u0001b\u001bc")).isEqualTo("a_b_c");
-    assertThat(ChaosAutoConfiguration.sanitizeForLog("x".repeat(5_000))).hasSize(1_024);
-    assertThat(ChaosAutoConfiguration.sanitizeForLog(null)).isEmpty();
   }
 
   @SuppressWarnings("unchecked")

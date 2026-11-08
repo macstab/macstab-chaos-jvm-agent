@@ -8,6 +8,7 @@ import com.macstab.chaos.jvm.startup.AgentArgs;
 import com.macstab.chaos.jvm.startup.AgentArgsParser;
 import com.macstab.chaos.jvm.startup.ChaosPlanMapper;
 import com.macstab.chaos.jvm.startup.ConfigLoadException;
+import com.macstab.chaos.jvm.startup.LogText;
 import com.macstab.chaos.jvm.startup.StartupConfigLoader;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -318,7 +319,7 @@ public final class StartupConfigPoller implements AutoCloseable {
         "[chaos-agent] config reloaded: "
             + newPlan.scenarios().size()
             + " scenario(s) from "
-            + sanitiseForLog(configPath.toString()));
+            + LogText.sanitize(configPath.toString()));
   }
 
   /**
@@ -390,7 +391,7 @@ public final class StartupConfigPoller implements AutoCloseable {
         "[chaos-agent] config file removed: "
             + stopped
             + " scenario(s) stopped ("
-            + sanitiseForLog(configPath.toString())
+            + LogText.sanitize(configPath.toString())
             + ")");
   }
 
@@ -454,7 +455,7 @@ public final class StartupConfigPoller implements AutoCloseable {
     for (final ChaosScenario scenario : newScenarios) {
       if (newById.putIfAbsent(scenario.id(), scenario) != null) {
         throw new IllegalStateException(
-            "duplicate scenario id '" + sanitiseForLog(scenario.id()) + "' in plan");
+            "duplicate scenario id '" + LogText.sanitize(scenario.id()) + "' in plan");
       }
     }
 
@@ -540,41 +541,11 @@ public final class StartupConfigPoller implements AutoCloseable {
   }
 
   private void logReloadFailure(final String message) {
-    final String sanitised = sanitiseForLog(message);
+    final String sanitised = LogText.sanitize(message);
     if (!sanitised.equals(lastLoggedFailure)) {
       lastLoggedFailure = sanitised;
       System.err.println("[chaos-agent] config reload failed: " + sanitised);
     }
-  }
-
-  /** Maximum number of characters rendered from a single log message before truncation. */
-  static final int MAX_LOG_MESSAGE_LENGTH = 512;
-
-  /**
-   * Strips control characters (including CR/LF) from strings before they hit {@code System.err}.
-   * Config file paths and parse-error messages can contain attacker-controlled bytes; without
-   * sanitisation a chaos-agent log line could be forged by embedding {@code \n[chaos-agent] ...}
-   * into a filename or JSON payload. Replaces any ASCII control character with U+FFFD and caps the
-   * rendered length so that a huge error message cannot flood the log.
-   */
-  static String sanitiseForLog(final String raw) {
-    if (raw == null) {
-      return "null";
-    }
-    final int end = Math.min(raw.length(), MAX_LOG_MESSAGE_LENGTH);
-    final StringBuilder sanitised = new StringBuilder(end);
-    for (int i = 0; i < end; i++) {
-      final char character = raw.charAt(i);
-      if (character < 0x20 || character == 0x7F) {
-        sanitised.append('\uFFFD');
-      } else {
-        sanitised.append(character);
-      }
-    }
-    if (raw.length() > MAX_LOG_MESSAGE_LENGTH) {
-      sanitised.append("...[truncated]");
-    }
-    return sanitised.toString();
   }
 
   /**

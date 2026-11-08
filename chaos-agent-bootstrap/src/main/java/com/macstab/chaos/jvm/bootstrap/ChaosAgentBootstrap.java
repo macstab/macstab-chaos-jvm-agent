@@ -406,7 +406,15 @@ public final class ChaosAgentBootstrap {
                     loadFailure.line(),
                     loadFailure.column(),
                     loadFailure.reason()));
-        throw loadFailure;
+        // Without its cause: the JVM prints the cause chain of a failed premain, and Jackson's
+        // message in it quotes an excerpt of the plan, which can hold credentials.
+        throw new ConfigLoadException(
+            String.valueOf(loadFailure.getMessage()),
+            loadFailure.getSource(),
+            null,
+            loadFailure.line(),
+            loadFailure.column(),
+            loadFailure.reason());
       }
       loadedPlan.ifPresent(
           loaded -> {

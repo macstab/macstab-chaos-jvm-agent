@@ -34,6 +34,9 @@ public final class ChaosPlanMapper {
    */
   @Internal public static final int MAX_JSON_LENGTH = 1_048_576;
 
+  /** Cap, in characters, on a validation message relayed into a parse failure. */
+  private static final int CAUSE_MESSAGE_MAX_LENGTH = 200;
+
   /**
    * Maximum JSON nesting depth allowed by the streaming parser. 32 is generous for any realistic
    * chaos plan (scenarios rarely exceed depth 6 — plan → scenarios → selector → network → ops)
@@ -189,10 +192,11 @@ public final class ChaosPlanMapper {
     if (exception
         instanceof com.fasterxml.jackson.databind.exc.ValueInstantiationException instantiation) {
       // The cause is the agent's own validation message (for example "delay bounds must be
-      // non-null"), not Jackson's description of the input.
+      // non-null"), not Jackson's description of the input. It can quote a field value (a
+      // duplicate id), so it is sanitised and capped.
       final Throwable cause = instantiation.getCause();
       return cause != null && cause.getMessage() != null
-          ? "invalid value: " + cause.getMessage()
+          ? "invalid value: " + LogText.sanitize(cause.getMessage(), CAUSE_MESSAGE_MAX_LENGTH)
           : "invalid value";
     }
     if (exception instanceof com.fasterxml.jackson.databind.exc.MismatchedInputException) {

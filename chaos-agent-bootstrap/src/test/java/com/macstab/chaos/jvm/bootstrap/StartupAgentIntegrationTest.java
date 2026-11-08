@@ -198,6 +198,39 @@ class StartupAgentIntegrationTest {
     }
   }
 
+  @Nested
+  @DisplayName("malformed inline plan")
+  class MalformedInlinePlan {
+
+    @Test
+    @DisplayName("aborts the start without printing the parser's excerpt of the plan")
+    void stderrCarriesNoInput() throws Exception {
+      // An unquoted token: Jackson's own message quotes it ("Unrecognized token 'SECRET123'").
+      final List<String> command =
+          List.of(
+              Path.of(System.getProperty("java.home"), "bin", "java").toString(),
+              "-javaagent:"
+                  + System.getProperty("chaos.bootstrap.agentJar")
+                  + "=configJson={\"scenarios\":SECRET123}",
+              "-cp",
+              System.getProperty("java.class.path"),
+              AgentProcessProbeMain.class.getName(),
+              "gc");
+      final Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
+      final String output;
+      try (final BufferedReader reader =
+          new BufferedReader(
+              new InputStreamReader(
+                  process.getInputStream(), java.nio.charset.StandardCharsets.UTF_8))) {
+        output = String.join("\n", reader.lines().toList());
+      }
+      assertThat(process.waitFor(30, TimeUnit.SECONDS)).as("probe JVM should finish").isTrue();
+
+      assertThat(process.exitValue()).as("the start is aborted: " + output).isNotZero();
+      assertThat(output).contains("malformed JSON").doesNotContain("SECRET123");
+    }
+  }
+
   private String runProbe(final ChaosPlan plan, final String mode) throws Exception {
     final Path configFile = tempDir.resolve(mode + "-plan.json");
     Files.writeString(configFile, ChaosPlanMapper.write(plan));

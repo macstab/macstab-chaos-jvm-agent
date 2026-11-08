@@ -6,6 +6,7 @@ import com.macstab.chaos.jvm.api.ChaosDiagnostics;
 import com.macstab.chaos.jvm.api.ChaosPlan;
 import com.macstab.chaos.jvm.startup.ChaosPlanMapper;
 import com.macstab.chaos.jvm.startup.ConfigLoadException;
+import com.macstab.chaos.jvm.startup.LogText;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -80,7 +81,12 @@ public final class ChaosManagement implements AutoCloseable {
     try {
       plan = ChaosPlanMapper.read(planJson);
     } catch (final ConfigLoadException | IllegalArgumentException invalid) {
-      LOGGER.log(Level.WARNING, invalid, () -> "chaos-agent: rejecting malformed plan JSON");
+      // Only the sanitised message: the cause chain (Jackson's own message) quotes the input.
+      LOGGER.log(
+          Level.WARNING,
+          () ->
+              "chaos-agent: rejecting malformed plan JSON: "
+                  + LogText.sanitize(invalid.getMessage()));
       return new ActivationResponse("invalid", null, "invalid plan: " + invalid.getMessage());
     }
     // The name is claimed before activating, so a plan refused for its name never injects a fault.

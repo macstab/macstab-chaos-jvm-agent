@@ -9,7 +9,12 @@ import com.macstab.chaos.jvm.api.ChaosSelector;
 import com.macstab.chaos.jvm.api.OperationType;
 import com.macstab.chaos.jvm.core.ChaosRuntime;
 import java.time.Duration;
+import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.logging.Handler;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -161,6 +166,42 @@ class ChaosManagementTest {
         management.activate(PLAN.replace("mgmt\"}", "other\"}"));
     assertThat(conflict.status()).isEqualTo("conflict");
     assertThat(conflict.message()).contains("already active");
+  }
+
+  @Test
+  @DisplayName("a malformed plan is logged without the parser's excerpt of the input")
+  void malformedPlanLogCarriesNoInput() {
+    final Logger logger = Logger.getLogger(ChaosManagement.class.getName());
+    final List<LogRecord> logged = new CopyOnWriteArrayList<>();
+    final Handler capture =
+        new Handler() {
+          @Override
+          public void publish(final LogRecord record) {
+            logged.add(record);
+          }
+
+          @Override
+          public void flush() {}
+
+          @Override
+          public void close() {}
+        };
+    logger.addHandler(capture);
+    try {
+      assertThat(management.activate("{\"scenarios\":SECRET123}").status()).isEqualTo("invalid");
+    } finally {
+      logger.removeHandler(capture);
+    }
+
+    assertThat(logged)
+        .singleElement()
+        .satisfies(
+            record -> {
+              assertThat(record.getThrown()).as("no cause chain in the log").isNull();
+              assertThat(record.getMessage())
+                  .contains("malformed JSON")
+                  .doesNotContain("SECRET123");
+            });
   }
 
   @Test
