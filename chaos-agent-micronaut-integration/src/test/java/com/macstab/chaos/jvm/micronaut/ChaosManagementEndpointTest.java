@@ -81,6 +81,19 @@ class ChaosManagementEndpointTest {
   }
 
   @Test
+  @DisplayName("stops a plan whose name holds a space")
+  void stopsANameWithASpace() {
+    ChaosPlatform.installLocally();
+    try (ApplicationContext context =
+        ApplicationContext.run(Map.of("macstab.chaos.management.enabled", "true"))) {
+      final ChaosManagementEndpoint endpoint = context.getBean(ChaosManagementEndpoint.class);
+      assertThat(endpoint.activate(PLAN.replace("\"mn-mgmt\"", "\"a b\"")).code()).isEqualTo(200);
+
+      assertThat(endpoint.stop("a b").code()).isEqualTo(200);
+    }
+  }
+
+  @Test
   @DisplayName("answers 503 instead of installing the agent")
   void neverInstallsTheAgent() {
     final ChaosManagementEndpoint endpoint = new ChaosManagementEndpoint(java.util.Optional::empty);

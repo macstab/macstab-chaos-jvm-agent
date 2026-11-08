@@ -274,7 +274,11 @@ public final class ChaosManagement implements AutoCloseable {
         }
         final String id;
         try {
-          id = java.net.URLDecoder.decode(path, java.nio.charset.StandardCharsets.UTF_8);
+          // A path is percent-decoded only: URLDecoder's form rule would turn a literal '+' into a
+          // space (Quarkus passes the path as sent). A space arrives as %20.
+          id =
+              java.net.URLDecoder.decode(
+                  path.replace("+", "%2B"), java.nio.charset.StandardCharsets.UTF_8);
         } catch (final IllegalArgumentException malformed) {
           return new HttpResult(400, error("malformed id"));
         }

@@ -85,10 +85,13 @@ public class ChaosManagementEndpoint {
    */
   @Delete(produces = MediaType.APPLICATION_JSON)
   public HttpResponse<String> stop(@Selector final String id) {
-    // Micronaut has decoded the selector already; handle() decodes its sub-path once more.
+    // Micronaut has decoded the selector already; handle() percent-decodes its sub-path once more.
+    // URLEncoder writes a space as '+', which a path keeps as a plus: it becomes %20.
     return answer(
         "DELETE",
-        "/" + java.net.URLEncoder.encode(id, java.nio.charset.StandardCharsets.UTF_8),
+        "/"
+            + java.net.URLEncoder.encode(id, java.nio.charset.StandardCharsets.UTF_8)
+                .replace("+", "%20"),
         null);
   }
 

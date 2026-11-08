@@ -664,6 +664,16 @@ class ChaosManagementTest {
   }
 
   @Test
+  @DisplayName("a plus in an id is a plus, not an encoded space")
+  void plusInIdIsAPlus() {
+    assertThat(management.activate(PLAN.replace("\"mgmt\"", "\"a+b\"")).status())
+        .isEqualTo("activated");
+    final ChaosManagement.HttpResult stopped = management.handle("DELETE", "/a+b", null);
+    assertThat(stopped.status()).isEqualTo(200);
+    assertThat(stopped.json()).contains("\"status\":\"stopped\"");
+  }
+
+  @Test
   @DisplayName("an id with a malformed escape is a bad request")
   void malformedIdIsBadRequest() {
     assertThat(management.handle("DELETE", "/%zz", null).status()).isEqualTo(400);
