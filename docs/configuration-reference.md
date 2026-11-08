@@ -1602,13 +1602,15 @@ If `strategy` is inapplicable to the actual return type (e.g., `EMPTY` on a prim
 |----------|-----------------------------------------------------------------------------------------------|
 | `FIXED`  | Constant offset added to every clock read: `real + skewAmount`                                |
 | `DRIFT`  | Accumulating offset: each read adds `skewAmount` to the running total (simulates clock drift) |
-| `FREEZE` | Clock is frozen at the timestamp captured at activation; every read returns the same value    |
+| `FREEZE` | Clock is frozen at the moment the scenario becomes active (its `activeFrom` when that is later than the activation), plus `skewAmount`; every read returns the same value, the wall clock and `nanoTime` alike |
 | `REGRESS` | The clock steps back once by `skewAmount` (positive) and stays there: the first read is real and arms the scenario, the next read jumps back, every later read stays shifted (the native library's `REGRESS`) |
 
 **JSON example — 1-hour future jump:**
 ```json
 { "type": "clockSkew", "skewAmount": "PT3600S", "mode": "FIXED" }
 ```
+
+Wall-clock reads (`currentTimeMillis`, `Instant`, `java.time`, `Date`) are skewed in whole milliseconds: the offset is floored to the millisecond at each read, so a millisecond read and an `Instant` read of the same moment agree, while a `DRIFT` below a millisecond per read still adds up. `nanoTime` is skewed to the nanosecond. A `LocalDateTime.now()` in a daylight-saving overlap (the hour that occurs twice) is skewed from the occurrence in force when it was read.
 
 **Valid with:** `JvmRuntimeSelector` targeting `SYSTEM_CLOCK_MILLIS`, `SYSTEM_CLOCK_NANOS`, `INSTANT_NOW`, `CLOCK_READ`, `LOCAL_DATE_TIME_NOW`, `ZONED_DATE_TIME_NOW`, `DATE_NEW`.
 

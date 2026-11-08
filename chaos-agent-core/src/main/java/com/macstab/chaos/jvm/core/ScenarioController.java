@@ -360,7 +360,9 @@ final class ScenarioController {
         } finally {
           ChaosDispatcher.decrementDispatchDepth();
         }
-        newClockSkewState = new ClockSkewState(skewEffect, wallMillis, nanoRef);
+        newClockSkewState =
+            new ClockSkewState(
+                skewEffect, wallMillis, nanoRef, scenario.activationPolicy().activeFrom());
       } else {
         newClockSkewState = null;
       }

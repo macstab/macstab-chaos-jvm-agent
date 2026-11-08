@@ -320,7 +320,8 @@ class DispatchPathsTest {
               new ChaosEffect.ClockSkewEffect(
                   Duration.ofNanos(half), ChaosEffect.ClockSkewMode.DRIFT),
               0L,
-              0L);
+              0L,
+              null);
       assertThat(state.applyNanos(ChaosEffect.ClockSkewMode.DRIFT, 0L)).isEqualTo(half);
       assertThat(state.applyNanos(ChaosEffect.ClockSkewMode.DRIFT, 0L)).isEqualTo(Long.MAX_VALUE);
       assertThat(state.applyNanos(ChaosEffect.ClockSkewMode.DRIFT, 0L)).isEqualTo(Long.MAX_VALUE);

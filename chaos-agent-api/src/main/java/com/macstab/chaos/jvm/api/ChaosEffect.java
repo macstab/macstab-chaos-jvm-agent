@@ -675,20 +675,23 @@ public sealed interface ChaosEffect
   /** Mode for {@link ClockSkewEffect}. Controls how the skew evolves over time. */
   enum ClockSkewMode {
     /**
-     * Apply a constant fixed offset to every clock read. {@code Instant} and {@code java.time}
-     * reads move by {@code skewAmount} to the nanosecond; millisecond clocks such as {@code
-     * System.currentTimeMillis()} by {@code skewAmount} floored to the millisecond.
+     * Apply a constant fixed offset to every clock read. Wall-clock reads ({@code
+     * System.currentTimeMillis()}, {@code Instant} and the other {@code java.time} reads) move by
+     * {@code skewAmount} floored to the millisecond, so a millisecond read and an {@code Instant}
+     * read of the same moment agree; {@code System.nanoTime()} moves to the nanosecond.
      */
     FIXED,
     /**
      * Increase the skew monotonically with each read, simulating clock drift. Each call adds
-     * skewAmount to the accumulated offset.
+     * skewAmount to the accumulated offset, kept in nanoseconds: a drift below a millisecond per
+     * read moves the wall clock once it has added up to one.
      */
     DRIFT,
     /**
-     * Freeze the clock. Every call returns the same timestamp captured at activation, plus {@code
-     * skewAmount}, down to the nanosecond of an {@code Instant}. Simulates a hung NTP daemon or
-     * failed clock source.
+     * Freeze the clock. Every call returns the same timestamp, plus {@code skewAmount}: the moment
+     * the scenario becomes active, which is its {@code activeFrom} when that is later than the
+     * activation. The wall clock and {@code System.nanoTime()} stop at the same moment. Simulates a
+     * hung NTP daemon or failed clock source.
      */
     FREEZE,
     /**

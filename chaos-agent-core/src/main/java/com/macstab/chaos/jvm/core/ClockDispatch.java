@@ -168,8 +168,10 @@ public final class ClockDispatch {
    * Returns the (possibly skewed) {@link java.time.LocalDateTime} for {@code
    * LocalDateTime.now(ZoneId)}.
    *
-   * <p>The skew is applied to the real instant to the nanosecond; rebuilding the value from epoch
-   * milliseconds would drop its sub-millisecond part.
+   * <p>The skew is applied to the real instant, keeping the value's sub-millisecond part. A local
+   * time in a daylight-saving overlap occurs twice; the value was produced just now, so it is the
+   * occurrence at the zone's offset in force now, not the earlier one {@code atZone} would pick.
+   * Without a clock-skew scenario the value is returned before any conversion.
    *
    * @param realValue the real local date-time
    * @param zone the zone the local date-time was produced in
@@ -177,7 +179,18 @@ public final class ClockDispatch {
    */
   public java.time.LocalDateTime adjustLocalDateTimeNowInZone(
       final java.time.LocalDateTime realValue, final java.time.ZoneId zone) {
-    final java.time.Instant realInstant = realValue.atZone(zone).toInstant();
+    if (engine.idle(OperationType.LOCAL_DATE_TIME_NOW)) {
+      return realValue;
+    }
+    final java.time.zone.ZoneRules rules = zone.getRules();
+    final java.time.Instant realInstant =
+        rules.getValidOffsets(realValue).size() > 1
+            ? java.time.ZonedDateTime.ofLocal(
+                    realValue,
+                    zone,
+                    rules.getOffset(java.time.Instant.ofEpochMilli(System.currentTimeMillis())))
+                .toInstant()
+            : realValue.atZone(zone).toInstant();
     final java.time.Instant skewed = skewInstant(realInstant, OperationType.LOCAL_DATE_TIME_NOW);
     return skewed.equals(realInstant) ? realValue : java.time.LocalDateTime.ofInstant(skewed, zone);
   }
@@ -189,6 +202,9 @@ public final class ClockDispatch {
    * @return the (possibly skewed) zoned-date-time to return to the caller
    */
   public java.time.ZonedDateTime adjustZonedDateTimeNow(final java.time.ZonedDateTime realValue) {
+    if (engine.idle(OperationType.ZONED_DATE_TIME_NOW)) {
+      return realValue;
+    }
     final java.time.Instant realInstant = realValue.toInstant();
     final java.time.Instant skewed = skewInstant(realInstant, OperationType.ZONED_DATE_TIME_NOW);
     return skewed.equals(realInstant) ? realValue : skewed.atZone(realValue.getZone());

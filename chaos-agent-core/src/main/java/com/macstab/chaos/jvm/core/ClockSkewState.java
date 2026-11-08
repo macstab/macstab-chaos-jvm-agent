@@ -3,18 +3,20 @@ package com.macstab.chaos.jvm.core;
 import com.macstab.chaos.jvm.api.ChaosEffect;
 import com.macstab.chaos.jvm.api.ChaosScenario;
 import java.util.concurrent.atomic.AtomicLong;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Mutable per-scenario state for {@link ChaosEffect.ClockSkewEffect}.
  *
  * <p>Tracks the accumulated drift (for {@link ChaosEffect.ClockSkewMode#DRIFT}) and the frozen
- * timestamp captured at scenario activation (for {@link ChaosEffect.ClockSkewMode#FREEZE}). All
- * state mutations are thread-safe via {@link AtomicLong}.
+ * timestamp (for {@link ChaosEffect.ClockSkewMode#FREEZE}): the moment the scenario becomes active,
+ * which is its {@code activeFrom} when that is later than the activation, for the wall clock and
+ * {@code nanoTime} alike. All state mutations are thread-safe via {@link AtomicLong}.
  *
- * <p>The wall clock (milliseconds and {@link java.time.Instant}) is skewed in nanoseconds, so a
- * skew below a millisecond moves {@code Instant} reads exactly; a millisecond read takes the
- * nanosecond offset floored to the millisecond, as {@link java.time.Instant#toEpochMilli()} does,
- * so both kinds of read agree.
+ * <p>The offset is kept in nanoseconds, so a drift below a millisecond per read still accumulates.
+ * The wall clock (milliseconds and {@link java.time.Instant}) is skewed by the offset floored to
+ * whole milliseconds at each read, so a millisecond read and an {@code Instant} read of the same
+ * moment agree; {@code nanoTime} is skewed to the nanosecond.
  *
  * <p>One instance is created per active {@link ChaosScenario} whose effect is {@link
  * ChaosEffect.ClockSkewEffect}. The instance is created in {@link ScenarioController#start()} and
@@ -47,18 +49,21 @@ final class ClockSkewState {
   private final AtomicLong accumulatedDriftNanos = new AtomicLong(0L);
 
   /**
-   * Creates a new state snapshot for the given effect, capturing the real clock values at the
-   * moment of activation so that {@link ChaosEffect.ClockSkewMode#FREEZE} can return a stable
-   * timestamp.
+   * Creates a new state snapshot for the given effect. {@link ChaosEffect.ClockSkewMode#FREEZE}
+   * freezes at the later of the activation and {@code activeFrom}: the wall clock at {@code
+   * max(capturedMillis, activeFrom)}, and {@code nanoTime} moved from {@code capturedNanos} by the
+   * same distance, so both clocks stop at the same moment.
    *
    * @param effect the clock skew configuration; must not be null
    * @param capturedMillis {@link System#currentTimeMillis()} at activation time
    * @param capturedNanos {@link System#nanoTime()} at activation time
+   * @param activeFrom the scenario's {@code activeFrom}, or {@code null}
    */
   ClockSkewState(
       final ChaosEffect.ClockSkewEffect effect,
       final long capturedMillis,
-      final long capturedNanos) {
+      final long capturedNanos,
+      final java.time.@Nullable Instant activeFrom) {
     // ClockSkewEffect rejects an amount past the nanosecond range, so this cannot overflow.
     this.skewNanos = effect.skewAmount().toNanos();
     // Saturate FREEZE-mode captures so a large positive skewAmount applied to a near-MAX
@@ -66,13 +71,27 @@ final class ClockSkewState {
     // ~292M years in the past and break every downstream timestamp comparison (JWT exp, cache
     // TTLs, log ordering). Same reasoning for nanos; monotonicity is already documented as
     // intentionally violated, but wraparound is never what the operator asked for.
-    this.frozenMillis = saturatingAdd(capturedMillis, Math.floorDiv(skewNanos, NANOS_PER_MILLI));
-    // Every long millisecond value, plus or minus the nanosecond range, is a valid Instant.
-    this.frozenInstant = java.time.Instant.ofEpochMilli(capturedMillis).plusNanos(skewNanos);
-    this.frozenNanos = saturatingAdd(capturedNanos, skewNanos);
+    final long anchorMillis = Math.max(capturedMillis, epochMillis(activeFrom));
+    this.frozenMillis = saturatingAdd(anchorMillis, Math.floorDiv(skewNanos, NANOS_PER_MILLI));
+    this.frozenInstant = java.time.Instant.ofEpochMilli(frozenMillis);
+    final long waitNanos =
+        saturatingMultiply(saturatingAdd(anchorMillis, -capturedMillis), NANOS_PER_MILLI);
+    this.frozenNanos = saturatingAdd(saturatingAdd(capturedNanos, waitNanos), skewNanos);
   }
 
   private static final long NANOS_PER_MILLI = 1_000_000L;
+
+  /** {@code activeFrom} in epoch milliseconds; {@code Long.MIN_VALUE} for none. */
+  private static long epochMillis(final java.time.@Nullable Instant activeFrom) {
+    if (activeFrom == null) {
+      return Long.MIN_VALUE;
+    }
+    try {
+      return activeFrom.toEpochMilli();
+    } catch (final ArithmeticException beyondTheRange) {
+      return activeFrom.isAfter(java.time.Instant.EPOCH) ? Long.MAX_VALUE : Long.MIN_VALUE;
+    }
+  }
 
   /**
    * Applies the skew to a millisecond clock value.
@@ -89,7 +108,7 @@ final class ClockSkewState {
   }
 
   /**
-   * Applies the skew to a wall-clock instant, to the nanosecond.
+   * Applies the skew to a wall-clock instant, in whole milliseconds as {@link #applyMillis}.
    *
    * @param mode the skew evolution mode
    * @param realInstant the instant the clock read
@@ -100,8 +119,8 @@ final class ClockSkewState {
     if (mode == ChaosEffect.ClockSkewMode.FREEZE) {
       return frozenInstant;
     }
-    final long offset = wallOffsetNanos(mode);
-    return offset == 0L ? realInstant : realInstant.plusNanos(offset);
+    final long offsetMillis = Math.floorDiv(wallOffsetNanos(mode), NANOS_PER_MILLI);
+    return offsetMillis == 0L ? realInstant : realInstant.plusMillis(offsetMillis);
   }
 
   /** The wall-clock offset of one read in nanoseconds; advances DRIFT and REGRESS. */
@@ -155,6 +174,14 @@ final class ClockSkewState {
       return Math.addExact(a, b);
     } catch (final ArithmeticException overflow) {
       return (b >= 0L) ? Long.MAX_VALUE : Long.MIN_VALUE;
+    }
+  }
+
+  private static long saturatingMultiply(final long a, final long b) {
+    try {
+      return Math.multiplyExact(a, b);
+    } catch (final ArithmeticException overflow) {
+      return (a >= 0L) == (b >= 0L) ? Long.MAX_VALUE : Long.MIN_VALUE;
     }
   }
 

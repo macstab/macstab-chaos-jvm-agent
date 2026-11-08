@@ -64,7 +64,7 @@ All scenarios that pass §3 for a call contribute. They are ordered by descendin
 
 ## 5. Clock skew and stressors
 
-**L16 — A clock skew applies to every clock read while its time bounds hold.** It honours `activeFor`, `activeFrom` and `activeUntil` and is session-scoped when its scenario is. It is not a per-call application, so `maxApplications`, `rateLimit`, `activateAfterMatches` and `probability < 1.0` are rejected for it.
+**L16 — A clock skew applies to every clock read while its time bounds hold.** It honours `activeFor`, `activeFrom` and `activeUntil` and is session-scoped when its scenario is. It is not a per-call application, so `maxApplications`, `rateLimit`, `activateAfterMatches` and `probability < 1.0` are rejected for it. `FREEZE` freezes at the moment the scenario becomes active (`activeFrom` when it is later than the activation), the wall clock and `nanoTime` together. Wall-clock reads are skewed in whole milliseconds, rounded at each read, so millisecond and `Instant` reads agree; `nanoTime` to the nanosecond. Without a clock-skew scenario a `java.time` read is returned before any conversion.
 
 **L17 — A stressor runs from activation until it ends.** It ends on `stop()`/`close()`, when `activeFor` elapses or at `activeUntil`. `activeFrom`, `maxApplications`, `rateLimit`, `activateAfterMatches` and `probability < 1.0` are rejected for it.
 

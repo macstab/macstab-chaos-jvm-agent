@@ -260,13 +260,15 @@ class ClockSkewRuntimeTest {
     }
 
     @Test
-    @DisplayName("a skew below a millisecond moves Instant reads by exactly that much")
+    @DisplayName(
+        "an Instant read is skewed in whole milliseconds, as a millisecond read, keeping its own"
+            + " sub-millisecond part")
     void subMillisecondSkew() {
       final ChaosRuntime runtime = new ChaosRuntime();
       final java.time.Instant real = java.time.Instant.ofEpochSecond(1_700_000_000L, 123_456_789);
-      runtime.activate(instantSkew(Duration.ofNanos(500_000), ChaosEffect.ClockSkewMode.FIXED));
+      runtime.activate(instantSkew(Duration.ofNanos(1_500_000), ChaosEffect.ClockSkewMode.FIXED));
       try {
-        assertThat(runtime.adjustInstantNow(real)).isEqualTo(real.plusNanos(500_000));
+        assertThat(runtime.adjustInstantNow(real)).isEqualTo(real.plusMillis(1));
       } finally {
         runtime.close();
       }
