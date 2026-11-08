@@ -105,14 +105,16 @@ java -javaagent:chaos-agent-bootstrap-<version>.jar=configFile=/etc/chaos/plan.j
      -jar your-application.jar
 ```
 
-### 2.4 JVM Flag for Self-Attach
+### 2.4 Self-Attach and the JEP 451 Warning
 
-When the testkit or Spring starters self-attach, the JVM must allow self-attachment. Set this in your build:
+When the testkit or Spring starters self-attach, no JVM flag is required: when the JVM does not allow a process to attach to itself (`jdk.attach.allowAttachSelf` unset, the default since JDK 9), ByteBuddy attaches from a short-lived helper process, and the agent installs as usual. On JDK 21 and later the JVM then prints the [JEP 451](https://openjdk.org/jeps/451) warning on stderr ("WARNING: A Java agent has been loaded dynamically …"). It is a warning only; chaos works. The agent does not suppress it. To avoid it, either load the agent at startup with `-javaagent:` (no dynamic loading, no warning), or add `-XX:+EnableDynamicAgentLoading` to the test JVM, which allows the dynamic load explicitly. A JVM started with `-XX:-EnableDynamicAgentLoading` refuses the self-attach; `installLocally()` then fails with `IllegalStateException`, and `-javaagent:` is the way to run.
+
+To allow the dynamic load explicitly (and so avoid the warning):
 
 ```kotlin
 // Gradle
 tasks.test {
-    jvmArgs("-Djdk.attach.allowAttachSelf=true")
+    jvmArgs("-XX:+EnableDynamicAgentLoading")
 }
 ```
 
@@ -122,12 +124,10 @@ tasks.test {
     <groupId>org.apache.maven.plugins</groupId>
     <artifactId>maven-surefire-plugin</artifactId>
     <configuration>
-        <argLine>-Djdk.attach.allowAttachSelf=true</argLine>
+        <argLine>-XX:+EnableDynamicAgentLoading</argLine>
     </configuration>
 </plugin>
 ```
-
-The Spring test starters set `jdk.attach.allowAttachSelf` programmatically before self-attach, so you may omit it from the JVM args when using `@ChaosTest`. It is still required if you use `ChaosTestKit.install()` from non-Spring tests and your framework does not preset the property.
 
 ---
 
@@ -353,7 +353,7 @@ class PaymentGatewayResilienceTest {
 // build.gradle.kts
 tasks.test {
     useJUnitPlatform()
-    jvmArgs("-Djdk.attach.allowAttachSelf=true")
+    jvmArgs("-XX:+EnableDynamicAgentLoading") // optional: avoids the JEP 451 warning
 
     // Separate the chaos test suite so it can be run in parallel with unit tests
     // but excluded from the fast feedback loop if desired
@@ -368,7 +368,7 @@ tasks.register<Test>("chaosTest") {
     useJUnitPlatform()
     testClassesDirs = sourceSets.test.get().output.classesDirs
     classpath = sourceSets.test.get().runtimeClasspath
-    jvmArgs("-Djdk.attach.allowAttachSelf=true")
+    jvmArgs("-XX:+EnableDynamicAgentLoading") // optional: avoids the JEP 451 warning
     // Run after unit tests so failures are attributed correctly
     shouldRunAfter(tasks.test)
 }

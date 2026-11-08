@@ -52,6 +52,7 @@ public final class StartupPathProbeMain {
       case "no-attach" -> noAttach();
       case "bridge-retry" -> bridgeRetry();
       case "settings" -> settings();
+      case "self-attach" -> selfAttach();
       default -> throw new IllegalArgumentException("unknown probe mode: " + args[0]);
     }
   }
@@ -143,6 +144,30 @@ public final class StartupPathProbeMain {
       final ChaosControlPlane installed = ChaosAgentBootstrap.current();
       System.out.println(
           "localInstallReturnsInstalled=" + (ChaosPlatform.installLocally() == installed));
+    }
+  }
+
+  /** Installs through self-attach and times an executor submit that a scenario delays. */
+  private static void selfAttach() throws Exception {
+    System.out.println("allowAttachSelf=" + System.getProperty("jdk.attach.allowAttachSelf"));
+    final ChaosControlPlane controlPlane = ChaosPlatform.installLocally();
+    try (var handle =
+        controlPlane.activate(
+            ChaosScenario.builder("self-attach-delay")
+                .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+                .effect(ChaosEffect.delay(Duration.ofMillis(200)))
+                .activationPolicy(ActivationPolicy.always())
+                .build())) {
+      final var executor = java.util.concurrent.Executors.newSingleThreadExecutor();
+      try {
+        final long started = System.nanoTime();
+        executor.submit(() -> {}).get(WAIT_SECONDS, TimeUnit.SECONDS);
+        System.out.println(
+            "submitMillis=" + TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started));
+      } finally {
+        executor.shutdownNow();
+      }
+      System.out.println("applied=" + handle.appliedCount());
     }
   }
 

@@ -15,7 +15,7 @@
 ./gradlew :chaos-agent-core:test       # run tests for a single module
 ```
 
-Tests for the instrumentation and bootstrap modules start a real agent (self-attach). They require no flags but do need the process to be attachable (`-Djdk.attach.allowAttachSelf=true` is wired automatically by the test extension).
+Tests for the instrumentation and bootstrap modules start a real agent (self-attach). They need no flags; the build's `Test` tasks still add `-Djdk.attach.allowAttachSelf=true` and `-XX:+EnableDynamicAgentLoading`, so the test output carries no JEP 451 warning, and `SelfAttachWithoutFlagsIntegrationTest` checks the launch without them.
 
 ## Quality gates
 

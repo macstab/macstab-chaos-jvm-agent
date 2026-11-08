@@ -144,7 +144,7 @@ full hook set: executors, queues, Socket/NIO/HTTP/JDBC/TLS/DNS/clock/GC/JNDI/JMX
 Serialization/... — nothing is premain-only.
 ```
 
-The opt-in remains the safeguard against rewriting a live production JVM: without it, `agentmain` does nothing. `ChaosPlatform.installLocally()` (below) goes through `installForLocalTests()` and gets the same hook set; it is intended for test-JVM self-attach, not for attaching to an unknown production process.
+The opt-in remains the safeguard against rewriting a live production JVM: without it, `agentmain` does nothing. This holds for an executable jar whose manifest names `Launcher-Agent-Class: com.macstab.chaos.jvm.bootstrap.ChaosAgentBootstrap` too: the JVM starts that agent through `agentmain`, so it needs the same opt-in. Security outranks convenience here, so the gate is kept: the jar's launcher sets `MACSTAB_CHAOS_ALLOW_DYNAMIC_ATTACH=true` (or `-Dmacstab.chaos.allow-dynamic-attach=true`). `ChaosPlatform.installLocally()` (below) goes through `installForLocalTests()` and gets the same hook set; it is intended for test-JVM self-attach, not for attaching to an unknown production process.
 
 ## Idempotency
 
@@ -164,19 +164,19 @@ Self-attach sequence:
 if (RUNTIME.get() != null) return existing runtime           // idempotent guard
 
 Instrumentation instrumentation = ByteBuddyAgent.install()   // JVM Attach API via ByteBuddy
-initialize("", instrumentation, Map.of())                    // same hook set as premain
+initialize("", instrumentation, System.getenv())             // same hook set as premain
 
 // hook groups retransform already-loaded JDK classes (Socket, NIO, HTTP, JDBC, ...)
 // on demand via Instrumentation.retransformClasses() under RETRANSFORMATION strategy
 ```
 
-**JDK requirement**: `ByteBuddyAgent.install()` uses the JVM Attach API (`com.sun.tools.attach.VirtualMachine`). On JDK 9+, self-attach requires the JVM to be started with `-Djdk.attach.allowAttachSelf=true`. `ChaosAgentExtension` (in the test starters) handles this automatically. For production dynamic attach, the host process must permit self-attachment or the attach must originate from a separate process.
+**JDK requirement**: `ByteBuddyAgent.install()` uses the JVM Attach API (`com.sun.tools.attach.VirtualMachine`, module `jdk.attach`). No JVM flag is required: when the JVM does not allow a process to attach to itself (`jdk.attach.allowAttachSelf` unset, the default since JDK 9), ByteBuddy attaches from a short-lived helper process, and the agent installs as usual. On JDK 21 and later the JVM then prints the [JEP 451](https://openjdk.org/jeps/451) warning on stderr ("WARNING: A Java agent has been loaded dynamically …"). It is a warning only; chaos works. The agent does not suppress it. To avoid it, either load the agent at startup with `-javaagent:` (no dynamic loading, no warning), or add `-XX:+EnableDynamicAgentLoading` to the test JVM, which allows the dynamic load explicitly. A JVM started with `-XX:-EnableDynamicAgentLoading` refuses the self-attach; `installLocally()` then fails with `IllegalStateException`, and `-javaagent:` is the way to run.
 
 `ByteBuddyAgent.install()` uses `VirtualMachine` internally but is a higher-level wrapper that also handles the JAR creation/location concerns automatically.
 
 **Hooks under self-attach**: `JdkInstrumentationInstaller` weaves every hook group — on demand, when a scenario first needs it — using `AgentBuilder` configured with `RedefinitionStrategy.RETRANSFORMATION` and `disableClassFormatChanges()`, exactly as for `-javaagent:`. JDK classes already loaded into the JVM (including `java.net.Socket`, `java.nio.channels.SocketChannel`, `java.net.http.HttpClient`, JDBC drivers) are retransformed in-place. Future calls to their methods fire the chaos instrumentation.
 
-**Fallback**: If self-attach fails (JRE without the Attach API, security manager prohibition, or `allowAttachSelf` not set), `installForLocalTests()` throws `IllegalStateException`. In that case, run with `-javaagent:chaos-agent-bootstrap.jar` instead.
+**Fallback**: If self-attach fails (a runtime without the `jdk.attach` module, `-XX:+DisableAttachMechanism`, or `-XX:-EnableDynamicAgentLoading`), `installForLocalTests()` throws `IllegalStateException`. In that case, run with `-javaagent:chaos-agent-bootstrap.jar` instead.
 
 ---
 
@@ -230,7 +230,7 @@ The `INITIALIZATION` future is the authoritative reference. Once completed succe
 - Reference: Java SE API — `com.sun.tools.attach.VirtualMachine` (self-attach via Attach API) — https://docs.oracle.com/en/java/docs/api/jdk.attach/com/sun/tools/attach/VirtualMachine.html
 - Reference: Java SE API — `javax.management.MBeanServer`, `ManagementFactory.getPlatformMBeanServer()` — https://docs.oracle.com/en/java/docs/api/java.management/javax/management/MBeanServer.html
 - Reference: Java SE API — `java.util.concurrent.atomic.AtomicReference` — https://docs.oracle.com/en/java/docs/api/java.base/java/util/concurrent/atomic/AtomicReference.html
-- Reference: JEP 451 — `jdk.attach.allowAttachSelf` restriction (JDK 9+) — https://openjdk.org/jeps/451
+- Reference: JEP 451 — Prepare to Disallow the Dynamic Loading of Agents (JDK 21+) — https://openjdk.org/jeps/451
 
 ---
 

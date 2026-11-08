@@ -262,17 +262,20 @@ public final class ChaosAgentBootstrap {
    * requiring the {@code -javaagent:} command-line flag.
    *
    * <p>Used by the test extensions and by the framework integrations when chaos is enabled without
-   * {@code -javaagent:} on the command line. It performs a self-attach via the JVM Attach API,
-   * which may require the JVM to be started with {@code -Djdk.attach.allowAttachSelf=true} on some
-   * JDK versions.
+   * {@code -javaagent:} on the command line. It performs a self-attach via the JVM Attach API and
+   * needs no JVM flag: where the JVM does not allow a process to attach to itself, ByteBuddy
+   * attaches from a helper process. On JDK 21 and later the JVM prints the JEP 451 warning for the
+   * dynamically loaded agent; {@code -XX:+EnableDynamicAgentLoading} or {@code -javaagent:} avoid
+   * it.
    *
    * <p>If the agent is already installed, the existing {@link ChaosControlPlane} is returned
    * immediately without reinitializing.
    *
    * @return the installed {@link ChaosControlPlane}; never null
-   * @throws IllegalStateException if dynamic self-attach is unavailable on this JVM (e.g., the JDK
-   *     tools JAR is missing or the security manager prevents attachment). In this case, run tests
-   *     with {@code -javaagent:chaos-agent.jar} instead.
+   * @throws IllegalStateException if dynamic self-attach is unavailable on this JVM (e.g., the
+   *     {@code jdk.attach} module is missing, or the JVM runs with {@code
+   *     -XX:-EnableDynamicAgentLoading} or {@code -XX:+DisableAttachMechanism}). In this case, run
+   *     tests with {@code -javaagent:chaos-agent.jar} instead.
    */
   public static ChaosControlPlane installForLocalTests() {
     copyByteBuddyExperimental();

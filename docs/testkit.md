@@ -252,16 +252,16 @@ Match numbers count the scenario's selector matches since it started; replay rep
 `ChaosPlatform.installLocally()` uses the JDK Attach API to self-attach the agent. Requirements:
 
 - JDK (not JRE): requires `tools.jar` (JDK 8) or the `java.attach` module (JDK 9+)
-- `-Djdk.attach.allowAttachSelf=true` must be set on JDK 9+ to allow a process to attach to itself. `ChaosAgentExtension` sets this as a system property before self-attach. Alternatively, set it in the JVM command line.
+- No JVM flag is required: when the JVM does not allow a process to attach to itself (`jdk.attach.allowAttachSelf` unset, the default since JDK 9), ByteBuddy attaches from a short-lived helper process, and the agent installs as usual. On JDK 21 and later the JVM then prints the [JEP 451](https://openjdk.org/jeps/451) warning on stderr ("WARNING: A Java agent has been loaded dynamically …"). It is a warning only; chaos works. The agent does not suppress it. To avoid it, either load the agent at startup with `-javaagent:` (no dynamic loading, no warning), or add `-XX:+EnableDynamicAgentLoading` to the test JVM, which allows the dynamic load explicitly. A JVM started with `-XX:-EnableDynamicAgentLoading` refuses the self-attach; `installLocally()` then fails with `IllegalStateException`, and `-javaagent:` is the way to run.
 
 **No `--add-opens` flags required.** The agent self-grants every JDK module open it needs at install time — manifest `Add-Opens` for `-javaagent:` startup attach, `Instrumentation#redefineModule` for self-attach. See [Module access strategy](instrumentation.md#module-access-strategy).
 - The agent JAR must be locatable on the classpath. `ChaosPlatform` uses a classpath scan to find the bootstrap JAR.
 
-**Gradle/Maven test configuration example**:
+**Gradle test configuration example** (optional; only avoids the JEP 451 warning):
 ```kotlin
 // build.gradle.kts
 tasks.test {
-    jvmArgs("-Djdk.attach.allowAttachSelf=true")
+    jvmArgs("-XX:+EnableDynamicAgentLoading")
 }
 ```
 
@@ -377,7 +377,7 @@ void gateBlocksAndReleasesCorrectly(ChaosSession session) throws Exception {
 | Activating JVM-scoped scenario without closing the handle                  | Scenario leaks across tests; chaos remains active for subsequent tests in the same JVM                       | Always call `handle.close()` in `finally`                                                            |
 | Not binding session before submitting work to an executor                  | Session context not propagated; executor tasks not affected by session-scoped chaos                          | Use `session.bind()` before submitting, or `session.wrap(task)` to create a context-carrying wrapper |
 | Submitting pool work before the session's first scenario is activated     | The task runs outside the session: session-scoped chaos and `X-Chaos-Session` do not reach it                | Activate the session's scenarios before submitting                                                   |
-| Using `ChaosTestKit.install()` without `-Djdk.attach.allowAttachSelf=true` | `IllegalStateException` at runtime                                                                           | Add the JVM arg to test config                                                                       |
+| Using `ChaosTestKit.install()` in a JVM started with `-XX:-EnableDynamicAgentLoading` | `IllegalStateException` at runtime (the JVM refuses dynamic agents)                                          | Remove the flag, or load the agent with `-javaagent:`                                                |
 | Checking `appliedCount` without waiting for scenarios to fire              | Race condition: the scenario may not have fired yet                                                          | Use event listeners or explicit synchronization points                                               |
 | Registering the same scenario ID twice in the same scope                   | `ChaosActivationException("scenario key already active")` (only while the previous one is REGISTERED/ACTIVE) | Use unique IDs per test; let `ChaosAgentExtension` manage session lifecycle                          |
 
@@ -414,7 +414,7 @@ If `matchedCount == 0`:
 
 - Reference: JUnit 5 — `Extension`, `BeforeEachCallback`, `AfterEachCallback`, `ParameterResolver` — https://junit.org/junit5/docs/current/user-guide/#extensions
 - Reference: Java SE API — `com.sun.tools.attach.VirtualMachine` (self-attach via Attach API) — https://docs.oracle.com/en/java/docs/api/jdk.attach/com/sun/tools/attach/VirtualMachine.html
-- Reference: JDK 9+ — `jdk.attach.allowAttachSelf` system property (required for self-attach) — https://openjdk.org/jeps/451
+- Reference: JEP 451 — Prepare to Disallow the Dynamic Loading of Agents (JDK 21+; the warning a self-attach prints) — https://openjdk.org/jeps/451
 - Reference: JSR-133 — Java Memory Model — `ThreadLocal` visibility guarantees per thread — https://jcp.org/aboutJava/communityprocess/mrel/jsr133/index.html
 
 ---

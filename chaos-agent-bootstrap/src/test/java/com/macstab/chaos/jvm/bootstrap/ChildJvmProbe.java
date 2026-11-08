@@ -54,6 +54,25 @@ final class ChildJvmProbe {
   }
 
   /**
+   * Runs {@code mainClass mode} in a child JVM without {@code -javaagent:} and without the flags
+   * that allow self-attach ({@code -Djdk.attach.allowAttachSelf}, {@code
+   * -XX:+EnableDynamicAgentLoading}): the launch an application gets by default.
+   *
+   * @param mainClass the probe main class
+   * @param mode the probe mode passed as the first program argument
+   * @return the probe's {@code key=value} output lines, with its stderr
+   */
+  ProbeResult runWithoutAgentOrFlags(final Class<?> mainClass, final String mode) throws Exception {
+    final List<String> command = new ArrayList<>();
+    command.add(Path.of(System.getProperty("java.home"), "bin", "java").toString());
+    command.add("-cp");
+    command.add(System.getProperty("java.class.path"));
+    command.add(mainClass.getName());
+    command.add(mode);
+    return execute(command);
+  }
+
+  /**
    * Runs {@code mainClass mode programArgs} in a child JVM without {@code -javaagent:}, for a probe
    * that is expected to end the JVM with a failure.
    *

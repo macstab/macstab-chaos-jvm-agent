@@ -216,6 +216,10 @@ Migration steps for each change: [docs/migration-2.0.md](docs/migration-2.0.md).
 * **api:** `NamePattern` GLOB matching uses an allocation-free wildcard matcher instead of a compiled regex.
 
 
+### Documentation
+
+* **bootstrap, testkit:** self-attach needs no JVM flag: the docs no longer ask for `-Djdk.attach.allowAttachSelf=true` or claim that the test extensions set it (none does; ByteBuddy attaches from a helper process when self-attach is not allowed). They describe the JEP 451 warning a self-attach prints on JDK 21+ and how to avoid it (`-javaagent:` or `-XX:+EnableDynamicAgentLoading`), and that an executable jar's `Launcher-Agent-Class` goes through `agentmain` and so needs `MACSTAB_CHAOS_ALLOW_DYNAMIC_ATTACH`. A child-JVM test installs and applies chaos without either flag.
+
 # 1.0.0 (2026-04-29)
 
 
