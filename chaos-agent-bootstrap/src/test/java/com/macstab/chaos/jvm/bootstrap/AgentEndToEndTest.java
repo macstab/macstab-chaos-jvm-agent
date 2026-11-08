@@ -1018,6 +1018,37 @@ class AgentEndToEndTest {
 
     @Test
     @DisplayName(
+        "a bridge claimed by another agent revision refuses the install before it touches the"
+            + " JVM")
+    void bridgeOfAnotherRevisionIsRefused() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.runWithoutAgent(InstallerProbeMain.class, "bridge-revision-claimed");
+
+      assertThat(result.value("preClaimed")).isEqualTo("true");
+      assertThat(result.value("installRefusal"))
+          .startsWith("a chaos agent of revision 0123456789abcdef is already installed")
+          .endsWith("restart with one agent version");
+      assertThat(result.value("delegateLeft")).isEqualTo("false");
+      assertThat(result.longValue("appends")).as("bridge jars appended").isZero();
+      assertThat(result.longValue("moduleRedefinitions")).as("modules opened").isZero();
+    }
+
+    @Test
+    @DisplayName(
+        "a bridge on the boot class path that no agent claimed is of an unknown revision: the"
+            + " install is refused")
+    void unclaimedBridgeIsRefused() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.runWithoutAgent(InstallerProbeMain.class, "bridge-revision-unclaimed");
+
+      assertThat(result.value("installRefusal"))
+          .startsWith("a chaos agent of revision unknown is already installed");
+      assertThat(result.value("delegateLeft")).isEqualTo("false");
+      assertThat(result.longValue("appends")).as("bridge jars appended").isZero();
+    }
+
+    @Test
+    @DisplayName(
         "a runtime used before the install raises the dispatch depth once installed: a clock"
             + " skew does not move a scenario's start")
     void runtimeUsedBeforeInstallSeesTheDispatcher() throws Exception {

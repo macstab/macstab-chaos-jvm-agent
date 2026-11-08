@@ -286,6 +286,9 @@ public final class BootstrapDispatcher {
    */
   private static volatile MethodHandle @Nullable [] handles;
 
+  /** The agent revision that claimed this bridge; see {@link #claimRevision(String)}. */
+  private static @Nullable String bridgeRevision;
+
   // ── Phase 1 handles (0-13): concurrency / scheduling interception points ────
   /** Handle index for {@link #decorateExecutorRunnable(String, Object, Runnable)}. */
   public static final int DECORATE_EXECUTOR_RUNNABLE = 0;
@@ -579,6 +582,26 @@ public final class BootstrapDispatcher {
    */
   public static @Nullable Object installedDelegate() {
     return delegate;
+  }
+
+  /**
+   * Claims this bridge for one agent revision (a digest of the bridge class bytes the agent copy
+   * appended), so a copy of another version detects that its own bridge classes are not the ones
+   * the bootstrap class loader resolves. Set-once: the first claim wins and a later claim never
+   * overwrites it, it returns the claimed revision instead; this also settles two copies in
+   * different class loaders that both appended a bridge before either resolved one.
+   *
+   * @param revision the claiming copy's revision, or {@code null} to read the claimed revision
+   *     without claiming
+   * @return the revision claimed before this call, or {@code null} when there was none (then {@code
+   *     revision}, unless {@code null}, is claimed now)
+   */
+  public static synchronized @Nullable String claimRevision(final @Nullable String revision) {
+    final String claimed = bridgeRevision;
+    if (claimed == null && revision != null) {
+      bridgeRevision = revision;
+    }
+    return claimed;
   }
 
   // ── Phase 1 dispatch methods ───────────────────────────────────────────────

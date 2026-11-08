@@ -38,6 +38,8 @@ public final class InstallerProbeMain {
       case "lifecycle" -> lifecycle();
       case "session-hosts-failure" -> sessionHostsFailure();
       case "foreign-copy" -> foreignCopy();
+      case "bridge-revision-claimed" -> bridgeOfAnotherRevision(true);
+      case "bridge-revision-unclaimed" -> bridgeOfAnotherRevision(false);
       case "dispatcher-before-install" -> dispatcherBeforeInstall();
       case "reports-during-shutdown" -> reportsDuringShutdown();
       case "retransform-failure" -> retransformFailure();
@@ -151,6 +153,61 @@ public final class InstallerProbeMain {
     }
     System.out.println("foreignAppends=" + counting.appends());
     System.out.println("foreignModuleRedefinitions=" + counting.moduleRedefinitions());
+  }
+
+  /**
+   * A bridge already on the bootstrap class path that this installer did not inject: claimed by
+   * another revision, or not claimed at all (a bridge placed there by hand, or by an agent version
+   * that predates the claim). The install must be refused before it touches the JVM.
+   */
+  private static void bridgeOfAnotherRevision(final boolean preClaim) throws Exception {
+    final Instrumentation real = net.bytebuddy.agent.ByteBuddyAgent.install();
+    appendBridgeByHand(real);
+    if (preClaim) {
+      try {
+        Class.forName(
+                "com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher", true, null)
+            .getMethod("claimRevision", String.class)
+            .invoke(null, "0123456789abcdef");
+        System.out.println("preClaimed=true");
+      } catch (final NoSuchMethodException noClaim) {
+        System.out.println("preClaimed=false");
+      }
+    }
+    final ScriptedInstrumentation counting = new ScriptedInstrumentation(real);
+    try {
+      JdkInstrumentationInstaller.install(
+          counting, new ChaosRuntime(), false, List.of(), List.of());
+      System.out.println("installRefusal=none");
+    } catch (final IllegalStateException refused) {
+      System.out.println("installRefusal=" + refused.getMessage());
+    }
+    System.out.println("delegateLeft=" + (bootDelegate() != null));
+    System.out.println("appends=" + counting.appends());
+    System.out.println("moduleRedefinitions=" + counting.moduleRedefinitions());
+  }
+
+  /**
+   * Appends the bridge classes to the bootstrap class path the way {@code -Xbootclasspath/a} does.
+   */
+  private static void appendBridgeByHand(final Instrumentation instrumentation) throws Exception {
+    final java.lang.reflect.Field listField =
+        Class.forName("com.macstab.chaos.jvm.instrumentation.BridgeInjector")
+            .getDeclaredField("BRIDGE_CLASSES");
+    listField.setAccessible(true);
+    final java.nio.file.Path jar = java.nio.file.Files.createTempFile("hand-placed-bridge", ".jar");
+    try (java.util.jar.JarOutputStream out =
+        new java.util.jar.JarOutputStream(java.nio.file.Files.newOutputStream(jar))) {
+      for (final Object entry : (List<?>) listField.get(null)) {
+        final String path = (String) entry;
+        try (java.io.InputStream in = ClassLoader.getSystemResourceAsStream(path)) {
+          out.putNextEntry(new java.util.jar.JarEntry(path));
+          java.util.Objects.requireNonNull(in, path).transferTo(out);
+          out.closeEntry();
+        }
+      }
+    }
+    instrumentation.appendToBootstrapClassLoaderSearch(new java.util.jar.JarFile(jar.toFile()));
   }
 
   /**

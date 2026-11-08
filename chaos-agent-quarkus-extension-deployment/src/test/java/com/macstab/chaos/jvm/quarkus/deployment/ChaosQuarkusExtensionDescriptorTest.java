@@ -35,6 +35,22 @@ class ChaosQuarkusExtensionDescriptorTest {
   }
 
   @Test
+  @DisplayName(
+      "the runtime jar loads the api and the agent parent-first, in tests and in the packaged"
+          + " application")
+  void runtimeDescriptorLoadsApiAndAgentParentFirst() throws IOException {
+    final Properties descriptor = new Properties();
+    try (InputStream in = resource("META-INF/quarkus-extension.properties")) {
+      descriptor.load(in);
+    }
+
+    final String agentArtifacts =
+        "com.macstab.chaos.jvm:chaos-agent-api,com.macstab.chaos.jvm:chaos-agent-bootstrap";
+    assertThat(descriptor.getProperty("parent-first-artifacts")).isEqualTo(agentArtifacts);
+    assertThat(descriptor.getProperty("runner-parent-first-artifacts")).isEqualTo(agentArtifacts);
+  }
+
+  @Test
   @DisplayName("the deployment jar indexes every class that declares a @BuildStep")
   void buildStepIndexListsBuildStepClasses() throws Exception {
     final List<String> indexed;

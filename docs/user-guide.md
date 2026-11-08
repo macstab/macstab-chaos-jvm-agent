@@ -107,6 +107,8 @@ java -javaagent:chaos-agent-bootstrap-<version>.jar=configFile=/etc/chaos/plan.j
      -jar your-application.jar
 ```
 
+Use one agent version per JVM. The JVM appends the `-javaagent` jar to the end of the class path, so an agent copy that the application already has on its class path (for example `chaos-agent-bootstrap` pulled in by a starter) is the one that runs. When the copies have different versions, the agent prints one `[chaos-agent] agent copies of different versions are on the class path` warning that names each jar. A copy of another version that finds the bootstrap bridge of a different version already installed refuses to install (`a chaos agent of revision … is already installed in this JVM …; restart with one agent version`). The Quarkus extensions load `chaos-agent-api` and `chaos-agent-bootstrap` parent-first, so a Quarkus application has one copy of each, shared with a `-javaagent` agent.
+
 ### 2.4 Self-Attach and the JEP 451 Warning
 
 When the testkit or Spring starters self-attach, no JVM flag is required: when the JVM does not allow a process to attach to itself (`jdk.attach.allowAttachSelf` unset, the default since JDK 9), ByteBuddy attaches from a short-lived helper process, and the agent installs as usual. On JDK 21 and later the JVM then prints the [JEP 451](https://openjdk.org/jeps/451) warning on stderr ("WARNING: A Java agent has been loaded dynamically …"). It is a warning only; chaos works. The agent does not suppress it. To avoid it, either load the agent at startup with `-javaagent:` (no dynamic loading, no warning), or add `-XX:+EnableDynamicAgentLoading` to the test JVM, which allows the dynamic load explicitly. A JVM started with `-XX:-EnableDynamicAgentLoading` refuses the self-attach; `installLocally()` then fails with `IllegalStateException`, and `-javaagent:` is the way to run.
@@ -870,7 +872,7 @@ The CI build runs `spotlessCheck` and fails on any formatting violation.
 | `chaos-agent-spring-boot4-test-starter` | Spring Boot 4 equivalent                                                                                                                                               |
 | `chaos-agent-spring-boot3-starter`      | Spring Boot 3 Actuator endpoint, auto-configuration                                                                                                                    |
 | `chaos-agent-spring-boot4-starter`      | Spring Boot 4 equivalent                                                                                                                                               |
-| `chaos-agent-quarkus-extension`         | Quarkus extension (`quarkus-extension.properties` + deployment build step); CDI producer for `ChaosControlPlane`; `macstab.chaos.enabled` read via MicroProfile Config |
+| `chaos-agent-quarkus-extension`         | Quarkus extension (`quarkus-extension.properties` + deployment build step; api and agent parent-first); CDI producer for `ChaosControlPlane`; `macstab.chaos.enabled` read via MicroProfile Config |
 | `chaos-agent-micronaut-integration`     | Micronaut DI integration; generated bean definitions make `ChaosControlPlane` injectable                                                                               |
 | `chaos-agent-benchmarks`                | JMH benchmark suite                                                                                                                                                    |
 

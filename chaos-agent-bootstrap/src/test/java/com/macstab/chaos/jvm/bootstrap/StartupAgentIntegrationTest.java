@@ -231,6 +231,89 @@ class StartupAgentIntegrationTest {
     }
   }
 
+  @Nested
+  @DisplayName("a class-path copy of the agent")
+  class ClassPathCopy {
+
+    @Test
+    @DisplayName("of another version shadows -javaagent: one warning names both jars")
+    void anotherVersionIsReported() throws Exception {
+      final Path copy = agentCopy("other-version.jar", "0.0.1-other");
+
+      final String output = runShadowed(copy);
+
+      assertThat(output)
+          .contains("[chaos-agent] agent copies of different versions are on the class path")
+          .contains(copy.toRealPath().toString())
+          .contains("0.0.1-other")
+          .contains(Path.of(System.getProperty("chaos.bootstrap.agentJar")).toRealPath().toString())
+          .contains(agentVersion());
+    }
+
+    @Test
+    @DisplayName("of the same version is not reported")
+    void sameVersionIsQuiet() throws Exception {
+      final Path copy = agentCopy("same-version.jar", agentVersion());
+
+      final String output = runShadowed(copy);
+
+      assertThat(output).doesNotContain("agent copies of different versions");
+    }
+
+    /** A jar with the agent's entry class and the given {@code Implementation-Version}. */
+    private Path agentCopy(final String name, final String version) throws Exception {
+      final java.util.jar.Manifest manifest = new java.util.jar.Manifest();
+      manifest.getMainAttributes().put(java.util.jar.Attributes.Name.MANIFEST_VERSION, "1.0");
+      manifest
+          .getMainAttributes()
+          .put(java.util.jar.Attributes.Name.IMPLEMENTATION_VERSION, version);
+      final Path jar = tempDir.resolve(name);
+      final String entry = ChaosAgentBootstrap.class.getName().replace('.', '/') + ".class";
+      try (java.util.jar.JarOutputStream out =
+              new java.util.jar.JarOutputStream(Files.newOutputStream(jar), manifest);
+          java.io.InputStream in = ClassLoader.getSystemResourceAsStream(entry)) {
+        out.putNextEntry(new java.util.jar.JarEntry(entry));
+        java.util.Objects.requireNonNull(in, entry).transferTo(out);
+        out.closeEntry();
+      }
+      return jar;
+    }
+
+    /** Runs the agent with {@code copy} in front of the class path; returns stdout and stderr. */
+    private String runShadowed(final Path copy) throws Exception {
+      final List<String> command =
+          List.of(
+              Path.of(System.getProperty("java.home"), "bin", "java").toString(),
+              "-javaagent:" + System.getProperty("chaos.bootstrap.agentJar"),
+              "-cp",
+              copy + java.io.File.pathSeparator + System.getProperty("java.class.path"),
+              AgentProcessProbeMain.class.getName(),
+              "gc");
+      final Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
+      final String output;
+      try (final BufferedReader reader =
+          new BufferedReader(
+              new InputStreamReader(
+                  process.getInputStream(), java.nio.charset.StandardCharsets.UTF_8))) {
+        output = String.join("\n", reader.lines().toList());
+      }
+      assertThat(process.waitFor(30, TimeUnit.SECONDS)).as("probe JVM should finish").isTrue();
+      assertThat(process.exitValue()).as("probe JVM exit value: " + output).isZero();
+      return output;
+    }
+
+    private static String agentVersion() throws Exception {
+      try (java.util.jar.JarFile agent =
+          new java.util.jar.JarFile(System.getProperty("chaos.bootstrap.agentJar"))) {
+        return String.valueOf(
+            agent
+                .getManifest()
+                .getMainAttributes()
+                .getValue(java.util.jar.Attributes.Name.IMPLEMENTATION_VERSION));
+      }
+    }
+  }
+
   private String runProbe(final ChaosPlan plan, final String mode) throws Exception {
     final Path configFile = tempDir.resolve(mode + "-plan.json");
     Files.writeString(configFile, ChaosPlanMapper.write(plan));

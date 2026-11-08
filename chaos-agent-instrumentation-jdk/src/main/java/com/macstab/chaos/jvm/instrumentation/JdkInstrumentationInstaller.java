@@ -121,9 +121,9 @@ public final class JdkInstrumentationInstaller {
    * @param sessionHeaderHosts host globs that receive {@code X-Chaos-Session} besides the internal
    *     hosts ({@code *} for all)
    * @throws IllegalArgumentException if a clock prefix names JDK classes
-   * @throws IllegalStateException if a copy of the agent loaded by another class loader is
-   *     installed (nothing is changed then), or if a later step fails (the delegate and the hooks
-   *     are removed again)
+   * @throws IllegalStateException if the bootstrap class path already holds the bridge of another
+   *     agent revision, or a copy of the agent loaded by another class loader is installed (nothing
+   *     is changed then), or if a later step fails (the delegate and the hooks are removed again)
    */
   public static void install(
       final Instrumentation instrumentation,
@@ -133,7 +133,9 @@ public final class JdkInstrumentationInstaller {
       final List<String> sessionHeaderHosts) {
     clockPackages = validatedClockPackages(clockCallSitePackages);
     // A refused copy must leave no trace: the foreign check runs before the steps that cannot be
-    // undone (a jar appended to the bootstrap class path, opened modules).
+    // undone (a jar appended to the bootstrap class path, opened modules). A bridge of another
+    // revision comes first: this copy's delegate and advice cannot run against its classes.
+    BridgeInjector.requireOwnRevision();
     rejectForeignDelegate(installedDelegateOrNull());
     BridgeInjector.injectBridge(instrumentation);
     ModuleOpener.grantInternalModuleOpens(instrumentation);

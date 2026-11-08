@@ -8,6 +8,7 @@ import java.nio.file.Path;
 import java.util.jar.JarEntry;
 import java.util.jar.JarOutputStream;
 import java.util.logging.Logger;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Writes the bootstrap bridge classes into a jar and appends it to the bootstrap class path, once
@@ -29,6 +30,11 @@ final class BridgeInjector {
 
   private static final String BOOTSTRAP_DISPATCHER =
       "com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher";
+
+  private static final String CLAIM_REVISION = "claimRevision";
+
+  /** Computed once; see {@link #revision()}. */
+  private static volatile @Nullable String revision;
 
   private BridgeInjector() {}
 
@@ -75,6 +81,13 @@ final class BridgeInjector {
       return;
     }
     if (onBootClassPath()) {
+      try {
+        // Another copy appended the bridge after this install's own check.
+        requireOwnRevision();
+      } catch (final RuntimeException foreign) {
+        BRIDGE_INJECTED.set(false);
+        throw foreign;
+      }
       return;
     }
     boolean appended = false;
@@ -104,6 +117,7 @@ final class BridgeInjector {
       BRIDGE_JARS.add(jarFile);
       instrumentation.appendToBootstrapClassLoaderSearch(jarFile);
       appended = true;
+      claim();
       // The bootstrap class path entry is opened when it is appended, and the JarFile above holds
       // its own handle, so on POSIX the file can be unlinked now and nothing is left in the temp
       // directory, even when the JVM is killed (deleteOnExit alone would leave one jar per kill
@@ -127,6 +141,91 @@ final class BridgeInjector {
       }
       throw failure;
     }
+  }
+
+  /**
+   * Refuses the install when the bootstrap class loader already resolves a bridge that is not this
+   * copy's revision: claimed by another agent version, or not claimed at all (a bridge placed with
+   * {@code -Xbootclasspath/a}, or appended by an agent version that predates the claim, whose
+   * dispatcher has no {@code claimRevision}). The advice and the delegate of this copy would run
+   * against another copy's bridge classes. Reads only: nothing is claimed or appended.
+   *
+   * @throws IllegalStateException if the bridge belongs to another revision, or its revision cannot
+   *     be read
+   */
+  static void requireOwnRevision() {
+    final Class<?> dispatcher;
+    try {
+      dispatcher = Class.forName(BOOTSTRAP_DISPATCHER, true, null);
+    } catch (final ClassNotFoundException notYet) {
+      return;
+    }
+    @Nullable String claimed;
+    try {
+      claimed =
+          (String) dispatcher.getMethod(CLAIM_REVISION, String.class).invoke(null, (Object) null);
+    } catch (final NoSuchMethodException predatesTheClaim) {
+      claimed = null;
+    } catch (final ReflectiveOperationException exception) {
+      throw new IllegalStateException("failed to read the bridge revision", exception);
+    }
+    final String own = revision();
+    if (!own.equals(claimed)) {
+      throw mismatch(claimed, own);
+    }
+  }
+
+  /** Claims the bridge this copy appended; a claim that loses a race to another revision fails. */
+  private static void claim() {
+    final String own = revision();
+    final @Nullable String claimed;
+    try {
+      claimed =
+          (String)
+              Class.forName(BOOTSTRAP_DISPATCHER, true, null)
+                  .getMethod(CLAIM_REVISION, String.class)
+                  .invoke(null, own);
+    } catch (final ReflectiveOperationException exception) {
+      throw new IllegalStateException("failed to claim the bridge revision", exception);
+    }
+    if (claimed != null && !claimed.equals(own)) {
+      throw mismatch(claimed, own);
+    }
+  }
+
+  private static IllegalStateException mismatch(final @Nullable String claimed, final String own) {
+    return new IllegalStateException(
+        "a chaos agent of revision "
+            + (claimed == null ? "unknown" : claimed)
+            + " is already installed in this JVM, and this copy is revision "
+            + own
+            + "; restart with one agent version");
+  }
+
+  /**
+   * This copy's bridge revision: the first 16 hex digits of the SHA-256 of the {@link
+   * #BRIDGE_CLASSES} bytes, in list order, as {@link #injectBridge} writes them.
+   *
+   * @throws IllegalStateException if a bridge class cannot be read
+   */
+  static String revision() {
+    String computed = revision;
+    if (computed == null) {
+      try {
+        final java.security.MessageDigest digest =
+            java.security.MessageDigest.getInstance("SHA-256");
+        for (final String bridgeClass : BRIDGE_CLASSES) {
+          try (InputStream classFile = openClass(bridgeClass)) {
+            digest.update(classFile.readAllBytes());
+          }
+        }
+        computed = java.util.HexFormat.of().formatHex(digest.digest()).substring(0, 16);
+      } catch (final IOException | java.security.NoSuchAlgorithmException exception) {
+        throw new IllegalStateException("failed to read the bridge classes", exception);
+      }
+      revision = computed;
+    }
+    return computed;
   }
 
   /** Returns whether the bootstrap class loader already resolves {@code BootstrapDispatcher}. */
@@ -239,9 +338,20 @@ final class BridgeInjector {
    */
   private static void writeClass(final JarOutputStream jarOutputStream, final String resourcePath)
       throws IOException {
-    final ClassLoader agentLoader = JdkInstrumentationInstaller.class.getClassLoader();
     final JarEntry jarEntry = new JarEntry(resourcePath);
     jarOutputStream.putNextEntry(jarEntry);
+    try (InputStream classFile = openClass(resourcePath)) {
+      classFile.transferTo(jarOutputStream);
+    }
+    jarOutputStream.closeEntry();
+  }
+
+  /**
+   * Opens the bridge class file {@code resourcePath} from the agent jar's {@value #BRIDGE_LAYOUT},
+   * or from the class name itself for the plain {@code chaos-agent-instrumentation-jdk} classes.
+   */
+  private static InputStream openClass(final String resourcePath) throws IOException {
+    final ClassLoader agentLoader = JdkInstrumentationInstaller.class.getClassLoader();
     InputStream inputStream = agentLoader.getResourceAsStream(BRIDGE_LAYOUT + resourcePath);
     if (inputStream == null) {
       inputStream = agentLoader.getResourceAsStream(resourcePath);
@@ -249,9 +359,6 @@ final class BridgeInjector {
     if (inputStream == null) {
       throw new IOException("missing bridge resource " + resourcePath);
     }
-    try (InputStream classFile = inputStream) {
-      classFile.transferTo(jarOutputStream);
-    }
-    jarOutputStream.closeEntry();
+    return inputStream;
   }
 }

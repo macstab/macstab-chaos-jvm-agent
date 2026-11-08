@@ -64,6 +64,8 @@ dependencies {
 
 val agentManifest = mapOf(
     "Automatic-Module-Name" to "com.macstab.chaos.jvm.agent.bootstrap",
+    // ChaosAgentBootstrap compares it across the agent copies on the class path.
+    "Implementation-Version" to project.version.toString(),
     "Premain-Class" to "com.macstab.chaos.jvm.bootstrap.ChaosAgentBootstrap",
     "Agent-Class" to "com.macstab.chaos.jvm.bootstrap.ChaosAgentBootstrap",
     "Can-Redefine-Classes" to "true",

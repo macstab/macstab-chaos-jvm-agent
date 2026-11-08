@@ -94,9 +94,11 @@ ChaosRuntime runtime = new ChaosRuntime()
 JdkInstrumentationInstaller.install(instrumentation, runtime, eager)
   — eager = eagerInstrumentation(agentArgs, env): agent arg instrumentation=eager,
     else -Dmacstab.chaos.instrumentation, else MACSTAB_CHAOS_INSTRUMENTATION
-  — refuses to install if a copy of the agent loaded by another class loader
-    already owns the bridge delegate (one copy per JVM); checked first, so a
-    refused copy appends no bridge jar and opens no module
+  — refuses to install if the bootstrap class path already holds the bridge of
+    another agent revision (claimed by another version, or unclaimed), or if a
+    copy of the agent loaded by another class loader already owns the bridge
+    delegate (one copy per JVM); checked first, so a refused copy appends no
+    bridge jar and opens no module
   — injects the bridge, opens the JDK-internal packages, then installs the
     delegate, sets the session-header hosts and registers the HookDemand
     callback; a failure from the delegate on removes the delegate again
@@ -153,6 +155,8 @@ The opt-in remains the safeguard against rewriting a live production JVM: withou
 `initialize()` claims a single `INITIALIZATION` slot with a compare-and-exchange before doing any work. Exactly one caller performs the installation; concurrent callers wait for its outcome and receive the same runtime (or the same failure). A completed initialization is returned as-is. If the installation fails, everything it installed is rolled back and the slot is freed, so a later call starts from a clean JVM. `installForLocalTests()` additionally serialises the self-attach under a lock so the attach work is not done twice.
 
 **One copy per JVM**: if a second copy of the agent, loaded by a different class loader (for example an agent jar on the system class path plus a starter bundled child-first in a web application), tries to install, it is refused with an `IllegalStateException` — installing would silently cut the first copy off from every intercepted call. The check runs before anything that cannot be undone: the refused copy appends no bridge jar to the bootstrap class path and opens no module. `JdkInstrumentationInstaller.connectDispatcher` (benchmarks and tests on the plain `chaos-agent-instrumentation-jdk` classes, `@Internal`) makes the same check, and closing it removes only its own delegate.
+
+**One agent version per JVM**: the bridge on the bootstrap class path is shared by every copy, and a copy's delegate and advice only fit its own bridge classes. The copy that appends the bridge claims it with its revision, a digest of the bridge class bytes, through `BootstrapDispatcher.claimRevision` (set-once: a later claim returns the first one, which also settles two copies that both appended a bridge). A later install compares its own revision with the claimed one before anything else; another revision, a bridge that nobody claimed (placed with `-Xbootclasspath/a`) or a dispatcher without `claimRevision` (an agent version that predates it) refuses the install with `a chaos agent of revision … is already installed in this JVM, and this copy is revision …; restart with one agent version`. `-javaagent` appends its jar at the end of the system class path, so an agent copy on the class path itself runs in its place: `premain` compares the `Implementation-Version` of every `ChaosAgentBootstrap` copy the system class loader sees and prints one `[chaos-agent]` warning naming each jar when they differ (one version: FINE only; a classes directory has no version and is not compared). The Quarkus extensions declare `chaos-agent-api` and `chaos-agent-bootstrap` as `parent-first-artifacts` and `runner-parent-first-artifacts` (in the packaged application they move to `lib/boot`), so Quarkus' class loader defines no copy of its own.
 
 ---
 

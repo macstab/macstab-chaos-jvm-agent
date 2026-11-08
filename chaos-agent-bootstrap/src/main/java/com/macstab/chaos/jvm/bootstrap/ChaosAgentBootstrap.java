@@ -165,6 +165,13 @@ public final class ChaosAgentBootstrap {
   /** Environment variable equivalent of {@link #SESSION_HEADER_HOSTS_ARG}. */
   static final String SESSION_HEADER_HOSTS_ENV = "MACSTAB_CHAOS_SESSION_HEADER_HOSTS";
 
+  /** This class as a resource: there is one per agent copy on a class path. */
+  private static final String ENTRY_CLASS =
+      "com/macstab/chaos/jvm/bootstrap/ChaosAgentBootstrap.class";
+
+  /** Several jar paths fit: the shared cap of {@link LogText#MAX_LENGTH} is for one value. */
+  private static final int COPIES_LOG_LENGTH = 4096;
+
   private ChaosAgentBootstrap() {}
 
   /**
@@ -183,7 +190,64 @@ public final class ChaosAgentBootstrap {
   public static void premain(
       final @Nullable String agentArgs, final Instrumentation instrumentation) {
     copyByteBuddyExperimental();
+    reportShadowingCopies(ClassLoader.getSystemClassLoader());
     initialize(agentArgs, instrumentation, System.getenv());
+  }
+
+  /**
+   * Warns once when agent copies of different versions are on the class path. {@code -javaagent}
+   * appends its jar at the end of the system class path, so a copy earlier on it (an agent
+   * dependency of another version) is the one that runs, in place of the {@code -javaagent} jar.
+   * Copies of one {@code Implementation-Version} are interchangeable (logged at FINE only); a copy
+   * without one (a classes directory) is not compared. Never fails the start.
+   *
+   * @param loader the class loader whose copies are compared
+   */
+  static void reportShadowingCopies(final ClassLoader loader) {
+    final Map<String, String> versions = new java.util.LinkedHashMap<>();
+    try {
+      for (final java.net.URL copy : java.util.Collections.list(loader.getResources(ENTRY_CLASS))) {
+        if (copy.openConnection() instanceof java.net.JarURLConnection entry
+            && "file".equals(entry.getJarFileURL().getProtocol())) {
+          final java.nio.file.Path jar = java.nio.file.Path.of(entry.getJarFileURL().toURI());
+          try (java.util.jar.JarFile file = new java.util.jar.JarFile(jar.toFile())) {
+            final java.util.jar.Manifest manifest = file.getManifest();
+            final String version =
+                manifest == null
+                    ? null
+                    : manifest
+                        .getMainAttributes()
+                        .getValue(java.util.jar.Attributes.Name.IMPLEMENTATION_VERSION);
+            if (version != null) {
+              versions.put(jar.toString(), version);
+            }
+          }
+        }
+      }
+    } catch (final java.io.IOException
+        | java.net.URISyntaxException
+        | RuntimeException unreadable) {
+      LOGGER.fine(() -> "chaos-agent: agent copies not compared: " + unreadable);
+      return;
+    }
+    if (new java.util.HashSet<>(versions.values()).size() > 1) {
+      final StringBuilder copies = new StringBuilder();
+      versions.forEach(
+          (jar, version) ->
+              copies
+                  .append(copies.length() == 0 ? "" : ", ")
+                  .append(jar)
+                  .append(" (")
+                  .append(version)
+                  .append(')'));
+      System.err.println(
+          "[chaos-agent] agent copies of different versions are on the class path; the first one"
+              + " runs, also in place of the -javaagent jar: "
+              + LogText.sanitize(copies.toString(), COPIES_LOG_LENGTH)
+              + ". Keep one agent version.");
+    } else if (versions.size() > 1) {
+      LOGGER.fine(() -> "chaos-agent: agent copies of one version: " + versions.keySet());
+    }
   }
 
   /**
