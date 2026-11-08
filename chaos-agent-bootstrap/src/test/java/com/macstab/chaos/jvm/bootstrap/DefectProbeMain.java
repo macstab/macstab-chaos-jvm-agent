@@ -1599,6 +1599,7 @@ public final class DefectProbeMain {
       "org.apache.hc.client5.http.impl.classic.CloseableHttpClient",
       "org.apache.hc.client5.http.impl.classic.InternalHttpClient",
       "org.apache.http.impl.client.CloseableHttpClient",
+      "org.apache.http.impl.client.InternalHttpClient",
       "org.apache.kafka.clients.consumer.KafkaConsumer",
       "org.apache.kafka.clients.producer.KafkaProducer",
       "org.apache.tomcat.util.threads.ThreadPoolExecutor",

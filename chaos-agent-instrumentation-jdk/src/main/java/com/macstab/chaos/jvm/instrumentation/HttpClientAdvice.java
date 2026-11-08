@@ -11,9 +11,8 @@ import net.bytebuddy.asm.Advice;
  * <ul>
  *   <li>Java 11+ {@code HttpClient} ({@code jdk.internal.net.http.HttpClientImpl})
  *   <li>OkHttp 3/4 ({@code okhttp3.RealCall})
- *   <li>Apache HttpComponents 4.x ({@code org.apache.http.impl.client.CloseableHttpClient})
- *   <li>Apache HttpComponents 5.x ({@code
- *       org.apache.hc.client5.http.impl.classic.CloseableHttpClient})
+ *   <li>Apache HttpComponents 4.x and 5.x ({@code doExecute} of the {@code CloseableHttpClient}
+ *       implementations)
  *   <li>Spring WebClient / Reactor Netty ({@code reactor.netty.http.client.HttpClientConnect})
  * </ul>
  *
@@ -236,112 +235,14 @@ final class HttpClientAdvice {
   }
 
   /**
-   * Intercepts Apache HttpComponents 4.x {@code CloseableHttpClient.execute(HttpHost, HttpRequest,
-   * ...)} overloads — the HttpHost-first variants. Apache HC 4.x defines four such overloads
-   * (with/without {@code HttpContext}, with/without {@code ResponseHandler}); the installer
-   * restricts the matcher by first-argument type so this advice only binds to those, leaving the
-   * HttpUriRequest-first overloads to {@link ApacheHc4UriExecuteAdvice}.
+   * Intercepts Apache HttpComponents 4.x {@code doExecute(HttpHost, HttpRequest, HttpContext)},
+   * which every public {@code execute} and {@code executeOpen} overload of {@code
+   * CloseableHttpClient} reaches with the caller's host (or {@code null}): one evaluation per
+   * request, with one URL rule ({@link HttpUrlExtractor#fromApacheHc4}). {@code SCOPE_HTTP} spans
+   * {@code doExecute} only: a response handler runs after it returns, so a request the handler
+   * sends is evaluated too.
    */
-  static final class ApacheHc4ExecuteAdvice {
-    @Advice.OnMethodEnter
-    static void enter(@Advice.Argument(0) final Object host, @Advice.Argument(1) final Object req)
-        throws Throwable {
-      if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_HTTP)) {
-        return;
-      }
-      final String url;
-      try {
-        BootstrapDispatcher.beginInternalCall();
-        try {
-          url = HttpUrlExtractor.fromApacheHc4Request(host, req);
-        } finally {
-          BootstrapDispatcher.endInternalCall();
-        }
-        BootstrapDispatcher.beforeHttpSend(url);
-      } catch (final Throwable throwable) {
-        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
-        throw throwable;
-      }
-    }
-
-    @Advice.OnMethodExit(onThrowable = Throwable.class)
-    static void exit() {
-      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
-    }
-  }
-
-  /**
-   * Intercepts Apache HttpComponents 4.x {@code CloseableHttpClient.execute(HttpUriRequest, ...)}
-   * overloads — the variants where the request is the first argument with no separate host. The
-   * previous single {@code takesArguments(2)} matcher bound the HttpHost-first advice to {@code
-   * execute(HttpUriRequest, HttpContext)} and {@code execute(HttpUriRequest, ResponseHandler)} as
-   * well, handing the advice an {@code HttpUriRequest} where it expected an {@code HttpHost} and
-   * producing malformed URL strings (or none at all).
-   */
-  static final class ApacheHc4UriExecuteAdvice {
-    @Advice.OnMethodEnter
-    static void enter(@Advice.Argument(0) final Object request) throws Throwable {
-      if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_HTTP)) {
-        return;
-      }
-      final String url;
-      try {
-        BootstrapDispatcher.beginInternalCall();
-        try {
-          url = HttpUrlExtractor.fromApacheHc4UriRequest(request);
-        } finally {
-          BootstrapDispatcher.endInternalCall();
-        }
-        BootstrapDispatcher.beforeHttpSend(url);
-      } catch (final Throwable throwable) {
-        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
-        throw throwable;
-      }
-    }
-
-    @Advice.OnMethodExit(onThrowable = Throwable.class)
-    static void exit() {
-      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
-    }
-  }
-
-  /**
-   * Intercepts Apache HttpComponents 5.x {@code CloseableHttpClient.execute(ClassicHttpRequest,
-   * HttpClientResponseHandler)}.
-   */
-  static final class ApacheHc5ExecuteAdvice {
-    @Advice.OnMethodEnter
-    static void enter(@Advice.Argument(0) final Object request) throws Throwable {
-      if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_HTTP)) {
-        return;
-      }
-      final String url;
-      try {
-        BootstrapDispatcher.beginInternalCall();
-        try {
-          url = HttpUrlExtractor.fromApacheHc5Request(request);
-        } finally {
-          BootstrapDispatcher.endInternalCall();
-        }
-        BootstrapDispatcher.beforeHttpSend(url);
-      } catch (final Throwable throwable) {
-        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
-        throw throwable;
-      }
-    }
-
-    @Advice.OnMethodExit(onThrowable = Throwable.class)
-    static void exit() {
-      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
-    }
-  }
-
-  /**
-   * Intercepts Apache HttpComponents 5.x {@code CloseableHttpClient.execute(HttpHost,
-   * ClassicHttpRequest, ...)} overloads, where the target host is passed separately from the
-   * request.
-   */
-  static final class ApacheHc5HostExecuteAdvice {
+  static final class ApacheHc4DoExecuteAdvice {
     @Advice.OnMethodEnter
     static void enter(
         @Advice.Argument(0) final Object host, @Advice.Argument(1) final Object request)
@@ -353,7 +254,44 @@ final class HttpClientAdvice {
       try {
         BootstrapDispatcher.beginInternalCall();
         try {
-          url = HttpUrlExtractor.fromApacheHc5HostRequest(host, request);
+          url = HttpUrlExtractor.fromApacheHc4(host, request);
+        } finally {
+          BootstrapDispatcher.endInternalCall();
+        }
+        BootstrapDispatcher.beforeHttpSend(url);
+      } catch (final Throwable throwable) {
+        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
+        throw throwable;
+      }
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit() {
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
+    }
+  }
+
+  /**
+   * Intercepts Apache HttpComponents 5.x {@code doExecute(HttpHost, ClassicHttpRequest,
+   * HttpContext)}, which every public {@code execute} and {@code executeOpen} overload of {@code
+   * CloseableHttpClient} reaches with the caller's host (or {@code null}): one evaluation per
+   * request, with one URL rule ({@link HttpUrlExtractor#fromApacheHc5}). {@code SCOPE_HTTP} spans
+   * {@code doExecute} only: a response handler runs after it returns, so a request the handler
+   * sends is evaluated too.
+   */
+  static final class ApacheHc5DoExecuteAdvice {
+    @Advice.OnMethodEnter
+    static void enter(
+        @Advice.Argument(0) final Object host, @Advice.Argument(1) final Object request)
+        throws Throwable {
+      if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_HTTP)) {
+        return;
+      }
+      final String url;
+      try {
+        BootstrapDispatcher.beginInternalCall();
+        try {
+          url = HttpUrlExtractor.fromApacheHc5(host, request);
         } finally {
           BootstrapDispatcher.endInternalCall();
         }

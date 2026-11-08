@@ -79,121 +79,93 @@ public final class HttpUrlExtractor {
   }
 
   /**
-   * Builds a URL-like string from an Apache HttpComponents 4.x {@code HttpHost} and {@code
-   * HttpRequest} pair.
+   * The URL of an Apache HttpComponents 4.x {@code doExecute(HttpHost, HttpRequest, HttpContext)}:
+   * an absolute request target ({@code getRequestLine().getUri()}) wins; else the host's URI
+   * ({@code HttpHost.toURI()}) followed by the target; else, without a host, the request's {@code
+   * getURI()}, or its target when it has none.
    *
-   * @param host an {@code org.apache.http.HttpHost} instance; may be {@code null}
-   * @param request an {@code org.apache.http.HttpRequest} instance; may be {@code null}
-   * @return the combined URL string, or {@code null} if extraction fails
+   * @param host the {@code org.apache.http.HttpHost}, or {@code null} when the caller gave none
+   * @param request the {@code org.apache.http.HttpRequest}; may be {@code null}
+   * @return the URL string, or {@code null} if extraction fails
    */
-  public static @Nullable String fromApacheHc4Request(
+  public static @Nullable String fromApacheHc4(
       final @Nullable Object host, final @Nullable Object request) {
     try {
-      final String hostPart = host == null ? "" : host.toString();
-      final String requestPath = extractApacheHc4RequestPath(request);
-      final String combined = hostPart + requestPath;
-      return combined.isEmpty() ? null : combined;
+      final Object requestLine = request == null ? null : invoke(request, "getRequestLine");
+      final Object target = requestLine == null ? null : invoke(requestLine, "getUri");
+      final Object uri = host == null && request != null ? invoke(request, "getURI") : null;
+      return compose(host, target, uri);
     } catch (final Throwable ignored) {
       return null;
     }
   }
 
-  private static String extractApacheHc4RequestPath(final @Nullable Object request)
-      throws Throwable {
-    if (request == null) {
-      return "";
-    }
-    final Object requestLine = invoke(request, "getRequestLine");
-    if (requestLine == null) {
-      return "";
-    }
-    final Object uri = invoke(requestLine, "getUri");
-    return uri == null ? "" : uri.toString();
-  }
-
   /**
-   * Extracts the URI from an Apache HttpComponents 4.x {@code HttpUriRequest} via {@code getURI()}.
-   * Falls back to {@code getRequestLine().getUri()} if {@code getURI()} is absent (e.g., a plain
-   * {@code HttpRequest} passed through the HttpUriRequest-first matcher by a driver subclass).
+   * The URL of an Apache HttpComponents 5.x {@code doExecute(HttpHost, ClassicHttpRequest,
+   * HttpContext)}: an absolute request target ({@code getRequestUri()}) wins; else the host's URI
+   * ({@code HttpHost.toURI()}) followed by the target; else, without a host (as {@code
+   * executeOpen(null, request, context)} passes it), the request's full {@code getUri()}, or its
+   * target when it has none.
    *
-   * @param request an {@code org.apache.http.client.methods.HttpUriRequest} (or superclass); may be
-   *     {@code null}
+   * @param host the {@code org.apache.hc.core5.http.HttpHost}, or {@code null} when the caller gave
+   *     none
+   * @param request the {@code org.apache.hc.core5.http.ClassicHttpRequest}; may be {@code null}
    * @return the URL string, or {@code null} if extraction fails
    */
-  public static @Nullable String fromApacheHc4UriRequest(final @Nullable Object request) {
-    if (request == null) {
-      return null;
-    }
-    try {
-      final Object uri = invoke(request, "getURI");
-      if (uri != null) {
-        return uri.toString();
-      }
-    } catch (final Throwable ignored) {
-      // fall through to request-line path
-    }
-    try {
-      final Object requestLine = invoke(request, "getRequestLine");
-      if (requestLine != null) {
-        final Object uri = invoke(requestLine, "getUri");
-        return uri == null ? null : uri.toString();
-      }
-    } catch (final Throwable ignored) {
-      return null;
-    }
-    return null;
-  }
-
-  /**
-   * Extracts the URI from an Apache HttpComponents 5.x {@code ClassicHttpRequest} via {@code
-   * getRequestUri}.
-   *
-   * @param request an {@code org.apache.hc.core5.http.ClassicHttpRequest} instance; may be {@code
-   *     null}
-   * @return the URI string, or {@code null} if extraction fails
-   */
-  public static @Nullable String fromApacheHc5Request(final @Nullable Object request) {
-    if (request == null) {
-      return null;
-    }
-    // HC5 ClassicHttpRequest exposes getUri() returning a full java.net.URI (scheme+host+path).
-    // Prefer it over getRequestUri() which returns only the request-target path string
-    // (e.g. "/api/v1/resource"), making host-pattern matching against "https://host/*" fail.
-    try {
-      final Object uri = invoke(request, "getUri");
-      if (uri != null) {
-        return uri.toString();
-      }
-    } catch (final Throwable ignored) {
-      // fall through to path-only fallback
-    }
-    try {
-      final Object uri = invoke(request, "getRequestUri");
-      return uri == null ? null : uri.toString();
-    } catch (final Throwable ignored) {
-      return null;
-    }
-  }
-
-  /**
-   * Builds a URL string for an Apache HttpComponents 5.x request executed against an explicit
-   * {@code HttpHost}: the host's URI ({@code HttpHost.toURI()}) followed by the request target. A
-   * request that already carries an absolute URI is returned as is.
-   *
-   * @param host an {@code org.apache.hc.core5.http.HttpHost}; may be {@code null}
-   * @param request an {@code org.apache.hc.core5.http.ClassicHttpRequest}; may be {@code null}
-   * @return the URL string, or {@code null} if extraction fails
-   */
-  public static @Nullable String fromApacheHc5HostRequest(
+  public static @Nullable String fromApacheHc5(
       final @Nullable Object host, final @Nullable Object request) {
     try {
       final Object target = request == null ? null : invoke(request, "getRequestUri");
-      final String path = target == null ? "" : target.toString();
-      if (path.startsWith("http://") || path.startsWith("https://")) {
+      final Object uri = host == null && request != null ? invoke(request, "getUri") : null;
+      return compose(host, target, uri);
+    } catch (final Throwable ignored) {
+      return null;
+    }
+  }
+
+  /**
+   * The one URL rule of the Apache clients: an absolute {@code target} wins; else {@code
+   * host.toURI()} followed by {@code target}; else, without a host, {@code uri}, else {@code
+   * target}.
+   */
+  private static @Nullable String compose(
+      final @Nullable Object host, final @Nullable Object target, final @Nullable Object uri)
+      throws Throwable {
+    final String path = target == null ? "" : target.toString();
+    if (isAbsolute(path)) {
+      return path;
+    }
+    if (host != null) {
+      final Object hostUri = invoke(host, "toURI");
+      final String combined = (hostUri == null ? "" : hostUri.toString()) + path;
+      return combined.isEmpty() ? null : combined;
+    }
+    if (uri != null) {
+      return uri.toString();
+    }
+    return path.isEmpty() ? null : path;
+  }
+
+  /**
+   * The URL of a Reactor Netty request from its {@code HttpClientConfig}: an absolute {@code uri()}
+   * wins; else {@code baseUrl()} followed by {@code uri()}; a missing part is left out.
+   *
+   * @param configuration the {@code reactor.netty.http.client.HttpClientConfig}; may be {@code
+   *     null}
+   * @return the URL string, or {@code null} if extraction fails
+   */
+  public static @Nullable String fromReactorNettyConfig(final @Nullable Object configuration) {
+    if (configuration == null) {
+      return null;
+    }
+    try {
+      final Object uri = invoke(configuration, "uri");
+      final String path = uri == null ? "" : uri.toString();
+      if (isAbsolute(path)) {
         return path;
       }
-      final Object hostUri = host == null ? null : invoke(host, "toURI");
-      final String combined = (hostUri == null ? "" : hostUri.toString()) + path;
+      final Object baseUrl = invoke(configuration, "baseUrl");
+      final String combined = (baseUrl == null ? "" : baseUrl.toString()) + path;
       return combined.isEmpty() ? null : combined;
     } catch (final Throwable ignored) {
       return null;
@@ -201,32 +173,29 @@ public final class HttpUrlExtractor {
   }
 
   /**
-   * Extracts the request URI from a Reactor Netty {@code HttpClientConnect} (the client instance
-   * whose no-argument {@code connect()} is intercepted) through its public {@code configuration()}:
-   * the configured {@code uri()}, falling back to {@code baseUrl()}.
+   * Extracts the request URL from a Reactor Netty {@code HttpClientConnect} (the client instance
+   * whose no-argument {@code connect()} is intercepted) through its public {@code configuration()},
+   * by the rule of {@link #fromReactorNettyConfig}.
    *
    * @param client the {@code reactor.netty.http.client.HttpClientConnect} instance; may be {@code
    *     null}
-   * @return the URI string, or {@code null} if extraction fails
+   * @return the URL string, or {@code null} if extraction fails
    */
   public static @Nullable String fromReactorNettyClient(final @Nullable Object client) {
     if (client == null) {
       return null;
     }
     try {
-      final Object configuration = invoke(client, "configuration");
-      if (configuration == null) {
-        return null;
-      }
-      final Object uri = invoke(configuration, "uri");
-      if (uri != null) {
-        return uri.toString();
-      }
-      final Object baseUrl = invoke(configuration, "baseUrl");
-      return baseUrl == null ? null : baseUrl.toString();
+      return fromReactorNettyConfig(invoke(client, "configuration"));
     } catch (final Throwable ignored) {
       return null;
     }
+  }
+
+  /** Whether {@code url} is an absolute {@code http} or {@code https} URL. */
+  private static boolean isAbsolute(final String url) {
+    return url.regionMatches(true, 0, "http://", 0, "http://".length())
+        || url.regionMatches(true, 0, "https://", 0, "https://".length());
   }
 
   private static @Nullable Object invoke(final Object target, final String methodName)

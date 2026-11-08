@@ -682,8 +682,8 @@ public interface BridgeDelegate {
 
   /**
    * Called before a synchronous HTTP client send (Java {@code HttpClient.send}, OkHttp {@code
-   * RealCall.execute}, Apache HttpComponents {@code CloseableHttpClient.execute}, the JDK's {@code
-   * HttpURLConnection}).
+   * RealCall.execute}, Apache HttpComponents {@code CloseableHttpClient.doExecute}, the JDK's
+   * {@code HttpURLConnection}).
    *
    * @param url the request URL in {@code scheme://host/path} form; may be {@code null} when
    *     extraction fails

@@ -1105,7 +1105,7 @@ Once the hook is wired, the matcher, effect, and activation policy behave like e
 
 **JSON type:** `"httpClient"`  
 **Operations:** `HTTP_CLIENT_SEND`, `HTTP_CLIENT_SEND_ASYNC`  
-**Purpose:** Intercept HTTP client requests across `java.net.http.HttpClient` (`send`, 2- and 3-arg `sendAsync`), `java.net.HttpURLConnection` / `HttpsURLConnection` (Spring `RestTemplate`'s default transport), OkHttp 3 and 4, Apache HttpComponents 4/5 (including HC5 `execute(request)` and the host-first `execute` overloads), and Spring WebClient (Reactor Netty — the URI is taken from the client configuration). Nested or delegating client calls are evaluated once, at the outermost call.
+**Purpose:** Intercept HTTP client requests across `java.net.http.HttpClient` (`send`, 2- and 3-arg `sendAsync`), `java.net.HttpURLConnection` / `HttpsURLConnection` (Spring `RestTemplate`'s default transport), OkHttp 3 and 4, Apache HttpComponents 4/5 (at `doExecute`, which every `execute` and `executeOpen` overload reaches once per request; a request a response handler sends is a call of its own), and Spring WebClient (Reactor Netty — the URI is taken from the client configuration). Nested or delegating client calls are evaluated once, at the outermost call.
 
 **Fields:**
 
@@ -1114,7 +1114,7 @@ Once the hook is wired, the matcher, effect, and activation policy behave like e
 | `operations` | Set\<OperationType\> | required  | `HTTP_CLIENT_SEND` and/or `HTTP_CLIENT_SEND_ASYNC`       |
 | `urlPattern` | NamePattern          | `ANY`     | Matched against request URL in `scheme://host/path` form |
 
-**`targetName` in invocation context:** the request URL (`scheme://host/path`). Use with `urlPattern` to restrict chaos to a specific upstream service.
+**`targetName` in invocation context:** the request URL (`scheme://host/path`). Use with `urlPattern` to restrict chaos to a specific upstream service. Apache HttpClient: an absolute request target, else the host's URI followed by the target, else the request's full URI (also for `executeOpen(null, …)`). Reactor Netty: an absolute `uri`, else `baseUrl` followed by `uri`.
 
 **JSON example — target payment service only:**
 ```json

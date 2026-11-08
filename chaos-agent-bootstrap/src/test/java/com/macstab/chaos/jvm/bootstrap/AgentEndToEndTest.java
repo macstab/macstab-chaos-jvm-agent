@@ -716,6 +716,60 @@ class AgentEndToEndTest {
     }
 
     @Test
+    @DisplayName("Apache HC5 executeOpen(null, request, null) matches on the full URL")
+    void hc5ExecuteOpenWithoutHost() throws Exception {
+      assertSingleMatch(
+          "hc5-open",
+          ChaosSelector.httpClient(
+              Set.of(OperationType.HTTP_CLIENT_SEND), NamePattern.glob("http://127.0.0.1:*/probe")),
+          "hc5-execute-open-null-host",
+          httpClasspath,
+          HttpLibraryProbeMain.class);
+    }
+
+    @Test
+    @DisplayName("an Apache HC5 request sent from a response handler is evaluated too")
+    void hc5HandlerNestedRequest() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.run(
+              plan(
+                  scenario(
+                      "hc5-nested",
+                      ChaosSelector.httpClient(Set.of(OperationType.HTTP_CLIENT_SEND)),
+                      ChaosEffect.delay(Duration.ofMillis(1)))),
+              HttpLibraryProbeMain.class,
+              "hc5-handler-nested-request",
+              httpClasspath);
+      assertThat(result.value("status")).isEqualTo("200");
+      assertThat(result.longValue("matched.hc5-nested")).as("outer and nested call").isEqualTo(2L);
+    }
+
+    @Test
+    @DisplayName("Apache HC4 execute(host, request with an absolute URI) reports that URI once")
+    void hc4HostAndAbsoluteUri() throws Exception {
+      assertSingleMatch(
+          "hc4-absolute",
+          ChaosSelector.httpClient(
+              Set.of(OperationType.HTTP_CLIENT_SEND),
+              NamePattern.regex("http://127\\.0\\.0\\.1:[0-9]+/probe")),
+          "hc4-host-absolute-uri",
+          System.getProperty("chaos.test.coverageClasspath"),
+          Hc4ProbeMain.class);
+    }
+
+    @Test
+    @DisplayName("Apache HC4 DefaultHttpClient (an AbstractHttpClient) is one HTTP_CLIENT_SEND")
+    void hc4DefaultHttpClient() throws Exception {
+      assertSingleMatch(
+          "hc4-default",
+          ChaosSelector.httpClient(
+              Set.of(OperationType.HTTP_CLIENT_SEND), NamePattern.glob("http://127.0.0.1:*/probe")),
+          "hc4-default-http-client",
+          System.getProperty("chaos.test.coverageClasspath"),
+          Hc4ProbeMain.class);
+    }
+
+    @Test
     @DisplayName("Reactor Netty requests are intercepted")
     void reactorNetty() throws Exception {
       final ChildJvmProbe.ProbeResult result =

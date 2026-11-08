@@ -660,10 +660,12 @@ public enum OperationType {
 
   /**
    * Fires before a synchronous HTTP client request is dispatched. Covers {@code
-   * java.net.http.HttpClient.send}, {@code okhttp3.RealCall.execute}, and Apache HttpComponents
-   * {@code CloseableHttpClient.execute}. Chaos here can inject latency or reject the call with the
-   * client's own {@link java.io.IOException}; a suppress is refused at activation (no real client
-   * skips a request without failing it).
+   * java.net.http.HttpClient.send}, {@code okhttp3.RealCall.execute}, and Apache HttpComponents 4/5
+   * {@code CloseableHttpClient.doExecute}, which every {@code execute} and {@code executeOpen}
+   * overload reaches once per request (a response handler runs after it, so a request the handler
+   * sends is evaluated too). Chaos here can inject latency or reject the call with the client's own
+   * {@link java.io.IOException}; a suppress is refused at activation (no real client skips a
+   * request without failing it).
    *
    * <p>The {@code targetName} field of the invocation context carries the request URL ({@code
    * scheme://host/path}). Use with {@link ChaosSelector.HttpClientSelector}.

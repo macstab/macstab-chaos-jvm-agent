@@ -47,6 +47,7 @@
 | 27 | The API's nullness is published (`@NullMarked`) | Kotlin code passes `null` where a type is non-null, or treats a non-null result as nullable | pass a value, or use the parameters marked `@Nullable` (§27) |
 | 29 | `chaos-agent-testkit` no longer brings JUnit | you get `junit-jupiter-api` (or the JUnit BOM's versions) only through the testkit or a starter that depends on it | declare JUnit in your test dependencies (§29) |
 | 30 | `ChaosEvent.Type.INACTIVE`; lifecycle events once per transition | a `switch` over `ChaosEvent.Type` has no `default`; a listener counts `STOPPED` per `stop()` / `close()` call, or waits for `STOPPED` to learn that a scenario expired or used up `maxApplications` | add `case INACTIVE`; count one `STOPPED` per scenario; wait for `INACTIVE` (§30) |
+| 31 | Apache HttpClient is evaluated at `doExecute`, with one URL rule | a scenario counts Apache HttpClient calls made from a response handler, a `urlPattern` matches the path-only URL of `executeOpen(null, …)` or the doubled URL of HC4 `execute(host, absoluteRequest)`, or you subclass `CloseableHttpClient` yourself | expect one more evaluation per request a handler sends; match the full URL; hook your own client differently (§31) |
 
 ---
 
@@ -369,6 +370,14 @@ Before (1.x): the testkit brought `junit-jupiter-api` and imported the JUnit BOM
 - A listener that counted `STOPPED` per `stop()` or `close()` call: `STOPPED` is now published once per scenario, on the transition into `STOPPED`; a second `stop()`, or `close()` after `stop()`, publishes nothing.
 - A listener that waited for `STOPPED` to learn that a scenario expired or used up `maxApplications`: wait for `INACTIVE`.
 - `STARTED` is published before the scenario fires; a call made while a listener still handles `STARTED` is neither matched nor applied.
+
+## 31. Apache HttpClient is evaluated at `doExecute`, with one URL rule
+
+Apache HttpClient 4 and 5 are hooked at `doExecute(HttpHost, request, HttpContext)` of the `CloseableHttpClient` implementations (`InternalHttpClient`, `MinimalHttpClient`; in HC4 also `AbstractHttpClient`, so `DefaultHttpClient` and its siblings), which every public `execute` and `executeOpen` overload reaches once per request, instead of at the public `execute` overloads.
+
+- A response handler runs after `doExecute` returns, outside the evaluation: a request the handler sends is now evaluated as a call of its own (1.x and earlier 2.0 builds counted one).
+- The URL (`targetName`, matched by `urlPattern`) follows one rule: an absolute request target wins; else the host's URI followed by the target; else, without a host, the request's full URI. `executeOpen(null, request, context)` (Spring's `HttpComponentsClientHttpRequestFactory`) used to report the path only (`/v1/orders`), and HC4 `execute(host, new HttpGet("https://h/v1"))` a doubled URL (`https://hhttps://h/v1`); both now report `https://h/v1`. A `urlPattern` written against the old forms must match the full URL.
+- A `CloseableHttpClient` subclass of your own, outside `org.apache.http.impl.client` / `org.apache.hc.client5.http.impl.classic`, is not hooked; its calls through a library client still are.
 
 ---
 

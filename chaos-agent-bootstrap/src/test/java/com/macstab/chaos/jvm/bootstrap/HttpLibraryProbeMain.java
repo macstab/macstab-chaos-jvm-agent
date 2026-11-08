@@ -19,6 +19,10 @@ public final class HttpLibraryProbeMain {
       case "hc5-execute" -> DefectProbeMain.withHttpServer(HttpLibraryProbeMain::hc5Execute);
       case "hc5-execute-host" ->
           DefectProbeMain.withHttpServer(HttpLibraryProbeMain::hc5ExecuteWithHost);
+      case "hc5-execute-open-null-host" ->
+          DefectProbeMain.withHttpServer(HttpLibraryProbeMain::hc5ExecuteOpenNullHost);
+      case "hc5-handler-nested-request" ->
+          DefectProbeMain.withHttpServer(HttpLibraryProbeMain::hc5HandlerNestedRequest);
       case "reactor-netty-get" ->
           DefectProbeMain.withHttpServer(HttpLibraryProbeMain::reactorNettyGet);
       default -> throw new IllegalArgumentException("unknown probe mode: " + args[0]);
@@ -60,6 +64,39 @@ public final class HttpLibraryProbeMain {
                     uri.getScheme(), uri.getHost(), uri.getPort()),
                 new org.apache.hc.client5.http.classic.methods.HttpGet(uri.getPath()))) {
       System.out.println("status=" + response.getCode());
+    }
+  }
+
+  /**
+   * {@code executeOpen(null, request, null)}: what Spring's HttpComponents request factory calls.
+   */
+  private static void hc5ExecuteOpenNullHost(final String url) throws Exception {
+    try (org.apache.hc.client5.http.impl.classic.CloseableHttpClient client =
+            org.apache.hc.client5.http.impl.classic.HttpClients.createDefault();
+        org.apache.hc.core5.http.ClassicHttpResponse response =
+            client.executeOpen(
+                null, new org.apache.hc.client5.http.classic.methods.HttpGet(url), null)) {
+      System.out.println("status=" + response.getCode());
+    }
+  }
+
+  /** A response handler that sends a second request: two calls. */
+  private static void hc5HandlerNestedRequest(final String url) throws Exception {
+    try (org.apache.hc.client5.http.impl.classic.CloseableHttpClient client =
+        org.apache.hc.client5.http.impl.classic.HttpClients.createDefault()) {
+      final int nestedStatus =
+          client.execute(
+              new org.apache.hc.client5.http.classic.methods.HttpGet(url),
+              outer -> {
+                org.apache.hc.core5.http.io.entity.EntityUtils.consume(outer.getEntity());
+                return client.execute(
+                    new org.apache.hc.client5.http.classic.methods.HttpGet(url),
+                    inner -> {
+                      org.apache.hc.core5.http.io.entity.EntityUtils.consume(inner.getEntity());
+                      return inner.getCode();
+                    });
+              });
+      System.out.println("status=" + nestedStatus);
     }
   }
 

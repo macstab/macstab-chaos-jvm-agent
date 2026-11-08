@@ -77,8 +77,9 @@ public final class BootstrapDispatcher {
   // Many instrumented methods call another instrumented method for the same logical operation:
   // InetAddress.getByName → getAllByName, a generic bridge → its typed twin, a pool proxy →
   // the driver statement, PgConnection.prepareStatement(String) → prepareStatement(String, int,
-  // int, int), CloseableHttpClient.execute(request) → execute(request, context), a class loader
-  // → its parent. Without a guard each nested hop is evaluated as a separate call: delays add
+  // int, int), HttpClient.sendAsync(request, handler) → sendAsync(request, handler, push), a
+  // class loader → its parent. Without a guard each nested hop is evaluated as a separate call:
+  // delays add
   // up, probability is rolled several times and maxApplications runs out early.
   //
   // Advice for such operations brackets the method with enterScope/exitScope. enterScope
@@ -2166,8 +2167,8 @@ public final class BootstrapDispatcher {
 
   /**
    * Called before a synchronous HTTP client {@code send} (Java {@code HttpClient.send}, {@code
-   * okhttp3.RealCall.execute}, Apache HttpComponents {@code CloseableHttpClient.execute}, the JDK's
-   * {@code HttpURLConnection}).
+   * okhttp3.RealCall.execute}, Apache HttpComponents {@code CloseableHttpClient.doExecute}, the
+   * JDK's {@code HttpURLConnection}).
    *
    * @param url the request URL in {@code scheme://host/path} form; may be {@code null} when the
    *     advice cannot extract a URL

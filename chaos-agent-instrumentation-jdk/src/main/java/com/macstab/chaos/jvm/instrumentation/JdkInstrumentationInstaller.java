@@ -710,8 +710,8 @@ public final class JdkInstrumentationInstaller {
   }
 
   /**
-   * Instruments classes that may not be present in every application (OkHttp, Apache HttpClient,
-   * HikariCP, c3p0, Reactor Netty) or every JDK.
+   * Instruments classes that may not be present in every application (OkHttp, HikariCP, c3p0,
+   * Reactor Netty) or every JDK.
    *
    * <p>The type is matched by name only. ByteBuddy evaluates the matcher whenever a class is
    * defined, by any class loader, so a library loaded later by an application class loader (for
@@ -721,8 +721,8 @@ public final class JdkInstrumentationInstaller {
    * so the libraries are not needed on the agent's classpath.
    *
    * <p>The class is not probed with {@code Class.forName} at install time: under {@code premain} in
-   * a fat jar such a probe always fails, so OkHttp, Apache HttpClient, HikariCP, c3p0 and Reactor
-   * Netty chaos would silently never apply.
+   * a fat jar such a probe always fails, so OkHttp, HikariCP, c3p0 and Reactor Netty chaos would
+   * silently never apply.
    *
    * @param builder the current {@link AgentBuilder} chain
    * @param transformer a {@link BuilderTransformer} that applies one or more {@link
@@ -882,10 +882,11 @@ public final class JdkInstrumentationInstaller {
    * Registers HTTP client interception: Java {@code java.net.http.HttpClient} (JDK 11+), OkHttp,
    * Apache HC 4.x, Apache HC 5.x, Reactor Netty.
    *
-   * <p>All library targets use {@link #instrumentOptional}, which matches them by name whenever
-   * they are loaded, by any class loader. Advice classes only use Object-typed arguments and
-   * reflective URL extraction, so the compileOnly dependencies (OkHttp, Apache HC, Reactor Netty)
-   * are not required at runtime.
+   * <p>The library targets are matched by name whenever they are loaded, by any class loader
+   * ({@link #instrumentOptional}; the Apache clients by package prefix and superclass name, {@link
+   * #apacheDoExecute}). Advice classes only use Object-typed arguments and reflective URL
+   * extraction, so the compileOnly dependencies (OkHttp, Apache HC, Reactor Netty) are not required
+   * at runtime.
    *
    * <p>Java 11+ {@code HttpClient} is implemented by {@code jdk.internal.net.http.HttpClientImpl},
    * which lives in the non-exported {@code java.net.http/jdk.internal.net.http} package. Two pieces
@@ -941,70 +942,23 @@ public final class JdkInstrumentationInstaller {
             "okhttp3.RealCall",
             "okhttp3.internal.connection.RealCall");
 
-    // Apache HC 4.x exposes eight execute() overloads split across two shapes:
-    //   execute(HttpHost, HttpRequest [, HttpContext] [, ResponseHandler])  — HttpHost first
-    //   execute(HttpUriRequest [, HttpContext] [, ResponseHandler])         — request first
-    //
-    // A flat takesArguments(2) matcher (the previous wiring) bound
-    // ApacheHc4ExecuteAdvice indiscriminately to all three 2-arg overloads,
-    // handing the advice an HttpUriRequest where it expected an HttpHost and
-    // leaving single-arg + 3-arg + 4-arg variants completely uncovered. The
-    // refined matchers below disambiguate by first-argument type so every
-    // overload routes to the advice that understands its signature.
+    // Apache HC 4.x and 5.x: every public execute / executeOpen overload of CloseableHttpClient
+    // reaches the protected doExecute(HttpHost, request, HttpContext) with the caller's host, and
+    // response handlers run after it returns. The implementations are matched by package and
+    // superclass (InternalHttpClient, MinimalHttpClient; in HC4 also the abstract
+    // AbstractHttpClient, whose doExecute is final, so DefaultHttpClient and its siblings inherit
+    // it); the abstract filter is on the method, not the type. A CloseableHttpClient subclass in
+    // another package is not hooked.
     agentBuilder =
-        instrumentOptional(
+        apacheDoExecute(
             agentBuilder,
-            typeBuilder ->
-                typeBuilder
-                    .visit(
-                        advise(
-                            HttpClientAdvice.ApacheHc4ExecuteAdvice.class,
-                            ElementMatchers.named("execute")
-                                .and(
-                                    ElementMatchers.takesArgument(
-                                        0, ElementMatchers.named("org.apache.http.HttpHost")))))
-                    .visit(
-                        advise(
-                            HttpClientAdvice.ApacheHc4UriExecuteAdvice.class,
-                            ElementMatchers.named("execute")
-                                .and(
-                                    ElementMatchers.takesArgument(
-                                        0,
-                                        ElementMatchers.named(
-                                            "org.apache.http.client.methods.HttpUriRequest"))))),
-            "org.apache.http.impl.client.CloseableHttpClient");
-
+            HttpClientAdvice.ApacheHc4DoExecuteAdvice.class,
+            "org.apache.http.impl.client.");
     agentBuilder =
-        instrumentOptional(
+        apacheDoExecute(
             agentBuilder,
-            typeBuilder ->
-                // HC5 execute overloads come in two shapes, distinguished by the first argument
-                // (as for HC4): request-first execute(ClassicHttpRequest [, HttpContext]
-                // [, handler]) and host-first execute(HttpHost, ClassicHttpRequest [, ...]). The
-                // common one-argument execute(request) goes straight to doExecute, so matching
-                // by arity missed it, and the host-first overloads handed an HttpHost to advice
-                // expecting a request. Overloads delegate to each other; SCOPE_HTTP evaluates one
-                // call once.
-                typeBuilder
-                    .visit(
-                        advise(
-                            HttpClientAdvice.ApacheHc5ExecuteAdvice.class,
-                            ElementMatchers.named("execute")
-                                .and(
-                                    ElementMatchers.takesArgument(
-                                        0,
-                                        ElementMatchers.named(
-                                            "org.apache.hc.core5.http.ClassicHttpRequest")))))
-                    .visit(
-                        advise(
-                            HttpClientAdvice.ApacheHc5HostExecuteAdvice.class,
-                            ElementMatchers.named("execute")
-                                .and(
-                                    ElementMatchers.takesArgument(
-                                        0,
-                                        ElementMatchers.named(
-                                            "org.apache.hc.core5.http.HttpHost"))))),
-            "org.apache.hc.client5.http.impl.classic.CloseableHttpClient");
+            HttpClientAdvice.ApacheHc5DoExecuteAdvice.class,
+            "org.apache.hc.client5.http.impl.classic.");
 
     agentBuilder =
         agentBuilder
@@ -1034,6 +988,29 @@ public final class JdkInstrumentationInstaller {
                     HttpClientAdvice.ReactorNettyConnectAdvice.class,
                     ElementMatchers.named("connect").and(ElementMatchers.takesArguments(0)))),
         "reactor.netty.http.client.HttpClientConnect");
+  }
+
+  /**
+   * Hooks {@code doExecute(HttpHost, request, HttpContext)} of the Apache HttpClient {@code
+   * CloseableHttpClient} subclasses in {@code clientPackage}. The package prefix keeps the
+   * superclass walk off every other class.
+   */
+  private static AgentBuilder apacheDoExecute(
+      final AgentBuilder agentBuilder, final Class<?> advice, final String clientPackage) {
+    return agentBuilder
+        .type(
+            ElementMatchers.nameStartsWith(clientPackage)
+                .and(
+                    ElementMatchers.hasSuperClass(
+                        ElementMatchers.named(clientPackage + "CloseableHttpClient"))))
+        .transform(
+            (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
+                typeBuilder.visit(
+                    advise(
+                        advice,
+                        ElementMatchers.named("doExecute")
+                            .and(ElementMatchers.takesArguments(3))
+                            .and(ElementMatchers.not(ElementMatchers.isAbstract())))));
   }
 
   /**

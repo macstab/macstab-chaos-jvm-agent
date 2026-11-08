@@ -77,97 +77,89 @@ class HttpUrlExtractorTest {
   }
 
   @Nested
-  @DisplayName("Apache HttpClient 4 host and request")
+  @DisplayName("Apache HttpClient 4 doExecute(host, request)")
   class ApacheHc4 {
 
-    @Test
-    @DisplayName("joins the host and the request line's URI")
-    void joinsHostAndPath() {
-      assertThat(
-              HttpUrlExtractor.fromApacheHc4Request(
-                  "https://api.example.com", new Hc4Request(new Hc4RequestLine("/v1/orders"))))
-          .isEqualTo(URL);
+    /** An HttpHost: toURI() is scheme, host and port. */
+    record Hc4Host(Object uri) {
+      Object toURI() {
+        return uri;
+      }
     }
 
-    @Test
-    @DisplayName("keeps what it can read of the host and the request")
-    void partial() {
-      assertThat(
-              HttpUrlExtractor.fromApacheHc4Request(null, new Hc4Request(new Hc4RequestLine("/x"))))
-          .isEqualTo("/x");
-      assertThat(HttpUrlExtractor.fromApacheHc4Request("https://h", null)).isEqualTo("https://h");
-      assertThat(HttpUrlExtractor.fromApacheHc4Request("https://h", new Hc4Request(null)))
-          .isEqualTo("https://h");
-      assertThat(
-              HttpUrlExtractor.fromApacheHc4Request(
-                  "https://h", new Hc4Request(new Hc4RequestLine(null))))
-          .isEqualTo("https://h");
-    }
-
-    @Test
-    @DisplayName("is null when nothing can be read or the host fails")
-    void nullWhenUnreadable() {
-      assertThat(HttpUrlExtractor.fromApacheHc4Request(null, null)).isNull();
-      assertThat(HttpUrlExtractor.fromApacheHc4Request(new Broken(), null)).isNull();
-    }
-  }
-
-  @Nested
-  @DisplayName("Apache HttpClient 4 URI request")
-  class ApacheHc4UriRequests {
-
+    /** An HttpUriRequest: its request line and getURI(). */
     static final class Hc4UriRequest {
+      private final Object target;
       private final Object uri;
 
-      Hc4UriRequest(final Object uri) {
+      Hc4UriRequest(final Object target, final Object uri) {
+        this.target = target;
         this.uri = uri;
+      }
+
+      Hc4RequestLine getRequestLine() {
+        return new Hc4RequestLine(target);
       }
 
       Object getURI() {
         return uri;
       }
-
-      Hc4RequestLine getRequestLine() {
-        return new Hc4RequestLine("/from-request-line");
-      }
     }
 
+    private final Hc4Host host = new Hc4Host("https://api.example.com");
+
     @Test
-    @DisplayName("reads getURI()")
-    void readsTheUri() {
-      assertThat(HttpUrlExtractor.fromApacheHc4UriRequest(new Hc4UriRequest(URI.create(URL))))
+    @DisplayName("an absolute request target wins over the host")
+    void absoluteTargetWins() {
+      assertThat(HttpUrlExtractor.fromApacheHc4(host, new Hc4Request(new Hc4RequestLine(URL))))
           .isEqualTo(URL);
+      assertThat(
+              HttpUrlExtractor.fromApacheHc4(
+                  null, new Hc4UriRequest("http://other.example.com/", URI.create(URL))))
+          .isEqualTo("http://other.example.com/");
     }
 
     @Test
-    @DisplayName("falls back to the request line when getURI() is null, fails or is absent")
-    void fallsBackToTheRequestLine() {
-      assertThat(HttpUrlExtractor.fromApacheHc4UriRequest(new Hc4UriRequest(null)))
-          .isEqualTo("/from-request-line");
-      assertThat(HttpUrlExtractor.fromApacheHc4UriRequest(new Hc4UriRequest(new Broken())))
-          .isEqualTo("/from-request-line");
-      final Hc4Request plain = new Hc4Request(new Hc4RequestLine("/plain"));
-      assertThat(HttpUrlExtractor.fromApacheHc4UriRequest(plain)).isEqualTo("/plain");
-      // The absence is remembered; the second call reads the same way.
-      assertThat(HttpUrlExtractor.fromApacheHc4UriRequest(plain)).isEqualTo("/plain");
+    @DisplayName("else the host's URI followed by the request target")
+    void hostAndTarget() {
+      assertThat(
+              HttpUrlExtractor.fromApacheHc4(
+                  host, new Hc4Request(new Hc4RequestLine("/v1/orders"))))
+          .isEqualTo(URL);
+      assertThat(HttpUrlExtractor.fromApacheHc4(host, new Hc4Request(null)))
+          .isEqualTo("https://api.example.com");
     }
 
     @Test
-    @DisplayName("is null without a request, a request line or its URI, and when it fails")
+    @DisplayName("else, without a host, the request's getURI(), else its target")
+    void withoutHost() {
+      assertThat(HttpUrlExtractor.fromApacheHc4(null, new Hc4UriRequest("/v1/orders", URL)))
+          .isEqualTo(URL);
+      assertThat(HttpUrlExtractor.fromApacheHc4(null, new Hc4UriRequest("/v1/orders", null)))
+          .isEqualTo("/v1/orders");
+      assertThat(HttpUrlExtractor.fromApacheHc4(null, new Hc4Request(new Hc4RequestLine("/x"))))
+          .isEqualTo("/x");
+      // The absence of getURI() is remembered; the second call reads the same way.
+      assertThat(HttpUrlExtractor.fromApacheHc4(null, new Hc4Request(new Hc4RequestLine("/x"))))
+          .isEqualTo("/x");
+    }
+
+    @Test
+    @DisplayName("is null when nothing can be read, or the host or the request fails")
     void nullWhenUnreadable() {
-      assertThat(HttpUrlExtractor.fromApacheHc4UriRequest(null)).isNull();
-      assertThat(HttpUrlExtractor.fromApacheHc4UriRequest(new Hc4Request(null))).isNull();
-      assertThat(HttpUrlExtractor.fromApacheHc4UriRequest(new Hc4Request(new Hc4RequestLine(null))))
+      assertThat(HttpUrlExtractor.fromApacheHc4(null, null)).isNull();
+      assertThat(HttpUrlExtractor.fromApacheHc4(null, new Hc4Request(null))).isNull();
+      assertThat(HttpUrlExtractor.fromApacheHc4(new Hc4Host(new Broken()), new Hc4Request(null)))
           .isNull();
       assertThat(
-              HttpUrlExtractor.fromApacheHc4UriRequest(
-                  new Hc4Request(new Hc4RequestLine(new Broken()))))
+              HttpUrlExtractor.fromApacheHc4(
+                  null, new Hc4Request(new Hc4RequestLine(new Broken()))))
           .isNull();
     }
   }
 
   @Nested
-  @DisplayName("Apache HttpClient 5 request")
+  @DisplayName("Apache HttpClient 5 doExecute(host, request)")
   class ApacheHc5 {
 
     static final class Hc5Request {
@@ -188,77 +180,53 @@ class HttpUrlExtractorTest {
       }
     }
 
-    static final class Hc5Host {
-      private final Object uri;
-
-      Hc5Host(final Object uri) {
-        this.uri = uri;
-      }
-
+    record Hc5Host(Object uri) {
       Object toURI() {
         return uri;
       }
     }
 
-    @Test
-    @DisplayName("prefers the absolute getUri() over the request target")
-    void prefersTheAbsoluteUri() {
-      assertThat(
-              HttpUrlExtractor.fromApacheHc5Request(new Hc5Request(URI.create(URL), "/v1/orders")))
-          .isEqualTo(URL);
-    }
+    private final Hc5Host host = new Hc5Host("https://api.example.com");
 
     @Test
-    @DisplayName("falls back to the request target when getUri() is null or fails")
-    void fallsBackToTheTarget() {
-      assertThat(HttpUrlExtractor.fromApacheHc5Request(new Hc5Request(null, "/v1/orders")))
-          .isEqualTo("/v1/orders");
-      assertThat(HttpUrlExtractor.fromApacheHc5Request(new Hc5Request(new Broken(), "/v1/orders")))
-          .isEqualTo("/v1/orders");
-    }
-
-    @Test
-    @DisplayName("is null without a request or a target, and when the target fails")
-    void nullWhenUnreadable() {
-      assertThat(HttpUrlExtractor.fromApacheHc5Request(null)).isNull();
-      assertThat(HttpUrlExtractor.fromApacheHc5Request(new Hc5Request(null, null))).isNull();
-      assertThat(HttpUrlExtractor.fromApacheHc5Request(new Hc5Request(null, new Broken())))
-          .isNull();
-    }
-
-    @Test
-    @DisplayName("joins an explicit host and a relative target; an absolute target stands alone")
-    void hostAndRequest() {
-      final Hc5Host host = new Hc5Host("https://api.example.com");
+    @DisplayName("an absolute request target wins over the host")
+    void absoluteTargetWins() {
+      assertThat(HttpUrlExtractor.fromApacheHc5(host, new Hc5Request(null, URL))).isEqualTo(URL);
       assertThat(
-              HttpUrlExtractor.fromApacheHc5HostRequest(host, new Hc5Request(null, "/v1/orders")))
-          .isEqualTo(URL);
-      assertThat(HttpUrlExtractor.fromApacheHc5HostRequest(host, new Hc5Request(null, URL)))
-          .isEqualTo(URL);
-      assertThat(
-              HttpUrlExtractor.fromApacheHc5HostRequest(
+              HttpUrlExtractor.fromApacheHc5(
                   host, new Hc5Request(null, "http://other.example.com/")))
           .isEqualTo("http://other.example.com/");
-      assertThat(HttpUrlExtractor.fromApacheHc5HostRequest(host, null))
-          .isEqualTo("https://api.example.com");
-      assertThat(HttpUrlExtractor.fromApacheHc5HostRequest(host, new Hc5Request(null, null)))
-          .isEqualTo("https://api.example.com");
-      assertThat(
-              HttpUrlExtractor.fromApacheHc5HostRequest(
-                  new Hc5Host(null), new Hc5Request(null, "/x")))
-          .isEqualTo("/x");
-      assertThat(HttpUrlExtractor.fromApacheHc5HostRequest(null, new Hc5Request(null, "/x")))
-          .isEqualTo("/x");
     }
 
     @Test
-    @DisplayName("is null for a host and request with nothing to read, and when the host fails")
-    void hostAndRequestUnreadable() {
-      assertThat(HttpUrlExtractor.fromApacheHc5HostRequest(null, null)).isNull();
+    @DisplayName("else the host's URI followed by the request target")
+    void hostAndTarget() {
+      assertThat(HttpUrlExtractor.fromApacheHc5(host, new Hc5Request(null, "/v1/orders")))
+          .isEqualTo(URL);
+      assertThat(HttpUrlExtractor.fromApacheHc5(host, new Hc5Request(null, null)))
+          .isEqualTo("https://api.example.com");
+    }
+
+    @Test
+    @DisplayName("else, without a host (executeOpen(null, ...)), the full getUri()")
+    void withoutHost() {
       assertThat(
-              HttpUrlExtractor.fromApacheHc5HostRequest(
-                  new Hc5Host(new Broken()), new Hc5Request(null, "/x")))
+              HttpUrlExtractor.fromApacheHc5(null, new Hc5Request(URI.create(URL), "/v1/orders")))
+          .isEqualTo(URL);
+      assertThat(HttpUrlExtractor.fromApacheHc5(null, new Hc5Request(null, "/v1/orders")))
+          .as("no getUri() to read: the target")
+          .isEqualTo("/v1/orders");
+    }
+
+    @Test
+    @DisplayName("is null when nothing can be read, or the host or the request fails")
+    void nullWhenUnreadable() {
+      assertThat(HttpUrlExtractor.fromApacheHc5(null, null)).isNull();
+      assertThat(HttpUrlExtractor.fromApacheHc5(null, new Hc5Request(null, null))).isNull();
+      assertThat(
+              HttpUrlExtractor.fromApacheHc5(new Hc5Host(new Broken()), new Hc5Request(null, "/x")))
           .isNull();
+      assertThat(HttpUrlExtractor.fromApacheHc5(null, new Hc5Request(new Broken(), "/x"))).isNull();
     }
   }
 
@@ -312,6 +280,22 @@ class HttpUrlExtractorTest {
       assertThat(
               HttpUrlExtractor.fromReactorNettyClient(new RnClient(new RnConfiguration(null, URL))))
           .isEqualTo(URL);
+    }
+
+    @Test
+    @DisplayName("an absolute uri() wins; a relative one follows baseUrl()")
+    void composesBaseUrlAndUri() {
+      assertThat(
+              HttpUrlExtractor.fromReactorNettyConfig(
+                  new RnConfiguration(URL, "http://other.example.com")))
+          .isEqualTo(URL);
+      assertThat(
+              HttpUrlExtractor.fromReactorNettyConfig(
+                  new RnConfiguration("/v1/orders", "https://api.example.com")))
+          .isEqualTo(URL);
+      assertThat(HttpUrlExtractor.fromReactorNettyConfig(new RnConfiguration("/v1/orders", null)))
+          .isEqualTo("/v1/orders");
+      assertThat(HttpUrlExtractor.fromReactorNettyConfig(null)).isNull();
     }
 
     @Test
