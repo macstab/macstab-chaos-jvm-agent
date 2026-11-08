@@ -1,20 +1,29 @@
 package com.macstab.chaos.jvm.startup;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.JsonToken;
 import com.fasterxml.jackson.core.StreamReadConstraints;
 import com.fasterxml.jackson.core.StreamReadFeature;
+import com.fasterxml.jackson.core.exc.InputCoercionException;
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.DeserializationConfig;
 import com.fasterxml.jackson.databind.DeserializationContext;
 import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.JavaType;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.MapperFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.databind.deser.std.StdScalarDeserializer;
+import com.fasterxml.jackson.databind.exc.InvalidFormatException;
+import com.fasterxml.jackson.databind.exc.InvalidNullException;
+import com.fasterxml.jackson.databind.exc.MismatchedInputException;
+import com.fasterxml.jackson.databind.exc.ValueInstantiationException;
+import com.fasterxml.jackson.databind.introspect.BeanPropertyDefinition;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.fasterxml.jackson.databind.module.SimpleModule;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
@@ -25,8 +34,16 @@ import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
+import java.util.ArrayDeque;
+import java.util.Arrays;
+import java.util.Deque;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.function.Function;
+import java.util.stream.Collectors;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Jackson-based serialisation bridge between JSON and {@link ChaosPlan}.
@@ -220,8 +237,10 @@ public final class ChaosPlanMapper {
     }
     // The shape is read from the tree; each shape is bound from the original text, so a failure
     // reports its position in the input.
+    // The tree locates what a failing record constructor hides (an unknown property, a null).
+    JsonNode tree = null;
     try {
-      final JsonNode tree = OBJECT_MAPPER.readTree(json);
+      tree = OBJECT_MAPPER.readTree(json);
       if (tree.isArray()) {
         return wrap(OBJECT_MAPPER.readValue(json, SCENARIO_LIST), planName, source);
       }
@@ -240,12 +259,12 @@ public final class ChaosPlanMapper {
       final com.fasterxml.jackson.core.JsonLocation location = exception.getLocation();
       final boolean positioned = location != null && location.getLineNr() > 0;
       throw new ConfigLoadException(
-          parseFailureMessage(exception),
+          parseFailureMessage(exception, tree),
           source,
           exception,
           positioned ? location.getLineNr() : 0,
           positioned ? location.getColumnNr() : 0,
-          parseFailureReason(exception));
+          parseFailureReason(exception, tree));
     }
   }
 
@@ -273,6 +292,16 @@ public final class ChaosPlanMapper {
    * are reported.
    */
   static String parseFailureMessage(final JsonProcessingException exception) {
+    return parseFailureMessage(exception, null);
+  }
+
+  /**
+   * Describes a parse failure as {@link #parseFailureMessage(JsonProcessingException)} does, using
+   * {@code tree} (the input read as a tree, {@code null} when it did not parse) to find what a
+   * failing constructor hides.
+   */
+  static String parseFailureMessage(
+      final JsonProcessingException exception, final @Nullable JsonNode tree) {
     final StringBuilder message = new StringBuilder("failed to parse chaos plan JSON");
     final com.fasterxml.jackson.core.JsonLocation location = exception.getLocation();
     if (location != null && location.getLineNr() > 0) {
@@ -282,21 +311,29 @@ public final class ChaosPlanMapper {
           .append(", column ")
           .append(location.getColumnNr());
     }
-    return message.append(": ").append(parseFailureReason(exception)).toString();
+    return message.append(": ").append(parseFailureReason(exception, tree)).toString();
   }
 
   /** The failure without its position: the kind and the JSON path. */
   static String parseFailureReason(final JsonProcessingException exception) {
+    return parseFailureReason(exception, null);
+  }
+
+  /** The failure without its position, using {@code tree} as {@link #parseFailureMessage} does. */
+  static String parseFailureReason(
+      final JsonProcessingException exception, final @Nullable JsonNode tree) {
     final String path =
         switch (exception) {
           case com.fasterxml.jackson.databind.JsonMappingException mapping -> jsonPath(mapping);
           case com.fasterxml.jackson.core.JsonParseException syntax -> parserPath(syntax);
           default -> "";
         };
-    return path.isEmpty() ? failureKind(exception) : failureKind(exception) + " at " + path;
+    final String kind = failureKind(exception, tree);
+    return path.isEmpty() ? kind : kind + " at " + path;
   }
 
-  private static String failureKind(final JsonProcessingException exception) {
+  private static String failureKind(
+      final JsonProcessingException exception, final @Nullable JsonNode tree) {
     if (exception
         instanceof com.fasterxml.jackson.databind.exc.UnrecognizedPropertyException unrecognized) {
       return "unknown property '" + unrecognized.getPropertyName() + "'";
@@ -304,24 +341,130 @@ public final class ChaosPlanMapper {
     if (exception instanceof com.fasterxml.jackson.databind.exc.InvalidTypeIdException) {
       return "unknown or missing type";
     }
-    if (exception
-        instanceof com.fasterxml.jackson.databind.exc.ValueInstantiationException instantiation) {
+    if (exception instanceof ValueInstantiationException instantiation) {
+      // A record constructor ran before Jackson reported what it buffered: an unknown property
+      // or a null in the object come first, in document order.
+      final String hidden = treeProblem(instantiation, tree);
+      if (hidden != null) {
+        return hidden;
+      }
       // The cause is the agent's own validation message (for example "delay bounds must be
       // non-null"), not Jackson's description of the input. It can quote a field value (a
       // duplicate id), so it is sanitised and capped.
       final Throwable cause = instantiation.getCause();
+      if (cause instanceof NullPointerException) {
+        return cause.getMessage() != null
+            ? "missing or null value: "
+                + LogText.sanitize(cause.getMessage(), CAUSE_MESSAGE_MAX_LENGTH)
+            : "missing or null value";
+      }
       return cause != null && cause.getMessage() != null
           ? "invalid value: " + LogText.sanitize(cause.getMessage(), CAUSE_MESSAGE_MAX_LENGTH)
           : "invalid value";
     }
-    if (exception instanceof com.fasterxml.jackson.databind.exc.MismatchedInputException) {
-      return "value of the wrong type";
+    if (exception instanceof InputCoercionException
+        || exception.getCause() instanceof InputCoercionException) {
+      return "number out of range";
+    }
+    if (exception instanceof InvalidNullException) {
+      return "missing or null value";
+    }
+    if (exception instanceof MismatchedInputException mismatch) {
+      return mismatchKind(mismatch);
     }
     // Syntax errors are found while the tree is read, before any value is bound.
-    if (exception instanceof com.fasterxml.jackson.core.JsonParseException) {
-      return "malformed JSON";
+    if (exception instanceof com.fasterxml.jackson.core.JsonParseException syntax) {
+      final String original = syntax.getOriginalMessage();
+      return original != null && original.startsWith("Duplicate field")
+          ? "duplicate property"
+          : "malformed JSON";
     }
     return exception.getClass().getSimpleName();
+  }
+
+  /** A value of the wrong type or form, by what was expected. */
+  private static String mismatchKind(final MismatchedInputException mismatch) {
+    final Class<?> target = mismatch.getTargetType();
+    if (target == Duration.class) {
+      return "invalid duration";
+    }
+    if (target == Instant.class) {
+      return "invalid instant";
+    }
+    if (target != null && target.isEnum() && mismatch instanceof InvalidFormatException) {
+      final String expected =
+          Arrays.stream(target.getEnumConstants())
+              .map(constant -> ((Enum<?>) constant).name())
+              .collect(Collectors.joining(", "));
+      return "unknown value; expected one of "
+          + LogText.sanitize(expected, CAUSE_MESSAGE_MAX_LENGTH);
+    }
+    return "value of the wrong type";
+  }
+
+  /**
+   * The first unknown property or null value, in document order, of the object a failing
+   * constructor was given; {@code null} when there is none or the object cannot be found.
+   */
+  private static @Nullable String treeProblem(
+      final ValueInstantiationException instantiation, final @Nullable JsonNode tree) {
+    JsonNode node = tree;
+    for (final com.fasterxml.jackson.databind.JsonMappingException.Reference reference :
+        instantiation.getPath()) {
+      if (node == null) {
+        return null;
+      }
+      node =
+          reference.getFieldName() != null
+              ? node.get(reference.getFieldName())
+              : node.get(reference.getIndex());
+    }
+    if (node == null || !node.isObject() || instantiation.getType() == null) {
+      return null;
+    }
+    final Set<String> known = propertyNames(instantiation.getType());
+    for (final Map.Entry<String, JsonNode> field : node.properties()) {
+      final String name = LogText.sanitize(field.getKey(), CAUSE_MESSAGE_MAX_LENGTH);
+      if (!known.contains(field.getKey())) {
+        return "unknown property '" + name + "'";
+      }
+      final JsonNode value = field.getValue();
+      boolean nullInside = value.isNull();
+      for (final JsonNode element : value.isArray() ? value : List.<JsonNode>of()) {
+        nullInside |= element.isNull();
+      }
+      if (nullInside) {
+        return "missing or null value: " + name;
+      }
+    }
+    return null;
+  }
+
+  /** The JSON property names of {@code type}, its type id included. */
+  private static Set<String> propertyNames(final JavaType type) {
+    final DeserializationConfig config = OBJECT_MAPPER.getDeserializationConfig();
+    final Set<String> names = new HashSet<>();
+    for (final BeanPropertyDefinition property : config.introspect(type).findProperties()) {
+      names.add(property.getName());
+    }
+    // The type id ("type" of a selector or an effect) is declared on a supertype.
+    final Deque<Class<?>> types = new ArrayDeque<>(List.of(type.getRawClass()));
+    while (!types.isEmpty()) {
+      final Class<?> current = types.pop();
+      final JsonTypeInfo.Value typeInfo =
+          config
+              .getAnnotationIntrospector()
+              .findPolymorphicTypeInfo(
+                  config, config.introspectClassAnnotations(current).getClassInfo());
+      if (typeInfo != null) {
+        names.add(typeInfo.getPropertyName());
+      }
+      if (current.getSuperclass() != null) {
+        types.push(current.getSuperclass());
+      }
+      types.addAll(Arrays.asList(current.getInterfaces()));
+    }
+    return names;
   }
 
   private static String jsonPath(

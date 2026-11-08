@@ -68,6 +68,8 @@ Every source (the agent's `configFile` / `configJson` / `configBase64`, the Spri
 | enum | the constant's name, exactly | `"SESSION"`, `"PLATFORM"`, `"EIO"` |
 | pattern | `{"mode": "EXACT" \| "PREFIX" \| "GLOB" \| "REGEX" \| "ANY", "value": string}` | `{"mode": "GLOB", "value": "*.internal"}` |
 
+An enum is matched exactly: `"jvm"` is refused with the constants it may be ("unknown value; expected one of JVM, SESSION"). The Quarkus `@ChaosScenario` annotation, which is not JSON, reads its `scope` attribute case-insensitively.
+
 ## 4. Strictness
 
 - **Unknown fields are rejected** everywhere (`additionalProperties: false`): a misspelled field is an error, not a silently ignored setting.

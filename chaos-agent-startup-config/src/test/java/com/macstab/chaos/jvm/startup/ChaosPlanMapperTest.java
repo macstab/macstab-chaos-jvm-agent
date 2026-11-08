@@ -468,21 +468,116 @@ class ChaosPlanMapperTest {
           .hasMessageContaining(": malformed JSON at metadata");
     }
 
-    @Test
-    @DisplayName("name an unclassified failure by its exception type, without the value")
-    void reportUnclassifiedFailureByType() {
-      final String json =
+    /** A plan of one scenario with these members; {@code extra} adds members, comma-led. */
+    private static String plan(
+        final String scope, final String selector, final String effect, final String extra) {
+      return """
+          {"metadata": {"name": "p"}, "scenarios": [{"id": "a", "scope": %s,
+            "selector": %s,
+            "effect": %s%s}]}
           """
-          {"metadata": {"name": "p"}, "scenarios": [{"id": "a", "scope": "JVM",
-            "selector": {"type": "executor", "operations": ["EXECUTOR_SUBMIT"]},
-            "effect": {"type": "delay", "minDelay": "PT0.1S", "maxDelay": "PT0.1S"},
-            "precedence": 99999999999999999}]}
-          """;
+          .formatted(scope, selector, effect, extra);
+    }
 
-      assertThatThrownBy(() -> ChaosPlanMapper.read(json))
+    private static final String EXECUTOR =
+        "{\"type\": \"executor\", \"operations\": [\"EXECUTOR_SUBMIT\"]}";
+    private static final String DELAY =
+        "{\"type\": \"delay\", \"minDelay\": \"PT0.1S\", \"maxDelay\": \"PT0.1S\"}";
+
+    @Test
+    @DisplayName("name the expected constants for an unknown enum value, without the value")
+    void unknownEnumValue() {
+      assertThatThrownBy(() -> ChaosPlanMapper.read(plan("\"jvm\"", EXECUTOR, DELAY, "")))
           .isInstanceOf(ConfigLoadException.class)
-          .hasMessageContaining(": JsonMappingException at scenarios[0].precedence")
-          .hasMessageNotContaining("99999999999999999");
+          .hasMessageContaining("unknown value; expected one of JVM, SESSION at scenarios[0].scope")
+          .hasMessageNotContaining("jvm\"");
+    }
+
+    @Test
+    @DisplayName("call a number too large for its integer field out of range, without the value")
+    void numberOutOfRange() {
+      assertThatThrownBy(
+              () ->
+                  ChaosPlanMapper.read(
+                      plan("\"JVM\"", EXECUTOR, DELAY, ", \"precedence\": 99999999999")))
+          .isInstanceOf(ConfigLoadException.class)
+          .hasMessageContaining("number out of range at scenarios[0].precedence")
+          .hasMessageNotContaining("99999999999");
+    }
+
+    @Test
+    @DisplayName("call a null inside a value and a missing value missing or null")
+    void missingOrNull() {
+      assertThatThrownBy(
+              () ->
+                  ChaosPlanMapper.read(
+                      plan(
+                          "\"JVM\"",
+                          "{\"type\": \"executor\", \"operations\": [null]}",
+                          DELAY,
+                          "")))
+          .isInstanceOf(ConfigLoadException.class)
+          .hasMessageContaining("missing or null value")
+          .hasMessageContaining("scenarios[0].selector");
+      assertThatThrownBy(
+              () ->
+                  ChaosPlanMapper.read(
+                      """
+                      {"metadata": {"name": "p"}, "scenarios": [{"id": "a", "scope": "JVM",
+                        "effect": {"type": "delay", "minDelay": "PT0.1S", "maxDelay": "PT0.1S"}}]}
+                      """))
+          .isInstanceOf(ConfigLoadException.class)
+          .hasMessageContaining("missing or null value: selector at scenarios[0]");
+    }
+
+    @Test
+    @DisplayName("call a malformed duration or instant invalid, without the value")
+    void invalidDurationAndInstant() {
+      assertThatThrownBy(
+              () ->
+                  ChaosPlanMapper.read(
+                      plan(
+                          "\"JVM\"",
+                          EXECUTOR,
+                          "{\"type\": \"delay\", \"minDelay\": \"5 seconds\", \"maxDelay\": \"PT1S\"}",
+                          "")))
+          .isInstanceOf(ConfigLoadException.class)
+          .hasMessageContaining("invalid duration at scenarios[0].effect.minDelay")
+          .hasMessageNotContaining("5 seconds");
+      assertThatThrownBy(
+              () ->
+                  ChaosPlanMapper.read(
+                      plan(
+                          "\"JVM\"",
+                          EXECUTOR,
+                          DELAY,
+                          ", \"activationPolicy\": {\"activeFrom\": 1}")))
+          .isInstanceOf(ConfigLoadException.class)
+          .hasMessageContaining("invalid instant at scenarios[0].activationPolicy.activeFrom");
+    }
+
+    @Test
+    @DisplayName("name a property given twice")
+    void duplicateProperty() {
+      assertThatThrownBy(
+              () -> ChaosPlanMapper.read(plan("\"JVM\", \"id\": \"b\"", EXECUTOR, DELAY, "")))
+          .isInstanceOf(ConfigLoadException.class)
+          .hasMessageContaining("duplicate property at scenarios[0].id");
+    }
+
+    @Test
+    @DisplayName("report an unknown property before the missing value it caused")
+    void unknownPropertyFirst() {
+      assertThatThrownBy(
+              () ->
+                  ChaosPlanMapper.read(
+                      plan(
+                          "\"JVM\"",
+                          EXECUTOR,
+                          "{\"type\": \"delay\", \"minDelay\": \"PT0.1S\", \"maxDelayy\": \"PT1S\"}",
+                          "")))
+          .isInstanceOf(ConfigLoadException.class)
+          .hasMessageContaining("unknown property 'maxDelayy' at scenarios[0].effect");
     }
   }
 
@@ -576,7 +671,8 @@ class ChaosPlanMapperTest {
     }
 
     @Test
-    @DisplayName("an instantiation failure without a cause message is an invalid value")
+    @DisplayName(
+        "an instantiation failure without a cause message is an invalid or a missing value")
     void instantiationWithoutDetail() {
       final com.fasterxml.jackson.databind.JavaType plan =
           TypeFactory.defaultInstance().constructType(ChaosPlan.class);
@@ -589,7 +685,69 @@ class ChaosPlanMapperTest {
               ChaosPlanMapper.parseFailureReason(
                   ValueInstantiationException.from(
                       null, "failed", plan, new NullPointerException())))
-          .isEqualTo("invalid value");
+          .isEqualTo("missing or null value");
+    }
+
+    @Test
+    @DisplayName("classify failures by kind without a parser")
+    void classifyWithoutParser() {
+      assertThat(
+              ChaosPlanMapper.parseFailureReason(
+                  new com.fasterxml.jackson.core.exc.InputCoercionException(
+                      null,
+                      "out of range",
+                      com.fasterxml.jackson.core.JsonToken.VALUE_NUMBER_INT,
+                      Integer.TYPE)))
+          .isEqualTo("number out of range");
+      assertThat(
+              ChaosPlanMapper.parseFailureReason(
+                  com.fasterxml.jackson.databind.exc.InvalidNullException.from(
+                      null,
+                      com.fasterxml.jackson.databind.PropertyName.construct("operations"),
+                      TypeFactory.defaultInstance().constructType(Set.class))))
+          .isEqualTo("missing or null value");
+      assertThat(
+              ChaosPlanMapper.parseFailureReason(
+                  new com.fasterxml.jackson.core.JsonParseException(null, (String) null)))
+          .isEqualTo("malformed JSON");
+      assertThat(
+              ChaosPlanMapper.parseFailureReason(
+                  com.fasterxml.jackson.databind.exc.MismatchedInputException.from(
+                      null, ChaosScenario.ScenarioScope.class, "not a string")))
+          .isEqualTo("value of the wrong type");
+      assertThat(
+              ChaosPlanMapper.parseFailureReason(
+                  com.fasterxml.jackson.databind.exc.MismatchedInputException.from(
+                      null, (Class<?>) null, "no target")))
+          .isEqualTo("value of the wrong type");
+    }
+
+    @Test
+    @DisplayName("fall back to the constructor's message when the tree does not hold the object")
+    void instantiationOutsideTheTree() throws Exception {
+      final com.fasterxml.jackson.databind.JsonNode tree =
+          new com.fasterxml.jackson.databind.ObjectMapper().readTree("{\"scenarios\": [1]}");
+      final com.fasterxml.jackson.databind.JavaType scenario =
+          TypeFactory.defaultInstance().constructType(ChaosScenario.class);
+      final ValueInstantiationException missingStep =
+          ValueInstantiationException.from(
+              null, "failed", scenario, new IllegalArgumentException("bad"));
+      missingStep.prependPath(new JsonMappingException.Reference(null, "x"));
+      missingStep.prependPath(new JsonMappingException.Reference(null, "metadata"));
+      final ValueInstantiationException notAnObject =
+          ValueInstantiationException.from(
+              null, "failed", scenario, new IllegalArgumentException("bad"));
+      notAnObject.prependPath(new JsonMappingException.Reference(null, 0));
+      notAnObject.prependPath(new JsonMappingException.Reference(null, "scenarios"));
+      final ValueInstantiationException untyped =
+          ValueInstantiationException.from(
+              null, "failed", null, new IllegalArgumentException("bad"));
+
+      assertThat(ChaosPlanMapper.parseFailureReason(missingStep, tree))
+          .isEqualTo("invalid value: bad at metadata.x");
+      assertThat(ChaosPlanMapper.parseFailureReason(notAnObject, tree))
+          .isEqualTo("invalid value: bad at scenarios[0]");
+      assertThat(ChaosPlanMapper.parseFailureReason(untyped, tree)).isEqualTo("invalid value: bad");
     }
 
     @Test
