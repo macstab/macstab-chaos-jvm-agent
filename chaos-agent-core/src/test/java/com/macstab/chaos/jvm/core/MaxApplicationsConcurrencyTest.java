@@ -1,19 +1,27 @@
 package com.macstab.chaos.jvm.core;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.macstab.chaos.jvm.api.ActivationPolicy;
 import com.macstab.chaos.jvm.api.ChaosActivationHandle;
 import com.macstab.chaos.jvm.api.ChaosDiagnostics;
 import com.macstab.chaos.jvm.api.ChaosEffect;
+import com.macstab.chaos.jvm.api.ChaosMetricsSink;
 import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.ChaosSelector;
 import com.macstab.chaos.jvm.api.NamePattern;
 import com.macstab.chaos.jvm.api.OperationType;
 import java.nio.channels.Selector;
+import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
@@ -92,6 +100,90 @@ class MaxApplicationsConcurrencyTest {
     assertThat(appliedCount)
         .as("applied count must be exactly maxApplications")
         .isEqualTo(MAX_APPLICATIONS);
+  }
+
+  @Nested
+  @DisplayName("a candidate that throws")
+  class ThrowingCandidate {
+
+    @Test
+    @DisplayName("returns the reservations of the candidates evaluated before it")
+    void throwingCandidateReturnsEarlierReservations() {
+      final ScenarioRegistry registry = new ScenarioRegistry(Clock.systemUTC(), Map::of);
+      // Evaluated first (id order): one application allowed, and its clock is never read.
+      final ScenarioController capped =
+          controller(
+              "a-capped",
+              ActivationPolicy.builder().maxApplications(1L).build(),
+              Clock.systemUTC());
+      // Evaluated second: its time bound makes evaluate() read the clock, which fails when armed.
+      final ArmableClock failingClock = new ArmableClock();
+      final ScenarioController failing =
+          controller(
+              "b-failing",
+              ActivationPolicy.builder().activeFor(Duration.ofHours(1)).build(),
+              failingClock);
+      registry.register(capped);
+      registry.register(failing);
+      capped.start();
+      failing.start();
+      final InvocationContext context =
+          new InvocationContext(
+              OperationType.EXECUTOR_SUBMIT, "executor", "task", null, false, null, null, null);
+
+      failingClock.armed = true;
+      assertThatThrownBy(() -> registry.match(context))
+          .isInstanceOf(IllegalStateException.class)
+          .hasMessage("clock failure");
+      failingClock.armed = false;
+
+      final List<ScenarioContribution> contributions = registry.match(context);
+      assertThat(contributions)
+          .as("the capped scenario's reservation was returned when the later candidate threw")
+          .extracting(contribution -> contribution.scenario().id())
+          .containsExactly("a-capped", "b-failing");
+      contributions.forEach(ScenarioContribution::commit);
+      assertThat(capped.appliedCount()).isEqualTo(1L);
+    }
+
+    private ScenarioController controller(
+        final String id, final ActivationPolicy policy, final Clock clock) {
+      return new ScenarioController(
+          ChaosScenario.builder(id)
+              .scope(ChaosScenario.ScenarioScope.JVM)
+              .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+              .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+              .activationPolicy(policy)
+              .build(),
+          "jvm",
+          null,
+          clock,
+          new ObservabilityBus(ChaosMetricsSink.NOOP),
+          Optional::empty);
+    }
+  }
+
+  /** A system clock whose {@code instant()} throws while the test has armed it. */
+  private static final class ArmableClock extends Clock {
+    private volatile boolean armed;
+
+    @Override
+    public ZoneId getZone() {
+      return ZoneOffset.UTC;
+    }
+
+    @Override
+    public Clock withZone(final ZoneId zone) {
+      return this;
+    }
+
+    @Override
+    public Instant instant() {
+      if (armed) {
+        throw new IllegalStateException("clock failure");
+      }
+      return Instant.now();
+    }
   }
 
   static final class ConcurrentThreadLocal extends ThreadLocal<String> {}

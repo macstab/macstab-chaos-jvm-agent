@@ -313,6 +313,9 @@ final class ScenarioRegistry implements ChaosDiagnostics {
    * instrumentation point. Implementations should remain allocation-light; the returned list is an
    * unmodifiable view.
    *
+   * <p>When a controller throws, the contributions already collected release their reservations
+   * before the failure propagates.
+   *
    * @param context the invocation context captured at the instrumentation point; must not be {@code
    *     null}
    * @return an unmodifiable, ordered list of contributions from matching scenarios; empty if no
@@ -324,15 +327,31 @@ final class ScenarioRegistry implements ChaosDiagnostics {
       return List.of();
     }
     ArrayList<ScenarioContribution> results = null;
-    for (final ScenarioController controller : candidates) {
-      final ScenarioContribution contribution = controller.evaluate(context);
-      if (contribution == null) {
-        continue;
+    try {
+      for (final ScenarioController controller : candidates) {
+        final ScenarioContribution contribution = controller.evaluate(context);
+        if (contribution == null) {
+          continue;
+        }
+        if (results == null) {
+          results = new ArrayList<>(4);
+        }
+        results.add(contribution);
       }
-      if (results == null) {
-        results = new ArrayList<>(4);
+    } catch (final RuntimeException | Error failure) {
+      // The caller never sees the contributions collected so far, so it cannot return them:
+      // release their reservations here, or a failing later candidate would use up the budget of
+      // every earlier one.
+      if (results != null) {
+        for (final ScenarioContribution contribution : results) {
+          try {
+            contribution.release();
+          } catch (final RuntimeException | Error releaseFailure) {
+            failure.addSuppressed(releaseFailure);
+          }
+        }
       }
-      results.add(contribution);
+      throw failure;
     }
     if (results == null) {
       return List.of();
