@@ -20,9 +20,11 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.api.parallel.ResourceLock;
 
 /** Reload robustness: change detection, broken and missing files, Kubernetes ConfigMap links. */
 @DisplayName("Config reload")
+@ResourceLock("System.err")
 class ConfigReloadTest {
 
   @TempDir Path tempDir;
@@ -81,11 +83,14 @@ class ConfigReloadTest {
     Files.writeString(file, plan("a"));
     backdate(file);
     start(file);
-
-    Files.setLastModifiedTime(file, FileTime.fromMillis(System.currentTimeMillis() - 30_000));
+    // Started without a baseline: the first tick reads the file and records its contents.
     poller.pollOnce();
 
+    Files.setLastModifiedTime(file, FileTime.fromMillis(System.currentTimeMillis() - 30_000));
+    final String stderr = StderrCapture.of(poller::pollOnce);
+
     assertThat(started).hasSize(1);
+    assertThat(stderr).doesNotContain("config reloaded");
   }
 
   @Test

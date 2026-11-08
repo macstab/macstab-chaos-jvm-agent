@@ -25,9 +25,6 @@ import com.macstab.chaos.jvm.core.ChaosRuntime;
 import com.macstab.chaos.jvm.startup.AgentSettings;
 import com.macstab.chaos.jvm.startup.ChaosPlanMapper;
 import com.macstab.chaos.jvm.startup.StartupConfigLoader;
-import java.io.ByteArrayOutputStream;
-import java.io.PrintStream;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.FileTime;
@@ -40,12 +37,14 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.api.parallel.ResourceLock;
 
 /**
  * How the poller handles plans and runtimes that fail, change detection at the edges of the file
  * stamp, and a close that races a reload.
  */
 @DisplayName("StartupConfigPoller edge cases")
+@ResourceLock("System.err")
 class StartupConfigPollerEdgeCaseTest {
 
   @TempDir Path tempDir;
@@ -95,22 +94,6 @@ class StartupConfigPollerEdgeCaseTest {
 
   private void stamp(final long millisAgo) throws Exception {
     Files.setLastModifiedTime(config, FileTime.fromMillis(System.currentTimeMillis() - millisAgo));
-  }
-
-  private static String stderrOf(final ThrowingRunnable action) throws Exception {
-    final PrintStream original = System.err;
-    final ByteArrayOutputStream captured = new ByteArrayOutputStream();
-    System.setErr(new PrintStream(captured, true, StandardCharsets.UTF_8));
-    try {
-      action.run();
-    } finally {
-      System.setErr(original);
-    }
-    return captured.toString(StandardCharsets.UTF_8);
-  }
-
-  private interface ThrowingRunnable {
-    void run() throws Exception;
   }
 
   private static ChaosScenario scenario(final String id, final long delayMillis) {
@@ -167,7 +150,7 @@ class StartupConfigPollerEdgeCaseTest {
     poller("60000");
 
     final String stderr =
-        stderrOf(() -> assertThatCode(poller::pollOnce).doesNotThrowAnyException());
+        StderrCapture.of(() -> assertThatCode(poller::pollOnce).doesNotThrowAnyException());
 
     assertThat(stderr).contains("[chaos-agent] config reload failed: simulated exhaustion");
   }
@@ -225,7 +208,7 @@ class StartupConfigPollerEdgeCaseTest {
     poller("60000");
 
     final String stderr =
-        stderrOf(
+        StderrCapture.of(
             () -> {
               poller.pollOnce();
               poller.pollOnce();
@@ -299,7 +282,7 @@ class StartupConfigPollerEdgeCaseTest {
     closedPoller.close();
     write(planJson("b"));
 
-    final String log = stderrOf(closedPoller::pollOnce);
+    final String log = StderrCapture.of(closedPoller::pollOnce);
 
     assertThat(log).doesNotContain("config reloaded");
     org.mockito.Mockito.verifyNoInteractions(runtime);

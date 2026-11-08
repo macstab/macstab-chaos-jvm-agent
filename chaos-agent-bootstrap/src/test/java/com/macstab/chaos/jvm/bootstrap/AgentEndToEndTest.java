@@ -2156,14 +2156,38 @@ class AgentEndToEndTest {
     }
 
     @Test
-    @DisplayName("dnsFamily keeps only IPv4 addresses")
+    @DisplayName("dnsFamily keeps only IPv4 addresses of a name that has both")
     void dnsFamily() throws Exception {
-      final ChildJvmProbe.ProbeResult result =
-          run(
-              ChaosSelector.dns(Set.of(OperationType.DNS_ANSWER), NamePattern.exact("localhost")),
-              ChaosEffect.dnsFamily(ChaosEffect.AddressFamily.IPV4),
-              "dns-lookups");
-      assertThat(result.value("localhost")).isEqualTo("127.0.0.1");
+      final ChildJvmProbe.ProbeResult result = dualStackLookups("dual.test");
+      assertThat(result.value("dual.test")).isEqualTo("127.0.0.1");
+    }
+
+    @Test
+    @DisplayName("without dnsFamily the dual-stack name resolves to both families")
+    void dnsFamilyControl() throws Exception {
+      final ChildJvmProbe.ProbeResult result = dualStackLookups("other.test");
+      assertThat(result.value("dual.test").split(","))
+          .containsExactlyInAnyOrder("127.0.0.1", "0:0:0:0:0:0:0:1");
+    }
+
+    /**
+     * Runs the lookups with a hosts file that gives {@code dual.test} an IPv4 and an IPv6 address,
+     * and a dnsFamily(IPV4) scenario on {@code name}. The DNS hook sits above the hosts-file
+     * resolver, so the answer the scenario filters is the one the file gives.
+     */
+    private ChildJvmProbe.ProbeResult dualStackLookups(final String name) throws Exception {
+      final Path hosts = tempDir.resolve("hosts-" + name);
+      Files.writeString(hosts, "127.0.0.1 dual.test\n::1 dual.test\n");
+      return probe.run(
+          plan(
+              scenario(
+                  "effect",
+                  ChaosSelector.dns(Set.of(OperationType.DNS_ANSWER), NamePattern.exact(name)),
+                  ChaosEffect.dnsFamily(ChaosEffect.AddressFamily.IPV4))),
+          DefectProbeMain.class,
+          "dns-lookups",
+          null,
+          "-Djdk.net.hosts.file=" + hosts);
     }
 
     @Test

@@ -3,10 +3,12 @@ package com.macstab.chaos.jvm.bootstrap;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import com.macstab.chaos.jvm.api.ActivationPolicy;
@@ -33,8 +35,10 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.api.parallel.ResourceLock;
 
 @DisplayName("StartupConfigPoller")
+@ResourceLock("System.err")
 class StartupConfigPollerTest {
 
   @TempDir Path tempDir;
@@ -344,6 +348,27 @@ class StartupConfigPollerTest {
       poller.pollOnce(); // same mtime → no-op
 
       verify(runtime, never()).activate(any(ChaosScenario.class));
+    }
+
+    @Test
+    @DisplayName("a touch of an applied plan reloads nothing and calls the runtime no more")
+    void touchCallsNothing() throws Exception {
+      Files.writeString(
+          config,
+          ChaosPlanMapper.write(
+              new com.macstab.chaos.jvm.api.ChaosPlan(null, null, List.of(scenario("s1")))));
+      Files.setLastModifiedTime(config, FileTime.from(Instant.now().minusSeconds(30)));
+      when(runtime.activate(any(ChaosScenario.class))).thenReturn(handle1);
+      poller.pollOnce();
+      verify(runtime).activate(scenario("s1"));
+      clearInvocations(runtime);
+
+      // Same content, a newer modification time.
+      Files.setLastModifiedTime(config, FileTime.from(Instant.now().minusSeconds(20)));
+      final String stderr = StderrCapture.of(poller::pollOnce);
+
+      assertThat(stderr).doesNotContain("config reloaded");
+      verifyNoMoreInteractions(runtime);
     }
 
     @Test

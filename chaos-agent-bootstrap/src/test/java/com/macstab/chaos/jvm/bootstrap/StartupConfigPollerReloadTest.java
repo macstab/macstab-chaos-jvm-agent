@@ -20,6 +20,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.api.parallel.ResourceLock;
 
 /**
  * Reloads against a real runtime and real files: a plan with a duplicate id is refused and the
@@ -28,6 +29,7 @@ import org.junit.jupiter.api.io.TempDir;
  * schedule is set far beyond the test.
  */
 @DisplayName("Plan file reloads")
+@ResourceLock("System.err")
 class StartupConfigPollerReloadTest {
 
   private static final String PLAN =
@@ -90,11 +92,12 @@ class StartupConfigPollerReloadTest {
 
   @Test
   @DisplayName("a touch without a change in content reloads nothing")
-  void touchIsNotAReload() throws IOException {
+  void touchIsNotAReload() throws Exception {
     final int before = registered.size();
     Files.setLastModifiedTime(file, FileTime.from(Instant.now().minusSeconds(20)));
-    poller.pollOnce();
+    final String stderr = StderrCapture.of(poller::pollOnce);
     assertThat(registered).hasSize(before);
+    assertThat(stderr).doesNotContain("config reloaded");
 
     Files.writeString(file, PLAN.formatted("second"));
     Files.setLastModifiedTime(file, FileTime.from(Instant.now().minusSeconds(10)));

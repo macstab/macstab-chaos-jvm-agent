@@ -956,7 +956,7 @@ public final class DefectProbeMain {
 
   /** Resolves an unresolvable name and localhost, reporting answers or failures. */
   private static void dnsLookups() {
-    for (final String host : new String[] {"chaos-probe.invalid", "localhost"}) {
+    for (final String host : new String[] {"chaos-probe.invalid", "localhost", "dual.test"}) {
       try {
         final StringBuilder addresses = new StringBuilder();
         for (final InetAddress address : InetAddress.getAllByName(host)) {

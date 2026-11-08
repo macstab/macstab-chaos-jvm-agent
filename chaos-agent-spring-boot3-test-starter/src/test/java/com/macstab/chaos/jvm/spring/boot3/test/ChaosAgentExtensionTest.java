@@ -81,12 +81,23 @@ class ChaosAgentExtensionTest {
   }
 
   @Nested
+  @TestInstance(TestInstance.Lifecycle.PER_CLASS)
   @DisplayName("session lifecycle")
   class SessionLifecycle {
+
+    /** The sessions injected into this class's tests, by identity. */
+    private final Set<ChaosSession> injected =
+        java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+
+    @AfterAll
+    void oneSessionForAllTests() {
+      assertThat(injected).as("the session injected into every test of the class").hasSize(1);
+    }
 
     @Test
     @DisplayName("session is open and usable during test execution")
     void sessionIsOpenDuringTest(final ChaosSession session) {
+      injected.add(session);
       // A closed session refuses activations; an open one runs them.
       try (ChaosActivationHandle handle =
           session.activate(
@@ -102,16 +113,9 @@ class ChaosAgentExtensionTest {
     @Test
     @DisplayName("same session instance is shared across tests in the class")
     void sessionIsStableAcrossTests(final ChaosSession session) {
-      assertThat(session).isSameAs(SessionLifecycle.capturedSession(session));
-    }
-
-    private static volatile ChaosSession captured;
-
-    private static ChaosSession capturedSession(final ChaosSession candidate) {
-      if (captured == null) {
-        captured = candidate;
-      }
-      return captured;
+      // Compared across both tests of this class in oneSessionForAllTests.
+      injected.add(session);
+      assertThat(session.id()).isNotBlank();
     }
   }
 

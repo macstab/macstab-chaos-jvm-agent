@@ -161,8 +161,27 @@ class StartupAgentIntegrationTest {
                       .activationPolicy(ActivationPolicy.always())
                       .build()));
 
-      final String output = runProbe(plan, "gc").output();
-      assertThat(output).contains("gc=returned");
+      final ChildJvmProbe.ProbeResult result = runProbe(plan, "gc");
+      assertThat(result.longValue("applied.gc-suppress")).isPositive();
+      assertThat(result.longValue("gcCollections")).as("System.gc() collected nothing").isZero();
+    }
+
+    @Test
+    @DisplayName("without a GC scenario System.gc() collects")
+    void systemGcCollectsWithoutScenario() throws Exception {
+      final ChaosPlan plan =
+          new ChaosPlan(
+              new ChaosPlan.Metadata("startup-no-gc", ""),
+              null,
+              List.of(
+                  ChaosScenario.builder("exit-suppress")
+                      .scope(ChaosScenario.ScenarioScope.JVM)
+                      .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.SYSTEM_EXIT_REQUEST)))
+                      .effect(ChaosEffect.suppress())
+                      .activationPolicy(ActivationPolicy.always())
+                      .build()));
+
+      assertThat(runProbe(plan, "gc").longValue("gcCollections")).isPositive();
     }
   }
 

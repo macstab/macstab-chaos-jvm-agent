@@ -222,9 +222,20 @@ public final class AgentProcessProbeMain {
     }
   }
 
+  /** Prints how many collections {@code System.gc()} ran: 0 when it is suppressed. */
   private static void gc() {
+    final long before = gcCollections();
     System.gc();
-    System.out.println("gc=returned");
+    System.out.println("gcCollections=" + (gcCollections() - before));
+  }
+
+  private static long gcCollections() {
+    long collections = 0L;
+    for (final java.lang.management.GarbageCollectorMXBean collector :
+        ManagementFactory.getGarbageCollectorMXBeans()) {
+      collections += Math.max(0L, collector.getCollectionCount());
+    }
+    return collections;
   }
 
   private static void exit() {
