@@ -324,7 +324,8 @@ public sealed interface ChaosEffect
    * other processes.
    *
    * @param skewAmount the clock offset to apply; positive = future, negative = past; must not be
-   *     zero
+   *     zero, except for {@code FREEZE}, where zero stops the clock at the moment the scenario
+   *     starts
    * @param mode how the skew evolves over time
    * @return a ClockSkewEffect
    */
@@ -1184,7 +1185,8 @@ public sealed interface ChaosEffect
    * violates its monotonicity contract — this is intentional as it simulates a defective or
    * replaced clock source.
    *
-   * @param skewAmount amount to shift the observed clock; non-zero, positive or negative
+   * @param skewAmount amount to shift the observed clock; positive or negative, and non-zero except
+   *     for {@code FREEZE}, where zero stops the clock at the moment the scenario starts
    * @param mode strategy used to apply the skew ({@code FIXED}, {@code DRIFT}, {@code FREEZE} or
    *     {@code REGRESS})
    */
@@ -1194,11 +1196,12 @@ public sealed interface ChaosEffect
       if (skewAmount == null) {
         throw new IllegalArgumentException("skewAmount must not be null");
       }
-      if (skewAmount.isZero()) {
-        throw new IllegalArgumentException("skewAmount must not be zero");
-      }
       if (mode == null) {
         throw new IllegalArgumentException("mode must not be null");
+      }
+      // A zero skew changes nothing, except under FREEZE, where it stops the clock where it is.
+      if (skewAmount.isZero() && mode != ClockSkewMode.FREEZE) {
+        throw new IllegalArgumentException("skewAmount must not be zero");
       }
       if (mode == ClockSkewMode.REGRESS && skewAmount.isNegative()) {
         throw new IllegalArgumentException(

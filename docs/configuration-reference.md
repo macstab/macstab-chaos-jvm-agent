@@ -1596,7 +1596,7 @@ If `strategy` is inapplicable to the actual return type (e.g., `EMPTY` on a prim
 
 | Field        | Type                | Constraint                                | Description                        |
 |--------------|---------------------|-------------------------------------------|------------------------------------|
-| `skewAmount` | Duration (ISO-8601) | non-zero; fits in Long nanos (±292 years) | Positive = future; negative = past |
+| `skewAmount` | Duration (ISO-8601) | non-zero, except `PT0S` with `FREEZE` (the clock stops where it is); fits in Long nanos (±292 years) | Positive = future; negative = past |
 | `mode`       | ClockSkewMode       | required                                  | `FIXED` \| `DRIFT` \| `FREEZE` \| `REGRESS` |
 
 **ClockSkewMode values:**

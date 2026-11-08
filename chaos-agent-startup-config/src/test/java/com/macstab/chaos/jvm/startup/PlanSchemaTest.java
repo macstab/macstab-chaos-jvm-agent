@@ -234,7 +234,8 @@ class PlanSchemaTest {
           // Effects.
           samples(
               ChaosEffect.ClockSkewEffect.class,
-              "{'type': 'clockSkew', 'skewAmount': 'PT1S', 'mode': 'FIXED'}"),
+              "{'type': 'clockSkew', 'skewAmount': 'PT1S', 'mode': 'FIXED'}",
+              "{'type': 'clockSkew', 'skewAmount': 'PT0S', 'mode': 'FREEZE'}"),
           samples(
               ChaosEffect.CodeCachePressureEffect.class,
               "{'type': 'codeCachePressure', 'classCount': 1, 'methodsPerClass': 1}"),

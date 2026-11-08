@@ -332,8 +332,7 @@ public final class ChaosQuarkusExtension
     }
     return switch (normalized) {
       case "suppress" -> ChaosEffect.suppress();
-      case "freeze" ->
-          ChaosEffect.skewClock(Duration.ofSeconds(1), ChaosEffect.ClockSkewMode.FREEZE);
+      case "freeze" -> ChaosEffect.skewClock(Duration.ZERO, ChaosEffect.ClockSkewMode.FREEZE);
       default ->
           throw new IllegalArgumentException(
               "unsupported effect identifier: "

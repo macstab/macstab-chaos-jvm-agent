@@ -151,6 +151,7 @@ class ChaosQuarkusExtensionTest {
       assertThat(scenario.effect()).isInstanceOf(ChaosEffect.ClockSkewEffect.class);
       final ChaosEffect.ClockSkewEffect skew = (ChaosEffect.ClockSkewEffect) scenario.effect();
       assertThat(skew.mode()).isEqualTo(ChaosEffect.ClockSkewMode.FREEZE);
+      assertThat(skew.skewAmount()).as("frozen at the activation time, not ahead of it").isZero();
       assertThat(((ChaosSelector.JvmRuntimeSelector) scenario.selector()).operations())
           .as("the clock reads that are actually instrumented, not System.currentTimeMillis")
           .containsExactlyInAnyOrder(

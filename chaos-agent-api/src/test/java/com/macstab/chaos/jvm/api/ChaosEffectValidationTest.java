@@ -369,11 +369,28 @@ class ChaosEffectValidationTest {
     }
 
     @Test
-    @DisplayName("zero amount throws")
+    @DisplayName("a zero amount throws for every mode but FREEZE")
     void zeroAmountThrows() {
-      assertThatThrownBy(
-              () -> new ChaosEffect.ClockSkewEffect(Duration.ZERO, ChaosEffect.ClockSkewMode.FIXED))
-          .isInstanceOf(IllegalArgumentException.class);
+      for (final ChaosEffect.ClockSkewMode mode :
+          new ChaosEffect.ClockSkewMode[] {
+            ChaosEffect.ClockSkewMode.FIXED,
+            ChaosEffect.ClockSkewMode.DRIFT,
+            ChaosEffect.ClockSkewMode.REGRESS
+          }) {
+        assertThatThrownBy(() -> ChaosEffect.skewClock(Duration.ZERO, mode))
+            .as("%s with a zero skew", mode)
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("skewAmount must not be zero");
+      }
+    }
+
+    @Test
+    @DisplayName("FREEZE with a zero amount stops the clock where it is")
+    void freezeAcceptsZeroAmount() {
+      final ChaosEffect.ClockSkewEffect frozen =
+          ChaosEffect.skewClock(Duration.ZERO, ChaosEffect.ClockSkewMode.FREEZE);
+      assertThat(frozen.skewAmount()).isZero();
+      assertThat(frozen.mode()).isEqualTo(ChaosEffect.ClockSkewMode.FREEZE);
     }
 
     @Test
