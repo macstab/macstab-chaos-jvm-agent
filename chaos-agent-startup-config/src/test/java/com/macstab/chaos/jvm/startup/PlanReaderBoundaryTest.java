@@ -71,7 +71,7 @@ class PlanReaderBoundaryTest {
         "{\"scenarios\": [" + SCENARIO.replace("[\"EXECUTOR_SUBMIT\"]", "7") + "]}",
         1,
         "value of the wrong type at scenarios[0].selector.operations");
-    assertFailure("{\"scenarios\": [\n\n" + SCENARIO + ",]}", 3, "malformed JSON at scenarios");
+    assertFailure("{\"scenarios\": [\n\n" + SCENARIO + ",]}", 3, "malformed JSON at scenarios[1]");
   }
 
   private static void assertFailure(final String json, final int line, final String reason) {

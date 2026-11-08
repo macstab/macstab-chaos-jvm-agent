@@ -305,6 +305,18 @@ class StartupConfigPollerTest {
 
       verify(runtime).activate(any(ChaosScenario.class));
     }
+
+    @Test
+    @DisplayName("a file holding an array of scenarios is applied like a plan")
+    void appliesAnArrayOfScenarios() throws IOException {
+      Files.writeString(config, "[" + ChaosPlanMapper.toJson(scenario("s1")) + "]");
+      Files.setLastModifiedTime(config, FileTime.from(Instant.now().plusSeconds(2)));
+
+      when(runtime.activate(any(ChaosScenario.class))).thenReturn(handle1);
+      poller.pollOnce();
+
+      verify(runtime).activate(scenario("s1"));
+    }
   }
 
   // ── close ──────────────────────────────────────────────────────────────────

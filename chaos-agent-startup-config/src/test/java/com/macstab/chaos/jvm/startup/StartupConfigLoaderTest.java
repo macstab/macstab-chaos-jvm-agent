@@ -637,6 +637,21 @@ class StartupConfigLoaderTest {
     }
 
     @Test
+    @DisplayName("reads a file holding a single scenario, with a byte order mark")
+    void readsSingleScenario() throws Exception {
+      final Path file = tempDir.resolve("scenario.json");
+      Files.writeString(
+          file,
+          "﻿{\"id\": \"from-file\", \"selector\": {\"type\": \"executor\", \"operations\":"
+              + " [\"EXECUTOR_SUBMIT\"]}, \"effect\": {\"type\": \"delay\", \"minDelay\":"
+              + " \"PT0.001S\", \"maxDelay\": \"PT0.001S\"}}");
+
+      assertThat(StartupConfigLoader.loadPlanFromFile(file.toString()).scenarios())
+          .extracting(com.macstab.chaos.jvm.api.ChaosScenario::id)
+          .containsExactly("from-file");
+    }
+
+    @Test
     @DisplayName("applies the agent's file checks and names the file as the source")
     void appliesFileChecks() {
       assertThatExceptionOfType(ConfigLoadException.class)

@@ -330,6 +330,26 @@ class ChaosManagementTest {
   }
 
   @Test
+  @DisplayName("an array of scenarios is plan default; a second, different array is a conflict")
+  void arraysArePlanDefault() {
+    final String scenario =
+        """
+        {"id":"array-delay","scope":"JVM",
+         "selector":{"type":"executor","operations":["EXECUTOR_SUBMIT"]},
+         "effect":{"type":"delay","minDelay":"PT0.001S","maxDelay":"PT0.001S"}}""";
+
+    final ChaosManagement.ActivationResponse first = management.activate("[" + scenario + "]");
+    assertThat(first.status()).isEqualTo("activated");
+    assertThat(first.handleId()).isEqualTo("plan:default");
+
+    final ChaosManagement.ActivationResponse second =
+        management.activate("[" + scenario.replace("array-delay", "other-array-delay") + "]");
+    assertThat(second.status()).isEqualTo("conflict");
+    assertThat(state("array-delay")).isEqualTo(ChaosDiagnostics.ScenarioState.ACTIVE);
+    assertThat(state("other-array-delay")).isNull();
+  }
+
+  @Test
   @DisplayName("an activation of a name another activation holds is refused without activating")
   void racingActivationsOfOneName() {
     final java.util.concurrent.atomic.AtomicInteger closed =

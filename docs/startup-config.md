@@ -158,7 +158,7 @@ The format is specified in [plan-schema.md](plan-schema.md) and defined by the J
 }
 ```
 
-`metadata` may be omitted (the plan is then named `default`); when present, its `name` is required. `observability` may be omitted; its three fields default as shown. A file may also hold a single scenario or a JSON array of scenarios.
+`metadata` may be omitted (the plan is then named `default`); when present, its `name` is required. `observability` may be omitted; its three fields default as shown. A file (or `configJson` / `configBase64`) may also hold a single scenario or a JSON array of scenarios, wrapped in a plan named `default` ([plan-schema](plan-schema.md)); a leading byte order mark is skipped.
 
 ## Activation policy defaults
 

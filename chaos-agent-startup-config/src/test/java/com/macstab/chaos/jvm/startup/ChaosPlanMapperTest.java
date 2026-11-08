@@ -552,4 +552,118 @@ class ChaosPlanMapperTest {
     assertThatThrownBy(() -> ChaosPlanMapper.read("  null  "))
         .isInstanceOf(ConfigLoadException.class);
   }
+
+  @Nested
+  @DisplayName("accepted shapes")
+  class AcceptedShapes {
+
+    private static final String SCENARIO =
+        """
+        {"id": "shape", "selector": {"type": "executor", "operations": ["EXECUTOR_SUBMIT"]},
+         "effect": {"type": "delay", "minDelay": "PT0.001S", "maxDelay": "PT0.001S"}}""";
+
+    @Test
+    @DisplayName("a single scenario is a plan named default")
+    void singleScenario() {
+      final ChaosPlan plan = ChaosPlanMapper.read(SCENARIO);
+
+      assertThat(plan.metadata().name()).isEqualTo("default");
+      assertThat(plan.scenarios()).extracting(ChaosScenario::id).containsExactly("shape");
+    }
+
+    @Test
+    @DisplayName("an array of scenarios is a plan named default")
+    void arrayOfScenarios() {
+      final ChaosPlan plan =
+          ChaosPlanMapper.read("[" + SCENARIO + ", " + SCENARIO.replace("shape", "other") + "]");
+
+      assertThat(plan.metadata().name()).isEqualTo("default");
+      assertThat(plan.scenarios()).extracting(ChaosScenario::id).containsExactly("shape", "other");
+    }
+
+    @Test
+    @DisplayName("an empty array is no plan")
+    void emptyArray() {
+      assertThatThrownBy(() -> ChaosPlanMapper.read("[]"))
+          .isInstanceOf(ConfigLoadException.class)
+          .hasMessageContaining("scenarios must not be empty");
+    }
+
+    @Test
+    @DisplayName("an object with plan members only is a plan without scenarios")
+    void planMembersOnly() {
+      assertThatThrownBy(() -> ChaosPlanMapper.read("{\"metadata\": {\"name\": \"p\"}}"))
+          .isInstanceOf(ConfigLoadException.class)
+          .hasMessageContaining("scenarios must not be empty");
+    }
+
+    @Test
+    @DisplayName("an empty object is read as a scenario and names what it lacks")
+    void emptyObject() {
+      assertThatThrownBy(() -> ChaosPlanMapper.read("{}"))
+          .isInstanceOf(ConfigLoadException.class)
+          .hasMessageNotContaining("scenarios must not be empty");
+    }
+
+    @Test
+    @DisplayName("a byte order mark before the JSON is skipped")
+    void byteOrderMark() {
+      assertThat(ChaosPlanMapper.read("﻿{\"scenarios\": [" + SCENARIO + "]}").scenarios())
+          .hasSize(1);
+      assertThat(ChaosPlanMapper.read("﻿" + SCENARIO).scenarios()).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("a failure in a bare scenario is reported at its position in the input")
+    void positionInTheInput() {
+      final String annotated =
+          """
+          {"id": "positioned",
+           "selector": {"type": "executor", "operations": ["EXECUTOR_SUBMIT"]},
+           "effect": {"type": "delay", "minDelay": "PT0.001S", "maxDelayy": "PT0.001S"}}
+          """;
+
+      assertThatThrownBy(() -> ChaosPlanMapper.readPlanOrScenarios(annotated, "@WithChaos"))
+          .isInstanceOfSatisfying(
+              ConfigLoadException.class,
+              failure -> {
+                assertThat(failure.line()).isEqualTo(3);
+                assertThat(failure.getMessage()).contains("at line 3,").contains("at effect");
+              });
+    }
+
+    @Test
+    @DisplayName("a syntax error names the member it is in, also inside an array")
+    void syntaxErrorPath() {
+      assertThatThrownBy(() -> ChaosPlanMapper.read("[" + SCENARIO + ", {\"id\": tru}]"))
+          .isInstanceOf(ConfigLoadException.class)
+          .hasMessageContaining(": malformed JSON at [1].id");
+    }
+
+    @Test
+    @DisplayName("empty input is no plan")
+    void emptyInput() {
+      assertThatThrownBy(() -> ChaosPlanMapper.read("")).isInstanceOf(ConfigLoadException.class);
+    }
+
+    @Test
+    @DisplayName("a failure that is neither a syntax nor a mapping error has no path")
+    void failureWithoutPath() {
+      assertThat(
+              ChaosPlanMapper.parseFailureReason(
+                  new com.fasterxml.jackson.core.JsonParseException(null, "broken")))
+          .isEqualTo("malformed JSON");
+      assertThat(
+              ChaosPlanMapper.parseFailureReason(
+                  new com.fasterxml.jackson.core.JsonProcessingException("broken") {}))
+          .doesNotContain(" at ");
+    }
+
+    @Test
+    @DisplayName("bare scenarios are named after the caller's plan name")
+    void callersPlanName() {
+      assertThat(ChaosPlanMapper.readPlanOrScenarios(SCENARIO, "@WithChaos").metadata().name())
+          .isEqualTo("@WithChaos");
+    }
+  }
 }

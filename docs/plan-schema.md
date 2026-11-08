@@ -56,7 +56,7 @@ policy        = { "probability", "activateAfterMatches", "maxApplications", "act
 rateLimit     = { "permits": integer, "window": duration }        ; both required
 ```
 
-A file may also hold a single scenario or a JSON array of scenarios; the agent wraps them in a plan (`ChaosPlanMapper.readPlanOrScenarios`). The schema describes the plan form.
+Every source (the agent's `configFile` / `configJson` / `configBase64`, the Spring `config-file`, the poller, the management endpoints, the MBean, `@WithChaos`) reads the same three shapes through `ChaosPlanMapper.read`: an object with a `scenarios`, `metadata` or `observability` member is a plan; any other object is a single scenario; an array is a list of scenarios. Bare scenarios are wrapped in a plan named `default` (`@WithChaos`: `@WithChaos`). An empty object `{}` is therefore read as a scenario, and its error names the scenario field it lacks; an empty array is refused ("scenarios must not be empty"). A byte order mark before the JSON is skipped, and a failure is reported at its line and column in the input. The schema describes the plan form.
 
 ## 3. Values
 

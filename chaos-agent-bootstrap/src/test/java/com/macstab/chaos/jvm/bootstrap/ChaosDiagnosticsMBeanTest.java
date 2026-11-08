@@ -56,6 +56,22 @@ class ChaosDiagnosticsMBeanTest {
   }
 
   @Test
+  @DisplayName("a single scenario or an array of scenarios is activated as a plan")
+  void bareScenarios() {
+    final ChaosDiagnosticsMBean bean = new ChaosDiagnosticsMBean(runtime, true);
+    final String scenario =
+        """
+        {"id":"jmx-bare","scope":"JVM",
+         "selector":{"type":"executor","operations":["EXECUTOR_SUBMIT"]},
+         "effect":{"type":"delay","minDelay":"PT0.001S","maxDelay":"PT0.001S"}}""";
+
+    assertThat(bean.activatePlan(scenario)).isEqualTo("jmx-bare");
+    assertThat(bean.stopAll()).isEqualTo(1);
+    assertThat(bean.activatePlan("[" + scenario + "]")).isEqualTo("jmx-bare");
+    assertThat(bean.stopAll()).isEqualTo(1);
+  }
+
+  @Test
   @DisplayName("an invalid plan is an IllegalArgumentException with the parse message")
   void invalidPlan() {
     final ChaosDiagnosticsMBean bean = new ChaosDiagnosticsMBean(runtime, true);
