@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.macstab.chaos.jvm.api.ChaosPlan;
+import com.macstab.chaos.jvm.api.Internal;
 
 /**
  * Jackson-based serialisation bridge between JSON and {@link ChaosPlan}.
@@ -27,8 +28,11 @@ import com.macstab.chaos.jvm.api.ChaosPlan;
  */
 public final class ChaosPlanMapper {
 
-  /** Maximum JSON input size accepted by {@link #read(String)}: 1 MiB. */
-  static final int MAX_JSON_LENGTH = 1_048_576;
+  /**
+   * Maximum JSON input size accepted by {@link #read(String)}, in UTF-8 bytes: 1 MiB. Also the cap
+   * on a plan file and on a plan posted to a management endpoint.
+   */
+  @Internal public static final int MAX_JSON_LENGTH = 1_048_576;
 
   /**
    * Maximum JSON nesting depth allowed by the streaming parser. 32 is generous for any realistic

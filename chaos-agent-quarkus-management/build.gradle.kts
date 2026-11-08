@@ -4,6 +4,8 @@ dependencies {
     api(project(":chaos-agent-api"))
     implementation(project(":chaos-agent-bootstrap"))
     api(libs.quarkus.vertx.http)
+    // Only for the plan size cap, a compile-time constant javac inlines.
+    compileOnly(project(":chaos-agent-startup-config"))
 
     compileOnly(platform(libs.quarkus.bom))
     compileOnly("io.quarkus:quarkus-core")
@@ -14,6 +16,7 @@ dependencies {
     testImplementation(libs.assertj)
     testImplementation("io.quarkus:quarkus-core")
     testImplementation(project(":chaos-agent-core"))
+    testImplementation(project(":chaos-agent-startup-config"))
 }
 
 tasks.processResources {

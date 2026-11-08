@@ -57,7 +57,7 @@ public final class StartupConfigLoader {
   public static final String ENV_DEBUG_DUMP = "MACSTAB_CHAOS_DEBUG_DUMP_ON_START";
 
   /** Maximum config file size: 1 MiB. Prevents OOM from oversized files. */
-  private static final long MAX_FILE_SIZE = 1_048_576L;
+  private static final long MAX_FILE_SIZE = ChaosPlanMapper.MAX_JSON_LENGTH;
 
   private static final String SOURCE_FILE_PREFIX = "file:";
   private static final String SOURCE_INLINE_JSON = "inline-json";
