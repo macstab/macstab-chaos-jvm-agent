@@ -25,6 +25,7 @@ A small set of classes (`BridgeInjector.BRIDGE_CLASSES`, led by `BootstrapDispat
 - Every bridge class and every type it references must be in the bridge jar. `ArchitectureTest` checks the jar is closed, and that inlined advice uses only public members.
 - One indirection per intercepted call: an idle dispatch costs about 7 ns and allocates nothing (`BridgeDispatchBenchmark`).
 - The slot table is documented in `docs/instrumentation.md` §7.
+- Amended in 2.0: only the bootstrap copy of the bridge carries the delegate, so no other class loader may define one. The agent jar keeps the bridge classes under `META-INF/macstab-chaos-bridge/` instead of their class names, so a loader that searches its own jars before its parent (a web application with the agent jar in `WEB-INF/lib`) resolves them through its parents to the bootstrap copy. A loader that still sees a `BootstrapDispatcher` class file of its own (the thin `chaos-agent-instrumentation-jdk` jar bundled in the application) is not woven and is named in `hookFailures`; the decision is made once per loader, from `getResource` alone, never by loading a class inside a transformer. A loader that reaches neither its parents nor the boot path for the bridge package (JBoss Modules, OSGi) must have the package delegated to the boot path.
 
 ## Alternatives rejected
 

@@ -20,6 +20,16 @@ final class BridgeInjector {
   private static final String BRIDGE_JAR_PREFIX = "macstab-chaos-bootstrap-bridge";
   private static final String BRIDGE_JAR_SUFFIX = ".jar";
 
+  /**
+   * Where the agent jar keeps the bridge classes: under a path that is not their class name, so no
+   * class loader that reads the agent jar defines a copy of its own ({@code
+   * chaos-agent-bootstrap/build.gradle.kts}).
+   */
+  static final String BRIDGE_LAYOUT = "META-INF/macstab-chaos-bridge/";
+
+  private static final String BOOTSTRAP_DISPATCHER =
+      "com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher";
+
   private BridgeInjector() {}
 
   /**
@@ -30,12 +40,19 @@ final class BridgeInjector {
    * advice references (the scheduled-task wrappers and the URL, JDBC and client-call extractors):
    * see {@link #BRIDGE_CLASSES}.
    *
-   * <p>They are read from the agent classloader's resources (the same JAR that contains this class)
-   * and written verbatim into the temp JAR, which is unlinked as soon as it is appended (on
-   * Windows, where an open file cannot be deleted, at exit or by the next start's sweep). After the
-   * JAR is written, {@link Instrumentation#appendToBootstrapClassLoaderSearch} makes its contents
-   * visible to the bootstrap classloader, allowing instrumented JDK classes — which are loaded by
-   * the bootstrap classloader — to call {@code BootstrapDispatcher} static methods.
+   * <p>They are read from the agent classloader's resources (the same JAR that contains this class;
+   * the agent jar keeps them under {@value #BRIDGE_LAYOUT}, the plain {@code chaos-agent-
+   * instrumentation-jdk} classes under their class names) and written verbatim into the temp JAR,
+   * which is unlinked as soon as it is appended (on Windows, where an open file cannot be deleted,
+   * at exit or by the next start's sweep). After the JAR is written, {@link
+   * Instrumentation#appendToBootstrapClassLoaderSearch} makes its contents visible to the bootstrap
+   * classloader, allowing instrumented JDK classes — which are loaded by the bootstrap classloader
+   * — to call {@code BootstrapDispatcher} static methods.
+   *
+   * <p>Nothing is appended when the bootstrap class loader already resolves {@code
+   * BootstrapDispatcher}: another copy of the agent, loaded by another class loader, injected the
+   * bridge, or it was placed there with {@code -Xbootclasspath/a}. A second jar would only be
+   * shadowed by the first.
    *
    * @param instrumentation the {@link Instrumentation} handle used to append to the bootstrap
    *     classpath
@@ -55,6 +72,9 @@ final class BridgeInjector {
     // neither of which is desirable. The bridge classes are fixed bytecode — once injected,
     // they never change — so skipping subsequent calls is both safe and correct.
     if (!BRIDGE_INJECTED.compareAndSet(false, true)) {
+      return;
+    }
+    if (onBootClassPath()) {
       return;
     }
     boolean appended = false;
@@ -106,6 +126,16 @@ final class BridgeInjector {
         BRIDGE_INJECTED.set(false);
       }
       throw failure;
+    }
+  }
+
+  /** Returns whether the bootstrap class loader already resolves {@code BootstrapDispatcher}. */
+  private static boolean onBootClassPath() {
+    try {
+      Class.forName(BOOTSTRAP_DISPATCHER, false, null);
+      return true;
+    } catch (final ClassNotFoundException notYet) {
+      return false;
     }
   }
 
@@ -202,16 +232,25 @@ final class BridgeInjector {
           "com/macstab/chaos/jvm/instrumentation/ClientCallExtractor.class",
           "com/macstab/chaos/jvm/instrumentation/ClientCallExtractor$1.class");
 
+  /**
+   * Writes the class file {@code resourcePath} into the bridge jar under its class name, read from
+   * the agent jar's {@value #BRIDGE_LAYOUT}, or from the class name itself for the plain {@code
+   * chaos-agent-instrumentation-jdk} classes (in-repo tests, benchmarks).
+   */
   private static void writeClass(final JarOutputStream jarOutputStream, final String resourcePath)
       throws IOException {
+    final ClassLoader agentLoader = JdkInstrumentationInstaller.class.getClassLoader();
     final JarEntry jarEntry = new JarEntry(resourcePath);
     jarOutputStream.putNextEntry(jarEntry);
-    try (InputStream inputStream =
-        JdkInstrumentationInstaller.class.getClassLoader().getResourceAsStream(resourcePath)) {
-      if (inputStream == null) {
-        throw new IOException("missing bridge resource " + resourcePath);
-      }
-      inputStream.transferTo(jarOutputStream);
+    InputStream inputStream = agentLoader.getResourceAsStream(BRIDGE_LAYOUT + resourcePath);
+    if (inputStream == null) {
+      inputStream = agentLoader.getResourceAsStream(resourcePath);
+    }
+    if (inputStream == null) {
+      throw new IOException("missing bridge resource " + resourcePath);
+    }
+    try (InputStream classFile = inputStream) {
+      classFile.transferTo(jarOutputStream);
     }
     jarOutputStream.closeEntry();
   }

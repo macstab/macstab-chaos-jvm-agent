@@ -24,6 +24,7 @@ The agent runs inside applications that bring their own ByteBuddy (Mockito, Hibe
 - No clash with the application's libraries, whichever versions it uses.
 - The jar is larger, and a security fix in ByteBuddy or Jackson needs an agent release (Dependabot proposes the update; the build verifies it).
 - Coverage of the child-JVM tests runs against the shaded classes; `childJvmCoverage` maps it back onto the module classes.
+- Amended in 2.0: the bootstrap bridge classes (ADR 0001) are stored under `META-INF/macstab-chaos-bridge/`, not under their class names, so no class loader that reads the jar defines a copy of its own. The thin `chaos-agent-instrumentation-jdk` jar keeps them under their class names: it is published for builds and benchmarks that use the plain classes, and must never be bundled in an application.
 
 ## Alternatives rejected
 

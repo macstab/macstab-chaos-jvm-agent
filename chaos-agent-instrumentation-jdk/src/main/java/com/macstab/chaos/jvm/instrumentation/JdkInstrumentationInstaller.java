@@ -491,6 +491,7 @@ public final class JdkInstrumentationInstaller {
       WOVEN_GROUPS.clear();
     }
     HookCoverage.reset();
+    BridgeVisibility.reset();
     if (!failures.isEmpty()) {
       final RuntimeException first = failures.get(0);
       failures.subList(1, failures.size()).forEach(first::addSuppressed);
@@ -588,9 +589,11 @@ public final class JdkInstrumentationInstaller {
    * benchmarks and tests can drive the dispatch methods exactly as woven advice does. Closing the
    * result disconnects it again, unless another delegate replaced it in the meantime.
    *
-   * <p>For benchmarks and tests on the plain {@code chaos-agent-instrumentation-jdk} classes only:
-   * it installs into the dispatcher this class links against, which is the bootstrap copy only when
-   * no agent jar injected one.
+   * <p>For benchmarks and tests on the plain (thin) {@code chaos-agent-instrumentation-jdk} classes
+   * only: it installs into the dispatcher this class links against, which is the bootstrap copy
+   * only when no agent jar injected one. The agent jar keeps the dispatcher out of its own loader's
+   * view ({@code META-INF/macstab-chaos-bridge/}), so there it resolves only once {@link #install}
+   * injected the bridge.
    *
    * @param runtime the runtime that receives the dispatches
    * @return a handle that uninstalls this delegate when closed
@@ -841,7 +844,8 @@ public final class JdkInstrumentationInstaller {
   /**
    * Builds the base {@link AgentBuilder} with retransformation strategy, failing on a refused
    * retransformation, error logging, and ignore rules for ByteBuddy and chaos-agent internal
-   * packages.
+   * packages and for class loaders with a bootstrap bridge copy of their own ({@link
+   * BridgeVisibility}).
    */
   private static AgentBuilder buildBaseAgentBuilder() {
     final AgentBuilder.Listener.Adapter errorListener =
@@ -866,7 +870,10 @@ public final class JdkInstrumentationInstaller {
         .with(errorListener)
         .ignore(
             ElementMatchers.nameStartsWith(BYTE_BUDDY_PACKAGE_PREFIX)
-                .or(ElementMatchers.nameStartsWith("com.macstab.chaos.jvm.")));
+                .or(ElementMatchers.nameStartsWith("com.macstab.chaos.jvm.")))
+        // Nor the classes of a loader with a bridge copy of its own: their advice would link
+        // against a dispatcher without the delegate.
+        .or(ElementMatchers.any(), BridgeVisibility.OWN_BRIDGE_COPY);
   }
 
   /**

@@ -1,4 +1,5 @@
 import com.github.jengelman.gradle.plugins.shadow.transformers.ApacheNoticeResourceTransformer
+import org.gradle.api.tasks.util.PatternSet
 
 plugins {
     id("com.gradleup.shadow")
@@ -90,6 +91,39 @@ tasks.jar {
     }
 }
 
+// The bootstrap bridge (BridgeInjector.BRIDGE_CLASSES): the classes inlined advice references,
+// which BridgeInjector appends to the bootstrap class path. The agent jar keeps them under
+// META-INF/macstab-chaos-bridge/, not under their class names, so a class loader that finds this
+// jar before its parent (a web application with the jar in WEB-INF/lib) cannot define a copy of its
+// own: the advice woven into its classes then reaches the one copy the agent's delegate is
+// installed in. BridgeDelegate stays an ordinary entry: the agent implements it. The child-JVM test
+// ChildFirstLoaderIntegrationTest checks this list against BRIDGE_CLASSES.
+val bridgeClasses = PatternSet()
+    .include(
+        "com/macstab/chaos/jvm/instrumentation/bridge/*.class",
+        "com/macstab/chaos/jvm/instrumentation/Scheduled*Wrapper*.class",
+        "com/macstab/chaos/jvm/instrumentation/HttpUrlExtractor*.class",
+        "com/macstab/chaos/jvm/instrumentation/JdbcTargetExtractor*.class",
+        "com/macstab/chaos/jvm/instrumentation/ClientCallExtractor*.class",
+    )
+    .exclude(
+        "com/macstab/chaos/jvm/instrumentation/bridge/BridgeDelegate.class",
+        "com/macstab/chaos/jvm/instrumentation/bridge/package-info.class",
+    )
+val instrumentationJar = configurations.runtimeClasspath.get().incoming.artifactView {
+    componentFilter {
+        it is ProjectComponentIdentifier && it.projectPath == ":chaos-agent-instrumentation-jdk"
+    }
+}.files
+val bridgeLayout by tasks.registering(Sync::class) {
+    into(layout.buildDirectory.dir("bridge-layout"))
+    from(instrumentationJar.elements.map { jars -> jars.map { zipTree(it) } }) {
+        include(bridgeClasses.includes)
+        exclude(bridgeClasses.excludes)
+        into("META-INF/macstab-chaos-bridge")
+    }
+}
+
 // The agent jar: every runtime dependency merged in, with ByteBuddy and Jackson relocated under
 // com.macstab.chaos.jvm.shaded so they cannot clash with the application's own copies (Mockito
 // and Hibernate bring ByteBuddy, most frameworks bring Jackson). The API classes carry no
@@ -99,6 +133,9 @@ tasks.shadowJar {
     manifest {
         attributes(agentManifest)
     }
+    // The bridge classes move to META-INF/macstab-chaos-bridge/ (see bridgeClasses).
+    from(bridgeLayout)
+    exclude { !it.isDirectory && bridgeClasses.asSpec.isSatisfiedBy(it) }
     relocate("net.bytebuddy", "com.macstab.chaos.jvm.shaded.net.bytebuddy")
     relocate("com.fasterxml.jackson", "com.macstab.chaos.jvm.shaded.com.fasterxml.jackson")
     mergeServiceFiles()

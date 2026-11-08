@@ -74,6 +74,8 @@ The API classes reference neither library (the JSON mapping lives in `chaos-agen
 
 Inside this build, project dependencies on `:chaos-agent-bootstrap` resolve to its thin JAR (classifier `plain`) plus the module dependencies, unshaded. The child-JVM tests in this module run against the shaded JAR.
 
+The bootstrap bridge classes (`BridgeInjector.BRIDGE_CLASSES`) are stored in the agent JAR under `META-INF/macstab-chaos-bridge/`, not under their class names; `BridgeInjector` reads them from there when it writes the bridge jar. So a class loader that reads the agent JAR before its parent (the JAR in a web application's `WEB-INF/lib`) cannot define a `BootstrapDispatcher` of its own, and the hooks in its classes reach the agent (`ChildFirstLoaderIntegrationTest`).
+
 ## Premain (startup attachment)
 
 ```
@@ -175,6 +177,8 @@ initialize("", instrumentation, System.getenv())             // same hook set as
 `ByteBuddyAgent.install()` uses `VirtualMachine` internally but is a higher-level wrapper that also handles the JAR creation/location concerns automatically.
 
 **Hooks under self-attach**: `JdkInstrumentationInstaller` weaves every hook group — on demand, when a scenario first needs it — using `AgentBuilder` configured with `RedefinitionStrategy.RETRANSFORMATION` and `disableClassFormatChanges()`, exactly as for `-javaagent:`. JDK classes already loaded into the JVM (including `java.net.Socket`, `java.nio.channels.SocketChannel`, `java.net.http.HttpClient`, JDBC drivers) are retransformed in-place. Future calls to their methods fire the chaos instrumentation.
+
+**Which jar**: self-attach, like `-javaagent:`, needs the agent JAR (`chaos-agent-bootstrap`). The thin `chaos-agent-core` and `chaos-agent-instrumentation-jdk` jars are published for builds and benchmarks that use the plain classes; never bundle them in an application. The thin instrumentation jar carries the bridge classes under their class names, so a class loader that reads it before its parent defines a `BootstrapDispatcher` of its own, without the agent's delegate. The agent does not weave that loader's classes and names it in the diagnostics' `hookFailures`. `JdkInstrumentationInstaller.connectDispatcher` (benchmarks) works on the thin classes only.
 
 **Fallback**: If self-attach fails (a runtime without the `jdk.attach` module, `-XX:+DisableAttachMechanism`, or `-XX:-EnableDynamicAgentLoading`), `installForLocalTests()` throws `IllegalStateException`. In that case, run with `-javaagent:chaos-agent-bootstrap.jar` instead.
 

@@ -69,7 +69,17 @@ final class HookCoverage {
    * @param failure why
    */
   static void failed(final String typeName, final Throwable failure) {
-    FAILED.add(typeName + ": " + failure);
+    failed(typeName, failure.toString());
+  }
+
+  /**
+   * Records that {@code subject} (a type, a hook group, a class loader) is not woven.
+   *
+   * @param subject what is not woven
+   * @param reason why
+   */
+  static void failed(final String subject, final String reason) {
+    FAILED.add(subject + ": " + reason);
   }
 
   /**

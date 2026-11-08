@@ -26,6 +26,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.channels.Selector;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -79,6 +80,7 @@ public final class DefectProbeMain {
       case "url-class-loader-load" -> urlClassLoaderLoad();
       case "get-resource" -> getResource();
       case "kafka-isolated-loader" -> kafkaIsolatedLoader();
+      case "child-first-loader" -> childFirstLoader();
       case "park-until-in-session" -> parkUntilInSession();
       case "jdbc-hikari-execute" -> jdbcHikariExecute();
       case "jdbc-prepared-execute" -> jdbcPreparedExecute();
@@ -2963,6 +2965,240 @@ public final class DefectProbeMain {
         .scenario(scenarioId)
         .map(ChaosDiagnostics.ScenarioReport::appliedCount)
         .orElse(-1L);
+  }
+
+  /** Where the agent jar keeps the bootstrap bridge classes, out of every class loader's view. */
+  private static final String BRIDGE_LAYOUT = "META-INF/macstab-chaos-bridge/";
+
+  /**
+   * A web application's class loader: child-first over the agent jar and the libraries in its
+   * {@code WEB-INF/lib} (here Kafka and {@code childfirst.ChildFirstTarget}), as Tomcat's is.
+   * Prints whether a method hook and a library hook in classes it defines reach the agent, where it
+   * resolves every bootstrap bridge class from, and what a loader that never delegates and holds
+   * its own copy of the bridge records instead of a {@code LinkageError}. Runs on the agent jar
+   * alone ({@link ChildJvmProbe#runShadedOnly}); {@code chaos.bootstrap.agentJar} names it and
+   * {@code chaos.test.isolatedClasspath} names the Kafka jars.
+   */
+  private static void childFirstLoader() throws Exception {
+    final Path agentJar = Path.of(System.getProperty("chaos.bootstrap.agentJar"));
+    final URL probeClasses =
+        DefectProbeMain.class.getProtectionDomain().getCodeSource().getLocation();
+    final java.util.List<URL> webInfLib = new java.util.ArrayList<>();
+    webInfLib.add(agentJar.toUri().toURL());
+    webInfLib.add(probeClasses);
+    for (final String entry :
+        Arrays.stream(
+                System.getProperty("chaos.test.isolatedClasspath")
+                    .split(java.io.File.pathSeparator))
+            .toList()) {
+      webInfLib.add(Path.of(entry).toUri().toURL());
+    }
+    final ChaosControlPlane controlPlane = ChaosPlatform.current();
+    try (URLClassLoader webapp =
+            new ChildFirstClassLoader(
+                webInfLib.toArray(new URL[0]), ClassLoader.getSystemClassLoader());
+        ChaosActivationHandle method =
+            controlPlane.activate(
+                ChaosScenario.builder("child-first-method")
+                    .selector(
+                        ChaosSelector.method(
+                            Set.of(OperationType.METHOD_ENTER),
+                            NamePattern.exact("childfirst.ChildFirstTarget"),
+                            NamePattern.exact("call")))
+                    .effect(ChaosEffect.reject("child-first down"))
+                    .activationPolicy(ActivationPolicy.always())
+                    .build());
+        ChaosActivationHandle kafka =
+            controlPlane.activate(
+                ChaosScenario.builder("child-first-kafka")
+                    .selector(
+                        ChaosSelector.messaging(
+                            Set.of(OperationType.MESSAGE_SEND), NamePattern.exact("orders")))
+                    .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+                    .activationPolicy(ActivationPolicy.always())
+                    .build())) {
+      // The method hook: a reject throws from the woven method.
+      final Class<?> target = Class.forName("childfirst.ChildFirstTarget", true, webapp);
+      System.out.println("target.childFirst=" + (target.getClassLoader() == webapp));
+      try {
+        System.out.println(
+            "target.call="
+                + target.getMethod("call").invoke(target.getConstructor().newInstance()));
+      } catch (final java.lang.reflect.InvocationTargetException failure) {
+        System.out.println("target.call=" + failure.getCause().getClass().getName());
+      }
+      System.out.println("method.applied=" + method.appliedCount());
+
+      // The library hook: Kafka in WEB-INF/lib.
+      final Thread current = Thread.currentThread();
+      final ClassLoader previous = current.getContextClassLoader();
+      current.setContextClassLoader(webapp);
+      try {
+        final java.util.Properties config = new java.util.Properties();
+        config.put("bootstrap.servers", "127.0.0.1:1");
+        config.put("max.block.ms", "100");
+        config.put("key.serializer", "org.apache.kafka.common.serialization.StringSerializer");
+        config.put("value.serializer", "org.apache.kafka.common.serialization.StringSerializer");
+        final Class<?> producerType =
+            Class.forName("org.apache.kafka.clients.producer.KafkaProducer", true, webapp);
+        final Class<?> recordType =
+            Class.forName("org.apache.kafka.clients.producer.ProducerRecord", true, webapp);
+        try (AutoCloseable producer =
+            (AutoCloseable)
+                producerType.getConstructor(java.util.Properties.class).newInstance(config)) {
+          producerType
+              .getMethod("send", recordType)
+              .invoke(
+                  producer,
+                  recordType
+                      .getConstructor(String.class, Object.class, Object.class)
+                      .newInstance("orders", "k", "v"));
+        }
+      } finally {
+        current.setContextClassLoader(previous);
+      }
+      System.out.println("kafka.matched=" + kafka.matchedCount());
+
+      // Every bridge class resolves to the boot copy, and the jar keeps exactly those classes
+      // out of view: the Gradle relocation list and BridgeInjector.BRIDGE_CLASSES agree.
+      final java.lang.reflect.Field listed =
+          Class.forName("com.macstab.chaos.jvm.instrumentation.BridgeInjector")
+              .getDeclaredField("BRIDGE_CLASSES");
+      listed.setAccessible(true);
+      @SuppressWarnings("unchecked")
+      final java.util.List<String> bridgeClasses = (java.util.List<String>) listed.get(null);
+      final java.util.Set<String> notBoot = new java.util.TreeSet<>();
+      for (final String path : bridgeClasses) {
+        final String name = path.substring(0, path.length() - ".class".length()).replace('/', '.');
+        if (Class.forName(name, false, webapp).getClassLoader() != null) {
+          notBoot.add(name);
+        }
+      }
+      final java.util.Set<String> unlisted = new java.util.TreeSet<>();
+      try (java.util.jar.JarFile jar = new java.util.jar.JarFile(agentJar.toFile())) {
+        jar.stream()
+            .map(java.util.zip.ZipEntry::getName)
+            .filter(name -> name.startsWith(BRIDGE_LAYOUT) && name.endsWith(".class"))
+            .map(name -> name.substring(BRIDGE_LAYOUT.length()))
+            .filter(path -> !bridgeClasses.contains(path))
+            .forEach(unlisted::add);
+      }
+      System.out.println("bridge.count=" + bridgeClasses.size());
+      System.out.println("bridge.notBoot=" + notBoot);
+      System.out.println("bridge.unlisted=" + unlisted);
+
+      // A loader that never delegates (JBoss Modules, OSGi without boot delegation) and holds its
+      // own copy of the bridge: its classes are not woven, and it is named as a hook failure.
+      final Path isolatedCopy = Files.createTempDirectory("chaos-non-delegating");
+      try (java.util.jar.JarFile jar = new java.util.jar.JarFile(agentJar.toFile())) {
+        for (final String path : bridgeClasses) {
+          final java.util.zip.ZipEntry entry =
+              jar.getEntry(BRIDGE_LAYOUT + path) != null
+                  ? jar.getEntry(BRIDGE_LAYOUT + path)
+                  : jar.getEntry(path);
+          final Path copy = isolatedCopy.resolve(path);
+          Files.createDirectories(copy.getParent());
+          try (java.io.InputStream in = jar.getInputStream(entry)) {
+            Files.copy(in, copy);
+          }
+        }
+      }
+      final String targetPath = "childfirst/ChildFirstTarget.class";
+      Files.createDirectories(isolatedCopy.resolve("childfirst"));
+      try (java.io.InputStream in = webapp.getResourceAsStream(targetPath)) {
+        Files.copy(java.util.Objects.requireNonNull(in), isolatedCopy.resolve(targetPath));
+      }
+      try (URLClassLoader module =
+              new NonDelegatingClassLoader(new URL[] {isolatedCopy.toUri().toURL()});
+          java.util.stream.Stream<Path> copied = Files.walk(isolatedCopy)) {
+        // Registered parents first: deleteOnExit deletes in reverse order, children first.
+        copied.forEach(path -> path.toFile().deleteOnExit());
+        System.out.println("module.loader=" + module);
+        final Class<?> moduleTarget = Class.forName("childfirst.ChildFirstTarget", true, module);
+        try {
+          System.out.println(
+              "module.call="
+                  + moduleTarget
+                      .getMethod("call")
+                      .invoke(moduleTarget.getConstructor().newInstance()));
+        } catch (final java.lang.reflect.InvocationTargetException failure) {
+          System.out.println("module.call=" + failure.getCause());
+        }
+      }
+      System.out.println(
+          "hookFailures="
+              + controlPlane.diagnostics().snapshot().runtimeDetails().get("hookFailures"));
+    }
+  }
+
+  /**
+   * Child-first, as Tomcat's web application class loader: a class the Java SE loader holds comes
+   * from it, any other from this loader's own URLs first, then from the parent.
+   */
+  private static final class ChildFirstClassLoader extends URLClassLoader {
+    ChildFirstClassLoader(final URL[] urls, final ClassLoader parent) {
+      super("child-first", urls, parent);
+    }
+
+    @Override
+    protected Class<?> loadClass(final String name, final boolean resolve)
+        throws ClassNotFoundException {
+      synchronized (getClassLoadingLock(name)) {
+        Class<?> type = findLoadedClass(name);
+        if (type == null) {
+          final ClassLoader javaSe = ClassLoader.getPlatformClassLoader();
+          if (javaSe.getResource(name.replace('.', '/') + ".class") != null) {
+            type = javaSe.loadClass(name);
+          } else {
+            try {
+              type = findClass(name);
+            } catch (final ClassNotFoundException notLocal) {
+              type = getParent().loadClass(name);
+            }
+          }
+        }
+        if (resolve) {
+          resolveClass(type);
+        }
+        return type;
+      }
+    }
+
+    @Override
+    public URL getResource(final String name) {
+      final URL local = findResource(name);
+      return local != null ? local : getParent().getResource(name);
+    }
+  }
+
+  /** A module loader that delegates nothing but {@code java.*}: no class path, no boot path. */
+  private static final class NonDelegatingClassLoader extends URLClassLoader {
+    NonDelegatingClassLoader(final URL[] urls) {
+      super("non-delegating", urls, ClassLoader.getPlatformClassLoader());
+    }
+
+    @Override
+    protected Class<?> loadClass(final String name, final boolean resolve)
+        throws ClassNotFoundException {
+      if (name.startsWith("java.")) {
+        return super.loadClass(name, resolve);
+      }
+      synchronized (getClassLoadingLock(name)) {
+        Class<?> type = findLoadedClass(name);
+        if (type == null) {
+          type = findClass(name);
+        }
+        if (resolve) {
+          resolveClass(type);
+        }
+        return type;
+      }
+    }
+
+    @Override
+    public URL getResource(final String name) {
+      return name.startsWith("java/") ? getParent().getResource(name) : findResource(name);
+    }
   }
 
   /**
