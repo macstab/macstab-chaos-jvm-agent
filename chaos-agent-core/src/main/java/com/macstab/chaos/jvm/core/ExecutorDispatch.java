@@ -189,19 +189,20 @@ public final class ExecutorDispatch {
    */
   public void beforeForkJoinTaskRun(final java.util.concurrent.@Nullable ForkJoinTask<?> task)
       throws Throwable {
+    if (engine.idle(OperationType.FORK_JOIN_TASK_RUN) || task instanceof AgentOwned) {
+      return; // idle first; an agent-owned task is the agent's own work (L3)
+    }
     engine.applyPreDecision(
-        (engine.idle(OperationType.FORK_JOIN_TASK_RUN)
-            ? RuntimeDecision.none()
-            : engine.evaluate(
-                new InvocationContext(
-                    OperationType.FORK_JOIN_TASK_RUN,
-                    "java.util.concurrent.ForkJoinPool",
-                    DispatchEngine.taskClassName(task),
-                    null,
-                    false,
-                    null,
-                    null,
-                    engine.scopeContext.currentSessionId()))));
+        engine.evaluate(
+            new InvocationContext(
+                OperationType.FORK_JOIN_TASK_RUN,
+                "java.util.concurrent.ForkJoinPool",
+                DispatchEngine.taskClassName(task),
+                null,
+                false,
+                null,
+                null,
+                engine.scopeContext.currentSessionId())));
   }
 
   /**

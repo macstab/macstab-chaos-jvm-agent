@@ -78,30 +78,18 @@ final class CodeCachePressureStressor implements ManagedStressor {
       final int methodsPerClass = effect.methodsPerClass();
       // Agent-owned thread: it runs with the dispatch depth raised so the user's REFLECTION_INVOKE
       // scenarios do not apply to its Method.invoke loop.
-      final Thread compiler =
-          new Thread(
+      compilerThread =
+          AgentThreads.start(
+              "chaos-code-cache-compiler",
+              true,
               () -> {
-                ChaosDispatcher.incrementDispatchDepth();
-                try {
-                  for (final Class<?> loadedClass : snapshot) {
-                    if (retainedClasses == null || Thread.currentThread().isInterrupted()) {
-                      return;
-                    }
-                    triggerCompilation(loadedClass, methodsPerClass);
+                for (final Class<?> loadedClass : snapshot) {
+                  if (retainedClasses == null || Thread.currentThread().isInterrupted()) {
+                    return;
                   }
-                } finally {
-                  ChaosDispatcher.decrementDispatchDepth();
+                  triggerCompilation(loadedClass, methodsPerClass);
                 }
-              },
-              "chaos-code-cache-compiler");
-      compiler.setDaemon(true);
-      compilerThread = compiler;
-      ChaosDispatcher.incrementDispatchDepth();
-      try {
-        compiler.start();
-      } finally {
-        ChaosDispatcher.decrementDispatchDepth();
-      }
+              });
     }
 
     if (compilationBean != null && compilationBean.isCompilationTimeMonitoringSupported()) {
@@ -129,12 +117,7 @@ final class CodeCachePressureStressor implements ManagedStressor {
     final Thread compiler = compilerThread;
     compilerThread = null;
     if (compiler != null) {
-      compiler.interrupt();
-      try {
-        compiler.join(COMPILER_JOIN_TIMEOUT_MILLIS);
-      } catch (final InterruptedException interrupted) {
-        Thread.currentThread().interrupt();
-      }
+      AgentThreads.stopAll(List.of(compiler), COMPILER_JOIN_TIMEOUT_MILLIS);
     }
     final List<URLClassLoader> loaders = retainedLoaders;
     retainedLoaders = null;

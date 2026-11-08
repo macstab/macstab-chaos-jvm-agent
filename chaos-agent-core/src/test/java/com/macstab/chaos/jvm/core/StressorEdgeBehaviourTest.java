@@ -647,6 +647,63 @@ class StressorEdgeBehaviourTest {
   }
 
   @Nested
+  @DisplayName("a close() under interrupt")
+  class CloseUnderInterrupt {
+
+    @Test
+    @DisplayName("ThreadLeakStressor: every thread has ended when close() returns")
+    void threadLeak() {
+      final ThreadLeakStressor stressor =
+          new ThreadLeakStressor(new ChaosEffect.ThreadLeakEffect(64, "edge-leak-", true, null));
+      assertThat(closeWhileInterrupted(stressor)).isTrue();
+      assertThat(stressor.aliveCount()).isZero();
+    }
+
+    @Test
+    @DisplayName("MonitorContentionStressor: every contender has ended when close() returns")
+    void monitorContention() {
+      final MonitorContentionStressor stressor =
+          new MonitorContentionStressor(
+              new ChaosEffect.MonitorContentionEffect(Duration.ofMillis(5), 16, false));
+      assertThat(closeWhileInterrupted(stressor)).isTrue();
+      assertThat(stressor.aliveCount()).isZero();
+    }
+
+    @Test
+    @DisplayName("KeepAliveStressor: the thread has ended when close() returns")
+    void keepAlive() {
+      final KeepAliveStressor stressor =
+          new KeepAliveStressor(new ChaosEffect.KeepAliveEffect("edge-keepalive-2", true, HOUR));
+      assertThat(closeWhileInterrupted(stressor)).isTrue();
+      assertThat(threadNamed("edge-keepalive-2")).isFalse();
+    }
+
+    @Test
+    @DisplayName("GcPressureStressor: the allocation thread has ended when close() returns")
+    void gcPressure() {
+      final GcPressureStressor stressor =
+          new GcPressureStressor(new ChaosEffect.GcPressureEffect(1024L, 1024, false, HOUR));
+      assertThat(closeWhileInterrupted(stressor)).isTrue();
+      assertThat(threadNamed("chaos-gc-pressure")).isFalse();
+    }
+
+    @Test
+    @DisplayName("VirtualThreadCarrierPinningStressor: every pinning thread has ended")
+    void carrierPinning() {
+      final VirtualThreadCarrierPinningStressor stressor =
+          new VirtualThreadCarrierPinningStressor(
+              new ChaosEffect.VirtualThreadCarrierPinningEffect(1, Duration.ofMillis(5)), true);
+      assertThat(closeWhileInterrupted(stressor)).isTrue();
+      assertThat(stressor.aliveCount()).isZero();
+    }
+
+    private static boolean threadNamed(final String name) {
+      return Thread.getAllStackTraces().keySet().stream()
+          .anyMatch(thread -> thread.getName().equals(name) && thread.isAlive());
+    }
+  }
+
+  @Nested
   @DisplayName("FinalizerBacklogStressor")
   class FinalizerBacklog {
 

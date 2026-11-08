@@ -1848,6 +1848,61 @@ class AgentEndToEndTest {
     }
   }
 
+  @Nested
+  @DisplayName("The agent's own work (L3)")
+  class AgentOwnedWork {
+
+    @Test
+    @DisplayName(
+        "a THREAD_START reject and a THREAD_SLEEP delay leave every thread stressor running")
+    void threadStressorsIgnoreUserThreadScenarios() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.runWithoutPlan(DefectProbeMain.class, "agent-owned-stressors");
+      for (final String stressor :
+          List.of(
+              "keepAlive",
+              "threadLeak",
+              "deadlock",
+              "monitorContention",
+              "gcPressure",
+              "referenceQueueFlood",
+              "safepointStorm",
+              "codeCachePressure",
+              "carrierPinning")) {
+        assertThat(result.value("activated." + stressor)).as(stressor).isEqualTo("ACTIVE");
+      }
+      // The participants sleep 10 ms before the second lock, not the 2 s the user delay adds.
+      assertThat(result.longValue("deadlockMillis")).isLessThan(1_500L);
+      // A collection every 20 ms, not one per 2 s.
+      assertThat(result.longValue("collectionsPerSecond")).isGreaterThanOrEqualTo(5L);
+    }
+
+    @Test
+    @DisplayName("a FORK_JOIN_TASK_RUN gate does not hold the thread-local-leak planting")
+    void threadLocalLeakIgnoresForkJoinGate() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.runWithoutPlan(DefectProbeMain.class, "thread-local-leak-fork-join-gate");
+      assertThat(result.value("threadLocalLeak")).isEqualTo("activated");
+      assertThat(result.longValue("threadLocalLeakMillis")).isLessThan(2_000L);
+    }
+
+    @Test
+    @DisplayName("a THREAD_LOCAL_SET delay does not slow the thread-local-leak planting")
+    void threadLocalLeakIgnoresThreadLocalSetDelay() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.runWithoutPlan(DefectProbeMain.class, "thread-local-leak-set-delay");
+      assertThat(result.longValue("threadLocalLeakMillis")).isLessThan(1_000L);
+    }
+
+    @Test
+    @DisplayName("a THREAD_LOCAL_GET suppress in a session leaves the session visible")
+    void sessionSurvivesThreadLocalGetSuppress() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.runWithoutPlan(DefectProbeMain.class, "session-thread-local-suppress");
+      assertThat(result.value("sessionVisible")).isEqualTo("true");
+    }
+  }
+
   private static ChaosPlan plan(final ChaosScenario... scenarios) {
     return new ChaosPlan(new ChaosPlan.Metadata("end-to-end", ""), null, List.of(scenarios));
   }

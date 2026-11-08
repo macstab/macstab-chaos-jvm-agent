@@ -85,8 +85,15 @@ final class DispatchEngine {
    * The seed of the corruption the current thread's read was just told to apply: {@code [seed,
    * set]}. Read once by {@link #corruptionSeed()}.
    */
-  private static final ThreadLocal<long[]> CORRUPTION_SEED =
-      ThreadLocal.withInitial(() -> new long[2]);
+  private static final ThreadLocal<long[]> CORRUPTION_SEED = new CorruptionSeed();
+
+  /** {@link #CORRUPTION_SEED}'s type: agent-owned, so no THREAD_LOCAL scenario sees it (L3). */
+  private static final class CorruptionSeed extends ThreadLocal<long[]> implements AgentOwned {
+    @Override
+    protected long[] initialValue() {
+      return new long[2];
+    }
+  }
 
   /**
    * Returns the seed of the bit flip the current thread's read was just told to apply, so a fixed

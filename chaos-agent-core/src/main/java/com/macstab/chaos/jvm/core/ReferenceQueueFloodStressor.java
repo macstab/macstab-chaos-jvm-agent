@@ -44,7 +44,9 @@ final class ReferenceQueueFloodStressor implements ManagedStressor {
     final long intervalMillis = effect.floodInterval().toMillis();
 
     floodThread =
-        new Thread(
+        AgentThreads.start(
+            "macstab-chaos-refqueue-flood",
+            true,
             () -> {
               while (running.get()) {
                 flood(referenceCount);
@@ -60,10 +62,7 @@ final class ReferenceQueueFloodStressor implements ManagedStressor {
                   break;
                 }
               }
-            },
-            "macstab-chaos-refqueue-flood");
-    floodThread.setDaemon(true);
-    floodThread.start();
+            });
     LOGGER.fine(
         "ReferenceQueueFloodStressor started; referenceCount="
             + referenceCount
@@ -75,12 +74,7 @@ final class ReferenceQueueFloodStressor implements ManagedStressor {
   @Override
   public void close() {
     running.set(false);
-    floodThread.interrupt();
-    try {
-      floodThread.join(5_000L);
-    } catch (final InterruptedException interruptedException) {
-      Thread.currentThread().interrupt();
-    }
+    AgentThreads.stopAll(List.of(floodThread), 5_000L);
     drain();
     LOGGER.fine(
         "ReferenceQueueFloodStressor stopped after " + floodCycleCount.get() + " flood cycles");

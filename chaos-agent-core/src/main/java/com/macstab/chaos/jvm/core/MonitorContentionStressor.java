@@ -42,8 +42,10 @@ final class MonitorContentionStressor implements ManagedStressor {
 
     for (int i = 0; i < count; i++) {
       final String name = "chaos-contention-" + i;
-      final Thread thread =
-          new Thread(
+      threads.add(
+          AgentThreads.platform(
+              name,
+              true,
               () -> {
                 ready.countDown();
                 try {
@@ -82,13 +84,9 @@ final class MonitorContentionStressor implements ManagedStressor {
                   }
                 }
                 LOGGER.fine(() -> "chaos monitor-contention thread terminated: " + name);
-              },
-              name);
-      thread.setDaemon(true);
-      thread.start();
-      threads.add(thread);
+              }));
     }
-    this.contentionThreads = List.copyOf(threads);
+    this.contentionThreads = AgentThreads.startAll(threads);
   }
 
   /**
@@ -101,24 +99,11 @@ final class MonitorContentionStressor implements ManagedStressor {
   @Override
   public void close() {
     stopped.set(true);
-    for (final Thread thread : contentionThreads) {
-      thread.interrupt();
-    }
     // Join after interrupt — without this, close() returns while contending threads are still
     // draining their 10 µs park loops, and test suites asserting "no contention threads alive"
     // immediately after deactivate observe flaky counts. Bounded join honours ManagedStressor's
     // "wait for termination" contract.
-    boolean selfInterrupted = false;
-    for (final Thread thread : contentionThreads) {
-      try {
-        thread.join(JOIN_TIMEOUT_MILLIS);
-      } catch (final InterruptedException interrupted) {
-        selfInterrupted = true;
-      }
-    }
-    if (selfInterrupted) {
-      Thread.currentThread().interrupt();
-    }
+    AgentThreads.stopAll(contentionThreads, JOIN_TIMEOUT_MILLIS);
   }
 
   /** Returns the number of contending threads that are still alive. */

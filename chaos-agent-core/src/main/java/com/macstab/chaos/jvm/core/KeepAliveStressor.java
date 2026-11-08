@@ -1,6 +1,7 @@
 package com.macstab.chaos.jvm.core;
 
 import com.macstab.chaos.jvm.api.ChaosEffect;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -39,7 +40,9 @@ final class KeepAliveStressor implements ManagedStressor {
    */
   KeepAliveStressor(final ChaosEffect.KeepAliveEffect effect) {
     this.thread =
-        new Thread(
+        AgentThreads.start(
+            effect.threadName(),
+            effect.daemon(),
             () -> {
               while (running.get()) {
                 try {
@@ -49,10 +52,7 @@ final class KeepAliveStressor implements ManagedStressor {
                   return;
                 }
               }
-            },
-            effect.threadName());
-    thread.setDaemon(effect.daemon());
-    thread.start();
+            });
   }
 
   /**
@@ -68,11 +68,6 @@ final class KeepAliveStressor implements ManagedStressor {
   @Override
   public void close() {
     running.set(false);
-    thread.interrupt();
-    try {
-      thread.join(500L);
-    } catch (final InterruptedException interrupted) {
-      Thread.currentThread().interrupt();
-    }
+    AgentThreads.stopAll(List.of(thread), 500L);
   }
 }

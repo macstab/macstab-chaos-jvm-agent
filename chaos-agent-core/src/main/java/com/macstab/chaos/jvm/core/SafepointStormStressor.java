@@ -35,7 +35,9 @@ final class SafepointStormStressor implements ManagedStressor {
     final int retransformCount = effect.retransformClassCount();
 
     stormThread =
-        new Thread(
+        AgentThreads.start(
+            "macstab-chaos-safepoint-storm",
+            true,
             () -> {
               while (running.get()) {
                 System.gc();
@@ -53,10 +55,7 @@ final class SafepointStormStressor implements ManagedStressor {
                   break;
                 }
               }
-            },
-            "macstab-chaos-safepoint-storm");
-    stormThread.setDaemon(true);
-    stormThread.start();
+            });
     LOGGER.fine(
         "SafepointStormStressor started; gcInterval="
             + intervalMillis
@@ -67,12 +66,7 @@ final class SafepointStormStressor implements ManagedStressor {
   @Override
   public void close() {
     running.set(false);
-    stormThread.interrupt();
-    try {
-      stormThread.join(5_000L);
-    } catch (final InterruptedException interruptedException) {
-      Thread.currentThread().interrupt();
-    }
+    AgentThreads.stopAll(java.util.List.of(stormThread), 5_000L);
     LOGGER.fine("SafepointStormStressor stopped after " + gcCycleCount.get() + " GC cycles");
   }
 

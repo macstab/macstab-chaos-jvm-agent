@@ -1,10 +1,15 @@
 package com.macstab.chaos.jvm.core;
 
 import com.macstab.chaos.jvm.api.ChaosEffect;
+import com.macstab.chaos.jvm.api.ChaosUnsupportedFeatureException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.ForkJoinTask;
+import java.util.concurrent.RecursiveAction;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.logging.Logger;
 import org.jspecify.annotations.Nullable;
 
@@ -18,7 +23,14 @@ import org.jspecify.annotations.Nullable;
  * by a task submitted to the common pool, to a byte array of {@link
  * ChaosEffect.ThreadLocalLeakEffect#valueSizeBytes()} bytes. The pool spreads the tasks over its
  * workers; which worker holds which entry is up to the pool. The constructor returns once every
- * entry is planted.
+ * entry is planted, and fails with {@link ChaosUnsupportedFeatureException} when the pool has not
+ * planted them all within {@value #PLANT_TIMEOUT_SECONDS} s (its workers are busy or blocked); the
+ * entries are then emptied and the remaining tasks cancelled.
+ *
+ * <p>The planting is the agent's own work (L3): its tasks are {@link AgentOwned}, so no
+ * FORK_JOIN_TASK_RUN scenario holds them, and they run with the dispatch depth raised, so no
+ * THREAD_LOCAL_SET or logging scenario applies to them. The planted ThreadLocals themselves are
+ * plain ones: they are the leak.
  *
  * <p>Each entry's value is held through a small {@link Planted} holder that this stressor keeps.
  * {@link #close()} empties the holders from the calling thread, so the planted bytes are released
@@ -28,6 +40,9 @@ import org.jspecify.annotations.Nullable;
 final class ThreadLocalLeakStressor implements ManagedStressor {
 
   private static final Logger LOGGER = Logger.getLogger("com.macstab.chaos.jvm");
+
+  /** How long the constructor waits for the common pool to plant every entry. */
+  static final long PLANT_TIMEOUT_SECONDS = 10L;
 
   /** The value of one planted entry; emptied on {@link #close()}. */
   static final class Planted {
@@ -67,21 +82,81 @@ final class ThreadLocalLeakStressor implements ManagedStressor {
       final ThreadLocal<Planted> local = new ThreadLocal<>();
       final Planted holder = new Planted(new byte[valueSizeBytes]);
       holders.add(holder);
-      tasks.add(
-          ForkJoinPool.commonPool()
-              .submit(
-                  () -> {
-                    local.set(holder);
-                    LOGGER.fine(
-                        () ->
-                            "chaos thread-local-leak planted entry on "
-                                + Thread.currentThread().getName());
-                  }));
+      tasks.add(ForkJoinPool.commonPool().submit(new Planting(local, holder)));
+    }
+    awaitPlanting(tasks, holders);
+    this.planted = List.copyOf(holders);
+  }
+
+  /**
+   * Waits for every planting task; on a timeout, an interrupt or a failed task, empties every
+   * holder and cancels the remaining tasks before it throws, so a task that runs late plants an
+   * empty holder.
+   */
+  private static void awaitPlanting(
+      final List<ForkJoinTask<?>> tasks, final List<Planted> holders) {
+    final long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(PLANT_TIMEOUT_SECONDS);
+    try {
+      for (final ForkJoinTask<?> task : tasks) {
+        task.get(Math.max(0L, deadline - System.nanoTime()), TimeUnit.NANOSECONDS);
+      }
+    } catch (final TimeoutException timedOut) {
+      abandon(tasks, holders);
+      throw new ChaosUnsupportedFeatureException(
+          "thread-local-leak: the common ForkJoinPool did not plant the "
+              + holders.size()
+              + " entries within "
+              + PLANT_TIMEOUT_SECONDS
+              + " s; its workers are busy or blocked");
+    } catch (final InterruptedException interrupted) {
+      abandon(tasks, holders);
+      Thread.currentThread().interrupt();
+      throw new IllegalStateException("thread-local-leak: interrupted while planting", interrupted);
+    } catch (final ExecutionException failed) {
+      abandon(tasks, holders);
+      final Throwable cause = failed.getCause();
+      if (cause instanceof RuntimeException runtime) {
+        throw runtime;
+      }
+      if (cause instanceof Error error) {
+        throw error;
+      }
+      throw new IllegalStateException("thread-local-leak: planting failed", cause);
+    }
+  }
+
+  private static void abandon(final List<ForkJoinTask<?>> tasks, final List<Planted> holders) {
+    for (final Planted holder : holders) {
+      holder.value = null;
     }
     for (final ForkJoinTask<?> task : tasks) {
-      task.join();
+      task.cancel(false);
     }
-    this.planted = List.copyOf(holders);
+  }
+
+  /** Plants one entry on the worker that runs it; agent-owned, so no scenario sees it. */
+  private static final class Planting extends RecursiveAction implements AgentOwned {
+    private static final long serialVersionUID = 1L;
+
+    private final transient ThreadLocal<Planted> local;
+    private final transient Planted holder;
+
+    Planting(final ThreadLocal<Planted> local, final Planted holder) {
+      this.local = local;
+      this.holder = holder;
+    }
+
+    @Override
+    protected void compute() {
+      ChaosDispatcher.incrementDispatchDepth();
+      try {
+        local.set(holder);
+        LOGGER.fine(
+            () -> "chaos thread-local-leak planted entry on " + Thread.currentThread().getName());
+      } finally {
+        ChaosDispatcher.decrementDispatchDepth();
+      }
+    }
   }
 
   @Override

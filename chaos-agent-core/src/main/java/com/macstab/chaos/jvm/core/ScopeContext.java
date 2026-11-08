@@ -52,8 +52,19 @@ final class ScopeContext {
    */
   private static final String NO_SESSION = new String("<no session>");
 
-  private final ThreadLocal<Deque<String>> sessionStack =
-      ThreadLocal.withInitial(ConcurrentLinkedDeque::new);
+  @SuppressWarnings("ThreadLocalUsage") // one set of stacks per control plane, as before
+  private final ThreadLocal<Deque<String>> sessionStack = new SessionStack();
+
+  /**
+   * The per-thread session stacks: agent-owned, so a THREAD_LOCAL scenario never sees the agent
+   * reading or binding a session (L3).
+   */
+  private static final class SessionStack extends ThreadLocal<Deque<String>> implements AgentOwned {
+    @Override
+    protected Deque<String> initialValue() {
+      return new ConcurrentLinkedDeque<>();
+    }
+  }
 
   /**
    * Returns the session ID at the top of the current thread's stack, or {@code null} if no session

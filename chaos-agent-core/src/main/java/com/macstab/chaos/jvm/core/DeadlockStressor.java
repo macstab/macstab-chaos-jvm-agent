@@ -45,8 +45,10 @@ final class DeadlockStressor implements ManagedStressor {
     for (int participantIndex = 0; participantIndex < participantCount; participantIndex++) {
       final int index = participantIndex;
       final String name = "chaos-deadlock-" + participantIndex;
-      final Thread thread =
-          new Thread(
+      threads.add(
+          AgentThreads.platform(
+              name,
+              true,
               () -> {
                 final ReentrantLock first = locks[index];
                 final ReentrantLock second = locks[(index + 1) % participantCount];
@@ -79,13 +81,9 @@ final class DeadlockStressor implements ManagedStressor {
                   Thread.currentThread().interrupt();
                   LOGGER.fine(() -> "chaos deadlock thread interrupted: " + name);
                 }
-              },
-              name);
-      thread.setDaemon(true);
-      thread.start();
-      threads.add(thread);
+              }));
     }
-    this.participants = List.copyOf(threads);
+    this.participants = AgentThreads.startAll(threads);
   }
 
   /**
@@ -103,23 +101,7 @@ final class DeadlockStressor implements ManagedStressor {
     // deactivate-then-reactivate cycle can start a second generation of deadlock threads while
     // the first generation still holds locks. That surfaces as overlapping thread names and a
     // stale aliveCount() — issues that vanished once close() waits for the previous generation.
-    for (final Thread thread : participants) {
-      thread.interrupt();
-    }
-    boolean selfInterrupted = false;
-    for (final Thread thread : participants) {
-      while (true) {
-        try {
-          thread.join(JOIN_TIMEOUT_MILLIS);
-          break;
-        } catch (final InterruptedException interrupted) {
-          selfInterrupted = true;
-        }
-      }
-    }
-    if (selfInterrupted) {
-      Thread.currentThread().interrupt();
-    }
+    AgentThreads.stopAll(participants, JOIN_TIMEOUT_MILLIS);
   }
 
   /** Returns the number of participant threads that are still alive. */

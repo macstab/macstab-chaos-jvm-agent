@@ -282,10 +282,10 @@ final class JvmRuntimeAdvice {
    *   <li>Bootstrap-classloader classes are visible from all classloaders, so the field reference
    *       is always accessible from this advice.
    *   <li>The check is a single reference comparison — zero allocation, nanosecond cost.
-   *   <li>All other internal {@code ThreadLocal} reads (e.g. {@code ScopeContext.sessionStack}) are
-   *       already protected by the {@code DEPTH > 0} guard inside the dispatch methods of {@code
-   *       BootstrapDispatcher}, because they are only read during chaos evaluation which happens
-   *       after DEPTH has been incremented to 1.
+   *   <li>The agent's other {@code ThreadLocal}s (e.g. {@code ScopeContext}'s session stack) are
+   *       read outside a dispatch too — binding a session runs on the application's thread at depth
+   *       0 — so they are not protected by the {@code DEPTH > 0} guard. They are marked {@code
+   *       AgentOwned} in core, and the dispatcher skips them after its idle check.
    * </ul>
    */
   static final class ThreadLocalGetAdvice {

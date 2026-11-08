@@ -132,6 +132,10 @@ public final class DefectProbeMain {
       case "sleep-duration" -> sleepDuration();
       case "jdk-send-async" -> withHttpServer(DefectProbeMain::jdkSendAsync);
       case "http-url-connection" -> withHttpServer(DefectProbeMain::httpUrlConnection);
+      case "agent-owned-stressors" -> agentOwnedStressors();
+      case "thread-local-leak-fork-join-gate" -> threadLocalLeakForkJoinGate();
+      case "thread-local-leak-set-delay" -> threadLocalLeakSetDelay();
+      case "session-thread-local-suppress" -> sessionThreadLocalSuppress();
       default -> throw new IllegalArgumentException("unknown probe mode: " + args[0]);
     }
     printCounts();
@@ -2256,6 +2260,213 @@ public final class DefectProbeMain {
                     HttpResponse.BodyHandlers.ofString())
                 .get(10L, TimeUnit.SECONDS)
                 .statusCode());
+  }
+
+  /**
+   * Activates every thread-owning stressor while a JVM-wide THREAD_START reject and a 2 s
+   * THREAD_SLEEP delay are active, and prints whether each activation succeeded ({@code
+   * activated.<id>=ACTIVE} or the exception), how long the deadlock took to form and how many
+   * collections the safepoint storm caused in one second. The probe itself never sleeps: it parks.
+   */
+  private static void agentOwnedStressors() {
+    final ChaosControlPlane plane = ChaosPlatform.current();
+    final java.util.List<ChaosActivationHandle> handles = new java.util.ArrayList<>();
+    handles.add(
+        plane.activate(
+            ChaosScenario.builder("reject-thread-start")
+                .selector(
+                    new ChaosSelector.ThreadSelector(
+                        Set.of(OperationType.THREAD_START),
+                        ChaosSelector.ThreadKind.ANY,
+                        NamePattern.any(),
+                        null))
+                .effect(ChaosEffect.reject("no threads"))
+                .activationPolicy(ActivationPolicy.always())
+                .build()));
+    handles.add(
+        plane.activate(
+            ChaosScenario.builder("slow-sleep")
+                .selector(
+                    new ChaosSelector.ThreadSelector(
+                        Set.of(OperationType.THREAD_SLEEP),
+                        ChaosSelector.ThreadKind.ANY,
+                        NamePattern.any(),
+                        null))
+                .effect(ChaosEffect.delay(Duration.ofSeconds(2)))
+                .activationPolicy(ActivationPolicy.always())
+                .build()));
+    final Map<String, ChaosEffect> stressors = new java.util.LinkedHashMap<>();
+    stressors.put(
+        "keepAlive",
+        new ChaosEffect.KeepAliveEffect("probe-keepalive", true, Duration.ofMillis(10)));
+    stressors.put("threadLeak", new ChaosEffect.ThreadLeakEffect(2, "probe-leak-", true, null));
+    stressors.put("deadlock", new ChaosEffect.DeadlockEffect(2, Duration.ofMillis(10)));
+    stressors.put(
+        "monitorContention",
+        new ChaosEffect.MonitorContentionEffect(Duration.ofMillis(1), 2, false));
+    stressors.put(
+        "gcPressure",
+        new ChaosEffect.GcPressureEffect(1_000_000L, 1024, false, Duration.ofMinutes(1)));
+    stressors.put(
+        "referenceQueueFlood",
+        new ChaosEffect.ReferenceQueueFloodEffect(10, Duration.ofMillis(10)));
+    stressors.put("safepointStorm", new ChaosEffect.SafepointStormEffect(Duration.ofMillis(20), 0));
+    stressors.put("codeCachePressure", new ChaosEffect.CodeCachePressureEffect(1, 1));
+    stressors.put(
+        "carrierPinning",
+        new ChaosEffect.VirtualThreadCarrierPinningEffect(1, Duration.ofMillis(10)));
+    final Map<String, ChaosSelector.StressTarget> targets =
+        Map.of(
+            "keepAlive", ChaosSelector.StressTarget.KEEPALIVE,
+            "threadLeak", ChaosSelector.StressTarget.THREAD_LEAK,
+            "deadlock", ChaosSelector.StressTarget.DEADLOCK,
+            "monitorContention", ChaosSelector.StressTarget.MONITOR_CONTENTION,
+            "gcPressure", ChaosSelector.StressTarget.GC_PRESSURE,
+            "referenceQueueFlood", ChaosSelector.StressTarget.REFERENCE_QUEUE_FLOOD,
+            "safepointStorm", ChaosSelector.StressTarget.SAFEPOINT_STORM,
+            "codeCachePressure", ChaosSelector.StressTarget.CODE_CACHE_PRESSURE,
+            "carrierPinning", ChaosSelector.StressTarget.VIRTUAL_THREAD_CARRIER_PINNING);
+    try {
+      for (final Map.Entry<String, ChaosEffect> stressor : stressors.entrySet()) {
+        try {
+          handles.add(
+              plane.activate(
+                  ChaosScenario.builder(stressor.getKey())
+                      .selector(ChaosSelector.stress(targets.get(stressor.getKey())))
+                      .effect(stressor.getValue())
+                      .activationPolicy(ActivationPolicy.withDestructiveEffects())
+                      .build()));
+          System.out.println("activated." + stressor.getKey() + "=" + state(stressor.getKey()));
+        } catch (final RuntimeException | Error failed) {
+          System.out.println(
+              "activated." + stressor.getKey() + "=" + failed.getClass().getSimpleName());
+        }
+      }
+      final long deadlockStart = System.nanoTime();
+      while (ManagementFactory.getThreadMXBean().findDeadlockedThreads() == null
+          && System.nanoTime() - deadlockStart < TimeUnit.SECONDS.toNanos(5)) {
+        LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(5));
+      }
+      System.out.println(
+          "deadlockMillis=" + TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - deadlockStart));
+      final long collectionsBefore = collections();
+      LockSupport.parkNanos(TimeUnit.SECONDS.toNanos(1));
+      System.out.println("collectionsPerSecond=" + (collections() - collectionsBefore));
+    } finally {
+      for (final ChaosActivationHandle handle : handles) {
+        handle.close();
+      }
+    }
+  }
+
+  private static String state(final String scenarioId) {
+    return ChaosPlatform.current().diagnostics().snapshot().scenarios().stream()
+        .filter(report -> report.id().equals(scenarioId))
+        .map(report -> report.state().name())
+        .findFirst()
+        .orElse("missing");
+  }
+
+  private static long collections() {
+    long total = 0;
+    for (final java.lang.management.GarbageCollectorMXBean collector :
+        ManagementFactory.getGarbageCollectorMXBeans()) {
+      total += Math.max(0L, collector.getCollectionCount());
+    }
+    return total;
+  }
+
+  /** The thread-local-leak stressor on the common pool, planting one small entry per worker. */
+  private static ChaosScenario threadLocalLeak() {
+    return ChaosScenario.builder("thread-local-leak")
+        .selector(ChaosSelector.stress(ChaosSelector.StressTarget.THREAD_LOCAL_LEAK))
+        .effect(new ChaosEffect.ThreadLocalLeakEffect(1, 16))
+        .activationPolicy(ActivationPolicy.always())
+        .build();
+  }
+
+  /**
+   * Activates the thread-local-leak stressor, on another thread, while a gate holds every
+   * FORK_JOIN_TASK_RUN: prints {@code threadLocalLeak=activated} and the milliseconds it took, or
+   * {@code threadLocalLeak=timeout} after 5 s.
+   */
+  private static void threadLocalLeakForkJoinGate() throws Exception {
+    final ChaosControlPlane plane = ChaosPlatform.current();
+    final ChaosActivationHandle gate =
+        plane.activate(
+            ChaosScenario.builder("gate-fork-join")
+                .selector(ChaosSelector.executor(Set.of(OperationType.FORK_JOIN_TASK_RUN)))
+                .effect(new ChaosEffect.GateEffect(null))
+                .activationPolicy(ActivationPolicy.always())
+                .build());
+    final java.util.concurrent.atomic.AtomicReference<ChaosActivationHandle> leak =
+        new java.util.concurrent.atomic.AtomicReference<>();
+    final long start = System.nanoTime();
+    final Thread activator =
+        Thread.ofPlatform().daemon().start(() -> leak.set(plane.activate(threadLocalLeak())));
+    activator.join(5_000L);
+    final long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+    System.out.println("threadLocalLeak=" + (leak.get() != null ? "activated" : "timeout"));
+    System.out.println("threadLocalLeakMillis=" + elapsedMillis);
+    gate.close();
+    activator.join(5_000L);
+    if (leak.get() != null) {
+      leak.get().close();
+    }
+  }
+
+  /**
+   * Activates the thread-local-leak stressor while every ThreadLocal.set is delayed by 2 s and
+   * prints how long the activation took.
+   */
+  private static void threadLocalLeakSetDelay() {
+    final ChaosControlPlane plane = ChaosPlatform.current();
+    try (ChaosActivationHandle slowSet =
+        plane.activate(
+            ChaosScenario.builder("slow-thread-local-set")
+                .selector(
+                    new ChaosSelector.ThreadLocalSelector(
+                        Set.of(OperationType.THREAD_LOCAL_SET), NamePattern.any()))
+                .effect(ChaosEffect.delay(Duration.ofSeconds(2)))
+                .activationPolicy(ActivationPolicy.always())
+                .build())) {
+      final long start = System.nanoTime();
+      try (ChaosActivationHandle leak = plane.activate(threadLocalLeak())) {
+        System.out.println(
+            "threadLocalLeakMillis=" + TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start));
+      }
+    }
+  }
+
+  /**
+   * Inside a session with a session-scoped THREAD_LOCAL_GET suppress, reads the current session
+   * from the diagnostics: prints {@code sessionVisible=true} when it is the session, else what was
+   * seen.
+   */
+  private static void sessionThreadLocalSuppress() {
+    try (ChaosSession session = ChaosPlatform.current().openSession("thread-local")) {
+      session.activate(
+          ChaosScenario.builder("suppress-thread-local-get")
+              .scope(ChaosScenario.ScenarioScope.SESSION)
+              .selector(
+                  new ChaosSelector.ThreadLocalSelector(
+                      Set.of(OperationType.THREAD_LOCAL_GET), NamePattern.any()))
+              .effect(ChaosEffect.suppress())
+              .activationPolicy(ActivationPolicy.always())
+              .build());
+      String seen;
+      try {
+        seen =
+            ChaosPlatform.current()
+                .diagnostics()
+                .snapshot()
+                .runtimeDetails()
+                .get("currentSessionId");
+      } catch (final RuntimeException failed) {
+        seen = failed.getClass().getSimpleName();
+      }
+      System.out.println("sessionVisible=" + (session.id().equals(seen) ? "true" : seen));
+    }
   }
 
   /** A {@link Delayed} that is due immediately. */

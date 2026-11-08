@@ -65,31 +65,22 @@ final class VirtualThreadCarrierPinningStressor implements ManagedStressor {
     final int count = effect.pinnedThreadCount();
     final CountDownLatch ready = new CountDownLatch(count);
     final List<Thread> threads = new ArrayList<>(count);
-    ChaosDispatcher.incrementDispatchDepth();
-    try {
-      for (int i = 0; i < count; i++) {
-        final String name = "chaos-carrier-pin-" + i;
-        final Runnable body =
-            pinWithMonitor ? () -> pinWithMonitor(pinNanos) : () -> occupyWithSpin(pinNanos);
-        threads.add(
-            Thread.ofVirtual()
-                .name(name)
-                .start(
-                    () -> {
-                      ChaosDispatcher.incrementDispatchDepth();
-                      try {
+    for (int i = 0; i < count; i++) {
+      final String name = "chaos-carrier-pin-" + i;
+      final Runnable body =
+          pinWithMonitor ? () -> pinWithMonitor(pinNanos) : () -> occupyWithSpin(pinNanos);
+      threads.add(
+          Thread.ofVirtual()
+              .name(name)
+              .unstarted(
+                  AgentThreads.owned(
+                      () -> {
                         ready.countDown();
                         body.run();
-                      } finally {
-                        ChaosDispatcher.decrementDispatchDepth();
-                      }
-                      LOGGER.fine(() -> "chaos carrier-pin thread terminated: " + name);
-                    }));
-      }
-    } finally {
-      ChaosDispatcher.decrementDispatchDepth();
+                        LOGGER.fine(() -> "chaos carrier-pin thread terminated: " + name);
+                      })));
     }
-    this.pinningThreads = List.copyOf(threads);
+    this.pinningThreads = AgentThreads.startAll(threads);
   }
 
   /**
@@ -178,22 +169,9 @@ final class VirtualThreadCarrierPinningStressor implements ManagedStressor {
   @Override
   public void close() {
     stopped.set(true);
-    for (final Thread thread : pinningThreads) {
-      thread.interrupt();
-    }
     // Join all threads even when interrupted mid-loop, then restore the interrupt: close() must
     // not return while carriers are still held.
-    boolean selfInterrupted = false;
-    for (final Thread thread : pinningThreads) {
-      try {
-        thread.join(JOIN_TIMEOUT_MILLIS);
-      } catch (final InterruptedException interrupted) {
-        selfInterrupted = true;
-      }
-    }
-    if (selfInterrupted) {
-      Thread.currentThread().interrupt();
-    }
+    AgentThreads.stopAll(pinningThreads, JOIN_TIMEOUT_MILLIS);
   }
 
   long aliveCount() {

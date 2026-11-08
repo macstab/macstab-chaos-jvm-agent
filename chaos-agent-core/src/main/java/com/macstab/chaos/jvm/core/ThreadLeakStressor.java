@@ -39,8 +39,10 @@ final class ThreadLeakStressor implements ManagedStressor {
 
     for (int i = 0; i < effect.threadCount(); i++) {
       final String name = effect.namePrefix() + i;
-      final Thread thread =
-          new Thread(
+      threads.add(
+          AgentThreads.platform(
+              name,
+              effect.daemon(),
               () -> {
                 final long deadline = deadlineMillis;
                 while (!stopped.get() && System.currentTimeMillis() < deadline) {
@@ -50,36 +52,18 @@ final class ThreadLeakStressor implements ManagedStressor {
                   }
                 }
                 LOGGER.fine(() -> "chaos thread-leak thread terminated: " + name);
-              },
-              name);
-      thread.setDaemon(effect.daemon());
-      thread.start();
-      threads.add(thread);
+              }));
     }
-    this.leakedThreads = List.copyOf(threads);
+    this.leakedThreads = AgentThreads.startAll(threads);
   }
 
   @Override
   public void close() {
-    // ManagedStressor.close() javadoc mandates waiting for termination before returning. The
-    // previous implementation set the stop flag and returned — callers that immediately checked
-    // aliveCount() or observed thread liveness raced against interrupt-observation latency (up
-    // to the 50 ms parkNanos window below) and saw stale state. Interrupt every thread first so
-    // each one begins winding down in parallel, then join each with a bounded per-thread
-    // timeout. 200 ms × threadCount is still bounded overall in practice because by the time
-    // the second join runs the threads are all already observing the interrupt/stop flag.
+    // ManagedStressor.close() javadoc mandates waiting for termination before returning: every
+    // thread is interrupted first so they wind down in parallel, then each is joined with a
+    // bounded per-thread timeout, also when the caller is interrupted.
     stopped.set(true);
-    for (final Thread thread : leakedThreads) {
-      thread.interrupt();
-    }
-    for (final Thread thread : leakedThreads) {
-      try {
-        thread.join(200L);
-      } catch (final InterruptedException interrupted) {
-        Thread.currentThread().interrupt();
-        break;
-      }
-    }
+    AgentThreads.stopAll(leakedThreads, 200L);
   }
 
   /** Returns the number of leaked threads that are still alive. */

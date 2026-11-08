@@ -264,9 +264,18 @@ final class ScenarioController {
     // Holding the monitor across this work blocks every concurrent evaluate(), stop(), and
     // JFR snapshot that needs synchronized(this) for the entire startup duration.
     // If state has changed (STOPPED raced us) we close the freshly-constructed stressor below.
-    final ManagedStressor newStressor =
-        stressorFactory.createIfNeeded(
-            scenario.effect(), scenario.activationPolicy().allowDestructiveEffects());
+    // The stressor's set-up is the agent's own work (L3): built with the dispatch depth raised,
+    // so no user scenario applies to its allocations, thread starts or pool submissions. The
+    // STARTED publish below stays at the caller's depth.
+    final ManagedStressor newStressor;
+    ChaosDispatcher.incrementDispatchDepth();
+    try {
+      newStressor =
+          stressorFactory.createIfNeeded(
+              scenario.effect(), scenario.activationPolicy().allowDestructiveEffects());
+    } finally {
+      ChaosDispatcher.decrementDispatchDepth();
+    }
     synchronized (this) {
       if (state == ChaosDiagnostics.ScenarioState.STOPPED) {
         if (newStressor != null) {
@@ -328,7 +337,12 @@ final class ScenarioController {
       // thread and cancels it, instead of a thread scheduled afterwards parking for activeFor.
       final Duration lifetime = stressorLifetime();
       if (newStressor != null && lifetime != null) {
-        scheduleStressorExpiry(lifetime);
+        ChaosDispatcher.incrementDispatchDepth();
+        try {
+          scheduleStressorExpiry(lifetime);
+        } finally {
+          ChaosDispatcher.decrementDispatchDepth();
+        }
       }
     }
     observabilityBus.publish(
@@ -731,32 +745,20 @@ final class ScenarioController {
       return; // beyond ~292 years: effectively never expires
     }
     final long deadline = System.nanoTime() + timeoutNanos;
-    final Thread expiry =
-        new Thread(
+    expiryThread =
+        AgentThreads.start(
+            "macstab-chaos-expiry-" + scenario.id(),
+            true,
             () -> {
-              ChaosDispatcher.incrementDispatchDepth();
-              try {
-                long remaining;
-                while ((remaining = deadline - System.nanoTime()) > 0L) {
-                  java.util.concurrent.locks.LockSupport.parkNanos(this, remaining);
-                  if (Thread.currentThread().isInterrupted()) {
-                    return;
-                  }
+              long remaining;
+              while ((remaining = deadline - System.nanoTime()) > 0L) {
+                java.util.concurrent.locks.LockSupport.parkNanos(this, remaining);
+                if (Thread.currentThread().isInterrupted()) {
+                  return;
                 }
-                markInactive("expired");
-              } finally {
-                ChaosDispatcher.decrementDispatchDepth();
               }
-            },
-            "macstab-chaos-expiry-" + scenario.id());
-    expiry.setDaemon(true);
-    expiryThread = expiry;
-    ChaosDispatcher.incrementDispatchDepth();
-    try {
-      expiry.start();
-    } finally {
-      ChaosDispatcher.decrementDispatchDepth();
-    }
+              markInactive("expired");
+            });
   }
 
   private void cancelStressorExpiry() {

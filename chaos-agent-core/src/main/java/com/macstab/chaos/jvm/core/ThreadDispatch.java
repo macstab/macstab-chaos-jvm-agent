@@ -148,8 +148,9 @@ public final class ThreadDispatch {
    * @throws Throwable if an active scenario throws to simulate a failure
    */
   public boolean beforeThreadLocalGet(final Object threadLocal) throws Throwable {
+    // Idle first; the agent's own ThreadLocals are never evaluated (L3).
     final RuntimeDecision decision =
-        (engine.idle(OperationType.THREAD_LOCAL_GET)
+        (engine.idle(OperationType.THREAD_LOCAL_GET) || threadLocal instanceof AgentOwned
             ? RuntimeDecision.none()
             : engine.evaluate(
                 new InvocationContext(
@@ -176,8 +177,9 @@ public final class ThreadDispatch {
    */
   public boolean beforeThreadLocalSet(final Object threadLocal, final @Nullable Object value)
       throws Throwable {
+    // Idle first; the agent's own ThreadLocals are never evaluated (L3).
     final RuntimeDecision decision =
-        (engine.idle(OperationType.THREAD_LOCAL_SET)
+        (engine.idle(OperationType.THREAD_LOCAL_SET) || threadLocal instanceof AgentOwned
             ? RuntimeDecision.none()
             : engine.evaluate(
                 new InvocationContext(
