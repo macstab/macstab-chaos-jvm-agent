@@ -1,6 +1,7 @@
 package com.macstab.chaos.jvm.benchmarks;
 
 import com.macstab.chaos.jvm.api.ActivationPolicy;
+import com.macstab.chaos.jvm.api.ChaosDiagnostics;
 import com.macstab.chaos.jvm.api.ChaosEffect;
 import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.ChaosSelector;
@@ -9,6 +10,7 @@ import com.macstab.chaos.jvm.api.OperationType;
 import com.macstab.chaos.jvm.core.ChaosDispatcher;
 import com.macstab.chaos.jvm.core.ChaosRuntime;
 import java.time.Duration;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import org.openjdk.jmh.annotations.Benchmark;
@@ -59,9 +61,7 @@ public class Phase4DispatchBenchmark {
   public Phase4DispatchBenchmark() {}
 
   private static final Duration ZERO_DELAY = Duration.ofMillis(0);
-  private static final ActivationPolicy ONE_SHOT_POLICY =
-      new ActivationPolicy(
-          ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 0, null, null, null, 1L, false);
+  private static final ActivationPolicy ONE_SHOT_POLICY = ActivationPolicy.count(1);
 
   private static final long SLEEP_DURATION_MILLIS = 1L;
   private static final String DNS_HOSTNAME = "api.example.com";
@@ -193,6 +193,16 @@ public class Phase4DispatchBenchmark {
       dispatcher.dns().beforeDnsResolve(SETUP_DNS_HOSTNAME);
       dispatcher.network().beforeSslHandshake(null);
       dispatcher.file().beforeFileIo(FILE_IO_READ_OPERATION, null, "/tmp/bench.dat", 4096);
+
+      // Otherwise the loop measures live scenarios, not the exhausted path this state names.
+      for (final String id : List.of("bench-sleep", "bench-dns", "bench-ssl", "bench-fileread")) {
+        final ChaosDiagnostics.ScenarioState state =
+            runtime.diagnostics().scenario(id).orElseThrow().state();
+        if (state != ChaosDiagnostics.ScenarioState.INACTIVE) {
+          throw new IllegalStateException(
+              "scenario " + id + " must be exhausted (INACTIVE) after setup but is " + state);
+        }
+      }
     }
 
     /** Closes the runtime after the measurement trial. */

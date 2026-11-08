@@ -82,6 +82,7 @@ public final class SlowDatabaseExample {
 - All public types, methods, and fields in this module have backward-compatible evolution guarantees
 - Additive changes (new methods with defaults, new enum constants) are allowed in minor versions
 - Removals and breaking changes require major version bump with prior deprecation
+- Record constructors: when a record gains a component, its previous canonical signature stays as a delegating constructor until the next major release. Build records through their factories and builders (`ActivationPolicy.count(n)`, `ActivationPolicy.builder()`, `ChaosScenario.builder(id)`) rather than positionally
 
 ---
 

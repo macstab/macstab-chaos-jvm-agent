@@ -20,19 +20,16 @@ import org.jspecify.annotations.Nullable;
  *       non-recoverable effects ({@code deadlock()}, {@code threadLeak()})
  * </ul>
  *
- * <p>Fine-grained control via the canonical constructor:
+ * <p>Fine-grained control via the builder (prefer it to the positional constructors, whose argument
+ * order is easy to misplace):
  *
  * <pre>{@code
  * // Fire with 30% probability, cap at 100 total applications, seeded for reproducibility.
- * new ActivationPolicy(
- *     StartMode.AUTOMATIC,
- *     0.30,           // probability
- *     0,              // activateAfterMatches (no warm-up)
- *     100L,           // maxApplications
- *     null,           // activeFor (no time bound)
- *     null,           // rateLimit
- *     42L,            // randomSeed
- *     false);         // allowDestructiveEffects
+ * ActivationPolicy.builder()
+ *     .probability(0.30)
+ *     .maxApplications(100L)
+ *     .randomSeed(42L)
+ *     .build();
  * }</pre>
  *
  * <p><strong>Destructive effects</strong>: {@link

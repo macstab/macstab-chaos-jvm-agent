@@ -41,6 +41,10 @@ scripts/check-reproducible.sh       # builds every jar twice and fails when any 
 
 The decisions behind the architecture are recorded in [docs/adr](docs/adr/README.md); a change that reverses one adds a record that supersedes it.
 
+## Record compatibility
+
+A record in `chaos-agent-api` that gains a component keeps its previous canonical signature as a delegating constructor until the next major release (see `ActivationPolicy`'s 8- and 10-argument constructors), and `apiCheck` must show only additions. Inside the project, tests, examples and benchmarks construct records through their factories and builders, never positionally.
+
 ## Code style
 
 Spotless enforces **Google Java Format**. Run `./gradlew spotlessApply` before pushing. The CI build fails on any formatting violation.

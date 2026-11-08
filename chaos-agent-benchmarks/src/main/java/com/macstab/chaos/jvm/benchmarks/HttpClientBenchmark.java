@@ -40,9 +40,7 @@ public class HttpClientBenchmark {
   private static final String BENCHMARK_URL = "https://example.com/api/v1/orders";
   private static final String NO_MATCH_URL_PATTERN = "https://other\\.example\\.net/.*";
   private static final Duration ZERO_DELAY = Duration.ofMillis(0);
-  private static final ActivationPolicy ONE_SHOT_POLICY =
-      new ActivationPolicy(
-          ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 0, null, null, null, 1L, false);
+  private static final ActivationPolicy ONE_SHOT_POLICY = ActivationPolicy.count(1);
   private static final int NON_MATCHING_SCENARIO_COUNT = 9;
 
   /** State with the runtime installed but no active scenarios — measures pure dispatch overhead. */

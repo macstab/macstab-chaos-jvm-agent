@@ -47,9 +47,7 @@ public class ChaosRuntimeBenchmark {
   private static final Runnable DUMMY_TASK = () -> {};
 
   private static final Duration ZERO_DELAY = Duration.ofMillis(0);
-  private static final ActivationPolicy ONE_SHOT_POLICY =
-      new ActivationPolicy(
-          ActivationPolicy.StartMode.AUTOMATIC, 1.0d, 0, null, null, null, 1L, false);
+  private static final ActivationPolicy ONE_SHOT_POLICY = ActivationPolicy.count(1);
   private static final String BENCHMARK_SQL = "SELECT 1";
   private static final int NON_MATCHING_SCENARIO_COUNT = 9;
 
