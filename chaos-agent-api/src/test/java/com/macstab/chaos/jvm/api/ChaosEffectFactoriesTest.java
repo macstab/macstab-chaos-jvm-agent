@@ -118,6 +118,19 @@ class ChaosEffectFactoriesTest {
     }
 
     @Test
+    @DisplayName("dnsOverride needs one address to compile: its signature is (String, String...)")
+    void overrideTakesAtLeastOneAddress() throws NoSuchMethodException {
+      assertThat(
+              ChaosEffect.class
+                  .getDeclaredMethod("dnsOverride", String.class, String[].class)
+                  .isVarArgs())
+          .isTrue();
+      assertThat(ChaosEffect.class.getDeclaredMethods())
+          .filteredOn(method -> method.getName().equals("dnsOverride"))
+          .hasSize(1);
+    }
+
+    @Test
     @DisplayName("the override list is an immutable copy")
     void overrideIsCopied() {
       final List<String> addresses = new ArrayList<>(List.of("10.0.0.1"));

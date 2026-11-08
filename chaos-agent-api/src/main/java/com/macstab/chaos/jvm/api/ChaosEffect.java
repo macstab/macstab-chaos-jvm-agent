@@ -161,15 +161,19 @@ public sealed interface ChaosEffect
   }
 
   /**
-   * Returns an effect that answers DNS lookups with {@code addresses} instead of the resolver's
-   * answer — even when the real lookup failed: the native library's {@code OVERRIDE}. Valid for
-   * {@link OperationType#DNS_ANSWER}.
+   * Returns an effect that answers DNS lookups with {@code address} and {@code moreAddresses}
+   * instead of the resolver's answer — even when the real lookup failed: the native library's
+   * {@code OVERRIDE}. Valid for {@link OperationType#DNS_ANSWER}.
    *
-   * @param addresses IPv4 or IPv6 literals; at least one
+   * @param address an IPv4 or IPv6 literal: the first address of the answer
+   * @param moreAddresses further literals, in answer order
    * @return a new {@link DnsAnswerEffect}
    */
-  static DnsAnswerEffect dnsOverride(final String... addresses) {
-    return new DnsAnswerEffect(java.util.List.of(addresses), null, false, null);
+  static DnsAnswerEffect dnsOverride(final String address, final String... moreAddresses) {
+    final java.util.List<String> addresses = new java.util.ArrayList<>(1 + moreAddresses.length);
+    addresses.add(address);
+    addresses.addAll(java.util.Arrays.asList(moreAddresses));
+    return new DnsAnswerEffect(addresses, null, false, null);
   }
 
   /**

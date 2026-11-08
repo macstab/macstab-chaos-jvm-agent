@@ -344,6 +344,9 @@ public sealed interface ChaosSelector
    * Returns a selector that matches the given JDBC operations across all supported pool and JDBC
    * implementations without target-name filtering.
    *
+   * <p>The one selector factory that takes its operations as varargs: the others fix their
+   * operations or take a {@code Set}, as the selector constructors do.
+   *
    * @param operations the JDBC operations to intercept; must not be empty
    * @return a JdbcSelector
    */
@@ -462,6 +465,10 @@ public sealed interface ChaosSelector
   /**
    * Returns a selector that matches the start of child processes whose program matches {@code
    * commandPattern}.
+   *
+   * <p>It selects {@link OperationType#PROCESS_START} only; waiting for a process ({@link
+   * OperationType#PROCESS_WAIT}) is selected through the {@link ProcessSelector} constructor, which
+   * takes the operations.
    *
    * @param commandPattern pattern matched against the program, the first element of the command
    *     (for example {@code NamePattern.exact("git")} or {@code

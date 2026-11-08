@@ -162,7 +162,7 @@ public interface com/macstab/chaos/jvm/api/ChaosEffect permits com/macstab/chaos
   public static method directBufferPressure(JI)Lcom/macstab/chaos/jvm/api/ChaosEffect$DirectBufferPressureEffect;
   public static method dnsFamily(Lcom/macstab/chaos/jvm/api/ChaosEffect$AddressFamily;)Lcom/macstab/chaos/jvm/api/ChaosEffect$DnsAnswerEffect;
   public static method dnsLimit(I)Lcom/macstab/chaos/jvm/api/ChaosEffect$DnsAnswerEffect;
-  public static method dnsOverride([Ljava/lang/String;)Lcom/macstab/chaos/jvm/api/ChaosEffect$DnsAnswerEffect;
+  public static method dnsOverride(Ljava/lang/String;[Ljava/lang/String;)Lcom/macstab/chaos/jvm/api/ChaosEffect$DnsAnswerEffect;
   public static method dnsRewrite(Ljava/lang/String;)Lcom/macstab/chaos/jvm/api/ChaosEffect$DnsRewriteEffect;
   public static method dnsShuffle()Lcom/macstab/chaos/jvm/api/ChaosEffect$DnsAnswerEffect;
   public static method errno(Lcom/macstab/chaos/jvm/api/ChaosEffect$Errno;)Lcom/macstab/chaos/jvm/api/ChaosEffect$ErrnoEffect;

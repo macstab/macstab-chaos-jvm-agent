@@ -115,6 +115,9 @@ public final class ConfigLoadException extends RuntimeException {
    *     }
    * }</pre>
    *
+   * <p>Named like a bean getter, unlike {@link #line()} and {@link #reason()}: it is the 1.x name,
+   * kept as it is.
+   *
    * @return the source identifier; never null
    */
   public String getSource() {
