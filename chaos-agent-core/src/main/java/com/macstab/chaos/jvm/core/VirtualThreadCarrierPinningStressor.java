@@ -61,7 +61,7 @@ final class VirtualThreadCarrierPinningStressor implements ManagedStressor {
    */
   VirtualThreadCarrierPinningStressor(
       final ChaosEffect.VirtualThreadCarrierPinningEffect effect, final boolean pinWithMonitor) {
-    final long pinNanos = effect.pinDuration().toNanos();
+    final long pinNanos = ManagedStressor.nanos(effect.pinDuration());
     final int count = effect.pinnedThreadCount();
     final CountDownLatch ready = new CountDownLatch(count);
     final List<Thread> threads = new ArrayList<>(count);
@@ -144,8 +144,8 @@ final class VirtualThreadCarrierPinningStressor implements ManagedStressor {
     final Object monitor = new Object();
     while (!stopped.get()) {
       synchronized (monitor) {
-        final long deadline = System.nanoTime() + pinNanos;
-        while (!stopped.get() && System.nanoTime() < deadline) {
+        final long start = System.nanoTime();
+        while (!stopped.get() && System.nanoTime() - start < pinNanos) {
           try {
             Thread.sleep(1L);
           } catch (final InterruptedException interrupted) {
@@ -159,8 +159,8 @@ final class VirtualThreadCarrierPinningStressor implements ManagedStressor {
   /** Holds the carrier by never blocking; checks the stop flag between spin iterations. */
   private void occupyWithSpin(final long pinNanos) {
     while (!stopped.get()) {
-      final long deadline = System.nanoTime() + pinNanos;
-      while (!stopped.get() && System.nanoTime() < deadline) {
+      final long start = System.nanoTime();
+      while (!stopped.get() && System.nanoTime() - start < pinNanos) {
         Thread.onSpinWait();
       }
     }

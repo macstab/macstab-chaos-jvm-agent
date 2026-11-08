@@ -1320,6 +1320,106 @@ class CompatibilityValidatorTest {
   }
 
   @Nested
+  @DisplayName("stressor parameters are refused, not clamped")
+  class StressorLimits {
+
+    @Test
+    @DisplayName("heap pressure above the free heap is refused as an unsupported runtime")
+    void heapAboveFreeHeapIsRefused() {
+      final Runtime jvm = Runtime.getRuntime();
+      final long free = jvm.maxMemory() - (jvm.totalMemory() - jvm.freeMemory());
+      org.junit.jupiter.api.Assumptions.assumeTrue(
+          free < ChaosEffect.HeapPressureEffect.MAX_BYTES, "the heap is larger than the maximum");
+      final ChaosScenario scenario =
+          stressScenario(
+              ChaosSelector.StressTarget.HEAP,
+              new ChaosEffect.HeapPressureEffect(
+                  ChaosEffect.HeapPressureEffect.MAX_BYTES, 1024 * 1024));
+
+      assertThatThrownBy(() -> CompatibilityValidator.validate(scenario, featureSet))
+          .isExactlyInstanceOf(ChaosUnsupportedFeatureException.class)
+          .hasMessageContaining("heap");
+    }
+
+    @Test
+    @DisplayName("more strings than the length can make distinct are refused")
+    void moreStringsThanDistinctValuesAreRefused() {
+      assertThatThrownBy(
+              () ->
+                  CompatibilityValidator.validate(
+                      stressScenario(
+                          ChaosSelector.StressTarget.STRING_INTERN_PRESSURE,
+                          new ChaosEffect.StringInternPressureEffect(257, 1)),
+                      featureSet))
+          .isExactlyInstanceOf(ChaosValidationException.class)
+          .hasMessageContaining("256");
+      assertThatCode(
+              () ->
+                  CompatibilityValidator.validate(
+                      stressScenario(
+                          ChaosSelector.StressTarget.STRING_INTERN_PRESSURE,
+                          new ChaosEffect.StringInternPressureEffect(256, 1)),
+                      featureSet))
+          .doesNotThrowAnyException();
+    }
+
+    @Test
+    @DisplayName("more than one million strings, or strings over 1 MiB, are refused")
+    void stringInternCapsAreRefused() {
+      assertThatThrownBy(
+              () ->
+                  CompatibilityValidator.validate(
+                      stressScenario(
+                          ChaosSelector.StressTarget.STRING_INTERN_PRESSURE,
+                          new ChaosEffect.StringInternPressureEffect(1_000_001, 8)),
+                      featureSet))
+          .isExactlyInstanceOf(ChaosValidationException.class)
+          .hasMessageContaining("1000000");
+      assertThatThrownBy(
+              () ->
+                  CompatibilityValidator.validate(
+                      stressScenario(
+                          ChaosSelector.StressTarget.STRING_INTERN_PRESSURE,
+                          new ChaosEffect.StringInternPressureEffect(1, (1 << 20) + 1)),
+                      featureSet))
+          .isExactlyInstanceOf(ChaosValidationException.class)
+          .hasMessageContaining("1048576");
+    }
+
+    @Test
+    @DisplayName("a stressor interval below one millisecond is refused; one millisecond is not")
+    void subMillisecondIntervalsAreRefused() {
+      final Duration below = Duration.ofNanos(500_000L);
+      final Duration oneMilli = Duration.ofMillis(1);
+      for (final Duration interval : java.util.List.of(below, oneMilli)) {
+        final java.util.List<ChaosScenario> scenarios =
+            java.util.List.of(
+                stressScenario(
+                    ChaosSelector.StressTarget.REFERENCE_QUEUE_FLOOD,
+                    new ChaosEffect.ReferenceQueueFloodEffect(10, interval)),
+                stressScenario(
+                    ChaosSelector.StressTarget.SAFEPOINT_STORM,
+                    new ChaosEffect.SafepointStormEffect(interval, 0)),
+                stressScenario(
+                    ChaosSelector.StressTarget.KEEPALIVE,
+                    new ChaosEffect.KeepAliveEffect("keep", true, interval)));
+        for (final ChaosScenario scenario : scenarios) {
+          if (interval.equals(below)) {
+            assertThatThrownBy(() -> CompatibilityValidator.validate(scenario, featureSet))
+                .as("%s", scenario.effect())
+                .isExactlyInstanceOf(ChaosValidationException.class)
+                .hasMessageContaining("1 ms");
+          } else {
+            assertThatCode(() -> CompatibilityValidator.validate(scenario, featureSet))
+                .as("%s", scenario.effect())
+                .doesNotThrowAnyException();
+          }
+        }
+      }
+    }
+  }
+
+  @Nested
   @DisplayName("direct-buffer pressure and the direct memory limit")
   class DirectMemoryLimit {
 

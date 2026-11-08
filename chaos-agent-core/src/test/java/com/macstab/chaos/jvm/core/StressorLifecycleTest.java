@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import com.macstab.chaos.jvm.api.ChaosEffect;
 import java.time.Duration;
 import java.util.concurrent.TimeUnit;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -46,6 +47,48 @@ class StressorLifecycleTest {
       stressor.close();
       assertThat(stressor.retainedClassCount()).isZero();
     }
+
+    @Test
+    @DisplayName(
+        "metaspace and code-cache classes are defined without sun.misc.Unsafe: denied, every class"
+            + " loads; warned, nothing warns")
+    void classesAreDefinedWithoutUnsafe() throws Exception {
+      final boolean unsafeSwitch = Runtime.version().feature() >= 23;
+      final String denied =
+          runClassDefinitionProbe(unsafeSwitch ? "--sun-misc-unsafe-memory-access=deny" : null);
+
+      assertThat(denied)
+          .contains("metaspaceRetained=5", "codeCacheRetained=5", "state=ACTIVE")
+          .doesNotContain("Thrown=");
+      if (unsafeSwitch) {
+        assertThat(runClassDefinitionProbe("--sun-misc-unsafe-memory-access=warn"))
+            .contains("metaspaceRetained=5")
+            .doesNotContain("sun.misc.Unsafe");
+      }
+    }
+
+    private String runClassDefinitionProbe(final @Nullable String unsafeAccess) throws Exception {
+      final java.util.List<String> command = new java.util.ArrayList<>();
+      command.add(java.nio.file.Path.of(System.getProperty("java.home"), "bin", "java").toString());
+      if (unsafeAccess != null) {
+        command.add(unsafeAccess);
+      }
+      command.addAll(
+          java.util.List.of(
+              "-cp",
+              System.getProperty("java.class.path"),
+              ClassDefinitionProbeMain.class.getName()));
+      final Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
+      try {
+        final String output =
+            new String(
+                process.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+        assertThat(process.waitFor(60, TimeUnit.SECONDS)).as(output).isTrue();
+        return output;
+      } finally {
+        process.destroyForcibly();
+      }
+    }
   }
 
   @Nested
@@ -62,15 +105,12 @@ class StressorLifecycleTest {
     }
 
     @Test
-    @DisplayName("registerCleaner=true still retains buffers so pressure is actually produced")
-    void cleanerModeAlsoRetainsBuffers() {
-      // The stressor retains strong references in both modes — the cleaner is attached to the
-      // stressor itself, so cleanup happens on stressor phantom-reachability rather than on
-      // per-buffer GC, and sustained pressure builds before any cleaner fires.
+    @DisplayName("registerCleaner=true allocates and drops: the buffers are freed when GC runs")
+    void cleanerModeDropsBuffers() {
       final DirectBufferPressureStressor stressor =
           new DirectBufferPressureStressor(
               new ChaosEffect.DirectBufferPressureEffect(4096L, 1024, true));
-      assertThat(stressor.retainedBufferCount()).isEqualTo(4);
+      assertThat(stressor.retainedBufferCount()).isZero();
     }
 
     @Test

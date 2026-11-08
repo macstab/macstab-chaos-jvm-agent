@@ -32,4 +32,21 @@ interface ManagedStressor extends AutoCloseable {
    */
   @Override
   void close();
+
+  /**
+   * Returns a duration in nanoseconds, saturated at {@link Long#MAX_VALUE}: a duration too large
+   * for nanoseconds (about 292 years) lasts until the stressor is stopped. Compare it with the time
+   * elapsed since a start ({@code System.nanoTime() - start < nanos}), never with a deadline sum,
+   * which overflows.
+   *
+   * @param duration a non-negative duration
+   * @return its nanoseconds, or {@link Long#MAX_VALUE}
+   */
+  static long nanos(final java.time.Duration duration) {
+    try {
+      return duration.toNanos();
+    } catch (final ArithmeticException tooLarge) {
+      return Long.MAX_VALUE;
+    }
+  }
 }

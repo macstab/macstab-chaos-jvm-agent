@@ -10,6 +10,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.macstab.chaos.jvm.api.ChaosActivationException;
 import com.macstab.chaos.jvm.api.ChaosPlan;
 import com.macstab.chaos.jvm.api.ChaosScenario;
+import com.macstab.chaos.jvm.api.ChaosUnsupportedFeatureException;
 import com.macstab.chaos.jvm.api.ChaosValidationException;
 import com.macstab.chaos.jvm.core.ChaosRuntime;
 import com.macstab.chaos.jvm.startup.ChaosPlanMapper;
@@ -27,10 +28,11 @@ import org.junit.jupiter.api.Test;
 /**
  * The plan pipeline on arbitrary input. Whatever the input, parsing returns a plan or throws {@link
  * ConfigLoadException}, and validating a parsed scenario returns or throws {@link
- * ChaosValidationException} / {@link ChaosActivationException}: no other exception, no hang. Two
- * sources of input: mutations of the seed plans in {@code fuzz-plans.json}, and plans generated
- * from the published plan schema, which reach the record constructors and validators of every
- * selector and effect.
+ * ChaosValidationException} / {@link ChaosActivationException} / {@link
+ * ChaosUnsupportedFeatureException} (a stressor larger than the runtime's memory): no other
+ * exception, no hang. Two sources of input: mutations of the seed plans in {@code fuzz-plans.json},
+ * and plans generated from the published plan schema, which reach the record constructors and
+ * validators of every selector and effect.
  *
  * <p>Seeded and replayable: {@code ./gradlew :chaos-agent-bootstrap:test --tests '*PlanFuzzTest*'
  * -PfuzzSeed=<seed> -PfuzzIterations=<n>} (defaults 20261103 and 4000); a failure names the seed,
@@ -98,7 +100,9 @@ class PlanFuzzTest {
     for (final ChaosScenario scenario : plan.scenarios()) {
       try {
         runtime.validate(scenario);
-      } catch (final ChaosValidationException | ChaosActivationException rejected) {
+      } catch (final ChaosValidationException
+          | ChaosActivationException
+          | ChaosUnsupportedFeatureException rejected) {
         // a well-formed but meaningless scenario: the defined outcome
       } catch (final Throwable crash) {
         throw failure("validating", input, source, iteration, crash);

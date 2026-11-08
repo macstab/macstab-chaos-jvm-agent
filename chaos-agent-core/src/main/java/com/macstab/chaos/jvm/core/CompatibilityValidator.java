@@ -61,6 +61,9 @@ final class CompatibilityValidator {
    *       paired with its corresponding {@link ChaosEffect} subtype.
    *   <li><b>Direct memory limit</b> — direct-buffer pressure must fit under {@code
    *       -XX:MaxDirectMemorySize} ({@link ChaosUnsupportedFeatureException}).
+   *   <li><b>Stressor limits</b> — heap pressure must fit in the free heap ({@link
+   *       ChaosUnsupportedFeatureException}); interned strings must be distinct and within their
+   *       caps; stressor intervals must be at least one millisecond.
    *   <li><b>Interceptor constraints</b> — effect/selector combinations must be semantically
    *       compatible (e.g. {@code ExceptionInjectionEffect} requires {@code MethodSelector} with
    *       {@code METHOD_ENTER} only; a reject only where the real call can fail).
@@ -93,6 +96,7 @@ final class CompatibilityValidator {
       validateStressBinding(stressSelector.target(), scenario.effect());
       validateStressActivationPolicy(scenario.activationPolicy());
       validateDirectMemoryLimit(scenario.effect(), featureSet);
+      validateStressorLimits(scenario.effect());
     }
     if (scenario.effect() instanceof ChaosEffect.ClockSkewEffect) {
       validateClockSkewActivationPolicy(scenario.activationPolicy());
@@ -117,6 +121,99 @@ final class CompatibilityValidator {
                 + limit
                 + " bytes (-XX:MaxDirectMemorySize)");
       }
+    }
+  }
+
+  /**
+   * Refuses stressor parameters a stressor cannot honour, instead of clamping them: heap pressure
+   * above the free heap (it depends on the runtime's state, {@link
+   * ChaosUnsupportedFeatureException}), more interned strings than their length can make distinct
+   * or than the caps allow, and an interval below the millisecond a stressor sleeps in.
+   */
+  private static void validateStressorLimits(final ChaosEffect effect) {
+    switch (effect) {
+      case ChaosEffect.HeapPressureEffect heap -> validateHeapLimit(heap.bytes());
+      case ChaosEffect.StringInternPressureEffect intern -> validateStringIntern(intern);
+      case ChaosEffect.ReferenceQueueFloodEffect flood ->
+          requireMillisecond("floodInterval", flood.floodInterval());
+      case ChaosEffect.SafepointStormEffect storm ->
+          requireMillisecond("gcInterval", storm.gcInterval());
+      case ChaosEffect.KeepAliveEffect keepAlive ->
+          requireMillisecond("heartbeat", keepAlive.heartbeat());
+      default -> {
+        // no limit beyond the effect's own
+      }
+    }
+  }
+
+  /**
+   * Refuses heap pressure above the heap left free: the maximum heap less what is in use now. A
+   * snapshot: the application allocating meanwhile can still make the stressor run out, which fails
+   * its start.
+   */
+  private static void validateHeapLimit(final long bytes) {
+    final Runtime jvm = Runtime.getRuntime();
+    final long max = jvm.maxMemory();
+    if (max == Long.MAX_VALUE) {
+      return;
+    }
+    final long free = max - (jvm.totalMemory() - jvm.freeMemory());
+    if (bytes > free) {
+      throw new ChaosUnsupportedFeatureException(
+          "heap pressure of "
+              + bytes
+              + " bytes exceeds the free heap of "
+              + free
+              + " bytes (the maximum heap, -Xmx, less what is in use)");
+    }
+  }
+
+  private static void validateStringIntern(final ChaosEffect.StringInternPressureEffect intern) {
+    if (intern.internCount() > StringInternPressureStressor.MAX_INTERN_COUNT) {
+      throw new ChaosValidationException(
+          "stringInternPressure internCount "
+              + intern.internCount()
+              + " exceeds the limit of "
+              + StringInternPressureStressor.MAX_INTERN_COUNT
+              + " strings");
+    }
+    if (intern.stringLengthBytes() > StringInternPressureStressor.MAX_STRING_LENGTH_BYTES) {
+      throw new ChaosValidationException(
+          "stringInternPressure stringLengthBytes "
+              + intern.stringLengthBytes()
+              + " exceeds the limit of "
+              + StringInternPressureStressor.MAX_STRING_LENGTH_BYTES
+              + " bytes");
+    }
+    // One Latin-1 character per byte: 256^length distinct strings (above 3 bytes, more than the
+    // count cap).
+    if (intern.stringLengthBytes() < 4) {
+      final long distinct = 1L << (8 * intern.stringLengthBytes());
+      if (intern.internCount() > distinct) {
+        throw new ChaosValidationException(
+            "stringInternPressure cannot make "
+                + intern.internCount()
+                + " distinct strings of "
+                + intern.stringLengthBytes()
+                + " bytes: there are 256^"
+                + intern.stringLengthBytes()
+                + " = "
+                + distinct
+                + "; raise stringLengthBytes");
+      }
+    }
+  }
+
+  /**
+   * Refuses an interval below one millisecond: the stressor sleeps whole ones, so it would spin.
+   */
+  private static void requireMillisecond(final String field, final java.time.Duration interval) {
+    if (interval.compareTo(java.time.Duration.ofMillis(1)) < 0) {
+      throw new ChaosValidationException(
+          field
+              + " "
+              + interval
+              + " is below 1 ms; the stressor sleeps whole milliseconds and would spin");
     }
   }
 

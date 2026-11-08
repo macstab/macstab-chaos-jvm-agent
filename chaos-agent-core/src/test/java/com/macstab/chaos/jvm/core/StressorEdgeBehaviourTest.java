@@ -559,39 +559,53 @@ class StressorEdgeBehaviourTest {
   }
 
   @Nested
+  @DisplayName("a duration too large for nanoseconds runs until the stressor is stopped")
+  class HugeDurations {
+
+    private final Duration forever = Duration.ofSeconds(Long.MAX_VALUE);
+
+    @Test
+    @DisplayName("GC pressure, a thread leak, carrier pinning and monitor contention keep running")
+    void hugeDurationsKeepRunning() {
+      final GcPressureStressor gc =
+          new GcPressureStressor(new ChaosEffect.GcPressureEffect(1_000L, 64, false, forever));
+      final ThreadLeakStressor leak =
+          new ThreadLeakStressor(new ChaosEffect.ThreadLeakEffect(1, "huge-leak-", true, forever));
+      final VirtualThreadCarrierPinningStressor pinning =
+          new VirtualThreadCarrierPinningStressor(
+              new ChaosEffect.VirtualThreadCarrierPinningEffect(1, forever));
+      final MonitorContentionStressor contention =
+          new MonitorContentionStressor(new ChaosEffect.MonitorContentionEffect(forever, 2, false));
+      try {
+        LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(200));
+
+        assertThat(gc.isRunning()).as("GC pressure").isTrue();
+        assertThat(leak.aliveCount()).as("leaked threads").isEqualTo(1);
+        assertThat(pinning.aliveCount()).as("pinning threads").isEqualTo(1);
+        assertThat(contention.aliveCount()).as("contending threads").isEqualTo(2);
+      } finally {
+        gc.close();
+        leak.close();
+        pinning.close();
+        contention.close();
+      }
+    }
+  }
+
+  @Nested
   @DisplayName("StringInternPressureStressor")
   class StringInternPressure {
 
     @Test
-    @DisplayName("an oversized string length is clamped to 1 MiB, padded, and reported")
-    void clampsLength() {
-      try (LogCapture log = LogCapture.of(StringInternPressureStressor.class)) {
-        final StringInternPressureStressor stressor =
-            new StringInternPressureStressor(
-                new ChaosEffect.StringInternPressureEffect(1, 2_000_000));
-        assertThat(stressor.internedCount()).isEqualTo(1);
+    @DisplayName("1,000 strings of two characters are 1,000 distinct strings of that length")
+    void shortStringsAreDistinct() {
+      final StringInternPressureStressor stressor =
+          new StringInternPressureStressor(new ChaosEffect.StringInternPressureEffect(1_000, 2));
+      try {
+        assertThat(stressor.internedCount()).isEqualTo(1_000);
+        assertThat(stressor.distinctCount()).isEqualTo(1_000);
+      } finally {
         stressor.close();
-        assertThat(log.messages())
-            .contains(
-                "chaos-agent: string-intern pressure clamped to 1 strings of 1048576 bytes"
-                    + " (limits 1000000 strings, 1048576 bytes)",
-                "StringInternPressureStressor interned 1 strings of 1048576 bytes each");
-      }
-    }
-
-    @Test
-    @DisplayName("an oversized intern count is clamped to one million and reported")
-    void clampsCount() {
-      try (LogCapture log = LogCapture.of(StringInternPressureStressor.class)) {
-        final StringInternPressureStressor stressor =
-            new StringInternPressureStressor(
-                new ChaosEffect.StringInternPressureEffect(1_000_001, 1));
-        assertThat(stressor.internedCount()).isEqualTo(1_000_000);
-        stressor.close();
-        assertThat(log.messages())
-            .contains(
-                "chaos-agent: string-intern pressure clamped to 1000000 strings of 1 bytes"
-                    + " (limits 1000000 strings, 1048576 bytes)");
       }
     }
   }

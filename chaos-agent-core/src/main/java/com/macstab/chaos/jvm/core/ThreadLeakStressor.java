@@ -42,12 +42,10 @@ final class ThreadLeakStressor implements ManagedStressor {
       final ChaosEffect.ThreadLeakEffect effect,
       final java.util.concurrent.ThreadFactory threadFactory) {
     final List<Thread> threads = new ArrayList<>(effect.threadCount());
-    // Compute deadline without overflow: when lifespan is null, use Long.MAX_VALUE directly
-    // rather than currentTimeMillis + Long.MAX_VALUE which would overflow to a negative number.
-    final long deadlineMillis =
-        effect.lifespan() != null
-            ? System.currentTimeMillis() + effect.lifespan().toMillis()
-            : Long.MAX_VALUE;
+    // Elapsed time against a saturated lifespan: a deadline sum overflows for a huge lifespan.
+    final java.time.Duration lifespan = effect.lifespan();
+    final long lifespanNanos = lifespan != null ? ManagedStressor.nanos(lifespan) : Long.MAX_VALUE;
+    final long start = System.nanoTime();
 
     for (int i = 0; i < effect.threadCount(); i++) {
       final String name = effect.namePrefix() + i;
@@ -57,8 +55,7 @@ final class ThreadLeakStressor implements ManagedStressor {
               name,
               effect.daemon(),
               () -> {
-                final long deadline = deadlineMillis;
-                while (!stopped.get() && System.currentTimeMillis() < deadline) {
+                while (!stopped.get() && System.nanoTime() - start < lifespanNanos) {
                   java.util.concurrent.locks.LockSupport.parkNanos(50_000_000L /* 50 ms */);
                   if (Thread.interrupted()) {
                     break;

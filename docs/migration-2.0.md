@@ -38,6 +38,7 @@
 | 18 | `suppress` on HTTP and JDBC is refused; `ChaosHttpSuppressException` / `ChaosJdbcSuppressException` are removed | a plan suppresses `HTTP_CLIENT_*` or `JDBC_*`, or code catches those exceptions | use `reject` and catch `IOException` / `SQLException` (§18) |
 | 19 | `reject` and `errno` raise the real call's exception; errnos apply per operation | a test catches the 1.x type of a reject or a file errno, reads its top stack frame, or applies a file errno to a call the kernel never reports it for | catch the type in §19; pick an errno the call can report (§19) |
 | 20 | The destructive-effect refusal is a `ChaosValidationException`; `suppress` is refused where a call cannot be skipped | code catches `ChaosActivationException` for a deadlock or thread leak without `allowDestructiveEffects`, or matches `plan rejected:` in the HTTP/JMX answer; a plan suppresses an operation outside the suppress list | catch `ChaosValidationException`, match `invalid plan:`; delay or reject instead (§20) |
+| 21 | Stressor parameters are refused instead of reduced | a `heapPressure` asks for more than the free heap; a `stringInternPressure` exceeds its caps or its length's distinct strings; a `floodInterval`, `gcInterval` or `heartbeat` is below 1 ms | lower the value or raise `-Xmx`, lengthen the strings, use 1 ms or more (§21) |
 
 ---
 
@@ -275,6 +276,23 @@ A `DeadlockEffect` or `ThreadLeakEffect` without `allowDestructiveEffects` fails
 A `SuppressEffect` applies only to operations whose call can be skipped or answered empty (the `suppress` row of the configuration reference's compatibility matrix). 1.x accepted it everywhere and it did nothing on the other operations; 2.0 refuses it with `ChaosValidationException`, naming `delay` (and `reject` where the call can fail) instead.
 
 Sessions gained the other way: a session-scoped scenario may now select thread starts and sleeps and executor shutdowns. Only `CLASS_LOAD`, `CLASS_DEFINE`, `RESOURCE_LOAD`, `SHUTDOWN_HOOK_REGISTER` and stressors are refused in a session.
+
+## 21. Stressor parameters are refused instead of reduced
+
+1.x reduced some stressor parameters with at most a warning, so a scenario ran with less load than it asked for. 2.0 refuses them at activation:
+
+| Parameter | 1.x | 2.0 |
+|-----------|-----|-----|
+| `heapPressure.bytes` above the free heap (`-Xmx` less what is in use) | capped at half the maximum heap, with a warning | `ChaosUnsupportedFeatureException` (`UNSUPPORTED_RUNTIME`) |
+| `stringInternPressure.internCount` above 1,000,000, `stringLengthBytes` above 1 MiB | clamped, with a warning | `ChaosValidationException` |
+| `stringInternPressure.internCount` above 256^`stringLengthBytes` (257 strings of 1 byte, 65,537 of 2) | duplicates interned (below 32 characters strings collided) | `ChaosValidationException` |
+| `referenceQueueFlood.floodInterval`, `safepointStorm.gcInterval`, `keepAlive.heartbeat` below 1 ms | the stressor spun | `ChaosValidationException` |
+
+- Lower `bytes`, or run the JVM under test with a larger `-Xmx`; catch `ChaosUnsupportedFeatureException` where a plan's heap pressure depends on the machine.
+- Lengthen the strings (4 bytes allow the 1,000,000 maximum) or intern fewer.
+- Use an interval of 1 ms or more.
+
+`gcPressure` now allocates at its rate instead of rounding up to one object per 50 ms: a low rate of large objects, which allocated far more than asked in 1.x, now allocates what it asks for. Raise `allocationRateBytesPerSecond` if a test relied on the extra load.
 
 ---
 

@@ -2,6 +2,8 @@ package com.macstab.chaos.jvm.core;
 
 import com.macstab.chaos.jvm.api.ChaosEffect;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.LongSupplier;
 import java.util.logging.Logger;
 import org.jspecify.annotations.Nullable;
 
@@ -15,10 +17,10 @@ import org.jspecify.annotations.Nullable;
  * survive a young-gen collection, forcing objects into the old generation and triggering major GC
  * cycles.
  *
- * <p>Rate pacing is coarse-grained: the thread allocates a batch, sleeps for one batch interval,
- * then repeats. Sub-millisecond precision is not guaranteed. The stressor respects the configured
- * {@link ChaosEffect.GcPressureEffect#duration()} by stopping the allocation thread after that
- * period.
+ * <p>The rate is held over time: every 50 ms the thread allocates the whole objects the rate owes
+ * since the start, so the fraction of an object a batch cannot allocate carries over to the next
+ * one, and the time spent allocating counts. The stressor stops allocating once the configured
+ * {@link ChaosEffect.GcPressureEffect#duration()} has elapsed.
  *
  * <p>{@link #close()} interrupts the allocation thread and nulls the ring buffer, making retained
  * objects eligible for collection.
@@ -27,45 +29,64 @@ final class GcPressureStressor implements ManagedStressor {
 
   private static final Logger LOGGER = Logger.getLogger("com.macstab.chaos.jvm");
   private static final int RING_SIZE = 100;
-  private static final long BATCH_INTERVAL_MS = 50L;
+  private static final long BATCH_INTERVAL_NANOS =
+      java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(50L);
 
   private final AtomicBoolean running = new AtomicBoolean(true);
+  private final AtomicLong allocatedBytes = new AtomicLong();
+  private final LongSupplier nanoClock;
+  private final Pause pause;
   private final Thread allocationThread;
   private volatile byte @Nullable [][] ring;
 
+  /** Waits between batches; a test seam replaces the sleep. */
+  @FunctionalInterface
+  interface Pause {
+    /**
+     * Waits.
+     *
+     * @param nanos how long
+     * @throws InterruptedException if the thread is interrupted while it waits
+     */
+    void pause(long nanos) throws InterruptedException;
+  }
+
   GcPressureStressor(final ChaosEffect.GcPressureEffect effect) {
+    this(effect, System::nanoTime, nanos -> Thread.sleep(java.time.Duration.ofNanos(nanos)));
+  }
+
+  /**
+   * Test seam: the clock that paces the allocation and the pause between batches.
+   *
+   * @param effect the effect
+   * @param nanoClock a monotonic clock in nanoseconds
+   * @param pause the wait between batches
+   */
+  GcPressureStressor(
+      final ChaosEffect.GcPressureEffect effect, final LongSupplier nanoClock, final Pause pause) {
+    this.nanoClock = nanoClock;
+    this.pause = pause;
     if (effect.promoteToOldGen()) {
       ring = new byte[RING_SIZE][];
     }
-
-    // Saturate the rate before the multiply. Without the clamp, a user-supplied
-    // allocationRateBytesPerSecond above Long.MAX_VALUE / BATCH_INTERVAL_MS wraps the product to
-    // a negative long; the outer Math.max(1L, …) then silently collapses to 1 byte/batch, leaving
-    // the stressor nominally ACTIVE while producing no GC pressure. Clamping instead behaves as
-    // if the caller had set the maximum representable rate.
-    final int objectSizeBytes = effect.objectSizeBytes();
-    final int objectsPerBatch =
-        objectsPerBatch(effect.allocationRateBytesPerSecond(), objectSizeBytes);
-    final long durationMillis = effect.duration().toMillis();
-    final boolean promote = effect.promoteToOldGen();
 
     allocationThread =
         AgentThreads.start(
             "chaos-gc-pressure",
             true,
-            allocationLoop(objectsPerBatch, objectSizeBytes, promote, durationMillis));
+            allocationLoop(
+                effect.allocationRateBytesPerSecond(),
+                effect.objectSizeBytes(),
+                effect.promoteToOldGen(),
+                ManagedStressor.nanos(effect.duration())));
   }
 
   /**
-   * The objects allocated per batch for a rate and an object size: at least one, and at most {@link
-   * Integer#MAX_VALUE}. Without the upper clamp a large rate of small objects wrapped to a negative
-   * count, and the stressor allocated nothing while it reported itself running.
+   * The bytes a rate owes after a time: {@code rate × elapsed}, saturated at {@link Long#MAX_VALUE}
+   * (a {@code double} product, whose cast saturates instead of wrapping).
    */
-  static int objectsPerBatch(final long allocationRateBytesPerSecond, final int objectSizeBytes) {
-    final long saturatedRate =
-        Math.min(allocationRateBytesPerSecond, Long.MAX_VALUE / BATCH_INTERVAL_MS);
-    final long batchSizeBytes = Math.max(1L, saturatedRate * BATCH_INTERVAL_MS / 1000L);
-    return (int) Math.min(Integer.MAX_VALUE, Math.max(1L, batchSizeBytes / objectSizeBytes));
+  private static long bytesOwed(final long bytesPerSecond, final long elapsedNanos) {
+    return (long) ((double) bytesPerSecond * elapsedNanos / 1_000_000_000d);
   }
 
   /**
@@ -73,12 +94,12 @@ final class GcPressureStressor implements ManagedStressor {
    * duration elapses or {@link #close()} sets {@code running=false}.
    */
   private Runnable allocationLoop(
-      final int objectsPerBatch,
+      final long bytesPerSecond,
       final int objectSizeBytes,
       final boolean promote,
-      final long durationMillis) {
+      final long durationNanos) {
     return () -> {
-      final long deadline = System.currentTimeMillis() + durationMillis;
+      final long start = nanoClock.getAsLong();
       // long — not int — because a stressor running at 1M allocations/sec
       // (e.g. 1 GB/s at 1 KB objects, a plausible high-pressure scenario) overflows
       // int in ~35 minutes. Past overflow, `Integer.MIN_VALUE % RING_SIZE` returns a
@@ -86,17 +107,23 @@ final class GcPressureStressor implements ManagedStressor {
       // old-gen promotion that scenarios depend on for the rest of their duration.
       // Math.floorMod guards against any future signed-math slip too.
       long ringIndex = 0L;
-      while (running.get() && System.currentTimeMillis() < deadline) {
-        for (int i = 0; i < objectsPerBatch; i++) {
+      while (running.get()) {
+        final long elapsed = Math.min(nanoClock.getAsLong() - start, durationNanos);
+        // The owed bytes are cumulative, so what a batch cannot allocate in whole objects carries
+        // over, and the time the batch itself took is paid for in the next one.
+        final long objects =
+            (bytesOwed(bytesPerSecond, elapsed) - allocatedBytes.get()) / objectSizeBytes;
+        for (long i = 0; i < objects; i++) {
           // Re-check running every iteration: close() sets running=false and nulls
           // the ring, but without this guard a batch that started before close()
           // would keep writing into the local `snapshot` for up to one full
-          // BATCH_INTERVAL_MS, keeping allocated byte[] arrays strongly reachable
+          // batch interval, keeping allocated byte[] arrays strongly reachable
           // past the documented close() boundary.
           if (!running.get()) {
             break;
           }
           final byte[] chunk = new byte[objectSizeBytes];
+          allocatedBytes.addAndGet(objectSizeBytes);
           if (promote) {
             final byte[][] snapshot = ring;
             if (snapshot != null) {
@@ -106,8 +133,11 @@ final class GcPressureStressor implements ManagedStressor {
           }
           // else: short-lived — chunk is immediately unreachable
         }
+        if (elapsed >= durationNanos) {
+          break;
+        }
         try {
-          Thread.sleep(BATCH_INTERVAL_MS);
+          pause.pause(Math.min(BATCH_INTERVAL_NANOS, durationNanos - elapsed));
         } catch (final InterruptedException e) {
           Thread.currentThread().interrupt();
           break;
@@ -132,6 +162,11 @@ final class GcPressureStressor implements ManagedStressor {
     // local reference to the ring snapshot — heap pressure is not immediately released.
     // This is a best-effort stop; full release occurs once the thread exits naturally.
     AgentThreads.stopAll(java.util.List.of(allocationThread), 500L);
+  }
+
+  /** Returns the bytes allocated so far; a test seam. */
+  long allocatedBytes() {
+    return allocatedBytes.get();
   }
 
   /** Returns {@code true} if the allocation thread is still running. */

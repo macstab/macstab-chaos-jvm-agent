@@ -35,7 +35,7 @@ final class MonitorContentionStressor implements ManagedStressor {
 
   MonitorContentionStressor(final ChaosEffect.MonitorContentionEffect effect) {
     final ReentrantLock lock = new ReentrantLock(!effect.unfair()); // fair=true unless unfair
-    final long holdNanos = effect.lockHoldDuration().toNanos();
+    final long holdNanos = ManagedStressor.nanos(effect.lockHoldDuration());
     final int count = effect.contendingThreadCount();
     final CountDownLatch ready = new CountDownLatch(count);
     final List<Thread> threads = new ArrayList<>(count);
@@ -66,8 +66,8 @@ final class MonitorContentionStressor implements ManagedStressor {
                     return;
                   }
                   try {
-                    final long holdDeadline = System.nanoTime() + holdNanos;
-                    while (System.nanoTime() < holdDeadline && !stopped.get()) {
+                    final long holdStart = System.nanoTime();
+                    while (System.nanoTime() - holdStart < holdNanos && !stopped.get()) {
                       // Thread.sleep(0, nanos) holds the lock (unlike wait()) and is not
                       // instrumented by the chaos agent (LockSupport.park* is), preventing
                       // a chaos delay scenario from recursively targeting this stressor.

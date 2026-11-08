@@ -1648,8 +1648,10 @@ Stressor effects are used exclusively with `StressSelector`. They launch backgro
 
 | Field            | Type  | Constraint     | Description                              |
 |------------------|-------|----------------|------------------------------------------|
-| `bytes`          | long  | > 0, ≤ 64 GiB  | Total bytes to allocate and retain       |
+| `bytes`          | long  | > 0, ≤ 64 GiB, ≤ the free heap | Total bytes to allocate and retain       |
 | `chunkSizeBytes` | int   | > 0, ≤ 256 MiB | Size of each individual allocation chunk |
+
+`bytes` above the free heap (the maximum heap, `-Xmx`, less what is in use at activation) is refused with `ChaosUnsupportedFeatureException` (`UNSUPPORTED_RUNTIME`); it is never silently reduced.
 
 **Cleanup:** retained chunks are released when the handle is closed.
 
@@ -1667,7 +1669,7 @@ Stressor effects are used exclusively with `StressSelector`. They launch backgro
 |--------------|----------|-------------|--------------------------------|
 | `threadName` | String   | non-blank   | Name for the kept-alive thread |
 | `daemon`     | boolean  | —           | `false` = prevents JVM exit    |
-| `heartbeat`  | Duration | positive    | Interval between park cycles   |
+| `heartbeat`  | Duration | ≥ 1 ms      | Interval between park cycles   |
 
 ---
 
@@ -1685,6 +1687,8 @@ Stressor effects are used exclusively with `StressSelector`. They launch backgro
 | `fieldsPerClass`      | int     | ≥ 0            | Static fields per class (controls per-class Metaspace footprint)                                                                                        |
 | `retain`              | boolean | default `true` | `true` = strong references held to prevent GC unloading; `false` = the loader is released immediately after the classes are defined (a transient spike) |
 
+The classes are defined by their own class loader, without `sun.misc.Unsafe`, so the stressor works on a JVM run with `--sun-misc-unsafe-memory-access=deny` and prints no Unsafe warning.
+
 **Cleanup:** Metaspace is only reclaimed when the classloader that loaded the synthetic classes is collected by GC — not immediately on handle close. With `retain=false` the loader becomes collectable right after activation; with `retain=true` it is released on `handle.close()` or when `activeFor` ends.
 
 ---
@@ -1701,9 +1705,9 @@ Stressor effects are used exclusively with `StressSelector`. They launch backgro
 |-------------------|---------|---------------------|-------------------------------------------------------------------------------|
 | `totalBytes`      | long    | > 0                 | Total native memory to exhaust                                                |
 | `bufferSizeBytes` | int     | > 0, ≤ `totalBytes` | Size of each buffer allocation                                                |
-| `registerCleaner` | boolean | default `false`     | `false` = intentional leak; `true` = Cleaner registered but reference dropped |
+| `registerCleaner` | boolean | default `false`     | `false` = buffers retained until the scenario stops; `true` = each buffer allocated and dropped, freed by the JDK's cleaner at the next GC |
 
-**Warning:** Direct memory is not GC-managed. Buffers allocated with `registerCleaner=false` persist until JVM exit. Use `registerCleaner=true` if the scenario may outlive the test.
+**Warning:** Direct memory is not GC-managed. Buffers allocated with `registerCleaner=false` persist until the scenario stops. Use `registerCleaner=true` for a burst that the next GC frees.
 
 ---
 
@@ -1721,6 +1725,8 @@ Stressor effects are used exclusively with `StressSelector`. They launch backgro
 | `objectSizeBytes`              | int      | > 0          | Size of each allocated object; default 1024 bytes                             |
 | `promoteToOldGen`              | boolean  | —            | `true` = objects held long enough to reach old generation (triggers major GC) |
 | `duration`                     | Duration | positive     | Total duration of the allocation workload                                     |
+
+The rate is held over time, not rounded per batch: every 50 ms the stressor allocates the whole objects the rate owes since its start, so 1,000 B/s in 1 KiB objects allocates one object about every second. A `duration` too large for nanoseconds (about 292 years) lasts until the scenario stops.
 
 ---
 
@@ -1822,6 +1828,8 @@ Stressor effects are used exclusively with `StressSelector`. They launch backgro
 | `classCount`      | int  | > 0        | Number of synthetic classes to generate |
 | `methodsPerClass` | int  | > 0        | Methods per generated class             |
 
+Like `metaspacePressure`, the classes are defined without `sun.misc.Unsafe`.
+
 **Cleanup note:** code-cache memory is only reclaimed when the JIT deoptimizes the compiled methods. This may not happen immediately after `handle.close()`.
 
 ---
@@ -1836,7 +1844,7 @@ Stressor effects are used exclusively with `StressSelector`. They launch backgro
 
 | Field                   | Type     | Constraint | Description                                                              |
 |-------------------------|----------|------------|--------------------------------------------------------------------------|
-| `gcInterval`            | Duration | positive   | Interval between forced `System.gc()` calls                              |
+| `gcInterval`            | Duration | ≥ 1 ms     | Interval between forced `System.gc()` calls                              |
 | `retransformClassCount` | int      | ≥ 0        | Number of classes to retransform per cycle (additional safepoint source) |
 
 ---
@@ -1845,14 +1853,16 @@ Stressor effects are used exclusively with `StressSelector`. They launch backgro
 
 **JSON type:** `"stringInternPressure"`  
 **Paired target:** `STRING_INTERN_PRESSURE`  
-**Purpose:** Exhaust JVM's native string table in Metaspace by interning large numbers of unique strings. Interned strings are not GC-eligible until their owning classloader is collected.
+**Purpose:** Grow the JVM's string table by interning large numbers of distinct strings. The strings live on the heap and are retained until the handle is closed; a long string table slows every `intern()` of the application.
 
 **Fields:**
 
 | Field               | Type | Constraint | Description                         |
 |---------------------|------|------------|-------------------------------------|
-| `internCount`       | int  | > 0        | Number of unique strings to intern  |
-| `stringLengthBytes` | int  | > 0        | Byte length of each interned string |
+| `internCount`       | int  | > 0, ≤ 1,000,000, ≤ 256^`stringLengthBytes` | Number of distinct strings to intern |
+| `stringLengthBytes` | int  | > 0, ≤ 1 MiB | Length of each interned string (one Latin-1 character per byte) |
+
+String `i` is `i` written in base 256, so the strings are distinct; a count, length or count-per-length beyond the limits is refused with `ChaosValidationException` instead of being reduced.
 
 ---
 
@@ -1867,7 +1877,7 @@ Stressor effects are used exclusively with `StressSelector`. They launch backgro
 | Field            | Type     | Constraint | Description                            |
 |------------------|----------|------------|----------------------------------------|
 | `referenceCount` | int      | > 0        | WeakReferences created per flood cycle |
-| `floodInterval`  | Duration | positive   | Interval between flood cycles          |
+| `floodInterval`  | Duration | ≥ 1 ms     | Interval between flood cycles          |
 
 ---
 

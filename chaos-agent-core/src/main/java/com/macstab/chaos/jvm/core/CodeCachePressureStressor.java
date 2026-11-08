@@ -3,14 +3,14 @@ package com.macstab.chaos.jvm.core;
 import com.macstab.chaos.jvm.api.ChaosEffect;
 import java.lang.management.CompilationMXBean;
 import java.lang.management.ManagementFactory;
-import java.net.URL;
-import java.net.URLClassLoader;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.logging.Logger;
 import net.bytebuddy.ByteBuddy;
 import net.bytebuddy.dynamic.DynamicType;
-import net.bytebuddy.dynamic.loading.ClassLoadingStrategy;
+import net.bytebuddy.dynamic.loading.ByteArrayClassLoader;
+import net.bytebuddy.dynamic.loading.InjectionClassLoader;
 import net.bytebuddy.implementation.FixedValue;
 import org.jspecify.annotations.Nullable;
 
@@ -24,9 +24,10 @@ import org.jspecify.annotations.Nullable;
  * containers, or reflection-heavy serialization libraries.
  *
  * <p>Implementation: each class is loaded by a fresh isolated {@link ClassLoader} so that the class
- * objects are separately addressable. A strong reference to each loaded class is retained to
- * prevent GC and to force the JIT to compile the methods. After loading, each method is invoked
- * once via reflection to trigger compilation.
+ * objects are separately addressable; the loader defines the class itself ({@link
+ * InjectionClassLoader}), without {@code sun.misc.Unsafe}. A strong reference to each loaded class
+ * is retained to prevent GC and to force the JIT to compile the methods. After loading, each method
+ * is invoked via reflection to trigger compilation.
  *
  * <p>{@link #close()} nulls all retained references. The code cache itself is only reclaimed when
  * the JIT deoptimizes the compiled methods, which may not happen immediately.
@@ -37,7 +38,6 @@ final class CodeCachePressureStressor implements ManagedStressor {
   private static final String CLASS_NAME_PREFIX = "com.macstab.chaos.jvm.synthetic.CodeCacheClass$";
 
   private volatile @Nullable List<Class<?>> retainedClasses;
-  private volatile @Nullable List<URLClassLoader> retainedLoaders;
 
   /** Background thread driving JIT compilation; stopped and joined by {@link #close()}. */
   private volatile @Nullable Thread compilerThread;
@@ -52,24 +52,17 @@ final class CodeCachePressureStressor implements ManagedStressor {
             : -1L;
 
     final List<Class<?>> classes = new ArrayList<>(effect.classCount());
-    final List<URLClassLoader> loaders = new ArrayList<>(effect.classCount());
     for (int i = 0; i < effect.classCount(); i++) {
-      final URLClassLoader loader = new URLClassLoader(new URL[0], null);
+      // Unsealed, so InjectionClassLoader.Strategy can define the class in it after construction.
+      final ByteArrayClassLoader loader = new ByteArrayClassLoader(null, false, Map.of());
       final Class<?> cls = generateAndLoadClass(i, effect.methodsPerClass(), loader);
       if (cls != null) {
+        // The class keeps its loader alive.
         classes.add(cls);
-        loaders.add(loader);
-      } else {
-        // Class generation failed — release the loader immediately rather than leaking it.
-        try {
-          loader.close();
-        } catch (final java.io.IOException ignored) {
-          // Best-effort — there is no live class holding the loader, so GC will reclaim it.
-        }
       }
+      // else: nothing references the loader, so a collection reclaims it
     }
     this.retainedClasses = List.copyOf(classes);
-    this.retainedLoaders = List.copyOf(loaders);
 
     // Trigger JIT compilation on a background daemon thread so the activation path is not
     // blocked for the duration of the 15,000-invocations-per-method compilation loop.
@@ -113,25 +106,13 @@ final class CodeCachePressureStressor implements ManagedStressor {
   @Override
   public void close() {
     // Stop the compiler thread first: it only checked for close between classes, so it kept
-    // invoking (and compiling) methods of classes whose loaders were being closed.
+    // invoking (and compiling) methods of classes that were being released.
     final Thread compiler = compilerThread;
     compilerThread = null;
     if (compiler != null) {
       AgentThreads.stopAll(List.of(compiler), COMPILER_JOIN_TIMEOUT_MILLIS);
     }
-    final List<URLClassLoader> loaders = retainedLoaders;
-    retainedLoaders = null;
-    if (loaders != null) {
-      for (final URLClassLoader loader : loaders) {
-        try {
-          loader.close();
-        } catch (final java.io.IOException ignored) {
-          // Best-effort: GC + Metaspace reclamation is the ultimate path regardless.
-        }
-      }
-    }
-    // Null classes last: retainedClassCount() == 0 signals Metaspace is fully released,
-    // but Metaspace is anchored by the loaders above — null only after all loaders are closed.
+    // Null classes last: retainedClassCount() == 0 signals that nothing anchors the classes.
     retainedClasses = null;
   }
 
@@ -142,7 +123,7 @@ final class CodeCachePressureStressor implements ManagedStressor {
   }
 
   private static @Nullable Class<?> generateAndLoadClass(
-      final int index, final int methodsPerClass, final URLClassLoader loader) {
+      final int index, final int methodsPerClass, final ByteArrayClassLoader loader) {
     final String className = CLASS_NAME_PREFIX + index + "$" + Long.toHexString(System.nanoTime());
     try {
       DynamicType.Builder<?> builder = new ByteBuddy().subclass(Object.class).name(className);
@@ -158,7 +139,7 @@ final class CodeCachePressureStressor implements ManagedStressor {
                 .intercept(FixedValue.value(0L));
       }
       try (DynamicType.Unloaded<?> unloaded = builder.make()) {
-        return unloaded.load(loader, ClassLoadingStrategy.Default.INJECTION).getLoaded();
+        return unloaded.load(loader, InjectionClassLoader.Strategy.INSTANCE).getLoaded();
       }
     } catch (final Exception exception) {
       LOGGER.fine(
