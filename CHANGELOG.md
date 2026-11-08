@@ -226,6 +226,7 @@ Migration steps for each change: [docs/migration-2.0.md](docs/migration-2.0.md).
 
 ### Documentation
 
+* **api:** the 4096-character cap on a name pattern was described as a ReDoS defence; it bounds compilation, not matching. The docs now say that a REGEX runs with Java's backtracking engine on the intercepted thread without a time limit, so plans with REGEX patterns must come from trusted authors.
 * **bootstrap, testkit:** self-attach needs no JVM flag: the docs no longer ask for `-Djdk.attach.allowAttachSelf=true` or claim that the test extensions set it (none does; ByteBuddy attaches from a helper process when self-attach is not allowed). They describe the JEP 451 warning a self-attach prints on JDK 21+ and how to avoid it (`-javaagent:` or `-XX:+EnableDynamicAgentLoading`), and that an executable jar's `Launcher-Agent-Class` goes through `agentmain` and so needs `MACSTAB_CHAOS_ALLOW_DYNAMIC_ATTACH`. A child-JVM test installs and applies chaos without either flag.
 
 ### Build

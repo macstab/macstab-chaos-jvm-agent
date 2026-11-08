@@ -68,6 +68,8 @@ Every source (the agent's `configFile` / `configJson` / `configBase64`, the Spri
 | enum | the constant's name, exactly | `"SESSION"`, `"PLATFORM"`, `"EIO"` |
 | pattern | `{"mode": "EXACT" \| "PREFIX" \| "GLOB" \| "REGEX" \| "ANY", "value": string}` | `{"mode": "GLOB", "value": "*.internal"}` |
 
+A `REGEX` runs on every evaluation of its selector, on the intercepted call's thread, with Java's backtracking engine and no time limit: the 4096-character cap does not bound a match, and nested or adjacent unbounded quantifiers (`(a+)+b`, `(.*a){12}`) can take seconds on a short name. Take REGEX patterns only from trusted authors, and prefer `GLOB`, `PREFIX` or `EXACT`.
+
 An enum is matched exactly: `"jvm"` is refused with the constants it may be ("unknown value; expected one of JVM, SESSION"). The Quarkus `@ChaosScenario` annotation, which is not JSON, reads its `scope` attribute case-insensitively.
 
 ## 4. Strictness

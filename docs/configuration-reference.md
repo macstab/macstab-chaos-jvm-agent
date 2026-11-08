@@ -369,7 +369,7 @@ Not diagrammed — tabular representation is clearer. See [Section 13.4 — Comp
 
 **Performance:** a GLOB is matched directly by code points, without a regex and without allocating: `*` matches any sequence (line terminators included), `?` exactly one code point (a surrogate pair is one character), every other character itself. REGEX patterns are compiled once on `NamePattern` construction and cached in a JVM-wide `ConcurrentHashMap` (capacity 1024); hot-path `matches()` calls do not recompile, and each allocates one `Matcher`. The cache is non-evicting once at capacity (inserts are skipped, not evicted) to preserve correctness under concurrent access.
 
-**Safety:** Pattern strings are capped at 4096 characters to mitigate ReDoS risk (Java regex is a backtracking NFA). Patterns are compiled eagerly at construction; syntax errors surface at plan-build time, not at first dispatch.
+**Safety:** Pattern strings are capped at 4096 characters, which bounds what a plan makes the JVM compile and cache, not how long a match takes. A REGEX runs on the intercepted call's thread on every evaluation, with Java's backtracking engine and no time limit: a short expression with nested or adjacent unbounded quantifiers (`(a+)+b`, `(.*a){12}`) can hold that thread for seconds on a candidate of a few dozen characters. Plans are trusted input: accept REGEX patterns only from trusted authors, keep them free of such quantifiers, and prefer GLOB, PREFIX or EXACT where they suffice. Patterns are compiled eagerly at construction; syntax errors surface at plan-build time, not at first dispatch.
 
 **Null semantics:** A null candidate matches only `ANY` mode. All other modes return `false` for a null candidate.
 

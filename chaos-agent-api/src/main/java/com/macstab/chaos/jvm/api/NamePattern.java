@@ -55,10 +55,11 @@ public record NamePattern(MatchMode mode, String value) {
   private static final int CACHE_CAPACITY = 1024;
 
   /**
-   * Upper bound on the length of a single GLOB/REGEX pattern string. Java's regex engine is a
-   * backtracking NFA; pathological expressions like {@code (a+)+b} on inputs of even modest size
-   * exhibit exponential runtime. Limiting raw size is a coarse-grained defence: it bounds the worst
-   * case for any given expression and makes denial-of-service-by-regex far less practical.
+   * Upper bound on the length of a single GLOB/REGEX pattern string. It bounds what a plan makes
+   * the JVM compile and cache, not how long a match takes: Java's regex engine backtracks, and a
+   * short expression such as {@code (.*a){12}} or {@code (a+)+b} takes seconds on a candidate of a
+   * few dozen characters. A plan's REGEX patterns therefore come from trusted authors (see {@link
+   * MatchMode#REGEX}).
    */
   private static final int MAX_PATTERN_LENGTH = 4096;
 
@@ -299,6 +300,12 @@ public record NamePattern(MatchMode mode, String value) {
     /**
      * Full Java regex match anchored to the entire candidate string. The pattern is compiled once
      * and cached; subsequent calls for the same regex string pay no compile cost.
+     *
+     * <p>The match runs on the intercepted call's thread, every time the selector is evaluated,
+     * with Java's backtracking engine and no time limit: nested or adjacent unbounded quantifiers
+     * ({@code (a+)+}, {@code (.*a){12}}) can hold that thread for seconds on a short candidate.
+     * Write plans only from trusted authors, keep expressions free of such quantifiers, and prefer
+     * {@link #GLOB}, {@link #PREFIX} or {@link #EXACT} where they suffice.
      */
     REGEX,
   }
