@@ -69,6 +69,7 @@ Out of scope:
 ## Assumptions
 
 - JDK 21+ is the minimum supported runtime
+- Linux and macOS are the supported operating systems: the `errno` texts follow Linux (one text per error on both), `ChaosEffect.Errno.code()` is the number of the current one (Linux numbering elsewhere), and the path-pattern rules assume `/`-separated paths. Windows works on a best-effort basis and is not tested in CI (CI runs on Linux): there an `errno` failure carries the Linux text and number, which Windows itself never reports
 - `VIRTUAL_THREAD_START` and `VirtualThreadCarrierPinningEffect` require Project Loom (JDK 21+); the agent probes availability at startup and rejects activation on older runtimes
 - JSON deserialization uses Jackson with `@JsonSubTypes` polymorphic dispatch; the `type` discriminator field is mandatory in JSON for all selector and effect types
 - All API types in `com.macstab.chaos.jvm.api` are stable public contracts; all implementation types in `com.macstab.chaos.jvm.core` are internal
@@ -1202,7 +1203,7 @@ Once the hook is wired, the matcher, effect, and activation policy behave like e
 | Field         | Type                 | Default   | Description                                                                                                                                                                                                                                       |
 |---------------|----------------------|-----------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `operations`  | Set\<OperationType\> | required  | any of the six `FILE_IO_*` operations                                                                                                                                                                                                             |
-| `pathPattern` | PathPattern          | `null`    | `{"prefix": "/var/lib/app"}` matches that path and everything below it on a `/` boundary (`/var/lib/application` does not match). Paths are normalised lexically (`.`, `..`, repeated `/`; `\` counts as `/`); symbolic links are not resolved. A stream opened from a `FileDescriptor` has no path and never matches. |
+| `pathPattern` | PathPattern          | `null`    | `{"prefix": "/var/lib/app"}` matches that path and everything below it on a `/` boundary (`/var/lib/application` does not match). Paths are normalised lexically (`.`, `..`, repeated `/`; `\` counts as `/`); symbolic links are not resolved. A stream opened from a `FileDescriptor` has no path and never matches. The prefix is compared case-sensitively, also on a case-insensitive file system (macOS, Windows): `/Var/lib/app` does not match `/var/lib/app`. |
 | `minBytes`    | Long                 | `null`    | The byte count of the call must be at least this (inclusive): 1 for `read()`/`write(int)`, the array length for `read(byte[])`/`write(byte[])`, otherwise `len`. For a read it is the number requested.                                        |
 | `maxBytes`    | Long                 | `null`    | The byte count of the call must be at most this (inclusive).                                                                                                                                                                                      |
 
@@ -1506,6 +1507,15 @@ The native library's DNS answer effects. `DNS_RESOLVE` fires before a lookup (de
 ```
 
 **Accepted operations:** only the operations listed under \*\*\* in §13.4; any other operation in the selector is rejected at activation.
+
+**On executors**, a suppressed task never runs, and what the caller sees depends on the executor:
+
+| Executor | Operation, call | The caller sees |
+|----------|-----------------|-----------------|
+| `ThreadPoolExecutor` | `EXECUTOR_SUBMIT`, `submit` | the returned `Future` is cancelled: `get()` throws `CancellationException` |
+| `ThreadPoolExecutor` | `EXECUTOR_SUBMIT`, `execute` of a plain `Runnable` | nothing: the task is dropped, and there is no future to observe it |
+| `ScheduledThreadPoolExecutor` | `SCHEDULE_SUBMIT`, `schedule` (also `submit` and `execute`, which schedule with no delay) | the task is replaced by a no-op before the executor builds its future, so a one-shot future completes normally with `null`; it is never cancelled. A periodic schedule runs the no-op at each period |
+| `Executors.newVirtualThreadPerTaskExecutor()` | — | neither operation is raised: each task starts a virtual thread, which `VIRTUAL_THREAD_START` selects |
 
 **Use cases:** suppress `QUEUE_OFFER` to simulate a full bounded queue; suppress `RESOURCE_LOAD` to simulate a missing resource. HTTP and JDBC calls take a reject (the client's own `IOException` / `SQLException`), not a suppress.
 
