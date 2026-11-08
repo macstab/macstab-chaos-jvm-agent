@@ -39,6 +39,11 @@ public final class InstallerProbeMain {
       case "foreign-copy" -> foreignCopy();
       case "dispatcher-before-install" -> dispatcherBeforeInstall();
       case "reports-during-shutdown" -> reportsDuringShutdown();
+      case "retransform-failure" -> retransformFailure();
+      case "reset-failure" -> resetFailure();
+      case "escapees" -> escapees(false);
+      case "escapee-batch-failure" -> escapees(true);
+      case "premain-retransform-failure" -> premainRetransformFailure(args[1]);
       default -> throw new IllegalArgumentException("unknown probe mode: " + args[0]);
     }
   }
@@ -210,6 +215,111 @@ public final class InstallerProbeMain {
                   }
                   System.out.flush();
                 }));
+  }
+
+  /**
+   * The JVM refuses to retransform {@code java.lang.Thread}: the THREAD_SLEEP activation fails, the
+   * group is not recorded as woven, the failure is in the hook failures, and the next activation
+   * weaves the group again.
+   */
+  private static void retransformFailure() throws Exception {
+    final ScriptedInstrumentation scripted =
+        new ScriptedInstrumentation(net.bytebuddy.agent.ByteBuddyAgent.install())
+            .failRetransformOf("java.lang.Thread");
+    final ChaosRuntime runtime = new ChaosRuntime();
+    JdkInstrumentationInstaller.install(scripted, runtime, false, List.of(), List.of());
+    try {
+      runtime.activate(sleepDelay("refused-sleep"));
+      System.out.println("refusedActivation=activated");
+    } catch (final RuntimeException refused) {
+      System.out.println("refusedActivation=" + refused.getClass().getSimpleName());
+    }
+    final java.util.Map<String, String> details = runtime.diagnostics().snapshot().runtimeDetails();
+    System.out.println("wovenAfterRefusal=" + details.get("wovenHookGroups"));
+    System.out.println(
+        "hookFailureNamesGroup="
+            + String.valueOf(details.get("hookFailures"))
+                .contains("THREAD_SLEEP: java.lang.IllegalStateException"));
+    scripted.failRetransformOf();
+    runtime.activate(sleepDelay("retried-sleep"));
+    System.out.println(
+        "threadRetransforms="
+            + scripted.retransformCalls().stream()
+                .filter(call -> call.contains("java.lang.Thread"))
+                .count());
+    System.out.println("retriedSleepMillis=" + sleepMillis());
+  }
+
+  /**
+   * The JVM refuses to retransform a woven class back: the uninstall reports it and still clears.
+   */
+  private static void resetFailure() throws Exception {
+    final ScriptedInstrumentation scripted =
+        new ScriptedInstrumentation(net.bytebuddy.agent.ByteBuddyAgent.install());
+    final ChaosRuntime runtime = new ChaosRuntime();
+    JdkInstrumentationInstaller.install(scripted, runtime, false, List.of(), List.of());
+    runtime.activate(sleepDelay("woven-sleep"));
+    scripted.failRetransformOf("java.lang.Thread");
+    try {
+      JdkInstrumentationInstaller.uninstall(scripted);
+      System.out.println("uninstallFailure=none");
+    } catch (final IllegalStateException failed) {
+      System.out.println("uninstallFailure=" + failed.getMessage());
+    }
+    System.out.println("uninstalledAgain=" + JdkInstrumentationInstaller.uninstall(scripted));
+  }
+
+  /** The classes woven after an installation because they escaped it; see the installer. */
+  private static final List<String> ESCAPEES =
+      List.of(
+          "java.io.ObjectOutputStream",
+          "java.io.ObjectInputStream",
+          "java.lang.VirtualThread",
+          "java.net.Socket",
+          "java.net.ServerSocket",
+          "sun.nio.ch.NioSocketImpl");
+
+  /**
+   * Weaves a group: the classes that escape an installation are retransformed in one call, and
+   * (with {@code failBatch}) a refused batch is retried one class at a time.
+   */
+  private static void escapees(final boolean failBatch) throws Exception {
+    final Instrumentation real = net.bytebuddy.agent.ByteBuddyAgent.install();
+    final ScriptedInstrumentation scripted = new ScriptedInstrumentation(real);
+    final ChaosRuntime runtime = new ChaosRuntime();
+    JdkInstrumentationInstaller.install(scripted, runtime, false, List.of(), List.of());
+    if (failBatch) {
+      scripted.failRetransformOf("java.io.ObjectOutputStream");
+    }
+    runtime.activate(sleepDelay("escapee-sleep"));
+    final List<List<String>> escapeeCalls =
+        scripted.retransformCalls().stream()
+            .filter(call -> call.stream().anyMatch(ESCAPEES::contains))
+            .toList();
+    System.out.println(
+        "batchCalls="
+            + escapeeCalls.stream()
+                .filter(
+                    call ->
+                        call.contains("java.io.ObjectOutputStream")
+                            && call.contains("java.net.Socket"))
+                .count());
+    System.out.println("escapeeCalls=" + escapeeCalls.size());
+    System.out.println(
+        "socketAlone="
+            + escapeeCalls.stream().anyMatch(call -> call.equals(List.of("java.net.Socket"))));
+  }
+
+  /**
+   * {@code premain} with a startup plan whose weave the JVM refuses: it throws, as for every other
+   * startup-plan failure, after writing the error to the status file.
+   */
+  private static void premainRetransformFailure(final String agentArgs) {
+    final ScriptedInstrumentation scripted =
+        new ScriptedInstrumentation(net.bytebuddy.agent.ByteBuddyAgent.install())
+            .failRetransformOf("java.lang.Thread");
+    ChaosAgentBootstrap.premain(agentArgs, scripted);
+    System.out.println("premainReturned=true");
   }
 
   /** The listeners registered on {@code runtime}'s event bus. */

@@ -854,6 +854,83 @@ class AgentEndToEndTest {
     }
 
     @Test
+    @DisplayName(
+        "a group whose retransformation the JVM refuses fails the activation, is reported and"
+            + " woven by the next activation")
+    void refusedRetransformationFailsTheActivation() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.runWithoutAgent(InstallerProbeMain.class, "retransform-failure");
+
+      assertThat(result.value("refusedActivation")).isEqualTo("ChaosInstrumentationException");
+      assertThat(result.value("wovenAfterRefusal")).doesNotContain("THREAD_SLEEP");
+      assertThat(result.value("hookFailureNamesGroup")).isEqualTo("true");
+      assertThat(result.longValue("threadRetransforms")).as("tried again").isEqualTo(2L);
+      assertThat(result.longValue("retriedSleepMillis")).isGreaterThanOrEqualTo(250L);
+    }
+
+    @Test
+    @DisplayName("an uninstall whose retransformation the JVM refuses reports it and still clears")
+    void refusedResetIsReported() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.runWithoutAgent(InstallerProbeMain.class, "reset-failure");
+
+      assertThat(result.value("uninstallFailure")).startsWith("Could not transform any of");
+      assertThat(result.value("uninstalledAgain")).isEqualTo("false");
+    }
+
+    @Test
+    @DisplayName("the classes that escape an installation are retransformed in one call")
+    void escapeesInOneCall() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.runWithoutAgent(InstallerProbeMain.class, "escapees");
+
+      assertThat(result.longValue("escapeeCalls")).isEqualTo(1L);
+      assertThat(result.longValue("batchCalls")).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("a refused escapee batch is retried one class at a time")
+    void refusedEscapeeBatchIsRetriedPerClass() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.runWithoutAgent(InstallerProbeMain.class, "escapee-batch-failure");
+
+      assertThat(result.longValue("batchCalls")).isEqualTo(1L);
+      assertThat(result.value("socketAlone")).isEqualTo("true");
+    }
+
+    @Test
+    @DisplayName(
+        "premain with a startup plan whose weave the JVM refuses aborts and writes the error"
+            + " status")
+    void premainAbortsOnARefusedWeave() throws Exception {
+      final Path reports = Files.createDirectories(tempDir.resolve("reports"));
+      final Path planFile = tempDir.resolve("refused-plan.json");
+      Files.writeString(
+          planFile,
+          com.macstab.chaos.jvm.startup.ChaosPlanMapper.write(
+              plan(
+                  scenario(
+                      "refused-sleep",
+                      ChaosSelector.thread(
+                          Set.of(OperationType.THREAD_SLEEP), ChaosSelector.ThreadKind.ANY),
+                      ChaosEffect.delay(Duration.ofMillis(1))))));
+
+      final ChildJvmProbe.Failure failure =
+          probe.runWithoutAgentExpectingFailure(
+              InstallerProbeMain.class,
+              "premain-retransform-failure",
+              "configFile=" + planFile + ";reports=on;reportsDir=" + reports);
+
+      assertThat(failure.exitValue()).as("premain aborts: %s", failure.output()).isNotZero();
+      assertThat(failure.output())
+          .contains("ChaosInstrumentationException")
+          .contains("Could not install class file transformer")
+          .doesNotContain("premainReturned=true");
+      assertThat(Files.readString(reports.resolve(ChaosReports.STATUS_FILE)))
+          .contains("state=error");
+    }
+
+    @Test
     @DisplayName("a second copy of the agent in another class loader is refused, not hijacking")
     void secondAgentCopyIsRefused() throws Exception {
       final ChildJvmProbe.ProbeResult result =

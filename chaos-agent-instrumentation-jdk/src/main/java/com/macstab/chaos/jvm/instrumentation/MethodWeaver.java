@@ -82,6 +82,7 @@ final class MethodWeaver {
                                           .and(ElementMatchers.returns(void.class)))))
               .installOn(instrumentation);
     } catch (final RuntimeException failure) {
+      HookCoverage.failed("METHODS", failure);
       throw new IllegalStateException("failed to weave method hooks for " + snapshot, failure);
     }
     woven = snapshot;
@@ -92,13 +93,19 @@ final class MethodWeaver {
    * Removes every method hook.
    *
    * @param instrumentation the instrumentation handle
+   * @return {@code true} if method hooks were woven
+   * @throws IllegalStateException if the JVM refused to retransform a class back; the transformer
+   *     is removed all the same
    */
-  static synchronized void reset(final Instrumentation instrumentation) {
-    if (transformer != null) {
-      transformer.reset(instrumentation, AgentBuilder.RedefinitionStrategy.RETRANSFORMATION);
-      transformer = null;
-    }
+  static synchronized boolean reset(final Instrumentation instrumentation) {
+    final ResettableClassFileTransformer current = transformer;
+    transformer = null;
     woven = Set.of();
+    if (current == null) {
+      return false;
+    }
+    JdkInstrumentationInstaller.reset(current, instrumentation);
+    return true;
   }
 
   /** Returns whether any method hook is woven; for diagnostics. */

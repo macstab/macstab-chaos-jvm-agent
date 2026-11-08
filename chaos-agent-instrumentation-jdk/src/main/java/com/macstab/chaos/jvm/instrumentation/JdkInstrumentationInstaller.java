@@ -174,8 +174,12 @@ public final class JdkInstrumentationInstaller {
     } catch (final RuntimeException | Error failure) {
       // Leave nothing bound to this runtime: a later install attempt must start from a clean
       // dispatcher, and the instrumented JDK classes must not call into a runtime that never
-      // became active.
-      uninstall(instrumentation);
+      // became active. A failing uninstall must not replace the failure that caused it.
+      try {
+        uninstall(instrumentation);
+      } catch (final RuntimeException | Error uninstallFailure) {
+        failure.addSuppressed(uninstallFailure);
+      }
       throw failure;
     }
   }
@@ -186,9 +190,13 @@ public final class JdkInstrumentationInstaller {
    * reset on its own. Groups stay woven until {@link #uninstall}: re-weaving on every activation
    * and stop would retransform core JDK classes over and over in test suites.
    *
+   * <p>A group the JVM refuses to retransform is not recorded as woven (the next call that needs it
+   * tries again) and is listed in the hook failures.
+   *
    * @param instrumentation the instrumentation handle
    * @param operations the operations about to be evaluated
-   * @throws IllegalStateException if a group cannot be woven
+   * @throws IllegalStateException if a group cannot be woven, also when the JVM refuses to
+   *     retransform one of its classes
    */
   static void weave(final Instrumentation instrumentation, final Set<OperationType> operations) {
     synchronized (WOVEN_GROUPS) {
@@ -201,6 +209,8 @@ public final class JdkInstrumentationInstaller {
         try {
           transformer = group.apply(buildBaseAgentBuilder()).installOn(instrumentation);
         } catch (final RuntimeException failure) {
+          // Not recorded as woven: the next activation that needs the group tries again.
+          HookCoverage.failed(group.name(), failure);
           throw new IllegalStateException(
               "failed to instrument " + group + " for " + group.operations(), failure);
         }
@@ -441,22 +451,60 @@ public final class JdkInstrumentationInstaller {
    * @param instrumentation the same {@link Instrumentation} handle originally passed to {@link
    *     #install}; required so the underlying JVMTI retransformation can see the previously
    *     transformed classes
+   *     <p>Every step runs even when an earlier one fails: the delegate is cleared, the
+   *     transformers are removed and the hook coverage is reset, so a later install starts empty.
    * @return {@code true} if a transformer was reset or this copy's delegate was cleared; {@code
    *     false} if there was nothing to undo
+   * @throws IllegalStateException after every step ran, if the JVM refused to retransform a class
+   *     back (it keeps the advice) or another step failed: the first failure, with the later ones
+   *     attached as suppressed
    */
   public static boolean uninstall(final Instrumentation instrumentation) {
-    final boolean delegateCleared = clearOwnDelegate();
-    MethodWeaver.reset(instrumentation);
+    final List<RuntimeException> failures = new java.util.ArrayList<>();
+    boolean undone = false;
+    try {
+      undone = clearOwnDelegate();
+    } catch (final RuntimeException failure) {
+      failures.add(failure);
+    }
+    try {
+      undone |= MethodWeaver.reset(instrumentation);
+    } catch (final RuntimeException failure) {
+      failures.add(failure);
+    }
     synchronized (WOVEN_GROUPS) {
-      if (WOVEN_GROUPS.isEmpty()) {
-        return delegateCleared;
-      }
       for (final ResettableClassFileTransformer transformer : WOVEN_GROUPS.values()) {
-        transformer.reset(instrumentation, AgentBuilder.RedefinitionStrategy.RETRANSFORMATION);
+        try {
+          reset(transformer, instrumentation);
+        } catch (final RuntimeException failure) {
+          failures.add(failure);
+        }
+        undone = true;
       }
       WOVEN_GROUPS.clear();
     }
-    return true;
+    HookCoverage.reset();
+    if (!failures.isEmpty()) {
+      final RuntimeException first = failures.get(0);
+      failures.subList(1, failures.size()).forEach(first::addSuppressed);
+      throw first;
+    }
+    return undone;
+  }
+
+  /**
+   * Removes {@code transformer} and retransforms its classes back, failing when the JVM refuses
+   * one: the default listener would ignore that, and the class would keep its advice silently.
+   *
+   * @throws IllegalStateException if a class could not be retransformed
+   */
+  static void reset(
+      final ResettableClassFileTransformer transformer, final Instrumentation instrumentation) {
+    transformer.reset(
+        instrumentation,
+        AgentBuilder.RedefinitionStrategy.RETRANSFORMATION,
+        AgentBuilder.RedefinitionStrategy.BatchAllocator.ForTotal.INSTANCE,
+        AgentBuilder.RedefinitionStrategy.Listener.ErrorEscalating.FAIL_FAST);
   }
 
   /**
@@ -738,16 +786,32 @@ public final class JdkInstrumentationInstaller {
    * See {@link #POST_INSTALL_RETRANSFORM_TARGETS} for the list and rationale.
    */
   private static void retransformPostInstallEscapees(final Instrumentation instrumentation) {
+    // A target not loaded yet is loaded here (not initialized): it is one that loads inside
+    // another class's transformation, where it would escape the transformers again.
+    final List<Class<?>> loaded = new java.util.ArrayList<>();
     for (final String name : POST_INSTALL_RETRANSFORM_TARGETS) {
       try {
-        final Class<?> cls = Class.forName(name, false, null);
-        if (instrumentation.isModifiableClass(cls)) {
-          instrumentation.retransformClasses(cls);
+        final Class<?> target = Class.forName(name, false, null);
+        if (instrumentation.isModifiableClass(target)) {
+          loaded.add(target);
         }
-      } catch (final ClassNotFoundException notLoaded) {
-        // Not loaded yet — the regular ClassFileTransformer will catch it on first use.
-      } catch (final Throwable failure) {
-        LOGGER.warning("failed to retransform " + name + ": " + failure);
+      } catch (final ClassNotFoundException absent) {
+        // not in this JDK
+      }
+    }
+    if (loaded.isEmpty()) {
+      return;
+    }
+    try {
+      instrumentation.retransformClasses(loaded.toArray(new Class<?>[0]));
+    } catch (final Throwable batchFailure) {
+      // One refused class fails the whole call: retry each, so the others still get their advice.
+      for (final Class<?> escapee : loaded) {
+        try {
+          instrumentation.retransformClasses(escapee);
+        } catch (final Throwable failure) {
+          LOGGER.warning("failed to retransform " + escapee.getName() + ": " + failure);
+        }
       }
     }
   }
@@ -762,8 +826,9 @@ public final class JdkInstrumentationInstaller {
   }
 
   /**
-   * Builds the base {@link AgentBuilder} with retransformation strategy, error logging, and ignore
-   * rules for ByteBuddy and chaos-agent internal packages.
+   * Builds the base {@link AgentBuilder} with retransformation strategy, failing on a refused
+   * retransformation, error logging, and ignore rules for ByteBuddy and chaos-agent internal
+   * packages.
    */
   private static AgentBuilder buildBaseAgentBuilder() {
     final AgentBuilder.Listener.Adapter errorListener =
@@ -782,6 +847,9 @@ public final class JdkInstrumentationInstaller {
     return new AgentBuilder.Default()
         .disableClassFormatChanges()
         .with(AgentBuilder.RedefinitionStrategy.RETRANSFORMATION)
+        // A class the JVM refuses to retransform fails the installation (ByteBuddy removes the
+        // transformer and throws) instead of leaving a group recorded as woven with inert hooks.
+        .with(AgentBuilder.RedefinitionStrategy.Listener.ErrorEscalating.FAIL_FAST)
         .with(errorListener)
         .ignore(
             ElementMatchers.nameStartsWith("net.bytebuddy.")

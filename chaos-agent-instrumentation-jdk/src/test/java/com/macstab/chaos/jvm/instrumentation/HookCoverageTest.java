@@ -61,6 +61,30 @@ class HookCoverageTest {
   }
 
   @Test
+  @DisplayName("an uninstall clears the coverage: a reinstall starts empty")
+  void reinstallStartsEmpty() {
+    HookCoverage.failed("com.example.Gone", new IllegalStateException("refused"));
+    HookCoverage.track(OtherAdvice.class, ElementMatchers.named("neverMatched"));
+
+    JdkInstrumentationInstaller.uninstall(noInstrumentation());
+
+    assertThat(HookCoverage.failures()).isEmpty();
+    assertThat(HookCoverage.unmatched()).isEmpty();
+    assertThat(HookCoverage.matched()).isEmpty();
+  }
+
+  /** An instrumentation with nothing woven through it: an uninstall never calls it. */
+  private static java.lang.instrument.Instrumentation noInstrumentation() {
+    return (java.lang.instrument.Instrumentation)
+        java.lang.reflect.Proxy.newProxyInstance(
+            HookCoverageTest.class.getClassLoader(),
+            new Class<?>[] {java.lang.instrument.Instrumentation.class},
+            (proxy, method, arguments) -> {
+              throw new AssertionError("unexpected call " + method.getName());
+            });
+  }
+
+  @Test
   @DisplayName("a failed transformation is reported with its type and cause")
   void failureIsReported() {
     HookCoverage.failed("com.example.Old", new IllegalStateException("class file version 50"));

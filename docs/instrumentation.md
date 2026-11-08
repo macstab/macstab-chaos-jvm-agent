@@ -148,7 +148,16 @@ ChaosControlPlane → HookDemand.require(SelectorOperations.of(selector))
    — RETRANSFORMATION strategy: retransforms already-loaded JDK classes
    — disableClassFormatChanges(): no structural changes; only adds advice bytecode inline
    — Error listener: logs warnings on per-class transformation failure; does not abort
-   — If installOn() throws, the activation fails (failure category INSTRUMENTATION_FAILURE)
+   — Redefinition listener ErrorEscalating.FAIL_FAST: a class the JVM refuses to retransform
+     makes installOn() remove the group's transformer and throw
+   — If installOn() throws, the group is not recorded as woven (the next activation that
+     needs it tries again), the failure is listed under hookFailures as `GROUP: error`, and
+     the activation fails with ChaosInstrumentationException (failure category
+     INSTRUMENTATION_FAILURE); for a startup plan this aborts premain, after the status file
+     is written
+   — then the classes that escape an installation (POST_INSTALL_RETRANSFORM_TARGETS) are
+     loaded (not initialized) and retransformed in one call, each on its own if that call
+     fails
 ```
 
 ## Per-Call Dispatch (hot path)
@@ -271,7 +280,7 @@ flowchart TB
 
 ## JdkInstrumentationInstaller
 
-**Responsibility**: Setup of the instrumentation stack. `install()` is called once per JVM from a single thread (serialised by the bootstrap); it injects the bridge, installs the delegate and registers the `HookDemand` callback. `weave()` then installs one `AgentBuilder` per `HookGroup` on demand and retains each group's `ResettableClassFileTransformer`, so that `uninstall(Instrumentation)` can reset every woven group and clear the bridge delegate — used by the bootstrap to roll back a failed initialization. The woven groups are reported in `ChaosDiagnostics.snapshot().runtimeDetails()` under `wovenHookGroups` (comma-separated, sorted group names; empty when none).
+**Responsibility**: Setup of the instrumentation stack. `install()` is called once per JVM from a single thread (serialised by the bootstrap); it injects the bridge, installs the delegate and registers the `HookDemand` callback. `weave()` then installs one `AgentBuilder` per `HookGroup` on demand and retains each group's `ResettableClassFileTransformer`, so that `uninstall(Instrumentation)` can reset every woven group and clear the bridge delegate — used by the bootstrap to roll back a failed initialization. `uninstall` runs every step even when one fails, resets the hook coverage, and then throws the first failure (a class the JVM refused to retransform back keeps its advice) with the others suppressed. The woven groups are reported in `ChaosDiagnostics.snapshot().runtimeDetails()` under `wovenHookGroups` (comma-separated, sorted group names; empty when none).
 
 **Hook coverage.** Every advice is applied through `advise(advice, methods)`, which wraps the method matcher in a recording one (`HookCoverage`). A hook is *registered* when it is woven into a type and *matched* once it matches a method of any type it is woven into — per hook, not per type, because a hook on the subtypes of a JDK type reaches subtypes that inherit the method. A registered hook that never matched is inactive: the JDK or library changed the method's name or signature (as JDK 25 did to `InetAddress.getHostFromNameService`). Such hooks are listed under `unmatchedHooks`, failed transformations under `hookFailures`. `HookCoverageIntegrationTest` weaves every group in a child JVM, loads every class a hook targets (JDK and client libraries) and requires every advice class to match, on each JDK the build tests.
 

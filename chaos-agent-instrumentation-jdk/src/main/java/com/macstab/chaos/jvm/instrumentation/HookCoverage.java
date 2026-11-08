@@ -82,6 +82,13 @@ final class HookCoverage {
     return Collections.unmodifiableSet(new TreeSet<>(FAILED));
   }
 
+  /** Forgets every hook and failure: the hooks were removed, a reinstall records them anew. */
+  static void reset() {
+    REGISTERED.clear();
+    MATCHED.clear();
+    FAILED.clear();
+  }
+
   /**
    * Returns the hooks that matched a method, as {@code advice on matcher}.
    *

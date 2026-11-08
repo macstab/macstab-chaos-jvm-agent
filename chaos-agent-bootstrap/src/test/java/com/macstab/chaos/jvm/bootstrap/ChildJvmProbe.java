@@ -54,6 +54,38 @@ final class ChildJvmProbe {
   }
 
   /**
+   * Runs {@code mainClass mode programArgs} in a child JVM without {@code -javaagent:}, for a probe
+   * that is expected to end the JVM with a failure.
+   *
+   * @param mainClass the probe main class
+   * @param mode the probe mode passed as the first program argument
+   * @param programArgs further program arguments
+   * @return the child's exit value and output
+   */
+  Failure runWithoutAgentExpectingFailure(
+      final Class<?> mainClass, final String mode, final String... programArgs) throws Exception {
+    final List<String> command = new ArrayList<>();
+    command.add(Path.of(System.getProperty("java.home"), "bin", "java").toString());
+    command.add("-Djdk.attach.allowAttachSelf=true");
+    command.add("-XX:+EnableDynamicAgentLoading");
+    command.add("-cp");
+    command.add(System.getProperty("java.class.path"));
+    command.add(mainClass.getName());
+    command.add(mode);
+    command.addAll(List.of(programArgs));
+    final Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
+    final String output =
+        new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+    assertThat(process.waitFor(TIMEOUT_SECONDS, TimeUnit.SECONDS))
+        .as("probe JVM must finish within %d s: %s", TIMEOUT_SECONDS, output)
+        .isTrue();
+    return new Failure(process.exitValue(), output);
+  }
+
+  /** Exit value and output of a probe run expected to fail. */
+  record Failure(int exitValue, String output) {}
+
+  /**
    * Runs {@code mainClass mode} in a child JVM with the agent attached and no startup plan.
    *
    * @param mainClass the probe main class

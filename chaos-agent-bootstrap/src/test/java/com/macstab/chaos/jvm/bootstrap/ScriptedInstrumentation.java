@@ -14,8 +14,9 @@ import org.jspecify.annotations.Nullable;
  * The JVM's instrumentation with scripted interference, for the start-up paths a healthy JVM never
  * takes: a hook that runs on the first bridge append or module redefinition (the first calls the
  * agent makes while installing), a failure when the bridge jar is appended to the bootstrap class
- * path, and a failure when a transformer is removed. It counts the bridge appends and module
- * redefinitions it sees.
+ * path, a failure when a transformer is removed, and a refused retransformation of named classes.
+ * It counts the bridge appends and module redefinitions, and records the retransformations, it
+ * sees.
  */
 final class ScriptedInstrumentation implements Instrumentation {
 
@@ -23,6 +24,9 @@ final class ScriptedInstrumentation implements Instrumentation {
   private volatile @Nullable Runnable onFirstInstallStep;
   private volatile @Nullable Throwable bridgeFailure;
   private volatile boolean failTransformerRemoval;
+  private volatile java.util.Set<String> failRetransformOf = java.util.Set.of();
+  private final java.util.List<java.util.List<String>> retransformCalls =
+      new java.util.concurrent.CopyOnWriteArrayList<>();
   private final AtomicInteger appends = new AtomicInteger();
   private final AtomicInteger moduleRedefinitions = new AtomicInteger();
 
@@ -37,6 +41,20 @@ final class ScriptedInstrumentation implements Instrumentation {
   ScriptedInstrumentation onFirstInstallStep(final Runnable hook) {
     this.onFirstInstallStep = hook;
     return this;
+  }
+
+  /**
+   * Makes every retransformation that includes one of {@code classNames} fail as the JVM refuses
+   * one; none refused when empty.
+   */
+  ScriptedInstrumentation failRetransformOf(final String... classNames) {
+    this.failRetransformOf = java.util.Set.of(classNames);
+    return this;
+  }
+
+  /** Returns the class names of every retransformation requested so far, one list per call. */
+  java.util.List<java.util.List<String>> retransformCalls() {
+    return java.util.List.copyOf(retransformCalls);
   }
 
   /** Returns how many times a jar was appended to the bootstrap class path. */
@@ -123,6 +141,14 @@ final class ScriptedInstrumentation implements Instrumentation {
 
   @Override
   public void retransformClasses(final Class<?>... classes) throws UnmodifiableClassException {
+    final java.util.List<String> names =
+        java.util.Arrays.stream(classes).map(Class::getName).toList();
+    retransformCalls.add(names);
+    for (final String name : names) {
+      if (failRetransformOf.contains(name)) {
+        throw new UnmodifiableClassException("scripted refusal of " + name);
+      }
+    }
     delegate.retransformClasses(classes);
   }
 
