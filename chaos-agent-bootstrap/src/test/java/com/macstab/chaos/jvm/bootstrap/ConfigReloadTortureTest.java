@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.macstab.chaos.jvm.api.ChaosDiagnostics;
 import com.macstab.chaos.jvm.core.ChaosRuntime;
+import com.macstab.chaos.jvm.startup.AgentSettings;
 import com.macstab.chaos.jvm.startup.ChaosPlanMapper;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -56,7 +57,8 @@ class ConfigReloadTortureTest {
   @DisplayName("invalid and torn plans are never applied, valid ones always are")
   void torture() throws Exception {
     reports =
-        ChaosReports.createIfEnabled("reports=on;reportsDir=" + tempDir, Map.of(), runtime)
+        ChaosReports.createIfEnabled(
+                AgentSettings.of("reports=on;reportsDir=" + tempDir, Map.of()), runtime)
             .orElseThrow();
     final Path volume = Files.createDirectories(tempDir.resolve("configmap"));
     int generation = 0;
@@ -64,8 +66,7 @@ class ConfigReloadTortureTest {
     Files.createSymbolicLink(volume.resolve("plan.json"), Path.of("..data", "plan.json"));
     poller =
         StartupConfigPoller.createIfEnabled(
-                "configWatchInterval=" + POLL_MILLIS,
-                Map.of(),
+                AgentSettings.of("configWatchInterval=" + POLL_MILLIS, Map.of()),
                 volume.resolve("plan.json"),
                 runtime)
             .orElseThrow();
@@ -147,14 +148,16 @@ class ConfigReloadTortureTest {
   @DisplayName("a broken plan reports its line and column in the status file")
   void statusReportsPosition() throws Exception {
     reports =
-        ChaosReports.createIfEnabled("reports=on;reportsDir=" + tempDir, Map.of(), runtime)
+        ChaosReports.createIfEnabled(
+                AgentSettings.of("reports=on;reportsDir=" + tempDir, Map.of()), runtime)
             .orElseThrow();
     final Path file = tempDir.resolve("plan.json");
     Files.writeString(file, validPlan("ok"));
     Files.setLastModifiedTime(
         file, java.nio.file.attribute.FileTime.fromMillis(System.currentTimeMillis() - 60_000));
     poller =
-        StartupConfigPoller.createIfEnabled("configWatchInterval=3600000", Map.of(), file, runtime)
+        StartupConfigPoller.createIfEnabled(
+                AgentSettings.of("configWatchInterval=3600000", Map.of()), file, runtime)
             .orElseThrow();
     poller.startWithInitialPlan(ChaosPlanMapper.read(validPlan("ok")), null);
 
@@ -170,14 +173,16 @@ class ConfigReloadTortureTest {
   @DisplayName("reverting a broken edit reports ok again; the broken content again is an error")
   void revertedEditReportsOk() throws Exception {
     reports =
-        ChaosReports.createIfEnabled("reports=on;reportsDir=" + tempDir, Map.of(), runtime)
+        ChaosReports.createIfEnabled(
+                AgentSettings.of("reports=on;reportsDir=" + tempDir, Map.of()), runtime)
             .orElseThrow();
     final Path file = tempDir.resolve("plan.json");
     final Path status = tempDir.resolve(ChaosReports.STATUS_FILE);
     final String broken = "{\n  \"scenarios\": [\n    {\"id\": oops}\n  ]\n}\n";
     write(file, validPlan("ok"), 60);
     poller =
-        StartupConfigPoller.createIfEnabled("configWatchInterval=3600000", Map.of(), file, runtime)
+        StartupConfigPoller.createIfEnabled(
+                AgentSettings.of("configWatchInterval=3600000", Map.of()), file, runtime)
             .orElseThrow();
     poller.startWithInitialPlan(ChaosPlanMapper.read(validPlan("ok")), null);
     poller.pollOnce();

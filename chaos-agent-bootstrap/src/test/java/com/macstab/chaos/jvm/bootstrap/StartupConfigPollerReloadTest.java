@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.macstab.chaos.jvm.api.ChaosEvent;
 import com.macstab.chaos.jvm.core.ChaosRuntime;
+import com.macstab.chaos.jvm.startup.AgentSettings;
 import com.macstab.chaos.jvm.startup.ChaosPlanMapper;
 import com.macstab.chaos.jvm.startup.StartupConfigLoader;
 import java.io.IOException;
@@ -54,7 +55,8 @@ class StartupConfigPollerReloadTest {
     // Old enough that the first read is not provisional (a file being written right now).
     Files.setLastModifiedTime(file, FileTime.from(Instant.now().minusSeconds(60)));
     poller =
-        StartupConfigPoller.createIfEnabled("configWatchInterval=3600000", Map.of(), file, runtime)
+        StartupConfigPoller.createIfEnabled(
+                AgentSettings.of("configWatchInterval=3600000", Map.of()), file, runtime)
             .orElseThrow();
     final StartupConfigLoader.PlanFile baseline =
         StartupConfigLoader.readPlanFile(file.toString()).orElseThrow();
@@ -129,9 +131,12 @@ class StartupConfigPollerReloadTest {
   @DisplayName("a blank interval is no interval; a tiny one is raised to the minimum")
   void intervalBounds() {
     assertThat(
-            StartupConfigPoller.resolveInterval(null, Map.of("MACSTAB_CHAOS_WATCH_INTERVAL", " ")))
+            StartupConfigPoller.resolveInterval(
+                AgentSettings.of(null, Map.of("MACSTAB_CHAOS_WATCH_INTERVAL", " "))))
         .isZero();
-    assertThat(StartupConfigPoller.resolveInterval("configWatchInterval=10", Map.of()))
+    assertThat(
+            StartupConfigPoller.resolveInterval(
+                AgentSettings.of("configWatchInterval=10", Map.of())))
         .as("raised to the minimum")
         .isEqualTo(StartupConfigPoller.MIN_WATCH_INTERVAL_MS);
   }

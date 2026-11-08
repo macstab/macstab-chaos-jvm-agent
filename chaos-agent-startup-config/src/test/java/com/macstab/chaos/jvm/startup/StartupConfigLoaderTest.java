@@ -57,6 +57,31 @@ class StartupConfigLoaderTest {
     }
 
     @Test
+    @DisplayName("each source has a system property, read after the agent arg")
+    void systemProperties() {
+      final String json = writeSampleJson("property-test");
+      System.setProperty("macstab.chaos.configJson", json);
+      System.setProperty("macstab.chaos.debugDumpOnStart", "true");
+      try {
+        final StartupConfigLoader.LoadedPlan loaded =
+            StartupConfigLoader.load(null, Map.of()).orElseThrow();
+
+        assertThat(loaded.plan().metadata().name()).isEqualTo("property-test");
+        assertThat(loaded.debugDumpOnStart()).isTrue();
+        assertThat(
+                StartupConfigLoader.load("configJson=" + writeSampleJson("arg-test"), Map.of())
+                    .orElseThrow()
+                    .plan()
+                    .metadata()
+                    .name())
+            .isEqualTo("arg-test");
+      } finally {
+        System.clearProperty("macstab.chaos.configJson");
+        System.clearProperty("macstab.chaos.debugDumpOnStart");
+      }
+    }
+
+    @Test
     @DisplayName("inline JSON from environment is loaded")
     void inlineJsonFromEnv() {
       String json = writeSampleJson("env-test");

@@ -21,6 +21,7 @@ import com.macstab.chaos.jvm.api.ChaosSelector;
 import com.macstab.chaos.jvm.api.ChaosValidationException;
 import com.macstab.chaos.jvm.api.OperationType;
 import com.macstab.chaos.jvm.core.ChaosRuntime;
+import com.macstab.chaos.jvm.startup.AgentSettings;
 import com.macstab.chaos.jvm.startup.ChaosPlanMapper;
 import com.macstab.chaos.jvm.startup.StartupConfigLoader;
 import java.io.ByteArrayOutputStream;
@@ -71,7 +72,7 @@ class StartupConfigPollerEdgeCaseTest {
   private StartupConfigPoller poller(final String interval) {
     poller =
         StartupConfigPoller.createIfEnabled(
-                "configWatchInterval=" + interval, Map.of(), config, runtime)
+                AgentSettings.of("configWatchInterval=" + interval, Map.of()), config, runtime)
             .orElseThrow();
     return poller;
   }

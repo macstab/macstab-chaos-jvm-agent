@@ -7,6 +7,7 @@ import com.macstab.chaos.jvm.api.ChaosSelector;
 import com.macstab.chaos.jvm.api.OperationType;
 import com.macstab.chaos.jvm.core.ChaosRuntime;
 import com.macstab.chaos.jvm.instrumentation.JdkInstrumentationInstaller;
+import com.macstab.chaos.jvm.startup.AgentSettings;
 import java.lang.instrument.Instrumentation;
 import java.net.URL;
 import java.net.URLClassLoader;
@@ -195,7 +196,8 @@ public final class InstallerProbeMain {
                 () -> {
                   try {
                     ChaosReports.createIfEnabled(
-                        "reports=on;reportsDir=" + dir, java.util.Map.of(), runtime);
+                        AgentSettings.of("reports=on;reportsDir=" + dir, java.util.Map.of()),
+                        runtime);
                     System.out.println("reportsFailure=none");
                   } catch (final IllegalStateException failed) {
                     System.out.println("reportsFailure=" + failed.getMessage());

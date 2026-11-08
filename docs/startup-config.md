@@ -42,12 +42,17 @@ Sources are evaluated in fixed priority order. **First match wins.** No merging.
 
 ```
 Priority 1: agent arg "configJson"           (inline JSON string in JVM argument)
+            -Dmacstab.chaos.configJson       (system property)
 Priority 2: env MACSTAB_CHAOS_CONFIG_JSON    (inline JSON in environment variable)
 Priority 3: agent arg "configBase64"         (base64-encoded JSON in JVM argument)
+            -Dmacstab.chaos.configBase64     (system property)
 Priority 4: env MACSTAB_CHAOS_CONFIG_BASE64  (base64-encoded JSON in environment variable)
 Priority 5: agent arg "configFile"           (file path in JVM argument)
+            -Dmacstab.chaos.configFile       (system property)
 Priority 6: env MACSTAB_CHAOS_CONFIG_FILE    (file path in environment variable)
 ```
+
+Each system property is read after its agent argument and before its environment variable. System properties are launch-time local sources and are trusted as the agent arguments are.
 
 If none of the above is present, `StartupConfigLoader.load()` returns `Optional.empty()`. The agent starts with no active scenarios.
 
@@ -71,7 +76,7 @@ The raw argument string (the part after `=`) is parsed by `AgentArgsParser`:
 - Empty or null argument string: produces empty `AgentArgs`
 - Arguments longer than 8192 characters are rejected
 
-Boolean values accept `true|false|1|0|yes|no|on|off` (case-insensitive). `debugDump` is accepted as an alias of `debugDumpOnStart`; the environment variable `MACSTAB_CHAOS_DEBUG_DUMP_ON_START` accepts the same literals.
+Boolean values accept `true|false|1|0|yes|no|on|off` (case-insensitive). `debugDump` is accepted as an alias of `debugDumpOnStart`; the system property `macstab.chaos.debugDumpOnStart` and the environment variable `MACSTAB_CHAOS_DEBUG_DUMP_ON_START` accept the same literals and are read in that order after the argument.
 
 ## AgentArgs Access
 
@@ -213,12 +218,15 @@ When the config source is a **file**, the agent can poll it continuously and app
 # agent arg (milliseconds)
 -javaagent:agent.jar=configFile=/etc/chaos/plan.json;configWatchInterval=500
 
+# or via system properties
+-Dmacstab.chaos.configFile=/etc/chaos/plan.json -Dmacstab.chaos.configWatchInterval=500
+
 # or via environment variables
 MACSTAB_CHAOS_CONFIG_FILE=/etc/chaos/plan.json
-MACSTAB_CHAOS_WATCH_INTERVAL=500
+MACSTAB_CHAOS_CONFIG_WATCH_INTERVAL=500
 ```
 
-`configWatchInterval` (agent arg) takes precedence over `MACSTAB_CHAOS_WATCH_INTERVAL` (env var). A value of `0` or absent disables watching — the file is read once at startup (watching is off by default). Values below 50 ms are raised to 50 ms. Watch mode is only available for file sources; inline JSON and base64 sources always use read-once mode.
+`configWatchInterval` (agent arg) takes precedence over `-Dmacstab.chaos.configWatchInterval`, then `MACSTAB_CHAOS_CONFIG_WATCH_INTERVAL`, then its alias `MACSTAB_CHAOS_WATCH_INTERVAL` (env vars). A value that is not a number disables watching with one `[chaos-agent]` line naming it. A value of `0` or absent disables watching — the file is read once at startup (watching is off by default). Values below 50 ms are raised to 50 ms. Watch mode is only available for file sources; inline JSON and base64 sources always use read-once mode.
 
 ## Diff algorithm
 
@@ -270,7 +278,7 @@ No JVM restart required.
 
 | Agent arg             | Environment variable           | Type      | Default      | Description                  |
 |-----------------------|--------------------------------|-----------|--------------|------------------------------|
-| `configWatchInterval` | `MACSTAB_CHAOS_WATCH_INTERVAL` | long (ms) | 0 (disabled) | Poll interval; 0 = read-once; minimum 50 |
+| `configWatchInterval` (`-Dmacstab.chaos.configWatchInterval`) | `MACSTAB_CHAOS_CONFIG_WATCH_INTERVAL` (alias `MACSTAB_CHAOS_WATCH_INTERVAL`) | long (ms) | 0 (disabled) | Poll interval; 0 = read-once; minimum 50 |
 
 ---
 

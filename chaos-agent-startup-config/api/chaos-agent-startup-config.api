@@ -32,6 +32,10 @@ public final class com/macstab/chaos/jvm/startup/StartupConfigLoader
   public static final field ENV_CONFIG_FILE Ljava/lang/String;
   public static final field ENV_CONFIG_JSON Ljava/lang/String;
   public static final field ENV_DEBUG_DUMP Ljava/lang/String;
+  public static final field PROPERTY_CONFIG_BASE64 Ljava/lang/String;
+  public static final field PROPERTY_CONFIG_FILE Ljava/lang/String;
+  public static final field PROPERTY_CONFIG_JSON Ljava/lang/String;
+  public static final field PROPERTY_DEBUG_DUMP Ljava/lang/String;
   public static method load(Ljava/lang/String;Ljava/util/Map;)Ljava/util/Optional;
   public static method loadPlanFromFile(Ljava/lang/String;)Lcom/macstab/chaos/jvm/api/ChaosPlan;
   public static method readPlanFile(Ljava/lang/String;)Ljava/util/Optional;

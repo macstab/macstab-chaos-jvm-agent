@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.macstab.chaos.jvm.core.ChaosRuntime;
+import com.macstab.chaos.jvm.startup.AgentSettings;
 import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
@@ -176,15 +177,22 @@ class ChaosDiagnosticsMBeanTest {
   @Test
   @DisplayName("jmxControl is read from the agent args, then the property and environment")
   void controlSetting() {
-    assertThat(ChaosAgentBootstrap.jmxControl("jmxControl=true", Map.of())).isTrue();
-    assertThat(ChaosAgentBootstrap.jmxControl("", Map.of("MACSTAB_CHAOS_JMX_CONTROL", "true")))
+    assertThat(ChaosAgentBootstrap.jmxControl(AgentSettings.of("jmxControl=true", Map.of())))
         .isTrue();
-    assertThat(ChaosAgentBootstrap.jmxControl("", Map.of())).isFalse();
+    assertThat(
+            ChaosAgentBootstrap.jmxControl(
+                AgentSettings.of("", Map.of("MACSTAB_CHAOS_JMX_CONTROL", "true"))))
+        .isTrue();
+    assertThat(ChaosAgentBootstrap.jmxControl(AgentSettings.of("", Map.of()))).isFalse();
     // The standard boolean literals of every other switch.
-    assertThat(ChaosAgentBootstrap.jmxControl("jmxControl=on", Map.of())).isTrue();
-    assertThat(ChaosAgentBootstrap.jmxControl("", Map.of("MACSTAB_CHAOS_JMX_CONTROL", "1")))
+    assertThat(ChaosAgentBootstrap.jmxControl(AgentSettings.of("jmxControl=on", Map.of())))
         .isTrue();
-    assertThat(ChaosAgentBootstrap.jmxControl("jmxControl=off", Map.of())).isFalse();
+    assertThat(
+            ChaosAgentBootstrap.jmxControl(
+                AgentSettings.of("", Map.of("MACSTAB_CHAOS_JMX_CONTROL", "1"))))
+        .isTrue();
+    assertThat(ChaosAgentBootstrap.jmxControl(AgentSettings.of("jmxControl=off", Map.of())))
+        .isFalse();
   }
 
   @Test

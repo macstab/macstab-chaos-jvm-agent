@@ -2,6 +2,7 @@ package com.macstab.chaos.jvm.bootstrap;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.macstab.chaos.jvm.startup.AgentSettings;
 import java.util.Map;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -16,14 +17,18 @@ class StartupSettingsTest {
     final Map<String, String> eagerEnvironment =
         Map.of(ChaosAgentBootstrap.INSTRUMENTATION_ENV, "eager");
 
-    assertThat(ChaosAgentBootstrap.eagerInstrumentation("instrumentation= EAGER ", Map.of()))
+    assertThat(
+            ChaosAgentBootstrap.eagerInstrumentation(
+                AgentSettings.of("instrumentation= EAGER ", Map.of())))
         .isTrue();
     assertThat(
-            ChaosAgentBootstrap.eagerInstrumentation("instrumentation=onDemand", eagerEnvironment))
+            ChaosAgentBootstrap.eagerInstrumentation(
+                AgentSettings.of("instrumentation=onDemand", eagerEnvironment)))
         .as("the agent argument is read first")
         .isFalse();
-    assertThat(ChaosAgentBootstrap.eagerInstrumentation("", eagerEnvironment)).isTrue();
-    assertThat(ChaosAgentBootstrap.eagerInstrumentation("", Map.of())).isFalse();
+    assertThat(ChaosAgentBootstrap.eagerInstrumentation(AgentSettings.of("", eagerEnvironment)))
+        .isTrue();
+    assertThat(ChaosAgentBootstrap.eagerInstrumentation(AgentSettings.of("", Map.of()))).isFalse();
   }
 
   @Test
@@ -34,21 +39,21 @@ class StartupSettingsTest {
 
     assertThat(
             ChaosAgentBootstrap.listSetting(
-                "sessionHeaderHosts= a.example , ,b.example,",
-                environment,
+                AgentSettings.of("sessionHeaderHosts= a.example , ,b.example,", environment),
                 ChaosAgentBootstrap.SESSION_HEADER_HOSTS_ARG,
                 ChaosAgentBootstrap.SESSION_HEADER_HOSTS_PROPERTY,
                 ChaosAgentBootstrap.SESSION_HEADER_HOSTS_ENV))
         .containsExactly("a.example", "b.example");
     assertThat(
             ChaosAgentBootstrap.listSetting(
-                "",
-                environment,
+                AgentSettings.of("", environment),
                 ChaosAgentBootstrap.SESSION_HEADER_HOSTS_ARG,
                 ChaosAgentBootstrap.SESSION_HEADER_HOSTS_PROPERTY,
                 ChaosAgentBootstrap.SESSION_HEADER_HOSTS_ENV))
         .containsExactly("env.example");
-    assertThat(ChaosAgentBootstrap.clockCallSites("clockCallSites=com.example", Map.of()))
+    assertThat(
+            ChaosAgentBootstrap.clockCallSites(
+                AgentSettings.of("clockCallSites=com.example", Map.of())))
         .containsExactly("com.example");
   }
 

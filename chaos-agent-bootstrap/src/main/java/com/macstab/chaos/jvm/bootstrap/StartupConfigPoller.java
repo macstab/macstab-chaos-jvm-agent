@@ -4,8 +4,7 @@ import com.macstab.chaos.jvm.api.ChaosActivationHandle;
 import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.core.ChaosRuntime;
 import com.macstab.chaos.jvm.core.DefaultChaosActivationHandle;
-import com.macstab.chaos.jvm.startup.AgentArgs;
-import com.macstab.chaos.jvm.startup.AgentArgsParser;
+import com.macstab.chaos.jvm.startup.AgentSettings;
 import com.macstab.chaos.jvm.startup.ChaosPlanMapper;
 import com.macstab.chaos.jvm.startup.ConfigLoadException;
 import com.macstab.chaos.jvm.startup.LogText;
@@ -43,9 +42,10 @@ import org.jspecify.annotations.Nullable;
  *   <li>Scenarios identical in both (same ID, same content) → kept running, untouched
  * </ul>
  *
- * <p>Enable by setting {@code configWatchInterval=<ms>} in the agent args or {@code
- * MACSTAB_CHAOS_WATCH_INTERVAL=<ms>} as an environment variable. A value of {@code 0} or absent
- * disables watching (read-once behaviour is preserved).
+ * <p>Enable by setting {@code configWatchInterval=<ms>} in the agent args, the system property
+ * {@code macstab.chaos.configWatchInterval} or the environment variable {@code
+ * MACSTAB_CHAOS_CONFIG_WATCH_INTERVAL} (alias {@code MACSTAB_CHAOS_WATCH_INTERVAL}). A value of
+ * {@code 0} or absent disables watching (read-once behaviour is preserved).
  *
  * <p>Example:
  *
@@ -63,7 +63,13 @@ import org.jspecify.annotations.Nullable;
 public final class StartupConfigPoller implements AutoCloseable {
 
   /** Environment variable that sets the poll interval in milliseconds. */
+  public static final String ENV_CONFIG_WATCH_INTERVAL = "MACSTAB_CHAOS_CONFIG_WATCH_INTERVAL";
+
+  /** Alias of {@link #ENV_CONFIG_WATCH_INTERVAL}, read after it. */
   public static final String ENV_WATCH_INTERVAL = "MACSTAB_CHAOS_WATCH_INTERVAL";
+
+  /** System property that sets the poll interval in milliseconds, read after the agent arg. */
+  public static final String PROPERTY_WATCH_INTERVAL = "macstab.chaos.configWatchInterval";
 
   /** Agent arg key that sets the poll interval in milliseconds, overrides the env var. */
   public static final String ARG_WATCH_INTERVAL = "configWatchInterval";
@@ -127,21 +133,20 @@ public final class StartupConfigPoller implements AutoCloseable {
   /**
    * Creates a poller if watch mode is configured, otherwise returns empty.
    *
-   * <p>Agent arg {@code configWatchInterval} takes precedence over env var {@code
-   * MACSTAB_CHAOS_WATCH_INTERVAL}. A value of {@code 0} or absent disables watching.
+   * <p>Agent arg {@code configWatchInterval} takes precedence over the system property {@code
+   * macstab.chaos.configWatchInterval}, then the environment variable {@code
+   * MACSTAB_CHAOS_CONFIG_WATCH_INTERVAL}, then its alias {@code MACSTAB_CHAOS_WATCH_INTERVAL}. A
+   * value of {@code 0} or absent disables watching; a value that is not a number disables it with
+   * one line on stderr.
    *
-   * @param rawAgentArgs raw argument string from {@code -javaagent:}, may be null
-   * @param environment environment variable map (typically {@link System#getenv()})
+   * @param settings the agent's settings
    * @param configPath the resolved config file path to watch
    * @param runtime the live runtime to apply diffs against
    * @return an unstarted poller, or empty if watching is not configured
    */
   public static Optional<StartupConfigPoller> createIfEnabled(
-      final @Nullable String rawAgentArgs,
-      final Map<String, String> environment,
-      final Path configPath,
-      final ChaosRuntime runtime) {
-    final long intervalMs = resolveInterval(rawAgentArgs, environment);
+      final AgentSettings settings, final Path configPath, final ChaosRuntime runtime) {
+    final long intervalMs = resolveInterval(settings);
     if (intervalMs <= 0) {
       return Optional.empty();
     }
@@ -557,30 +562,41 @@ public final class StartupConfigPoller implements AutoCloseable {
    */
   static final long MIN_WATCH_INTERVAL_MS = 50L;
 
-  static long resolveInterval(
-      final @Nullable String rawAgentArgs, final Map<String, String> environment) {
-    final long rawIntervalMs = resolveRawInterval(rawAgentArgs, environment);
+  static long resolveInterval(final AgentSettings settings) {
+    final long rawIntervalMs = resolveRawInterval(settings);
     if (rawIntervalMs <= 0) {
       return 0L;
     }
     return Math.max(rawIntervalMs, MIN_WATCH_INTERVAL_MS);
   }
 
-  private static long resolveRawInterval(
-      final @Nullable String rawAgentArgs, final Map<String, String> environment) {
-    final AgentArgs args = AgentArgsParser.parse(rawAgentArgs);
-    if (args.get(ARG_WATCH_INTERVAL) != null) {
-      // A present argument decides, also configWatchInterval=0 (off) over the environment.
-      return args.getLong(ARG_WATCH_INTERVAL, 0L);
+  private static long resolveRawInterval(final AgentSettings settings) {
+    // A present argument decides, also configWatchInterval=0 (off) over the environment.
+    final String value =
+        settings.valueOrEmpty(
+            ARG_WATCH_INTERVAL,
+            PROPERTY_WATCH_INTERVAL,
+            ENV_CONFIG_WATCH_INTERVAL,
+            ENV_WATCH_INTERVAL);
+    if (value.isEmpty()) {
+      return 0L;
     }
-    final String envValue = environment.get(ENV_WATCH_INTERVAL);
-    if (envValue != null && !envValue.isBlank()) {
-      try {
-        return Long.parseLong(envValue.strip());
-      } catch (NumberFormatException ignored) {
-        return 0L;
-      }
+    try {
+      return Long.parseLong(value);
+    } catch (final NumberFormatException notANumber) {
+      System.err.println(
+          "[chaos-agent] the watch interval ("
+              + ARG_WATCH_INTERVAL
+              + ", -D"
+              + PROPERTY_WATCH_INTERVAL
+              + ", "
+              + ENV_CONFIG_WATCH_INTERVAL
+              + " or "
+              + ENV_WATCH_INTERVAL
+              + ") '"
+              + LogText.sanitize(value)
+              + "' is not a number of milliseconds; the plan file is not watched");
+      return 0L;
     }
-    return 0L;
   }
 }

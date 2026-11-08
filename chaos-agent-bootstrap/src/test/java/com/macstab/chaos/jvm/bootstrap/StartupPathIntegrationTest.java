@@ -230,6 +230,31 @@ class StartupPathIntegrationTest {
   }
 
   @Nested
+  @DisplayName("settings")
+  class Settings {
+
+    @Test
+    @DisplayName(
+        "a duplicated agent arg is reported once, and a second attach names the arguments it"
+            + " ignores")
+    void resolvedOnce() throws Exception {
+      final Result result = run(Map.of(), List.of(), "settings");
+
+      assertThat(result.value("installed")).isEqualTo("true");
+      assertThat(result.output().lines().filter(line -> line.contains("duplicate agent arg")))
+          .as("the arguments are parsed once, however many settings read them")
+          .containsExactly(
+              "[chaos-agent] duplicate agent arg key 'a': previous value overwritten (last-wins)");
+      assertThat(result.output().lines().filter(line -> line.contains("already installed")))
+          .as("only b differs from the installed arguments; malformed ones are not quoted")
+          .containsExactly(
+              "[chaos-agent] the agent is already installed; these agent args are ignored: b",
+              "[chaos-agent] the agent is already installed; these agent args are ignored: all"
+                  + " (malformed)");
+    }
+  }
+
+  @Nested
   @DisplayName("MBean and JFR")
   class MBeanAndJfr {
 

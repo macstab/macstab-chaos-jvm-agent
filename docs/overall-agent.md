@@ -877,8 +877,10 @@ Semicolon-separated `key=value` pairs (quote the argument in a shell). `\;`, `\=
 | `MACSTAB_CHAOS_CONFIG_JSON`         | `configJson`          | Inline JSON. Agent arg takes precedence.                   |
 | `MACSTAB_CHAOS_CONFIG_BASE64`       | `configBase64`        | Base64 JSON. Agent arg takes precedence.                   |
 | `MACSTAB_CHAOS_DEBUG_DUMP_ON_START` | `debugDumpOnStart`    | `true`/`1`/`yes`/`on` to enable. Either source enables it. |
-| `MACSTAB_CHAOS_WATCH_INTERVAL`      | `configWatchInterval` | Poll interval in ms. Agent arg takes precedence.           |
+| `MACSTAB_CHAOS_CONFIG_WATCH_INTERVAL` | `configWatchInterval` | Poll interval in ms. Agent arg takes precedence. Alias: `MACSTAB_CHAOS_WATCH_INTERVAL`. |
 | `MACSTAB_CHAOS_INSTRUMENTATION`     | `instrumentation`     | `eager` = weave all hooks at start. Arg > sysprop > env.   |
+
+Each startup argument also has a system property `macstab.chaos.<key>` (for example `-Dmacstab.chaos.configFile=…`), read after the agent arg and before the environment variable.
 
 ## Priority Order
 

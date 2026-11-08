@@ -10,6 +10,7 @@ import com.macstab.chaos.jvm.api.ChaosSelector;
 import com.macstab.chaos.jvm.api.ChaosSession;
 import com.macstab.chaos.jvm.api.OperationType;
 import com.macstab.chaos.jvm.core.ChaosRuntime;
+import com.macstab.chaos.jvm.startup.AgentSettings;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -40,7 +41,8 @@ class ChaosReportsTest {
 
   private ChaosReports create(final String agentArgs, final Map<String, String> environment) {
     final ChaosReports reports =
-        ChaosReports.createIfEnabled(agentArgs, environment, runtime).orElseThrow();
+        ChaosReports.createIfEnabled(AgentSettings.of(agentArgs, environment), runtime)
+            .orElseThrow();
     created.add(reports);
     return reports;
   }
@@ -59,12 +61,17 @@ class ChaosReportsTest {
   void switchedOff() {
     final Optional<ChaosReports> before = ChaosReports.current();
 
-    assertThat(ChaosReports.createIfEnabled("", Map.of(), runtime)).as("off by default").isEmpty();
-    assertThat(ChaosReports.createIfEnabled("reports=off", Map.of(), runtime)).isEmpty();
-    assertThat(ChaosReports.createIfEnabled("reports=FALSE", Map.of(), runtime)).isEmpty();
+    assertThat(ChaosReports.createIfEnabled(AgentSettings.of("", Map.of()), runtime))
+        .as("off by default")
+        .isEmpty();
+    assertThat(ChaosReports.createIfEnabled(AgentSettings.of("reports=off", Map.of()), runtime))
+        .isEmpty();
+    assertThat(ChaosReports.createIfEnabled(AgentSettings.of("reports=FALSE", Map.of()), runtime))
+        .isEmpty();
     assertThat(
             ChaosReports.createIfEnabled(
-                "", Map.of(ChaosReports.REPORTS_ENV, "off", "unrelated", "x"), runtime))
+                AgentSettings.of("", Map.of(ChaosReports.REPORTS_ENV, "off", "unrelated", "x")),
+                runtime))
         .isEmpty();
     assertThat(ChaosReports.current()).as("nothing was published").isEqualTo(before);
 
@@ -119,7 +126,8 @@ class ChaosReportsTest {
   void booleanLiterals() {
     create("reports=yes;reportsDir=" + tempDir, Map.of()).statusOk(1, "inline");
     assertThat(tempDir.resolve(ChaosReports.STATUS_FILE)).exists();
-    assertThat(ChaosReports.createIfEnabled("reports=0", Map.of(), runtime)).isEmpty();
+    assertThat(ChaosReports.createIfEnabled(AgentSettings.of("reports=0", Map.of()), runtime))
+        .isEmpty();
   }
 
   @Test

@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.macstab.chaos.jvm.api.ChaosDiagnostics;
 import com.macstab.chaos.jvm.api.ChaosEvent;
 import com.macstab.chaos.jvm.core.ChaosRuntime;
+import com.macstab.chaos.jvm.startup.AgentSettings;
 import com.macstab.chaos.jvm.startup.ChaosPlanMapper;
 import com.macstab.chaos.jvm.startup.ConfigLoadException;
 import com.macstab.chaos.jvm.startup.StartupConfigLoader;
@@ -56,7 +57,7 @@ class ConfigReloadTest {
         });
     poller =
         StartupConfigPoller.createIfEnabled(
-                "configWatchInterval=3600000", Map.of(), configured, runtime)
+                AgentSettings.of("configWatchInterval=3600000", Map.of()), configured, runtime)
             .orElseThrow();
     poller.startWithInitialPlan(ChaosPlanMapper.read(Files.readString(configured)), null);
   }
@@ -180,7 +181,7 @@ class ConfigReloadTest {
 
   private StartupConfigPoller poller(final Path configured) {
     return StartupConfigPoller.createIfEnabled(
-            "configWatchInterval=3600000", Map.of(), configured, runtime)
+            AgentSettings.of("configWatchInterval=3600000", Map.of()), configured, runtime)
         .orElseThrow();
   }
 

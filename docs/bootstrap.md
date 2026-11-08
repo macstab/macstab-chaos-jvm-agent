@@ -125,7 +125,10 @@ unregistered, runtime closed, slot freed — a later call can retry cleanly
 VirtualMachine.attach(pid).loadAgent("chaos-agent-bootstrap.jar", agentArgs)
   ↓
 Opt-in check: System.getProperty("macstab.chaos.allow-dynamic-attach") /
-              MACSTAB_CHAOS_ALLOW_DYNAMIC_ATTACH env var must be "true".
+              MACSTAB_CHAOS_ALLOW_DYNAMIC_ATTACH env var must be true
+              (true|1|yes|on, case-insensitive).
+An attach after the agent is installed changes nothing; when its args differ
+from the installed ones, one stderr line names the ignored keys.
 Without the opt-in, agentmain is a no-op (security: prevents drive-by injection
 from any process with jcmd/attach permission).
   ↓

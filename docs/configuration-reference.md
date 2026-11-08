@@ -715,8 +715,10 @@ Register custom listeners via `controlPlane.addEventListener(listener)`. Listene
 | `MACSTAB_CHAOS_CONFIG_BASE64`       | `configBase64`                             |
 | `MACSTAB_CHAOS_CONFIG_FILE`         | `configFile`                               |
 | `MACSTAB_CHAOS_DEBUG_DUMP_ON_START` | `debugDumpOnStart` (`true`/`1`/`yes`/`on`) |
-| `MACSTAB_CHAOS_WATCH_INTERVAL`      | `configWatchInterval`                      |
+| `MACSTAB_CHAOS_CONFIG_WATCH_INTERVAL` | `configWatchInterval` (`MACSTAB_CHAOS_WATCH_INTERVAL` is an alias, read after it) |
 | `MACSTAB_CHAOS_INSTRUMENTATION`     | `instrumentation`                          |
+
+Every argument above also has a system property, `macstab.chaos.<argument>` (for example `-Dmacstab.chaos.configFile=/etc/chaos/plan.json`, `-Dmacstab.chaos.configWatchInterval=500`); the system property is a launch-time local source and is trusted as the agent argument is. Precedence for each setting: agent arg > system property > environment variable. The settings are read once at start: a duplicate argument is reported once, an interval that is not a number turns watching off with one `[chaos-agent]` line, and a second attach whose arguments differ from the installed agent's prints one line naming the ignored keys.
 
 The weaving mode can also be set with the system property `-Dmacstab.chaos.instrumentation=eager`. Precedence: agent arg `instrumentation` > system property > `MACSTAB_CHAOS_INSTRUMENTATION`. Only `eager` (case-insensitive) changes the mode; any other value, or none, keeps on-demand weaving.
 

@@ -1,6 +1,7 @@
 package com.macstab.chaos.jvm.startup;
 
 import com.macstab.chaos.jvm.api.ChaosPlan;
+import com.macstab.chaos.jvm.api.Internal;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
@@ -28,7 +29,9 @@ import org.jspecify.annotations.Nullable;
  *   <li><b>File path</b> — agent arg {@code configFile} or env {@code MACSTAB_CHAOS_CONFIG_FILE}
  * </ol>
  *
- * <p>Within each source type, the agent arg takes precedence over the environment variable.
+ * <p>Within each source type, the agent arg takes precedence over the system property ({@code
+ * macstab.chaos.configJson}, {@code macstab.chaos.configBase64}, {@code macstab.chaos.configFile}),
+ * which takes precedence over the environment variable.
  *
  * <p>If no source is configured, {@link #load} returns empty — the agent starts with no active
  * scenarios.
@@ -51,11 +54,24 @@ public final class StartupConfigLoader {
   public static final String ENV_CONFIG_BASE64 = "MACSTAB_CHAOS_CONFIG_BASE64";
 
   /**
-   * Environment variable name for the debug dump flag; if set to {@code "true"} (case-insensitive)
-   * or if the agent arg {@code "debugDumpOnStart"} is true, a diagnostic dump of the loaded plan is
-   * printed at startup.
+   * Environment variable name for the debug dump flag ({@code true|1|yes|on}, case-insensitive),
+   * read when neither the agent arg {@code debugDumpOnStart} nor the system property {@value
+   * #PROPERTY_DEBUG_DUMP} is set; when on, a diagnostic dump of the loaded plan is printed at
+   * startup. The agent arg {@code debugDump} turns it on as well.
    */
   public static final String ENV_DEBUG_DUMP = "MACSTAB_CHAOS_DEBUG_DUMP_ON_START";
+
+  /** System property for the config file path; read after the agent arg. */
+  public static final String PROPERTY_CONFIG_FILE = "macstab.chaos.configFile";
+
+  /** System property for the inline JSON config; read after the agent arg. */
+  public static final String PROPERTY_CONFIG_JSON = "macstab.chaos.configJson";
+
+  /** System property for the base64-encoded JSON config; read after the agent arg. */
+  public static final String PROPERTY_CONFIG_BASE64 = "macstab.chaos.configBase64";
+
+  /** System property for the debug dump flag; read after the agent arg. */
+  public static final String PROPERTY_DEBUG_DUMP = "macstab.chaos.debugDumpOnStart";
 
   /** Maximum config file size: 1 MiB. Prevents OOM from oversized files. */
   private static final long MAX_FILE_SIZE = ChaosPlanMapper.MAX_JSON_LENGTH;
@@ -106,20 +122,32 @@ public final class StartupConfigLoader {
    */
   public static Optional<LoadedPlan> load(
       final @Nullable String rawAgentArgs, final Map<String, String> environment) {
-    final AgentArgs agentArgs = AgentArgsParser.parse(rawAgentArgs);
+    return load(AgentSettings.of(rawAgentArgs, environment));
+  }
 
+  /**
+   * Loads a chaos plan from the first available configuration source, from settings already
+   * resolved.
+   *
+   * @param settings the agent's settings
+   * @return loaded plan with source metadata, or empty if no config is present
+   * @throws ConfigLoadException if a source is specified but cannot be read or parsed
+   */
+  @Internal
+  public static Optional<LoadedPlan> load(final AgentSettings settings) {
     final String inlineJson =
-        firstNonBlank(agentArgs.get(ARG_CONFIG_JSON), environment.get(ENV_CONFIG_JSON));
+        settings.nonBlankValue(ARG_CONFIG_JSON, PROPERTY_CONFIG_JSON, ENV_CONFIG_JSON);
     final String base64Json =
-        firstNonBlank(agentArgs.get(ARG_CONFIG_BASE64), environment.get(ENV_CONFIG_BASE64));
+        settings.nonBlankValue(ARG_CONFIG_BASE64, PROPERTY_CONFIG_BASE64, ENV_CONFIG_BASE64);
     final String file =
-        firstNonBlank(agentArgs.get(ARG_CONFIG_FILE), environment.get(ENV_CONFIG_FILE));
+        settings.nonBlankValue(ARG_CONFIG_FILE, PROPERTY_CONFIG_FILE, ENV_CONFIG_FILE);
 
     // "debugDump" is the spelling used in parts of the documentation; both keys are accepted.
+    final String debugDump =
+        settings.value(ARG_DEBUG_DUMP_ON_START, PROPERTY_DEBUG_DUMP, ENV_DEBUG_DUMP);
     final boolean debugDumpOnStart =
-        agentArgs.getBoolean(ARG_DEBUG_DUMP_ON_START, false)
-            || agentArgs.getBoolean(ARG_DEBUG_DUMP_ALIAS, false)
-            || AgentArgs.parseBoolean(ENV_DEBUG_DUMP, environment.get(ENV_DEBUG_DUMP), false);
+        AgentArgs.parseBoolean(ARG_DEBUG_DUMP_ON_START, debugDump, false)
+            || settings.args().getBoolean(ARG_DEBUG_DUMP_ALIAS, false);
 
     if (inlineJson != null) {
       final ChaosPlan plan = ChaosPlanMapper.read(inlineJson, SOURCE_INLINE_JSON);
@@ -544,17 +572,6 @@ public final class StartupConfigLoader {
       // Fall through to fail-closed.
     }
     return false;
-  }
-
-  private static @Nullable String firstNonBlank(
-      final @Nullable String left, final @Nullable String right) {
-    if (left != null && !left.isBlank()) {
-      return left;
-    }
-    if (right != null && !right.isBlank()) {
-      return right;
-    }
-    return null;
   }
 
   /**

@@ -4,6 +4,7 @@ import com.macstab.chaos.jvm.api.ChaosEvent;
 import com.macstab.chaos.jvm.core.ChaosRuntime;
 import com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher;
 import com.macstab.chaos.jvm.startup.AgentArgs;
+import com.macstab.chaos.jvm.startup.AgentSettings;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -93,25 +94,19 @@ final class ChaosReports implements AutoCloseable {
   /**
    * Creates and starts the reports when they are switched on ({@code reports=on}).
    *
-   * @param agentArgs the raw agent arguments
-   * @param environment the process environment
+   * @param settings the agent's settings
    * @param runtime the runtime whose scenarios are reported
    * @return the reports, or empty when not switched on
    * @throws IllegalStateException if the JVM is shutting down; nothing is started then
    */
   static Optional<ChaosReports> createIfEnabled(
-      final @Nullable String agentArgs,
-      final Map<String, String> environment,
-      final ChaosRuntime runtime) {
-    final String enabled =
-        AgentSettings.valueOrEmpty(
-            agentArgs, environment, REPORTS_ARG, REPORTS_PROPERTY, REPORTS_ENV);
+      final AgentSettings settings, final ChaosRuntime runtime) {
+    final String enabled = settings.valueOrEmpty(REPORTS_ARG, REPORTS_PROPERTY, REPORTS_ENV);
     if (!AgentArgs.parseBoolean(REPORTS_ARG, enabled, false)) {
       return Optional.empty();
     }
     final String dir =
-        AgentSettings.valueOrEmpty(
-            agentArgs, environment, REPORTS_DIR_ARG, REPORTS_DIR_PROPERTY, REPORTS_DIR_ENV);
+        settings.valueOrEmpty(REPORTS_DIR_ARG, REPORTS_DIR_PROPERTY, REPORTS_DIR_ENV);
     final ChaosReports reports =
         new ChaosReports(
             Path.of(dir.isEmpty() ? System.getProperty("java.io.tmpdir") : dir), runtime);

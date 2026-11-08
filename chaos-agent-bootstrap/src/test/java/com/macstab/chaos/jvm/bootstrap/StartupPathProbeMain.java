@@ -51,6 +51,7 @@ public final class StartupPathProbeMain {
       case "no-jfr" -> noJfr();
       case "no-attach" -> noAttach();
       case "bridge-retry" -> bridgeRetry();
+      case "settings" -> settings();
       default -> throw new IllegalArgumentException("unknown probe mode: " + args[0]);
     }
   }
@@ -139,6 +140,19 @@ public final class StartupPathProbeMain {
       System.out.println(
           "localInstallReturnsInstalled=" + (ChaosPlatform.installLocally() == installed));
     }
+  }
+
+  /**
+   * Installs with a duplicated agent arg, which every setting reads, then initializes again with
+   * other arguments, the same ones and malformed ones, which the installed agent ignores.
+   */
+  private static void settings() {
+    final Instrumentation instrumentation = ByteBuddyAgent.install();
+    ChaosAgentBootstrap.initialize("a=1;a=2", instrumentation, Map.of());
+    ChaosAgentBootstrap.initialize("a=2;b=2", instrumentation, Map.of());
+    ChaosAgentBootstrap.initialize("a=2", instrumentation, Map.of());
+    ChaosAgentBootstrap.initialize("=secret", instrumentation, Map.of());
+    System.out.println("installed=" + installed());
   }
 
   /**
