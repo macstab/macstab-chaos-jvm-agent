@@ -45,6 +45,7 @@
 | 25 | Plan JSON is read strictly and written in ISO-8601 | a plan gives a duration or instant as a number, a number as a string, a fraction for an integer, `0`/`1` for a boolean, an ordinal for an enum or a field twice; or you read `GET /q/chaos` (`/chaos`, `/actuator/chaos`) or `ChaosPlanMapper.toJson` output as numbers | write ISO-8601 strings and plain JSON values; read `capturedAt` and durations as ISO-8601 strings (§25) |
 | 26 | A name pattern is no longer canonicalised | a pattern has a mode without a value (`{"mode": "GLOB"}`, `NamePattern.glob(null)`), a value without a mode, or `ANY` with a value other than `"*"` | give the mode its value, or use `ANY` (`NamePattern.any()`) (§26) |
 | 27 | The API's nullness is published (`@NullMarked`) | Kotlin code passes `null` where a type is non-null, or treats a non-null result as nullable | pass a value, or use the parameters marked `@Nullable` (§27) |
+| 29 | `chaos-agent-testkit` no longer brings JUnit | you get `junit-jupiter-api` (or the JUnit BOM's versions) only through the testkit or a starter that depends on it | declare JUnit in your test dependencies (§29) |
 
 ---
 
@@ -352,6 +353,12 @@ Before (1.x): Kotlin let `selector.destinationPattern()` be treated as nullable 
 `ChaosAssertions`: `within(t).never()` and `within(t).atMost(n)` now hold for the whole of `t` and fail at the first count past the bound; in 1.x they checked once, at once. `hasNoFailuresFor` takes at least one id (`hasNoFailuresFor(String, String...)`), and a repeated id no longer throws. Negative bounds and negative `within` timeouts throw `IllegalArgumentException`. Messages name a scenario from `scenario(id)` by its key, `jvm::<id>` or `session:<id>::<id>`, as the handle assertions already did.
 
 Before (1.x): `assertThat(handle).applied().within(Duration.ofSeconds(5)).never()` returned at once. Now it takes 5 s; drop `within` for an instant check. A call `hasNoFailuresFor()` without ids, which passed, no longer compiles: pass the ids, or use `hasNoFailures()`.
+
+## 29. `chaos-agent-testkit` no longer brings JUnit
+
+`chaos-agent-testkit` compiles against `junit-jupiter-api` but no longer exports it, nor the JUnit BOM: its POM has no JUnit dependency. The same holds for the modules built on it (`chaos-agent-spring-boot3-test-starter`, `chaos-agent-spring-boot4-test-starter`, `chaos-agent-quarkus-extension`, `chaos-agent-micronaut-integration`), so JUnit no longer reaches the production class path of an application that ships the Quarkus or Micronaut module, and the testkit no longer pins your JUnit version.
+
+Before (1.x): the testkit brought `junit-jupiter-api` and imported the JUnit BOM into every consumer. Now declare JUnit where your tests run (`spring-boot-starter-test`, `quarkus-junit5` and `micronaut-test-junit5` already bring it); with Gradle, for example, `testImplementation(platform("org.junit:junit-bom:<version>"))` and `testImplementation("org.junit.jupiter:junit-jupiter")`.
 
 ---
 

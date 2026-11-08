@@ -12,6 +12,7 @@ dependencies {
     // The /chaos management endpoint; the application brings micronaut-management to use it.
     compileOnly("io.micronaut:micronaut-management")
     compileOnly("io.micronaut.test:micronaut-test-junit5")
+    compileOnly(platform(libs.junit.bom))
     compileOnly(libs.junit.jupiter.api)
 
     // Generates the bean definitions (ChaosFactory$Definition and friends). Without the

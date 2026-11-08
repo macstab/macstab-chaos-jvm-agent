@@ -9,6 +9,7 @@ dependencies {
     compileOnly("org.springframework.boot:spring-boot-test-autoconfigure")
     compileOnly("org.springframework.boot:spring-boot-autoconfigure")
     compileOnly("org.springframework:spring-context")
+    compileOnly(platform(libs.junit.bom))
     compileOnly(libs.junit.jupiter.api)
 
     testImplementation(platform(libs.spring.boot4.dependencies))

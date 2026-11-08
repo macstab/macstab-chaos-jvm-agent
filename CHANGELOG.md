@@ -5,6 +5,8 @@
 
 Migration steps for each change: [docs/migration-2.0.md](docs/migration-2.0.md).
 
+* **testkit:** `chaos-agent-testkit` no longer exports `junit-jupiter-api` or the JUnit BOM (it compiles against them only), so the modules built on it (the Spring Boot test starters, the Quarkus and Micronaut modules) put no JUnit on a production class path and force no JUnit version. Declare JUnit in your test dependencies (migration §29).
+
 * **api:** `OperationType` gained constants next to their families (`CLOCK_READ`, `FILE_IO_OPEN`, `SOCKET_BIND`, `DATAGRAM_SEND`, …), so the ordinals of later constants moved; persist names, not ordinals.
 
 * **instrumentation:** `SOCKET_*` scenarios also match `SocketChannel` and `ServerSocketChannel` calls: the JDK `HttpClient`, NIO clients and servers, and Spring's `TestRestTemplate` where it uses the JDK client. A `NetworkSelector` without peer filters now also reaches those connections; narrow it with `remoteCidr` / `remotePort` where only one peer is meant.

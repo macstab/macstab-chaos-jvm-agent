@@ -10,6 +10,7 @@ dependencies {
     compileOnly("io.quarkus:quarkus-core")
     compileOnly("io.quarkus:quarkus-arc")
     compileOnly("io.quarkus:quarkus-junit5")
+    compileOnly(platform(libs.junit.bom))
     compileOnly(libs.junit.jupiter.api)
     // NOTE: quarkus-core-deployment is deliberately NOT depended on here — it
     // belongs to :chaos-agent-quarkus-extension-deployment. Leaking deployment
