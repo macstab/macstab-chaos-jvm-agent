@@ -603,7 +603,8 @@ public interface ChaosDiagnostics {
     // Full point-in-time snapshot of all registered scenarios
     Snapshot snapshot();
 
-    // Lookup a specific scenario by ID
+    // Lookup a specific scenario by ID; an ID in several scopes answers the JVM scope's,
+    // else the session with the smallest id (a session's own: its activation handle)
     Optional<ScenarioReport> scenario(String id);
 
     // Human-readable multi-line text dump (suitable for logs or JMX inspection)

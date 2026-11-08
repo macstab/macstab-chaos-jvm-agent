@@ -50,7 +50,7 @@ For a matching call, the scenario's `ActivationPolicy` is checked in this order;
 
 ## 4. Composing several scenarios
 
-All scenarios that pass §3 for a call contribute. They are ordered by descending `precedence`, then ascending scenario id (`ScenarioRegistry`).
+All scenarios that pass §3 for a call contribute. They are ordered by descending `precedence`, then ascending scenario id, then scope key (`ScenarioRegistry`): the same id in the JVM scope (`"jvm"`) comes before its sessions (`"session:<id>"`), and sessions by id, so an equal-precedence tie between scopes is decided the same way on every thread. The same order answers `ChaosDiagnostics.scenario(id)` for an id registered in several scopes: the JVM scope's report, else the session with the smallest id.
 
 **L11 — Delays add up.** The delays of every contribution are summed and applied first. A single delay is at most 720 hours, so the sum stays far from overflow (it saturates at `Long.MAX_VALUE` ms regardless).
 

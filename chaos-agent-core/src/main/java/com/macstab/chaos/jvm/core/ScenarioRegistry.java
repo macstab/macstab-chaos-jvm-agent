@@ -58,10 +58,19 @@ import org.jspecify.annotations.Nullable;
  * operation, instead of every registered scenario, and never sorts.
  */
 final class ScenarioRegistry implements ChaosDiagnostics {
+  /**
+   * The order of the scopes of one id: by scope key, so the JVM scope ({@code "jvm"}) comes before
+   * every session ({@code "session:<id>"}) and sessions by their id. It decides both the lookup by
+   * bare id and equal-precedence ties, whatever thread asks.
+   */
+  private static final Comparator<ScenarioController> SCOPE_ORDER =
+      Comparator.comparing(ScenarioController::scopeKey);
+
   private static final Comparator<ScenarioController> MATCH_ORDER =
       Comparator.comparingInt((ScenarioController c) -> c.scenario().precedence())
           .reversed()
-          .thenComparing(c -> c.scenario().id());
+          .thenComparing(c -> c.scenario().id())
+          .thenComparing(SCOPE_ORDER);
 
   private static final ScenarioController[] NO_CONTROLLERS = new ScenarioController[0];
 
@@ -382,10 +391,9 @@ final class ScenarioRegistry implements ChaosDiagnostics {
   /**
    * {@inheritDoc}
    *
-   * <p>Scans all currently registered controllers for one whose snapshot ID equals {@code
-   * scenarioId}. Returns the first match, or {@link Optional#empty()} if none is found. Note that a
-   * single logical scenario may be active in multiple scopes (e.g. per-session), each backed by its
-   * own controller; this method returns the first one encountered.
+   * <p>An id may be registered in several scopes, each with its own controller. The JVM scope's
+   * controller is returned when there is one, else the session with the smallest id: the same
+   * answer on every thread. For one session's scenario, use its activation handle.
    *
    * @param scenarioId the scenario ID to look up; must not be {@code null}
    * @return an {@link Optional} containing the matching report, or empty if no active controller
@@ -394,9 +402,9 @@ final class ScenarioRegistry implements ChaosDiagnostics {
   @Override
   public Optional<ScenarioReport> scenario(final String scenarioId) {
     return controllers.values().stream()
-        .map(ScenarioController::snapshot)
-        .filter(report -> report.id().equals(scenarioId))
-        .findFirst();
+        .filter(controller -> controller.scenario().id().equals(scenarioId))
+        .min(SCOPE_ORDER)
+        .map(ScenarioController::snapshot);
   }
 
   /**

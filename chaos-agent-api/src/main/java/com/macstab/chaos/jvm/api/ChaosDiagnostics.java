@@ -43,7 +43,9 @@ public interface ChaosDiagnostics {
 
   /**
    * Returns the current report for the scenario with the given ID, or empty if no scenario with
-   * that ID is registered.
+   * that ID is registered. When the ID is registered in several scopes, the JVM scope's report is
+   * returned, else the report of the session with the smallest id, whichever thread asks; a
+   * session's own scenario is reported by its activation handle.
    *
    * @param scenarioId the scenario ID as provided to {@link ChaosScenario.Builder#build()}
    * @return the scenario report, or empty if not found

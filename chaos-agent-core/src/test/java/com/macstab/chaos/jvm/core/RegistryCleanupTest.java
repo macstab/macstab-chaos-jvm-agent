@@ -8,7 +8,11 @@ import com.macstab.chaos.jvm.api.ChaosEffect;
 import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.ChaosSelector;
 import com.macstab.chaos.jvm.api.OperationType;
+import java.time.Clock;
 import java.time.Duration;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -144,5 +148,74 @@ class RegistryCleanupTest {
     // sessionA closed: scenario-a must now also be removed.
     final ChaosDiagnostics.Snapshot snap3 = runtime.diagnostics().snapshot();
     assertThat(snap3.scenarios().stream().anyMatch(r -> "scenario-a".equals(r.id()))).isFalse();
+  }
+
+  /**
+   * The same id registered in several scopes: lookup by bare id and the equal-precedence order are
+   * decided by the scope key ({@code "jvm"} before {@code "session:…"}, sessions by key), never by
+   * the registry's hash order. The keys are chosen and registered in both orders, so a hash order
+   * that puts a session first is among the cases.
+   */
+  @Test
+  @DisplayName("the same id in several scopes resolves to the JVM's, then the smallest session key")
+  void sameIdResolvesByScopeKey() {
+    for (final List<String> scopes :
+        List.of(
+            List.of("jvm", "session:a", "session:zz"),
+            List.of("session:zz", "session:a", "jvm"),
+            List.of("session:9f3", "jvm", "session:0b1"),
+            List.of("session:x7", "session:q", "jvm"))) {
+      final ScenarioRegistry registry = new ScenarioRegistry(Clock.systemUTC(), Map::of);
+      for (final String scope : scopes) {
+        registry.register(controller(scope));
+      }
+
+      assertThat(registry.scenario("shared").orElseThrow().scopeKey())
+          .as("registered as %s", scopes)
+          .isEqualTo("jvm");
+      assertThat(
+              Arrays.stream(registry.candidates(OperationType.EXECUTOR_SUBMIT))
+                  .map(ScenarioController::scopeKey)
+                  .toList())
+          .as("match order of %s", scopes)
+          .isEqualTo(scopes.stream().sorted().toList());
+    }
+  }
+
+  @Test
+  @DisplayName("without a JVM scenario the id resolves to the smallest session key")
+  void sessionsOnlyResolveToTheSmallestKey() {
+    for (final List<String> scopes :
+        List.of(
+            List.of("session:b", "session:a"),
+            List.of("session:a", "session:b"),
+            List.of("session:x7", "session:q", "session:0b1"))) {
+      final ScenarioRegistry registry = new ScenarioRegistry(Clock.systemUTC(), Map::of);
+      for (final String scope : scopes) {
+        registry.register(controller(scope));
+      }
+
+      assertThat(registry.scenario("shared").orElseThrow().scopeKey())
+          .as("registered as %s", scopes)
+          .isEqualTo(scopes.stream().sorted().findFirst().orElseThrow());
+    }
+  }
+
+  private static ScenarioController controller(final String scopeKey) {
+    return new ScenarioController(
+        ChaosScenario.builder("shared")
+            .scope(
+                scopeKey.equals("jvm")
+                    ? ChaosScenario.ScenarioScope.JVM
+                    : ChaosScenario.ScenarioScope.SESSION)
+            .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+            .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+            .activationPolicy(ActivationPolicy.always())
+            .build(),
+        scopeKey,
+        scopeKey.equals("jvm") ? null : scopeKey.substring("session:".length()),
+        Clock.systemUTC(),
+        new ObservabilityBus(com.macstab.chaos.jvm.api.ChaosMetricsSink.NOOP),
+        java.util.Optional::empty);
   }
 }
