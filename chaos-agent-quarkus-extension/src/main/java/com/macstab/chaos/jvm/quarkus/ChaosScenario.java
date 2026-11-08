@@ -84,9 +84,9 @@ public @interface ChaosScenario {
    * Scope of the scenario, matching {@link com.macstab.chaos.jvm.api.ChaosScenario.ScenarioScope}.
    * Defaults to {@code "JVM"}. JVM-scoped scenarios are activated at JVM scope via {@link
    * com.macstab.chaos.jvm.api.ChaosControlPlane#activate} and are tracked per-class or per-method
-   * for teardown in {@code afterAll}/{@code afterEach}. SESSION-scoped scenarios are activated on
-   * the class-scoped {@link com.macstab.chaos.jvm.api.ChaosSession} and are torn down by {@code
-   * session.close()} in {@code afterAll}.
+   * for teardown in {@code afterAll}/{@code afterTestExecution}. SESSION-scoped scenarios are
+   * activated on the class-scoped {@link com.macstab.chaos.jvm.api.ChaosSession} and are torn down
+   * by {@code session.close()} in {@code afterAll}.
    *
    * @return the scenario scope name
    */

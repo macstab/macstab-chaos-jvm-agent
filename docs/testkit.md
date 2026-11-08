@@ -71,6 +71,15 @@ com.macstab.chaos.jvm.testkit.ChaosAgentExtension
   — TrackingChaosControlPlane wraps the real control plane to record JVM-scoped handle activations
   ChaosSession session = tracker.openSession(testDisplayName)
   — session ID is a UUID; displayName is the test method display name
+  — no scenario is active yet: the test's own @BeforeEach methods run without chaos
+
+Around the test method (beforeTestExecution → test method → afterTestExecution):
+  @WithChaos scenarios of the class, its enclosing classes and the method are activated
+  — the thread that runs the test method is bound to the session while it runs: also the
+    separate thread of @Timeout(threadMode = SEPARATE_THREAD), and each dynamic test of a
+    @TestFactory (under concurrent execution a dynamic test may run after its factory's
+    teardown, outside the session)
+  — the scenarios stop right after the method, before the test's own @AfterEach methods
 
 @AfterEach:
   session.close()
@@ -159,10 +168,12 @@ When each extension activates and stops them:
 
 | Extension                                   | Class-level `@WithChaos`             | Method-level `@WithChaos`        | Test thread bound to the session |
 |---------------------------------------------|--------------------------------------|----------------------------------|----------------------------------|
-| testkit `ChaosAgentExtension`               | each test (session per test)         | each test                        | yes, while any `@WithChaos` applies |
-| Spring Boot 3/4 `ChaosAgentExtension`       | `beforeAll` → `afterAll`             | `beforeEach` → `afterEach`       | no (bind, or use `JVM` scope)    |
-| `ChaosMicronautExtension`                   | `beforeAll` → `afterAll`             | `beforeEach` → `afterEach`       | no (bind, or use `JVM` scope)    |
-| `ChaosQuarkusExtension`                     | `beforeAll` → `afterAll`             | `beforeEach` → `afterEach`       | no (bind, or use `JVM` scope)    |
+| testkit `ChaosAgentExtension`               | around each test method (session per test) | around each test method    | yes, while any `@WithChaos` applies |
+| Spring Boot 3/4 `ChaosAgentExtension`       | `beforeAll` → `afterAll`             | around the test method          | no (bind, or use `JVM` scope)    |
+| `ChaosMicronautExtension`                   | `beforeAll` → `afterAll`             | around the test method          | no (bind, or use `JVM` scope)    |
+| `ChaosQuarkusExtension`                     | `beforeAll` → `afterAll`             | around the test method          | no (bind, or use `JVM` scope)    |
+
+"Around the test method" means after the test's `@BeforeEach` methods and before its `@AfterEach` methods (`beforeTestExecution` → `afterTestExecution`): set-up and tear-down run without the method's chaos.
 
 A `JVM`-scoped scenario id has one owner at a time. The testkit activates class-level `@WithChaos` for every test, so with concurrent test methods (`junit.jupiter.execution.parallel.mode.default=concurrent`) a class-level `JVM` scenario is activated again while it is still active and the second test fails with an activation conflict. Declare such scenarios with `SESSION` scope, or keep the class on one thread with `@Execution(ExecutionMode.SAME_THREAD)`.
 

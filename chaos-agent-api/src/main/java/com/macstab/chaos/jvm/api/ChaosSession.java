@@ -85,8 +85,8 @@ public interface ChaosSession extends AutoCloseable {
    * Binds the calling thread to this session, making it eligible for session-scoped chaos.
    *
    * <p>The binding is stored in a thread-local and remains active until {@link ScopeBinding#close}
-   * is called. Bindings are not re-entrant — nested bind() calls on the same thread replace the
-   * previous binding.
+   * is called. Nested bind() calls on the same thread stack: the innermost binding applies until it
+   * is closed, then the one beneath it applies again.
    *
    * <p>Always use in try-with-resources to guarantee the thread is unbound:
    *

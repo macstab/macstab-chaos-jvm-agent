@@ -6,11 +6,13 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.macstab.chaos.jvm.api.ChaosControlPlane;
 import com.macstab.chaos.jvm.api.ChaosSession;
+import java.lang.reflect.Method;
 import java.lang.reflect.Parameter;
 import java.lang.reflect.Proxy;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtensionContext;
@@ -32,6 +34,73 @@ class ChaosAgentExtensionGuardsTest {
 
     assertThatCode(() -> extension.afterEach(context(values))).doesNotThrowAnyException();
     assertThat(values).isEmpty();
+  }
+
+  @Test
+  @DisplayName("before and around a test whose setup never ran, nothing is activated or bound")
+  void testExecutionWithoutSetup() throws Throwable {
+    final Map<Object, Object> values = new HashMap<>();
+    final ExtensionContext context = context(values);
+
+    extension.beforeTestExecution(context);
+    final boolean[] proceeded = new boolean[1];
+    extension.interceptTestMethod(
+        () -> {
+          proceeded[0] = true;
+          return null;
+        },
+        null,
+        context);
+    extension.afterTestExecution(context);
+
+    assertThat(values).isEmpty();
+    assertThat(proceeded[0]).isTrue();
+  }
+
+  @Test
+  @DisplayName("half a setup (no session) activates nothing and binds nothing")
+  void testExecutionWithoutSession() throws Throwable {
+    final Map<Object, Object> values = new HashMap<>();
+    values.put(ChaosControlPlane.class, ChaosTestKit.install());
+    final ExtensionContext context = context(values);
+
+    extension.beforeTestExecution(context);
+    assertThat(values).containsOnlyKeys(ChaosControlPlane.class);
+
+    values.put(WithChaosSupport.class, java.util.List.of(new Object()));
+    assertThat(extension.interceptTestFactoryMethod(() -> "proceeded", null, context))
+        .isEqualTo("proceeded");
+  }
+
+  @Test
+  @DisplayName("a failing method declaration stops the class scenarios already activated")
+  void failedActivationStopsTheClassScenarios() throws Exception {
+    final Map<Object, Object> values = new HashMap<>();
+    final ExtensionContext context =
+        context(values, Fixture.class, Fixture.class.getDeclaredMethod("invalid"));
+    extension.beforeEach(context);
+    try {
+      assertThatThrownBy(() -> extension.beforeTestExecution(context))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("needs exactly one of value (JSON) and resource");
+      assertThat(ChaosTestKit.install().diagnostics().scenario("guards-class-scenario").isPresent())
+          .as("the class scenario is stopped")
+          .isFalse();
+    } finally {
+      extension.afterEach(context);
+    }
+  }
+
+  @WithChaos(
+      """
+      {"id": "guards-class-scenario", "scope": "SESSION",
+       "selector": {"type": "executor", "operations": ["EXECUTOR_SUBMIT"]},
+       "effect": {"type": "delay", "minDelay": "PT0.001S", "maxDelay": "PT0.001S"}}
+      """)
+  static final class Fixture {
+
+    @WithChaos
+    void invalid() {}
   }
 
   @Test
@@ -82,6 +151,14 @@ class ChaosAgentExtensionGuardsTest {
 
   /** A context whose store holds {@code values} and that has no parent. */
   private static ExtensionContext context(final Map<Object, Object> values) {
+    return context(values, null, null);
+  }
+
+  /** A context for {@code testMethod} of {@code testClass} whose store holds {@code values}. */
+  private static ExtensionContext context(
+      final Map<Object, Object> values,
+      final @Nullable Class<?> testClass,
+      final @Nullable Method testMethod) {
     final ExtensionContext.Store store =
         (ExtensionContext.Store)
             Proxy.newProxyInstance(
@@ -103,6 +180,8 @@ class ChaosAgentExtensionGuardsTest {
                   case "getStore" -> store;
                   case "getParent" -> Optional.empty();
                   case "getDisplayName" -> "guards";
+                  case "getRequiredTestClass" -> testClass;
+                  case "getRequiredTestMethod" -> testMethod;
                   default -> null;
                 });
   }

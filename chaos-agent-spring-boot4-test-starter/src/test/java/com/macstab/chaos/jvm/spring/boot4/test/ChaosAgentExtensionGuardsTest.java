@@ -33,8 +33,8 @@ class ChaosAgentExtensionGuardsTest {
     final Map<Object, Object> values = new HashMap<>();
     final ExtensionContext empty = context(values);
 
-    extension.beforeEach(empty);
-    extension.afterEach(empty);
+    extension.beforeTestExecution(empty);
+    extension.afterTestExecution(empty);
     extension.afterAll(empty);
 
     assertThat(values).isEmpty();
@@ -53,7 +53,7 @@ class ChaosAgentExtensionGuardsTest {
                 });
     context.getStore(null).put(ChaosControlPlane.class, plane);
 
-    extension.beforeEach(context);
+    extension.beforeTestExecution(context);
 
     assertThat(context.getStore(null).get(com.macstab.chaos.jvm.testkit.WithChaosSupport.class))
         .isNull();

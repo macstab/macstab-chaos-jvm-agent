@@ -1,7 +1,13 @@
-public final class com/macstab/chaos/jvm/testkit/ChaosAgentExtension implements org/junit/jupiter/api/extension/AfterEachCallback, org/junit/jupiter/api/extension/BeforeEachCallback, org/junit/jupiter/api/extension/ParameterResolver
+public final class com/macstab/chaos/jvm/testkit/ChaosAgentExtension implements org/junit/jupiter/api/extension/AfterEachCallback, org/junit/jupiter/api/extension/AfterTestExecutionCallback, org/junit/jupiter/api/extension/BeforeEachCallback, org/junit/jupiter/api/extension/BeforeTestExecutionCallback, org/junit/jupiter/api/extension/InvocationInterceptor, org/junit/jupiter/api/extension/ParameterResolver
   public method <init>()V
   public method afterEach(Lorg/junit/jupiter/api/extension/ExtensionContext;)V
+  public method afterTestExecution(Lorg/junit/jupiter/api/extension/ExtensionContext;)V
   public method beforeEach(Lorg/junit/jupiter/api/extension/ExtensionContext;)V
+  public method beforeTestExecution(Lorg/junit/jupiter/api/extension/ExtensionContext;)V
+  public method interceptDynamicTest(Lorg/junit/jupiter/api/extension/InvocationInterceptor$Invocation;Lorg/junit/jupiter/api/extension/DynamicTestInvocationContext;Lorg/junit/jupiter/api/extension/ExtensionContext;)V
+  public method interceptTestFactoryMethod(Lorg/junit/jupiter/api/extension/InvocationInterceptor$Invocation;Lorg/junit/jupiter/api/extension/ReflectiveInvocationContext;Lorg/junit/jupiter/api/extension/ExtensionContext;)Ljava/lang/Object;
+  public method interceptTestMethod(Lorg/junit/jupiter/api/extension/InvocationInterceptor$Invocation;Lorg/junit/jupiter/api/extension/ReflectiveInvocationContext;Lorg/junit/jupiter/api/extension/ExtensionContext;)V
+  public method interceptTestTemplateMethod(Lorg/junit/jupiter/api/extension/InvocationInterceptor$Invocation;Lorg/junit/jupiter/api/extension/ReflectiveInvocationContext;Lorg/junit/jupiter/api/extension/ExtensionContext;)V
   public method resolveParameter(Lorg/junit/jupiter/api/extension/ParameterContext;Lorg/junit/jupiter/api/extension/ExtensionContext;)Ljava/lang/Object;
   public method supportsParameter(Lorg/junit/jupiter/api/extension/ParameterContext;Lorg/junit/jupiter/api/extension/ExtensionContext;)Z
 

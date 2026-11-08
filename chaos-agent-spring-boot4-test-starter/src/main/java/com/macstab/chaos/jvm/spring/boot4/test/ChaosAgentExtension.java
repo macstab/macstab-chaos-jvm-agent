@@ -11,9 +11,9 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.extension.AfterAllCallback;
-import org.junit.jupiter.api.extension.AfterEachCallback;
+import org.junit.jupiter.api.extension.AfterTestExecutionCallback;
 import org.junit.jupiter.api.extension.BeforeAllCallback;
-import org.junit.jupiter.api.extension.BeforeEachCallback;
+import org.junit.jupiter.api.extension.BeforeTestExecutionCallback;
 import org.junit.jupiter.api.extension.ExtensionContext;
 import org.junit.jupiter.api.extension.ParameterContext;
 import org.junit.jupiter.api.extension.ParameterResolutionException;
@@ -32,6 +32,10 @@ import org.junit.jupiter.api.extension.ParameterResolver;
  * <ul>
  *   <li>{@code beforeAll}: self-attach the agent (idempotent) and open one session for the whole
  *       class. A {@code @Nested} class runs inside its outer class and shares its session.
+ *   <li>{@code beforeTestExecution} / {@code afterTestExecution}: activate the method's {@link
+ *       com.macstab.chaos.jvm.testkit.WithChaos} scenarios right before the test method runs and
+ *       stop them right after it, so the test's {@code @BeforeEach} and {@code @AfterEach} methods
+ *       run without them.
  *   <li>{@code afterAll}: close the session, stopping every session-scoped scenario activated
  *       during the class; a {@code @Nested} class only stops its own class-level scenarios.
  * </ul>
@@ -44,8 +48,8 @@ import org.junit.jupiter.api.extension.ParameterResolver;
 public final class ChaosAgentExtension
     implements BeforeAllCallback,
         AfterAllCallback,
-        BeforeEachCallback,
-        AfterEachCallback,
+        BeforeTestExecutionCallback,
+        AfterTestExecutionCallback,
         ParameterResolver {
   static final ExtensionContext.Namespace NAMESPACE =
       ExtensionContext.Namespace.create(ChaosAgentExtension.class);
@@ -116,7 +120,7 @@ public final class ChaosAgentExtension
   }
 
   @Override
-  public void beforeEach(final ExtensionContext context) {
+  public void beforeTestExecution(final ExtensionContext context) {
     final ChaosControlPlane controlPlane =
         (ChaosControlPlane) findInContextHierarchy(context, ChaosControlPlane.class);
     final ChaosSession session = (ChaosSession) findInContextHierarchy(context, ChaosSession.class);
@@ -132,7 +136,7 @@ public final class ChaosAgentExtension
 
   @Override
   @SuppressWarnings("unchecked")
-  public void afterEach(final ExtensionContext context) {
+  public void afterTestExecution(final ExtensionContext context) {
     // Method-level @WithChaos scenarios end with the method, not with the class.
     WithChaosSupport.close(
         (List<ChaosActivationHandle>)

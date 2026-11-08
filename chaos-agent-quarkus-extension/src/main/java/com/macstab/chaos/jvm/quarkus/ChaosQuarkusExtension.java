@@ -19,9 +19,9 @@ import java.util.Locale;
 import java.util.Set;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.extension.AfterAllCallback;
-import org.junit.jupiter.api.extension.AfterEachCallback;
+import org.junit.jupiter.api.extension.AfterTestExecutionCallback;
 import org.junit.jupiter.api.extension.BeforeAllCallback;
-import org.junit.jupiter.api.extension.BeforeEachCallback;
+import org.junit.jupiter.api.extension.BeforeTestExecutionCallback;
 import org.junit.jupiter.api.extension.ExtensionContext;
 import org.junit.jupiter.api.extension.ParameterContext;
 import org.junit.jupiter.api.extension.ParameterResolutionException;
@@ -40,11 +40,14 @@ import org.junit.jupiter.api.extension.ParameterResolver;
  *   <li>{@code beforeAll}: self-attach the agent (idempotent), open one session for the whole test
  *       class, and activate every {@link ChaosScenario} annotation present on the class. A
  *       {@code @Nested} class runs inside its outer class and shares its session.
- *   <li>{@code beforeEach}: activate every {@link ChaosScenario} annotation present on the test
- *       method. The activations of either scope are tracked per method so {@code afterEach} can
- *       tear them down — otherwise the second test method that declared the same scenario id would
- *       hit an {@code "already active"} activation conflict.
- *   <li>{@code afterEach}: stop the scenarios activated by the current method's annotations;
+ *   <li>{@code beforeTestExecution}: activate every {@link ChaosScenario} and {@link
+ *       com.macstab.chaos.jvm.testkit.WithChaos} annotation present on the test method, right
+ *       before the test method runs (after its {@code @BeforeEach} methods). The activations of
+ *       either scope are tracked per method so {@code afterTestExecution} can tear them down —
+ *       otherwise the second test method that declared the same scenario id would hit an {@code
+ *       "already active"} activation conflict.
+ *   <li>{@code afterTestExecution}: stop the scenarios activated by the current method's
+ *       annotations, right after the test method ran (before its {@code @AfterEach} methods);
  *       class-level scenarios remain active for the whole class.
  *   <li>{@code afterAll}: stop the scenarios activated by class-level annotations and close the
  *       session (which stops every session-scoped scenario activated during the class).
@@ -59,8 +62,8 @@ import org.junit.jupiter.api.extension.ParameterResolver;
 @SuppressWarnings("removal")
 public final class ChaosQuarkusExtension
     implements BeforeAllCallback,
-        BeforeEachCallback,
-        AfterEachCallback,
+        BeforeTestExecutionCallback,
+        AfterTestExecutionCallback,
         AfterAllCallback,
         ParameterResolver {
   static final ExtensionContext.Namespace NAMESPACE =
@@ -74,10 +77,10 @@ public final class ChaosQuarkusExtension
 
   /**
    * Store key, scoped to the per-test-method {@link ExtensionContext.Store}, for the handles
-   * activated from annotations on the test method itself. These must be stopped in afterEach —
-   * otherwise a {@code @ChaosScenario(id="x")} on two different test methods causes the second
-   * method to fail with an activation conflict because the first method's handle is still
-   * registered.
+   * activated from annotations on the test method itself. These must be stopped in
+   * afterTestExecution — otherwise a {@code @ChaosScenario(id="x")} on two different test methods
+   * causes the second method to fail with an activation conflict because the first method's handle
+   * is still registered.
    */
   private static final String METHOD_HANDLES_KEY = "methodHandles";
 
@@ -115,7 +118,7 @@ public final class ChaosQuarkusExtension
   }
 
   @Override
-  public void beforeEach(final ExtensionContext context) {
+  public void beforeTestExecution(final ExtensionContext context) {
     final Method testMethod = context.getTestMethod().orElse(null);
     if (testMethod == null) {
       return;
@@ -126,7 +129,7 @@ public final class ChaosQuarkusExtension
       return;
     }
     // Track the activations from *this method's* annotations in a method-scoped list so
-    // afterEach can stop exactly them. context.getStore(NAMESPACE) in beforeEach/afterEach is
+    // afterTestExecution can stop exactly them. context.getStore(NAMESPACE) here is
     // scoped to the test-method context, so values written here are isolated per method and do
     // not bleed into sibling tests. Class-level annotations keep using the class-scoped list
     // populated by beforeAll (see CLASS_HANDLES_KEY above).
@@ -139,7 +142,7 @@ public final class ChaosQuarkusExtension
   }
 
   @Override
-  public void afterEach(final ExtensionContext context) {
+  public void afterTestExecution(final ExtensionContext context) {
     // Stop the scenarios activated by annotations on the current test method. Without this, a
     // second test method declaring the same scenario id would collide with the still-active
     // handle from the previous method and fail with "scenario already active".

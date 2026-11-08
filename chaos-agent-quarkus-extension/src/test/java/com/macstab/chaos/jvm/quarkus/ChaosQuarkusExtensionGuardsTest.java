@@ -82,17 +82,18 @@ class ChaosQuarkusExtensionGuardsTest {
   @DisplayName("before each test, nothing happens without a test method or without a session")
   void beforeEachWithoutState() throws Exception {
     final Map<Object, Object> withoutMethod = new HashMap<>();
-    extension.beforeEach(context(withoutMethod, null, null, null));
+    extension.beforeTestExecution(context(withoutMethod, null, null, null));
     assertThat(withoutMethod).isEmpty();
 
     final Map<Object, Object> withoutSession = new HashMap<>();
     withoutSession.put(ChaosControlPlane.class, controlPlane);
-    extension.beforeEach(context(withoutSession, null, fixture("sessionScoped"), null));
+    extension.beforeTestExecution(context(withoutSession, null, fixture("sessionScoped"), null));
     assertThat(withoutSession).containsOnlyKeys(ChaosControlPlane.class);
 
     final Map<Object, Object> withoutControlPlane = new HashMap<>();
     withoutControlPlane.put(ChaosSession.class, session);
-    extension.beforeEach(context(withoutControlPlane, null, fixture("sessionScoped"), null));
+    extension.beforeTestExecution(
+        context(withoutControlPlane, null, fixture("sessionScoped"), null));
     assertThat(withoutControlPlane).containsOnlyKeys(ChaosSession.class);
     assertThat(session.activated).isEmpty();
   }
@@ -104,7 +105,7 @@ class ChaosQuarkusExtensionGuardsTest {
     final ExtensionContext method =
         context(new HashMap<>(), null, fixture("sessionScoped"), parent);
 
-    extension.beforeEach(method);
+    extension.beforeTestExecution(method);
 
     assertThat(session.activated).containsExactly("guard-session");
     assertThat(controlPlane.activated).isEmpty();
@@ -115,9 +116,9 @@ class ChaosQuarkusExtensionGuardsTest {
   void failingMethodHandle() throws Exception {
     final ExtensionContext method =
         context(new HashMap<>(), null, fixture("jvmScoped"), classContext());
-    extension.beforeEach(method);
+    extension.beforeTestExecution(method);
 
-    assertThatCode(() -> extension.afterEach(method)).doesNotThrowAnyException();
+    assertThatCode(() -> extension.afterTestExecution(method)).doesNotThrowAnyException();
     assertThat(controlPlane.activated).containsExactly("guard-jvm");
     assertThat(controlPlane.closeAttempts).isEqualTo(1);
   }
@@ -130,7 +131,7 @@ class ChaosQuarkusExtensionGuardsTest {
 
     assertThatCode(
             () -> {
-              extension.afterEach(context);
+              extension.afterTestExecution(context);
               extension.afterAll(context);
             })
         .doesNotThrowAnyException();

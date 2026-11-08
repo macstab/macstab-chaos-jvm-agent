@@ -39,8 +39,8 @@ class ChaosMicronautExtensionGuardsTest {
 
     assertThatCode(
             () -> {
-              extension.beforeEach(context);
-              extension.afterEach(context);
+              extension.beforeTestExecution(context);
+              extension.afterTestExecution(context);
             })
         .doesNotThrowAnyException();
     assertThat(values).containsOnlyKeys(ChaosControlPlane.class);
@@ -48,7 +48,7 @@ class ChaosMicronautExtensionGuardsTest {
     final Map<Object, Object> empty = new HashMap<>();
     assertThatCode(
             () -> {
-              extension.beforeEach(context(empty, null));
+              extension.beforeTestExecution(context(empty, null));
               extension.afterAll(context(empty, null));
             })
         .doesNotThrowAnyException();
@@ -112,7 +112,7 @@ class ChaosMicronautExtensionGuardsTest {
     parentValues.put(ChaosSession.class, unused(ChaosSession.class));
     final Map<Object, Object> methodValues = new HashMap<>();
 
-    extension.beforeEach(context(methodValues, context(parentValues, null)));
+    extension.beforeTestExecution(context(methodValues, context(parentValues, null)));
 
     assertThat(methodValues.get(WithChaosSupport.class)).isEqualTo(List.of());
   }

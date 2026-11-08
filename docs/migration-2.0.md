@@ -40,6 +40,7 @@
 | 20 | The destructive-effect refusal is a `ChaosValidationException`; `suppress` is refused where a call cannot be skipped | code catches `ChaosActivationException` for a deadlock or thread leak without `allowDestructiveEffects`, or matches `plan rejected:` in the HTTP/JMX answer; a plan suppresses an operation outside the suppress list | catch `ChaosValidationException`, match `invalid plan:`; delay or reject instead (§20) |
 | 21 | Stressor parameters are refused instead of reduced | a `heapPressure` asks for more than the free heap; a `stringInternPressure` exceeds its caps or its length's distinct strings; a `floodInterval`, `gcInterval` or `heartbeat` is below 1 ms | lower the value or raise `-Xmx`, lengthen the strings, use 1 ms or more (§21) |
 | 22 | Unused `@Internal` `ChaosRuntime` overloads removed | code calls `beforeThreadStart(Thread)`, `beforeSocketRead(Object)`, `beforeSocketWrite(Object, int)` or `beforeFileIo(String, Object)` on `ChaosRuntime` | call the full forms (§22) |
+| 23 | `@WithChaos` is active around the test method only | a `@BeforeEach` / `@AfterEach` method relies on a method-level (testkit: any) `@WithChaos` scenario | activate it in the set-up method instead (§23) |
 
 ---
 
@@ -307,6 +308,14 @@ Sessions gained the other way: a session-scoped scenario may now select thread s
 | `beforeFileIo(operation, stream)` | `beforeFileIo(operation, stream, null, -1)` (no path, unknown byte count) |
 
 The documented manual method hooks, `beforeMethodEnter(className, methodName)` and `afterMethodExit(className, methodName, returnType, value)`, stay.
+
+## 23. `@WithChaos` is active around the test method only
+
+The test extensions activate `@WithChaos` scenarios right before the test method runs and stop them right after it (`beforeTestExecution` → `afterTestExecution`), so the test's own `@BeforeEach` and `@AfterEach` methods run without them. In 1.x they were activated in `beforeEach` and stopped in `afterEach`, so set-up and tear-down ran under the test's chaos. This applies to every `@WithChaos` of the testkit `ChaosAgentExtension` and to method-level `@WithChaos` (and Quarkus `@ChaosScenario`) of the Spring Boot 3/4, Micronaut and Quarkus extensions; class-level declarations of those three still span the whole class (`beforeAll` → `afterAll`).
+
+The testkit also binds the thread that runs the test method rather than the thread of `beforeEach`: a body on the separate thread of `@Timeout(threadMode = SEPARATE_THREAD)` and each dynamic test of a `@TestFactory` now run in the session. Under concurrent execution a dynamic test may run after its factory's teardown, outside the session. `ChaosAgentExtension` (testkit, Spring Boot 3/4), `ChaosMicronautExtension` and `ChaosQuarkusExtension` implement `BeforeTestExecutionCallback` / `AfterTestExecutionCallback` (the framework ones no longer implement `BeforeEachCallback` / `AfterEachCallback`), and the testkit one implements `InvocationInterceptor`.
+
+Before (1.x): a `@BeforeEach` method that warmed a cache through a call the test's `@WithChaos` delays was delayed too. Now it is not. Where set-up must run under a scenario, activate it there yourself with the injected `ChaosSession` or `ChaosControlPlane` (and bind the thread for a session-scoped one).
 
 ---
 

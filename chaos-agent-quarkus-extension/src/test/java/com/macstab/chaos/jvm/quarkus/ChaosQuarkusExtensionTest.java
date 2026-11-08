@@ -203,7 +203,8 @@ class ChaosQuarkusExtensionTest {
       assertThat(session).isNotNull();
       assertThat(controlPlane).isNotNull();
       assertThat(controlPlane.diagnostics().scenario("method-delay"))
-          .as("method-delay scenario is visible in diagnostics after beforeEach activation")
+          .as(
+              "method-delay scenario is visible in diagnostics after beforeTestExecution activation")
           .isPresent();
     }
   }
