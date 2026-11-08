@@ -56,6 +56,16 @@ class AgentJarContentsTest {
     }
 
     @Test
+    @DisplayName("asks for no native method prefix, which the agent never sets")
+    void requestsNoNativeMethodPrefix() throws IOException {
+      try (JarFile jar = agentJar()) {
+        final java.util.jar.Attributes manifest = jar.getManifest().getMainAttributes();
+        assertThat(manifest.getValue("Can-Retransform-Classes")).isEqualTo("true");
+        assertThat(manifest.getValue("Can-Set-Native-Method-Prefix")).isNull();
+      }
+    }
+
+    @Test
     @DisplayName("keeps the ASM licence shipped by ByteBuddy")
     void keepsAsmLicense() throws IOException {
       try (JarFile jar = agentJar()) {

@@ -67,7 +67,6 @@ val agentManifest = mapOf(
     "Agent-Class" to "com.macstab.chaos.jvm.bootstrap.ChaosAgentBootstrap",
     "Can-Redefine-Classes" to "true",
     "Can-Retransform-Classes" to "true",
-    "Can-Set-Native-Method-Prefix" to "true",
     // Self-grant access to JDK internals the agent instruments / reflects into.
     // Honoured by the JVM only on -javaagent: (premain) attach; the runtime self-attach
     // path (ChaosAgentBootstrap#installForLocalTests / agentmain) grants the same opens

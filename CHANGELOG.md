@@ -232,6 +232,7 @@ Migration steps for each change: [docs/migration-2.0.md](docs/migration-2.0.md).
 * **demos:** each demo has 120 seconds, and CI runs them on JDK 21 and 25; `scripts/check-reproducible.sh` fails when there is no jar to compare.
 * **publishing:** every published POM describes its own module (all carried the same text), and the SCM connections are `scm:git:https://…` and `scm:git:ssh://git@…` instead of the retired `git://` protocol.
 * **spring:** `chaos-agent-spring-boot-common` is compiled against Spring Boot 3 and used with Boot 3 and Boot 4; its tests now run on both (`testBoot4`).
+* **packaging:** the agent manifest no longer requests `Can-Set-Native-Method-Prefix`; the agent never sets a native method prefix.
 * **build:** a test method without its own `@Timeout` fails after 5 minutes and a test task after 25. A rebuilt agent jar reruns the tests that start it (bootstrap, the fat-jar probe) instead of reusing a cached result.
 
 # 1.0.0 (2026-04-29)
