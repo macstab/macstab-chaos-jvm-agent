@@ -17,7 +17,6 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
-import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -1077,25 +1076,15 @@ class InstrumentationIntegrationTest {
 
     // No coverage agent here: these plans reach every file write, thread start, class load, gc and
     // exit of the JVM, the coverage agent's own dump at shutdown included.
-    // Output goes to a file, not a pipe: a pipe is read only after the JVM exits, so a child that
-    // writes more than the pipe holds would block on its next write until the timeout.
-    final Path log = tempDir.resolve(mode + ".out");
-    final Process process =
-        new ProcessBuilder(cmd).redirectErrorStream(true).redirectOutput(log.toFile()).start();
-    final boolean finished = process.waitFor(30, TimeUnit.SECONDS);
-    if (!finished) {
-      final String threads = ChildJvmProbe.threadDump(process);
-      process.destroyForcibly().waitFor(10, TimeUnit.SECONDS);
-      assertThat(finished)
-          .as(
-              "probe JVM should finish within 30 s; output:%n%s%nthreads:%n%s",
-              Files.readString(log), threads)
-          .isTrue();
-    }
-    final List<String> lines = Files.readAllLines(log);
-    final String output = String.join("\n", lines);
-    assertThat(process.exitValue()).as("probe JVM exit value: " + output).isZero();
-    return new ChildJvmProbe.ProbeResult(output, ChildJvmProbe.parse(lines));
+    final ChildJvmProbe.BoundedRun run =
+        ChildJvmProbe.runBounded(cmd, tempDir.resolve(mode + ".out"), Duration.ofSeconds(30));
+    assertThat(run.finished())
+        .as(
+            "probe JVM should finish within 30 s; output:%n%s%nthreads:%n%s",
+            run.output(), run.threads())
+        .isTrue();
+    assertThat(run.exitValue()).as("probe JVM exit value: " + run.output()).isZero();
+    return run.result();
   }
 
   /**

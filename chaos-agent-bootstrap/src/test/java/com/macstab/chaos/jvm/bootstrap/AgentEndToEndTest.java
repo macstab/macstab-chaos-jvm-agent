@@ -2514,26 +2514,25 @@ class AgentEndToEndTest {
       Files.writeString(
           planFile,
           "{\n  \"metadata\": {\"name\": \"p\"},\n  \"scenarios\": [ { \"idd\": 1 } ]\n}\n");
-      final Process process =
-          new ProcessBuilder(
-                  withCoverage(
-                      java.util.List.of(
-                          Path.of(System.getProperty("java.home"), "bin", "java").toString(),
-                          "-javaagent:"
-                              + System.getProperty("chaos.bootstrap.agentJar")
-                              + "=configFile="
-                              + planFile,
-                          "-Dmacstab.chaos.reports=on",
-                          "-Dmacstab.chaos.reportsDir=" + reports,
-                          "-cp",
-                          System.getProperty("java.class.path"),
-                          DefectProbeMain.class.getName(),
-                          "woven-groups")))
-              .redirectErrorStream(true)
-              .start();
-      process.getInputStream().readAllBytes();
-      assertThat(process.waitFor(60, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
-      assertThat(process.exitValue()).as("the agent refuses a malformed plan").isNotZero();
+      final ChildJvmProbe.BoundedRun run =
+          ChildJvmProbe.runBounded(
+              withCoverage(
+                  java.util.List.of(
+                      Path.of(System.getProperty("java.home"), "bin", "java").toString(),
+                      "-javaagent:"
+                          + System.getProperty("chaos.bootstrap.agentJar")
+                          + "=configFile="
+                          + planFile,
+                      "-Dmacstab.chaos.reports=on",
+                      "-Dmacstab.chaos.reportsDir=" + reports,
+                      "-cp",
+                      System.getProperty("java.class.path"),
+                      DefectProbeMain.class.getName(),
+                      "woven-groups")),
+              tempDir.resolve("broken-plan.out"),
+              java.time.Duration.ofSeconds(60));
+      assertThat(run.finished()).as("probe JVM should finish: " + run.output()).isTrue();
+      assertThat(run.exitValue()).as("the agent refuses a malformed plan").isNotZero();
 
       final Map<String, String> status = readKeyValues(reports.resolve(".chaos-jvm.status"));
       assertThat(status).containsEntry("state", "error").containsEntry("line", "3");

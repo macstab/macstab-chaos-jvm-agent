@@ -10,14 +10,11 @@ import com.macstab.chaos.jvm.api.ChaosSelector;
 import com.macstab.chaos.jvm.api.NamePattern;
 import com.macstab.chaos.jvm.api.OperationType;
 import com.macstab.chaos.jvm.startup.ChaosPlanMapper;
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Set;
-import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -211,18 +208,13 @@ class StartupAgentIntegrationTest {
               System.getProperty("java.class.path"),
               AgentProcessProbeMain.class.getName(),
               "gc");
-      final Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
-      final String output;
-      try (final BufferedReader reader =
-          new BufferedReader(
-              new InputStreamReader(
-                  process.getInputStream(), java.nio.charset.StandardCharsets.UTF_8))) {
-        output = String.join("\n", reader.lines().toList());
-      }
-      assertThat(process.waitFor(30, TimeUnit.SECONDS)).as("probe JVM should finish").isTrue();
+      final ChildJvmProbe.BoundedRun run =
+          ChildJvmProbe.runBounded(
+              command, tempDir.resolve("malformed.out"), Duration.ofSeconds(30));
+      assertThat(run.finished()).as("probe JVM should finish: " + run.output()).isTrue();
 
-      assertThat(process.exitValue()).as("the start is aborted: " + output).isNotZero();
-      assertThat(output).contains("malformed JSON").doesNotContain("SECRET123");
+      assertThat(run.exitValue()).as("the start is aborted: " + run.output()).isNotZero();
+      assertThat(run.output()).contains("malformed JSON").doesNotContain("SECRET123");
     }
   }
 
@@ -284,16 +276,12 @@ class StartupAgentIntegrationTest {
               copy + java.io.File.pathSeparator + System.getProperty("java.class.path"),
               AgentProcessProbeMain.class.getName(),
               "gc");
-      final Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
-      final String output;
-      try (final BufferedReader reader =
-          new BufferedReader(
-              new InputStreamReader(
-                  process.getInputStream(), java.nio.charset.StandardCharsets.UTF_8))) {
-        output = String.join("\n", reader.lines().toList());
-      }
-      assertThat(process.waitFor(30, TimeUnit.SECONDS)).as("probe JVM should finish").isTrue();
-      assertThat(process.exitValue()).as("probe JVM exit value: " + output).isZero();
+      final ChildJvmProbe.BoundedRun run =
+          ChildJvmProbe.runBounded(
+              command, tempDir.resolve(copy.getFileName() + ".out"), Duration.ofSeconds(30));
+      assertThat(run.finished()).as("probe JVM should finish: " + run.output()).isTrue();
+      assertThat(run.exitValue()).as("probe JVM exit value: " + run.output()).isZero();
+      final String output = run.output();
       return output;
     }
 
@@ -323,17 +311,12 @@ class StartupAgentIntegrationTest {
     command.add(System.getProperty("java.class.path"));
     command.add(AgentProcessProbeMain.class.getName());
     command.add(mode);
-    final Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
-    final boolean finished = process.waitFor(30, TimeUnit.SECONDS);
-    assertThat(finished).as("probe JVM should finish").isTrue();
-    try (final BufferedReader reader =
-        new BufferedReader(
-            new InputStreamReader(
-                process.getInputStream(), java.nio.charset.StandardCharsets.UTF_8))) {
-      final List<String> lines = reader.lines().toList();
-      final String output = String.join("\n", lines);
-      assertThat(process.exitValue()).as("probe JVM exit value: " + output).isZero();
-      return new ChildJvmProbe.ProbeResult(output, ChildJvmProbe.parse(lines));
-    }
+    final ChildJvmProbe.BoundedRun run =
+        ChildJvmProbe.runBounded(command, tempDir.resolve(mode + ".out"), Duration.ofSeconds(30));
+    assertThat(run.finished())
+        .as("probe JVM should finish: %s%nthreads:%n%s", run.output(), run.threads())
+        .isTrue();
+    assertThat(run.exitValue()).as("probe JVM exit value: " + run.output()).isZero();
+    return run.result();
   }
 }

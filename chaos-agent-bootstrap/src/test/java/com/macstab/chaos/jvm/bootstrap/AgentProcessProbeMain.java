@@ -156,6 +156,8 @@ public final class AgentProcessProbeMain {
       case "jdbc-commit-delay" -> jdbcCommitDelay();
       case "jdbc-rollback-delay" -> jdbcRollbackDelay();
       case "jdbc-connection-acquire-delay" -> jdbcConnectionAcquireDelay();
+      // A child that never ends, for the bounded run's own test.
+      case "sleep-forever" -> Thread.sleep(Long.MAX_VALUE);
       default -> throw new IllegalArgumentException("unknown mode " + args[0]);
     }
     printApplied();

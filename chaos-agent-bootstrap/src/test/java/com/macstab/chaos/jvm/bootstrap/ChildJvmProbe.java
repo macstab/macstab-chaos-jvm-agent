@@ -10,6 +10,7 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -301,6 +302,66 @@ final class ChildJvmProbe {
         .isTrue();
     assertThat(process.exitValue()).as("probe JVM exit value, output:\n%s", output).isZero();
     return new ProbeResult(output, parse(lines));
+  }
+
+  /**
+   * Runs {@code command} as it is (no coverage agent added, no exit value asserted) with its output
+   * and errors written to {@code log}: a file, not a pipe, so a child that prints a lot never
+   * blocks on a full pipe nobody reads. Waits at most {@code timeout}; a child still running then
+   * has its threads dumped and is destroyed, so no test leaves a child JVM behind.
+   *
+   * @param command the command line
+   * @param log the file that receives the child's output
+   * @param timeout how long the child may run
+   * @return whether the child finished, its exit value and its output
+   */
+  static BoundedRun runBounded(final List<String> command, final Path log, final Duration timeout)
+      throws Exception {
+    final Process process =
+        new ProcessBuilder(command).redirectErrorStream(true).redirectOutput(log.toFile()).start();
+    try {
+      final boolean finished = process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS);
+      final String threads = finished ? "" : threadDump(process);
+      if (!finished) {
+        process.destroyForcibly().waitFor(10, TimeUnit.SECONDS);
+      }
+      final List<String> lines = Files.readAllLines(log);
+      return new BoundedRun(
+          finished,
+          finished ? process.exitValue() : -1,
+          String.join("\n", lines),
+          lines,
+          threads,
+          process.pid());
+    } finally {
+      if (process.isAlive()) {
+        process.destroyForcibly();
+      }
+    }
+  }
+
+  /**
+   * A bounded child run.
+   *
+   * @param finished whether the child exited within the timeout
+   * @param exitValue its exit value; {@code -1} when it did not finish
+   * @param output its output, one line per line
+   * @param lines its output lines
+   * @param threads its thread dump when it did not finish, else empty
+   * @param pid its process id
+   */
+  record BoundedRun(
+      boolean finished,
+      int exitValue,
+      String output,
+      List<String> lines,
+      String threads,
+      long pid) {
+
+    /** The {@code key=value} lines of the output, as {@link #parse(List)} reads them. */
+    ProbeResult result() {
+      return new ProbeResult(output, parse(lines));
+    }
   }
 
   /**
