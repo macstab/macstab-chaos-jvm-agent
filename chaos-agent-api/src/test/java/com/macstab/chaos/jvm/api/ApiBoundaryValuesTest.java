@@ -277,9 +277,10 @@ class ApiBoundaryValuesTest {
     }
 
     @Test
-    @DisplayName("a non-ANY name pattern without a value falls back to '*'")
+    @DisplayName("a non-ANY name pattern without a value is refused")
     void namePatternValue() {
-      assertThat(new NamePattern(NamePattern.MatchMode.EXACT, null).value()).isEqualTo("*");
+      assertThatThrownBy(() -> new NamePattern(NamePattern.MatchMode.EXACT, null))
+          .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test

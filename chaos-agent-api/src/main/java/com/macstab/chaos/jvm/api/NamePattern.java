@@ -34,10 +34,15 @@ import org.jspecify.annotations.Nullable;
  *
  * <p>A GLOB is matched directly, without a regex and without allocating. REGEX patterns are
  * compiled once and cached in a JVM-wide bounded cache keyed by the pattern string (capacity
- * {@value #CACHE_CAPACITY}); past the capacity a pattern is compiled per call instead of cached, so
- * a pattern-spamming plan cannot pin arbitrary heap.
+ * {@value #CACHE_CAPACITY}); a full cache is emptied before the next expression is cached, so a
+ * pattern-spamming plan cannot pin arbitrary heap and a plan's own expressions are cached again.
  *
- * @param mode matching algorithm to apply; {@code null} normalises to {@link MatchMode#ANY}
+ * <p>No input is silently reinterpreted: a mode other than {@link MatchMode#ANY} needs a non-blank
+ * value, {@link MatchMode#ANY} takes none (a {@code null}, blank or {@code "*"} value, kept as
+ * {@code "*"}), and a value needs a mode. Without both, the pattern is {@link MatchMode#ANY}.
+ *
+ * @param mode matching algorithm to apply; {@code null} together with a {@code null} value is
+ *     {@link MatchMode#ANY}
  * @param value pattern string interpreted according to {@code mode}
  */
 public record NamePattern(MatchMode mode, String value) {
@@ -60,22 +65,22 @@ public record NamePattern(MatchMode mode, String value) {
   /** Pre-compiled patterns for REGEX mode, keyed by the raw regex string. */
   private static final Map<String, Pattern> REGEX_CACHE = new ConcurrentHashMap<>();
 
-  private static Pattern cachedCompile(
+  /** Compiles {@code regex} through {@code cache}; package-private as a test seam. */
+  static Pattern cachedCompile(
       final Map<String, Pattern> cache, final String key, final String regex) {
     // ConcurrentHashMap for lock-free hot-path reads. Plans seed the cache eagerly at
     // construction, so at runtime the map only grows with distinct live-plan patterns.
-    // At capacity: compile and return without inserting rather than calling cache.clear()
-    // (which was non-atomic — concurrent threads could each observe size >= CACHE_CAPACITY
-    // and race to clear, wiping each other's freshly inserted entries and turning the cache
-    // into a source of repeated Pattern.compile calls under load). Returning without inserting
-    // is safe: the pattern is correct and the capacity guard still bounds heap.
+    // At capacity the cache is emptied, then the expression is inserted: matches() compiles
+    // through here on every call, so not inserting would recompile a live plan's expression on
+    // every match once the cache is full. Concurrent clears can wipe each other's fresh entries;
+    // that costs recompiles only, never a wrong pattern, and the capacity still bounds the heap.
     final Pattern cached = cache.get(key);
     if (cached != null) {
       return cached;
     }
     final Pattern compiled = Pattern.compile(regex);
     if (cache.size() >= CACHE_CAPACITY) {
-      return compiled;
+      cache.clear();
     }
     final Pattern winner = cache.putIfAbsent(key, compiled);
     return winner != null ? winner : compiled;
@@ -85,20 +90,30 @@ public record NamePattern(MatchMode mode, String value) {
   private static final NamePattern ANY = new NamePattern(MatchMode.ANY, "*");
 
   /**
-   * Canonical constructor. Normalises {@code null} mode to {@link MatchMode#ANY} and {@code null}
-   * value to {@code "*"}.
+   * Canonical constructor. Both {@code null} make {@link MatchMode#ANY}; {@link MatchMode#ANY}'s
+   * value is always {@code "*"}.
    *
-   * @throws IllegalArgumentException if mode is not {@link MatchMode#ANY} and value is blank
+   * @throws IllegalArgumentException if the mode is not {@link MatchMode#ANY} and the value is
+   *     {@code null} or blank, if the mode is {@link MatchMode#ANY} and the value is other than
+   *     {@code null}, blank or {@code "*"}, or if a value is given without a mode
    */
   public NamePattern(final MatchMode mode, final String value) {
+    if (mode == null && value != null) {
+      throw new IllegalArgumentException("name pattern value needs a mode");
+    }
     this.mode = Objects.requireNonNullElse(mode, MatchMode.ANY);
-    // Canonicalise ANY's value to "*" so that `new NamePattern(ANY, "anything")` equals the
-    // singleton returned by `any()`. Without this, a YAML/JSON round-trip that preserves a
-    // non-"*" value field silently produces a pattern that fails to equal `ANY`, breaking the
-    // dedup pattern in selector parsing and bloating caches.
-    this.value = (this.mode == MatchMode.ANY) ? "*" : (value == null ? "*" : value);
-    if (this.mode != MatchMode.ANY && this.value.isBlank()) {
-      throw new IllegalArgumentException("name pattern value must be non-blank");
+    if (this.mode == MatchMode.ANY) {
+      // ANY matches everything, so a value it would ignore is a mistake, not a setting. "*" and
+      // blank stay accepted: the any() singleton and every written plan carry "*".
+      if (value != null && !value.isBlank() && !value.equals("*")) {
+        throw new IllegalArgumentException("name pattern mode ANY takes no value");
+      }
+      this.value = "*";
+    } else {
+      if (value == null || value.isBlank()) {
+        throw new IllegalArgumentException("name pattern value must be non-blank");
+      }
+      this.value = value;
     }
     // Length guard runs at construction so oversized patterns are rejected when the selector is
     // built, not lazily on the first call to matches(). This keeps the blast radius of a hostile

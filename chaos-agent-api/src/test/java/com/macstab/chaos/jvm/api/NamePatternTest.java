@@ -312,6 +312,40 @@ class NamePatternTest {
     }
 
     @Test
+    @DisplayName("ANY keeps '*' and a blank value, as the singleton and written plans carry them")
+    void anyModeAcceptsStar() {
+      assertThat(new NamePattern(MatchMode.ANY, "*")).isEqualTo(NamePattern.any());
+      assertThat(new NamePattern(MatchMode.ANY, null)).isEqualTo(NamePattern.any());
+      assertThat(new NamePattern(MatchMode.ANY, "")).isEqualTo(NamePattern.any());
+    }
+
+    @Test
+    @DisplayName("ANY refuses any other value instead of dropping it")
+    void anyModeRefusesValue() {
+      assertThatThrownBy(() -> new NamePattern(MatchMode.ANY, "x"))
+          .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @DisplayName("a value without a mode is refused instead of matching everything")
+    void valueWithoutMode() {
+      assertThatThrownBy(() -> new NamePattern(null, "com.example.*"))
+          .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    @DisplayName("a mode without a value is refused instead of matching everything")
+    void modeWithoutValue() {
+      assertThatThrownBy(() -> NamePattern.glob(null)).isInstanceOf(IllegalArgumentException.class);
+      assertThatThrownBy(() -> NamePattern.exact(null))
+          .isInstanceOf(IllegalArgumentException.class);
+      assertThatThrownBy(() -> NamePattern.prefix(null))
+          .isInstanceOf(IllegalArgumentException.class);
+      assertThatThrownBy(() -> NamePattern.regex(null))
+          .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     @DisplayName("non-ANY mode rejects blank value")
     void nonAnyModeRejectsBlankValue() {
       assertThatThrownBy(() -> new NamePattern(MatchMode.EXACT, "   "))
@@ -381,6 +415,28 @@ class NamePatternTest {
         }
       }
       return Pattern.compile(builder.append('$').toString(), Pattern.DOTALL);
+    }
+  }
+
+  @Nested
+  @DisplayName("regex cache")
+  class RegexCache {
+
+    @Test
+    @DisplayName("is cleared when full, then caches the new expression")
+    void clearedWhenFull() {
+      // A test-owned cache filled to the capacity of the JVM-wide one (1024).
+      final java.util.Map<String, java.util.regex.Pattern> cache =
+          new java.util.concurrent.ConcurrentHashMap<>();
+      for (int i = 0; i < 1024; i++) {
+        cache.put("filler-" + i, java.util.regex.Pattern.compile("filler-" + i));
+      }
+
+      final java.util.regex.Pattern first = NamePattern.cachedCompile(cache, "new.*", "new.*");
+      final java.util.regex.Pattern second = NamePattern.cachedCompile(cache, "new.*", "new.*");
+
+      assertThat(second).isSameAs(first);
+      assertThat(cache).hasSize(1);
     }
   }
 }

@@ -138,6 +138,31 @@ class ChaosPlanMapperTest {
     }
 
     @Test
+    @DisplayName("reads back the ANY name patterns it writes")
+    void anyPatternRoundTrip() {
+      final ChaosPlan original =
+          new ChaosPlan(
+              new ChaosPlan.Metadata("any", ""),
+              null,
+              List.of(
+                  ChaosScenario.builder("any-thread")
+                      .scope(ChaosScenario.ScenarioScope.JVM)
+                      .selector(
+                          new ChaosSelector.ThreadSelector(
+                              Set.of(OperationType.THREAD_START),
+                              ChaosSelector.ThreadKind.ANY,
+                              com.macstab.chaos.jvm.api.NamePattern.any(),
+                              null))
+                      .effect(ChaosEffect.delay(Duration.ofMillis(5)))
+                      .build()));
+
+      final String json = ChaosPlanMapper.write(original);
+
+      assertThat(json).contains("\"ANY\"");
+      assertThat(ChaosPlanMapper.read(json)).isEqualTo(original);
+    }
+
+    @Test
     @DisplayName("writes durations and instants in ISO-8601 and leaves out absent values")
     void isoWithoutNulls() {
       final String json = ChaosPlanMapper.write(samplePlan("iso", 100));
@@ -249,6 +274,20 @@ class ChaosPlanMapperTest {
           .isInstanceOf(ConfigLoadException.class);
       assertThatThrownBy(() -> ChaosPlanMapper.read(scenario(DELAY, "").replace("\"JVM\"", "0")))
           .isInstanceOf(ConfigLoadException.class);
+    }
+
+    @Test
+    @DisplayName("refuses a name pattern with a mode and no value instead of matching everything")
+    void patternWithoutValue() {
+      final String json =
+          """
+          {"metadata":{"name":"p"},"scenarios":[{"id":"s","scope":"JVM",
+           "selector":{"type":"thread","operations":["THREAD_START"],
+                       "threadNamePattern":{"mode":"GLOB"}},
+           "effect":{"type":"delay","minDelay":"PT0.005S","maxDelay":"PT0.005S"}}]}
+          """;
+
+      assertThatThrownBy(() -> ChaosPlanMapper.read(json)).isInstanceOf(ConfigLoadException.class);
     }
 
     @Test

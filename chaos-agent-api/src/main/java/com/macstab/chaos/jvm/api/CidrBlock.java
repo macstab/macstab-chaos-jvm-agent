@@ -18,7 +18,10 @@ import org.jspecify.annotations.Nullable;
  */
 public final class CidrBlock {
 
-  /** Bound on the parse cache; distinct blocks come from plans, so this is generous. */
+  /**
+   * Bound on the parse cache; distinct blocks come from plans, so this is generous. A full cache is
+   * emptied before the next block is cached.
+   */
   private static final int CACHE_CAPACITY = 256;
 
   private static final Map<String, CidrBlock> CACHE = new ConcurrentHashMap<>();
@@ -91,15 +94,23 @@ public final class CidrBlock {
    * @throws IllegalArgumentException if {@code text} is not a valid block
    */
   public static CidrBlock cached(final String text) {
-    final CidrBlock cached = CACHE.get(text);
+    return cached(CACHE, text);
+  }
+
+  /** Parses {@code text} through {@code cache}; package-private as a test seam. */
+  static CidrBlock cached(final Map<String, CidrBlock> cache, final String text) {
+    final CidrBlock cached = cache.get(text);
     if (cached != null) {
       return cached;
     }
     final CidrBlock parsed = parse(text);
-    if (CACHE.size() < CACHE_CAPACITY) {
-      CACHE.putIfAbsent(text, parsed);
+    // Selectors look blocks up on every evaluation: a full cache is emptied so a live plan's
+    // blocks are cached again. Concurrent clears cost re-parses only.
+    if (cache.size() >= CACHE_CAPACITY) {
+      cache.clear();
     }
-    return parsed;
+    final CidrBlock winner = cache.putIfAbsent(text, parsed);
+    return winner != null ? winner : parsed;
   }
 
   /**

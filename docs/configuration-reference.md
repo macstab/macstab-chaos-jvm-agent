@@ -793,7 +793,7 @@ The weaving mode can also be set with the system property `-Dmacstab.chaos.instr
 { "mode": "ANY" }
 ```
 
-Absent `mode` normalises to `ANY`.
+An absent pattern, or one without `mode` and `value`, is `ANY`. Every other mode needs a non-blank `value`; `ANY` takes none (a blank value or `"*"` is accepted, any other is refused), and a `value` without a `mode` is refused: none of them is reinterpreted as `ANY` any more.
 
 ---
 

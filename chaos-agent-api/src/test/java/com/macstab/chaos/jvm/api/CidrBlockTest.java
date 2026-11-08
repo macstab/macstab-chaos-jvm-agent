@@ -3,9 +3,6 @@ package com.macstab.chaos.jvm.api;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import java.lang.reflect.Method;
-import java.net.URL;
-import java.net.URLClassLoader;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -122,24 +119,18 @@ class CidrBlockTest {
   }
 
   @Test
-  @DisplayName("past its capacity the cache parses each new block anew instead of keeping it")
-  void cacheStopsGrowingAtCapacity() throws Exception {
-    // A class loader of its own gives this test a fresh cache: filling the JVM-wide one would
-    // change what every later test in this JVM observes.
-    final URL classes = CidrBlock.class.getProtectionDomain().getCodeSource().getLocation();
-    try (URLClassLoader isolated =
-        new URLClassLoader(new URL[] {classes}, ClassLoader.getPlatformClassLoader())) {
-      final Method cached =
-          isolated.loadClass(CidrBlock.class.getName()).getMethod("cached", String.class);
-      for (int i = 0; i < 256; i++) {
-        cached.invoke(null, "10.0." + i + ".0/24");
-      }
-
-      final Object kept = cached.invoke(null, "10.0.0.0/24");
-      assertThat(cached.invoke(null, "10.0.0.0/24")).isSameAs(kept);
-      final Object first = cached.invoke(null, "10.1.0.0/16");
-      final Object second = cached.invoke(null, "10.1.0.0/16");
-      assertThat(second).isEqualTo(first).isNotSameAs(first);
+  @DisplayName("the parse cache is cleared when full, then caches the new block")
+  void cacheClearedWhenFull() {
+    // A test-owned cache filled to the capacity of the JVM-wide one (256).
+    final java.util.Map<String, CidrBlock> cache = new java.util.concurrent.ConcurrentHashMap<>();
+    for (int i = 0; i < 256; i++) {
+      cache.put("10.0." + i + ".0/24", CidrBlock.parse("10.0." + i + ".0/24"));
     }
+
+    final CidrBlock first = CidrBlock.cached(cache, "192.168.0.0/16");
+    final CidrBlock second = CidrBlock.cached(cache, "192.168.0.0/16");
+
+    assertThat(second).isSameAs(first);
+    assertThat(cache).hasSize(1);
   }
 }

@@ -43,6 +43,7 @@
 | 23 | `@WithChaos` is active around the test method only | a `@BeforeEach` / `@AfterEach` method relies on a method-level (testkit: any) `@WithChaos` scenario | activate it in the set-up method instead (§23) |
 | 24 | `ActivationPolicy.fromJson` is no longer public | you call it from code | use the constructor or `ActivationPolicy.builder()`, or read JSON with `ChaosPlanMapper` (§24) |
 | 25 | Plan JSON is read strictly and written in ISO-8601 | a plan gives a duration or instant as a number, a number as a string, a fraction for an integer, `0`/`1` for a boolean, an ordinal for an enum or a field twice; or you read `GET /q/chaos` (`/chaos`, `/actuator/chaos`) or `ChaosPlanMapper.toJson` output as numbers | write ISO-8601 strings and plain JSON values; read `capturedAt` and durations as ISO-8601 strings (§25) |
+| 26 | A name pattern is no longer canonicalised | a pattern has a mode without a value (`{"mode": "GLOB"}`, `NamePattern.glob(null)`), a value without a mode, or `ANY` with a value other than `"*"` | give the mode its value, or use `ANY` (`NamePattern.any()`) (§26) |
 
 ---
 
@@ -332,6 +333,12 @@ Before (1.x): `ActivationPolicy.fromJson(null, null, 0L, …)` built a policy wi
 Its JSON output changed too: durations and instants are ISO-8601 strings (`"PT0.005S"`, `"capturedAt": "2026-11-08T10:15:30Z"`) instead of decimal seconds, in `ChaosPlanMapper.write`, `toJson` and the diagnostics the management endpoints return; `write` leaves out absent (`null`) values.
 
 Before (1.x): `"minDelay": 0.005` was read as 5 ms and the diagnostics snapshot carried `"capturedAt": 1794132930.000000000`. Now write `"minDelay": "PT0.005S"`, and read `capturedAt` and durations as ISO-8601 strings.
+
+## 26. A name pattern is no longer canonicalised
+
+`NamePattern` refuses with `IllegalArgumentException` (through the plan reader, `ConfigLoadException`) what 1.x silently turned into a pattern that matches everything: a mode other than `ANY` without a value (`{"mode": "GLOB"}`, `NamePattern.glob(null)`), a value without a mode (`{"value": "com.example.*"}`), and `ANY` with a value other than blank or `"*"` (`new NamePattern(ANY, "x")`). A pattern without both mode and value is still `ANY`, and `ANY` with `"*"` (what `NamePattern.any()` and every written plan carry) still works.
+
+Before (1.x): `{"mode": "GLOB"}` without a value matched every name, so a selector meant to narrow its scenario applied it everywhere. Now give the mode its value, or write `{"mode": "ANY"}`.
 
 ---
 
