@@ -18,6 +18,8 @@ import org.junit.jupiter.api.extension.ExtensionContext;
 import org.junit.jupiter.api.extension.ParameterContext;
 import org.junit.jupiter.api.extension.ParameterResolutionException;
 import org.junit.jupiter.api.extension.ParameterResolver;
+import org.springframework.beans.factory.annotation.ParameterResolutionDelegate;
+import org.springframework.test.context.support.TestConstructorUtils;
 
 /**
  * JUnit 5 extension that installs the chaos agent once per test JVM and opens a class-scoped {@link
@@ -43,7 +45,11 @@ import org.junit.jupiter.api.extension.ParameterResolver;
  * <h2>Parameter injection</h2>
  *
  * <p>The extension injects {@link ChaosSession} and {@link ChaosControlPlane} parameters on test
- * methods and lifecycle methods.
+ * methods and lifecycle methods. A parameter Spring autowires is left to Spring: one of an
+ * autowired test constructor ({@code @Autowired}, {@code @TestConstructor(autowireMode = ALL)} or
+ * {@code spring.test.constructor.autowire.mode=all}) and one annotated {@code @Autowired},
+ * {@code @Value} or {@code @Qualifier}. Spring injects the context's {@link ChaosControlPlane} bean
+ * there; a {@link ChaosSession} is not a bean, so Spring reports it as missing.
  */
 public final class ChaosAgentExtension
     implements BeforeAllCallback,
@@ -187,7 +193,16 @@ public final class ChaosAgentExtension
   public boolean supportsParameter(
       final ParameterContext parameterContext, final ExtensionContext extensionContext) {
     final Class<?> parameterType = parameterContext.getParameter().getType();
-    return parameterType == ChaosSession.class || parameterType == ChaosControlPlane.class;
+    if (parameterType != ChaosSession.class && parameterType != ChaosControlPlane.class) {
+      return false;
+    }
+    // The SpringExtension resolves these itself; claiming them too makes JUnit fail the test with
+    // competing resolvers. The same checks as SpringExtension.supportsParameter.
+    return !TestConstructorUtils.isAutowirableConstructor(
+            parameterContext.getDeclaringExecutable(),
+            name -> extensionContext.getConfigurationParameter(name).orElse(null))
+        && !ParameterResolutionDelegate.isAutowirable(
+            parameterContext.getParameter(), parameterContext.getIndex());
   }
 
   @Override

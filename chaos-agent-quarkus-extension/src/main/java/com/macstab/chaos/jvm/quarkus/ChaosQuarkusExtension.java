@@ -10,6 +10,7 @@ import com.macstab.chaos.jvm.api.OperationType;
 import com.macstab.chaos.jvm.bootstrap.ChaosPlatform;
 import com.macstab.chaos.jvm.testkit.TrackingChaosControlPlane;
 import com.macstab.chaos.jvm.testkit.WithChaosSupport;
+import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -56,7 +57,8 @@ import org.junit.jupiter.api.extension.ParameterResolver;
  * <h2>Parameter injection</h2>
  *
  * <p>The extension injects {@link ChaosSession} and {@link ChaosControlPlane} parameters on test
- * methods and lifecycle methods.
+ * methods and lifecycle methods. Constructor parameters are left to Quarkus' own extension, which
+ * resolves every one of them (a {@link ChaosControlPlane} there is the CDI bean).
  */
 // Still honours the deprecated @ChaosScenario until it is removed.
 @SuppressWarnings("removal")
@@ -200,7 +202,10 @@ public final class ChaosQuarkusExtension
   public boolean supportsParameter(
       final ParameterContext parameterContext, final ExtensionContext extensionContext) {
     final Class<?> parameterType = parameterContext.getParameter().getType();
-    return parameterType == ChaosSession.class || parameterType == ChaosControlPlane.class;
+    // QuarkusTestExtension claims every constructor parameter; claiming one too makes JUnit fail
+    // the test with competing resolvers.
+    return (parameterType == ChaosSession.class || parameterType == ChaosControlPlane.class)
+        && !(parameterContext.getDeclaringExecutable() instanceof Constructor);
   }
 
   @Override

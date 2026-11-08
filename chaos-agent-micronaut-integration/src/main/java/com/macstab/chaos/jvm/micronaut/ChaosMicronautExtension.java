@@ -6,7 +6,8 @@ import com.macstab.chaos.jvm.api.ChaosSession;
 import com.macstab.chaos.jvm.bootstrap.ChaosPlatform;
 import com.macstab.chaos.jvm.testkit.TrackingChaosControlPlane;
 import com.macstab.chaos.jvm.testkit.WithChaosSupport;
-import io.micronaut.test.extensions.junit5.annotation.MicronautTest;
+import java.lang.annotation.Annotation;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -20,7 +21,6 @@ import org.junit.jupiter.api.extension.ExtensionContext;
 import org.junit.jupiter.api.extension.ParameterContext;
 import org.junit.jupiter.api.extension.ParameterResolutionException;
 import org.junit.jupiter.api.extension.ParameterResolver;
-import org.junit.platform.commons.support.AnnotationSupport;
 
 /**
  * JUnit 5 extension that installs the chaos agent once per test JVM and opens a class-scoped {@link
@@ -54,11 +54,13 @@ import org.junit.platform.commons.support.AnnotationSupport;
  * ApplicationContext}, and {@link ChaosControlPlane} is exposed as a bean via {@code
  * ChaosFactory.chaosControlPlane()}. If both resolvers claimed the parameter, JUnit would raise
  * {@code ParameterResolutionException("Discovered multiple competing ParameterResolvers ...")}. To
- * avoid the collision this extension detects the presence of {@link MicronautTest} on the test
- * class (walking parents so nested classes inherit the decision) and yields ownership of the
- * control-plane parameter to Micronaut in that case. When the extension is used standalone (without
- * {@link MicronautTest}), no competing resolver exists and this extension resolves the control
- * plane from its own store.
+ * avoid the collision this extension detects {@code @MicronautTest} on the test class, directly or
+ * as a meta-annotation (walking parents so nested classes inherit the decision), and yields
+ * ownership of the control-plane parameter to Micronaut when it resolves parameters ({@code
+ * resolveParameters}, {@code true} by default). Without {@code @MicronautTest}, or with {@code
+ * resolveParameters = false}, no competing resolver exists and this extension resolves the control
+ * plane from its own store. The annotation is found by name, so micronaut-test need not be on the
+ * class path.
  */
 public final class ChaosMicronautExtension
     implements BeforeAllCallback,
@@ -68,6 +70,10 @@ public final class ChaosMicronautExtension
         ParameterResolver {
   static final ExtensionContext.Namespace NAMESPACE =
       ExtensionContext.Namespace.create(ChaosMicronautExtension.class);
+
+  /** The annotation Micronaut's JUnit 5 extension is registered with; found by name. */
+  private static final String MICRONAUT_TEST =
+      "io.micronaut.test.extensions.junit5.annotation.MicronautTest";
 
   /**
    * The control planes test application contexts expose as beans ({@link ChaosTestFactory}); a
@@ -218,19 +224,52 @@ public final class ChaosMicronautExtension
     return false;
   }
 
+  /** Whether a {@code @MicronautTest} that resolves parameters is on the class or its outers. */
   private static boolean isMicronautTest(final ExtensionContext context) {
     ExtensionContext current = context;
     while (current != null) {
       final Optional<Class<?>> testClass = current.getTestClass();
-      // isAnnotated also finds @MicronautTest as a meta-annotation (it is one on
-      // @MicronautChaosTest); Class.isAnnotationPresent only sees direct annotations.
-      if (testClass.isPresent()
-          && AnnotationSupport.isAnnotated(testClass.get(), MicronautTest.class)) {
-        return true;
+      if (testClass.isPresent()) {
+        final Annotation micronautTest =
+            findByName(testClass.get().getAnnotations(), new HashSet<>());
+        if (micronautTest != null) {
+          return resolvesParameters(micronautTest);
+        }
       }
       current = current.getParent().orElse(null);
     }
     return false;
+  }
+
+  /**
+   * The {@code @MicronautTest} among {@code annotations} or their meta-annotations (it is one on
+   * {@code @MicronautChaosTest}); {@code visited} stops the walk at annotations already seen.
+   */
+  private static @Nullable Annotation findByName(
+      final Annotation[] annotations, final Set<Class<?>> visited) {
+    for (final Annotation annotation : annotations) {
+      final Class<? extends Annotation> type = annotation.annotationType();
+      if (type.getName().equals(MICRONAUT_TEST)) {
+        return annotation;
+      }
+      if (visited.add(type)) {
+        final Annotation meta = findByName(type.getAnnotations(), visited);
+        if (meta != null) {
+          return meta;
+        }
+      }
+    }
+    return null;
+  }
+
+  /** {@code resolveParameters} of a {@code @MicronautTest}; {@code true} when it cannot be read. */
+  private static boolean resolvesParameters(final Annotation micronautTest) {
+    try {
+      return !Boolean.FALSE.equals(
+          micronautTest.annotationType().getMethod("resolveParameters").invoke(micronautTest));
+    } catch (final ReflectiveOperationException | RuntimeException unreadable) {
+      return true;
+    }
   }
 
   @Override

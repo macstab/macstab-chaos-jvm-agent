@@ -104,15 +104,24 @@ Scenarios activated through an injected `ChaosControlPlane` bean are released wh
 
 #### `ParameterResolver` — `ChaosSession` and `ChaosControlPlane` injection
 
-The resolver supports two types:
+The resolver supports two types, except where Spring autowires the parameter:
 
 ```java
 public boolean supportsParameter(ParameterContext parameterContext,
                                   ExtensionContext extensionContext) {
     final Class<?> parameterType = parameterContext.getParameter().getType();
-    return parameterType == ChaosSession.class || parameterType == ChaosControlPlane.class;
+    if (parameterType != ChaosSession.class && parameterType != ChaosControlPlane.class) {
+        return false;
+    }
+    return !TestConstructorUtils.isAutowirableConstructor(
+            parameterContext.getDeclaringExecutable(),
+            name -> extensionContext.getConfigurationParameter(name).orElse(null))
+        && !ParameterResolutionDelegate.isAutowirable(
+            parameterContext.getParameter(), parameterContext.getIndex());
 }
 ```
+
+`SpringExtension` resolves the parameters of an autowired test constructor (`@Autowired`, `@TestConstructor(autowireMode = ALL)` or `spring.test.constructor.autowire.mode=all`) and every parameter annotated `@Autowired`, `@Value` or `@Qualifier`; if the chaos resolver claimed them too, JUnit would fail the test with "competing ParameterResolvers". There Spring injects the context's `ChaosControlPlane` bean (the tracking plane of `ChaosTestAutoConfiguration`); a `ChaosSession` is not a bean, so Spring reports it as missing: take the session as a test-method parameter instead.
 
 Resolution walks the context hierarchy:
 

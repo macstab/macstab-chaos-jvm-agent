@@ -153,6 +153,17 @@ class ChaosQuarkusExtensionGuardsTest {
   }
 
   @Test
+  @DisplayName("leaves constructor parameters to Quarkus, which resolves every one of them")
+  void constructorParameters() throws Exception {
+    final ExtensionContext context = context(new HashMap<>(), null, null, null);
+
+    assertThat(extension.supportsParameter(constructorParameter(ChaosControlPlane.class), context))
+        .isFalse();
+    assertThat(extension.supportsParameter(constructorParameter(ChaosSession.class), context))
+        .isFalse();
+  }
+
+  @Test
   @DisplayName("a blank selector or effect is rejected")
   void blankIdentifiers() {
     assertThatThrownBy(() -> ChaosQuarkusExtension.toScenario(annotation("blankSelector")))
@@ -197,13 +208,32 @@ class ChaosQuarkusExtensionGuardsTest {
   private static void target(
       final ChaosSession session, final ChaosControlPlane plane, final String other) {}
 
+  /** A test class whose constructor takes the chaos types. */
+  @SuppressWarnings("unused")
+  private static final class ConstructorTarget {
+    ConstructorTarget(final ChaosSession session, final ChaosControlPlane plane) {}
+  }
+
   private static ParameterContext parameter(final Class<?> type) throws Exception {
+    return parameterContext(
+        ChaosQuarkusExtensionGuardsTest.class
+            .getDeclaredMethod("target", ChaosSession.class, ChaosControlPlane.class, String.class)
+            .getParameters(),
+        type);
+  }
+
+  private static ParameterContext constructorParameter(final Class<?> type) throws Exception {
+    return parameterContext(
+        ConstructorTarget.class
+            .getDeclaredConstructor(ChaosSession.class, ChaosControlPlane.class)
+            .getParameters(),
+        type);
+  }
+
+  private static ParameterContext parameterContext(
+      final Parameter[] parameters, final Class<?> type) {
     final Parameter parameter =
-        java.util.Arrays.stream(
-                ChaosQuarkusExtensionGuardsTest.class
-                    .getDeclaredMethod(
-                        "target", ChaosSession.class, ChaosControlPlane.class, String.class)
-                    .getParameters())
+        java.util.Arrays.stream(parameters)
             .filter(candidate -> candidate.getType() == type)
             .findFirst()
             .orElseThrow();

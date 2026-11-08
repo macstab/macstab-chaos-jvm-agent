@@ -100,6 +100,8 @@ Around the test method (beforeTestExecution → test method → afterTestExecuti
 
 Parameters of any other type are not resolved by this extension (JUnit delegates to other resolvers).
 
+The framework test extensions leave a parameter to the framework's own resolver where that resolver claims it, so JUnit never sees two resolvers for one parameter: the Spring Boot `ChaosAgentExtension` the parameters Spring autowires (an autowired test constructor, `@Autowired`, `@Value`, `@Qualifier`), `ChaosQuarkusExtension` every constructor parameter (Quarkus resolves them all), and `ChaosMicronautExtension` the `ChaosControlPlane` of a `@MicronautTest` class unless it sets `resolveParameters = false`. The framework then injects its `ChaosControlPlane` bean. `ChaosMicronautExtension` finds `@MicronautTest` by name, so it also works without micronaut-test on the class path.
+
 **`ChaosDiagnostics` is not injectable.** Obtain it via `controlPlane.diagnostics()`:
 ```java
 void myTest(ChaosControlPlane controlPlane) {

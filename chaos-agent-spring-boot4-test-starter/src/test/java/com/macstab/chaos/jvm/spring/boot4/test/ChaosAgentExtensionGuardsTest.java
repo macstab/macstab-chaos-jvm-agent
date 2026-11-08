@@ -133,13 +133,13 @@ class ChaosAgentExtensionGuardsTest {
       final ChaosSession session, final ChaosControlPlane plane, final String other) {}
 
   private static ParameterContext parameter(final Class<?> type) throws Exception {
-    final Parameter parameter =
-        java.util.Arrays.stream(
-                ChaosAgentExtensionGuardsTest.class
-                    .getDeclaredMethod(
-                        "target", ChaosSession.class, ChaosControlPlane.class, String.class)
-                    .getParameters())
-            .filter(candidate -> candidate.getType() == type)
+    final Parameter[] parameters =
+        ChaosAgentExtensionGuardsTest.class
+            .getDeclaredMethod("target", ChaosSession.class, ChaosControlPlane.class, String.class)
+            .getParameters();
+    final int index =
+        java.util.stream.IntStream.range(0, parameters.length)
+            .filter(candidate -> parameters[candidate].getType() == type)
             .findFirst()
             .orElseThrow();
     return (ParameterContext)
@@ -147,11 +147,59 @@ class ChaosAgentExtensionGuardsTest {
             ParameterContext.class.getClassLoader(),
             new Class<?>[] {ParameterContext.class},
             (self, method, args) ->
-                method.getName().equals("getParameter")
-                    ? parameter
-                    : method.isDefault()
-                        ? java.lang.reflect.InvocationHandler.invokeDefault(self, method, args)
-                        : null);
+                switch (method.getName()) {
+                  case "getParameter" -> parameters[index];
+                  case "getIndex" -> index;
+                  default ->
+                      method.isDefault()
+                          ? java.lang.reflect.InvocationHandler.invokeDefault(self, method, args)
+                          : null;
+                });
+  }
+
+  /** A test class whose constructor takes the chaos types, with no autowiring annotation. */
+  @SuppressWarnings("unused")
+  private static final class ConstructorTarget {
+    ConstructorTarget(final ChaosSession session, final ChaosControlPlane plane) {}
+  }
+
+  @Test
+  @DisplayName(
+      "leaves constructor parameters to Spring when the JUnit configuration autowires them")
+  void constructorAutowiredByConfiguration() throws Exception {
+    final Parameter plane =
+        ConstructorTarget.class.getDeclaredConstructor(ChaosSession.class, ChaosControlPlane.class)
+            .getParameters()[1];
+    final ParameterContext parameter =
+        (ParameterContext)
+            Proxy.newProxyInstance(
+                ParameterContext.class.getClassLoader(),
+                new Class<?>[] {ParameterContext.class},
+                (self, method, args) ->
+                    switch (method.getName()) {
+                      case "getParameter" -> plane;
+                      case "getIndex" -> 1;
+                      default ->
+                          method.isDefault()
+                              ? java.lang.reflect.InvocationHandler.invokeDefault(
+                                  self, method, args)
+                              : null;
+                    });
+
+    assertThat(extension.supportsParameter(parameter, configured(Optional.of("all")))).isFalse();
+    assertThat(extension.supportsParameter(parameter, configured(Optional.empty()))).isTrue();
+  }
+
+  /** A context whose JUnit configuration parameters all have {@code value}. */
+  private static ExtensionContext configured(final Optional<String> value) {
+    return (ExtensionContext)
+        Proxy.newProxyInstance(
+            ExtensionContext.class.getClassLoader(),
+            new Class<?>[] {ExtensionContext.class},
+            (self, method, args) ->
+                method.getName().equals("getConfigurationParameter") && args.length == 1
+                    ? value
+                    : null);
   }
 
   /** A context with an empty store and no parent: the state before beforeAll. */
