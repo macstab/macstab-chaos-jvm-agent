@@ -116,6 +116,7 @@ public final class DefectProbeMain {
       case "udp-dns" -> udpAndReverseDns();
       case "pool-queue-reject" -> poolQueueReject();
       case "queue-poll-suppress" -> queuePollSuppress();
+      case "scheduled-offer-reject" -> scheduledOfferReject();
       case "file-map-transfer" -> fileMapAndTransfer();
       case "socket-bind" -> socketBind();
       case "thread-eagain" -> threadEagain();
@@ -1691,6 +1692,37 @@ public final class DefectProbeMain {
     System.out.println("delay.applied=" + (delay.appliedCount() > 0));
     delay.close();
     pool.shutdownNow();
+  }
+
+  /**
+   * A reject on QUEUE_OFFER while a scheduled pool, whose delay queue has no capacity limit, runs a
+   * one-shot and a fixed-rate task: prints the one-shot's result (or {@code timeout}) and whether
+   * the fixed-rate task ticked three times.
+   */
+  private static void scheduledOfferReject() throws Exception {
+    final ChaosActivationHandle reject =
+        ChaosPlatform.current()
+            .activate(
+                ChaosScenario.builder("offer-reject")
+                    .selector(ChaosSelector.queue(Set.of(OperationType.QUEUE_OFFER)))
+                    .effect(ChaosEffect.reject("full"))
+                    .build());
+    final ScheduledExecutorService executor = Executors.newScheduledThreadPool(1);
+    try {
+      final ScheduledFuture<Integer> oneShot =
+          executor.schedule(() -> 42, 10L, TimeUnit.MILLISECONDS);
+      try {
+        System.out.println("scheduledResult=" + oneShot.get(5L, TimeUnit.SECONDS));
+      } catch (final java.util.concurrent.TimeoutException timedOut) {
+        System.out.println("scheduledResult=timeout");
+      }
+      final CountDownLatch ticks = new CountDownLatch(3);
+      executor.scheduleAtFixedRate(ticks::countDown, 0L, 10L, TimeUnit.MILLISECONDS);
+      System.out.println("fixedRateTicked=" + ticks.await(5L, TimeUnit.SECONDS));
+    } finally {
+      executor.shutdownNow();
+      printApplied(reject);
+    }
   }
 
   /**

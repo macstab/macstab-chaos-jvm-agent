@@ -15,6 +15,8 @@ import java.util.Set;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.PriorityBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.AfterEach;
@@ -320,6 +322,93 @@ class ExecutorDispatchTest {
 
       assertThat(runtime.beforeBooleanQueueOperation("QUEUE_POLL", null)).isFalse();
       assertThat(runtime.beforeBooleanQueueOperation("QUEUE_POLL", new OrdersQueue())).isNull();
+    }
+  }
+
+  @Nested
+  @DisplayName("an offer to a queue without a capacity limit")
+  class QueueOfferOnUnboundedQueue {
+
+    private ChaosActivationHandle offers(final String id, final ChaosEffect effect) {
+      return runtime.activate(
+          ChaosScenario.builder(id)
+              .scope(ChaosScenario.ScenarioScope.JVM)
+              .selector(ChaosSelector.queue(Set.of(OperationType.QUEUE_OFFER)))
+              .effect(effect)
+              .activationPolicy(ActivationPolicy.always())
+              .build());
+    }
+
+    @Test
+    @DisplayName("is neither rejected nor suppressed, and counts no application")
+    void unboundedQueueKeepsTheOffer() throws Throwable {
+      // Arrange
+      final ChaosActivationHandle rejecting = offers("reject", reject("full"));
+      final ChaosActivationHandle suppressing = offers("suppress", suppress());
+
+      // Act + Assert: a queue that can never be full has no "full" to report
+      assertThat(
+              runtime.beforeBooleanQueueOperation(
+                  "QUEUE_OFFER", new PriorityBlockingQueue<String>()))
+          .isNull();
+      assertThat(
+              runtime.beforeBooleanQueueOperation("QUEUE_OFFER", new LinkedBlockingQueue<String>()))
+          .isNull();
+      assertThat(rejecting.appliedCount()).isZero();
+      assertThat(suppressing.appliedCount()).isZero();
+    }
+
+    @Test
+    @DisplayName("is still rejected on a bounded queue")
+    void boundedQueueIsRejected() throws Throwable {
+      // Arrange
+      final ChaosActivationHandle rejecting = offers("reject", reject("full"));
+
+      // Act
+      final Boolean forced =
+          runtime.beforeBooleanQueueOperation("QUEUE_OFFER", new ArrayBlockingQueue<String>(1));
+
+      // Assert
+      assertThat(forced).isFalse();
+      assertThat(rejecting.appliedCount()).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("is treated as bounded when the queue cannot report its capacity")
+    void failingCapacityCountsAsBounded() throws Throwable {
+      // Arrange
+      final ChaosActivationHandle rejecting = offers("reject", reject("full"));
+      final LinkedBlockingQueue<String> broken =
+          new LinkedBlockingQueue<>() {
+            private static final long serialVersionUID = 1L;
+
+            @Override
+            public int remainingCapacity() {
+              throw new IllegalStateException("no capacity");
+            }
+          };
+
+      // Act + Assert
+      assertThat(runtime.beforeBooleanQueueOperation("QUEUE_OFFER", broken)).isFalse();
+      assertThat(rejecting.appliedCount()).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("still waits out a delay")
+    void delayStillApplies() throws Throwable {
+      // Arrange
+      final ChaosActivationHandle delaying = offers("delay", ChaosEffect.delay(DELAY));
+
+      // Act
+      final Duration elapsed =
+          timed(
+              () ->
+                  runtime.beforeBooleanQueueOperation(
+                      "QUEUE_OFFER", new LinkedBlockingQueue<String>()));
+
+      // Assert
+      assertThat(elapsed).isGreaterThanOrEqualTo(DELAY);
+      assertThat(delaying.appliedCount()).isEqualTo(1L);
     }
   }
 

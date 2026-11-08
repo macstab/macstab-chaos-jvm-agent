@@ -868,6 +868,8 @@ All selectors use `"type"` as the JSON discriminator.
 
 A thread pool's own work queue is a `BlockingQueue` too: its workers take their next task with `take()` or `poll(keepAlive)`, so a queue scenario reaches them unless `queueClassPattern` excludes the pool's queue. `reject` is refused on `QUEUE_TAKE` and `QUEUE_POLL`, which the JDK fails only by interruption; on the producer side, `QUEUE_PUT` and `QUEUE_OFFER` accept it.
 
+`reject` and `suppress` on `QUEUE_OFFER` answer `false` only from a queue with a capacity limit. A queue without one (`remainingCapacity()` is `Integer.MAX_VALUE`: an unbounded `LinkedBlockingQueue`, a `PriorityBlockingQueue`, a `ScheduledThreadPoolExecutor`'s delay queue) is never full, so the offer runs as usual and counts no application; a delay or gate on it still applies. This keeps a scheduled pool, which ignores the result of its queue's `add`, from silently dropping its tasks. A pool built on an unbounded queue (`Executors.newFixedThreadPool`) cannot be saturated through `QUEUE_OFFER`: reject `EXECUTOR_SUBMIT` instead.
+
 `suppress` on `QUEUE_POLL` returns `null` as an empty queue does: `poll()` at once, `poll(timeout, unit)` after waiting its timeout (an interrupt ends the wait with `InterruptedException`).
 
 ---
@@ -1474,7 +1476,7 @@ The native library's DNS answer effects. `DNS_RESOLVE` fires before a lookup (de
 
 **Accepted operations:** only the operations listed under \*\*\* in §13.4; any other operation in the selector is rejected at activation.
 
-**Use cases:** suppress `QUEUE_OFFER` to simulate a full queue; suppress `RESOURCE_LOAD` to simulate a missing resource; suppress HTTP calls (see also `ChaosHttpSuppressException`).
+**Use cases:** suppress `QUEUE_OFFER` to simulate a full bounded queue; suppress `RESOURCE_LOAD` to simulate a missing resource; suppress HTTP calls (see also `ChaosHttpSuppressException`).
 
 ---
 

@@ -657,7 +657,7 @@ final class CompatibilityValidator {
       throw new ChaosValidationException(
           "RejectEffect is not supported for QUEUE_TAKE or QUEUE_POLL: the JDK's take() and poll()"
               + " do not fail that way (a pool worker dies on it); delay or gate them, suppress"
-              + " QUEUE_POLL, or reject QUEUE_PUT or QUEUE_OFFER");
+              + " QUEUE_POLL, or reject QUEUE_PUT or QUEUE_OFFER on a bounded queue");
     }
     if (effect instanceof ChaosEffect.ClockSkewEffect) {
       for (final OperationType operation : operations) {

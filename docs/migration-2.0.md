@@ -31,6 +31,7 @@
 | 10 | Bridge handle slots renumbered | you call `BootstrapDispatcher` directly | none for applications (§10) |
 | 11 | A glob's `*` also matches line terminators | a GLOB must not match across a line break | use a REGEX (§11) |
 | 14 | Enabling switches are honoured only from local sources on Quarkus and Micronaut | a config server sets `macstab.chaos.enabled` or a management switch | set `macstab.chaos.allow-remote-enable=true` locally (§14) |
+| 15 | `reject` / `suppress` on `QUEUE_OFFER` skip queues without a capacity limit | you saturate a pool on an unbounded queue through `QUEUE_OFFER` | reject `EXECUTOR_SUBMIT`, or give the queue a capacity (§15) |
 
 ---
 
@@ -188,6 +189,12 @@ Quarkus and Micronaut follow the rule the Spring starters already applied: a swi
 - Micronaut: `macstab.chaos.enabled` in `application.yml` switches chaos on, as in 1.x. A test that composes `@MicronautTest` and `@ExtendWith(ChaosMicronautExtension.class)` itself, instead of `@MicronautChaosTest`, adds `@Property(name = "macstab.chaos.test.enabled", value = "true")` to get the tracking control plane; a plain `@MicronautTest` gets the application's bean.
 - Every switch reads `true|false|1|0|yes|no|on|off`; any other value leaves it off with a warning (Spring read `on` and `yes` as off).
 - Spring: `SPRING_APPLICATION_JSON`, config files read from a local path (`./config/application.yml`, `spring.config.location=file:…`) and config trees (`configtree:`) now count as local.
+
+## 15. `reject` and `suppress` on `QUEUE_OFFER` skip queues without a capacity limit
+
+A queue whose `remainingCapacity()` is `Integer.MAX_VALUE` (an unbounded `LinkedBlockingQueue`, a `PriorityBlockingQueue`, a `ScheduledThreadPoolExecutor`'s delay queue) is never full, so a `RejectEffect` or `SuppressEffect` on `QUEUE_OFFER` no longer answers `false` from it: the offer runs and counts no application. In 1.x every scheduled pool silently dropped its tasks under such a scenario. A delay or gate on the offer still applies.
+
+Before (1.x): a reject on `QUEUE_OFFER` made `Executors.newFixedThreadPool(n)` throw `RejectedExecutionException` once its workers were busy. Now it does not, because that pool's queue is unbounded. To fail submissions, reject `EXECUTOR_SUBMIT`; to model a full queue, build the pool on a bounded one (`new ThreadPoolExecutor(n, n, 0, MILLISECONDS, new ArrayBlockingQueue<>(capacity))`).
 
 ---
 

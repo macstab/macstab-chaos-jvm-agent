@@ -151,7 +151,10 @@ public enum OperationType {
 
   /**
    * Fires before a non-blocking {@link java.util.concurrent.BlockingQueue#offer} call. Chaos here
-   * can simulate a full queue by returning {@code false} or delaying the offer.
+   * can simulate a full queue by returning {@code false} or delaying the offer. A reject or
+   * suppress applies only to a queue with a capacity limit: on one without (its {@code
+   * remainingCapacity()} is {@code Integer.MAX_VALUE}) the offer runs as usual and counts no
+   * application.
    */
   QUEUE_OFFER,
 

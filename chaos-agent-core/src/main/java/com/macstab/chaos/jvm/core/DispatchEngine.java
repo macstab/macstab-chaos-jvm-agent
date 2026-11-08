@@ -213,6 +213,9 @@ final class DispatchEngine {
     }
   }
 
+  /** The target name of a QUEUE_OFFER on a queue without a capacity limit. */
+  static final String UNBOUNDED_QUEUE = "unbounded";
+
   /** Salts of the effects' own random choices; see {@link ScenarioController#effectSeed}. */
   private static final long TORN_SALT = 1L;
 
@@ -298,6 +301,13 @@ final class DispatchEngine {
               operationType == OperationType.PROCESS_START ? context.targetName() : context.path(),
               context.targetClassName() != null
                   && context.targetClassName().startsWith("java.io.")));
+    }
+    if ((effect instanceof ChaosEffect.RejectEffect || effect instanceof ChaosEffect.SuppressEffect)
+        && operationType == OperationType.QUEUE_OFFER
+        && UNBOUNDED_QUEUE.equals(context.targetName())) {
+      // A queue without a capacity limit is never full: a refused offer would only lose the
+      // element (a scheduled pool drops the task), which no real offer to it does.
+      return new TerminalAction.NotApplicable();
     }
     if (effect instanceof ChaosEffect.RejectEffect rejectEffect) {
       return rejectTerminal(operationType, rejectEffect.message());

@@ -3,6 +3,7 @@ package com.macstab.chaos.jvm.core;
 import com.macstab.chaos.jvm.api.Internal;
 import com.macstab.chaos.jvm.api.OperationType;
 import java.util.Objects;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import org.jspecify.annotations.Nullable;
@@ -229,7 +230,9 @@ public final class ExecutorDispatch {
                     indexedOp,
                     queue == null ? "unknown" : queue.getClass().getName(),
                     null,
-                    null,
+                    indexedOp == OperationType.QUEUE_OFFER && hasNoCapacityLimit(queue)
+                        ? DispatchEngine.UNBOUNDED_QUEUE
+                        : null,
                     false,
                     null,
                     null,
@@ -244,6 +247,26 @@ public final class ExecutorDispatch {
       }
     }
     return null;
+  }
+
+  /**
+   * Whether {@code queue} can never be full, so a refused offer has nothing real to report (a
+   * {@code ScheduledThreadPoolExecutor} ignores the result of its queue's {@code add} and would
+   * drop the task). {@code size()} is asked only when the capacity is not {@code MAX_VALUE}: it is
+   * O(n) on some queues and takes the lock on others. A queue that fails to answer counts as
+   * bounded.
+   */
+  private static boolean hasNoCapacityLimit(final @Nullable Object queue) {
+    if (!(queue instanceof BlockingQueue<?> blockingQueue)) {
+      return false;
+    }
+    try {
+      final int remaining = blockingQueue.remainingCapacity();
+      return remaining == Integer.MAX_VALUE
+          || remaining >= Integer.MAX_VALUE - blockingQueue.size();
+    } catch (final RuntimeException failed) {
+      return false;
+    }
   }
 
   /**

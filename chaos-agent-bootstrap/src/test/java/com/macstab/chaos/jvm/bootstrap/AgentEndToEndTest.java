@@ -1637,6 +1637,16 @@ class AgentEndToEndTest {
     }
 
     @Test
+    @DisplayName("a rejected offer does not drop a scheduled pool's tasks: its queue is unbounded")
+    void rejectedOfferKeepsScheduledTasks() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.runWithoutPlan(DefectProbeMain.class, "scheduled-offer-reject");
+      assertThat(result.value("scheduledResult")).isEqualTo("42");
+      assertThat(result.value("fixedRateTicked")).isEqualTo("true");
+      assertThat(result.longValue("applied.jvm::offer-reject")).isZero();
+    }
+
+    @Test
     @DisplayName("a suppressed timed poll waits its timeout: a polling worker does not spin")
     void suppressedTimedPollWaits() throws Exception {
       final ChildJvmProbe.ProbeResult result =

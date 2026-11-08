@@ -240,7 +240,8 @@ class EffectReachesTheCallTest {
     INVOKERS.put(
         OperationType.QUEUE_OFFER,
         runtime -> {
-          final LinkedBlockingQueue<String> queue = new LinkedBlockingQueue<>();
+          // Bounded: a full queue is what a refused offer reports (an unbounded one is never full).
+          final LinkedBlockingQueue<String> queue = new LinkedBlockingQueue<>(1);
           // A non-null answer skips the real offer and is its result (OnNonDefaultValue).
           final Boolean forced = runtime.beforeBooleanQueueOperation("QUEUE_OFFER", queue);
           final boolean offered = forced != null ? forced : queue.offer("element");
