@@ -130,6 +130,32 @@ final class ChildJvmProbe {
   }
 
   /**
+   * Runs {@code mainClass mode} in a child JVM whose agent classes all come from the agent jar: the
+   * classpath holds the test classes only, none of the project's modules or their libraries, so the
+   * shaded jar is what runs.
+   *
+   * @param mainClass the probe main class
+   * @param mode the probe mode passed as the first program argument
+   * @param jvmArgs additional JVM arguments placed before the classpath
+   * @return the probe's {@code key=value} output lines
+   */
+  ProbeResult runShadedOnly(final Class<?> mainClass, final String mode, final String... jvmArgs)
+      throws Exception {
+    final List<String> command = new ArrayList<>();
+    command.add(Path.of(System.getProperty("java.home"), "bin", "java").toString());
+    command.add("-javaagent:" + System.getProperty("chaos.bootstrap.agentJar"));
+    command.addAll(List.of(jvmArgs));
+    command.add("-cp");
+    command.add(
+        Path.of(mainClass.getProtectionDomain().getCodeSource().getLocation().toURI()).toString());
+    command.add(mainClass.getName());
+    command.add(mode);
+    // Without the coverage agent: the agent jar's classes are other class files than the
+    // module classes the child coverage is mapped onto, and would replace their data.
+    return executeAsIs(command);
+  }
+
+  /**
    * Runs {@code mainClass mode} in a child JVM with the agent attached and {@code plan} loaded.
    *
    * @param plan the plan written to the child's config file
@@ -192,6 +218,10 @@ final class ChildJvmProbe {
   private static ProbeResult execute(final List<String> base) throws Exception {
     final List<String> command = new ArrayList<>(base);
     command.addAll(1, coverageAgent());
+    return executeAsIs(command);
+  }
+
+  private static ProbeResult executeAsIs(final List<String> command) throws Exception {
     final Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
     final List<String> lines = new java.util.concurrent.CopyOnWriteArrayList<>();
     // Read on another thread: reading to the end first would block until the child exits, so a

@@ -297,7 +297,9 @@ The wiring is derived, not written per slot: each `public static final int` slot
 **`AgentBuilder` configuration**:
 - `disableClassFormatChanges()`: prevents ByteBuddy from adding fields or changing the constant pool structure — required for retransformation
 - `RedefinitionStrategy.RETRANSFORMATION`: allows transforming already-loaded classes; required for JDK classes that are already loaded when a hook group is woven
-- `ignore(nameStartsWith("net.bytebuddy.") or nameStartsWith("com.macstab.chaos.jvm."))`: prevents self-instrumentation of the agent and ByteBuddy itself
+- `ignore(nameStartsWith("net.bytebuddy.") or nameStartsWith("com.macstab.chaos.jvm."))`: prevents self-instrumentation of the agent, its relocated ByteBuddy (under `com.macstab.chaos.jvm.shaded`) and an application's own ByteBuddy. The `net.bytebuddy.` prefix is built at run time (`String.join`), because the agent jar relocates every `"net.bytebuddy..."` string literal along with the classes.
+
+**ByteBuddy's `net.bytebuddy.experimental` switch**: the relocated ByteBuddy in the agent jar reads `com.macstab.chaos.jvm.shaded.net.bytebuddy.experimental`. Every entry point (`premain`, `agentmain`, `installForLocalTests` and so `ChaosPlatform.installLocally()`) first copies `-Dnet.bytebuddy.experimental` to that name, before any ByteBuddy class initialises (ByteBuddy reads the switch in static initialisers), unless the relocated name is already set.
 
 ## BootstrapDispatcher
 

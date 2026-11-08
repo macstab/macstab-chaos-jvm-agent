@@ -24,6 +24,13 @@ final class SafepointStormStressor implements ManagedStressor {
 
   private static final Logger LOGGER = Logger.getLogger(SafepointStormStressor.class.getName());
 
+  /**
+   * ByteBuddy's package, whose classes the agent never touches. Built at run time: the agent jar
+   * relocates ByteBuddy, and with it a {@code "net.bytebuddy."} literal, which would then name only
+   * the agent's own relocated copy and no longer an application's ByteBuddy.
+   */
+  private static final String BYTE_BUDDY_PACKAGE_PREFIX = String.join(".", "net", "bytebuddy", "");
+
   private final AtomicBoolean running = new AtomicBoolean(true);
   private final AtomicLong gcCycleCount = new AtomicLong();
   private final Thread stormThread;
@@ -116,7 +123,7 @@ final class SafepointStormStressor implements ManagedStressor {
     }
     final String className = cls.getName();
     return !className.startsWith("com.macstab.chaos.jvm.")
-        && !className.startsWith("net.bytebuddy.")
+        && !className.startsWith(BYTE_BUDDY_PACKAGE_PREFIX)
         && !className.startsWith("jdk.internal.");
   }
 }

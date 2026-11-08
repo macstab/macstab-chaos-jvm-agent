@@ -82,6 +82,23 @@ public final class ChaosAgentBootstrap {
 
   private static final String MBEAN_NAME = "com.macstab.chaos.jvm:type=ChaosDiagnostics";
 
+  private static final java.util.logging.Logger LOGGER =
+      java.util.logging.Logger.getLogger(ChaosAgentBootstrap.class.getName());
+
+  /**
+   * ByteBuddy's switch for class files newer than it supports, as a user sets it. Built at run
+   * time: the agent jar relocates ByteBuddy, and with it every {@code "net.bytebuddy..."} literal.
+   */
+  private static final String BYTE_BUDDY_EXPERIMENTAL =
+      String.join(".", "net", "bytebuddy", "experimental");
+
+  /**
+   * The same switch as the agent's own ByteBuddy reads it: the literal is relocated with ByteBuddy
+   * (in the agent jar {@code com.macstab.chaos.jvm.shaded.net.bytebuddy.experimental}; unshaded it
+   * equals {@link #BYTE_BUDDY_EXPERIMENTAL}).
+   */
+  private static final String AGENT_BYTE_BUDDY_EXPERIMENTAL = "net.bytebuddy.experimental";
+
   /**
    * The active config-file poller, or {@code null} when watch mode is disabled or the plan was
    * loaded from an inline / base64 source (which has no backing file to watch).
@@ -158,7 +175,33 @@ public final class ChaosAgentBootstrap {
    */
   public static void premain(
       final @Nullable String agentArgs, final Instrumentation instrumentation) {
+    copyByteBuddyExperimental();
     initialize(agentArgs, instrumentation, System.getenv());
+  }
+
+  /**
+   * Hands {@code -Dnet.bytebuddy.experimental} to the agent's relocated ByteBuddy, which reads its
+   * own relocated name. Runs first in every entry point: ByteBuddy reads the switch in static
+   * initialisers, so the copy must come before any ByteBuddy class initialises. A switch the user
+   * set under the relocated name wins.
+   */
+  private static void copyByteBuddyExperimental() {
+    copyProperty(BYTE_BUDDY_EXPERIMENTAL, AGENT_BYTE_BUDDY_EXPERIMENTAL);
+  }
+
+  /**
+   * Sets system property {@code to} to the value of {@code from} when {@code from} is set and
+   * {@code to} is not. Package-private as a test seam: unshaded, both ByteBuddy names are equal.
+   */
+  static void copyProperty(final String from, final String to) {
+    try {
+      final String value = System.getProperty(from);
+      if (value != null && System.getProperty(to) == null) {
+        System.setProperty(to, value);
+      }
+    } catch (final SecurityException denied) {
+      LOGGER.fine(() -> "chaos-agent: cannot hand " + from + " on: " + denied);
+    }
   }
 
   /**
@@ -184,6 +227,7 @@ public final class ChaosAgentBootstrap {
    */
   public static void agentmain(
       final @Nullable String agentArgs, final Instrumentation instrumentation) {
+    copyByteBuddyExperimental();
     if (!dynamicAttachAllowed(System.getProperties(), System.getenv())) {
       System.err.println(
           "[chaos-agent] ignoring dynamic attach: set -D"
@@ -224,6 +268,7 @@ public final class ChaosAgentBootstrap {
    *     with {@code -javaagent:chaos-agent.jar} instead.
    */
   public static ChaosControlPlane installForLocalTests() {
+    copyByteBuddyExperimental();
     final ChaosRuntime existing = installedRuntime();
     if (existing != null) {
       return existing;

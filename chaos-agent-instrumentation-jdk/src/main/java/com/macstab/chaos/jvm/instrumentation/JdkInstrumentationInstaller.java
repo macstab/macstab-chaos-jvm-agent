@@ -80,6 +80,13 @@ public final class JdkInstrumentationInstaller {
       Logger.getLogger(JdkInstrumentationInstaller.class.getName());
 
   /**
+   * ByteBuddy's package, whose classes the agent never touches. Built at run time: the agent jar
+   * relocates ByteBuddy, and with it a {@code "net.bytebuddy."} literal, which would then name only
+   * the agent's own relocated copy and no longer an application's ByteBuddy.
+   */
+  private static final String BYTE_BUDDY_PACKAGE_PREFIX = String.join(".", "net", "bytebuddy", "");
+
+  /**
    * The transformer of each hook group woven so far, kept so {@link #uninstall} can reset the
    * transformations. Guarded by its own monitor.
    */
@@ -858,7 +865,7 @@ public final class JdkInstrumentationInstaller {
         .with(AgentBuilder.RedefinitionStrategy.Listener.ErrorEscalating.FAIL_FAST)
         .with(errorListener)
         .ignore(
-            ElementMatchers.nameStartsWith("net.bytebuddy.")
+            ElementMatchers.nameStartsWith(BYTE_BUDDY_PACKAGE_PREFIX)
                 .or(ElementMatchers.nameStartsWith("com.macstab.chaos.jvm.")));
   }
 
