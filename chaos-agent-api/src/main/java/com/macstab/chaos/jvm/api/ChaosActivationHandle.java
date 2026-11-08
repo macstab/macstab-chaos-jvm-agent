@@ -63,6 +63,12 @@ public interface ChaosActivationHandle extends AutoCloseable {
    * Opens a blocked {@link ChaosEffect.GateEffect} gate, releasing all threads currently blocked by
    * this scenario without stopping the scenario itself.
    *
+   * <p>On an active scenario the gate closes again at once, so later calls are held until the next
+   * release. On an {@link ChaosDiagnostics.ScenarioState#INACTIVE inactive} scenario (its {@code
+   * maxApplications} spent, or expired) the gate opens once and is not closed again. A spent {@code
+   * maxApplications} keeps its last admitted caller at the gate until {@code release()} or {@link
+   * #stop()}; expiry releases waiting threads by itself.
+   *
    * <p>Calling {@code release()} on a scenario that does not use {@link ChaosEffect.GateEffect} is
    * a no-op. Calling it on a stopped scenario is also a no-op.
    *

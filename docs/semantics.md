@@ -54,7 +54,7 @@ All scenarios that pass §3 for a call contribute. They are ordered by descendin
 
 **L11 — Delays add up.** The delays of every contribution are summed and applied first. A single delay is at most 720 hours, so the sum stays far from overflow (it saturates at `Long.MAX_VALUE` ms regardless).
 
-**L12 — One gate.** Of the gate contributions, the one with the highest precedence (first in order on a tie) holds the caller, after the delay.
+**L12 — One gate.** Of the gate contributions, the one with the highest precedence (first in order on a tie) holds the caller, after the delay. Expiry (`activeFor`, `activeUntil`) releases every caller held at the gate; a spent `maxApplications` does not, so its last admitted caller is held like the others until `release()` or `stop()`. A `release()` of an `INACTIVE` scenario opens the gate once without closing it again.
 
 **L13 — One terminal.** Of the terminal contributions (reject, suppress, exception injection, exceptional completion, return-value corruption), the one with the highest precedence (first in order on a tie) decides the outcome, after the delay and the gate.
 

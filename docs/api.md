@@ -197,7 +197,7 @@ public interface ChaosActivationHandle extends AutoCloseable {
 
 **`close()`**: On every handle returned by `activate()` (scenario, session and plan handles), `close()` stops the scenario **and** removes it from the registry, so it disappears from diagnostics and its id can be activated again. Use try-with-resources for automatic cleanup. `stop()` alone leaves a `STOPPED` entry registered (which is still replaced by a later activation of the same id).
 
-**`release()`**: Applicable only to gate-effect scenarios. Unblocks all threads currently waiting in `ManualGate.await()` and re-arms the gate. Does not stop the scenario — subsequent matching invocations will re-enter the gate. A no-op for non-gate scenarios and for scenarios that are not `ACTIVE`.
+**`release()`**: Applicable only to gate-effect scenarios. Unblocks all threads currently waiting in `ManualGate.await()` and re-arms the gate. Does not stop the scenario — subsequent matching invocations will re-enter the gate. On an `INACTIVE` scenario (`maxApplications` spent, or expired) it opens the gate once without re-arming it: a spent `maxApplications` holds its last admitted caller until `release()` or `stop()`, while expiry itself already releases waiters. A no-op for non-gate scenarios and for scenarios that are neither `ACTIVE` nor `INACTIVE`.
 
 **`state()`**: Returns one of `REGISTERED`, `ACTIVE`, `INACTIVE`, `STOPPED`. Useful for assertions in tests (`assertThat(handle.state()).isEqualTo(ACTIVE)`).
 

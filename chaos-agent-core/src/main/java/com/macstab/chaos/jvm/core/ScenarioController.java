@@ -377,20 +377,30 @@ final class ScenarioController {
    * inside a gate-effect hold without stopping the scenario. Subsequent invocations that pass the
    * full evaluation pipeline will re-enter the gate and wait again until the next release.
    *
-   * <p>The gate closes again in the same step; only counting the latch down would leave the gate
-   * open after the first release, so no later call would ever be held. Publishes a {@link
-   * com.macstab.chaos.jvm.api.ChaosEvent.Type#RELEASED} event to the {@link ObservabilityBus}.
+   * <p>On an active scenario the gate closes again in the same step; only counting the latch down
+   * would leave the gate open after the first release, so no later call would ever be held.
+   * Publishes a {@link com.macstab.chaos.jvm.api.ChaosEvent.Type#RELEASED} event to the {@link
+   * ObservabilityBus}.
    *
-   * <p>A no-op, without an event, for a scenario that has no gate effect or is not active, as
-   * {@link com.macstab.chaos.jvm.api.ChaosActivationHandle#release()} documents.
+   * <p>On an {@code INACTIVE} scenario (its {@code maxApplications} spent, or expired) the gate
+   * opens once and is not closed again: no later call is held, including one admitted just before
+   * the scenario became inactive.
+   *
+   * <p>A no-op, without an event, for a scenario that has no gate effect or is neither active nor
+   * inactive, as {@link com.macstab.chaos.jvm.api.ChaosActivationHandle#release()} documents.
    */
   void release() {
     synchronized (this) {
-      if (!(scenario.effect() instanceof ChaosEffect.GateEffect)
-          || state != ChaosDiagnostics.ScenarioState.ACTIVE) {
+      if (!(scenario.effect() instanceof ChaosEffect.GateEffect)) {
         return;
       }
-      gate.releaseAndReset();
+      if (state == ChaosDiagnostics.ScenarioState.ACTIVE) {
+        gate.releaseAndReset();
+      } else if (state == ChaosDiagnostics.ScenarioState.INACTIVE) {
+        gate.release();
+      } else {
+        return;
+      }
     }
     observabilityBus.publish(
         ChaosEvent.Type.RELEASED, scenario.id(), "manual gate released", Map.of("scope", scopeKey));
@@ -671,9 +681,13 @@ final class ScenarioController {
         state = ChaosDiagnostics.ScenarioState.INACTIVE;
         started.set(false);
         reason = newReason;
-        // An inactive scenario applies nothing more: release threads parked on its gate (an
-        // indefinite gate would otherwise hold them until stop()) and end its background load.
-        gate.release();
+        // An expired scenario applies nothing more: release threads parked on its gate (an
+        // indefinite gate would otherwise hold them until stop()). A spent maxApplications keeps
+        // them: its last admitted caller reaches the gate only after this commit, and is held
+        // until release() or stop(). Either way the background load ends.
+        if ("expired".equals(newReason)) {
+          gate.release();
+        }
         closeStressor();
       }
     }
