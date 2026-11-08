@@ -70,6 +70,29 @@ public final class ChannelBuffers {
   }
 
   /**
+   * Returns the bytes a read can take into {@code buffers[offset .. offset+length)}, as {@link
+   * #remaining}, but {@code 0} when one of them is read-only: the JDK refuses such a read, so no
+   * byte is read and an effect on the bytes (a corruption, a trickle) neither applies nor counts.
+   *
+   * @param buffers the buffers
+   * @param offset the first buffer
+   * @param length the number of buffers
+   * @return the bytes, or {@code -1}
+   */
+  static int readable(final ByteBuffer[] buffers, final int offset, final int length) {
+    final int remaining = remaining(buffers, offset, length);
+    if (remaining <= 0) {
+      return remaining;
+    }
+    for (int i = offset; i < offset + length; i++) {
+      if (buffers[i].isReadOnly()) {
+        return 0;
+      }
+    }
+    return remaining;
+  }
+
+  /**
    * Shapes the buffers for a call the dispatcher answered with {@code count}: a count below {@code
    * requested} limits the buffers to that many bytes, a negative count ({@code -(n) - 1}) also
    * marks the bytes read for corruption.

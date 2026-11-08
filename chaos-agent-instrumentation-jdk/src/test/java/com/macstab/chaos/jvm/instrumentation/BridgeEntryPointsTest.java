@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.macstab.chaos.jvm.api.ActivationPolicy;
+import com.macstab.chaos.jvm.api.ChaosActivationHandle;
 import com.macstab.chaos.jvm.api.ChaosEffect;
 import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.ChaosSelector;
@@ -223,6 +224,80 @@ class BridgeEntryPointsTest {
               BootstrapDispatcher.corruptDatagramPacket(
                   this, new java.net.DatagramPacket(new byte[4], 4)))
           .isTrue();
+    }
+  }
+
+  @Nested
+  @DisplayName("reads into a read-only buffer")
+  class ReadOnlyBuffers {
+
+    private ChaosActivationHandle corrupt(final ChaosSelector selector) {
+      return runtime.activate(
+          ChaosScenario.builder("corrupt-" + System.nanoTime())
+              .selector(selector)
+              .effect(ChaosEffect.corruptRead())
+              .activationPolicy(ActivationPolicy.always())
+              .build());
+    }
+
+    @Test
+    @DisplayName("the JDK refuses a channel read into a read-only buffer")
+    void jdkRefusesReadOnlyRead() throws Exception {
+      try (java.nio.channels.Pipe.SourceChannel source = java.nio.channels.Pipe.open().source()) {
+        assertThatThrownBy(() -> source.read(ByteBuffer.allocate(8).asReadOnlyBuffer()))
+            .isInstanceOf(IllegalArgumentException.class);
+      }
+    }
+
+    @Test
+    @DisplayName(
+        "a corrupted socket channel read into a read-only buffer neither applies nor counts")
+    void socketChannelRead() throws Throwable {
+      final ChaosActivationHandle handle = corrupt(network(OperationType.SOCKET_READ));
+      final ByteBuffer readOnly = ByteBuffer.allocate(8).asReadOnlyBuffer();
+
+      assertThat(BootstrapDispatcher.beforeSocketChannelRead(this, readOnly)).isNull();
+      assertThat(
+              BootstrapDispatcher.beforeSocketChannelRead(
+                  this, new ByteBuffer[] {ByteBuffer.allocate(8), readOnly}, 0, 2))
+          .isNull();
+
+      assertThat(handle.appliedCount()).isZero();
+    }
+
+    @Test
+    @DisplayName("a corrupted datagram receive into a read-only buffer neither applies nor counts")
+    void datagramReceive() throws Throwable {
+      final ChaosActivationHandle handle = corrupt(network(OperationType.DATAGRAM_RECEIVE));
+
+      assertThat(
+              BootstrapDispatcher.beforeDatagramReceive(
+                  this, ByteBuffer.allocate(8).asReadOnlyBuffer()))
+          .isNull();
+
+      assertThat(handle.appliedCount()).isZero();
+    }
+
+    @Test
+    @DisplayName(
+        "a corrupted scattering file read into a read-only buffer neither applies nor counts")
+    void fileScatterRead() throws Throwable {
+      final ChaosActivationHandle handle =
+          corrupt(
+              new ChaosSelector.FileIoSelector(
+                  Set.of(OperationType.FILE_IO_READ), null, null, null));
+
+      assertThat(
+              BootstrapDispatcher.beforeFileChannelIo(
+                  "FILE_IO_READ",
+                  this,
+                  "/f",
+                  new ByteBuffer[] {ByteBuffer.allocate(8).asReadOnlyBuffer()},
+                  0,
+                  1))
+          .isNull();
+
+      assertThat(handle.appliedCount()).isZero();
     }
   }
 

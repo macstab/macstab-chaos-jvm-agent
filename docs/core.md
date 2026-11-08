@@ -76,7 +76,7 @@ Out of scope:
 |--------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | **InvocationContext**    | Immutable record built at each instrumentation point: operation type, class names, target name, periodic flag, daemon/virtual thread flags, session ID.                                                        |
 | **ScenarioContribution** | The value returned by `ScenarioController.evaluate()` when all 9 checks pass: carries the controller, effect, sampled delay, and gate timeout.                                                                 |
-| **RuntimeDecision**      | Merged output of all matching contributions: accumulated delay, last gate action, highest-precedence terminal action.                                                                                          |
+| **RuntimeDecision**      | Merged output of all matching contributions: accumulated delay, highest-precedence gate, highest-precedence terminal action.                                                                     |
 | **TerminalAction**       | The final action to execute: THROW, RETURN (with value), SUPPRESS, COMPLETE_EXCEPTIONALLY, or CORRUPT_RETURN.                                                                                                  |
 | **TerminalKind**         | Enum discriminating TerminalAction variants.                                                                                                                                                                   |
 | **GateAction**           | A pair of (ManualGate, maxBlockDuration) triggering a conditional block on the calling thread.                                                                                                                 |
@@ -212,16 +212,20 @@ return new ScenarioContribution(this, scenario, effect, sampleDelayMillis(matche
 long delayMillis = 0L;                // ADDITIVE across all contributions
 GateAction gateAction = null;         // LAST gate wins (only one gate blocks at a time)
 TerminalAction terminalAction = null; // HIGHEST PRECEDENCE wins; ties broken by sorted order
-int terminalPrecedence = Integer.MIN_VALUE;
+int terminalIndex = -1;
+int terminalPrecedence = 0;
 
 for (ScenarioContribution contribution : contributions) {
     delayMillis += contribution.delayMillis();
     if (effect instanceof GateEffect) {
-        gateAction = new GateAction(controller.gate(), contribution.gateTimeout());
+        // the first gate (highest precedence, then smallest id) wins
+        continue;
     }
     TerminalAction candidate = terminalActionFor(operationType, effect, scenario);
-    if (candidate != null && scenario.precedence() >= terminalPrecedence) {
+    // the first candidate wins whatever its precedence (Integer.MIN_VALUE included)
+    if (candidate != null && (terminalIndex < 0 || scenario.precedence() > terminalPrecedence)) {
         terminalAction = candidate;
+        terminalIndex = index;
         terminalPrecedence = scenario.precedence();
     }
 }
@@ -229,7 +233,7 @@ for (ScenarioContribution contribution : contributions) {
 
 Delay composition: multiple delay scenarios stack. Three scenarios each contributing 50 ms delay = 150 ms total. This is intentional load amplification — composing delays is a feature, not a bug.
 
-Gate composition: only the last gate in the sorted contribution list applies. Two gate scenarios = the higher-precedence gate blocks; the lower-precedence gate is ignored. This is a limitation of the current implementation (not a deliberate multi-gate feature).
+Gate composition: only the first gate in the sorted contribution list (highest precedence, then smallest id) applies. Two gate scenarios = the higher-precedence gate blocks; the lower-precedence gate is ignored. This is a limitation of the current implementation (not a deliberate multi-gate feature).
 
 Terminal action selection: the highest-precedence scenario wins. If two scenarios share the same precedence, the lexicographically first `id` wins (the `ScenarioRegistry` operation index keeps each operation's controllers pre-sorted by descending precedence, then id; `match()` preserves that order and does not sort per call).
 
@@ -579,12 +583,12 @@ The last row confirms that `maxApplications` and `rateLimit` are independent gua
 
 ## Multi-Scenario Terminal Action Precedence
 
-When two or more scenarios match the same invocation and both carry terminal actions (reject, suppress, exception), the merge rule is:
+When two or more scenarios match the same invocation and both carry terminal actions, the merge rule is below. Every effect other than a delay or a gate is a terminal and they are exclusive: reject, suppress, an errno, exception injection, exceptional completion, return-value corruption, timeout, connection reset, redirect, a DNS answer or rewrite, a spurious wakeup, and the data-shaping effects trickle, torn write and corrupted read (a trickle and a corrupted read on the same read never both apply; `docs/semantics.md` L13).
 
 1. **Order**: delay first, then gate, then terminal action. A delay is never dropped because a terminal action wins.
 2. **Delays accumulate**: all matching scenarios' delay durations are summed before sleeping.
 3. **Gate**: the highest-precedence gate holds the thread.
-4. **Terminal action**: the scenario with the highest `precedence()` integer wins. Equal precedence is last-write (non-deterministic) but always results in exactly one terminal action being applied — never zero, never two.
+4. **Terminal action**: the scenario with the highest `precedence()` integer wins. Equal precedence is resolved by scenario id ascending (deterministic: the registry index is sorted by precedence descending, then id ascending, and the first candidate wins), and always results in exactly one terminal action being applied — never zero, never two. A sole terminal wins whatever its precedence, `Integer.MIN_VALUE` included.
 
 **Test coverage in `TwoScenariosConflictingTerminalActionsTest`**:
 

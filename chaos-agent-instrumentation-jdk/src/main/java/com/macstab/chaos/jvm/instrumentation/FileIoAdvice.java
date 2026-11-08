@@ -198,8 +198,12 @@ final class FileIoAdvice {
         @Advice.Argument(0) final java.nio.ByteBuffer buffer,
         @Advice.FieldValue("path") final String path)
         throws Throwable {
+      // A read-only buffer takes no bytes: the JDK refuses the read, so a corruption counts none.
       return BootstrapDispatcher.beforeFileIo(
-              OperationTags.FILE_IO_READ, channel, path, buffer == null ? -1 : buffer.remaining())
+              OperationTags.FILE_IO_READ,
+              channel,
+              path,
+              buffer == null ? -1 : buffer.isReadOnly() ? 0 : buffer.remaining())
           < 0;
     }
 

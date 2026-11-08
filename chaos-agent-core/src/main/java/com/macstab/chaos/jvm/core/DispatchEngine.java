@@ -178,9 +178,10 @@ final class DispatchEngine {
         // Tie-break rule for both gate and terminal: the ScenarioRegistry sorts contributions by
         // precedence DESC then id ASC, so on strict `>` the first-iterated (highest precedence,
         // lowest id within that precedence) wins and subsequent equal-precedence candidates do
-        // not overwrite it.
+        // not overwrite it. The first candidate always wins, whatever its precedence: comparing
+        // it with the initial value alone would drop a sole Integer.MIN_VALUE gate or terminal.
         if (contribution.effect() instanceof ChaosEffect.GateEffect) {
-          if (contribution.scenario().precedence() > gatePrecedence) {
+          if (gateIndex < 0 || contribution.scenario().precedence() > gatePrecedence) {
             gateAction =
                 new GateAction(contribution.controller().gate(), contribution.gateTimeout());
             gateIndex = index;
@@ -204,7 +205,7 @@ final class DispatchEngine {
           // A delay (or an effect without a terminal action for this operation) always takes
           // effect: delays of all matching scenarios are summed.
           applied[index] = true;
-        } else if (contribution.scenario().precedence() > terminalPrecedence) {
+        } else if (terminalIndex < 0 || contribution.scenario().precedence() > terminalPrecedence) {
           terminalAction = candidate;
           terminalIndex = index;
           terminalPrecedence = contribution.scenario().precedence();

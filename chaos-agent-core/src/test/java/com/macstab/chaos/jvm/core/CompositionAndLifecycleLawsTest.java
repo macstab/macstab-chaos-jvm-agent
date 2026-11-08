@@ -121,6 +121,32 @@ class CompositionAndLifecycleLawsTest {
   }
 
   @Test
+  @DisplayName(
+      "data-shaping effects are exclusive terminals: of trickle and corruptRead one applies")
+  void dataShapingEffectsAreExclusive() throws Throwable {
+    runtime.activate(
+        ChaosScenario.builder("a-trickle")
+            .scope(ChaosScenario.ScenarioScope.JVM)
+            .selector(ChaosSelector.network(Set.of(OperationType.SOCKET_READ)))
+            .effect(ChaosEffect.trickle(10))
+            .precedence(5)
+            .activationPolicy(ActivationPolicy.always())
+            .build());
+    runtime.activate(
+        ChaosScenario.builder("b-corrupt")
+            .scope(ChaosScenario.ScenarioScope.JVM)
+            .selector(ChaosSelector.network(Set.of(OperationType.SOCKET_READ)))
+            .effect(ChaosEffect.corruptRead())
+            .activationPolicy(ActivationPolicy.always())
+            .build());
+
+    final int count = runtime.beforeSocketChannelRead(this, 64);
+
+    assertThat(count).as("trickled to 10 bytes, not marked for corruption").isEqualTo(10);
+    assertThat(applied).extracting(ChaosEvent::scenarioId).containsExactly("a-trickle");
+  }
+
+  @Test
   @DisplayName("start() on a stopped handle is a no-op: the scenario never fires again")
   void stopIsFinal() {
     final ChaosActivationHandle handle =

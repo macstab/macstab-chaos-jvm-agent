@@ -2565,7 +2565,8 @@ public final class BootstrapDispatcher {
     if (target == null) {
       return null;
     }
-    final int requested = target.remaining();
+    // A read-only buffer takes no bytes: the JDK refuses the receive, so a corruption counts none.
+    final int requested = target.isReadOnly() ? 0 : target.remaining();
     final int count = datagram(OperationTags.DATAGRAM_RECEIVE, channel, null, requested);
     return count >= 0
         ? null
@@ -2728,9 +2729,14 @@ public final class BootstrapDispatcher {
    */
   public static @Nullable ChannelBuffers beforeSocketChannelRead(
       final Object channel, final java.nio.ByteBuffer buffer) throws Throwable {
+    // A read-only buffer takes no bytes: the JDK refuses the read, so a corruption counts none.
     return buffer == null
         ? null
-        : shapeOne(BEFORE_SOCKET_CHANNEL_READ, channel, buffer, buffer.remaining());
+        : shapeOne(
+            BEFORE_SOCKET_CHANNEL_READ,
+            channel,
+            buffer,
+            buffer.isReadOnly() ? 0 : buffer.remaining());
   }
 
   /**
@@ -2746,7 +2752,13 @@ public final class BootstrapDispatcher {
   public static @Nullable ChannelBuffers beforeSocketChannelRead(
       final Object channel, final java.nio.ByteBuffer[] buffers, final int offset, final int length)
       throws Throwable {
-    return shapeMany(BEFORE_SOCKET_CHANNEL_READ, channel, buffers, offset, length);
+    return shapeMany(
+        BEFORE_SOCKET_CHANNEL_READ,
+        channel,
+        buffers,
+        offset,
+        length,
+        ChannelBuffers.readable(buffers, offset, length));
   }
 
   /**
@@ -2778,7 +2790,13 @@ public final class BootstrapDispatcher {
   public static @Nullable ChannelBuffers beforeSocketChannelWrite(
       final Object channel, final java.nio.ByteBuffer[] buffers, final int offset, final int length)
       throws Throwable {
-    return shapeMany(BEFORE_SOCKET_CHANNEL_WRITE, channel, buffers, offset, length);
+    return shapeMany(
+        BEFORE_SOCKET_CHANNEL_WRITE,
+        channel,
+        buffers,
+        offset,
+        length,
+        ChannelBuffers.remaining(buffers, offset, length));
   }
 
   /**
@@ -2795,7 +2813,13 @@ public final class BootstrapDispatcher {
   public static @Nullable ChannelBuffers beforeNioChannelWrite(
       final Object channel, final java.nio.ByteBuffer[] buffers, final int offset, final int length)
       throws Throwable {
-    return shapeMany(BEFORE_NIO_CHANNEL_WRITE, channel, buffers, offset, length);
+    return shapeMany(
+        BEFORE_NIO_CHANNEL_WRITE,
+        channel,
+        buffers,
+        offset,
+        length,
+        ChannelBuffers.remaining(buffers, offset, length));
   }
 
   /**
@@ -2819,7 +2843,10 @@ public final class BootstrapDispatcher {
       final int offset,
       final int length)
       throws Throwable {
-    final int requested = ChannelBuffers.remaining(buffers, offset, length);
+    final int requested =
+        OperationTags.FILE_IO_READ.equals(operation)
+            ? ChannelBuffers.readable(buffers, offset, length)
+            : ChannelBuffers.remaining(buffers, offset, length);
     if (requested < 0) {
       return null;
     }
@@ -2843,9 +2870,9 @@ public final class BootstrapDispatcher {
       final Object channel,
       final java.nio.ByteBuffer[] buffers,
       final int offset,
-      final int length)
+      final int length,
+      final int requested)
       throws Throwable {
-    final int requested = ChannelBuffers.remaining(buffers, offset, length);
     if (requested < 0) {
       return null;
     }

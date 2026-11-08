@@ -1742,6 +1742,9 @@ class AgentEndToEndTest {
       assertThat(result.longValue("readLineDifferingBits")).isEqualTo(1L);
       assertThat(result.longValue("channelRead")).isEqualTo(64L);
       assertThat(result.longValue("channelDifferingBits")).isEqualTo(1L);
+      // a channel read into a read-only buffer fails in the JDK and counts no application
+      assertThat(result.value("readOnlyChannelRead")).isEqualTo("IllegalArgumentException");
+      assertThat(result.longValue("readOnlyChannelApplied")).isZero();
     }
 
     private ChildJvmProbe.ProbeResult runInTmp(

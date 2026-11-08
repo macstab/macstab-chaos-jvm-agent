@@ -972,6 +972,18 @@ public final class DefectProbeMain {
         System.out.println("channelRead=" + read);
         System.out.println("channelDifferingBits=" + differingBits);
       }
+      try (java.nio.channels.FileChannel channel = java.nio.channels.FileChannel.open(file)) {
+        // The JDK refuses a read into a read-only buffer: nothing is corrupted, nothing counts.
+        final long before = appliedCount("effect");
+        String outcome;
+        try {
+          outcome = "read " + channel.read(java.nio.ByteBuffer.allocate(8).asReadOnlyBuffer());
+        } catch (final IllegalArgumentException refused) {
+          outcome = refused.getClass().getSimpleName();
+        }
+        System.out.println("readOnlyChannelRead=" + outcome);
+        System.out.println("readOnlyChannelApplied=" + (appliedCount("effect") - before));
+      }
     } finally {
       java.nio.file.Files.deleteIfExists(file);
     }
@@ -2935,6 +2947,14 @@ public final class DefectProbeMain {
   private static void parallelStream() {
     System.out.println(
         "parallelSum=" + java.util.stream.LongStream.range(0L, 100_000L).parallel().sum());
+  }
+
+  private static long appliedCount(final String scenarioId) {
+    return ChaosPlatform.current()
+        .diagnostics()
+        .scenario(scenarioId)
+        .map(ChaosDiagnostics.ScenarioReport::appliedCount)
+        .orElse(-1L);
   }
 
   static void printCounts() {

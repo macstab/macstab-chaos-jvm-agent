@@ -152,7 +152,7 @@ If no source is present, the agent starts with no active scenarios. Programmatic
 | **Stressor effect**    | An effect that runs as a background task independent of any specific JVM operation: heap pressure, deadlock, thread leak, GC pressure, etc. Used with `StressSelector`.                                                                                   |
 | **Session scope**      | A `ChaosSession` creates an isolated scope where scenarios only fire for threads explicitly bound to that session via `session.bind()`. Enables per-test isolation in shared JVMs.                                                                        |
 | **JVM scope**          | The default scope: a scenario fires for any thread in the JVM that triggers a matching operation.                                                                                                                                                         |
-| **Precedence**         | An integer tie-breaker. When multiple terminal effects (reject, suppress, exception) match the same operation simultaneously, the highest-precedence effect wins. Delay effects always accumulate across all matching scenarios regardless of precedence. |
+| **Precedence**         | An integer tie-breaker. When multiple terminal effects (every effect except delay and gate: reject, suppress, errno, exception, timeout, trickle, corruptRead, tornWrite, …) match the same operation simultaneously, the highest-precedence effect wins, the smallest scenario id on equal precedence. Delay effects always accumulate across all matching scenarios regardless of precedence. |
 
 ---
 
@@ -201,7 +201,8 @@ If no source is present, the agent starts with no active scenarios. Programmatic
       (a delay is never dropped because a terminal action wins)
    c. Delay effects: all delays sum; thread sleeps for total
    d. Gate: the highest-precedence gate holds the thread
-   e. Terminal effects (reject/suppress/exception): highest-precedence wins
+   e. Terminal effects (every effect but delay and gate, data-shaping ones
+      included): highest-precedence wins, the smallest id on a tie
    f. APPLIED is published only for contributions that take effect (every
       delay, the winning gate, the winning terminal action); losing
       scenarios do not consume maxApplications
