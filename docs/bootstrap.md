@@ -91,8 +91,11 @@ JdkInstrumentationInstaller.install(instrumentation, runtime, eager)
   — eager = eagerInstrumentation(agentArgs, env): agent arg instrumentation=eager,
     else -Dmacstab.chaos.instrumentation, else MACSTAB_CHAOS_INSTRUMENTATION
   — refuses to install if a copy of the agent loaded by another class loader
-    already owns the bridge delegate (one copy per JVM)
-  — injects the bridge, installs the delegate, registers the HookDemand callback
+    already owns the bridge delegate (one copy per JVM); checked first, so a
+    refused copy appends no bridge jar and opens no module
+  — injects the bridge, opens the JDK-internal packages, then installs the
+    delegate, sets the session-header hosts and registers the HookDemand
+    callback; a failure from the delegate on removes the delegate again
   — on demand (default): no hook group woven yet; each group is woven (retransformed)
     the first time an activated scenario needs one of its operations
   — eager: every hook group woven now (the 1.x behaviour)
@@ -142,7 +145,7 @@ The opt-in remains the safeguard against rewriting a live production JVM: withou
 
 `initialize()` claims a single `INITIALIZATION` slot with a compare-and-exchange before doing any work. Exactly one caller performs the installation; concurrent callers wait for its outcome and receive the same runtime (or the same failure). A completed initialization is returned as-is. If the installation fails, everything it installed is rolled back and the slot is freed, so a later call starts from a clean JVM. `installForLocalTests()` additionally serialises the self-attach under a lock so the attach work is not done twice.
 
-**One copy per JVM**: if a second copy of the agent, loaded by a different class loader (for example an agent jar on the system class path plus a starter bundled child-first in a web application), tries to install, it is refused with an `IllegalStateException` — installing would silently cut the first copy off from every intercepted call.
+**One copy per JVM**: if a second copy of the agent, loaded by a different class loader (for example an agent jar on the system class path plus a starter bundled child-first in a web application), tries to install, it is refused with an `IllegalStateException` — installing would silently cut the first copy off from every intercepted call. The check runs before anything that cannot be undone: the refused copy appends no bridge jar to the bootstrap class path and opens no module. `JdkInstrumentationInstaller.connectDispatcher` (benchmarks and tests on the plain `chaos-agent-instrumentation-jdk` classes, `@Internal`) makes the same check, and closing it removes only its own delegate.
 
 ---
 

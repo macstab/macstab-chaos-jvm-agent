@@ -6,30 +6,55 @@ import java.lang.instrument.Instrumentation;
 import java.lang.instrument.UnmodifiableClassException;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.jar.JarFile;
 import org.jspecify.annotations.Nullable;
 
 /**
  * The JVM's instrumentation with scripted interference, for the start-up paths a healthy JVM never
- * takes: a hook that runs on the first module redefinition (the first call the agent makes while
- * installing), a failure when the bridge jar is appended to the bootstrap class path, and a failure
- * when a transformer is removed.
+ * takes: a hook that runs on the first bridge append or module redefinition (the first calls the
+ * agent makes while installing), a failure when the bridge jar is appended to the bootstrap class
+ * path, and a failure when a transformer is removed. It counts the bridge appends and module
+ * redefinitions it sees.
  */
 final class ScriptedInstrumentation implements Instrumentation {
 
   private final Instrumentation delegate;
-  private volatile @Nullable Runnable onFirstModuleRedefinition;
+  private volatile @Nullable Runnable onFirstInstallStep;
   private volatile @Nullable Throwable bridgeFailure;
   private volatile boolean failTransformerRemoval;
+  private final AtomicInteger appends = new AtomicInteger();
+  private final AtomicInteger moduleRedefinitions = new AtomicInteger();
 
   ScriptedInstrumentation(final Instrumentation delegate) {
     this.delegate = delegate;
   }
 
-  /** Runs {@code hook} on the installing thread, once, before the first module redefinition. */
-  ScriptedInstrumentation onFirstModuleRedefinition(final Runnable hook) {
-    this.onFirstModuleRedefinition = hook;
+  /**
+   * Runs {@code hook} on the installing thread, once, before the first bridge append or module
+   * redefinition, whichever comes first.
+   */
+  ScriptedInstrumentation onFirstInstallStep(final Runnable hook) {
+    this.onFirstInstallStep = hook;
     return this;
+  }
+
+  /** Returns how many times a jar was appended to the bootstrap class path. */
+  int appends() {
+    return appends.get();
+  }
+
+  /** Returns how many times a module was redefined. */
+  int moduleRedefinitions() {
+    return moduleRedefinitions.get();
+  }
+
+  private void runFirstInstallStep() {
+    final Runnable hook = onFirstInstallStep;
+    if (hook != null) {
+      onFirstInstallStep = null;
+      hook.run();
+    }
   }
 
   /** Throws {@code failure} (checked or not) where the bridge jar is appended. */
@@ -57,16 +82,15 @@ final class ScriptedInstrumentation implements Instrumentation {
       final Map<String, Set<Module>> extraOpens,
       final Set<Class<?>> extraUses,
       final Map<Class<?>, java.util.List<Class<?>>> extraProvides) {
-    final Runnable hook = onFirstModuleRedefinition;
-    if (hook != null) {
-      onFirstModuleRedefinition = null;
-      hook.run();
-    }
+    moduleRedefinitions.incrementAndGet();
+    runFirstInstallStep();
     delegate.redefineModule(module, extraReads, extraExports, extraOpens, extraUses, extraProvides);
   }
 
   @Override
   public void appendToBootstrapClassLoaderSearch(final JarFile jarfile) {
+    appends.incrementAndGet();
+    runFirstInstallStep();
     final Throwable failure = bridgeFailure;
     if (failure != null) {
       ScriptedInstrumentation.<RuntimeException>sneakyThrow(failure);

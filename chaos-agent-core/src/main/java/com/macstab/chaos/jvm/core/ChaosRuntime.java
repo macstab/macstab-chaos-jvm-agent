@@ -536,6 +536,8 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @param demand the hook demand; never {@code null}
    */
   public void setHookDemand(final HookDemand demand) {
+    // The installer connects the runtime here, after it injected the bootstrap dispatcher.
+    ChaosDispatcher.forgetAbsentDispatcher();
     controlPlane.setHookDemand(demand);
   }
 

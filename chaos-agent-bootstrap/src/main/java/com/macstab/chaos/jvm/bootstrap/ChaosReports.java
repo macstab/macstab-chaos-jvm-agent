@@ -97,6 +97,7 @@ final class ChaosReports implements AutoCloseable {
    * @param environment the process environment
    * @param runtime the runtime whose scenarios are reported
    * @return the reports, or empty when not switched on
+   * @throws IllegalStateException if the JVM is shutting down; nothing is started then
    */
   static Optional<ChaosReports> createIfEnabled(
       final @Nullable String agentArgs,
@@ -128,12 +129,16 @@ final class ChaosReports implements AutoCloseable {
     return Optional.ofNullable(current);
   }
 
+  /**
+   * Registers the shutdown hook first: it is the step that fails while the JVM shuts down ({@link
+   * IllegalStateException}), and then no listener and no writer thread may be left behind.
+   */
   private void start() {
-    runtime.addEventListener(hitCounter);
     BootstrapDispatcher.beginInternalCall();
     try {
-      hitsWriter.start();
       Runtime.getRuntime().addShutdownHook(shutdownHook);
+      runtime.addEventListener(hitCounter);
+      hitsWriter.start();
     } finally {
       BootstrapDispatcher.endInternalCall();
     }

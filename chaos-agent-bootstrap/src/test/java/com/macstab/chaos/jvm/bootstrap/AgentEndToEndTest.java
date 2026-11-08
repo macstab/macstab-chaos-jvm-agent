@@ -809,6 +809,51 @@ class AgentEndToEndTest {
     }
 
     @Test
+    @DisplayName("an install that fails after installing the delegate leaves no delegate behind")
+    void failedInstallClearsTheDelegate() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.runWithoutAgent(InstallerProbeMain.class, "session-hosts-failure");
+
+      assertThat(result.value("installFailed")).isEqualTo("true");
+      assertThat(result.value("delegateLeft")).isEqualTo("false");
+    }
+
+    @Test
+    @DisplayName("a refused second copy appends no bridge jar and opens no module")
+    void refusedCopyLeavesNoTrace() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.runWithoutAgent(InstallerProbeMain.class, "foreign-copy");
+
+      assertThat(result.value("foreignRefused")).isEqualTo("true");
+      assertThat(result.longValue("foreignAppends")).as("bridge jars appended").isZero();
+      assertThat(result.longValue("foreignModuleRedefinitions")).as("modules opened").isZero();
+    }
+
+    @Test
+    @DisplayName(
+        "a runtime used before the install raises the dispatch depth once installed: a clock"
+            + " skew does not move a scenario's start")
+    void runtimeUsedBeforeInstallSeesTheDispatcher() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.runWithoutAgent(InstallerProbeMain.class, "dispatcher-before-install");
+
+      assertThat(result.longValue("windowedSleepMillis"))
+          .as("the activeFor window is still open")
+          .isGreaterThanOrEqualTo(250L);
+    }
+
+    @Test
+    @DisplayName("reports created during shutdown fail and leave no writer thread and no listener")
+    void reportsDuringShutdownLeaveNothing() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.runWithoutAgent(InstallerProbeMain.class, "reports-during-shutdown");
+
+      assertThat(result.value("reportsFailure")).isEqualTo("Shutdown in progress");
+      assertThat(result.value("writerAlive")).isEqualTo("false");
+      assertThat(result.value("listenersAdded")).isEqualTo("0");
+    }
+
+    @Test
     @DisplayName("a second copy of the agent in another class loader is refused, not hijacking")
     void secondAgentCopyIsRefused() throws Exception {
       final ChildJvmProbe.ProbeResult result =

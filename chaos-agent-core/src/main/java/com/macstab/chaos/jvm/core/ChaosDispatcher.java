@@ -43,6 +43,20 @@ public final class ChaosDispatcher {
 
   private record InternalCalls(MethodHandle begin, MethodHandle end) {}
 
+  /**
+   * Forgets a dispatcher found absent, so the next use looks it up again: called when a runtime is
+   * connected to the instrumentation, which injects the dispatcher. A runtime used before that (a
+   * scenario started before the install) would otherwise never raise the depth.
+   */
+  static void forgetAbsentDispatcher() {
+    synchronized (ChaosDispatcher.class) {
+      final var resolved = internalCalls;
+      if (resolved != null && resolved.get() == null) {
+        internalCalls = null;
+      }
+    }
+  }
+
   private static @Nullable InternalCalls resolveInternalCalls() {
     final var resolved = internalCalls;
     if (resolved != null) {

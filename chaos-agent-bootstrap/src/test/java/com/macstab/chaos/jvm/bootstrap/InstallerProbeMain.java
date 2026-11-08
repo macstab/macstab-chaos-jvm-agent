@@ -8,7 +8,10 @@ import com.macstab.chaos.jvm.api.OperationType;
 import com.macstab.chaos.jvm.core.ChaosRuntime;
 import com.macstab.chaos.jvm.instrumentation.JdkInstrumentationInstaller;
 import java.lang.instrument.Instrumentation;
+import java.net.URL;
+import java.net.URLClassLoader;
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -32,6 +35,10 @@ public final class InstallerProbeMain {
   public static void main(final String[] args) throws Exception {
     switch (args[0]) {
       case "lifecycle" -> lifecycle();
+      case "session-hosts-failure" -> sessionHostsFailure();
+      case "foreign-copy" -> foreignCopy();
+      case "dispatcher-before-install" -> dispatcherBeforeInstall();
+      case "reports-during-shutdown" -> reportsDuringShutdown();
       default -> throw new IllegalArgumentException("unknown probe mode: " + args[0]);
     }
   }
@@ -82,6 +89,161 @@ public final class InstallerProbeMain {
             + fineMessages.stream().anyMatch(m -> m.startsWith("bridge jar sweep skipped")));
     System.out.println(
         "wovenLogged=" + fineMessages.stream().anyMatch(m -> m.startsWith("chaos hooks woven")));
+  }
+
+  /**
+   * An install whose session-header hosts fail after the delegate is installed (a {@code null}
+   * glob): the failed install must leave no delegate behind.
+   */
+  private static void sessionHostsFailure() throws Exception {
+    final Instrumentation instrumentation = net.bytebuddy.agent.ByteBuddyAgent.install();
+    try {
+      JdkInstrumentationInstaller.install(
+          instrumentation, new ChaosRuntime(), false, List.of(), Arrays.asList((String) null));
+      System.out.println("installFailed=false");
+    } catch (final RuntimeException failed) {
+      System.out.println("installFailed=true");
+    }
+    System.out.println("delegateLeft=" + (bootDelegate() != null));
+  }
+
+  /**
+   * A second copy of the agent, in its own class loader, installing through a counting
+   * instrumentation while the first copy is installed: the refused install must not touch the JVM
+   * (no bridge jar appended, no module opened).
+   */
+  private static void foreignCopy() throws Exception {
+    final Instrumentation real = net.bytebuddy.agent.ByteBuddyAgent.install();
+    JdkInstrumentationInstaller.install(real, new ChaosRuntime(), false, List.of(), List.of());
+    final ScriptedInstrumentation counting = new ScriptedInstrumentation(real);
+    try (URLClassLoader isolated =
+        new URLClassLoader(classpath(), ClassLoader.getPlatformClassLoader())) {
+      final Class<?> runtimeClass = Class.forName(ChaosRuntime.class.getName(), true, isolated);
+      final Class<?> installer =
+          Class.forName(JdkInstrumentationInstaller.class.getName(), true, isolated);
+      try {
+        installer
+            .getMethod(
+                "install",
+                Instrumentation.class,
+                runtimeClass,
+                boolean.class,
+                List.class,
+                List.class)
+            .invoke(
+                null,
+                counting,
+                runtimeClass.getConstructor().newInstance(),
+                false,
+                List.of(),
+                List.of());
+        System.out.println("foreignRefused=false");
+      } catch (final java.lang.reflect.InvocationTargetException refused) {
+        System.out.println(
+            "foreignRefused=" + (refused.getCause() instanceof IllegalStateException));
+      }
+    }
+    System.out.println("foreignAppends=" + counting.appends());
+    System.out.println("foreignModuleRedefinitions=" + counting.moduleRedefinitions());
+  }
+
+  /**
+   * A runtime that started a scenario before the agent was installed (so it looked up the
+   * dispatcher while there was none), then installed: a clock skew one hour back must not move the
+   * start of a later scenario's {@code activeFor} window, which would end it at once.
+   */
+  private static void dispatcherBeforeInstall() throws Exception {
+    final ChaosRuntime runtime = new ChaosRuntime();
+    runtime.activate(sleepDelay("before-install")).close();
+    JdkInstrumentationInstaller.install(
+        net.bytebuddy.agent.ByteBuddyAgent.install(), runtime, false, List.of(), List.of());
+    runtime.activate(
+        ChaosScenario.builder("skew-back")
+            .scope(ChaosScenario.ScenarioScope.JVM)
+            .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.CLOCK_READ)))
+            .effect(ChaosEffect.skewClock(Duration.ofHours(-1L), ChaosEffect.ClockSkewMode.FIXED))
+            .activationPolicy(ActivationPolicy.always())
+            .build());
+    runtime.activate(
+        ChaosScenario.builder("windowed-sleep")
+            .scope(ChaosScenario.ScenarioScope.JVM)
+            .selector(
+                ChaosSelector.thread(
+                    Set.of(OperationType.THREAD_SLEEP), ChaosSelector.ThreadKind.ANY))
+            .effect(ChaosEffect.delay(Duration.ofMillis(300L)))
+            .activationPolicy(ActivationPolicy.builder().activeFor(Duration.ofMinutes(5L)).build())
+            .build());
+    System.out.println("windowedSleepMillis=" + sleepMillis());
+  }
+
+  /**
+   * Reports created while the JVM shuts down: the creation fails, and must leave no writer thread
+   * and no listener behind.
+   */
+  private static void reportsDuringShutdown() throws Exception {
+    final ChaosRuntime runtime = new ChaosRuntime();
+    final java.nio.file.Path dir = java.nio.file.Files.createTempDirectory("reports-shutdown");
+    final int listenersBefore = listenerCount(runtime);
+    Runtime.getRuntime()
+        .addShutdownHook(
+            new Thread(
+                () -> {
+                  try {
+                    ChaosReports.createIfEnabled(
+                        "reports=on;reportsDir=" + dir, java.util.Map.of(), runtime);
+                    System.out.println("reportsFailure=none");
+                  } catch (final IllegalStateException failed) {
+                    System.out.println("reportsFailure=" + failed.getMessage());
+                  }
+                  System.out.println(
+                      "writerAlive="
+                          + Thread.getAllStackTraces().keySet().stream()
+                              .anyMatch(
+                                  thread ->
+                                      thread.getName().equals("macstab-chaos-hits-writer")
+                                          && thread.isAlive()));
+                  try {
+                    System.out.println(
+                        "listenersAdded=" + (listenerCount(runtime) - listenersBefore));
+                  } catch (final ReflectiveOperationException unreadable) {
+                    System.out.println("listenersAdded=" + unreadable);
+                  }
+                  System.out.flush();
+                }));
+  }
+
+  /** The listeners registered on {@code runtime}'s event bus. */
+  private static int listenerCount(final ChaosRuntime runtime) throws ReflectiveOperationException {
+    final java.lang.reflect.Field planeField = ChaosRuntime.class.getDeclaredField("controlPlane");
+    planeField.setAccessible(true);
+    final Object plane = planeField.get(runtime);
+    final java.lang.reflect.Field busField = plane.getClass().getDeclaredField("observabilityBus");
+    busField.setAccessible(true);
+    final Object bus = busField.get(plane);
+    final java.lang.reflect.Field listenersField = bus.getClass().getDeclaredField("listeners");
+    listenersField.setAccessible(true);
+    return ((List<?>) listenersField.get(bus)).size();
+  }
+
+  /** The delegate of the bootstrap copy of the dispatcher, the one woven advice calls. */
+  private static Object bootDelegate() throws ReflectiveOperationException {
+    return Class.forName(
+            "com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher", true, null)
+        .getMethod("installedDelegate")
+        .invoke(null);
+  }
+
+  private static URL[] classpath() {
+    return Arrays.stream(System.getProperty("java.class.path").split(java.io.File.pathSeparator))
+        .map(
+            entry -> {
+              try {
+                return java.nio.file.Path.of(entry).toUri().toURL();
+              } catch (final java.net.MalformedURLException exception) {
+                throw new IllegalStateException(exception);
+              }
+            })
+        .toArray(URL[]::new);
   }
 
   private static ChaosScenario sleepDelay(final String id) {

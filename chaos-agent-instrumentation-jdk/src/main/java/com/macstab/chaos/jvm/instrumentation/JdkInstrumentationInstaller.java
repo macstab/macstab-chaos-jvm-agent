@@ -1,6 +1,7 @@
 package com.macstab.chaos.jvm.instrumentation;
 
 import com.macstab.chaos.jvm.api.ChaosSelector;
+import com.macstab.chaos.jvm.api.Internal;
 import com.macstab.chaos.jvm.api.OperationType;
 import com.macstab.chaos.jvm.core.ChaosRuntime;
 import com.macstab.chaos.jvm.core.HookDemand;
@@ -32,10 +33,14 @@ import org.jspecify.annotations.Nullable;
  *
  * <ol>
  *   <li>{@link #install} is called once by {@code ChaosAgentBootstrap} after the runtime is ready.
+ *       It first refuses a JVM whose dispatcher already carries the delegate of another copy of the
+ *       agent, before any step that cannot be undone.
  *   <li>{@link BridgeInjector#injectBridge(java.lang.instrument.Instrumentation)} packages {@link
  *       com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher} and the types woven
  *       advice references into a temporary JAR and appends it to the bootstrap classpath so that
  *       bootstrap-loaded JDK classes can see it.
+ *   <li>{@link ModuleOpener#grantInternalModuleOpens} opens the JDK-internal packages the advice
+ *       reads.
  *   <li>{@link #installDelegate(Object)} constructs a {@link
  *       com.macstab.chaos.jvm.instrumentation.ChaosBridge}, builds the {@link
  *       com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher#HANDLE_COUNT
@@ -109,6 +114,9 @@ public final class JdkInstrumentationInstaller {
    * @param sessionHeaderHosts host globs that receive {@code X-Chaos-Session} besides the internal
    *     hosts ({@code *} for all)
    * @throws IllegalArgumentException if a clock prefix names JDK classes
+   * @throws IllegalStateException if a copy of the agent loaded by another class loader is
+   *     installed (nothing is changed then), or if a later step fails (the delegate and the hooks
+   *     are removed again)
    */
   public static void install(
       final Instrumentation instrumentation,
@@ -117,12 +125,14 @@ public final class JdkInstrumentationInstaller {
       final List<String> clockCallSitePackages,
       final List<String> sessionHeaderHosts) {
     clockPackages = validatedClockPackages(clockCallSitePackages);
-    ModuleOpener.grantInternalModuleOpens(instrumentation);
+    // A refused copy must leave no trace: the foreign check runs before the steps that cannot be
+    // undone (a jar appended to the bootstrap class path, opened modules).
+    rejectForeignDelegate(installedDelegateOrNull());
     BridgeInjector.injectBridge(instrumentation);
-    rejectForeignDelegate();
-    installDelegate(new ChaosBridge(runtime));
-    setSessionHeaderHosts(sessionHeaderHosts);
+    ModuleOpener.grantInternalModuleOpens(instrumentation);
     try {
+      installDelegate(new ChaosBridge(runtime));
+      setSessionHeaderHosts(sessionHeaderHosts);
       runtime.setHookDemand(
           new HookDemand() {
             @Override
@@ -456,8 +466,7 @@ public final class JdkInstrumentationInstaller {
    * delegate: the first copy's startup plan, scenarios and diagnostics would silently stop
    * receiving any call.
    */
-  private static void rejectForeignDelegate() {
-    final Object existing = installedDelegateOrNull();
+  private static void rejectForeignDelegate(final @Nullable Object existing) {
     if (existing != null && !ownLoader(existing)) {
       throw new IllegalStateException(
           "the chaos agent is already installed in this JVM by another class loader ("
@@ -522,17 +531,35 @@ public final class JdkInstrumentationInstaller {
    * Connects {@code runtime} to the {@link
    * com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher} without weaving any class, so
    * benchmarks and tests can drive the dispatch methods exactly as woven advice does. Closing the
-   * result disconnects it again.
+   * result disconnects it again, unless another delegate replaced it in the meantime.
+   *
+   * <p>For benchmarks and tests on the plain {@code chaos-agent-instrumentation-jdk} classes only:
+   * it installs into the dispatcher this class links against, which is the bootstrap copy only when
+   * no agent jar injected one.
    *
    * @param runtime the runtime that receives the dispatches
-   * @return a handle that uninstalls the dispatcher's delegate when closed
+   * @return a handle that uninstalls this delegate when closed
+   * @throws IllegalStateException if a copy of the agent loaded by another class loader is
+   *     installed
    * @throws Exception if the method handles cannot be built
    */
+  @Internal
+  // The monitor of BootstrapDispatcher.install: the check and the install (or clear) are one step.
+  @SuppressWarnings("LockOnNonEnclosingClassLiteral")
   public static AutoCloseable connectDispatcher(final ChaosRuntime runtime) throws Exception {
-    com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher.install(
-        new ChaosBridge(runtime), buildMethodHandles());
-    return () ->
-        com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher.install(null, null);
+    final ChaosBridge bridge = new ChaosBridge(runtime);
+    final MethodHandle[] methodHandles = buildMethodHandles();
+    synchronized (BootstrapDispatcher.class) {
+      rejectForeignDelegate(BootstrapDispatcher.installedDelegate());
+      BootstrapDispatcher.install(bridge, methodHandles);
+    }
+    return () -> {
+      synchronized (BootstrapDispatcher.class) {
+        if (BootstrapDispatcher.installedDelegate() == bridge) {
+          BootstrapDispatcher.install(null, null);
+        }
+      }
+    };
   }
 
   /**

@@ -95,7 +95,7 @@ public final class StartupPathProbeMain {
     final AtomicReference<String> reentry = new AtomicReference<>("not attempted");
     final ScriptedInstrumentation gated =
         new ScriptedInstrumentation(real)
-            .onFirstModuleRedefinition(
+            .onFirstInstallStep(
                 () -> {
                   reentry.set(describe(() -> ChaosAgentBootstrap.initialize("", real, Map.of())));
                   entered.countDown();
