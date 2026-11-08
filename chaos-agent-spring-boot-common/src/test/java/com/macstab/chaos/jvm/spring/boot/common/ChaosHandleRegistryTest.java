@@ -18,6 +18,36 @@ class ChaosHandleRegistryTest {
   private final ChaosHandleRegistry registry = new ChaosHandleRegistry();
 
   @Test
+  @DisplayName("a closing context holds no shared plan, and a second close releases nothing twice")
+  void sharedPlanAfterClose() {
+    final com.macstab.chaos.jvm.api.ChaosControlPlane plane =
+        com.macstab.chaos.jvm.bootstrap.ChaosPlatform.installLocally();
+    final com.macstab.chaos.jvm.api.ChaosPlan plan =
+        com.macstab.chaos.jvm.startup.ChaosPlanMapper.read(
+            """
+            {"scenarios": [{"id": "registry-shared", "scope": "JVM",
+              "selector": {"type": "executor", "operations": ["EXECUTOR_SUBMIT"]},
+              "effect": {"type": "delay", "minDelay": "PT0.001S", "maxDelay": "PT0.001S"}}]}
+            """);
+    final ChaosHandleRegistry other = new ChaosHandleRegistry();
+    registry.activateShared(plane, plan);
+    // A context applying its plan twice holds it once.
+    registry.activateShared(plane, plan);
+    other.activateShared(plane, plan);
+
+    registry.destroy();
+    registry.destroy();
+    assertThat(plane.diagnostics().scenario("registry-shared"))
+        .as("the other context still holds it")
+        .isPresent();
+    org.assertj.core.api.Assertions.assertThatThrownBy(() -> registry.activateShared(plane, plan))
+        .isInstanceOf(IllegalStateException.class);
+
+    other.destroy();
+    assertThat(plane.diagnostics().scenario("registry-shared")).isEmpty();
+  }
+
+  @Test
   @DisplayName("registering an id again stops the handle it replaces")
   void replacesById() {
     final FakeHandle first = new FakeHandle("plan:a");

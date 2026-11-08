@@ -1,5 +1,6 @@
 package com.macstab.chaos.jvm.spring.boot.common;
 
+import com.macstab.chaos.jvm.api.ChaosActivationConflictException;
 import com.macstab.chaos.jvm.api.ChaosActivationHandle;
 import com.macstab.chaos.jvm.api.ChaosControlPlane;
 import com.macstab.chaos.jvm.api.ChaosPlan;
@@ -15,6 +16,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.context.ApplicationContext;
 import org.springframework.context.ApplicationListener;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Conditional;
@@ -83,10 +85,17 @@ public class ChaosAutoConfiguration {
    * Applies the optional startup plan file and the optional debug dump once the application context
    * is fully started.
    *
-   * @param controlPlane the chaos control plane bean
+   * <p>The plan belongs to the context, not to the {@link ChaosControlPlane} bean: it is activated
+   * on the JVM-wide control plane ({@link ChaosPlatform#installLocally()}), so a test's tracking
+   * bean does not stop it when a test class ends, and it stops when the last context holding it
+   * closes ({@link ChaosHandleRegistry#activateShared}). Only this context's own ready event
+   * applies it; a child context's event, which reaches its parents too, does not.
+   *
+   * @param controlPlane the chaos control plane bean, for the debug dump
    * @param properties the chaos configuration properties
    * @param handleRegistry the starter-local handle registry
    * @param environment the environment, to check where {@code config-file} comes from
+   * @param applicationContext this context
    * @return an {@link ApplicationListener} that performs the startup work
    */
   @Bean
@@ -95,8 +104,13 @@ public class ChaosAutoConfiguration {
       final ChaosControlPlane controlPlane,
       final ChaosProperties properties,
       final ChaosHandleRegistry handleRegistry,
-      final ConfigurableEnvironment environment) {
-    return event -> applyStartup(controlPlane, properties, handleRegistry, environment);
+      final ConfigurableEnvironment environment,
+      final ApplicationContext applicationContext) {
+    return event -> {
+      if (event.getApplicationContext().equals(applicationContext)) {
+        applyStartup(controlPlane, properties, handleRegistry, environment);
+      }
+    };
   }
 
   private static void applyStartup(
@@ -120,8 +134,8 @@ public class ChaosAutoConfiguration {
       final String safeConfigFile = LogText.sanitize(configFile);
       try {
         final ChaosPlan plan = StartupConfigLoader.loadPlanFromFile(configFile);
-        final ChaosActivationHandle handle = controlPlane.activate(plan);
-        handleRegistry.register(handle);
+        final ChaosActivationHandle handle =
+            handleRegistry.activateShared(ChaosPlatform.installLocally(), plan);
         LOGGER.log(
             Level.INFO,
             "chaos-agent: activated startup plan \"{0}\" from {1}",
@@ -136,6 +150,17 @@ public class ChaosAutoConfiguration {
                     + safeConfigFile
                     + " (reason: "
                     + LogText.sanitize(exception.getMessage())
+                    + ")");
+      } catch (final ChaosActivationConflictException conflict) {
+        // Another context holds a different plan with one of these scenario ids.
+        LOGGER.log(
+            Level.WARNING,
+            () ->
+                "chaos-agent: startup plan from "
+                    + safeConfigFile
+                    + " not activated: another context's startup plan holds one of its scenario"
+                    + " ids (reason: "
+                    + LogText.sanitize(conflict.getMessage())
                     + ")");
       } catch (final RuntimeException exception) {
         LOGGER.log(

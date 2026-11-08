@@ -3,6 +3,9 @@ package com.macstab.chaos.jvm.spring.boot.common;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 
+import com.macstab.chaos.jvm.api.ChaosDiagnostics;
+import com.macstab.chaos.jvm.api.ChaosDiagnostics.ScenarioReport;
+import com.macstab.chaos.jvm.bootstrap.ChaosPlatform;
 import com.macstab.chaos.jvm.core.ChaosRuntime;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -11,6 +14,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.logging.Handler;
+import java.util.logging.Level;
 import java.util.logging.LogRecord;
 import java.util.logging.Logger;
 import org.junit.jupiter.api.AfterEach;
@@ -87,10 +91,13 @@ class ChaosStartupApplierTest {
         .run(
             context -> {
               ready(context);
-              final ChaosRuntime runtime = context.getBean(ChaosRuntime.class);
-              assertThat(runtime.diagnostics().scenario("startup-delay")).isPresent();
+              assertThat(jvmScenario("startup-delay")).isPresent();
+              assertThat(
+                      context.getBean(ChaosRuntime.class).diagnostics().scenario("startup-delay"))
+                  .as("activated JVM-wide, not on the context's control plane bean")
+                  .isEmpty();
               context.getBean(ChaosHandleRegistry.class).destroy();
-              assertThat(runtime.diagnostics().scenario("startup-delay"))
+              assertThat(jvmScenario("startup-delay"))
                   .as("the plan's handle is tracked and stops with the context")
                   .isEmpty();
             });
@@ -113,9 +120,7 @@ class ChaosStartupApplierTest {
         .run(
             context -> {
               ready(context);
-              assertThat(
-                      context.getBean(ChaosRuntime.class).diagnostics().scenario("startup-delay"))
-                  .isEmpty();
+              assertThat(jvmScenario("startup-delay")).isEmpty();
               assertThat(logged)
                   .anyMatch(
                       record ->
@@ -136,8 +141,7 @@ class ChaosStartupApplierTest {
           .run(
               context -> {
                 assertThatCode(() -> ready(context)).doesNotThrowAnyException();
-                assertThat(context.getBean(ChaosRuntime.class).diagnostics().snapshot().scenarios())
-                    .isEmpty();
+                assertThat(jvmScenario("startup-delay")).isEmpty();
               });
       assertThat(logged)
           .anySatisfy(
@@ -197,6 +201,102 @@ class ChaosStartupApplierTest {
     assertThat(logged)
         .anySatisfy(
             record -> assertThat(record.getMessage()).contains("failed to activate startup plan"));
+  }
+
+  @Test
+  @DisplayName("contexts with the same plan share it, and it stops when the last one closes")
+  void contextsShareOnePlan() throws IOException {
+    final String plan = PLAN.replace("startup-delay", "shared-startup");
+    final Path first = Files.writeString(directory.resolve("first.json"), plan);
+    // The same plan with other whitespace: one plan, as the canonical JSON decides.
+    final Path second =
+        Files.writeString(directory.resolve("second.json"), plan.replace("\n", "\n  "));
+    final ApplicationContextRunner jvmWide =
+        new ApplicationContextRunner()
+            .withConfiguration(AutoConfigurations.of(ChaosAutoConfiguration.class))
+            .withPropertyValues("macstab.chaos.enabled=true");
+
+    jvmWide
+        .withPropertyValues("macstab.chaos.config-file=" + first)
+        .run(
+            context -> {
+              ready(context);
+              jvmWide
+                  .withPropertyValues("macstab.chaos.config-file=" + second)
+                  .run(ChaosStartupApplierTest::ready);
+              assertThat(jvmScenario("shared-startup").map(ScenarioReport::state))
+                  .as("after the second context closed")
+                  .contains(ChaosDiagnostics.ScenarioState.ACTIVE);
+            });
+
+    assertThat(logged)
+        .filteredOn(record -> record.getLevel() == Level.SEVERE)
+        .extracting(LogRecord::getMessage)
+        .isEmpty();
+    assertThat(jvmScenario("shared-startup")).as("after the last context closed").isEmpty();
+  }
+
+  @Test
+  @DisplayName("a different plan reusing another context's scenario id is refused with a warning")
+  void clashingPlanIsAWarning() throws IOException {
+    final String plan = PLAN.replace("startup-delay", "clashing-startup");
+    final Path first = Files.writeString(directory.resolve("first.json"), plan);
+    final Path second =
+        Files.writeString(directory.resolve("second.json"), plan.replace("PT0.001S", "PT0.002S"));
+    final ApplicationContextRunner jvmWide =
+        new ApplicationContextRunner()
+            .withConfiguration(AutoConfigurations.of(ChaosAutoConfiguration.class))
+            .withPropertyValues("macstab.chaos.enabled=true");
+
+    jvmWide
+        .withPropertyValues("macstab.chaos.config-file=" + first)
+        .run(
+            context -> {
+              ready(context);
+              jvmWide
+                  .withPropertyValues("macstab.chaos.config-file=" + second)
+                  .run(ChaosStartupApplierTest::ready);
+              assertThat(jvmScenario("clashing-startup"))
+                  .as("the first context's plan keeps running")
+                  .isPresent();
+            });
+
+    assertThat(logged)
+        .filteredOn(record -> record.getLevel() == Level.WARNING)
+        .extracting(LogRecord::getMessage)
+        .anySatisfy(
+            message ->
+                assertThat(message).contains("another context's startup plan", "second.json"));
+    assertThat(logged).noneMatch(record -> record.getLevel() == Level.SEVERE);
+  }
+
+  @Test
+  @DisplayName("a parent context does not apply its plan when a child context is ready")
+  void parentIgnoresTheChildReadyEvent() throws IOException {
+    final Path plan =
+        Files.writeString(
+            directory.resolve("parent.json"), PLAN.replace("startup-delay", "parent-startup"));
+    new ApplicationContextRunner()
+        .withConfiguration(AutoConfigurations.of(ChaosAutoConfiguration.class))
+        .withPropertyValues("macstab.chaos.enabled=true", "macstab.chaos.config-file=" + plan)
+        .run(
+            parent ->
+                new ApplicationContextRunner()
+                    .withParent(parent.getSourceApplicationContext())
+                    .run(
+                        child -> {
+                          final ConfigurableApplicationContext source =
+                              child.getSourceApplicationContext();
+                          // Published in the child, the event reaches the parent's listeners too.
+                          source.publishEvent(
+                              new ApplicationReadyEvent(
+                                  new SpringApplication(), new String[0], source, Duration.ZERO));
+                          assertThat(jvmScenario("parent-startup")).isEmpty();
+                        }));
+  }
+
+  private static java.util.Optional<ScenarioReport> jvmScenario(final String id) {
+    return ChaosPlatform.installLocally().diagnostics().scenario(id);
   }
 
   @Test

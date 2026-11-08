@@ -180,7 +180,7 @@ public class ChaosTestAutoConfiguration {
 
 The bean is a tracking control plane: what a test activates through it is released when its context closes (by default each `@MicronautTest` class has its own) or when the last running chaos test class ends.
 
-`before = ChaosAutoConfiguration.class` orders it ahead of the application starter's configuration, which declares a `chaosControlPlane` bean too: with `macstab.chaos.enabled=true` in a test, the tracked plane is the one registered, also for the actuator endpoint and the startup plan of that context.
+`before = ChaosAutoConfiguration.class` orders it ahead of the application starter's configuration, which declares a `chaosControlPlane` bean too: with `macstab.chaos.enabled=true` in a test, the tracked plane is the one registered, also for the actuator endpoint of that context. The startup plan is not activated through the bean (see §3.6), so a test class ending never stops it.
 
 `@ConditionalOnProperty(name = "macstab.chaos.test.enabled")` matches only in contexts where `ChaosAgentInitializer` added its per-context property source, i.e. contexts of `@ChaosTest` classes. A plain `@SpringBootTest` context never self-attaches the agent through this configuration.
 
@@ -393,7 +393,7 @@ public ApplicationListener<ApplicationReadyEvent> chaosStartupApplier(
 
 The startup logic (`applyStartup`) performs two independent operations:
 
-1. **Startup plan activation**: if `macstab.chaos.config-file` is non-blank and comes from a trusted property source (an untrusted one is ignored with a warning), reads the file via `StartupConfigLoader.loadPlanFromFile(configFile)` (the same hardening as the agent's `configFile`: symlink rejection, 1 MiB cap, world-writable rejection), calls `controlPlane.activate(plan)`, and registers the resulting `ChaosActivationHandle` in `handleRegistry`. `ConfigLoadException` and other `RuntimeException`s are caught and logged at `SEVERE` without propagating — a missing or malformed chaos plan file does not crash the application.
+1. **Startup plan activation**: if `macstab.chaos.config-file` is non-blank and comes from a trusted property source (an untrusted one is ignored with a warning), reads the file via `StartupConfigLoader.loadPlanFromFile(configFile)` (the same hardening as the agent's `configFile`: symlink rejection, 1 MiB cap, world-writable rejection), activates it on the JVM-wide control plane (`ChaosPlatform.installLocally()`, not the `ChaosControlPlane` bean) through `handleRegistry.activateShared(...)`. Only the context's own `ApplicationReadyEvent` applies it: a child context's event, which Spring also delivers to its parents, does not. A plan another context in the JVM already holds (equal canonical JSON, whatever the file's whitespace) is shared, not activated again. A different plan reusing one of its scenario ids is refused with a `WARNING`. `ConfigLoadException` and other `RuntimeException`s are caught and logged at `SEVERE` without propagating — a missing or malformed chaos plan file does not crash the application.
 
 2. **Diagnostics dump**: if `macstab.chaos.debug-dump-on-start` is true, calls `controlPlane.diagnostics().debugDump()` and logs the full text at `INFO`. This snapshot captures the activated scenario list, their states and counters, and JVM runtime details. It is intended as a one-shot startup confirmation that the plan loaded and the scenarios are in `ACTIVE` state.
 
@@ -481,7 +481,7 @@ http.requestMatcher(EndpointRequest.to(ChaosActuatorEndpoint.class))
 
 ### 3.6 `ChaosHandleRegistry`
 
-The registry holds the handle of the startup plan (`macstab.chaos.config-file`), so that plan stops when the application context closes. It is a `DisposableBean`: `destroy()` sets a closing flag, so a registration racing the shutdown stops its own handle instead of outliving the context, and stops every held handle, continuing past one whose `close()` fails. The startup plan is not managed by the actuator endpoint, which stops only the plans activated through it.
+The registry holds the handle of the startup plan (`macstab.chaos.config-file`), so that plan stops when the application context closes. The plan belongs to the contexts that hold it, not to a control plane bean or a test class: contexts with the same plan (a test suite's cached contexts) share one activation, counted in a JVM-wide table, and it stops when the last of them closes; a context closed twice releases its hold once. It is a `DisposableBean`: `destroy()` sets a closing flag, so a registration racing the shutdown stops its own handle instead of outliving the context, and stops every held handle, continuing past one whose `close()` fails. The startup plan is not managed by the actuator endpoint, which stops only the plans activated through it.
 
 ### 3.7 Sequence Diagram — POST `/actuator/chaos`
 
