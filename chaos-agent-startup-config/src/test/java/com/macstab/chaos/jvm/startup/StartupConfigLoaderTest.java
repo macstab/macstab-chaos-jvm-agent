@@ -25,6 +25,8 @@ import java.util.Set;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
 @DisplayName("StartupConfigLoader")
@@ -443,6 +445,91 @@ class StartupConfigLoaderTest {
       } finally {
         System.setProperty("user.name", original);
       }
+    }
+  }
+
+  @Nested
+  @DisplayName("trust checks across platforms")
+  class PlatformTrust {
+
+    @Test
+    @EnabledOnOs({OS.LINUX, OS.MAC})
+    @DisplayName("a plan in a directory reached through a symbolic link loads")
+    void planBehindSymlinkedDirectoryLoads() throws Exception {
+      final Path real = Files.createDirectory(tempDir.resolve("real"));
+      Files.writeString(real.resolve("plan.json"), writeSampleJson("linked-dir"));
+      final Path linked = Files.createSymbolicLink(tempDir.resolve("linked"), real);
+      if (OS.MAC.isCurrentOs()) {
+        // Linux reports every symbolic link as 0777; macOS gives a link its own mode, so set it.
+        final Process chmod =
+            new ProcessBuilder("chmod", "-h", "777", linked.toString()).inheritIO().start();
+        assumeTrue(chmod.waitFor() == 0, "chmod -h not available");
+      }
+
+      assertThat(
+              StartupConfigLoader.load("configFile=" + linked.resolve("plan.json"), Map.of())
+                  .orElseThrow()
+                  .plan()
+                  .metadata()
+                  .name())
+          .isEqualTo("linked-dir");
+    }
+
+    @Test
+    @DisplayName("a file system without a posix view skips the owner check (Windows DOMAIN\\user)")
+    void ownerCheckSkippedWithoutPosixView() throws Exception {
+      final Path file = tempDir.resolve("plan.json");
+      Files.writeString(file, writeSampleJson("windows"));
+
+      final Path target =
+          StartupConfigLoader.validateAndResolvePath(
+              file.toString(),
+              Set.of("basic", "owner", "dos", "acl", "user"),
+              path -> "DESKTOP\\alice",
+              "alice");
+
+      assertThat(target).isEqualTo(file.toAbsolutePath().normalize());
+    }
+
+    @Test
+    @DisplayName("a directory link owned by another user than the JVM's is rejected")
+    void foreignDirectoryLinkRejected() throws Exception {
+      assumePosix();
+      final Path real = Files.createDirectory(tempDir.resolve("real"));
+      Files.writeString(real.resolve("plan.json"), writeSampleJson("planted"));
+      final Path linked =
+          Files.createSymbolicLink(tempDir.resolve("linked"), real).toAbsolutePath().normalize();
+
+      assertThatExceptionOfType(ConfigLoadException.class)
+          .isThrownBy(
+              () ->
+                  StartupConfigLoader.validateAndResolvePath(
+                      linked.resolve("plan.json").toString(),
+                      FileSystems.getDefault().supportedFileAttributeViews(),
+                      path -> path.equals(linked) ? "bob" : "alice",
+                      "alice"))
+          .withMessageContaining(linked + " is owned by bob");
+    }
+
+    @Test
+    @DisplayName("a world-writable refusal says how to load a plan from a 0777 mount")
+    void worldWritableRefusalNamesTheWayOut() throws Exception {
+      assumePosix();
+      final Path directory = Files.createDirectory(tempDir.resolve("mount"));
+      final Path file = directory.resolve("plan.json");
+      Files.writeString(file, writeSampleJson("mount"));
+      Files.setPosixFilePermissions(file, PosixFilePermissions.fromString("rw-rw-rw-"));
+
+      assertThatThrownBy(() -> StartupConfigLoader.load("configFile=" + file, Map.of()))
+          .hasMessageContaining("config file is world-writable")
+          .hasMessageContaining("configJson");
+
+      Files.setPosixFilePermissions(file, PosixFilePermissions.fromString("rw-r--r--"));
+      Files.setPosixFilePermissions(directory, PosixFilePermissions.fromString("rwxrwxrwx"));
+
+      assertThatThrownBy(() -> StartupConfigLoader.load("configFile=" + file, Map.of()))
+          .hasMessageContaining("parent directory is world-writable")
+          .hasMessageContaining("configJson");
     }
   }
 

@@ -3,8 +3,8 @@ package com.macstab.chaos.jvm.startup;
 import com.macstab.chaos.jvm.api.ChaosPlan;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
@@ -13,6 +13,7 @@ import java.util.Base64;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Function;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -86,6 +87,12 @@ public final class StartupConfigLoader {
 
   /** {@code java.nio.file} attribute name exposing the full Unix mode (sticky bit in high bits). */
   private static final String ATTR_UNIX_MODE = "unix:mode";
+
+  /** Appended to a world-writable refusal: mounts that report every file as 0777 hit it. */
+  private static final String WORLD_WRITABLE_HINT =
+      "; a volume that reports every file as 0777 (Azure Files, WSL /mnt, Docker Desktop bind"
+          + " mounts) needs restrictive mount modes (file_mode/dir_mode, umask), or pass the plan"
+          + " inline with configJson or configBase64";
 
   private StartupConfigLoader() {}
 
@@ -231,25 +238,32 @@ public final class StartupConfigLoader {
   }
 
   /**
-   * Rejects a plan file (or ConfigMap link) owned by another user than the JVM's, root excepted: in
-   * a shared world-writable directory such as {@code /tmp}, another local user could otherwise
-   * plant the plan while it is missing and inject their faults. Skipped where file ownership is not
-   * available or the user name is unknown (containers running an unnamed uid).
+   * Rejects a plan file (or ConfigMap link, or the link to its directory) owned by another user
+   * than the JVM's, root excepted: in a shared world-writable directory such as {@code /tmp},
+   * another local user could otherwise plant the plan while it is missing and inject their faults.
+   * Applied only on file systems with a {@code posix} view (Windows' domain-qualified owner names
+   * do not compare with {@code user.name}); skipped where the owner is not available or the user
+   * name is unknown (containers running an unnamed uid).
    */
-  private static void rejectForeignOwner(final Path path, final String filePath) {
-    final String self = System.getProperty("user.name", "");
+  private static void rejectForeignOwner(
+      final Path path,
+      final String filePath,
+      final String subject,
+      final Function<Path, String> ownerOf,
+      final String self) {
     if (self.isBlank() || self.equals("?")) {
       return;
     }
     final String owner;
     try {
-      owner = Files.getOwner(path, LinkOption.NOFOLLOW_LINKS).getName();
-    } catch (final IOException | UnsupportedOperationException unavailable) {
+      owner = ownerOf.apply(path);
+    } catch (final UncheckedIOException | UnsupportedOperationException unavailable) {
       return;
     }
     if (!owner.equals(self) && !owner.equals("root")) {
       throw new ConfigLoadException(
-          "config file "
+          subject
+              + " "
               + path
               + " is owned by "
               + owner
@@ -265,12 +279,38 @@ public final class StartupConfigLoader {
    *
    * <p>{@link Path#normalize()} resolves all {@code ..} and {@code .} path components before any
    * check is applied, neutralising traversal sequences. Symlink rejection is the primary
-   * path-safety control on the resolved path.
+   * path-safety control on the resolved path; it covers the file itself, while a link to the file's
+   * directory is followed (its mode is checked on the real directory, its owner as the file's).
    *
    * @throws ConfigLoadException if the path is unsafe, a symlink other than the Kubernetes
    *     ConfigMap layout, or exceeds size limits
    */
   private static Path validateAndResolvePath(final String filePath) {
+    return validateAndResolvePath(
+        filePath,
+        Path.of(filePath).getFileSystem().supportedFileAttributeViews(),
+        StartupConfigLoader::ownerName,
+        System.getProperty("user.name", ""));
+  }
+
+  /**
+   * Test seam of {@link #validateAndResolvePath(String)}: the file system's attribute views, the
+   * owner lookup and the JVM's user name are passed in, so a test can model a file system without a
+   * {@code posix} view and files owned by different users.
+   *
+   * @param filePath the configured path
+   * @param supportedViews the attribute views of the path's file system
+   * @param ownerOf the owner name of a path, not following a link in its last component; throws
+   *     {@link UncheckedIOException} or {@link UnsupportedOperationException} where the owner is
+   *     unavailable
+   * @param jvmUser the JVM's user name ({@code user.name})
+   * @return the regular file to read
+   */
+  static Path validateAndResolvePath(
+      final String filePath,
+      final Set<String> supportedViews,
+      final Function<Path, String> ownerOf,
+      final String jvmUser) {
     final Path path = Path.of(filePath).toAbsolutePath().normalize();
 
     if (!Files.exists(path, LinkOption.NOFOLLOW_LINKS)) {
@@ -283,12 +323,30 @@ public final class StartupConfigLoader {
           "config path is not a regular file: " + target, SOURCE_FILE_PREFIX + filePath);
     }
     rejectIfOversize(target, filePath);
-    rejectWorldWritable(target, filePath);
-    rejectForeignOwner(path, filePath);
-    if (!target.equals(path)) {
-      rejectForeignOwner(target, filePath);
+    // Mode bits and owner names are POSIX notions: a file system without a posix view (Windows)
+    // expresses the same intent through ACLs, and its owner names never equal user.name.
+    if (supportedViews.contains(ATTR_VIEW_POSIX)) {
+      rejectWorldWritable(target, filePath);
+      rejectForeignOwner(path, filePath, "config file", ownerOf, jvmUser);
+      if (!target.equals(path)) {
+        rejectForeignOwner(target, filePath, "config file", ownerOf, jvmUser);
+      }
+      // The mode check follows a link to the directory, so whoever owns the link chooses the
+      // directory the plan is read from: the link must be trusted as the file is.
+      final Path parent = target.getParent();
+      if (parent != null && Files.isSymbolicLink(parent)) {
+        rejectForeignOwner(parent, filePath, "config file's directory link", ownerOf, jvmUser);
+      }
     }
     return target;
+  }
+
+  private static String ownerName(final Path path) {
+    try {
+      return Files.getOwner(path, LinkOption.NOFOLLOW_LINKS).getName();
+    } catch (final IOException unavailable) {
+      throw new UncheckedIOException(unavailable);
+    }
   }
 
   /**
@@ -428,26 +486,24 @@ public final class StartupConfigLoader {
 
   /**
    * Rejects config files that are world-writable (POSIX {@code o+w}) or whose enclosing directory
-   * is world-writable. Either condition lets any local user on the host swap the plan contents for
-   * an attacker-chosen payload between deploys — activating chaos with scenarios the operator never
-   * authorised. On non-POSIX filesystems the check is skipped: NTFS / ReFS express the same intent
-   * through ACLs rather than mode bits, and we'd rather keep the agent usable on Windows test hosts
-   * than fail-closed on a platform where the check is meaningless.
+   * is world-writable without the sticky bit. Either condition lets any local user on the host swap
+   * the plan contents for an attacker-chosen payload between deploys — activating chaos with
+   * scenarios the operator never authorised. The directory is checked where its links lead: Linux
+   * reports every symbolic link as 0777. Called only for a path whose file system has a {@code
+   * posix} view; a mount that reports every file as 0777 is refused, with a hint.
    */
   private static void rejectWorldWritable(final Path path, final String originalPath) {
-    if (!FileSystems.getDefault().supportedFileAttributeViews().contains(ATTR_VIEW_POSIX)) {
-      return;
-    }
     try {
       final Set<PosixFilePermission> filePerms =
           Files.getPosixFilePermissions(path, LinkOption.NOFOLLOW_LINKS);
       if (filePerms.contains(PosixFilePermission.OTHERS_WRITE)) {
         throw new ConfigLoadException(
-            "config file is world-writable (rejected for safety): " + path,
+            "config file is world-writable (rejected for safety): " + path + WORLD_WRITABLE_HINT,
             SOURCE_FILE_PREFIX + originalPath);
       }
-      final Path parent = path.getParent();
-      if (parent != null) {
+      final Path linkedParent = path.getParent();
+      if (linkedParent != null) {
+        final Path parent = linkedParent.toRealPath();
         final Set<PosixFilePermission> dirPerms =
             Files.getPosixFilePermissions(parent, LinkOption.NOFOLLOW_LINKS);
         // A world-writable parent without the sticky bit (t) lets any local user replace the
@@ -458,7 +514,8 @@ public final class StartupConfigLoader {
           throw new ConfigLoadException(
               "config file's parent directory is world-writable without sticky bit (rejected"
                   + " for safety): "
-                  + parent,
+                  + parent
+                  + WORLD_WRITABLE_HINT,
               SOURCE_FILE_PREFIX + originalPath);
         }
       }
