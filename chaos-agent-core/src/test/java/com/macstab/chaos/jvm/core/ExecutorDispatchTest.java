@@ -280,17 +280,6 @@ class ExecutorDispatchTest {
     }
 
     @Test
-    @DisplayName("an offer rejected through the void entry point fails as a suppressed operation")
-    void rejectedOfferThroughVoidEntryPoint() {
-      activate(
-          "offer", queue(OperationType.QUEUE_OFFER, NamePattern.any()), ChaosEffect.reject("x"));
-
-      assertThatThrownBy(() -> runtime.beforeQueueOperation("QUEUE_OFFER", new OrdersQueue()))
-          .isInstanceOf(RejectedExecutionException.class)
-          .hasMessage("operation suppressed by chaos agent");
-    }
-
-    @Test
     @DisplayName("a boolean queue operation keeps its real result under a delay alone")
     void delayKeepsTheRealResult() throws Throwable {
       activate(
@@ -560,7 +549,7 @@ class ExecutorDispatchTest {
           ChaosEffect.reject("no flush"));
 
       assertThatThrownBy(() -> runtime.decorateShutdownHook(new FlushHook(runs::incrementAndGet)))
-          .isInstanceOf(RejectedExecutionException.class);
+          .isExactlyInstanceOf(IllegalStateException.class);
       assertThat(runtime.decorateShutdownHook(new Thread(runs::incrementAndGet))).isNotNull();
     }
 
@@ -573,8 +562,8 @@ class ExecutorDispatchTest {
           ChaosEffect.reject("no hooks"));
 
       assertThatThrownBy(() -> runtime.decorateShutdownHook(null))
-          .isInstanceOf(RejectedExecutionException.class)
-          .hasMessageContaining("no hooks");
+          .isExactlyInstanceOf(IllegalStateException.class)
+          .hasMessage("Shutdown in progress");
     }
 
     @Test

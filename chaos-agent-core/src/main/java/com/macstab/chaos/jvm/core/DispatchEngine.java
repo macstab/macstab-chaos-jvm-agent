@@ -4,7 +4,6 @@ import com.macstab.chaos.jvm.api.ChaosEffect;
 import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.OperationType;
 import java.util.List;
-import java.util.concurrent.RejectedExecutionException;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -294,20 +293,14 @@ final class DispatchEngine {
         return new TerminalAction.NotApplicable();
       }
       return new TerminalAction.Timeout(
-          context.timeoutMillis(),
-          new java.net.SocketTimeoutException(
-              operationType == OperationType.SOCKET_CONNECT
-                  ? "Connect timed out"
-                  : "Read timed out"));
+          context.timeoutMillis(), () -> FailureFactory.timeout(operationType));
     }
     if (effect instanceof ChaosEffect.ErrnoEffect errnoEffect) {
+      final String path =
+          operationType == OperationType.PROCESS_START ? context.targetName() : context.path();
+      final boolean javaIo = FailureFactory.isJavaIo(context);
       return new TerminalAction.Throw(
-          FailureFactory.errno(
-              errnoEffect.errno(),
-              operationType,
-              operationType == OperationType.PROCESS_START ? context.targetName() : context.path(),
-              context.targetClassName() != null
-                  && context.targetClassName().startsWith("java.io.")));
+          () -> FailureFactory.errno(errnoEffect.errno(), operationType, path, javaIo));
     }
     if ((effect instanceof ChaosEffect.RejectEffect || effect instanceof ChaosEffect.SuppressEffect)
         && operationType == OperationType.QUEUE_OFFER
@@ -317,18 +310,20 @@ final class DispatchEngine {
       return new TerminalAction.NotApplicable();
     }
     if (effect instanceof ChaosEffect.RejectEffect rejectEffect) {
-      return rejectTerminal(operationType, rejectEffect.message());
+      return rejectTerminal(context, rejectEffect.message());
     }
     if (effect instanceof ChaosEffect.SuppressEffect) {
       return suppressTerminal(operationType);
     }
     if (effect instanceof ChaosEffect.ExceptionalCompletionEffect exceptionalCompletionEffect) {
       return new TerminalAction.CompleteExceptionally(
-          FailureFactory.completionFailure(
-              exceptionalCompletionEffect.failureKind(), exceptionalCompletionEffect.message()));
+          () ->
+              FailureFactory.completionFailure(
+                  exceptionalCompletionEffect.failureKind(),
+                  exceptionalCompletionEffect.message()));
     }
     if (effect instanceof ChaosEffect.ExceptionInjectionEffect injectionEffect) {
-      return buildInjectedExceptionTerminal(injectionEffect);
+      return new TerminalAction.Throw(() -> FailureFactory.injected(injectionEffect));
     }
     if (effect instanceof ChaosEffect.ReturnValueCorruptionEffect corruptEffect) {
       return new TerminalAction.CorruptReturn(corruptEffect, scenario.id());
@@ -345,76 +340,20 @@ final class DispatchEngine {
     return null;
   }
 
-  TerminalAction.Throw buildInjectedExceptionTerminal(
-      final ChaosEffect.ExceptionInjectionEffect effect) {
-    try {
-      // Class.forName(name, initialize=false, loader): deliberately skip static initialisation.
-      // Running <clinit> of an attacker-chosen class during exception construction would turn
-      // the injection path into a class-loading gadget. The package allow-list in
-      // ExceptionInjectionEffect is the primary gate; this is defence in depth.
-      final Class<?> exClass =
-          Class.forName(effect.exceptionClassName(), false, ChaosDispatcher.class.getClassLoader());
-      if (!Throwable.class.isAssignableFrom(exClass)) {
-        return new TerminalAction.Throw(
-            new IllegalArgumentException(
-                "chaos-agent: configured exception class does not extend Throwable: "
-                    + effect.exceptionClassName()));
-      }
-      Throwable instance;
-      try {
-        final java.lang.reflect.Constructor<?> stringCtor =
-            exClass.getDeclaredConstructor(String.class);
-        stringCtor.setAccessible(true);
-        instance = (Throwable) stringCtor.newInstance(effect.message());
-      } catch (final NoSuchMethodException noMsg) {
-        // Fallback: class has no (String) constructor. Silently dropping effect.message() here
-        // made injected exceptions opaque in logs — operators could not tell which scenario
-        // fired. If a message was configured, thread it through initCause so the message text
-        // survives (visible via getCause().getMessage() in stack traces). With no message the
-        // cause stays null and the exception behaves as before.
-        final java.lang.reflect.Constructor<?> noArgCtor = exClass.getDeclaredConstructor();
-        noArgCtor.setAccessible(true);
-        instance = (Throwable) noArgCtor.newInstance();
-        final String msg = effect.message();
-        if (msg != null && !msg.isEmpty()) {
-          try {
-            instance.initCause(new RuntimeException(msg));
-          } catch (final IllegalStateException alreadyInitialised) {
-            // Some Throwable subclasses pre-initialise cause in their no-arg ctor; respect
-            // that rather than overwriting. Opacity remains in that case, but we did our best.
-          }
-        }
-      }
-      if (!effect.withStackTrace()) {
-        instance.setStackTrace(new StackTraceElement[0]);
-      }
-      return new TerminalAction.Throw(instance);
-    } catch (final ReflectiveOperationException reflective) {
-      // Preserve the cause chain so operators can see *why* instantiation failed
-      // (missing class, inaccessible ctor, ctor threw, etc.) without having to reproduce.
-      final RuntimeException wrapped =
-          new RuntimeException(
-              "chaos-agent: failed to instantiate " + effect.exceptionClassName(), reflective);
-      return new TerminalAction.Throw(wrapped);
-    }
-  }
-
-  TerminalAction rejectTerminal(final OperationType operationType, final String message) {
-    return switch (operationType) {
+  TerminalAction rejectTerminal(final InvocationContext context, final String message) {
+    return switch (context.operationType()) {
       case QUEUE_OFFER, ASYNC_COMPLETE, ASYNC_COMPLETE_EXCEPTIONALLY ->
           new TerminalAction.Return(Boolean.FALSE);
       case RESOURCE_LOAD -> new TerminalAction.Return(null);
-      default -> new TerminalAction.Throw(FailureFactory.reject(operationType, message));
+      default -> new TerminalAction.Throw(() -> FailureFactory.reject(context, message));
     };
   }
 
   TerminalAction suppressTerminal(final OperationType operationType) {
     return switch (operationType) {
       case THREAD_START, VIRTUAL_THREAD_START ->
-          new TerminalAction.Throw(
-              new RejectedExecutionException("thread start suppressed by chaos agent"));
-      case SYSTEM_EXIT_REQUEST ->
-          new TerminalAction.Throw(new SecurityException("exit suppressed by chaos agent"));
+          new TerminalAction.Throw(FailureFactory::suppressedStart);
+      case SYSTEM_EXIT_REQUEST -> new TerminalAction.Throw(FailureFactory::suppressedExit);
       case QUEUE_OFFER, ASYNC_COMPLETE, ASYNC_COMPLETE_EXCEPTIONALLY ->
           new TerminalAction.Return(Boolean.FALSE);
       // QUEUE_POLL: routed through beforeBooleanQueueOperation which returns the Boolean to the
@@ -434,12 +373,6 @@ final class DispatchEngine {
       final TerminalAction terminalAction = decision.terminalAction();
       if (terminalAction instanceof TerminalAction.Throw thrown) {
         throw thrown.failure();
-      }
-      if (terminalAction instanceof TerminalAction.Return returned) {
-        if (Boolean.FALSE.equals(returned.value())) {
-          throw new RejectedExecutionException("operation suppressed by chaos agent");
-        }
-        return;
       }
       if (terminalAction.kind() == TerminalKind.CORRUPT_RETURN) {
         // CORRUPT_RETURN is only meaningful once a return value exists — it is applied by

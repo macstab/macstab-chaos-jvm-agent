@@ -62,8 +62,8 @@ class ChaosPresetsTest {
   void diskFull() {
     activate(ChaosPresets.diskFull("/var/lib/app"));
     assertThatThrownBy(() -> runtime.beforeFileIo("FILE_IO_WRITE", this, "/var/lib/app/data", 10))
-        .isInstanceOf(java.nio.file.FileSystemException.class)
-        .hasMessageContaining("No space left on device");
+        .isExactlyInstanceOf(java.io.IOException.class)
+        .hasMessage("No space left on device");
   }
 
   @Test

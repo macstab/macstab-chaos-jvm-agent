@@ -240,9 +240,8 @@ applyPreDecision(decision):
   applyGate(gateAction):
     gate.await(maxBlock)  — blocks until release() or timeout; throws if interrupted
   if terminalAction != null:
-    THROW     → throw terminalAction.throwable()
-    RETURN(false) → throw RejectedExecutionException("operation suppressed")
-    RETURN(other) → return normally (callers handle non-false return values differently)
+    THROW     → throw terminalAction.failure()
+    RETURN    → return normally (only the call sites that return a value produce one)
     SUPPRESS  → return (no-op)
   sleep(delayMillis)  — Thread.sleep; interrupt restores flag + throws IllegalStateException
 ```
@@ -455,22 +454,32 @@ The return type is determined from the actual value's runtime class if the decla
 
 ## FailureFactory
 
-Constructs operation-appropriate exceptions for `RejectEffect` and `ExceptionalCompletionEffect`:
+The single place that builds the failures the agent injects (ADR 0005): each is what the real call raises. `reject(InvocationContext, message)` is an exhaustive switch over `OperationType` (a new operation does not compile until it is mapped) and looks at the call where the operation alone does not decide:
 
-| Operation type                          | Exception type                                |
-|-----------------------------------------|-----------------------------------------------|
-| `SOCKET_CONNECT`, `NIO_CHANNEL_CONNECT` | `ConnectException`                            |
-| `SOCKET_READ`, `SOCKET_ACCEPT`          | `SocketTimeoutException`                      |
-| `SOCKET_WRITE`, `NIO_CHANNEL_WRITE`     | `IOException`                                 |
-| `EXECUTOR_SUBMIT`                       | `RejectedExecutionException`                  |
-| `JNDI_LOOKUP`                           | `NamingException`                             |
-| `CLASS_LOAD`, `CLASS_DEFINE`            | `ClassNotFoundException` / `ClassFormatError` |
-| `OBJECT_DESERIALIZE`                    | `InvalidClassException`                       |
-| `OBJECT_SERIALIZE`                      | `NotSerializableException`                    |
-| `NATIVE_LIBRARY_LOAD`                   | `UnsatisfiedLinkError`                        |
-| `DIRECT_BUFFER_ALLOCATE`                | `OutOfMemoryError`                            |
-| `SYSTEM_EXIT_REQUEST`                   | `SecurityException` (via suppressTerminal)    |
-| default                                 | `RuntimeException` with the reject message    |
+| Operation type                                                    | Exception type                                                       |
+|-------------------------------------------------------------------|----------------------------------------------------------------------|
+| `SOCKET_CONNECT`                                                  | `ConnectException`                                                   |
+| `SOCKET_READ`                                                     | `SocketTimeoutException` with an `SO_TIMEOUT`, else `SocketException` |
+| `SOCKET_WRITE`, `SOCKET_SHUTDOWN`                                 | `SocketException`                                                    |
+| `SOCKET_BIND`                                                     | `BindException`                                                      |
+| `DNS_RESOLVE`, `DNS_ANSWER`, `DNS_REVERSE`                        | `UnknownHostException`                                               |
+| `EXECUTOR_SUBMIT`, `SCHEDULE_SUBMIT`, `VIRTUAL_THREAD_START`      | `RejectedExecutionException`                                         |
+| `THREAD_START` (platform)                                         | `OutOfMemoryError("unable to create native thread: …")`              |
+| `THREAD_SLEEP`, `QUEUE_PUT`, `EXECUTOR_AWAIT_TERMINATION`, `PROCESS_WAIT` | `InterruptedException`                                       |
+| `SHUTDOWN_HOOK_REGISTER`                                          | `IllegalStateException("Shutdown in progress")`                      |
+| `METHOD_ENTER`, `METHOD_EXIT`, `SCHEDULE_TICK`                    | `IllegalStateException` with the reject message                      |
+| `REFLECTION_INVOKE`                                               | `InvocationTargetException` with a `RuntimeException` cause          |
+| `ZIP_INFLATE`                                                     | `DataFormatException`                                                |
+| `FILE_IO_OPEN`                                                    | `FileNotFoundException` (`java.io`), `FileSystemException` (`java.nio`) |
+| `FILE_IO_SYNC`                                                    | `SyncFailedException`                                                |
+| other file, socket, NIO, HTTP, Netty and process operations       | `IOException`                                                        |
+| `JNDI_LOOKUP`, `JMX_*`, `SSL_HANDSHAKE`, `JDBC_*`                 | `NamingException`, `MBeanException`, `SSLHandshakeException`, `SQLException` (built reflectively) |
+| `CLASS_LOAD`, `CLASS_DEFINE`                                      | `ClassNotFoundException` / `ClassFormatError`                        |
+| `OBJECT_DESERIALIZE`, `OBJECT_SERIALIZE`                          | `InvalidClassException` / `NotSerializableException`                 |
+| `NATIVE_LIBRARY_LOAD`, `DIRECT_BUFFER_ALLOCATE`                   | `UnsatisfiedLinkError` / `OutOfMemoryError`                          |
+| client libraries                                                  | the library's own type (`clientReject`), else `IOException`          |
+
+Operations whose reject the validator refuses, or answers with a value (`QUEUE_OFFER`, `ASYNC_COMPLETE*`, `RESOURCE_LOAD`), never build a failure. `errno` maps an `ErrnoEffect` (a call on an open file fails with `IOException(reason)`, a path call with the `java.nio.file` exception), and `timeout`, `completionFailure`, `injected`, `suppressedStart` and `suppressedExit` build the other effects' failures. A failure is built only for the terminal that wins the decision (`TerminalAction` carries its builder), and its stack trace is cut to the call site: the frames up to the last `BootstrapDispatcher` frame (or, for a manual `ChaosRuntime` hook, the last frame of `com.macstab.chaos.jvm.core`) are removed, so the top frame is the intercepted method.
 
 ---
 

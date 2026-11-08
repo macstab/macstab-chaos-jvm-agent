@@ -495,67 +495,108 @@ final class CompatibilityValidator {
               ChaosEffect.RedirectEffect.class,
               EnumSet.of(OperationType.SOCKET_CONNECT));
 
-  /** Operations a network {@link ChaosEffect.Errno} applies to. */
-  private static final Set<OperationType> ERRNO_NETWORK_OPS =
-      EnumSet.of(
-          OperationType.SOCKET_CONNECT,
-          OperationType.SOCKET_ACCEPT,
-          OperationType.SOCKET_READ,
-          OperationType.SOCKET_WRITE,
-          OperationType.SOCKET_CLOSE,
-          OperationType.SOCKET_BIND,
-          OperationType.SOCKET_SHUTDOWN,
-          OperationType.DATAGRAM_SEND,
-          OperationType.DATAGRAM_RECEIVE,
-          OperationType.NIO_CHANNEL_CONNECT,
-          OperationType.NIO_CHANNEL_ACCEPT,
-          OperationType.NIO_CHANNEL_READ,
-          OperationType.NIO_CHANNEL_WRITE);
-
-  /** Operations a file {@link ChaosEffect.Errno} applies to. */
-  private static final Set<OperationType> ERRNO_FILE_OPS =
-      EnumSet.of(
-          OperationType.FILE_IO_READ,
-          OperationType.FILE_IO_WRITE,
-          OperationType.FILE_IO_SYNC,
-          OperationType.FILE_IO_TRUNCATE,
-          OperationType.FILE_IO_DELETE,
-          OperationType.FILE_IO_MOVE,
-          OperationType.FILE_IO_OPEN,
-          OperationType.FILE_IO_MAP,
-          OperationType.FILE_IO_CLOSE,
-          OperationType.FILE_IO_MOVE_TARGET,
-          // A process start fails on the program file: ENOENT, EACCES and the like.
-          OperationType.PROCESS_START);
-
   /**
-   * Operations an {@link ChaosEffect.Errno} applies to beyond its family's: errors the kernel
-   * reports for more than one kind of call.
+   * The operations each {@link ChaosEffect.Errno} applies to: the calls the kernel reports it for.
+   * A network error applies to every socket call. A file error applies per call: a call on an open
+   * descriptor (read, write, sync, truncate, map, close) never reports a missing file or a
+   * permission, and a path call (open, delete, move) never reports a full disk on delete. A program
+   * that cannot be started reports any file error, and {@code EAGAIN} or {@code ENOMEM} of {@code
+   * fork}.
    */
-  private static final java.util.Map<ChaosEffect.Errno, Set<OperationType>> ERRNO_EXTRA_OPS =
-      java.util.Map.of(
-          // binding a privileged port
-          ChaosEffect.Errno.EACCES,
-          EnumSet.of(OperationType.SOCKET_BIND),
-          // connects and accepts open a descriptor
-          ChaosEffect.Errno.EMFILE,
-          EnumSet.of(
-              OperationType.SOCKET_CONNECT,
-              OperationType.SOCKET_ACCEPT,
-              OperationType.NIO_CHANNEL_CONNECT,
-              OperationType.NIO_CHANNEL_ACCEPT),
-          ChaosEffect.Errno.ENFILE,
-          EnumSet.of(
-              OperationType.SOCKET_CONNECT,
-              OperationType.SOCKET_ACCEPT,
-              OperationType.NIO_CHANNEL_CONNECT,
-              OperationType.NIO_CHANNEL_ACCEPT),
-          // pthread_create of a platform thread
-          ChaosEffect.Errno.EAGAIN,
-          EnumSet.of(OperationType.THREAD_START),
-          // pthread_create, and mmap of a file region
-          ChaosEffect.Errno.ENOMEM,
-          EnumSet.of(OperationType.THREAD_START, OperationType.FILE_IO_MAP));
+  private static final java.util.Map<ChaosEffect.Errno, Set<OperationType>> ERRNO_OPS =
+      new java.util.EnumMap<>(ChaosEffect.Errno.class);
+
+  static {
+    final Set<OperationType> socketCalls =
+        EnumSet.of(
+            OperationType.SOCKET_CONNECT,
+            OperationType.SOCKET_ACCEPT,
+            OperationType.SOCKET_READ,
+            OperationType.SOCKET_WRITE,
+            OperationType.SOCKET_CLOSE,
+            OperationType.SOCKET_BIND,
+            OperationType.SOCKET_SHUTDOWN,
+            OperationType.DATAGRAM_SEND,
+            OperationType.DATAGRAM_RECEIVE,
+            OperationType.NIO_CHANNEL_CONNECT,
+            OperationType.NIO_CHANNEL_ACCEPT,
+            OperationType.NIO_CHANNEL_READ,
+            OperationType.NIO_CHANNEL_WRITE);
+    for (final ChaosEffect.Errno errno : ChaosEffect.Errno.values()) {
+      if (errno.family() == ChaosEffect.Errno.Family.NETWORK) {
+        ERRNO_OPS.put(errno, socketCalls);
+      }
+    }
+    // connects and accepts open a descriptor
+    final Set<OperationType> descriptorOpens =
+        EnumSet.of(
+            OperationType.FILE_IO_OPEN,
+            OperationType.SOCKET_CONNECT,
+            OperationType.SOCKET_ACCEPT,
+            OperationType.NIO_CHANNEL_CONNECT,
+            OperationType.NIO_CHANNEL_ACCEPT,
+            OperationType.PROCESS_START);
+    ERRNO_OPS.put(ChaosEffect.Errno.EMFILE, descriptorOpens);
+    ERRNO_OPS.put(ChaosEffect.Errno.ENFILE, descriptorOpens);
+    final Set<OperationType> noSpace =
+        EnumSet.of(
+            OperationType.FILE_IO_WRITE,
+            OperationType.FILE_IO_SYNC,
+            OperationType.FILE_IO_CLOSE,
+            OperationType.FILE_IO_OPEN,
+            OperationType.PROCESS_START);
+    ERRNO_OPS.put(ChaosEffect.Errno.ENOSPC, noSpace);
+    ERRNO_OPS.put(ChaosEffect.Errno.EDQUOT, noSpace);
+    ERRNO_OPS.put(
+        ChaosEffect.Errno.EROFS,
+        EnumSet.of(
+            OperationType.FILE_IO_OPEN,
+            OperationType.FILE_IO_DELETE,
+            OperationType.FILE_IO_MOVE,
+            OperationType.FILE_IO_MOVE_TARGET,
+            OperationType.PROCESS_START));
+    ERRNO_OPS.put(
+        ChaosEffect.Errno.ENOENT,
+        EnumSet.of(
+            OperationType.FILE_IO_OPEN,
+            OperationType.FILE_IO_DELETE,
+            OperationType.FILE_IO_MOVE,
+            OperationType.FILE_IO_MOVE_TARGET,
+            OperationType.PROCESS_START));
+    ERRNO_OPS.put(
+        ChaosEffect.Errno.EACCES,
+        EnumSet.of(
+            OperationType.FILE_IO_OPEN,
+            OperationType.FILE_IO_DELETE,
+            OperationType.FILE_IO_MOVE,
+            OperationType.FILE_IO_MOVE_TARGET,
+            // a mapping wider than the descriptor's open mode
+            OperationType.FILE_IO_MAP,
+            // binding a privileged port
+            OperationType.SOCKET_BIND,
+            OperationType.PROCESS_START));
+    ERRNO_OPS.put(
+        ChaosEffect.Errno.EIO,
+        EnumSet.of(
+            OperationType.FILE_IO_READ,
+            OperationType.FILE_IO_WRITE,
+            OperationType.FILE_IO_SYNC,
+            OperationType.FILE_IO_TRUNCATE,
+            OperationType.FILE_IO_CLOSE,
+            OperationType.FILE_IO_DELETE,
+            OperationType.FILE_IO_MOVE,
+            OperationType.FILE_IO_MOVE_TARGET,
+            OperationType.PROCESS_START));
+    // pthread_create of a platform thread, fork of a process
+    ERRNO_OPS.put(
+        ChaosEffect.Errno.EAGAIN,
+        EnumSet.of(OperationType.THREAD_START, OperationType.PROCESS_START));
+    // and mmap of a file region
+    ERRNO_OPS.put(
+        ChaosEffect.Errno.ENOMEM,
+        EnumSet.of(
+            OperationType.THREAD_START, OperationType.FILE_IO_MAP, OperationType.PROCESS_START));
+  }
 
   /**
    * Operations whose interception point can carry out a {@link ChaosEffect.SuppressEffect}: it
@@ -649,23 +690,16 @@ final class CompatibilityValidator {
               + operations);
     }
     if (effect instanceof ChaosEffect.ErrnoEffect errnoEffect) {
-      final Set<OperationType> allowed =
-          EnumSet.copyOf(
-              switch (errnoEffect.errno().family()) {
-                case NETWORK -> ERRNO_NETWORK_OPS;
-                case FILE -> ERRNO_FILE_OPS;
-                case PROCESS -> EnumSet.of(OperationType.PROCESS_START);
-              });
-      allowed.addAll(ERRNO_EXTRA_OPS.getOrDefault(errnoEffect.errno(), Set.of()));
+      final Set<OperationType> allowed = ERRNO_OPS.get(errnoEffect.errno());
       for (final OperationType operation : operations) {
-        if (!allowed.contains(operation)) {
+        if (allowed == null || !allowed.contains(operation)) {
           throw new ChaosValidationException(
               errnoEffect.errno()
                   + " is a "
                   + errnoEffect.errno().family().name().toLowerCase(java.util.Locale.ROOT)
                   + " error and does not apply to "
                   + operation
-                  + "; it applies to "
+                  + ", where the kernel never reports it; it applies to "
                   + allowed);
         }
       }

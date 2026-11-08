@@ -1,11 +1,14 @@
 package com.macstab.chaos.jvm.core;
 
 import com.macstab.chaos.jvm.api.ChaosEffect;
+import java.util.function.Supplier;
 import org.jspecify.annotations.Nullable;
 
 /**
  * What the chaos engine does at the end of a decision: one record per {@link TerminalKind}, each
- * carrying exactly the payload its kind needs.
+ * carrying exactly the payload its kind needs. A failure is carried as its builder: it is built (by
+ * {@link FailureFactory}) only when the winning terminal is carried out, never for the
+ * contributions that lost the decision.
  */
 sealed interface TerminalAction {
 
@@ -17,14 +20,23 @@ sealed interface TerminalAction {
   TerminalKind kind();
 
   /**
-   * Throw {@code failure} from the interception site.
+   * Throw the failure {@code failureBuilder} builds from the interception site.
    *
-   * @param failure the exception to throw
+   * @param failureBuilder builds the exception to throw
    */
-  record Throw(Throwable failure) implements TerminalAction {
+  record Throw(Supplier<Throwable> failureBuilder) implements TerminalAction {
     @Override
     public TerminalKind kind() {
       return TerminalKind.THROW;
+    }
+
+    /**
+     * Builds the exception to throw, a new one on each call.
+     *
+     * @return the exception
+     */
+    Throwable failure() {
+      return failureBuilder.get();
     }
   }
 
@@ -41,14 +53,23 @@ sealed interface TerminalAction {
   }
 
   /**
-   * Complete a future exceptionally with {@code failure}.
+   * Complete a future exceptionally with the failure {@code failureBuilder} builds.
    *
-   * @param failure the exception to complete with
+   * @param failureBuilder builds the exception to complete with
    */
-  record CompleteExceptionally(Throwable failure) implements TerminalAction {
+  record CompleteExceptionally(Supplier<Throwable> failureBuilder) implements TerminalAction {
     @Override
     public TerminalKind kind() {
       return TerminalKind.COMPLETE_EXCEPTIONALLY;
+    }
+
+    /**
+     * Builds the exception to complete with, a new one on each call.
+     *
+     * @return the exception
+     */
+    Throwable failure() {
+      return failureBuilder.get();
     }
   }
 
@@ -107,15 +128,24 @@ sealed interface TerminalAction {
   }
 
   /**
-   * Wait {@code waitMillis}, then throw {@code failure}.
+   * Wait {@code waitMillis}, then throw the failure {@code failureBuilder} builds.
    *
    * @param waitMillis the call's own timeout
-   * @param failure the timeout exception
+   * @param failureBuilder builds the timeout exception
    */
-  record Timeout(long waitMillis, Throwable failure) implements TerminalAction {
+  record Timeout(long waitMillis, Supplier<Throwable> failureBuilder) implements TerminalAction {
     @Override
     public TerminalKind kind() {
       return TerminalKind.TIMEOUT;
+    }
+
+    /**
+     * Builds the timeout exception, a new one on each call.
+     *
+     * @return the exception
+     */
+    Throwable failure() {
+      return failureBuilder.get();
     }
   }
 

@@ -71,9 +71,10 @@ class ThreadAndSessionDispatchTest {
               null),
           ChaosEffect.reject("no workers"));
 
+      // the JVM's own failure to create the native thread, whatever the scenario's message
       assertThatThrownBy(() -> runtime.beforeThreadStart(new Thread(() -> {}, "worker-1")))
-          .isInstanceOf(RejectedExecutionException.class)
-          .hasMessage("no workers");
+          .isExactlyInstanceOf(OutOfMemoryError.class)
+          .hasMessageStartingWith("unable to create native thread");
       assertThatCode(() -> runtime.beforeThreadStart(new Thread(() -> {}, "main-loop")))
           .doesNotThrowAnyException();
     }
@@ -124,7 +125,7 @@ class ThreadAndSessionDispatchTest {
       assertThatCode(() -> runtime.beforeThreadStart(Thread.ofVirtual().unstarted(() -> {})))
           .doesNotThrowAnyException();
       assertThatThrownBy(() -> runtime.beforeThreadStart(new Thread(() -> {})))
-          .hasMessage("no platform threads");
+          .isExactlyInstanceOf(OutOfMemoryError.class);
     }
 
     @Test
@@ -134,7 +135,8 @@ class ThreadAndSessionDispatchTest {
           ChaosSelector.thread(Set.of(OperationType.THREAD_START), ChaosSelector.ThreadKind.ANY),
           ChaosEffect.reject("no threads"));
 
-      assertThatThrownBy(() -> runtime.beforeThreadStart(null)).hasMessage("no threads");
+      assertThatThrownBy(() -> runtime.beforeThreadStart(null))
+          .isExactlyInstanceOf(OutOfMemoryError.class);
     }
   }
 

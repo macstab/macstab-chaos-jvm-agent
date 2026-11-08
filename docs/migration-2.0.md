@@ -35,6 +35,7 @@
 | 16 | A pool task carries a session only once the session has a scenario | another service relies on `X-Chaos-Session` from pool tasks of a session without local scenarios | activate a scenario in the session first, or set the header from `session.id()` (§16) |
 | 17 | Direct-buffer pressure above the direct memory limit is refused | a `directBufferPressure` asks for more than `-XX:MaxDirectMemorySize` (by default the maximum heap) | lower `totalBytes` or raise the limit (§17) |
 | 18 | `suppress` on HTTP and JDBC is refused; `ChaosHttpSuppressException` / `ChaosJdbcSuppressException` are removed | a plan suppresses `HTTP_CLIENT_*` or `JDBC_*`, or code catches those exceptions | use `reject` and catch `IOException` / `SQLException` (§18) |
+| 19 | `reject` and `errno` raise the real call's exception; errnos apply per operation | a test catches the 1.x type of a reject or a file errno, reads its top stack frame, or applies a file errno to a call the kernel never reports it for | catch the type in §19; pick an errno the call can report (§19) |
 
 ---
 
@@ -218,6 +219,32 @@ A `SuppressEffect` on `HTTP_CLIENT_SEND`, `HTTP_CLIENT_SEND_ASYNC`, `JDBC_CONNEC
 - In plans: replace `{"type": "suppress"}` on these operations with `{"type": "reject", "message": "…"}`; in code, `ChaosEffect.suppress()` with `ChaosEffect.reject("…")`.
 - In tests: catch `java.io.IOException` for HTTP (an `UncheckedIOException` or your client's wrapper where it wraps one) and `java.sql.SQLException` for JDBC (Spring: `DataAccessException`, `CannotGetJdbcConnectionException`) instead of `ChaosHttpSuppressException` / `ChaosJdbcSuppressException`.
 - Code that calls `BootstrapDispatcher` or `BridgeDelegate` directly: `beforeHttpSend`, `beforeHttpSendAsync` and the five `beforeJdbc*` return `void`; a reject throws from them.
+
+## 19. `reject` and `errno` raise the real call's exception
+
+A `RejectEffect` fails the call with the exception the real call raises, and every injected failure's stack trace starts at the intercepted method (the agent's frames are removed). The types that changed:
+
+| Operation | 1.x | 2.0 |
+|-----------|-----|-----|
+| `DNS_ANSWER` | `IllegalStateException` | `UnknownHostException` |
+| `NIO_SELECTOR_SELECT` | `ClosedSelectorException` | `IOException` |
+| `SOCKET_READ` without `SO_TIMEOUT` (and every socket-channel read) | `SocketTimeoutException` | `SocketException` |
+| `SOCKET_WRITE` | `IOException` | `SocketException` |
+| `ZIP_INFLATE` | `IllegalStateException` | `DataFormatException` |
+| `REFLECTION_INVOKE` | `IllegalStateException` | `InvocationTargetException`, its cause a `RuntimeException` with the message |
+| `SCHEDULE_SUBMIT` | `IllegalStateException` | `RejectedExecutionException` |
+| `EXECUTOR_AWAIT_TERMINATION`, `QUEUE_PUT` | `IllegalStateException` | `InterruptedException` |
+| platform `THREAD_START` | `RejectedExecutionException` | `OutOfMemoryError("unable to create native thread: …")` |
+| `SHUTDOWN_HOOK_REGISTER` | `RejectedExecutionException` | `IllegalStateException("Shutdown in progress")` |
+| `java.nio` `FILE_IO_OPEN` | `FileNotFoundException` | `FileSystemException` naming the path |
+| Kafka, gRPC, Redis, R2DBC, AWS without the library's type visible | `IllegalStateException` | `IOException` |
+
+`METHOD_ENTER`, `METHOD_EXIT` and `SCHEDULE_TICK` keep `IllegalStateException`. The two messages of the JVM (thread start, shutdown hook) replace the reject's message.
+
+An `ErrnoEffect` on a call on an open file — `FILE_IO_READ`, `FILE_IO_WRITE`, `FILE_IO_TRUNCATE`, `FILE_IO_MAP`, `FILE_IO_CLOSE` — fails with `IOException("<reason>")`, as the JDK reports it, instead of a `FileSystemException` naming the path; an open, delete or move still names it. An errno applies only to the calls the kernel reports it for (the table in the configuration reference); `ENOENT` or `EACCES` on a read, `EROFS` on a truncate or `ENOSPC` on a delete is refused at activation with `ChaosValidationException`.
+
+- In tests: catch the 2.0 type (`IOException` covers the file and socket rows), and read the reason from `getMessage()` instead of `FileSystemException.getReason()`.
+- In plans: an errno a call cannot report becomes one it can: `EIO` for a failing read or truncate, `ENOENT` / `EACCES` on `FILE_IO_OPEN`.
 
 ---
 

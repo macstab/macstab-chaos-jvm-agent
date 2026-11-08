@@ -812,9 +812,8 @@ public enum OperationType {
 
   /**
    * Fires before a file is shortened or extended: {@code FileChannel.truncate(long)} and {@code
-   * RandomAccessFile.setLength(long)}. A reject throws {@link java.io.IOException}; an {@code
-   * ErrnoEffect} the matching {@link java.nio.file.FileSystemException} (for example {@code
-   * ENOSPC}, {@code EROFS}).
+   * RandomAccessFile.setLength(long)}. A reject or an {@code ErrnoEffect} ({@code EIO}) throws
+   * {@link java.io.IOException}.
    *
    * <p>Use with {@link ChaosSelector.FileIoSelector}; the path is the file's.
    */

@@ -17,7 +17,10 @@ import java.nio.file.NoSuchFileException;
 import java.util.Set;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 @DisplayName("ErrnoEffect")
 class ErrnoEffectTest {
@@ -71,12 +74,12 @@ class ErrnoEffectTest {
   }
 
   @Test
-  @DisplayName("file errors carry the file's path")
+  @DisplayName("file errors of a path call carry the file's path")
   void fileErrorsCarryPath() {
-    activate(ChaosSelector.fileIo(Set.of(OperationType.FILE_IO_WRITE)), Errno.ENOSPC);
+    activate(ChaosSelector.fileIo(Set.of(OperationType.FILE_IO_OPEN)), Errno.ENOSPC);
 
     assertThatThrownBy(
-            () -> runtime.beforeFileIo("FILE_IO_WRITE", this, "/var/lib/app/wal.log", 512))
+            () -> runtime.beforeFileIo("FILE_IO_OPEN", this, "/var/lib/app/wal.log", 512))
         .isExactlyInstanceOf(FileSystemException.class)
         .satisfies(
             failure -> {
@@ -88,11 +91,11 @@ class ErrnoEffectTest {
   }
 
   @Test
-  @DisplayName("EACCES and ENOENT use the specific java.nio.file exceptions")
+  @DisplayName("EACCES and ENOENT of a path call use the specific java.nio.file exceptions")
   void specificFileExceptions() {
-    assertThat(FailureFactory.errno(Errno.EACCES, OperationType.FILE_IO_READ, "/x", false))
+    assertThat(FailureFactory.errno(Errno.EACCES, OperationType.FILE_IO_OPEN, "/x", false))
         .isExactlyInstanceOf(AccessDeniedException.class);
-    assertThat(FailureFactory.errno(Errno.ENOENT, OperationType.FILE_IO_READ, "/x", false))
+    assertThat(FailureFactory.errno(Errno.ENOENT, OperationType.FILE_IO_DELETE, "/x", false))
         .isExactlyInstanceOf(NoSuchFileException.class);
   }
 
@@ -141,5 +144,56 @@ class ErrnoEffectTest {
     assertThat(FailureFactory.errno(Errno.EAGAIN, OperationType.THREAD_START, null, false))
         .isInstanceOf(OutOfMemoryError.class)
         .hasMessageStartingWith("unable to create native thread");
+  }
+
+  /**
+   * Reads, writes, truncates, maps and closes act on an open descriptor: the JDK reports their
+   * error as {@code IOException} with the system's text, not as a {@code java.nio.file} exception
+   * naming a path.
+   */
+  @Nested
+  @DisplayName("descriptor operations throw IOException")
+  class DescriptorOperationsThrowIOException {
+
+    @ParameterizedTest(name = "{1} on {0}")
+    @CsvSource({
+      "FILE_IO_READ, EIO",
+      "FILE_IO_WRITE, ENOSPC",
+      "FILE_IO_WRITE, EDQUOT",
+      "FILE_IO_TRUNCATE, EIO",
+      "FILE_IO_MAP, EACCES",
+      "FILE_IO_CLOSE, EIO"
+    })
+    @DisplayName("the error is an IOException with the system's text")
+    void descriptorErrorIsIOException(final OperationType operation, final Errno errno) {
+      activate(ChaosSelector.fileIo(Set.of(operation)), errno);
+
+      assertThatThrownBy(
+              () ->
+                  runtime.beforeFileIo(
+                      operation.name(),
+                      new EffectReachesTheCallTest.ProbeFileChannelImpl(),
+                      "/var/lib/app/wal.log",
+                      512))
+          .isExactlyInstanceOf(java.io.IOException.class)
+          .hasMessage(errno.reason());
+    }
+
+    @ParameterizedTest(name = "{1} on {0}")
+    @CsvSource({
+      "FILE_IO_READ, ENOENT",
+      "FILE_IO_READ, EACCES",
+      "FILE_IO_WRITE, ENOENT",
+      "FILE_IO_TRUNCATE, EROFS",
+      "FILE_IO_CLOSE, EACCES",
+      "FILE_IO_DELETE, ENOSPC",
+      "FILE_IO_OPEN, EIO"
+    })
+    @DisplayName("an error the kernel never reports for the operation is refused at activation")
+    void errorTheKernelNeverReportsIsRefused(final OperationType operation, final Errno errno) {
+      assertThatThrownBy(() -> activate(ChaosSelector.fileIo(Set.of(operation)), errno))
+          .isInstanceOf(ChaosValidationException.class)
+          .hasMessageContaining(operation.name());
+    }
   }
 }

@@ -120,11 +120,11 @@ class DispatchEngineEdgeTest {
     @Test
     @DisplayName("an injected exception that sets its own cause keeps it")
     void injectedExceptionKeepsOwnCause() {
-      final TerminalAction.Throw action =
-          engine.buildInjectedExceptionTerminal(
+      final Throwable failure =
+          FailureFactory.injected(
               new ChaosEffect.ExceptionInjectionEffect(
                   PreCausedException.class.getName(), "configured message", true));
-      assertThat(action.failure())
+      assertThat(failure)
           .isInstanceOf(PreCausedException.class)
           .cause()
           .isInstanceOf(IllegalArgumentException.class)
@@ -216,22 +216,19 @@ class DispatchEngineEdgeTest {
     }
 
     @Test
-    @DisplayName("a client rejection without a client falls back to the generic rejection")
+    @DisplayName("a client rejection without a client falls back to IOException")
     void clientRejectWithoutClient() {
       final Throwable failure =
           FailureFactory.clientReject(OperationType.EXECUTOR_SUBMIT, null, "no client");
-      assertThat(failure).isInstanceOf(RejectedExecutionException.class).hasMessage("no client");
+      assertThat(failure).isExactlyInstanceOf(IOException.class).hasMessage("no client");
     }
 
     @Test
-    @DisplayName("a client rejection whose library is absent falls back to the generic rejection")
+    @DisplayName("a client rejection whose library is absent falls back to IOException")
     void clientRejectWithoutLibrary() {
       final Throwable failure =
           FailureFactory.clientReject(OperationType.MESSAGE_SEND, null, "no kafka");
-      assertThat(failure)
-          .isExactlyInstanceOf(
-              FailureFactory.reject(OperationType.MESSAGE_SEND, "no kafka").getClass())
-          .hasMessage("no kafka");
+      assertThat(failure).isExactlyInstanceOf(IOException.class).hasMessage("no kafka");
     }
 
     @Test

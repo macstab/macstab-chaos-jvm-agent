@@ -1,6 +1,7 @@
 package com.macstab.chaos.jvm.bootstrap;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.SoftAssertions.assertSoftly;
 
 import com.macstab.chaos.jvm.api.ActivationPolicy;
 import com.macstab.chaos.jvm.api.ChaosEffect;
@@ -1187,7 +1188,7 @@ class AgentEndToEndTest {
     }
 
     @Test
-    @DisplayName("ENOSPC on a real FileOutputStream write is a FileSystemException with the path")
+    @DisplayName("ENOSPC on a real FileOutputStream write is an IOException with the system's text")
     void fileWriteNoSpace() throws Exception {
       final Path root = Files.createDirectories(tempDir.resolve("errno"));
       final ChildJvmProbe.ProbeResult result =
@@ -1205,9 +1206,9 @@ class AgentEndToEndTest {
               "file-writes-by-path",
               null,
               "-Dchaos.test.dir=" + root);
-      assertThat(result.value("a.type")).isEqualTo("java.nio.file.FileSystemException");
-      assertThat(result.value("a.message"))
-          .isEqualTo(root.resolve("a").resolve("f") + ": No space left on device");
+      // a write of an open file reports the error as IOUtil does: no path
+      assertThat(result.value("a.type")).isEqualTo("java.io.IOException");
+      assertThat(result.value("a.message")).isEqualTo("No space left on device");
       assertThat(result.value("b")).isEqualTo("ok");
     }
 
@@ -1306,21 +1307,27 @@ class AgentEndToEndTest {
                   scenario(
                       "read-only-under-a",
                       new ChaosSelector.FileIoSelector(
-                          Set.of(
-                              OperationType.FILE_IO_TRUNCATE,
-                              OperationType.FILE_IO_DELETE,
-                              OperationType.FILE_IO_MOVE),
+                          Set.of(OperationType.FILE_IO_DELETE, OperationType.FILE_IO_MOVE),
                           PathPattern.under(root.resolve("a").toString()),
                           null,
                           null),
-                      ChaosEffect.errno(ChaosEffect.Errno.EROFS))),
+                      ChaosEffect.errno(ChaosEffect.Errno.EROFS)),
+                  // ftruncate of an open file never reports EROFS; a failing disk is EIO
+                  scenario(
+                      "failing-disk-under-a",
+                      new ChaosSelector.FileIoSelector(
+                          Set.of(OperationType.FILE_IO_TRUNCATE),
+                          PathPattern.under(root.resolve("a").toString()),
+                          null,
+                          null),
+                      ChaosEffect.errno(ChaosEffect.Errno.EIO))),
               DefectProbeMain.class,
               "file-ops",
               null,
               "-Dchaos.test.dir=" + root);
       final String failure = "java.nio.file.FileSystemException";
-      assertThat(result.value("a.truncate")).isEqualTo(failure);
-      assertThat(result.value("a.setLength")).isEqualTo(failure);
+      assertThat(result.value("a.truncate")).isEqualTo("java.io.IOException");
+      assertThat(result.value("a.setLength")).isEqualTo("java.io.IOException");
       assertThat(result.value("a.move")).isEqualTo(failure);
       assertThat(result.value("a.renameTo"))
           .as("java.io reports failure as false")
@@ -1435,7 +1442,7 @@ class AgentEndToEndTest {
       // a failing close still releases the descriptor, as close(2) does
       assertThat(result.value("streamClose")).isEqualTo("java.io.IOException: Input/output error");
       assertThat(result.value("streamFdValid")).isEqualTo("false");
-      assertThat(result.value("channelClose")).isEqualTo("java.nio.file.FileSystemException");
+      assertThat(result.value("channelClose")).isEqualTo("java.io.IOException");
       assertThat(result.value("channelOpen")).isEqualTo("false");
       assertThat(result.value("plainClose")).isEqualTo("ok");
       // a stream and its channel are one close
@@ -1785,7 +1792,7 @@ class AgentEndToEndTest {
     }
 
     @Test
-    @DisplayName("ENOSPC on a RandomAccessFile write is a FileSystemException with the path")
+    @DisplayName("ENOSPC on a RandomAccessFile write is an IOException with the system's text")
     void randomAccessFileNoSpace() throws Exception {
       final ChildJvmProbe.ProbeResult result =
           runInTmp(
@@ -1793,8 +1800,8 @@ class AgentEndToEndTest {
               Set.of(OperationType.FILE_IO_WRITE),
               ChaosEffect.errno(ChaosEffect.Errno.ENOSPC),
               "random-access-write");
-      assertThat(result.value("raf.type")).isEqualTo("java.nio.file.FileSystemException");
-      assertThat(result.value("raf.message")).endsWith(": No space left on device");
+      assertThat(result.value("raf.type")).isEqualTo("java.io.IOException");
+      assertThat(result.value("raf.message")).isEqualTo("No space left on device");
     }
 
     @Test
@@ -1949,6 +1956,88 @@ class AgentEndToEndTest {
           probe.runWithoutPlan(DefectProbeMain.class, "thread-eagain");
       assertThat(result.value("during")).startsWith("unable to create native thread");
       assertThat(result.value("after")).isEqualTo("started");
+    }
+
+    @Test
+    @DisplayName(
+        "a reject raises the real call's exception, thrown from the intercepted method itself")
+    void rejectRaisesTheRealException() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.runWithoutPlan(DefectProbeMain.class, "reject-types");
+      assertSoftly(
+          softly -> {
+            softly
+                .assertThat(result.value("dnsAnswer.type"))
+                .isEqualTo("java.net.UnknownHostException");
+            softly
+                .assertThat(result.value("dnsAnswer.top"))
+                .isEqualTo("java.net.InetAddress.getAllByName");
+            softly
+                .assertThat(result.value("reflection.type"))
+                .isEqualTo("java.lang.reflect.InvocationTargetException");
+            softly
+                .assertThat(result.value("reflection.top"))
+                .isEqualTo("java.lang.reflect.Method.invoke");
+            softly
+                .assertThat(result.value("reflection.cause"))
+                .isEqualTo("java.lang.RuntimeException");
+            softly
+                .assertThat(result.value("scheduleSubmit.type"))
+                .isEqualTo("java.util.concurrent.RejectedExecutionException");
+            softly
+                .assertThat(result.value("scheduleSubmit.top"))
+                .isEqualTo("java.util.concurrent.ScheduledThreadPoolExecutor.schedule");
+            softly
+                .assertThat(result.value("awaitTermination.type"))
+                .isEqualTo("java.lang.InterruptedException");
+            softly
+                .assertThat(result.value("awaitTermination.top"))
+                .isEqualTo("java.util.concurrent.ThreadPoolExecutor.awaitTermination");
+            softly
+                .assertThat(result.value("queuePut.type"))
+                .isEqualTo("java.lang.InterruptedException");
+            softly
+                .assertThat(result.value("queuePut.top"))
+                .isEqualTo("java.util.concurrent.ArrayBlockingQueue.put");
+            softly
+                .assertThat(result.value("threadStart.type"))
+                .isEqualTo("java.lang.OutOfMemoryError");
+            softly.assertThat(result.value("threadStart.top")).isEqualTo("java.lang.Thread.start");
+            softly
+                .assertThat(result.value("shutdownHook.type"))
+                .isEqualTo("java.lang.IllegalStateException");
+            softly
+                .assertThat(result.value("shutdownHook.top"))
+                .isEqualTo("java.lang.Runtime.addShutdownHook");
+            softly.assertThat(result.value("select.type")).isEqualTo("java.io.IOException");
+            softly
+                .assertThat(result.value("select.top"))
+                .isEqualTo("sun.nio.ch.SelectorImpl.select");
+            softly
+                .assertThat(result.value("nioOpen.type"))
+                .isEqualTo("java.nio.file.FileSystemException");
+            softly.assertThat(result.value("nioOpen.top")).doesNotStartWith("com.macstab.");
+            softly
+                .assertThat(result.value("channelWriteEnospc.type"))
+                .isEqualTo("java.io.IOException");
+            softly
+                .assertThat(result.value("channelWriteEnospc.top"))
+                .isEqualTo("sun.nio.ch.FileChannelImpl.write");
+            softly
+                .assertThat(result.value("socketRead.type"))
+                .isEqualTo("java.net.SocketException");
+            softly.assertThat(result.value("socketRead.top")).doesNotStartWith("com.macstab.");
+            softly
+                .assertThat(result.value("socketWrite.type"))
+                .isEqualTo("java.net.SocketException");
+            softly.assertThat(result.value("socketWrite.top")).doesNotStartWith("com.macstab.");
+            softly
+                .assertThat(result.value("zipInflate.type"))
+                .isEqualTo("java.util.zip.DataFormatException");
+            softly
+                .assertThat(result.value("zipInflate.top"))
+                .isEqualTo("java.util.zip.Inflater.inflate");
+          });
     }
 
     @Test

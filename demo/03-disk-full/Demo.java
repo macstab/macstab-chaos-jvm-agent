@@ -1,3 +1,4 @@
+import java.io.IOException;
 import java.nio.file.*;
 
 public class Demo {
@@ -8,8 +9,8 @@ public class Demo {
       try (var out = Files.newOutputStream(file)) {
         out.write(new byte[64]);
         System.out.println(dir + "=ok");
-      } catch (FileSystemException full) {
-        System.out.println(dir + "=" + full.getReason());
+      } catch (IOException full) {
+        System.out.println(dir + "=" + full.getMessage());
       }
     }
   }

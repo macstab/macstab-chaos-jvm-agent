@@ -240,8 +240,10 @@ public sealed interface ChaosEffect
   }
 
   /**
-   * Returns a reject effect that throws an appropriate exception for the matched operation type
-   * (e.g., {@link java.util.concurrent.RejectedExecutionException} for executor submissions).
+   * Returns a reject effect that fails the call with the exception the real call raises (e.g.,
+   * {@link java.util.concurrent.RejectedExecutionException} for executor submissions, {@link
+   * java.net.UnknownHostException} for lookups), its stack trace starting at the intercepted
+   * method.
    *
    * @param message the exception message; must be non-blank
    * @return a RejectEffect with the given message
@@ -771,11 +773,13 @@ public sealed interface ChaosEffect
 
   /**
    * Fails the operation the way the operating system reports {@code errno}, as the Java exception
-   * an application catches for it — the native library's {@code ERRNO} effect. Network errors apply
-   * to socket and NIO channel operations, file errors to file operations; a mismatch is rejected at
+   * an application catches for it — the native library's {@code ERRNO} effect. Each error applies
+   * to the calls the kernel reports it for (network errors to socket and NIO channel operations;
+   * {@code ENOENT} to opens, deletes and moves but never to a read); a mismatch is rejected at
    * activation.
    *
-   * <p>File errors carry the file's path when the stream or channel has one ({@link
+   * <p>A read, write, truncate, map or close of an open file fails with {@link java.io.IOException}
+   * and the system's text; an open, delete or move names the file's path ({@link
    * java.nio.file.FileSystemException#getFile()}).
    *
    * @param errno the error to raise
@@ -937,21 +941,35 @@ public sealed interface ChaosEffect
     EAFNOSUPPORT(Family.NETWORK, 97, 47, "Address family not supported by protocol"),
     /** Protocol not supported: {@link java.net.SocketException}. */
     EPROTONOSUPPORT(Family.NETWORK, 93, 43, "Protocol not supported"),
-    /** No space left on device: {@link java.nio.file.FileSystemException}. */
+    /**
+     * No space left on device: {@link java.io.IOException} on a write, sync or close, {@link
+     * java.nio.file.FileSystemException} on an open.
+     */
     ENOSPC(Family.FILE, 28, 28, "No space left on device"),
-    /** Disk quota exceeded: {@link java.nio.file.FileSystemException}. */
+    /** Disk quota exceeded: as {@link #ENOSPC}. */
     EDQUOT(Family.FILE, 122, 69, "Disk quota exceeded"),
-    /** Read-only file system: {@link java.nio.file.FileSystemException}. */
+    /**
+     * Read-only file system: {@link java.nio.file.FileSystemException} on an open, delete or move.
+     */
     EROFS(Family.FILE, 30, 30, "Read-only file system"),
-    /** Permission denied: {@link java.nio.file.AccessDeniedException}. */
+    /**
+     * Permission denied: {@link java.nio.file.AccessDeniedException} on an open, delete or move;
+     * also on a map and on a bind of a privileged port.
+     */
     EACCES(Family.FILE, 13, 13, "Permission denied"),
-    /** No such file or directory: {@link java.nio.file.NoSuchFileException}. */
+    /**
+     * No such file or directory: {@link java.nio.file.NoSuchFileException} on an open, delete or
+     * move.
+     */
     ENOENT(Family.FILE, 2, 2, "No such file or directory"),
-    /** Input/output error (a failing disk): {@link java.nio.file.FileSystemException}. */
+    /**
+     * Input/output error (a failing disk): {@link java.io.IOException} on a call on an open file,
+     * {@link java.nio.file.FileSystemException} on a delete or move.
+     */
     EIO(Family.FILE, 5, 5, "Input/output error"),
     /**
-     * Too many open files (the process limit): {@link java.nio.file.FileSystemException}; also on
-     * socket connects and accepts, which open a descriptor.
+     * Too many open files (the process limit): {@link java.nio.file.FileSystemException} on an
+     * open; also on socket connects and accepts, which open a descriptor.
      */
     EMFILE(Family.FILE, 24, 24, "Too many open files"),
     /** Too many open files in the system (the system limit): as {@link #EMFILE}. */

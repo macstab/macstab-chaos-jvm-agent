@@ -122,6 +122,7 @@ public final class DefectProbeMain {
       case "file-map-transfer" -> fileMapAndTransfer();
       case "socket-bind" -> socketBind();
       case "thread-eagain" -> threadEagain();
+      case "reject-types" -> rejectTypes();
       case "method-weaving" -> methodWeaving();
       case "method-kinds" -> methodKinds();
       case "woven-groups" -> printWovenGroups();
@@ -1670,6 +1671,163 @@ public final class DefectProbeMain {
       System.out.println("accept=ok");
     } catch (final java.io.IOException failed) {
       System.out.println("accept=" + failed.getClass().getName() + ": " + failed.getMessage());
+    }
+  }
+
+  /**
+   * One real call per row under a reject (or an errno), each scenario active only around its call.
+   * Prints {@code <row>.type} (the failure's class) and {@code <row>.top} (its top frame as {@code
+   * class.method}), and for the reflective call {@code <row>.cause}.
+   */
+  private static void rejectTypes() throws Exception {
+    final Path dir = java.nio.file.Files.createTempDirectory("reject-types");
+    final ChaosEffect reject = ChaosEffect.reject("chaos");
+    rejectRow(
+        "dnsAnswer",
+        ChaosSelector.dns(Set.of(OperationType.DNS_ANSWER), NamePattern.exact("localhost")),
+        reject,
+        () -> InetAddress.getAllByName("localhost"));
+    final java.lang.reflect.Method target = Object.class.getMethod("hashCode");
+    rejectRow(
+        "reflection",
+        ChaosSelector.jvmRuntime(Set.of(OperationType.REFLECTION_INVOKE)),
+        reject,
+        () -> target.invoke(new Object()));
+    final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+    rejectRow(
+        "scheduleSubmit",
+        ChaosSelector.scheduling(Set.of(OperationType.SCHEDULE_SUBMIT)),
+        reject,
+        () -> scheduler.schedule(() -> {}, 1, TimeUnit.SECONDS));
+    scheduler.shutdownNow();
+    rejectRow(
+        "awaitTermination",
+        ChaosSelector.shutdown(Set.of(OperationType.EXECUTOR_AWAIT_TERMINATION)),
+        reject,
+        () -> scheduler.awaitTermination(1, TimeUnit.MILLISECONDS));
+    final BlockingQueue<String> queue = new java.util.concurrent.ArrayBlockingQueue<>(1);
+    rejectRow(
+        "queuePut",
+        ChaosSelector.queue(Set.of(OperationType.QUEUE_PUT)),
+        reject,
+        () -> queue.put("item"));
+    rejectRow(
+        "threadStart",
+        new ChaosSelector.ThreadSelector(
+            Set.of(OperationType.THREAD_START),
+            ChaosSelector.ThreadKind.PLATFORM,
+            NamePattern.exact("probe-reject"),
+            null),
+        reject,
+        () -> new Thread(() -> {}, "probe-reject").start());
+    rejectRow(
+        "shutdownHook",
+        ChaosSelector.shutdown(Set.of(OperationType.SHUTDOWN_HOOK_REGISTER)),
+        reject,
+        () -> Runtime.getRuntime().addShutdownHook(new Thread(() -> {})));
+    try (Selector selector = Selector.open()) {
+      rejectRow(
+          "select",
+          ChaosSelector.nio(Set.of(OperationType.NIO_SELECTOR_SELECT)),
+          reject,
+          () -> selector.select(10));
+    }
+    final Path opened = dir.resolve("opened");
+    rejectRow(
+        "nioOpen",
+        new ChaosSelector.FileIoSelector(
+            Set.of(OperationType.FILE_IO_OPEN),
+            com.macstab.chaos.jvm.api.PathPattern.under(dir.toString()),
+            null,
+            null),
+        reject,
+        () ->
+            java.nio.channels.FileChannel.open(
+                    opened,
+                    java.nio.file.StandardOpenOption.CREATE,
+                    java.nio.file.StandardOpenOption.WRITE)
+                .close());
+    try (java.nio.channels.FileChannel channel =
+        java.nio.channels.FileChannel.open(
+            dir.resolve("written"),
+            java.nio.file.StandardOpenOption.CREATE,
+            java.nio.file.StandardOpenOption.WRITE)) {
+      rejectRow(
+          "channelWriteEnospc",
+          new ChaosSelector.FileIoSelector(
+              Set.of(OperationType.FILE_IO_WRITE),
+              com.macstab.chaos.jvm.api.PathPattern.under(dir.toString()),
+              null,
+              null),
+          ChaosEffect.errno(ChaosEffect.Errno.ENOSPC),
+          () -> channel.write(java.nio.ByteBuffer.allocate(8)));
+    }
+    try (java.net.ServerSocket server =
+            new java.net.ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"));
+        java.net.Socket client = new java.net.Socket()) {
+      client.connect(server.getLocalSocketAddress());
+      try (java.net.Socket accepted = server.accept()) {
+        final ChaosSelector.NetworkSelector toServer =
+            new ChaosSelector.NetworkSelector(
+                Set.of(OperationType.SOCKET_READ, OperationType.SOCKET_WRITE),
+                NamePattern.any(),
+                "127.0.0.1/32",
+                server.getLocalPort(),
+                null,
+                null);
+        rejectRow("socketRead", toServer, reject, () -> client.getInputStream().read());
+        rejectRow("socketWrite", toServer, reject, () -> client.getOutputStream().write(1));
+        accepted.getOutputStream().flush();
+      }
+    }
+    // Last: class loading from the agent's JAR inflates too, so every class the dispatch needs
+    // is loaded by the rows above before inflation is rejected.
+    final java.util.zip.Inflater inflater = new java.util.zip.Inflater();
+    inflater.setInput(new byte[] {0x78, (byte) 0x9c, 0x03, 0x00, 0x00, 0x00, 0x00, 0x01});
+    rejectRow(
+        "zipInflate",
+        ChaosSelector.jvmRuntime(Set.of(OperationType.ZIP_INFLATE)),
+        reject,
+        () -> inflater.inflate(new byte[8]));
+    inflater.end();
+  }
+
+  @FunctionalInterface
+  interface Call {
+    void run() throws Exception;
+  }
+
+  private static void rejectRow(
+      final String row, final ChaosSelector selector, final ChaosEffect effect, final Call call) {
+    Throwable failure = null;
+    try (ChaosActivationHandle handle =
+        ChaosPlatform.current()
+            .activate(
+                ChaosScenario.builder(row)
+                    .selector(selector)
+                    .effect(effect)
+                    .activationPolicy(ActivationPolicy.always())
+                    .build())) {
+      try {
+        call.run();
+      } catch (final Throwable thrown) {
+        failure = thrown;
+      }
+    }
+    if (failure == null) {
+      System.out.println(row + ".type=none");
+      return;
+    }
+    System.out.println(row + ".type=" + failure.getClass().getName());
+    final StackTraceElement[] stack = failure.getStackTrace();
+    System.out.println(
+        row
+            + ".top="
+            + (stack.length == 0
+                ? "none"
+                : stack[0].getClassName() + "." + stack[0].getMethodName()));
+    if (failure.getCause() != null) {
+      System.out.println(row + ".cause=" + failure.getCause().getClass().getName());
     }
   }
 

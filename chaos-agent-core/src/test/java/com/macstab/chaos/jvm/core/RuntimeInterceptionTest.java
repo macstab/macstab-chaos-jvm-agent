@@ -574,8 +574,8 @@ class RuntimeInterceptionTest {
     }
 
     @Test
-    @DisplayName("RejectEffect throws SocketTimeoutException")
-    void rejectEffectThrowsSocketTimeoutException() {
+    @DisplayName("RejectEffect on a read without SO_TIMEOUT throws SocketException, not a timeout")
+    void rejectEffectThrowsSocketException() {
       final ChaosRuntime runtime =
           runtimeWith(
               ChaosScenario.builder("socket-read-reject")
@@ -586,7 +586,7 @@ class RuntimeInterceptionTest {
                   .activationPolicy(ActivationPolicy.always())
                   .build());
       final Throwable thrown = catchThrowable(() -> runtime.beforeSocketRead(null));
-      assertThat(thrown).isInstanceOf(java.net.SocketTimeoutException.class);
+      assertThat(thrown).isExactlyInstanceOf(java.net.SocketException.class);
     }
 
     @Test

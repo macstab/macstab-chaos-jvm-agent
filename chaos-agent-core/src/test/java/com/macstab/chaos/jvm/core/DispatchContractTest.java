@@ -137,7 +137,10 @@ class DispatchContractTest {
       activate(
           ChaosSelector.shutdown(Set.of(OperationType.SHUTDOWN_HOOK_REGISTER)),
           ChaosEffect.reject("no hooks"));
-      assertThatThrownBy(() -> runtime.decorateShutdownHook(hook)).hasMessageContaining("no hooks");
+      // ApplicationShutdownHooks.add refuses a hook only while the JVM shuts down, with its text
+      assertThatThrownBy(() -> runtime.decorateShutdownHook(hook))
+          .isExactlyInstanceOf(IllegalStateException.class)
+          .hasMessage("Shutdown in progress");
       assertThatThrownBy(
               () ->
                   activate(

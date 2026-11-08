@@ -131,12 +131,12 @@ class EffectReachesTheCallTest {
 
   /** Calls an operation's entry point and returns what the caller observes. */
   @FunctionalInterface
-  private interface Invoker {
+  interface Invoker {
     Object invoke(ChaosRuntime runtime) throws Throwable;
   }
 
   /** For each operation, a call of the entry point its advice calls, with representative values. */
-  private static final Map<OperationType, Invoker> INVOKERS = new EnumMap<>(OperationType.class);
+  static final Map<OperationType, Invoker> INVOKERS = new EnumMap<>(OperationType.class);
 
   static {
     // Threads
@@ -806,7 +806,7 @@ class EffectReachesTheCallTest {
   // --- enumeration helpers ---
 
   /** For each operation, the selectors (with no filter) that select only that operation. */
-  private static Map<OperationType, List<ChaosSelector>> selectorsByOperation() {
+  static Map<OperationType, List<ChaosSelector>> selectorsByOperation() {
     final Map<OperationType, List<ChaosSelector>> selectors = new EnumMap<>(OperationType.class);
     for (final Class<?> type : ChaosSelector.class.getPermittedSubclasses()) {
       for (final OperationType operation : OperationType.values()) {

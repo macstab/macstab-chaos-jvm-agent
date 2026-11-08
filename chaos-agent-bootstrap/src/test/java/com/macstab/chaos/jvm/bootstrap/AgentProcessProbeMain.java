@@ -36,7 +36,6 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.RecursiveAction;
-import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
@@ -187,7 +186,8 @@ public final class AgentProcessProbeMain {
       t.start();
       t.join();
       System.out.println("thread=started");
-    } catch (final RejectedExecutionException e) {
+    } catch (final OutOfMemoryError e) {
+      // a rejected platform thread start fails as the JVM's own "unable to create native thread"
       System.out.println("thread=rejected");
     } catch (final InterruptedException e) {
       Thread.currentThread().interrupt();

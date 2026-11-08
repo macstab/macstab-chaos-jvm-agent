@@ -1146,6 +1146,34 @@ class CompatibilityValidatorTest {
           .hasMessageContaining("SYSTEM_GC_REQUEST");
     }
 
+    @Test
+    @DisplayName("ENOENT on a file read is refused: a read of an open descriptor never reports it")
+    void enoentOnReadIsRefused() {
+      final ChaosScenario scenario =
+          jvm(
+              ChaosSelector.fileIo(Set.of(OperationType.FILE_IO_READ)),
+              ChaosEffect.errno(ChaosEffect.Errno.ENOENT));
+
+      assertThatThrownBy(() -> CompatibilityValidator.validate(scenario, featureSet))
+          .isInstanceOf(ChaosValidationException.class)
+          .hasMessageContaining("FILE_IO_READ");
+    }
+
+    @Test
+    @DisplayName("a reject on a method entry or exit is accepted: a method may throw anything")
+    void rejectOnMethodIsAccepted() {
+      final ChaosScenario scenario =
+          jvm(
+              ChaosSelector.method(
+                  Set.of(OperationType.METHOD_ENTER, OperationType.METHOD_EXIT),
+                  NamePattern.exact("com.example.Service"),
+                  NamePattern.any()),
+              ChaosEffect.reject("down"));
+
+      assertThatCode(() -> CompatibilityValidator.validate(scenario, featureSet))
+          .doesNotThrowAnyException();
+    }
+
     private ChaosScenario jvm(final ChaosSelector selector, final ChaosEffect effect) {
       return ChaosScenario.builder("support")
           .scope(ChaosScenario.ScenarioScope.JVM)
