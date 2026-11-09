@@ -88,6 +88,25 @@ class LogManagerIntegrationTest {
   }
 
   @Test
+  @DisplayName("a JVM that exits before JUL is initialised still prints the held lines")
+  void exitBeforeJulWritesTheHeldLines() throws Exception {
+    final ChildJvmProbe.ProbeResult result =
+        run(
+            "exit-at-once",
+            ChaosScenario.builder("logging-exit")
+                .scope(ChaosScenario.ScenarioScope.JVM)
+                .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+                .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+                .activationPolicy(ActivationPolicy.always())
+                .build());
+
+    assertThat(result.value("exited")).isEqualTo("true");
+    assertThat(result.output())
+        .as("the held STARTED line is written at exit")
+        .contains("INFO com.macstab.chaos.jvm: type=STARTED scenarioId=\"logging-exit\"");
+  }
+
+  @Test
   @DisplayName("a failed premain writes the lines it held before the JVM exits")
   void failedPremainWritesTheHeldLines() throws Exception {
     final ChaosPlan plan =

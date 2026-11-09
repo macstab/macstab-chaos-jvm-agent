@@ -19,10 +19,14 @@ public final class LogManagerProbeMain {
   /**
    * Runs the probe.
    *
-   * @param args ignored
+   * @param args the mode; {@code exit-at-once} returns at once without touching JUL
    * @throws Exception when the MBean server cannot be read
    */
   public static void main(final String[] args) throws Exception {
+    if (args.length > 0 && "exit-at-once".equals(args[0])) {
+      System.out.println("exited=true");
+      return;
+    }
     System.setProperty("java.util.logging.manager", ProbeLogManager.class.getName());
     System.out.println("logManager=" + LogManager.getLogManager().getClass().getName());
     final ObjectName name = new ObjectName(CHAOS_MBEAN);

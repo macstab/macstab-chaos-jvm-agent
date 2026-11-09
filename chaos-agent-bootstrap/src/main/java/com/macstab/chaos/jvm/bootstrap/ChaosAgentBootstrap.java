@@ -5,6 +5,7 @@ import com.macstab.chaos.jvm.bootstrap.jfr.JfrIntegration;
 import com.macstab.chaos.jvm.core.AgentLog;
 import com.macstab.chaos.jvm.core.ChaosRuntime;
 import com.macstab.chaos.jvm.instrumentation.JdkInstrumentationInstaller;
+import com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher;
 import com.macstab.chaos.jvm.startup.AgentArgs;
 import com.macstab.chaos.jvm.startup.AgentArgsParser;
 import com.macstab.chaos.jvm.startup.AgentSettings;
@@ -228,10 +229,38 @@ public final class ChaosAgentBootstrap {
         AgentLog.release();
       }
     }
+    releaseHeldLinesAtExit();
     LoggingStart.runAfter(
         LoggingStart.logManagerInitialised(),
         LoggingStart.LIMIT,
         ChaosAgentBootstrap::finishDeferredStart);
+  }
+
+  /**
+   * Registers a shutdown hook that writes the lines still held when the JVM exits before the
+   * deferred start released them (a JVM that ran for less than {@link LoggingStart#LIMIT} without
+   * initialising JUL): straight to {@code System.err}, since JUL's own shutdown hook may already
+   * have closed its handlers. After a release it writes nothing. The registration and the hook's
+   * work are the agent's own (L3).
+   */
+  private static void releaseHeldLinesAtExit() {
+    final Thread hook =
+        new Thread(
+            () -> {
+              BootstrapDispatcher.beginInternalCall();
+              try {
+                AgentLog.releaseToStandardError();
+              } finally {
+                BootstrapDispatcher.endInternalCall();
+              }
+            },
+            "macstab-chaos-log-release");
+    BootstrapDispatcher.beginInternalCall();
+    try {
+      Runtime.getRuntime().addShutdownHook(hook);
+    } finally {
+      BootstrapDispatcher.endInternalCall();
+    }
   }
 
   /**

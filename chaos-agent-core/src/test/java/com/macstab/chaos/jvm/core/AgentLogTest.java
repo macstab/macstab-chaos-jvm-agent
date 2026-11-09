@@ -112,6 +112,28 @@ class AgentLogTest {
   }
 
   @Test
+  @DisplayName("at exit, the held lines go straight to System.err, not through JUL")
+  void releasedToStandardError() {
+    final AgentLog log = AgentLog.named(NAME);
+    final java.io.ByteArrayOutputStream captured = new java.io.ByteArrayOutputStream();
+    final java.io.PrintStream errBefore = System.err;
+    AgentLog.hold();
+    log.log(Level.WARNING, new IllegalStateException("boom"), () -> "held at exit");
+    System.setErr(new java.io.PrintStream(captured, true, java.nio.charset.StandardCharsets.UTF_8));
+    try {
+      AgentLog.releaseToStandardError();
+    } finally {
+      System.setErr(errBefore);
+    }
+
+    assertThat(written).as("nothing goes through JUL").isEmpty();
+    assertThat(captured.toString(java.nio.charset.StandardCharsets.UTF_8))
+        .contains("WARNING " + NAME + ": held at exit")
+        .contains("java.lang.IllegalStateException: boom");
+    assertThat(AgentLog.holding()).isFalse();
+  }
+
+  @Test
   @DisplayName("holding twice keeps the held lines; releasing twice writes them once")
   void holdAndReleaseAreIdempotent() {
     final AgentLog log = AgentLog.named(NAME);

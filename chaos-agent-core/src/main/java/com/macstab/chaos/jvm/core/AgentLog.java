@@ -1,6 +1,7 @@
 package com.macstab.chaos.jvm.core;
 
 import com.macstab.chaos.jvm.api.Internal;
+import java.io.PrintStream;
 import java.util.ArrayDeque;
 import java.util.function.Supplier;
 import java.util.logging.Level;
@@ -16,7 +17,8 @@ import org.jspecify.annotations.Nullable;
  *
  * <p>While lines are held ({@link #hold()}, from {@code premain} until the application has
  * initialised JUL), each line is kept in a buffer of {@value #HELD_LINES} lines, the oldest dropped
- * first, and written on {@link #release()} with its original time. Otherwise a line goes to the JUL
+ * first, and written on {@link #release()} with its original time, or by {@link
+ * #releaseToStandardError()} when the JVM exits before that. Otherwise a line goes to the JUL
  * logger of its name, looked up when the first line is written.
  *
  * <p>Thread-safe. Agent-internal; not an API.
@@ -163,32 +165,72 @@ public final class AgentLog {
    * every later line at once. Does nothing when no line is held.
    */
   public static void release() {
-    final ArrayDeque<LogRecord> lines;
-    final long lost;
-    synchronized (LOCK) {
-      lines = held;
-      lost = dropped;
-      held = null;
-      dropped = 0;
-      holding = false;
-    }
-    if (lines == null) {
+    final Held taken = take();
+    if (taken == null) {
       return;
     }
-    if (lost > 0) {
-      named(AGENT)
-          .warning(
-              () ->
-                  "[chaos-agent] "
-                      + lost
-                      + " log lines of the agent's start were dropped; the "
-                      + HELD_LINES
-                      + " latest follow");
+    if (taken.lost() > 0) {
+      named(AGENT).warning(() -> droppedLine(taken.lost()));
     }
-    for (final LogRecord line : lines) {
+    for (final LogRecord line : taken.lines()) {
       Logger.getLogger(line.getLoggerName()).log(line);
     }
   }
+
+  /**
+   * Writes the held lines straight to {@code System.err}, for a JVM that exits before {@link
+   * #release()} ran: JUL's own shutdown hook may already have closed its handlers, as shutdown
+   * hooks run in no defined order, so JUL is not used. Every later line is written at once, as
+   * after {@link #release()}. Does nothing when no line is held.
+   */
+  public static void releaseToStandardError() {
+    final Held taken = take();
+    if (taken == null) {
+      return;
+    }
+    final PrintStream err = System.err;
+    if (taken.lost() > 0) {
+      err.println(Level.WARNING.getName() + " " + AGENT + ": " + droppedLine(taken.lost()));
+    }
+    for (final LogRecord line : taken.lines()) {
+      err.println(
+          line.getInstant()
+              + " "
+              + line.getLevel().getName()
+              + " "
+              + line.getLoggerName()
+              + ": "
+              + line.getMessage());
+      final Throwable thrown = line.getThrown();
+      if (thrown != null) {
+        thrown.printStackTrace(err);
+      }
+    }
+    err.flush();
+  }
+
+  /** Ends holding and takes the held lines; {@code null} when no line is held. */
+  private static @Nullable Held take() {
+    synchronized (LOCK) {
+      final ArrayDeque<LogRecord> lines = held;
+      final long lost = dropped;
+      held = null;
+      dropped = 0;
+      holding = false;
+      return lines == null ? null : new Held(lines, lost);
+    }
+  }
+
+  private static String droppedLine(final long lost) {
+    return "[chaos-agent] "
+        + lost
+        + " log lines of the agent's start were dropped; the "
+        + HELD_LINES
+        + " latest follow";
+  }
+
+  /** The lines taken from the buffer, and how many were dropped before them. */
+  private record Held(ArrayDeque<LogRecord> lines, long lost) {}
 
   /**
    * Whether lines are held now.
