@@ -57,6 +57,28 @@ class StartupAgentIntegrationTest {
           .as("the submission takes the whole configured %d ms", DELAY_MS)
           .isGreaterThanOrEqualTo(DELAY_MS);
     }
+
+    @Test
+    @DisplayName("weaves without making the JDK warn about sun.misc.Unsafe")
+    void weavingPrintsNoUnsafeWarning() throws Exception {
+      final ChaosPlan plan =
+          new ChaosPlan(
+              new ChaosPlan.Metadata("startup-quiet", ""),
+              null,
+              List.of(
+                  ChaosScenario.builder("quiet-delay")
+                      .scope(ChaosScenario.ScenarioScope.JVM)
+                      .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+                      .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+                      .activationPolicy(ActivationPolicy.always())
+                      .build()));
+
+      final ChildJvmProbe.ProbeResult result = runProbe(plan, "executor");
+
+      assertThat(result.longValue("applied.quiet-delay")).isEqualTo(1L);
+      // JDK 24 and later print this on the first sun.misc.Unsafe memory access (JEP 498).
+      assertThat(result.output()).doesNotContain("sun.misc.Unsafe");
+    }
   }
 
   @Nested

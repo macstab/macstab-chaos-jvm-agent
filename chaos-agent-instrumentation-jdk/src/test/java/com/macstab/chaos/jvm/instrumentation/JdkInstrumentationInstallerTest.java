@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.macstab.chaos.jvm.core.ChaosRuntime;
 import com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher;
 import java.lang.invoke.MethodHandle;
+import net.bytebuddy.dynamic.Nexus;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -58,6 +59,24 @@ class JdkInstrumentationInstallerTest {
         assertThat(BootstrapDispatcher.installedDelegate()).isSameAs(foreign);
       } finally {
         BootstrapDispatcher.install(null, null);
+      }
+    }
+  }
+
+  @Test
+  @DisplayName("building an agent builder keeps a Nexus switch the JVM was started with")
+  void agentBuilderKeepsTheNexusSwitch() {
+    final String before = System.getProperty(Nexus.PROPERTY);
+    System.setProperty(Nexus.PROPERTY, "false");
+    try {
+      JdkInstrumentationInstaller.newAgentBuilder();
+
+      assertThat(System.getProperty(Nexus.PROPERTY)).isEqualTo("false");
+    } finally {
+      if (before == null) {
+        System.clearProperty(Nexus.PROPERTY);
+      } else {
+        System.setProperty(Nexus.PROPERTY, before);
       }
     }
   }

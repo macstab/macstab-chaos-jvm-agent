@@ -21,6 +21,7 @@ import net.bytebuddy.agent.builder.ResettableClassFileTransformer;
 import net.bytebuddy.asm.Advice;
 import net.bytebuddy.asm.AsmVisitorWrapper;
 import net.bytebuddy.description.method.MethodDescription;
+import net.bytebuddy.dynamic.Nexus;
 import net.bytebuddy.matcher.ElementMatcher;
 import net.bytebuddy.matcher.ElementMatchers;
 import net.bytebuddy.utility.JavaModule;
@@ -881,6 +882,29 @@ public final class JdkInstrumentationInstaller {
   }
 
   /**
+   * Creates an {@link AgentBuilder} without ByteBuddy's {@link Nexus}. The default builder
+   * initialises the Nexus, whose class injector reaches for {@code sun.misc.Unsafe}: JDK 24 and
+   * later print a deprecation warning for it on every start (JEP 498). The hooks are inlined advice
+   * and register no live type initializer, so the Nexus is never needed. The switch is set only
+   * while the builder is created; the Nexus reads it once, when the builder first touches it. In
+   * the agent jar the property name is relocated with ByteBuddy, so it concerns the agent's copy
+   * only. Package-private as a test seam.
+   */
+  static AgentBuilder newAgentBuilder() {
+    final String previous = System.getProperty(Nexus.PROPERTY);
+    System.setProperty(Nexus.PROPERTY, "true");
+    try {
+      return new AgentBuilder.Default();
+    } finally {
+      if (previous == null) {
+        System.clearProperty(Nexus.PROPERTY);
+      } else {
+        System.setProperty(Nexus.PROPERTY, previous);
+      }
+    }
+  }
+
+  /**
    * Builds the base {@link AgentBuilder} with retransformation strategy, failing on a refused
    * retransformation, error logging, and ignore rules for ByteBuddy and chaos-agent internal
    * packages and for class loaders with a bootstrap bridge copy of their own ({@link
@@ -900,7 +924,7 @@ public final class JdkInstrumentationInstaller {
             LOGGER.warning("chaos instrumentation failed for " + typeName + ": " + throwable);
           }
         };
-    return new AgentBuilder.Default()
+    return newAgentBuilder()
         .disableClassFormatChanges()
         .with(AgentBuilder.RedefinitionStrategy.RETRANSFORMATION)
         // A class the JVM refuses to retransform fails the installation (ByteBuddy removes the
