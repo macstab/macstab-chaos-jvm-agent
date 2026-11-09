@@ -1,6 +1,7 @@
 package com.macstab.chaos.jvm.core;
 
 import com.macstab.chaos.jvm.api.ActivationPolicy;
+import com.macstab.chaos.jvm.api.ChaosActivationException;
 import com.macstab.chaos.jvm.api.ChaosEffect;
 import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.ChaosSelector;
@@ -51,7 +52,42 @@ final class CompatibilityValidator {
           OperationType.SHUTDOWN_HOOK_REGISTER);
 
   /**
-   * Validates {@code scenario} against {@code featureSet} and the internal chaos model invariants.
+   * Validates {@code scenario} for an activation in {@code activationScope}: first that its scope
+   * fits there, then {@link #validate(ChaosScenario, FeatureSet)}. A session-scoped scenario is
+   * refused outside a session, where it would apply to every thread, and a session accepts only
+   * session-scoped scenarios. These refusals are {@link ChaosActivationException}s (where the
+   * scenario is activated is wrong, not the scenario), the others {@link ChaosValidationException}
+   * or {@link ChaosUnsupportedFeatureException}.
+   *
+   * @param scenario the scenario to validate
+   * @param featureSet the runtime feature flags describing the active JVM capabilities
+   * @param activationScope {@code JVM} for the control plane, {@code SESSION} for a session
+   * @throws ChaosActivationException if the scenario's scope does not fit {@code activationScope}
+   * @throws ChaosValidationException if any structural or semantic constraint is violated
+   * @throws ChaosUnsupportedFeatureException if the scenario needs more than the runtime provides
+   */
+  static void validate(
+      final ChaosScenario scenario,
+      final FeatureSet featureSet,
+      final ChaosScenario.ScenarioScope activationScope) {
+    if (activationScope == ChaosScenario.ScenarioScope.SESSION) {
+      if (scenario.scope() != ChaosScenario.ScenarioScope.SESSION) {
+        throw new ChaosActivationException(
+            "session activation requires scenario scope SESSION for " + scenario.id());
+      }
+    } else if (scenario.scope() == ChaosScenario.ScenarioScope.SESSION) {
+      throw new ChaosActivationException(
+          "session-scoped scenario "
+              + scenario.id()
+              + " must be activated on a session (ChaosSession.activate); outside one it"
+              + " would apply to every thread");
+    }
+    validate(scenario, featureSet);
+  }
+
+  /**
+   * Validates {@code scenario} against {@code featureSet} and the internal chaos model invariants,
+   * wherever it is activated.
    *
    * <p>Validation is fail-fast: the method throws on the first constraint violation it encounters.
    * The following checks are performed in order:

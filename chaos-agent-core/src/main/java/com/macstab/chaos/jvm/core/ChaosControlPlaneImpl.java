@@ -116,83 +116,134 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
 
   @Override
   public ChaosActivationHandle activate(final ChaosScenario scenario) {
-    rejectSessionScope(scenario);
     return registerScenario(scenario, "jvm", null);
   }
 
   /**
-   * Refuses a session-scoped scenario outside a session: with no session to match it would fire for
-   * every thread in the JVM.
-   */
-  private void rejectSessionScope(final ChaosScenario scenario) {
-    if (scenario.scope() == ChaosScenario.ScenarioScope.SESSION) {
-      final ChaosActivationException failure = outsideSession(scenario);
-      recordFailure(
-          scenario.id(),
-          ChaosDiagnostics.FailureCategory.INVALID_CONFIGURATION,
-          failure.getMessage());
-      throw failure;
-    }
-  }
-
-  /**
    * Runs the checks {@link #activate(ChaosScenario)} runs before registering, without registering
-   * anything: lets a caller validate a whole plan before it changes the active set.
+   * anything: lets a caller validate a whole plan before it changes the active set. A refusal is
+   * recorded in the diagnostics and published as {@code FAILED}, as an activation's is (L21).
    *
    * @param scenario the scenario
-   * @throws com.macstab.chaos.jvm.api.ChaosActivationException if the scenario is invalid
+   * @throws com.macstab.chaos.jvm.api.ChaosActivationException if the scenario is session-scoped
+   * @throws com.macstab.chaos.jvm.api.ChaosValidationException if the scenario is invalid
    * @throws ChaosUnsupportedFeatureException if the runtime cannot run it
    */
   void validate(final ChaosScenario scenario) {
-    if (scenario.scope() == ChaosScenario.ScenarioScope.SESSION) {
-      throw outsideSession(scenario);
-    }
-    CompatibilityValidator.validate(scenario, featureSet);
+    validate(scenario, ChaosScenario.ScenarioScope.JVM);
   }
 
   /**
-   * Weaves the hook groups {@code scenario}'s operations need, without activating it. Groups stay
-   * woven, as after an activation. A method selector's weaving belongs to its registration and is
-   * not done here.
+   * The checks a scenario must pass to be activated in a session: session scope, then the same
+   * compatibility checks as everywhere else. A refusal is recorded, as by {@link
+   * #validate(ChaosScenario)}.
+   *
+   * @param scenario the scenario
+   */
+  void validateInSession(final ChaosScenario scenario) {
+    validate(scenario, ChaosScenario.ScenarioScope.SESSION);
+  }
+
+  private void validate(
+      final ChaosScenario scenario, final ChaosScenario.ScenarioScope activationScope) {
+    try {
+      CompatibilityValidator.validate(scenario, featureSet, activationScope);
+    } catch (final ChaosUnsupportedFeatureException unsupported) {
+      recordFailure(
+          scenario.id(),
+          ChaosDiagnostics.FailureCategory.UNSUPPORTED_RUNTIME,
+          unsupported.getMessage());
+      throw unsupported;
+    } catch (final RuntimeException invalid) {
+      recordFailure(
+          scenario.id(),
+          ChaosDiagnostics.FailureCategory.INVALID_CONFIGURATION,
+          invalid.getMessage());
+      throw invalid;
+    }
+  }
+
+  /**
+   * Weaves the hooks {@code scenario} needs, without activating it: its hook groups, and its method
+   * selector added to the ones woven already, so the pre-checks of several scenarios add up. Woven
+   * hooks stay, as after an activation; a method selector of a scenario that is never registered is
+   * removed at the next removal. A weaving failure is recorded (L21).
    */
   void requireHooks(final ChaosScenario scenario) {
     try {
       hookDemand.require(SelectorOperations.of(scenario.selector()));
+      if (scenario.selector() instanceof ChaosSelector.MethodSelector methodSelector) {
+        registry.weaveBeforeRegistering(Set.of(methodSelector), hookDemand::methods);
+      }
     } catch (final RuntimeException weavingFailure) {
-      throw weavingFailed(scenario, weavingFailure);
+      registry.reconcileMethodSelectors();
+      throw recordedWeavingFailure(scenario.id(), "scenario " + scenario.id(), weavingFailure);
     }
+  }
+
+  /**
+   * Weaves every hook a plan needs before any of its scenarios is registered: the union of their
+   * hook groups and all their method selectors, each in one call. A failure therefore starts none
+   * of them; it is recorded under the plan's handle id.
+   */
+  private void weavePlan(final ChaosPlan plan, final String planId) {
+    final Set<OperationType> operations = EnumSet.noneOf(OperationType.class);
+    final Set<ChaosSelector.MethodSelector> methodSelectors = new java.util.HashSet<>();
+    for (final ChaosScenario scenario : plan.scenarios()) {
+      operations.addAll(SelectorOperations.of(scenario.selector()));
+      if (scenario.selector() instanceof ChaosSelector.MethodSelector methodSelector) {
+        methodSelectors.add(methodSelector);
+      }
+    }
+    try {
+      hookDemand.require(operations);
+      if (!methodSelectors.isEmpty()) {
+        registry.weaveBeforeRegistering(methodSelectors, hookDemand::methods);
+      }
+    } catch (final RuntimeException weavingFailure) {
+      registry.reconcileMethodSelectors();
+      throw recordedWeavingFailure(planId, "plan " + planId, weavingFailure);
+    }
+  }
+
+  /**
+   * Records a weaving failure under {@code recordedId} ({@code UNSUPPORTED_RUNTIME} for an
+   * unsupported runtime, else {@code INSTRUMENTATION_FAILURE}) and returns it as {@link
+   * #weavingFailed} reports it.
+   */
+  private RuntimeException recordedWeavingFailure(
+      final String recordedId, final String subject, final RuntimeException weavingFailure) {
+    final RuntimeException failure = weavingFailed(subject, weavingFailure);
+    recordFailure(
+        recordedId,
+        failure instanceof ChaosUnsupportedFeatureException
+            ? ChaosDiagnostics.FailureCategory.UNSUPPORTED_RUNTIME
+            : ChaosDiagnostics.FailureCategory.INSTRUMENTATION_FAILURE,
+        failure.getMessage());
+    return failure;
   }
 
   /**
    * The failure an activation or {@link #requireHooks} reports when hooks cannot be woven: the
    * API's own exceptions (an unsupported runtime) as they are, anything else as a {@link
    * com.macstab.chaos.jvm.api.ChaosInstrumentationException} with the weaving failure as its cause.
+   *
+   * @param subject what the hooks were woven for, such as {@code scenario <id>}
    */
   private static RuntimeException weavingFailed(
-      final ChaosScenario scenario, final RuntimeException weavingFailure) {
-    if (weavingFailure instanceof com.macstab.chaos.jvm.api.ChaosUnsupportedFeatureException
+      final String subject, final RuntimeException weavingFailure) {
+    if (weavingFailure instanceof ChaosUnsupportedFeatureException
         || weavingFailure instanceof ChaosActivationException) {
       return weavingFailure;
     }
     return new com.macstab.chaos.jvm.api.ChaosInstrumentationException(
-        "the hooks of scenario "
-            + scenario.id()
-            + " could not be woven: "
-            + weavingFailure.getMessage(),
+        "the hooks of " + subject + " could not be woven: " + weavingFailure.getMessage(),
         weavingFailure);
   }
 
   /** Whether the JVM-scoped key of {@code scenarioId} is held by a live controller. */
   boolean isLive(final String scenarioId) {
     return registry.isLive("jvm::" + scenarioId);
-  }
-
-  private static ChaosActivationException outsideSession(final ChaosScenario scenario) {
-    return new ChaosActivationException(
-        "session-scoped scenario "
-            + scenario.id()
-            + " must be activated on a session (ChaosSession.activate); outside one it"
-            + " would apply to every thread");
   }
 
   /**
@@ -279,15 +330,18 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
    * Activates a plan as one unit, for the control plane ({@code jvm}) and for a session.
    *
    * <p>Every scenario is validated and its key checked before anything is registered, so an invalid
-   * fifth scenario never forces a rollback of four that already injected faults. Then the plan's
-   * observability settings are applied and the scenarios registered; if one still fails, those
-   * already registered are rolled back and the settings cleared, so the plan is never partly
-   * active.
+   * fifth scenario never forces a rollback of four that already injected faults; the validator
+   * records its own refusals, a taken key is recorded here. Then every hook the plan needs is woven
+   * at once (hook groups and method selectors), so a weaving failure starts none of its scenarios.
+   * Then the plan's observability settings are applied and the scenarios registered; if one still
+   * fails, those already registered are rolled back and the settings cleared, so the plan is never
+   * partly active.
    *
    * @param plan the plan
    * @param scopeKey the scope of its scenarios ({@code jvm}, or {@code session:<id>})
    * @param idPrefix the prefix of the plan handle's id
-   * @param validator the checks one scenario must pass before any is registered
+   * @param validator the checks one scenario must pass before any is registered; records its
+   *     refusals
    * @param activator registers one scenario
    * @param rollback undoes one registered scenario
    * @return the plan handle
@@ -301,15 +355,7 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
       final Consumer<ChaosActivationHandle> rollback) {
     ensureOpen();
     for (final ChaosScenario scenario : plan.scenarios()) {
-      try {
-        validator.accept(scenario);
-      } catch (final RuntimeException invalid) {
-        recordFailure(
-            scenario.id(),
-            ChaosDiagnostics.FailureCategory.INVALID_CONFIGURATION,
-            invalid.getMessage());
-        throw invalid;
-      }
+      validator.accept(scenario);
       final String key = scopeKey + "::" + scenario.id();
       if (registry.isLive(key)) {
         final ChaosActivationException conflict =
@@ -321,6 +367,7 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
         throw conflict;
       }
     }
+    weavePlan(plan, idPrefix + plan.metadata().name());
     final List<String> ids = plan.scenarios().stream().map(ChaosScenario::id).toList();
     final Object owner = new Object();
     applyPlanObservability(ids, plan.observability(), owner);
@@ -349,24 +396,6 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
     }
   }
 
-  /**
-   * The checks a scenario must pass to be activated in a session: session scope, then the same
-   * compatibility checks as everywhere else.
-   *
-   * @param scenario the scenario
-   */
-  void validateInSession(final ChaosScenario scenario) {
-    requireSessionScope(scenario);
-    CompatibilityValidator.validate(scenario, featureSet);
-  }
-
-  private static void requireSessionScope(final ChaosScenario scenario) {
-    if (scenario.scope() != ChaosScenario.ScenarioScope.SESSION) {
-      throw new ChaosActivationException(
-          "session activation requires scenario scope SESSION for " + scenario.id());
-    }
-  }
-
   @Override
   public ChaosSession openSession(final String displayName) {
     // A session only needs {@code activateInSession} to register session-scoped scenarios; that
@@ -374,7 +403,12 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
     // bouncing through the ChaosRuntime facade. Callers that reach the control plane without
     // going through ChaosRuntime can open sessions too.
     ensureOpen();
-    hookDemand.require(SESSION_PROPAGATION_OPERATIONS);
+    try {
+      hookDemand.require(SESSION_PROPAGATION_OPERATIONS);
+    } catch (final RuntimeException weavingFailure) {
+      throw recordedWeavingFailure(
+          "session:" + displayName, "session " + displayName, weavingFailure);
+    }
     final DefaultChaosSession session = new DefaultChaosSession(displayName, scopeContext, this);
     openSessions.put(session.id(), session);
     return session;
@@ -462,7 +496,6 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
 
   DefaultChaosActivationHandle activateInSession(
       final DefaultChaosSession session, final ChaosScenario scenario) {
-    requireSessionScope(scenario);
     return registerScenario(scenario, "session:" + session.id(), session.id());
   }
 
@@ -494,17 +527,25 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
     boolean weavingFailed = false;
     boolean registeredInRegistry = false;
     try {
-      CompatibilityValidator.validate(scenario, featureSet);
+      // The scope check first: a session-scoped scenario outside a session, or a JVM-scoped one in
+      // a session, is refused and recorded like every other invalid scenario.
+      CompatibilityValidator.validate(
+          scenario,
+          featureSet,
+          sessionId == null
+              ? ChaosScenario.ScenarioScope.JVM
+              : ChaosScenario.ScenarioScope.SESSION);
       validated = true;
       try {
         hookDemand.require(SelectorOperations.of(scenario.selector()));
         if (scenario.selector() instanceof ChaosSelector.MethodSelector methodSelector) {
-          // Weave before registering, so a weaving failure leaves nothing registered.
-          registry.weaveBeforeRegistering(methodSelector, hookDemand::methods);
+          // Weave before registering, so a weaving failure leaves nothing registered; a no-op when
+          // its plan or a pre-check wove it already.
+          registry.weaveBeforeRegistering(Set.of(methodSelector), hookDemand::methods);
         }
       } catch (final RuntimeException weavingFailure) {
         weavingFailed = true;
-        throw weavingFailed(scenario, weavingFailure);
+        throw weavingFailed("scenario " + scenario.id(), weavingFailure);
       }
       controller =
           new ScenarioController(

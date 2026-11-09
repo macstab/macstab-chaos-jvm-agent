@@ -104,10 +104,13 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Validates a scenario as {@link #activate(ChaosScenario)} would, without activating it.
+   * Validates a scenario as {@link #activate(ChaosScenario)} would, without activating it: nothing
+   * is registered, but a refusal is recorded in the diagnostics and published as {@code FAILED}, as
+   * an activation's is (L21).
    *
    * @param scenario the scenario
-   * @throws com.macstab.chaos.jvm.api.ChaosActivationException if the scenario is invalid
+   * @throws com.macstab.chaos.jvm.api.ChaosActivationException if the scenario is session-scoped
+   * @throws com.macstab.chaos.jvm.api.ChaosValidationException if the scenario is invalid
    * @throws com.macstab.chaos.jvm.api.ChaosUnsupportedFeatureException if the runtime cannot run it
    */
   public void validate(final ChaosScenario scenario) {
@@ -116,7 +119,9 @@ public final class ChaosRuntime implements ChaosControlPlane {
 
   /**
    * Weaves the hooks a scenario needs, as {@link #activate(ChaosScenario)} would, without
-   * activating it; a method selector's weaving is left to the activation.
+   * activating it: its hook groups, and its method selector added to the ones woven already (a
+   * selector whose scenario is never activated is removed at the next removal). A weaving failure
+   * is recorded in the diagnostics and published as {@code FAILED}.
    *
    * @param scenario the scenario
    * @throws com.macstab.chaos.jvm.api.ChaosInstrumentationException if its hooks cannot be woven

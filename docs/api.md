@@ -125,9 +125,9 @@ public interface ChaosControlPlane {
 
 **`activate(ChaosScenario)`**: Requires `scenario.scope() == JVM`. Weaves the hook groups serving the selector's operations if they are not woven yet (the first activation of a group pays its one-time retransformation cost; a weaving failure throws `ChaosInstrumentationException` and is recorded as `INSTRUMENTATION_FAILURE`), registers the scenario with `ScenarioRegistry`, starts it if `startMode == AUTOMATIC`, returns a handle. Throws `ChaosActivationException` when a scenario with the same id is still `REGISTERED` or `ACTIVE`, or on incompatible configuration. A previous scenario with the same id that is `STOPPED` or `INACTIVE` is replaced, so re-activating an id after `stop()` or `close()` works.
 
-**`activate(ChaosPlan)`**: Rejects any session-scoped scenario in the plan with `ChaosActivationException`. Activation is atomic: if any scenario fails, the ones already registered are removed again before the exception propagates.
+**`activate(ChaosPlan)`**: Rejects any session-scoped scenario in the plan with `ChaosActivationException`. Every scenario is validated, and every hook the plan needs is woven (the union of its hook groups and all its method selectors, in one call each), before any scenario is registered: a weaving failure starts none of them and is recorded under the plan's handle id (`plan:<name>`). Activation is atomic: if any scenario still fails, the ones already registered are removed again before the exception propagates.
 
-**`openSession(String)`**: Weaves the hook groups needed to propagate the session (executors, schedulers, thread start, fork-join), if not woven yet, then creates a `DefaultChaosSession` with a UUID and the given display name. The opening thread is bound to the session until `session.close()`; call `session.bind()` on other threads that should participate.
+**`openSession(String)`**: Weaves the hook groups needed to propagate the session (executors, schedulers, thread start, fork-join), if not woven yet (a weaving failure throws `ChaosInstrumentationException` and is recorded under `session:<displayName>`), then creates a `DefaultChaosSession` with a UUID and the given display name. The opening thread is bound to the session until `session.close()`; call `session.bind()` on other threads that should participate.
 
 **After `close()`**: `activate`, `openSession` and `addEventListener` throw `IllegalStateException("chaos control plane is closed")`.
 
@@ -650,7 +650,7 @@ public interface ChaosDiagnostics {
 }
 ```
 
-**Activation failure categories**: every failed activation is recorded once, as an `ActivationFailure` and a `FAILED` event, and the original exception is rethrown.
+**Activation failure categories**: every failed activation is recorded once, as an `ActivationFailure` and a `FAILED` event, and the original exception is rethrown. So is a refusal by `ChaosRuntime.validate(scenario)` or a weaving failure of `ChaosRuntime.requireHooks(scenario)`, which register nothing.
 
 | Category | Recorded when | Thrown |
 |----------|---------------|--------|

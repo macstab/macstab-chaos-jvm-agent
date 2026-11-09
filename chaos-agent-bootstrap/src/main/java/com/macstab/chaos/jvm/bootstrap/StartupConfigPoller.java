@@ -345,11 +345,16 @@ public final class StartupConfigPoller implements AutoCloseable {
     ChaosReports.current().ifPresent(reports -> reports.statusOk(scenarios, "file:" + configPath));
   }
 
-  /** Whether a reload failure would recur for the same file content. */
+  /**
+   * Whether a reload failure would recur for the same file content: then it is not retried (and so
+   * recorded once) until the file changes. A scenario the runtime cannot run (a JVM flag, a limit)
+   * is as final as an invalid one; a conflict with a scenario activated elsewhere may clear.
+   */
   private static boolean isDeterministic(final Throwable failure) {
     for (Throwable cause = failure; cause != null; cause = cause.getCause()) {
       if (cause instanceof com.macstab.chaos.jvm.startup.ConfigLoadException
           || cause instanceof com.macstab.chaos.jvm.api.ChaosValidationException
+          || cause instanceof com.macstab.chaos.jvm.api.ChaosUnsupportedFeatureException
           || cause instanceof IllegalArgumentException) {
         return true;
       }
@@ -464,10 +469,12 @@ public final class StartupConfigPoller implements AutoCloseable {
       }
     }
 
-    // Validate every new or changed scenario, and weave its hooks, before touching the active set:
-    // an invalid plan, or one whose hooks cannot be woven, then leaves the running scenarios
-    // running, instead of stopping the changed ones, activating part of the new plan and rolling
-    // back (which restarts them, resetting their counters, budgets and windows).
+    // Validate every new or changed scenario, and weave its hooks (method selectors included),
+    // before touching the active set: an invalid plan, or one whose hooks cannot be woven, then
+    // leaves the running scenarios running, instead of stopping the changed ones, activating part
+    // of the new plan and rolling back (which restarts them, resetting their counters, budgets and
+    // windows). The runtime records each refusal (FAILED and the diagnostics); a refusal that
+    // recurs for the same content is not retried, so it is recorded once.
     for (final ChaosScenario scenario : newById.values()) {
       if (!scenario.equals(activeScenarios.get(scenario.id()))) {
         try {
@@ -481,7 +488,8 @@ public final class StartupConfigPoller implements AutoCloseable {
       // An id taken by a scenario activated elsewhere would fail the activation below after the
       // changed scenarios were stopped, and every retry would stop and restart them again
       // (resetting their counters, budgets and windows). Refuse before anything changes; the
-      // conflict stays retryable.
+      // conflict stays retryable, so it is not recorded (stderr and the status file report it
+      // once).
       if (!activeScenarios.containsKey(scenario.id()) && runtime.isActive(scenario.id())) {
         final String conflict = "scenario key already active: jvm::" + scenario.id();
         throw new IllegalStateException(

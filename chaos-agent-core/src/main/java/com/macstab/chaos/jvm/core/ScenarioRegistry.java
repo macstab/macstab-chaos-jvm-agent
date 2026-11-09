@@ -82,7 +82,7 @@ final class ScenarioRegistry implements ChaosDiagnostics {
 
   /**
    * The ids of the sessions with at least one registered controller; replaced, never changed, by
-   * {@link #rebuildIndex()}.
+   * {@link #rebuildIndex(boolean)}.
    */
   private volatile Set<String> sessionsWithScenarios = Set.of();
 
@@ -150,7 +150,9 @@ final class ScenarioRegistry implements ChaosDiagnostics {
           }
           throw new ChaosActivationConflictException("scenario key already active: " + key);
         });
-    rebuildIndex();
+    // Adds the new controller's method selector if it was not woven beforehand, and keeps the
+    // pre-woven ones of a plan whose other scenarios are still to be registered.
+    rebuildIndex(false);
     return replaced[0];
   }
 
@@ -185,7 +187,7 @@ final class ScenarioRegistry implements ChaosDiagnostics {
    */
   void unregister(final ScenarioController controller) {
     if (controllers.remove(controller.key(), controller)) {
-      rebuildIndex();
+      rebuildIndex(true);
     }
   }
 
@@ -202,9 +204,11 @@ final class ScenarioRegistry implements ChaosDiagnostics {
   /**
    * Replaces the operation index and the set of sessions with scenarios with ones built from the
    * current controllers. Every change to {@link #controllers} is followed by a rebuild, and
-   * rebuilds are serialised, so the last rebuild always sees every change made before it.
+   * rebuilds are serialised, so the last rebuild always sees every change made before it. Then the
+   * method selectors are reconciled: trimmed to the registered ones after a removal ({@code trim}),
+   * only added to after a registration.
    */
-  private void rebuildIndex() {
+  private void rebuildIndex(final boolean trim) {
     synchronized (indexLock) {
       final EnumMap<OperationType, List<ScenarioController>> byOperation =
           new EnumMap<>(OperationType.class);
@@ -228,42 +232,66 @@ final class ScenarioRegistry implements ChaosDiagnostics {
       index = next;
       sessionsWithScenarios = Set.copyOf(sessions);
     }
-    reconcileMethodSelectors();
+    reconcileMethodSelectors(trim);
   }
 
   /**
-   * Hands the method selectors of the registered scenarios to the weaver when they differ from the
-   * ones it has. Runs on the thread that changed the registry, outside the index lock.
+   * Hands exactly the method selectors of the registered scenarios to the weaver when they differ
+   * from the ones it has, dropping selectors woven beforehand for scenarios that were never
+   * registered. Runs after a removal and after a failed registration, on the thread that made the
+   * change, outside the index lock.
    */
   void reconcileMethodSelectors() {
+    reconcileMethodSelectors(true);
+  }
+
+  /**
+   * Hands the registered method selectors to the weaver: exactly them when {@code trim}, otherwise
+   * added to the ones woven already (after a registration, which keeps the selectors woven
+   * beforehand for the scenarios still to come).
+   */
+  private void reconcileMethodSelectors(final boolean trim) {
     synchronized (weaveLock) {
       final Set<ChaosSelector.MethodSelector> current = collectMethodSelectors();
-      if (!current.equals(wovenMethodSelectors)) {
-        wovenMethodSelectors = current;
-        methodSelectorListener.accept(current);
+      final Set<ChaosSelector.MethodSelector> next = trim ? current : union(current, Set.of());
+      if (!next.equals(wovenMethodSelectors)) {
+        wovenMethodSelectors = next;
+        methodSelectorListener.accept(next);
       }
     }
   }
 
   /**
-   * Weaves the method selectors of the registered scenarios plus {@code added} before a scenario
-   * with {@code added} is registered, so a weaving failure leaves nothing registered. A failure of
-   * {@code weaver} propagates; after a failed registration, {@link #reconcileMethodSelectors()}
-   * removes {@code added} again.
+   * Weaves {@code added} before the scenarios with those method selectors are registered, so a
+   * weaving failure leaves nothing registered. The weaver gets the selectors woven already, those
+   * of the registered scenarios and {@code added}; nothing when that adds none. Pre-weaves add up
+   * (a plan weaves all its selectors in one call, the plan-file reloader one per checked scenario)
+   * until the next removal or failed registration trims them ({@link #reconcileMethodSelectors()}).
+   * A failure of {@code weaver} propagates and leaves the woven set as it was.
    *
-   * @param added the method selector of the scenario about to be registered
+   * @param added the method selectors of the scenarios about to be registered
    * @param weaver weaves the given selectors
    */
   void weaveBeforeRegistering(
-      final ChaosSelector.MethodSelector added,
+      final Set<ChaosSelector.MethodSelector> added,
       final Consumer<Set<ChaosSelector.MethodSelector>> weaver) {
     synchronized (weaveLock) {
-      final Set<ChaosSelector.MethodSelector> selectors = new HashSet<>(collectMethodSelectors());
-      selectors.add(added);
-      final Set<ChaosSelector.MethodSelector> next = Set.copyOf(selectors);
-      weaver.accept(next);
-      wovenMethodSelectors = next;
+      final Set<ChaosSelector.MethodSelector> next = union(collectMethodSelectors(), added);
+      if (!next.equals(wovenMethodSelectors)) {
+        weaver.accept(next);
+        wovenMethodSelectors = next;
+      }
     }
+  }
+
+  /** The woven method selectors with {@code registered} and {@code added}; under the weave lock. */
+  private Set<ChaosSelector.MethodSelector> union(
+      final Set<ChaosSelector.MethodSelector> registered,
+      final Set<ChaosSelector.MethodSelector> added) {
+    final Set<ChaosSelector.MethodSelector> selectors = new HashSet<>(wovenMethodSelectors);
+    selectors.addAll(registered);
+    selectors.addAll(added);
+    return Set.copyOf(selectors);
   }
 
   private Set<ChaosSelector.MethodSelector> collectMethodSelectors() {

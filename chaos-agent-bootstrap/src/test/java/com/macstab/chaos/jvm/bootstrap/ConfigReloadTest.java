@@ -281,7 +281,9 @@ class ConfigReloadTest {
   }
 
   @Test
-  @DisplayName("a plan whose method selector cannot be woven is not retried on every tick")
+  @DisplayName(
+      "a plan whose method selector cannot be woven stops nothing, is recorded once and is not"
+          + " retried on every tick")
   void methodWeavingFailureNotRetried() throws Exception {
     final Path file = tempDir.resolve("plan.json");
     Files.writeString(file, plan("a"));
@@ -305,10 +307,15 @@ class ConfigReloadTest {
         });
     final java.util.concurrent.atomic.AtomicInteger restarts =
         new java.util.concurrent.atomic.AtomicInteger();
+    final java.util.concurrent.atomic.AtomicInteger failed =
+        new java.util.concurrent.atomic.AtomicInteger();
     runtime.addEventListener(
         event -> {
           if (event.type() == ChaosEvent.Type.STARTED && "a".equals(event.scenarioId())) {
             restarts.incrementAndGet();
+          }
+          if (event.type() == ChaosEvent.Type.FAILED && "m".equals(event.scenarioId())) {
+            failed.incrementAndGet();
           }
         });
 
@@ -327,7 +334,48 @@ class ConfigReloadTest {
     assertThat(state("a")).isEqualTo(ChaosDiagnostics.ScenarioState.ACTIVE);
     assertThat(state("m")).isNull();
     assertThat(weaves).as("the same content is not woven again").hasValue(1);
-    assertThat(restarts).as("restored once, not on every tick").hasValue(1);
+    assertThat(restarts)
+        .as("never stopped: the weave fails before the active set changes")
+        .hasValue(0);
+    assertThat(failed).as("recorded once").hasValue(1);
+  }
+
+  @Test
+  @DisplayName("a plan the runtime cannot run is recorded once, however often it is polled")
+  void unsupportedRefusalRecordedOnce() throws Exception {
+    final Path file = tempDir.resolve("plan.json");
+    Files.writeString(file, plan("a"));
+    backdate(file);
+    start(file);
+    final java.util.concurrent.atomic.AtomicInteger failed =
+        new java.util.concurrent.atomic.AtomicInteger();
+    runtime.addEventListener(
+        event -> {
+          if (event.type() == ChaosEvent.Type.FAILED && "heap".equals(event.scenarioId())) {
+            failed.incrementAndGet();
+          }
+        });
+
+    // 64 GiB of heap pressure: more than this JVM's free heap, so UNSUPPORTED_RUNTIME.
+    Files.writeString(
+        file,
+        """
+        {"metadata":{"name":"p"},"scenarios":[{"id":"heap","scope":"JVM",
+         "selector":{"type":"stress","target":"HEAP"},
+         "effect":{"type":"heapPressure","bytes":68719476736,"chunkSizeBytes":1048576}}]}
+        """);
+    backdate(file);
+    poller.pollOnce();
+    Files.setLastModifiedTime(file, FileTime.fromMillis(System.currentTimeMillis() - 30_000));
+    poller.pollOnce();
+
+    assertThat(failed).hasValue(1);
+    assertThat(
+            runtime.diagnostics().snapshot().failures().stream()
+                .filter(failure -> failure.scenarioId().equals("heap"))
+                .map(ChaosDiagnostics.ActivationFailure::category))
+        .containsExactly(ChaosDiagnostics.FailureCategory.UNSUPPORTED_RUNTIME);
+    assertThat(state("a")).isEqualTo(ChaosDiagnostics.ScenarioState.ACTIVE);
   }
 
   @Test
