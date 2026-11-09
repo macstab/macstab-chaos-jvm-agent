@@ -24,7 +24,7 @@
 | Policy   | probability, `@first`, `@from`/`@until`, `@size`, `FAIL_AFTER` counter   | `ActivationPolicy.builder()...build()` plus selector filters | `"activationPolicy": {...}`                 |
 | Scope    | the process the library is preloaded into                                | the JVM (`ChaosScenario.ScenarioScope.JVM`) or one session (`ChaosScenario.ScenarioScope.SESSION`) | `"scope": "JVM"` / `"SESSION"` |
 | Source   | a text file, re-read when it changes                                     | the API, or a plan file re-read when it changes ([startup-config.md](startup-config.md)) | the plan file                               |
-| Status   | `/tmp/.chaos-<lib>.status` (`state`, `rules`, `line`, `reason`, `text`, `pid`), `/tmp/.chaos-<lib>.hits.<n>` | `/tmp/.chaos-jvm.status`, `/tmp/.chaos-jvm.hits.<pid>`: the same `key=value` line format, with `scenarios` for `rules`, `column` beside `line`, `source` (the plan) and no `text` ([observability.md](observability.md)) | |
+| Status   | `/tmp/.chaos-<lib>.status` (`state`, `rules`, `line`, `reason`, `text`, `pid`), `/tmp/.chaos-<lib>.hits.<n>` | `<reportsDir>/.chaos-jvm.status`, `<reportsDir>/.chaos-jvm.hits.<pid>` (`reportsDir` defaults to `java.io.tmpdir`, written only with `reports=on`): the same `key=value` line format, with `scenarios` for `rules`, `column` beside `line`, `source` (the plan) and no `text`; no `0` lines in the hits file ([observability.md §1](observability.md#1-status-and-hits-files) lists every difference) | |
 
 The evaluation order of a JVM scenario is in [semantics.md](semantics.md); the native order is in the library's `DSL.md` §7–§8.
 

@@ -51,7 +51,7 @@ import org.jspecify.annotations.Nullable;
  * <p>Example:
  *
  * <pre>{@code
- * java -javaagent:chaos-agent.jar=configFile=/etc/chaos/plan.json,configWatchInterval=500 -jar app.jar
+ * java -javaagent:chaos-agent.jar=configFile=/etc/chaos/plan.json;configWatchInterval=500 -jar app.jar
  * }</pre>
  *
  * or via environment:

@@ -22,7 +22,7 @@ The Spring integration layer is organized along two independent axes:
 - **Scope axis**: test-time vs runtime deployment
 - **Version axis**: Spring Boot 3.x vs Spring Boot 4.x
 
-This gives four modules, each compiled against its own Spring Boot BOM and carrying its own `Automatic-Module-Name`. No module carries a runtime Spring Boot dependency — all Spring artifacts are declared `compileOnly` so the starters are inert unless the consuming application supplies Spring Boot on the classpath.
+This gives four starters, each compiled against its own Spring Boot BOM and carrying its own `Automatic-Module-Name`, plus `chaos-agent-spring-boot-common`, which the runtime starters share. No module carries a runtime Spring Boot dependency — all Spring artifacts are declared `compileOnly` so the starters are inert unless the consuming application supplies Spring Boot on the classpath.
 
 | Module                                  | Scope                                  | Spring Boot | Automatic-Module-Name                           | Base Package                              |
 |-----------------------------------------|----------------------------------------|-------------|-------------------------------------------------|-------------------------------------------|
@@ -30,6 +30,7 @@ This gives four modules, each compiled against its own Spring Boot BOM and carry
 | `chaos-agent-spring-boot4-test-starter` | Test (JUnit 5 + `@SpringBootTest`)     | 4.1.2       | `com.macstab.chaos.jvm.agent.spring.boot4.test` | `com.macstab.chaos.jvm.spring.boot4.test` |
 | `chaos-agent-spring-boot3-starter`      | Runtime (production / soak / game day) | 3.5.16      | `com.macstab.chaos.jvm.agent.spring.boot3`      | `com.macstab.chaos.jvm.spring.boot3`      |
 | `chaos-agent-spring-boot4-starter`      | Runtime (production / soak / game day) | 4.1.2       | `com.macstab.chaos.jvm.agent.spring.boot4`      | `com.macstab.chaos.jvm.spring.boot4`      |
+| `chaos-agent-spring-boot-common`        | Shared by both runtime starters (and through them the test starters): `ChaosAutoConfiguration`, `ChaosProperties`, `ChaosActuatorEndpoint`, `ChaosHandleRegistry`, `ChaosSessionFilter`, the trust conditions | compiled against 3.5.16, runs on 3 and 4 | `com.macstab.chaos.jvm.agent.spring.boot.common` | `com.macstab.chaos.jvm.spring.boot.common` |
 
 The test and runtime starters are intentionally separate. Combining them in a single artifact would put Actuator plumbing on the test classpath and test-only classes in production JARs. The separation enforces the blast-radius boundary at the Gradle dependency level rather than requiring callers to remember which scope to use.
 
@@ -187,7 +188,7 @@ public class ChaosTestAutoConfiguration {
 }
 ```
 
-The bean is a tracking control plane: what a test activates through it is released when its context closes (by default each `@MicronautTest` class has its own) or when the last running chaos test class ends.
+The bean is a tracking control plane: what a test activates through it is released when its context closes (Spring's test context cache shares a context between test classes with the same configuration and closes it at the end of the run) or when the last running chaos test class ends.
 
 `before = ChaosAutoConfiguration.class` orders it ahead of the application starter's configuration, which declares a `chaosControlPlane` bean too: with `macstab.chaos.enabled=true` in a test, the tracked plane is the one registered, also for the actuator endpoint of that context. The startup plan is not activated through the bean (see §3.6), so a test class ending never stops it.
 
@@ -481,15 +482,17 @@ management:
         include: health,info,chaos
   endpoint:
     chaos:
-      access: restricted
+      access: unrestricted   # read-only allows the GET only; POST and DELETE need unrestricted
 ```
 
 And a security rule restricting actuator access to an internal role or network:
 
 ```java
-http.requestMatcher(EndpointRequest.to(ChaosActuatorEndpoint.class))
+http.securityMatcher(EndpointRequest.to("chaos"))
     .authorizeHttpRequests(a -> a.anyRequest().hasRole("CHAOS_OPERATOR"));
 ```
+
+`EndpointRequest.to("chaos")` names the endpoint by its id, so the rule compiles with the starter alone (`ChaosActuatorEndpoint` lives in `chaos-agent-spring-boot-common`, a dependency of the starter that is not on the application's compile class path).
 
 ### 3.6 `ChaosHandleRegistry`
 
@@ -545,18 +548,18 @@ The `ApplicationContextInitializer` of the test starters is registered identical
 
 ### What is Identical
 
-Everything else is source-identical between Boot 3 and Boot 4 variants. The differences are limited to:
+`ChaosProperties`, `ChaosAutoConfiguration`, `ChaosActuatorEndpoint`, `ChaosHandleRegistry`, `ChaosSessionFilter` and the trust conditions exist once, in `chaos-agent-spring-boot-common` (package `com.macstab.chaos.jvm.spring.boot.common`), compiled against Boot 3 and used unchanged on Boot 4; both runtime starters list its `ChaosAutoConfiguration` in their `AutoConfiguration.imports`. Each starter keeps its own copy of the rest, source-identical between Boot 3 and Boot 4 except for:
 
 - Package names (`spring.boot3` vs `spring.boot4`)
 - The `Automatic-Module-Name` in the JAR manifest
 - The Spring Boot BOM version used for compilation (`3.5.16` vs `4.1.2`)
 - The `EnvironmentPostProcessor` interface package and `spring.factories` key (as described above)
 
-All class names, method signatures, annotation usages, `@ConditionalOn*` expressions, JUnit 5 extension logic, parameter resolution, session lifecycle, and property key names are identical. The Java source of `ChaosProperties`, `ChaosAutoConfiguration`, `ChaosActuatorEndpoint`, `ChaosHandleRegistry`, `ChaosAgentExtension`, `ChaosAgentInitializer`, `ChaosTestAutoConfiguration`, and `@ChaosTest` contain no conditional logic — they compile against their respective BOMs and work identically at runtime.
+The copies are `ChaosAgentEnvironmentPostProcessor` in the runtime starters and `ChaosAgentExtension`, `ChaosAgentInitializer`, `ChaosTestAutoConfiguration` and `@ChaosTest` in the test starters: their method signatures, annotation usages, `@ConditionalOn*` expressions, extension logic, parameter resolution, session lifecycle and property key names are identical.
 
 `ChaosAgentEnvironmentPostProcessor` carries the same logic in both Boot 3 and Boot 4. The only differences are the import (`org.springframework.boot.env.EnvironmentPostProcessor` in Boot 3 vs `org.springframework.boot.EnvironmentPostProcessor` in Boot 4), the `spring.factories` key, and the attach-marker value (`spring-boot-3` / `spring-boot-4`).
 
-The duplication is intentional and has a concrete justification: Spring Boot 3 and Spring Boot 4 have incompatible `@AutoConfiguration` processing semantics and compile-time annotation processor outputs. A shared module compiled against Boot 3 cannot be used in a Boot 4 application without classloader issues, and vice versa. The clean separation means each module's JAR has a single, unambiguous compile-time dependency graph.
+The copies remain where a type differs between the versions (the `EnvironmentPostProcessor` interface moved) or where the test starters build on Spring Boot test APIs of their own version; what uses only API common to both versions is shared.
 
 ---
 
@@ -567,7 +570,7 @@ All properties live under the `macstab.chaos` prefix and apply to both Boot 3 an
 | Property                            | Type      | Default | Description                                                                                                          |
 |-------------------------------------|-----------|---------|----------------------------------------------------------------------------------------------------------------------|
 | `macstab.chaos.enabled`             | `boolean` | `false` | Master switch. Gates the early attach and all beans in `ChaosAutoConfiguration`; honoured only from trusted sources. |
-| `macstab.chaos.allow-remote-enable` | `boolean` | `false` | Lets `macstab.chaos.enabled` come from any property source. Itself honoured only from a trusted source.              |
+| `macstab.chaos.allow-remote-enable` | `boolean` | `false` | Lets `macstab.chaos.enabled`, `macstab.chaos.actuator.enabled` and `macstab.chaos.config-file` come from any property source. Itself honoured only from a trusted source. |
 | `macstab.chaos.config-file`         | `String`  | `null`  | Absolute or relative path to a JSON plan file. Loaded on `ApplicationReadyEvent`. Null or blank = no startup plan. Honoured only from trusted sources. |
 | `macstab.chaos.debug-dump-on-start` | `boolean` | `false` | If `true`, logs the full `controlPlane.diagnostics().debugDump()` output at `INFO` after the startup plan activates. |
 | `macstab.chaos.actuator.enabled`    | `boolean` | `false` | Enables `ChaosActuatorEndpoint`. Requires both this flag and `spring-boot-actuator` on the classpath. Honoured only from trusted sources. |

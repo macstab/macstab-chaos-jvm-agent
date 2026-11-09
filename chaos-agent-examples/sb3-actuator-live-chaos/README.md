@@ -6,8 +6,9 @@ A Spring Boot 3 payment service calls a downstream payment gateway (WireMock on 
 through Resilience4j's circuit breaker. The test first charges an order without chaos (the gateway
 answers `"charged"`), then activates a plan through the live actuator endpoint, `POST
 /actuator/chaos`: it rejects every `SOCKET_CONNECT` to the gateway's port with a
-`ConnectException`. After three failed calls the circuit breaker opens and the next requests are
-served by the fallback method (`"fallback:circuit-open"`) without touching the network. The test
+`ConnectException`. Once at least three calls are in the circuit breaker's window and 60 % of them
+failed (with the clean call in the window, after the second rejected one), the circuit opens and the
+next requests are served by the fallback method (`"fallback:circuit-open"`) without touching the network. The test
 stops the plan with `DELETE /actuator/chaos/plan:gateway-down`.
 
 The example demonstrates:

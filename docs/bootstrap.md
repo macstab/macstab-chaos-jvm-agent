@@ -117,8 +117,10 @@ registerMBean(runtime)            // skipped with a warning if the name is taken
   ↓
 JfrIntegration.installIfAvailable(runtime)
   ↓
+ChaosReports.createIfEnabled(settings, runtime)   // status and hits files, reports=on
+  ↓
 Optional<StartupConfigLoader.LoadedPlan> plan =
-    StartupConfigLoader.load(agentArgs, System.getenv())
+    StartupConfigLoader.load(settings)   // agent args, system properties, environment
   if plan present:
     file source + configWatchInterval → StartupConfigPoller.startWithInitialPlan(...)
     otherwise                         → runtime.activate(plan.get().plan())
@@ -180,10 +182,11 @@ The opt-in remains the safeguard against rewriting a live production JVM: withou
 Self-attach sequence:
 
 ```
-if (RUNTIME.get() != null) return existing runtime           // idempotent guard
-
-Instrumentation instrumentation = ByteBuddyAgent.install()   // JVM Attach API via ByteBuddy
-initialize("", instrumentation, System.getenv())             // same hook set as premain
+if (installedRuntime() != null) return it                    // idempotent guard (INITIALIZATION)
+synchronized (INSTALL_LOCK) { check again, then:
+  Instrumentation instrumentation = ByteBuddyAgent.install() // JVM Attach API via ByteBuddy
+  initialize("", instrumentation, System.getenv())           // same hook set as premain;
+}                                                            // MACSTAB_CHAOS_* switches apply
 
 // hook groups retransform already-loaded JDK classes (Socket, NIO, HTTP, JDBC, ...)
 // on demand via Instrumentation.retransformClasses() under RETRANSFORMATION strategy
@@ -205,10 +208,13 @@ initialize("", instrumentation, System.getenv())             // same hook set as
 
 The MBean is registered at `com.macstab.chaos.jvm:type=ChaosDiagnostics`.
 
-**Interface**: `ChaosDiagnosticsMXBean` exposes a single operation:
-- `debugDump()` → `String` (full human-readable diagnostic text)
+**Interface**: `ChaosDiagnosticsMXBean` exposes:
+- `debugDump()` → `String` (full human-readable diagnostic text; scenarios of a plan with `jmxEnabled=false` are left out)
+- `listScenarios()` → `String[]` (`<id> state=<state> matched=<n> applied=<n>` per scenario)
+- the attribute `ControlEnabled` (`isControlEnabled()`): whether the control operations below are allowed
+- `activatePlan(planJson)` → `String`, `stopScenario(id)` → `boolean`, `stopAll()` → `int`: refused unless the agent was started with `jmxControl=true` (`-Dmacstab.chaos.jmx.control=true`, `MACSTAB_CHAOS_JMX_CONTROL=true`); see [observability.md §4](observability.md#4-jmx)
 
-There are no attributes; structured data (`snapshot()`, `scenario(id)`) is available only through the `ChaosDiagnostics` API in code.
+Structured data (`snapshot()`, `scenario(id)`) is available only through the `ChaosDiagnostics` API in code.
 
 **Registration**: Uses `ManagementFactory.getPlatformMBeanServer()`, after `premain` once the application has initialised `java.util.logging` (section 3). If an MBean with that name is already registered, registration is skipped with a warning on stderr and the agent continues without its own MBean.
 
@@ -219,11 +225,11 @@ There are no attributes; structured data (`snapshot()`, `scenario(id)`) is avail
 # 6. Singleton and Lifecycle
 
 ```java
-private static final AtomicReference<ChaosRuntime> RUNTIME_REF = new AtomicReference<>();
+private static final AtomicReference<CompletableFuture<ChaosRuntime>> INITIALIZATION = new AtomicReference<>();
 
 public static ChaosControlPlane current() {
-    ChaosRuntime runtime = RUNTIME_REF.get();
-    if (runtime == null) throw new IllegalStateException("agent not installed");
+    ChaosRuntime runtime = installedRuntime();   // the completed INITIALIZATION future, else null
+    if (runtime == null) throw new IllegalStateException("the chaos agent is not installed");
     return runtime;
 }
 ```
@@ -240,7 +246,7 @@ The `INITIALIZATION` future is the authoritative reference. Once completed succe
 | ByteBuddy transformation failure for a class | Warning logged; specific class uninstrumented; agent continues                                                    |
 | Bootstrap bridge injection failure           | `IllegalStateException`; agent startup fails                                                                      |
 | Hook group weaving failure                   | `ChaosInstrumentationException` from the `activate()` needing the group; recorded as `INSTRUMENTATION_FAILURE`    |
-| MBean registration failure                   | Warning logged; diagnostics accessible only via API; agent continues                                              |
+| MBean registration failure                   | One `[chaos-agent] MBean registration skipped: …` line on stderr; diagnostics accessible only via API; agent continues |
 | `installLocally()` self-attach failure       | `IllegalStateException` propagated to `ChaosTestKit.install()` caller                                             |
 
 ---

@@ -29,15 +29,17 @@ import java.util.logging.Level;
 import org.jspecify.annotations.Nullable;
 
 /**
- * The status and hits files, in the native library's format, so tools that read the library's
- * reports read the agent's the same way.
+ * The status and hits files, in the native library's line format, so tools that read the library's
+ * reports read the agent's the same way. The differences: {@code scenarios} instead of {@code
+ * rules}, a {@code column} beside {@code line}, a {@code source} and no {@code text}; the hits file
+ * lists only ids that applied (no {@code 0} lines), and the status file is one per directory.
  *
  * <ul>
  *   <li><b>Status file</b> {@code <dir>/.chaos-jvm.status}, rewritten after every load of the
  *       startup plan and every reload: {@code state=ok} with {@code scenarios=<n>}, or {@code
- *       state=error} with {@code line} and {@code column} (1-based, {@code 0} without a position)
- *       and {@code reason}; then {@code source} and {@code pid}. Without a startup plan it is not
- *       written.
+ *       state=error} and {@code scenarios=0} with {@code line} and {@code column} (1-based, {@code
+ *       0} without a position) and {@code reason}; then {@code source} and {@code pid}. Without a
+ *       startup plan it is not written.
  *   <li><b>Hits file</b> {@code <dir>/.chaos-jvm.hits.<pid>}, one line per scenario id that
  *       applied, sorted by id: {@code <applied count>\t<scenario id>}. The count is cumulative
  *       since the reports started: a stopped or reloaded scenario keeps its count, and the same id

@@ -68,7 +68,7 @@ If none of the above is present, `StartupConfigLoader.load()` returns `Optional.
 
 The raw argument string (the part after `=`) is parsed by `AgentArgsParser`:
 - Split on `;` — commas are ordinary characters and need no escaping
-- Escapes: `\;` is a literal `;`, `\=` a literal `=`, `\\` a literal `\`. Any other backslash is kept as written, so Windows paths (`configFile=C:\chaos\plan.json`) and JSON escapes inside `configJson` reach the consumer unchanged
+- Escapes: `\;` is a literal `;`, `\=` a literal `=`, `\\` a literal `\`. Any other backslash is kept as written, so Windows paths (`configFile=C:\chaos\plan.json`) and the JSON escapes inside `configJson` (`\"`, `\n`, `\u0041`) reach the consumer unchanged. The JSON escape `\\` is the exception: it becomes a single `\`, so write a JSON backslash as `\\\\` in the argument (or use `configBase64` or `configFile`)
 - Each token split on the first `=` into key and value
 - Keys and values are trimmed of whitespace
 - Duplicate keys: last value wins (a warning is printed to stderr)
@@ -95,7 +95,7 @@ The `instrumentation` key is parsed by `AgentArgsParser` but read by `chaos-agen
 | System property        | `macstab.chaos.instrumentation`  | same                                                       |
 | Environment variable   | `MACSTAB_CHAOS_INSTRUMENTATION`  | same                                                       |
 
-The agent arg takes precedence over the system property, which takes precedence over the environment variable; `eager` is case-insensitive. On demand, each hook group is woven the first time an activated scenario needs it, and a JVM without scenarios runs unmodified JDK classes. `eager` weaves every group at start (the 1.x behaviour), so no activation pays the one-time weaving cost.
+The agent arg takes precedence over the system property, which takes precedence over the environment variable; `eager` is case-insensitive. On demand, each hook group is woven the first time an activated scenario needs it, and a JVM without scenarios and without an open session runs unmodified JDK classes. `eager` weaves every group at start (the 1.x behaviour), so no activation pays the one-time weaving cost.
 
 ---
 
@@ -119,7 +119,7 @@ When loading from a file path, `StartupConfigLoader.validateAndResolvePath()` ap
 
 The `configBase64` source accepts **standard or URL-safe Base64**. Whitespace (for example line breaks from wrapped `base64` output) is removed first; the input is then decoded with `Base64.getDecoder()` and, if that fails, with `Base64.getUrlDecoder()`. Any other invalid character is rejected — it is not skipped. Decoded bytes are interpreted as UTF-8.
 
-Malformed base64 input throws `ConfigLoadException` with category `base64`.
+Malformed base64 input throws `ConfigLoadException` with source `base64`.
 
 ---
 
@@ -208,7 +208,7 @@ A plan's `observability` block applies to that plan's scenarios for as long as t
 
 ---
 
-# 10. Live Config Reload — File Watch Mode
+# 9. Live Config Reload — File Watch Mode
 
 When the config source is a **file**, the agent can poll it continuously and apply incremental diffs to the live scenario registry. This is the primary integration point for external chaos pipeline frameworks that need to change the running scenario set without restarting the JVM.
 
@@ -232,7 +232,7 @@ MACSTAB_CHAOS_CONFIG_WATCH_INTERVAL=500
 
 On every poll tick `StartupConfigPoller`:
 
-1. Resolves the file (following a Kubernetes ConfigMap link, see §3) and compares its stamp — the real file, modification time, size and file key — with the last read that was applied or refused for good. An unchanged stamp is a no-op: the file is not opened, so an unchanged file the JVM can no longer read (`chmod 000`, which changes only the change time) is not a failure. A `..data` link pointing at a directory that is gone counts as a missing file.
+1. Resolves the file (following a Kubernetes ConfigMap link, see §4) and compares its stamp — the real file, modification time, size and file key — with the last read that was applied or refused for good. An unchanged stamp is a no-op: the file is not opened, so an unchanged file the JVM can no longer read (`chmod 000`, which changes only the change time) is not a failure. A `..data` link pointing at a directory that is gone counts as a missing file.
 2. Otherwise reads it and compares a SHA-256 of the contents: an unchanged digest (a touch, a ConfigMap re-sync) only records the new stamp; contents that already failed to parse are not parsed again until they change.
 3. A read within 20 ms of the file's modification time is provisional: the writer may still be writing, so the next tick reads again even if the stamp did not change (a second write in the same timestamp tick is not missed). A whole-second modification time gets one second, because a file system that stores whole seconds gives a same-size edit within that second the same stamp. The window counts from when the stamp was first seen at the latest, so a modification time ahead of the clock (a skewed file server) is not read on every tick.
 4. If the file changed while it was being read, the tick is skipped and the next one retries.
@@ -283,7 +283,7 @@ No JVM restart required.
 
 ---
 
-# 9. References
+# 10. References
 
 - Reference: ISO 8601 — Date and time format; duration strings (`PT0.1S`, `PT30S`) — https://www.iso.org/iso-8601-date-and-time-format.html
 - Reference: Jackson `ObjectMapper` — `FAIL_ON_UNKNOWN_PROPERTIES`, `JavaTimeModule` for `Duration` — https://github.com/FasterXML/jackson-databind
