@@ -56,12 +56,13 @@ import org.jspecify.annotations.Nullable;
  * application thread that triggered them. {@link #close()} stops counting.
  *
  * <p>The series tagged with a scenario are retired once the scenario has ended ({@code STOPPED},
- * {@code INACTIVE}, or a {@code FAILED} activation) and two scrapes (reads of the {@code
- * chaos.scenarios} gauges) ran since, so its last values were exported: on the first event after
- * that, or at {@link #close()}, and only while no scenario with that id is registered or active in
- * any scope (the scopes of one id share its series). Without a later event the ended ids wait for
- * one; they are at most the scenarios that ended. For OpenTelemetry without Micrometer, use the
- * {@code chaos-agent-opentelemetry} module.
+ * {@code INACTIVE}, or a {@code FAILED} activation) and two scrapes ran since (counted by the reads
+ * of the seven meters taken from the diagnostics, whichever a {@code MeterFilter} left registered;
+ * with all seven denied, the series wait for {@link #close()}), so its last values were exported:
+ * on the first event after that, or at {@link #close()}, and only while no scenario with that id is
+ * registered or active in any scope (the scopes of one id share its series). Without a later event
+ * the ended ids wait for one; they are at most the scenarios that ended. For OpenTelemetry without
+ * Micrometer, use the {@code chaos-agent-opentelemetry} module.
  *
  * <pre>{@code
  * new ChaosMeterBinder(ChaosPlatform.current()).bindTo(meterRegistry);
@@ -71,6 +72,13 @@ public final class ChaosMeterBinder implements MeterBinder, AutoCloseable {
 
   private static final java.util.logging.Logger LOGGER =
       java.util.logging.Logger.getLogger(ChaosMeterBinder.class.getName());
+
+  /** The scrape probes: one per {@code chaos.scenarios} state, then these two meters. */
+  private static final int DROPPED_PROBE = ChaosDiagnostics.ScenarioState.values().length;
+
+  private static final int WOVEN_PROBE = DROPPED_PROBE + 1;
+
+  private static final int PROBES = WOVEN_PROBE + 1;
 
   /** How long a diagnostics snapshot serves the meters: one scrape. */
   private static final long SNAPSHOT_REUSE_NANOS = java.util.concurrent.TimeUnit.SECONDS.toNanos(1);
@@ -98,16 +106,17 @@ public final class ChaosMeterBinder implements MeterBinder, AutoCloseable {
   public void bindTo(final MeterRegistry registry) {
     final Series series = new Series(registry);
     bound.add(series);
-    for (final ChaosDiagnostics.ScenarioState state : ChaosDiagnostics.ScenarioState.values()) {
-      // One gauge notices the scrapes: every scrape reads it.
-      final boolean scrapeProbe = state == ChaosDiagnostics.ScenarioState.REGISTERED;
+    // Every meter read from the diagnostics notices the scrapes, each with its own count: a
+    // MeterFilter may deny any of them, and a denied meter is never read.
+    final ChaosDiagnostics.ScenarioState[] states = ChaosDiagnostics.ScenarioState.values();
+    for (int index = 0; index < states.length; index++) {
+      final ChaosDiagnostics.ScenarioState state = states[index];
+      final int probe = index;
       Gauge.builder(
               "chaos.scenarios",
               controlPlane,
               plane -> {
-                if (scrapeProbe) {
-                  series.scraped();
-                }
+                series.scraped(probe);
                 return countIn(snapshot(), state);
               })
           .description("Registered chaos scenarios by state")
@@ -117,13 +126,19 @@ public final class ChaosMeterBinder implements MeterBinder, AutoCloseable {
     FunctionCounter.builder(
             "chaos.listener.events.dropped",
             controlPlane,
-            plane -> detail(snapshot(), "droppedEvents", Long::parseLong))
+            plane -> {
+              series.scraped(DROPPED_PROBE);
+              return detail(snapshot(), "droppedEvents", Long::parseLong);
+            })
         .description("Chaos events dropped by full asynchronous listener queues")
         .register(registry);
     Gauge.builder(
             "chaos.hooks.woven",
             controlPlane,
-            plane -> detail(snapshot(), "wovenHookGroups", ChaosMeterBinder::countList))
+            plane -> {
+              series.scraped(WOVEN_PROBE);
+              return detail(snapshot(), "wovenHookGroups", ChaosMeterBinder::countList);
+            })
         .description("Hook groups woven into JDK and library classes")
         .register(registry);
     final ChaosEventListener counting =
@@ -273,9 +288,9 @@ public final class ChaosMeterBinder implements MeterBinder, AutoCloseable {
   private final class Series {
     private final MeterRegistry registry;
 
-    /** Reads of the scrape probe gauge so far. */
-    private final java.util.concurrent.atomic.AtomicLong scrapes =
-        new java.util.concurrent.atomic.AtomicLong();
+    /** Reads of each scrape probe so far; one scrape reads every probe the registry kept once. */
+    private final java.util.concurrent.atomic.AtomicLongArray probeReads =
+        new java.util.concurrent.atomic.AtomicLongArray(PROBES);
 
     /** Guarded by {@code this}: the meters per scenario id. */
     private final java.util.Map<String, java.util.Set<Meter>> meters = new java.util.HashMap<>();
@@ -293,12 +308,17 @@ public final class ChaosMeterBinder implements MeterBinder, AutoCloseable {
       this.registry = registry;
     }
 
-    void scraped() {
-      scrapes.incrementAndGet();
+    void scraped(final int probe) {
+      probeReads.incrementAndGet(probe);
     }
 
+    /** The scrapes so far: the reads of the probe read most, which no MeterFilter denied. */
     long scrapes() {
-      return scrapes.get();
+      long most = 0;
+      for (int probe = 0; probe < PROBES; probe++) {
+        most = Math.max(most, probeReads.get(probe));
+      }
+      return most;
     }
 
     synchronized <M extends Meter> M track(final String scenarioId, final M meter) {

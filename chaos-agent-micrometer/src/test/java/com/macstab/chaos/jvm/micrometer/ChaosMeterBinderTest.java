@@ -202,6 +202,44 @@ class ChaosMeterBinderTest {
   }
 
   @Test
+  @DisplayName("ended series are retired when a MeterFilter denies the chaos.scenarios gauges")
+  void retiresWithScenarioGaugesDenied() {
+    registry
+        .config()
+        .meterFilter(
+            io.micrometer.core.instrument.config.MeterFilter.deny(
+                id -> id.getName().equals("chaos.scenarios")));
+    new ChaosMeterBinder(runtime).bindTo(registry);
+    runtime.activate(scenario("denied-gauge")).close();
+    await()
+        .atMost(Duration.ofSeconds(5))
+        .until(
+            () ->
+                registry
+                        .find("chaos.events")
+                        .tag("type", "stopped")
+                        .tag("scenario", "denied-gauge")
+                        .counter()
+                    != null);
+
+    scrapeEveryMeter();
+    scrapeEveryMeter();
+    runtime.activate(scenario("later"));
+
+    await()
+        .atMost(Duration.ofSeconds(5))
+        .until(
+            () ->
+                registry
+                        .find("chaos.events")
+                        .tag("type", "registered")
+                        .tag("scenario", "later")
+                        .counter()
+                    != null);
+    assertThat(registry.find("chaos.events").tag("scenario", "denied-gauge").counter()).isNull();
+  }
+
+  @Test
   @DisplayName("a series shared by an id that is still live in another scope is kept")
   void keepsSharedSeries() {
     new ChaosMeterBinder(runtime).bindTo(registry);
@@ -387,6 +425,14 @@ class ChaosMeterBinderTest {
 
   private void scrape() {
     registry.find("chaos.scenarios").gauges().forEach(io.micrometer.core.instrument.Gauge::value);
+  }
+
+  /** Reads every meter, as an exporter's scrape does. */
+  private void scrapeEveryMeter() {
+    registry
+        .getMeters()
+        .forEach(
+            meter -> meter.measure().forEach(io.micrometer.core.instrument.Measurement::getValue));
   }
 
   private static ChaosScenario scenario(final String id) {
