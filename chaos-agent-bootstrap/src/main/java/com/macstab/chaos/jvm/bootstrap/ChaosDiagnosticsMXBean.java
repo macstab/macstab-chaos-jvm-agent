@@ -19,8 +19,8 @@ package com.macstab.chaos.jvm.bootstrap;
  *   <caption>JMX operations exposed by this MXBean</caption>
  *   <tr><th>Operation</th><th>Return type</th><th>Description</th></tr>
  *   <tr><td>{@link #debugDump()}</td><td>{@code String}</td>
- *       <td>Returns a multi-line human-readable snapshot of all registered chaos scenarios,
- *           their current state, applied-count, and any stressor-specific metrics.</td></tr>
+ *       <td>Returns a multi-line human-readable snapshot of the runtime details, all registered
+ *           chaos scenarios with their state and counts, and the recent activation failures.</td></tr>
  * </table>
  */
 public interface ChaosDiagnosticsMXBean {
@@ -28,9 +28,10 @@ public interface ChaosDiagnosticsMXBean {
   /**
    * Returns a multi-line human-readable diagnostics dump of the current chaos runtime state.
    *
-   * <p>The dump includes, for each registered scenario: its ID, scope, current {@link
-   * com.macstab.chaos.jvm.api.ChaosDiagnostics.ScenarioState}, applied-effect count, and any
-   * stressor-specific resource metrics. The exact format is not stable across agent versions and is
+   * <p>The dump includes the runtime details; for each registered scenario its ID, scope, current
+   * {@link com.macstab.chaos.jvm.api.ChaosDiagnostics.ScenarioState}, matched and applied counts
+   * and reason; and the recent activation failures. Scenarios of a plan with {@code
+   * jmxEnabled=false} are left out. The exact format is not stable across agent versions and is
    * intended for human consumption only.
    *
    * @return a non-null, non-empty diagnostics string; formatting may include newlines

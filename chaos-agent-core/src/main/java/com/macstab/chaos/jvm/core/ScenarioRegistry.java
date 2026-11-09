@@ -7,6 +7,7 @@ import com.macstab.chaos.jvm.api.ChaosSelector;
 import com.macstab.chaos.jvm.api.OperationType;
 import java.time.Clock;
 import java.time.Instant;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -17,7 +18,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import org.jspecify.annotations.Nullable;
@@ -98,7 +98,20 @@ final class ScenarioRegistry implements ChaosDiagnostics {
   /** The method selectors last handed to the weaver; guarded by {@link #weaveLock}. */
   private Set<ChaosSelector.MethodSelector> wovenMethodSelectors = Set.of();
 
-  private final ConcurrentLinkedQueue<ActivationFailure> failures = new ConcurrentLinkedQueue<>();
+  /** How many activation failures the diagnostics keep: the most recent ones. */
+  static final int MAX_FAILURES = 256;
+
+  /**
+   * The {@value #MAX_FAILURES} most recent activation failures, oldest first; guarded by itself, as
+   * is {@link #droppedFailures}, so the add and the trim are one step.
+   */
+  private final ArrayDeque<ActivationFailure> failures = new ArrayDeque<>();
+
+  /**
+   * The failures dropped from {@link #failures} to keep it bounded; guarded by {@link #failures}.
+   */
+  private long droppedFailures;
+
   private final Supplier<Map<String, String>> runtimeDetailsSupplier;
   private final Clock clock;
 
@@ -320,14 +333,35 @@ final class ScenarioRegistry implements ChaosDiagnostics {
    *
    * @param scenarioId the ID of the scenario whose activation failed
    * @param category the category of the failure (e.g. compatibility error, resource exhaustion)
+   *     <p>Only the {@value #MAX_FAILURES} most recent failures are kept; an older one is dropped
+   *     and counted ({@link #droppedActivationFailures()}).
    * @param message a human-readable description of what went wrong; an exception without a message
    *     is recorded as {@code "(no message)"}
    */
   void recordFailure(
       final String scenarioId, final FailureCategory category, final @Nullable String message) {
-    failures.add(
+    final ActivationFailure failure =
         new ActivationFailure(
-            scenarioId, category, java.util.Objects.requireNonNullElse(message, "(no message)")));
+            scenarioId, category, java.util.Objects.requireNonNullElse(message, "(no message)"));
+    synchronized (failures) {
+      failures.addLast(failure);
+      if (failures.size() > MAX_FAILURES) {
+        failures.removeFirst();
+        droppedFailures++;
+      }
+    }
+  }
+
+  /**
+   * Returns how many activation failures were dropped to keep the history at {@value
+   * #MAX_FAILURES}.
+   *
+   * @return the dropped count
+   */
+  long droppedActivationFailures() {
+    synchronized (failures) {
+      return droppedFailures;
+    }
   }
 
   /**
@@ -424,9 +458,9 @@ final class ScenarioRegistry implements ChaosDiagnostics {
    *
    * <p>Captures the current state of every registered controller as a {@link ScenarioReport}, sorts
    * them by ID then scope key for a stable ordering, and bundles them together with the accumulated
-   * activation failures and the runtime details from the supplier provided at construction time.
-   * The {@link Snapshot#capturedAt()} timestamp is read, unskewed, from the {@link Clock} supplied
-   * at construction time.
+   * activation failures (the {@value #MAX_FAILURES} most recent) and the runtime details from the
+   * supplier provided at construction time. The {@link Snapshot#capturedAt()} timestamp is read,
+   * unskewed, from the {@link Clock} supplied at construction time.
    */
   @Override
   public Snapshot snapshot() {
@@ -436,10 +470,14 @@ final class ScenarioRegistry implements ChaosDiagnostics {
             .sorted(
                 Comparator.comparing(ScenarioReport::id).thenComparing(ScenarioReport::scopeKey))
             .toList();
+    final List<ActivationFailure> recentFailures;
+    synchronized (failures) {
+      recentFailures = List.copyOf(failures);
+    }
     return new Snapshot(
         Instant.ofEpochMilli(ChaosDispatcher.unskewedInstant(clock).toEpochMilli()),
         reports,
-        List.copyOf(failures),
+        recentFailures,
         runtimeDetailsSupplier.get());
   }
 
@@ -477,6 +515,8 @@ final class ScenarioRegistry implements ChaosDiagnostics {
    * &lt;runtimeDetail key&gt;=&lt;value&gt;
    * ...
    * &lt;scenarioId&gt; state=&lt;state&gt; scope=&lt;scopeKey&gt; matched=&lt;n&gt; applied=&lt;n&gt; reason=&lt;reason&gt;
+   * ...
+   * failure &lt;scenarioId&gt; category=&lt;category&gt; message=&lt;message&gt;
    * ...
    * </pre>
    *
@@ -519,6 +559,16 @@ final class ScenarioRegistry implements ChaosDiagnostics {
           .append(report.appliedCount())
           .append(" reason=")
           .append(report.reason())
+          .append(System.lineSeparator());
+    }
+    for (final ActivationFailure failure : snapshot.failures()) {
+      builder
+          .append("failure ")
+          .append(failure.scenarioId())
+          .append(" category=")
+          .append(failure.category())
+          .append(" message=")
+          .append(failure.message())
           .append(System.lineSeparator());
     }
     return builder.toString();

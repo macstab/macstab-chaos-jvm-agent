@@ -780,8 +780,12 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
     // The JDK 21 baseline has virtual threads; the key stays for diagnostics readers.
     details.put("virtualThreadsSupported", "true");
     details.put("jfrSupported", Boolean.toString(featureSet.jfrSupported()));
-    details.put("currentSessionId", String.valueOf(scopeContext.currentSessionId()));
+    final String currentSessionId = scopeContext.currentSessionId();
+    if (currentSessionId != null) {
+      details.put("currentSessionId", currentSessionId);
+    }
     details.put("droppedEvents", String.valueOf(observabilityBus.droppedEvents()));
+    details.put("droppedActivationFailures", String.valueOf(registry.droppedActivationFailures()));
     details.put("wovenHookGroups", String.join(",", new java.util.TreeSet<>(hookDemand.woven())));
     details.put(
         "unmatchedHooks", String.join("; ", new java.util.TreeSet<>(hookDemand.unmatched())));

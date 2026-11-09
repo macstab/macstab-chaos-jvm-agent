@@ -34,8 +34,10 @@ public interface ChaosDiagnostics {
    *
    * <ul>
    *   <li>one {@link ScenarioReport} per registered scenario with current counters and state
-   *   <li>all {@link ActivationFailure} records accumulated since agent startup
-   *   <li>runtime capability details: JDK version, virtual thread support, JFR availability
+   *   <li>the 256 most recent {@link ActivationFailure} records (older ones are counted in the
+   *       runtime detail {@code droppedActivationFailures})
+   *   <li>runtime details: JDK version, virtual thread support, JFR availability, dropped counts
+   *       and hook health
    * </ul>
    *
    * @return the current diagnostics snapshot
@@ -139,10 +141,13 @@ public interface ChaosDiagnostics {
    *
    * @param capturedAt when this snapshot was taken
    * @param scenarios per-scenario reports ordered by id, then scope
-   * @param failures all activation failures accumulated since agent startup
-   * @param runtimeDetails capability map: {@code jdkFeatureVersion}, {@code
-   *     virtualThreadsSupported}, {@code jfrSupported}, {@code currentSessionId}; iterates in the
-   *     order it was given in
+   * @param failures the 256 most recent activation failures, oldest first
+   * @param runtimeDetails runtime details, iterating in the order they were given in: {@code
+   *     jdkFeatureVersion}, {@code virtualThreadsSupported}, {@code jfrSupported}, {@code
+   *     currentSessionId} (the calling thread's session; absent when none is bound), {@code
+   *     droppedEvents} (events an asynchronous listener's full queue dropped), {@code
+   *     droppedActivationFailures} (failures older than the 256 kept), {@code wovenHookGroups},
+   *     {@code unmatchedHooks} and {@code hookFailures}
    */
   record Snapshot(
       Instant capturedAt,
