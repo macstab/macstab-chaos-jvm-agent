@@ -152,7 +152,7 @@ final class ChaosReports implements AutoCloseable {
     BootstrapDispatcher.beginInternalCall();
     try {
       Runtime.getRuntime().addShutdownHook(shutdownHook);
-      runtime.addEventListener(hitCounter);
+      runtime.addLifecycleListener(hitCounter);
       hitsWriter.start();
     } finally {
       BootstrapDispatcher.endInternalCall();
@@ -421,7 +421,7 @@ final class ChaosReports implements AutoCloseable {
     if (!closed.compareAndSet(false, true)) {
       return;
     }
-    runtime.removeEventListener(hitCounter);
+    runtime.removeLifecycleListener(hitCounter);
     LockSupport.unpark(hitsWriter);
     try {
       hitsWriter.join();

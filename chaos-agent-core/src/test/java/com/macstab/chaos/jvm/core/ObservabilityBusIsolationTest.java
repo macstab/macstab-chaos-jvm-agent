@@ -29,6 +29,31 @@ class ObservabilityBusIsolationTest {
   private interface CloseableListener extends ChaosEventListener, AutoCloseable {}
 
   @Test
+  @DisplayName("a lifecycle listener receives every event but does not count as an observer")
+  void lifecycleListenerIsNoObserver() throws Exception {
+    final ObservabilityBus bus = new ObservabilityBus(ChaosMetricsSink.NOOP);
+    final List<ChaosEvent> received = new CopyOnWriteArrayList<>();
+    final ChaosEventListener lifecycle = received::add;
+    final ChaosEventListener observer = event -> {};
+
+    bus.addLifecycleListener(lifecycle);
+    assertThat(bus.hasListeners()).isFalse();
+    bus.publish(ChaosEvent.Type.APPLIED, "s1", "applied", Map.of());
+    assertThat(received).extracting(ChaosEvent::scenarioId).containsExactly("s1");
+
+    bus.addListener(observer);
+    assertThat(bus.hasListeners()).isTrue();
+    assertThat(bus.removeListener(observer)).isTrue();
+    assertThat(bus.hasListeners()).isFalse();
+    assertThat(bus.removeListener(lifecycle)).isTrue();
+    assertThat(bus.removeListener(lifecycle)).isFalse();
+
+    bus.addListener(observer);
+    bus.close();
+    assertThat(bus.hasListeners()).as("after close").isFalse();
+  }
+
+  @Test
   @DisplayName("a listener that throws is logged and the next listener still receives the event")
   void throwingListenerIsIsolated() {
     final ObservabilityBus bus = new ObservabilityBus(ChaosMetricsSink.NOOP);

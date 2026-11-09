@@ -220,6 +220,30 @@ public final class ChaosRuntime implements ChaosControlPlane {
     return controlPlane.removeEventListener(listener);
   }
 
+  /**
+   * Registers a listener of the agent's own that never reads {@code SKIPPED} events (the JFR sink,
+   * the reports' hit counter): it receives every event, but does not make the runtime build the
+   * {@code SKIPPED} events that exist only for observers. Closed by {@link #close()} like every
+   * listener.
+   *
+   * @param listener the listener
+   */
+  @Internal
+  public void addLifecycleListener(final ChaosEventListener listener) {
+    controlPlane.addLifecycleListener(listener);
+  }
+
+  /**
+   * Removes a listener registered with {@link #addLifecycleListener}.
+   *
+   * @param listener the listener as it was registered
+   * @return {@code true} if it was registered
+   */
+  @Internal
+  public boolean removeLifecycleListener(final ChaosEventListener listener) {
+    return controlPlane.removeEventListener(listener);
+  }
+
   @Override
   public void close() {
     controlPlane.close();

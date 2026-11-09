@@ -88,6 +88,46 @@ class JfrChaosEventSinkTest {
   }
 
   @Test
+  @DisplayName("a lifecycle event carries the message; an applied effect its match and delay")
+  void messageMatchAndDelay() throws IOException {
+    final List<RecordedEvent> events;
+    try (JfrChaosEventSink sink = new JfrChaosEventSink(runtime.diagnostics());
+        Recording recording = new Recording()) {
+      recording.enable(LIFECYCLE);
+      recording.enable(APPLIED);
+      recording.start();
+      sink.onEvent(event(ChaosEvent.Type.STARTED, "s2", Map.of("scope", "jvm")));
+      sink.onEvent(
+          event(
+              ChaosEvent.Type.APPLIED,
+              "s2",
+              Map.of(
+                  "operation", "SOCKET_READ",
+                  "effectType", "DelayEffect",
+                  "scope", "jvm",
+                  "match", "3",
+                  "delayNanos", "300000")));
+      // A hand-made event (any ChaosEventListener can be fed one): no delay, a match that is no
+      // number.
+      sink.onEvent(
+          event(
+              ChaosEvent.Type.APPLIED, "s3", Map.of("operation", "SOCKET_READ", "match", "first")));
+      recording.stop();
+      events = read(recording);
+    }
+
+    assertThat(events.stream().filter(e -> e.getEventType().getName().equals(LIFECYCLE)))
+        .singleElement()
+        .satisfies(started -> assertThat(started.getString("message")).isEqualTo("STARTED s2"));
+    assertThat(events.stream().filter(e -> e.getEventType().getName().equals(APPLIED)))
+        .extracting(
+            e -> e.getString("scenarioId"), e -> e.getLong("match"), e -> e.getLong("delayNanos"))
+        .containsExactly(
+            org.assertj.core.groups.Tuple.tuple("s2", 3L, 300_000L),
+            org.assertj.core.groups.Tuple.tuple("s3", 0L, 0L));
+  }
+
+  @Test
   @DisplayName("the periodic snapshot counts active scenarios and bounds their id list")
   void periodicSnapshot() throws Exception {
     for (int i = 0; i < 40; i++) {

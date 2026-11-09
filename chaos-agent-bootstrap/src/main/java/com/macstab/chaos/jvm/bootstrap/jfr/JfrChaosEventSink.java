@@ -63,7 +63,7 @@ final class JfrChaosEventSink implements ChaosEventListener, AutoCloseable {
       return;
     }
     jfrEvent.scenarioId = event.scenarioId();
-    jfrEvent.description = event.message();
+    jfrEvent.message = event.message();
     jfrEvent.eventType = event.type().name();
     jfrEvent.scopeKey = event.attributes().getOrDefault("scope", "");
     jfrEvent.commit();
@@ -79,7 +79,22 @@ final class JfrChaosEventSink implements ChaosEventListener, AutoCloseable {
     jfrEvent.effectType = event.attributes().getOrDefault("effectType", "");
     jfrEvent.scopeKey = event.attributes().getOrDefault("scope", "");
     jfrEvent.sessionId = event.attributes().get("sessionId");
+    jfrEvent.match = longAttribute(event, "match");
+    jfrEvent.delayNanos = longAttribute(event, "delayNanos");
     jfrEvent.commit();
+  }
+
+  /** A numeric event attribute; 0 when it is absent or not a number. */
+  private static long longAttribute(final ChaosEvent event, final String name) {
+    final String value = event.attributes().get(name);
+    if (value == null) {
+      return 0L;
+    }
+    try {
+      return Long.parseLong(value);
+    } catch (final NumberFormatException notANumber) {
+      return 0L;
+    }
   }
 
   private void emitStressorSnapshot() {

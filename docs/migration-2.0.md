@@ -56,6 +56,7 @@
 | 37 | Stressors without load are refused; a stressor that stops ends its scenario | a plan runs a `safepointStorm` with `retransformClassCount = 0` on a JVM with `-XX:+DisableExplicitGC`, or a `finalizerBacklog` with `--finalization=disabled`; a test expects a `gcPressure` or `threadLeak` scenario to stay `ACTIVE` after its `duration` / `lifespan` | set `retransformClassCount` above 0 or drop the stressor on that JVM; expect `INACTIVE` (§37) |
 | 38 | The event log line is quoted and escaped | you parse the `com.macstab.chaos.jvm` log lines (`type=… scenarioId=… attributes={k=v}`) | read the quoted, escaped form (§38) |
 | 39 | A gate read from JSON needs `maxBlock` | a plan file, an HTTP or JMX plan, or `@WithChaos` JSON has a `gate` without `maxBlock` | set `maxBlock` (§39) |
+| 40 | The JFR field `description` is `message` | a JFR query, a JMC view or a `RecordedEvent.getString("description")` reads `com.macstab.chaos.jvm.ScenarioLifecycle` | read `message` (§40) |
 
 ---
 
@@ -446,6 +447,13 @@ A scenario on a general primitive (file reads, ZIP inflation, direct buffers, GC
 Before (1.x): `{"type": "gate"}` held the matched calls with nothing to release them. Now give the gate its bound, for example `{"type": "gate", "maxBlock": "PT30S"}`, or activate it through the Java API and call `handle.release()`.
 
 The seed default is unchanged and now stated exactly: an `activationPolicy` that omits `randomSeed` (or sets it to `null`) draws a random seed; a scenario without `activationPolicy` gets `ActivationPolicy.always()`, whose seed is `0`.
+
+
+## 40. The JFR field `description` is `message`
+
+The `com.macstab.chaos.jvm.ScenarioLifecycle` event's field `description` is renamed `message`: it held the event's message (`ChaosEvent.message()`), never a description of the scenario. A query or view that reads `description` reads `message` instead, for example `jfr print --events com.macstab.chaos.jvm.ScenarioLifecycle` shows `message = "scenario started"`.
+
+`com.macstab.chaos.jvm.EffectApplied` gained `match` and `delayNanos`; the other fields are unchanged.
 
 ---
 

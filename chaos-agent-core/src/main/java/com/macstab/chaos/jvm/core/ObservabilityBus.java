@@ -52,7 +52,15 @@ final class ObservabilityBus {
   private final java.util.concurrent.atomic.AtomicLong droppedEvents =
       new java.util.concurrent.atomic.AtomicLong();
 
-  private record Registration(ChaosEventListener registered, ChaosEventListener delivered) {}
+  /**
+   * The listeners registered other than as lifecycle listeners: only they make {@link
+   * #hasListeners()} true.
+   */
+  private final java.util.concurrent.atomic.AtomicInteger observers =
+      new java.util.concurrent.atomic.AtomicInteger();
+
+  private record Registration(
+      ChaosEventListener registered, ChaosEventListener delivered, boolean lifecycle) {}
 
   /**
    * Listeners that have thrown at least once: their first failure is logged at WARNING, later ones
@@ -90,11 +98,30 @@ final class ObservabilityBus {
    * @param listener the listener to register; must not be {@code null}
    */
   void addListener(final ChaosEventListener listener) {
+    add(listener, false);
+  }
+
+  /**
+   * Registers {@code listener} as a lifecycle listener: it receives every event published, as
+   * {@link #addListener} does, but does not count for {@link #hasListeners()}, so the events built
+   * only for observers ({@code SKIPPED}) are not built for it. For the agent's own listeners that
+   * never read them (the JFR sink, the reports' hit counter). Removed with {@link #removeListener}.
+   *
+   * @param listener the listener to register
+   */
+  void addLifecycleListener(final ChaosEventListener listener) {
+    add(listener, true);
+  }
+
+  private void add(final ChaosEventListener listener, final boolean lifecycle) {
     final ChaosEventListener delivered =
         listener instanceof com.macstab.chaos.jvm.api.AsyncChaosEventListener async
             ? new AsyncDelivery(async.delegate(), droppedEvents)
             : listener;
-    registrations.add(new Registration(listener, delivered));
+    if (!lifecycle) {
+      observers.incrementAndGet();
+    }
+    registrations.add(new Registration(listener, delivered, lifecycle));
     listeners.add(delivered);
   }
 
@@ -111,6 +138,9 @@ final class ObservabilityBus {
     // the instance that was registered.
     for (final Registration registration : List.copyOf(registrations)) {
       if (registration.registered() == listener && registrations.remove(registration)) {
+        if (!registration.lifecycle()) {
+          observers.decrementAndGet();
+        }
         listeners.remove(registration.delivered());
         failedListeners.remove(registration.delivered());
         if (registration.delivered() instanceof AsyncDelivery delivery) {
@@ -123,13 +153,13 @@ final class ObservabilityBus {
   }
 
   /**
-   * Whether a listener other than the built-in logging one is registered: events published only for
-   * observers ({@code SKIPPED}) are not built otherwise.
+   * Whether a listener other than the built-in logging one and the lifecycle listeners is
+   * registered: events published only for observers ({@code SKIPPED}) are not built otherwise.
    *
    * @return {@code true} when someone listens
    */
   boolean hasListeners() {
-    return !registrations.isEmpty();
+    return observers.get() > 0;
   }
 
   /**
@@ -293,6 +323,7 @@ final class ObservabilityBus {
     }
     listeners.clear();
     registrations.clear();
+    observers.set(0);
   }
 
   /**

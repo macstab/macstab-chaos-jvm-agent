@@ -489,6 +489,20 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
     }
   }
 
+  /**
+   * Registers a lifecycle listener ({@link ObservabilityBus#addLifecycleListener}); removed with
+   * {@link #removeEventListener}.
+   *
+   * @param listener the listener
+   */
+  void addLifecycleListener(final ChaosEventListener listener) {
+    Objects.requireNonNull(listener, "listener");
+    synchronized (lifecycleLock) {
+      ensureOpen();
+      observabilityBus.addLifecycleListener(listener);
+    }
+  }
+
   @Override
   public boolean removeEventListener(final ChaosEventListener listener) {
     Objects.requireNonNull(listener, "listener");

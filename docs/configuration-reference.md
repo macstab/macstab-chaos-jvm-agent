@@ -652,21 +652,29 @@ REGEX patterns are compiled once per unique expression string and cached (GLOB p
 
 The agent registers `ChaosDiagnosticsMXBean` at `com.macstab.chaos.jvm:type=ChaosDiagnostics`. It exposes a single operation, `debugDump()`, which returns the multi-line diagnostics text (every registered scenario with its state, counters and reason, plus stressor details). There are no per-scenario attributes; for structured data use `controlPlane.diagnostics().snapshot()`.
 
-Access via `jconsole`, `jmc`, or any JMX client. `Observability.jmxEnabled = false` has no effect — the field is not read by the runtime.
+Access via `jconsole`, `jmc`, or any JMX client. The MBean is always registered: `Observability.jmxEnabled = false` has no effect — the field is not read by the runtime. With `-javaagent` it is registered once the application has initialised `java.util.logging` (at most 30 s after the start; [bootstrap](bootstrap.md) section 3), with `agentmain` and self-attach at once.
 
 ## 12.2 Structured Logging
 
-Chaos events are written to `java.util.logging` (logger `com.macstab.chaos.jvm`): `FAILED` at `WARNING`, `STARTED`/`STOPPED`/`INACTIVE` at `INFO`, `REGISTERED`/`APPLIED`/`RELEASED` at `FINE`, `SKIPPED` at `FINER`. Configure with `-Djava.util.logging.config.file=logging.properties` or programmatically. Each event is one line:
+Chaos events are written to `java.util.logging` (logger `com.macstab.chaos.jvm`): `FAILED` at `WARNING`, `STARTED`/`STOPPED`/`INACTIVE` at `INFO`, `REGISTERED`/`APPLIED`/`RELEASED` at `FINE`, `SKIPPED` at `FINER` (a `SKIPPED` event is built only while a listener of the application is registered; the agent's own JFR sink and report counter do not count). Configure with `-Djava.util.logging.config.file=logging.properties` or programmatically. Each event is one line:
 
 ```
-type=APPLIED scenarioId="slow-db" message="scenario effect applied" attributes={operation="JDBC_STATEMENT_EXECUTE", match="3", scope="jvm", effectType="DelayEffect", delayMillis="200"}
+type=APPLIED scenarioId="slow-db" message="scenario effect applied" attributes={operation="JDBC_STATEMENT_EXECUTE", match="3", scope="jvm", effectType="DelayEffect", delayNanos="200000000", delayMillis="200"}
 ```
 
 The scenario ID, the message and every attribute key and value are escaped — `\\`, `\"`, `\r`, `\n`, and `\uXXXX` for the other control characters (C0, DEL, C1) and U+2028/U+2029 — so a value with a line break or a quote can neither split the line nor forge another; ID, message and values are quoted. The attributes come in the order the event carries them, the same in every JVM (for `APPLIED`: operation, match, scope, effect type, the delay and, for session scenarios, session ID; the order per type is in [observability.md](observability.md#2-events)).
 
 ## 12.3 JFR Integration
 
-When `jdk.jfr` is available on the classpath (JDK 11+ default), the agent automatically installs a `ChaosEventListener` that emits `ChaosApplicationEvent` JFR events. These correlate chaos activity with JFR profiling data. View in JDK Mission Control or `jfr print`.
+When `jdk.jfr` is available, the agent installs a JFR sink as a lifecycle listener: it receives every event whether or not a recording runs (so the snapshot's total counts every application since the start), but never makes a skipped call build a `SKIPPED` event. It emits three events; view them in JDK Mission Control or with `jfr print`:
+
+| Event | Enabled by default | Fields |
+|---|---|---|
+| `com.macstab.chaos.jvm.ScenarioLifecycle` | yes | `scenarioId`, `message` (the event's message; `description` before 2.0), `eventType` (`REGISTERED`, `STARTED`, `STOPPED`, `INACTIVE`, `RELEASED`), `scopeKey` |
+| `com.macstab.chaos.jvm.EffectApplied` | no (one per applied call) | `scenarioId`, `operationType`, `effectType`, `scopeKey`, `sessionId`, `match` (the call's number among the scenario's matches, from 1), `delayNanos` (the applied delay, a nanosecond timespan; 0 without a delay) |
+| `com.macstab.chaos.jvm.StressorSnapshot` | yes, every 5 s | `activeScenarioCount`, `totalAppliedCount`, `activeScenarioIds` (at most 1024 characters) |
+
+`scopeKey` is `jvm` for a JVM scenario and `session:<id>` for a session scenario. Each event and field carries a `@Label`, and each event a `@Description`.
 
 ## 12.4 `ChaosDiagnostics` API
 

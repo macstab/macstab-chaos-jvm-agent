@@ -1,6 +1,7 @@
 package com.macstab.chaos.jvm.bootstrap.jfr;
 
 import jdk.jfr.Category;
+import jdk.jfr.Description;
 import jdk.jfr.Enabled;
 import jdk.jfr.Event;
 import jdk.jfr.Label;
@@ -19,6 +20,7 @@ import org.jspecify.annotations.Nullable;
 @Name("com.macstab.chaos.jvm.ScenarioLifecycle")
 @Category({"Chaos", "Lifecycle"})
 @Label("Chaos Scenario Lifecycle")
+@Description("A chaos scenario changed its state")
 @StackTrace(false)
 @Enabled(true)
 public final class ChaosScenarioLifecycleEvent extends Event {
@@ -30,9 +32,10 @@ public final class ChaosScenarioLifecycleEvent extends Event {
   @Label("Scenario ID")
   public @Nullable String scenarioId;
 
-  /** Human-readable description of the scenario. */
-  @Label("Description")
-  public @Nullable String description;
+  /** The event's message, as {@code ChaosEvent.message()} gives it. */
+  @Label("Message")
+  @Description("The event's message")
+  public @Nullable String message;
 
   /**
    * Lifecycle transition: one of {@code REGISTERED}, {@code STARTED}, {@code STOPPED}, {@code
@@ -41,7 +44,8 @@ public final class ChaosScenarioLifecycleEvent extends Event {
   @Label("Event Type")
   public @Nullable String eventType;
 
-  /** Scope key that was active when the transition occurred; {@code null} for global scope. */
+  /** The scope the scenario runs in: {@code jvm}, or {@code session:<id>}; empty when unknown. */
   @Label("Scope Key")
+  @Description("jvm, or session:<id>")
   public @Nullable String scopeKey;
 }

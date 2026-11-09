@@ -2,6 +2,7 @@ package com.macstab.chaos.jvm.bootstrap.jfr;
 
 import com.macstab.chaos.jvm.api.ChaosDiagnostics;
 import jdk.jfr.Category;
+import jdk.jfr.Description;
 import jdk.jfr.Event;
 import jdk.jfr.Label;
 import jdk.jfr.Name;
@@ -28,6 +29,7 @@ import org.jspecify.annotations.Nullable;
 @Name("com.macstab.chaos.jvm.StressorSnapshot")
 @Category({"Chaos", "Stressor"})
 @Label("Chaos Stressor Snapshot")
+@Description("The active chaos scenarios and the applications since the start")
 @Period("5 s")
 @StackTrace(false)
 public final class ChaosStressorSnapshotEvent extends Event {
