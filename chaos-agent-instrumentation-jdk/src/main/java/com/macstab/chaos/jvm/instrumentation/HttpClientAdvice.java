@@ -14,7 +14,7 @@ import org.jspecify.annotations.Nullable;
  *   <li>OkHttp 3/4 ({@code RealCall.execute} and its call chain)
  *   <li>Apache HttpComponents 4.x and 5.x ({@code doExecute} of the {@code CloseableHttpClient}
  *       implementations)
- *   <li>Spring WebClient / Reactor Netty ({@code reactor.netty.http.client.HttpClientConnect})
+ *   <li>Spring WebClient / Reactor Netty ({@code HttpClientConnect.MonoHttpConnect.subscribe})
  * </ul>
  *
  * <p>Each inner class targets one specific client method. URL extraction uses reflection via {@link
@@ -307,33 +307,40 @@ final class HttpClientAdvice {
   }
 
   /**
-   * Intercepts Reactor Netty {@code HttpClientConnect.connect(HttpClientRequest, NettyOutbound,
-   * ...)}. Spring {@code WebClient} internally dispatches through this method.
+   * Intercepts Reactor Netty {@code HttpClientConnect.MonoHttpConnect.subscribe(CoreSubscriber)}:
+   * once per subscription, so each retry or resubscription is a request of its own, with the URL of
+   * that subscription's configuration ({@link HttpUrlExtractor#fromReactorNettyConfig}; a deferred
+   * {@code uri(Mono)} is resolved by then). Spring {@code WebClient} dispatches through it. A
+   * reject skips the connection and signals the {@link java.io.IOException} to the subscriber
+   * ({@code Operators.error}), as a failed connection does; nothing is thrown from {@code
+   * subscribe}.
    */
-  static final class ReactorNettyConnectAdvice {
-    @Advice.OnMethodEnter
-    static void enter(@Advice.This final Object client) throws Throwable {
-      if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_HTTP)) {
-        return;
-      }
+  static final class ReactorNettySubscribeAdvice {
+    @Advice.OnMethodEnter(skipOn = Advice.OnNonDefaultValue.class)
+    static @Nullable Throwable enter(@Advice.FieldValue("config") final Object config) {
       final String url;
+      BootstrapDispatcher.beginInternalCall();
       try {
-        BootstrapDispatcher.beginInternalCall();
-        try {
-          url = HttpUrlExtractor.fromReactorNettyClient(client);
-        } finally {
-          BootstrapDispatcher.endInternalCall();
-        }
+        url = HttpUrlExtractor.fromReactorNettyConfig(config);
+      } finally {
+        BootstrapDispatcher.endInternalCall();
+      }
+      try {
         BootstrapDispatcher.beforeHttpSendAsync(url);
-      } catch (final Throwable throwable) {
-        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
-        throw throwable;
+        return null;
+      } catch (final Throwable rejected) {
+        return rejected;
       }
     }
 
-    @Advice.OnMethodExit(onThrowable = Throwable.class)
-    static void exit() {
-      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
+    @Advice.OnMethodExit
+    static void exit(
+        @Advice.Enter final @Nullable Throwable rejected,
+        @Advice.Argument(0) final Object subscriber) {
+      if (rejected != null) {
+        reactor.core.publisher.Operators.error(
+            (org.reactivestreams.Subscriber<?>) subscriber, rejected);
+      }
     }
   }
 }

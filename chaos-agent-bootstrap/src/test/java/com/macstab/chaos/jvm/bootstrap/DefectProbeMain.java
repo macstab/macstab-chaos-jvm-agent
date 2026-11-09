@@ -1604,7 +1604,7 @@ public final class DefectProbeMain {
       "org.apache.kafka.clients.consumer.KafkaConsumer",
       "org.apache.kafka.clients.producer.KafkaProducer",
       "org.apache.tomcat.util.threads.ThreadPoolExecutor",
-      "reactor.netty.http.client.HttpClientConnect",
+      "reactor.netty.http.client.HttpClientConnect$MonoHttpConnect",
       "redis.clients.jedis.Connection",
       "redis.clients.jedis.ConnectionFactory",
       "redis.clients.jedis.JedisFactory",

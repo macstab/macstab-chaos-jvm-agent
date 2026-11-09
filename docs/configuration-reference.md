@@ -1105,7 +1105,7 @@ Once the hook is wired, the matcher, effect, and activation policy behave like e
 
 **JSON type:** `"httpClient"`  
 **Operations:** `HTTP_CLIENT_SEND`, `HTTP_CLIENT_SEND_ASYNC`  
-**Purpose:** Intercept HTTP client requests across `java.net.http.HttpClient` (`send`, 2- and 3-arg `sendAsync`), `java.net.HttpURLConnection` / `HttpsURLConnection` (Spring `RestTemplate`'s default transport), OkHttp 3 and 4, Apache HttpComponents 4/5 (at `doExecute`, which every `execute` and `executeOpen` overload reaches once per request; a request a response handler sends is a call of its own), and Spring WebClient (Reactor Netty — the URI is taken from the client configuration). Nested or delegating client calls are evaluated once, at the outermost call.
+**Purpose:** Intercept HTTP client requests across `java.net.http.HttpClient` (`send`, 2- and 3-arg `sendAsync`), `java.net.HttpURLConnection` / `HttpsURLConnection` (Spring `RestTemplate`'s default transport), OkHttp 3 and 4, Apache HttpComponents 4/5 (at `doExecute`, which every `execute` and `executeOpen` overload reaches once per request; a request a response handler sends is a call of its own), and Spring WebClient (Reactor Netty — evaluated once per subscription, so each retry is a request; the URI is taken from that subscription's configuration). A reject on an asynchronous call fails it the way the client does: a failed future (`sendAsync`), `Callback.onFailure` (OkHttp `enqueue`), an error signal (Reactor Netty). Nested or delegating client calls are evaluated once, at the outermost call.
 
 **Fields:**
 

@@ -231,12 +231,10 @@ class HttpUrlExtractorTest {
   }
 
   @Nested
-  @DisplayName("Reactor Netty client")
+  @DisplayName("Reactor Netty configuration")
   class ReactorNetty {
 
     private record RnConfiguration(Object uri, Object baseUrl) {}
-
-    private record RnClient(Object configuration) {}
 
     /** A uri() declared two interfaces up, as Reactor Netty declares its accessors. */
     interface UriSource {
@@ -272,13 +270,11 @@ class HttpUrlExtractorTest {
     }
 
     @Test
-    @DisplayName("reads configuration().uri(), else configuration().baseUrl()")
+    @DisplayName("reads uri(), else baseUrl()")
     void readsUriThenBaseUrl() {
-      assertThat(
-              HttpUrlExtractor.fromReactorNettyClient(new RnClient(new RnConfiguration(URL, "x"))))
+      assertThat(HttpUrlExtractor.fromReactorNettyConfig(new RnConfiguration(URL, "x")))
           .isEqualTo(URL);
-      assertThat(
-              HttpUrlExtractor.fromReactorNettyClient(new RnClient(new RnConfiguration(null, URL))))
+      assertThat(HttpUrlExtractor.fromReactorNettyConfig(new RnConfiguration(null, URL)))
           .isEqualTo(URL);
     }
 
@@ -301,25 +297,17 @@ class HttpUrlExtractorTest {
     @Test
     @DisplayName("finds an accessor declared on a super-interface of an implemented interface")
     void findsInterfaceAccessors() {
-      assertThat(
-              HttpUrlExtractor.fromReactorNettyClient(new RnClient(new InheritedConfiguration())))
+      assertThat(HttpUrlExtractor.fromReactorNettyConfig(new InheritedConfiguration()))
           .isEqualTo(URL);
     }
 
     @Test
-    @DisplayName("is null without a client, a configuration or either accessor")
+    @DisplayName("is null without a configuration or either accessor")
     void nullWhenUnreadable() {
-      assertThat(HttpUrlExtractor.fromReactorNettyClient(null)).isNull();
-      assertThat(HttpUrlExtractor.fromReactorNettyClient(new RnClient(null))).isNull();
-      assertThat(
-              HttpUrlExtractor.fromReactorNettyClient(
-                  new RnClient(new RnConfiguration(null, null))))
-          .isNull();
-      assertThat(HttpUrlExtractor.fromReactorNettyClient(new RnClient(new EmptyConfiguration())))
-          .isNull();
-      assertThat(
-              HttpUrlExtractor.fromReactorNettyClient(
-                  new RnClient(new RnConfiguration(new Broken(), null))))
+      assertThat(HttpUrlExtractor.fromReactorNettyConfig(null)).isNull();
+      assertThat(HttpUrlExtractor.fromReactorNettyConfig(new RnConfiguration(null, null))).isNull();
+      assertThat(HttpUrlExtractor.fromReactorNettyConfig(new EmptyConfiguration())).isNull();
+      assertThat(HttpUrlExtractor.fromReactorNettyConfig(new RnConfiguration(new Broken(), null)))
           .isNull();
     }
 
@@ -332,7 +320,7 @@ class HttpUrlExtractorTest {
       final Class<?> type = encapsulated.getClass();
       assertThat(type.getModule().isOpen(type.getPackageName(), HttpUrlExtractor.class.getModule()))
           .isFalse();
-      assertThat(HttpUrlExtractor.fromReactorNettyClient(new RnClient(encapsulated))).isNull();
+      assertThat(HttpUrlExtractor.fromReactorNettyConfig(encapsulated)).isNull();
     }
   }
 }

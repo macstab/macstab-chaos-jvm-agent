@@ -852,6 +852,46 @@ class AgentEndToEndTest {
     }
 
     @Test
+    @DisplayName(
+        "Reactor Netty: a reject is an error signal, and each retry's subscription is evaluated")
+    void reactorRetryReject() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.run(
+              plan(
+                  scenario(
+                      "reactor-retry",
+                      ChaosSelector.httpClient(Set.of(OperationType.HTTP_CLIENT_SEND_ASYNC)),
+                      ChaosEffect.reject("service down"))),
+              HttpLibraryProbeMain.class,
+              "reactor-retry-reject",
+              httpClasspath);
+      assertThat(result.value("error.type")).isEqualTo("java.io.IOException");
+      assertThat(result.value("error.message")).isEqualTo("service down");
+      assertThat(result.longValue("matched.reactor-retry"))
+          .as("the first subscription and two retries")
+          .isEqualTo(3L);
+    }
+
+    @Test
+    @DisplayName("Reactor Netty: a baseUrl and a deferred uri are matched on the full URL")
+    void reactorBaseUrlDeferredUri() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.run(
+              plan(
+                  scenario(
+                      "reactor-deferred",
+                      ChaosSelector.httpClient(
+                          Set.of(OperationType.HTTP_CLIENT_SEND_ASYNC),
+                          NamePattern.glob("http://127.0.0.1:*/probe")),
+                      ChaosEffect.delay(Duration.ofMillis(1)))),
+              HttpLibraryProbeMain.class,
+              "reactor-base-url-deferred-uri",
+              httpClasspath);
+      assertThat(result.value("body")).isEqualTo("ok");
+      assertThat(result.longValue("matched.reactor-deferred")).isEqualTo(1L);
+    }
+
+    @Test
     @DisplayName("a host-filtered socket read scenario matches reads from that host only")
     void socketReadHostFilter() throws Exception {
       final ChildJvmProbe.ProbeResult result =

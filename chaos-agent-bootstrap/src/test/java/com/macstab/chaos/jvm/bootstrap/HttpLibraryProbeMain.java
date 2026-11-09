@@ -29,6 +29,10 @@ public final class HttpLibraryProbeMain {
           DefectProbeMain.withHttpServer(HttpLibraryProbeMain::hc5HandlerNestedRequest);
       case "reactor-netty-get" ->
           DefectProbeMain.withHttpServer(HttpLibraryProbeMain::reactorNettyGet);
+      case "reactor-retry-reject" ->
+          DefectProbeMain.withHttpServer(HttpLibraryProbeMain::reactorRetryReject);
+      case "reactor-base-url-deferred-uri" ->
+          DefectProbeMain.withHttpServer(HttpLibraryProbeMain::reactorBaseUrlDeferredUri);
       default -> throw new IllegalArgumentException("unknown probe mode: " + args[0]);
     }
     DefectProbeMain.printCounts();
@@ -162,6 +166,41 @@ public final class HttpLibraryProbeMain {
               });
       System.out.println("status=" + nestedStatus);
     }
+  }
+
+  /** A request retried twice: each subscription is a request, and how the last one failed. */
+  private static void reactorRetryReject(final String url) {
+    try {
+      final String body =
+          reactor.netty.http.client.HttpClient.create()
+              .get()
+              .uri(url)
+              .responseContent()
+              .aggregate()
+              .asString()
+              .retry(2)
+              .block(Duration.ofSeconds(10L));
+      System.out.println("body=" + body);
+    } catch (final RuntimeException failure) {
+      final Throwable cause = reactor.core.Exceptions.unwrap(failure);
+      System.out.println("error.type=" + cause.getClass().getName());
+      System.out.println("error.message=" + cause.getMessage());
+    }
+  }
+
+  /** A {@code baseUrl} and a path given as a {@code Mono}: known only when subscribed. */
+  private static void reactorBaseUrlDeferredUri(final String url) {
+    final URI uri = URI.create(url);
+    final String body =
+        reactor.netty.http.client.HttpClient.create()
+            .baseUrl(uri.getScheme() + "://" + uri.getAuthority())
+            .get()
+            .uri(reactor.core.publisher.Mono.just(uri.getPath()))
+            .responseContent()
+            .aggregate()
+            .asString()
+            .block(Duration.ofSeconds(10L));
+    System.out.println("body=" + body);
   }
 
   private static void reactorNettyGet(final String url) {

@@ -978,17 +978,15 @@ public final class JdkInstrumentationInstaller {
                                 ElementMatchers.namedOneOf(
                                         "connect", "getInputStream", "getOutputStream")
                                     .and(ElementMatchers.takesArguments(0)))));
+    // Reactor Netty: one evaluation per subscription of the request's Mono (1.1.21).
     return instrumentOptional(
         agentBuilder,
         typeBuilder ->
             typeBuilder.visit(
-                // HttpClientConnect.connect() takes no arguments; the request URI comes from the
-                // client configuration. Matching named("connect") alone also hit the generated
-                // lambda$connect$N methods.
                 advise(
-                    HttpClientAdvice.ReactorNettyConnectAdvice.class,
-                    ElementMatchers.named("connect").and(ElementMatchers.takesArguments(0)))),
-        "reactor.netty.http.client.HttpClientConnect");
+                    HttpClientAdvice.ReactorNettySubscribeAdvice.class,
+                    ElementMatchers.named("subscribe").and(ElementMatchers.takesArguments(1)))),
+        "reactor.netty.http.client.HttpClientConnect$MonoHttpConnect");
   }
 
   /**

@@ -172,26 +172,6 @@ public final class HttpUrlExtractor {
     }
   }
 
-  /**
-   * Extracts the request URL from a Reactor Netty {@code HttpClientConnect} (the client instance
-   * whose no-argument {@code connect()} is intercepted) through its public {@code configuration()},
-   * by the rule of {@link #fromReactorNettyConfig}.
-   *
-   * @param client the {@code reactor.netty.http.client.HttpClientConnect} instance; may be {@code
-   *     null}
-   * @return the URL string, or {@code null} if extraction fails
-   */
-  public static @Nullable String fromReactorNettyClient(final @Nullable Object client) {
-    if (client == null) {
-      return null;
-    }
-    try {
-      return fromReactorNettyConfig(invoke(client, "configuration"));
-    } catch (final Throwable ignored) {
-      return null;
-    }
-  }
-
   /** Whether {@code url} is an absolute {@code http} or {@code https} URL. */
   private static boolean isAbsolute(final String url) {
     return url.regionMatches(true, 0, "http://", 0, "http://".length())

@@ -676,10 +676,11 @@ public enum OperationType {
   /**
    * Fires before an asynchronous HTTP client request is dispatched. Covers {@code
    * java.net.http.HttpClient.sendAsync}, an OkHttp {@code Call.enqueue} (evaluated in its call
-   * chain on OkHttp's dispatcher thread), and Spring WebClient's Reactor Netty client. Chaos here
-   * can inject latency or reject the call with the client's own {@link java.io.IOException},
-   * delivered the way the client fails an asynchronous call: a failed future ({@code sendAsync}),
-   * {@code Callback.onFailure} (OkHttp); a suppress is refused at activation.
+   * chain on OkHttp's dispatcher thread), and Spring WebClient's Reactor Netty client (once per
+   * subscription, so each retry is evaluated). Chaos here can inject latency or reject the call
+   * with the client's own {@link java.io.IOException}, delivered the way the client fails an
+   * asynchronous call: a failed future ({@code sendAsync}), {@code Callback.onFailure} (OkHttp), an
+   * error signal (Reactor Netty); a suppress is refused at activation.
    *
    * <p>The {@code targetName} field of the invocation context carries the request URL. Use with
    * {@link ChaosSelector.HttpClientSelector}.
