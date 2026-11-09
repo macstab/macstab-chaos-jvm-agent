@@ -78,16 +78,7 @@ class StressorLifecycleTest {
               "-cp",
               System.getProperty("java.class.path"),
               ClassDefinitionProbeMain.class.getName()));
-      final Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
-      try {
-        final String output =
-            new String(
-                process.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
-        assertThat(process.waitFor(60, TimeUnit.SECONDS)).as(output).isTrue();
-        return output;
-      } finally {
-        process.destroyForcibly();
-      }
+      return BoundedChildJvm.run(command, Duration.ofSeconds(60));
     }
   }
 
@@ -126,8 +117,9 @@ class StressorLifecycleTest {
     @Test
     @DisplayName("running out of direct memory frees what it allocated and rethrows")
     void outOfDirectMemoryFreesWhatItAllocated() throws Exception {
-      final Process process =
-          new ProcessBuilder(
+      final String output =
+          BoundedChildJvm.run(
+              java.util.List.of(
                   java.nio.file.Path.of(System.getProperty("java.home"), "bin", "java").toString(),
                   "-XX:MaxDirectMemorySize=8m",
                   // The packages the agent jar's manifest opens for the eager free.
@@ -135,18 +127,8 @@ class StressorLifecycleTest {
                   "--add-opens=java.base/jdk.internal.ref=ALL-UNNAMED",
                   "-cp",
                   System.getProperty("java.class.path"),
-                  DirectBufferOomProbeMain.class.getName())
-              .redirectErrorStream(true)
-              .start();
-      final String output;
-      try {
-        output =
-            new String(
-                process.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
-        assertThat(process.waitFor(60, TimeUnit.SECONDS)).isTrue();
-      } finally {
-        process.destroyForcibly();
-      }
+                  DirectBufferOomProbeMain.class.getName()),
+              Duration.ofSeconds(60));
 
       assertThat(output).contains("thrown=OutOfMemoryError");
       final long used =

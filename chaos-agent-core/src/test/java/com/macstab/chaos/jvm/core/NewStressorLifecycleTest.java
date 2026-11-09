@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
 import com.macstab.chaos.jvm.api.ChaosEffect;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Optional;
@@ -150,22 +149,15 @@ class NewStressorLifecycleTest {
     @Test
     @DisplayName("keeps flooding for 30 s in a 64 MB heap without running out of memory")
     void keepsFloodingInASmallHeap() throws Exception {
-      final Process process =
-          new ProcessBuilder(
+      final String output =
+          BoundedChildJvm.run(
+              java.util.List.of(
                   Path.of(System.getProperty("java.home"), "bin", "java").toString(),
                   "-Xmx64m",
                   "-cp",
                   System.getProperty("java.class.path"),
-                  ReferenceQueueFloodProbeMain.class.getName())
-              .redirectErrorStream(true)
-              .start();
-      final String output;
-      try {
-        output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-        assertThat(process.waitFor(60, TimeUnit.SECONDS)).isTrue();
-      } finally {
-        process.destroyForcibly();
-      }
+                  ReferenceQueueFloodProbeMain.class.getName()),
+              Duration.ofSeconds(60));
 
       assertThat(output).doesNotContain("OutOfMemoryError");
       assertThat(probeValue(output, "late")).isGreaterThan(probeValue(output, "early"));

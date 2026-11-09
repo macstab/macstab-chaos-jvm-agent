@@ -1678,16 +1678,7 @@ class CompatibilityValidatorTest {
       command.addAll(
           List.of(
               "-cp", System.getProperty("java.class.path"), RuntimeFlagsProbeMain.class.getName()));
-      final Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
-      try {
-        final String output =
-            new String(
-                process.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
-        assertThat(process.waitFor(60, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
-        return output;
-      } finally {
-        process.destroyForcibly();
-      }
+      return BoundedChildJvm.run(command, Duration.ofSeconds(60));
     }
 
     @Test

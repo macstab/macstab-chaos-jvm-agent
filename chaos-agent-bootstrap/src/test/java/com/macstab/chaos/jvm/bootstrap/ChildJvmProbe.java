@@ -93,13 +93,17 @@ final class ChildJvmProbe {
     command.add(mainClass.getName());
     command.add(mode);
     command.addAll(List.of(programArgs));
-    final Process process = new ProcessBuilder(command).redirectErrorStream(true).start();
-    final String output =
-        new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-    assertThat(process.waitFor(TIMEOUT_SECONDS, TimeUnit.SECONDS))
-        .as("probe JVM must finish within %d s: %s", TIMEOUT_SECONDS, output)
+    final BoundedRun run =
+        runBounded(
+            command,
+            Files.createTempFile(workDir, "expecting-failure-", ".log"),
+            Duration.ofSeconds(TIMEOUT_SECONDS));
+    assertThat(run.finished())
+        .as(
+            "probe JVM must finish within %d s: %s\nthreads:\n%s",
+            TIMEOUT_SECONDS, run.output(), run.threads())
         .isTrue();
-    return new Failure(process.exitValue(), output);
+    return new Failure(run.exitValue(), run.output());
   }
 
   /** Exit value and output of a probe run expected to fail. */
@@ -402,16 +406,33 @@ final class ChildJvmProbe {
    */
   static String threadDump(final Process process) {
     try {
-      final Process jcmd =
-          new ProcessBuilder(
-                  java.nio.file.Path.of(System.getProperty("java.home"), "bin", "jcmd").toString(),
-                  Long.toString(process.pid()),
-                  "Thread.print")
-              .redirectErrorStream(true)
-              .start();
-      final byte[] dump = jcmd.getInputStream().readAllBytes();
-      jcmd.waitFor(10, TimeUnit.SECONDS);
-      return new String(dump, StandardCharsets.UTF_8);
+      // The dump goes to a file, not a pipe: a jcmd that never ends must not block this read, so
+      // it is waited for at most 10 s and then destroyed.
+      final Path dump = Files.createTempFile("chaos-thread-dump-", ".txt");
+      try {
+        final Process jcmd =
+            new ProcessBuilder(
+                    Path.of(System.getProperty("java.home"), "bin", "jcmd").toString(),
+                    Long.toString(process.pid()),
+                    "Thread.print")
+                .redirectErrorStream(true)
+                .redirectOutput(dump.toFile())
+                .start();
+        try {
+          if (!jcmd.waitFor(10, TimeUnit.SECONDS)) {
+            jcmd.destroyForcibly().waitFor(5, TimeUnit.SECONDS);
+            return "(no thread dump: jcmd did not finish within 10 s)\n"
+                + Files.readString(dump, StandardCharsets.UTF_8);
+          }
+          return Files.readString(dump, StandardCharsets.UTF_8);
+        } finally {
+          if (jcmd.isAlive()) {
+            jcmd.destroyForcibly();
+          }
+        }
+      } finally {
+        Files.deleteIfExists(dump);
+      }
     } catch (final java.io.IOException | InterruptedException failed) {
       return "(no thread dump: " + failed + ")";
     }
