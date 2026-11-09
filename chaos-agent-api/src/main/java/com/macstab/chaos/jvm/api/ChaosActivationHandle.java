@@ -10,18 +10,18 @@ package com.macstab.chaos.jvm.api;
  * <p>Lifecycle state machine:
  *
  * <pre>
- * REGISTERED
- *   │
- *   ├─ [AUTOMATIC] → ACTIVE ──┐
- *   │                         │
- *   └─ [MANUAL] → INACTIVE    │
- *        │                    │
- *        └── start() ─────────┤
- *                             │
- *                          stop() / close()
- *                             │
- *                          STOPPED
+ * REGISTERED ── start() ──→ ACTIVE      (AUTOMATIC: inside activate(); MANUAL: handle.start())
+ * REGISTERED ── stop() / close() ──→ STOPPED
+ * ACTIVE ── expiry ──→ INACTIVE          (activeFor / activeUntil passed, maxApplications spent,
+ *                                         or the stressor ended)
+ * ACTIVE ── stop() / close() ──→ STOPPED
+ * INACTIVE ── stop() / close() ──→ STOPPED
  * </pre>
+ *
+ * <p>Only a {@code REGISTERED} scenario starts: {@code INACTIVE} and {@code STOPPED} are final for
+ * the handle, and {@code start()} on them does nothing. {@code close()} also unregisters the
+ * scenario; activating its id again registers a new one that replaces a {@code STOPPED} or {@code
+ * INACTIVE} scenario.
  *
  * <p>Once {@code STOPPED}, the handle cannot be restarted. Create a new activation to re-inject the
  * same scenario.

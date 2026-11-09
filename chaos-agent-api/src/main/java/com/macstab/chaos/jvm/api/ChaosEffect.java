@@ -260,8 +260,12 @@ public sealed interface ChaosEffect
   }
 
   /**
-   * Returns a suppress effect that silently discards the matched operation. Callers receive {@code
-   * null} or {@code false} depending on operation semantics.
+   * Returns a suppress effect that skips the matched operation. Where the call can be skipped the
+   * caller sees no exception and receives {@code null}, {@code false}, {@code 0} or nothing,
+   * depending on the operation. Where skipping cannot be expressed the call fails instead: a thread
+   * start ({@code THREAD_START}, {@code VIRTUAL_THREAD_START}) throws {@link
+   * java.util.concurrent.RejectedExecutionException} and {@code SYSTEM_EXIT_REQUEST} throws {@link
+   * SecurityException}.
    *
    * @return a SuppressEffect
    */
@@ -412,9 +416,8 @@ public sealed interface ChaosEffect
 
   /**
    * Returns a direct buffer pressure stressor that allocates off-heap {@link
-   * java.nio.ByteBuffer#allocateDirect direct ByteBuffers} without registering a Cleaner,
-   * simulating NIO/Netty buffer leaks. The buffers are intentionally not cleaned up until the JVM
-   * exits.
+   * java.nio.ByteBuffer#allocateDirect direct ByteBuffers} and retains them, simulating NIO/Netty
+   * buffer leaks. The buffers are held until the scenario stops, which releases them.
    *
    * <p>Use with {@link ChaosSelector.StressSelector} targeting {@link
    * ChaosSelector.StressTarget#DIRECT_BUFFER}.
@@ -570,8 +573,8 @@ public sealed interface ChaosEffect
 
   /**
    * Returns a string intern pressure stressor that calls {@link String#intern()} on {@code
-   * internCount} unique strings of {@code stringLengthBytes} bytes each, exhausting the JVM's
-   * native string table in Metaspace.
+   * internCount} unique strings of {@code stringLengthBytes} bytes each, growing the JVM's string
+   * table. The strings live on the heap and are retained until the scenario stops.
    *
    * <p>Use with {@link ChaosSelector.StressSelector} targeting {@link
    * ChaosSelector.StressTarget#STRING_INTERN_PRESSURE}.
@@ -1083,8 +1086,12 @@ public sealed interface ChaosEffect
   }
 
   /**
-   * Suppresses the matched operation silently. Callers receive a null return or false boolean
-   * depending on operation semantics.
+   * Skips the matched operation. Where the call can be skipped the caller sees no exception and
+   * receives a {@code null}, {@code false} or {@code 0} return, or the call returns without doing
+   * its work. Where skipping cannot be expressed the call fails instead: a thread start ({@code
+   * THREAD_START}, {@code VIRTUAL_THREAD_START}) throws {@link
+   * java.util.concurrent.RejectedExecutionException} and {@code SYSTEM_EXIT_REQUEST} throws {@link
+   * SecurityException} (the exit is vetoed).
    */
   record SuppressEffect() implements ChaosEffect {}
 
@@ -1353,13 +1360,14 @@ public sealed interface ChaosEffect
    * Allocates off-heap direct ByteBuffers to exhaust native direct memory. Simulates direct buffer
    * leaks common in NIO-heavy applications (Netty, Kafka clients).
    *
-   * <p>When registerCleaner is false the buffers are intentionally leaked — no Cleaner is
-   * registered. When true a Cleaner is registered but the reference is dropped, so the buffer is
-   * cleaned only when GC runs.
+   * <p>When registerCleaner is false the buffers are retained until the scenario stops. When true
+   * each buffer is allocated and dropped, so the JDK's cleaner frees it at the next GC: a burst of
+   * short-lived buffers.
    *
    * @param totalBytes total direct memory to retain; must be {@code > 0}
    * @param bufferSizeBytes size of each buffer; {@code <= totalBytes}
-   * @param registerCleaner whether a Cleaner is registered for each buffer
+   * @param registerCleaner {@code false} to retain the buffers until the scenario stops, {@code
+   *     true} to drop each one for the next GC to free
    */
   record DirectBufferPressureEffect(long totalBytes, int bufferSizeBytes, boolean registerCleaner)
       implements ChaosEffect {
@@ -1713,9 +1721,9 @@ public sealed interface ChaosEffect
   }
 
   /**
-   * Interns a large number of unique strings into the JVM's native string table (Metaspace),
-   * creating memory pressure distinct from heap and class-loading pressure. Interned strings are
-   * not eligible for GC until the classloader that owns them is collected.
+   * Interns a large number of unique strings, growing the JVM's string table: a long table slows
+   * every {@code intern()} of the application. The strings live on the heap and are retained until
+   * the scenario stops; the next collection after that removes them from the table.
    *
    * @param internCount number of unique strings to intern; must be {@code > 0}
    * @param stringLengthBytes byte length of each interned string; must be {@code > 0}
@@ -1755,18 +1763,17 @@ public sealed interface ChaosEffect
   }
 
   /**
-   * Pins JDK 21+ virtual-thread carrier platform threads by keeping them inside {@code
-   * synchronized} blocks for {@code pinDuration} each cycle.
-   *
-   * <p>In JDK 21, a virtual thread mounted on a carrier that enters a {@code synchronized} block
-   * cannot be unmounted (pinned). This stressor simulates that condition by explicitly occupying
-   * {@code pinnedThreadCount} platform threads inside synchronized monitors, reducing the effective
-   * carrier pool available for virtual-thread scheduling and causing starvation under load.
+   * Starts {@code pinnedThreadCount} virtual threads, each of which holds its carrier for {@code
+   * pinDuration} per cycle: on JDK 21–23 by sleeping inside a {@code synchronized} block (true
+   * pinning, no CPU), on JDK 24 and later, where {@code synchronized} no longer pins (JEP 491), by
+   * spin-waiting (one CPU per held carrier). The held carriers are unavailable to other virtual
+   * threads, which queue for a carrier under load. Without {@code allowDestructiveEffects} it
+   * leaves one carrier free.
    *
    * <p>Cleanup: all pinning threads are interrupted and the monitor is released when the activation
    * handle is closed.
    *
-   * @param pinnedThreadCount number of carrier platform threads to pin; must be {@code > 0}
+   * @param pinnedThreadCount number of carrier threads to hold; must be {@code > 0}
    * @param pinDuration how long each pin is held per cycle; must be positive
    */
   record VirtualThreadCarrierPinningEffect(int pinnedThreadCount, Duration pinDuration)

@@ -332,7 +332,7 @@ Sealed hierarchy. Divided into interceptor effects (applied inline on the callin
 
 ## Presets
 
-`ChaosPresets` holds ready-made scenarios for the faults production systems meet, each the JVM counterpart of a native rule. A preset returns a prefilled `ChaosScenario.Builder` (id, description, selector, effect, tag `preset=<name>`), so scope, activation policy and id stay yours.
+`ChaosPresets` holds ready-made scenarios for the faults production systems meet, each the JVM counterpart of a native rule. A preset returns a prefilled `ChaosScenario.Builder` (id, description, selector, effect, tag `preset=<name>`), so scope and activation policy stay yours; the id is the preset's.
 
 | Preset | Fault | Native rule |
 |--------|-------|-------------|
@@ -386,7 +386,8 @@ ChaosEffect.gate(Duration.ofSeconds(30));
 // Throw an operation-appropriate exception
 ChaosEffect.reject("connection refused");
 
-// Silently discard; return null/false per operation contract
+// Skip the call: null/false/0 or no work per operation; a thread start
+// throws RejectedExecutionException and System.exit throws SecurityException
 ChaosEffect.suppress();
 
 // Complete a CompletableFuture exceptionally
