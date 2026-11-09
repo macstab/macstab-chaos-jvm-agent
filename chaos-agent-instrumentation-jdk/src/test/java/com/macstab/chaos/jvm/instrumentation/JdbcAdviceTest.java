@@ -23,16 +23,19 @@ import org.junit.jupiter.api.Test;
 @DisplayName("JdbcAdvice / JDBC bridge")
 class JdbcAdviceTest {
 
+  private ChaosRuntime runtime;
   private ChaosBridge bridge;
 
   @BeforeEach
   void setUp() {
-    bridge = new ChaosBridge(new ChaosRuntime());
+    runtime = new ChaosRuntime();
+    bridge = new ChaosBridge(runtime);
   }
 
   @AfterEach
   void resetBridge() {
     BootstrapDispatcher.install(null, null);
+    runtime.close();
   }
 
   @Nested
