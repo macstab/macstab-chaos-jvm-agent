@@ -143,6 +143,7 @@ Migration steps for each change: [docs/migration-2.0.md](docs/migration-2.0.md).
 
 ### Bug Fixes
 
+* **core:** the `UnknownHostException` of a DNS family filter that leaves no address is built by `FailureFactory` and starts at the call site, without the agent's frames.
 * **instrumentation, core:** `HttpURLConnection` connects, the file system provider's open, copy, move, delete and `deleteIfExists`, and JDBC statements check idle before they format their URL, path or SQL snippet: each allocated a string per call with no scenario for the operation.
 * **instrumentation:** a hook group that fails after others in the same activation no longer skips the retransformation of the classes that escape an installation, so the groups woven before it get their advice into those classes too; a refused retransformation of such a class is listed in `hookFailures`, which keeps at most 256 entries. `MBeanServer.getAttributes` checks idle before it joins the attribute names.
 * **instrumentation:** two copies of the agent in different class loaders (two web applications that each bundle it) installing at the same time could both pass the check for another installed copy, and the later one replaced the first one's delegate: the first copy's scenarios stopped receiving calls. The check is repeated together with the install, under the bootstrap dispatcher's lock, so the later copy is refused.

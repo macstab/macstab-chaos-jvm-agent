@@ -458,6 +458,22 @@ final class FailureFactory {
   }
 
   /**
+   * The failure of a DNS answer a family filter left without an address: the lookup fails as one
+   * for a name with no address of that family does.
+   *
+   * @param hostname the name looked up
+   * @param family the family the answer was filtered to
+   * @return the {@link java.net.UnknownHostException}, trimmed to the call site
+   */
+  static java.net.UnknownHostException noAddressOfFamily(
+      final String hostname, final ChaosEffect.AddressFamily family) {
+    return (java.net.UnknownHostException)
+        atCallSite(
+            new java.net.UnknownHostException(
+                hostname + ": no " + family + " address in the answer"));
+  }
+
+  /**
    * The failure of a suppressed thread start: a start that cannot be skipped is refused.
    *
    * @return the {@link RejectedExecutionException}, trimmed to the call site

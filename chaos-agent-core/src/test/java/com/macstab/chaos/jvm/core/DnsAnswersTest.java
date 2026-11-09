@@ -58,6 +58,26 @@ class DnsAnswersTest {
   }
 
   @Test
+  @DisplayName(
+      "an empty family filter fails through FailureFactory: the UnknownHostException starts at"
+          + " the call site, without the agent's frames")
+  void familyFailureAtCallSite() {
+    assertThatThrownBy(
+            () ->
+                shape(
+                    ChaosEffect.dnsFamily(ChaosEffect.AddressFamily.IPV6),
+                    "h",
+                    Arrays.copyOf(answer(), 2),
+                    null))
+        .isInstanceOf(UnknownHostException.class)
+        .hasMessage("h: no IPV6 address in the answer")
+        .satisfies(
+            failure ->
+                assertThat(failure.getStackTrace())
+                    .noneMatch(frame -> frame.getClassName().equals(DnsAnswers.class.getName())));
+  }
+
+  @Test
   @DisplayName("limit keeps the first n, shuffle keeps the same addresses")
   void limitAndShuffle() throws Exception {
     assertThat(shape(ChaosEffect.dnsLimit(1), "h", answer(), null)).containsExactly(answer()[0]);

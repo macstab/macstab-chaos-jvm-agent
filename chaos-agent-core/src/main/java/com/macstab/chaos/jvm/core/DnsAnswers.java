@@ -43,15 +43,15 @@ final class DnsAnswers {
     } else {
       Collections.addAll(addresses, answer);
     }
-    if (effect.family() != null) {
+    final ChaosEffect.AddressFamily family = effect.family();
+    if (family != null) {
       addresses.removeIf(
           address ->
-              effect.family() == ChaosEffect.AddressFamily.IPV4
+              family == ChaosEffect.AddressFamily.IPV4
                   ? !(address instanceof Inet4Address)
                   : !(address instanceof Inet6Address));
       if (addresses.isEmpty()) {
-        throw new UnknownHostException(
-            hostname + ": no " + effect.family() + " address in the answer");
+        throw FailureFactory.noAddressOfFamily(hostname, family);
       }
     }
     if (effect.shuffle()) {
