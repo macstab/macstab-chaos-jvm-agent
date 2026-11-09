@@ -346,7 +346,7 @@ public sealed interface ChaosEffect
    * in poorly-written NIO event loops.
    *
    * <p>Only valid with {@link ChaosSelector.NioSelector} and {@link
-   * OperationType#NIO_SELECTOR_SELECT}.
+   * OperationType#NIO_SELECTOR_SELECT} as its only operation.
    *
    * @return a SpuriousWakeupEffect
    */
@@ -1635,7 +1635,7 @@ public sealed interface ChaosEffect
   /**
    * Causes {@link java.nio.channels.Selector#select()} to return 0 immediately with no ready keys,
    * simulating a spurious wakeup. Only valid with {@link ChaosSelector.NioSelector} and {@link
-   * OperationType#NIO_SELECTOR_SELECT}.
+   * OperationType#NIO_SELECTOR_SELECT} as its only operation.
    */
   record SpuriousWakeupEffect() implements ChaosEffect {}
 

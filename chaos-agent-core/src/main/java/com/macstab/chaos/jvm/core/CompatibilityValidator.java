@@ -460,8 +460,8 @@ final class CompatibilityValidator {
    *   <li>{@link ChaosEffect.ReturnValueCorruptionEffect} requires {@link
    *       ChaosSelector.MethodSelector} with {@code METHOD_EXIT} operations only.
    *   <li>{@link ChaosEffect.ClockSkewEffect} requires {@link ChaosSelector.JvmRuntimeSelector}.
-   *   <li>{@link ChaosEffect.SpuriousWakeupEffect} requires {@link ChaosSelector.NioSelector}
-   *       containing {@code NIO_SELECTOR_SELECT}.
+   *   <li>{@link ChaosEffect.SpuriousWakeupEffect} requires {@link ChaosSelector.NioSelector} with
+   *       {@code NIO_SELECTOR_SELECT} as its only operation.
    *   <li>{@link ChaosSelector.NioSelector} operations must all be NIO operation types.
    *   <li>{@link ChaosSelector.NetworkSelector} operations must all be socket operation types.
    *   <li>{@link ChaosSelector.ThreadLocalSelector} operations must be confined to {@code
@@ -604,10 +604,14 @@ final class CompatibilityValidator {
     if (!(selector instanceof ChaosSelector.NioSelector)) {
       throw new ChaosValidationException("SpuriousWakeupEffect requires NioSelector");
     }
+    // A wakeup is a select() that returns 0 keys: on any other NIO call the same terminal would
+    // skip the call instead.
     if (selector instanceof ChaosSelector.NioSelector nioSelector
-        && !nioSelector.operations().contains(OperationType.NIO_SELECTOR_SELECT)) {
+        && !nioSelector.operations().equals(Set.of(OperationType.NIO_SELECTOR_SELECT))) {
       throw new ChaosValidationException(
-          "SpuriousWakeupEffect requires NioSelector with NIO_SELECTOR_SELECT operation");
+          "SpuriousWakeupEffect requires NioSelector with NIO_SELECTOR_SELECT as its only"
+              + " operation, not "
+              + nioSelector.operations());
     }
   }
 

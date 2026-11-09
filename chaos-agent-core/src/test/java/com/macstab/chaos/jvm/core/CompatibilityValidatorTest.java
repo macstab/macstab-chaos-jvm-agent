@@ -951,6 +951,25 @@ class CompatibilityValidatorTest {
     }
 
     @Test
+    @DisplayName("with NioSelector adding another NIO operation to NIO_SELECTOR_SELECT throws")
+    void spuriousWakeupWithSelectAndAnotherNioOperationThrows() {
+      // A wakeup is a select() that returns 0 keys; on a channel read or write the same terminal
+      // would skip the call instead.
+      ChaosScenario scenario =
+          ChaosScenario.builder("spurious-mixed")
+              .selector(
+                  new ChaosSelector.NioSelector(
+                      Set.of(OperationType.NIO_SELECTOR_SELECT, OperationType.NIO_CHANNEL_READ),
+                      NamePattern.any()))
+              .effect(new ChaosEffect.SpuriousWakeupEffect())
+              .build();
+      assertThatThrownBy(() -> CompatibilityValidator.validate(scenario, featureSet))
+          .isInstanceOf(ChaosValidationException.class)
+          .hasMessageContaining("NIO_SELECTOR_SELECT")
+          .hasMessageContaining("NIO_CHANNEL_READ");
+    }
+
+    @Test
     @DisplayName("with NioSelector containing NIO_SELECTOR_SELECT succeeds")
     void spuriousWakeupWithValidNioSelectorSucceeds() {
       ChaosScenario scenario =

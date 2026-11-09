@@ -391,7 +391,7 @@ Key checks:
 
 - Stressor effects require `StressSelector`, each stress target its own effect type; stress scenarios must be JVM scoped
 - A `reject` only where the real call can fail: refused on `THREAD_PARK`, `MONITOR_ENTER`, `SYSTEM_GC_REQUEST`, `SYSTEM_EXIT_REQUEST`, `THREAD_LOCAL_GET` / `SET`, `ASYNC_CANCEL`, `ZIP_DEFLATE`, `EXECUTOR_SHUTDOWN`, `EXECUTOR_WORKER_RUN`, `FORK_JOIN_TASK_RUN`, `QUEUE_TAKE`, `QUEUE_POLL`, `NETTY_CHANNEL_READ` and the clock reads, each with the alternative to use
-- `SpuriousWakeupEffect` requires `NioSelector`
+- `SpuriousWakeupEffect` requires a `NioSelector` with `NIO_SELECTOR_SELECT` as its only operation
 - `ReturnValueCorruptionEffect` requires `MethodSelector` with `METHOD_EXIT` operation
 - `ExceptionInjectionEffect` requires `MethodSelector` with `METHOD_ENTER` operation
 - `ExceptionalCompletionEffect` requires `AsyncSelector`

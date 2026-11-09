@@ -1683,7 +1683,7 @@ Wall-clock reads (`currentTimeMillis`, `Instant`, `java.time`, `Date`) are skewe
 **JSON type:** `"spuriousWakeup"`  
 **Purpose:** Cause `Selector.select()` to return 0 with no ready keys, simulating the spurious wakeup behaviour that can cause busy-loops in NIO event loops.
 
-**Valid with:** a `NioSelector` whose operations include `NIO_SELECTOR_SELECT`. Select that operation alone: the validator does not refuse other NIO operations in the same selector, but a spurious wakeup means nothing for a channel read, write, connect or accept.
+**Valid with:** a `NioSelector` with `NIO_SELECTOR_SELECT` as its only operation. Any other NIO operation in the same selector is refused: a spurious wakeup means nothing for a channel read, write, connect or accept.
 
 **Fields:** none.
 

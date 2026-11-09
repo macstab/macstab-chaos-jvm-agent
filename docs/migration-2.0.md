@@ -58,6 +58,7 @@
 | 39 | A gate read from JSON needs `maxBlock` | a plan file, an HTTP or JMX plan, or `@WithChaos` JSON has a `gate` without `maxBlock` | set `maxBlock` (§39) |
 | 40 | The JFR field `description` is `message` | a JFR query, a JMC view or a `RecordedEvent.getString("description")` reads `com.macstab.chaos.jvm.ScenarioLifecycle` | read `message` (§40) |
 | 41 | A test's sessions and listeners end with it | a test opens a session or adds a listener through the injected `ChaosControlPlane` and a later test relies on it | open or add it again in that test, or through `ChaosPlatform.current()` (§41) |
+| 42 | `spuriousWakeup` selects `NIO_SELECTOR_SELECT` alone | a `spuriousWakeup` scenario's `NioSelector` also lists a channel operation (`NIO_CHANNEL_READ`, `NIO_CHANNEL_WRITE`, `NIO_CHANNEL_CONNECT`, `NIO_CHANNEL_ACCEPT`) | remove the other operations, or put them in a scenario of their own (§42) |
 
 ---
 
@@ -461,6 +462,12 @@ The `com.macstab.chaos.jvm.ScenarioLifecycle` event's field `description` is ren
 The `TrackingChaosControlPlane` a test extension injects as `ChaosControlPlane` releases everything the test created through it, not only the scenarios it activated: `stopTracked()` also closes the sessions opened with `openSession` and removes the event listeners added with `addEventListener`. The testkit `ChaosAgentExtension` does so after each test, the Spring Boot 3/4, Micronaut and Quarkus extensions after the test class. A listener the test removed itself is left alone. The control plane bean that an application context (Spring, Micronaut) or a Quarkus application gets keeps the application's listeners and sessions (`new TrackingChaosControlPlane(delegate, false)`); only what it activated is stopped.
 
 Before (1.x): a listener added in one test kept receiving the events of every later test in the JVM, and a session opened through the injected plane stayed open. Now add the listener, or open the session, in each test that needs it, or through `ChaosPlatform.current()` when it must outlive the test.
+
+## 42. `spuriousWakeup` selects `NIO_SELECTOR_SELECT` alone
+
+A `spuriousWakeup` effect is refused with `ChaosValidationException` unless its `NioSelector` lists `NIO_SELECTOR_SELECT` as its only operation. 1.x required `NIO_SELECTOR_SELECT` among the operations but accepted others beside it, and on a channel read, write, connect or accept the effect skipped the call instead of waking a selector.
+
+Before (1.x): `new NioSelector(Set.of(NIO_SELECTOR_SELECT, NIO_CHANNEL_READ), …)` with `spuriousWakeup()` was accepted. Now select `NIO_SELECTOR_SELECT` alone; give a channel operation a scenario of its own with an effect it supports (a delay, `reject`, `errno`).
 
 ---
 
