@@ -30,8 +30,10 @@ final class ChaosDiagnosticsMBean implements ChaosDiagnosticsMXBean {
   private final ChaosDiagnostics diagnostics;
   private final ChaosControlPlane controlPlane;
   private final boolean controlEnabled;
-  private final java.util.function.Predicate<String> visible;
-  private final java.util.function.Function<java.util.function.Predicate<String>, String> dump;
+  private final java.util.function.Predicate<ChaosDiagnostics.ScenarioReport> visible;
+  private final java.util.function.Function<
+          java.util.function.Predicate<ChaosDiagnostics.ScenarioReport>, String>
+      dump;
 
   /** Handles of scenarios activated through JMX, by scenario id. */
   private final Map<String, ChaosActivationHandle> activated = new ConcurrentHashMap<>();
@@ -48,14 +50,14 @@ final class ChaosDiagnosticsMBean implements ChaosDiagnosticsMXBean {
     this.diagnostics = runtime.diagnostics();
     this.controlPlane = runtime;
     this.controlEnabled = controlEnabled;
-    this.visible = runtime::jmxVisible;
+    this.visible = report -> runtime.jmxVisible(report.scopeKey(), report.id());
     this.dump = runtime::debugDump;
   }
 
   @Override
   public String[] listScenarios() {
     return diagnostics.snapshot().scenarios().stream()
-        .filter(report -> visible.test(report.id()))
+        .filter(visible)
         .map(
             report ->
                 report.id()

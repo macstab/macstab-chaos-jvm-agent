@@ -155,10 +155,10 @@ class LifecycleEdgeTest {
       runtime.applyPlanObservability(List.of("x"), hidden, second);
 
       runtime.clearPlanObservability(List.of("x"), first);
-      assertThat(runtime.jmxVisible("x")).isFalse();
+      assertThat(runtime.jmxVisible("jvm", "x")).isFalse();
 
       runtime.clearPlanObservability(List.of("x"), second);
-      assertThat(runtime.jmxVisible("x")).isTrue();
+      assertThat(runtime.jmxVisible("jvm", "x")).isTrue();
     }
 
     @Test
@@ -328,9 +328,9 @@ class LifecycleEdgeTest {
                     new ChaosPlan.Observability(false, true, false),
                     List.of(sessionScenario("hidden-s"))));
 
-        assertThat(runtime.jmxVisible("hidden-s")).isFalse();
+        assertThat(runtime.jmxVisible("session:" + session.id(), "hidden-s")).isFalse();
         plan.close();
-        assertThat(runtime.jmxVisible("hidden-s")).isTrue();
+        assertThat(runtime.jmxVisible("session:" + session.id(), "hidden-s")).isTrue();
       } finally {
         session.close();
       }

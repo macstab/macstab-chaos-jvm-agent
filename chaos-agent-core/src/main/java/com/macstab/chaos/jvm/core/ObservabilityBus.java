@@ -38,7 +38,8 @@ final class ObservabilityBus {
   private static final Logger LOGGER = Logger.getLogger("com.macstab.chaos.jvm");
 
   /**
-   * Scenarios whose plan set {@code structuredLoggingEnabled=false}: their events are not logged.
+   * Scenarios whose plan set {@code structuredLoggingEnabled=false}, by {@code <scope>::<id>}:
+   * their events are not logged.
    */
   private final java.util.Set<String> loggingMuted =
       java.util.concurrent.ConcurrentHashMap.newKeySet();
@@ -296,14 +297,15 @@ final class ObservabilityBus {
   /**
    * Turns the structured logging of one scenario's events off or back on.
    *
-   * @param scenarioId the scenario id
+   * @param scenarioKey the scenario's {@code <scopeKey>::<id>}; an event is matched by its {@code
+   *     scope} attribute and its scenario id
    * @param muted {@code true} to stop logging its events
    */
-  void muteLogging(final String scenarioId, final boolean muted) {
+  void muteLogging(final String scenarioKey, final boolean muted) {
     if (muted) {
-      loggingMuted.add(scenarioId);
+      loggingMuted.add(scenarioKey);
     } else {
-      loggingMuted.remove(scenarioId);
+      loggingMuted.remove(scenarioKey);
     }
   }
 
@@ -409,7 +411,8 @@ final class ObservabilityBus {
    * @param event the event to log; must not be {@code null}
    */
   private void log(final ChaosEvent event) {
-    if (event.scenarioId() != null && loggingMuted.contains(event.scenarioId())) {
+    if (!loggingMuted.isEmpty()
+        && loggingMuted.contains(event.attributes().get("scope") + "::" + event.scenarioId())) {
       return;
     }
     final StringBuilder line = new StringBuilder(128);

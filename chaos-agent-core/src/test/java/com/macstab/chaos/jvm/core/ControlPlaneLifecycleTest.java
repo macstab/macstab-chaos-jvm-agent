@@ -298,7 +298,7 @@ class ControlPlaneLifecycleTest {
           .hasRootCauseMessage("cannot weave queues");
 
       assertThat(submissionRejected()).as("the first scenario was rolled back").isFalse();
-      assertThat(runtime.jmxVisible("first")).as("its plan settings were cleared").isTrue();
+      assertThat(runtime.jmxVisible("jvm", "first")).as("its plan settings were cleared").isTrue();
       assertThat(failures())
           .extracting(ChaosDiagnostics.ActivationFailure::category)
           .containsExactly(ChaosDiagnostics.FailureCategory.INSTRUMENTATION_FAILURE);

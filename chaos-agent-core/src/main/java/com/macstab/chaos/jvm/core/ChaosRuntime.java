@@ -144,8 +144,8 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
-   * Applies a plan's observability settings to scenarios activated one by one (the plan-file
-   * reloader does this); {@link #activate(ChaosPlan)} applies them itself.
+   * Applies a plan's observability settings to JVM-scoped scenarios activated one by one (the
+   * plan-file reloader does this); {@link #activate(ChaosPlan)} applies them itself.
    *
    * @param scenarioIds the plan's scenario ids
    * @param observability the plan's settings
@@ -155,37 +155,41 @@ public final class ChaosRuntime implements ChaosControlPlane {
       final java.util.Collection<String> scenarioIds,
       final ChaosPlan.Observability observability,
       final Object owner) {
-    controlPlane.applyPlanObservability(scenarioIds, observability, owner);
+    controlPlane.applyPlanObservability("jvm", scenarioIds, observability, owner);
   }
 
   /**
-   * Restores the default observability of scenarios that left {@code owner}'s plan.
+   * Restores the default observability of JVM-scoped scenarios that left {@code owner}'s plan.
    *
    * @param scenarioIds the scenario ids
    * @param owner the owner that applied the settings
    */
   public void clearPlanObservability(
       final java.util.Collection<String> scenarioIds, final Object owner) {
-    controlPlane.clearPlanObservability(scenarioIds, owner);
+    controlPlane.clearPlanObservability("jvm", scenarioIds, owner);
   }
 
   /**
    * Returns whether JMX may list and dump the scenario.
    *
+   * @param scopeKey the scenario's scope, as {@link
+   *     com.macstab.chaos.jvm.api.ChaosDiagnostics.ScenarioReport#scopeKey()} reports it
    * @param scenarioId the scenario id
    * @return {@code false} when its plan set {@code jmxEnabled=false}
    */
-  public boolean jmxVisible(final String scenarioId) {
-    return controlPlane.jmxVisible(scenarioId);
+  public boolean jmxVisible(final String scopeKey, final String scenarioId) {
+    return controlPlane.jmxVisible(scopeKey, scenarioId);
   }
 
   /**
    * Returns the diagnostics dump restricted to scenarios {@code include} accepts.
    *
-   * @param include whether a scenario id is part of the dump
+   * @param include whether a scenario is part of the dump
    * @return the dump
    */
-  public String debugDump(final java.util.function.Predicate<String> include) {
+  public String debugDump(
+      final java.util.function.Predicate<com.macstab.chaos.jvm.api.ChaosDiagnostics.ScenarioReport>
+          include) {
     return controlPlane.debugDump(include);
   }
 

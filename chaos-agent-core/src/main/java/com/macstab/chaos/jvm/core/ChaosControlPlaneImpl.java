@@ -59,12 +59,16 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
   private final Object lifecycleLock = new Object();
 
   /**
-   * Which plan's observability settings a scenario id carries: only that owner may clear them, so a
-   * rejected or later plan with the same ids cannot strip the settings of the running one.
+   * Which plan's observability settings a scenario carries, by {@code <scopeKey>::<id>}: only that
+   * owner may clear them, so a rejected or later plan with the same ids cannot strip the settings
+   * of the running one, and a plan in one scope never changes the same id in another.
    */
   private final Map<String, Object> observabilityOwners = new ConcurrentHashMap<>();
 
-  /** Scenarios whose plan set {@code jmxEnabled=false}: JMX does not list or dump them. */
+  /**
+   * Scenarios whose plan set {@code jmxEnabled=false}, by {@code <scopeKey>::<id>}: JMX does not
+   * list or dump them.
+   */
   private final Set<String> jmxHidden = ConcurrentHashMap.newKeySet();
 
   private volatile Optional<Instrumentation> instrumentation = Optional.empty();
@@ -130,7 +134,7 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
    * @throws ChaosUnsupportedFeatureException if the runtime cannot run it
    */
   void validate(final ChaosScenario scenario) {
-    validate(scenario, ChaosScenario.ScenarioScope.JVM);
+    validate(scenario, ChaosScenario.ScenarioScope.JVM, "jvm");
   }
 
   /**
@@ -138,24 +142,29 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
    * compatibility checks as everywhere else. A refusal is recorded, as by {@link
    * #validate(ChaosScenario)}.
    *
+   * @param session the session
    * @param scenario the scenario
    */
-  void validateInSession(final ChaosScenario scenario) {
-    validate(scenario, ChaosScenario.ScenarioScope.SESSION);
+  void validateInSession(final DefaultChaosSession session, final ChaosScenario scenario) {
+    validate(scenario, ChaosScenario.ScenarioScope.SESSION, "session:" + session.id());
   }
 
   private void validate(
-      final ChaosScenario scenario, final ChaosScenario.ScenarioScope activationScope) {
+      final ChaosScenario scenario,
+      final ChaosScenario.ScenarioScope activationScope,
+      final String scopeKey) {
     try {
       CompatibilityValidator.validate(scenario, featureSet, activationScope);
     } catch (final ChaosUnsupportedFeatureException unsupported) {
       recordFailure(
+          scopeKey,
           scenario.id(),
           ChaosDiagnostics.FailureCategory.UNSUPPORTED_RUNTIME,
           unsupported.getMessage());
       throw unsupported;
     } catch (final RuntimeException invalid) {
       recordFailure(
+          scopeKey,
           scenario.id(),
           ChaosDiagnostics.FailureCategory.INVALID_CONFIGURATION,
           invalid.getMessage());
@@ -177,16 +186,17 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
       }
     } catch (final RuntimeException weavingFailure) {
       registry.reconcileMethodSelectors();
-      throw recordedWeavingFailure(scenario.id(), "scenario " + scenario.id(), weavingFailure);
+      throw recordedWeavingFailure(
+          "jvm", scenario.id(), "scenario " + scenario.id(), weavingFailure);
     }
   }
 
   /**
    * Weaves every hook a plan needs before any of its scenarios is registered: the union of their
    * hook groups and all their method selectors, each in one call. A failure therefore starts none
-   * of them; it is recorded under the plan's handle id.
+   * of them; it is recorded under the plan's handle id, in the plan's scope.
    */
-  private void weavePlan(final ChaosPlan plan, final String planId) {
+  private void weavePlan(final ChaosPlan plan, final String scopeKey, final String planId) {
     final Set<OperationType> operations = EnumSet.noneOf(OperationType.class);
     final Set<ChaosSelector.MethodSelector> methodSelectors = new java.util.HashSet<>();
     for (final ChaosScenario scenario : plan.scenarios()) {
@@ -202,19 +212,23 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
       }
     } catch (final RuntimeException weavingFailure) {
       registry.reconcileMethodSelectors();
-      throw recordedWeavingFailure(planId, "plan " + planId, weavingFailure);
+      throw recordedWeavingFailure(scopeKey, planId, "plan " + planId, weavingFailure);
     }
   }
 
   /**
-   * Records a weaving failure under {@code recordedId} ({@code UNSUPPORTED_RUNTIME} for an
-   * unsupported runtime, else {@code INSTRUMENTATION_FAILURE}) and returns it as {@link
-   * #weavingFailed} reports it.
+   * Records a weaving failure under {@code recordedId} in {@code scopeKey} ({@code
+   * UNSUPPORTED_RUNTIME} for an unsupported runtime, else {@code INSTRUMENTATION_FAILURE}) and
+   * returns it as {@link #weavingFailed} reports it.
    */
   private RuntimeException recordedWeavingFailure(
-      final String recordedId, final String subject, final RuntimeException weavingFailure) {
+      final String scopeKey,
+      final String recordedId,
+      final String subject,
+      final RuntimeException weavingFailure) {
     final RuntimeException failure = weavingFailed(subject, weavingFailure);
     recordFailure(
+        scopeKey,
         recordedId,
         failure instanceof ChaosUnsupportedFeatureException
             ? ChaosDiagnostics.FailureCategory.UNSUPPORTED_RUNTIME
@@ -247,25 +261,29 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
   }
 
   /**
-   * Applies a plan's {@link ChaosPlan.Observability} to its scenarios: {@code
+   * Applies a plan's {@link ChaosPlan.Observability} to its scenarios in one scope: {@code
    * structuredLoggingEnabled=false} stops logging their events, {@code jmxEnabled=false} hides them
-   * from JMX. The settings then belong to {@code owner}, replacing an earlier owner's.
+   * from JMX. The settings then belong to {@code owner}, replacing an earlier owner's; the same ids
+   * in other scopes keep theirs.
    *
+   * @param scopeKey the scope of the scenarios ({@code jvm}, or {@code session:<id>})
    * @param scenarioIds the plan's scenario ids
    * @param observability the plan's settings
    * @param owner the plan (handle, poller) the settings belong to
    */
   void applyPlanObservability(
+      final String scopeKey,
       final java.util.Collection<String> scenarioIds,
       final ChaosPlan.Observability observability,
       final Object owner) {
     for (final String id : scenarioIds) {
-      observabilityOwners.put(id, owner);
-      observabilityBus.muteLogging(id, !observability.structuredLoggingEnabled());
+      final String key = scopeKey + "::" + id;
+      observabilityOwners.put(key, owner);
+      observabilityBus.muteLogging(key, !observability.structuredLoggingEnabled());
       if (observability.jmxEnabled()) {
-        jmxHidden.remove(id);
+        jmxHidden.remove(key);
       } else {
-        jmxHidden.add(id);
+        jmxHidden.add(key);
       }
     }
   }
@@ -274,14 +292,34 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
    * Restores the default observability of scenarios whose settings {@code owner} set; settings of
    * another owner are left alone.
    *
+   * @param scopeKey the scope of the scenarios
    * @param scenarioIds the scenario ids
    * @param owner the owner that applied them
    */
-  void clearPlanObservability(final java.util.Collection<String> scenarioIds, final Object owner) {
+  void clearPlanObservability(
+      final String scopeKey, final java.util.Collection<String> scenarioIds, final Object owner) {
     for (final String id : scenarioIds) {
-      if (observabilityOwners.remove(id, owner)) {
-        observabilityBus.muteLogging(id, false);
-        jmxHidden.remove(id);
+      final String key = scopeKey + "::" + id;
+      if (observabilityOwners.remove(key, owner)) {
+        observabilityBus.muteLogging(key, false);
+        jmxHidden.remove(key);
+      }
+    }
+  }
+
+  /**
+   * Restores the default observability of every scenario in {@code scopeKey}, whichever plan set
+   * it: a closed session leaves no settings behind, even for a plan handle that was never closed.
+   * Idempotent.
+   *
+   * @param scopeKey the scope, {@code session:<id>}
+   */
+  void clearScopeObservability(final String scopeKey) {
+    final String prefix = scopeKey + "::";
+    for (final String key : List.copyOf(observabilityOwners.keySet())) {
+      if (key.startsWith(prefix) && observabilityOwners.remove(key) != null) {
+        observabilityBus.muteLogging(key, false);
+        jmxHidden.remove(key);
       }
     }
   }
@@ -289,20 +327,21 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
   /**
    * Returns whether JMX may list and dump the scenario.
    *
+   * @param scopeKey the scenario's scope ({@code jvm}, or {@code session:<id>})
    * @param scenarioId the scenario id
    * @return {@code false} when its plan set {@code jmxEnabled=false}
    */
-  boolean jmxVisible(final String scenarioId) {
-    return !jmxHidden.contains(scenarioId);
+  boolean jmxVisible(final String scopeKey, final String scenarioId) {
+    return !jmxHidden.contains(scopeKey + "::" + scenarioId);
   }
 
   /**
    * Returns the debug dump restricted to scenarios {@code include} accepts.
    *
-   * @param include whether a scenario id is part of the dump
+   * @param include whether a scenario is part of the dump
    * @return the dump
    */
-  String debugDump(final java.util.function.Predicate<String> include) {
+  String debugDump(final java.util.function.Predicate<ChaosDiagnostics.ScenarioReport> include) {
     return registry.debugDump(include);
   }
 
@@ -361,16 +400,17 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
         final ChaosActivationException conflict =
             new ChaosActivationConflictException("scenario key already active: " + key);
         recordFailure(
+            scopeKey,
             scenario.id(),
             ChaosDiagnostics.FailureCategory.ACTIVATION_CONFLICT,
             conflict.getMessage());
         throw conflict;
       }
     }
-    weavePlan(plan, idPrefix + plan.metadata().name());
+    weavePlan(plan, scopeKey, idPrefix + plan.metadata().name());
     final List<String> ids = plan.scenarios().stream().map(ChaosScenario::id).toList();
     final Object owner = new Object();
-    applyPlanObservability(ids, plan.observability(), owner);
+    applyPlanObservability(scopeKey, ids, plan.observability(), owner);
     final List<ChaosActivationHandle> handles = new ArrayList<>();
     try {
       for (final ChaosScenario scenario : plan.scenarios()) {
@@ -378,13 +418,15 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
       }
       final ChaosActivationHandle planHandle =
           new CompositeActivationHandle(
-              idPrefix + plan.metadata().name(), handles, () -> clearPlanObservability(ids, owner));
+              idPrefix + plan.metadata().name(),
+              handles,
+              () -> clearPlanObservability(scopeKey, ids, owner));
       if (plan.observability().debugDumpOnStart()) {
         System.err.println(registry.debugDump());
       }
       return planHandle;
     } catch (final RuntimeException failure) {
-      clearPlanObservability(ids, owner);
+      clearPlanObservability(scopeKey, ids, owner);
       for (final ChaosActivationHandle handle : handles) {
         try {
           rollback.accept(handle);
@@ -407,7 +449,7 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
       hookDemand.require(SESSION_PROPAGATION_OPERATIONS);
     } catch (final RuntimeException weavingFailure) {
       throw recordedWeavingFailure(
-          "session:" + displayName, "session " + displayName, weavingFailure);
+          "jvm", "session:" + displayName, "session " + displayName, weavingFailure);
     }
     final DefaultChaosSession session = new DefaultChaosSession(displayName, scopeContext, this);
     openSessions.put(session.id(), session);
@@ -552,7 +594,9 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
               scenario, scopeKey, sessionId, clock, observabilityBus, stressorFactory);
       final DefaultChaosActivationHandle handle =
           new DefaultChaosActivationHandle(
-              controller, registry, failure -> recordStartFailure(scenario.id(), failure));
+              controller,
+              registry,
+              failure -> recordStartFailure(scopeKey, scenario.id(), failure));
       // Register before starting. A duplicate id is rejected here, before any side effect;
       // starting first would spawn the new controller's stressor and publish STARTED, then roll
       // it back with a STOPPED event carrying the id of the scenario that is still running. A
@@ -586,6 +630,7 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
     } catch (final ChaosUnsupportedFeatureException unsupported) {
       unregisterAndDestroyQuietly(controller, registeredInRegistry);
       recordFailure(
+          scopeKey,
           scenario.id(),
           ChaosDiagnostics.FailureCategory.UNSUPPORTED_RUNTIME,
           unsupported.getMessage());
@@ -596,6 +641,7 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
       final boolean conflict = validated && !weavingFailed && !registeredInRegistry;
       unregisterAndDestroyQuietly(controller, registeredInRegistry);
       recordFailure(
+          scopeKey,
           scenario.id(),
           weavingFailed
               ? ChaosDiagnostics.FailureCategory.INSTRUMENTATION_FAILURE
@@ -609,6 +655,7 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
       // A refusal because the plane closed is no failure of the scenario, and the bus is closing.
       if (!closed.get()) {
         recordFailure(
+            scopeKey,
             scenario.id(),
             weavingFailed
                 ? ChaosDiagnostics.FailureCategory.INSTRUMENTATION_FAILURE
@@ -626,7 +673,10 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
       }
       if (!closed.get()) {
         recordFailure(
-            scenario.id(), ChaosDiagnostics.FailureCategory.INTERNAL_ERROR, error.toString());
+            scopeKey,
+            scenario.id(),
+            ChaosDiagnostics.FailureCategory.INTERNAL_ERROR,
+            error.toString());
       }
       throw error;
     }
@@ -636,7 +686,8 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
    * Records a failed {@link ChaosActivationHandle#start()} of a {@code MANUAL} scenario, with the
    * category an activation would record for the same failure.
    */
-  private void recordStartFailure(final String scenarioId, final Throwable failure) {
+  private void recordStartFailure(
+      final String scopeKey, final String scenarioId, final Throwable failure) {
     if (closed.get()) {
       return;
     }
@@ -649,7 +700,10 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
       category = ChaosDiagnostics.FailureCategory.INVALID_CONFIGURATION;
     }
     recordFailure(
-        scenarioId, category, failure instanceof Error ? failure.toString() : failure.getMessage());
+        scopeKey,
+        scenarioId,
+        category,
+        failure instanceof Error ? failure.toString() : failure.getMessage());
   }
 
   private void weaveMethods(final Set<ChaosSelector.MethodSelector> selectors) {
@@ -663,17 +717,22 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
     }
   }
 
-  /** Records an activation failure in the diagnostics and publishes it as a FAILED event. */
+  /**
+   * Records an activation failure in the diagnostics and publishes it as a FAILED event carrying
+   * the {@code category} and the {@code scope} of the refused scenario, so the failure of a muted
+   * plan's scenario is muted like its other events.
+   */
   private void recordFailure(
+      final String scopeKey,
       final String scenarioId,
       final ChaosDiagnostics.FailureCategory category,
       final @Nullable String message) {
     registry.recordFailure(scenarioId, category, message);
+    final Map<String, String> attributes = new LinkedHashMap<>();
+    attributes.put("category", category.name());
+    attributes.put("scope", scopeKey);
     observabilityBus.publish(
-        ChaosEvent.Type.FAILED,
-        scenarioId,
-        String.valueOf(message),
-        Map.of("category", category.name()));
+        ChaosEvent.Type.FAILED, scenarioId, String.valueOf(message), attributes);
   }
 
   private void ensureOpen() {

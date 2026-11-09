@@ -220,4 +220,28 @@ class ChaosDiagnosticsMBeanTest {
         .noneMatch(line -> line.startsWith("jmx-hidden "));
     assertThat(bean.debugDump()).contains("jmx-shown state=").doesNotContain("jmx-hidden");
   }
+
+  @Test
+  @DisplayName("jmxEnabled=false hides one session's scenario, not the same id in another scope")
+  void hidesPerScope() {
+    final ChaosDiagnosticsMBean bean = new ChaosDiagnosticsMBean(runtime, false);
+    try (com.macstab.chaos.jvm.api.ChaosSession session = runtime.openSession("secret")) {
+      runtime.activate(com.macstab.chaos.jvm.startup.ChaosPlanMapper.read(PLAN));
+      session.activate(
+          com.macstab.chaos.jvm.startup.ChaosPlanMapper.read(
+              """
+              {"metadata": {"name": "secret"},
+               "observability": {"jmxEnabled": false, "structuredLoggingEnabled": true,
+                                 "debugDumpOnStart": false},
+               "scenarios": [{"id": "jmx-delay", "scope": "SESSION",
+                 "selector": {"type": "executor", "operations": ["EXECUTOR_SUBMIT"]},
+                 "effect": {"type": "delay", "minDelay": "PT0.001S", "maxDelay": "PT0.001S"}}]}
+              """));
+
+      assertThat(bean.listScenarios()).singleElement().asString().startsWith("jmx-delay ");
+      assertThat(bean.debugDump())
+          .contains("jmx-delay state=ACTIVE scope=jvm")
+          .doesNotContain("scope=session:");
+    }
+  }
 }

@@ -133,7 +133,7 @@ final class DefaultChaosSession implements ChaosSession {
         plan,
         "session:" + id,
         "session-plan:",
-        controlPlane::validateInSession,
+        scenario -> controlPlane.validateInSession(this, scenario),
         this::activate,
         child -> {
           // Leave the session's handle list first, so close() never destroys it a second time.
@@ -223,6 +223,9 @@ final class DefaultChaosSession implements ChaosSession {
         }
       }
     }
+    // The plans of this session may still hold observability settings (a plan handle that was
+    // never closed): its scenarios are gone, so are the settings.
+    controlPlane.clearScopeObservability("session:" + id);
     try {
       rootBinding.close();
     } catch (final RuntimeException bindingFailure) {

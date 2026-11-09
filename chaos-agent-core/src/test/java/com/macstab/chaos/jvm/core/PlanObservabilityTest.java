@@ -1,12 +1,15 @@
 package com.macstab.chaos.jvm.core;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.macstab.chaos.jvm.api.ChaosActivationConflictException;
 import com.macstab.chaos.jvm.api.ChaosActivationHandle;
 import com.macstab.chaos.jvm.api.ChaosEffect;
 import com.macstab.chaos.jvm.api.ChaosPlan;
 import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.ChaosSelector;
+import com.macstab.chaos.jvm.api.ChaosSession;
 import com.macstab.chaos.jvm.api.OperationType;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
@@ -83,13 +86,14 @@ class PlanObservabilityTest {
         runtime.activate(plan(new ChaosPlan.Observability(false, true, false), "hidden"));
     runtime.activate(scenario("shown"));
 
-    assertThat(runtime.jmxVisible("hidden")).isFalse();
-    assertThat(runtime.jmxVisible("shown")).isTrue();
-    final String dump = runtime.debugDump(runtime::jmxVisible);
+    assertThat(runtime.jmxVisible("jvm", "hidden")).isFalse();
+    assertThat(runtime.jmxVisible("jvm", "shown")).isTrue();
+    final String dump =
+        runtime.debugDump(report -> runtime.jmxVisible(report.scopeKey(), report.id()));
     assertThat(dump).contains("shown state=").doesNotContain("hidden state=");
 
     plan.close();
-    assertThat(runtime.jmxVisible("hidden")).isTrue();
+    assertThat(runtime.jmxVisible("jvm", "hidden")).isTrue();
   }
 
   @Test
@@ -122,7 +126,109 @@ class PlanObservabilityTest {
     } catch (final RuntimeException expected) {
       // the second scenario's id is in use
     }
-    assertThat(runtime.jmxVisible("fresh")).isTrue();
+    assertThat(runtime.jmxVisible("jvm", "fresh")).isTrue();
+  }
+
+  @Test
+  @DisplayName("two sessions' plans with one id keep their own logging setting")
+  void sessionsMuteIndependently() {
+    final Level previous = logger.getLevel();
+    logger.setLevel(Level.ALL);
+    try (ChaosSession loud = runtime.openSession("loud");
+        ChaosSession quiet = runtime.openSession("quiet")) {
+      quiet.activate(sessionPlan(new ChaosPlan.Observability(true, false, false), "dup"));
+      loud.activate(sessionPlan(new ChaosPlan.Observability(true, true, false), "dup"));
+      logged.clear();
+
+      submitIn(quiet);
+      submitIn(loud);
+
+      assertThat(logged)
+          .anyMatch(line -> line.startsWith("type=APPLIED") && line.contains(scopeOf(loud)))
+          .noneMatch(line -> line.contains(scopeOf(quiet)));
+    } finally {
+      logger.setLevel(previous);
+    }
+  }
+
+  @Test
+  @DisplayName("a FAILED event of a muted session plan is not logged")
+  void mutedSessionFailure() {
+    try (ChaosSession quiet = runtime.openSession("quiet");
+        ChaosSession loud = runtime.openSession("loud")) {
+      quiet.activate(sessionPlan(new ChaosPlan.Observability(true, false, false), "dup"));
+      loud.activate(sessionPlan(new ChaosPlan.Observability(true, true, false), "dup"));
+      logged.clear();
+
+      assertThatThrownBy(() -> quiet.activate(sessionScenario("dup")))
+          .isInstanceOf(ChaosActivationConflictException.class);
+      assertThatThrownBy(() -> loud.activate(sessionScenario("dup")))
+          .isInstanceOf(ChaosActivationConflictException.class);
+
+      assertThat(logged)
+          .filteredOn(line -> line.startsWith("type=FAILED"))
+          .singleElement()
+          .asString()
+          .contains(scopeOf(loud));
+    }
+  }
+
+  @Test
+  @DisplayName("a session closed with its plan still open leaves no settings behind")
+  void sessionCloseClearsSettings() {
+    final ChaosSession session = runtime.openSession("leaky");
+    session.activate(sessionPlan(new ChaosPlan.Observability(false, false, false), "leak"));
+    assertThat(runtime.jmxVisible("session:" + session.id(), "leak")).isFalse();
+
+    session.close();
+    session.close();
+
+    assertThat(runtime.jmxVisible("session:" + session.id(), "leak")).isTrue();
+    assertThat(runtime.jmxVisible("jvm", "leak")).isTrue();
+    logged.clear();
+    runtime.activate(scenario("leak")).close();
+    assertThat(logged).anyMatch(line -> line.contains("scenarioId=\"leak\""));
+  }
+
+  @Test
+  @DisplayName("jmxEnabled=false hides one session's scenario, not the same id elsewhere")
+  void hidesPerScope() {
+    try (ChaosSession hidden = runtime.openSession("hidden");
+        ChaosSession shown = runtime.openSession("shown")) {
+      shown.activate(sessionPlan(new ChaosPlan.Observability(true, true, false), "dup"));
+      hidden.activate(sessionPlan(new ChaosPlan.Observability(false, true, false), "dup"));
+
+      final String dump =
+          runtime.debugDump(report -> runtime.jmxVisible(report.scopeKey(), report.id()));
+
+      assertThat(dump)
+          .contains("dup state=ACTIVE scope=" + "session:" + shown.id())
+          .doesNotContain("session:" + hidden.id());
+    }
+  }
+
+  private void submitIn(final ChaosSession session) {
+    try (ChaosSession.ScopeBinding binding = session.bind()) {
+      submit();
+    }
+  }
+
+  private static String scopeOf(final ChaosSession session) {
+    return "scope=\"session:" + session.id() + "\"";
+  }
+
+  private static ChaosPlan sessionPlan(
+      final ChaosPlan.Observability observability, final String id) {
+    return new ChaosPlan(
+        new ChaosPlan.Metadata(id, ""), observability, List.of(sessionScenario(id)));
+  }
+
+  private static ChaosScenario sessionScenario(final String id) {
+    return ChaosScenario.builder(id)
+        .scope(ChaosScenario.ScenarioScope.SESSION)
+        .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+        .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+        .build();
   }
 
   private void submit() {

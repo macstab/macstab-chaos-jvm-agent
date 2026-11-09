@@ -110,7 +110,7 @@ class ActivationIntegrityTest {
         .isInstanceOf(ChaosActivationException.class)
         .hasMessageContaining("already active");
 
-    assertThat(runtime.jmxVisible("x")).as("still plan a's setting").isFalse();
+    assertThat(runtime.jmxVisible("jvm", "x")).as("still plan a's setting").isFalse();
   }
 
   @Test
@@ -131,7 +131,7 @@ class ActivationIntegrityTest {
 
     first.close();
 
-    assertThat(runtime.jmxVisible("x")).isFalse();
+    assertThat(runtime.jmxVisible("jvm", "x")).isFalse();
   }
 
   @Nested
