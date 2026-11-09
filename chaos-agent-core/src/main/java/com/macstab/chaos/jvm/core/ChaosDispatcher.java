@@ -140,6 +140,12 @@ public final class ChaosDispatcher {
    */
   public static final int DATAGRAM_DROPPED = Integer.MIN_VALUE;
 
+  /**
+   * Tag of {@code scheduleAtFixedRate} / {@code scheduleWithFixedDelay}: a {@code SCHEDULE_SUBMIT}
+   * of a periodic task ({@code SchedulingSelector.periodicOnly}).
+   */
+  public static final String SCHEDULE_SUBMIT_PERIODIC = "SCHEDULE_SUBMIT_PERIODIC";
+
   /** Tag of {@code FileChannel.transferTo}: a read whose bytes never reach a buffer. */
   public static final String TRANSFER_TO = "FILE_IO_TRANSFER_TO";
 

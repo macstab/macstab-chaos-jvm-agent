@@ -600,8 +600,10 @@ public sealed interface ChaosSelector
    * @param operations operation types this selector matches
    * @param executorClassPattern pattern matched against the executor's runtime class name
    * @param taskClassPattern pattern matched against the submitted task's class name
-   * @param scheduledOnly when {@code true}, match only scheduled executor invocations; {@code null}
-   *     matches both
+   * @param scheduledOnly when {@code true}, match only calls on a {@link
+   *     java.util.concurrent.ScheduledThreadPoolExecutor} (a user {@code ScheduledExecutorService}
+   *     of another class, or a {@code ForkJoinPool}, is not scheduled); {@code FORK_JOIN_TASK_RUN}
+   *     carries no executor and never matches; {@code null} matches both
    */
   record ExecutorSelector(
       Set<OperationType> operations,
@@ -677,7 +679,9 @@ public sealed interface ChaosSelector
    *
    * @param operations operation types this selector matches
    * @param executorClassPattern pattern matched against the executor's runtime class name
-   * @param periodicOnly when {@code true}, match only periodic schedules; {@code null} matches both
+   * @param periodicOnly when {@code true}, match only periodic schedules ({@code
+   *     scheduleAtFixedRate} / {@code scheduleWithFixedDelay}, for {@code SCHEDULE_SUBMIT} and each
+   *     {@code SCHEDULE_TICK} of their task); {@code null} matches both
    */
   record SchedulingSelector(
       Set<OperationType> operations,

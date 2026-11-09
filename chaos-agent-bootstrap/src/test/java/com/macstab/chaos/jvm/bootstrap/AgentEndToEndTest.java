@@ -2995,6 +2995,50 @@ class AgentEndToEndTest {
     }
   }
 
+  @Nested
+  @DisplayName("scheduledOnly and periodicOnly")
+  class ScheduledAndPeriodic {
+
+    @Test
+    @DisplayName("schedule-periodic-only: periodicOnly matches scheduleAtFixedRate, not schedule")
+    void periodicOnly() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.runWithoutPlan(DefectProbeMain.class, "schedule-periodic-only");
+      assertSoftly(
+          softly -> {
+            softly.assertThat(result.longValue("oneShotSubmit")).as("schedule").isZero();
+            softly.assertThat(result.longValue("oneShotTick")).as("one-shot tick").isZero();
+            softly.assertThat(result.value("periodicRan")).isEqualTo("true");
+            softly
+                .assertThat(result.longValue("periodicSubmit"))
+                .as("scheduleAtFixedRate (SCHEDULE_SUBMIT)")
+                .isEqualTo(1L);
+            softly.assertThat(result.value("periodicTicks")).as("periodic ticks").isEqualTo("true");
+          });
+    }
+
+    @Test
+    @DisplayName(
+        "executor-scheduled-only: scheduledOnly matches a ScheduledThreadPoolExecutor only")
+    void scheduledOnly() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.runWithoutPlan(DefectProbeMain.class, "executor-scheduled-only");
+      assertSoftly(
+          softly -> {
+            softly.assertThat(result.longValue("stpe.submit")).isEqualTo(1L);
+            softly.assertThat(result.longValue("stpe.run")).isPositive();
+            softly.assertThat(result.longValue("stpe.shutdown")).isPositive();
+            softly.assertThat(result.longValue("tpe.submit")).isZero();
+            softly.assertThat(result.longValue("tpe.run")).isZero();
+            softly.assertThat(result.longValue("tpe.shutdown")).isZero();
+            softly
+                .assertThat(result.longValue("forkJoin"))
+                .as("FORK_JOIN_TASK_RUN carries no executor")
+                .isZero();
+          });
+    }
+  }
+
   private static ChaosPlan plan(final ChaosScenario... scenarios) {
     return new ChaosPlan(new ChaosPlan.Metadata("end-to-end", ""), null, List.of(scenarios));
   }

@@ -7,7 +7,8 @@ package com.macstab.chaos.jvm.instrumentation.bridge;
  * OperationType}, so operations cross it by name. These constants make a misspelled name a compile
  * error instead of a failure on the first intercepted call; they are inlined where used. Each is
  * the name of an {@code OperationType} constant, except {@link #FILE_IO_TRANSFER_TO} and {@link
- * #FILE_IO_TRANSFER_FROM}, the file-channel transfers the core maps to reads and writes.
+ * #FILE_IO_TRANSFER_FROM}, the file-channel transfers the core maps to reads and writes, and {@link
+ * #SCHEDULE_SUBMIT_PERIODIC}, a periodic {@code SCHEDULE_SUBMIT}.
  */
 public final class OperationTags {
 
@@ -33,6 +34,13 @@ public final class OperationTags {
 
   /** {@code EXECUTOR_SHUTDOWN}. */
   public static final String EXECUTOR_SHUTDOWN = "EXECUTOR_SHUTDOWN";
+
+  /**
+   * {@code SCHEDULE_SUBMIT} of a periodic schedule ({@code scheduleAtFixedRate} / {@code
+   * scheduleWithFixedDelay}); the core maps it to {@code SCHEDULE_SUBMIT} with {@code periodic}
+   * set.
+   */
+  public static final String SCHEDULE_SUBMIT_PERIODIC = "SCHEDULE_SUBMIT_PERIODIC";
 
   /** {@code EXECUTOR_SUBMIT}. */
   public static final String EXECUTOR_SUBMIT = "EXECUTOR_SUBMIT";

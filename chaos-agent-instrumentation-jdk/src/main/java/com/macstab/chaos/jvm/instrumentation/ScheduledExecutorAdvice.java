@@ -92,7 +92,7 @@ final class ScheduledExecutorAdvice {
         throws Throwable {
       task =
           BootstrapDispatcher.decorateExecutorRunnable(
-              OperationTags.SCHEDULE_SUBMIT, executor, task);
+              OperationTags.SCHEDULE_SUBMIT_PERIODIC, executor, task);
       task = new ScheduledRunnableWrapper(executor, task, true);
     }
   }

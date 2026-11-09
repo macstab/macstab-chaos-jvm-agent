@@ -17,12 +17,15 @@ import org.junit.jupiter.api.Test;
 class OperationTagsTest {
 
   @Test
-  @DisplayName("every tag is an OperationType name or a transfer tag the core resolves")
+  @DisplayName("every tag is an OperationType name or a tag the core resolves")
   void everyTagResolves() throws IllegalAccessException {
     final Set<String> operations =
         Arrays.stream(OperationType.values()).map(Enum::name).collect(Collectors.toSet());
     final Set<String> transfers =
-        Set.of(ChaosDispatcher.TRANSFER_TO, ChaosDispatcher.TRANSFER_FROM);
+        Set.of(
+            ChaosDispatcher.TRANSFER_TO,
+            ChaosDispatcher.TRANSFER_FROM,
+            ChaosDispatcher.SCHEDULE_SUBMIT_PERIODIC);
     int tags = 0;
     for (final Field field : OperationTags.class.getDeclaredFields()) {
       if (!Modifier.isStatic(field.getModifiers())) {

@@ -858,7 +858,7 @@ All selectors use `"type"` as the JSON discriminator.
 | `operations`           | Set\<OperationType\> | required      | Subset of valid operations                    |
 | `executorClassPattern` | NamePattern          | `ANY`         | Matched against executor's runtime class name |
 | `taskClassPattern`     | NamePattern          | `ANY`         | Matched against submitted task's class name   |
-| `scheduledOnly`        | Boolean              | `null` (both) | `true` = scheduled executors only             |
+| `scheduledOnly`        | Boolean              | `null` (both) | `true` = `ScheduledThreadPoolExecutor` calls only (not another `ScheduledExecutorService` class or a `ForkJoinPool`; never `FORK_JOIN_TASK_RUN`, which carries no executor) |
 
 ---
 
@@ -911,7 +911,7 @@ A thread pool's own work queue is a `BlockingQueue` too: its workers take their 
 |------------------------|----------------------|---------------|-----------------------------------------------------------------------------------|
 | `operations`           | Set\<OperationType\> | required      | `SCHEDULE_SUBMIT` and/or `SCHEDULE_TICK`                                          |
 | `executorClassPattern` | NamePattern          | `ANY`         | Matched against executor class name                                               |
-| `periodicOnly`         | Boolean              | `null` (both) | `true` = periodic schedules only (`scheduleAtFixedRate`/`scheduleWithFixedDelay`) |
+| `periodicOnly`         | Boolean              | `null` (both) | `true` = periodic schedules only (`scheduleAtFixedRate`/`scheduleWithFixedDelay`): their `SCHEDULE_SUBMIT` and each `SCHEDULE_TICK` |
 
 ---
 

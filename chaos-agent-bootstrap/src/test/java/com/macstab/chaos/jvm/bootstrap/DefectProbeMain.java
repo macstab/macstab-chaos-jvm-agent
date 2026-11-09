@@ -163,6 +163,8 @@ public final class DefectProbeMain {
       case "executor-submit-kinds" -> executorSubmitKinds();
       case "executor-submit-suppress" -> executorSubmitSuppress();
       case "session-tick-stpe-submit" -> sessionTickStpeSubmit();
+      case "schedule-periodic-only" -> schedulePeriodicOnly();
+      case "executor-scheduled-only" -> executorScheduledOnly();
       default -> throw new IllegalArgumentException("unknown probe mode: " + args[0]);
     }
     printCounts();
@@ -3597,6 +3599,92 @@ public final class DefectProbeMain {
     } finally {
       stpe.shutdownNow();
     }
+  }
+
+  /**
+   * A {@code periodicOnly} SCHEDULE_SUBMIT and SCHEDULE_TICK scenario: a one-shot {@code schedule}
+   * and a {@code scheduleAtFixedRate}; prints the matches each adds.
+   */
+  private static void schedulePeriodicOnly() throws Exception {
+    final ChaosActivationHandle submit =
+        activateDelay(
+            "periodic-submit",
+            new ChaosSelector.SchedulingSelector(
+                Set.of(OperationType.SCHEDULE_SUBMIT), NamePattern.any(), true));
+    final ChaosActivationHandle tick =
+        activateDelay(
+            "periodic-tick",
+            new ChaosSelector.SchedulingSelector(
+                Set.of(OperationType.SCHEDULE_TICK), NamePattern.any(), true));
+    final ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor();
+    try {
+      executor.schedule(() -> {}, 0L, TimeUnit.MILLISECONDS).get(5L, TimeUnit.SECONDS);
+      System.out.println("oneShotSubmit=" + submit.matchedCount());
+      System.out.println("oneShotTick=" + tick.matchedCount());
+      final CountDownLatch twoRuns = new CountDownLatch(2);
+      final ScheduledFuture<?> periodic =
+          executor.scheduleAtFixedRate(twoRuns::countDown, 0L, 10L, TimeUnit.MILLISECONDS);
+      System.out.println("periodicRan=" + twoRuns.await(5L, TimeUnit.SECONDS));
+      periodic.cancel(false);
+      System.out.println("periodicSubmit=" + submit.matchedCount());
+      System.out.println("periodicTicks=" + (tick.matchedCount() > 0L));
+    } finally {
+      executor.shutdownNow();
+    }
+  }
+
+  /**
+   * A {@code scheduledOnly} ExecutorSelector on EXECUTOR_SUBMIT, EXECUTOR_WORKER_RUN and
+   * EXECUTOR_SHUTDOWN, and one on FORK_JOIN_TASK_RUN: a task through a {@code
+   * ScheduledThreadPoolExecutor}, a {@code ThreadPoolExecutor} and the common pool; prints the
+   * matches of each executor.
+   */
+  private static void executorScheduledOnly() throws Exception {
+    final ChaosActivationHandle submit =
+        activateDelay(
+            "scheduled-submit",
+            new ChaosSelector.ExecutorSelector(
+                Set.of(OperationType.EXECUTOR_SUBMIT), NamePattern.any(), NamePattern.any(), true));
+    final ChaosActivationHandle run =
+        activateDelay(
+            "scheduled-run",
+            new ChaosSelector.ExecutorSelector(
+                Set.of(OperationType.EXECUTOR_WORKER_RUN),
+                NamePattern.any(),
+                NamePattern.any(),
+                true));
+    final ChaosActivationHandle shutdown =
+        activateDelay(
+            "scheduled-shutdown",
+            new ChaosSelector.ExecutorSelector(
+                Set.of(OperationType.EXECUTOR_SHUTDOWN),
+                NamePattern.any(),
+                NamePattern.any(),
+                true));
+    final ChaosActivationHandle forkJoin =
+        activateDelay(
+            "scheduled-fork-join",
+            new ChaosSelector.ExecutorSelector(
+                Set.of(OperationType.FORK_JOIN_TASK_RUN),
+                NamePattern.any(),
+                NamePattern.any(),
+                true));
+    final Map<String, ExecutorService> executors = new java.util.LinkedHashMap<>();
+    executors.put("stpe", new java.util.concurrent.ScheduledThreadPoolExecutor(1));
+    executors.put("tpe", Executors.newFixedThreadPool(1));
+    for (final Map.Entry<String, ExecutorService> executor : executors.entrySet()) {
+      final long submits = submit.matchedCount();
+      final long runs = run.matchedCount();
+      final long shutdowns = shutdown.matchedCount();
+      executor.getValue().submit(() -> {}).get(5L, TimeUnit.SECONDS);
+      executor.getValue().shutdown();
+      executor.getValue().awaitTermination(5L, TimeUnit.SECONDS);
+      System.out.println(executor.getKey() + ".submit=" + (submit.matchedCount() - submits));
+      System.out.println(executor.getKey() + ".run=" + (run.matchedCount() - runs));
+      System.out.println(executor.getKey() + ".shutdown=" + (shutdown.matchedCount() - shutdowns));
+    }
+    java.util.concurrent.ForkJoinPool.commonPool().submit(() -> {}).get(5L, TimeUnit.SECONDS);
+    System.out.println("forkJoin=" + forkJoin.matchedCount());
   }
 
   static void printCounts() {

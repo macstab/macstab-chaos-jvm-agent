@@ -2,12 +2,23 @@ package com.macstab.chaos.jvm.core;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.macstab.chaos.jvm.api.ActivationPolicy;
+import com.macstab.chaos.jvm.api.ChaosActivationHandle;
+import com.macstab.chaos.jvm.api.ChaosEffect;
+import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.ChaosSelector;
 import com.macstab.chaos.jvm.api.NamePattern;
 import com.macstab.chaos.jvm.api.OperationType;
 import java.net.InetAddress;
+import java.time.Duration;
 import java.util.Set;
+import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import org.jspecify.annotations.Nullable;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -52,36 +63,94 @@ class SelectorMatcherFilterTest {
     return InetAddress.getByName(literal);
   }
 
+  /**
+   * {@code scheduledOnly} and {@code periodicOnly} on the contexts the executor dispatch builds:
+   * the flag comes from the executor and the submission tag, not from the test.
+   */
   @Nested
-  @DisplayName("ExecutorSelector scheduledOnly")
+  @DisplayName("ExecutorSelector scheduledOnly and SchedulingSelector periodicOnly")
   class ScheduledOnly {
 
-    @Test
-    @DisplayName("false matches a one-shot task")
-    void falseMatchesOneShot() {
-      final ChaosSelector selector =
-          new ChaosSelector.ExecutorSelector(
-              Set.of(OperationType.EXECUTOR_SUBMIT), NamePattern.any(), NamePattern.any(), false);
-      assertThat(
-              SelectorMatcher.matches(
-                  selector, call(OperationType.EXECUTOR_SUBMIT, "Pool", "Task", null, false)))
-          .isTrue();
+    private final ChaosRuntime runtime = new ChaosRuntime();
+
+    @AfterEach
+    void close() {
+      runtime.close();
+    }
+
+    private ChaosActivationHandle activate(final ChaosSelector selector) {
+      return runtime.activate(
+          ChaosScenario.builder("only")
+              .scope(ChaosScenario.ScenarioScope.JVM)
+              .selector(selector)
+              .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+              .activationPolicy(ActivationPolicy.always())
+              .build());
+    }
+
+    private static ChaosSelector executor(final OperationType operation, final Boolean only) {
+      return new ChaosSelector.ExecutorSelector(
+          Set.of(operation), NamePattern.any(), NamePattern.any(), only);
     }
 
     @Test
-    @DisplayName("true matches a periodic task and rejects a one-shot task")
-    void trueMatchesOnlyPeriodic() {
-      final ChaosSelector selector =
-          new ChaosSelector.ExecutorSelector(
-              Set.of(OperationType.EXECUTOR_SUBMIT), NamePattern.any(), NamePattern.any(), true);
-      assertThat(
-              SelectorMatcher.matches(
-                  selector, call(OperationType.EXECUTOR_SUBMIT, "Pool", "Task", null, true)))
-          .isTrue();
-      assertThat(
-              SelectorMatcher.matches(
-                  selector, call(OperationType.EXECUTOR_SUBMIT, "Pool", "Task", null, false)))
-          .isFalse();
+    @DisplayName(
+        "true matches a ScheduledThreadPoolExecutor's worker run and shutdown, not a TPE's")
+    void trueMatchesOnlyScheduledExecutors() throws Throwable {
+      final ChaosActivationHandle run = activate(executor(OperationType.EXECUTOR_WORKER_RUN, true));
+      final ScheduledThreadPoolExecutor scheduled = new ScheduledThreadPoolExecutor(1);
+      final ThreadPoolExecutor plain =
+          new ThreadPoolExecutor(1, 1, 0L, TimeUnit.SECONDS, new LinkedBlockingQueue<>());
+      try {
+        runtime.beforeWorkerRun(plain, Thread.currentThread(), () -> {});
+        assertThat(run.matchedCount()).as("ThreadPoolExecutor").isZero();
+        runtime.beforeWorkerRun(scheduled, Thread.currentThread(), () -> {});
+        assertThat(run.matchedCount()).as("ScheduledThreadPoolExecutor").isEqualTo(1L);
+        run.close();
+        final ChaosActivationHandle shutdown =
+            activate(executor(OperationType.EXECUTOR_SHUTDOWN, true));
+        runtime.beforeExecutorShutdown("EXECUTOR_SHUTDOWN", plain, 0L);
+        runtime.beforeExecutorShutdown("EXECUTOR_SHUTDOWN", scheduled, 0L);
+        assertThat(shutdown.matchedCount()).isEqualTo(1L);
+      } finally {
+        scheduled.shutdownNow();
+        plain.shutdownNow();
+      }
+    }
+
+    @Test
+    @DisplayName("false matches a plain executor's submission")
+    void falseMatchesPlainExecutor() {
+      final ChaosActivationHandle submit = activate(executor(OperationType.EXECUTOR_SUBMIT, false));
+      runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", new Object(), () -> {});
+      assertThat(submit.matchedCount()).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("a JDK 25 ForkJoinPool, a ScheduledExecutorService there, is not scheduled")
+    void forkJoinPoolIsNotScheduled() {
+      final ChaosActivationHandle submit = activate(executor(OperationType.EXECUTOR_SUBMIT, true));
+      runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", ForkJoinPool.commonPool(), () -> {});
+      assertThat(submit.matchedCount()).isZero();
+    }
+
+    @Test
+    @DisplayName("periodicOnly matches the periodic submission tag, not a one-shot schedule")
+    void periodicOnlyMatchesPeriodicSubmission() {
+      final ChaosActivationHandle submit =
+          activate(
+              new ChaosSelector.SchedulingSelector(
+                  Set.of(OperationType.SCHEDULE_SUBMIT), NamePattern.any(), true));
+      final ScheduledThreadPoolExecutor scheduled = new ScheduledThreadPoolExecutor(1);
+      try {
+        runtime.decorateExecutorRunnable("SCHEDULE_SUBMIT", scheduled, () -> {});
+        assertThat(submit.matchedCount()).as("schedule").isZero();
+        // The tag PeriodicAdvice passes (ChaosDispatcher.SCHEDULE_SUBMIT_PERIODIC).
+        runtime.decorateExecutorRunnable("SCHEDULE_SUBMIT_PERIODIC", scheduled, () -> {});
+        assertThat(submit.matchedCount()).as("scheduleAtFixedRate").isEqualTo(1L);
+      } finally {
+        scheduled.shutdownNow();
+      }
     }
   }
 

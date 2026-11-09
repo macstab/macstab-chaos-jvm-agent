@@ -6,6 +6,7 @@ import java.util.Objects;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -47,6 +48,29 @@ public final class ExecutorDispatch {
   private static final Callable<?> NO_OP_CALLABLE = () -> null;
 
   /**
+   * The operation of a submission tag: {@link ChaosDispatcher#SCHEDULE_SUBMIT_PERIODIC} is a {@code
+   * SCHEDULE_SUBMIT}.
+   */
+  private static OperationType submitOperation(final String operation) {
+    return ChaosDispatcher.SCHEDULE_SUBMIT_PERIODIC.equals(operation)
+        ? OperationType.SCHEDULE_SUBMIT
+        : OperationType.valueOf(operation);
+  }
+
+  /**
+   * The context's {@code periodic} flag of a submission: a periodic schedule for {@code
+   * SCHEDULE_SUBMIT} ({@code SchedulingSelector.periodicOnly}), a {@link
+   * ScheduledThreadPoolExecutor} for {@code EXECUTOR_SUBMIT} ({@code
+   * ExecutorSelector.scheduledOnly}). The class, not {@code ScheduledExecutorService}: on JDK 25
+   * {@code ForkJoinPool} implements that interface too.
+   */
+  private static boolean periodic(final String operation, final @Nullable Object executor) {
+    return ChaosDispatcher.SCHEDULE_SUBMIT_PERIODIC.equals(operation)
+        || (OperationType.EXECUTOR_SUBMIT.name().equals(operation)
+            && executor instanceof ScheduledThreadPoolExecutor);
+  }
+
+  /**
    * Returns a (possibly session-scoped or suppressed) wrapper for an executor-submitted runnable.
    *
    * <p>The task is wrapped to carry the bound session only when that session has a registered
@@ -68,7 +92,7 @@ public final class ExecutorDispatch {
         sessionId != null && engine.registry.hasScenarios(sessionId)
             ? engine.scopeContext.wrap(sessionId, task)
             : task;
-    final OperationType indexedOp = OperationType.valueOf(operation);
+    final OperationType indexedOp = submitOperation(operation);
     if (engine.idle(indexedOp)) {
       // Before any decision: escape analysis does not remove one on this path (32 B per call).
       return scoped;
@@ -80,7 +104,7 @@ public final class ExecutorDispatch {
                 executor == null ? "unknown" : executor.getClass().getName(),
                 DispatchEngine.taskClassName(task),
                 null,
-                false,
+                periodic(operation, executor),
                 null,
                 null,
                 sessionId));
@@ -134,7 +158,7 @@ public final class ExecutorDispatch {
         sessionId != null && engine.registry.hasScenarios(sessionId)
             ? engine.scopeContext.wrap(sessionId, task)
             : task;
-    final OperationType indexedOp = OperationType.valueOf(operation);
+    final OperationType indexedOp = submitOperation(operation);
     if (engine.idle(indexedOp)) {
       return scoped;
     }
@@ -145,7 +169,7 @@ public final class ExecutorDispatch {
                 executor == null ? "unknown" : executor.getClass().getName(),
                 DispatchEngine.taskClassName(task),
                 null,
-                false,
+                periodic(operation, executor),
                 null,
                 null,
                 sessionId));
@@ -190,7 +214,7 @@ public final class ExecutorDispatch {
                     executor.getClass().getName(),
                     DispatchEngine.taskClassName(ScopeContext.unwrap(task)),
                     worker == null ? null : worker.getName(),
-                    false,
+                    executor instanceof ScheduledThreadPoolExecutor,
                     worker == null ? null : worker.isDaemon(),
                     worker == null ? null : engine.featureSet.isVirtualThread(worker),
                     engine.taskSession(task)))));
@@ -457,7 +481,7 @@ public final class ExecutorDispatch {
                     executor == null ? "unknown" : executor.getClass().getName(),
                     null,
                     Long.toString(timeoutMillis),
-                    false,
+                    executor instanceof ScheduledThreadPoolExecutor,
                     null,
                     null,
                     engine.scopeContext.currentSessionId()))));
