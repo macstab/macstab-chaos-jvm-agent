@@ -15,6 +15,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.SplittableRandom;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
@@ -34,8 +35,9 @@ import org.jspecify.annotations.Nullable;
  *   <li><b>REGISTERED</b> — initial state; {@link #evaluate} always returns {@code null}.
  *   <li><b>ACTIVE</b> — entered via {@link #start()}; {@link #evaluate} participates in chaos
  *       decisions.
- *   <li><b>INACTIVE</b> — entered when the activation window expires or {@code maxApplications} is
- *       used up; evaluation is suspended.
+ *   <li><b>INACTIVE</b> — entered when the activation window expires (also without traffic, on the
+ *       agent's expiry thread) or {@code maxApplications} is used up; evaluation ends, and {@link
+ *       #start()} does not revive it.
  *   <li><b>STOPPED</b> — terminal; entered via {@link #stop()} or {@link #destroy()}; {@link
  *       #evaluate} always returns {@code null} after this point.
  * </ol>
@@ -101,8 +103,11 @@ final class ScenarioController {
    */
   private final Object applicationBudgetLock = new Object();
 
-  /** Thread that ends a stressor scenario when {@code activeFor} elapses; {@code null} if none. */
-  private volatile @Nullable Thread expiryThread;
+  /**
+   * The scheduled end of a time-bounded scenario ({@link ExpiryScheduler}); {@code null} if none.
+   * Written under the monitor.
+   */
+  private volatile @Nullable ScheduledFuture<?> expiry;
 
   /** Reservations taken by {@link #reserveApplication()} and not yet committed or released. */
   private long reservedApplications;
@@ -255,14 +260,47 @@ final class ScenarioController {
   }
 
   /**
-   * Returns the current lifecycle state of this controller.
+   * Returns the current lifecycle state of this controller, after ending it ({@code INACTIVE},
+   * {@code "expired"}) when its time bounds have passed. Publishes, so a caller must hold no lock;
+   * {@link #rawState()} reads the state without the check.
    *
    * @return one of {@link ChaosDiagnostics.ScenarioState#REGISTERED}, {@link
    *     ChaosDiagnostics.ScenarioState#ACTIVE}, {@link ChaosDiagnostics.ScenarioState#INACTIVE}, or
    *     {@link ChaosDiagnostics.ScenarioState#STOPPED}; never {@code null}
    */
   ChaosDiagnostics.ScenarioState state() {
+    refreshExpiry();
     return state;
+  }
+
+  /**
+   * Returns the lifecycle state as it is, without ending an expired scenario: for a caller that may
+   * hold a lock (the registry's map update).
+   *
+   * @return the state; never {@code null}
+   */
+  ChaosDiagnostics.ScenarioState rawState() {
+    return state;
+  }
+
+  /**
+   * Whether this scenario is {@code ACTIVE} and its time bounds have passed, so it is about to end.
+   * Free of side effects.
+   *
+   * @return {@code true} when an {@link #refreshExpiry()} would end it
+   */
+  boolean isExpired() {
+    return state == ChaosDiagnostics.ScenarioState.ACTIVE && window() == Window.EXPIRED;
+  }
+
+  /**
+   * Ends this scenario ({@code INACTIVE}, reason {@code "expired"}, with its event) when it is
+   * running and its time bounds have passed. Publishes, so a caller must hold no lock.
+   */
+  void refreshExpiry() {
+    if (started.get() && window() == Window.EXPIRED) {
+      endOnItsOwn("expired");
+    }
   }
 
   /**
@@ -279,8 +317,9 @@ final class ScenarioController {
 
   /**
    * Transitions this controller from {@code REGISTERED} to {@code ACTIVE} and begins chaos
-   * evaluation. Calling {@code start()} on a controller that is already {@code ACTIVE} is
-   * idempotent; the state and counters are not reset.
+   * evaluation. Only a {@code REGISTERED} controller starts: on an {@code ACTIVE} one {@code
+   * start()} is idempotent (the state and counters are not reset), and an {@code INACTIVE} or
+   * {@code STOPPED} one has ended for good — {@code start()} builds nothing and changes nothing.
    *
    * <p>Side effects on a fresh start:
    *
@@ -299,7 +338,10 @@ final class ScenarioController {
    *       REGISTERED}.
    *   <li>Initialises {@link ClockSkewState} if the effect is a {@link
    *       com.macstab.chaos.jvm.api.ChaosEffect.ClockSkewEffect}.
-   *   <li>Schedules the end of a stressor with a lifetime, once {@code STARTED} is delivered.
+   *   <li>Schedules the end of a time-bounded scenario ({@code activeFor}, {@code activeUntil}) on
+   *       the agent's expiry thread ({@link ExpiryScheduler}), once {@code STARTED} is delivered,
+   *       so it ends without traffic. When that thread cannot start, the start fails with {@link
+   *       ChaosUnsupportedFeatureException} and the controller stays {@code REGISTERED}.
    * </ul>
    */
   void start() {
@@ -321,6 +363,14 @@ final class ScenarioController {
     // The stressor's set-up is the agent's own work (L3): built with the dispatch depth raised,
     // so no user scenario applies to its allocations, thread starts or pool submissions. The
     // STARTED publish below stays at the caller's depth.
+    // Only a REGISTERED controller starts: a running one is not started twice (a fresh stressor
+    // would clobber startedAt and leak the first), and a STOPPED or INACTIVE one has ended for
+    // good (L19). Checked before the stressor is built, and again under the monitor below.
+    synchronized (this) {
+      if (state != ChaosDiagnostics.ScenarioState.REGISTERED) {
+        return;
+      }
+    }
     final ManagedStressor newStressor;
     ChaosDispatcher.incrementDispatchDepth();
     try {
@@ -331,32 +381,27 @@ final class ScenarioController {
       // The stressor could not get its resources: heap, direct memory, or a native thread (the
       // JVM reports a thread it cannot start as an OutOfMemoryError). The runtime cannot run it,
       // which is not a configuration error. Any other failure keeps its own type.
-      final ChaosUnsupportedFeatureException unsupported =
-          new ChaosUnsupportedFeatureException(
-              "stressor "
-                  + scenario.effect().getClass().getSimpleName()
-                  + " could not get its resources at start: "
-                  + exhausted.getMessage());
-      unsupported.addSuppressed(exhausted);
-      throw unsupported;
+      throw unsupported("stressor " + scenario.effect().getClass().getSimpleName(), exhausted);
     } finally {
       ChaosDispatcher.decrementDispatchDepth();
     }
-    // Carried from phase 1 to phase 2: the stressor's lifetime, counted from startNanos, and the
-    // clock skew, which takes effect only in phase 2 like every other effect.
-    long startNanos = 0L;
-    Duration lifetime = null;
-    ClockSkewState newClockSkewState = null;
-    synchronized (this) {
-      if (state == ChaosDiagnostics.ScenarioState.STOPPED) {
+    if (timeBounded()) {
+      // A time-bounded scenario needs the expiry thread to end: without it the start fails and
+      // the controller stays REGISTERED.
+      try {
+        ExpiryScheduler.ensureStarted();
+      } catch (final OutOfMemoryError exhausted) {
         if (newStressor != null) {
           newStressor.close();
         }
-        return;
+        throw unsupported("the expiry thread", exhausted);
       }
-      if (state == ChaosDiagnostics.ScenarioState.ACTIVE) {
-        // Idempotent: a second start() on a running controller would otherwise create a fresh
-        // stressor and clobber startedAt, leaking the previous stressor for the JVM lifetime.
+    }
+    // Carried from phase 1 to phase 2: the clock skew, which takes effect only in phase 2 like
+    // every other effect.
+    ClockSkewState newClockSkewState = null;
+    synchronized (this) {
+      if (state != ChaosDiagnostics.ScenarioState.REGISTERED) {
         if (newStressor != null) {
           newStressor.close();
         }
@@ -373,7 +418,6 @@ final class ScenarioController {
       // a 5-minute activeFor window into 65 minutes; a -1h skew would make it expire instantly.
       ChaosDispatcher.incrementDispatchDepth();
       try {
-        startNanos = System.nanoTime();
         startedAt = clock.instant();
         // Anchor the rate-limit window at activation, so the first window ends one window after
         // start rather than at an epoch-aligned instant.
@@ -405,13 +449,11 @@ final class ScenarioController {
       // Phase 1: ACTIVE, but evaluate() still returns null until phase 2 sets the started flag.
       state = ChaosDiagnostics.ScenarioState.ACTIVE;
       reason = "started";
-      lifetime = newStressor == null ? null : stressorLifetime();
     }
     observabilityBus.publish(
         ChaosEvent.Type.STARTED, scenario.id(), "scenario started", Map.of("scope", scopeKey));
     // Phase 2, after STARTED: re-check the state, because evaluate() checks only the started flag
-    // and a stop() or an expiry since phase 1 must not be revived. The started flag also tells a
-    // second start() that ran phase 1 again (INACTIVE → ACTIVE) not to schedule a second expiry.
+    // and a stop() or an expiry since phase 1 must not be revived.
     synchronized (this) {
       if (state != ChaosDiagnostics.ScenarioState.ACTIVE || started.get()) {
         return;
@@ -419,17 +461,20 @@ final class ScenarioController {
       started.set(true);
       // Clock reads bypass evaluate(): a clock skew takes effect when its state is set.
       clockSkewState = newClockSkewState;
-      // Under the monitor: a stop() that runs once start() has left it then finds the expiry
-      // thread and cancels it, instead of a thread scheduled afterwards parking for activeFor.
-      if (stressor != null && lifetime != null) {
-        ChaosDispatcher.incrementDispatchDepth();
-        try {
-          scheduleStressorExpiry(lifetime, startNanos);
-        } finally {
-          ChaosDispatcher.decrementDispatchDepth();
-        }
-      }
+      // Under the monitor: a stop() that runs once start() has left it then finds the check and
+      // cancels it. Scheduled after STARTED, so INACTIVE never precedes it.
+      scheduleExpiry();
     }
+  }
+
+  /** The failure of a start that could not get {@code what}'s resources. */
+  private static ChaosUnsupportedFeatureException unsupported(
+      final String what, final OutOfMemoryError exhausted) {
+    final ChaosUnsupportedFeatureException unsupported =
+        new ChaosUnsupportedFeatureException(
+            what + " could not get its resources at start: " + exhausted.getMessage());
+    unsupported.addSuppressed(exhausted);
+    return unsupported;
   }
 
   /**
@@ -464,7 +509,7 @@ final class ScenarioController {
       reason = "stopped";
       gate.release();
       closeStressor();
-      cancelStressorExpiry();
+      cancelExpiry();
       clockSkewState = null;
     }
     if (transitioned) {
@@ -707,6 +752,7 @@ final class ScenarioController {
   }
 
   ChaosDiagnostics.ScenarioReport snapshot() {
+    refreshExpiry();
     // Read appliedCount before matchedCount: a match is always counted before its application, so
     // this order guarantees applied <= matched in the report even while calls are in flight.
     final long applied = appliedCount.get();
@@ -801,6 +847,7 @@ final class ScenarioController {
           gate.release();
         }
         closeStressor();
+        cancelExpiry();
         return true;
       }
       return false;
@@ -825,67 +872,68 @@ final class ScenarioController {
         Map.of("scope", scopeKey, "reason", newReason));
   }
 
-  /**
-   * Returns how long a stressor started now may run: the shorter of {@code activeFor} and the time
-   * left until {@code activeUntil}, or {@code null} when neither is set.
-   */
-  private @Nullable Duration stressorLifetime() {
+  /** Whether the policy bounds the scenario in time ({@code activeFor} or {@code activeUntil}). */
+  private boolean timeBounded() {
     final ActivationPolicy policy = scenario.activationPolicy();
-    Duration lifetime = policy.activeFor();
-    if (policy.activeUntil() != null) {
-      final Duration untilEnd;
-      ChaosDispatcher.incrementDispatchDepth();
-      try {
-        untilEnd = Duration.between(clock.instant(), policy.activeUntil());
-      } finally {
-        ChaosDispatcher.decrementDispatchDepth();
-      }
-      final Duration bounded = untilEnd.isNegative() ? Duration.ZERO : untilEnd;
-      lifetime = lifetime == null || bounded.compareTo(lifetime) < 0 ? bounded : lifetime;
-    }
-    return lifetime;
+    return policy.activeFor() != null || policy.activeUntil() != null;
   }
 
   /**
-   * Ends a stressor scenario when its lifetime ({@code activeFor}, {@code activeUntil}) elapses.
-   * Stressors are never evaluated per call, so the window check in {@link
-   * #evaluate(InvocationContext)} cannot end them; this thread does.
-   *
-   * <p>The expiry thread is agent-owned: it runs with the dispatch depth raised for its whole life,
-   * so user scenarios (thread start, park, sleep) never apply to it. It ends early when the
-   * scenario is stopped.
+   * Schedules {@link #expire()} for when the time bounds end by the controller's clock; nothing for
+   * a scenario without an end. Called under the monitor.
    */
-  private void scheduleStressorExpiry(final Duration activeFor, final long fromNanos) {
-    long timeoutNanos;
+  private void scheduleExpiry() {
+    final ActivationPolicy policy = scenario.activationPolicy();
+    Instant end = policy.activeUntil();
+    final Instant capturedStart = startedAt;
+    if (policy.activeFor() != null && capturedStart != null) {
+      try {
+        final Instant forEnd = capturedStart.plus(policy.activeFor());
+        end = end == null || forEnd.isBefore(end) ? forEnd : end;
+      } catch (final java.time.DateTimeException | ArithmeticException overflow) {
+        // beyond Instant.MAX: activeFor never ends
+      }
+    }
+    if (end == null) {
+      return;
+    }
+    final long nanos;
     try {
-      timeoutNanos = activeFor.toNanos();
+      nanos = Duration.between(ChaosDispatcher.unskewedInstant(clock), end).toNanos();
     } catch (final ArithmeticException overflow) {
       return; // beyond ~292 years: effectively never expires
     }
-    final long deadline = fromNanos + timeoutNanos;
-    expiryThread =
-        AgentThreads.start(
-            "macstab-chaos-expiry-" + scenario.id(),
-            true,
-            () -> {
-              long remaining;
-              while ((remaining = deadline - System.nanoTime()) > 0L) {
-                java.util.concurrent.locks.LockSupport.parkNanos(this, remaining);
-                if (Thread.currentThread().isInterrupted()) {
-                  return;
-                }
-              }
-              endOnItsOwn("expired");
-            });
+    // An early run (a clock behind the scheduler's) checks again no sooner than 1 ms later.
+    expiry =
+        ExpiryScheduler.schedule(
+            this::expire, nanos <= 0L ? 0L : Math.max(nanos, MIN_EXPIRY_RECHECK_NANOS));
   }
 
-  private void cancelStressorExpiry() {
-    final Thread expiry = expiryThread;
-    expiryThread = null;
-    if (expiry != null) {
-      expiry.interrupt();
+  /**
+   * The scheduled check: ends the scenario when its bounds have passed. A check that comes early,
+   * because the controller's clock is behind the scheduler's (a test clock, or bounds computed from
+   * a wall clock that was set back), schedules itself again for the time left.
+   */
+  private void expire() {
+    refreshExpiry();
+    synchronized (this) {
+      if (state == ChaosDiagnostics.ScenarioState.ACTIVE && started.get()) {
+        scheduleExpiry();
+      }
     }
   }
+
+  /** Cancels the scheduled check; called under the monitor. */
+  private void cancelExpiry() {
+    final ScheduledFuture<?> scheduled = expiry;
+    expiry = null;
+    if (scheduled != null) {
+      scheduled.cancel(false);
+    }
+  }
+
+  /** The shortest wait before an early expiry check runs again. */
+  private static final long MIN_EXPIRY_RECHECK_NANOS = 1_000_000L;
 
   /**
    * Publishes SKIPPED for a call the policy kept the effect from, when anyone listens; returns
@@ -915,8 +963,9 @@ final class ScenarioController {
 
   /**
    * Checks the policy's time bounds against the controller's clock. The clock is the real system
-   * clock in production; it is read inside a dispatch, where the agent's own clock hooks return the
-   * real value, so an active clock skew cannot move the window.
+   * clock in production; it is read with the dispatch depth raised, where the agent's own clock
+   * hooks return the real value, so an active clock skew cannot move the window, also for a caller
+   * outside any dispatch ({@code ChaosRuntime.adjustClockMillis}).
    *
    * @return the window state; {@link Window#OPEN} when no bound is configured
    */
@@ -928,7 +977,7 @@ final class ScenarioController {
     if (activeFor == null && activeFrom == null && activeUntil == null) {
       return Window.OPEN;
     }
-    final Instant now = clock.instant();
+    final Instant now = ChaosDispatcher.unskewedInstant(clock);
     if (activeUntil != null && !now.isBefore(activeUntil)) {
       return Window.EXPIRED;
     }

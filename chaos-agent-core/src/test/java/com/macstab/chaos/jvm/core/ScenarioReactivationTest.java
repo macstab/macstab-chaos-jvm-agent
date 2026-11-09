@@ -2,6 +2,7 @@ package com.macstab.chaos.jvm.core;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.awaitility.Awaitility.await;
 
 import com.macstab.chaos.jvm.api.ActivationPolicy;
 import com.macstab.chaos.jvm.api.ChaosActivationException;
@@ -9,14 +10,19 @@ import com.macstab.chaos.jvm.api.ChaosActivationHandle;
 import com.macstab.chaos.jvm.api.ChaosDiagnostics;
 import com.macstab.chaos.jvm.api.ChaosEffect;
 import com.macstab.chaos.jvm.api.ChaosEvent;
+import com.macstab.chaos.jvm.api.ChaosMetricsSink;
 import com.macstab.chaos.jvm.api.ChaosPlan;
 import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.ChaosSelector;
 import com.macstab.chaos.jvm.api.OperationType;
+import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicInteger;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -179,6 +185,80 @@ class ScenarioReactivationTest {
           .isInstanceOf(IllegalStateException.class);
       assertThatThrownBy(() -> runtime.addEventListener(event -> {}))
           .isInstanceOf(IllegalStateException.class);
+    }
+  }
+
+  @Nested
+  @DisplayName("an INACTIVE scenario is final")
+  class InactiveIsFinal {
+
+    @Test
+    @DisplayName("start() after maxApplications is spent does not revive it")
+    void spentScenarioIsNotRevived() {
+      final List<ChaosEvent.Type> events = new CopyOnWriteArrayList<>();
+      runtime.addEventListener(event -> events.add(event.type()));
+      final ChaosActivationHandle handle =
+          runtime.activate(
+              ChaosScenario.builder("spent")
+                  .scope(ChaosScenario.ScenarioScope.JVM)
+                  .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+                  .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+                  .activationPolicy(ActivationPolicy.count(1))
+                  .build());
+      runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
+      runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
+      assertThat(handle.state()).isEqualTo(ChaosDiagnostics.ScenarioState.INACTIVE);
+
+      handle.start();
+      runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
+
+      assertThat(handle.state()).isEqualTo(ChaosDiagnostics.ScenarioState.INACTIVE);
+      assertThat(handle.appliedCount()).isEqualTo(1L);
+      assertThat(events).as("no second start").containsOnlyOnce(ChaosEvent.Type.STARTED);
+    }
+
+    @Test
+    @DisplayName("start() after a stressor expired builds no second stressor")
+    void expiredStressorIsNotRebuilt() {
+      final AtomicInteger built = new AtomicInteger();
+      final StressorFactory counting =
+          new StressorFactory(Optional::empty) {
+            @Override
+            @Nullable ManagedStressor createIfNeeded(
+                final ChaosEffect effect, final boolean allowDestructiveEffects) {
+              built.incrementAndGet();
+              return super.createIfNeeded(effect, allowDestructiveEffects);
+            }
+          };
+      final ScenarioController controller =
+          new ScenarioController(
+              ChaosScenario.builder("keep-alive")
+                  .scope(ChaosScenario.ScenarioScope.JVM)
+                  .selector(ChaosSelector.stress(ChaosSelector.StressTarget.KEEPALIVE))
+                  .effect(
+                      new ChaosEffect.KeepAliveEffect(
+                          "final-keep-alive", true, Duration.ofMillis(10)))
+                  .activationPolicy(
+                      ActivationPolicy.builder().activeFor(Duration.ofMillis(50)).build())
+                  .build(),
+              "jvm",
+              null,
+              Clock.systemUTC(),
+              new ObservabilityBus(ChaosMetricsSink.NOOP),
+              counting);
+      try {
+        controller.start();
+        await()
+            .atMost(Duration.ofSeconds(5))
+            .until(() -> controller.state() == ChaosDiagnostics.ScenarioState.INACTIVE);
+
+        controller.start();
+
+        assertThat(controller.state()).isEqualTo(ChaosDiagnostics.ScenarioState.INACTIVE);
+        assertThat(built).hasValue(1);
+      } finally {
+        controller.stop();
+      }
     }
   }
 

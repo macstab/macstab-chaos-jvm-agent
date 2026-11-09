@@ -3039,6 +3039,21 @@ class AgentEndToEndTest {
     }
   }
 
+  @Nested
+  @DisplayName("time bounds")
+  class TimeBounds {
+
+    @Test
+    @DisplayName(
+        "skewed-window-manual-read: a window read outside any dispatch uses the real clock")
+    void windowReadOutsideDispatchIsNotSkewed() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.runWithoutPlan(DefectProbeMain.class, "skewed-window-manual-read");
+      assertThat(result.value("hourState")).isEqualTo("ACTIVE");
+      assertThat(result.longValue("skewMillis")).isEqualTo(5_000L);
+    }
+  }
+
   private static ChaosPlan plan(final ChaosScenario... scenarios) {
     return new ChaosPlan(new ChaosPlan.Metadata("end-to-end", ""), null, List.of(scenarios));
   }

@@ -570,7 +570,7 @@ The last row confirms that `maxApplications` and `rateLimit` are independent gua
 
 ## stop() Monotonic State Transition
 
-`ScenarioController` state transitions monotonically: `REGISTERED → ACTIVE → STOPPED` (or `ACTIVE → INACTIVE` on expiry / exhausted budget). Once a controller observes the stopped flag it never reverts. Re-activating the same id after `stop()` or `close()` registers a **new** controller that replaces the stopped one.
+`ScenarioController` state transitions monotonically: `REGISTERED → ACTIVE → STOPPED` (or `ACTIVE → INACTIVE` on expiry / exhausted budget). Once a controller observes the stopped flag it never reverts, and `start()` acts on a `REGISTERED` controller only, so an `INACTIVE` one is not revived and builds no stressor. Expiry needs no traffic: `ExpiryScheduler`, one agent-owned daemon thread for the JVM, runs a check at the end of each time-bounded scenario (`activeFor`, `activeUntil`; also stress scenarios, replacing a per-stressor thread), which reschedules itself when the controller's clock is behind and is cancelled on stop. When that thread cannot start, `start()` fails with `ChaosUnsupportedFeatureException` and the controller stays `REGISTERED`. `state()` and `snapshot()` apply a passed expiry first; the registry's map update reads the side-effect-free `rawState()` / `isExpired()`, and `register()` applies the expiry of the controller it may replace before the update, so its `INACTIVE` event is published outside the map's lock. `window()` reads the clock with the dispatch depth raised, so a clock skew cannot move it. Re-activating the same id after `stop()` or `close()` registers a **new** controller that replaces the stopped one.
 
 **Guarantees (test coverage in `StopDuringEvaluationTest`)**:
 

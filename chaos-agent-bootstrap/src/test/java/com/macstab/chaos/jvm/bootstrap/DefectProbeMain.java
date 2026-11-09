@@ -165,6 +165,7 @@ public final class DefectProbeMain {
       case "session-tick-stpe-submit" -> sessionTickStpeSubmit();
       case "schedule-periodic-only" -> schedulePeriodicOnly();
       case "executor-scheduled-only" -> executorScheduledOnly();
+      case "skewed-window-manual-read" -> skewedWindowManualRead();
       default -> throw new IllegalArgumentException("unknown probe mode: " + args[0]);
     }
     printCounts();
@@ -3685,6 +3686,36 @@ public final class DefectProbeMain {
     }
     java.util.concurrent.ForkJoinPool.commonPool().submit(() -> {}).get(5L, TimeUnit.SECONDS);
     System.out.println("forkJoin=" + forkJoin.matchedCount());
+  }
+
+  /**
+   * A day-ahead CLOCK_READ / INSTANT_NOW skew and an hour-long SYSTEM_CLOCK_MILLIS skew read
+   * through {@code ChaosRuntime.adjustClockMillis}, the documented manual hook, outside any
+   * dispatch: the hour's window must be read on the real clock, not the skewed one.
+   */
+  private static void skewedWindowManualRead() {
+    final ChaosControlPlane plane = ChaosPlatform.current();
+    plane.activate(
+        ChaosScenario.builder("day-ahead")
+            .selector(
+                ChaosSelector.jvmRuntime(
+                    Set.of(OperationType.CLOCK_READ, OperationType.INSTANT_NOW)))
+            .effect(ChaosEffect.skewClock(Duration.ofDays(1), ChaosEffect.ClockSkewMode.FIXED))
+            .activationPolicy(ActivationPolicy.always())
+            .build());
+    final ChaosActivationHandle hour =
+        plane.activate(
+            ChaosScenario.builder("hour")
+                .selector(ChaosSelector.jvmRuntime(Set.of(OperationType.SYSTEM_CLOCK_MILLIS)))
+                .effect(
+                    ChaosEffect.skewClock(Duration.ofSeconds(5), ChaosEffect.ClockSkewMode.FIXED))
+                .activationPolicy(ActivationPolicy.builder().activeFor(Duration.ofHours(1)).build())
+                .build());
+    final long real = 1_700_000_000_000L;
+    System.out.println(
+        "skewMillis="
+            + (((com.macstab.chaos.jvm.core.ChaosRuntime) plane).adjustClockMillis(real) - real));
+    System.out.println("hourState=" + hour.state());
   }
 
   static void printCounts() {

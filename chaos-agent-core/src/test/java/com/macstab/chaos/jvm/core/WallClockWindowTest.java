@@ -1,12 +1,14 @@
 package com.macstab.chaos.jvm.core;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.awaitility.Awaitility.await;
 
 import com.macstab.chaos.jvm.api.ActivationPolicy;
 import com.macstab.chaos.jvm.api.ChaosDiagnostics;
 import com.macstab.chaos.jvm.api.ChaosEffect;
+import com.macstab.chaos.jvm.api.ChaosEvent;
 import com.macstab.chaos.jvm.api.ChaosMetricsSink;
 import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.ChaosSelector;
@@ -17,7 +19,9 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CopyOnWriteArrayList;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -160,9 +164,11 @@ class WallClockWindowTest {
   class Stressors {
 
     @Test
-    @DisplayName("end at activeUntil")
+    @DisplayName("end at activeUntil, by the runtime's clock")
     void endAtActiveUntil() throws InterruptedException {
       runtime.activate(keepAlive(ActivationPolicy.window(null, T0.plusMillis(200))));
+      // The expiry check runs about 200 ms from now and reads the runtime's clock.
+      clock.set(T0.plusMillis(200));
 
       await()
           .atMost(Duration.ofSeconds(5))
@@ -189,6 +195,66 @@ class WallClockWindowTest {
           .effect(new ChaosEffect.KeepAliveEffect("window-keep-alive", true, Duration.ofMillis(50)))
           .activationPolicy(policy)
           .build();
+    }
+  }
+
+  @Nested
+  @DisplayName("expiry without calls")
+  class ExpiryWithoutCalls {
+
+    @Test
+    @DisplayName("a time-bounded scenario ends with its INACTIVE event without any call or read")
+    void endsWithoutTraffic() {
+      try (ChaosRuntime real = new ChaosRuntime()) {
+        final List<ChaosEvent> inactive = new CopyOnWriteArrayList<>();
+        real.addEventListener(
+            event -> {
+              if (event.type() == ChaosEvent.Type.INACTIVE) {
+                inactive.add(event);
+              }
+            });
+        real.activate(
+            submitScenario(ActivationPolicy.builder().activeFor(Duration.ofMillis(100)).build()));
+
+        await().atMost(Duration.ofSeconds(5)).until(() -> !inactive.isEmpty());
+
+        assertThat(inactive)
+            .singleElement()
+            .satisfies(event -> assertThat(event.attributes()).containsEntry("reason", "expired"));
+        assertThatCode(() -> real.activate(submitScenario(ActivationPolicy.always())))
+            .as("the expired id can be activated again")
+            .doesNotThrowAnyException();
+      }
+    }
+
+    @Test
+    @DisplayName(
+        "activating an id whose window has passed ends the old scenario first, outside the"
+            + " registry's map update")
+    void registerOverExpired() {
+      final List<String> events = new CopyOnWriteArrayList<>();
+      final List<Boolean> insideCompute = new CopyOnWriteArrayList<>();
+      runtime.addEventListener(
+          event -> {
+            events.add(event.type().name());
+            if (event.type() == ChaosEvent.Type.INACTIVE) {
+              insideCompute.add(
+                  java.util.Arrays.stream(Thread.currentThread().getStackTrace())
+                      .anyMatch(
+                          frame ->
+                              frame.getClassName().equals("java.util.concurrent.ConcurrentHashMap")
+                                  && frame.getMethodName().equals("compute")));
+            }
+          });
+      runtime.activate(submitScenario(ActivationPolicy.window(null, T0.plusSeconds(60))));
+      clock.set(T0.plusSeconds(60));
+      events.clear();
+
+      assertThatCode(() -> runtime.activate(submitScenario(ActivationPolicy.always())))
+          .doesNotThrowAnyException();
+
+      assertThat(events).startsWith("INACTIVE", "STOPPED");
+      assertThat(insideCompute).containsExactly(false);
     }
   }
 

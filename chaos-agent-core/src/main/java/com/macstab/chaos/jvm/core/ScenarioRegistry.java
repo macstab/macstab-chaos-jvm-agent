@@ -131,6 +131,12 @@ final class ScenarioRegistry implements ChaosDiagnostics {
    *     {@code REGISTERED} or {@code ACTIVE}
    */
   ScenarioController register(final ScenarioController controller) {
+    // An expired controller under the key ends first, with its INACTIVE event published here,
+    // outside the map update: listener code never runs inside a bin lock.
+    final ScenarioController current = controllers.get(controller.key());
+    if (current != null) {
+      current.refreshExpiry();
+    }
     final ScenarioController[] replaced = new ScenarioController[1];
     controllers.compute(
         controller.key(),
@@ -160,10 +166,12 @@ final class ScenarioRegistry implements ChaosDiagnostics {
     return existing != null && !isFinished(existing);
   }
 
+  /** Side-effect free: called inside the map update. */
   private static boolean isFinished(final ScenarioController controller) {
-    final ChaosDiagnostics.ScenarioState state = controller.state();
+    final ChaosDiagnostics.ScenarioState state = controller.rawState();
     return state == ChaosDiagnostics.ScenarioState.STOPPED
-        || state == ChaosDiagnostics.ScenarioState.INACTIVE;
+        || state == ChaosDiagnostics.ScenarioState.INACTIVE
+        || controller.isExpired();
   }
 
   /**
