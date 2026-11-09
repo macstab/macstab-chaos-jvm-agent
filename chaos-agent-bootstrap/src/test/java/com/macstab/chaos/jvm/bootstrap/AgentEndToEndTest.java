@@ -1319,6 +1319,20 @@ class AgentEndToEndTest {
 
       assertThat(result.longValue("batchCalls")).isEqualTo(1L);
       assertThat(result.value("socketAlone")).isEqualTo("true");
+      assertThat(result.value("escapeeFailureRecorded"))
+          .as("the refused escapee is listed in hookFailures")
+          .isEqualTo("true");
+    }
+
+    @Test
+    @DisplayName("the escapees are retransformed also when a later hook group of the weave fails")
+    void escapeesAfterAPartialWeave() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.runWithoutAgent(InstallerProbeMain.class, "escapees-partial-weave");
+
+      assertThat(result.value("partialActivation")).isEqualTo("ChaosInstrumentationException");
+      assertThat(result.value("wovenAfterFailure")).contains("DATAGRAM");
+      assertThat(result.longValue("escapeeCalls")).isPositive();
     }
 
     @Test

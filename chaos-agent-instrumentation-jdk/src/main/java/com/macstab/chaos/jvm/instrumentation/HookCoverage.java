@@ -31,6 +31,12 @@ final class HookCoverage {
   /** {@code advice on matcher} of every hook that matched a method. */
   private static final Set<String> MATCHED = ConcurrentHashMap.newKeySet();
 
+  /**
+   * The most failures {@link #failures} lists: a class loader or type refused on every activation
+   * must not grow the set without bound.
+   */
+  static final int MAX_FAILURES = 256;
+
   /** {@code type: error} of every transformation that failed: all its hooks are inactive. */
   private static final Set<String> FAILED = ConcurrentHashMap.newKeySet();
 
@@ -74,13 +80,17 @@ final class HookCoverage {
   }
 
   /**
-   * Records that {@code subject} (a type, a hook group, a class loader) is not woven.
+   * Records that {@code subject} (a type, a hook group, a class loader) is not woven. Once {@link
+   * #MAX_FAILURES} are recorded, further ones are dropped.
    *
    * @param subject what is not woven
    * @param reason why
    */
   static void failed(final String subject, final String reason) {
-    FAILED.add(subject + ": " + reason);
+    // Racing writers can pass the check together: the bound is MAX_FAILURES plus their number.
+    if (FAILED.size() < MAX_FAILURES) {
+      FAILED.add(subject + ": " + reason);
+    }
   }
 
   /**

@@ -1,6 +1,7 @@
 package com.macstab.chaos.jvm.instrumentation;
 
 import com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher;
+import com.macstab.chaos.jvm.instrumentation.bridge.OperationTags;
 import net.bytebuddy.asm.Advice;
 
 /**
@@ -433,8 +434,11 @@ final class JvmRuntimeAdvice {
         throws Throwable {
       if (BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_JMX)) {
         try {
-          BootstrapDispatcher.beforeJmxGetAttr(
-              server, objectName, attributes == null ? "" : String.join(",", attributes));
+          // The idle check comes first: String.join builds a new string on every call.
+          if (!BootstrapDispatcher.idle(OperationTags.JMX_GET_ATTR)) {
+            BootstrapDispatcher.beforeJmxGetAttr(
+                server, objectName, attributes == null ? "" : String.join(",", attributes));
+          }
         } catch (final Throwable throwable) {
           BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_JMX);
           throw throwable;

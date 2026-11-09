@@ -216,30 +216,34 @@ public final class JdkInstrumentationInstaller {
   static void weave(final Instrumentation instrumentation, final Set<OperationType> operations) {
     synchronized (WOVEN_GROUPS) {
       boolean wovenNow = false;
-      for (final HookGroup group : HookGroup.values()) {
-        if (WOVEN_GROUPS.containsKey(group) || !group.serves(operations)) {
-          continue;
+      try {
+        for (final HookGroup group : HookGroup.values()) {
+          if (WOVEN_GROUPS.containsKey(group) || !group.serves(operations)) {
+            continue;
+          }
+          final ResettableClassFileTransformer transformer;
+          try {
+            transformer = group.apply(buildBaseAgentBuilder()).installOn(instrumentation);
+          } catch (final RuntimeException failure) {
+            // Not recorded as woven: the next activation that needs the group tries again.
+            HookCoverage.failed(group.name(), failure);
+            throw new IllegalStateException(
+                "failed to instrument " + group + " for " + group.operations(), failure);
+          }
+          WOVEN_GROUPS.put(group, transformer);
+          wovenNow = true;
+          LOGGER.fine(() -> "chaos hooks woven: " + group);
         }
-        final ResettableClassFileTransformer transformer;
-        try {
-          transformer = group.apply(buildBaseAgentBuilder()).installOn(instrumentation);
-        } catch (final RuntimeException failure) {
-          // Not recorded as woven: the next activation that needs the group tries again.
-          HookCoverage.failed(group.name(), failure);
-          throw new IllegalStateException(
-              "failed to instrument " + group + " for " + group.operations(), failure);
+      } finally {
+        // Some JDK classes (the object streams, the socket classes) can be loaded as a side effect
+        // of an installOn() while it is inside a JVMTI ClassFileLoadHook for another class; the
+        // JVMTI re-entrancy rule then suppresses the hook for those loads, so they escape every
+        // transformer, also those of groups woven earlier. Outside any hook, an explicit
+        // retransformation applies the missing advice; for a class no group targets it is a
+        // no-op. The groups woven before a failing one stay woven, so they need it too.
+        if (wovenNow) {
+          retransformPostInstallEscapees(instrumentation);
         }
-        WOVEN_GROUPS.put(group, transformer);
-        wovenNow = true;
-        LOGGER.fine(() -> "chaos hooks woven: " + group);
-      }
-      // Some JDK classes (the object streams, the socket classes) can be loaded as a side effect
-      // of an installOn() while it is inside a JVMTI ClassFileLoadHook for another class; the
-      // JVMTI re-entrancy rule then suppresses the hook for those loads, so they escape every
-      // transformer, also those of groups woven earlier. Outside any hook, an explicit
-      // retransformation applies the missing advice; for a class no group targets it is a no-op.
-      if (wovenNow) {
-        retransformPostInstallEscapees(instrumentation);
       }
     }
   }
@@ -885,6 +889,7 @@ public final class JdkInstrumentationInstaller {
         try {
           instrumentation.retransformClasses(escapee);
         } catch (final Throwable failure) {
+          HookCoverage.failed(escapee.getName(), failure);
           LOGGER.warning(() -> "failed to retransform " + escapee.getName() + ": " + failure);
         }
       }

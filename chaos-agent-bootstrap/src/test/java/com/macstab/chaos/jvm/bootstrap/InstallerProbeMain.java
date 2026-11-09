@@ -48,6 +48,7 @@ public final class InstallerProbeMain {
       case "reset-failure" -> resetFailure();
       case "escapees" -> escapees(false);
       case "escapee-batch-failure" -> escapees(true);
+      case "escapees-partial-weave" -> escapeesAfterPartialWeave();
       case "premain-retransform-failure" -> premainRetransformFailure(args[1]);
       default -> throw new IllegalArgumentException("unknown probe mode: " + args[0]);
     }
@@ -476,6 +477,47 @@ public final class InstallerProbeMain {
     System.out.println(
         "socketAlone="
             + escapeeCalls.stream().anyMatch(call -> call.equals(List.of("java.net.Socket"))));
+    System.out.println(
+        "escapeeFailureRecorded="
+            + String.valueOf(runtime.diagnostics().snapshot().runtimeDetails().get("hookFailures"))
+                .contains("java.io.ObjectOutputStream: "));
+  }
+
+  /**
+   * A plan whose second hook group the JVM refuses (THREAD_SLEEP, after DATAGRAM): the group woven
+   * before the failure still gets the escapees retransformed.
+   */
+  private static void escapeesAfterPartialWeave() throws Exception {
+    final Instrumentation real = net.bytebuddy.agent.ByteBuddyAgent.install();
+    final ScriptedInstrumentation scripted = new ScriptedInstrumentation(real);
+    final ChaosRuntime runtime = new ChaosRuntime();
+    JdkInstrumentationInstaller.install(scripted, runtime, false, List.of(), List.of(), null);
+    scripted.failRetransformOf("java.lang.Thread");
+    try {
+      runtime.activate(
+          new com.macstab.chaos.jvm.api.ChaosPlan(
+              new com.macstab.chaos.jvm.api.ChaosPlan.Metadata("partial", ""),
+              null,
+              List.of(
+                  ChaosScenario.builder("datagram-delay")
+                      .scope(ChaosScenario.ScenarioScope.JVM)
+                      .selector(ChaosSelector.network(Set.of(OperationType.DATAGRAM_SEND)))
+                      .effect(ChaosEffect.delay(Duration.ofMillis(1L)))
+                      .activationPolicy(ActivationPolicy.always())
+                      .build(),
+                  sleepDelay("refused-sleep"))));
+      System.out.println("partialActivation=activated");
+    } catch (final RuntimeException refused) {
+      System.out.println("partialActivation=" + refused.getClass().getSimpleName());
+    }
+    System.out.println(
+        "wovenAfterFailure="
+            + runtime.diagnostics().snapshot().runtimeDetails().get("wovenHookGroups"));
+    System.out.println(
+        "escapeeCalls="
+            + scripted.retransformCalls().stream()
+                .filter(call -> call.stream().anyMatch(ESCAPEES::contains))
+                .count());
   }
 
   /**

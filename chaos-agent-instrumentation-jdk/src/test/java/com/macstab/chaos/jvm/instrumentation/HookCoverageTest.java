@@ -61,6 +61,20 @@ class HookCoverageTest {
   }
 
   @Test
+  @DisplayName("failures beyond the bound are dropped: a type refused over and over grows nothing")
+  void failuresAreBounded() {
+    HookCoverage.reset();
+    try {
+      for (int i = 0; i < 1_000; i++) {
+        HookCoverage.failed("com.example.Refused" + i, "refused");
+      }
+      assertThat(HookCoverage.failures()).hasSize(256);
+    } finally {
+      HookCoverage.reset();
+    }
+  }
+
+  @Test
   @DisplayName("an uninstall clears the coverage: a reinstall starts empty")
   void reinstallStartsEmpty() {
     HookCoverage.failed("com.example.Gone", new IllegalStateException("refused"));

@@ -56,6 +56,17 @@ class ClientCallAdviceIdleTest {
     assertThat(delegateCalls).doesNotContain("beforeClientCall");
   }
 
+  @Test
+  @DisplayName("an idle JMX getAttributes joins no attribute names and reaches no JMX dispatch")
+  void idleJmxGetAttributesJoinsNothing() throws Throwable {
+    BootstrapDispatcher.install(idleDelegate(), JdkInstrumentationInstaller.buildMethodHandles());
+
+    JvmRuntimeAdvice.JmxGetAttrsAdvice.enter(new Object(), new Object(), new String[] {"a", "b"});
+    JvmRuntimeAdvice.JmxGetAttrsAdvice.exit();
+
+    assertThat(delegateCalls).doesNotContain("beforeJmxGetAttr");
+  }
+
   /** A delegate that is idle for every operation and records every other call. */
   private Object idleDelegate() {
     return Proxy.newProxyInstance(

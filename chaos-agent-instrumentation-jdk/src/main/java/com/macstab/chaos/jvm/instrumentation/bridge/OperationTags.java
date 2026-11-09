@@ -51,6 +51,9 @@ public final class OperationTags {
 
   public static final String JDBC_CONNECTION_ACQUIRE = "JDBC_CONNECTION_ACQUIRE";
 
+  /** {@code JMX_GET_ATTR}. */
+  public static final String JMX_GET_ATTR = "JMX_GET_ATTR";
+
   /** {@code FILE_IO_CLOSE}. */
   public static final String FILE_IO_CLOSE = "FILE_IO_CLOSE";
 
