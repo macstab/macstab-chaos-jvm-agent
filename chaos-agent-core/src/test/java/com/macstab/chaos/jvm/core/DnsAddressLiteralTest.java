@@ -54,9 +54,9 @@ class DnsAddressLiteralTest {
   }
 
   @Test
-  @DisplayName("null (getLocalHost) and the empty name are not literals")
-  void nullAndEmptyAreNotLiterals() {
+  @DisplayName("null (getLocalHost) is looked up; the empty name is loopback without a lookup")
+  void nullIsLookedUpEmptyIsNot() {
     assertThat(DnsDispatch.isAddressLiteral(null)).isFalse();
-    assertThat(DnsDispatch.isAddressLiteral("")).isFalse();
+    assertThat(DnsDispatch.isAddressLiteral("")).isTrue();
   }
 }

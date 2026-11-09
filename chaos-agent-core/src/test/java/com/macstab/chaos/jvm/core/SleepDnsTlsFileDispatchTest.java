@@ -216,6 +216,35 @@ class SleepDnsTlsFileDispatchTest {
     }
 
     @Test
+    @DisplayName(
+        "the empty name (getByName(\"\"), loopback) is no lookup: a reject or rewrite skips it")
+    void emptyNameIsNotALookup() throws Throwable {
+      try (ChaosRuntime runtime = new ChaosRuntime()) {
+        final ChaosActivationHandle reject =
+            activate(
+                runtime,
+                "dns-reject-all",
+                ChaosSelector.dns(Set.of(OperationType.DNS_RESOLVE)),
+                ChaosEffect.reject("chaos dns"));
+        final String afterReject = runtime.beforeDnsResolve("");
+        reject.stop();
+        final ChaosActivationHandle rewrite =
+            activate(
+                runtime,
+                "dns-rewrite-all",
+                ChaosSelector.dns(Set.of(OperationType.DNS_RESOLVE)),
+                ChaosEffect.dnsRewrite("does-not-exist.invalid"));
+        final String afterRewrite = runtime.beforeDnsResolve("");
+        rewrite.stop();
+
+        assertThat(afterReject).isEmpty();
+        assertThat(afterRewrite).isEmpty();
+        assertThat(reject.matchedCount()).isZero();
+        assertThat(rewrite.matchedCount()).isZero();
+      }
+    }
+
+    @Test
     @DisplayName("DNS_RESOLVE scenario does NOT suppress FILE_IO_READ")
     void dnsScenarioDoesNotAffectFileIo() throws Throwable {
       try (ChaosRuntime runtime = new ChaosRuntime()) {

@@ -47,8 +47,8 @@ public final class DnsDispatch {
    * Called before {@link java.net.InetAddress#getByName(String)}, {@link
    * java.net.InetAddress#getAllByName(String)}, or {@link java.net.InetAddress#getLocalHost()}.
    *
-   * <p>An IP literal is not evaluated: the JDK parses it without a lookup ({@link
-   * #isAddressLiteral}).
+   * <p>An IP literal or the empty name is not evaluated: the JDK parses it, or returns the loopback
+   * address, without a lookup ({@link #isAddressLiteral}).
    *
    * @param hostname the hostname being resolved; {@code null} for {@code getLocalHost()}
    * @return the name to resolve: {@code hostname}, or another under a {@code DnsRewriteEffect}
@@ -124,8 +124,9 @@ public final class DnsDispatch {
   }
 
   /**
-   * Whether the JDK takes {@code name} as an address without a lookup: an IPv6 literal (any name
-   * with a {@code ':'}, bracketed or not, scoped or not) or an IPv4 literal as {@code
+   * Whether the JDK takes {@code name} as an address without a lookup: the empty name (the loopback
+   * address, as {@code getByName("")} returns it), an IPv6 literal (any name with a {@code ':'},
+   * bracketed or not, scoped or not) or an IPv4 literal as {@code
    * IPAddressUtil.textToNumericFormatV4} accepts it: at most 15 characters, one to four
    * dot-separated decimal parts, the last filling the remaining bytes ({@code 127.1}, {@code 1.2},
    * {@code 010.1.1.1}). {@code 1.2.3.4.5} and {@code 999.1.1.1} are names the JDK looks up. A part
@@ -133,12 +134,17 @@ public final class DnsDispatch {
    * is evaluated, and fails with the same {@code UnknownHostException} a reject throws.
    * Allocation-free.
    *
-   * @param name the name resolved; {@code null} is not a literal
+   * @param name the name resolved; {@code null} is not a literal: it stands for {@code
+   *     getLocalHost()}, which looks its name up (the advice passes it for {@code getByName(null)}
+   *     too)
    * @return {@code true} for an IP literal
    */
   static boolean isAddressLiteral(final @Nullable String name) {
-    if (name == null || name.isEmpty()) {
+    if (name == null) {
       return false;
+    }
+    if (name.isEmpty()) {
+      return true;
     }
     if (name.indexOf(':') >= 0) {
       return true;
