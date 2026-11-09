@@ -342,4 +342,26 @@ class ChaosRuntimeTest {
   private interface ThrowingRunnable {
     void run() throws Throwable;
   }
+
+  @Test
+  @DisplayName("isActive is true from activation until the scenario stops")
+  void isActiveFollowsTheScenario() {
+    try (ChaosRuntime runtime = new ChaosRuntime()) {
+      assertThat(runtime.isActive("live")).as("before activation").isFalse();
+
+      final ChaosActivationHandle handle =
+          runtime.activate(
+              ChaosScenario.builder("live")
+                  .scope(ChaosScenario.ScenarioScope.JVM)
+                  .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+                  .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+                  .activationPolicy(ActivationPolicy.always())
+                  .build());
+      assertThat(runtime.isActive("live")).as("while active").isTrue();
+      assertThat(runtime.isActive("other")).as("another id").isFalse();
+
+      handle.close();
+      assertThat(runtime.isActive("live")).as("after close").isFalse();
+    }
+  }
 }

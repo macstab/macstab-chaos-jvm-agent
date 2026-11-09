@@ -64,8 +64,9 @@ class HookCoverageIntegrationTest {
         String.join(
             File.pathSeparator,
             System.getProperty("chaos.test.jdbcClasspath"),
-            System.getProperty("chaos.test.httpClasspath"),
+            // Before the HTTP clients: Reactor Netty brings an older Netty than the client probes.
             System.getProperty("chaos.test.clientClasspath"),
+            System.getProperty("chaos.test.httpClasspath"),
             System.getProperty("chaos.test.coverageClasspath"));
     final ChildJvmProbe.ProbeResult result =
         new ChildJvmProbe(tempDir)
@@ -76,13 +77,38 @@ class HookCoverageIntegrationTest {
                 "-Dmacstab.chaos.instrumentation=eager");
 
     final String runtime = result.value("runtime");
+    assertThat(result.values().keySet())
+        .as("hook targets missing from the coverage classpath: their hooks are not verified")
+        // A JDK class a hook targets may exist on one JDK version only (CompletableFuture$Delayer
+        // on JDK 21); the libraries must all be on the probe classpath.
+        .filteredOn(key -> key.startsWith("absent.") && !isJdkClass(key.substring(7)))
+        // Tomcat's pool has no jar on the probe classpaths (none is a test dependency).
+        .containsOnly("absent.org.apache.tomcat.util.threads.ThreadPoolExecutor");
+    assertThat(result.value("nettyVersions"))
+        .as("the Netty the probe loaded, one version for every Netty artifact")
+        .isNotEmpty()
+        .satisfies(
+            versions ->
+                assertThat(versions.split(","))
+                    .allSatisfy(version -> assertThat(version).contains(":4.")));
+
     assertThat(result.value("unmatchedHooks"))
         .as(
             "hooks woven into a type that matched no method on JDK %s: a signature changed",
             runtime)
         .isEmpty();
 
-    assertThat(result.value("hookFailures"))
+    // Netty probes its optional logging back ends: a logger adapter whose library (Log4j 2) is not
+    // on the class path fails to resolve its superclass while the hook matchers inspect it, and
+    // cannot be loaded either. It is no hook target, so no hook is lost.
+    assertThat(
+            Arrays.stream(result.value("hookFailures").split("; "))
+                .filter(failure -> !failure.isEmpty())
+                .filter(
+                    failure ->
+                        !(failure.startsWith("io.netty.util.internal.logging.")
+                            && failure.contains("NoSuchTypeException")))
+                .toList())
         .as("types whose weaving failed on JDK %s: none of their hooks is applied", runtime)
         .isEmpty();
 
@@ -107,6 +133,13 @@ class HookCoverageIntegrationTest {
     } catch (final ClassNotFoundException absent) {
       return true;
     }
+  }
+
+  private static boolean isJdkClass(final String className) {
+    return className.startsWith("java.")
+        || className.startsWith("javax.")
+        || className.startsWith("jdk.")
+        || className.startsWith("sun.");
   }
 
   /** {@code Holder.Advice} of every nested class with an enter or exit advice method. */

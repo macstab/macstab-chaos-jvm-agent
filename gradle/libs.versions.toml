@@ -62,6 +62,8 @@ jedis = { module = "redis.clients:jedis", version.ref = "jedis" }
 kafka-clients = { module = "org.apache.kafka:kafka-clients", version.ref = "kafka" }
 lettuce-core = { module = "io.lettuce:lettuce-core", version.ref = "lettuce" }
 netty-transport = { module = "io.netty:netty-transport", version.ref = "nettyProbe" }
+netty-transport-classes-epoll = { module = "io.netty:netty-transport-classes-epoll", version.ref = "nettyProbe" }
+netty-transport-classes-kqueue = { module = "io.netty:netty-transport-classes-kqueue", version.ref = "nettyProbe" }
 r2dbc-h2 = { module = "io.r2dbc:r2dbc-h2", version.ref = "r2dbcH2" }
 apache-httpclient4 = { module = "org.apache.httpcomponents:httpclient", version.ref = "apacheHc4" }
 apache-httpclient5 = { module = "org.apache.httpcomponents.client5:httpclient5", version.ref = "apacheHc5" }

@@ -21,6 +21,20 @@ class ChaosTestAutoConfigurationTest {
           .withConfiguration(AutoConfigurations.of(ChaosTestAutoConfiguration.class));
 
   @Test
+  @DisplayName("the starter registers the test and the session propagation auto-configurations")
+  void autoConfigurationImports() {
+    assertThat(
+            org.springframework.boot.context.annotation.ImportCandidates.load(
+                    org.springframework.boot.autoconfigure.AutoConfiguration.class,
+                    getClass().getClassLoader())
+                .getCandidates())
+        .contains(
+            ChaosTestAutoConfiguration.class.getName(),
+            com.macstab.chaos.jvm.spring.boot.common.ChaosSessionPropagationAutoConfiguration.class
+                .getName());
+  }
+
+  @Test
   @DisplayName("in a chaos-test context the control plane bean tracks the installed one")
   void exposesInstalledControlPlane() {
     runner

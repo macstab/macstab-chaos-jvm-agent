@@ -121,6 +121,41 @@ class ChaosOpenTelemetryDetailsTest {
   }
 
   @Test
+  @DisplayName("closing the registrations stops counting, observing and adding span events")
+  void closedRegistrationsStop() {
+    final ChaosOpenTelemetry.Registration metrics = ChaosOpenTelemetry.metrics(plane, sdk);
+    final ChaosOpenTelemetry.Registration spans = ChaosOpenTelemetry.spanEvents(plane);
+    plane.deliver(applied());
+    assertThat(applications(reader.collectAllMetrics())).isEqualTo(1L);
+
+    metrics.close();
+    spans.close();
+    plane.deliver(applied());
+
+    final Collection<MetricData> collected = reader.collectAllMetrics();
+    assertThat(applications(collected)).as("no event counted after close").isEqualTo(1L);
+    assertThat(find(collected, "chaos.scenarios")).as("callbacks removed").isEmpty();
+    assertThat(find(collected, "chaos.hooks.woven")).isEmpty();
+    assertThat(find(collected, "chaos.listener.events.dropped")).isEmpty();
+    assertThat(plane.listeners).as("both listeners removed").isEmpty();
+  }
+
+  private static ChaosEvent applied() {
+    return new ChaosEvent(
+        Instant.EPOCH,
+        ChaosEvent.Type.APPLIED,
+        "closed",
+        "applied",
+        Map.of("operation", "THREAD_SLEEP", "effectType", "SuppressEffect"));
+  }
+
+  private static long applications(final Collection<MetricData> collected) {
+    return find(collected, "chaos.applications").orElseThrow().getLongSumData().getPoints().stream()
+        .mapToLong(point -> point.getValue())
+        .sum();
+  }
+
+  @Test
   @DisplayName("the effect attribute is the plan JSON type: the class name without Effect")
   void effectNames() {
     assertThat(ChaosOpenTelemetry.effectName("DelayEffect")).isEqualTo("delay");

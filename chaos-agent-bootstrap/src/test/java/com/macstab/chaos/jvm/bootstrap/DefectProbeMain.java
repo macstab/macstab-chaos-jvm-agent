@@ -1706,6 +1706,12 @@ public final class DefectProbeMain {
         System.out.println("absent." + target + "=true");
       }
     }
+    System.out.println(
+        "nettyVersions="
+            + io.netty.util.Version.identify().values().stream()
+                .map(version -> version.artifactId() + ":" + version.artifactVersion())
+                .sorted()
+                .collect(java.util.stream.Collectors.joining(",")));
     // Implementations chosen by the platform: create one of each.
     Selector.open().close();
     javax.net.ssl.SSLContext.getDefault().createSSLEngine();

@@ -56,6 +56,9 @@ dependencies {
         libs.kafka.clients, libs.grpc.core, libs.grpc.inprocess, libs.grpc.stub, libs.jedis,
         libs.lettuce.core, libs.r2dbc.h2, libs.aws.sdk.s3, libs.aws.sdk.url.connection.client,
         libs.netty.transport,
+        // The epoll and kqueue channel classes the Netty hooks target, of the same Netty version
+        // (Reactor Netty on the HTTP probe classpath brings an older epoll jar).
+        libs.netty.transport.classes.epoll, libs.netty.transport.classes.kqueue,
     )) {
         testCompileOnly(client)
         clientLibraryProbe(client)

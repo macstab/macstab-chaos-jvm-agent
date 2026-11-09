@@ -24,6 +24,14 @@ class StressorFactoryTest {
   static Stream<Arguments> effects() {
     final Duration hour = Duration.ofHours(1);
     return Stream.of(
+        Arguments.of(ChaosEffect.heapPressure(1024L, 1024), HeapPressureStressor.class),
+        Arguments.of(
+            ChaosEffect.keepAlive("factory-test-keep-alive", true, Duration.ofMillis(1)),
+            KeepAliveStressor.class),
+        Arguments.of(ChaosEffect.deadlock(2), DeadlockStressor.class),
+        Arguments.of(
+            ChaosEffect.virtualThreadCarrierPinning(1, Duration.ofMillis(1)),
+            VirtualThreadCarrierPinningStressor.class),
         Arguments.of(ChaosEffect.metaspacePressure(1, 1), MetaspacePressureStressor.class),
         Arguments.of(
             ChaosEffect.directBufferPressure(1024L, 1024), DirectBufferPressureStressor.class),
