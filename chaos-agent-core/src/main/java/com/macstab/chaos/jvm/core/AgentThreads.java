@@ -80,8 +80,8 @@ final class AgentThreads {
 
   /**
    * Returns an unstarted platform thread whose body runs with the dispatch depth raised; start it
-   * with {@link #startAll(List)}. For the expiry thread, whose executor handles its tasks'
-   * failures.
+   * with {@link #startAll(List)}. For the expiry thread: its executor keeps a task's failure in the
+   * task's future, so each task traces its own failure ({@code ScenarioController}).
    *
    * @param name the thread name
    * @param daemon whether the thread is a daemon

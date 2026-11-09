@@ -997,6 +997,155 @@ class ControlPlaneLifecycleTest {
     }
   }
 
+  @Nested
+  @DisplayName("A failure while a scenario ends")
+  class EndFailures {
+
+    /** A control plane whose every stressor fails to close with a failure of its own. */
+    private ChaosControlPlaneImpl planeWithFailingCloses(
+        final Clock clock, final List<RuntimeException> closeFailures) {
+      return new ChaosControlPlaneImpl(
+          clock,
+          com.macstab.chaos.jvm.api.ChaosMetricsSink.NOOP,
+          new StressorFactory(java.util.Optional::empty) {
+            @Override
+            ManagedStressor createIfNeeded(
+                final ChaosEffect effect,
+                final boolean allowDestructiveEffects,
+                final java.util.function.Consumer<String> onEnd) {
+              final RuntimeException closeFailure =
+                  new IllegalStateException("cannot close " + closeFailures.size());
+              closeFailures.add(closeFailure);
+              return () -> {
+                throw closeFailure;
+              };
+            }
+          });
+    }
+
+    /** Waits up to 5 s for the INACTIVE event of the plane's only scenario. */
+    private static ChaosEvent awaitInactive(final List<ChaosEvent> events)
+        throws InterruptedException {
+      final long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+      while (System.nanoTime() < deadline) {
+        for (final ChaosEvent event : events) {
+          if (event.type() == ChaosEvent.Type.INACTIVE) {
+            return event;
+          }
+        }
+        Thread.sleep(10);
+      }
+      throw new AssertionError("no INACTIVE event within 5 s: " + events);
+    }
+
+    @Test
+    @DisplayName(
+        "a stressor that fails to close at expiry is logged once, and the scenario still reports"
+            + " INACTIVE")
+    void expiryWithFailingStressorClose() throws InterruptedException {
+      // Arrange
+      final List<RuntimeException> closeFailures = new CopyOnWriteArrayList<>();
+      final ChaosControlPlaneImpl plane = planeWithFailingCloses(Clock.systemUTC(), closeFailures);
+      final List<ChaosEvent> events = new CopyOnWriteArrayList<>();
+      plane.addEventListener(events::add);
+      try (LogCapture log = LogCapture.agent()) {
+        // Act
+        plane.activate(
+            submitScenario(
+                "expiring", ActivationPolicy.builder().activeFor(Duration.ofMillis(50)).build()));
+        final ChaosEvent inactive = awaitInactive(events);
+
+        // Assert
+        assertThat(inactive.attributes()).containsEntry("reason", "expired");
+        assertThat(log.records())
+            .filteredOn(record -> record.getLevel() == java.util.logging.Level.WARNING)
+            .singleElement()
+            .satisfies(record -> assertThat(record.getThrown()).isSameAs(closeFailures.get(0)));
+      } finally {
+        plane.close();
+      }
+    }
+
+    @Test
+    @DisplayName(
+        "an expiry check that fails (a clock that throws) is logged, and ends the scenario with"
+            + " reason 'expiry failed'")
+    void failingExpiryCheckEndsTheScenario() throws InterruptedException {
+      // Arrange
+      final AtomicReference<Boolean> broken = new AtomicReference<>(false);
+      final IllegalStateException clockFailure = new IllegalStateException("clock broken");
+      final Clock clock =
+          new Clock() {
+            @Override
+            public java.time.ZoneId getZone() {
+              return ZoneOffset.UTC;
+            }
+
+            @Override
+            public Clock withZone(final java.time.ZoneId zone) {
+              return this;
+            }
+
+            @Override
+            public Instant instant() {
+              if (broken.get()) {
+                throw clockFailure;
+              }
+              return Instant.now();
+            }
+          };
+      final ChaosControlPlaneImpl plane =
+          new ChaosControlPlaneImpl(clock, com.macstab.chaos.jvm.api.ChaosMetricsSink.NOOP);
+      final List<ChaosEvent> events = new CopyOnWriteArrayList<>();
+      plane.addEventListener(events::add);
+      try (LogCapture log = LogCapture.agent()) {
+        plane.activate(
+            submitScenario(
+                "expiring", ActivationPolicy.builder().activeFor(Duration.ofMillis(50)).build()));
+
+        // Act
+        broken.set(true);
+        final ChaosEvent inactive = awaitInactive(events);
+
+        // Assert
+        assertThat(inactive.attributes()).containsEntry("reason", "expiry failed");
+        assertThat(log.records())
+            .filteredOn(record -> record.getLevel() == java.util.logging.Level.WARNING)
+            .extracting(java.util.logging.LogRecord::getThrown)
+            .contains(clockFailure);
+      } finally {
+        broken.set(false);
+        plane.close();
+      }
+    }
+
+    @Test
+    @DisplayName(
+        "close() stops every scenario and closes the listeners although a stop fails; the failure"
+            + " is rethrown with the later ones suppressed")
+    void closeContinuesAfterAFailingStop() {
+      // Arrange
+      final List<RuntimeException> closeFailures = new CopyOnWriteArrayList<>();
+      final ChaosControlPlaneImpl plane = planeWithFailingCloses(Clock.systemUTC(), closeFailures);
+      final AtomicInteger listenerCloses = new AtomicInteger();
+      plane.addEventListener(new ClosingListener(listenerCloses));
+      plane.activate(submitScenario("first", ActivationPolicy.always()));
+      plane.activate(submitScenario("second", ActivationPolicy.always()));
+
+      // Act
+      final Throwable thrown = org.assertj.core.api.Assertions.catchThrowable(plane::close);
+
+      // Assert
+      assertThat(closeFailures).hasSize(2);
+      assertThat(thrown).isIn(closeFailures.get(0), closeFailures.get(1));
+      assertThat(thrown.getSuppressed())
+          .containsExactly(
+              thrown == closeFailures.get(0) ? closeFailures.get(1) : closeFailures.get(0));
+      assertThat(plane.registry().controllers()).isEmpty();
+      assertThat(listenerCloses).hasValue(1);
+    }
+  }
+
   /** A listener that counts its events and its closes. */
   static final class ClosingListener implements ChaosEventListener, AutoCloseable {
     private final AtomicInteger closed;

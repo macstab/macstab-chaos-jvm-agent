@@ -528,9 +528,14 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
       }
       toUnregister = new ArrayList<>(registry.controllers());
     }
+    // A controller that fails to stop does not keep the others, or the listeners, alive: the first
+    // failure is rethrown at the end, the later ones are added to it as suppressed.
+    Throwable failure = null;
     for (final ScenarioController controller : toUnregister) {
       try {
         controller.destroy();
+      } catch (final RuntimeException | Error destroyFailure) {
+        failure = firstOf(failure, destroyFailure);
       } finally {
         registry.unregister(controller);
       }
@@ -538,7 +543,26 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
     // Close AutoCloseable listeners (e.g. JfrChaosEventSink's FlightRecorder periodic hook).
     // A hook left registered pins its dead runtime in FlightRecorder — a silent JVM-wide leak
     // that grows with every runtime a test suite spins up.
-    observabilityBus.close();
+    try {
+      observabilityBus.close();
+    } catch (final RuntimeException | Error busFailure) {
+      failure = firstOf(failure, busFailure);
+    }
+    if (failure instanceof RuntimeException runtimeFailure) {
+      throw runtimeFailure;
+    }
+    if (failure instanceof Error error) {
+      throw error;
+    }
+  }
+
+  /** Returns {@code first}, with {@code next} added as suppressed, or {@code next} if none. */
+  private static Throwable firstOf(final @Nullable Throwable first, final Throwable next) {
+    if (first == null) {
+      return next;
+    }
+    first.addSuppressed(next);
+    return first;
   }
 
   void setHookDemand(final HookDemand demand) {

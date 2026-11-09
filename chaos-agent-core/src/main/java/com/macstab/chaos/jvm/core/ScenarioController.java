@@ -20,6 +20,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
+import java.util.logging.Level;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -477,7 +478,7 @@ final class ScenarioController {
       // scenario not yet started, so it is ended now, after STARTED.
       final String ended = stressorEnd;
       if (ended != null) {
-        ExpiryScheduler.execute(() -> endAfterStressor(ended));
+        ExpiryScheduler.execute(onExpiryThread(() -> endAfterStressor(ended)));
       }
     }
   }
@@ -490,7 +491,7 @@ final class ScenarioController {
   private void stressorEnded(final String newReason) {
     if (stressorEnd == null) {
       stressorEnd = newReason;
-      ExpiryScheduler.execute(() -> endAfterStressor(newReason));
+      ExpiryScheduler.execute(onExpiryThread(() -> endAfterStressor(newReason)));
     }
   }
 
@@ -889,8 +890,17 @@ final class ScenarioController {
         if ("expired".equals(newReason)) {
           gate.release();
         }
-        closeStressor();
         cancelExpiry();
+        try {
+          closeStressor();
+        } catch (final RuntimeException | Error closeFailure) {
+          // The scenario has ended: it still reports its end (INACTIVE) to the caller.
+          AgentLog.named(AgentLog.AGENT)
+              .log(
+                  Level.WARNING,
+                  closeFailure,
+                  () -> "[chaos-agent] could not close the stressor of scenario " + scenario.id());
+        }
         return true;
       }
       return false;
@@ -962,8 +972,33 @@ final class ScenarioController {
     // An early run (a clock behind the scheduler's) checks again no sooner than 1 ms later.
     expiry =
         ExpiryScheduler.schedule(
-            this::expire, nanos <= 0L ? 0L : Math.max(nanos, MIN_EXPIRY_RECHECK_NANOS));
+            onExpiryThread(this::expire),
+            nanos <= 0L ? 0L : Math.max(nanos, MIN_EXPIRY_RECHECK_NANOS));
   }
+
+  /**
+   * Returns {@code task} for the expiry thread, tracing its failure: the executor would keep a
+   * {@link Throwable} in a future nobody reads. A failed task (a clock that throws, for example) is
+   * logged once at WARNING and ends the scenario with reason {@value #EXPIRY_FAILED}, so it neither
+   * stays {@code ACTIVE} nor ends without a trace.
+   */
+  private Runnable onExpiryThread(final Runnable task) {
+    return () -> {
+      try {
+        task.run();
+      } catch (final Throwable failure) {
+        AgentLog.named(AgentLog.AGENT)
+            .log(
+                Level.WARNING,
+                failure,
+                () -> "[chaos-agent] the end of scenario " + scenario.id() + " failed");
+        endOnItsOwn(EXPIRY_FAILED);
+      }
+    };
+  }
+
+  /** The reason of the INACTIVE transition when a task on the expiry thread failed. */
+  private static final String EXPIRY_FAILED = "expiry failed";
 
   /**
    * The scheduled check: ends the scenario when its bounds have passed. A check that comes early,
