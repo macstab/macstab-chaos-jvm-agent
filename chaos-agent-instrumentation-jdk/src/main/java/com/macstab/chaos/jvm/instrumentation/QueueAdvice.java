@@ -10,11 +10,12 @@ import org.jspecify.annotations.Nullable;
  *
  * <p>Every advice brackets the queue method with {@link BootstrapDispatcher#enterScope(int)} /
  * {@link BootstrapDispatcher#exitScope(int)} on {@link BootstrapDispatcher#SCOPE_QUEUE}, so only
- * the outermost queue call on a thread is evaluated. Queues delegate internally (generic bridge
- * {@code put(Object)} → {@code put(Delayed)} → {@code offer(..)} in {@code DelayQueue} and {@code
- * DelayedWorkQueue}; {@code PriorityBlockingQueue.put} → {@code offer}). Evaluating the nested call
- * as well would apply delays several times and let a rejecting QUEUE_OFFER decision skip the inner
- * {@code offer} while the outer {@code void put()} returns normally, silently dropping the element.
+ * the outermost queue call on a thread is evaluated. Queues delegate internally ({@code put} →
+ * {@code offer} in {@code DelayQueue}, {@code DelayedWorkQueue} and {@code PriorityBlockingQueue};
+ * a generic bridge method is never woven, only the method it bridges to). Evaluating the nested
+ * call as well would apply delays several times and let a rejecting QUEUE_OFFER decision skip the
+ * inner {@code offer} while the outer {@code void put()} returns normally, silently dropping the
+ * element.
  */
 final class QueueAdvice {
   private QueueAdvice() {}

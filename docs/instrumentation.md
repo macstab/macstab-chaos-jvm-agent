@@ -9,7 +9,7 @@
 
 # chaos-agent-instrumentation-jdk — Instrumentation Layer Reference
 
-> Internal reference for the bootstrap bridge, ByteBuddy advice classes, reentrancy guard, and the 64-handle interception surface.
+> Internal reference for the bootstrap bridge, ByteBuddy advice classes, reentrancy guard, and the 78-handle interception surface.
 > 
 > *Engineered by* **[Christian Schnapka](https://macstab.com)** — Embedded Principal+ Engineer · [Macstab GmbH](https://macstab.com) · Hamburg, Germany
 
@@ -33,7 +33,7 @@ In scope:
 - `JdkInstrumentationInstaller` — entry point; orchestrates all startup steps
 - `BootstrapDispatcher` — bootstrap-classloader-resident static dispatcher (78 handle slots + reentrancy guard and call-depth scopes)
 - `ChannelBuffers` — bootstrap-resident shaping of a channel call's buffers (single, scattering, gathering): limits for torn and trickled calls, the bit flip of a corrupted read
-- `BridgeDelegate` — interface defining the 64-method contract
+- `BridgeDelegate` — interface defining the 78-method contract, one method per handle slot
 - `ChaosBridge` — agent-classloader implementation of `BridgeDelegate`; thin delegation to `ChaosRuntime`
 - All `@Advice` classes, grouped into `JdkInstrumentationInstaller.HookGroup`s
 - `ScheduledCallableWrapper`, `ScheduledRunnableWrapper` — task wrappers for tick-level interception
@@ -50,7 +50,7 @@ Out of scope:
 
 ---
 
-# 2. Engineerural Context
+# 2. Architectural Context
 
 **Dependencies**:
 - ByteBuddy (`net.bytebuddy`) for advice weaving and class transformation
@@ -97,8 +97,8 @@ When an open is refused (a JVM that denies `redefineModule`), `DirectBufferPress
 | **Bootstrap classloader** | The JVM root classloader; loads `java.*`, `javax.*`. Has no parent. Can only see classes from `rt.jar`/`java.base` and explicitly appended JARs.                                                                                                         |
 | **Agent classloader**     | The classloader created for the agent JAR. Has the bootstrap classloader as parent (indirect). Can see all agent classes.                                                                                                                                |
 | **Advice class**          | A ByteBuddy concept: a class containing `@Advice.OnMethodEnter` and/or `@Advice.OnMethodExit` static methods, whose bytecode is inlined into the instrumented method. Not a real class instantiation at runtime — the advice body is copied as bytecode. |
-| **BootstrapDispatcher**   | A class that must be visible to the bootstrap classloader. Provides 64 static dispatch methods called from advice.                                                                                                                                       |
-| **BridgeDelegate**        | Interface in the agent classloader defining the 64-method contract. Implemented by `ChaosBridge`.                                                                                                                                                        |
+| **BootstrapDispatcher**   | A class that must be visible to the bootstrap classloader. Provides the static dispatch methods advice calls, served by 78 handle slots, and the scope helpers.                                                                                         |
+| **BridgeDelegate**        | Interface in the agent classloader defining the 78-method contract (one method per slot). Implemented by `ChaosBridge`.                                                                                                                                  |
 | **MethodHandle**          | A typed reference to a method, invokable across classloader boundaries. Built from the agent classloader; stored in `BootstrapDispatcher.handles[]`.                                                                                                     |
 | **DEPTH guard**           | `ThreadLocal<int[]>` in `BootstrapDispatcher`. Prevents infinite recursion when chaos code calls instrumented JDK methods.                                                                                                                               |
 | **Hook group**            | A `JdkInstrumentationInstaller.HookGroup`: related interception points (e.g. `SOCKET`, `JDBC`) tagged with the `OperationType`s they serve. Woven once, on the first activation needing them (or at start when eager); stays woven until uninstall.      |
@@ -123,7 +123,8 @@ JdkInstrumentationInstaller.install(instrumentation, runtime, eager)
    — Write them into a temp JAR at java.io.tmpdir (0600 on POSIX)
    — instrumentation.appendToBootstrapClassLoaderSearch(new JarFile(tempJar))
    — On POSIX the file is unlinked right away (the open JarFile keeps it readable);
-     elsewhere it is deleted on exit, and stale jars of earlier JVMs are swept
+     Windows cannot delete an open file, so there it stays until a later start
+     sweeps the stale jars of earlier JVMs
    → BootstrapDispatcher is now visible to bootstrap classloader
 
 1b. rejectForeignDelegate()
@@ -132,7 +133,7 @@ JdkInstrumentationInstaller.install(instrumentation, runtime, eager)
      only one copy of the agent can be active per JVM
 
 2. installDelegate(new ChaosBridge(runtime))
-   — buildMethodHandles(): 77 MethodHandle[] via MethodHandles.publicLookup() against BridgeDelegate
+   — buildMethodHandles(): 78 MethodHandle[] via MethodHandles.publicLookup() against BridgeDelegate
    — Class.forName("...BootstrapDispatcher", true, null)  // null CL = bootstrap CL
    — bootstrapDispatcherClass.getMethod("install", Object.class, MethodHandle[].class)
                               .invoke(null, bridgeDelegate, mh)
@@ -195,12 +196,14 @@ BootstrapDispatcher.someDispatchMethod(...)   (guard inlined in every method):
 
 `ThreadLocal.get()` and `ThreadLocal.set()` are globally instrumented once the `THREAD_LOCAL` hook group is woven. The DEPTH guard itself uses `DEPTH.get()`, which is a `ThreadLocal.get()` call. Without a special check, this would create infinite recursion: `ThreadLocal.get()` → advice → `BootstrapDispatcher.beforeThreadLocalGet()` → `DEPTH.get()` → `ThreadLocal.get()` → ...
 
-The special case in `ThreadLocalGetAdvice.onEnter()`:
+The special case in `ThreadLocalGetAdvice` and `ThreadLocalSetAdvice`:
 ```java
-if (threadLocal == BootstrapDispatcher.depthThreadLocal()) return false;
+if (BootstrapDispatcher.isDepthThreadLocal(threadLocal)) {
+    return false;
+}
 ```
 
-This identity check fires before any delegation. When `DEPTH` reads itself, the advice detects `threadLocal == DEPTH` and skips the dispatch, returning `false` (no suppression). This is the only place in the entire codebase where `BootstrapDispatcher.depthThreadLocal()` is called externally.
+This identity check fires before any delegation. When `DEPTH` reads itself, the advice detects `threadLocal == DEPTH` and skips the dispatch, returning `false` (no suppression). These two advices are the only callers of `BootstrapDispatcher.isDepthThreadLocal(Object)`.
 
 ---
 
@@ -229,56 +232,53 @@ flowchart TB
 
 ## Interception Map
 
-```mermaid
-flowchart TB
-  subgraph g1["Executor and thread hook groups"]
-    n2["Thread.start() / start(ThreadContainer)"]
-    n3["VirtualThread.start() / start(ThreadContainer)"]
-    n4["ThreadPoolExecutor.execute()"]
-    n5["ThreadPoolExecutor.beforeExecute()"]
-    n6["ThreadPoolExecutor.shutdown()"]
-    n7["ThreadPoolExecutor.awaitTermination()"]
-    n8["ScheduledThreadPoolExecutor.schedule*()"]
-    n9["ScheduledCallableWrapper / ScheduledRunnableWrapper (tick)"]
-  end
-  subgraph g10["JDK and library hook groups"]
-    n11["BlockingQueue.put/take/offer/poll"]
-    n12["CompletableFuture.complete/completeExceptionally/cancel"]
-    n13["ClassLoader.loadClass/getResource"]
-    n14["ClassLoader.defineClass"]
-    n15["Runtime.addShutdownHook"]
-    n16["ForkJoinTask.doExec"]
-    n17["System.gc"]
-    n18["Runtime.exit/halt (System.exit delegates to Runtime.exit)"]
-    n19["Method.invoke"]
-    n20["ByteBuffer.allocateDirect"]
-    n21["ObjectInputStream.readObject"]
-    n22["ObjectOutputStream.writeObject"]
-    n23["LockSupport.park/parkNanos/parkUntil"]
-    n24["AQS.acquire"]
-    n25["Selector.select/select(long)/selectNow + Consumer overloads"]
-    n26["Thread.sleep(long)/sleep(long,int)/sleep(Duration)"]
-    n27["SSLSocket.startHandshake (explicit + implicit)/SSLEngine.beginHandshake"]
-    n28["SocketChannel.connect/read/write"]
-    n29["ServerSocketChannel.accept"]
-    n30["Socket.connect/close"]
-    n31["ServerSocket.accept"]
-    n32["SocketInputStream.read"]
-    n33["SocketOutputStream.write"]
-    n34["Inflater.inflate"]
-    n35["Deflater.deflate"]
-    n36["ThreadLocal.get/set"]
-    n37["InitialContext.lookup"]
-    n38["MBeanServer.invoke/getAttribute"]
-    n39["Runtime.loadLibrary0"]
-    n40["Instant.now()"]
-    n41["LocalDateTime.now() / now(ZoneId)"]
-    n42["ZonedDateTime.now() / now(ZoneId)"]
-    n43["Date() constructor"]
-    n44["HttpClientImpl.send/sendAsync, HttpURLConnection, OkHttp 3/4, Apache HC 4/5, Reactor Netty"]
-    n45["JDBC pools, Statement/PreparedStatement execute*, Connection prepare/commit/rollback"]
-  end
-```
+The interception points belong to 41 hook groups (`JdkInstrumentationInstaller.HookGroup`), each woven the first time a scenario needs one of its operations (or at start with `instrumentation=eager`), plus the method hooks of `MethodSelector`s (`METHODS` in `wovenHookGroups`). The methods each group weaves are in the slot table (§7); the client libraries in §12 and §13 and in [configuration-reference.md §13.3](configuration-reference.md#133-selector-reference).
+
+| Hook group | Operations |
+|------------|------------|
+| `THREAD_START` | `THREAD_START`, `VIRTUAL_THREAD_START` |
+| `THREAD_SLEEP` | `THREAD_SLEEP` |
+| `THREAD_POOL_EXECUTOR` | `EXECUTOR_SUBMIT`, `EXECUTOR_WORKER_RUN`, `EXECUTOR_SHUTDOWN`, `EXECUTOR_AWAIT_TERMINATION` |
+| `EXECUTOR_SUBMIT` | `EXECUTOR_SUBMIT`, `SCHEDULE_SUBMIT` (`ScheduledThreadPoolExecutor` and `ThreadPerTaskExecutor` `execute` / `submit`) |
+| `SCHEDULED_EXECUTOR` | `SCHEDULE_SUBMIT`, `SCHEDULE_TICK` |
+| `FORK_JOIN` | `FORK_JOIN_TASK_RUN` |
+| `BLOCKING_QUEUE` | `QUEUE_PUT`, `QUEUE_OFFER`, `QUEUE_TAKE`, `QUEUE_POLL` |
+| `COMPLETABLE_FUTURE` | `ASYNC_COMPLETE`, `ASYNC_COMPLETE_EXCEPTIONALLY` |
+| `COMPLETABLE_FUTURE_CANCEL` | `ASYNC_CANCEL` |
+| `SHUTDOWN_HOOK` | `SHUTDOWN_HOOK_REGISTER` |
+| `CLASS_LOADER` | `CLASS_LOAD`, `RESOURCE_LOAD` |
+| `CLASS_DEFINE` | `CLASS_DEFINE` |
+| `JDK_INTERNAL_CLASS_LOAD` | the `FILE_IO_*` and `ZIP_*` operations: the `SCOPE_JDK_INTERNAL` bracket of class loading (§6) |
+| `RUNTIME_LIFECYCLE` | `SYSTEM_GC_REQUEST` (`System.gc()`), `SYSTEM_EXIT_REQUEST` (`Runtime.exit`, `Runtime.halt`) |
+| `REFLECTION_INVOKE` | `REFLECTION_INVOKE` |
+| `DIRECT_BUFFER` | `DIRECT_BUFFER_ALLOCATE` |
+| `SERIALIZATION` | `OBJECT_SERIALIZE`, `OBJECT_DESERIALIZE` |
+| `THREAD_PARK` | `THREAD_PARK` |
+| `MONITOR_ENTER` | `MONITOR_ENTER` (`AbstractQueuedSynchronizer.acquire(int)`) |
+| `NIO` | `NIO_SELECTOR_SELECT`, `NIO_CHANNEL_READ`, `NIO_CHANNEL_WRITE`, `NIO_CHANNEL_CONNECT`, `NIO_CHANNEL_ACCEPT` |
+| `SOCKET` | `SOCKET_CONNECT`, `SOCKET_ACCEPT`, `SOCKET_READ`, `SOCKET_WRITE`, `SOCKET_CLOSE`, `SOCKET_BIND`, `SOCKET_SHUTDOWN` (`Socket`, `ServerSocket`, `sun.nio.ch.NioSocketImpl` reads and writes) |
+| `SOCKET_CHANNEL` | `SOCKET_CONNECT`, `SOCKET_ACCEPT`, `SOCKET_READ`, `SOCKET_WRITE`, `SOCKET_CLOSE`, `SOCKET_SHUTDOWN` (`SocketChannel`, `ServerSocketChannel`) |
+| `DATAGRAM` | `DATAGRAM_SEND`, `DATAGRAM_RECEIVE` |
+| `SSL_HANDSHAKE` | `SSL_HANDSHAKE` |
+| `DNS` | `DNS_RESOLVE`, `DNS_ANSWER`, `DNS_REVERSE` |
+| `ZIP` | `ZIP_INFLATE`, `ZIP_DEFLATE` |
+| `THREAD_LOCAL` | `THREAD_LOCAL_GET`, `THREAD_LOCAL_SET` |
+| `TIME_API` | `INSTANT_NOW`, `CLOCK_READ`, `LOCAL_DATE_TIME_NOW`, `ZONED_DATE_TIME_NOW`, `DATE_NEW` |
+| `CLOCK_CALL_SITES` | `SYSTEM_CLOCK_MILLIS`, `SYSTEM_CLOCK_NANOS` (call sites in the `clockCallSites` packages) |
+| `JNDI_JMX` | `JNDI_LOOKUP`, `JMX_INVOKE`, `JMX_GET_ATTR` |
+| `NATIVE_LIBRARY` | `NATIVE_LIBRARY_LOAD` |
+| `PROCESS` | `PROCESS_START`, `PROCESS_WAIT` |
+| `FILE_IO` | the ten `FILE_IO_*` operations |
+| `HTTP_CLIENT` | `HTTP_CLIENT_SEND`, `HTTP_CLIENT_SEND_ASYNC` (JDK `HttpClient`, `HttpURLConnection`, OkHttp, Apache HttpClient 4/5, Reactor Netty) |
+| `JDBC` | `JDBC_CONNECTION_ACQUIRE`, `JDBC_STATEMENT_EXECUTE`, `JDBC_PREPARED_STATEMENT`, `JDBC_TRANSACTION_COMMIT`, `JDBC_TRANSACTION_ROLLBACK` |
+| `R2DBC` | `R2DBC_STATEMENT_EXECUTE` |
+| `KAFKA` | `MESSAGE_SEND`, `MESSAGE_RECEIVE` |
+| `GRPC` | `RPC_CALL` |
+| `REDIS` | `REDIS_COMMAND` |
+| `AWS_SDK` | `AWS_SDK_CALL` |
+| `NETTY` | `NETTY_CHANNEL_WRITE`, `NETTY_CHANNEL_READ` |
+
+Opening a session weaves the groups that carry the session to other threads (`EXECUTOR_SUBMIT`, `SCHEDULE_SUBMIT`, `THREAD_START`, `FORK_JOIN_TASK_RUN` and `HTTP_CLIENT_SEND`).
 
 ---
 
@@ -300,7 +300,7 @@ The wiring is derived, not written per slot: each `public static final int` slot
 
 **`installDelegate()`**: Uses `Class.forName("...BootstrapDispatcher", true, null)` — the `null` classloader argument requests loading from the bootstrap classloader, ensuring the instance obtained is the bootstrap-classloader version, not the agent-classloader version. Reflective invocation of `install()` crosses the classloader boundary without sharing type references.
 
-**`instrumentOptional()`**: Before registering a ByteBuddy type matcher for optional JDK classes (e.g., `javax.naming.InitialContext`, `javax.management.MBeanServer`), attempts `Class.forName(typeName, false, systemClassLoader)`. If absent, logs at FINE and skips the transformation. This prevents agent startup failure in environments where these classes are not on the classpath.
+**`instrumentOptional()`**: Classes that may be absent from an application or a JDK (OkHttp, Reactor Netty, HikariCP, c3p0, `javax.naming.InitialContext`, the native-library loader) are matched by name only (`ElementMatchers.namedOneOf`). ByteBuddy evaluates the matcher whenever a class is defined, by any class loader, so a library an application class loader loads later (Spring Boot's fat-jar launcher, which does not exist yet when `premain` runs) is still woven, and an absent library costs one string comparison per class definition. The class is not probed with `Class.forName` at install time: under `premain` in a fat jar such a probe would always fail. The advice uses only `Object`-typed parameters and reflection, so the libraries are not needed on the agent's class path.
 
 **`AgentBuilder` configuration**:
 - `disableClassFormatChanges()`: prevents ByteBuddy from adding fields or changing the constant pool structure — required for retransformation
@@ -311,7 +311,7 @@ The wiring is derived, not written per slot: each `public static final int` slot
 
 ## BootstrapDispatcher
 
-57 public static dispatch methods, each guarding reentrancy inline:
+The public static dispatch methods advice calls (one or more per handle slot; overloads share a slot) each guard reentrancy inline:
 1. Returns the fallback when `DEPTH[0] > 0`; otherwise increments `DEPTH[0]`
 2. Snapshot-reads `handles` and `delegate` into locals and invokes the slot's handle (fallback when not installed)
 3. Returns the result or rethrows the exception via `sneakyThrow`; decrements `DEPTH[0]` in `finally`
@@ -320,7 +320,7 @@ There is no shared `invoke(supplier, fallback)` trampoline: its single call site
 
 The snapshot-read pattern (`final MethodHandle[] h = handles; final Object d = delegate;`) is required because `handles` and `delegate` are separate `volatile` fields. Reading them in two separate reads could theoretically see a stale value for one but not the other if reads were not ordered. The safe publication protocol (handles written before delegate) guarantees that if `d != null` is observed, `h != null` is also guaranteed to be visible. The local snapshot prevents a second read from seeing a reset (`uninstall()` calls `install(null, null)`).
 
-**DEPTH lifetime**: `DEPTH` holds an `int[]`: index 0 is the reentrancy depth, the remaining slots are call-depth scope counters. The array is not removed when the depth returns to 0, because it also carries the scope counters of enclosing instrumented calls; its footprint is one small `int[]` per thread that reaches an instrumented call, released with the thread. The decrement runs in the `finally` block, so it runs even if the handle throws.
+**DEPTH lifetime**: `DEPTH` holds an `int[SCOPE_COUNT]` (32): index 0 is the reentrancy depth, indexes 1–31 are the call-depth scope counters (`SCOPE_DNS` = 1 … `SCOPE_EXECUTOR_SUBMIT` = 31). The array is not removed when the depth returns to 0, because it also carries the scope counters of enclosing instrumented calls; its footprint is one small `int[]` per thread that reaches an instrumented call, released with the thread. The decrement runs in the `finally` block, so it runs even if the handle throws.
 
 **Call-depth scopes**: many instrumented methods call another instrumented method for the same logical operation (`InetAddress.getByName` → `getAllByName`, a pool proxy statement → the driver statement, `sendAsync(2-arg)` → `sendAsync(3-arg)`, `Thread.sleep` overloads, `VirtualThread.start()` → `start(container)`, class-loader parent delegation, explicit → implicit TLS handshake). Advice for these operations brackets the method with `enterScope(SCOPE_*)` / `exitScope(SCOPE_*)`; only the outermost call on the thread dispatches. A nested or delegating call is therefore evaluated once: delays do not add up, probability is rolled once and `maxApplications` is consumed once. Scopes exist for DNS, zip inflate/deflate, JMX, queues, class load/define, resource lookup, thread park, JDBC prepare/execute/commit/rollback, HTTP, TLS handshake, thread start and thread sleep, client libraries, pool-worker creation, `java.time` `now()` methods with an operation of their own (their system-clock read is not a `CLOCK_READ`), file transfers and compound `java.io` reads (`SCOPE_FILE_TRANSFER`), file closes, datagram sends, file opens through a file system provider (`SCOPE_FILE_OPEN`: `newByteChannel` opens through `newFileChannel` on JDK 24+) serialization (`SCOPE_SERIALIZATION`: the nested `writeObject` / `readObject` of a class's own serialization methods) a Jedis connection's set-up and pool validation (`SCOPE_REDIS_SETUP`, scope-only: `JedisSendCommand` skips the commands sent inside it) and a Kafka send (`SCOPE_MESSAGE_SEND`, scope-only: the producer's metadata wait is evaluated only inside it), an OkHttp synchronous call (`SCOPE_HTTP_SYNC_CALL`, scope-only), an STPE or virtual-thread-per-task executor `execute` / `submit` (`SCOPE_EXECUTOR_SUBMIT`: one `EXECUTOR_SUBMIT`, and the `schedule` advice inside it skips its `SCHEDULE_SUBMIT` evaluation, checked with `inScope`, but still wraps the task for `SCHEDULE_TICK`) and the JDK's own use of a general primitive (`SCOPE_JDK_INTERNAL`, scope-only, semantics L3a: inside it the file, ZIP, direct-buffer, GC-request and `SCHEDULE_SUBMIT` dispatch returns its fallback).
 
@@ -344,33 +344,40 @@ Thin delegation layer. Every method is a one-line call to the corresponding `Cha
 Each advice class is a static inner class following ByteBuddy's advice pattern:
 
 ```java
-// Void dispatch (typical executor hook):
-public static class BeforeExecuteAdvice {
-    @Advice.OnMethodEnter(suppress = Throwable.class)
-    public static void onEnter(
-        @Advice.This Object executor,
-        @Advice.Argument(0) Thread worker,
-        @Advice.Argument(1) Runnable task) throws Throwable {
-        BootstrapDispatcher.beforeWorkerRun(executor, worker, task);
+// Argument-rewriting dispatch (ExecutorAdvice.ExecuteAdvice, ThreadPoolExecutor.execute):
+static final class ExecuteAdvice {
+    @Advice.OnMethodEnter
+    static void enter(
+            @Advice.This final Object executor,
+            @Advice.Argument(value = 0, readOnly = false) Runnable task)
+            throws Throwable {
+        task = BootstrapDispatcher.decorateExecutorRunnable(
+            OperationTags.EXECUTOR_SUBMIT, executor, task);   // the task, wrapped or replaced
     }
 }
 
-// Value-returning dispatch (executor decoration):
-public static class ExecuteAdvice {
-    @Advice.OnMethodEnter(suppress = Throwable.class)
-    public static Runnable onEnter(
-        @Advice.This ThreadPoolExecutor executor,
-        @Advice.Argument(value = 0, readOnly = false) Runnable task) throws Throwable {
-        return BootstrapDispatcher.decorateExecutorRunnable("execute", executor, task);
+// Scoped dispatch (QueueAdvice.PutAdvice): only the outermost queue call is evaluated
+static final class PutAdvice {
+    @Advice.OnMethodEnter
+    static void enter(@Advice.This final Object queue) throws Throwable {
+        if (BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_QUEUE)) {
+            try {
+                BootstrapDispatcher.beforeQueueOperation(OperationTags.QUEUE_PUT, queue);
+            } catch (final Throwable throwable) {
+                BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_QUEUE);
+                throw throwable;
+            }
+        }
     }
-    @Advice.OnMethodEnter // argument assignment
-    // task is reassigned to the decorated runnable
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit() {
+        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_QUEUE);
+    }
 }
 ```
 
-**`suppress = Throwable.class`**: When present, exceptions thrown from the advice are caught and logged (not propagated). Used on advice methods that should never abort the instrumented method due to agent errors.
-
-**Exception-injecting advice** (e.g., `ExitRequestAdvice`): Does NOT use `suppress = Throwable.class` because it intentionally allows injected exceptions to propagate.
+**No `suppress = Throwable.class`**: no advice uses it. A throwable from the dispatch is the injected failure (a reject, an `errno`, an exception injection) and must reach the caller; ByteBuddy's `suppress` would swallow it, so the fault would silently not happen. Scoped advice leaves its scope again before rethrowing, as above.
 
 **Return-value rewriting advice** (e.g., `SystemClockMillisAdvice`): Uses `@Advice.OnMethodExit` with `@Advice.Return(readOnly = false)` to overwrite the return value. `System.currentTimeMillis()` / `nanoTime()` themselves cannot be woven (§14 Known Limitations, item 1); calls to them in the packages named by `clockCallSites` are rewritten to `BootstrapDispatcher.currentTimeMillis()` / `nanoTime()` with `MemberSubstitution` instead.
 
@@ -386,7 +393,7 @@ If the bridge is not installed (`BootstrapDispatcher.handles == null`), the wrap
 
 ---
 
-# 7. The 77 Interception Handles
+# 7. The 78 Interception Handles
 
 | Index | Constant                             | JDK method(s) intercepted                                                                                                                                                       | Direction                                    |
 |-------|--------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------|
@@ -527,7 +534,7 @@ Step 3 explicitly carries the original `ZoneId` into the result. The zone is nev
 
 # 8. Concurrency and Threading Model
 
-The dispatcher itself has no mutable per-call state. The two `volatile` fields (`handles`, `delegate`) are written once at startup and never reset. All dispatch methods are re-entrant provided the DEPTH guard is functioning.
+The dispatcher itself has no mutable per-call state. The two `volatile` fields (`handles`, `delegate`) are written at install and reset only by `uninstall()` (`install(null, null)`). All dispatch methods are re-entrant provided the DEPTH guard is functioning.
 
 **DEPTH ThreadLocal lifecycle**:
 - `DEPTH[0]` is incremented to 1 at the start of the outermost dispatch-method call on the current thread
@@ -562,7 +569,7 @@ This is a fatal startup failure; the agent cannot operate without the bootstrap 
 
 ## Missing Optional Classes
 
-`instrumentOptional()` silently skips JNDI, JMX, and native library instrumentation if the target class is absent. The agent logs at FINE. The affected operation types will never trigger chaos even if scenarios targeting them are registered.
+Optional library targets (OkHttp, HikariCP, c3p0, Reactor Netty, the client libraries) are matched by name: a library that is never loaded is never woven, and nothing is logged. Scenarios for its operations stay `ACTIVE` and simply never match. A hook woven into a type that matched none of its methods (the library changed the method) is listed under `unmatchedHooks` in the runtime details.
 
 ---
 
@@ -583,11 +590,11 @@ The instrumentation layer has two potential security implications:
 When `ScenarioRegistry.controllers` is empty:
 - Advice fires: ~2–5 ns (advice bytecode inlined into method)
 - `BootstrapDispatcher` dispatch method: `DEPTH.get()` (1 ThreadLocal read) + inline depth check + null-check of `delegate` → returns fallback; no allocation
-- Total additional overhead per intercepted method call: ~5–15 ns
+- Total additional overhead per intercepted method call: 7–12 ns, allocation-free (`BridgeDispatchBenchmark`, JDK 25; [benchmarks.md §8](benchmarks.md#8-bridgedispatchbenchmark--the-woven-path))
 
 ## Advice Overhead (with scenarios)
 
-See [overall-agent.md §11] for full hot-path cost breakdown.
+See [configuration-reference.md §11](configuration-reference.md#11-performance-model) for the hot-path cost breakdown and [benchmarks.md](benchmarks.md) for the measurements.
 
 ## Retransformation Cost (on-demand weaving)
 
@@ -631,7 +638,7 @@ Both slots carry the URL string as a single `String` argument and return nothing
 
 None of the four third-party client libraries is a compile-time dependency of `chaos-agent-instrumentation-jdk`. They are declared `compileOnly` in the module so that the agent JAR carries no transitive class references to OkHttp, Apache HC, or Reactor Netty. At advice-weave time ByteBuddy inlines the advice bytecode into the target method; if a reference to `okhttp3.HttpUrl` appeared in the advice class descriptor the JVM would require that class to be present at transformation time. Using `Object`-typed parameters and reflective dispatch sidesteps this entirely.
 
-`HttpUrlExtractor` (package-private in `com.macstab.chaos.jvm.instrumentation`) resolves URLs through a `ConcurrentHashMap<String, Method>` keyed on `"$className#$methodName"`. On first call for a given class the method is located by walking the class hierarchy — declared methods, then interface methods, then superclass — looking for a zero-argument method with the target name. The found `Method` is stored in the cache with `setAccessible(true)` for subsequent fast-path invocations. The cache key includes the runtime class name so that distinct OkHttp `Call` subtypes or proxy wrappers each get their own cache slot.
+`HttpUrlExtractor` (a public class in `com.macstab.chaos.jvm.instrumentation`, injected into the bootstrap class path with the bridge, since the advice that calls it is inlined into client classes of any loader) caches the accessor methods in a `ClassValue<ConcurrentHashMap<String, Method>>`: one map per runtime `Class` (not per class name, which would collide across class loaders), keyed by method name. On the first call for a class the method is located by walking the class and its superclasses (declared methods), then their interfaces transitively, looking for a zero-argument method with the target name. A found `Method` is cached after `setAccessible(true)` (kept even when the module refuses that, since a public method may still be invocable); a method the class lacks is cached as a negative marker, so the walk is not repeated on every call.
 
 For each client:
 
@@ -646,25 +653,17 @@ For each client:
 
 When any step in the chain returns `null`, or when any reflective call throws, the extractor catches the `Throwable`, discards it, and returns `null`. A `null` URL passed to `BootstrapDispatcher.beforeHttpSend()` reaches `SelectorMatcher` as the `targetName` field of `InvocationContext`. The `SelectorMatcher` treats a `null` target name as a non-match for all non-`any()` patterns, but as a match for `NamePattern.any()`. This is intentional: a scenario with `urlPattern = any()` continues to fire even if URL extraction failed, matching the broadest intent of the selector. A scenario with a specific glob pattern silently misses, which is the safer failure mode.
 
-The reflection approach has one observable warm-up cost: the first call for each new client class incurs a full hierarchy walk. After the `Method` object is cached, subsequent calls are a single `ConcurrentHashMap.get()` plus `Method.invoke()` — cheap but not zero. At JIT saturation the JIT may inline through the `MethodHandle` and `Method.invoke` layers, though the reflective dispatch path is generally not inlined by C2.
+The reflection approach has one observable warm-up cost: the first call for each new client class incurs a full hierarchy walk. After the `Method` object is cached, subsequent calls are a `ClassValue` lookup, a `ConcurrentHashMap.get()` and `Method.invoke()` — cheap but not zero; while no scenario is indexed for the operation the advice returns before extracting anything (`BootstrapDispatcher.idle`, §6). At JIT saturation the JIT may inline through the `MethodHandle` and `Method.invoke` layers, though the reflective dispatch path is generally not inlined by C2.
 
 ## 12.4 How a Rejected Request Fails
 
 A reject on `HTTP_CLIENT_SEND` / `HTTP_CLIENT_SEND_ASYNC` throws `java.io.IOException(message)` (built by `FailureFactory`) from `BootstrapDispatcher.beforeHttpSend` / `beforeHttpSendAsync`, inside the advice, before the real method body runs. An asynchronous call does not throw it: the JDK `sendAsync` advice skips the send and returns `CompletableFuture.failedFuture(exception)`, and OkHttp evaluates an enqueued call in its call chain on the dispatcher thread, where the exception reaches `Callback.onFailure`; Reactor Netty signals it to the subscriber (`Operators.error`) instead of connecting. Every wired client declares or tolerates `IOException` on these paths, so the caller's own error handling — retries, circuit breakers, `ExchangeFilterFunction`s, OkHttp interceptors — sees what a refused or reset connection produces. 1.x also had a suppress that threw the agent's `ChaosHttpSuppressException`; no real client throws it, so 2.0 refuses a suppress on HTTP at activation and the class is gone.
 
-## 12.5 The `instrumentOptional` Guard
+## 12.5 Optional Clients: Matching by Name
 
-`JdkInstrumentationInstaller.instrumentOptional()` is the mechanism that allows all four third-party clients to be absent from the classpath without aborting agent startup. Before adding a type transformation to the `AgentBuilder` chain, it calls:
+None of the four third-party clients needs to be on the class path. OkHttp and Reactor Netty are woven through `JdkInstrumentationInstaller.instrumentOptional()`, which matches the target classes by name only (`ElementMatchers.namedOneOf("okhttp3.RealCall", "okhttp3.internal.connection.RealCall")`, …); Apache HttpClient 4 and 5 are matched by package (`org.apache.http.impl.client.`, `org.apache.hc.client5.http.impl.classic.`) and their `CloseableHttpClient` supertype. ByteBuddy evaluates these matchers whenever a class is defined, by any class loader, so a client loaded later by an application class loader (Spring Boot's fat-jar launcher, which does not exist when `premain` runs) is still woven. Nothing is probed with `Class.forName` at install time: under `premain` in a fat jar such a probe would always fail and the client's chaos would silently never apply.
 
-```java
-Class.forName(typeName, false, ClassLoader.getSystemClassLoader());
-```
-
-The `false` second argument suppresses class initialization — only presence is tested. If `ClassNotFoundException` is thrown, the method logs at `FINE` level and returns the original `AgentBuilder` unchanged. The transformation for that client is never registered. No type matcher fires, no advice is woven, no exception is thrown.
-
-If the class is present, `instrumentOptional` adds a standard `.type(ElementMatchers.named(typeName)).transform(...)` entry to the builder chain.
-
-The OkHttp, Apache HC 4.x, Apache HC 5.x, and Reactor Netty transformations are all wrapped in `instrumentOptional`. An application using only OkHttp pays the advice overhead for OkHttp calls and nothing for Apache HC. An application using none of these libraries pays zero overhead on any HTTP path (because no HTTP advice is woven at all).
+An application using only OkHttp has advice woven into OkHttp's call chain and nothing into Apache HttpClient. An application using none of these libraries carries no advice for them; a class definition costs one name comparison per matcher.
 
 ## 12.6 The Java 11 `HttpClientImpl` Limitation
 
@@ -673,7 +672,7 @@ The advice classes `JavaHttpClientSendAdvice` and `JavaHttpClientSendAsyncAdvice
 `jdk.internal.net.http.HttpClientImpl` lives in the non-exported package `jdk.internal.net.http` inside the `java.net.http` module. The agent self-grants the required reflective open at install time — see [Module access strategy](#module-access-strategy) — so users never need to set `--add-opens` JVM flags. Two pieces are involved:
 
 1. **Module open** — `Instrumentation#redefineModule(...)` is called from `ModuleOpener#grantInternalModuleOpens` as the first step of `install`, and the agent JAR's `MANIFEST.MF` carries an `Add-Opens` line for the same packages (the manifest attribute is honoured on `-javaagent:` premain attach; `redefineModule` covers `agentmain` / runtime self-attach).
-2. **Bootstrap-classpath types** — types referenced by woven advice (`HttpUrlExtractor`, `JdbcTargetExtractor`) are injected into the bootstrap classloader's classpath alongside `BootstrapDispatcher`. Without this the JVM verifier raises `NoClassDefFoundError` because `HttpClientImpl` is loaded by the platform classloader and cannot resolve agent-classloader types directly.
+2. **Bootstrap-classpath types** — types referenced by woven advice (`HttpUrlExtractor`, `JdbcTargetExtractor`) are injected into the bootstrap classloader's classpath alongside `BootstrapDispatcher`. Without this, resolving the advice's reference fails with `NoClassDefFoundError`, because `HttpClientImpl` is loaded by the platform classloader, which cannot see agent-classloader types.
 
 ## 12.7 URL Pattern Matching in `SelectorMatcher`
 
@@ -767,7 +766,7 @@ The JDBC layer sits at the boundary between application code and the database dr
 
 | Target                      | Class instrumented                                  | Method                                                                                                                     | Advice class                     | Operation type              | `targetName`                                       |
 |-----------------------------|-----------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------|----------------------------------|-----------------------------|----------------------------------------------------|
-| HikariCP connection acquire | `com.zaxxer.hikari.pool.HikariPool`                 | `getConnection(long)`                                                                                                      | `HikariGetConnectionAdvice`      | `JDBC_CONNECTION_ACQUIRE`   | Pool name from `getPoolName()`                     |
+| HikariCP connection acquire | `com.zaxxer.hikari.pool.HikariPool`                 | `getConnection(long)`                                                                                                      | `HikariGetConnectionAdvice`      | `JDBC_CONNECTION_ACQUIRE`   | Pool name (`toString()` of the pool, §13.5)        |
 | c3p0 connection checkout    | `com.mchange.v2.c3p0.impl.C3P0PooledConnectionPool` | `checkoutPooledConnection()`                                                                                               | `C3p0CheckoutAdvice`             | `JDBC_CONNECTION_ACQUIRE`   | Class name fallback                                |
 | Statement execute           | subtypes of `java.sql.Statement`                    | `execute`, `executeQuery`, `executeUpdate`, `executeLargeUpdate` — every overload whose first argument is the SQL `String` | `StatementExecuteAdvice`         | `JDBC_STATEMENT_EXECUTE`    | SQL snippet (≤ 200 chars)                          |
 | PreparedStatement execute   | subtypes of `java.sql.PreparedStatement`            | no-arg `execute()`, `executeQuery()`, `executeUpdate()`, `executeLargeUpdate()`                                            | `PreparedStatementExecuteAdvice` | `JDBC_STATEMENT_EXECUTE`    | `null` (the SQL is visible at prepare time, below) |
@@ -777,7 +776,7 @@ The JDBC layer sits at the boundary between application code and the database dr
 
 A pool proxy that delegates to the driver statement or connection (for example `HikariProxyStatement` → `PgStatement`), and overloads that call each other, are evaluated once per call via the JDBC call-depth scopes (see §6 Call-depth scopes).
 
-HikariCP and c3p0 are wired via `instrumentOptional` — their absence from the classpath is tolerated cleanly (see §5 `instrumentOptional` description). The `java.sql.Statement` and `java.sql.Connection` instrumentation targets are always registered because `java.sql` is part of `java.sql` module, which is always present.
+HikariCP and c3p0 are wired via `instrumentOptional` — matched by name, so their absence from the class path costs nothing and a pool loaded later is still woven (see §6 `instrumentOptional()` and §12.5). The `java.sql.Statement` and `java.sql.Connection` instrumentation targets are always registered because `java.sql` is part of `java.sql` module, which is always present.
 
 The handle slots in `BootstrapDispatcher`:
 
@@ -831,9 +830,9 @@ The no-arg `PreparedStatement.execute()` / `executeQuery()` / `executeUpdate()` 
 
 ## 13.5 `JdbcTargetExtractor` — Pool Name Extraction
 
-`JdbcTargetExtractor.fromHikariPool(Object pool)` extracts the HikariCP pool name by reflectively calling `getPoolName()` on the `HikariPool` instance. The same `ConcurrentHashMap<String, Method>` cache pattern used in `HttpUrlExtractor` is used here. The method hierarchy walk is superclass-only (no interface walk) because `getPoolName()` is a concrete method declared in HikariCP's `HikariDataSource`/`HikariPool` class hierarchy.
+`JdbcTargetExtractor.fromHikariPool(Object pool)` extracts the HikariCP pool name. `HikariPool` declares no `getPoolName()` (only `HikariDataSource` and `HikariConfig` do); its `PoolBase` holds the name and returns it from `toString()`. The extractor therefore uses a `getPoolName()` where a pool type has one, then a `toString()` the pool class declares itself (not `Object`'s), then the class name. Lookups are cached per runtime `Class` in a `ClassValue`, as in `HttpUrlExtractor`, with an empty `Optional` recording a method the class lacks, so a pool type without the accessor is not searched again on every acquire; the advice returns before extracting while no scenario is indexed for `JDBC_CONNECTION_ACQUIRE`.
 
-If `getPoolName()` is not found (e.g., a version of HikariCP that renamed or removed the method), the extractor falls back to `pool.getClass().getName()`. This fallback guarantees that the `targetName` is always non-null when the `pool` argument is non-null. A `JdbcSelector` with `targetPattern = any()` continues to fire correctly; a pattern like `NamePattern.glob("payments-*")` simply fails to match the class name fallback, which is a safe degradation.
+The class-name fallback guarantees that the `targetName` is non-null when the `pool` argument is non-null. A `JdbcSelector` with `targetPattern = any()` continues to fire correctly; a pattern like `NamePattern.glob("payments-*")` simply fails to match the class name fallback, which is a safe degradation.
 
 For c3p0, the `C3p0CheckoutAdvice` does not use `JdbcTargetExtractor`. It uses `pool.getClass().getName()` directly:
 
@@ -845,7 +844,7 @@ c3p0 does not expose a named-pool API at the level that the advice can reflectiv
 
 ## 13.6 How a Rejected JDBC Call Fails
 
-A reject throws `java.sql.SQLException` (built by `FailureFactory`) from the dispatch, inside the advice, before the pool's or driver's method body runs. Spring's `DataSourceUtils.getConnection()` translates it into a `CannotGetJdbcConnectionException`, `JdbcTemplate` into a `DataAccessException`, and plain JDBC callers see the `SQLException` itself — exactly as for a database that refuses the call. 1.x also had a suppress that threw the agent's `ChaosJdbcSuppressException`; no driver throws it, so 2.0 refuses a suppress on JDBC at activation and the class is gone.
+A reject throws `java.sql.SQLException` (built by `FailureFactory`) from the dispatch, inside the advice, before the pool's or driver's method body runs. Spring's `DataSourceUtils.getConnection()` translates it into a `CannotGetJdbcConnectionException`, `JdbcTemplate` into a `DataAccessException`, and plain JDBC callers see the `SQLException` itself — the type and path a database that refuses the call produces. The agent's `SQLException` carries the scenario's message and no SQL state or vendor code, so error handling that branches on `getSQLState()` sees `null`. 1.x also had a suppress that threw the agent's `ChaosJdbcSuppressException`; no driver throws it, so 2.0 refuses a suppress on JDBC at activation and the class is gone.
 
 The advice holds no string concatenation (which compiles to `invokedynamic`): it is inlined into drivers and pools compiled for Java 6 (class file version 50), where `invokedynamic` is not allowed.
 
@@ -900,7 +899,7 @@ Each caller sets the `targetClassName` to the JDBC API class that semantically o
 
 The contract: `evaluateJdbc` returns nothing. It throws the `SQLException` of a reject; in every other case (no scenario, delay only, gate only) it returns after the delay and gate, and the real JDBC method body proceeds.
 
-## 13.8 Integration Test Design — Why `ChaosPlatform.installLocally()` Was Not Used
+## 13.8 Integration Test Design — Why `ChaosPlatform.installLocally()` Is Not Used
 
 `JdbcIntegrationTest` wires the pipeline manually:
 
@@ -915,9 +914,9 @@ void installBridge() throws Exception {
 }
 ```
 
-`ChaosPlatform.installLocally()` — the self-attach mechanism used by the Spring test starter — calls `JdkInstrumentationInstaller.install(instrumentation, runtime, eager)`, which weaves every hook group (JDBC included) on demand exactly as a `-javaagent:` start does. The `chaos-agent-instrumentation-jdk` module already depends on `chaos-agent-bootstrap` for the `ChaosPlatform` type. `chaos-agent-bootstrap` in turn depends on `chaos-agent-instrumentation-jdk`. Calling `ChaosPlatform.installLocally()` from within `chaos-agent-instrumentation-jdk`'s own test scope would create a module dependency cycle: the module-under-test would need its own outputs on the classpath at test time in a way that the Gradle project structure does not support without forking a child process with `-javaagent:`.
+`ChaosPlatform` lives in `chaos-agent-bootstrap`, which depends on `chaos-agent-instrumentation-jdk`; this module depends only on `chaos-agent-api` and `chaos-agent-core`, so `ChaosPlatform.installLocally()` is not on its test class path, and adding the dependency would make a cycle. (Self-attach weaves the JDBC group on demand exactly as a `-javaagent:` start does; that path is covered by the bootstrap module's tests.)
 
-The manual `BootstrapDispatcher.install(bridge, handles)` approach bypasses ByteBuddy entirely. The test calls the `BootstrapDispatcher` static dispatch methods (`beforeJdbcStatementExecute`, `beforeJdbcConnectionAcquire`, etc.) directly, simulating what the ByteBuddy-woven advice would call at production runtime. The real `ChaosRuntime` → `ChaosDispatcher` → `ScenarioRegistry` → `SelectorMatcher` pipeline executes in full. The real H2 in-memory database and HikariCP connection pool are used. The only missing piece is the ByteBuddy weaving — which is a concern for `JdkInstrumentationInstaller` to test, not for `JdbcIntegrationTest`. The test covers the dispatch path, the `SQLException` of a reject, the refusal of a suppress at activation, and the passthrough path; it leaves the bytecode transformation mechanics to the installer's own test scope.
+The manual `BootstrapDispatcher.install(bridge, handles)` approach bypasses ByteBuddy entirely. The test drives the `JdbcAdvice` entry methods and the `BootstrapDispatcher` static dispatch methods directly, simulating what the woven advice calls at production runtime. The real `ChaosRuntime` → `ChaosDispatcher` → `ScenarioRegistry` → `SelectorMatcher` pipeline executes in full. The real H2 in-memory database and HikariCP connection pool are used. The only missing piece is the ByteBuddy weaving — which is a concern for `JdkInstrumentationInstaller` to test, not for `JdbcIntegrationTest`. The test covers the dispatch path, the `SQLException` of a reject, the refusal of a suppress at activation, and the passthrough path; it leaves the bytecode transformation mechanics to the installer's own test scope.
 
 ## 13.9 Sequence Diagram — HikariCP Connection Acquire
 
@@ -1011,16 +1010,19 @@ sequenceDiagram
    `currentTimeMillis()` remains native. No error is surfaced. This is a hard JVM limitation.
    Workarounds (e.g. `-Xpatch:java.base`, a C-level JVMTI agent) are out of scope.
 
-   **Clock skew works via two supported paths:**
-   - Code explicitly wired through `BootstrapDispatcher.adjustClockMillis` / `adjustClockNanos`.
+   **Clock skew works via three supported paths:**
+   - Call sites in the packages named by `clockCallSites`: their `System.currentTimeMillis()` / `nanoTime()` calls are rewritten (`MemberSubstitution`, the `CLOCK_CALL_SITES` hook group) to `BootstrapDispatcher.currentTimeMillis()` / `nanoTime()`, which read the real clock and return it through the clock-skew dispatch.
+   - Code explicitly wired through `ChaosRuntime.adjustClockMillis` / `adjustClockNanos` (the `ADJUST_CLOCK_MILLIS` / `ADJUST_CLOCK_NANOS` slots).
    - `java.time.Instant.now()`, `LocalDateTime.now()` / `now(ZoneId)`, `ZonedDateTime.now()` / `now(ZoneId)`, and `new java.util.Date()` — all are non-native Java members woven at exit by the `TIME_API` hook group. See §7a for implementation details including the `DateNewAdvice` `ClassCircularityError` edge case and the nanosecond-precision preservation guarantee for `Instant`.
 
 2. **Dynamic attach requires opt-in**: Dynamic attach (`agentmain`) weaves the same hook groups as `-javaagent:` — every group is applied by retransformation on demand, so sockets, NIO, `LockSupport`, HTTP, JDBC, etc. are all available — but `agentmain` remains a no-op unless dynamic attach is explicitly enabled (see [bootstrap.md](bootstrap.md)).
 
 3. **Native method wrapping for other bootstrap classes**: The `disableClassFormatChanges()`
    restriction in the primary `AgentBuilder` prevents ByteBuddy from creating native method
-   wrappers. `Runtime.gc()` is intercepted via `@OnMethodEnter` (before the native call) which
-   does not require adding methods. Return-value interception for native methods remains blocked.
+   wrappers. A native method cannot be woven at all: `Runtime.gc()` is native, so the agent hooks
+   the non-native `System.gc()` that delegates to it (`@OnMethodEnter`, which adds no method), and a
+   direct `Runtime.getRuntime().gc()` is not intercepted. Return-value interception for native
+   methods remains blocked.
 
 4. **`AbstractSelector` subtypes**: NIO `Selector.select()` (and the JDK 11+ `Consumer` overloads) is instrumented on `sun.nio.ch.SelectorImpl` and on concrete subtypes of `AbstractSelector` (e.g., `KQueueSelectorImpl` on macOS, `EPollSelectorImpl` on Linux). These are platform-specific classes loaded lazily at first `Selector.open()` call. If `Selector.open()` is called before the agent attaches (agentmain), the platform selector class may not be instrumented.
 

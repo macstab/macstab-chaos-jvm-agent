@@ -18,7 +18,8 @@ final class JvmRuntimeAdvice {
   // ── A2: GC ────────────────────────────────────────────────────────────────
 
   /**
-   * Intercepts {@code System.gc()} and {@code Runtime.gc()}. Skips the GC call when a
+   * Intercepts {@code System.gc()}. {@code Runtime.gc()} is native and is not woven, so a direct
+   * {@code Runtime.getRuntime().gc()} is not intercepted. Skips the GC call when a
    * SUPPRESS-terminating scenario is active.
    *
    * <p>When {@code enter()} returns {@code true}, ByteBuddy's {@code skipOn =

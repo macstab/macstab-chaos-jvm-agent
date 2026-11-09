@@ -1366,7 +1366,7 @@ public final class BootstrapDispatcher {
   }
 
   /**
-   * Called before {@code System.gc()} or {@code Runtime.gc()}.
+   * Called before {@code System.gc()} ({@code Runtime.gc()} is native and not intercepted).
    *
    * <p>The returned flag drives the {@code skipOn = Advice.OnNonDefaultValue.class} mechanism in
    * {@code GcRequestAdvice}: returning {@code true} causes ByteBuddy to skip the GC call entirely.

@@ -75,7 +75,10 @@ final class JvmRuntimeHooks {
                             .and(ElementMatchers.takesArgument(0, String.class)))));
   }
 
-  /** System.exit, System.gc, Runtime.gc, Runtime.halt instrumentation. */
+  /**
+   * System.gc, Runtime.exit (so System.exit) and Runtime.halt instrumentation. Runtime.gc is native
+   * and not woven.
+   */
   static AgentBuilder applyRuntimeLifecycleTransformations(final AgentBuilder builder) {
     return builder
         .type(ElementMatchers.named("java.lang.System"))

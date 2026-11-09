@@ -282,7 +282,7 @@ public interface BridgeDelegate {
   long adjustDateNew(long realMillis) throws Throwable;
 
   /**
-   * Called before {@code System.gc()} or {@code Runtime.gc()}.
+   * Called before {@code System.gc()} ({@code Runtime.gc()} is native and not intercepted).
    *
    * @return {@code true} if an active SUPPRESS scenario wants to block the garbage-collection
    *     request; {@code false} to allow it

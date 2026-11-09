@@ -1432,9 +1432,13 @@ public final class JdkInstrumentationInstaller {
   }
 
   /**
-   * File channels, {@code RandomAccessFile} and fsync. Only the private funnels are hooked ({@code
-   * implRead}/{@code implWrite}, {@code readBytes}/{@code writeBytes}), so a public overload
-   * delegating to them is one call.
+   * File channels, {@code RandomAccessFile} and fsync. {@code FileChannelImpl} is hooked at its
+   * public methods ({@code read}/{@code write} of one buffer, positional or not, and of a buffer
+   * array; {@code map}, {@code transferTo}/{@code transferFrom}, {@code force}, {@code truncate},
+   * {@code implCloseChannel}); {@code RandomAccessFile} at {@code read()}, {@code write(int)},
+   * {@code readLine()}, {@code setLength} and its private funnels {@code readBytes}/{@code
+   * writeBytes}, so a public {@code read}/{@code write} overload delegating to a funnel is one
+   * call.
    */
   private static AgentBuilder applyFileChannelInterception(final AgentBuilder agentBuilder) {
     return agentBuilder
