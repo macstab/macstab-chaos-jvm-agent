@@ -85,6 +85,38 @@ class ChaosHandleRegistryTest {
   }
 
   @Test
+  @DisplayName("a failed stop logs the handle's id on one line, its line breaks replaced")
+  void failedStopLogsSanitizedId() {
+    final java.util.List<String> lines = new java.util.concurrent.CopyOnWriteArrayList<>();
+    final java.util.logging.Logger logger =
+        java.util.logging.Logger.getLogger(ChaosHandleRegistry.class.getName());
+    final java.util.logging.Handler capture =
+        new java.util.logging.Handler() {
+          @Override
+          public void publish(final java.util.logging.LogRecord record) {
+            lines.add(record.getMessage());
+          }
+
+          @Override
+          public void flush() {}
+
+          @Override
+          public void close() {}
+        };
+    logger.addHandler(capture);
+    try {
+      registry.register(new FakeHandle("plan:a\n2026-11-09 FORGED", true));
+      registry.destroy();
+    } finally {
+      logger.removeHandler(capture);
+    }
+
+    assertThat(lines)
+        .singleElement()
+        .satisfies(line -> assertThat(line).contains("plan:a").doesNotContain("\n"));
+  }
+
+  @Test
   @DisplayName("after the context closes, a late registration is stopped at once and not tracked")
   void registrationDuringShutdown() {
     final FakeHandle early = new FakeHandle("early");

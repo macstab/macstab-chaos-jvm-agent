@@ -143,7 +143,7 @@ public class ChaosAutoConfiguration {
         LOGGER.log(
             Level.INFO,
             "[chaos-agent] activated startup plan \"{0}\" from {1}",
-            new Object[] {handle.id(), safeConfigFile});
+            new Object[] {LogText.sanitize(handle.id()), safeConfigFile});
       } catch (final ConfigLoadException exception) {
         // Only the sanitised message, never the exception: its cause chain (Jackson's own
         // message) quotes an excerpt of the file, which can hold credentials.

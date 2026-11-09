@@ -243,7 +243,7 @@ public final class ChaosQuarkusExtension
    * individual {@link ChaosActivationHandle#close()} is logged as a {@code WARNING} and not thrown,
    * so that it cannot mask a real test failure and so that sibling handles are always released.
    */
-  private static void stopHandlesSafely(final List<ChaosActivationHandle> handles) {
+  static void stopHandlesSafely(final List<ChaosActivationHandle> handles) {
     if (handles == null) {
       return;
     }
@@ -257,7 +257,10 @@ public final class ChaosQuarkusExtension
             .log(
                 Level.WARNING,
                 failure,
-                () -> "[chaos-agent] failed to stop scenario " + handle.id() + " after the test");
+                () ->
+                    "[chaos-agent] failed to stop scenario "
+                        + com.macstab.chaos.jvm.startup.LogText.sanitize(handle.id())
+                        + " after the test");
       }
     }
   }

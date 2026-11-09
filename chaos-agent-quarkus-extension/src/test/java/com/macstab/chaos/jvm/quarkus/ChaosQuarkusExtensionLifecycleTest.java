@@ -131,4 +131,46 @@ class ChaosQuarkusExtensionLifecycleTest {
       return ChaosQuarkusExtension.toScenario(annotated.getAnnotation(ChaosScenario.class));
     }
   }
+
+  @Test
+  @DisplayName("a failed stop after the test logs the scenario id on one line")
+  void failedStopLogsSanitizedId() {
+    final java.util.List<String> lines = new java.util.concurrent.CopyOnWriteArrayList<>();
+    final java.util.logging.Logger logger =
+        java.util.logging.Logger.getLogger(ChaosQuarkusExtension.class.getName());
+    final java.util.logging.Handler capture =
+        new java.util.logging.Handler() {
+          @Override
+          public void publish(final java.util.logging.LogRecord record) {
+            lines.add(record.getMessage());
+          }
+
+          @Override
+          public void flush() {}
+
+          @Override
+          public void close() {}
+        };
+    final com.macstab.chaos.jvm.api.ChaosActivationHandle failing =
+        (com.macstab.chaos.jvm.api.ChaosActivationHandle)
+            java.lang.reflect.Proxy.newProxyInstance(
+                getClass().getClassLoader(),
+                new Class<?>[] {com.macstab.chaos.jvm.api.ChaosActivationHandle.class},
+                (proxy, method, args) -> {
+                  if (method.getName().equals("id")) {
+                    return "s\n2026-11-09 FORGED";
+                  }
+                  throw new IllegalStateException("stop failed");
+                });
+    logger.addHandler(capture);
+    try {
+      ChaosQuarkusExtension.stopHandlesSafely(java.util.List.of(failing));
+    } finally {
+      logger.removeHandler(capture);
+    }
+
+    assertThat(lines)
+        .singleElement()
+        .satisfies(line -> assertThat(line).contains("FORGED").doesNotContain("\n"));
+  }
 }
