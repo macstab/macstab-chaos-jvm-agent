@@ -16,6 +16,10 @@ public final class HttpLibraryProbeMain {
   public static void main(final String[] args) throws Exception {
     switch (args[0]) {
       case "okhttp-execute" -> DefectProbeMain.withHttpServer(HttpLibraryProbeMain::okHttpExecute);
+      case "okhttp-enqueue-reject" ->
+          DefectProbeMain.withHttpServer(HttpLibraryProbeMain::okHttpEnqueueReject);
+      case "okhttp-interceptor-nested-request" ->
+          DefectProbeMain.withHttpServer(HttpLibraryProbeMain::okHttpInterceptorNestedRequest);
       case "hc5-execute" -> DefectProbeMain.withHttpServer(HttpLibraryProbeMain::hc5Execute);
       case "hc5-execute-host" ->
           DefectProbeMain.withHttpServer(HttpLibraryProbeMain::hc5ExecuteWithHost);
@@ -40,6 +44,66 @@ public final class HttpLibraryProbeMain {
     } finally {
       client.dispatcher().executorService().shutdown();
       client.connectionPool().evictAll();
+    }
+  }
+
+  /** An enqueued call: whether {@code enqueue} threw, and what its callback received where. */
+  private static void okHttpEnqueueReject(final String url) throws Exception {
+    final okhttp3.OkHttpClient client = new okhttp3.OkHttpClient();
+    final java.util.concurrent.CompletableFuture<String> outcome =
+        new java.util.concurrent.CompletableFuture<>();
+    try {
+      client
+          .newCall(new okhttp3.Request.Builder().url(url).build())
+          .enqueue(
+              new okhttp3.Callback() {
+                @Override
+                public void onFailure(final okhttp3.Call call, final java.io.IOException failure) {
+                  System.out.println("callback.type=" + failure.getClass().getName());
+                  System.out.println("callback.message=" + failure.getMessage());
+                  System.out.println("callback.thread=" + Thread.currentThread().getName());
+                  outcome.complete("failure");
+                }
+
+                @Override
+                public void onResponse(final okhttp3.Call call, final okhttp3.Response response) {
+                  response.close();
+                  outcome.complete("response " + response.code());
+                }
+              });
+      System.out.println("callback=" + outcome.get(10, java.util.concurrent.TimeUnit.SECONDS));
+    } catch (final Exception failure) {
+      System.out.println("call.type=" + failure.getClass().getName());
+    } finally {
+      client.dispatcher().executorService().shutdown();
+      client.connectionPool().evictAll();
+    }
+  }
+
+  /** An application interceptor that sends a request of its own before the call proceeds. */
+  private static void okHttpInterceptorNestedRequest(final String url) throws Exception {
+    final okhttp3.OkHttpClient nestedClient = new okhttp3.OkHttpClient();
+    final okhttp3.OkHttpClient client =
+        new okhttp3.OkHttpClient.Builder()
+            .addInterceptor(
+                chain -> {
+                  try (okhttp3.Response nested =
+                      nestedClient
+                          .newCall(new okhttp3.Request.Builder().url(url).build())
+                          .execute()) {
+                    System.out.println("nested.status=" + nested.code());
+                  }
+                  return chain.proceed(chain.request());
+                })
+            .build();
+    try (okhttp3.Response response =
+        client.newCall(new okhttp3.Request.Builder().url(url).build()).execute()) {
+      System.out.println("status=" + response.code());
+    } finally {
+      for (final okhttp3.OkHttpClient each : java.util.List.of(client, nestedClient)) {
+        each.dispatcher().executorService().shutdown();
+        each.connectionPool().evictAll();
+      }
     }
   }
 

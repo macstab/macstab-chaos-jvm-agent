@@ -11,7 +11,7 @@ import org.jspecify.annotations.Nullable;
  *
  * <ul>
  *   <li>Java 11+ {@code HttpClient} ({@code jdk.internal.net.http.HttpClientImpl})
- *   <li>OkHttp 3/4 ({@code okhttp3.RealCall})
+ *   <li>OkHttp 3/4 ({@code RealCall.execute} and its call chain)
  *   <li>Apache HttpComponents 4.x and 5.x ({@code doExecute} of the {@code CloseableHttpClient}
  *       implementations)
  *   <li>Spring WebClient / Reactor Netty ({@code reactor.netty.http.client.HttpClientConnect})
@@ -189,59 +189,46 @@ final class HttpClientAdvice {
     }
   }
 
-  /** Intercepts {@code okhttp3.RealCall.execute()}. */
+  /**
+   * {@code RealCall.execute()} of OkHttp 3 and 4, scope-only ({@link
+   * BootstrapDispatcher#SCOPE_HTTP_SYNC_CALL}): the call is evaluated in its chain ({@link
+   * OkHttpChainAdvice}), which this scope marks synchronous.
+   */
   static final class OkHttpExecuteAdvice {
     @Advice.OnMethodEnter
-    static void enter(@Advice.This final Object call) throws Throwable {
-      if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_HTTP)) {
-        return;
-      }
-      final String url;
-      try {
-        BootstrapDispatcher.beginInternalCall();
-        try {
-          url = HttpUrlExtractor.fromOkHttpCall(call);
-        } finally {
-          BootstrapDispatcher.endInternalCall();
-        }
-        BootstrapDispatcher.beforeHttpSend(url);
-      } catch (final Throwable throwable) {
-        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
-        throw throwable;
-      }
+    static void enter() {
+      BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_HTTP_SYNC_CALL);
     }
 
     @Advice.OnMethodExit(onThrowable = Throwable.class)
     static void exit() {
-      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP_SYNC_CALL);
     }
   }
 
-  /** Intercepts {@code okhttp3.RealCall.enqueue(Callback)}. */
-  static final class OkHttpEnqueueAdvice {
+  /**
+   * {@code RealCall.getResponseWithInterceptorChain} (OkHttp 4: {@code ...$okhttp}): every call
+   * runs it once, an {@code execute()} on the caller's thread ({@code HTTP_CLIENT_SEND}), an {@code
+   * enqueue}d call on OkHttp's dispatcher thread ({@code HTTP_CLIENT_SEND_ASYNC}). A reject throws
+   * the {@link java.io.IOException} where OkHttp's own network failures are thrown: {@code
+   * execute()} throws it, an enqueued call hands it to {@code Callback.onFailure}. A request an
+   * interceptor sends is a call of its own and is evaluated too.
+   */
+  static final class OkHttpChainAdvice {
     @Advice.OnMethodEnter
     static void enter(@Advice.This final Object call) throws Throwable {
-      if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_HTTP)) {
-        return;
-      }
       final String url;
+      BootstrapDispatcher.beginInternalCall();
       try {
-        BootstrapDispatcher.beginInternalCall();
-        try {
-          url = HttpUrlExtractor.fromOkHttpCall(call);
-        } finally {
-          BootstrapDispatcher.endInternalCall();
-        }
-        BootstrapDispatcher.beforeHttpSendAsync(url);
-      } catch (final Throwable throwable) {
-        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
-        throw throwable;
+        url = HttpUrlExtractor.fromOkHttpCall(call);
+      } finally {
+        BootstrapDispatcher.endInternalCall();
       }
-    }
-
-    @Advice.OnMethodExit(onThrowable = Throwable.class)
-    static void exit() {
-      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
+      if (BootstrapDispatcher.inScope(BootstrapDispatcher.SCOPE_HTTP_SYNC_CALL)) {
+        BootstrapDispatcher.beforeHttpSend(url);
+      } else {
+        BootstrapDispatcher.beforeHttpSendAsync(url);
+      }
     }
   }
 

@@ -688,6 +688,49 @@ class AgentEndToEndTest {
     }
 
     @Test
+    @DisplayName(
+        "OkHttp enqueue: a reject reaches Callback.onFailure on OkHttp's dispatcher thread, enqueue"
+            + " does not throw")
+    void okHttpEnqueueReject() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.run(
+              plan(
+                  scenario(
+                      "okhttp-async",
+                      ChaosSelector.httpClient(Set.of(OperationType.HTTP_CLIENT_SEND_ASYNC)),
+                      ChaosEffect.reject("service down"))),
+              HttpLibraryProbeMain.class,
+              "okhttp-enqueue-reject",
+              httpClasspath);
+      assertThat(result.values()).doesNotContainKey("call.type");
+      assertThat(result.value("callback")).isEqualTo("failure");
+      assertThat(result.value("callback.type")).isEqualTo("java.io.IOException");
+      assertThat(result.value("callback.message")).isEqualTo("service down");
+      assertThat(result.value("callback.thread")).startsWith("OkHttp");
+      assertThat(result.longValue("matched.okhttp-async")).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("an OkHttp request sent from an interceptor is evaluated too")
+    void okHttpInterceptorNestedRequest() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.run(
+              plan(
+                  scenario(
+                      "okhttp-nested",
+                      ChaosSelector.httpClient(Set.of(OperationType.HTTP_CLIENT_SEND)),
+                      ChaosEffect.delay(Duration.ofMillis(1)))),
+              HttpLibraryProbeMain.class,
+              "okhttp-interceptor-nested-request",
+              httpClasspath);
+      assertThat(result.value("nested.status")).isEqualTo("200");
+      assertThat(result.value("status")).isEqualTo("200");
+      assertThat(result.longValue("matched.okhttp-nested"))
+          .as("outer and nested call")
+          .isEqualTo(2L);
+    }
+
+    @Test
     @DisplayName("Apache HC5 execute(request) with one argument is one HTTP_CLIENT_SEND match")
     void hc5ExecuteOneArgument() throws Exception {
       assertSingleMatch(

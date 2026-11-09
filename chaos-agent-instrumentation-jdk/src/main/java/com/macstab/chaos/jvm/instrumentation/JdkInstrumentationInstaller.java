@@ -934,11 +934,12 @@ public final class JdkInstrumentationInstaller {
                             HttpClientAdvice.OkHttpExecuteAdvice.class,
                             ElementMatchers.named("execute")
                                 .and(ElementMatchers.takesArguments(0))))
+                    // 4.12: getResponseWithInterceptorChain$okhttp(); 3.x and 5.x unverified.
                     .visit(
                         advise(
-                            HttpClientAdvice.OkHttpEnqueueAdvice.class,
-                            ElementMatchers.named("enqueue")
-                                .and(ElementMatchers.takesArguments(1)))),
+                            HttpClientAdvice.OkHttpChainAdvice.class,
+                            ElementMatchers.nameStartsWith("getResponseWithInterceptorChain")
+                                .and(ElementMatchers.takesArguments(0)))),
             "okhttp3.RealCall",
             "okhttp3.internal.connection.RealCall");
 

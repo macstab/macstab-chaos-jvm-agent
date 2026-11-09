@@ -425,8 +425,8 @@ If the bridge is not installed (`BootstrapDispatcher.handles == null`), the wrap
 | 42    | `ADJUST_LOCAL_DATE_TIME_NOW`         | `LocalDateTime.now()` (no-arg static)                                                                                                                                           | exit (`LocalDateTime` rewrite)               |
 | 43    | `ADJUST_ZONED_DATE_TIME_NOW`         | `ZonedDateTime.now()`, `now(ZoneId)` (static)                                                                                                                                   | exit (`ZonedDateTime` rewrite)               |
 | 44    | `ADJUST_DATE_NEW`                    | `Date()` (no-arg constructor)                                                                                                                                                   | exit (embedded millis rewrite via `setTime`) |
-| 45    | `BEFORE_HTTP_SEND`                   | `HttpClientImpl.send`, `HttpURLConnection.plainConnect0()`, OkHttp 3/4 `RealCall.execute()`, Apache HC 4/5 `doExecute(host, request, context)`                                         | enter (`void`; a reject throws)              |
-| 46    | `BEFORE_HTTP_SEND_ASYNC`             | `HttpClientImpl.sendAsync` (2- and 3-arg), OkHttp 3/4 `RealCall.enqueue(Callback)`, Reactor Netty `HttpClientConnect.connect()`                                                 | enter (`void`; a reject throws)              |
+| 45    | `BEFORE_HTTP_SEND`                   | `HttpClientImpl.send`, `HttpURLConnection.plainConnect0()`, OkHttp 3/4 `RealCall.getResponseWithInterceptorChain` inside `execute()`, Apache HC 4/5 `doExecute(host, request, context)`                                         | enter (`void`; a reject throws)              |
+| 46    | `BEFORE_HTTP_SEND_ASYNC`             | `HttpClientImpl.sendAsync` (2- and 3-arg), OkHttp 3/4 `RealCall.getResponseWithInterceptorChain` of an enqueued call, Reactor Netty `HttpClientConnect.connect()`                                                 | enter (`void`; a reject throws)              |
 | 47    | `BEFORE_JDBC_CONNECTION_ACQUIRE`     | `HikariPool.getConnection(long)`, c3p0 `checkoutPooledConnection()`                                                                                                             | enter (`void`; a reject throws)              |
 | 48    | `BEFORE_JDBC_STATEMENT_EXECUTE`      | `Statement.execute*(String, …)`; `PreparedStatement.execute()`, `executeQuery()`, `executeUpdate()`, `executeLargeUpdate()` (target `null`)                                     | enter (`void`; a reject throws)              |
 | 49    | `BEFORE_JDBC_PREPARED_STATEMENT`     | `Connection.prepareStatement(String, …)`, `prepareCall(String, …)`                                                                                                              | enter (`void`; a reject throws)              |
@@ -599,20 +599,20 @@ The agent instruments the JDK `HttpClient` plus four third-party HTTP client lib
 | JDK `HttpClient` synchronous     | JDK 11+                                                   | `jdk.internal.net.http.HttpClientImpl`                                 | `send(HttpRequest, BodyHandler)` (2-arg)                                                                                                                          | `BEFORE_HTTP_SEND` (sync)        |
 | JDK `HttpClient` asynchronous    | JDK 11+                                                   | `jdk.internal.net.http.HttpClientImpl`                                 | `sendAsync(...)` (2-arg and 3-arg with `PushPromiseHandler`)                                                                                                      | `BEFORE_HTTP_SEND_ASYNC` (async) |
 | JDK `HttpURLConnection` (and HTTPS) | JDK                                                    | `sun.net.www.protocol.http.HttpURLConnection`                          | `plainConnect0()` — once per request, however it is driven (`connect`, `getResponseCode`, `getInputStream`, `getOutputStream`)                                     | `BEFORE_HTTP_SEND` (sync)        |
-| OkHttp synchronous               | `com.squareup.okhttp3:okhttp:4.12.0` (3.x also supported) | `okhttp3.RealCall` (3.x), `okhttp3.internal.connection.RealCall` (4.x) | `execute()` (0-arg)                                                                                                                                               | `BEFORE_HTTP_SEND` (sync)        |
-| OkHttp asynchronous              | same                                                      | same                                                                   | `enqueue(Callback)` (1-arg)                                                                                                                                       | `BEFORE_HTTP_SEND_ASYNC` (async) |
+| OkHttp synchronous               | `com.squareup.okhttp3:okhttp:4.12.0` (3.x also supported) | `okhttp3.RealCall` (3.x), `okhttp3.internal.connection.RealCall` (4.x) | `getResponseWithInterceptorChain` (4.12: `...$okhttp`; 3.x / 5.x unverified) inside `execute()` (scope-only `SCOPE_HTTP_SYNC_CALL`) | `BEFORE_HTTP_SEND` (sync)        |
+| OkHttp asynchronous              | same                                                      | same                                                                   | `getResponseWithInterceptorChain` of an `enqueue`d call, on OkHttp's dispatcher thread (a reject reaches `Callback.onFailure`) | `BEFORE_HTTP_SEND_ASYNC` (async) |
 | Apache HC 4.x                    | `org.apache.httpcomponents:httpclient:4.5.14`             | `CloseableHttpClient` subclasses in `org.apache.http.impl.client` (`InternalHttpClient`, `MinimalHttpClient`, `AbstractHttpClient`) | `doExecute(HttpHost, HttpRequest, HttpContext)`, which every `execute` overload reaches once per request | `BEFORE_HTTP_SEND` (sync)        |
 | Apache HC 5.x                    | `org.apache.httpcomponents.client5:httpclient5:5.3.1` (5.5.2, 5.6.4 checked) | `CloseableHttpClient` subclasses in `org.apache.hc.client5.http.impl.classic` (`InternalHttpClient`, `MinimalHttpClient`) | `doExecute(HttpHost, ClassicHttpRequest, HttpContext)`, which every `execute` and `executeOpen` overload reaches once per request | `BEFORE_HTTP_SEND` (sync)        |
 | Spring WebClient / Reactor Netty | `io.projectreactor.netty:reactor-netty-http:1.1.21`       | `reactor.netty.http.client.HttpClientConnect`                          | `connect()` (0-arg; URI read from the client configuration)                                                                                                       | `BEFORE_HTTP_SEND_ASYNC` (async) |
 
-Overloads that delegate to each other are evaluated once per call (`SCOPE_HTTP`, see §6 Call-depth scopes). For Apache HttpClient the scope spans `doExecute` only: a response handler runs after it returns, so a request the handler sends is evaluated as a call of its own. The Apache URL follows one rule: an absolute request target wins, else the host's URI followed by the target, else (no host, as `executeOpen(null, …)` passes it) the request's full URI. A `CloseableHttpClient` subclass outside the two client packages is not hooked.
+Overloads that delegate to each other are evaluated once per call (`SCOPE_HTTP`, see §6 Call-depth scopes). OkHttp is evaluated in the call chain, which every call runs once; it takes no `SCOPE_HTTP`, so a request an interceptor sends is a call of its own. For Apache HttpClient the scope spans `doExecute` only: a response handler runs after it returns, so a request the handler sends is evaluated as a call of its own. The Apache URL follows one rule: an absolute request target wins, else the host's URI followed by the target, else (no host, as `executeOpen(null, …)` passes it) the request's full URI. A `CloseableHttpClient` subclass outside the two client packages is not hooked.
 
 Spring `WebClient` dispatches all HTTP through Reactor Netty's internal `HttpClientConnect.connect()`. Intercepting at that internal connection initiation method means the interception is client-implementation-agnostic: `WebClient`, `RestClient` (when backed by Reactor Netty), and `HttpExchange` clients routed through WebClient all fire the same advice.
 
 The handle slots in `BootstrapDispatcher` are:
 
-- `BEFORE_HTTP_SEND = 45` — synchronous send (JDK `send()`, `HttpURLConnection`, OkHttp `execute()`, Apache HC 4/5 `execute()`)
-- `BEFORE_HTTP_SEND_ASYNC = 46` — asynchronous / reactive send (JDK `sendAsync()`, OkHttp `enqueue()`, Reactor Netty `connect()`)
+- `BEFORE_HTTP_SEND = 45` — synchronous send (JDK `send()`, `HttpURLConnection`, the call chain of an OkHttp `execute()`, Apache HC 4/5 `doExecute()`)
+- `BEFORE_HTTP_SEND_ASYNC = 46` — asynchronous / reactive send (JDK `sendAsync()`, the call chain of an OkHttp `enqueue()` on its dispatcher thread, Reactor Netty `connect()`)
 
 Both slots carry the URL string as a single `String` argument and return nothing: a reject throws the client's own `IOException` from the dispatch, a delay sleeps there, and the real call then runs or not. A suppress is refused at activation (ADR 0005): no real client skips a request without failing it.
 
@@ -639,7 +639,7 @@ The reflection approach has one observable warm-up cost: the first call for each
 
 ## 12.4 How a Rejected Request Fails
 
-A reject on `HTTP_CLIENT_SEND` / `HTTP_CLIENT_SEND_ASYNC` throws `java.io.IOException(message)` (built by `FailureFactory`) from `BootstrapDispatcher.beforeHttpSend` / `beforeHttpSendAsync`, inside the advice, before the real method body runs. An asynchronous call does not throw it: the JDK `sendAsync` advice skips the send and returns `CompletableFuture.failedFuture(exception)`. Every wired client declares or tolerates `IOException` on these paths, so the caller's own error handling — retries, circuit breakers, `ExchangeFilterFunction`s, OkHttp interceptors — sees what a refused or reset connection produces. 1.x also had a suppress that threw the agent's `ChaosHttpSuppressException`; no real client throws it, so 2.0 refuses a suppress on HTTP at activation and the class is gone.
+A reject on `HTTP_CLIENT_SEND` / `HTTP_CLIENT_SEND_ASYNC` throws `java.io.IOException(message)` (built by `FailureFactory`) from `BootstrapDispatcher.beforeHttpSend` / `beforeHttpSendAsync`, inside the advice, before the real method body runs. An asynchronous call does not throw it: the JDK `sendAsync` advice skips the send and returns `CompletableFuture.failedFuture(exception)`, and OkHttp evaluates an enqueued call in its call chain on the dispatcher thread, where the exception reaches `Callback.onFailure`. Every wired client declares or tolerates `IOException` on these paths, so the caller's own error handling — retries, circuit breakers, `ExchangeFilterFunction`s, OkHttp interceptors — sees what a refused or reset connection produces. 1.x also had a suppress that threw the agent's `ChaosHttpSuppressException`; no real client throws it, so 2.0 refuses a suppress on HTTP at activation and the class is gone.
 
 ## 12.5 The `instrumentOptional` Guard
 
@@ -681,13 +681,13 @@ The `HttpClientSelectorTest` (`agentInstalled_zeroScenarios` through `sessionIdM
 
 ## 12.8 Sequence Diagram — OkHttp Synchronous Path
 
-*OkHttp RealCall.execute() → chaos pipeline → rejection or passthrough*
+*OkHttp RealCall.execute() → call chain (evaluated) → chaos pipeline → rejection or passthrough*
 
 ```mermaid
 sequenceDiagram
   participant App as Application<br/>Thread
   participant RC as okhttp3.RealCall<br/>(advice woven)
-  participant Advice as HttpClientAdvice<br/>.OkHttpExecuteAdvice
+  participant Advice as HttpClientAdvice<br/>.OkHttpChainAdvice
   participant BD as BootstrapDispatcher<br/>.beforeHttpSend(url)
   participant CB as ChaosBridge<br/>.beforeHttpSend(url)
   participant CD as ChaosDispatcher<br/>.beforeHttpSend(url, HTTP_CLIENT_SEND)
@@ -695,8 +695,8 @@ sequenceDiagram
   participant SM as SelectorMatcher
   App->>RC: call.execute()
   activate RC
-  Note over RC: @Advice.OnMethodEnter fires<br/>before method body
-  RC->>Advice: OkHttpExecuteAdvice.enter(this)
+  Note over RC: execute() enters SCOPE_HTTP_SYNC_CALL<br/>and runs getResponseWithInterceptorChain
+  RC->>Advice: OkHttpChainAdvice.enter(this)
   activate Advice
   Advice->>Advice: url = HttpUrlExtractor.fromOkHttpCall(call)<br/>  → call.request().url().toString()
   Advice->>BD: beforeHttpSend(url)

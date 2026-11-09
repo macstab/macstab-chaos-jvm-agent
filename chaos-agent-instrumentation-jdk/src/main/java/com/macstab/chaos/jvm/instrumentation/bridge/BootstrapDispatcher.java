@@ -203,8 +203,14 @@ public final class BootstrapDispatcher {
    */
   public static final int SCOPE_MESSAGE_SEND = 27;
 
+  /**
+   * Scope of an OkHttp {@code RealCall.execute()} (scope-only): the call chain evaluated inside it
+   * is a synchronous send, one run on OkHttp's dispatcher thread an asynchronous one.
+   */
+  public static final int SCOPE_HTTP_SYNC_CALL = 28;
+
   /** Size of the per-thread counter array: index 0 is the reentrancy depth, then the scopes. */
-  static final int SCOPE_COUNT = 28;
+  static final int SCOPE_COUNT = 29;
 
   /**
    * Enters a call-depth scope on the current thread.
