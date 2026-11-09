@@ -54,8 +54,14 @@ jobs:
           grep -qx "version = ${VERSION}" gradle.properties
 
       # The commit published is the commit checked: the version edit above is part of both.
-      - name: Check and publish to GitHub Packages
-        run: ./gradlew check publish --no-daemon --stacktrace
+      # Check and publish are separate steps: in one Gradle call (with org.gradle.parallel) nothing
+      # orders a publish task after check, so a module could be uploaded while another module's tests
+      # still run. The tests also never see the signing key or the token.
+      - name: Check
+        run: ./gradlew check --no-daemon --stacktrace
+
+      - name: Publish to GitHub Packages
+        run: ./gradlew publish --no-daemon --stacktrace
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_ACTOR: ${{ github.actor }}

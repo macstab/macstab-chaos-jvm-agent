@@ -124,8 +124,10 @@ the bundled ASM).
   merges the tagged release back into develop, keeping develop's `gradle.properties`
   (`.github/scripts/back-merge.sh`; any other conflict fails the job). The release image is
   pinned by digest, and the bot token reaches git as a request header, never in a remote URL.
-- `publish-release.yml` - on a tag push, in the `release` environment: `./gradlew check publish`
-  of the tagged commit with the tag's version, then the build provenance and SBOM attestations
+- `publish-release.yml` - on a tag push, in the `release` environment: `./gradlew check` of the
+  tagged commit with the tag's version, then, as a separate step that runs only after the check
+  passed, `./gradlew publish` (only this step sees the signing key and the token), then the build
+  provenance and SBOM attestations
 - `deploy-javadoc.yml` - builds the aggregated Javadoc read-only, then a separate job deploys
   it to `gh-pages` on tag push
 
@@ -152,8 +154,10 @@ Semantic-release reads commit messages to pick the version bump:
 git fetch --tags
 git checkout 1.0.0
 
-# Stage signed artifacts into the Central Portal
-./gradlew clean build publish
+# Build and test first, then stage signed artifacts into the Central Portal (two calls: one call
+# does not order the uploads after the tests)
+./gradlew clean build
+./gradlew publish
 
 # Trigger the Central Portal upload API
 ./gradlew releaseToCentral
