@@ -6,6 +6,7 @@ import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
 import net.bytebuddy.description.method.MethodDescription;
 import net.bytebuddy.matcher.ElementMatcher;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Which hooks matched a method.
@@ -89,7 +90,32 @@ final class HookCoverage {
    * @return the failures, sorted
    */
   static Set<String> failures() {
-    return Collections.unmodifiableSet(new TreeSet<>(FAILED));
+    final Set<String> failures = new TreeSet<>(FAILED);
+    final String grpcMiss = grpcFailingStreamMiss();
+    if (grpcMiss != null) {
+      failures.add(grpcMiss);
+    }
+    return Collections.unmodifiableSet(failures);
+  }
+
+  /**
+   * A gRPC reject the woven advice could not turn into gRPC's failing stream: recorded by the copy
+   * of {@link ClientCallExtractor} the advice links, the bootstrap one once the bridge is injected.
+   */
+  private static @Nullable String grpcFailingStreamMiss() {
+    try {
+      return (String) linkedExtractor().getMethod("failingStreamMiss").invoke(null);
+    } catch (final ReflectiveOperationException unreadable) {
+      return null;
+    }
+  }
+
+  private static Class<?> linkedExtractor() {
+    try {
+      return Class.forName(ClientCallExtractor.class.getName(), false, null);
+    } catch (final ClassNotFoundException thinClasses) {
+      return ClientCallExtractor.class;
+    }
   }
 
   /** Forgets every hook and failure: the hooks were removed, a reinstall records them anew. */
@@ -97,6 +123,11 @@ final class HookCoverage {
     REGISTERED.clear();
     MATCHED.clear();
     FAILED.clear();
+    try {
+      linkedExtractor().getMethod("forgetFailingStreamMiss").invoke(null);
+    } catch (final ReflectiveOperationException unreachable) {
+      // an older bootstrap copy without the method: nothing recorded there to forget
+    }
   }
 
   /**

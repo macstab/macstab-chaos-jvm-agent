@@ -14,6 +14,7 @@ import java.time.Duration;
 import java.util.Set;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 @DisplayName("Client-library operations")
@@ -78,6 +79,82 @@ class ClientCallValidationTest {
 
     assertThatThrownBy(() -> runtime.beforeClientCall("RPC_CALL", this, "a.B/C", null, null))
         .hasMessage("rpc down");
+  }
+
+  @Nested
+  @DisplayName("a gRPC reject, which fails the call through gRPC's FailingClientStream")
+  class GrpcReject {
+
+    @Test
+    @DisplayName(
+        "is refused when the gRPC on the class path has no FailingClientStream it can build")
+    void refusedWithUnknownConstructor() throws Exception {
+      final ClassLoader grpc = fakeGrpc(false);
+
+      assertThatThrownBy(() -> activateWithContextLoader(grpc))
+          .isInstanceOf(ChaosValidationException.class)
+          .hasMessageContaining("RPC_CALL")
+          .hasMessageContaining("io.grpc.internal.FailingClientStream");
+    }
+
+    @Test
+    @DisplayName("is accepted when the FailingClientStream has a known constructor")
+    void acceptedWithKnownConstructor() throws Exception {
+      final ClassLoader grpc = fakeGrpc(true);
+
+      activateWithContextLoader(grpc);
+
+      assertThat(runtime.diagnostics().scenario("client")).isPresent();
+    }
+
+    @Test
+    @DisplayName("is accepted when gRPC is not visible at activation")
+    void acceptedWithoutGrpc() {
+      runtime.activate(
+          scenario(ChaosSelector.rpc(NamePattern.any()), ChaosEffect.reject("rpc down")));
+
+      assertThat(runtime.diagnostics().scenario("client")).isPresent();
+    }
+
+    private void activateWithContextLoader(final ClassLoader loader) {
+      final Thread thread = Thread.currentThread();
+      final ClassLoader previous = thread.getContextClassLoader();
+      thread.setContextClassLoader(loader);
+      try {
+        runtime.activate(
+            scenario(ChaosSelector.rpc(NamePattern.any()), ChaosEffect.reject("rpc down")));
+      } finally {
+        thread.setContextClassLoader(previous);
+      }
+    }
+
+    /**
+     * A loader with {@code io.grpc.Status} and an {@code io.grpc.internal.FailingClientStream}
+     * whose one constructor takes {@code (Status)} when {@code known}, else {@code (String)}.
+     */
+    private ClassLoader fakeGrpc(final boolean known) throws Exception {
+      final net.bytebuddy.dynamic.loading.ByteArrayClassLoader loader =
+          new net.bytebuddy.dynamic.loading.ByteArrayClassLoader(
+              getClass().getClassLoader(), java.util.Map.of());
+      final Class<?> status =
+          new net.bytebuddy.ByteBuddy()
+              .subclass(Object.class)
+              .name("io.grpc.Status")
+              .make()
+              .load(loader, net.bytebuddy.dynamic.loading.ClassLoadingStrategy.Default.INJECTION)
+              .getLoaded();
+      new net.bytebuddy.ByteBuddy()
+          .subclass(
+              Object.class,
+              net.bytebuddy.dynamic.scaffold.subclass.ConstructorStrategy.Default.NO_CONSTRUCTORS)
+          .name("io.grpc.internal.FailingClientStream")
+          .defineConstructor(net.bytebuddy.description.modifier.Visibility.PUBLIC)
+          .withParameters(known ? status : String.class)
+          .intercept(net.bytebuddy.implementation.MethodCall.invoke(Object.class.getConstructor()))
+          .make()
+          .load(loader, net.bytebuddy.dynamic.loading.ClassLoadingStrategy.Default.INJECTION);
+      return loader;
+    }
   }
 
   private static ChaosScenario scenario(final ChaosSelector selector, final ChaosEffect effect) {

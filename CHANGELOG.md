@@ -5,6 +5,8 @@
 
 Migration steps for each change: [docs/migration-2.0.md](docs/migration-2.0.md).
 
+* **instrumentation:** a client-library reject fails the call through the library's own failure channel. gRPC: `RPC_CALL` is evaluated when the call opens its stream (`newStream`), not at `ClientCallImpl.start`, and a reject opens no stream and fails the call through its listener with `UNAVAILABLE` (gRPC's `FailingClientStream`): a future stub's future and an async stub's observer receive it instead of a throw from the stub call. A gRPC whose `FailingClientStream` has no known constructor is refused at activation when visible (migration §32).
+
 * **instrumentation:** Apache HttpClient 4 and 5 are evaluated at `doExecute`, which every `execute` and `executeOpen` overload reaches once per request, instead of at the public `execute` overloads. A request sent from a response handler is now evaluated too (it ran inside the outer call's scope), and the URL follows one rule for every overload: an absolute request target, else the host's URI and the target, else the request's full URI (migration §31).
 
 * **testkit:** `chaos-agent-testkit` no longer exports `junit-jupiter-api` or the JUnit BOM (it compiles against them only), so the modules built on it (the Spring Boot test starters, the Quarkus and Micronaut modules) put no JUnit on a production class path and force no JUnit version. Declare JUnit in your test dependencies (migration §29).
@@ -116,6 +118,7 @@ Migration steps for each change: [docs/migration-2.0.md](docs/migration-2.0.md).
 
 ### Bug Fixes
 
+* **instrumentation:** a gRPC reject on a call started before the channel's name resolved panicked the channel ("Uncaught exception in the SynchronizationContext. Panic!") and left the call hanging; it now fails the call with `UNAVAILABLE`, opens no transport stream, and the channel keeps working.
 * **instrumentation:** Apache HttpClient 5 `executeOpen(null, request, context)` (Spring's `HttpComponentsClientHttpRequestFactory`) was evaluated with the path only, so a `urlPattern` naming the host never matched it; HC4 `execute(host, request)` with an absolute request URI reported a doubled URL (`https://hhttps://h/v1`). Both now report the full URL, and a Reactor Netty request with a `baseUrl` and a relative `uri` reports both parts.
 * **quarkus:** a Quarkus application loaded its own copies of `chaos-agent-api` and the agent, apart from the ones a `-javaagent` agent or the test extensions use, so the control plane and the installed runtime were not shared. Both extensions now declare `chaos-agent-api` and `chaos-agent-bootstrap` parent-first (`parent-first-artifacts` and `runner-parent-first-artifacts`).
 * **instrumentation, packaging:** agent copies of different versions in one JVM failed obscurely ("BridgeDelegate methods without a handle slot") or mixed silently. The copy that appends the bootstrap bridge claims it with a digest of its classes, and a copy of another revision is refused before it changes anything ("a chaos agent of revision … is already installed in this JVM …; restart with one agent version"). The agent manifest carries `Implementation-Version`, and `premain` warns once, naming each jar, when a class-path copy of another version shadows the `-javaagent` jar.

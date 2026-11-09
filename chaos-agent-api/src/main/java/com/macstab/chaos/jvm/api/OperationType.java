@@ -908,10 +908,13 @@ public enum OperationType {
   MESSAGE_RECEIVE,
 
   /**
-   * Fires when a gRPC client call starts ({@code io.grpc.internal.ClientCallImpl.start}), once per
-   * call, for blocking, future and async stubs and any transport. The target is the full method
-   * name ({@code package.Service/Method}). A reject throws {@code StatusRuntimeException} with
-   * status {@code UNAVAILABLE}.
+   * Fires when a gRPC client call opens its stream ({@code newStream} of the channel's {@code
+   * ClientCallImpl.ClientStreamProvider}), once per call, for blocking, future and async stubs and
+   * any transport; a call started before the channel's name resolved is evaluated when it resolves.
+   * The target is the full method name ({@code package.Service/Method}). A reject opens no stream
+   * and fails the call through its listener with status {@code UNAVAILABLE}, as gRPC fails a call
+   * whose deadline expired before it started: a blocking stub throws {@code
+   * StatusRuntimeException}, a future stub's future and an async stub's observer fail with it.
    *
    * <p>Use with {@link ChaosSelector.RpcSelector}.
    */

@@ -33,16 +33,30 @@ final class ClientLibraryHooks {
                             .and(ElementMatchers.takesArguments(java.time.Duration.class)))));
   }
 
-  /** gRPC client call start, once per call for every stub flavour and transport. */
+  /**
+   * gRPC client stream creation, once per call for every stub flavour and transport: {@code
+   * newStream} of the {@code ClientCallImpl.ClientStreamProvider} implementations (1.85: {@code
+   * ManagedChannelImpl.ChannelStreamProvider}, {@code SubchannelChannel}'s). The provider is an
+   * interface, so its implementations are matched; the {@code io.grpc.} prefix keeps the hierarchy
+   * walk off every other class.
+   */
   static AgentBuilder applyGrpcTransformations(final AgentBuilder builder) {
     return builder
-        .type(ElementMatchers.named("io.grpc.internal.ClientCallImpl"))
+        .type(
+            ElementMatchers.nameStartsWith("io.grpc.")
+                .and(
+                    ElementMatchers.hasSuperType(
+                        ElementMatchers.named(
+                            "io.grpc.internal.ClientCallImpl$ClientStreamProvider")))
+                .and(ElementMatchers.not(ElementMatchers.isInterface())))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder.visit(
                     advise(
-                        ClientCallAdvice.GrpcStart.class,
-                        ElementMatchers.named("start").and(ElementMatchers.takesArguments(2)))));
+                        ClientCallAdvice.GrpcNewStream.class,
+                        ElementMatchers.named("newStream")
+                            .and(ElementMatchers.takesArguments(4))
+                            .and(ElementMatchers.not(ElementMatchers.isAbstract())))));
   }
 
   /** Jedis and Lettuce command dispatch. */

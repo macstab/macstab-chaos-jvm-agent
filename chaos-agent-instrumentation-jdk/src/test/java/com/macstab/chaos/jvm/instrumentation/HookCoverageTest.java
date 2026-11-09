@@ -65,6 +65,11 @@ class HookCoverageTest {
   void reinstallStartsEmpty() {
     HookCoverage.failed("com.example.Gone", new IllegalStateException("refused"));
     HookCoverage.track(OtherAdvice.class, ElementMatchers.named("neverMatched"));
+    // a gRPC reject whose failing stream could not be built (no FailingClientStream visible)
+    ClientCallExtractor.grpcFailingStream(
+        new ClientCallExtractorTest.GrpcFailingStream.Rejection(new Object()));
+    assertThat(HookCoverage.failures())
+        .anyMatch(failure -> failure.contains("FailingClientStream"));
 
     JdkInstrumentationInstaller.uninstall(noInstrumentation());
 

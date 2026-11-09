@@ -9,7 +9,7 @@
 
 # 0005 — Faults are the JDK's own failures, raised in the real call
 
-**Status:** Accepted; amended in 2.0: the HTTP and JDBC suppress, which threw the agent's own `ChaosHttpSuppressException` / `ChaosJdbcSuppressException`, is refused at activation ("use reject") and both classes are removed
+**Status:** Accepted; amended in 2.0: the HTTP and JDBC suppress, which threw the agent's own `ChaosHttpSuppressException` / `ChaosJdbcSuppressException`, is refused at activation ("use reject") and both classes are removed; amended (2.0): a client-library reject fails the call through the channel the library itself fails it through — gRPC's own failing stream and the call's listener, a failed future, a callback, an error signal, a failed Netty write — never by a throw from a method the library does not expect to throw (a throw there panicked gRPC's synchronization context, hung Netty's write loop, and reached asynchronous callers synchronously); a library version on which that channel cannot be built is refused at activation where the agent can tell, else the call fails by a throw and the miss is named in `hookFailures`
 
 ## Context
 

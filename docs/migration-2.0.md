@@ -48,6 +48,7 @@
 | 29 | `chaos-agent-testkit` no longer brings JUnit | you get `junit-jupiter-api` (or the JUnit BOM's versions) only through the testkit or a starter that depends on it | declare JUnit in your test dependencies (§29) |
 | 30 | `ChaosEvent.Type.INACTIVE`; lifecycle events once per transition | a `switch` over `ChaosEvent.Type` has no `default`; a listener counts `STOPPED` per `stop()` / `close()` call, or waits for `STOPPED` to learn that a scenario expired or used up `maxApplications` | add `case INACTIVE`; count one `STOPPED` per scenario; wait for `INACTIVE` (§30) |
 | 31 | Apache HttpClient is evaluated at `doExecute`, with one URL rule | a scenario counts Apache HttpClient calls made from a response handler, a `urlPattern` matches the path-only URL of `executeOpen(null, …)` or the doubled URL of HC4 `execute(host, absoluteRequest)`, or you subclass `CloseableHttpClient` yourself | expect one more evaluation per request a handler sends; match the full URL; hook your own client differently (§31) |
+| 32 | Client rejects fail through the library's own failure channel | a test expects a rejected asynchronous client call (a gRPC future or async stub, …) to throw from the call that starts it, or counts gRPC `RPC_CALL` evaluations at `ClientCall.start` | expect the failure in the future, observer, callback or publisher (§32) |
 
 ---
 
@@ -378,6 +379,13 @@ Apache HttpClient 4 and 5 are hooked at `doExecute(HttpHost, request, HttpContex
 - A response handler runs after `doExecute` returns, outside the evaluation: a request the handler sends is now evaluated as a call of its own (1.x and earlier 2.0 builds counted one).
 - The URL (`targetName`, matched by `urlPattern`) follows one rule: an absolute request target wins; else the host's URI followed by the target; else, without a host, the request's full URI. `executeOpen(null, request, context)` (Spring's `HttpComponentsClientHttpRequestFactory`) used to report the path only (`/v1/orders`), and HC4 `execute(host, new HttpGet("https://h/v1"))` a doubled URL (`https://hhttps://h/v1`); both now report `https://h/v1`. A `urlPattern` written against the old forms must match the full URL.
 - A `CloseableHttpClient` subclass of your own, outside `org.apache.http.impl.client` / `org.apache.hc.client5.http.impl.classic`, is not hooked; its calls through a library client still are.
+
+## 32. Client rejects fail through the library's own failure channel
+
+A reject on a client-library call fails it the way the library itself fails it, through the same channel, instead of throwing from the method the advice is woven into. A throw where the library does not expect one panicked gRPC's channel, hung Netty writes and reached asynchronous callers synchronously.
+
+- **gRPC (`RPC_CALL`)**: evaluated when the call opens its stream (`newStream` of the channel's `ClientCallImpl.ClientStreamProvider`), no longer at `ClientCallImpl.start`; a call started before the channel's name resolved is evaluated when it resolves (it panicked the channel's synchronization context before). A reject opens no stream and fails the call through its listener with `UNAVAILABLE`, through gRPC's own `FailingClientStream`: a blocking stub still throws `StatusRuntimeException`, while a future stub's future and an async stub's `StreamObserver.onError` now receive it instead of a throw from the stub call. A gRPC whose `io.grpc.internal.FailingClientStream` has none of the known constructors is refused at activation when it is visible to the activating thread's context class loader or the system class loader; one that is not visible then is accepted, and if the stream cannot be built the status is thrown from `newStream` and the miss is named in the diagnostics' `hookFailures`.
+- Evaluation counts: a gRPC call is still evaluated once.
 
 ---
 

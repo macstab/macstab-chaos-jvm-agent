@@ -27,6 +27,7 @@ public final class ClientLibraryProbeMain {
       case "kafka-send" -> kafkaSend();
       case "kafka-poll" -> kafkaPoll();
       case "grpc-call" -> grpcCall();
+      case "grpc-reject-before-resolution" -> grpcRejectBeforeResolution();
       case "jedis-set" -> jedisSet();
       case "jedis-pooled-set" -> jedisPooledSet();
       case "jedis-pool-set" -> jedisPoolSet();
@@ -82,39 +83,8 @@ public final class ClientLibraryProbeMain {
   }
 
   private static void grpcCall() throws Exception {
-    final io.grpc.MethodDescriptor.Marshaller<String> marshaller =
-        new io.grpc.MethodDescriptor.Marshaller<>() {
-          @Override
-          public java.io.InputStream stream(final String value) {
-            return new java.io.ByteArrayInputStream(value.getBytes(StandardCharsets.UTF_8));
-          }
-
-          @Override
-          public String parse(final java.io.InputStream stream) {
-            try {
-              return new String(stream.readAllBytes(), StandardCharsets.UTF_8);
-            } catch (final java.io.IOException e) {
-              throw new java.io.UncheckedIOException(e);
-            }
-          }
-        };
-    final io.grpc.MethodDescriptor<String, String> say =
-        io.grpc.MethodDescriptor.<String, String>newBuilder()
-            .setType(io.grpc.MethodDescriptor.MethodType.UNARY)
-            .setFullMethodName("probe.Echo/Say")
-            .setRequestMarshaller(marshaller)
-            .setResponseMarshaller(marshaller)
-            .build();
-    final io.grpc.ServerServiceDefinition service =
-        io.grpc.ServerServiceDefinition.builder("probe.Echo")
-            .addMethod(
-                say,
-                io.grpc.stub.ServerCalls.asyncUnaryCall(
-                    (request, observer) -> {
-                      observer.onNext("echo " + request);
-                      observer.onCompleted();
-                    }))
-            .build();
+    final io.grpc.MethodDescriptor<String, String> say = echoSay();
+    final io.grpc.ServerServiceDefinition service = echoService(say);
     final io.grpc.Server server =
         io.grpc.inprocess.InProcessServerBuilder.forName("probe")
             .addService(service)
@@ -133,6 +103,169 @@ public final class ClientLibraryProbeMain {
       channel.shutdownNow();
       server.shutdownNow();
     }
+  }
+
+  /**
+   * Calls started before the channel's name is resolved: they wait as pending calls, and their
+   * stream is created later, inside the channel's synchronization context. A blocking call and a
+   * future call (rejected), then a call that succeeds; the server counts the calls it received.
+   */
+  private static void grpcRejectBeforeResolution() throws Exception {
+    final io.grpc.MethodDescriptor<String, String> say = echoSay();
+    final java.util.concurrent.atomic.AtomicInteger received =
+        new java.util.concurrent.atomic.AtomicInteger();
+    final io.grpc.Server server =
+        io.grpc.inprocess.InProcessServerBuilder.forName("probe-late")
+            .addService(
+                io.grpc.ServerInterceptors.intercept(
+                    echoService(say),
+                    new io.grpc.ServerInterceptor() {
+                      @Override
+                      public <Q, A> io.grpc.ServerCall.Listener<Q> interceptCall(
+                          final io.grpc.ServerCall<Q, A> call,
+                          final io.grpc.Metadata headers,
+                          final io.grpc.ServerCallHandler<Q, A> next) {
+                        received.incrementAndGet();
+                        return next.startCall(call, headers);
+                      }
+                    }))
+            .build()
+            .start();
+    io.grpc.NameResolverRegistry.getDefaultRegistry().register(new LateResolverProvider());
+    final io.grpc.ManagedChannel channel =
+        io.grpc.inprocess.InProcessChannelBuilder.forTarget("probe-late:///echo").build();
+    // A deadline, so a call the channel never completes fails instead of hanging the probe.
+    final io.grpc.CallOptions options =
+        io.grpc.CallOptions.DEFAULT.withDeadlineAfter(5, java.util.concurrent.TimeUnit.SECONDS);
+    try {
+      try {
+        System.out.println(
+            "blocking.reply="
+                + io.grpc.stub.ClientCalls.blockingUnaryCall(channel, say, options, "hi"));
+      } catch (final io.grpc.StatusRuntimeException failure) {
+        System.out.println("blocking.code=" + failure.getStatus().getCode());
+        System.out.println("blocking.description=" + failure.getStatus().getDescription());
+      }
+      try {
+        System.out.println(
+            "future.reply="
+                + io.grpc.stub.ClientCalls.futureUnaryCall(channel.newCall(say, options), "hi")
+                    .get(2, java.util.concurrent.TimeUnit.SECONDS));
+      } catch (final java.util.concurrent.ExecutionException failure) {
+        System.out.println(
+            "future.code="
+                + ((io.grpc.StatusRuntimeException) failure.getCause()).getStatus().getCode());
+      }
+      System.out.println(
+          "later.reply=" + io.grpc.stub.ClientCalls.blockingUnaryCall(channel, say, options, "hi"));
+      System.out.println("received=" + received.get());
+    } finally {
+      channel.shutdownNow();
+      server.shutdownNow();
+    }
+  }
+
+  /** Resolves {@code probe-late:///…} to the in-process server, 300 ms after it is asked. */
+  private static final class LateResolverProvider extends io.grpc.NameResolverProvider {
+    @Override
+    protected boolean isAvailable() {
+      return true;
+    }
+
+    @Override
+    protected int priority() {
+      return 5;
+    }
+
+    @Override
+    public String getDefaultScheme() {
+      return "probe-late";
+    }
+
+    @Override
+    public java.util.Collection<Class<? extends java.net.SocketAddress>>
+        getProducedSocketAddressTypes() {
+      return List.of(io.grpc.inprocess.InProcessSocketAddress.class);
+    }
+
+    @Override
+    public io.grpc.NameResolver newNameResolver(
+        final URI targetUri, final io.grpc.NameResolver.Args args) {
+      if (!"probe-late".equals(targetUri.getScheme())) {
+        return null;
+      }
+      return new io.grpc.NameResolver() {
+        @Override
+        public String getServiceAuthority() {
+          return "probe-late";
+        }
+
+        @Override
+        public void start(final io.grpc.NameResolver.Listener2 listener) {
+          Thread.ofPlatform()
+              .daemon()
+              .start(
+                  () -> {
+                    try {
+                      Thread.sleep(300L);
+                    } catch (final InterruptedException interrupted) {
+                      Thread.currentThread().interrupt();
+                      return;
+                    }
+                    listener.onResult(
+                        io.grpc.NameResolver.ResolutionResult.newBuilder()
+                            .setAddressesOrError(
+                                io.grpc.StatusOr.fromValue(
+                                    List.of(
+                                        new io.grpc.EquivalentAddressGroup(
+                                            new io.grpc.inprocess.InProcessSocketAddress(
+                                                "probe-late")))))
+                            .build());
+                  });
+        }
+
+        @Override
+        public void shutdown() {}
+      };
+    }
+  }
+
+  private static io.grpc.MethodDescriptor<String, String> echoSay() {
+    final io.grpc.MethodDescriptor.Marshaller<String> marshaller =
+        new io.grpc.MethodDescriptor.Marshaller<>() {
+          @Override
+          public java.io.InputStream stream(final String value) {
+            return new java.io.ByteArrayInputStream(value.getBytes(StandardCharsets.UTF_8));
+          }
+
+          @Override
+          public String parse(final java.io.InputStream stream) {
+            try {
+              return new String(stream.readAllBytes(), StandardCharsets.UTF_8);
+            } catch (final java.io.IOException e) {
+              throw new java.io.UncheckedIOException(e);
+            }
+          }
+        };
+    return io.grpc.MethodDescriptor.<String, String>newBuilder()
+        .setType(io.grpc.MethodDescriptor.MethodType.UNARY)
+        .setFullMethodName("probe.Echo/Say")
+        .setRequestMarshaller(marshaller)
+        .setResponseMarshaller(marshaller)
+        .build();
+  }
+
+  private static io.grpc.ServerServiceDefinition echoService(
+      final io.grpc.MethodDescriptor<String, String> say) {
+    return io.grpc.ServerServiceDefinition.builder("probe.Echo")
+        .addMethod(
+            say,
+            io.grpc.stub.ServerCalls.asyncUnaryCall(
+                (request, observer) -> {
+                  observer.onNext("echo " + request);
+                  observer.onCompleted();
+                }))
+        .build();
   }
 
   private static void jedisSet() throws Exception {

@@ -3,6 +3,8 @@ package com.macstab.chaos.jvm.instrumentation;
 import com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher;
 import com.macstab.chaos.jvm.instrumentation.bridge.OperationTags;
 import net.bytebuddy.asm.Advice;
+import net.bytebuddy.implementation.bytecode.assign.Assigner;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Advice for client libraries: Kafka, gRPC, Jedis, Lettuce, R2DBC, the AWS SDK for Java v2 and
@@ -45,12 +47,19 @@ final class ClientCallAdvice {
     }
   }
 
-  /** {@code io.grpc.internal.ClientCallImpl.start(Listener, Metadata)}. */
-  static final class GrpcStart {
-    @Advice.OnMethodEnter
-    static void enter(
-        @Advice.This final Object call, @Advice.FieldValue("method") final Object method)
-        throws Throwable {
+  /**
+   * {@code newStream(MethodDescriptor, CallOptions, Metadata, Context)} of gRPC's {@code
+   * ClientCallImpl.ClientStreamProvider} implementations: once per call, when the call is about to
+   * open its stream (later, inside the channel's synchronization context, for a call started before
+   * the name resolved). A reject skips the real {@code newStream}, so no transport stream is
+   * opened, and returns gRPC's own {@code FailingClientStream}: the call fails through its listener
+   * with the status. Only when that stream cannot be built is the status thrown from {@code
+   * newStream}.
+   */
+  static final class GrpcNewStream {
+    @Advice.OnMethodEnter(skipOn = Advice.OnNonDefaultValue.class)
+    static @Nullable Throwable enter(
+        @Advice.This final Object provider, @Advice.Argument(0) final Object method) {
       final String fullMethodName;
       BootstrapDispatcher.beginInternalCall();
       try {
@@ -58,8 +67,33 @@ final class ClientCallAdvice {
       } finally {
         BootstrapDispatcher.endInternalCall();
       }
-      BootstrapDispatcher.beforeClientCall(
-          OperationTags.RPC_CALL, call, fullMethodName, null, null);
+      try {
+        BootstrapDispatcher.beforeClientCall(
+            OperationTags.RPC_CALL, provider, fullMethodName, null, null);
+        return null;
+      } catch (final Throwable rejected) {
+        return rejected;
+      }
+    }
+
+    @Advice.OnMethodExit
+    static void exit(
+        @Advice.Enter final @Nullable Throwable rejected,
+        @Advice.Return(readOnly = false, typing = Assigner.Typing.DYNAMIC) Object stream)
+        throws Throwable {
+      if (rejected != null) {
+        final Object failing;
+        BootstrapDispatcher.beginInternalCall();
+        try {
+          failing = ClientCallExtractor.grpcFailingStream(rejected);
+        } finally {
+          BootstrapDispatcher.endInternalCall();
+        }
+        if (failing == null) {
+          throw rejected;
+        }
+        stream = failing;
+      }
     }
   }
 

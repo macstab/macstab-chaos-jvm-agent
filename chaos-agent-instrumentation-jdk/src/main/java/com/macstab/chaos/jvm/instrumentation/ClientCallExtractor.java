@@ -1,10 +1,14 @@
 package com.macstab.chaos.jvm.instrumentation;
 
+import java.lang.reflect.Array;
+import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.TreeSet;
@@ -37,6 +41,26 @@ public final class ClientCallExtractor {
           return new ConcurrentHashMap<>();
         }
       };
+
+  /** gRPC's own failing stream, built for a rejected call ({@link #grpcFailingStream}). */
+  private static final String GRPC_FAILING_STREAM = "io.grpc.internal.FailingClientStream";
+
+  /**
+   * The {@code FailingClientStream} constructors gRPC versions have had, newest last; {@code
+   * CompatibilityValidator} refuses a gRPC reject at activation against the same list.
+   */
+  private static final List<List<String>> GRPC_FAILING_STREAM_SHAPES =
+      List.of(
+          List.of("io.grpc.Status"),
+          List.of("io.grpc.Status", "io.grpc.internal.ClientStreamListener$RpcProgress"),
+          List.of("io.grpc.Status", "[Lio.grpc.ClientStreamTracer;"),
+          List.of(
+              "io.grpc.Status",
+              "io.grpc.internal.ClientStreamListener$RpcProgress",
+              "[Lio.grpc.ClientStreamTracer;"));
+
+  /** The first gRPC failing stream that could not be built; see {@link #failingStreamMiss()}. */
+  private static volatile @Nullable String failingStreamMiss;
 
   private ClientCallExtractor() {}
 
@@ -126,6 +150,93 @@ public final class ClientCallExtractor {
    */
   public static @Nullable String grpcMethod(final Object methodDescriptor) {
     return stringOf(methodDescriptor, "getFullMethodName");
+  }
+
+  /**
+   * Builds the stream gRPC itself returns for a call that fails before it reaches a transport: an
+   * {@code io.grpc.internal.FailingClientStream} for the status of {@code rejected} (a {@code
+   * StatusRuntimeException}), through the class loader of that status. The call then fails through
+   * its listener with that status, as a deadline that expired before the call started does, also
+   * when the stream is created later inside the channel's synchronization context (a call started
+   * before the name resolved), where a throw would panic the channel.
+   *
+   * @param rejected the library exception the reject built
+   * @return the failing stream, or {@code null} when {@code rejected} carries no gRPC status or
+   *     this gRPC version has no known {@code FailingClientStream} constructor (recorded once, see
+   *     {@link #failingStreamMiss()})
+   */
+  public static @Nullable Object grpcFailingStream(final Throwable rejected) {
+    final Object status;
+    try {
+      status = rejected.getClass().getMethod("getStatus").invoke(rejected);
+    } catch (final ReflectiveOperationException | RuntimeException noStatus) {
+      return null;
+    }
+    if (status == null) {
+      return null;
+    }
+    final ClassLoader loader = status.getClass().getClassLoader();
+    try {
+      final Class<?> failing = Class.forName(GRPC_FAILING_STREAM, false, loader);
+      for (final List<String> shape : GRPC_FAILING_STREAM_SHAPES) {
+        for (final Constructor<?> constructor : failing.getConstructors()) {
+          if (parameterNames(constructor).equals(shape)) {
+            return constructor.newInstance(failingStreamArguments(constructor, status));
+          }
+        }
+      }
+    } catch (final ReflectiveOperationException | LinkageError | RuntimeException unavailable) {
+      recordFailingStreamMiss(unavailable.toString());
+      return null;
+    }
+    recordFailingStreamMiss("no known constructor");
+    return null;
+  }
+
+  /**
+   * Why a gRPC reject could not be turned into gRPC's failing stream (and was thrown from {@code
+   * newStream} instead), the first time it happened; read into the diagnostics' hook failures.
+   *
+   * @return the reason, or {@code null} when it never happened
+   */
+  public static @Nullable String failingStreamMiss() {
+    return failingStreamMiss;
+  }
+
+  /** Forgets the recorded miss ({@link #failingStreamMiss()}): the hooks were uninstalled. */
+  public static void forgetFailingStreamMiss() {
+    failingStreamMiss = null;
+  }
+
+  private static void recordFailingStreamMiss(final String reason) {
+    if (failingStreamMiss == null) {
+      failingStreamMiss = GRPC_FAILING_STREAM + ": " + reason;
+    }
+  }
+
+  private static List<String> parameterNames(final Constructor<?> constructor) {
+    final List<String> names = new ArrayList<>();
+    for (final Class<?> parameter : constructor.getParameterTypes()) {
+      names.add(parameter.getName());
+    }
+    return names;
+  }
+
+  /**
+   * The status, then {@code RpcProgress.PROCESSED} (not retried transparently), then no tracers.
+   */
+  private static Object[] failingStreamArguments(
+      final Constructor<?> constructor, final Object status) throws ReflectiveOperationException {
+    final Class<?>[] parameters = constructor.getParameterTypes();
+    final Object[] arguments = new Object[parameters.length];
+    arguments[0] = status;
+    for (int index = 1; index < parameters.length; index++) {
+      arguments[index] =
+          parameters[index].isArray()
+              ? Array.newInstance(parameters[index].getComponentType(), 0)
+              : parameters[index].getMethod("valueOf", String.class).invoke(null, "PROCESSED");
+    }
+    return arguments;
   }
 
   /**

@@ -323,6 +323,134 @@ class ClientCallExtractorTest {
     }
   }
 
+  @Nested
+  @DisplayName("gRPC failing stream")
+  class GrpcFailingStream {
+
+    /** A rejection carrying a gRPC status, as {@code StatusRuntimeException} does. */
+    public static final class Rejection extends RuntimeException {
+      private static final long serialVersionUID = 1L;
+      private final transient Object status;
+
+      Rejection(final Object status) {
+        super("rejected");
+        this.status = status;
+      }
+
+      public Object getStatus() {
+        return status;
+      }
+    }
+
+    @Test
+    @DisplayName("builds the stream with (Status, RpcProgress, ClientStreamTracer[]), as 1.85 has")
+    void currentConstructor() throws Exception {
+      final FakeGrpc grpc = new FakeGrpc();
+      final Object status = grpc.status();
+      grpc.failingStream(grpc.statusType(), grpc.rpcProgress(), grpc.tracers());
+
+      final Object stream = ClientCallExtractor.grpcFailingStream(new Rejection(status));
+
+      assertThat(stream).isNotNull();
+      assertThat(stream.getClass().getName()).isEqualTo("io.grpc.internal.FailingClientStream");
+      assertThat(stream.getClass().getField("error").get(stream)).isSameAs(status);
+    }
+
+    @Test
+    @DisplayName("builds the stream with (Status), as older lines have")
+    void oldestConstructor() throws Exception {
+      final FakeGrpc grpc = new FakeGrpc();
+      final Object status = grpc.status();
+      grpc.failingStream(grpc.statusType());
+
+      final Object stream = ClientCallExtractor.grpcFailingStream(new Rejection(status));
+
+      assertThat(stream).isNotNull();
+      assertThat(stream.getClass().getField("error").get(stream)).isSameAs(status);
+    }
+
+    @Test
+    @DisplayName("is null without a known constructor, and records the miss once")
+    void unknownConstructor() throws Exception {
+      final FakeGrpc grpc = new FakeGrpc();
+      final Object status = grpc.status();
+      grpc.failingStream(String.class);
+
+      try {
+        assertThat(ClientCallExtractor.grpcFailingStream(new Rejection(status))).isNull();
+        assertThat(ClientCallExtractor.failingStreamMiss())
+            .contains("io.grpc.internal.FailingClientStream");
+      } finally {
+        ClientCallExtractor.forgetFailingStreamMiss();
+      }
+    }
+
+    @Test
+    @DisplayName("is null for a failure without a gRPC status (the fallback IOException)")
+    void noStatus() {
+      assertThat(ClientCallExtractor.grpcFailingStream(new java.io.IOException("rpc down")))
+          .isNull();
+    }
+  }
+
+  /** {@code io.grpc} stand-ins defined in a class loader of their own. */
+  static final class FakeGrpc {
+    private final net.bytebuddy.dynamic.loading.ByteArrayClassLoader loader =
+        new net.bytebuddy.dynamic.loading.ByteArrayClassLoader(
+            FakeGrpc.class.getClassLoader(), java.util.Map.of());
+    private final Class<?> statusType = define("io.grpc.Status");
+
+    Class<?> statusType() {
+      return statusType;
+    }
+
+    Object status() throws ReflectiveOperationException {
+      return statusType.getConstructor().newInstance();
+    }
+
+    Class<?> rpcProgress() {
+      return new net.bytebuddy.ByteBuddy()
+          .makeEnumeration("PROCESSED", "REFUSED")
+          .name("io.grpc.internal.ClientStreamListener$RpcProgress")
+          .make()
+          .load(loader, net.bytebuddy.dynamic.loading.ClassLoadingStrategy.Default.INJECTION)
+          .getLoaded();
+    }
+
+    Class<?> tracers() {
+      return java.lang.reflect.Array.newInstance(define("io.grpc.ClientStreamTracer"), 0)
+          .getClass();
+    }
+
+    /** Defines {@code FailingClientStream} with one constructor that keeps argument 0 in error. */
+    void failingStream(final Class<?>... parameters) throws ReflectiveOperationException {
+      new net.bytebuddy.ByteBuddy()
+          .subclass(
+              Object.class,
+              net.bytebuddy.dynamic.scaffold.subclass.ConstructorStrategy.Default.NO_CONSTRUCTORS)
+          .name("io.grpc.internal.FailingClientStream")
+          .defineField("error", Object.class, net.bytebuddy.description.modifier.Visibility.PUBLIC)
+          .defineConstructor(net.bytebuddy.description.modifier.Visibility.PUBLIC)
+          .withParameters(parameters)
+          .intercept(
+              net.bytebuddy.implementation.MethodCall.invoke(Object.class.getConstructor())
+                  .andThen(
+                      net.bytebuddy.implementation.FieldAccessor.ofField("error")
+                          .setsArgumentAt(0)))
+          .make()
+          .load(loader, net.bytebuddy.dynamic.loading.ClassLoadingStrategy.Default.INJECTION);
+    }
+
+    private Class<?> define(final String name) {
+      return new net.bytebuddy.ByteBuddy()
+          .subclass(Object.class)
+          .name(name)
+          .make()
+          .load(loader, net.bytebuddy.dynamic.loading.ClassLoadingStrategy.Default.INJECTION)
+          .getLoaded();
+    }
+  }
+
   /** An unsafe subclass without an outer reference of its own. */
   static final class SubclassedUnsafe extends Channel.Unsafe {
     SubclassedUnsafe(final Channel channel) {

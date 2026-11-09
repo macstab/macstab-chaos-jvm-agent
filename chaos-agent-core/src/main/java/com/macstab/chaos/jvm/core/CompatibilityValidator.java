@@ -8,8 +8,13 @@ import com.macstab.chaos.jvm.api.ChaosUnsupportedFeatureException;
 import com.macstab.chaos.jvm.api.ChaosValidationException;
 import com.macstab.chaos.jvm.api.NamePattern;
 import com.macstab.chaos.jvm.api.OperationType;
+import java.lang.reflect.Constructor;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.EnumSet;
+import java.util.List;
 import java.util.Set;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Validates that a {@link ChaosScenario} is consistent with the current {@link FeatureSet} and with
@@ -874,7 +879,77 @@ final class CompatibilityValidator {
                   + REJECT_REFUSALS.getOrDefault(operation, "no real call of it fails"));
         }
       }
+      if (operations.contains(OperationType.RPC_CALL)) {
+        validateGrpcFailingStream();
+      }
     }
+  }
+
+  private static final String GRPC_FAILING_STREAM = "io.grpc.internal.FailingClientStream";
+
+  /**
+   * The {@code FailingClientStream} constructors the gRPC reject can build; {@code
+   * ClientCallExtractor} in the instrumentation builds the stream against the same list.
+   */
+  private static final List<List<String>> GRPC_FAILING_STREAM_SHAPES =
+      List.of(
+          List.of("io.grpc.Status"),
+          List.of("io.grpc.Status", "io.grpc.internal.ClientStreamListener$RpcProgress"),
+          List.of("io.grpc.Status", "[Lio.grpc.ClientStreamTracer;"),
+          List.of(
+              "io.grpc.Status",
+              "io.grpc.internal.ClientStreamListener$RpcProgress",
+              "[Lio.grpc.ClientStreamTracer;"));
+
+  /**
+   * A gRPC reject fails the call through gRPC's own {@code FailingClientStream} (a throw where the
+   * stream is created would panic the channel for a call started before its name resolved). The
+   * class is looked up through the activating thread's context class loader, then the system class
+   * loader (the loader of the call path is not known before a call): not visible, the reject is
+   * accepted (a version without a known constructor then fails the call by a throw and is named in
+   * the hook failures); visible without a known constructor, it is refused.
+   */
+  private static void validateGrpcFailingStream() {
+    final Class<?> failing = visibleGrpcFailingStream();
+    if (failing == null) {
+      return;
+    }
+    try {
+      for (final Constructor<?> constructor : failing.getConstructors()) {
+        final List<String> parameters = new ArrayList<>();
+        for (final Class<?> parameter : constructor.getParameterTypes()) {
+          parameters.add(parameter.getName());
+        }
+        if (GRPC_FAILING_STREAM_SHAPES.contains(parameters)) {
+          return;
+        }
+      }
+    } catch (final LinkageError | SecurityException unreadable) {
+      // Unreadable constructors: refused below, as no known one was found.
+    }
+    throw new ChaosValidationException(
+        "RejectEffect is not supported for RPC_CALL with this gRPC version: the reject fails the"
+            + " call through "
+            + GRPC_FAILING_STREAM
+            + ", and its constructors are none of "
+            + GRPC_FAILING_STREAM_SHAPES
+            + "; delay the call instead");
+  }
+
+  private static @Nullable Class<?> visibleGrpcFailingStream() {
+    for (final ClassLoader loader :
+        Arrays.asList(
+            Thread.currentThread().getContextClassLoader(), ClassLoader.getSystemClassLoader())) {
+      if (loader == null) {
+        continue;
+      }
+      try {
+        return Class.forName(GRPC_FAILING_STREAM, false, loader);
+      } catch (final ClassNotFoundException | LinkageError notVisible) {
+        // the next loader
+      }
+    }
+    return null;
   }
 
   /**

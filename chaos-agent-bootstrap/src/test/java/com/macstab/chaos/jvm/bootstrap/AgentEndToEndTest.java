@@ -1657,6 +1657,48 @@ class AgentEndToEndTest {
     }
 
     @Test
+    @DisplayName("gRPC call: a unary call is one RPC_CALL")
+    void grpcUnaryOnce() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.run(
+              plan(
+                  scenario(
+                      "grpc-once",
+                      ChaosSelector.rpc(NamePattern.exact("probe.Echo/Say")),
+                      ChaosEffect.delay(Duration.ofMillis(1)))),
+              ClientLibraryProbeMain.class,
+              "grpc-call",
+              clientClasspath);
+      assertThat(result.value("reply")).isEqualTo("echo hi");
+      assertThat(result.longValue("matched.grpc-once")).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName(
+        "gRPC calls started before the name resolves: rejected with UNAVAILABLE through the"
+            + " call, no stream opened, and the channel keeps working")
+    void grpcRejectBeforeResolution() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.run(
+              plan(
+                  ChaosScenario.builder("grpc-late")
+                      .scope(ChaosScenario.ScenarioScope.JVM)
+                      .selector(ChaosSelector.rpc(NamePattern.exact("probe.Echo/Say")))
+                      .effect(ChaosEffect.reject("grpc down"))
+                      .activationPolicy(ActivationPolicy.builder().maxApplications(2L).build())
+                      .build()),
+              ClientLibraryProbeMain.class,
+              "grpc-reject-before-resolution",
+              clientClasspath);
+      assertThat(result.value("blocking.code")).isEqualTo("UNAVAILABLE");
+      assertThat(result.value("blocking.description")).isEqualTo("grpc down");
+      assertThat(result.value("future.code")).isEqualTo("UNAVAILABLE");
+      assertThat(result.value("later.reply")).isEqualTo("echo hi");
+      assertThat(result.longValue("received")).as("calls that reached the server").isEqualTo(1L);
+      assertThat(result.longValue("applied.grpc-late")).isEqualTo(2L);
+    }
+
+    @Test
     @DisplayName("gRPC call: an unmatched scenario leaves the call alone")
     void grpcCallUnmatched() throws Exception {
       final ChildJvmProbe.ProbeResult result =

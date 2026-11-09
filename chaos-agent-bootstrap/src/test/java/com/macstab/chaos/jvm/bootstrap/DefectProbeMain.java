@@ -1588,7 +1588,7 @@ public final class DefectProbeMain {
       // client libraries, on the classpath of the coverage run
       "com.zaxxer.hikari.pool.HikariPool",
       "com.mchange.v2.c3p0.impl.C3P0PooledConnectionPool",
-      "io.grpc.internal.ClientCallImpl",
+      "io.grpc.internal.ManagedChannelImpl$ChannelStreamProvider",
       "io.lettuce.core.RedisChannelHandler",
       "io.netty.channel.AbstractChannel$AbstractUnsafe",
       "io.netty.channel.nio.AbstractNioByteChannel$NioByteUnsafe",
