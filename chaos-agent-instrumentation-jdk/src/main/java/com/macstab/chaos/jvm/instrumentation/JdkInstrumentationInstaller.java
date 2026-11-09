@@ -1073,7 +1073,7 @@ public final class JdkInstrumentationInstaller {
         .type(
             ElementMatchers.nameStartsWith(clientPackage)
                 .and(
-                    ElementMatchers.hasSuperClass(
+                    TypeMatchers.superClass(
                         ElementMatchers.named(clientPackage + "CloseableHttpClient"))))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
@@ -1131,7 +1131,7 @@ public final class JdkInstrumentationInstaller {
     // takesArgument(0, String.class) is sufficient and binds to all overloads.
     return agentBuilder
         .type(
-            ElementMatchers.isSubTypeOf(java.sql.Statement.class)
+            TypeMatchers.subTypeOf(java.sql.Statement.class)
                 .and(ElementMatchers.not(ElementMatchers.isInterface()))
                 .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
         .transform(
@@ -1165,7 +1165,7 @@ public final class JdkInstrumentationInstaller {
                                 .and(ElementMatchers.takesArguments(0))
                                 .and(ElementMatchers.not(ElementMatchers.isAbstract())))))
         .type(
-            ElementMatchers.isSubTypeOf(java.sql.PreparedStatement.class)
+            TypeMatchers.subTypeOf(java.sql.PreparedStatement.class)
                 .and(ElementMatchers.not(ElementMatchers.isInterface()))
                 .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
         .transform(
@@ -1178,7 +1178,7 @@ public final class JdkInstrumentationInstaller {
                             .and(ElementMatchers.takesArguments(0))
                             .and(ElementMatchers.not(ElementMatchers.isAbstract())))))
         .type(
-            ElementMatchers.isSubTypeOf(java.sql.Connection.class)
+            TypeMatchers.subTypeOf(java.sql.Connection.class)
                 .and(ElementMatchers.not(ElementMatchers.isInterface()))
                 .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
         .transform(
@@ -1225,7 +1225,7 @@ public final class JdkInstrumentationInstaller {
     // methods. Target concrete subtypes (e.g. JmxMBeanServer) instead.
     return agentBuilder
         .type(
-            ElementMatchers.isSubTypeOf(javax.management.MBeanServer.class)
+            TypeMatchers.subTypeOf(javax.management.MBeanServer.class)
                 .and(ElementMatchers.not(ElementMatchers.isInterface()))
                 .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
         .transform(
@@ -1418,7 +1418,7 @@ public final class JdkInstrumentationInstaller {
   private static AgentBuilder applyR2dbcTransformations(final AgentBuilder builder) {
     return builder
         .type(
-            ElementMatchers.hasSuperType(ElementMatchers.named("io.r2dbc.spi.Statement"))
+            TypeMatchers.superType(ElementMatchers.named("io.r2dbc.spi.Statement"))
                 .and(ElementMatchers.not(ElementMatchers.isInterface())))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
@@ -1580,7 +1580,7 @@ public final class JdkInstrumentationInstaller {
         // FileChannel.open reach the platform provider's newByteChannel or newFileChannel.
         .type(
             ElementMatchers.nameStartsWith("sun.nio.fs.")
-                .and(ElementMatchers.isSubTypeOf(java.nio.file.spi.FileSystemProvider.class)))
+                .and(TypeMatchers.subTypeOf(java.nio.file.spi.FileSystemProvider.class)))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder.visit(
@@ -1594,7 +1594,7 @@ public final class JdkInstrumentationInstaller {
         // WindowsFileSystemProvider); other providers (zip file systems) are not hooked.
         .type(
             ElementMatchers.nameStartsWith("sun.nio.fs.")
-                .and(ElementMatchers.isSubTypeOf(java.nio.file.spi.FileSystemProvider.class)))
+                .and(TypeMatchers.subTypeOf(java.nio.file.spi.FileSystemProvider.class)))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
                 typeBuilder

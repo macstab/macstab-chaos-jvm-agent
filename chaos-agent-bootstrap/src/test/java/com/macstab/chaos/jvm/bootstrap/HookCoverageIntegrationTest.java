@@ -99,15 +99,11 @@ class HookCoverageIntegrationTest {
         .isEmpty();
 
     // Netty probes its optional logging back ends: a logger adapter whose library (Log4j 2) is not
-    // on the class path fails to resolve its superclass while the hook matchers inspect it, and
-    // cannot be loaded either. It is no hook target, so no hook is lost.
+    // on the class path has a superclass no hook matcher can resolve. It is no target, so it is no
+    // failure either.
     assertThat(
             Arrays.stream(result.value("hookFailures").split("; "))
                 .filter(failure -> !failure.isEmpty())
-                .filter(
-                    failure ->
-                        !(failure.startsWith("io.netty.util.internal.logging.")
-                            && failure.contains("NoSuchTypeException")))
                 .toList())
         .as("types whose weaving failed on JDK %s: none of their hooks is applied", runtime)
         .isEmpty();

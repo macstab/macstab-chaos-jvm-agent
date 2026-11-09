@@ -2616,6 +2616,17 @@ class AgentEndToEndTest {
   class OnDemandWeaving {
 
     @Test
+    @DisplayName("a class whose superclass is missing is no target: no hook failure, no WARNING")
+    void missingSuperclassIsNoTarget() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.runWithoutPlan(
+              DefectProbeMain.class, "missing-superclass", "-Dmacstab.chaos.instrumentation=eager");
+      assertThat(result.value("loaded")).isEqualTo("java.lang.NoClassDefFoundError");
+      assertThat(result.value("orphanFailures")).isEmpty();
+      assertThat(result.value("orphanWarnings")).isEmpty();
+    }
+
+    @Test
     @DisplayName("an agent without scenarios weaves no hooks")
     void idleAgentWeavesNothing() throws Exception {
       final ChildJvmProbe.ProbeResult result =

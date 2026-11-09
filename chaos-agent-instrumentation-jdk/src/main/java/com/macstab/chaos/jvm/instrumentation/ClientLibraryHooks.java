@@ -55,7 +55,7 @@ final class ClientLibraryHooks {
         .type(
             ElementMatchers.nameStartsWith("io.grpc.")
                 .and(
-                    ElementMatchers.hasSuperType(
+                    TypeMatchers.superType(
                         ElementMatchers.named(
                             "io.grpc.internal.ClientCallImpl$ClientStreamProvider")))
                 .and(ElementMatchers.not(ElementMatchers.isInterface())))
@@ -159,7 +159,7 @@ final class ClientLibraryHooks {
         .type(
             ElementMatchers.nameStartsWith("io.netty.")
                 .and(
-                    ElementMatchers.hasSuperClass(
+                    TypeMatchers.superClass(
                         ElementMatchers.named("io.netty.channel.AbstractChannel"))))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->

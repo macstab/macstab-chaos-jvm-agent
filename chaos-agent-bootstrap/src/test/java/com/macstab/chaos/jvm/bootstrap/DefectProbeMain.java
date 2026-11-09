@@ -120,6 +120,7 @@ public final class DefectProbeMain {
       case "close-shutdown-wait" -> closeShutdownAndWait();
       case "redirect" -> redirect();
       case "redirect-unix-domain" -> redirectUnixDomain();
+      case "missing-superclass" -> missingSuperclass();
       case "udp-dns" -> udpAndReverseDns();
       case "pool-queue-reject" -> poolQueueReject();
       case "queue-poll-suppress" -> queuePollSuppress();
@@ -1487,6 +1488,70 @@ public final class DefectProbeMain {
       }
       printApplied(redirect);
     }
+  }
+
+  /**
+   * The class file of {@code probe.missing.Orphan extends probe.missing.Parent}. Apart from {@link
+   * DefectProbeMain}, which runs without ByteBuddy on its class path in the shaded-only modes.
+   */
+  private static final class OrphanClassFile {
+    private OrphanClassFile() {}
+
+    static byte[] bytes() {
+      final net.bytebuddy.dynamic.DynamicType.Unloaded<Object> parent =
+          new net.bytebuddy.ByteBuddy().subclass(Object.class).name("probe.missing.Parent").make();
+      return new net.bytebuddy.ByteBuddy()
+          .subclass(parent.getTypeDescription())
+          .name("probe.missing.Orphan")
+          .make()
+          .getBytes();
+    }
+  }
+
+  /**
+   * Loads a class whose superclass is absent (an optional dependency missing, as Netty's Log4j 2
+   * logger without Log4j 2) while every hook group is woven. Prints the class's load outcome, the
+   * hookFailures entries naming it and the agent WARNING lines naming it.
+   */
+  private static void missingSuperclass() throws Exception {
+    final java.util.List<String> warnings = new java.util.concurrent.CopyOnWriteArrayList<>();
+    AGENT_LOGGER.addHandler(
+        new java.util.logging.Handler() {
+          @Override
+          public void publish(final java.util.logging.LogRecord logRecord) {
+            final String message = String.valueOf(logRecord.getMessage());
+            if (logRecord.getLevel().intValue() >= java.util.logging.Level.WARNING.intValue()
+                && message.contains("probe.missing")) {
+              warnings.add(message);
+            }
+          }
+
+          @Override
+          public void flush() {}
+
+          @Override
+          public void close() {}
+        });
+    final byte[] orphan = OrphanClassFile.bytes();
+    final Path directory = Files.createTempDirectory("missing-superclass");
+    final Path classFile = directory.resolve("probe/missing/Orphan.class");
+    Files.createDirectories(classFile.getParent());
+    Files.write(classFile, orphan);
+    String loaded;
+    try (URLClassLoader loader = new URLClassLoader(new URL[] {directory.toUri().toURL()}, null)) {
+      loaded = String.valueOf(Class.forName("probe.missing.Orphan", true, loader));
+    } catch (final Throwable failure) {
+      loaded = failure.getClass().getName();
+    }
+    System.out.println("loaded=" + loaded);
+    final Object failures =
+        ChaosPlatform.current().diagnostics().snapshot().runtimeDetails().get("hookFailures");
+    System.out.println(
+        "orphanFailures="
+            + Arrays.stream(String.valueOf(failures).split("; "))
+                .filter(failure -> failure.contains("probe.missing"))
+                .collect(java.util.stream.Collectors.joining(" | ")));
+    System.out.println("orphanWarnings=" + String.join(" | ", warnings));
   }
 
   /**

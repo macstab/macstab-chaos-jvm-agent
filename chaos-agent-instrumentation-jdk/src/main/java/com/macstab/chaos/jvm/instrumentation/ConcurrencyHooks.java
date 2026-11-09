@@ -249,7 +249,7 @@ final class ConcurrencyHooks {
   static AgentBuilder applyBlockingQueueTransformations(final AgentBuilder builder) {
     return builder
         .type(
-            ElementMatchers.isSubTypeOf(java.util.concurrent.BlockingQueue.class)
+            TypeMatchers.subTypeOf(java.util.concurrent.BlockingQueue.class)
                 .and(ElementMatchers.not(ElementMatchers.isInterface()))
                 .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
         .transform(

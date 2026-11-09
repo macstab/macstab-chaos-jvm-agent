@@ -66,7 +66,7 @@ final class NetworkHooks {
                                     ElementMatchers.takesArguments(
                                         java.util.function.Consumer.class)))))
         .type(
-            ElementMatchers.isSubTypeOf(java.nio.channels.spi.AbstractSelector.class)
+            TypeMatchers.subTypeOf(java.nio.channels.spi.AbstractSelector.class)
                 .and(ElementMatchers.not(ElementMatchers.isAbstract()))
                 .and(ElementMatchers.not(ElementMatchers.isInterface()))
                 .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
@@ -92,7 +92,7 @@ final class NetworkHooks {
         // possibly vendor variants) where the actual I/O code lives. Exclude abstract /
         // synthetic matches to avoid VerifyError on bridge methods.
         .type(
-            ElementMatchers.isSubTypeOf(java.nio.channels.SocketChannel.class)
+            TypeMatchers.subTypeOf(java.nio.channels.SocketChannel.class)
                 .and(ElementMatchers.not(ElementMatchers.isAbstract()))
                 .and(ElementMatchers.not(ElementMatchers.isInterface()))
                 .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
@@ -130,7 +130,7 @@ final class NetworkHooks {
                                         java.nio.ByteBuffer[].class, int.class, int.class)))))
         // NIO ServerSocketChannel — same abstract-base issue as SocketChannel above.
         .type(
-            ElementMatchers.isSubTypeOf(java.nio.channels.ServerSocketChannel.class)
+            TypeMatchers.subTypeOf(java.nio.channels.ServerSocketChannel.class)
                 .and(ElementMatchers.not(ElementMatchers.isAbstract()))
                 .and(ElementMatchers.not(ElementMatchers.isInterface()))
                 .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
@@ -231,7 +231,7 @@ final class NetworkHooks {
   static AgentBuilder applySocketChannelTransformations(final AgentBuilder builder) {
     return builder
         .type(
-            ElementMatchers.isSubTypeOf(java.nio.channels.SocketChannel.class)
+            TypeMatchers.subTypeOf(java.nio.channels.SocketChannel.class)
                 .and(ElementMatchers.not(ElementMatchers.isAbstract()))
                 .and(ElementMatchers.not(ElementMatchers.isInterface()))
                 .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
@@ -295,7 +295,7 @@ final class NetworkHooks {
                                     ElementMatchers.takesArguments(
                                         byte[].class, int.class, int.class)))))
         .type(
-            ElementMatchers.isSubTypeOf(java.nio.channels.ServerSocketChannel.class)
+            TypeMatchers.subTypeOf(java.nio.channels.ServerSocketChannel.class)
                 .and(ElementMatchers.not(ElementMatchers.isAbstract()))
                 .and(ElementMatchers.not(ElementMatchers.isInterface()))
                 .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
@@ -381,7 +381,7 @@ final class NetworkHooks {
     AgentBuilder agentBuilder =
         builder
             .type(
-                ElementMatchers.isSubTypeOf(javax.net.ssl.SSLSocket.class)
+                TypeMatchers.subTypeOf(javax.net.ssl.SSLSocket.class)
                     .and(ElementMatchers.not(ElementMatchers.isAbstract()))
                     .and(ElementMatchers.not(ElementMatchers.isInterface()))
                     .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
@@ -402,7 +402,7 @@ final class NetworkHooks {
     agentBuilder =
         agentBuilder
             .type(
-                ElementMatchers.isSubTypeOf(javax.net.ssl.SSLEngine.class)
+                TypeMatchers.subTypeOf(javax.net.ssl.SSLEngine.class)
                     .and(ElementMatchers.not(ElementMatchers.isAbstract()))
                     .and(ElementMatchers.not(ElementMatchers.isInterface()))
                     .and(ElementMatchers.not(ElementMatchers.isSynthetic())))
