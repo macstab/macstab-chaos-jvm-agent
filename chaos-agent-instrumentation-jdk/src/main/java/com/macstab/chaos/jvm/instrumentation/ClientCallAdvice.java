@@ -203,26 +203,47 @@ final class ClientCallAdvice {
 
   /**
    * {@code io.r2dbc.spi.Statement.execute()} in any driver. Pool and proxy statements delegate to
-   * the driver's statement, so only the outermost {@code execute()} is evaluated.
+   * the driver's statement, so only the outermost {@code execute()} is evaluated. A reject skips
+   * the execution and returns a publisher that signals the exception ({@code Mono.error} or {@code
+   * Flux.error}, as the driver's {@code execute()} declares), as a driver fails an execution; only
+   * when Reactor is not visible to the statement's class loader is it thrown from {@code
+   * execute()}.
    */
   static final class R2dbcExecute {
-    @Advice.OnMethodEnter
-    static void enter(@Advice.This final Object statement) throws Throwable {
+    @Advice.OnMethodEnter(skipOn = Advice.OnNonDefaultValue.class)
+    static @Nullable Throwable enter(@Advice.This final Object statement) {
       if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_CLIENT)) {
-        return;
+        return null;
       }
       try {
         BootstrapDispatcher.beforeClientCall(
             OperationTags.R2DBC_STATEMENT_EXECUTE, statement, null, null, null);
-      } catch (final Throwable throwable) {
-        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_CLIENT);
-        throw throwable;
+        return null;
+      } catch (final Throwable rejected) {
+        return rejected;
       }
     }
 
     @Advice.OnMethodExit(onThrowable = Throwable.class)
-    static void exit() {
+    static void exit(
+        @Advice.Enter final @Nullable Throwable rejected,
+        @Advice.This final Object statement,
+        @Advice.Return(readOnly = false, typing = Assigner.Typing.DYNAMIC) Object results)
+        throws Throwable {
       BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_CLIENT);
+      if (rejected != null) {
+        final Object failing;
+        BootstrapDispatcher.beginInternalCall();
+        try {
+          failing = ClientCallExtractor.r2dbcFailingPublisher(statement, rejected);
+        } finally {
+          BootstrapDispatcher.endInternalCall();
+        }
+        if (failing == null) {
+          throw rejected;
+        }
+        results = failing;
+      }
     }
   }
 

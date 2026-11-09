@@ -942,7 +942,9 @@ public enum OperationType {
   /**
    * Fires when an R2DBC statement is executed ({@code io.r2dbc.spi.Statement.execute()}, in any
    * driver). The call is evaluated when the execution is requested (the publisher is created), not
-   * when it is subscribed. A reject throws {@code R2dbcTransientResourceException}.
+   * when it is subscribed. A reject returns a publisher that signals {@code
+   * R2dbcTransientResourceException}, as a driver fails an execution (thrown from {@code execute()}
+   * only when Reactor is not visible to the driver's class loader).
    *
    * <p>Use with {@link ChaosSelector.JdbcSelector}; the target pattern does not apply (R2DBC
    * statements do not expose their SQL).
@@ -953,7 +955,8 @@ public enum OperationType {
    * Fires when an AWS SDK for Java v2 client calls an operation, sync or async ({@code
    * BaseSyncClientHandler} / {@code BaseAsyncClientHandler.execute}), before signing and sending.
    * The service is taken from the request's package ({@code s3}, {@code dynamodb}, ...), the
-   * operation from the SDK ({@code GetObject}). A reject throws {@code SdkClientException}.
+   * operation from the SDK ({@code GetObject}). A reject throws {@code SdkClientException}; an
+   * asynchronous client returns it as a failed future, as it does for any failure of the call.
    *
    * <p>Use with {@link ChaosSelector.AwsSdkSelector}.
    */

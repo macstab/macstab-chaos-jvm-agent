@@ -448,8 +448,15 @@ public final class ClientLibraryProbeMain {
     final io.r2dbc.spi.Connection connection =
         reactor.core.publisher.Mono.from(factory.create()).block();
     try {
-      reactor.core.publisher.Flux.from(connection.createStatement("SELECT 1").execute())
-          .blockLast();
+      final org.reactivestreams.Publisher<? extends io.r2dbc.spi.Result> results;
+      try {
+        results = connection.createStatement("SELECT 1").execute();
+      } catch (final RuntimeException failure) {
+        // A driver fails an execution through its publisher, not by throwing from execute().
+        report("call", failure);
+        return;
+      }
+      reactor.core.publisher.Flux.from(results).blockLast();
       System.out.println("execute.type=completed");
     } catch (final RuntimeException failure) {
       report("execute", failure);

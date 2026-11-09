@@ -346,6 +346,21 @@ class ClientCallExtractorTest {
   }
 
   @Nested
+  @DisplayName("R2DBC failing publisher")
+  class R2dbcFailingPublisher {
+
+    @Test
+    @DisplayName("is null when Reactor is not visible to the statement's class loader")
+    void nullWithoutReactor() {
+      // A boot-loaded object: its loader (the boot loader) has no Reactor.
+      assertThat(
+              ClientCallExtractor.r2dbcFailingPublisher(
+                  new Object(), new IllegalStateException("r2dbc down")))
+          .isNull();
+    }
+  }
+
+  @Nested
   @DisplayName("gRPC failing stream")
   class GrpcFailingStream {
 

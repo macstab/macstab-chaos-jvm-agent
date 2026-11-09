@@ -298,6 +298,34 @@ public final class ClientCallExtractor {
   }
 
   /**
+   * Builds the publisher a rejected R2DBC execution returns: Reactor's {@code Mono.error(failure)}
+   * or {@code Flux.error(failure)}, whichever the statement's {@code execute()} may return (a
+   * driver may narrow it, as r2dbc-h2 does to {@code Flux}), through the statement's class loader.
+   *
+   * @param statement the R2DBC statement
+   * @param failure the library exception the reject built
+   * @return the publisher, or {@code null} when Reactor is not visible to the statement's loader or
+   *     neither type fits the return type
+   */
+  public static @Nullable Object r2dbcFailingPublisher(
+      final Object statement, final Throwable failure) {
+    try {
+      final ClassLoader loader = statement.getClass().getClassLoader();
+      final Class<?> returned = statement.getClass().getMethod("execute").getReturnType();
+      for (final String type :
+          List.of("reactor.core.publisher.Mono", "reactor.core.publisher.Flux")) {
+        final Class<?> publisher = Class.forName(type, false, loader);
+        if (returned.isAssignableFrom(publisher)) {
+          return publisher.getMethod("error", Throwable.class).invoke(null, failure);
+        }
+      }
+      return null;
+    } catch (final ReflectiveOperationException | LinkageError | RuntimeException noReactor) {
+      return null;
+    }
+  }
+
+  /**
    * Returns the operation name of AWS SDK {@code ClientExecutionParams}.
    *
    * @param executionParams the execution parameters

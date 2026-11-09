@@ -1876,15 +1876,20 @@ class AgentEndToEndTest {
     }
 
     @Test
-    @DisplayName("R2DBC: a rejected execute throws R2dbcTransientResourceException")
+    @DisplayName(
+        "R2DBC: a rejected execute signals R2dbcTransientResourceException through its publisher")
     void r2dbc() throws Exception {
       final ChildJvmProbe.ProbeResult result =
           runReject(
               "r2dbc",
               new ChaosSelector.JdbcSelector(Set.of(OperationType.R2DBC_STATEMENT_EXECUTE), null),
               "r2dbc-execute");
+      assertThat(result.values())
+          .as("execute() returns its publisher; the failure is signalled through it")
+          .doesNotContainKey("call.type");
       assertThat(result.value("execute.type"))
           .isEqualTo("io.r2dbc.spi.R2dbcTransientResourceException");
+      assertThat(result.value("execute.message")).isEqualTo("r2dbc down");
       assertThat(result.longValue("matched.r2dbc")).isEqualTo(1L);
     }
 
