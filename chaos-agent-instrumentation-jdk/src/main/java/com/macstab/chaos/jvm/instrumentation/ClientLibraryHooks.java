@@ -153,6 +153,8 @@ final class ClientLibraryHooks {
    * AbstractNioMessageChannel}, {@code NioSocketChannel}, {@code LocalChannel}, ...; {@code
    * NioDatagramChannel} inherits it): no override calls {@code super.doWrite}, so a write is
    * evaluated once. The {@code io.netty.} prefix keeps the superclass walk off every other class.
+   * The advice skips a datagram channel at run time, because the NIO and io_uring datagram channels
+   * share their {@code doWrite} with other channel types.
    */
   static AgentBuilder applyNettyTransformations(final AgentBuilder builder) {
     return builder

@@ -1950,8 +1950,9 @@ class AgentEndToEndTest {
 
     @Test
     @DisplayName(
-        "Netty: a rejected write fails its future with an IOException and closes the channel,"
-            + " for a socket and a datagram channel; an empty flush is not evaluated")
+        "Netty: a rejected write fails its future with an IOException and closes a socket"
+            + " channel; a datagram channel is not evaluated and stays open; an empty flush is not"
+            + " evaluated")
     void nettyWriteReject() throws Exception {
       final ChildJvmProbe.ProbeResult result =
           runReject(
@@ -1959,15 +1960,18 @@ class AgentEndToEndTest {
               new ChaosSelector.NettySelector(
                   Set.of(OperationType.NETTY_CHANNEL_WRITE), "127.0.0.0/8", null),
               "netty-write-reject");
-      for (final String channel : List.of("socket", "datagram")) {
-        assertThat(result.value(channel + ".done")).as(channel).isEqualTo("true");
-        assertThat(result.value(channel + ".type")).as(channel).isEqualTo("java.io.IOException");
-        assertThat(result.value(channel + ".message")).as(channel).isEqualTo("netty down");
-        assertThat(result.value(channel + ".closed")).as(channel).isEqualTo("true");
-      }
+      assertThat(result.value("socket.done")).isEqualTo("true");
+      assertThat(result.value("socket.type")).isEqualTo("java.io.IOException");
+      assertThat(result.value("socket.message")).isEqualTo("netty down");
+      assertThat(result.value("socket.closed")).isEqualTo("true");
+      assertThat(result.value("datagram.done")).isEqualTo("true");
+      assertThat(result.values())
+          .as("a real datagram write error fails one message; a reject must not close the channel")
+          .doesNotContainKey("datagram.type");
+      assertThat(result.value("datagram.closed")).isEqualTo("false");
       assertThat(result.longValue("matched.netty"))
-          .as("one evaluation per written buffer, none for the empty flush")
-          .isEqualTo(2L);
+          .as("one evaluation for the socket's buffer, none for the empty flush or the datagram")
+          .isEqualTo(1L);
       assertThat(result.output()).doesNotContain("Unexpected exception in the selector loop");
     }
 

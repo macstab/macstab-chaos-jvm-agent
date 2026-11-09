@@ -67,6 +67,23 @@ public final class ClientCallExtractor {
         }
       };
 
+  /**
+   * Whether a Netty channel class is a datagram channel ({@code io.netty.channel.socket
+   * .DatagramChannel} or {@code io.netty.channel.unix.DomainDatagramChannel}), found once per class
+   * by name, so no Netty class is loaded.
+   */
+  private static final ClassValue<Boolean> NETTY_DATAGRAM =
+      new ClassValue<>() {
+        @Override
+        protected Boolean computeValue(final Class<?> type) {
+          return implementsNamed(type, NETTY_DATAGRAM_TYPES);
+        }
+      };
+
+  private static final List<String> NETTY_DATAGRAM_TYPES =
+      List.of(
+          "io.netty.channel.socket.DatagramChannel", "io.netty.channel.unix.DomainDatagramChannel");
+
   /** gRPC's own failing stream, built for a rejected call ({@link #grpcFailingStream}). */
   private static final String GRPC_FAILING_STREAM = "io.grpc.internal.FailingClientStream";
 
@@ -418,6 +435,29 @@ public final class ClientCallExtractor {
     } catch (final Throwable unreadable) {
       return null;
     }
+  }
+
+  /**
+   * Returns whether {@code channel} is a Netty datagram channel. Its {@code doWrite} is not
+   * evaluated: a real write error there fails one datagram and the channel stays open, but a throw
+   * from the hook would close the channel ({@code AbstractUnsafe.handleWriteError}).
+   *
+   * @param channel the channel
+   * @return {@code true} for a {@code DatagramChannel} or {@code DomainDatagramChannel}
+   */
+  public static boolean nettyDatagramChannel(final Object channel) {
+    return NETTY_DATAGRAM.get(channel.getClass());
+  }
+
+  private static boolean implementsNamed(final Class<?> type, final List<String> names) {
+    for (Class<?> current = type; current != null; current = current.getSuperclass()) {
+      for (final Class<?> implemented : current.getInterfaces()) {
+        if (names.contains(implemented.getName()) || implementsNamed(implemented, names)) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   private static @Nullable String stringOf(final Object target, final String accessor) {

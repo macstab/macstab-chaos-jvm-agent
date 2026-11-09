@@ -302,6 +302,10 @@ final class ClientCallAdvice {
    * catches what it throws into {@code handleWriteError}: a reject fails the flushed writes'
    * futures with the {@code IOException} and closes the channel, as a real write error does. A
    * buffer the socket takes in several rounds ({@code OP_WRITE}) is evaluated once per round.
+   *
+   * <p>A datagram channel's write is not evaluated: a real error there fails that one datagram and
+   * the channel stays open ({@code continueOnWriteError}, epoll/kqueue {@code doWrite}), which a
+   * throw from here cannot reproduce. A NIO datagram write reaches {@code DATAGRAM_SEND}.
    */
   static final class NettyWrite {
     @Advice.OnMethodEnter
@@ -309,12 +313,17 @@ final class ClientCallAdvice {
       if (BootstrapDispatcher.idle(OperationTags.NETTY_CHANNEL_WRITE)) {
         return;
       }
+      final boolean datagram;
       final Object remote;
       BootstrapDispatcher.beginInternalCall();
       try {
-        remote = ClientCallExtractor.nettyChannelRemoteAddress(channel);
+        datagram = ClientCallExtractor.nettyDatagramChannel(channel);
+        remote = datagram ? null : ClientCallExtractor.nettyChannelRemoteAddress(channel);
       } finally {
         BootstrapDispatcher.endInternalCall();
+      }
+      if (datagram) {
+        return;
       }
       BootstrapDispatcher.beforeClientCall(
           OperationTags.NETTY_CHANNEL_WRITE, channel, null, null, remote);

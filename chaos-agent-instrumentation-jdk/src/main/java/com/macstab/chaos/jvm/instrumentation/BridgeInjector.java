@@ -385,7 +385,8 @@ final class BridgeInjector {
           // loader) cannot see the agent's loader, so it must come from the bootstrap class path.
           "com/macstab/chaos/jvm/instrumentation/ClientCallExtractor.class",
           "com/macstab/chaos/jvm/instrumentation/ClientCallExtractor$1.class",
-          "com/macstab/chaos/jvm/instrumentation/ClientCallExtractor$2.class");
+          "com/macstab/chaos/jvm/instrumentation/ClientCallExtractor$2.class",
+          "com/macstab/chaos/jvm/instrumentation/ClientCallExtractor$3.class");
 
   /**
    * Writes the class file {@code resourcePath} into the bridge jar under its class name, read from

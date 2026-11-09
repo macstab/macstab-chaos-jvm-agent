@@ -5,8 +5,14 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import net.bytebuddy.ByteBuddy;
+import net.bytebuddy.description.type.TypeDescription;
+import net.bytebuddy.dynamic.DynamicType;
+import net.bytebuddy.dynamic.loading.ByteArrayClassLoader;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -313,6 +319,66 @@ class ClientCallExtractorTest {
       assertThat(ClientCallExtractor.nettyRemoteAddress(new Object())).isNull();
       final Channel failing = new Channel(null, new IllegalStateException("closed"));
       assertThat(ClientCallExtractor.nettyRemoteAddress(failing.unsafe())).isNull();
+    }
+
+    @Test
+    @DisplayName(
+        "a datagram channel implements Netty's DatagramChannel or DomainDatagramChannel, also"
+            + " through a superclass or a sub-interface; a socket channel does not")
+    void datagramChannel() throws Exception {
+      final TypeDescription datagram = netty("io.netty.channel.socket.DatagramChannel");
+      final TypeDescription domain = netty("io.netty.channel.unix.DomainDatagramChannel");
+      final TypeDescription duplex = netty("io.netty.channel.socket.DuplexChannel");
+      final DynamicType.Unloaded<?> nioDatagram = channel("probe.NioDatagramChannel", datagram);
+      final DynamicType.Unloaded<?> extended =
+          new ByteBuddy().makeInterface(datagram).name("probe.ExtendedDatagram").make();
+      final Map<String, byte[]> types = new HashMap<>();
+      for (final DynamicType.Unloaded<?> type :
+          List.of(
+              nioDatagram,
+              extended,
+              channel("probe.EpollDomainChannel", domain),
+              channel("probe.NioSocketChannel", duplex),
+              channel("probe.ViaSubInterface", extended.getTypeDescription()),
+              new ByteBuddy()
+                  .subclass(nioDatagram.getTypeDescription())
+                  .name("probe.SubclassedDatagramChannel")
+                  .make())) {
+        types.put(type.getTypeDescription().getName(), type.getBytes());
+      }
+      for (final TypeDescription type : List.of(datagram, domain, duplex)) {
+        types.put(
+            type.getName(), new ByteBuddy().makeInterface().name(type.getName()).make().getBytes());
+      }
+      final ClassLoader loader = new ByteArrayClassLoader(getClass().getClassLoader(), types);
+
+      for (final String name :
+          List.of(
+              "probe.NioDatagramChannel",
+              "probe.EpollDomainChannel",
+              "probe.SubclassedDatagramChannel",
+              "probe.ViaSubInterface")) {
+        assertThat(ClientCallExtractor.nettyDatagramChannel(newInstance(loader, name)))
+            .as(name)
+            .isTrue();
+      }
+      assertThat(
+              ClientCallExtractor.nettyDatagramChannel(
+                  newInstance(loader, "probe.NioSocketChannel")))
+          .isFalse();
+      assertThat(ClientCallExtractor.nettyDatagramChannel(new Object())).isFalse();
+    }
+
+    private TypeDescription netty(final String name) {
+      return new ByteBuddy().makeInterface().name(name).make().getTypeDescription();
+    }
+
+    private DynamicType.Unloaded<?> channel(final String name, final TypeDescription implemented) {
+      return new ByteBuddy().subclass(Object.class).implement(implemented).name(name).make();
+    }
+
+    private Object newInstance(final ClassLoader loader, final String name) throws Exception {
+      return loader.loadClass(name).getConstructor().newInstance();
     }
   }
 

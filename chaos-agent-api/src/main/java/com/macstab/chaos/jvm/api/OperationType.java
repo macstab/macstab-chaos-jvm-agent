@@ -980,7 +980,9 @@ public enum OperationType {
    * and kqueue ones that bypass {@code java.nio}; an empty flush writes nothing and is not
    * evaluated, and a buffer the socket takes in several rounds is evaluated once per round. A
    * reject fails the flushed writes' futures with an {@link java.io.IOException} and closes the
-   * channel, as a real write error does. A delay sleeps the channel's event loop.
+   * channel, as a real write error does. A delay sleeps the channel's event loop. A datagram
+   * channel's write is not evaluated: a real error there fails one datagram and keeps the channel
+   * open; a NIO datagram write reaches {@link #DATAGRAM_SEND}.
    *
    * <p>Use with {@link ChaosSelector.NettySelector}.
    */

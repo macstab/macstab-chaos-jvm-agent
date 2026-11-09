@@ -506,9 +506,10 @@ public final class ClientLibraryProbeMain {
   }
 
   /**
-   * A rejected Netty write on a socket channel (after an empty flush, which writes nothing) and on
-   * a connected datagram channel, whose {@code doWrite} is inherited from {@code
-   * AbstractNioMessageChannel}: each write's future, and whether the channel closed.
+   * A rejected Netty write on a socket channel (after an empty flush, which writes nothing), and a
+   * write on a connected datagram channel, whose {@code doWrite} is inherited from {@code
+   * AbstractNioMessageChannel} and is not evaluated: each write's future, and whether the channel
+   * closed.
    */
   private static void nettyWriteReject() throws Exception {
     final io.netty.channel.EventLoopGroup group =
