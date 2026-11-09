@@ -270,7 +270,7 @@ flowchart TB
     CD["ChaosDispatcher<br/>(hot path)"]
   end
   subgraph g5["chaos-agent-bootstrap"]
-    BD["BootstrapDispatcher<br/>(77 slots)"]
+    BD["BootstrapDispatcher<br/>(76 slots)"]
   end
   AgentArgs --> AAP
   EnvVars --> SCL

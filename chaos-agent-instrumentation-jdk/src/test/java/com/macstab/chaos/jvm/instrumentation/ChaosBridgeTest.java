@@ -158,18 +158,13 @@ class ChaosBridgeTest {
   class ShutdownHookLifecycle {
 
     @Test
-    @DisplayName("decorateShutdownHook returns a non-null Thread")
-    void decorateShutdownHookReturnsThread() throws Throwable {
-      final Thread hook = new Thread(() -> {}, "probe-hook");
-      assertThat(bridge.decorateShutdownHook(hook)).isNotNull();
-    }
-
-    @Test
-    @DisplayName("resolveShutdownHook returns a non-null Thread")
-    void resolveShutdownHookReturnsThread() throws Throwable {
-      final Thread hook = new Thread(() -> {}, "probe-hook");
-      final Thread decorated = bridge.decorateShutdownHook(hook);
-      assertThat(bridge.resolveShutdownHook(decorated)).isNotNull();
+    @DisplayName("decorateShutdownHook evaluates a hook without a scenario and does not run it")
+    void decorateShutdownHookEvaluates() {
+      final java.util.concurrent.atomic.AtomicInteger runs =
+          new java.util.concurrent.atomic.AtomicInteger();
+      final Thread hook = new Thread(runs::incrementAndGet, "probe-hook");
+      assertThatCode(() -> bridge.decorateShutdownHook(hook)).doesNotThrowAnyException();
+      assertThat(runs).hasValue(0);
     }
   }
 

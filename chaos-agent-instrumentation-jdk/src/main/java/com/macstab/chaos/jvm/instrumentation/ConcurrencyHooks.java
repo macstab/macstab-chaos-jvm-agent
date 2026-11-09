@@ -407,22 +407,16 @@ final class ConcurrencyHooks {
                             ElementMatchers.named("set").and(ElementMatchers.takesArguments(1)))));
   }
 
-  /** Runtime addShutdownHook / removeShutdownHook instrumentation. */
+  /** Runtime addShutdownHook instrumentation. */
   static AgentBuilder applyShutdownHookTransformations(final AgentBuilder builder) {
     return builder
         .type(ElementMatchers.named("java.lang.Runtime"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
-                typeBuilder
-                    .visit(
-                        advise(
-                            ShutdownAdvice.AddShutdownHookAdvice.class,
-                            ElementMatchers.named("addShutdownHook")
-                                .and(ElementMatchers.takesArguments(Thread.class))))
-                    .visit(
-                        advise(
-                            ShutdownAdvice.RemoveShutdownHookAdvice.class,
-                            ElementMatchers.named("removeShutdownHook")
-                                .and(ElementMatchers.takesArguments(Thread.class)))));
+                typeBuilder.visit(
+                    advise(
+                        ShutdownAdvice.AddShutdownHookAdvice.class,
+                        ElementMatchers.named("addShutdownHook")
+                            .and(ElementMatchers.takesArguments(Thread.class)))));
   }
 }

@@ -78,17 +78,11 @@ class BootstrapDispatcherTest {
     }
 
     @Test
-    @DisplayName("decorateShutdownHook returns original hook unchanged")
-    void decorateShutdownHookReturnsFallback() throws Throwable {
+    @DisplayName("decorateShutdownHook without a delegate does nothing")
+    void decorateShutdownHookWithoutDelegate() {
       final Thread hook = new Thread(() -> {});
-      assertThat(BootstrapDispatcher.decorateShutdownHook(hook)).isSameAs(hook);
-    }
-
-    @Test
-    @DisplayName("resolveShutdownHook returns original thread unchanged")
-    void resolveShutdownHookReturnsFallback() {
-      final Thread original = new Thread(() -> {});
-      assertThat(BootstrapDispatcher.resolveShutdownHook(original)).isSameAs(original);
+      assertThatCode(() -> BootstrapDispatcher.decorateShutdownHook(hook))
+          .doesNotThrowAnyException();
     }
 
     @Test

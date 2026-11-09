@@ -155,8 +155,7 @@ class BridgeGuardsTest {
    * Entry points that must never fail the call they intercept: a failure of the delegate makes them
    * pass the call through.
    */
-  private static final Set<String> SWALLOW_FAILURE =
-      Set.of("resolveShutdownHook", "currentSessionId", "sessionHeaderFor");
+  private static final Set<String> SWALLOW_FAILURE = Set.of("currentSessionId", "sessionHeaderFor");
 
   /** Arguments that make an entry point reach its delegate, where the samples do not. */
   private static Object[] argumentsFor(final Method method) throws Exception {

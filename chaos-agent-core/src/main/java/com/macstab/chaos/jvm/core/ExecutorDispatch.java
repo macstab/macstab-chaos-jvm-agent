@@ -426,10 +426,9 @@ public final class ExecutorDispatch {
    * and runs the hook as the thread it is.
    *
    * @param hook the shutdown hook being registered; may be {@code null}
-   * @return {@code hook}
    * @throws Throwable if a matching scenario's terminal action mandates it
    */
-  public @Nullable Thread decorateShutdownHook(final @Nullable Thread hook) throws Throwable {
+  public void decorateShutdownHook(final @Nullable Thread hook) throws Throwable {
     final RuntimeDecision decision =
         (engine.idle(OperationType.SHUTDOWN_HOOK_REGISTER)
             ? RuntimeDecision.none()
@@ -446,17 +445,6 @@ public final class ExecutorDispatch {
     // A throwing terminal (reject) unwinds here; suppress is rejected for this operation at
     // activation (CompatibilityValidator), so every other decision registers the hook.
     engine.applyPreDecision(decision);
-    return hook;
-  }
-
-  /**
-   * Resolves the thread to remove for a shutdown hook: the hook itself, as registered.
-   *
-   * @param original the user-supplied shutdown hook
-   * @return {@code original}
-   */
-  public Thread resolveShutdownHook(final Thread original) {
-    return original;
   }
 
   /**

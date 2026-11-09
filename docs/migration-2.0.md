@@ -190,7 +190,7 @@ New operations (`CLOCK_READ`, `FILE_IO_OPEN`, `SOCKET_BIND`, `DATAGRAM_SEND`, �
 
 ## 10. Bridge handle slots renumbered
 
-The unused slot `ADJUST_SCHEDULE_DELAY` was removed and new slots were appended; `BootstrapDispatcher.HANDLE_COUNT` is 77. Only code that calls `BootstrapDispatcher` or implements `BridgeDelegate` directly — the agent itself — is affected. `ChaosAgentBootstrap.initialize` lost its `premainMode` parameter; it is package-private.
+The unused slot `ADJUST_SCHEDULE_DELAY` was removed and new slots were appended. The slot `RESOLVE_SHUTDOWN_HOOK` (`removeShutdownHook`, which only returned its argument) was removed too, and `BEFORE_SOCKET_SHUTDOWN` took its index 12; `DECORATE_SHUTDOWN_HOOK` returns nothing. `BootstrapDispatcher.HANDLE_COUNT` is 76. Only code that calls `BootstrapDispatcher` or implements `BridgeDelegate` directly — the agent itself — is affected. `ChaosAgentBootstrap.initialize` lost its `premainMode` parameter; it is package-private.
 
 
 ## 11. A glob's `*` also matches line terminators

@@ -200,29 +200,14 @@ final class ChaosBridge implements BridgeDelegate {
   }
 
   /**
-   * Decorates a shutdown hook thread before it is registered with the JVM.
+   * Evaluates a shutdown hook before it is registered with the JVM; the hook itself is registered.
    *
    * @param hook the shutdown hook thread about to be registered
-   * @return the thread to actually register (may be the same instance or a wrapper)
    * @throws Throwable if the runtime decides to abort hook registration
    */
   @Override
-  public @Nullable Thread decorateShutdownHook(final @Nullable Thread hook) throws Throwable {
-    return runtime.decorateShutdownHook(hook);
-  }
-
-  /**
-   * Resolves which thread should be removed when a shutdown hook is deregistered.
-   *
-   * <p>Because {@link #decorateShutdownHook} may have substituted the original hook thread with a
-   * wrapper, this method provides the reverse mapping so that the JVM removes the correct thread.
-   *
-   * @param original the thread passed to the deregistration call
-   * @return the thread that was actually registered (may equal {@code original})
-   */
-  @Override
-  public Thread resolveShutdownHook(final Thread original) {
-    return runtime.resolveShutdownHook(original);
+  public void decorateShutdownHook(final @Nullable Thread hook) throws Throwable {
+    runtime.decorateShutdownHook(hook);
   }
 
   /**

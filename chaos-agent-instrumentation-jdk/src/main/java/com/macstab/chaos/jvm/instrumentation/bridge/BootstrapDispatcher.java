@@ -386,8 +386,11 @@ public final class BootstrapDispatcher {
   /** Handle index for {@link #decorateShutdownHook(Thread)}. */
   public static final int DECORATE_SHUTDOWN_HOOK = 11;
 
-  /** Handle index for {@link #resolveShutdownHook(Thread)}. */
-  public static final int RESOLVE_SHUTDOWN_HOOK = 12;
+  /**
+   * Handle index for {@link #beforeSocketShutdown(Object, Object, int)}: index 12, freed by the
+   * removed shutdown-hook resolution slot, so the table keeps no hole.
+   */
+  public static final int BEFORE_SOCKET_SHUTDOWN = 12;
 
   /** Handle index for {@link #beforeExecutorShutdown(String, Object, long)}. */
   public static final int BEFORE_EXECUTOR_SHUTDOWN = 13;
@@ -507,7 +510,7 @@ public final class BootstrapDispatcher {
   /** Handle index for {@link #beforeJdbcTransactionRollback()}. */
   public static final int BEFORE_JDBC_TRANSACTION_ROLLBACK = 51;
 
-  // ── Later handles (52-76) ──────────────────────────────────────────────────
+  // ── Later handles (52-75) ──────────────────────────────────────────────────
   /** Handle index for {@link #beforeThreadSleep(long)}. */
   public static final int BEFORE_THREAD_SLEEP = 52;
 
@@ -583,11 +586,8 @@ public final class BootstrapDispatcher {
   /** Handle index for {@link #beforeProcessWait(Object, long)}. */
   public static final int BEFORE_PROCESS_WAIT = 75;
 
-  /** Handle index for {@link #beforeSocketShutdown(Object, Object, int)}. */
-  public static final int BEFORE_SOCKET_SHUTDOWN = 76;
-
   /** Total number of method-handle slots; equals the highest index plus one. */
-  public static final int HANDLE_COUNT = 77;
+  public static final int HANDLE_COUNT = 76;
 
   /** The header that carries a session id between services; {@code ChaosSession.HEADER}. */
   public static final String SESSION_HEADER = "X-Chaos-Session";
@@ -1022,58 +1022,24 @@ public final class BootstrapDispatcher {
    *
    * @param hook the shutdown-hook thread submitted by the application; {@code null} when the
    *     application passed none (the JDK then throws)
-   * @return the thread to register: {@code hook}
    * @throws Throwable if the delegate throws
    */
-  public static @Nullable Thread decorateShutdownHook(final @Nullable Thread hook)
-      throws Throwable {
+  public static void decorateShutdownHook(final @Nullable Thread hook) throws Throwable {
     final int[] depth = DEPTH.get();
     if (depth[0] > 0) {
-      return hook;
+      return;
     }
     depth[0]++;
     try {
       final MethodHandle[] h = handles;
       final Object d = delegate;
-      return (d == null || h == null)
-          ? hook
-          : (@Nullable Thread) h[DECORATE_SHUTDOWN_HOOK].invoke(d, hook);
+      if (d != null && h != null) {
+        h[DECORATE_SHUTDOWN_HOOK].invoke(d, hook);
+      }
     } catch (final Throwable throwable) {
       sneakyThrow(throwable);
-      return hook;
     } finally {
       depth[0]--;
-    }
-  }
-
-  /**
-   * Resolves the thread to remove when the application calls {@code Runtime.removeShutdownHook}.
-   * Hooks are registered as themselves, so this is the hook passed in.
-   *
-   * @param original the thread passed to {@code removeShutdownHook}; never {@code null}
-   * @return the thread to remove: {@code original}
-   */
-  public static Thread resolveShutdownHook(final Thread original) {
-    // Use a safe (non-sneaky-throwing) fallback path: any chaos exception here would propagate
-    // out of Runtime.removeShutdownHook() to the application, which never expects it. Return
-    // the original hook unmodified on any error so the JVM shutdown sequencing is unaffected.
-    try {
-      final int[] depth = DEPTH.get();
-      if (depth[0] > 0) {
-        return original;
-      }
-      depth[0]++;
-      try {
-        final MethodHandle[] h = handles;
-        final Object d = delegate;
-        return (d == null || h == null)
-            ? original
-            : (Thread) h[RESOLVE_SHUTDOWN_HOOK].invoke(d, original);
-      } finally {
-        depth[0]--;
-      }
-    } catch (final Throwable ignored) {
-      return original;
     }
   }
 

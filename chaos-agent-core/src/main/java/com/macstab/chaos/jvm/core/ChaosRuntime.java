@@ -391,22 +391,11 @@ public final class ChaosRuntime implements ChaosControlPlane {
   /**
    * Delegates to {@link ExecutorDispatch#decorateShutdownHook}.
    *
-   * @param hook the original shutdown hook being registered
-   * @return the wrapper thread that should actually be registered with the runtime
+   * @param hook the shutdown hook being registered
    * @throws Throwable if an active scenario throws to simulate a failure
    */
-  public @Nullable Thread decorateShutdownHook(final @Nullable Thread hook) throws Throwable {
-    return executorDispatch.decorateShutdownHook(hook);
-  }
-
-  /**
-   * Delegates to {@link ExecutorDispatch#resolveShutdownHook}.
-   *
-   * @param original the original shutdown hook that was registered
-   * @return the wrapper thread, or {@code original} if no wrapper is registered
-   */
-  public Thread resolveShutdownHook(final Thread original) {
-    return executorDispatch.resolveShutdownHook(original);
+  public void decorateShutdownHook(final @Nullable Thread hook) throws Throwable {
+    executorDispatch.decorateShutdownHook(hook);
   }
 
   /**

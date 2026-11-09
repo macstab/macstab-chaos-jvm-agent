@@ -183,22 +183,9 @@ public interface BridgeDelegate {
    * the registration. The hook itself is registered.
    *
    * @param hook the shutdown-hook thread submitted by the application, or {@code null}
-   * @return the thread to register: {@code hook}
    * @throws Throwable if the delegate throws
    */
-  @Nullable Thread decorateShutdownHook(@Nullable Thread hook) throws Throwable;
-
-  /**
-   * Resolves the thread to remove when the application calls {@code Runtime.removeShutdownHook}.
-   * Hooks are registered as themselves, so this is the hook passed in. Non-throwing: {@code
-   * RemoveShutdownHookAdvice} does not declare {@code throws Throwable}.
-   *
-   * @param original the thread passed to {@code removeShutdownHook}; never {@code null}
-   * @return the thread to remove: {@code original}
-   */
-  // Non-throwing: resolveShutdownHook is called from RemoveShutdownHookAdvice which does not
-  // declare throws Throwable.
-  Thread resolveShutdownHook(Thread original);
+  void decorateShutdownHook(@Nullable Thread hook) throws Throwable;
 
   /**
    * Called before an executor service's {@code shutdown} or {@code shutdownNow}.

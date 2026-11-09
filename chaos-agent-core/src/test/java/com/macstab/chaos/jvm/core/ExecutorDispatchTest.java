@@ -1,6 +1,7 @@
 package com.macstab.chaos.jvm.core;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.macstab.chaos.jvm.api.ActivationPolicy;
@@ -552,7 +553,8 @@ class ExecutorDispatchTest {
 
       assertThatThrownBy(() -> runtime.decorateShutdownHook(new FlushHook(runs::incrementAndGet)))
           .isExactlyInstanceOf(IllegalStateException.class);
-      assertThat(runtime.decorateShutdownHook(new Thread(runs::incrementAndGet))).isNotNull();
+      assertThatCode(() -> runtime.decorateShutdownHook(new Thread(runs::incrementAndGet)))
+          .doesNotThrowAnyException();
     }
 
     @Test
@@ -569,21 +571,21 @@ class ExecutorDispatchTest {
     }
 
     @Test
-    @DisplayName("a missing hook without a matching scenario reaches the JDK as null")
-    void missingHookPassesThrough() throws Throwable {
+    @DisplayName("a missing hook without a rejecting scenario is left to the JDK")
+    void missingHookPassesThrough() {
       activate(
           "hooks",
           ChaosSelector.shutdown(Set.of(OperationType.SHUTDOWN_HOOK_REGISTER)),
           ChaosEffect.delay(Duration.ofMillis(1)));
 
-      assertThat(runtime.decorateShutdownHook(null)).isNull();
+      assertThatCode(() -> runtime.decorateShutdownHook(null)).doesNotThrowAnyException();
     }
 
     @Test
-    @DisplayName("a hook is registered as itself, with or without a scenario applied")
-    void hookIsRegisteredAsItself() throws Throwable {
+    @DisplayName("a hook is evaluated without being run, with or without a scenario applied")
+    void hookIsEvaluatedNotRun() throws Throwable {
       final Thread idle = new Thread(runs::incrementAndGet, "idle-hook");
-      assertThat(runtime.decorateShutdownHook(idle)).isSameAs(idle);
+      runtime.decorateShutdownHook(idle);
 
       final ChaosActivationHandle handle =
           runtime.activate(
@@ -594,9 +596,8 @@ class ExecutorDispatchTest {
                   .build());
       final Thread hook = new Thread(runs::incrementAndGet, "user-hook");
 
-      assertThat(runtime.decorateShutdownHook(hook)).isSameAs(hook);
+      runtime.decorateShutdownHook(hook);
       assertThat(handle.appliedCount()).isEqualTo(1L);
-      assertThat(runtime.resolveShutdownHook(hook)).isSameAs(hook);
       assertThat(runs).hasValue(0);
     }
   }

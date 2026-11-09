@@ -249,9 +249,8 @@ class EffectReachesTheCallTest {
         OperationType.SHUTDOWN_HOOK_REGISTER,
         runtime -> {
           final Thread hook = new Thread(() -> {}, "probe-hook");
-          final Thread registered = runtime.decorateShutdownHook(hook);
-          runtime.resolveShutdownHook(hook);
-          return registered == hook ? "the hook" : "a wrapper of the hook";
+          runtime.decorateShutdownHook(hook);
+          return "the hook";
         });
 
     // Queues
