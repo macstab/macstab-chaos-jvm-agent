@@ -702,7 +702,7 @@ record ChaosEvent(
 
 **Published events**: every type is published; when, and with which attributes, is in [observability.md §2](observability.md#2-events). `APPLIED` is published only for contributions that actually take effect on a call — every matching delay, the winning gate and the winning terminal action by precedence. A scenario that loses on precedence publishes nothing and does not consume its `maxApplications` budget. `APPLIED` attributes carry `operation`, `scope`, `effectType` and, for session scenarios, `sessionId`.
 
-**Contract**: Listeners are called synchronously on the thread that triggered the event, unless wrapped in `ChaosEventListener.async(listener)` (bounded queue of 10 000; overflow is dropped and counted as `droppedEvents`). Must not block, perform I/O, or throw checked exceptions. Listener exceptions are caught and logged; they do not abort the chaos operation.
+**Contract**: Listeners are called synchronously on the thread that triggered the event, unless wrapped in `ChaosEventListener.async(listener)` (bounded queue of 10 000; overflow is dropped and counted as `droppedEvents`). Must not block, perform I/O, or throw checked exceptions. Listener exceptions are caught and logged (a listener's first at WARNING, later ones at FINE); they do not abort the chaos operation.
 
 **Observability use**: Subscribe a listener to count `APPLIED` events per scenario ID — this is the ground truth for "how many times did my chaos actually fire during this test?". Skipped matches arrive as `SKIPPED` with the policy check as `reason`; `matchedCount` and `appliedCount` in `diagnostics().snapshot()` give the totals.
 

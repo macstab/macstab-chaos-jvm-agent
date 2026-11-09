@@ -7,6 +7,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
@@ -52,6 +53,14 @@ final class ObservabilityBus {
       new java.util.concurrent.atomic.AtomicLong();
 
   private record Registration(ChaosEventListener registered, ChaosEventListener delivered) {}
+
+  /**
+   * Listeners that have thrown at least once: their first failure is logged at WARNING, later ones
+   * at FINE, so a listener that throws on every event does not flood the log. By identity.
+   */
+  private final java.util.Set<ChaosEventListener> failedListeners =
+      java.util.Collections.synchronizedSet(
+          java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>()));
 
   private final ChaosMetricsSink metricsSink;
 
@@ -101,6 +110,7 @@ final class ObservabilityBus {
     for (final Registration registration : List.copyOf(registrations)) {
       if (registration.registered() == listener && registrations.remove(registration)) {
         listeners.remove(registration.delivered());
+        failedListeners.remove(registration.delivered());
         if (registration.delivered() instanceof AsyncDelivery delivery) {
           delivery.close();
         }
@@ -132,9 +142,21 @@ final class ObservabilityBus {
   /**
    * Delivers events to a listener on an agent-owned thread through a bounded queue. The thread runs
    * with the dispatch depth raised, so chaos never applies to the delivery itself.
+   *
+   * <p>{@link #close()} never interrupts the listener: the event in progress completes, the events
+   * still queued are counted as dropped, and the delivery thread ends after it. The close waits for
+   * it at most {@link #CLOSE_JOIN_MILLIS}, and not at all on the delivery thread itself (a listener
+   * that removes itself, or closes the control plane, from {@code onEvent}).
    */
   private static final class AsyncDelivery implements ChaosEventListener, AutoCloseable {
     private static final int CAPACITY = 10_000;
+
+    /** How long {@link #close()} waits for the event in progress. */
+    static final long CLOSE_JOIN_MILLIS = 5_000L;
+
+    /** Queued by {@link #close()} to end the delivery thread; compared by identity. */
+    private static final ChaosEvent END =
+        new ChaosEvent(Instant.EPOCH, ChaosEvent.Type.SKIPPED, "end", "end", Map.of());
 
     private final java.util.concurrent.BlockingQueue<ChaosEvent> queue =
         new java.util.concurrent.ArrayBlockingQueue<>(CAPACITY);
@@ -159,30 +181,39 @@ final class ObservabilityBus {
 
     @Override
     public void onEvent(final ChaosEvent event) {
-      if (!queue.offer(event)) {
+      if (closed || !queue.offer(event)) {
         dropped.incrementAndGet();
       }
     }
 
+    @SuppressWarnings("ReferenceEquality") // END is the one sentinel instance
     private void deliver() {
       ChaosDispatcher.incrementDispatchDepth();
+      boolean failedBefore = false;
       try {
-        while (!closed) {
+        while (true) {
           final ChaosEvent event;
           try {
             event = queue.take();
           } catch (final InterruptedException interrupted) {
             return;
           }
+          if (event == END) {
+            // Offered by a racing publish after close() drained the queue.
+            dropped.addAndGet(queue.drainTo(new java.util.ArrayList<>()));
+            return;
+          }
           try {
             delegate.onEvent(event);
           } catch (final Throwable listenerFailure) {
-            LOGGER.warning(
+            LOGGER.log(
+                failedBefore ? Level.FINE : Level.WARNING,
                 () ->
                     "asynchronous ChaosEventListener threw; delivery continues. listener="
                         + delegate.getClass().getName()
                         + " error="
                         + listenerFailure);
+            failedBefore = true;
           }
         }
       } finally {
@@ -193,13 +224,41 @@ final class ObservabilityBus {
     @Override
     public void close() {
       closed = true;
-      thread.interrupt();
+      final java.util.List<ChaosEvent> discarded = new java.util.ArrayList<>();
+      do {
+        queue.drainTo(discarded);
+      } while (!queue.offer(END));
+      dropped.addAndGet(discarded.size());
+      if (Thread.currentThread() != thread) {
+        awaitDeliveryEnd();
+      }
       if (delegate instanceof AutoCloseable closeable) {
         try {
           closeable.close();
         } catch (final Exception ignored) {
           // closing a listener must not fail the control plane's shutdown
         }
+      }
+    }
+
+    /** Waits for the event in progress, at most {@link #CLOSE_JOIN_MILLIS}; keeps an interrupt. */
+    private void awaitDeliveryEnd() {
+      ChaosDispatcher.incrementDispatchDepth();
+      try {
+        thread.join(CLOSE_JOIN_MILLIS);
+      } catch (final InterruptedException interrupted) {
+        Thread.currentThread().interrupt();
+      } finally {
+        ChaosDispatcher.decrementDispatchDepth();
+      }
+      if (thread.isAlive()) {
+        LOGGER.warning(
+            () ->
+                "chaos-agent: asynchronous ChaosEventListener "
+                    + delegate.getClass().getName()
+                    + " did not return within "
+                    + CLOSE_JOIN_MILLIS
+                    + " ms of its removal; its delivery thread ends when it does");
       }
     }
   }
@@ -256,9 +315,10 @@ final class ObservabilityBus {
    * or on a control-plane thread (REGISTERED, STARTED, STOPPED, FAILED).
    *
    * <p>Listeners are notified in registration order. A listener that throws is isolated: the
-   * exception is logged at WARNING level and delivery continues to the remaining listeners. This
-   * guarantee is critical in an agent context where publish runs on application threads inside
-   * ByteBuddy advice — a buggy custom listener must never propagate into application code.
+   * exception is logged (its first one at WARNING, later ones at FINE) and delivery continues to
+   * the remaining listeners. This guarantee is critical in an agent context where publish runs on
+   * application threads inside ByteBuddy advice — a buggy custom listener must never propagate into
+   * application code.
    *
    * @param type the event type; must not be {@code null}
    * @param scenarioId the ID of the scenario that generated this event; must not be {@code null}
@@ -283,8 +343,9 @@ final class ObservabilityBus {
         // advice — an Error escaping here would unwind straight into user code. StackOverflow
         // and OOM from a pathological listener would each trigger that path, as would every
         // ThreadDeath raised by JVM shutdown. Swallow, log, and keep going; never let a
-        // listener pollute application semantics.
-        LOGGER.warning(
+        // listener pollute application semantics. Only a listener's first failure is a WARNING.
+        LOGGER.log(
+            failedListeners.add(listener) ? Level.WARNING : Level.FINE,
             () ->
                 "ChaosEventListener threw during publish; delivery continues."
                     + " event="

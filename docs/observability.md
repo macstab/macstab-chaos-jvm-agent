@@ -43,7 +43,7 @@ Both files are written to a staging file and renamed, so a reader never sees a p
 
 ## 2. Events
 
-`ChaosControlPlane.addEventListener` delivers every event synchronously on the thread that triggered it; wrap a listener in `ChaosEventListener.async(listener)` to receive events on an agent-owned thread instead (bounded queue of 10 000; overflow is dropped and counted in the diagnostics' `droppedEvents`). `removeEventListener` removes a listener as it was registered.
+`ChaosControlPlane.addEventListener` delivers every event synchronously on the thread that triggered it; wrap a listener in `ChaosEventListener.async(listener)` to receive events on an agent-owned thread instead (bounded queue of 10 000; overflow is dropped and counted in the diagnostics' `droppedEvents`). `removeEventListener` removes a listener as it was registered. Removing an asynchronous listener (or closing the control plane) lets the event it is handling complete, never interrupting it, and counts the events still queued in `droppedEvents`; it waits for that event at most 5 s (one WARNING if the listener has not returned by then) and not at all when the listener removes itself from `onEvent`. A listener that throws is logged at WARNING once, then at FINE.
 
 | Type         | When                                                                                                                         | Attributes                                   |
 |--------------|------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------|

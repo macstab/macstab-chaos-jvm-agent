@@ -11,8 +11,11 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.logging.Level;
 import java.util.logging.LogRecord;
 import org.junit.jupiter.api.DisplayName;
@@ -192,6 +195,164 @@ class ObservabilityBusIsolationTest {
           .containsEntry("type=REGISTERED", Level.FINE)
           .containsEntry("type=SKIPPED", Level.FINER)
           .hasSize(ChaosEvent.Type.values().length);
+    }
+  }
+
+  @Test
+  @DisplayName(
+      "removing an asynchronous listener counts the events it drops and does not interrupt the"
+          + " event in progress")
+  void asyncRemovalCountsDropsAndDoesNotInterrupt() throws Exception {
+    // Arrange: the first event blocks in the listener, 100 more wait in its queue
+    final ObservabilityBus bus = new ObservabilityBus(ChaosMetricsSink.NOOP);
+    final CountDownLatch inFlight = new CountDownLatch(1);
+    final CountDownLatch release = new CountDownLatch(1);
+    final AtomicBoolean interrupted = new AtomicBoolean();
+    final ChaosEventListener async =
+        ChaosEventListener.async(
+            event -> {
+              if (event.scenarioId().equals("first")) {
+                inFlight.countDown();
+                try {
+                  release.await();
+                } catch (final InterruptedException interruptedWhileBlocked) {
+                  interrupted.set(true);
+                }
+              }
+            });
+    bus.addListener(async);
+    bus.publish(ChaosEvent.Type.APPLIED, "first", "applied", Map.of());
+    assertThat(inFlight.await(5, TimeUnit.SECONDS)).isTrue();
+    for (int i = 0; i < 100; i++) {
+      bus.publish(ChaosEvent.Type.APPLIED, "queued-" + i, "applied", Map.of());
+    }
+
+    // Act: remove it from another thread; the removal waits for the event in progress
+    final Thread remover = new Thread(() -> bus.removeListener(async), "remover");
+    remover.start();
+    await().atMost(5, TimeUnit.SECONDS).until(() -> bus.droppedEvents() == 100L);
+    release.countDown();
+    remover.join(10_000L);
+
+    // Assert
+    assertThat(remover.isAlive()).isFalse();
+    assertThat(interrupted).isFalse();
+    assertThat(bus.droppedEvents()).isEqualTo(100L);
+  }
+
+  @Test
+  @DisplayName("an asynchronous listener that removes itself from onEvent does not wait for itself")
+  void asyncSelfRemovalDoesNotWait() {
+    final ObservabilityBus bus = new ObservabilityBus(ChaosMetricsSink.NOOP);
+    final AtomicReference<ChaosEventListener> self = new AtomicReference<>();
+    final AtomicLong removalNanos = new AtomicLong(-1L);
+    final ChaosEventListener async =
+        ChaosEventListener.async(
+            event -> {
+              final long start = System.nanoTime();
+              bus.removeListener(self.get());
+              removalNanos.set(System.nanoTime() - start);
+            });
+    self.set(async);
+    bus.addListener(async);
+
+    bus.publish(ChaosEvent.Type.APPLIED, "once", "applied", Map.of());
+
+    await().atMost(10, TimeUnit.SECONDS).until(() -> removalNanos.get() >= 0L);
+    assertThat(Duration.ofNanos(removalNanos.get())).isLessThan(Duration.ofSeconds(1));
+    assertThat(bus.hasListeners()).isFalse();
+  }
+
+  @Test
+  @DisplayName("removing an asynchronous listener that never returns gives up after 5 s, once")
+  void asyncRemovalOfAStuckListenerIsBounded() throws Exception {
+    final ObservabilityBus bus = new ObservabilityBus(ChaosMetricsSink.NOOP);
+    final CountDownLatch inFlight = new CountDownLatch(1);
+    final CountDownLatch release = new CountDownLatch(1);
+    final ChaosEventListener async =
+        ChaosEventListener.async(
+            event -> {
+              inFlight.countDown();
+              try {
+                release.await();
+              } catch (final InterruptedException interruptedWhileBlocked) {
+                Thread.currentThread().interrupt();
+              }
+            });
+    bus.addListener(async);
+    bus.publish(ChaosEvent.Type.APPLIED, "stuck", "applied", Map.of());
+    assertThat(inFlight.await(5, TimeUnit.SECONDS)).isTrue();
+    try (LogCapture log = LogCapture.agent()) {
+      final long start = System.nanoTime();
+
+      assertThat(bus.removeListener(async)).isTrue();
+
+      assertThat(Duration.ofNanos(System.nanoTime() - start))
+          .isBetween(Duration.ofMillis(4_500), Duration.ofSeconds(30));
+      assertThat(log.records())
+          .filteredOn(record -> record.getLevel() == Level.WARNING)
+          .singleElement()
+          .satisfies(record -> assertThat(record.getMessage()).contains("5000 ms"));
+    } finally {
+      release.countDown();
+    }
+  }
+
+  @Test
+  @DisplayName("a listener that throws on every event logs one WARNING, then FINE")
+  void throwingListenerWarnsOnce() {
+    final ObservabilityBus bus = new ObservabilityBus(ChaosMetricsSink.NOOP);
+    bus.addListener(
+        event -> {
+          throw new IllegalStateException("listener broke");
+        });
+    try (LogCapture log = LogCapture.agent()) {
+      for (int i = 0; i < 50; i++) {
+        bus.publish(ChaosEvent.Type.APPLIED, "flood-" + i, "applied", Map.of());
+      }
+
+      final List<LogRecord> failures =
+          log.records().stream()
+              .filter(record -> record.getMessage().startsWith("ChaosEventListener threw"))
+              .toList();
+      assertThat(failures).hasSize(50);
+      assertThat(failures).filteredOn(record -> record.getLevel() == Level.WARNING).hasSize(1);
+      assertThat(failures).filteredOn(record -> record.getLevel() == Level.FINE).hasSize(49);
+    }
+  }
+
+  @Test
+  @DisplayName("an asynchronous listener that throws on every event logs one WARNING, then FINE")
+  void throwingAsyncListenerWarnsOnce() {
+    final ObservabilityBus bus = new ObservabilityBus(ChaosMetricsSink.NOOP);
+    final ChaosEventListener failing =
+        ChaosEventListener.async(
+            event -> {
+              throw new IllegalStateException("async broke");
+            });
+    bus.addListener(failing);
+    try (LogCapture log = LogCapture.agent()) {
+      for (int i = 0; i < 5; i++) {
+        bus.publish(ChaosEvent.Type.APPLIED, "async-flood-" + i, "applied", Map.of());
+      }
+
+      await()
+          .atMost(5, TimeUnit.SECONDS)
+          .untilAsserted(
+              () -> {
+                final List<LogRecord> failures =
+                    log.records().stream()
+                        .filter(
+                            record ->
+                                record.getMessage().startsWith("asynchronous ChaosEventListener"))
+                        .toList();
+                assertThat(failures).hasSize(5);
+                assertThat(failures)
+                    .filteredOn(record -> record.getLevel() == Level.WARNING)
+                    .hasSize(1);
+              });
+    } finally {
+      bus.removeListener(failing);
     }
   }
 }
