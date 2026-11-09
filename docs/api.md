@@ -716,7 +716,7 @@ record ChaosEvent(
 | `ChaosActivationConflictException` | `chaos-agent-api` | A `ChaosActivationException`: a scenario with the same id is already active (a retry may succeed once it stops) |
 | `ChaosInstrumentationException` | `chaos-agent-api` | A `ChaosActivationException`: the hooks the scenario needs cannot be woven into the running JVM; the cause is the weaving failure, and the same scenario fails the same way again |
 | `ChaosValidationException` | `chaos-agent-api` | A scenario's effect, selector and policy do not fit together (`CompatibilityValidator`) |
-| `ChaosUnsupportedFeatureException` | `chaos-agent-api` | Scenario requires a JVM feature not available on the running JVM (e.g., JFR absent on a stripped JRE) |
+| `ChaosUnsupportedFeatureException` | `chaos-agent-api` | The running JVM cannot run the scenario (`UNSUPPORTED_RUNTIME`): `heapPressure` above the free heap, `directBufferPressure` above the direct memory limit, a stressor that could not get its resources at start, or a `threadLocalLeak` whose entries the common pool did not plant in time |
 | `ConfigLoadException` | `chaos-agent-startup-config` | Startup configuration cannot be read or parsed. Not part of the core API surface — only thrown from `StartupConfigLoader.load()` and only visible to code that imports the startup-config module. |
 
 All are `RuntimeException` subclasses. They propagate to the caller of `activate()` or `StartupConfigLoader.load()`.

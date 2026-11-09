@@ -7,7 +7,6 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -102,16 +101,6 @@ class StartupConfigPollerEdgeCaseTest {
         .effect(ChaosEffect.delay(Duration.ofMillis(delayMillis)))
         .activationPolicy(ActivationPolicy.always())
         .build();
-  }
-
-  @Test
-  @DisplayName("a plan with two scenarios of one id is refused before anything is activated")
-  void duplicateIdsRefused() {
-    assertThatThrownBy(() -> poller("60000").applyDiff(List.of(scenario("a", 1), scenario("a", 2))))
-        .isInstanceOf(IllegalStateException.class)
-        .hasMessage("duplicate scenario id 'a' in plan");
-
-    verify(runtime, never()).activate(any(ChaosScenario.class));
   }
 
   @Test

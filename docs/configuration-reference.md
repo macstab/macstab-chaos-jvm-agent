@@ -538,7 +538,7 @@ Interceptors run on the calling virtual thread if the application uses Project L
 | Selector ↔ effect mismatch                                 | `ChaosValidationException`         | At `activate()` call                       |
 | Duplicate scenario ID                                      | `ChaosActivationException`         | At `activate()` call                       |
 | Destructive effect without `allowDestructiveEffects`       | `ChaosValidationException`         | At `activate()` call                       |
-| Feature not available (e.g., virtual threads on JDK 17)    | `ChaosUnsupportedFeatureException` | At `activate()` call                       |
+| The JVM cannot run it (pressure above the heap or direct-memory limit, a stressor without its resources) | `ChaosUnsupportedFeatureException` | At `activate()` call |
 | Invalid `ActivationPolicy` field                           | `IllegalArgumentException`         | At `ActivationPolicy` construction         |
 | Invalid `NamePattern` regex                                | `IllegalArgumentException`         | At `NamePattern` construction              |
 | Invalid `NamePattern` glob                                 | `IllegalArgumentException`         | At `NamePattern` construction              |
@@ -2119,7 +2119,7 @@ Constraints: listeners are called synchronously on the intercepting thread. Must
 
 ## 14.5 Compatibility Notes
 
-- `VIRTUAL_THREAD_START` and `VirtualThreadCarrierPinningEffect` require JDK 21+. The agent probes availability at startup and raises `ChaosUnsupportedFeatureException` on earlier runtimes.
+- `VIRTUAL_THREAD_START` and `VirtualThreadCarrierPinningEffect` need virtual threads, which every supported runtime (JDK 21 and later) has.
 - An activated `ChaosPlan` object is immutable; to change scenarios programmatically, stop or close the handle and activate again. For file-based startup plans, hot reload is available: set the agent arg `configWatchInterval=<ms>` or `MACSTAB_CHAOS_WATCH_INTERVAL` (off by default, minimum 50 ms). Each reload is atomic — removed and changed scenarios are stopped, the new set is activated, and on any failure the previous versions are restored. Parse errors report line, column, kind and JSON path, never input values.
 
 ---

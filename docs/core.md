@@ -96,7 +96,7 @@ controlPlane.activate(scenario) or session.activate(scenario)
 ChaosRuntime.registerScenario(scenario, scopeKey, sessionId)
   ↓
 CompatibilityValidator.validate(scenario, featureSet)
-  — throws ChaosUnsupportedFeatureException on JVM feature mismatch
+  — throws ChaosUnsupportedFeatureException when the JVM cannot run it (heap or direct-memory pressure above the limit)
   — throws ChaosValidationException on selector/effect/operation incompatibility
   ↓
 hookDemand.require(SelectorOperations.of(scenario.selector()))

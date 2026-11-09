@@ -502,10 +502,11 @@ public final class StartupConfigPoller implements AutoCloseable {
    * they passed validation when they were first activated. A reloaded plan is therefore never
    * partially applied, and a changed scenario that fails never stays stopped.
    *
-   * @param newScenarios the scenarios of the reloaded plan
+   * @param newScenarios the scenarios of the reloaded plan, with distinct ids (a {@link
+   *     com.macstab.chaos.jvm.api.ChaosPlan} refuses duplicates)
    * @param observability the plan's observability settings; {@code null} leaves them unchanged
-   * @throws IllegalStateException when the plan has duplicate ids or a scenario fails to activate;
-   *     the previous set is active again when this is thrown
+   * @throws IllegalStateException when a scenario fails to activate; the previous set is active
+   *     again when this is thrown
    */
   synchronized void applyDiff(
       final List<ChaosScenario> newScenarios,
@@ -518,10 +519,7 @@ public final class StartupConfigPoller implements AutoCloseable {
     }
     final Map<String, ChaosScenario> newById = new java.util.LinkedHashMap<>(newScenarios.size());
     for (final ChaosScenario scenario : newScenarios) {
-      if (newById.putIfAbsent(scenario.id(), scenario) != null) {
-        throw new IllegalStateException(
-            "duplicate scenario id '" + LogText.sanitize(scenario.id()) + "' in plan");
-      }
+      newById.put(scenario.id(), scenario);
     }
 
     // Validate every new or changed scenario, and weave its hooks (method selectors included),
