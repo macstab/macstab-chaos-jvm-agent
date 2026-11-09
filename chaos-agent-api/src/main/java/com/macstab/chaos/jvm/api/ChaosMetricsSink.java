@@ -6,13 +6,9 @@ import java.util.Map;
 /**
  * Bridge for emitting chaos activity as metrics to an external monitoring system.
  *
- * <p>Implement this interface to route chaos metrics to Micrometer, Prometheus, Dropwizard Metrics,
- * StatsD, or any other metrics backend. Pass the implementation to the {@code ChaosRuntime}
- * constructor on startup.
- *
- * <p>The default implementation is {@link #NOOP}: all calls are discarded. In production
- * environments, replace it to observe chaos activity in your dashboards alongside application
- * metrics.
+ * <p>Implement this interface to route chaos metrics to a metrics backend, and pass the
+ * implementation to the {@code ChaosRuntime(Clock, ChaosMetricsSink)} constructor. The default is
+ * {@link #NOOP}: all calls are discarded.
  *
  * <p><b>Metrics emitted by the runtime:</b>
  *
@@ -21,9 +17,18 @@ import java.util.Map;
  *       {@code scenarioId}, {@code operation}.
  * </ul>
  *
+ * <p>{@link #recordDuration} is never called by the runtime.
+ *
  * <p><b>Implementation contract:</b> all methods must be non-blocking and must not throw. They are
  * called on the thread performing the intercepted JVM operation.
+ *
+ * @deprecated a second metrics API beside the events: the same count is {@code chaos.applications}
+ *     of {@code chaos-agent-micrometer}'s {@code ChaosMeterBinder} and of {@code
+ *     chaos-agent-opentelemetry}, which a {@link ChaosEventListener} on {@code APPLIED} events can
+ *     also produce for any other backend. This interface and {@code chaos.effect.applied} will be
+ *     removed.
  */
+@Deprecated(since = "2.0.0", forRemoval = true)
 public interface ChaosMetricsSink {
 
   /**
@@ -51,7 +56,7 @@ public interface ChaosMetricsSink {
   /**
    * Records a timing/duration metric sample.
    *
-   * @param name the metric name; e.g., {@code "chaos.gate.block.duration"}
+   * @param name the metric name
    * @param duration the observed duration; never null
    * @param tags additional dimensions; never null but may be empty
    */

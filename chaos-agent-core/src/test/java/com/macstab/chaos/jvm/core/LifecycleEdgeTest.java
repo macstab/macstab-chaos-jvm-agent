@@ -45,6 +45,7 @@ import org.junit.jupiter.api.Test;
  * a misuse, a failing start or an unusual policy takes.
  */
 @DisplayName("Lifecycle edges")
+@SuppressWarnings("removal") // ChaosMetricsSink, deprecated, until it is removed
 class LifecycleEdgeTest {
 
   private static final Duration HOUR = Duration.ofHours(1);

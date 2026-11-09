@@ -94,6 +94,7 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
   /** Open sessions by id, for {@link #bindSession(String)}. */
   private final Map<String, DefaultChaosSession> openSessions = new ConcurrentHashMap<>();
 
+  @SuppressWarnings("removal") // the deprecated sink is still fed until it is removed
   ChaosControlPlaneImpl(final Clock clock, final ChaosMetricsSink metricsSink) {
     this(clock, metricsSink, null);
   }
@@ -102,6 +103,7 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
    * Creates a control plane whose stressors come from {@code stressorFactory}, or from the standard
    * factory when it is {@code null} (test seam, U-72 c2).
    */
+  @SuppressWarnings("removal") // the deprecated sink is still fed until it is removed
   ChaosControlPlaneImpl(
       final Clock clock,
       final ChaosMetricsSink metricsSink,

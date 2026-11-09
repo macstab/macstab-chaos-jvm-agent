@@ -31,6 +31,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 @DisplayName("Scenario re-activation and handle lifecycle")
+@SuppressWarnings("removal") // ChaosMetricsSink, deprecated, until it is removed
 class ScenarioReactivationTest {
 
   private ChaosRuntime runtime;

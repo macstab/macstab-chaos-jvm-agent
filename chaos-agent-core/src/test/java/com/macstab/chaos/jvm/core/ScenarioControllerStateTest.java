@@ -16,6 +16,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 @DisplayName("ScenarioController — state machine")
+@SuppressWarnings("removal") // ChaosMetricsSink, deprecated, until it is removed
 class ScenarioControllerStateTest {
 
   private static ScenarioController makeController(final String id) {

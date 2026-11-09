@@ -67,18 +67,18 @@ class ChaosOpenTelemetryTest {
               point -> {
                 assertThat(point.getValue()).isEqualTo(2L);
                 assertThat(point.getAttributes().get(ChaosOpenTelemetry.OPERATION))
-                    .isEqualTo("EXECUTOR_SUBMIT");
-                assertThat(point.getAttributes().get(ChaosOpenTelemetry.EFFECT))
-                    .isEqualTo("DelayEffect");
+                    .isEqualTo("executor_submit");
+                assertThat(point.getAttributes().get(ChaosOpenTelemetry.EFFECT)).isEqualTo("delay");
               });
       final MetricData delay = find(collected, "chaos.injected.delay").orElseThrow();
-      assertThat(delay.getUnit()).isEqualTo("ms");
+      assertThat(delay.getUnit()).isEqualTo("s");
       assertThat(delay.getHistogramData().getPoints())
           .singleElement()
           .satisfies(
               point -> {
                 assertThat(point.getCount()).isEqualTo(2L);
-                assertThat(point.getSum()).isEqualTo(2.0);
+                assertThat(point.getSum())
+                    .isCloseTo(0.002, org.assertj.core.data.Offset.offset(1e-12));
               });
       assertThat(find(collected, "chaos.scenarios").orElseThrow().getLongGaugeData().getPoints())
           .anySatisfy(
@@ -87,7 +87,8 @@ class ChaosOpenTelemetryTest {
                     .isEqualTo("active");
                 assertThat(point.getValue()).isEqualTo(1L);
               });
-      assertThat(find(collected, "chaos.events.dropped")).isPresent();
+      assertThat(find(collected, "chaos.listener.events.dropped")).isPresent();
+      assertThat(find(collected, "chaos.events.dropped")).as("renamed").isEmpty();
       assertThat(find(collected, "chaos.hooks.woven")).isPresent();
     }
   }
@@ -114,7 +115,7 @@ class ChaosOpenTelemetryTest {
               assertThat(event.getName()).isEqualTo(ChaosOpenTelemetry.SPAN_EVENT);
               assertThat(event.getAttributes().get(ChaosOpenTelemetry.SCENARIO_ID))
                   .isEqualTo("otel-span");
-              assertThat(event.getAttributes().get(ChaosOpenTelemetry.DELAY_MILLIS)).isEqualTo(1L);
+              assertThat(event.getAttributes().get(ChaosOpenTelemetry.DELAY)).isEqualTo(0.001);
             });
   }
 
@@ -193,8 +194,7 @@ class ChaosOpenTelemetryTest {
     assertThat(spans.getFinishedSpanItems().get(0).getEvents())
         .singleElement()
         .satisfies(
-            event ->
-                assertThat(event.getAttributes().get(ChaosOpenTelemetry.DELAY_MILLIS)).isNull());
+            event -> assertThat(event.getAttributes().get(ChaosOpenTelemetry.DELAY)).isNull());
   }
 
   /** The named metric, once the asynchronous listener has delivered what it records. */

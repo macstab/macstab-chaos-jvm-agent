@@ -17,6 +17,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 @DisplayName("Seeded effect choices")
+@SuppressWarnings("removal") // ChaosMetricsSink, deprecated, until it is removed
 class EffectSeedTest {
 
   private static ScenarioController controller(final String id, final Long seed) {

@@ -33,18 +33,26 @@ class ChaosMeterBinderDetailsTest {
   @Test
   @DisplayName("counts woven hook groups, and reads a missing, blank or malformed detail as zero")
   void runtimeDetails() {
-    new ChaosMeterBinder(plane).bindTo(registry);
+    // A snapshot serves the meters for a second: each set of details is read by a fresh binder.
+    SimpleMeterRegistry scraped =
+        bound(Map.of("droppedEvents", "many", "wovenHookGroups", "a,b,c"));
+    assertThat(scraped.get("chaos.hooks.woven").gauge().value()).isEqualTo(3.0);
+    assertThat(scraped.get("chaos.listener.events.dropped").functionCounter().count()).isZero();
 
-    plane.details = Map.of("droppedEvents", "many", "wovenHookGroups", "jdk-io,jdk-net,jdbc");
-    assertThat(registry.get("chaos.hooks.woven").gauge().value()).isEqualTo(3.0);
-    assertThat(registry.get("chaos.events.dropped").functionCounter().count()).isZero();
+    scraped = bound(Map.of("droppedEvents", "", "wovenHookGroups", " "));
+    assertThat(scraped.get("chaos.hooks.woven").gauge().value()).isZero();
+    assertThat(scraped.get("chaos.listener.events.dropped").functionCounter().count()).isZero();
 
-    plane.details = Map.of("droppedEvents", "", "wovenHookGroups", " ");
-    assertThat(registry.get("chaos.hooks.woven").gauge().value()).isZero();
-    assertThat(registry.get("chaos.events.dropped").functionCounter().count()).isZero();
+    scraped = bound(Map.of());
+    assertThat(scraped.get("chaos.hooks.woven").gauge().value()).isZero();
+  }
 
-    plane.details = Map.of();
-    assertThat(registry.get("chaos.hooks.woven").gauge().value()).isZero();
+  private SimpleMeterRegistry bound(final Map<String, String> details) {
+    final FixedControlPlane fixed = new FixedControlPlane();
+    fixed.details = details;
+    final SimpleMeterRegistry scraped = new SimpleMeterRegistry();
+    new ChaosMeterBinder(fixed).bindTo(scraped);
+    return scraped;
   }
 
   @Test
@@ -88,13 +96,70 @@ class ChaosMeterBinderDetailsTest {
                     "scenario",
                     "suppressing",
                     "operation",
-                    "JDBC_STATEMENT_EXECUTE",
+                    "jdbc_statement_execute",
                     "effect",
-                    "SuppressEffect")
+                    "suppress")
                 .counter()
                 .count())
         .isEqualTo(1.0);
     assertThat(registry.find("chaos.injected.delay").timer()).isNull();
+  }
+
+  @Test
+  @DisplayName("a 300 µs delay is recorded from delayNanos")
+  void subMillisecondDelayRecorded() {
+    new ChaosMeterBinder(plane).bindTo(registry);
+
+    plane.deliver(
+        new ChaosEvent(
+            Instant.EPOCH,
+            ChaosEvent.Type.APPLIED,
+            "short",
+            "applied",
+            Map.of(
+                "operation", "THREAD_SLEEP", "effectType", "DelayEffect", "delayNanos", "300000")));
+
+    final io.micrometer.core.instrument.Timer delay =
+        registry.get("chaos.injected.delay").tags("scenario", "short").timer();
+    assertThat(delay.count()).isEqualTo(1L);
+    assertThat(delay.totalTime(java.util.concurrent.TimeUnit.MICROSECONDS)).isEqualTo(300.0);
+  }
+
+  @Test
+  @DisplayName("one scrape of the 7 diagnostics meters takes one diagnostics snapshot")
+  void oneSnapshotPerScrape() {
+    new ChaosMeterBinder(plane).bindTo(registry);
+    final long before = plane.snapshots.get();
+
+    registry.getMeters().forEach(meter -> meter.measure().forEach(m -> m.getValue()));
+
+    assertThat(registry.getMeters()).hasSize(7);
+    assertThat(plane.snapshots.get() - before).isEqualTo(1L);
+  }
+
+  @Test
+  @DisplayName("a scrape a second after the last snapshot takes a fresh one")
+  void snapshotRefreshedAfterASecond() {
+    new ChaosMeterBinder(plane).bindTo(registry);
+    final io.micrometer.core.instrument.Gauge woven = registry.get("chaos.hooks.woven").gauge();
+    woven.value();
+    final long first = plane.snapshots.get();
+    plane.details = Map.of("wovenHookGroups", "jdk-io");
+
+    org.awaitility.Awaitility.await()
+        .atMost(java.time.Duration.ofSeconds(5))
+        .until(() -> woven.value() == 1.0);
+
+    assertThat(plane.snapshots.get()).isGreaterThan(first);
+  }
+
+  @Test
+  @DisplayName("the effect tag is the plan JSON type: the class name without Effect, decapitalised")
+  void effectNames() {
+    assertThat(ChaosMeterBinder.effectName("DelayEffect")).isEqualTo("delay");
+    assertThat(ChaosMeterBinder.effectName("ConnectionResetEffect")).isEqualTo("connectionReset");
+    assertThat(ChaosMeterBinder.effectName("unknown")).isEqualTo("unknown");
+    assertThat(ChaosMeterBinder.effectName("Effect")).isEqualTo("Effect");
   }
 
   /**
@@ -105,6 +170,8 @@ class ChaosMeterBinderDetailsTest {
     private final List<ChaosEventListener> listeners = new CopyOnWriteArrayList<>();
     private volatile Map<String, String> details = Map.of();
     private volatile List<ChaosDiagnostics.ScenarioReport> scenarios = List.of();
+    private final java.util.concurrent.atomic.AtomicLong snapshots =
+        new java.util.concurrent.atomic.AtomicLong();
 
     void deliver(final ChaosEvent event) {
       listeners.forEach(listener -> listener.onEvent(event));
@@ -115,6 +182,7 @@ class ChaosMeterBinderDetailsTest {
       return new ChaosDiagnostics() {
         @Override
         public Snapshot snapshot() {
+          snapshots.incrementAndGet();
           return new Snapshot(Instant.EPOCH, scenarios, List.of(), details);
         }
 

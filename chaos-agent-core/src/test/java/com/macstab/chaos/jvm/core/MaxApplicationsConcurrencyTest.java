@@ -39,6 +39,7 @@ import org.junit.jupiter.api.Test;
  * both increment it, and both receive a non-null contribution — overshooting the cap.
  */
 @DisplayName("maxApplications CAS correctness under concurrency")
+@SuppressWarnings("removal") // ChaosMetricsSink, deprecated, until it is removed
 class MaxApplicationsConcurrencyTest {
 
   private static final int MAX_APPLICATIONS = 5;

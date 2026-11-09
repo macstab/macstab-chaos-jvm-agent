@@ -56,7 +56,7 @@ Differences from the native library, and limits of shared directories:
 |--------------|------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------|
 | `REGISTERED` | a scenario was registered, before it starts                                                                                  | `scope`                                      |
 | `STARTED`    | the scenario became `ACTIVE`                                                                                                 | `scope`                                      |
-| `APPLIED`    | an effect took effect                                                                                                        | `operation`, `match` (the scenario's 1-based match number), `scope`, `effectType`, `delayMillis` (when it added a delay), `sessionId` (session scenarios) |
+| `APPLIED`    | an effect took effect                                                                                                        | `operation`, `match` (the scenario's 1-based match number), `scope`, `effectType`, `delayNanos` (when it added a delay), `delayMillis` (deprecated: the same delay in whole milliseconds, from 1 ms), `sessionId` (session scenarios) |
 | `SKIPPED`    | the selector matched but the policy kept the effect from applying — published only while a listener is registered           | `reason` (`notYetActive`, `warmUp`, `probability`, `rateLimit`, `maxApplications`), `operation`, `scope` |
 | `RELEASED`   | a gate was released                                                                                                          | `scope`                                      |
 | `INACTIVE`   | the scenario ended on its own (`ACTIVE → INACTIVE`), once                                                                    | `scope`, `reason` (`expired`, `max applications reached`, and for a stressor `stressor failed: <type>`, `duration elapsed`, `lifespan elapsed`) |
@@ -73,14 +73,16 @@ Two optional modules turn events into metrics. Each instrument has one fixed set
 |-----------------------------|-----------------------|--------------------------------------|-------------------------------------------------------------------|
 | `chaos.events`              | counter               | `type`, `scenario`                   | every event                                                       |
 | `chaos.applications`        | counter               | `scenario`, `operation`, `effect`    | effects that took effect                                          |
-| `chaos.injected.delay`      | timer / histogram (ms) | `scenario`, `operation`             | latency the agent added to calls (from the `APPLIED` event's `delayMillis`) |
+| `chaos.injected.delay`      | timer / histogram (s) | `scenario`, `operation`              | latency the agent added to calls (from the `APPLIED` event's `delayNanos`, so a sub-millisecond delay counts) |
 | `chaos.skips`               | counter               | `scenario`, `reason`                 | matches the policy kept from applying (while a listener is registered) |
 | `chaos.activation.failures` | counter               | `category`                           | failed activations                                                |
 | `chaos.scenarios`           | gauge                 | `state`                              | registered scenarios per state                                    |
-| `chaos.events.dropped`      | counter               | —                                    | events dropped by full asynchronous listener queues               |
+| `chaos.listener.events.dropped` | counter           | —                                    | events dropped by full asynchronous listener queues               |
 | `chaos.hooks.woven`         | gauge                 | —                                    | hook groups woven into JDK and library classes                    |
 
-**Micrometer** (`chaos-agent-micrometer`):
+Tag values: `operation` is the `OperationType` name in lower case (`thread_sleep`); `effect` is the effect's plan JSON type (`delay`, `connectionReset`), derived from the event's `effectType` (the effect class's simple name, without `Effect`, first letter lower-cased). `chaos.events` is only the event counter; the dropped-events counter is named `chaos.listener.events.dropped`, so no metric name is a prefix of another.
+
+**Micrometer** (`chaos-agent-micrometer`). The seven meters read from the diagnostics (the five `chaos.scenarios` gauges, `chaos.listener.events.dropped`, `chaos.hooks.woven`) share one diagnostics snapshot per scrape, reused for one second:
 
 ```java
 ChaosMeterBinder binder = new ChaosMeterBinder(ChaosPlatform.current());
@@ -92,11 +94,13 @@ The series tagged with a `scenario` are retired once the scenario has ended (`ST
 **OpenTelemetry** (`chaos-agent-opentelemetry`), the same instruments with attributes `chaos.event.type`, `chaos.scenario.id`, `chaos.operation`, `chaos.effect`, `chaos.skip.reason`, `chaos.failure.category`, `chaos.scenario.state`, scope `com.macstab.chaos.jvm`. `chaos.events` and `chaos.activation.failures` carry no scenario id; `chaos.applications`, `chaos.skips` and `chaos.injected.delay` keep `chaos.scenario.id`, because the API cannot retire a series: they are bounded by the SDK's cardinality limit, and a View drops the attribute where scenario ids are many:
 
 ```java
-AutoCloseable metrics = ChaosOpenTelemetry.metrics(ChaosPlatform.current(), openTelemetry);
-AutoCloseable spans = ChaosOpenTelemetry.spanEvents(ChaosPlatform.current());
+ChaosOpenTelemetry.Registration metrics =
+    ChaosOpenTelemetry.metrics(ChaosPlatform.current(), openTelemetry);
+ChaosOpenTelemetry.Registration spans = ChaosOpenTelemetry.spanEvents(ChaosPlatform.current());
+// Registration.close() throws no checked exception
 ```
 
-`spanEvents` adds a `chaos.applied` event (scenario, operation, effect, `chaos.delay_ms`) to the current span each time chaos applies to a call made inside it, so a trace shows which request was slowed or failed and by which scenario. It runs on the application thread, where the span is current; the counters are fed asynchronously.
+`spanEvents` adds a `chaos.applied` event (scenario, operation, effect, `chaos.delay` in seconds) to the current span each time chaos applies to a call made inside it, so a trace shows which request was slowed or failed and by which scenario. It runs on the application thread, where the span is current; the counters are fed asynchronously.
 
 Both modules declare their library as `compileOnly`: the application brings Micrometer or OpenTelemetry.
 

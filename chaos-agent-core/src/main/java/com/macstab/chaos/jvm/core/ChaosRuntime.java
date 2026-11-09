@@ -50,6 +50,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
   private final ClientDispatch clientDispatch;
 
   /** Creates a runtime using the system UTC clock and a no-op metrics sink. */
+  @SuppressWarnings("removal") // the deprecated sink's no-op
   public ChaosRuntime() {
     this(Clock.systemUTC(), ChaosMetricsSink.NOOP);
   }
@@ -60,6 +61,7 @@ public final class ChaosRuntime implements ChaosControlPlane {
    * @param clock the clock used for scheduling and timestamping
    * @param metricsSink the metrics sink to receive observability events
    */
+  @SuppressWarnings("removal") // the deprecated sink is still fed until it is removed
   public ChaosRuntime(final Clock clock, final ChaosMetricsSink metricsSink) {
     this.controlPlane = new ChaosControlPlaneImpl(clock, metricsSink);
     this.dispatcher = new ChaosDispatcher(controlPlane);

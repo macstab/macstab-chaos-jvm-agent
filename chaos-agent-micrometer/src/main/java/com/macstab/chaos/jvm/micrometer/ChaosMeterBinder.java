@@ -14,6 +14,7 @@ import io.micrometer.core.instrument.binder.MeterBinder;
 import java.time.Duration;
 import java.util.Locale;
 import java.util.Objects;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Publishes chaos activity as Micrometer metrics. Every meter name has one fixed set of tag keys,
@@ -28,18 +29,28 @@ import java.util.Objects;
  *       <td>{@code scenario}, {@code operation}, {@code effect}</td>
  *       <td>effects that took effect, by intercepted operation and effect type</td></tr>
  *   <tr><td>{@code chaos.injected.delay}</td><td>timer</td><td>{@code scenario}, {@code operation}</td>
- *       <td>latency the agent added to calls</td></tr>
+ *       <td>latency the agent added to calls, from the event's {@code delayNanos}</td></tr>
  *   <tr><td>{@code chaos.skips}</td><td>counter</td><td>{@code scenario}, {@code reason}</td>
  *       <td>matches the policy kept from applying (published while a listener is registered)</td></tr>
  *   <tr><td>{@code chaos.activation.failures}</td><td>counter</td>
  *       <td>{@code category}</td><td>failed activations</td></tr>
  *   <tr><td>{@code chaos.scenarios}</td><td>gauge</td><td>{@code state}</td>
  *       <td>registered scenarios per state</td></tr>
- *   <tr><td>{@code chaos.events.dropped}</td><td>function counter</td><td>none</td>
+ *   <tr><td>{@code chaos.listener.events.dropped}</td><td>function counter</td><td>none</td>
  *       <td>events dropped by full asynchronous listener queues</td></tr>
  *   <tr><td>{@code chaos.hooks.woven}</td><td>gauge</td><td>none</td>
  *       <td>hook groups woven into JDK and library classes</td></tr>
  * </table>
+ *
+ * <p>Tag values: {@code operation} is the {@code OperationType} name in lower case ({@code
+ * thread_sleep}); {@code effect} is the effect's plan JSON type ({@code delay}, {@code
+ * connectionReset}), derived from the event's {@code effectType}, the effect class's simple name:
+ * without its {@code Effect} suffix, first letter lower-cased.
+ *
+ * <p>The seven meters read from the diagnostics (the five {@code chaos.scenarios} gauges, {@code
+ * chaos.listener.events.dropped} and {@code chaos.hooks.woven}) share one snapshot per scrape: a
+ * snapshot is reused for one second, so a scrape takes one, and a scrape longer than that takes a
+ * fresh one.
  *
  * <p>Events are counted on an agent-owned thread ({@link ChaosEventListener#async}), never on the
  * application thread that triggered them. {@link #close()} stops counting.
@@ -61,10 +72,18 @@ public final class ChaosMeterBinder implements MeterBinder, AutoCloseable {
   private static final java.util.logging.Logger LOGGER =
       java.util.logging.Logger.getLogger(ChaosMeterBinder.class.getName());
 
+  /** How long a diagnostics snapshot serves the meters: one scrape. */
+  private static final long SNAPSHOT_REUSE_NANOS = java.util.concurrent.TimeUnit.SECONDS.toNanos(1);
+
   private final ChaosControlPlane controlPlane;
   private final java.util.List<ChaosEventListener> listeners =
       new java.util.concurrent.CopyOnWriteArrayList<>();
   private final java.util.List<Series> bound = new java.util.concurrent.CopyOnWriteArrayList<>();
+
+  /** The last snapshot and when it was taken. */
+  private volatile @Nullable TakenSnapshot lastSnapshot;
+
+  private record TakenSnapshot(long takenAtNanos, ChaosDiagnostics.Snapshot snapshot) {}
 
   /**
    * Creates a binder for {@code controlPlane}.
@@ -89,22 +108,22 @@ public final class ChaosMeterBinder implements MeterBinder, AutoCloseable {
                 if (scrapeProbe) {
                   series.scraped();
                 }
-                return countIn(plane, state);
+                return countIn(snapshot(), state);
               })
           .description("Registered chaos scenarios by state")
           .tag("state", state.name().toLowerCase(Locale.ROOT))
           .register(registry);
     }
     FunctionCounter.builder(
-            "chaos.events.dropped",
+            "chaos.listener.events.dropped",
             controlPlane,
-            plane -> detail(plane, "droppedEvents", Long::parseLong))
+            plane -> detail(snapshot(), "droppedEvents", Long::parseLong))
         .description("Chaos events dropped by full asynchronous listener queues")
         .register(registry);
     Gauge.builder(
             "chaos.hooks.woven",
             controlPlane,
-            plane -> detail(plane, "wovenHookGroups", ChaosMeterBinder::countList))
+            plane -> detail(snapshot(), "wovenHookGroups", ChaosMeterBinder::countList))
         .description("Hook groups woven into JDK and library classes")
         .register(registry);
     final ChaosEventListener counting =
@@ -135,18 +154,31 @@ public final class ChaosMeterBinder implements MeterBinder, AutoCloseable {
     }
   }
 
+  /**
+   * The diagnostics snapshot for the meters: the last one while it is younger than a second, so the
+   * meters of one scrape read one snapshot.
+   */
+  private ChaosDiagnostics.Snapshot snapshot() {
+    final long now = System.nanoTime();
+    final TakenSnapshot last = lastSnapshot;
+    if (last != null && now - last.takenAtNanos() < SNAPSHOT_REUSE_NANOS) {
+      return last.snapshot();
+    }
+    final ChaosDiagnostics.Snapshot fresh = controlPlane.diagnostics().snapshot();
+    lastSnapshot = new TakenSnapshot(now, fresh);
+    return fresh;
+  }
+
   private static double countIn(
-      final ChaosControlPlane plane, final ChaosDiagnostics.ScenarioState state) {
-    return plane.diagnostics().snapshot().scenarios().stream()
-        .filter(report -> report.state() == state)
-        .count();
+      final ChaosDiagnostics.Snapshot snapshot, final ChaosDiagnostics.ScenarioState state) {
+    return snapshot.scenarios().stream().filter(report -> report.state() == state).count();
   }
 
   private static double detail(
-      final ChaosControlPlane plane,
+      final ChaosDiagnostics.Snapshot snapshot,
       final String key,
       final java.util.function.ToLongFunction<String> parse) {
-    final String value = plane.diagnostics().snapshot().runtimeDetails().get(key);
+    final String value = snapshot.runtimeDetails().get(key);
     if (value == null || value.isEmpty()) {
       return 0.0;
     }
@@ -155,6 +187,18 @@ public final class ChaosMeterBinder implements MeterBinder, AutoCloseable {
     } catch (final NumberFormatException unexpected) {
       return 0.0;
     }
+  }
+
+  /**
+   * The effect's plan JSON type from its class's simple name: {@code DelayEffect} is {@code delay},
+   * {@code ConnectionResetEffect} is {@code connectionReset}.
+   */
+  static String effectName(final String effectType) {
+    final String base =
+        effectType.endsWith("Effect")
+            ? effectType.substring(0, effectType.length() - "Effect".length())
+            : effectType;
+    return base.isEmpty() ? effectType : Character.toLowerCase(base.charAt(0)) + base.substring(1);
   }
 
   private static long countList(final String commaSeparated) {
@@ -176,7 +220,8 @@ public final class ChaosMeterBinder implements MeterBinder, AutoCloseable {
     final java.util.Map<String, String> attributes = event.attributes();
     switch (event.type()) {
       case APPLIED -> {
-        final String operation = attributes.getOrDefault("operation", "unknown");
+        final String operation =
+            attributes.getOrDefault("operation", "unknown").toLowerCase(Locale.ROOT);
         series
             .track(
                 scenario,
@@ -184,10 +229,10 @@ public final class ChaosMeterBinder implements MeterBinder, AutoCloseable {
                     .description("Chaos effects that took effect")
                     .tag("scenario", scenario)
                     .tag("operation", operation)
-                    .tag("effect", attributes.getOrDefault("effectType", "unknown"))
+                    .tag("effect", effectName(attributes.getOrDefault("effectType", "unknown")))
                     .register(registry))
             .increment();
-        final String delay = attributes.get("delayMillis");
+        final String delay = attributes.get("delayNanos");
         if (delay != null) {
           series
               .track(
@@ -197,7 +242,7 @@ public final class ChaosMeterBinder implements MeterBinder, AutoCloseable {
                       .tag("scenario", scenario)
                       .tag("operation", operation)
                       .register(registry))
-              .record(Duration.ofMillis(Long.parseLong(delay)));
+              .record(Duration.ofNanos(Long.parseLong(delay)));
         }
       }
       case SKIPPED ->

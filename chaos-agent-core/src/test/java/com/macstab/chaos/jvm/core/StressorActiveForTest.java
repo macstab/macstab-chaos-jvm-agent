@@ -23,6 +23,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 @DisplayName("Stressor scenarios and their activation policy")
+@SuppressWarnings("removal") // ChaosMetricsSink, deprecated, until it is removed
 class StressorActiveForTest {
 
   private ChaosRuntime runtime;

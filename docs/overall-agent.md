@@ -443,7 +443,7 @@ flowchart TB
 
 **Why this design**: Centralizing the dispatch in one class prevents duplicate match/evaluate logic per operation. The runtime doesn't know or care about classloader boundaries — that separation is enforced by `BootstrapDispatcher` and `ChaosBridge` above it.
 
-**Extension points**: `ChaosMetricsSink` injection at construction for custom metric forwarding.
+**Extension points**: `ChaosMetricsSink` injection at construction for custom metric forwarding (deprecated for removal since 2.0: use `chaos-agent-micrometer`, `chaos-agent-opentelemetry` or a `ChaosEventListener` on `APPLIED` events (`chaos.applications`)).
 
 **Misuse risks**:
 - Calling `evaluate()` before any scenario is started returns `RuntimeDecision.none()` (safe fallback)
@@ -791,7 +791,7 @@ The agent uses `java.util.logging` (`java.util.logging.Logger`). Log output goes
 
 ## Metrics
 
-`ChaosMetricsSink` interface. Default: `NOOP`. Custom sinks can be injected at `ChaosRuntime` construction. The sole metric currently emitted is `chaos.effect.applied` with tags `scenarioId` and `operation`.
+`ChaosMetricsSink` interface, deprecated for removal since 2.0: use `chaos-agent-micrometer`, `chaos-agent-opentelemetry` or a `ChaosEventListener` on `APPLIED` events (`chaos.applications`). Default: `NOOP`. Custom sinks can be injected at `ChaosRuntime` construction. The sole metric currently emitted is `chaos.effect.applied` with tags `scenarioId` and `operation`. The metrics modules are described in [`observability.md`](observability.md).
 
 ## Events
 
@@ -929,7 +929,7 @@ Internal modules (`chaos-agent-core`, `chaos-agent-instrumentation-jdk`, `chaos-
 
 ## Extension Points
 
-- **`ChaosMetricsSink`**: inject custom metric forwarding at `ChaosRuntime` construction time
+- **`ChaosMetricsSink`**: inject custom metric forwarding at `ChaosRuntime` construction time (deprecated for removal since 2.0: use `chaos-agent-micrometer`, `chaos-agent-opentelemetry` or a `ChaosEventListener` on `APPLIED` events (`chaos.applications`))
 - **`ChaosEventListener`**: register event listeners on the control plane for observability hooks
 - **`ChaosSelector`**: sealed interface; cannot be extended outside the module (sealed hierarchy)
 - **`ChaosEffect`**: sealed interface; cannot be extended outside the module

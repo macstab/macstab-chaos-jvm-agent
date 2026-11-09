@@ -774,10 +774,14 @@ final class ScenarioController {
     eventAttributes.put("match", Long.toString(matchNumber));
     eventAttributes.put("scope", scopeKey);
     eventAttributes.put("effectType", scenario.effect().getClass().getSimpleName());
-    final long delayMillis = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(delayNanos);
-    if (delayMillis > 0L) {
+    if (delayNanos > 0L) {
       // The delay this application adds to the call: the source of injected-latency metrics.
-      eventAttributes.put("delayMillis", Long.toString(delayMillis));
+      eventAttributes.put("delayNanos", Long.toString(delayNanos));
+      final long delayMillis = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(delayNanos);
+      if (delayMillis > 0L) {
+        // Deprecated: whole milliseconds only, kept for listeners that read it.
+        eventAttributes.put("delayMillis", Long.toString(delayMillis));
+      }
     }
     if (sessionId != null) {
       eventAttributes.put("sessionId", sessionId);

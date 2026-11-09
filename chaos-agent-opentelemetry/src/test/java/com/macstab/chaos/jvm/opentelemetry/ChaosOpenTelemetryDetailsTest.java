@@ -79,10 +79,54 @@ class ChaosOpenTelemetryDetailsTest {
               point -> {
                 assertThat(point.getValue()).isEqualTo(1L);
                 assertThat(point.getAttributes().get(ChaosOpenTelemetry.EFFECT))
-                    .isEqualTo("SuppressEffect");
+                    .isEqualTo("suppress");
+                assertThat(point.getAttributes().get(ChaosOpenTelemetry.OPERATION))
+                    .isEqualTo("jdbc_statement_execute");
               });
       assertThat(find(collected, "chaos.injected.delay")).isEmpty();
     }
+  }
+
+  @Test
+  @DisplayName("a 300 µs delay is recorded from delayNanos, in seconds")
+  void subMillisecondDelayRecorded() {
+    // A Registration closes without a checked exception: no throws clause, no catch.
+    try (ChaosOpenTelemetry.Registration metrics = ChaosOpenTelemetry.metrics(plane, sdk)) {
+      plane.deliver(
+          new ChaosEvent(
+              Instant.EPOCH,
+              ChaosEvent.Type.APPLIED,
+              "short",
+              "applied",
+              Map.of(
+                  "operation",
+                  "THREAD_SLEEP",
+                  "effectType",
+                  "DelayEffect",
+                  "delayNanos",
+                  "300000")));
+
+      final MetricData delay =
+          find(reader.collectAllMetrics(), "chaos.injected.delay").orElseThrow();
+      assertThat(delay.getUnit()).isEqualTo("s");
+      assertThat(delay.getHistogramData().getPoints())
+          .singleElement()
+          .satisfies(
+              point -> {
+                assertThat(point.getCount()).isEqualTo(1L);
+                assertThat(point.getSum())
+                    .isCloseTo(0.0003, org.assertj.core.data.Offset.offset(1e-12));
+              });
+    }
+  }
+
+  @Test
+  @DisplayName("the effect attribute is the plan JSON type: the class name without Effect")
+  void effectNames() {
+    assertThat(ChaosOpenTelemetry.effectName("DelayEffect")).isEqualTo("delay");
+    assertThat(ChaosOpenTelemetry.effectName("ConnectionResetEffect")).isEqualTo("connectionReset");
+    assertThat(ChaosOpenTelemetry.effectName("unknown")).isEqualTo("unknown");
+    assertThat(ChaosOpenTelemetry.effectName("Effect")).isEqualTo("Effect");
   }
 
   private static long woven(final Collection<MetricData> collected) {
@@ -96,7 +140,7 @@ class ChaosOpenTelemetryDetailsTest {
   }
 
   private static long dropped(final Collection<MetricData> collected) {
-    return find(collected, "chaos.events.dropped")
+    return find(collected, "chaos.listener.events.dropped")
         .orElseThrow()
         .getLongSumData()
         .getPoints()

@@ -23,6 +23,7 @@ import org.junit.jupiter.api.Test;
 
 /** A failing listener or sink never escapes the bus, and every event type is logged. */
 @DisplayName("ObservabilityBus isolation")
+@SuppressWarnings("removal") // ChaosMetricsSink, deprecated, until it is removed
 class ObservabilityBusIsolationTest {
 
   private interface CloseableListener extends ChaosEventListener, AutoCloseable {}

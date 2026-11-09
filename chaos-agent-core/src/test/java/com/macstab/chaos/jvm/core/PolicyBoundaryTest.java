@@ -35,6 +35,7 @@ import org.junit.jupiter.api.Test;
  * Mutation testing showed each of these could change without a test failing.
  */
 @DisplayName("Activation-policy boundaries")
+@SuppressWarnings("removal") // ChaosMetricsSink, deprecated, until it is removed
 class PolicyBoundaryTest {
 
   private static final InvocationContext SUBMIT =

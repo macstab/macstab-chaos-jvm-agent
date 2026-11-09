@@ -23,6 +23,7 @@ import org.junit.jupiter.api.Test;
  * accumulate indefinitely in the registry.
  */
 @DisplayName("Registry cleanup on session close")
+@SuppressWarnings("removal") // ChaosMetricsSink, deprecated, until it is removed
 class RegistryCleanupTest {
 
   @Test

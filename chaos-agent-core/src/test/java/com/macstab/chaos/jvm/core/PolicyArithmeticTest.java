@@ -21,6 +21,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 @DisplayName("Activation-policy arithmetic")
+@SuppressWarnings("removal") // ChaosMetricsSink, deprecated, until it is removed
 class PolicyArithmeticTest {
 
   @Nested

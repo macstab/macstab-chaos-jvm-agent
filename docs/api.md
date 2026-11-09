@@ -77,7 +77,7 @@ public final class SlowDatabaseExample {
 - `ChaosDiagnostics` — read-only inspection of agent state
 - `OperationType` — enum of intercepted JDK operations
 - `ChaosEvent` / `ChaosEventListener` — event bus contract
-- `ChaosMetricsSink` — metrics integration point
+- `ChaosMetricsSink` — metrics integration point, deprecated for removal since 2.0: use `chaos-agent-micrometer`, `chaos-agent-opentelemetry` or a `ChaosEventListener` on `APPLIED` events (`chaos.applications`)
 - All exception types
 
 ## Stability Contract
@@ -733,7 +733,9 @@ public interface ChaosMetricsSink {
 }
 ```
 
-Currently emitted metric: `chaos.effect.applied` with tags `scenarioId` and `operation`.
+**Deprecated for removal** (since 2.0): a second metrics API beside the events. The same count is `chaos.applications` of `chaos-agent-micrometer` and `chaos-agent-opentelemetry`; a `ChaosEventListener` on `APPLIED` events produces it for any other backend. `ChaosMetricsSink` and `chaos.effect.applied` will be removed.
+
+Currently emitted metric: `chaos.effect.applied` with tags `scenarioId` and `operation`. `recordDuration` is never called.
 
 Inject a custom sink via `new ChaosRuntime(clock, yourSink)` (bootstrap-level customization; not exposed via the public API currently — this is a known gap in the public API surface).
 

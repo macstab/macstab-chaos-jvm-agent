@@ -2119,7 +2119,7 @@ Constraints: listeners are called synchronously on the intercepting thread. Must
 
 ## 14.4 Custom Metrics Sink
 
-`ChaosMetricsSink` (in `chaos-agent-api`) provides an additional push-based metrics integration point distinct from the event listener model. Implement and register via `ChaosControlPlane` to receive counters without the overhead of the full event object. The runtime currently increments one counter, `chaos.effect.applied` (tags `scenarioId`, `operation`), once per committed application.
+`ChaosMetricsSink` (in `chaos-agent-api`, deprecated for removal since 2.0: use `chaos-agent-micrometer`, `chaos-agent-opentelemetry` or a `ChaosEventListener` on `APPLIED` events (`chaos.applications`)) provides an additional push-based metrics integration point distinct from the event listener model. Implement and register via `ChaosControlPlane` to receive counters without the overhead of the full event object. The runtime currently increments one counter, `chaos.effect.applied` (tags `scenarioId`, `operation`), once per committed application.
 
 ## 14.5 Compatibility Notes
 

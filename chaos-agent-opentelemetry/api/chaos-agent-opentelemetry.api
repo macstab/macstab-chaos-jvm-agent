@@ -1,5 +1,5 @@
 public final class com/macstab/chaos/jvm/opentelemetry/ChaosOpenTelemetry
-  public static final field DELAY_MILLIS Lio/opentelemetry/api/common/AttributeKey;
+  public static final field DELAY Lio/opentelemetry/api/common/AttributeKey;
   public static final field EFFECT Lio/opentelemetry/api/common/AttributeKey;
   public static final field EVENT_TYPE Lio/opentelemetry/api/common/AttributeKey;
   public static final field FAILURE_CATEGORY Lio/opentelemetry/api/common/AttributeKey;
@@ -9,5 +9,8 @@ public final class com/macstab/chaos/jvm/opentelemetry/ChaosOpenTelemetry
   public static final field SCOPE Ljava/lang/String;
   public static final field SKIP_REASON Lio/opentelemetry/api/common/AttributeKey;
   public static final field SPAN_EVENT Ljava/lang/String;
-  public static method metrics(Lcom/macstab/chaos/jvm/api/ChaosControlPlane;Lio/opentelemetry/api/OpenTelemetry;)Ljava/lang/AutoCloseable;
-  public static method spanEvents(Lcom/macstab/chaos/jvm/api/ChaosControlPlane;)Ljava/lang/AutoCloseable;
+  public static method metrics(Lcom/macstab/chaos/jvm/api/ChaosControlPlane;Lio/opentelemetry/api/OpenTelemetry;)Lcom/macstab/chaos/jvm/opentelemetry/ChaosOpenTelemetry$Registration;
+  public static method spanEvents(Lcom/macstab/chaos/jvm/api/ChaosControlPlane;)Lcom/macstab/chaos/jvm/opentelemetry/ChaosOpenTelemetry$Registration;
+
+public static interface com/macstab/chaos/jvm/opentelemetry/ChaosOpenTelemetry$Registration implements java/lang/AutoCloseable
+  public abstract method close()V

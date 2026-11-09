@@ -29,6 +29,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 @DisplayName("Gate semantics")
+@SuppressWarnings("removal") // ChaosMetricsSink, deprecated, until it is removed
 class GateSemanticsTest {
 
   private ChaosRuntime runtime;

@@ -58,8 +58,7 @@ class ChaosMeterBinderTest {
     assertThat(
             registry
                 .get("chaos.applications")
-                .tags(
-                    "scenario", "metered", "operation", "EXECUTOR_SUBMIT", "effect", "DelayEffect")
+                .tags("scenario", "metered", "operation", "executor_submit", "effect", "delay")
                 .counter()
                 .count())
         .isEqualTo(2.0);
@@ -68,7 +67,7 @@ class ChaosMeterBinderTest {
     assertThat(delay.count()).isEqualTo(2L);
     assertThat(delay.totalTime(java.util.concurrent.TimeUnit.MILLISECONDS)).isEqualTo(2.0);
     assertThat(registry.get("chaos.hooks.woven").gauge().value()).isGreaterThanOrEqualTo(0.0);
-    assertThat(registry.get("chaos.events.dropped").functionCounter().count()).isZero();
+    assertThat(registry.get("chaos.listener.events.dropped").functionCounter().count()).isZero();
   }
 
   @Test

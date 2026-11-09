@@ -28,6 +28,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 @DisplayName("Event model")
+@SuppressWarnings("removal") // ChaosMetricsSink, deprecated, until it is removed
 class EventModelTest {
 
   private final ChaosRuntime runtime = new ChaosRuntime();
@@ -89,6 +90,30 @@ class EventModelTest {
         .singleElement()
         .satisfies(event -> assertThat(event.attributes()).containsEntry("reason", "warmUp"));
     assertThat(events).extracting(ChaosEvent::type).contains(ChaosEvent.Type.APPLIED);
+  }
+
+  @Test
+  @DisplayName("APPLIED carries a sub-millisecond delay in delayNanos; delayMillis only from 1 ms")
+  void subMillisecondDelayInNanos() {
+    runtime.addEventListener(recorder);
+    runtime.activate(
+        ChaosScenario.builder("short")
+            .scope(ChaosScenario.ScenarioScope.JVM)
+            .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+            .effect(ChaosEffect.delay(Duration.ofNanos(300_000)))
+            .activationPolicy(ActivationPolicy.always())
+            .build());
+
+    submit();
+
+    assertThat(events)
+        .filteredOn(event -> event.type() == ChaosEvent.Type.APPLIED)
+        .singleElement()
+        .satisfies(
+            event ->
+                assertThat(event.attributes())
+                    .containsEntry("delayNanos", "300000")
+                    .doesNotContainKey("delayMillis"));
   }
 
   @Test

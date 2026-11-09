@@ -29,6 +29,7 @@ import org.junit.jupiter.api.Test;
 
 /** The absolute wall-clock window of a policy: {@code activeFrom} and {@code activeUntil}. */
 @DisplayName("Wall-clock activation window")
+@SuppressWarnings("removal") // ChaosMetricsSink, deprecated, until it is removed
 class WallClockWindowTest {
 
   private static final Instant T0 = Instant.parse("2026-10-30T12:00:00Z");

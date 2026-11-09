@@ -40,6 +40,7 @@ import org.junit.jupiter.api.Test;
  * activations, closing, the events each transition publishes and how listeners are managed.
  */
 @DisplayName("Control-plane lifecycle")
+@SuppressWarnings("removal") // ChaosMetricsSink, deprecated, until it is removed
 class ControlPlaneLifecycleTest {
 
   private static final ChaosPlan.Observability DEFAULT_OBSERVABILITY =

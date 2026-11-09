@@ -23,6 +23,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 @DisplayName("ChaosRuntime — ActivationPolicy")
+@SuppressWarnings("removal") // ChaosMetricsSink, deprecated, until it is removed
 class ChaosRuntimeActivationPolicyTest {
 
   /**
