@@ -113,8 +113,16 @@ public final class StartupConfigPoller implements AutoCloseable {
   private byte @Nullable [] lastDigest;
   private byte @Nullable [] failedDigest;
 
-  /** Until then (epoch millis) the file is read on every tick even if its stamp did not change. */
+  /**
+   * Until a read begins at or after this time (epoch millis), the file is read on every tick even
+   * if its stamp did not change.
+   */
   private long provisionalUntil;
+
+  /**
+   * When the last read of the file began (epoch millis); it settles the stamp once past the window.
+   */
+  private long lastReadStartedAt = Long.MIN_VALUE;
 
   /** Whether a missing file has been reported since it disappeared. */
   private boolean missingReported;
@@ -198,6 +206,7 @@ public final class StartupConfigPoller implements AutoCloseable {
       lastStamp = stampOf(baseline);
       lastDigest = digest(baseline.json());
       provisionalUntil = provisionalUntil(baseline.lastModified());
+      lastReadStartedAt = baseline.readStartedAt();
     }
     applyDiff(initialPlan.scenarios(), initialPlan.observability());
     // Reported before the first tick can run, so a tick's own report is never overwritten.
@@ -268,7 +277,9 @@ public final class StartupConfigPoller implements AutoCloseable {
           internally(() -> StartupConfigLoader.statPlanFile(configPath.toString()));
       if (stamp.isPresent()) {
         missingOnce = false;
-        if (System.currentTimeMillis() >= provisionalUntil) {
+        // Settled only by a read that began after the window: an edit within the window that keeps
+        // the stamp (a same-size edit in the same whole second) is then seen by the next read.
+        if (lastReadStartedAt >= provisionalUntil) {
           if (stamp.get().equals(lastStamp)) {
             recovered();
             return;
@@ -337,12 +348,14 @@ public final class StartupConfigPoller implements AutoCloseable {
    * Reloads when the contents changed. A new stamp with the same contents (a touch, a ConfigMap
    * re-sync) only updates the stamp. Contents that already failed to parse are not parsed again
    * until they change. A file read within {@value #PROVISIONAL_MILLIS} ms of its modification (one
-   * second for a whole-second modification time) may be mid-write, so it is read again on the next
-   * tick even if its stamp did not change; the window counts from when the stamp was first seen at
-   * the latest, so a modification time ahead of the clock does not keep it open.
+   * second for a whole-second modification time) may be mid-write, and an edit within that window
+   * may keep the stamp, so the file is read again on every tick until a read that began after the
+   * window; the window counts from when the stamp was first seen at the latest, so a modification
+   * time ahead of the clock does not keep it open.
    */
   private void reloadIfChanged(final StartupConfigLoader.PlanFile file) throws IOException {
     final StartupConfigLoader.PlanFileStamp stamp = stampOf(file);
+    lastReadStartedAt = file.readStartedAt();
     final byte[] digest = digest(file.json());
     if (java.util.Arrays.equals(digest, lastDigest)) {
       settle(stamp);

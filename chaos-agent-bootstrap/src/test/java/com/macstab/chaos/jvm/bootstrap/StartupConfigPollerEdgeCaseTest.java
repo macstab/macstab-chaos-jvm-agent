@@ -231,7 +231,8 @@ class StartupConfigPollerEdgeCaseTest {
 
   @Test
   @DisplayName(
-      "a modification time ahead of the clock is read again only within 20 ms of its first sight")
+      "a modification time ahead of the clock is read again only until a read after 20 ms of its"
+          + " first sight")
   void futureModificationTimeIsNotReadOnEveryTick() throws Exception {
     when(runtime.activate(any(ChaosScenario.class))).thenReturn(handle);
     // A skewed file server: an hour ahead, with a millisecond part (a whole second would get the
@@ -247,6 +248,8 @@ class StartupConfigPollerEdgeCaseTest {
     poller = new StartupConfigPoller(config, runtime, 3_600_000L, digested::incrementAndGet);
     startFromBaseline(poller);
     Thread.sleep(50);
+    // The baseline read began within the window: one more read, of the unchanged file, settles it.
+    poller.pollOnce();
 
     // Same size, same stamp: past the window, the poller does not read the file again.
     Files.writeString(config, planJson("b"));
@@ -279,6 +282,42 @@ class StartupConfigPollerEdgeCaseTest {
     Files.setLastModifiedTime(config, wholeSecond);
     org.junit.jupiter.api.Assumptions.assumeTrue(
         System.currentTimeMillis() < wholeSecond.toMillis() + 900L, "the tick ran late");
+    poller.pollOnce();
+
+    verify(runtime, times(2)).activate(any(ChaosScenario.class));
+    verify(handle).stop();
+  }
+
+  @Test
+  @DisplayName(
+      "a same-size edit after a read in the same whole second is applied by the tick after the"
+          + " window")
+  void sameSecondEditAfterTheReadIsAppliedPastTheWindow() throws Exception {
+    when(runtime.activate(any(ChaosScenario.class))).thenReturn(handle);
+    // The read at T + 0.7 s of a file modified at the whole second T; its window ends at T + 1 s.
+    while (System.currentTimeMillis() % 1_000L < 700L
+        || System.currentTimeMillis() % 1_000L >= 750L) {
+      Thread.sleep(5);
+    }
+    final long now = System.currentTimeMillis();
+    final FileTime wholeSecond = FileTime.fromMillis(now - now % 1_000L);
+    Files.setLastModifiedTime(config, wholeSecond);
+    poller("3600000").pollOnce();
+    verify(runtime, times(1)).activate(any(ChaosScenario.class));
+
+    // The edit at T + 0.9 s: a file system storing whole seconds gives it the same stamp.
+    while (System.currentTimeMillis() < wholeSecond.toMillis() + 900L) {
+      Thread.sleep(5);
+    }
+    Files.writeString(config, planJson("b"));
+    Files.setLastModifiedTime(config, wholeSecond);
+    org.junit.jupiter.api.Assumptions.assumeTrue(
+        System.currentTimeMillis() < wholeSecond.toMillis() + 1_000L, "the edit ran late");
+
+    // The tick at T + 1.2 s, past the window: the last read began inside it, so it reads again.
+    while (System.currentTimeMillis() < wholeSecond.toMillis() + 1_200L) {
+      Thread.sleep(5);
+    }
     poller.pollOnce();
 
     verify(runtime, times(2)).activate(any(ChaosScenario.class));

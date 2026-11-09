@@ -471,6 +471,8 @@ public final class StartupConfigLoader {
    * @param lastModified the file's modification time
    * @param size the file's size in bytes
    * @param fileKey the file system's key of the file (inode), or {@code null}
+   * @param readStartedAt when the read began (epoch millis), before the attributes were taken: a
+   *     read that began after the modification time's provisional window saw the settled file
    */
   @Internal
   public record PlanFile(
@@ -478,7 +480,8 @@ public final class StartupConfigLoader {
       String json,
       java.nio.file.attribute.FileTime lastModified,
       long size,
-      @Nullable Object fileKey) {}
+      @Nullable Object fileKey,
+      long readStartedAt) {}
 
   /**
    * Reads a plan file with the startup checks (regular file or Kubernetes ConfigMap link, size cap,
@@ -512,6 +515,7 @@ public final class StartupConfigLoader {
       return Optional.empty();
     }
     try {
+      final long readStartedAt = System.currentTimeMillis();
       final java.nio.file.attribute.BasicFileAttributes attributes =
           Files.readAttributes(
               target, java.nio.file.attribute.BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
@@ -522,7 +526,8 @@ public final class StartupConfigLoader {
               json,
               attributes.lastModifiedTime(),
               attributes.size(),
-              attributes.fileKey()));
+              attributes.fileKey(),
+              readStartedAt));
     } catch (final java.nio.file.NoSuchFileException vanished) {
       // Removed after its checks (a ConfigMap swap, an editor's rename): a missing file.
       return Optional.empty();
