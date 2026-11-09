@@ -889,10 +889,12 @@ public enum OperationType {
   // ── Client libraries ───────────────────────────────────────────────────────────
 
   /**
-   * Fires before a Kafka producer sends a record: {@code KafkaProducer.send(ProducerRecord,
-   * Callback)} (the one-argument {@code send} delegates to it). The destination is the record's
-   * topic. A reject throws Kafka's {@code org.apache.kafka.common.errors.TimeoutException} from
-   * {@code send()}.
+   * Fires when a Kafka producer sends a record: {@code KafkaProducer.send(ProducerRecord,
+   * Callback)} (the one-argument {@code send} delegates to it), at the point where the send waits
+   * for the topic's metadata; {@code partitionsFor}, which waits too, is not a send. The
+   * destination is the record's topic. A reject fails the send as a metadata timeout does: with
+   * Kafka's {@code org.apache.kafka.common.errors.TimeoutException}, through the callback, the
+   * producer interceptors and the returned future, not by a throw from {@code send()}.
    *
    * <p>Use with {@link ChaosSelector.MessagingSelector}.
    */

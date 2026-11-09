@@ -196,8 +196,15 @@ public final class BootstrapDispatcher {
    */
   public static final int SCOPE_REDIS_SETUP = 26;
 
+  /**
+   * Scope of a Kafka {@code KafkaProducer.send(record, callback)} (scope-only): the producer's
+   * metadata wait inside it is the send's evaluation point, the same wait from {@code
+   * partitionsFor} is not a send.
+   */
+  public static final int SCOPE_MESSAGE_SEND = 27;
+
   /** Size of the per-thread counter array: index 0 is the reentrancy depth, then the scopes. */
-  static final int SCOPE_COUNT = 27;
+  static final int SCOPE_COUNT = 28;
 
   /**
    * Enters a call-depth scope on the current thread.

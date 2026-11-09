@@ -111,16 +111,6 @@ public final class ClientCallExtractor {
   }
 
   /**
-   * Returns the topic of a Kafka {@code ProducerRecord}.
-   *
-   * @param record the producer record
-   * @return the topic, or {@code null}
-   */
-  public static @Nullable String kafkaTopic(final Object record) {
-    return stringOf(record, "topic");
-  }
-
-  /**
    * Returns a Kafka consumer's subscribed topics, sorted and comma-separated.
    *
    * @param consumer the Kafka consumer

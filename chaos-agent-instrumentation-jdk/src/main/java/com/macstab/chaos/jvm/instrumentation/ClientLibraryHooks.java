@@ -13,16 +13,26 @@ import net.bytebuddy.matcher.ElementMatchers;
 final class ClientLibraryHooks {
   private ClientLibraryHooks() {}
 
-  /** Kafka producer send and consumer poll. */
+  /**
+   * Kafka producer send (the scope of {@code send(record, callback)}, evaluated at its private
+   * {@code waitOnMetadata}, 3.9 and 4.x) and consumer poll.
+   */
   static AgentBuilder applyKafkaTransformations(final AgentBuilder builder) {
     return builder
         .type(ElementMatchers.named("org.apache.kafka.clients.producer.KafkaProducer"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->
-                typeBuilder.visit(
-                    advise(
-                        ClientCallAdvice.KafkaSend.class,
-                        ElementMatchers.named("send").and(ElementMatchers.takesArguments(2)))))
+                typeBuilder
+                    .visit(
+                        advise(
+                            ClientCallAdvice.KafkaSend.class,
+                            ElementMatchers.named("send").and(ElementMatchers.takesArguments(2))))
+                    .visit(
+                        advise(
+                            ClientCallAdvice.KafkaWaitOnMetadata.class,
+                            ElementMatchers.named("waitOnMetadata")
+                                .and(ElementMatchers.takesArguments(4))
+                                .and(ElementMatchers.takesArgument(0, String.class)))))
         .type(ElementMatchers.named("org.apache.kafka.clients.consumer.KafkaConsumer"))
         .transform(
             (typeBuilder, typeDescription, classLoader, module, protectionDomain) ->

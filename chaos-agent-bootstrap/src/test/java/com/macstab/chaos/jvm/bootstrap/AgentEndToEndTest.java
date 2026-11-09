@@ -1592,7 +1592,9 @@ class AgentEndToEndTest {
     }
 
     @Test
-    @DisplayName("Kafka send: a rejected topic throws Kafka's TimeoutException, others are sent")
+    @DisplayName(
+        "Kafka send: a rejected topic fails the send's future, callback and interceptor with"
+            + " Kafka's TimeoutException; partitionsFor is not a send")
     void kafkaSend() throws Exception {
       final ChildJvmProbe.ProbeResult result =
           runReject(
@@ -1603,11 +1605,16 @@ class AgentEndToEndTest {
       assertThat(result.value("orders.type"))
           .isEqualTo("org.apache.kafka.common.errors.TimeoutException");
       assertThat(result.value("orders.message")).isEqualTo("kafka down");
+      assertThat(result.longValue("orders.callbacks")).isEqualTo(1L);
+      assertThat(result.longValue("orders.interceptorErrors")).isEqualTo(1L);
       assertThat(result.value("audit.type"))
-          .as(
-              "an unmatched topic is handed to Kafka, which reports its own failures via the Future")
-          .isEqualTo("sent");
-      assertThat(result.longValue("matched.kafka")).isEqualTo(1L);
+          .as("an unmatched topic is handed to Kafka, which times out waiting for metadata")
+          .isEqualTo("org.apache.kafka.common.errors.TimeoutException");
+      assertThat(result.value("audit.message")).isNotEqualTo("kafka down");
+      assertThat(result.value("partitions.message")).isNotEqualTo("kafka down");
+      assertThat(result.longValue("matched.kafka"))
+          .as("the matched send only; partitionsFor waits for metadata outside a send")
+          .isEqualTo(1L);
     }
 
     @Test

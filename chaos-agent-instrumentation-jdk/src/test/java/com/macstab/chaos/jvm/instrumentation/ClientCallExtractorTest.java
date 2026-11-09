@@ -30,21 +30,21 @@ class ClientCallExtractorTest {
 
   /** An accessor declared on a public class. */
   public static class PublicRecord {
-    private final Object topic;
+    private final Object name;
 
-    PublicRecord(final Object topic) {
-      this.topic = topic;
+    PublicRecord(final Object name) {
+      this.name = name;
     }
 
-    public Object topic() {
-      return topic;
+    public Object getFullMethodName() {
+      return name;
     }
   }
 
   /** A non-public subclass: the accessor is called through its public superclass. */
   static final class HiddenRecord extends PublicRecord {
-    HiddenRecord(final Object topic) {
-      super(topic);
+    HiddenRecord(final Object name) {
+      super(name);
     }
   }
 
@@ -80,13 +80,13 @@ class ClientCallExtractorTest {
     @Test
     @DisplayName("calls an accessor of a public class")
     void publicClass() {
-      assertThat(ClientCallExtractor.kafkaTopic(new PublicRecord("orders"))).isEqualTo("orders");
+      assertThat(ClientCallExtractor.grpcMethod(new PublicRecord("orders"))).isEqualTo("orders");
     }
 
     @Test
     @DisplayName("calls an accessor of a non-public class through its public superclass")
     void publicSuperclass() {
-      assertThat(ClientCallExtractor.kafkaTopic(new HiddenRecord("payments")))
+      assertThat(ClientCallExtractor.grpcMethod(new HiddenRecord("payments")))
           .isEqualTo("payments");
     }
 
@@ -110,8 +110,8 @@ class ClientCallExtractorTest {
       assertThat(ClientCallExtractor.grpcMethod(new Object())).isNull();
       // Read twice: the absence is remembered.
       assertThat(ClientCallExtractor.grpcMethod(new Object())).isNull();
-      assertThat(ClientCallExtractor.kafkaTopic(new PublicRecord(null))).isNull();
-      assertThat(ClientCallExtractor.kafkaTopic(new PublicRecord(new Broken()))).isNull();
+      assertThat(ClientCallExtractor.grpcMethod(new PublicRecord(null))).isNull();
+      assertThat(ClientCallExtractor.grpcMethod(new PublicRecord(new Broken()))).isNull();
     }
   }
 

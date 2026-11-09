@@ -15,17 +15,35 @@ import org.jspecify.annotations.Nullable;
 final class ClientCallAdvice {
   private ClientCallAdvice() {}
 
-  /** {@code KafkaProducer.send(ProducerRecord, Callback)}. */
+  /**
+   * {@code KafkaProducer.send(ProducerRecord, Callback)}, scope-only ({@link
+   * BootstrapDispatcher#SCOPE_MESSAGE_SEND}): the send is evaluated at its metadata wait ({@link
+   * KafkaWaitOnMetadata}), inside {@code doSend}'s own error handling.
+   */
   static final class KafkaSend {
     @Advice.OnMethodEnter
-    static void enter(@Advice.This final Object producer, @Advice.Argument(0) final Object record)
+    static void enter() {
+      BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_MESSAGE_SEND);
+    }
+
+    @Advice.OnMethodExit(onThrowable = Throwable.class)
+    static void exit() {
+      BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_MESSAGE_SEND);
+    }
+  }
+
+  /**
+   * {@code KafkaProducer.waitOnMetadata(String topic, Integer, long, long)}, evaluated only inside
+   * a send ({@link KafkaSend}), not for {@code partitionsFor}. A reject throws Kafka's {@code
+   * TimeoutException} where Kafka's own metadata timeout is thrown: {@code doSend} hands it to the
+   * callback and the interceptors and returns a failed future, as for a real timeout.
+   */
+  static final class KafkaWaitOnMetadata {
+    @Advice.OnMethodEnter
+    static void enter(@Advice.This final Object producer, @Advice.Argument(0) final String topic)
         throws Throwable {
-      final String topic;
-      BootstrapDispatcher.beginInternalCall();
-      try {
-        topic = ClientCallExtractor.kafkaTopic(record);
-      } finally {
-        BootstrapDispatcher.endInternalCall();
+      if (!BootstrapDispatcher.inScope(BootstrapDispatcher.SCOPE_MESSAGE_SEND)) {
+        return;
       }
       BootstrapDispatcher.beforeClientCall(OperationTags.MESSAGE_SEND, producer, topic, null, null);
     }

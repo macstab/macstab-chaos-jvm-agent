@@ -46,23 +46,78 @@ public final class ClientLibraryProbeMain {
     System.out.println(key + ".message=" + failure.getMessage());
   }
 
-  private static void kafkaSend() {
+  /**
+   * Sends to a matched ({@code orders}) and an unmatched ({@code audit}) topic without a broker:
+   * how each send fails (synchronously, or through its future), how often its callback and the
+   * producer interceptor saw the failure; then {@code partitionsFor}, which also waits for metadata
+   * but is not a send.
+   */
+  private static void kafkaSend() throws Exception {
     final Properties config = new Properties();
     config.put("bootstrap.servers", "127.0.0.1:1");
     config.put("max.block.ms", "300");
     config.put("key.serializer", "org.apache.kafka.common.serialization.StringSerializer");
     config.put("value.serializer", "org.apache.kafka.common.serialization.StringSerializer");
+    config.put("interceptor.classes", CountingInterceptor.class.getName());
     try (org.apache.kafka.clients.producer.KafkaProducer<String, String> producer =
         new org.apache.kafka.clients.producer.KafkaProducer<>(config)) {
       for (final String topic : List.of("orders", "audit")) {
+        final java.util.concurrent.atomic.AtomicInteger callbacks =
+            new java.util.concurrent.atomic.AtomicInteger();
+        final java.util.concurrent.Future<org.apache.kafka.clients.producer.RecordMetadata> sent;
         try {
-          producer.send(new org.apache.kafka.clients.producer.ProducerRecord<>(topic, "k", "v"));
-          System.out.println(topic + ".type=sent");
+          sent =
+              producer.send(
+                  new org.apache.kafka.clients.producer.ProducerRecord<>(topic, "k", "v"),
+                  (metadata, exception) -> callbacks.incrementAndGet());
         } catch (final RuntimeException failure) {
-          report(topic, failure);
+          report(topic + ".send", failure);
+          continue;
         }
+        try {
+          sent.get(5, java.util.concurrent.TimeUnit.SECONDS);
+          System.out.println(topic + ".type=sent");
+        } catch (final java.util.concurrent.ExecutionException failure) {
+          report(topic, failure.getCause());
+        }
+        System.out.println(topic + ".callbacks=" + callbacks.get());
+        System.out.println(topic + ".interceptorErrors=" + CountingInterceptor.ERRORS.getAndSet(0));
+      }
+      try {
+        producer.partitionsFor("orders");
+        System.out.println("partitions.type=returned");
+      } catch (final RuntimeException failure) {
+        report("partitions", failure);
       }
     }
+  }
+
+  /** Counts the failed sends a producer interceptor is told about. */
+  public static final class CountingInterceptor
+      implements org.apache.kafka.clients.producer.ProducerInterceptor<String, String> {
+    static final java.util.concurrent.atomic.AtomicInteger ERRORS =
+        new java.util.concurrent.atomic.AtomicInteger();
+
+    @Override
+    public org.apache.kafka.clients.producer.ProducerRecord<String, String> onSend(
+        final org.apache.kafka.clients.producer.ProducerRecord<String, String> record) {
+      return record;
+    }
+
+    @Override
+    public void onAcknowledgement(
+        final org.apache.kafka.clients.producer.RecordMetadata metadata,
+        final Exception exception) {
+      if (exception != null) {
+        ERRORS.incrementAndGet();
+      }
+    }
+
+    @Override
+    public void close() {}
+
+    @Override
+    public void configure(final java.util.Map<String, ?> configs) {}
   }
 
   private static void kafkaPoll() {
