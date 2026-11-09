@@ -25,7 +25,7 @@ Every intercepted operation that some scenario is indexed under runs through `Sc
 JDK classes (`Thread`, `Socket`, `System`, etc.) are loaded by the **bootstrap classloader** — the root of the classloader hierarchy with no parent. ByteBuddy advice woven into these classes executes *in* the bootstrap classloader's namespace, which cannot see agent classes by name. The bridge:
 
 1. At startup, `BootstrapDispatcher.class` bytecode (plus the few types woven advice references) is extracted from the agent JAR, written to a temp JAR, and appended to the bootstrap classpath via `Instrumentation.appendToBootstrapClassLoaderSearch`
-2. A 77-slot `MethodHandle[]` array (`BootstrapDispatcher.HANDLE_COUNT`) is built against `BridgeDelegate.class` using `MethodHandles.publicLookup()` and wired into `BootstrapDispatcher.install()` via reflection against the bootstrap-classloader version (`Class.forName("...BootstrapDispatcher", true, null)`)
+2. A 78-slot `MethodHandle[]` array (`BootstrapDispatcher.HANDLE_COUNT`) is built against `BridgeDelegate.class` using `MethodHandles.publicLookup()` and wired into `BootstrapDispatcher.install()` via reflection against the bootstrap-classloader version (`Class.forName("...BootstrapDispatcher", true, null)`)
 3. `handles` is written to the `volatile` field **before** `delegate` — the Java Memory Model's happens-before rule on volatile writes guarantees any thread that observes `delegate != null` also observes the fully-initialized `handles` array
 
 ### Reentrancy Guard
@@ -47,7 +47,7 @@ The `int[]` is kept for the thread's lifetime rather than removed when the depth
 A second recursion risk: `ThreadLocal.get()` is itself instrumented once the `THREAD_LOCAL` hook group is woven. Reading `DEPTH.get()` inside a dispatch method would re-trigger `ThreadLocalGetAdvice`, which would call `BootstrapDispatcher.beforeThreadLocalGet()`, which would call `DEPTH.get()` ... The advice contains an identity check:
 
 ```java
-if (threadLocal == BootstrapDispatcher.depthThreadLocal()) return false;
+if (BootstrapDispatcher.isDepthThreadLocal(threadLocal)) return false;
 ```
 
 This single pointer-equality check is the only thing preventing infinite recursion at that specific callsite.
@@ -111,11 +111,11 @@ Rate-limited scenarios contend rarely, so the uncontended CAS path dominates.
 - **macOS**: the same POSIX path, `pthread_cond_timedwait(3)` on HotSpot's `Parker`; the kernel side is a Mach wait.
 - **Timer resolution**: with high-resolution timers (`CONFIG_HIGH_RES_TIMERS=y`, the default on modern kernels) a timed park wakes within microseconds of its deadline on an idle machine; under load the woken thread still waits for a CPU, so `Thread.sleep(1)` can take noticeably longer than 1 ms. Injected delays are lower bounds, not exact durations.
 
-The `THREAD_PARK` instrumentation fires a `beforeThreadPark()` dispatch before the actual park. If a `DelayEffect` is configured, `Thread.sleep(delayMillis)` is called — which itself calls `park`, which the reentrancy DEPTH guard intercepts and returns the fallback immediately. Without the DEPTH guard, a 100ms chaos delay on `THREAD_PARK` would cause infinite `sleep → park → chaos eval → sleep → park ...` recursion.
+The `THREAD_PARK` instrumentation fires a `beforeThreadPark()` dispatch before the actual park. If a `DelayEffect` is configured, the summed delay is slept with `Thread.sleep` — which itself calls `park`, which the reentrancy DEPTH guard intercepts and returns the fallback immediately. Without the DEPTH guard, a 100ms chaos delay on `THREAD_PARK` would cause infinite `sleep → park → chaos eval → sleep → park ...` recursion.
 
 ### Safepoint Mechanics and `SafepointStormStressor`
 
-HotSpot safepoints are JVM-global stop-the-world pauses. All application threads must reach a "safe point" — a location in the bytecode where the JVM knows the full GC root set. The `SafepointStormStressor` deliberately triggers them by calling both `System.gc()` and `Instrumentation.retransformClasses()` on a timer.
+HotSpot safepoints are JVM-global stop-the-world pauses. All application threads must reach a "safe point" — a location in the bytecode where the JVM knows the full GC root set. The `SafepointStormStressor` deliberately triggers them by calling `System.gc()` on a timer and, when it has an `Instrumentation` and `retransformClassCount > 0`, `Instrumentation.retransformClasses()` on a sample of loaded classes.
 
 How a safepoint is reached on current HotSpot:
 1. The VM thread arms every Java thread's poll word ([thread-local handshakes, JEP 312](https://openjdk.org/jeps/312)).
@@ -123,7 +123,7 @@ How a safepoint is reached on current HotSpot:
 3. The interpreter checks at branches and returns; threads in native code or blocked count as safe already and are held only when they return to Java.
 4. With every thread stopped, the VM runs the operation (a full GC, a class redefinition, a deoptimisation) and releases them.
 
-`SafepointStormStressor` calls `System.gc()` and `Instrumentation.retransformClasses()` on a timer; each requires a safepoint, so every application thread stops for its duration. This simulates STW pause pressure that would appear in production under heavy GC load or JVM agent activity.
+`SafepointStormStressor` calls `System.gc()` (and the retransformations) on a timer; each requires a safepoint (a `System.gc()` only where explicit collections are not disabled: under `-XX:+DisableExplicitGC` a storm without retransformations is refused at activation), so every application thread stops for its duration. This simulates STW pause pressure that would appear in production under heavy GC load or JVM agent activity.
 
 ### Virtual Threads and Carrier-Thread Pinning Risk
 

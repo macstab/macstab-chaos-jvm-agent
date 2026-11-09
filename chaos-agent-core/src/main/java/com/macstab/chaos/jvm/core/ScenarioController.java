@@ -170,7 +170,7 @@ final class ScenarioController {
     this.observabilityBus = observabilityBus;
     this.stressorFactory = stressorFactory;
     // randomSeed==null must mean "non-deterministic sampling", not "seed 0". Seeding with 0 would
-    // make splittableRandom(matched) collapse to baseSeed ^ matched ^ scenario.id().hashCode() — a
+    // make splittableRandom(matched) collapse to a function of the match count and the id hash — a
     // function of scenario ID and match count only, so every JVM run would reproduce the exact
     // same fire/no-fire sequence, and operators with probability<1.0 expecting stochastic sampling
     // across CI runs would get a fixed schedule. Draw the fallback seed from ThreadLocalRandom so
@@ -607,8 +607,9 @@ final class ScenarioController {
    *       without being counted.
    *   <li><b>Warm-up</b>: {@code matchedCount} must exceed {@code activateAfterMatches}.
    *   <li><b>Probability</b>: a random draw using {@link java.util.SplittableRandom} seeded with
-   *       the configured seed XOR-ed with the match count and scenario ID hash must be below the
-   *       configured probability.
+   *       {@code baseSeed ^ rotl(matched, 32) ^ (id.hashCode() * 0x9e3779b97f4a7c15L)} must be
+   *       below the configured probability; with {@code replayMatches}, the match number must be in
+   *       the replay log instead.
    *   <li><b>Rate limit</b>: if a rate limit is configured, the number of permits issued in the
    *       current fixed window must not exceed the limit (guarded by {@code synchronized(this)}).
    *   <li><b>Max applications</b>: if {@code maxApplications} is set, a reservation must fit under
@@ -1197,7 +1198,8 @@ final class ScenarioController {
   }
 
   /**
-   * Returns a {@link SplittableRandom} seeded with {@code baseSeed ^ matched ^ scenarioIdHash}.
+   * Returns a {@link SplittableRandom} seeded with {@code baseSeed ^ Long.rotateLeft(matched, 32) ^
+   * (scenario.id().hashCode() * 0x9e3779b97f4a7c15L)}.
    *
    * <p>A new instance is constructed per call because {@link SplittableRandom} is not thread-safe.
    * The seed incorporates {@code matched} so that successive invocations produce different draws
