@@ -77,6 +77,19 @@ public final class StartupConfigLoader {
   private static final long MAX_FILE_SIZE = ChaosPlanMapper.MAX_JSON_LENGTH;
 
   private static final String SOURCE_FILE_PREFIX = "file:";
+
+  /**
+   * The source a plan file is reported under: {@code file:} and its absolute, normalised path, so a
+   * relative configured path names the same file wherever the report is read (U-43).
+   */
+  private static String fileSource(final String filePath) {
+    try {
+      return SOURCE_FILE_PREFIX + Path.of(filePath).toAbsolutePath().normalize();
+    } catch (final java.nio.file.InvalidPathException notAPath) {
+      return SOURCE_FILE_PREFIX + filePath;
+    }
+  }
+
   private static final String SOURCE_INLINE_JSON = "inline-json";
   private static final String SOURCE_BASE64 = "base64";
 
@@ -198,13 +211,13 @@ public final class StartupConfigLoader {
             .orElseThrow(
                 () ->
                     new ConfigLoadException(
-                        "config file does not exist: " + filePath, SOURCE_FILE_PREFIX + filePath));
-    final ChaosPlan plan = ChaosPlanMapper.read(file.json(), SOURCE_FILE_PREFIX + filePath);
+                        "config file does not exist: " + filePath, fileSource(filePath)));
+    final ChaosPlan plan = ChaosPlanMapper.read(file.json(), fileSource(filePath));
     // The configured path, not the resolved target: a reloading poller must keep watching the
     // ConfigMap link, whose target directory is replaced on every update.
     return new LoadedPlan(
         plan,
-        SOURCE_FILE_PREFIX + filePath,
+        fileSource(filePath),
         debugDumpOnStart,
         Path.of(filePath).toAbsolutePath().normalize(),
         file);
@@ -228,7 +241,7 @@ public final class StartupConfigLoader {
 
   private static ChaosPlan readValidatedPlanFile(final String filePath) {
     final Path target = validateAndResolvePath(filePath);
-    return ChaosPlanMapper.read(readFileContents(target, filePath), SOURCE_FILE_PREFIX + filePath);
+    return ChaosPlanMapper.read(readFileContents(target, filePath), fileSource(filePath));
   }
 
   /**
@@ -254,13 +267,13 @@ public final class StartupConfigLoader {
       if (content.length > MAX_FILE_SIZE) {
         throw new ConfigLoadException(
             "chaos plan config file exceeds maximum size of " + MAX_FILE_SIZE + " bytes: " + path,
-            SOURCE_FILE_PREFIX + originalFilePath);
+            fileSource(originalFilePath));
       }
       return new String(content, StandardCharsets.UTF_8);
     } catch (IOException exception) {
       throw new ConfigLoadException(
           "failed to read chaos plan config file: " + path,
-          SOURCE_FILE_PREFIX + originalFilePath,
+          fileSource(originalFilePath),
           exception);
     }
   }
@@ -298,7 +311,7 @@ public final class StartupConfigLoader {
               + ", not by the JVM's user "
               + self
               + " or root",
-          SOURCE_FILE_PREFIX + filePath);
+          fileSource(filePath));
     }
   }
 
@@ -342,13 +355,12 @@ public final class StartupConfigLoader {
     final Path path = Path.of(filePath).toAbsolutePath().normalize();
 
     if (!Files.exists(path, LinkOption.NOFOLLOW_LINKS)) {
-      throw new ConfigLoadException(
-          "config file does not exist: " + path, SOURCE_FILE_PREFIX + filePath);
+      throw new ConfigLoadException("config file does not exist: " + path, fileSource(filePath));
     }
     final Path target = Files.isSymbolicLink(path) ? configMapTarget(path, filePath) : path;
     if (!Files.isRegularFile(target, LinkOption.NOFOLLOW_LINKS)) {
       throw new ConfigLoadException(
-          "config path is not a regular file: " + target, SOURCE_FILE_PREFIX + filePath);
+          "config path is not a regular file: " + target, fileSource(filePath));
     }
     rejectIfOversize(target, filePath);
     // Mode bits and owner names are POSIX notions: a file system without a posix view (Windows)
@@ -397,7 +409,7 @@ public final class StartupConfigLoader {
             "config file is a symbolic link (rejected for safety; only the Kubernetes ConfigMap"
                 + " layout <dir>/<name> -> ..data/<name> is followed): "
                 + link,
-            SOURCE_FILE_PREFIX + originalPath);
+            fileSource(originalPath));
       }
       // Absolute (see validateAndResolvePath), so a link always has a parent directory.
       final Path directory =
@@ -406,7 +418,7 @@ public final class StartupConfigLoader {
       if (!Files.isSymbolicLink(data)) {
         throw new ConfigLoadException(
             "config file links into ..data, which is not the Kubernetes data link: " + data,
-            SOURCE_FILE_PREFIX + originalPath);
+            fileSource(originalPath));
       }
       final Path version = Files.readSymbolicLink(data);
       if (version.isAbsolute()
@@ -414,14 +426,12 @@ public final class StartupConfigLoader {
           || !version.getFileName().toString().startsWith("..")) {
         throw new ConfigLoadException(
             "..data does not point at a timestamped directory beside it: " + data,
-            SOURCE_FILE_PREFIX + originalPath);
+            fileSource(originalPath));
       }
       return directory.resolve(version).resolve(fileName);
     } catch (final IOException unreadable) {
       throw new ConfigLoadException(
-          "cannot resolve config file link: " + link,
-          SOURCE_FILE_PREFIX + originalPath,
-          unreadable);
+          "cannot resolve config file link: " + link, fileSource(originalPath), unreadable);
     }
   }
 
@@ -472,9 +482,7 @@ public final class StartupConfigLoader {
               attributes.fileKey()));
     } catch (final IOException unreadable) {
       throw new ConfigLoadException(
-          "failed to read chaos plan config file: " + target,
-          SOURCE_FILE_PREFIX + filePath,
-          unreadable);
+          "failed to read chaos plan config file: " + target, fileSource(filePath), unreadable);
     }
   }
 
@@ -504,13 +512,11 @@ public final class StartupConfigLoader {
                 + size
                 + " actual): "
                 + path,
-            SOURCE_FILE_PREFIX + originalPath);
+            fileSource(originalPath));
       }
     } catch (IOException exception) {
       throw new ConfigLoadException(
-          "cannot determine size of config file: " + path,
-          SOURCE_FILE_PREFIX + originalPath,
-          exception);
+          "cannot determine size of config file: " + path, fileSource(originalPath), exception);
     }
   }
 
@@ -529,7 +535,7 @@ public final class StartupConfigLoader {
       if (filePerms.contains(PosixFilePermission.OTHERS_WRITE)) {
         throw new ConfigLoadException(
             "config file is world-writable (rejected for safety): " + path + WORLD_WRITABLE_HINT,
-            SOURCE_FILE_PREFIX + originalPath);
+            fileSource(originalPath));
       }
       final Path linkedParent = path.getParent();
       if (linkedParent != null) {
@@ -546,7 +552,7 @@ public final class StartupConfigLoader {
                   + " for safety): "
                   + parent
                   + WORLD_WRITABLE_HINT,
-              SOURCE_FILE_PREFIX + originalPath);
+              fileSource(originalPath));
         }
       }
     } catch (UnsupportedOperationException | IOException exception) {
@@ -555,7 +561,7 @@ public final class StartupConfigLoader {
       // bits matter.
       throw new ConfigLoadException(
           "cannot check POSIX permissions on config file: " + path,
-          SOURCE_FILE_PREFIX + originalPath,
+          fileSource(originalPath),
           exception);
     }
   }

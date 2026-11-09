@@ -58,6 +58,10 @@ Migration steps for each change: [docs/migration-2.0.md](docs/migration-2.0.md).
 
 * **core:** the event log line is `type=X scenarioId="…" message="…" attributes={k="v", …}`: the id, message and attribute values are quoted, and the id, message, keys and values escaped (`\\`, `\"`, `\r`, `\n`, `\uXXXX` for the other control characters and U+2028/U+2029). It was `type=X scenarioId=… message="…" attributes={k=v, …}`, unescaped. A parser of the old line must follow ([migration §38](docs/migration-2.0.md#38-the-event-log-line-is-quoted-and-escaped)).
 
+### Changed
+
+* **startup-config:** a `file:` source (the status file's `source=`, `LoadedPlan.source()`, `ConfigLoadException.getSource()`) is the plan file's absolute, normalised path, also when it was configured relative.
+
 ### Features
 
 * **core:** a session-scoped scenario may select thread starts and sleeps (`ThreadSelector`) and executor shutdowns (`ShutdownSelector` on `EXECUTOR_SHUTDOWN` / `EXECUTOR_AWAIT_TERMINATION`): they run on the session's thread. Only the operations the JVM evaluates without a session (`CLASS_LOAD`, `CLASS_DEFINE`, `RESOURCE_LOAD`, `SHUTDOWN_HOOK_REGISTER`) and stressors are refused in a session.
@@ -130,6 +134,10 @@ Migration steps for each change: [docs/migration-2.0.md](docs/migration-2.0.md).
 
 ### Bug Fixes
 
+* **bootstrap:** a failure without a message reported `reason=null` in the status file and `config reload failed: null` on stderr; it reports the exception's class name. A `FAILED` event of such a failure says `(no message)`, as the diagnostics record does.
+* **bootstrap:** a reload failure that recurred on every tick (an id taken by a scenario activated elsewhere) rewrote the status file on every tick; it is written once, like the stderr line. An `Error` in a tick (`StackOverflowError`, `OutOfMemoryError`) ended the watching for good; it is logged and the next tick tries again.
+* **bootstrap:** a reloaded plan changing an id that the reloader's own scenario held until it ended, and that another activation then took, stopped and restarted the other changed scenarios on every tick before the conflict was found; every new or changed id is now checked before anything stops.
+* **bootstrap:** a plan file's `observability` settings were applied after its scenarios started, so `structuredLoggingEnabled=false` still logged their first events; they are applied after the checks and before the activations, and restored when an activation fails. The startup plan's status is written before the first tick, so a tick's report is not overwritten by it.
 * **core:** the diagnostics kept every activation failure since start, so a reloader or a test suite refusing scenarios grew the history (and every `snapshot()` copy of it) without bound; the 256 most recent are kept and the older ones counted in the runtime detail `droppedActivationFailures`. `debugDump()` now lists the failures, as its javadoc promised, and the JMX `debugDump` no longer claims stressor metrics. `currentSessionId` read the literal `"null"` outside a session; the key is left out then.
 * **core:** a plan's observability settings (`structuredLoggingEnabled`, `jmxEnabled`) were kept by bare scenario id, so a session plan muted or hid the same id in the JVM scope and in every other session, and the last plan to apply them won; they now belong to the scenario's scope. A session closed without closing its plan handle left the settings behind; the session's close now clears them. `FAILED` events carry the `scope` attribute, so a muted plan's refusals are muted too, and the JMX `listScenarios` and `debugDump` hide a scenario by its scope.
 * **api, core:** a scenario id or message with a line break split the event's log line in two, and could forge a second line; it is now escaped. Event attributes, the diagnostics' runtime details and a selector's operations iterated in an order that changed from JVM to JVM (`Map.copyOf`, `Set.copyOf`), so the same event printed, and the same plan serialised, differently between runs; attributes and runtime details now keep the order they were given in (still refusing null keys and values) and operations their declaration order. The `Snapshot` javadoc said scenarios were ordered by registration time; they are ordered by id, then scope.

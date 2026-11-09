@@ -731,8 +731,12 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
     final Map<String, String> attributes = new LinkedHashMap<>();
     attributes.put("category", category.name());
     attributes.put("scope", scopeKey);
+    // The message the diagnostics record: an exception without one is "(no message)", not "null".
     observabilityBus.publish(
-        ChaosEvent.Type.FAILED, scenarioId, String.valueOf(message), attributes);
+        ChaosEvent.Type.FAILED,
+        scenarioId,
+        Objects.requireNonNullElse(message, "(no message)"),
+        attributes);
   }
 
   private void ensureOpen() {

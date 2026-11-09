@@ -199,6 +199,28 @@ class StartupConfigLoaderTest {
     }
 
     @Test
+    @DisplayName("a relative file path is reported absolute, also when it fails")
+    void relativePathReportedAbsolute() throws Exception {
+      final Path configFile = tempDir.resolve("relative.json");
+      Files.writeString(configFile, writeSampleJson("relative-test"));
+      final Path workingDirectory = Path.of("").toAbsolutePath();
+      assumeTrue(configFile.getRoot().equals(workingDirectory.getRoot()));
+      final Path relative = workingDirectory.relativize(configFile);
+      final Path missing = workingDirectory.relativize(tempDir.resolve("missing.json"));
+
+      final StartupConfigLoader.LoadedPlan loaded =
+          StartupConfigLoader.load("configFile=" + relative, Map.of()).orElseThrow();
+
+      assertThat(loaded.source()).isEqualTo("file:" + configFile.toAbsolutePath().normalize());
+      assertThatExceptionOfType(ConfigLoadException.class)
+          .isThrownBy(() -> StartupConfigLoader.load("configFile=" + missing, Map.of()))
+          .satisfies(
+              failure ->
+                  assertThat(failure.getSource())
+                      .isEqualTo("file:" + tempDir.resolve("missing.json").toAbsolutePath()));
+    }
+
+    @Test
     @DisplayName("agent args take precedence over environment variables")
     void argsPrecedence() throws Exception {
       Path envFile = tempDir.resolve("env-plan.json");

@@ -567,16 +567,20 @@ public final class ChaosAgentBootstrap {
       }
       loadedPlan.ifPresent(
           loaded -> {
+            final boolean watched;
             try {
-              activateLoadedPlan(loaded, settings, runtime);
+              watched = activateLoadedPlan(loaded, settings, runtime);
             } catch (final RuntimeException activationFailure) {
               report.ifPresent(
                   r ->
                       r.statusError(
-                          loaded.source(), 0, 0, String.valueOf(activationFailure.getMessage())));
+                          loaded.source(), 0, 0, ChaosReports.reasonOf(activationFailure)));
               throw activationFailure;
             }
-            report.ifPresent(r -> r.statusOk(loaded.plan().scenarios().size(), loaded.source()));
+            // A watched plan is reported by its poller, before its first tick.
+            if (!watched) {
+              report.ifPresent(r -> r.statusOk(loaded.plan().scenarios().size(), loaded.source()));
+            }
           });
       return runtime;
     } catch (final Throwable installFailure) {
@@ -645,15 +649,22 @@ public final class ChaosAgentBootstrap {
     }
   }
 
-  private static void activateLoadedPlan(
+  /**
+   * Activates the startup plan, through a poller when its file is watched.
+   *
+   * @return whether a poller watches the plan file
+   */
+  private static boolean activateLoadedPlan(
       final StartupConfigLoader.LoadedPlan loaded,
       final AgentSettings settings,
       final ChaosRuntime runtime) {
+    boolean watched = false;
     if (loaded.filePath() != null) {
       final Optional<StartupConfigPoller> poller =
           StartupConfigPoller.createIfEnabled(settings, loaded.filePath(), runtime);
       if (poller.isPresent()) {
         startPollerWithInitialPlan(poller.get(), loaded);
+        watched = true;
       } else {
         runtime.activate(loaded.plan());
       }
@@ -666,6 +677,7 @@ public final class ChaosAgentBootstrap {
     if ((loaded.debugDumpOnStart() && !planDumps) || (planDumps && pollerActivated)) {
       System.err.println(runtime.diagnostics().debugDump());
     }
+    return watched;
   }
 
   private static void startPollerWithInitialPlan(

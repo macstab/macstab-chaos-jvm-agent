@@ -1,6 +1,7 @@
 package com.macstab.chaos.jvm.bootstrap;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doReturn;
@@ -160,17 +161,13 @@ class StartupConfigPollerEdgeCaseTest {
   }
 
   @Test
-  @DisplayName("a VirtualMachineError during a reload is logged and rethrown")
-  void virtualMachineErrorRethrown() throws Exception {
+  @DisplayName("a VirtualMachineError during a reload is logged, not rethrown: watching goes on")
+  void virtualMachineErrorLogged() throws Exception {
     doThrow(new OutOfMemoryError("simulated exhaustion")).when(runtime).validate(any());
     poller("60000");
 
     final String stderr =
-        stderrOf(
-            () ->
-                assertThatThrownBy(poller::pollOnce)
-                    .isInstanceOf(OutOfMemoryError.class)
-                    .hasMessage("simulated exhaustion"));
+        stderrOf(() -> assertThatCode(poller::pollOnce).doesNotThrowAnyException());
 
     assertThat(stderr).contains("[chaos-agent] config reload failed: simulated exhaustion");
   }

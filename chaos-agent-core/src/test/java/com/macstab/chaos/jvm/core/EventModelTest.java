@@ -401,4 +401,38 @@ class EventModelTest {
     submit();
     assertThat(plan.appliedCount()).isEqualTo(2L);
   }
+
+  @Test
+  @DisplayName("a FAILED event of an exception without a message says (no message), not null")
+  void failedWithoutMessage() {
+    runtime.addEventListener(recorder);
+    runtime.setHookDemand(
+        operations -> {
+          throw new com.macstab.chaos.jvm.api.ChaosUnsupportedFeatureException("unused") {
+            private static final long serialVersionUID = 1L;
+
+            @Override
+            public String getMessage() {
+              return null;
+            }
+          };
+        });
+    final ChaosScenario scenario =
+        ChaosScenario.builder("silent")
+            .scope(ChaosScenario.ScenarioScope.JVM)
+            .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+            .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+            .build();
+
+    assertThatThrownBy(() -> runtime.activate(scenario))
+        .isInstanceOf(com.macstab.chaos.jvm.api.ChaosUnsupportedFeatureException.class);
+
+    assertThat(events)
+        .filteredOn(event -> event.type() == ChaosEvent.Type.FAILED)
+        .singleElement()
+        .satisfies(event -> assertThat(event.message()).isEqualTo("(no message)"));
+    assertThat(runtime.diagnostics().snapshot().failures())
+        .singleElement()
+        .satisfies(failure -> assertThat(failure.message()).isEqualTo("(no message)"));
+  }
 }

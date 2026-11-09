@@ -187,6 +187,18 @@ final class ChaosReports implements AutoCloseable {
   }
 
   /**
+   * What a failure reports as its reason: its message, else its class's simple name, never {@code
+   * "null"}.
+   *
+   * @param failure the failure
+   * @return the reason
+   */
+  static String reasonOf(final Throwable failure) {
+    final String message = failure.getMessage();
+    return message != null ? message : failure.getClass().getSimpleName();
+  }
+
+  /**
    * Writes the hits file a last time, if anything was applied: a JVM in which no scenario ever
    * applied leaves no hits file behind.
    */

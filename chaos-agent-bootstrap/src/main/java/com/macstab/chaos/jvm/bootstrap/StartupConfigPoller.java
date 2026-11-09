@@ -86,6 +86,9 @@ public final class StartupConfigPoller implements AutoCloseable {
   /** The scenario ids the current plan's observability settings apply to. */
   private Set<String> observedIds = Set.of();
 
+  /** The current plan's observability settings; {@code null} before the first plan. */
+  private com.macstab.chaos.jvm.api.ChaosPlan.@Nullable Observability observed;
+
   /**
    * What identifies the file's contents for change detection: the regular file actually read (a
    * Kubernetes ConfigMap update replaces it), its modification time, size and file key.
@@ -115,6 +118,9 @@ public final class StartupConfigPoller implements AutoCloseable {
   // outlives the shutdown (blocked in an uninterruptible read) then activates nothing, so no
   // scenario stays registered without an owner.
   private volatile boolean closed = false;
+
+  /** Runs before each read of the plan file; a test seam (U-72 c1), a no-op otherwise. */
+  private volatile Runnable readHook = () -> {};
 
   private StartupConfigPoller(
       final Path configPath, final ChaosRuntime runtime, final long intervalMs) {
@@ -168,8 +174,11 @@ public final class StartupConfigPoller implements AutoCloseable {
       lastDigest = digest(baseline.json());
       provisional = isRecent(baseline.lastModified());
     }
-    applyDiff(initialPlan.scenarios());
-    applyObservability(initialPlan);
+    applyDiff(initialPlan.scenarios(), initialPlan.observability());
+    // Reported before the first tick can run, so a tick's own report is never overwritten.
+    ChaosReports.current()
+        .ifPresent(
+            reports -> reports.statusOk(initialPlan.scenarios().size(), "file:" + configPath));
     // The future is not needed: pollOnce() catches every Throwable, so the schedule never ends
     // with a failure that the future would report; close() stops the scheduler.
     @SuppressWarnings("FutureReturnValueIgnored")
@@ -237,22 +246,32 @@ public final class StartupConfigPoller implements AutoCloseable {
     } catch (final Throwable throwable) {
       // Catch Throwable, not Exception: ScheduledExecutorService.scheduleAtFixedRate silently
       // suppresses all future executions if the task throws anything, including Errors. Log here
-      // and keep the scheduler alive; the next tick retries. Re-interrupt on
-      // InterruptedException and re-throw VirtualMachineError, past which continuing is not
-      // meaningful. A failed read or parse keeps the current plan.
+      // and keep the scheduler alive, also after an Error (a StackOverflowError, an
+      // OutOfMemoryError): the next tick retries, while a rethrow would end the watching for good.
+      // Re-interrupt on InterruptedException. A failed read or parse keeps the current plan. A
+      // failure that recurs on every tick is logged and reported once.
       if (throwable instanceof InterruptedException) {
         Thread.currentThread().interrupt();
       }
-      logReloadFailure(String.valueOf(throwable.getMessage()));
-      reportReloadFailure(throwable);
-      if (throwable instanceof VirtualMachineError virtualMachineError) {
-        throw virtualMachineError;
+      if (logReloadFailure(ChaosReports.reasonOf(throwable))) {
+        reportReloadFailure(throwable);
       }
     }
   }
 
   private Optional<StartupConfigLoader.PlanFile> readCurrentFile() {
+    readHook.run();
     return StartupConfigLoader.readPlanFile(configPath.toString());
+  }
+
+  /**
+   * Test seam (U-72 c1): runs {@code hook} on the poll thread before each read of the plan file, so
+   * a test can fail a tick the way a broken file system or the JVM would.
+   *
+   * @param hook what to run before each read
+   */
+  void onRead(final Runnable hook) {
+    readHook = java.util.Objects.requireNonNull(hook, "hook");
   }
 
   /**
@@ -296,13 +315,12 @@ public final class StartupConfigPoller implements AutoCloseable {
     final com.macstab.chaos.jvm.api.ChaosPlan newPlan;
     try {
       newPlan = ChaosPlanMapper.read(file.json());
-      applyDiff(newPlan.scenarios());
+      applyDiff(newPlan.scenarios(), newPlan.observability());
       // A close that overtook this reload made applyDiff a no-op: nothing was applied, so
-      // nothing is configured, recorded or reported.
+      // nothing is recorded or reported.
       if (closed) {
         return;
       }
-      applyObservability(newPlan);
     } catch (final RuntimeException failure) {
       // Remember content that can never apply (malformed, invalid, hooks that cannot be woven) so
       // it is not tried again; a conflict with a scenario activated elsewhere may clear and is
@@ -390,12 +408,13 @@ public final class StartupConfigPoller implements AutoCloseable {
     synchronized (this) {
       stopped = activeScenarios.size();
       applyDiff(List.of());
-      runtime.clearPlanObservability(observedIds, this);
-      observedIds = Set.of();
+      observe(Set.of(), null);
     }
     lastStamp = null;
     lastDigest = null;
     failedDigest = null;
+    // The status file is gone: a failure after the file comes back is reported again.
+    lastLoggedFailure = null;
     ChaosReports.current().ifPresent(ChaosReports::removeStatus);
     System.err.println(
         "[chaos-agent] config file removed: "
@@ -423,38 +442,56 @@ public final class StartupConfigPoller implements AutoCloseable {
   }
 
   /**
-   * Applies the plan's observability settings to its scenarios and restores the defaults of
-   * scenarios that left the plan.
+   * Applies a plan's observability settings to its scenarios and restores the defaults of scenarios
+   * that left the plan; {@code null} settings restore the defaults of all of them.
    */
-  private synchronized void applyObservability(final com.macstab.chaos.jvm.api.ChaosPlan plan) {
-    final Set<String> ids =
-        plan.scenarios().stream()
-            .map(ChaosScenario::id)
-            .collect(java.util.stream.Collectors.toUnmodifiableSet());
+  private synchronized void observe(
+      final Set<String> ids,
+      final com.macstab.chaos.jvm.api.ChaosPlan.@Nullable Observability observability) {
     final Set<String> gone = new java.util.HashSet<>(observedIds);
-    gone.removeAll(ids);
+    if (observability != null) {
+      gone.removeAll(ids);
+    }
     runtime.clearPlanObservability(gone, this);
-    runtime.applyPlanObservability(ids, plan.observability(), this);
-    observedIds = ids;
+    if (observability != null) {
+      runtime.applyPlanObservability(ids, observability, this);
+    }
+    observedIds = observability != null ? Set.copyOf(ids) : Set.of();
+    observed = observability;
+  }
+
+  /**
+   * Applies a reloaded plan's scenarios without changing the observability settings (see {@link
+   * #applyDiff(List, com.macstab.chaos.jvm.api.ChaosPlan.Observability)}).
+   *
+   * @param newScenarios the scenarios of the reloaded plan
+   */
+  void applyDiff(final List<ChaosScenario> newScenarios) {
+    applyDiff(newScenarios, null);
   }
 
   /**
    * Applies a reloaded plan atomically: either every new and changed scenario is active afterwards,
    * or the previously active set is restored.
    *
-   * <p>Every new or changed scenario is validated first; an invalid one rejects the plan before
-   * anything changes. Then scenarios that were removed or changed are stopped (their ids must be
-   * free for the new versions), and every new or changed scenario is activated. If an activation
-   * still fails (a conflict with a scenario activated elsewhere, a weaving failure), the scenarios
-   * activated by this call are closed and the previous versions are re-activated; they passed
-   * validation when they were first activated. A reloaded plan is therefore never partially
-   * applied, and a changed scenario that fails never stays stopped.
+   * <p>Every new or changed scenario is validated first, and its id checked against scenarios
+   * activated elsewhere; an invalid one, or one whose id is taken, rejects the plan before anything
+   * changes. Then the plan's observability settings are applied, so its scenarios start with them,
+   * and scenarios that were removed or changed are stopped (their ids must be free for the new
+   * versions), and every new or changed scenario is activated. If an activation still fails (a
+   * conflict with a scenario activated elsewhere, a weaving failure), the scenarios activated by
+   * this call are closed, the previous settings restored and the previous versions re-activated;
+   * they passed validation when they were first activated. A reloaded plan is therefore never
+   * partially applied, and a changed scenario that fails never stays stopped.
    *
    * @param newScenarios the scenarios of the reloaded plan
+   * @param observability the plan's observability settings; {@code null} leaves them unchanged
    * @throws IllegalStateException when the plan has duplicate ids or a scenario fails to activate;
    *     the previous set is active again when this is thrown
    */
-  synchronized void applyDiff(final List<ChaosScenario> newScenarios) {
+  synchronized void applyDiff(
+      final List<ChaosScenario> newScenarios,
+      final com.macstab.chaos.jvm.api.ChaosPlan.@Nullable Observability observability) {
     // Race guard: close() sets `closed=true` before entering this monitor. An in-flight pollOnce
     // that was blocked on file I/O may reach applyDiff after close() returned; activating into a
     // torn-down poller would orphan the handles. Bail out instead.
@@ -476,26 +513,41 @@ public final class StartupConfigPoller implements AutoCloseable {
     // windows). The runtime records each refusal (FAILED and the diagnostics); a refusal that
     // recurs for the same content is not retried, so it is recorded once.
     for (final ChaosScenario scenario : newById.values()) {
-      if (!scenario.equals(activeScenarios.get(scenario.id()))) {
-        try {
-          runtime.validate(scenario);
-          runtime.requireHooks(scenario);
-        } catch (final RuntimeException invalid) {
-          throw new IllegalStateException(
-              "plan not applied, previous scenarios kept: " + invalid.getMessage(), invalid);
-        }
+      if (scenario.equals(activeScenarios.get(scenario.id()))) {
+        continue;
+      }
+      try {
+        runtime.validate(scenario);
+        runtime.requireHooks(scenario);
+      } catch (final RuntimeException invalid) {
+        throw new IllegalStateException(
+            "plan not applied, previous scenarios kept: " + invalid.getMessage(), invalid);
       }
       // An id taken by a scenario activated elsewhere would fail the activation below after the
       // changed scenarios were stopped, and every retry would stop and restart them again
       // (resetting their counters, budgets and windows). Refuse before anything changes; the
       // conflict stays retryable, so it is not recorded (stderr and the status file report it
-      // once).
-      if (!activeScenarios.containsKey(scenario.id()) && runtime.isActive(scenario.id())) {
+      // once). A changed id is taken when the live scenario of that id is not this poller's own:
+      // its own ended (INACTIVE) or was replaced by another activation (STOPPED).
+      final ChaosActivationHandle own = activeHandles.get(scenario.id());
+      if (runtime.isActive(scenario.id())
+          && (own == null
+              || own.state() == com.macstab.chaos.jvm.api.ChaosDiagnostics.ScenarioState.INACTIVE
+              || own.state() == com.macstab.chaos.jvm.api.ChaosDiagnostics.ScenarioState.STOPPED)) {
         final String conflict = "scenario key already active: jvm::" + scenario.id();
         throw new IllegalStateException(
             "plan not applied, previous scenarios kept: " + conflict,
             new com.macstab.chaos.jvm.api.ChaosActivationConflictException(conflict));
       }
+    }
+
+    // Applied after the checks, so a refused plan never takes over the settings of the running
+    // one, and before the activations, so the new scenarios start with them.
+    final Set<String> previousIds = observedIds;
+    final com.macstab.chaos.jvm.api.ChaosPlan.@Nullable Observability previousObservability =
+        observed;
+    if (observability != null) {
+      observe(newById.keySet(), observability);
     }
 
     final Map<String, ChaosScenario> replaced = new java.util.LinkedHashMap<>();
@@ -518,6 +570,9 @@ public final class StartupConfigPoller implements AutoCloseable {
       }
     } catch (final RuntimeException activationFailure) {
       activated.values().forEach(StartupConfigPoller::destroyHandle);
+      if (observability != null) {
+        observe(previousIds, previousObservability);
+      }
       for (final ChaosScenario previous : replaced.values()) {
         try {
           activeHandles.put(previous.id(), runtime.activate(previous));
@@ -547,18 +602,24 @@ public final class StartupConfigPoller implements AutoCloseable {
                     loadFailure.column(),
                     loadFailure.reason());
               } else {
-                reports.statusError(
-                    "file:" + configPath, 0, 0, String.valueOf(failure.getMessage()));
+                reports.statusError("file:" + configPath, 0, 0, ChaosReports.reasonOf(failure));
               }
             });
   }
 
-  private void logReloadFailure(final String message) {
+  /**
+   * Logs a reload failure unless it is the one logged last.
+   *
+   * @return whether it was new (and logged): only then is it reported in the status file too
+   */
+  private boolean logReloadFailure(final String message) {
     final String sanitised = LogText.sanitize(message);
-    if (!sanitised.equals(lastLoggedFailure)) {
-      lastLoggedFailure = sanitised;
-      System.err.println("[chaos-agent] config reload failed: " + sanitised);
+    if (sanitised.equals(lastLoggedFailure)) {
+      return false;
     }
+    lastLoggedFailure = sanitised;
+    System.err.println("[chaos-agent] config reload failed: " + sanitised);
+    return true;
   }
 
   /**

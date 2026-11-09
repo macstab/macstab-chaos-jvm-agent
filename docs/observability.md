@@ -8,7 +8,7 @@
 
 The same two files the native chaos libraries write, in the same format, so one tool reads every layer. They are written only when switched on with `reports=on` (or any other true literal: `true`, `1`, `yes`); the first write that fails is logged once as a warning naming the directory.
 
-**Status file** `<dir>/.chaos-jvm.status`, rewritten after every load of the startup plan and every reload:
+**Status file** `<dir>/.chaos-jvm.status`, rewritten after every load of the startup plan and every reload; a reload failure that recurs on every tick (an id taken elsewhere) is written once, not on every tick:
 
 ```text
 state=error
@@ -20,8 +20,8 @@ source=file:/etc/chaos/plan.json
 pid=4711
 ```
 
-- `state=ok` with `scenarios=<n>`, `source` and `pid` on success.
-- On a rejected plan: `line` and `column` (1-based; `0` when the failure has no position, e.g. a validation error at activation), `reason` (what is wrong, without input values), `source`, `pid`. The agent refuses to start with a rejected startup plan; a rejected reload keeps the previous plan active.
+- `state=ok` with `scenarios=<n>`, `source` and `pid` on success. A `file:` source is the plan file's absolute path, also when it was configured relative.
+- On a rejected plan: `line` and `column` (1-based; `0` when the failure has no position, e.g. a validation error at activation), `reason` (what is wrong, without input values; the exception's class name when it has no message), `source`, `pid`. The agent refuses to start with a rejected startup plan; a rejected reload keeps the previous plan active.
 - Without a startup plan the status file is not written.
 
 **Hits file** `<dir>/.chaos-jvm.hits.<pid>`, one line per scenario id that applied, sorted by id:
