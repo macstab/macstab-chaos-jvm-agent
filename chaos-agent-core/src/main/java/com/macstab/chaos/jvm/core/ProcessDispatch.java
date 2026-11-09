@@ -2,6 +2,9 @@ package com.macstab.chaos.jvm.core;
 
 import com.macstab.chaos.jvm.api.Internal;
 import com.macstab.chaos.jvm.api.OperationType;
+import java.lang.ref.Reference;
+import java.lang.ref.ReferenceQueue;
+import java.util.concurrent.ConcurrentHashMap;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -16,8 +19,33 @@ public final class ProcessDispatch {
 
   private final DispatchEngine engine;
 
+  /**
+   * The program each started process was started as, by the process's identity and held weakly: its
+   * wait is matched by the same name as its start. Written for every start while the process hooks
+   * are woven, whether or not a scenario is active, so a wait scenario activated after the start
+   * finds the name.
+   */
+  private final ConcurrentHashMap<IdentityWeakKey, String> programs = new ConcurrentHashMap<>();
+
+  private final ReferenceQueue<Object> collected = new ReferenceQueue<>();
+
   ProcessDispatch(final DispatchEngine engine) {
     this.engine = engine;
+  }
+
+  /**
+   * Records the program {@code process} was started as.
+   *
+   * @param process the started process
+   * @param program the first element of its command; {@code null} records nothing
+   */
+  public void afterProcessStart(final Object process, final @Nullable String program) {
+    for (Reference<?> key = collected.poll(); key != null; key = collected.poll()) {
+      programs.remove(key);
+    }
+    if (program != null) {
+      programs.put(new IdentityWeakKey(process, collected), program);
+    }
   }
 
   /**
@@ -40,7 +68,7 @@ public final class ProcessDispatch {
                 OperationType.PROCESS_WAIT,
                 "java.lang.Process",
                 null,
-                programName(process),
+                startedAs(process),
                 false,
                 null,
                 null,
@@ -59,6 +87,16 @@ public final class ProcessDispatch {
     }
     engine.applyPreDecision(decision);
     return false;
+  }
+
+  /**
+   * The program {@code process} was started as; for a process started before the hooks were woven,
+   * the file name of the program the operating system reports for it, or {@code null} when it
+   * reports none (a reaped child).
+   */
+  private @Nullable String startedAs(final Object process) {
+    final String program = programs.isEmpty() ? null : programs.get(new IdentityWeakKey(process));
+    return program != null ? program : programName(process);
   }
 
   /** The file name of the program {@code process} runs, or {@code null} when unknown. */

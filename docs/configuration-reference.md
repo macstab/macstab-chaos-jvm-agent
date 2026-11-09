@@ -270,7 +270,7 @@ flowchart TB
     CD["ChaosDispatcher<br/>(hot path)"]
   end
   subgraph g5["chaos-agent-bootstrap"]
-    BD["BootstrapDispatcher<br/>(77 slots)"]
+    BD["BootstrapDispatcher<br/>(78 slots)"]
   end
   AgentArgs --> AAP
   EnvVars --> SCL
@@ -1253,12 +1253,12 @@ A delay on a hook that runs on an event loop or a synchronization context (a Net
 
 **JSON type:** `"process"`  
 **Operations:** `PROCESS_START`, `PROCESS_WAIT`  
-**Purpose:** Intercept starting a child process: `ProcessBuilder.start()`, `ProcessBuilder.startPipeline` and `Runtime.exec`, which all reach the private `ProcessBuilder.start(Redirect[])`. Valid effects: delay, gate, `reject` (`IOException`) and `errno` (the JDK's `Cannot run program` failure, above). Waiting for a process (`Process.waitFor`) is not intercepted.
+**Purpose:** Intercept starting a child process: `ProcessBuilder.start()`, `ProcessBuilder.startPipeline` and `Runtime.exec`, which all reach the private `ProcessBuilder.start(Redirect[])`. Valid effects: delay, gate, `reject` (`IOException`) and `errno` (the JDK's `Cannot run program` failure, above). `PROCESS_WAIT` intercepts `Process.waitFor()` and `waitFor(long, TimeUnit)` of the JDK's own processes; `timeout()` on a timed wait reports a child that has not exited.
 
 | Field            | Type                 | Default  | Description                                                                 |
 |------------------|----------------------|----------|-----------------------------------------------------------------------------|
-| `operations`     | Set\<OperationType\> | required | `PROCESS_START`                                                             |
-| `commandPattern` | NamePattern          | `ANY`    | Matched against the program: the first element of the command, as passed   |
+| `operations`     | Set\<OperationType\> | required | `PROCESS_START`, `PROCESS_WAIT`                                             |
+| `commandPattern` | NamePattern          | `ANY`    | Matched against the program: the first element of the command, as passed; a wait is matched by the program its process was started as (`sh` stays `sh`, also after the child is reaped). A process started before the process hooks were woven is matched by the file name of the program the operating system reports for it, which can differ (a symbolic link resolved) or be unknown once the child is reaped |
 
 ```json
 { "type": "process", "operations": ["PROCESS_START"], "commandPattern": { "mode": "EXACT", "value": "git" } }

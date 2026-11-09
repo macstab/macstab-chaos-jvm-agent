@@ -516,6 +516,11 @@ final class ChaosBridge implements BridgeDelegate {
     runtime.beforeProcessStart(command);
   }
 
+  @Override
+  public void afterProcessStart(final Object process, final @Nullable String program) {
+    runtime.afterProcessStart(process, program);
+  }
+
   /**
    * Returns the calling thread's session id.
    *

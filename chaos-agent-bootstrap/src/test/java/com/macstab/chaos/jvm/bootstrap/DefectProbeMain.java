@@ -118,6 +118,7 @@ public final class DefectProbeMain {
       case "file-open" -> fileOpen();
       case "hook-coverage" -> hookCoverage();
       case "close-shutdown-wait" -> closeShutdownAndWait();
+      case "process-wait-name" -> processWaitName();
       case "redirect" -> redirect();
       case "redirect-unix-domain" -> redirectUnixDomain();
       case "missing-superclass" -> missingSuperclass();
@@ -1613,6 +1614,33 @@ public final class DefectProbeMain {
   }
 
   /**
+   * A child started as {@code sh} is waited for as {@code sh}: the wait is awaited until the child
+   * has been reaped, when the process's own information no longer names its program.
+   */
+  private static void processWaitName() throws Exception {
+    final ChaosControlPlane plane = ChaosPlatform.current();
+    final ChaosActivationHandle sh =
+        plane.activate(
+            ChaosScenario.builder("process-sh")
+                .selector(
+                    new ChaosSelector.ProcessSelector(
+                        Set.of(OperationType.PROCESS_START, OperationType.PROCESS_WAIT),
+                        NamePattern.exact("sh")))
+                .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+                .activationPolicy(ActivationPolicy.always())
+                .build());
+    final Process child = new ProcessBuilder("sh", "-c", "true").start();
+    final long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+    while (child.isAlive() && System.nanoTime() - deadline < 0) {
+      Thread.sleep(5);
+    }
+    System.out.println("childAlive=" + child.isAlive());
+    System.out.println("exitCode=" + child.waitFor());
+    System.out.println("matched.process-sh=" + sh.matchedCount());
+    sh.close();
+  }
+
+  /**
    * File closes and moves under {@code chaos.test.dir}, socket half-closes, a timed select and a
    * timed process wait, each under a scenario activated here. Prints what the application saw.
    */
@@ -1744,18 +1772,18 @@ public final class DefectProbeMain {
     }
     printApplied(stalled);
 
+    // A wait is matched by the program as the child was started: here the java binary's path.
+    final String javaBinary = Path.of(System.getProperty("java.home"), "bin", "java").toString();
     final ChaosActivationHandle hangs =
         plane.activate(
             ChaosScenario.builder("child-hangs")
                 .selector(
                     new ChaosSelector.ProcessSelector(
-                        Set.of(OperationType.PROCESS_WAIT), NamePattern.exact("java")))
+                        Set.of(OperationType.PROCESS_WAIT), NamePattern.exact(javaBinary)))
                 .effect(ChaosEffect.timeout())
                 .build());
     final Process child =
-        new ProcessBuilder(
-                java.nio.file.Path.of(System.getProperty("java.home"), "bin", "java").toString(),
-                "-version")
+        new ProcessBuilder(javaBinary, "-version")
             .redirectErrorStream(true)
             .redirectOutput(ProcessBuilder.Redirect.DISCARD)
             .start();

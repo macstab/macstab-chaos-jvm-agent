@@ -510,7 +510,7 @@ public final class BootstrapDispatcher {
   /** Handle index for {@link #beforeJdbcTransactionRollback()}. */
   public static final int BEFORE_JDBC_TRANSACTION_ROLLBACK = 51;
 
-  // ── Later handles (52-76) ──────────────────────────────────────────────────
+  // ── Later handles (52-77) ──────────────────────────────────────────────────
   /** Handle index for {@link #beforeThreadSleep(long)}. */
   public static final int BEFORE_THREAD_SLEEP = 52;
 
@@ -589,8 +589,11 @@ public final class BootstrapDispatcher {
   /** Handle index for {@link #idle(String)}. */
   public static final int IDLE = 76;
 
+  /** Handle index for {@link #afterProcessStart(Object, String)}. */
+  public static final int AFTER_PROCESS_START = 77;
+
   /** Total number of method-handle slots; equals the highest index plus one. */
-  public static final int HANDLE_COUNT = 77;
+  public static final int HANDLE_COUNT = 78;
 
   /** The header that carries a session id between services; {@code ChaosSession.HEADER}. */
   public static final String SESSION_HEADER = "X-Chaos-Session";
@@ -1806,6 +1809,32 @@ public final class BootstrapDispatcher {
     } catch (final Throwable throwable) {
       sneakyThrow(throwable);
       return remaining;
+    } finally {
+      depth[0]--;
+    }
+  }
+
+  /**
+   * Called after a child process has started: records the program it was started as, the name a
+   * {@code PROCESS_WAIT} on it is matched by. Never fails the start.
+   *
+   * @param process the started process
+   * @param program the program, the first element of the command; {@code null} if empty
+   */
+  public static void afterProcessStart(final Object process, final @Nullable String program) {
+    final int[] depth = DEPTH.get();
+    if (depth[0] > 0) {
+      return;
+    }
+    depth[0]++;
+    try {
+      final MethodHandle[] h = handles;
+      final Object d = delegate;
+      if (d != null && h != null) {
+        h[AFTER_PROCESS_START].invoke(d, process, program);
+      }
+    } catch (final Throwable throwable) {
+      // The process runs: a failed record only leaves its wait to the process's own information.
     } finally {
       depth[0]--;
     }

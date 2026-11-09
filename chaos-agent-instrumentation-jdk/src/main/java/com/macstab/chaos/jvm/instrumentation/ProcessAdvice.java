@@ -47,15 +47,24 @@ final class ProcessAdvice {
   }
 
   /**
-   * Intercepts {@code ProcessBuilder.start(Redirect[])}: every process start. The receiver is
-   * declared as {@code Object}: an advice signature naming {@code ProcessBuilder} makes ByteBuddy
-   * resolve that class while it is being loaded and transformed (ClassCircularityError).
+   * Intercepts {@code ProcessBuilder.start(Redirect[])}: every process start, evaluated at entry;
+   * on return the started process is recorded with its program, so its wait is matched by the same
+   * name. The receiver is declared as {@code Object}: an advice signature naming {@code
+   * ProcessBuilder} makes ByteBuddy resolve that class while it is being loaded and transformed
+   * (ClassCircularityError).
    */
   static final class ProcessStartAdvice {
     @Advice.OnMethodEnter
     static void enter(@Advice.This final Object builder) throws Throwable {
       final java.util.List<String> command = ((ProcessBuilder) builder).command();
       BootstrapDispatcher.beforeProcessStart(command.isEmpty() ? null : command.get(0));
+    }
+
+    /** Records the program the child was started as, for its {@code PROCESS_WAIT}. */
+    @Advice.OnMethodExit
+    static void exit(@Advice.This final Object builder, @Advice.Return final Object process) {
+      final java.util.List<String> command = ((ProcessBuilder) builder).command();
+      BootstrapDispatcher.afterProcessStart(process, command.isEmpty() ? null : command.get(0));
     }
   }
 }

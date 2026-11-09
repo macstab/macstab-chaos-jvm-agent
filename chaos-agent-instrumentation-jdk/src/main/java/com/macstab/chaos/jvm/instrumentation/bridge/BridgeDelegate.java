@@ -453,6 +453,14 @@ public interface BridgeDelegate {
   void beforeProcessStart(String command) throws Throwable;
 
   /**
+   * Called after a child process has started, with the program it was started as.
+   *
+   * @param process the started process
+   * @param program the program, the first element of the command, or {@code null}
+   */
+  void afterProcessStart(Object process, @Nullable String program);
+
+  /**
    * Returns the id of the session the calling thread is bound to, for the HTTP client hooks that
    * forward it as the {@code X-Chaos-Session} header.
    *

@@ -201,6 +201,24 @@ class DispatchContractTest {
     }
 
     @Test
+    @DisplayName(
+        "a wait is matched by the program its process was started as, a start without one not")
+    void waitMatchesTheStartedProgram() throws Throwable {
+      activate(
+          new ChaosSelector.ProcessSelector(
+              Set.of(OperationType.PROCESS_WAIT), NamePattern.exact("sh")),
+          ChaosEffect.timeout());
+      final Object started = new Object();
+      final Object unnamed = new Object();
+      runtime.afterProcessStart(started, "sh");
+      runtime.afterProcessStart(unnamed, null);
+
+      assertThat(runtime.beforeProcessWait(started, 1L)).as("started as sh").isTrue();
+      assertThat(runtime.beforeProcessWait(unnamed, 1L)).as("no program recorded").isFalse();
+      assertThat(runtime.beforeProcessWait(new Object(), 1L)).as("never recorded").isFalse();
+    }
+
+    @Test
     @DisplayName("timeout waits out the timeout and reports a child that has not exited")
     void timeout() throws Throwable {
       activate(

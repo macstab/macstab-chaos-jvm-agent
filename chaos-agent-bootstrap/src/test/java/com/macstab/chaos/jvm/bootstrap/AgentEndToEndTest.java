@@ -1640,6 +1640,17 @@ class AgentEndToEndTest {
     }
 
     @Test
+    @DisplayName("a child is waited for under the program it was started as, also once reaped")
+    @org.junit.jupiter.api.condition.DisabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS)
+    void processWaitMatchesTheStartedProgram() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.runWithoutPlan(DefectProbeMain.class, "process-wait-name");
+      assertThat(result.value("childAlive")).as("reaped before the wait").isEqualTo("false");
+      assertThat(result.longValue("exitCode")).isZero();
+      assertThat(result.longValue("matched.process-sh")).as("the start and the wait").isEqualTo(2L);
+    }
+
+    @Test
     @DisplayName("closes, move targets, half-closes, select and process-wait timeouts")
     void closesShutdownsAndWaits() throws Exception {
       final Path root = Files.createDirectories(tempDir.resolve("lifecycle"));

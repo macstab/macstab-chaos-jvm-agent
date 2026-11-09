@@ -22,7 +22,7 @@
 `chaos-agent-instrumentation-jdk` is the adapter between ByteBuddy's advice model and `ChaosRuntime`'s normalized dispatch API. Its responsibilities:
 
 1. Package `BootstrapDispatcher` into a temp JAR and append it to the bootstrap classpath
-2. Build a 77-slot `MethodHandle[]` array and wire it into `BootstrapDispatcher` via reflection
+2. Build a 78-slot `MethodHandle[]` array and wire it into `BootstrapDispatcher` via reflection
 3. Register a `HookDemand` callback on the runtime and weave each hook group (one `AgentBuilder` installation per `HookGroup`) the first time a scenario needs one of its operations — or every group at once in `eager` mode
 
 Apart from weaving hook groups on demand, this module has no further runtime role. All runtime execution paths go through `BootstrapDispatcher` → `ChaosBridge` → `ChaosRuntime`.
@@ -31,7 +31,7 @@ Apart from weaving hook groups on demand, this module has no further runtime rol
 
 In scope:
 - `JdkInstrumentationInstaller` — entry point; orchestrates all startup steps
-- `BootstrapDispatcher` — bootstrap-classloader-resident static dispatcher (77 handle slots + reentrancy guard and call-depth scopes)
+- `BootstrapDispatcher` — bootstrap-classloader-resident static dispatcher (78 handle slots + reentrancy guard and call-depth scopes)
 - `ChannelBuffers` — bootstrap-resident shaping of a channel call's buffers (single, scattering, gathering): limits for torn and trickled calls, the bit flip of a corrupted read
 - `BridgeDelegate` — interface defining the 64-method contract
 - `ChaosBridge` — agent-classloader implementation of `BridgeDelegate`; thin delegation to `ChaosRuntime`
@@ -294,7 +294,7 @@ flowchart TB
 
 **One copy of the bridge**: only the bootstrap copy of `BootstrapDispatcher` carries the delegate, and advice woven into a class links against whatever copy that class's loader resolves. The agent JAR therefore keeps the bridge classes under `META-INF/macstab-chaos-bridge/` (`chaos-agent-bootstrap/build.gradle.kts`), so a child-first loader over it (`WEB-INF/lib`) finds no copy of its own and resolves the bootstrap one through its parents. `BridgeVisibility` guards the rest: on a class loader's first sight in the type matcher (an ignore rule of every hook group and of method weaving) it asks `loader.getResource(".../bridge/BootstrapDispatcher.class")`, as an internal call and outside its cache lock, and never loads a class. No class file, or the one the agent's own loader sees, means the loader resolves the bootstrap copy: its classes are woven (a bridge appended at run time is invisible to `getResource`). Any other class file is a copy of its own (a thin jar bundled in the application): its classes are not woven, and the loader is named once in `hookFailures`. A loader that delegates the bridge package nowhere and holds no copy cannot be detected that way; delegate `com.macstab.chaos.jvm.instrumentation` to the boot path there (JBoss Modules `jboss.modules.system.pkgs`, OSGi `org.osgi.framework.bootdelegation`).
 
-**`buildMethodHandles()`**: Uses `MethodHandles.publicLookup()` against `BridgeDelegate.class`. Public lookup is required because the bootstrap classloader must be able to invoke the handles; a full-access lookup with the agent classloader's module system would not be reachable from the bootstrap context. Each handle is a virtual method handle; when invoked with `delegate` as the first argument, it dispatches to the `ChaosBridge` implementation. The array has `HANDLE_COUNT` (77) slots; see §7 for the full slot table.
+**`buildMethodHandles()`**: Uses `MethodHandles.publicLookup()` against `BridgeDelegate.class`. Public lookup is required because the bootstrap classloader must be able to invoke the handles; a full-access lookup with the agent classloader's module system would not be reachable from the bootstrap context. Each handle is a virtual method handle; when invoked with `delegate` as the first argument, it dispatches to the `ChaosBridge` implementation. The array has `HANDLE_COUNT` (78) slots; see §7 for the full slot table.
 
 The wiring is derived, not written per slot: each `public static final int` slot constant `FOO_BAR` on `BootstrapDispatcher` (other than `SCOPE_*` and `HANDLE_COUNT`) is served by the `BridgeDelegate` method `fooBar`. Adding a dispatch entry point is therefore a constant, a delegate method and its `ChaosBridge` implementation; `buildMethodHandles()` checks the table in full and fails the install naming the mismatch — a slot without a method, a method without a slot, an index used twice or left unset, an overloaded delegate method.
 
@@ -467,6 +467,7 @@ If the bridge is not installed (`BootstrapDispatcher.handles == null`), the wrap
 | 74    | `BEFORE_DNS_REVERSE`                 | `InetAddress.getHostFromNameService` — `getHostName`, `getCanonicalHostName` (`DNS_REVERSE`)                                                                                    | enter (failure: IP literal returned)         |
 | 75    | `BEFORE_PROCESS_WAIT`                | `ProcessImpl.waitFor()` and `waitFor(long, TimeUnit)` (`PROCESS_WAIT`)                                                                                                            | enter (timeout: returns `false`)             |
 | 76    | `IDLE`                               | not woven: `BootstrapDispatcher.idle(String)`, which advice that reads its target reflectively calls first (client libraries, OkHttp, Apache HttpClient, Reactor Netty, HikariCP) | `true`: return before reading (no scenario indexed for the operation) |
+| 77    | `AFTER_PROCESS_START`                | `ProcessBuilder.start(Redirect[])` on return (`PROCESS_WAIT`): records the program the child was started as, for its wait; written while the group is woven, scenario or not | exit (record only)                           |
 
 `BEFORE_SOCKET_CONNECT` returns the endpoint to connect to: the requested one, or another under `ChaosEffect.redirect(...)`, which the `Socket.connect` and `SocketChannel.connect` advice write back into their argument. File operations without a slot of their own (`FILE_IO_OPEN`, `FILE_IO_CLOSE`, `FILE_IO_MAP`, `FILE_IO_MOVE_TARGET`, transfers, scattering and gathering `FileChannel` calls) go through `BEFORE_FILE_IO` with their operation tag; a transfer is one event (`SCOPE_FILE_TRANSFER`), as is a compound read (`FileInputStream.readAllBytes` / `readNBytes(int)`, `RandomAccessFile.readLine`, evaluated at entry with `Integer.MAX_VALUE` or `len` bytes requested; a `corruptRead` flips one bit of the returned bytes in exit advice), a provider open is one event (`SCOPE_FILE_OPEN`), a stream and its channel are one close (`SCOPE_FILE_CLOSE`).
 

@@ -880,6 +880,16 @@ public final class ChaosRuntime implements ChaosControlPlane {
   }
 
   /**
+   * Delegates to {@link ProcessDispatch#afterProcessStart(Object, String)}.
+   *
+   * @param process the started process
+   * @param program the program it was started as, or {@code null}
+   */
+  public void afterProcessStart(final Object process, final @Nullable String program) {
+    processDispatch.afterProcessStart(process, program);
+  }
+
+  /**
    * Delegates to {@link NetworkDispatch#beforeNioChannelWrite(Object, int)}.
    *
    * @param channel the channel being written to
