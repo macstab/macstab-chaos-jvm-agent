@@ -19,6 +19,7 @@ dependencies {
     compileOnly("org.springframework.boot:spring-boot-actuator-autoconfigure")
     compileOnly("org.springframework:spring-context")
     compileOnly("jakarta.servlet:jakarta.servlet-api")
+    compileOnly("org.springframework:spring-webmvc")
 
     testImplementation(platform(libs.spring.boot3.dependencies))
     testImplementation(platform(libs.junit.bom))
@@ -32,6 +33,9 @@ dependencies {
     testImplementation("org.springframework:spring-test")
     testImplementation("org.springframework:spring-web")
     testImplementation("jakarta.servlet:jakarta.servlet-api")
+    // An actuator over Spring MVC (ChaosActuatorBodyLimitTest).
+    testImplementation("org.springframework:spring-webmvc")
+    testImplementation("com.fasterxml.jackson.core:jackson-databind")
 }
 
 tasks.jar {
@@ -64,6 +68,9 @@ val testBoot4Runtime: Configuration by configurations.creating {
 }
 dependencies {
     testBoot4Runtime(platform(libs.spring.boot4.dependencies))
+    // Boot 4 moved the Spring MVC actuator and the Jackson auto-configuration into their own modules.
+    testBoot4Runtime("org.springframework.boot:spring-boot-webmvc")
+    testBoot4Runtime("org.springframework.boot:spring-boot-jackson")
 }
 val testBoot4 = tasks.register<Test>("testBoot4") {
     description = "Runs the tests on Spring Boot 4."

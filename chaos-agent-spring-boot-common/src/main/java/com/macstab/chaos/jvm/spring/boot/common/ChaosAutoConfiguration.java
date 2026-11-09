@@ -10,10 +10,14 @@ import com.macstab.chaos.jvm.startup.LogText;
 import com.macstab.chaos.jvm.startup.StartupConfigLoader;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.boot.actuate.endpoint.EndpointId;
 import org.springframework.boot.actuate.endpoint.annotation.Endpoint;
+import org.springframework.boot.actuate.endpoint.web.PathMappedEndpoints;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.ApplicationContext;
@@ -211,6 +215,24 @@ public class ChaosAutoConfiguration {
                 + " Security or network-level controls before using in production.");
       }
       return new ChaosActuatorEndpoint(controlPlane);
+    }
+
+    /** The request body cap of the endpoint on Spring MVC ({@link ChaosActuatorBodyLimit}). */
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
+    @ConditionalOnClass(
+        name = "org.springframework.web.servlet.mvc.method.annotation.RequestBodyAdvice")
+    static class WebMvcBodyLimitConfiguration {
+
+      @Bean
+      ChaosActuatorBodyLimit chaosActuatorBodyLimit(
+          final ObjectProvider<PathMappedEndpoints> endpoints) {
+        return new ChaosActuatorBodyLimit(
+            () -> {
+              final PathMappedEndpoints mapped = endpoints.getIfAvailable();
+              return mapped == null ? null : mapped.getPath(EndpointId.of("chaos"));
+            });
+      }
     }
 
     private static boolean isSpringSecurityOnClasspath() {

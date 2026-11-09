@@ -472,6 +472,8 @@ The plan is read with `ChaosPlanMapper`, which rejects unknown fields, so a typo
 
 #### Security note
 
+**Body size.** The plan reader takes at most 1 MiB of plan JSON. On Spring MVC, a `POST /actuator/chaos` body above 2 MiB + 64 bytes (a plan of that size with every character escaped, and the key) is refused with 413 before it is bound: from `Content-Length` before anything is read, or while reading a body without one (`ChaosActuatorBodyLimit`, a `RequestBodyAdvice` that applies to this endpoint only, on a separate management port too). Spring MVC itself bounds no JSON body. On WebFlux the body is bounded by the codecs' `spring.codec.max-in-memory-size`, 256 KiB by default: larger plans fail there before the reader sees them; set it to `2MB` (an application-wide setting) to accept every plan the reader accepts.
+
 `ChaosActuatorEndpoint` is protected by whatever security the host application applies to the Actuator namespace. The endpoint must not be reachable from the public internet without authentication. A `POST /actuator/chaos` endpoint that accepts arbitrary chaos plan JSON and activates it in the live JVM is an extremely high-impact surface. Protect it as you would a shutdown endpoint.
 
 Standard Spring Security configuration for Actuator:

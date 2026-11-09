@@ -45,7 +45,10 @@ public class ChaosActuatorEndpoint implements AutoCloseable {
   }
 
   /**
-   * Activates a chaos plan supplied inline in the request body ({@code {"planJson": "<plan>"}}).
+   * Activates a chaos plan supplied inline in the request body ({@code {"planJson": "<plan>"}}). On
+   * Spring MVC a body above {@code ChaosActuatorBodyLimit.MAX_BODY_BYTES} is refused with 413
+   * before it is bound; on WebFlux {@code spring.codec.max-in-memory-size} bounds it (256 KiB by
+   * default, {@code 2MB} accepts every plan of the 1 MiB plan cap).
    *
    * @param planJson the plan, in the startup-config JSON format
    * @return the outcome, with its HTTP status
