@@ -412,11 +412,11 @@ public final class StartupConfigPoller implements AutoCloseable {
       if (closed) {
         return;
       }
-    } catch (final RuntimeException failure) {
-      // Remember content that can never apply (malformed, invalid, hooks that cannot be woven) so
-      // it is not tried again; a conflict with a scenario activated elsewhere may clear and is
-      // retried.
-      if (isDeterministic(failure)) {
+    } catch (final RuntimeException | Error failure) {
+      // Remember content that can never apply (malformed, invalid, hooks that cannot be woven, an
+      // Error while applying it) so it is not tried again; a conflict with a scenario activated
+      // elsewhere may clear and is retried.
+      if (failure instanceof Error || isDeterministic(failure)) {
         failedDigest = digest;
         failedStamp = stamp;
         provisionalUntil = provisionalUntil(stamp.lastModified());
@@ -604,7 +604,8 @@ public final class StartupConfigPoller implements AutoCloseable {
    *     com.macstab.chaos.jvm.api.ChaosPlan} refuses duplicates)
    * @param observability the plan's observability settings; {@code null} leaves them unchanged
    * @throws IllegalStateException when a scenario fails to activate; the previous set is active
-   *     again when this is thrown
+   *     again when this is thrown. An {@link Error} of an activation is rethrown as it is, after
+   *     the same rollback
    */
   synchronized void applyDiff(
       final List<ChaosScenario> newScenarios,
@@ -682,7 +683,9 @@ public final class StartupConfigPoller implements AutoCloseable {
           activated.put(scenario.id(), runtime.activate(scenario));
         }
       }
-    } catch (final RuntimeException activationFailure) {
+    } catch (final RuntimeException | Error activationFailure) {
+      // An Error too (core rethrows one after its own cleanup): the replaced scenarios are already
+      // stopped, so without the rollback they would be gone and the new ones owned by nobody.
       activated.values().forEach(StartupConfigPoller::destroyHandle);
       if (observability != null) {
         observe(previousIds, previousObservability);
@@ -691,9 +694,12 @@ public final class StartupConfigPoller implements AutoCloseable {
         try {
           activeHandles.put(previous.id(), runtime.activate(previous));
           activeScenarios.put(previous.id(), previous);
-        } catch (final RuntimeException restoreFailure) {
+        } catch (final RuntimeException | Error restoreFailure) {
           activationFailure.addSuppressed(restoreFailure);
         }
+      }
+      if (activationFailure instanceof Error error) {
+        throw error;
       }
       throw new IllegalStateException(
           "plan not applied, previous scenarios kept: " + activationFailure.getMessage(),

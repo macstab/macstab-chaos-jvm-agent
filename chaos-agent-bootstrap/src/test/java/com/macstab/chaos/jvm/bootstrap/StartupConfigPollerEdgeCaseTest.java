@@ -133,6 +133,44 @@ class StartupConfigPollerEdgeCaseTest {
   }
 
   @Test
+  @DisplayName("an Error while a reload activates restores the previous scenarios")
+  void errorDuringActivationRestoresThePrevious() {
+    final ChaosScenario v1 = scenario("a", 1);
+    final ChaosScenario v2 = scenario("a", 2);
+    when(runtime.activate(v1)).thenReturn(handle);
+    when(runtime.activate(v2)).thenThrow(new LinkageError("v2 could not link"));
+    poller("60000").applyDiff(List.of(v1));
+
+    assertThatThrownBy(() -> poller.applyDiff(List.of(v2)))
+        .isInstanceOf(LinkageError.class)
+        .hasMessage("v2 could not link");
+
+    verify(handle).stop();
+    verify(runtime, times(2)).activate(v1);
+    // The restored version is the poller's own again: the same plan activates nothing.
+    poller.applyDiff(List.of(v1));
+    verify(runtime, times(2)).activate(v1);
+  }
+
+  @Test
+  @DisplayName("content whose reload fails with an Error is not tried again until it changes")
+  void errorDuringReloadNotRetried() throws Exception {
+    when(runtime.activate(any(ChaosScenario.class))).thenThrow(new LinkageError("cannot link"));
+    poller("60000");
+
+    final String stderr =
+        StderrCapture.of(
+            () -> {
+              poller.pollOnce();
+              stamp(30_000);
+              poller.pollOnce();
+            });
+
+    verify(runtime, times(1)).activate(any(ChaosScenario.class));
+    assertThat(stderr).contains("config reload failed: cannot link");
+  }
+
+  @Test
   @DisplayName("a VirtualMachineError during a reload is logged, not rethrown: watching goes on")
   void virtualMachineErrorLogged() throws Exception {
     doThrow(new OutOfMemoryError("simulated exhaustion")).when(runtime).validate(any());
