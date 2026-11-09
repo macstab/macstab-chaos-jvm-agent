@@ -205,6 +205,29 @@ class StartupConfigPollerTest {
           .startsWith("[chaos-agent]")
           .contains(StartupConfigPoller.ENV_WATCH_INTERVAL, "'abc'");
     }
+
+    @Test
+    @DisplayName("a negative interval turns watching off with one line naming the value")
+    void negativeIsReported() {
+      final java.io.ByteArrayOutputStream captured = new java.io.ByteArrayOutputStream();
+      final java.io.PrintStream original = System.err;
+      final long interval;
+      System.setErr(
+          new java.io.PrintStream(captured, true, java.nio.charset.StandardCharsets.UTF_8));
+      try {
+        interval =
+            StartupConfigPoller.resolveInterval(
+                AgentSettings.of("configWatchInterval=-500", Map.of()));
+      } finally {
+        System.setErr(original);
+      }
+
+      assertThat(interval).isZero();
+      assertThat(captured.toString(java.nio.charset.StandardCharsets.UTF_8).lines())
+          .singleElement(org.assertj.core.api.InstanceOfAssertFactories.STRING)
+          .startsWith("[chaos-agent]")
+          .contains("'-500'", "negative");
+    }
   }
 
   // ── applyDiff ──────────────────────────────────────────────────────────────

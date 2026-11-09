@@ -771,7 +771,15 @@ public final class StartupConfigPoller implements AutoCloseable {
       return 0L;
     }
     try {
-      return Long.parseLong(value);
+      final long interval = Long.parseLong(value);
+      if (interval < 0) {
+        System.err.println(
+            "[chaos-agent] the watch interval '"
+                + interval
+                + "' is negative; the plan file is not watched (0 turns watching off)");
+        return 0L;
+      }
+      return interval;
     } catch (final NumberFormatException notANumber) {
       System.err.println(
           "[chaos-agent] the watch interval ("
