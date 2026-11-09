@@ -320,7 +320,8 @@ public enum OperationType {
    *
    * <p>Typical wiring point: an application-level {@code TimeProvider} / {@code Clock} wrapper
    * already used in place of {@code System.currentTimeMillis()}. For skew without any setting, use
-   * {@link #INSTANT_NOW}, which the agent always wires.
+   * the {@code java.time} reads the agent always wires: {@link #INSTANT_NOW}, {@link #CLOCK_READ},
+   * {@link #LOCAL_DATE_TIME_NOW} and {@link #ZONED_DATE_TIME_NOW}.
    *
    * <p>Used exclusively with {@link ChaosSelector.JvmRuntimeSelector}.
    */

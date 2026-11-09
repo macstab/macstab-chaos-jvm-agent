@@ -538,7 +538,7 @@ Two starters per Spring Boot line (3.5 and 4.1): the **test starter** adds `@Cha
 
 ## Performance
 
-An intercepted call with no scenario for its operation costs 7–12 ns and allocates nothing. For a service handling 2 000 requests/s, the agent with no scenarios takes about 0.03 % of one CPU core, and four exhausted scenarios left registered about 0.17 %. Close a handle when its scenario is done: an exhausted scenario left registered costs as much per call as an active one. Measurements, targets and how they are taken are in [docs/benchmarks.md](docs/benchmarks.md); `./gradlew :chaos-agent-benchmarks:run` runs the JMH suite.
+An intercepted call with no scenario for its operation costs 7–12 ns and allocates nothing. For a service handling 2 000 requests/s (about 5 300 intercepted calls/s), the dispatch with no scenarios takes about 0.002 % of one CPU core, and with four exhausted scenarios left registered about 0.01 %. Close a handle when its scenario is done: an exhausted scenario left registered is still evaluated on every call of its operation. Measurements, targets and how they are taken are in [docs/benchmarks.md](docs/benchmarks.md); `./gradlew :chaos-agent-benchmarks:run` runs the JMH suite.
 
 ---
 

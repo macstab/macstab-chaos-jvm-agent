@@ -9,8 +9,23 @@ public class Demo {
       peer.getOutputStream().write(new byte[1000]);
       peer.getOutputStream().flush();
       InputStream in = client.getInputStream();
-      int first = in.read(new byte[1000]);
-      System.out.println("firstRead=" + first);
+      byte[] buffer = new byte[1000];
+      int first = -1;
+      int max = 0;
+      int total = 0;
+      // A trickled reader must loop: every read returns at most 16 bytes, not only the first.
+      while (total < 1000) {
+        int read = in.read(buffer, 0, 1000 - total);
+        if (read < 0) {
+          break;
+        }
+        if (first < 0) {
+          first = read;
+        }
+        max = Math.max(max, read);
+        total += read;
+      }
+      System.out.println("firstRead=" + first + " maxRead=" + max + " total=" + total);
     }
   }
 }

@@ -788,14 +788,15 @@ ActivationPolicy.builder()
 
 ## 10. Performance Budget
 
-Measured with JMH on JDK 21, x86-64 (see `docs/benchmarks.md` for the full methodology):
+Dispatch cost per intercepted call, measured with JMH on JDK 25 (Apple Silicon; `ChaosRuntimeBenchmark`, see `docs/benchmarks.md` for the full methodology and the targets):
 
-| Scenario                                        | Overhead | Production impact                                  |
-|-------------------------------------------------|----------|----------------------------------------------------|
-| Agent installed, zero active scenarios          | < 50 ns  | Invisible; below noise floor of any I/O operation  |
-| One scenario, selector doesn't match            | < 100 ns | < 0.5% of a 20 µs loopback TCP call                |
-| One scenario, selector matches, no effect fires | < 300 ns | < 3% of a 10 µs HikariCP pool acquire              |
-| Ten scenarios, one match                        | < 1 µs   | 10% of a 10 µs pool acquire — use only transiently |
+| Scenario                                                   | Measured | Production impact                                  |
+|------------------------------------------------------------|----------|----------------------------------------------------|
+| Agent installed, zero active scenarios                     | ~2 ns    | Invisible; below noise floor of any I/O operation  |
+| One scenario on the operation, its regex doesn't match     | ~90 ns   | < 0.5% of a 20 µs loopback TCP call                |
+| One exhausted scenario left registered                     | ~16 ns   | Invisible; close the handle anyway                 |
+| Ten scenarios on the operation (nine regex non-matches)    | ~295 ns  | 3% of a 10 µs pool acquire — use only transiently  |
+| Session-scoped scenario, calling thread outside the session | ~320 ns | 3% of a 10 µs pool acquire                         |
 
 The agent is designed to be permanently installed in production. With zero active scenarios, every intercepted call site costs approximately 5–15 ns for the `BootstrapDispatcher` fast path (inline reentrancy check, no allocation). Hook groups are woven on demand, so call sites whose hook group no scenario has needed yet are not instrumented at all.
 

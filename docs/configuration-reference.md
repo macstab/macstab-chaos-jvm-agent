@@ -621,9 +621,9 @@ The evaluation path for each instrumented operation call has the following cost 
 | `NamePattern.matches()` per scenario      | O(1) for ANY/EXACT/PREFIX; O(m) for GLOB (no alloc) and REGEX    |
 | `ActivationPolicy` evaluation             | O(1); atomic reads + RNG sample                                  |
 | `DelayEffect`                             | `Thread.sleep(t)` or virtual-thread park; dominates overall cost |
-| No-match path (most common in benchmarks) | ~50–120 ns per intercepted call                                  |
+| No scenario for the operation             | ~2–4 ns per call (dispatch); one regex non-match ~70–90 ns       |
 
-**Reference benchmark (from `docs/benchmarks.md`):** `OneMatchNoEffectState` measures a one-shot policy scenario where the single application is consumed immediately, leaving subsequent calls on the no-match path. Throughput: ~8.4M ops/s (i.e., ~120 ns/call overhead).
+**Reference benchmark (from `docs/benchmarks.md`):** `OneMatchNoEffectState` measures a one-shot scenario whose single application is spent in `@Setup`, so every measured call meets an exhausted scenario: ~16 ns per call (JDK 25, Apple Silicon), about 60M calls/s on one core.
 
 ## 11.2 NamePattern Cache
 

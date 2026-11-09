@@ -2,6 +2,8 @@ package com.macstab.chaos.jvm.examples.sb4pinning;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.macstab.chaos.jvm.api.ChaosControlPlane;
+import com.macstab.chaos.jvm.api.ChaosDiagnostics;
 import com.macstab.chaos.jvm.spring.boot4.test.ChaosTest;
 import java.util.ArrayList;
 import java.util.List;
@@ -29,8 +31,15 @@ class VirtualThreadPinningIT {
 
   @LocalServerPort private int port;
 
+  private static final String SCENARIO_ID = "virtual-thread-carrier-pinning";
+
   @Test
-  void hundredConcurrentVirtualThreadRecordCallsAllSucceed() throws Exception {
+  void hundredConcurrentVirtualThreadRecordCallsAllSucceed(final ChaosControlPlane chaos)
+      throws Exception {
+    assertThat(chaos.diagnostics().scenario(SCENARIO_ID))
+        .as("ChaosStartupPlan activated the pinning scenario at startup")
+        .hasValueSatisfying(
+            report -> assertThat(report.state()).isEqualTo(ChaosDiagnostics.ScenarioState.ACTIVE));
     final RestClient client = RestClient.create("http://localhost:" + port);
     int concurrency = 100;
     List<Future<ResponseEntity<Void>>> futures = new ArrayList<>(concurrency);
@@ -64,7 +73,11 @@ class VirtualThreadPinningIT {
         .as("All 100 concurrent virtual-thread requests must succeed (no 5xx)")
         .isZero();
 
-    log.info("100 concurrent POST /metrics under MonitorContention: {} ms wall-clock", wallMillis);
+    log.info("100 concurrent POST /metrics under carrier pinning: {} ms wall-clock", wallMillis);
+    assertThat(chaos.diagnostics().scenario(SCENARIO_ID))
+        .as("the pinning scenario is still active after the burst")
+        .hasValueSatisfying(
+            report -> assertThat(report.state()).isEqualTo(ChaosDiagnostics.ScenarioState.ACTIVE));
 
     ResponseEntity<Map<String, Long>> snapshot =
         client

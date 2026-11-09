@@ -6,6 +6,8 @@
 #         (default: chaos-agent-bootstrap/build/libs/chaos-agent-bootstrap-<version>.jar)
 # Exit status: 0 when every demo printed what it expects, 1 otherwise. A demo that runs longer than
 # DEMO_TIMEOUT seconds (default 120) fails; timeout(1) (coreutils; gtimeout on macOS) enforces it.
+# A demo whose stderr has a WARNING line or an exception (a line naming an Exception or Error, or a
+# stack frame) fails too, even when its output matches: the agent must run them without warnings.
 set -euo pipefail
 
 DEMO_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -36,6 +38,9 @@ trap 'if [[ -n "$work" ]]; then rm -rf "$work"; fi' EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
+# stderr lines that fail a demo.
+NOISE='^WARNING|Exception|Error[: ]|^[[:space:]]+at '
+
 pass=0
 fail=0
 for demo in "$DEMO_DIR"/[0-9][0-9]-*/; do
@@ -44,7 +49,8 @@ for demo in "$DEMO_DIR"/[0-9][0-9]-*/; do
   cp "$demo"/Demo.java "$demo"/plan.json "$work"/
   if actual="$(cd "$work" && ${LIMIT[@]+"${LIMIT[@]}"} "$JAVA" \
       "-javaagent:$AGENT=configFile=$work/plan.json" Demo.java 2>"$work/stderr")" \
-      && [[ "$actual" == "$(cat "$demo/expected.txt")" ]]; then
+      && [[ "$actual" == "$(cat "$demo/expected.txt")" ]] \
+      && ! grep -Eq "$NOISE" "$work/stderr"; then
     echo "[PASS] $name"
     pass=$((pass + 1))
   else
@@ -52,6 +58,9 @@ for demo in "$DEMO_DIR"/[0-9][0-9]-*/; do
     echo "  expected:"; sed 's/^/    /' "$demo/expected.txt"
     echo "  actual:";   printf '%s\n' "${actual:-}" | sed 's/^/    /'
     echo "  stderr (tail):"; tail -5 "$work/stderr" | sed 's/^/    /'
+    if grep -Eq "$NOISE" "$work/stderr"; then
+      echo "  stderr warnings and exceptions:"; grep -E "$NOISE" "$work/stderr" | sed 's/^/    /'
+    fi
     fail=$((fail + 1))
   fi
   rm -rf "$work"

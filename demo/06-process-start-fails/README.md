@@ -1,4 +1,4 @@
-# 06-process-limit
+# 06-process-start-fails
 
 Process: starting a child process fails the way the JDK reports a missing program (ENOENT has the same number on Linux and macOS).
 

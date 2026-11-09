@@ -1,0 +1,3 @@
+# Written when a demo runs in its own directory (demo 03 writes under data/ and logs/).
+*/data/
+*/logs/

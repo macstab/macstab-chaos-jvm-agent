@@ -145,6 +145,9 @@ class SlaValidationTest {
       assertThat(p99WithChaos)
           .as("P99 with 40%% HTTP-send delay must stay within 500 ms of baseline P99")
           .isLessThan(p99Baseline + Duration.ofMillis(500).toNanos());
+      assertThat(handle.appliedCount())
+          .as("the delay applied to some of the %d outbound calls", 3 * ITERATIONS)
+          .isPositive();
     } finally {
       handle.stop();
     }

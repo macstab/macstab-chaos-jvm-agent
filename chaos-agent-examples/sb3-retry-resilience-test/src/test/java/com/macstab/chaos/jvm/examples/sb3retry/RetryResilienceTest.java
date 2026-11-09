@@ -100,6 +100,12 @@ class RetryResilienceTest {
       assertThat(response.getBody())
           .as("Response body must be 'pong' from WireMock once chaos is exhausted")
           .isEqualTo("pong");
+      assertThat(handle.appliedCount())
+          .as("the first two connects to the downstream were rejected")
+          .isEqualTo(2);
+      assertThat(handle.matchedCount())
+          .as("the scenario ended with its second application: the third connect was not matched")
+          .isEqualTo(2);
     }
   }
 }

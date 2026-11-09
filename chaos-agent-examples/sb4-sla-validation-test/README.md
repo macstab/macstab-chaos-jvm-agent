@@ -2,20 +2,20 @@
 
 ## What this example demonstrates
 
-A Spring Boot 4 service fans out to three downstream endpoints concurrently using virtual threads
-and `CompletableFuture`. Chaos injects random delays of 20–80 ms on `SOCKET_READ` operations at
-40% probability, simulating adverse network conditions such as TCP receive-buffer throttling or
-a slow upstream proxy.
+A Spring Boot 4 service fans out to three downstream endpoints (WireMock servers on free ports)
+concurrently using virtual threads and `CompletableFuture`, through the JDK `HttpClient`. Two
+tests run `GET /fanout` 30 times per measurement:
 
-The test runs 50 sequential iterations of `GET /fanout` under active chaos and asserts that the
-P99 latency across all iterations stays below 500 ms. Because all three fan-out legs run in
-parallel, the per-request wall time is dominated by `max(latencyA, latencyB, latencyC)` — only
-the worst-case leg matters. With 40% probability and 80 ms max delay per read, the statistical
-expectation is well within the 500 ms SLA.
+- `probabilisticDelayStaysWithin500msOfBaseline` measures the P99 without chaos, then delays each
+  `HTTP_CLIENT_SEND` by 20–80 ms with probability 0.4 and asserts that the P99 stays within 500 ms
+  of the baseline P99, and that the delay applied. Because all three fan-out legs run in
+  parallel, the per-request wall time is dominated by the slowest leg.
+- `graduatedDelayLadderStacksAdditively` stacks one, two and three scenarios that each delay every
+  `HTTP_CLIENT_SEND` by 120 ms, and asserts that each step raises the P99 by at least 96 ms per
+  scenario over the baseline median.
 
 This pattern encodes the SLA directly in the test suite: if latency regresses (e.g. a developer
-accidentally makes the fan-out sequential), the test fails even without chaos. With chaos active
-it also validates that the service's concurrency model holds under realistic network jitter.
+accidentally makes the fan-out sequential), the budget is exceeded under chaos.
 
 ## Application components
 
@@ -43,11 +43,12 @@ it also validates that the service's concurrency model holds under realistic net
 ## Expected output
 
 ```
-[SlaValidationTest] 50 iterations, P99 latency = 187 ms (SLA: 500 ms)
+baseline P99=10ms  chaos P99=86ms
+P99 ladder (0 = baseline median): 0=2ms  1=132ms  2=249ms  3=369ms  (threshold/step=96ms)
 ```
 
-The exact P99 depends on the delay distribution and host performance. With 40% probability and
-an 80 ms max per socket read, a three-leg fan-out typically peaks at 80–160 ms wall time.
+One run on JDK 25 (Apple Silicon); the exact numbers depend on the host. With probability 0.4 and an 80 ms maximum per call, a
+three-leg fan-out typically adds up to 80 ms to the slowest leg.
 
 ## Tuning the scenario
 

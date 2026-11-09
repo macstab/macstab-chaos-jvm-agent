@@ -10,13 +10,14 @@ effectively reduces the carrier pool and starves other virtual threads waiting t
 `MetricsAggregator` uses `synchronized(lock)` intentionally: it represents a common production
 pattern where a service accumulates counters in a guarded `HashMap`. At startup, if
 `macstab.chaos.contention.enabled=true`, `ChaosStartupPlan` activates a
-`MonitorContentionEffect` that spawns 8 background threads competing for a shared lock held for
-5 ms per cycle — saturating the monitor and forcing virtual threads to queue.
+`VirtualThreadCarrierPinningEffect` that pins two of the virtual-thread carriers for 25 ms bursts,
+so the request handlers' virtual threads wait for a free carrier.
 
 The integration test submits 100 concurrent `POST /metrics?name=test` calls on a
 `newVirtualThreadPerTaskExecutor()` and asserts:
-1. All 100 requests succeed (no 5xx).
-2. The snapshot shows a count of 100 for the `test` key.
+1. The pinning scenario is ACTIVE before and after the burst (the property switched it on).
+2. All 100 requests succeed (no 5xx).
+3. The snapshot shows a count of 100 for the `test` key.
 
 The wall-clock time is printed for observation — the test is a demonstration of degradation under
 contention, not a strict latency gate.
@@ -28,7 +29,7 @@ contention, not a strict latency gate.
 | `VirtualThreadPinningApplication` | Spring Boot entry point |
 | `MetricsAggregator` | Synchronized metric counter — the pinning target |
 | `MetricsController` | `POST /metrics?name=` and `GET /metrics/snapshot` |
-| `ChaosStartupPlan` | Activates `MonitorContentionEffect` on `ApplicationReadyEvent` |
+| `ChaosStartupPlan` | Activates `VirtualThreadCarrierPinningEffect` on `ApplicationReadyEvent` |
 
 ## Prerequisites
 
@@ -44,11 +45,11 @@ contention, not a strict latency gate.
 ## Expected output
 
 ```
-[VirtualThreadPinningIT] 100 concurrent POST /metrics under MonitorContention: 843 ms wall-clock
+[VirtualThreadPinningIT] 100 concurrent POST /metrics under carrier pinning: 178 ms wall-clock
 ```
 
-The exact number varies by hardware. The point is that 100 requests that would complete in well
-under 100 ms on an uncontended service can take 5-10x longer when carrier threads are pinned.
+One run on JDK 25 (Apple Silicon); the number varies by hardware, and the test logs it without
+gating on it. Compare it with a run without the property to see what the pinned carriers cost.
 
 Enable JFR virtual-thread pinning events (`jdk.VirtualThreadPinned`) for a flamegraph showing
 exactly which `synchronized` blocks cause pinning.

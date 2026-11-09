@@ -1,6 +1,7 @@
 package com.macstab.chaos.jvm.benchmarks;
 
 import com.macstab.chaos.jvm.api.ActivationPolicy;
+import com.macstab.chaos.jvm.api.ChaosDiagnostics;
 import com.macstab.chaos.jvm.api.ChaosEffect;
 import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.ChaosSelector;
@@ -50,6 +51,11 @@ public class ChaosRuntimeBenchmark {
   private static final ActivationPolicy ONE_SHOT_POLICY = ActivationPolicy.count(1);
   private static final String BENCHMARK_SQL = "SELECT 1";
   private static final int NON_MATCHING_SCENARIO_COUNT = 9;
+  private static final String NO_MATCH_SQL_PATTERN = "SELECT\\s+\\*\\s+FROM\\s+no_match_table";
+
+  /** The statement every benchmark runs, a field so the JIT cannot fold it into a constant. */
+  @SuppressWarnings("FieldCanBeFinal") // non-final on purpose: no constant folding
+  private String sql = BENCHMARK_SQL;
 
   /** Baseline state used to measure raw executor throughput without the chaos agent installed. */
   @State(Scope.Benchmark)
@@ -102,7 +108,7 @@ public class ChaosRuntimeBenchmark {
               .selector(
                   new ChaosSelector.JdbcSelector(
                       Set.of(OperationType.JDBC_STATEMENT_EXECUTE),
-                      NamePattern.regex("SELECT\\s+\\*\\s+FROM\\s+no_match_table")))
+                      NamePattern.regex(NO_MATCH_SQL_PATTERN)))
               .effect(ChaosEffect.delay(Duration.ofMillis(1)))
               .activationPolicy(ActivationPolicy.always())
               .build());
@@ -125,9 +131,13 @@ public class ChaosRuntimeBenchmark {
     ChaosRuntime runtime;
     ChaosDispatcher dispatcher;
 
-    /** Registers the matching no-effect scenario before the trial. */
+    /**
+     * Registers the matching no-effect scenario and spends its one application before the trial.
+     *
+     * @throws Throwable if the dispatcher surfaces an unexpected failure
+     */
     @Setup(Level.Trial)
-    public void setup() {
+    public void setup() throws Throwable {
       runtime = new ChaosRuntime();
       runtime.activate(
           ChaosScenario.builder("bench-match-no-effect")
@@ -139,6 +149,7 @@ public class ChaosRuntimeBenchmark {
               .activationPolicy(ONE_SHOT_POLICY)
               .build());
       dispatcher = runtime.dispatcher();
+      exhaust(runtime, dispatcher, "bench-match-no-effect");
     }
 
     /** Closes the runtime after the measurement trial. */
@@ -185,8 +196,8 @@ public class ChaosRuntimeBenchmark {
   }
 
   /**
-   * State with nine non-matching scenarios plus one matching scenario to measure registry scan
-   * cost.
+   * State with nine scenarios on the same operation whose statement pattern does not match, plus
+   * one matching scenario spent in setup: every call evaluates ten scenarios of its operation.
    */
   @State(Scope.Benchmark)
   public static class TenScenariosState {
@@ -196,9 +207,13 @@ public class ChaosRuntimeBenchmark {
     ChaosRuntime runtime;
     ChaosDispatcher dispatcher;
 
-    /** Registers the mix of non-matching and matching scenarios before the trial. */
+    /**
+     * Registers the mix of non-matching and matching scenarios before the trial.
+     *
+     * @throws Throwable if the dispatcher surfaces an unexpected failure
+     */
     @Setup(Level.Trial)
-    public void setup() {
+    public void setup() throws Throwable {
       runtime = new ChaosRuntime();
       for (int i = 0; i < NON_MATCHING_SCENARIO_COUNT; i++) {
         runtime.activate(
@@ -206,7 +221,8 @@ public class ChaosRuntimeBenchmark {
                 .scope(ChaosScenario.ScenarioScope.JVM)
                 .selector(
                     new ChaosSelector.JdbcSelector(
-                        Set.of(OperationType.JDBC_CONNECTION_ACQUIRE), NamePattern.any()))
+                        Set.of(OperationType.JDBC_STATEMENT_EXECUTE),
+                        NamePattern.regex(NO_MATCH_SQL_PATTERN)))
                 .effect(ChaosEffect.delay(ZERO_DELAY))
                 .activationPolicy(ActivationPolicy.always())
                 .build());
@@ -221,12 +237,29 @@ public class ChaosRuntimeBenchmark {
               .activationPolicy(ONE_SHOT_POLICY)
               .build());
       dispatcher = runtime.dispatcher();
+      exhaust(runtime, dispatcher, "bench-match");
     }
 
     /** Closes the runtime after the measurement trial. */
     @TearDown(Level.Trial)
     public void tearDown() {
       runtime.close();
+    }
+  }
+
+  /**
+   * Spends the one application of a one-shot scenario, so the measurement loop sees it exhausted,
+   * and checks that it is: otherwise the loop would measure a live scenario.
+   */
+  private static void exhaust(
+      final ChaosRuntime runtime, final ChaosDispatcher dispatcher, final String id)
+      throws Throwable {
+    dispatcher.client().beforeJdbcStatementExecute(BENCHMARK_SQL);
+    final ChaosDiagnostics.ScenarioState state =
+        runtime.diagnostics().scenario(id).orElseThrow().state();
+    if (state != ChaosDiagnostics.ScenarioState.INACTIVE) {
+      throw new IllegalStateException(
+          "scenario " + id + " must be exhausted (INACTIVE) after setup but is " + state);
     }
   }
 
@@ -250,7 +283,7 @@ public class ChaosRuntimeBenchmark {
    */
   @Benchmark
   public void agentInstalled_zeroScenarios(ZeroScenariosState state) throws Throwable {
-    state.dispatcher.client().beforeJdbcStatementExecute(BENCHMARK_SQL);
+    state.dispatcher.client().beforeJdbcStatementExecute(sql);
   }
 
   /**
@@ -261,7 +294,7 @@ public class ChaosRuntimeBenchmark {
    */
   @Benchmark
   public void agentInstalled_oneScenario_noMatch(OneScenarioNoMatchState state) throws Throwable {
-    state.dispatcher.client().beforeJdbcStatementExecute(BENCHMARK_SQL);
+    state.dispatcher.client().beforeJdbcStatementExecute(sql);
   }
 
   /**
@@ -272,7 +305,7 @@ public class ChaosRuntimeBenchmark {
    */
   @Benchmark
   public void agentInstalled_oneMatch_noEffect(OneMatchNoEffectState state) throws Throwable {
-    state.dispatcher.client().beforeJdbcStatementExecute(BENCHMARK_SQL);
+    state.dispatcher.client().beforeJdbcStatementExecute(sql);
   }
 
   /**
@@ -284,7 +317,7 @@ public class ChaosRuntimeBenchmark {
    */
   @Benchmark
   public void sessionIdMiss(SessionMissState state) throws Throwable {
-    state.dispatcher.client().beforeJdbcStatementExecute(BENCHMARK_SQL);
+    state.dispatcher.client().beforeJdbcStatementExecute(sql);
   }
 
   /**
@@ -295,6 +328,6 @@ public class ChaosRuntimeBenchmark {
    */
   @Benchmark
   public void tenScenarios_oneMatch(TenScenariosState state) throws Throwable {
-    state.dispatcher.client().beforeJdbcStatementExecute(BENCHMARK_SQL);
+    state.dispatcher.client().beforeJdbcStatementExecute(sql);
   }
 }

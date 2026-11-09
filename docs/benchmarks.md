@@ -153,11 +153,11 @@ Each benchmark variant has its own `@State` inner class that pre-activates a spe
 
 **`OneScenarioNoMatchState`**: One scenario is activated targeting `JDBC_STATEMENT_EXECUTE` with a regex pattern `"SELECT\\s+\\*\\s+FROM\\s+no_match_table"`. The scenario is active but will never match `"SELECT 1"`. `registry.match()` finds the scenario under `JDBC_STATEMENT_EXECUTE` in the operation index, `SelectorMatcher` evaluates the regex and fails, the contribution list is empty, and `evaluateJdbc` returns `false`. This measures the cost of one indexed evaluation including regex evaluation.
 
-**`OneMatchNoEffectState`**: One scenario is activated targeting `JDBC_STATEMENT_EXECUTE` with `NamePattern.any()`. The scenario uses `ONE_SHOT_POLICY` — `ActivationPolicy` constructed with `probability=1.0d` and `maxApplications=1L` — and a `ChaosEffect.delay(Duration.ofMillis(0))` (zero-delay). The scenario matches every call; on the very first application it fires a 0ms delay (no observable pause), then `maxApplications` is reached and the scenario transitions to INACTIVE. All warmup and measurement iterations after the first see the INACTIVE fast path. This measures the cost of a full selector match plus the INACTIVE state check once the quota is exhausted.
+**`OneMatchNoEffectState`**: One scenario is activated targeting `JDBC_STATEMENT_EXECUTE` with `NamePattern.any()`, `ONE_SHOT_POLICY` (`ActivationPolicy.count(1)`) and a zero delay. `@Setup` spends its one application with one call and checks that the scenario is INACTIVE (it throws `IllegalStateException` otherwise), so every warmup and measurement call sees an exhausted scenario still registered for the operation.
 
 **`SessionMissState`**: A session-scoped scenario is activated on a session that is never joined on the calling thread. `ClientDispatch.evaluateJdbc()` calls `scopeContext.currentSessionId()` to get the current thread's session ID. If the current thread is not inside a session (`currentSessionId()` returns `null`), session-scoped scenarios are filtered out by `registry.match()` at the session-scope check. The scenario exists in the registry but never contributes. This measures the additional cost of the session scope check: approximately one `ThreadLocal.get()` call.
 
-**`TenScenariosState`**: Nine scenarios are activated targeting `JDBC_CONNECTION_ACQUIRE` (a different operation type) and one scenario targets `JDBC_STATEMENT_EXECUTE` with a zero-probability activation. `registry.match()` reads only the `JDBC_STATEMENT_EXECUTE` entry of the operation index: the nine `JDBC_CONNECTION_ACQUIRE` scenarios are never evaluated; one matches but produces no terminal effect. This measures that scenarios for other operations add no per-call cost. (The recorded results predate the operation index, when all ten entries were scanned and nine discarded at the `operationType` check.)
+**`TenScenariosState`**: Nine scenarios target `JDBC_STATEMENT_EXECUTE` with the non-matching regex of `OneScenarioNoMatchState`, and one targets it with `NamePattern.any()` and `ONE_SHOT_POLICY`, spent in `@Setup` like `OneMatchNoEffectState`. Every call evaluates the ten scenarios of its operation: nine regex non-matches and one exhausted scenario. This measures how the cost grows with the scenarios on one operation; scenarios on other operations are not evaluated at all (the operation index), as `ZeroScenariosState` against `OneScenarioNoMatchState` of `Phase4DispatchBenchmark` shows.
 
 ### 3.3 Benchmark Variants and Targets
 
@@ -166,9 +166,23 @@ Each benchmark variant has its own `@State` inner class that pre-activates a spe
 | `baseline_noAgent`                   | `NoAgentState`            | Raw executor call + `Blackhole.consume()` with no agent on the path | Reference: ~1–5 ns                      |
 | `agentInstalled_zeroScenarios`       | `ZeroScenariosState`      | Empty registry fast path                                            | < 50 ns                                 |
 | `agentInstalled_oneScenario_noMatch` | `OneScenarioNoMatchState` | One scenario, regex non-match                                       | < 100 ns                                |
-| `agentInstalled_oneMatch_noEffect`   | `OneMatchNoEffectState`   | Selector match, zero-probability effect                             | < 300 ns                                |
-| `sessionIdMiss`                      | `SessionMissState`        | Session scope check short-circuit                                   | < 20 ns additional over `zeroScenarios` |
-| `tenScenarios_oneMatch`              | `TenScenariosState`       | Index lookup; 9 other-operation entries not evaluated               | < 1 µs                                  |
+| `agentInstalled_oneMatch_noEffect`   | `OneMatchNoEffectState`   | One exhausted scenario on the operation                             | < 300 ns                                |
+| `sessionIdMiss`                      | `SessionMissState`        | Session-scoped scenario, calling thread outside the session         | < 20 ns additional over `zeroScenarios` |
+| `tenScenarios_oneMatch`              | `TenScenariosState`       | Ten scenarios on the operation: 9 regex non-matches, 1 exhausted    | < 1 µs                                  |
+
+Measured on OpenJDK 25.0.1 (Apple Silicon), the class's own settings (`-f 1`, 3 × 1 s warmup, 5 × 1 s measurement):
+
+```
+Benchmark                                                 Mode  Cnt    Score    Error  Units
+ChaosRuntimeBenchmark.baseline_noAgent                    avgt    5    0.548 ±  0.070  ns/op
+ChaosRuntimeBenchmark.agentInstalled_zeroScenarios        avgt    5    2.239 ±  0.159  ns/op
+ChaosRuntimeBenchmark.agentInstalled_oneScenario_noMatch  avgt    5   89.996 ±  2.395  ns/op
+ChaosRuntimeBenchmark.agentInstalled_oneMatch_noEffect    avgt    5   16.288 ±  0.331  ns/op
+ChaosRuntimeBenchmark.sessionIdMiss                       avgt    5  318.041 ±  8.067  ns/op
+ChaosRuntimeBenchmark.tenScenarios_oneMatch               avgt    5  294.819 ±  8.244  ns/op
+```
+
+Every variant meets its target except `sessionIdMiss`: a session-scoped scenario costs a call outside its session about 316 ns over `zeroScenarios`, not under 20 ns. An exhausted scenario (16 ns) costs far less than one whose regex is evaluated (90 ns); the regex dominates `tenScenarios_oneMatch` (nine of them, 295 ns).
 
 ### 3.4 What the Targets Mean in Production Terms
 
@@ -178,8 +192,8 @@ The agent's overhead targets are calibrated against these real I/O costs:
 
 - **< 50 ns** (zero scenarios): below one thread park. The agent installed with no active chaos is essentially invisible — it does not register in the timing of any I/O operation that takes more than a microsecond.
 - **< 100 ns** (one scenario, no match): still below one thread park. A single inactive scenario costs less than half a percent of a 20 µs loopback TCP call.
-- **< 300 ns** (one match, no effect): 3% of a 10 µs HikariCP connection acquire. Acceptable for a scenario that is structurally active. In practice, a zero-probability scenario is used only during ramp-up or ramp-down; steady-state chaos will either have the scenario inactive or the effect firing (in which case the latency is dominated by the effect, not the dispatch).
-- **< 1 µs** (ten scenarios, one match): 10% of a 10 µs pool acquire. Ten simultaneously active scenarios is an unusually high number for a single operation type; typical production chaos game days run one to three scenarios.
+- **< 300 ns** (one exhausted scenario): 3% of a 10 µs HikariCP connection acquire. A scenario left registered after its last application; steady-state chaos either has no scenario on the operation or the effect firing (in which case the latency is dominated by the effect, not the dispatch).
+- **< 1 µs** (ten scenarios on one operation): 10% of a 10 µs pool acquire. Ten simultaneously active scenarios is an unusually high number for a single operation type; typical production chaos game days run one to three scenarios.
 
 ### 3.5 The `baseline_noAgent` Baseline
 
@@ -203,7 +217,7 @@ The `baseline_noAgent` result is the floor below which no agent measurement can 
 
 `HttpClientBenchmark` mirrors `ChaosRuntimeBenchmark` in structure but targets `ClientDispatch.beforeHttpSend(URL, OperationType.HTTP_CLIENT_SEND)`. This is the entry point for all synchronous HTTP client interceptions (OkHttp `execute()`, Apache HC 4/5 `execute()`).
 
-The HTTP dispatch path has slightly more overhead than the JDBC path for one reason: URL pattern matching. For a `JdbcSelector` without a SQL pattern, the target name match is a single `NamePattern.any()` fast path. For an `HttpClientSelector`, the `urlPattern` may be a glob or regex matched against the full URL string. Even for `NamePattern.any()`, the `SelectorMatcher` must read the URL string from `InvocationContext.targetName` and invoke `urlPattern.matches()`. The constant URL `"https://example.com/api/v1/orders"` used throughout the HTTP benchmark ensures the string is interned and does not allocate on each call.
+The HTTP dispatch path has slightly more overhead than the JDBC path for one reason: URL pattern matching. For a `JdbcSelector` without a SQL pattern, the target name match is a single `NamePattern.any()` fast path. For an `HttpClientSelector`, the `urlPattern` may be a glob or regex matched against the full URL string. Even for `NamePattern.any()`, the `SelectorMatcher` must read the URL string from `InvocationContext.targetName` and invoke `urlPattern.matches()`. The URL `"https://example.com/api/v1/orders"`, held in a `@State` field, is the same string on every call and does not allocate.
 
 ### 4.2 Scenario Configurations
 
@@ -213,28 +227,42 @@ The HTTP benchmark replicates all five non-baseline variants from `ChaosRuntimeB
 
 **`OneScenarioNoMatchState`**: One HTTP scenario targeting `HTTP_CLIENT_SEND` with `NamePattern.regex("https://other\\.example\\.net/.*")`. The benchmark URL `"https://example.com/api/v1/orders"` does not match. The regex is compiled once during activation and evaluated per call.
 
-**`OneMatchNoEffectState`**: One HTTP scenario targeting `HTTP_CLIENT_SEND` with `NamePattern.any()`, zero-probability activation. The selector matches the URL; the effect does not fire.
+**`OneMatchNoEffectState`**: One HTTP scenario targeting `HTTP_CLIENT_SEND` with `NamePattern.any()` and `ONE_SHOT_POLICY`, spent in `@Setup` and checked INACTIVE: the scenario is registered but exhausted.
 
 **`SessionMissState`**: Session-scoped HTTP scenario. Current thread carries no session ID; the scenario is filtered out.
 
-**`TenScenariosState`**: Nine scenarios targeting `HTTP_CLIENT_SEND_ASYNC` (operation type mismatch) and one targeting `HTTP_CLIENT_SEND` with `NamePattern.any()` and zero-probability activation. The nine are never evaluated (operation-type index); one matches but does not fire.
+**`TenScenariosState`**: Nine scenarios targeting `HTTP_CLIENT_SEND` with the non-matching URL regex of `OneScenarioNoMatchState`, and one targeting it with `NamePattern.any()` and `ONE_SHOT_POLICY`, spent in `@Setup`. Every call evaluates the ten scenarios of its operation.
 
 ### 4.3 Benchmark Variants and Targets
 
 | Benchmark method                     | Target             | Notes                                                                        |
 |--------------------------------------|--------------------|------------------------------------------------------------------------------|
-| `baseline_noAgent`                   | Reference: ~1–3 ns | `bh.consume(URL.length())` — string length read as proxy for "no agent work" |
+| `baseline_noAgent`                   | Reference: ~1–3 ns | `bh.consume(url.length())` — string length read as proxy for "no agent work" |
 | `agentInstalled_zeroScenarios`       | < 50 ns            | Empty registry fast path                                                     |
 | `agentInstalled_oneScenario_noMatch` | < 150 ns           | Regex non-match against URL string                                           |
-| `agentInstalled_oneMatch_noEffect`   | < 300 ns           | `any()` URL match, zero-probability                                          |
-| `sessionIdMiss`                      | < 20 ns additional | Session scope short-circuit                                                  |
-| `tenScenarios_oneMatch`              | < 1 µs             | Operation-type index; the nine other-operation scenarios are not evaluated   |
+| `agentInstalled_oneMatch_noEffect`   | < 300 ns           | One exhausted `any()` scenario on the operation                              |
+| `sessionIdMiss`                      | < 20 ns additional | Session-scoped scenario, calling thread outside the session                  |
+| `tenScenarios_oneMatch`              | < 1 µs             | Ten scenarios on the operation: 9 URL regex non-matches, 1 exhausted         |
 
-The HTTP `oneScenario_noMatch` target is 50 ns higher than the JDBC equivalent (150 ns vs 100 ns) because the regex evaluation against a URL string is measurably more expensive than a regex evaluation against a short SQL verb string (`"SELECT 1"`). The URL string `"https://example.com/api/v1/orders"` is 36 characters; `"SELECT \\s+\\*\\s+FROM\\s+no_match_table"` must scan farther before it fails than a short SQL non-match.
+Measured with the JDBC benchmark above (same machine and settings):
+
+```
+Benchmark                                                 Mode  Cnt    Score    Error  Units
+HttpClientBenchmark.baseline_noAgent                      avgt    5    0.752 ±  0.038  ns/op
+HttpClientBenchmark.agentInstalled_zeroScenarios          avgt    5    1.838 ±  0.040  ns/op
+HttpClientBenchmark.agentInstalled_oneScenario_noMatch    avgt    5   72.844 ±  1.687  ns/op
+HttpClientBenchmark.agentInstalled_oneMatch_noEffect      avgt    5   16.175 ±  1.286  ns/op
+HttpClientBenchmark.sessionIdMiss                         avgt    5  311.678 ±  9.651  ns/op
+HttpClientBenchmark.tenScenarios_oneMatch                 avgt    5  270.127 ± 38.956  ns/op
+```
+
+As for JDBC, every variant meets its target except `sessionIdMiss` (about 310 ns over `zeroScenarios`).
+
+The HTTP `oneScenario_noMatch` target is 50 ns higher than the JDBC equivalent (150 ns vs 100 ns) to leave room for a regex run against a longer string; measured, the URL regex fails sooner (73 ns) than the SQL one (90 ns).
 
 ### 4.4 The `baseline_noAgent` Difference
 
-The HTTP baseline is `bh.consume(URL.length())` rather than an executor call, because the HTTP benchmark has no natural "zero-agent equivalent" of an HTTP call — the actual OkHttp or Apache HC call would dominate the measurement. `URL.length()` is a deterministic, O(1) operation on an interned `String`. Its cost is essentially a pointer dereference and an `int` load — 1–3 ns. This is the measurement floor for the HTTP benchmark class.
+The HTTP baseline is `bh.consume(url.length())` rather than an executor call, because the HTTP benchmark has no natural "zero-agent equivalent" of an HTTP call — the actual OkHttp or Apache HC call would dominate the measurement. `url` is a field of the benchmark's `@State`, not a constant, so the JIT cannot fold the length into a constant; every benchmark of the class sends that field. Its cost is essentially a field load, a pointer dereference and an `int` load — 1–3 ns. This is the measurement floor for the HTTP benchmark class.
 
 ---
 
@@ -358,7 +386,7 @@ lower bound for any installed agent. Dispatch terminates at the first `registry.
 
 **`OneScenarioNoMatchState`** — one JDBC scenario is active. All Phase 4 dispatch calls miss it at
 the operation-type index lookup, before any scenario is evaluated. This isolates the cost of a non-empty
-registry with a guaranteed early reject.
+registry with a guaranteed early reject; measured, it costs nothing over the empty registry.
 
 **`FourScenariosExhaustedState`** — one scenario per Phase 4 operation type, each activated with
 `maxApplications=1`. During `@Setup`, each scenario is consumed once, exhausting it. The measurement
@@ -368,29 +396,34 @@ sit in the registry until the handle is stopped).
 
 ### 7.3 Measured Results
 
-Run on OpenJDK 25.0.1 (Apple Silicon), `-f 0 -wi 2 -i 3 -bm avgt -tu ns`:
+Run on OpenJDK 25.0.1 (Apple Silicon), `-f 1 -wi 2 -i 3 -bm avgt -tu ns`:
 
 ```
-Benchmark                                              Mode  Cnt    Score    Error  Units
-──────────────────────────────────────────────────────────────────────────────────────────
-Phase4DispatchBenchmark.dnsResolve_zeroScenarios        avgt    3   56.0 ±  13.1  ns/op
-Phase4DispatchBenchmark.fileIoRead_zeroScenarios        avgt    3   58.9 ±   5.0  ns/op
-Phase4DispatchBenchmark.fileIoWrite_zeroScenarios       avgt    3   58.9 ±   0.7  ns/op
-Phase4DispatchBenchmark.sslHandshake_zeroScenarios      avgt    3   57.7 ±   4.5  ns/op
-Phase4DispatchBenchmark.threadSleep_zeroScenarios       avgt    3   55.8 ±   2.0  ns/op
+Benchmark                                                    Mode  Cnt   Score   Error  Units
+──────────────────────────────────────────────────────────────────────────────────────────────
+Phase4DispatchBenchmark.dnsResolve_zeroScenarios             avgt    3   1.767 ± 0.273  ns/op
+Phase4DispatchBenchmark.fileIoRead_zeroScenarios             avgt    3   3.547 ± 0.718  ns/op
+Phase4DispatchBenchmark.fileIoWrite_zeroScenarios            avgt    3   3.507 ± 0.243  ns/op
+Phase4DispatchBenchmark.sslHandshake_zeroScenarios           avgt    3   1.793 ± 0.706  ns/op
+Phase4DispatchBenchmark.threadSleep_zeroScenarios            avgt    3   1.777 ± 0.225  ns/op
 
-Phase4DispatchBenchmark.dnsResolve_oneScenarioNoMatch   avgt    3   89.4 ±   6.4  ns/op
-Phase4DispatchBenchmark.fileIoRead_oneScenarioNoMatch   avgt    3   85.8 ±   2.0  ns/op
-Phase4DispatchBenchmark.fileIoWrite_oneScenarioNoMatch  avgt    3   85.7 ±  11.0  ns/op
-Phase4DispatchBenchmark.sslHandshake_oneScenarioNoMatch avgt    3   85.1 ±   0.9  ns/op
-Phase4DispatchBenchmark.threadSleep_oneScenarioNoMatch  avgt    3   82.5 ±   2.1  ns/op
+Phase4DispatchBenchmark.dnsResolve_oneScenarioNoMatch        avgt    3   1.762 ± 0.510  ns/op
+Phase4DispatchBenchmark.fileIoRead_oneScenarioNoMatch        avgt    3   3.529 ± 0.658  ns/op
+Phase4DispatchBenchmark.fileIoWrite_oneScenarioNoMatch       avgt    3   3.547 ± 0.108  ns/op
+Phase4DispatchBenchmark.sslHandshake_oneScenarioNoMatch      avgt    3   1.778 ± 0.041  ns/op
+Phase4DispatchBenchmark.threadSleep_oneScenarioNoMatch       avgt    3   1.745 ± 0.371  ns/op
 
-Phase4DispatchBenchmark.dnsResolve_fourScenariosExh.    avgt    3  306.2 ±   8.1  ns/op
-Phase4DispatchBenchmark.fileIoRead_fourScenariosExh.    avgt    3  333.4 ±  24.3  ns/op
-Phase4DispatchBenchmark.fileIoWrite_fourScenariosExh.   avgt    3  120.8 ±   4.4  ns/op
-Phase4DispatchBenchmark.sslHandshake_fourScenariosExh.  avgt    3  325.8 ±   3.0  ns/op
-Phase4DispatchBenchmark.threadSleep_fourScenariosExh.   avgt    3  332.9 ±   8.9  ns/op
+Phase4DispatchBenchmark.dnsResolve_fourScenariosExhausted    avgt    3  18.632 ± 3.220  ns/op
+Phase4DispatchBenchmark.fileIoRead_fourScenariosExhausted    avgt    3  18.695 ± 2.791  ns/op
+Phase4DispatchBenchmark.fileIoWrite_fourScenariosExhausted   avgt    3   3.504 ± 0.080  ns/op
+Phase4DispatchBenchmark.sslHandshake_fourScenariosExhausted  avgt    3  15.522 ± 0.155  ns/op
+Phase4DispatchBenchmark.threadSleep_fourScenariosExhausted   avgt    3  14.776 ± 2.272  ns/op
 ```
+
+The figures published before 2.0 (56–59, 83–89 and 306–333 ns) were measured with scenarios that
+never exhausted (their policy set the random seed, not `maxApplications`) and before the operation
+index; they are replaced. `fileIoWrite_fourScenariosExhausted` has no write scenario among the four,
+so it is the type-miss path.
 
 ### 7.4 Practical Throughput Impact — What the Agent Costs You
 
@@ -452,15 +485,14 @@ defines the ceiling.
 
 | Active chaos scenarios                  | Cost per read          | Max reads/sec   | Throughput loss   |
 |-----------------------------------------|------------------------|-----------------|-------------------|
-| 0 (agent installed, no scenarios)       | 1 000 + 58 = 1 058 ns  | 945 180         | **−5.5 %**        |
-| 1 scenario, different type (type-miss)  | 1 000 + 87 = 1 087 ns  | 919 960         | **−8.0 %**        |
-| 1 scenario, FILE_IO_READ, exhausted     | 1 000 + 333 = 1 333 ns | 750 188         | **−25.0 %**       |
-| 4 scenarios, all exhausted (worst case) | 1 000 + 333 = 1 333 ns | 750 188         | **−25.0 %**       |
+| 0 (agent installed, no scenarios)       | 1 000 + 3.5 = 1 003.5 ns  | 996 512      | **−0.35 %**       |
+| 1 scenario, different type (type-miss)  | 1 000 + 3.5 = 1 003.5 ns  | 996 512      | **−0.35 %**       |
+| 4 scenarios, all exhausted (worst case) | 1 000 + 18.7 = 1 018.7 ns | 981 643      | **−1.8 %**        |
 
-> **The −25% figure is the maximum realistic worst case for File I/O dispatch overhead.**
+> **The −1.8 % figure is the worst case for File I/O dispatch overhead.**
 > It requires: page-cache-hot reads (rare in containers), exhausted scenarios left resident in the
-> registry (avoidable with `ChaosActivationHandle.stop()`), and an application doing nothing but
-> reading files at maximum speed. Remove exhausted scenarios and this drops to −5.5% or better.
+> registry (avoidable with `ChaosActivationHandle.close()`), and an application doing nothing but
+> reading files at maximum speed. Remove exhausted scenarios and this drops to −0.35 %.
 
 ---
 
@@ -475,9 +507,9 @@ operation is also a HashMap lookup, roughly the same complexity as the dispatch 
 
 | Active chaos scenarios                 | Cost per lookup    | Max lookups/sec   | Throughput loss  |
 |----------------------------------------|--------------------|-------------------|------------------|
-| 0 (agent installed, no scenarios)      | 500 + 56 = 556 ns  | 1 798 561         | **−10.1 %**      |
-| 1 scenario, different type (type-miss) | 500 + 89 = 589 ns  | 1 697 793         | **−15.1 %**      |
-| 1 scenario, DNS_RESOLVE, exhausted     | 500 + 306 = 806 ns | 1 240 695         | **−37.9 %**      |
+| 0 (agent installed, no scenarios)      | 500 + 1.8 = 501.8 ns  | 1 992 826      | **−0.36 %**      |
+| 1 scenario, different type (type-miss) | 500 + 1.8 = 501.8 ns  | 1 992 826      | **−0.36 %**      |
+| 1 scenario, DNS_RESOLVE, exhausted     | 500 + 18.6 = 518.6 ns | 1 928 268      | **−3.6 %**       |
 
 2 million DNS lookups per second on the same host from one JVM is not DNS traffic — it is a tight
 loop. In practice, achieving this rate requires the application to do essentially nothing else.
@@ -493,8 +525,8 @@ When the hostname is not in the JVM cache and the OS resolver is queried, the op
 
 | Active chaos scenarios                  | Cost per lookup   | Max lookups/sec   | Throughput loss  |
 |-----------------------------------------|-------------------|-------------------|------------------|
-| 0 (agent installed, no scenarios)       | 500 000 + 56 ns   | 1 999.8           | **−0.01 %**      |
-| 4 scenarios, all exhausted (worst case) | 500 000 + 306 ns  | 1 998.8           | **−0.06 %**      |
+| 0 (agent installed, no scenarios)       | 500 000 + 1.8 ns  | 1 999.99          | **−0.0004 %**    |
+| 4 scenarios, all exhausted (worst case) | 500 000 + 18.6 ns | 1 999.93          | **−0.004 %**     |
 
 The agent is invisible. The same applies to SSL handshakes (1–10 ms) and any `Thread.sleep` call
 by definition. **Any operation that crosses a network boundary makes the dispatch overhead
@@ -515,29 +547,34 @@ profile:
 | Thread.sleep (retry backoff, health check timers)                | 0.1             | 200               |
 | **Total intercepted calls/sec**                                  |                 | **5 300**         |
 
-**Total agent overhead — no chaos scenarios active:**
-5 300 calls/sec × 58 ns/call = **307 400 ns = 0.31 ms per second**
+**Total dispatch overhead — no chaos scenarios active:**
+- 4 000 file reads × 3.5 ns = 14 000 ns
+- 1 000 DNS lookups × 1.8 ns = 1 800 ns
+- 100 SSL handshakes × 1.8 ns = 180 ns
+- 200 thread sleeps × 1.8 ns = 360 ns
+- **Total: 16 340 ns = 0.016 ms per second**
 
 One CPU core provides 1 000 ms of CPU time per second.
-The agent costs **0.31 ms of it — 0.031% of one CPU core.**
+The dispatch costs **0.016 ms of it — 0.002 % of one CPU core.**
 
-**Total agent overhead — 4 exhausted scenarios, worst-case paths:**
-- 4 000 file reads × 333 ns = 1 332 000 ns
-- 1 000 DNS lookups × 306 ns = 306 000 ns  
-- 100 SSL handshakes × 326 ns = 32 600 ns
-- 200 thread sleeps × 333 ns = 66 600 ns
-- **Total: 1 737 200 ns = 1.74 ms per second**
+**Total dispatch overhead — 4 exhausted scenarios, worst-case paths:**
+- 4 000 file reads × 18.7 ns = 74 800 ns
+- 1 000 DNS lookups × 18.6 ns = 18 600 ns
+- 100 SSL handshakes × 15.5 ns = 1 550 ns
+- 200 thread sleeps × 14.8 ns = 2 960 ns
+- **Total: 97 910 ns = 0.098 ms per second**
 
-1.74 ms out of 1 000 ms = **0.17% of one CPU core.**
+0.098 ms out of 1 000 ms = **0.01 % of one CPU core.**
 
-Even with four exhausted scenarios sitting in the registry across all operation types, the chaos
-agent consumes less than two tenths of one percent of one CPU core in a realistic microservice
-workload. The dominant cost is always the business logic, the I/O, and the network — not the
-dispatch overhead.
+These are dispatch costs; a woven call adds its hook (7–12 ns with no scenario for the operation,
+section 8), about 0.005 % of a core at 5 300 calls/sec. Even with four exhausted scenarios sitting in
+the registry across all operation types, the agent consumes about a hundredth of one percent of one
+CPU core in a realistic microservice workload. The dominant cost is always the business logic, the
+I/O, and the network — not the dispatch overhead.
 
-**The one rule that matters:** call `ChaosActivationHandle.stop()` when a scenario is done.
-An exhausted scenario costs as much to evaluate as one that is actively firing, and delivers
-nothing in return. Everything else is noise.
+**The one rule that matters:** call `ChaosActivationHandle.close()` when a scenario is done.
+An exhausted scenario left registered is still evaluated on every call of its operation (about
+13–17 ns more than none), and delivers nothing in return. Everything else is noise.
 
 ---
 
@@ -545,41 +582,39 @@ nothing in return. Everything else is noise.
 
 | Situation                                                 | Impact                            | Verdict                              |
 |-----------------------------------------------------------|-----------------------------------|--------------------------------------|
-| Agent installed, no active scenarios                      | −5–10% throughput on cheapest ops | Acceptable; unavoidable              |
-| Real network operations (DNS query, SSL, HTTP)            | < 0.1% on any load                | Negligible                           |
-| Cheap ops (page-cache reads) + active/exhausted scenarios | −8–25% on that specific call type | Manageable; stop exhausted scenarios |
-| Typical mixed microservice, any scenario count            | < 0.02% total CPU                 | Irrelevant                           |
-| Pathological: same-host JVM-cached DNS at 2M/sec          | −10–38% on that loop              | Artificial; not a real workload      |
+| Agent installed, no active scenarios                      | < 0.4 % throughput on cheapest ops | Negligible                           |
+| Real network operations (DNS query, SSL, HTTP)            | < 0.01 % on any load               | Negligible                           |
+| Cheap ops (page-cache reads) + exhausted scenarios        | −2–4 % on that specific call type  | Manageable; close exhausted scenarios |
+| Typical mixed microservice, four exhausted scenarios      | about 0.01 % of one core           | Irrelevant                           |
+| Pathological: same-host JVM-cached DNS at 2M/sec          | −0.4–3.6 % on that loop            | Artificial; not a real workload      |
 
 ### 7.5 Design Targets and Compliance
 
 | Path                        | Target   | Measured     | Compliant   |
 |-----------------------------|----------|--------------|-------------|
-| Empty registry              | < 100 ns | 55.8–58.9 ns | ✓           |
-| One mismatching scenario    | < 150 ns | 82.5–89.4 ns | ✓           |
-| Four exhausted (type-miss)  | < 200 ns | 120.8 ns     | ✓           |
-| Four exhausted (type-match) | < 500 ns | 306–333 ns   | ✓           |
+| Empty registry              | < 100 ns | 1.8–3.5 ns   | ✓           |
+| One mismatching scenario    | < 150 ns | 1.7–3.5 ns   | ✓           |
+| Four exhausted (type-miss)  | < 200 ns | 3.5 ns       | ✓           |
+| Four exhausted (type-match) | < 500 ns | 14.8–18.7 ns | ✓           |
 
-All four paths meet their design targets. The exhausted-type-match path (306–333 ns) has the largest
-error bar for `fileIoRead` (±24 ns), attributable to `AtomicLong` memory-fence variance under
-macOS's ARM memory model. On x86 Linux (production target), variance is expected to be lower.
+All four paths meet their design targets by more than an order of magnitude: a call whose operation
+has no scenario returns at the operation index, before any scenario is evaluated.
 
 ### 7.6 Operational Guidance
 
-**Remove exhausted scenarios.** The most actionable result from this benchmark is that an exhausted
-scenario sitting in the registry costs 250 ns more per matching call than a scenario that was never
-there. `ChaosActivationHandle.close()` stops the scenario and removes it from the live registry
+**Remove exhausted scenarios.** An exhausted scenario sitting in the registry costs about 13–17 ns
+more per call of its operation than a scenario that was never there. `ChaosActivationHandle.close()` stops the scenario and removes it from the live registry
 with a single `ConcurrentHashMap` removal (`stop()` alone leaves it registered). Call it as soon as
 `maxApplications` has been reached and the scenario is no longer needed.
 
-**Keep selector types narrow.** A `FileIoSelector(READ_ONLY)` scenario adds ~35 ns to write calls
-(type-mismatch reject) but 0 ns overhead beyond that to DNS, SSL, and thread operations (they fail
-at operation-type level before even reaching the file-type check). Wide selectors that cover multiple
+**Keep selector types narrow.** A scenario adds nothing measurable to calls of other operations
+(`fileIoWrite_fourScenariosExhausted` against `fileIoWrite_zeroScenarios`): they miss it at the
+operation index, before any selector is evaluated. Wide selectors that cover multiple
 operation types increase the per-call cost across more code paths.
 
-**Benchmark with `-f 1` for publication.** The results above use `-f 0` (no fork) for speed. For
-published benchmarks, use `-f 1 -wi 3 -i 5` to isolate JIT state across classes and collect tighter
-confidence intervals.
+**Benchmark with `-f 1` or more for publication.** The results above use `-f 1` with short warmup
+and measurement (`-wi 2 -i 3`). For tighter confidence intervals, use `-f 3 -wi 3 -i 5`; never `-f 0`,
+which shares the JIT state of the harness and of earlier benchmark classes.
 
 ---
 
