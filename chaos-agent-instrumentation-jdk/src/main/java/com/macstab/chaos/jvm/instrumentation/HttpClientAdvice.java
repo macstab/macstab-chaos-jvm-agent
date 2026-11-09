@@ -2,6 +2,7 @@ package com.macstab.chaos.jvm.instrumentation;
 
 import com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher;
 import net.bytebuddy.asm.Advice;
+import org.jspecify.annotations.Nullable;
 
 /**
  * ByteBuddy {@link Advice} classes for HTTP client interception points.
@@ -74,17 +75,19 @@ final class HttpClientAdvice {
   }
 
   /**
-   * Intercepts {@code jdk.internal.net.http.HttpClientImpl.sendAsync(HttpRequest, BodyHandler)}.
+   * Intercepts {@code jdk.internal.net.http.HttpClientImpl.sendAsync} (2 and 3 arguments; the
+   * 2-argument form delegates, {@code SCOPE_HTTP} evaluates the outermost). A reject skips the send
+   * and returns a future failed with the {@link java.io.IOException} the dispatcher built, as the
+   * client fails an asynchronous exchange: the call itself does not throw.
    */
   static final class JavaHttpClientSendAsyncAdvice {
-    @Advice.OnMethodEnter
-    static void enter(
+    @Advice.OnMethodEnter(skipOn = Advice.OnNonDefaultValue.class)
+    static @Nullable Throwable enter(
         @Advice.Argument(
                 value = 0,
                 readOnly = false,
                 typing = net.bytebuddy.implementation.bytecode.assign.Assigner.Typing.DYNAMIC)
-            Object request)
-        throws Throwable {
+            Object request) {
       // Inside a session, a request to an internal host carries its id to the next service.
       if (request instanceof java.net.http.HttpRequest httpRequest
           && httpRequest.headers().firstValue(BootstrapDispatcher.SESSION_HEADER).isEmpty()) {
@@ -101,7 +104,7 @@ final class HttpClientAdvice {
         }
       }
       if (!BootstrapDispatcher.enterScope(BootstrapDispatcher.SCOPE_HTTP)) {
-        return;
+        return null;
       }
       // Inlined into HttpClientImpl (java.net.http), the advice calls HttpRequest.uri() directly:
       // the request's own class (jdk.internal.net.http) is not open to reflection by the agent.
@@ -111,15 +114,23 @@ final class HttpClientAdvice {
               : null;
       try {
         BootstrapDispatcher.beforeHttpSendAsync(url);
-      } catch (final Throwable throwable) {
-        BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
-        throw throwable;
+        return null;
+      } catch (final Throwable rejected) {
+        return rejected;
       }
     }
 
     @Advice.OnMethodExit(onThrowable = Throwable.class)
-    static void exit() {
+    static void exit(
+        @Advice.Enter final @Nullable Throwable rejected,
+        @Advice.Return(
+                readOnly = false,
+                typing = net.bytebuddy.implementation.bytecode.assign.Assigner.Typing.DYNAMIC)
+            Object response) {
       BootstrapDispatcher.exitScope(BootstrapDispatcher.SCOPE_HTTP);
+      if (rejected != null) {
+        response = java.util.concurrent.CompletableFuture.failedFuture(rejected);
+      }
     }
   }
 

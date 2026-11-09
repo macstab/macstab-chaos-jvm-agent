@@ -626,6 +626,26 @@ class AgentEndToEndTest {
     }
 
     @Test
+    @DisplayName(
+        "HttpClient.sendAsync: a reject fails the returned future, the call does not throw")
+    void jdkSendAsyncReject() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.run(
+              plan(
+                  scenario(
+                      "send-async",
+                      ChaosSelector.httpClient(Set.of(OperationType.HTTP_CLIENT_SEND_ASYNC)),
+                      ChaosEffect.reject("service down"))),
+              DefectProbeMain.class,
+              "jdk-send-async-reject",
+              null);
+      assertThat(result.values()).doesNotContainKey("call.type");
+      assertThat(result.value("future.type")).isEqualTo("java.io.IOException");
+      assertThat(result.value("future.message")).isEqualTo("service down");
+      assertThat(result.longValue("matched.send-async")).isEqualTo(1L);
+    }
+
+    @Test
     @DisplayName("a URL filter matches JDK HttpClient requests")
     void jdkHttpClientUrlFilter() throws Exception {
       final ChildJvmProbe.ProbeResult result =

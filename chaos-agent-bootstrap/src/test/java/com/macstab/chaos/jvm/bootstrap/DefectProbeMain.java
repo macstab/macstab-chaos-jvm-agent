@@ -135,6 +135,7 @@ public final class DefectProbeMain {
       case "select-consumer" -> selectConsumer();
       case "sleep-duration" -> sleepDuration();
       case "jdk-send-async" -> withHttpServer(DefectProbeMain::jdkSendAsync);
+      case "jdk-send-async-reject" -> withHttpServer(DefectProbeMain::jdkSendAsyncReject);
       case "http-url-connection" -> withHttpServer(DefectProbeMain::httpUrlConnection);
       case "agent-owned-stressors" -> agentOwnedStressors();
       case "thread-local-leak-fork-join-gate" -> threadLocalLeakForkJoinGate();
@@ -2621,6 +2622,27 @@ public final class DefectProbeMain {
                     HttpResponse.BodyHandlers.ofString())
                 .get(10L, TimeUnit.SECONDS)
                 .statusCode());
+  }
+
+  /** A rejected {@code sendAsync}: whether the call threw, and how its future ended. */
+  private static void jdkSendAsyncReject(final String url) throws Exception {
+    final HttpClient client = HttpClient.newHttpClient();
+    final java.util.concurrent.CompletableFuture<HttpResponse<String>> response;
+    try {
+      response =
+          client.sendAsync(
+              HttpRequest.newBuilder(URI.create(url)).build(),
+              HttpResponse.BodyHandlers.ofString());
+    } catch (final Exception failure) {
+      System.out.println("call.type=" + failure.getClass().getName());
+      return;
+    }
+    try {
+      System.out.println("status=" + response.get(10L, TimeUnit.SECONDS).statusCode());
+    } catch (final java.util.concurrent.ExecutionException failure) {
+      System.out.println("future.type=" + failure.getCause().getClass().getName());
+      System.out.println("future.message=" + failure.getCause().getMessage());
+    }
   }
 
   /**

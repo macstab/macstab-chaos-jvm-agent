@@ -639,7 +639,7 @@ The reflection approach has one observable warm-up cost: the first call for each
 
 ## 12.4 How a Rejected Request Fails
 
-A reject on `HTTP_CLIENT_SEND` / `HTTP_CLIENT_SEND_ASYNC` throws `java.io.IOException(message)` (built by `FailureFactory`) from `BootstrapDispatcher.beforeHttpSend` / `beforeHttpSendAsync`, inside the advice, before the real method body runs. Every wired client declares or tolerates `IOException` on these paths, so the caller's own error handling — retries, circuit breakers, `ExchangeFilterFunction`s, OkHttp interceptors — sees what a refused or reset connection produces. 1.x also had a suppress that threw the agent's `ChaosHttpSuppressException`; no real client throws it, so 2.0 refuses a suppress on HTTP at activation and the class is gone.
+A reject on `HTTP_CLIENT_SEND` / `HTTP_CLIENT_SEND_ASYNC` throws `java.io.IOException(message)` (built by `FailureFactory`) from `BootstrapDispatcher.beforeHttpSend` / `beforeHttpSendAsync`, inside the advice, before the real method body runs. An asynchronous call does not throw it: the JDK `sendAsync` advice skips the send and returns `CompletableFuture.failedFuture(exception)`. Every wired client declares or tolerates `IOException` on these paths, so the caller's own error handling — retries, circuit breakers, `ExchangeFilterFunction`s, OkHttp interceptors — sees what a refused or reset connection produces. 1.x also had a suppress that threw the agent's `ChaosHttpSuppressException`; no real client throws it, so 2.0 refuses a suppress on HTTP at activation and the class is gone.
 
 ## 12.5 The `instrumentOptional` Guard
 
