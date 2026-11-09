@@ -259,11 +259,11 @@ The recorder keeps one log per scenario and scope: `replay(scenario)` replays th
 
 `ChaosPlatform.installLocally()` uses the JDK Attach API to self-attach the agent. Requirements:
 
-- JDK (not JRE): requires `tools.jar` (JDK 8) or the `java.attach` module (JDK 9+)
+- A JDK runtime with the `jdk.attach` module (a JRE or a `jlink` image without it cannot self-attach)
 - No JVM flag is required: when the JVM does not allow a process to attach to itself (`jdk.attach.allowAttachSelf` unset, the default since JDK 9), ByteBuddy attaches from a short-lived helper process, and the agent installs as usual. On JDK 21 and later the JVM then prints the [JEP 451](https://openjdk.org/jeps/451) warning on stderr ("WARNING: A Java agent has been loaded dynamically …"). It is a warning only; chaos works. The agent does not suppress it. To avoid it, either load the agent at startup with `-javaagent:` (no dynamic loading, no warning), or add `-XX:+EnableDynamicAgentLoading` to the test JVM, which allows the dynamic load explicitly. A JVM started with `-XX:-EnableDynamicAgentLoading` refuses the self-attach; `installLocally()` then fails with `IllegalStateException`, and `-javaagent:` is the way to run.
 
 **No `--add-opens` flags required.** The agent self-grants every JDK module open it needs at install time — manifest `Add-Opens` for `-javaagent:` startup attach, `Instrumentation#redefineModule` for self-attach. See [Module access strategy](instrumentation.md#module-access-strategy).
-- The agent JAR must be locatable on the classpath. `ChaosPlatform` uses a classpath scan to find the bootstrap JAR.
+- `chaos-agent-bootstrap` must be on the test class path (the testkit depends on it). `ChaosPlatform.installLocally()` obtains the `Instrumentation` through ByteBuddy's `ByteBuddyAgent.install()`; no agent jar is searched for or configured.
 
 **Gradle test configuration example** (optional; only avoids the JEP 451 warning):
 ```kotlin
@@ -351,27 +351,23 @@ void dbCallShouldHandleNetworkFailure(ChaosSession session) {
 void gateBlocksAndReleasesCorrectly(ChaosSession session) throws Exception {
     ChaosActivationHandle handle = session.activate(ChaosScenario.builder("gate-test")
         .scope(ChaosScenario.ScenarioScope.SESSION)
-        .selector(ChaosSelector.executor(
-            Set.of(OperationType.EXECUTOR_SUBMIT, OperationType.EXECUTOR_WORKER_RUN)))
-        .effect(ChaosEffect.gate(Duration.ofSeconds(5)))
+        .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+        .effect(ChaosEffect.gate(Duration.ofSeconds(5)))   // the submit proceeds after 5 s at the latest
         .build()
     );
 
-    CountDownLatch started = new CountDownLatch(1);
-    Thread t = new Thread(() -> {
-        started.countDown();
-        try (ChaosSession.ScopeBinding scope = session.bind()) {
-            executor.execute(() -> {}); // blocks on gate
-        }
-    });
+    Thread t = new Thread(session.wrap(() -> executor.execute(() -> {}))); // the submit blocks on the gate
     t.start();
 
-    started.await();
-    // Assert: thread is blocked
+    // Wait until the submit is held at the gate: the thread parks there with the gate's timeout.
+    // A release() before that would not let it through (the gate closes again at once).
+    while (t.getState() != Thread.State.TIMED_WAITING) {
+        Thread.onSpinWait();
+    }
     assertTrue(t.isAlive());
 
-    handle.release(); // unblocks gate
-    t.join(1000);
+    handle.release(); // unblocks the gate
+    t.join(2000);
     assertFalse(t.isAlive());
 }
 ```
@@ -395,8 +391,9 @@ void gateBlocksAndReleasesCorrectly(ChaosSession session) throws Exception {
 
 ```java
 @Test
-void debugChaos(ChaosSession session, ChaosDiagnostics diag) {
+void debugChaos(ChaosSession session, ChaosControlPlane controlPlane) {
     // ... activate scenarios ...
+    ChaosDiagnostics diag = controlPlane.diagnostics();   // ChaosDiagnostics is not injectable
 
     ChaosDiagnostics.Snapshot snap = diag.snapshot();
     snap.scenarios().forEach(r ->
