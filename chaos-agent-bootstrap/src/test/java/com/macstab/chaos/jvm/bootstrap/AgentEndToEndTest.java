@@ -2737,6 +2737,17 @@ class AgentEndToEndTest {
     }
 
     @Test
+    @DisplayName("the agent's WARNING for a suppressed tick is not seen by FILE_IO_WRITE")
+    void tickWarningIsAgentWork() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.runWithoutPlan(DefectProbeMain.class, "tick-warning-to-log-file");
+      assertThat(result.longValue("suppressedTicks")).isGreaterThanOrEqualTo(6L);
+      assertThat(result.longValue("rise"))
+          .as("FILE_IO_WRITE matches between the first and the sixth suppressed tick")
+          .isZero();
+    }
+
+    @Test
     @DisplayName("a FILE_IO_READ reject does not fail the plan file's reloads")
     void planReloadIgnoresFileReadReject() throws Exception {
       final String mode = "plan-reload-under-file-reject";

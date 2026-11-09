@@ -418,6 +418,23 @@ final class ObservabilityBus {
         && loggingMuted.contains(event.attributes().get("scope") + "::" + event.scenarioId())) {
       return;
     }
+    final java.util.logging.Level level =
+        switch (event.type()) {
+          case STARTED, STOPPED, INACTIVE -> java.util.logging.Level.INFO;
+          case APPLIED, RELEASED -> java.util.logging.Level.FINE;
+          // FAILED is visibility-critical: this is how operators see that a scenario's effect
+          // application itself errored. Log at WARNING so it surfaces above normal INFO traffic.
+          case FAILED -> java.util.logging.Level.WARNING;
+          // REGISTERED fires once per scenario at plan load; FINE keeps it visible to debug/audit
+          // tooling without cluttering production logs. SKIPPED can be high frequency (policy
+          // rate limiting, probability misses) so push it to FINER.
+          case REGISTERED -> java.util.logging.Level.FINE;
+          case SKIPPED -> java.util.logging.Level.FINER;
+        };
+    // Formatted only for a line that is written: APPLIED and SKIPPED come with every call.
+    if (!LOGGER.isLoggable(level)) {
+      return;
+    }
     final StringBuilder line = new StringBuilder(128);
     line.append("type=").append(event.type()).append(" scenarioId=\"");
     escape(event.scenarioId(), line);
@@ -433,19 +450,7 @@ final class ObservabilityBus {
       line.append('"');
       separator = ", ";
     }
-    final String formatted = line.append('}').toString();
-    switch (event.type()) {
-      case STARTED, STOPPED, INACTIVE -> LOGGER.info(formatted);
-      case APPLIED, RELEASED -> LOGGER.fine(formatted);
-      // FAILED is visibility-critical: this is how operators see that a scenario's effect
-      // application itself errored. Log at WARNING so it surfaces above normal INFO traffic.
-      case FAILED -> LOGGER.warning(formatted);
-      // REGISTERED fires once per scenario at plan load; FINE keeps it visible to debug/audit
-      // tooling without cluttering production logs. SKIPPED can be high frequency (policy rate
-      // limiting, probability misses) so push it to FINER.
-      case REGISTERED -> LOGGER.fine(formatted);
-      case SKIPPED -> LOGGER.finer(formatted);
-    }
+    LOGGER.log(level, line.append('}').toString());
   }
 
   /**

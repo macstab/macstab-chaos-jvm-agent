@@ -172,6 +172,65 @@ class NewStressorLifecycleTest {
     }
   }
 
+  @Nested
+  @DisplayName("FINE lines")
+  @org.junit.jupiter.api.parallel.ResourceLock("com.macstab.chaos.jvm logger")
+  class FineLines {
+
+    @Test
+    @DisplayName("each stressor reports its start and stop at FINE, with its figures")
+    void startAndStopAreReported() throws Exception {
+      final java.util.logging.Logger logger =
+          java.util.logging.Logger.getLogger("com.macstab.chaos.jvm");
+      final java.util.List<String> lines = new java.util.concurrent.CopyOnWriteArrayList<>();
+      final java.util.logging.Handler capture =
+          new java.util.logging.Handler() {
+            @Override
+            public void publish(final java.util.logging.LogRecord logRecord) {
+              lines.add(String.valueOf(logRecord.getMessage()));
+            }
+
+            @Override
+            public void flush() {}
+
+            @Override
+            public void close() {}
+          };
+      final java.util.logging.Level previous = logger.getLevel();
+      logger.setLevel(java.util.logging.Level.FINE);
+      capture.setLevel(java.util.logging.Level.FINE);
+      logger.addHandler(capture);
+      try {
+        new CodeCachePressureStressor(new ChaosEffect.CodeCachePressureEffect(2, 1)).close();
+        new StringInternPressureStressor(new ChaosEffect.StringInternPressureEffect(10, 8)).close();
+        final SafepointStormStressor storm =
+            new SafepointStormStressor(
+                new ChaosEffect.SafepointStormEffect(Duration.ofMillis(20), 0), Optional.empty());
+        await().atMost(2, TimeUnit.SECONDS).until(() -> storm.gcCycleCount() > 0);
+        storm.close();
+        final ReferenceQueueFloodStressor flood =
+            new ReferenceQueueFloodStressor(
+                new ChaosEffect.ReferenceQueueFloodEffect(5, Duration.ofMillis(20)));
+        await().atMost(2, TimeUnit.SECONDS).until(() -> flood.floodCycleCount() > 0);
+        flood.close();
+      } finally {
+        logger.removeHandler(capture);
+        logger.setLevel(previous);
+      }
+
+      assertThat(lines)
+          .anyMatch(line -> line.startsWith("CodeCachePressureStressor loaded 2 classes"))
+          .anyMatch(
+              line ->
+                  line.equals("StringInternPressureStressor interned 10 strings of 8 bytes each"))
+          .anyMatch(line -> line.startsWith("SafepointStormStressor started; gcInterval=20ms"))
+          .anyMatch(line -> line.startsWith("SafepointStormStressor stopped after "))
+          .anyMatch(
+              line -> line.startsWith("ReferenceQueueFloodStressor started; referenceCount=5"))
+          .anyMatch(line -> line.startsWith("ReferenceQueueFloodStressor stopped after "));
+    }
+  }
+
   private static long probeValue(final String output, final String key) {
     return output
         .lines()

@@ -63,13 +63,20 @@ public final class ScheduledRunnableWrapper implements Runnable {
         if (chaosFailure instanceof InterruptedException) {
           Thread.currentThread().interrupt();
         }
-        LOGGER.log(
-            Level.WARNING,
-            "chaos: suppressing chaos-injected exception from beforeScheduledTick to preserve"
-                + " periodicity (task="
-                + delegate.getClass().getName()
-                + ")",
-            chaosFailure);
+        // The agent's own logging: a handler's file write is no FILE_IO of the application.
+        BootstrapDispatcher.beginInternalCall();
+        try {
+          LOGGER.log(
+              Level.WARNING,
+              chaosFailure,
+              () ->
+                  "chaos: suppressing chaos-injected exception from beforeScheduledTick to"
+                      + " preserve periodicity (task="
+                      + delegate.getClass().getName()
+                      + ")");
+        } finally {
+          BootstrapDispatcher.endInternalCall();
+        }
         return;
       }
       // Restore the interrupt flag before sneaky-rethrow: otherwise an InterruptedException

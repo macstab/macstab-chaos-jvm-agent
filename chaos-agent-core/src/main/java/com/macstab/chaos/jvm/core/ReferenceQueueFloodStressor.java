@@ -99,11 +99,12 @@ final class ReferenceQueueFloodStressor implements ManagedStressor {
             },
             ManagedStressor.failure(onEnd, "ReferenceQueueFlood"));
     LOGGER.fine(
-        "ReferenceQueueFloodStressor started; referenceCount="
-            + referenceCount
-            + ", floodInterval="
-            + intervalMillis
-            + "ms");
+        () ->
+            "ReferenceQueueFloodStressor started; referenceCount="
+                + referenceCount
+                + ", floodInterval="
+                + intervalMillis
+                + "ms");
   }
 
   @Override
@@ -112,7 +113,8 @@ final class ReferenceQueueFloodStressor implements ManagedStressor {
     AgentThreads.stopAll(List.of(floodThread), 5_000L);
     drain();
     LOGGER.fine(
-        "ReferenceQueueFloodStressor stopped after " + floodCycleCount.get() + " flood cycles");
+        () ->
+            "ReferenceQueueFloodStressor stopped after " + floodCycleCount.get() + " flood cycles");
   }
 
   /** Returns the number of completed flood cycles so far. */

@@ -80,17 +80,18 @@ final class SafepointStormStressor implements ManagedStressor {
             },
             ManagedStressor.failure(onEnd, "SafepointStorm"));
     LOGGER.fine(
-        "SafepointStormStressor started; gcInterval="
-            + intervalMillis
-            + "ms, retransformClassCount="
-            + retransformCount);
+        () ->
+            "SafepointStormStressor started; gcInterval="
+                + intervalMillis
+                + "ms, retransformClassCount="
+                + retransformCount);
   }
 
   @Override
   public void close() {
     running.set(false);
     AgentThreads.stopAll(java.util.List.of(stormThread), 5_000L);
-    LOGGER.fine("SafepointStormStressor stopped after " + gcCycleCount.get() + " GC cycles");
+    LOGGER.fine(() -> "SafepointStormStressor stopped after " + gcCycleCount.get() + " GC cycles");
   }
 
   /** Returns the total number of GC cycles triggered so far. */

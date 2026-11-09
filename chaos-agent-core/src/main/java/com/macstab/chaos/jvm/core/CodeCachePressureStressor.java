@@ -102,13 +102,14 @@ final class CodeCachePressureStressor implements ManagedStressor {
     if (compilationBean != null && compilationBean.isCompilationTimeMonitoringSupported()) {
       final long delta = compilationBean.getTotalCompilationTime() - compilationTimeBefore;
       LOGGER.fine(
-          "CodeCachePressureStressor loaded "
-              + classes.size()
-              + " classes; JIT compilation time delta: "
-              + delta
-              + " ms");
+          () ->
+              "CodeCachePressureStressor loaded "
+                  + classes.size()
+                  + " classes; JIT compilation time delta: "
+                  + delta
+                  + " ms");
     } else {
-      LOGGER.fine("CodeCachePressureStressor loaded " + classes.size() + " classes");
+      LOGGER.fine(() -> "CodeCachePressureStressor loaded " + classes.size() + " classes");
     }
   }
 
@@ -157,7 +158,7 @@ final class CodeCachePressureStressor implements ManagedStressor {
       }
     } catch (final Exception exception) {
       LOGGER.fine(
-          "CodeCachePressureStressor: failed to generate class " + index + ": " + exception);
+          () -> "CodeCachePressureStressor: failed to generate class " + index + ": " + exception);
       return null;
     }
   }
@@ -179,7 +180,7 @@ final class CodeCachePressureStressor implements ManagedStressor {
         }
       }
     } catch (final Exception exception) {
-      LOGGER.fine("CodeCachePressureStressor: failed to invoke methods: " + exception);
+      LOGGER.fine(() -> "CodeCachePressureStressor: failed to invoke methods: " + exception);
     }
   }
 }

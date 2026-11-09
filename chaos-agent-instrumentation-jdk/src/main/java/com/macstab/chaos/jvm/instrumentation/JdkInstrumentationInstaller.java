@@ -864,7 +864,7 @@ public final class JdkInstrumentationInstaller {
         try {
           instrumentation.retransformClasses(escapee);
         } catch (final Throwable failure) {
-          LOGGER.warning("failed to retransform " + escapee.getName() + ": " + failure);
+          LOGGER.warning(() -> "failed to retransform " + escapee.getName() + ": " + failure);
         }
       }
     }
@@ -909,32 +909,40 @@ public final class JdkInstrumentationInstaller {
   }
 
   /**
+   * The listener that records and logs a type whose transformation failed ({@link
+   * HookCoverage#failed(String, Throwable)}).
+   *
+   * @return the listener
+   */
+  static AgentBuilder.Listener errorListener() {
+    return new AgentBuilder.Listener.Adapter() {
+      @Override
+      public void onError(
+          final String typeName,
+          final ClassLoader classLoader,
+          final JavaModule module,
+          final boolean loaded,
+          final Throwable throwable) {
+        HookCoverage.failed(typeName, throwable);
+        LOGGER.warning(() -> "chaos instrumentation failed for " + typeName + ": " + throwable);
+      }
+    };
+  }
+
+  /**
    * Builds the base {@link AgentBuilder} with retransformation strategy, failing on a refused
    * retransformation, error logging, and ignore rules for ByteBuddy and chaos-agent internal
    * packages and for class loaders with a bootstrap bridge copy of their own ({@link
    * BridgeVisibility}).
    */
   private static AgentBuilder buildBaseAgentBuilder() {
-    final AgentBuilder.Listener.Adapter errorListener =
-        new AgentBuilder.Listener.Adapter() {
-          @Override
-          public void onError(
-              final String typeName,
-              final ClassLoader classLoader,
-              final JavaModule module,
-              final boolean loaded,
-              final Throwable throwable) {
-            HookCoverage.failed(typeName, throwable);
-            LOGGER.warning("chaos instrumentation failed for " + typeName + ": " + throwable);
-          }
-        };
     return newAgentBuilder()
         .disableClassFormatChanges()
         .with(AgentBuilder.RedefinitionStrategy.RETRANSFORMATION)
         // A class the JVM refuses to retransform fails the installation (ByteBuddy removes the
         // transformer and throws) instead of leaving a group recorded as woven with inert hooks.
         .with(AgentBuilder.RedefinitionStrategy.Listener.ErrorEscalating.FAIL_FAST)
-        .with(errorListener)
+        .with(errorListener())
         .ignore(
             ElementMatchers.nameStartsWith(BYTE_BUDDY_PACKAGE_PREFIX)
                 .or(ElementMatchers.nameStartsWith("com.macstab.chaos.jvm.")))

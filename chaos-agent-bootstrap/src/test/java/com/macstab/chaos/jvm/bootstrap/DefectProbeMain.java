@@ -141,6 +141,7 @@ public final class DefectProbeMain {
       case "http-url-connection" -> withHttpServer(DefectProbeMain::httpUrlConnection);
       case "agent-owned-stressors" -> agentOwnedStressors();
       case "plan-reload-under-file-reject" -> planReloadUnderFileReject();
+      case "tick-warning-to-log-file" -> tickWarningToLogFile();
       case "thread-local-leak-fork-join-gate" -> threadLocalLeakForkJoinGate();
       case "thread-local-leak-set-delay" -> threadLocalLeakSetDelay();
       case "session-thread-local-suppress" -> sessionThreadLocalSuppress();
@@ -2737,6 +2738,87 @@ public final class DefectProbeMain {
     } catch (final java.util.concurrent.ExecutionException failure) {
       System.out.println("future.type=" + failure.getCause().getClass().getName());
       System.out.println("future.message=" + failure.getCause().getMessage());
+    }
+  }
+
+  /**
+   * The agent's WARNING for a suppressed periodic tick, written by a {@code FileHandler} on the
+   * agent's logger (filtered to that message), while FILE_IO_WRITE on the log file is observed and
+   * SCHEDULE_TICK is rejected. Prints how often FILE_IO_WRITE matched between the first and the
+   * sixth suppressed tick ({@code rise}), and the number of suppressed ticks seen.
+   */
+  private static void tickWarningToLogFile() throws Exception {
+    final Path directory = Files.createTempDirectory("agent-log");
+    final Path log = directory.resolve("agent.log");
+    final java.util.logging.FileHandler file = new java.util.logging.FileHandler(log.toString());
+    final java.util.function.Predicate<java.util.logging.LogRecord> tickWarning =
+        logRecord -> String.valueOf(logRecord.getMessage()).startsWith("chaos: suppressing");
+    file.setFilter(tickWarning::test);
+    final java.util.concurrent.atomic.AtomicInteger warnings =
+        new java.util.concurrent.atomic.AtomicInteger();
+    AGENT_LOGGER.addHandler(file);
+    AGENT_LOGGER.addHandler(
+        new java.util.logging.Handler() {
+          @Override
+          public void publish(final java.util.logging.LogRecord logRecord) {
+            if (tickWarning.test(logRecord)) {
+              warnings.incrementAndGet();
+            }
+          }
+
+          @Override
+          public void flush() {}
+
+          @Override
+          public void close() {}
+        });
+    final ChaosControlPlane plane = ChaosPlatform.current();
+    final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+    try (ChaosActivationHandle writes =
+            plane.activate(
+                ChaosScenario.builder("log-writes")
+                    .scope(ChaosScenario.ScenarioScope.JVM)
+                    .selector(
+                        new ChaosSelector.FileIoSelector(
+                            Set.of(OperationType.FILE_IO_WRITE),
+                            com.macstab.chaos.jvm.api.PathPattern.under(directory.toString()),
+                            null,
+                            null))
+                    .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+                    .activationPolicy(ActivationPolicy.always())
+                    .build());
+        ChaosActivationHandle ticks =
+            plane.activate(
+                ChaosScenario.builder("tick-reject")
+                    .scope(ChaosScenario.ScenarioScope.JVM)
+                    .selector(ChaosSelector.scheduling(Set.of(OperationType.SCHEDULE_TICK)))
+                    .effect(ChaosEffect.reject("tick"))
+                    .activationPolicy(ActivationPolicy.always())
+                    .build())) {
+      @SuppressWarnings("FutureReturnValueIgnored")
+      final Object unused = scheduler.scheduleAtFixedRate(() -> {}, 0L, 10L, TimeUnit.MILLISECONDS);
+      awaitAtLeast(warnings, 1);
+      final long first = writes.matchedCount();
+      awaitAtLeast(warnings, 6);
+      final long last = writes.matchedCount();
+      scheduler.shutdownNow();
+      System.out.println("rise=" + (last - first));
+      System.out.println("suppressedTicks=" + ticks.matchedCount());
+    } finally {
+      scheduler.shutdownNow();
+      AGENT_LOGGER.removeHandler(file);
+      file.close();
+    }
+  }
+
+  private static void awaitAtLeast(
+      final java.util.concurrent.atomic.AtomicInteger count, final int expected) {
+    final long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+    while (count.get() < expected) {
+      if (System.nanoTime() > deadline) {
+        throw new IllegalStateException("only " + count.get() + " of " + expected + " seen");
+      }
+      LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(5));
     }
   }
 

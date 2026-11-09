@@ -15,6 +15,39 @@ import org.junit.jupiter.api.Test;
 class JdkInstrumentationInstallerTest {
 
   @Test
+  @DisplayName("a failed type is formatted for its record only when the log level drops the line")
+  void failedTypeIsNotFormattedForADroppedLogLine() {
+    final java.util.logging.Logger logger =
+        java.util.logging.Logger.getLogger("com.macstab.chaos.jvm");
+    final java.util.logging.Level previous = logger.getLevel();
+    final java.util.concurrent.atomic.AtomicInteger formatted =
+        new java.util.concurrent.atomic.AtomicInteger();
+    final Throwable failure =
+        new IllegalStateException() {
+          // Throwable.toString reads the message: each formatting of the failure counts.
+          @Override
+          public String getMessage() {
+            formatted.incrementAndGet();
+            return "probe failure";
+          }
+        };
+    logger.setLevel(java.util.logging.Level.OFF);
+    try {
+      JdkInstrumentationInstaller.errorListener()
+          .onError(
+              "com.example.FormattedOnce",
+              ClassLoader.getSystemClassLoader(),
+              net.bytebuddy.utility.JavaModule.ofType(Object.class),
+              false,
+              failure);
+    } finally {
+      logger.setLevel(previous);
+    }
+
+    assertThat(formatted).as("formatted for the hookFailures record only").hasValue(1);
+  }
+
+  @Test
   @DisplayName("buildMethodHandles resolves all handle slots without nulls")
   void buildMethodHandlesResolvesAllSlots() throws Exception {
     final MethodHandle[] handles = JdkInstrumentationInstaller.buildMethodHandles();

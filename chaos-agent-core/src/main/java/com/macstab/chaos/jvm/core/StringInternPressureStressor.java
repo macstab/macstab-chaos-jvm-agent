@@ -51,11 +51,12 @@ final class StringInternPressureStressor implements ManagedStressor {
     }
     this.internedStrings = List.copyOf(strings);
     LOGGER.fine(
-        "StringInternPressureStressor interned "
-            + strings.size()
-            + " strings of "
-            + lengthBytes
-            + " bytes each");
+        () ->
+            "StringInternPressureStressor interned "
+                + strings.size()
+                + " strings of "
+                + lengthBytes
+                + " bytes each");
   }
 
   @Override
