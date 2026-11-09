@@ -91,9 +91,13 @@ claim the INITIALIZATION slot (AtomicReference<CompletableFuture<ChaosRuntime>>)
   ↓
 ChaosRuntime runtime = new ChaosRuntime()
   ↓
-JdkInstrumentationInstaller.install(instrumentation, runtime, eager)
+JdkInstrumentationInstaller.install(instrumentation, runtime, eager, …, bridgeDir)
   — eager = eagerInstrumentation(agentArgs, env): agent arg instrumentation=eager,
     else -Dmacstab.chaos.instrumentation, else MACSTAB_CHAOS_INSTRUMENTATION
+  — bridgeDir = agent arg bridgeDir, else -Dmacstab.chaos.bridgeDir, else
+    MACSTAB_CHAOS_BRIDGE_DIR; checked by DirectoryTrust (not world-writable without
+    the sticky bit, not another user's, parent likewise), a refused one aborts the
+    start; unset: java.io.tmpdir, then /dev/shm
   — refuses to install if the bootstrap class path already holds the bridge of
     another agent revision (claimed by another version, or unclaimed), or if a
     copy of the agent loaded by another class loader already owns the bridge

@@ -108,14 +108,8 @@ public final class StartupConfigLoader {
   /** Alias of {@link #ARG_DEBUG_DUMP_ON_START}. */
   private static final String ARG_DEBUG_DUMP_ALIAS = "debugDump";
 
-  /** POSIX sticky-bit flag (01000) within the Unix mode word. */
-  private static final int POSIX_STICKY_BIT = 01000;
-
   /** {@code java.nio.file} attribute-view name for POSIX filesystems. */
   private static final String ATTR_VIEW_POSIX = "posix";
-
-  /** {@code java.nio.file} attribute name exposing the full Unix mode (sticky bit in high bits). */
-  private static final String ATTR_UNIX_MODE = "unix:mode";
 
   /** Appended to a world-writable refusal: mounts that report every file as 0777 hit it. */
   private static final String WORLD_WRITABLE_HINT =
@@ -565,9 +559,7 @@ public final class StartupConfigLoader {
       final Path linkedDirectory, final String originalPath, final String subject) {
     try {
       final Path directory = linkedDirectory.toRealPath();
-      final Set<PosixFilePermission> dirPerms =
-          Files.getPosixFilePermissions(directory, LinkOption.NOFOLLOW_LINKS);
-      if (dirPerms.contains(PosixFilePermission.OTHERS_WRITE) && !isStickyBitSet(directory)) {
+      if (DirectoryTrust.worldWritableWithoutSticky(directory)) {
         throw new ConfigLoadException(
             subject
                 + " is world-writable without sticky bit (rejected for safety): "
@@ -599,22 +591,6 @@ public final class StartupConfigLoader {
       // check the mode
     }
     rejectWorldWritableDirectory(mount, originalPath, "config file's ConfigMap directory");
-  }
-
-  private static boolean isStickyBitSet(final Path directory) {
-    // POSIX sticky bit is not exposed by Files.getPosixFilePermissions (only the nine rwxrwxrwx
-    // mode bits are). Use the Unix-specific "unix:mode" attribute view where available, which
-    // returns the full 16-bit mode including setuid/setgid/sticky in the high bits. On
-    // filesystems that don't expose it, assume sticky is NOT set — fail-closed.
-    try {
-      final Object mode = Files.getAttribute(directory, ATTR_UNIX_MODE, LinkOption.NOFOLLOW_LINKS);
-      if (mode instanceof Integer modeValue) {
-        return (modeValue & POSIX_STICKY_BIT) != 0;
-      }
-    } catch (UnsupportedOperationException | IllegalArgumentException | IOException ignored) {
-      // Fall through to fail-closed.
-    }
-    return false;
   }
 
   /**

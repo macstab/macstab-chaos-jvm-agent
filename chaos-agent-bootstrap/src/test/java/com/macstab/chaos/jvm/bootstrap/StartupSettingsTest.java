@@ -1,11 +1,17 @@
 package com.macstab.chaos.jvm.bootstrap;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.macstab.chaos.jvm.startup.AgentSettings;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.util.Map;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 /** The start-up switches read from the agent arguments before the property and environment. */
 @DisplayName("Start-up settings")
@@ -70,5 +76,28 @@ class StartupSettingsTest {
     assertThat(ChaosAgentBootstrap.dynamicAttachAllowed(properties, Map.of())).isTrue();
     assertThat(ChaosAgentBootstrap.dynamicAttachAllowed(new java.util.Properties(), Map.of()))
         .isFalse();
+  }
+
+  @Test
+  @DisplayName("bridgeDir names a trusted directory, or nothing when it is not set")
+  void bridgeDirTrusted(@TempDir final Path tempDir) throws Exception {
+    final Path bridge = Files.createDirectory(tempDir.resolve("bridge"));
+
+    assertThat(ChaosAgentBootstrap.bridgeDir(AgentSettings.of("bridgeDir=" + bridge, Map.of())))
+        .isEqualTo(bridge);
+    assertThat(ChaosAgentBootstrap.bridgeDir(AgentSettings.of("", Map.of()))).isNull();
+  }
+
+  @Test
+  @DisplayName("a world-writable bridgeDir without the sticky bit is refused with the reason")
+  void bridgeDirRefused(@TempDir final Path tempDir) throws Exception {
+    assumeTrue(tempDir.getFileSystem().supportedFileAttributeViews().contains("posix"));
+    final Path open = Files.createDirectory(tempDir.resolve("open"));
+    Files.setPosixFilePermissions(open, PosixFilePermissions.fromString("rwxrwxrwx"));
+
+    assertThatThrownBy(
+            () -> ChaosAgentBootstrap.bridgeDir(AgentSettings.of("bridgeDir=" + open, Map.of())))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageStartingWith("[chaos-agent] bridgeDir " + open + " is refused: ");
   }
 }

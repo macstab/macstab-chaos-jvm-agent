@@ -714,6 +714,7 @@ Register custom listeners via `controlPlane.addEventListener(listener)`. Listene
 | `debugDumpOnStart`    | Boolean flag | Print a diagnostics dump to stderr after the startup plan is activated; `debugDump` is an alias |
 | `configWatchInterval` | long (ms)    | Poll a `configFile` for changes and reload it; off by default, minimum 50 ms                    |
 | `instrumentation`     | String       | `eager` weaves every hook group at start (1.x); anything else or absent = on demand (default)   |
+| `bridgeDir`           | Path         | Directory for the bootstrap bridge jar instead of `java.io.tmpdir` (then `/dev/shm`); see below |
 
 ### Supported Environment Variables
 
@@ -725,8 +726,11 @@ Register custom listeners via `controlPlane.addEventListener(listener)`. Listene
 | `MACSTAB_CHAOS_DEBUG_DUMP_ON_START` | `debugDumpOnStart` (`true`/`1`/`yes`/`on`) |
 | `MACSTAB_CHAOS_CONFIG_WATCH_INTERVAL` | `configWatchInterval` (`MACSTAB_CHAOS_WATCH_INTERVAL` is an alias, read after it) |
 | `MACSTAB_CHAOS_INSTRUMENTATION`     | `instrumentation`                          |
+| `MACSTAB_CHAOS_BRIDGE_DIR`          | `bridgeDir`                                |
 
 Every argument above also has a system property, `macstab.chaos.<argument>` (for example `-Dmacstab.chaos.configFile=/etc/chaos/plan.json`, `-Dmacstab.chaos.configWatchInterval=500`); the system property is a launch-time local source and is trusted as the agent argument is. Precedence for each setting: agent arg > system property > environment variable. The settings are read once at start: a duplicate argument is reported once, an interval that is not a number turns watching off with one `[chaos-agent]` line, and a second attach whose arguments differ from the installed agent's prints one line naming the ignored keys.
+
+**The bridge jar's directory.** At start the agent writes a small jar (the bootstrap bridge, owner-only 0600 on POSIX) and appends it to the bootstrap class path; on POSIX it is unlinked right after. It goes to `java.io.tmpdir`, and when that is not writable (a read-only container file system) to `/dev/shm` where it exists; every directory tried is named when none takes it. `bridgeDir` (`-Dmacstab.chaos.bridgeDir`, `MACSTAB_CHAOS_BRIDGE_DIR`) names the directory instead, and then only that one is used. The bootstrap class loader runs the jar's code, so `bridgeDir` must be a directory that is neither world-writable without the sticky bit nor owned by another user than the JVM's (root excepted), in a parent that is not world-writable without the sticky bit (POSIX); otherwise the start is aborted with the reason. Stale bridge jars older than a day are swept from the directory used, only the JVM user's own on POSIX. On Windows the jar stays until exit, or until the next start's sweep after a kill.
 
 The weaving mode can also be set with the system property `-Dmacstab.chaos.instrumentation=eager`. Precedence: agent arg `instrumentation` > system property > `MACSTAB_CHAOS_INSTRUMENTATION`. Only `eager` (case-insensitive) changes the mode; any other value, or none, keeps on-demand weaving.
 

@@ -63,24 +63,21 @@ public final class InstallerProbeMain {
     System.out.println(
         "uninstallBeforeInstall=" + JdkInstrumentationInstaller.uninstall(instrumentation));
 
-    final String tmpDir = System.getProperty("java.io.tmpdir");
     final java.nio.file.Path missing =
-        java.nio.file.Path.of(tmpDir, "missing-" + System.nanoTime());
-    System.setProperty("java.io.tmpdir", missing.toString());
+        java.nio.file.Path.of(System.getProperty("java.io.tmpdir"), "missing-" + System.nanoTime());
     try {
+      // A bridge directory that does not exist: an explicit one is never replaced by another.
       JdkInstrumentationInstaller.install(
-          instrumentation, new ChaosRuntime(), false, List.of(), List.of());
+          instrumentation, new ChaosRuntime(), false, List.of(), List.of(), missing);
       System.out.println("injectFailure=none");
     } catch (final IllegalStateException failed) {
       System.out.println("injectFailure=" + failed.getMessage());
-    } finally {
-      System.setProperty("java.io.tmpdir", tmpDir);
     }
 
     final ChaosRuntime first = new ChaosRuntime();
-    JdkInstrumentationInstaller.install(instrumentation, first, false, List.of(), List.of());
+    JdkInstrumentationInstaller.install(instrumentation, first, false, List.of(), List.of(), null);
     final ChaosRuntime second = new ChaosRuntime();
-    JdkInstrumentationInstaller.install(instrumentation, second, false, List.of(), List.of());
+    JdkInstrumentationInstaller.install(instrumentation, second, false, List.of(), List.of(), null);
     first.activate(sleepDelay("first-sleep"));
     second.activate(sleepDelay("second-sleep"));
     System.out.println("installedSleepMillis=" + sleepMillis());
@@ -107,7 +104,12 @@ public final class InstallerProbeMain {
     final Instrumentation instrumentation = net.bytebuddy.agent.ByteBuddyAgent.install();
     try {
       JdkInstrumentationInstaller.install(
-          instrumentation, new ChaosRuntime(), false, List.of(), Arrays.asList((String) null));
+          instrumentation,
+          new ChaosRuntime(),
+          false,
+          List.of(),
+          Arrays.asList((String) null),
+          null);
       System.out.println("installFailed=false");
     } catch (final RuntimeException failed) {
       System.out.println("installFailed=true");
@@ -122,7 +124,8 @@ public final class InstallerProbeMain {
    */
   private static void foreignCopy() throws Exception {
     final Instrumentation real = net.bytebuddy.agent.ByteBuddyAgent.install();
-    JdkInstrumentationInstaller.install(real, new ChaosRuntime(), false, List.of(), List.of());
+    JdkInstrumentationInstaller.install(
+        real, new ChaosRuntime(), false, List.of(), List.of(), null);
     final ScriptedInstrumentation counting = new ScriptedInstrumentation(real);
     try (URLClassLoader isolated =
         new URLClassLoader(classpath(), ClassLoader.getPlatformClassLoader())) {
@@ -137,14 +140,16 @@ public final class InstallerProbeMain {
                 runtimeClass,
                 boolean.class,
                 List.class,
-                List.class)
+                List.class,
+                java.nio.file.Path.class)
             .invoke(
                 null,
                 counting,
                 runtimeClass.getConstructor().newInstance(),
                 false,
                 List.of(),
-                List.of());
+                List.of(),
+                null);
         System.out.println("foreignRefused=false");
       } catch (final java.lang.reflect.InvocationTargetException refused) {
         System.out.println(
@@ -177,7 +182,7 @@ public final class InstallerProbeMain {
     final ScriptedInstrumentation counting = new ScriptedInstrumentation(real);
     try {
       JdkInstrumentationInstaller.install(
-          counting, new ChaosRuntime(), false, List.of(), List.of());
+          counting, new ChaosRuntime(), false, List.of(), List.of(), null);
       System.out.println("installRefusal=none");
     } catch (final IllegalStateException refused) {
       System.out.println("installRefusal=" + refused.getMessage());
@@ -219,7 +224,7 @@ public final class InstallerProbeMain {
     final ChaosRuntime runtime = new ChaosRuntime();
     runtime.activate(sleepDelay("before-install")).close();
     JdkInstrumentationInstaller.install(
-        net.bytebuddy.agent.ByteBuddyAgent.install(), runtime, false, List.of(), List.of());
+        net.bytebuddy.agent.ByteBuddyAgent.install(), runtime, false, List.of(), List.of(), null);
     runtime.activate(
         ChaosScenario.builder("skew-back")
             .scope(ChaosScenario.ScenarioScope.JVM)
@@ -286,7 +291,7 @@ public final class InstallerProbeMain {
         new ScriptedInstrumentation(net.bytebuddy.agent.ByteBuddyAgent.install())
             .failRetransformOf("java.lang.Thread");
     final ChaosRuntime runtime = new ChaosRuntime();
-    JdkInstrumentationInstaller.install(scripted, runtime, false, List.of(), List.of());
+    JdkInstrumentationInstaller.install(scripted, runtime, false, List.of(), List.of(), null);
     try {
       runtime.activate(sleepDelay("refused-sleep"));
       System.out.println("refusedActivation=activated");
@@ -316,7 +321,7 @@ public final class InstallerProbeMain {
     final ScriptedInstrumentation scripted =
         new ScriptedInstrumentation(net.bytebuddy.agent.ByteBuddyAgent.install());
     final ChaosRuntime runtime = new ChaosRuntime();
-    JdkInstrumentationInstaller.install(scripted, runtime, false, List.of(), List.of());
+    JdkInstrumentationInstaller.install(scripted, runtime, false, List.of(), List.of(), null);
     runtime.activate(sleepDelay("woven-sleep"));
     scripted.failRetransformOf("java.lang.Thread");
     try {
@@ -346,7 +351,7 @@ public final class InstallerProbeMain {
     final Instrumentation real = net.bytebuddy.agent.ByteBuddyAgent.install();
     final ScriptedInstrumentation scripted = new ScriptedInstrumentation(real);
     final ChaosRuntime runtime = new ChaosRuntime();
-    JdkInstrumentationInstaller.install(scripted, runtime, false, List.of(), List.of());
+    JdkInstrumentationInstaller.install(scripted, runtime, false, List.of(), List.of(), null);
     if (failBatch) {
       scripted.failRetransformOf("java.io.ObjectOutputStream");
     }

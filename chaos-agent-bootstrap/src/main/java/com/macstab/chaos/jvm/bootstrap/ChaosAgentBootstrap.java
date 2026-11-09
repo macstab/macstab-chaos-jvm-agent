@@ -8,6 +8,7 @@ import com.macstab.chaos.jvm.startup.AgentArgs;
 import com.macstab.chaos.jvm.startup.AgentArgsParser;
 import com.macstab.chaos.jvm.startup.AgentSettings;
 import com.macstab.chaos.jvm.startup.ConfigLoadException;
+import com.macstab.chaos.jvm.startup.DirectoryTrust;
 import com.macstab.chaos.jvm.startup.LogText;
 import com.macstab.chaos.jvm.startup.StartupConfigLoader;
 import java.lang.instrument.Instrumentation;
@@ -164,6 +165,18 @@ public final class ChaosAgentBootstrap {
 
   /** Environment variable equivalent of {@link #SESSION_HEADER_HOSTS_ARG}. */
   static final String SESSION_HEADER_HOSTS_ENV = "MACSTAB_CHAOS_SESSION_HEADER_HOSTS";
+
+  /**
+   * Agent arg naming the directory the bootstrap bridge jar is written to, instead of {@code
+   * java.io.tmpdir} (then {@code /dev/shm}).
+   */
+  static final String BRIDGE_DIR_ARG = "bridgeDir";
+
+  /** System property equivalent of {@link #BRIDGE_DIR_ARG}. */
+  static final String BRIDGE_DIR_PROPERTY = "macstab.chaos.bridgeDir";
+
+  /** Environment variable equivalent of {@link #BRIDGE_DIR_ARG}. */
+  static final String BRIDGE_DIR_ENV = "MACSTAB_CHAOS_BRIDGE_DIR";
 
   /** This class as a resource: there is one per agent copy on a class path. */
   private static final String ENTRY_CLASS =
@@ -538,7 +551,8 @@ public final class ChaosAgentBootstrap {
               settings,
               SESSION_HEADER_HOSTS_ARG,
               SESSION_HEADER_HOSTS_PROPERTY,
-              SESSION_HEADER_HOSTS_ENV));
+              SESSION_HEADER_HOSTS_ENV),
+          bridgeDir(settings));
       instrumentationInstalled = true;
       registeredMBean = registerMBean(runtime, jmxControl(settings));
       installJfrIntegration(runtime);
@@ -600,6 +614,29 @@ public final class ChaosAgentBootstrap {
         .equalsIgnoreCase(
             settings.valueOrEmpty(
                 INSTRUMENTATION_ARG, INSTRUMENTATION_PROPERTY, INSTRUMENTATION_ENV));
+  }
+
+  /**
+   * The directory for the bootstrap bridge jar: agent arg {@code bridgeDir}, system property
+   * {@value #BRIDGE_DIR_PROPERTY} or environment variable {@value #BRIDGE_DIR_ENV}. The bootstrap
+   * class loader runs the code in that jar, so the directory must pass {@link DirectoryTrust}; a
+   * refused one aborts the start with the reason rather than fall back to another directory.
+   *
+   * @return the directory, or {@code null} when not set
+   * @throws IllegalStateException if the directory is refused
+   */
+  static java.nio.file.@Nullable Path bridgeDir(final AgentSettings settings) {
+    final String value = settings.valueOrEmpty(BRIDGE_DIR_ARG, BRIDGE_DIR_PROPERTY, BRIDGE_DIR_ENV);
+    if (value.isEmpty()) {
+      return null;
+    }
+    final java.nio.file.Path directory = java.nio.file.Path.of(value);
+    final Optional<String> refusal = DirectoryTrust.distrust(directory);
+    if (refusal.isPresent()) {
+      throw new IllegalStateException(
+          "[chaos-agent] bridgeDir " + directory + " is refused: " + refusal.get());
+    }
+    return directory;
   }
 
   /**

@@ -1,6 +1,8 @@
 package com.macstab.chaos.jvm.bootstrap;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.macstab.chaos.jvm.api.ActivationPolicy;
 import com.macstab.chaos.jvm.api.ChaosEffect;
@@ -10,14 +12,18 @@ import com.macstab.chaos.jvm.api.ChaosSelector;
 import com.macstab.chaos.jvm.api.NamePattern;
 import com.macstab.chaos.jvm.api.OperationType;
 import com.macstab.chaos.jvm.startup.ChaosPlanMapper;
+import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
 import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
 @DisplayName("StartupAgent integration")
@@ -232,6 +238,76 @@ class StartupAgentIntegrationTest {
   }
 
   @Nested
+  @DisplayName("bridge directory")
+  class BridgeDirectory {
+
+    private final ChaosPlan plan =
+        new ChaosPlan(
+            new ChaosPlan.Metadata("bridge-dir", ""),
+            null,
+            List.of(
+                ChaosScenario.builder("bridge-delay")
+                    .scope(ChaosScenario.ScenarioScope.JVM)
+                    .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+                    .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+                    .activationPolicy(ActivationPolicy.always())
+                    .build()));
+
+    @Test
+    @EnabledOnOs(OS.LINUX)
+    @DisplayName("a read-only java.io.tmpdir puts the bridge jar in /dev/shm and chaos applies")
+    void readOnlyTmpDirFallsBackToSharedMemory() throws Exception {
+      // Root writes into a 0555 directory, so the row would pass without the fallback.
+      assumeFalse("root".equals(System.getProperty("user.name")), "test runs as root");
+      final Path readOnly = readOnlyDirectory("tmp-ro");
+
+      final ChildJvmProbe.BoundedRun run =
+          runAgent(plan, "executor", "", List.of("-Djava.io.tmpdir=" + readOnly));
+
+      assertThat(run.exitValue()).as("the agent starts: " + run.output()).isZero();
+      assertThat(run.result().longValue("applied.bridge-delay")).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("bridgeDir takes the bridge jar when java.io.tmpdir is read-only")
+    void bridgeDirTakesTheJar() throws Exception {
+      assumeFalse("root".equals(System.getProperty("user.name")), "test runs as root");
+      final Path readOnly = readOnlyDirectory("tmp-ro");
+      final Path bridgeDir = Files.createDirectory(tempDir.resolve("bridge"));
+
+      final ChildJvmProbe.BoundedRun run =
+          runAgent(
+              plan, "executor", ";bridgeDir=" + bridgeDir, List.of("-Djava.io.tmpdir=" + readOnly));
+
+      assertThat(run.exitValue()).as("the agent starts: " + run.output()).isZero();
+      assertThat(run.result().longValue("applied.bridge-delay")).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName(
+        "a world-writable bridgeDir without the sticky bit aborts the start with the reason")
+    void worldWritableBridgeDirRefused() throws Exception {
+      assumeTrue(FileSystems.getDefault().supportedFileAttributeViews().contains("posix"));
+      final Path bridgeDir = Files.createDirectory(tempDir.resolve("open-bridge"));
+      Files.setPosixFilePermissions(bridgeDir, PosixFilePermissions.fromString("rwxrwxrwx"));
+
+      final ChildJvmProbe.BoundedRun run =
+          runAgent(plan, "executor", "", List.of("-Dmacstab.chaos.bridgeDir=" + bridgeDir));
+
+      assertThat(run.exitValue()).as("the start is aborted: " + run.output()).isNotZero();
+      assertThat(run.output())
+          .contains("bridgeDir " + bridgeDir + " is refused")
+          .contains("world-writable without the sticky bit");
+    }
+
+    private Path readOnlyDirectory(final String name) throws Exception {
+      final Path directory = Files.createDirectory(tempDir.resolve(name));
+      Files.setPosixFilePermissions(directory, PosixFilePermissions.fromString("r-xr-xr-x"));
+      return directory;
+    }
+  }
+
+  @Nested
   @DisplayName("malformed inline plan")
   class MalformedInlinePlan {
 
@@ -340,14 +416,30 @@ class StartupAgentIntegrationTest {
 
   private ChildJvmProbe.ProbeResult runProbe(final ChaosPlan plan, final String mode)
       throws Exception {
+    final ChildJvmProbe.BoundedRun run = runAgent(plan, mode, "", List.of());
+    assertThat(run.exitValue()).as("probe JVM exit value: " + run.output()).isZero();
+    return run.result();
+  }
+
+  /**
+   * Runs {@link AgentProcessProbeMain} in {@code mode} under the agent with {@code plan}, extra
+   * agent options ({@code ;key=value...}) and JVM options; the run must finish.
+   */
+  private ChildJvmProbe.BoundedRun runAgent(
+      final ChaosPlan plan,
+      final String mode,
+      final String agentOptions,
+      final List<String> jvmOptions)
+      throws Exception {
     final Path configFile = tempDir.resolve(mode + "-plan.json");
     Files.writeString(configFile, ChaosPlanMapper.write(plan));
     final String agentJar = System.getProperty("chaos.bootstrap.agentJar");
     final java.util.List<String> command = new java.util.ArrayList<>();
     command.add(Path.of(System.getProperty("java.home"), "bin", "java").toString());
+    command.addAll(jvmOptions);
     // No coverage agent here: these plans reach every file write, thread start, class load, gc and
     // exit of the JVM, the coverage agent's own dump at shutdown included.
-    command.add("-javaagent:" + agentJar + "=configFile=" + configFile);
+    command.add("-javaagent:" + agentJar + "=configFile=" + configFile + agentOptions);
     command.add("-cp");
     command.add(System.getProperty("java.class.path"));
     command.add(AgentProcessProbeMain.class.getName());
@@ -357,7 +449,6 @@ class StartupAgentIntegrationTest {
     assertThat(run.finished())
         .as("probe JVM should finish: %s%nthreads:%n%s", run.output(), run.threads())
         .isTrue();
-    assertThat(run.exitValue()).as("probe JVM exit value: " + run.output()).isZero();
-    return run.result();
+    return run;
   }
 }

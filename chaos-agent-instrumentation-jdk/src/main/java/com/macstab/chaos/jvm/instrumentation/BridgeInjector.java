@@ -60,13 +60,20 @@ final class BridgeInjector {
    * bridge, or it was placed there with {@code -Xbootclasspath/a}. A second jar would only be
    * shadowed by the first.
    *
+   * <p>The jar is written to {@code bridgeDir} when it is given, and only there: the operator chose
+   * it, and a jar the bootstrap class loader reads must not move to a directory nobody chose.
+   * Otherwise it goes to {@code java.io.tmpdir}, and when that is not writable (a read-only
+   * container file system) to {@code /dev/shm} where it exists.
+   *
    * @param instrumentation the {@link Instrumentation} handle used to append to the bootstrap
    *     classpath
-   * @throws IllegalStateException wrapping the underlying {@link java.io.IOException} if the
-   *     temporary JAR cannot be created, if a required class resource is missing from the agent
-   *     JAR, or if appending to the bootstrap classpath fails
+   * @param bridgeDir the directory configured for the jar, already checked by the caller; {@code
+   *     null} for the default directories
+   * @throws IllegalStateException wrapping the underlying {@link java.io.IOException} (which names
+   *     every directory tried) if the temporary JAR cannot be created, if a required class resource
+   *     is missing from the agent JAR, or if appending to the bootstrap classpath fails
    */
-  static void injectBridge(final Instrumentation instrumentation) {
+  static void injectBridge(final Instrumentation instrumentation, final @Nullable Path bridgeDir) {
     // Idempotency: appendToBootstrapClassLoaderSearch has no unwind operation — once a JAR
     // is appended, its entries stay visible to the bootstrap classloader for the JVM's
     // lifetime, and the bootstrap classloader caches the classes it has loaded. A second
@@ -92,8 +99,7 @@ final class BridgeInjector {
     }
     boolean appended = false;
     try {
-      sweepStaleBridgeJars();
-      final Path bridgeJar = createSecureTempFile();
+      final Path bridgeJar = createBridgeJar(bridgeDir);
       bridgeJar.toFile().deleteOnExit();
       try (JarOutputStream jarOutputStream =
           new JarOutputStream(Files.newOutputStream(bridgeJar))) {
@@ -256,26 +262,76 @@ final class BridgeInjector {
   /** Bridge jars older than this are left over from earlier JVMs and are removed. */
   private static final java.time.Duration STALE_BRIDGE_JAR_AGE = java.time.Duration.ofDays(1);
 
+  /** Where the jar goes when {@code java.io.tmpdir} is not writable (Linux). */
+  private static final Path SHARED_MEMORY = Path.of("/dev/shm");
+
+  /**
+   * Creates the bridge jar's file in the first directory that takes it: {@code bridgeDir} alone
+   * when it is set, else {@code java.io.tmpdir}, then {@code /dev/shm} where it exists. Each
+   * directory is swept of stale bridge jars first.
+   *
+   * <p>Package-private as a test seam.
+   *
+   * @throws IOException naming every directory tried and why it failed, each failure suppressed
+   */
+  static Path createBridgeJar(final @Nullable Path bridgeDir) throws IOException {
+    final java.util.Set<Path> candidates = new java.util.LinkedHashSet<>();
+    if (bridgeDir != null) {
+      candidates.add(bridgeDir);
+    } else {
+      candidates.add(Path.of(System.getProperty("java.io.tmpdir")));
+      if (Files.isDirectory(SHARED_MEMORY)) {
+        candidates.add(SHARED_MEMORY);
+      }
+    }
+    final java.util.StringJoiner tried = new java.util.StringJoiner("; ");
+    final java.util.List<IOException> failures = new java.util.ArrayList<>();
+    for (final Path directory : candidates) {
+      sweepStaleBridgeJars(directory, System.getProperty("user.name", ""));
+      try {
+        return createSecureTempFile(directory);
+      } catch (final IOException failed) {
+        tried.add(directory + ": " + failed);
+        failures.add(failed);
+      }
+    }
+    final IOException none = new IOException("no directory takes the bridge jar: " + tried);
+    failures.forEach(none::addSuppressed);
+    throw none;
+  }
+
   /**
    * Removes bridge jars of earlier JVMs that could not delete their own (Windows, where an open
-   * file cannot be deleted, or JVMs killed before exit). Only files with the bridge prefix that are
-   * older than a day are considered; a jar still in use by a running JVM is locked on Windows and
+   * file cannot be deleted, or JVMs killed before exit). Only regular files with the bridge prefix
+   * that are older than a day are considered and, where the file system has a {@code posix} view,
+   * only those owned by the JVM's user: a directory without the sticky bit would otherwise let the
+   * sweep delete another user's files. A jar still in use by a running JVM is locked on Windows and
    * the delete simply fails. Failures are ignored: the sweep is housekeeping only.
+   *
+   * <p>Package-private as a test seam: the JVM's user name is passed in.
+   *
+   * @param directory the directory the bridge jar is written to
+   * @param jvmUser the JVM's user name ({@code user.name}); a blank or unknown ({@code ?}) name
+   *     deletes nothing on a {@code posix} file system, since no owner can be confirmed
    */
-  private static void sweepStaleBridgeJars() {
-    final Path tmpPath = Path.of(System.getProperty("java.io.tmpdir"));
+  static void sweepStaleBridgeJars(final Path directory, final String jvmUser) {
     final java.time.Instant cutoff = java.time.Instant.now().minus(STALE_BRIDGE_JAR_AGE);
+    final boolean posix = directory.getFileSystem().supportedFileAttributeViews().contains("posix");
     try (java.nio.file.DirectoryStream<Path> candidates =
-        Files.newDirectoryStream(tmpPath, BRIDGE_JAR_PREFIX + "*" + BRIDGE_JAR_SUFFIX)) {
+        Files.newDirectoryStream(directory, BRIDGE_JAR_PREFIX + "*" + BRIDGE_JAR_SUFFIX)) {
       for (final Path candidate : candidates) {
         try {
           if (Files.isRegularFile(candidate, java.nio.file.LinkOption.NOFOLLOW_LINKS)
               && Files.getLastModifiedTime(candidate, java.nio.file.LinkOption.NOFOLLOW_LINKS)
                   .toInstant()
-                  .isBefore(cutoff)) {
+                  .isBefore(cutoff)
+              && (!posix
+                  || Files.getOwner(candidate, java.nio.file.LinkOption.NOFOLLOW_LINKS)
+                      .getName()
+                      .equals(jvmUser))) {
             Files.deleteIfExists(candidate);
           }
-        } catch (final IOException | SecurityException skipped) {
+        } catch (final IOException | SecurityException | UnsupportedOperationException skipped) {
           // In use, owned by another user, or already gone.
         }
       }
@@ -285,21 +341,19 @@ final class BridgeInjector {
   }
 
   /**
-   * Creates the bridge jar's file, owner-only (0600) on POSIX file systems: the bootstrap
-   * classloader loads its code, so a file another local user could replace before the JVM opens it
-   * would let them run code at bootstrap level. Other file systems (Windows) get the default
-   * permissions.
+   * Creates the bridge jar's file in {@code directory}, owner-only (0600) on POSIX file systems:
+   * the bootstrap classloader loads its code, so a file another local user could replace before the
+   * JVM opens it would let them run code at bootstrap level. Other file systems (Windows) get the
+   * default permissions.
    */
-  private static Path createSecureTempFile() throws IOException {
-    final String tmpDir = System.getProperty("java.io.tmpdir");
-    final Path tmpPath = Path.of(tmpDir);
-    if (Files.getFileStore(tmpPath).supportsFileAttributeView("posix")) {
+  private static Path createSecureTempFile(final Path directory) throws IOException {
+    if (Files.getFileStore(directory).supportsFileAttributeView("posix")) {
       final java.nio.file.attribute.FileAttribute<?> ownerOnly =
           java.nio.file.attribute.PosixFilePermissions.asFileAttribute(
               java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"));
-      return Files.createTempFile(BRIDGE_JAR_PREFIX, BRIDGE_JAR_SUFFIX, ownerOnly);
+      return Files.createTempFile(directory, BRIDGE_JAR_PREFIX, BRIDGE_JAR_SUFFIX, ownerOnly);
     }
-    return Files.createTempFile(BRIDGE_JAR_PREFIX, BRIDGE_JAR_SUFFIX);
+    return Files.createTempFile(directory, BRIDGE_JAR_PREFIX, BRIDGE_JAR_SUFFIX);
   }
 
   /**

@@ -496,7 +496,7 @@ flowchart TB
 
 **Responsibility**: Assembles the ByteBuddy transformations, grouped into `HookGroup`s, and weaves each group on demand (via the `HookDemand` callback it registers on the runtime) or all at once in `eager` mode. Manages the bridge injection lifecycle. Woven groups are reported as `wovenHookGroups` in `ChaosDiagnostics.snapshot().runtimeDetails()`.
 
-**Bootstrap bridge injection**: Reads `BootstrapDispatcher.class` and the types woven advice references (the scheduled-task wrappers, the API exceptions it throws) from the agent JAR's resources and writes them into a temp JAR. The temp JAR (created with mode 0600 on POSIX) is appended to the bootstrap classpath via `Instrumentation.appendToBootstrapClassLoaderSearch`. On POSIX the file is unlinked immediately afterwards (the class path entry keeps its own handle), so nothing is left in the temp directory even after `kill -9`; on Windows it is deleted on exit and stale jars from earlier JVMs are swept on the next start. Injection happens once per JVM.
+**Bootstrap bridge injection**: Reads `BootstrapDispatcher.class` and the types woven advice references (the scheduled-task wrappers, the API exceptions it throws) from the agent JAR's resources and writes them into a temp JAR in `bridgeDir` when it is set (a trusted directory, or the start is aborted), else in `java.io.tmpdir`, then `/dev/shm` when the temp directory is read-only. The temp JAR (created with mode 0600 on POSIX) is appended to the bootstrap classpath via `Instrumentation.appendToBootstrapClassLoaderSearch`. On POSIX the file is unlinked immediately afterwards (the class path entry keeps its own handle), so nothing is left in the temp directory even after `kill -9`; on Windows it is deleted on exit and stale jars from earlier JVMs (only the JVM user's own on POSIX) are swept on the next start. Injection happens once per JVM.
 
 **MethodHandle array construction** (`buildMethodHandles`): Uses `MethodHandles.publicLookup()` against `BridgeDelegate.class` to build `BootstrapDispatcher.HANDLE_COUNT` handles (currently 77). All handles are unbound virtual handles resolved against the interface, not the implementation, so the bootstrap classloader can invoke them without visibility into `ChaosBridge`; each dispatch call supplies the delegate instance as the first argument. The handle array is passed to `BootstrapDispatcher.install()` via reflection (`Class.forName(..., null)` with bootstrap classloader).
 
@@ -880,6 +880,7 @@ Semicolon-separated `key=value` pairs (quote the argument in a shell). `\;`, `\=
 | `MACSTAB_CHAOS_DEBUG_DUMP_ON_START` | `debugDumpOnStart`    | `true`/`1`/`yes`/`on` to enable. Either source enables it. |
 | `MACSTAB_CHAOS_CONFIG_WATCH_INTERVAL` | `configWatchInterval` | Poll interval in ms. Agent arg takes precedence. Alias: `MACSTAB_CHAOS_WATCH_INTERVAL`. |
 | `MACSTAB_CHAOS_INSTRUMENTATION`     | `instrumentation`     | `eager` = weave all hooks at start. Arg > sysprop > env.   |
+| `MACSTAB_CHAOS_BRIDGE_DIR`          | `bridgeDir`           | Directory for the bootstrap bridge jar; must be trusted.   |
 
 Each startup argument also has a system property `macstab.chaos.<key>` (for example `-Dmacstab.chaos.configFile=…`), read after the agent arg and before the environment variable.
 
@@ -986,7 +987,7 @@ Upgrading from 1.x: [migration-2.0.md](migration-2.0.md).
 
 ## Infrastructure Interactions
 
-The agent has no direct infrastructure dependencies at runtime. It does not perform network calls, file I/O (beyond the startup temp-JAR creation), or external service lookups. The startup-time temp JAR (bootstrap bridge) is written to `java.io.tmpdir` and, on POSIX, unlinked right after it is appended to the bootstrap class path (on Windows: deleted on exit, stale copies swept on the next start).
+The agent has no direct infrastructure dependencies at runtime. It does not perform network calls, file I/O (beyond the startup temp-JAR creation), or external service lookups. The startup-time temp JAR (bootstrap bridge) is written to `bridgeDir`, else `java.io.tmpdir` (then `/dev/shm` when that is read-only), and, on POSIX, unlinked right after it is appended to the bootstrap class path (on Windows: deleted on exit, stale copies swept on the next start).
 
 ---
 

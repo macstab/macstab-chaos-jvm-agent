@@ -36,7 +36,8 @@ import org.jspecify.annotations.Nullable;
  *   <li>{@link #install} is called once by {@code ChaosAgentBootstrap} after the runtime is ready.
  *       It first refuses a JVM whose dispatcher already carries the delegate of another copy of the
  *       agent, before any step that cannot be undone.
- *   <li>{@link BridgeInjector#injectBridge(java.lang.instrument.Instrumentation)} packages {@link
+ *   <li>{@link BridgeInjector#injectBridge(java.lang.instrument.Instrumentation,
+ *       java.nio.file.Path)} packages {@link
  *       com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher} and the types woven
  *       advice references into a temporary JAR and appends it to the bootstrap classpath so that
  *       bootstrap-loaded JDK classes can see it.
@@ -121,6 +122,8 @@ public final class JdkInstrumentationInstaller {
    *     {@code com.sun.} prefixes are refused
    * @param sessionHeaderHosts host globs that receive {@code X-Chaos-Session} besides the internal
    *     hosts ({@code *} for all)
+   * @param bridgeDir the directory for the bootstrap bridge jar ({@code bridgeDir}), already
+   *     checked by the caller; {@code null} for {@code java.io.tmpdir}, then {@code /dev/shm}
    * @throws IllegalArgumentException if a clock prefix names JDK classes
    * @throws IllegalStateException if the bootstrap class path already holds the bridge of another
    *     agent revision, or a copy of the agent loaded by another class loader is installed (nothing
@@ -131,14 +134,15 @@ public final class JdkInstrumentationInstaller {
       final ChaosRuntime runtime,
       final boolean eager,
       final List<String> clockCallSitePackages,
-      final List<String> sessionHeaderHosts) {
+      final List<String> sessionHeaderHosts,
+      final java.nio.file.@Nullable Path bridgeDir) {
     clockPackages = validatedClockPackages(clockCallSitePackages);
     // A refused copy must leave no trace: the foreign check runs before the steps that cannot be
     // undone (a jar appended to the bootstrap class path, opened modules). A bridge of another
     // revision comes first: this copy's delegate and advice cannot run against its classes.
     BridgeInjector.requireOwnRevision();
     rejectForeignDelegate(installedDelegateOrNull());
-    BridgeInjector.injectBridge(instrumentation);
+    BridgeInjector.injectBridge(instrumentation, bridgeDir);
     ModuleOpener.grantInternalModuleOpens(instrumentation);
     try {
       installDelegate(new ChaosBridge(runtime));
