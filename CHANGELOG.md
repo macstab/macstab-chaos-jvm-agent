@@ -143,6 +143,7 @@ Migration steps for each change: [docs/migration-2.0.md](docs/migration-2.0.md).
 
 ### Bug Fixes
 
+* **quarkus:** `ChaosQuarkusExtension.contextPlane` and `releaseContextPlane`, public only for `ChaosArcProducer`'s reflective call across class loaders, are `@Internal` and no longer part of the recorded API.
 * **opentelemetry:** the `chaos.events` counter is described as "Chaos events by type": it carries no scenario id, but its description said "by type and scenario".
 * **spring, micronaut, quarkus:** a blank chaos switch value (`macstab.chaos.enabled=`) is off without a warning, as an absent one is, and as the agent arguments read it; it was warned about as an unrecognised boolean.
 * **spring, quarkus:** a scenario or handle id is logged through `LogText.sanitize` (by `ChaosAutoConfiguration`, `ChaosHandleRegistry` and `ChaosQuarkusExtension`): an id with a line break wrote a second, forged log line.

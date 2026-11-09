@@ -10,8 +10,6 @@ public final class com/macstab/chaos/jvm/quarkus/ChaosQuarkusExtension implement
   public method beforeTestExecution(Lorg/junit/jupiter/api/extension/ExtensionContext;)V
   public method resolveParameter(Lorg/junit/jupiter/api/extension/ParameterContext;Lorg/junit/jupiter/api/extension/ExtensionContext;)Ljava/lang/Object;
   public method supportsParameter(Lorg/junit/jupiter/api/extension/ParameterContext;Lorg/junit/jupiter/api/extension/ExtensionContext;)Z
-  public static method contextPlane(Lcom/macstab/chaos/jvm/api/ChaosControlPlane;)Lcom/macstab/chaos/jvm/api/ChaosControlPlane;
-  public static method releaseContextPlane(Lcom/macstab/chaos/jvm/api/ChaosControlPlane;)V
 
 public class com/macstab/chaos/jvm/quarkus/ChaosQuarkusRecorder
   public method <init>()V

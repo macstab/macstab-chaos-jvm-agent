@@ -113,6 +113,7 @@ public final class ChaosQuarkusExtension
    * @param delegate the JVM-wide control plane
    * @return the tracking control plane
    */
+  @com.macstab.chaos.jvm.api.Internal
   public static ChaosControlPlane contextPlane(final ChaosControlPlane delegate) {
     final TrackingChaosControlPlane plane = new TrackingChaosControlPlane(delegate, false);
     CONTEXT_PLANES.add(plane);
@@ -126,6 +127,7 @@ public final class ChaosQuarkusExtension
    *
    * @param plane the plane being released
    */
+  @com.macstab.chaos.jvm.api.Internal
   public static void releaseContextPlane(final ChaosControlPlane plane) {
     if (plane instanceof TrackingChaosControlPlane tracker && CONTEXT_PLANES.remove(tracker)) {
       tracker.stopTracked();
