@@ -144,6 +144,24 @@ public record NamePattern(MatchMode mode, String value) {
   }
 
   /**
+   * Whether this pattern matches every name, as far as its form shows: {@link MatchMode#ANY}, a
+   * GLOB made of {@code *} characters only, or the REGEX {@code .*}, {@code ^.*$} or {@code .*+}.
+   * The list cannot be complete (a regex such as {@code (.*)} also matches everything); it serves
+   * the {@link ChaosSelector.MethodSelector} guard, whose real protection is that method hooks
+   * never weave JDK classes.
+   *
+   * @return {@code true} for a pattern of a match-all form
+   */
+  boolean matchesEverything() {
+    return switch (mode) {
+      case ANY -> true;
+      case GLOB -> value.chars().allMatch(c -> c == '*');
+      case REGEX -> value.equals(".*") || value.equals("^.*$") || value.equals(".*+");
+      default -> false;
+    };
+  }
+
+  /**
    * Returns a pattern that matches any string, including {@code null}. The standard choice when a
    * selector field is not constrained. Returns a shared singleton, so selectors that use {@code
    * any()} allocate nothing on the plan parsing path.

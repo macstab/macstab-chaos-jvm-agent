@@ -972,7 +972,7 @@ Object out = chaosRuntime.afterMethodExit(
 | `methodNamePattern` | NamePattern          | `ANY`     | Matched against method name                                                |
 | `signaturePattern`  | NamePattern          | `ANY`     | Matched against the JVM method descriptor, e.g. `(Ljava/lang/String;)V`   |
 
-**Safety constraint:** both `classPattern` and `methodNamePattern` cannot both be `ANY` simultaneously.
+**Safety constraint:** `classPattern` and `methodNamePattern` cannot both match everything: `ANY`, a `GLOB` of `*` characters only (`*`, `**`) and the `REGEX` `.*`, `^.*$` or `.*+` count as match-all, and the selector is refused with `IllegalArgumentException` (`ConfigLoadException` when read from a plan). The list cannot be complete; the real protection is that method hooks never weave a class of the bootstrap or platform class loader (the JDK), whatever the patterns name. Application classes in `javax.*` packages on the class path stay weavable.
 
 **Paired effects:**
 - `METHOD_ENTER` + `ExceptionInjectionEffect` → inject any exception before the method body

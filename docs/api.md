@@ -575,7 +575,7 @@ Then any `JvmRuntimeSelector` scenario with `SYSTEM_CLOCK_MILLIS` and a `ClockSk
 
 ### Method entry / exit
 
-With the agent attached, activating a `MethodSelector` scenario weaves entry and exit hooks into the methods it names, and removing the scenario restores them (see `docs/configuration-reference.md`, `method` selector). `signaturePattern` selects overloads by JVM descriptor.
+With the agent attached, activating a `MethodSelector` scenario weaves entry and exit hooks into the methods it names, and removing the scenario restores them (see `docs/configuration-reference.md`, `method` selector). `signaturePattern` selects overloads by JVM descriptor. JDK classes (those of the bootstrap and platform class loaders) are never woven, whatever the patterns name, and a selector whose class and method patterns both match everything (`ANY`, a `GLOB` of `*` only, the `REGEX` `.*`, `^.*$`, `.*+`) is refused with `IllegalArgumentException`.
 
 Without the agent — a `ChaosRuntime` in a plain unit test — wire the events from interception the application already runs (Spring AOP `@Around`, AspectJ, Micronaut / Quarkus interceptors):
 

@@ -61,7 +61,12 @@ final class MethodWeaver {
       transformer =
           baseBuilder
               .get()
-              .type(typeMatcher(snapshot))
+              // Never a JDK class: the bootstrap and platform loaders' classes are not woven,
+              // whatever the patterns say (the selector guard cannot spot every match-all form).
+              .type(
+                  typeMatcher(snapshot),
+                  ElementMatchers.not(ElementMatchers.isBootstrapClassLoader())
+                      .and(ElementMatchers.not(ElementMatchers.isExtensionClassLoader())))
               .transform(
                   (builder, type, classLoader, module, protectionDomain) ->
                       builder

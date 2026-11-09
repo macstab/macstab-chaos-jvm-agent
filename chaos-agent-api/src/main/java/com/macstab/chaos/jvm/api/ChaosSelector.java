@@ -799,11 +799,18 @@ public sealed interface ChaosSelector
       this.operations = validatedOperations(operations, VALID_OPS, "MethodSelector");
       this.classPattern = classPattern == null ? NamePattern.any() : classPattern;
       this.methodNamePattern = methodNamePattern == null ? NamePattern.any() : methodNamePattern;
-      if (this.classPattern.mode() == NamePattern.MatchMode.ANY
-          && this.methodNamePattern.mode() == NamePattern.MatchMode.ANY) {
+      if (this.classPattern.matchesEverything() && this.methodNamePattern.matchesEverything()) {
         throw new IllegalArgumentException(
-            "MethodSelector requires at least one non-ANY pattern to prevent "
-                + "accidental global method instrumentation");
+            "MethodSelector requires a class or method pattern that does not match everything"
+                + " (class "
+                + this.classPattern.mode()
+                + " '"
+                + this.classPattern.value()
+                + "', method "
+                + this.methodNamePattern.mode()
+                + " '"
+                + this.methodNamePattern.value()
+                + "'), to prevent accidental global method instrumentation");
       }
       this.signaturePattern = signaturePattern == null ? NamePattern.any() : signaturePattern;
     }

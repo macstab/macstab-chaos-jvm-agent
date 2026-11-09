@@ -127,6 +127,7 @@ public final class DefectProbeMain {
       case "thread-eagain" -> threadEagain();
       case "reject-types" -> rejectTypes();
       case "method-weaving" -> methodWeaving();
+      case "method-weaving-jdk" -> methodWeavingJdk();
       case "method-kinds" -> methodKinds();
       case "woven-groups" -> printWovenGroups();
       case "woven-groups-after-thread-local" -> wovenGroupsAfterThreadLocal();
@@ -648,6 +649,46 @@ public final class DefectProbeMain {
       accepted.getOutputStream().write(42);
       accepted.getOutputStream().flush();
       System.out.println("byte=" + client.getInputStream().read());
+    }
+  }
+
+  /**
+   * Method selectors that name a JDK class ({@code java.util.HashMap.get}) and an application class
+   * ({@code com.example.chaostarget.UserMap.get}): only the application's method is woven.
+   */
+  private static void methodWeavingJdk() {
+    final ChaosControlPlane plane = ChaosPlatform.current();
+    final java.util.Map<String, String> map = new java.util.HashMap<>(Map.of("k", "v"));
+    try (ChaosActivationHandle jdk =
+            plane.activate(
+                ChaosScenario.builder("jdk")
+                    .scope(ChaosScenario.ScenarioScope.JVM)
+                    .selector(
+                        new ChaosSelector.MethodSelector(
+                            Set.of(OperationType.METHOD_ENTER),
+                            NamePattern.exact("java.util.HashMap"),
+                            NamePattern.exact("get"),
+                            null))
+                    .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+                    .activationPolicy(ActivationPolicy.always())
+                    .build());
+        ChaosActivationHandle user =
+            plane.activate(
+                ChaosScenario.builder("user")
+                    .scope(ChaosScenario.ScenarioScope.JVM)
+                    .selector(
+                        new ChaosSelector.MethodSelector(
+                            Set.of(OperationType.METHOD_ENTER),
+                            NamePattern.exact("com.example.chaostarget.UserMap"),
+                            NamePattern.exact("get"),
+                            null))
+                    .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+                    .activationPolicy(ActivationPolicy.always())
+                    .build())) {
+      System.out.println("map=" + map.get("k"));
+      System.out.println("userMap=" + new com.example.chaostarget.UserMap().get());
+      System.out.println("matched.jdk=" + jdk.matchedCount());
+      System.out.println("matched.user=" + user.matchedCount());
     }
   }
 

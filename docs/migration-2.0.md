@@ -50,6 +50,7 @@
 | 31 | Apache HttpClient is evaluated at `doExecute`, with one URL rule | a scenario counts Apache HttpClient calls made from a response handler, a `urlPattern` matches the path-only URL of `executeOpen(null, …)` or the doubled URL of HC4 `execute(host, absoluteRequest)`, or you subclass `CloseableHttpClient` yourself | expect one more evaluation per request a handler sends; match the full URL; hook your own client differently (§31) |
 | 32 | Client rejects fail through the library's own failure channel | a test expects a rejected asynchronous client call (a gRPC future or async stub, a Kafka send, a Lettuce async command, a JDK `sendAsync`, an OkHttp `enqueue`, a Reactor Netty request, an R2DBC `execute()`) to throw from the call that starts it, or counts gRPC `RPC_CALL` evaluations at `ClientCall.start` | expect the failure in the future, observer, callback or publisher (§32) |
 | 33 | The JDK's own use of a general primitive is not a target (L3a) | a scenario with an unnarrowed selector expects to hit class loading, the `CompletableFuture` timers, `/dev/urandom`, the JDK `HttpClient`'s selector, JDK-private ThreadLocals, the serialization hooks, a pool worker's lock, or the agent's MBean; a test counts those evaluations | target your own code's calls; name `/dev/urandom` in a path pattern or a JDK `ThreadLocal` / `ThreadPoolExecutor$Worker` class in the pattern to reach it (§33) |
+| 34 | Method hooks never weave JDK classes; match-all method selectors are refused | a `MethodSelector` names a JDK class (`java.*`, `jdk.*`, `sun.*`, a platform-loader module), or pairs two match-all patterns such as `glob("*")` and `regex(".*")` | target your own classes; narrow the class or the method pattern (§34) |
 
 ---
 
@@ -403,6 +404,11 @@ A scenario on a general primitive (file reads, ZIP inflation, direct buffers, GC
 - To reach a listed use on purpose, name it: a path pattern matching `/dev/urandom`, a `ThreadLocalSelector` or `MonitorSelector` pattern naming the JDK class. The other entries (class loading, the timers, the `HttpClient` selector, `jdk.internal.*` futures, the serialization hooks) cannot be targeted.
 - `CompletableFuture.delayedExecutor` stays evaluated. On JDK 25 its tasks run on the pool's `DelayScheduler` thread, so a `FORK_JOIN_TASK_RUN` delay on them also delays the pool's `orTimeout` timers.
 - The agent's own MBeans (`com.macstab.chaos.jvm`) are never a JMX target. A JMX event's subject is the `ObjectName`, `MBeanServer.getAttributes(ObjectName, String[])` is a `JMX_GET_ATTR` too, and an `ASYNC_*` event names the future's class instead of `CompletableFuture`.
+
+## 34. Method hooks never weave JDK classes; match-all method selectors are refused
+
+- A `MethodSelector` no longer weaves classes of the bootstrap or platform class loader: `exact("java.util.HashMap")` with `exact("get")` was woven into every `HashMap.get` of the JVM, the agent's own included. Such a scenario now matches nothing. Application classes, also in `javax.*` packages on the class path, are woven as before.
+- The guard against weaving every method of every class refused only `ANY` for both patterns. A pattern that matches everything in another form now counts too: a `GLOB` of `*` characters only (`glob("*")`, `glob(null)`, `**`) and the `REGEX` `.*`, `^.*$` and `.*+`. Such a pair is refused at construction with `IllegalArgumentException` (`ConfigLoadException` when a plan is read). Narrow the class or the method pattern.
 
 ---
 

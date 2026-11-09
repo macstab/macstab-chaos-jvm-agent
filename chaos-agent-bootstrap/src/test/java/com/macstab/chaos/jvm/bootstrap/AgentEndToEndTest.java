@@ -1976,6 +1976,16 @@ class AgentEndToEndTest {
     }
 
     @Test
+    @DisplayName("method-weaving-jdk: a JDK class is never woven, an application class is")
+    void jdkClassesAreNotWoven() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.runWithoutPlan(DefectProbeMain.class, "method-weaving-jdk");
+      assertThat(result.value("map")).isEqualTo("v");
+      assertThat(result.longValue("matched.jdk")).as("HashMap.get").isZero();
+      assertThat(result.longValue("matched.user")).as("UserMap.get").isEqualTo(1L);
+    }
+
+    @Test
     @DisplayName("only methods with a body of their own are evaluated: no bridge, no lambda body")
     void bridgeAndSyntheticMethodsAreNotWoven() throws Exception {
       final ChildJvmProbe.ProbeResult result =
