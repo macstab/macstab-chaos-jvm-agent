@@ -176,6 +176,30 @@ class PolicyBoundaryTest {
   }
 
   @Test
+  @DisplayName("a null randomSeed draws a fresh seed; a scenario without a policy has seed 0")
+  void seedDefaults() {
+    final ActivationPolicy unseeded =
+        ActivationPolicy.builder().probability(0.5).randomSeed(null).build();
+    final ActivationPolicy zero =
+        ActivationPolicy.builder().probability(0.5).randomSeed(0L).build();
+
+    assertThat(decisions("a", unseeded))
+        .as("two controllers of an unseeded policy draw differently")
+        .isNotEqualTo(decisions("a", unseeded));
+    assertThat(decisions("a", zero)).isEqualTo(decisions("a", zero));
+    assertThat(
+            ChaosScenario.builder("default")
+                .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+                .effect(ChaosEffect.suppress())
+                .build()
+                .activationPolicy())
+        .as("a scenario without a policy runs ActivationPolicy.always(), seed 0")
+        .isEqualTo(ActivationPolicy.always())
+        .extracting(ActivationPolicy::randomSeed)
+        .isEqualTo(0L);
+  }
+
+  @Test
   @DisplayName("an APPLIED event carries the delay it added, and only a delay; a metric counts it")
   void appliedEventAttributes() throws Throwable {
     final List<ChaosEvent> applied = new CopyOnWriteArrayList<>();

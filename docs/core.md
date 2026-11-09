@@ -82,7 +82,7 @@ Out of scope:
 | **GateAction**           | A pair of (ManualGate, maxBlockDuration) triggering a conditional block on the calling thread.                                                                                                                 |
 | **SessionId**            | A string assigned by `DefaultChaosSession` and stored in `ScopeContext` as a `ThreadLocal`. Null means "not bound to any session" (JVM-scope applies).                                                         |
 | **ScopeContext**         | Single mutable source of truth for the current thread's session ID. Used by `ChaosRuntime` dispatch methods and `DefaultChaosSession.bind()`.                                                                  |
-| **baseSeed**             | Per-controller seed for `SplittableRandom`, derived from `ActivationPolicy.randomSeed` or 0. XOR-ed with `matchedCount` and `scenarioId.hashCode()` per evaluation to produce varied-but-reproducible samples. |
+| **baseSeed**             | Per-controller seed for `SplittableRandom`, `ActivationPolicy.randomSeed`, or a seed drawn from `ThreadLocalRandom` when it is `null`. XOR-ed with `matchedCount` and `scenarioId.hashCode()` per evaluation to produce varied-but-reproducible samples. |
 
 ---
 
@@ -511,7 +511,7 @@ rateLimit: (permits, window)       — max applications per fixed window anchore
 activateAfterMatches: long ≥ 0    — skip first N matches (warm-up)
 activeFor: Duration                — auto-expire after this duration from start()
 maxApplications: Long              — stop after this many total applications; null = unlimited
-randomSeed: Long                   — seed for probability sampling; null = 0
+randomSeed: Long                   — seed for probability sampling; null = a random seed drawn at activation (always() and builder(): 0)
 ```
 
 All fields are optional and compose independently (AND logic). A scenario passes all guards or fires on none. Stress scenarios reject `maxApplications`, `rateLimit`, `activateAfterMatches > 0` and `probability < 1.0`; for them `activeFor` ends the stressor (state `INACTIVE`, reason `"expired"`).

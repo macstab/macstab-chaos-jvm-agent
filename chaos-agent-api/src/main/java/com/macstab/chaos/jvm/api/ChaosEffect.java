@@ -82,6 +82,9 @@ public sealed interface ChaosEffect
    * Returns a gate effect that blocks the matched operation until {@link
    * ChaosActivationHandle#release()} is called or {@code maxBlock} elapses.
    *
+   * <p>Only the handle releases the gate, so a plan read from JSON (a plan file, HTTP, JMX or
+   * {@code @WithChaos}) must set {@code maxBlock}: the plan reader refuses a gate without one.
+   *
    * @param maxBlock maximum time to block; {@code null} blocks indefinitely
    * @return a GateEffect that blocks for up to maxBlock
    */
@@ -752,7 +755,8 @@ public sealed interface ChaosEffect
 
   /**
    * Blocks the matched operation on a manual gate until the gate is opened or maxBlock elapses. A
-   * null maxBlock blocks indefinitely.
+   * null maxBlock blocks indefinitely; a plan read from JSON refuses it, since nothing there can
+   * open the gate.
    *
    * @param maxBlock maximum time the operation blocks before unblocking; {@code null} means no
    *     timeout

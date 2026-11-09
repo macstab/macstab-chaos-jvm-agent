@@ -272,7 +272,10 @@ public record ActivationPolicy(
    *
    * <p>Equivalent to: {@code probability=1.0, startMode=AUTOMATIC, no other constraints}. Uses the
    * fixed seed {@code 0}, so sampled delays of a delay range are reproducible across runs; pass
-   * {@code randomSeed = null} to the constructor (or omit it in JSON) for a random seed.
+   * {@code randomSeed = null} to the constructor for a random seed. A scenario without a policy
+   * gets this one, so in plan JSON a scenario without {@code activationPolicy} has seed {@code 0},
+   * while an {@code activationPolicy} that omits {@code randomSeed} (or sets it to {@code null})
+   * draws a random one.
    *
    * @return an always-fire activation policy
    */

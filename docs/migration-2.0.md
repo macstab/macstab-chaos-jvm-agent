@@ -55,6 +55,7 @@
 | 36 | Injected exceptions are JDK classes, resolved at activation | an `ExceptionInjectionEffect` names a `jakarta.` or agent class, or a class that is abstract, not public, not a `Throwable` or has no public `(String)` / no-argument constructor | name a public JDK exception class (§36) |
 | 37 | Stressors without load are refused; a stressor that stops ends its scenario | a plan runs a `safepointStorm` with `retransformClassCount = 0` on a JVM with `-XX:+DisableExplicitGC`, or a `finalizerBacklog` with `--finalization=disabled`; a test expects a `gcPressure` or `threadLeak` scenario to stay `ACTIVE` after its `duration` / `lifespan` | set `retransformClassCount` above 0 or drop the stressor on that JVM; expect `INACTIVE` (§37) |
 | 38 | The event log line is quoted and escaped | you parse the `com.macstab.chaos.jvm` log lines (`type=… scenarioId=… attributes={k=v}`) | read the quoted, escaped form (§38) |
+| 39 | A gate read from JSON needs `maxBlock` | a plan file, an HTTP or JMX plan, or `@WithChaos` JSON has a `gate` without `maxBlock` | set `maxBlock` (§39) |
 
 ---
 
@@ -437,6 +438,14 @@ A scenario on a general primitive (file reads, ZIP inflation, direct buffers, GC
 - Each event the agent logs (logger `com.macstab.chaos.jvm`) is one line `type=X scenarioId="…" message="…" attributes={k="v", …}`. 1.x wrote `scenarioId=` and the attribute values unquoted and nothing escaped, so a line break in an id or a message split the line.
 - The id, the message and the attribute keys and values are escaped: `\\`, `\"`, `\r`, `\n`, and `\uXXXX` for the other C0 controls, DEL, the C1 controls and U+2028/U+2029. A log parser reads the quoted fields and unescapes them.
 - The attributes come in a fixed order per event type (see [observability.md](observability.md#2-events)), the same in every JVM; 1.x printed them in an order that changed between runs.
+
+## 39. A gate read from JSON needs `maxBlock`
+
+`ChaosPlanMapper` refuses a `gate` effect without `maxBlock` with `ConfigLoadException` ("gate needs maxBlock"), whatever the JSON source: the plan file, inline or Base64 startup JSON, the HTTP and JMX management endpoints and `@WithChaos`. A gate is released only through its `ChaosActivationHandle`, which the author of a JSON plan never holds, so a gate without a bound held every caller until the scenario was stopped. `ChaosEffect.gate(null)` through the Java API is unchanged.
+
+Before (1.x): `{"type": "gate"}` held the matched calls with nothing to release them. Now give the gate its bound, for example `{"type": "gate", "maxBlock": "PT30S"}`, or activate it through the Java API and call `handle.release()`.
+
+The seed default is unchanged and now stated exactly: an `activationPolicy` that omits `randomSeed` (or sets it to `null`) draws a random seed; a scenario without `activationPolicy` gets `ActivationPolicy.always()`, whose seed is `0`.
 
 ---
 

@@ -1095,4 +1095,93 @@ class ChaosPlanMapperTest {
                 .toList())
         .containsExactlyElementsOf(declared.stream().map(OperationType::name).toList());
   }
+
+  @Nested
+  @DisplayName("gates and seeds read from JSON")
+  class GatesAndSeeds {
+
+    private static final String GATE_SCENARIO =
+        """
+        {"id": "g", "scope": "JVM",
+          "selector": {"type": "executor", "operations": ["EXECUTOR_SUBMIT"]},
+          "effect": {"type": "gate"%s}}
+        """;
+
+    @Test
+    @DisplayName("a gate without maxBlock is refused in a plan, an array and a bare scenario")
+    void unboundedGateRefused() {
+      final String gate = GATE_SCENARIO.formatted("");
+
+      assertThatThrownBy(() -> ChaosPlanMapper.read("{\"scenarios\": [" + gate + "]}"))
+          .isInstanceOf(ConfigLoadException.class)
+          .hasMessageContaining("gate needs maxBlock")
+          .hasMessageContaining("at scenarios[0].effect");
+      assertThatThrownBy(
+              () ->
+                  ChaosPlanMapper.read(
+                      "["
+                          + GATE_SCENARIO
+                              .formatted(", \"maxBlock\": \"PT1S\"")
+                              .replace("\"g\"", "\"h\"")
+                          + ", "
+                          + gate
+                          + "]"))
+          .isInstanceOf(ConfigLoadException.class)
+          .hasMessageContaining("at [1].effect");
+      assertThatThrownBy(() -> ChaosPlanMapper.readPlanOrScenarios(gate, "@WithChaos"))
+          .isInstanceOf(ConfigLoadException.class)
+          .satisfies(
+              refused ->
+                  assertThat(((ConfigLoadException) refused).reason())
+                      .startsWith("invalid value: gate needs maxBlock")
+                      .endsWith(" at effect"));
+    }
+
+    @Test
+    @DisplayName("a gate with maxBlock is read")
+    void boundedGateRead() {
+      final ChaosPlan plan =
+          ChaosPlanMapper.read(GATE_SCENARIO.formatted(", \"maxBlock\": \"PT1S\""));
+
+      assertThat(plan.scenarios().get(0).effect())
+          .isEqualTo(new ChaosEffect.GateEffect(Duration.ofSeconds(1)));
+    }
+
+    @Test
+    @DisplayName("a policy without randomSeed draws a random seed; a scenario without one has 0")
+    void seedDefaults() {
+      final String scenario =
+          """
+          {"id": "s", "scope": "JVM",
+            "selector": {"type": "executor", "operations": ["EXECUTOR_SUBMIT"]},
+            "effect": {"type": "suppress"}%s}
+          """;
+
+      assertThat(
+              ChaosPlanMapper.read(scenario.formatted(", \"activationPolicy\": {}"))
+                  .scenarios()
+                  .get(0)
+                  .activationPolicy()
+                  .randomSeed())
+          .as("a policy that omits randomSeed")
+          .isNull();
+      assertThat(
+              ChaosPlanMapper.read(
+                      scenario.formatted(", \"activationPolicy\": {\"randomSeed\": null}"))
+                  .scenarios()
+                  .get(0)
+                  .activationPolicy()
+                  .randomSeed())
+          .as("an explicit randomSeed: null")
+          .isNull();
+      assertThat(
+              ChaosPlanMapper.read(scenario.formatted(""))
+                  .scenarios()
+                  .get(0)
+                  .activationPolicy()
+                  .randomSeed())
+          .as("no policy: ActivationPolicy.always()")
+          .isEqualTo(0L);
+    }
+  }
 }

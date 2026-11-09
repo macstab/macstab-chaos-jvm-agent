@@ -124,7 +124,7 @@ final class ScenarioController {
   private volatile long rateWindowStartMillis;
   private volatile long rateWindowPermits;
 
-  /** Base seed for PRNG draws; derived once from the scenario's randomSeed (or 0). */
+  /** Base seed for PRNG draws: the scenario's randomSeed, or a random one when it is null. */
   private final long baseSeed;
 
   /** The constructor of an injected exception, resolved once; {@code null} for other effects. */

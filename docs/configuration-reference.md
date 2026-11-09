@@ -446,7 +446,8 @@ ActivationPolicy {
   maxApplications        : Long        // null = unlimited; > 0 when set
   activeFor              : Duration    // null = unlimited; positive when set
   rateLimit              : RateLimit   // null = unlimited; see below
-  randomSeed             : Long        // null = non-deterministic; explicit = reproducible sampling
+  randomSeed             : Long        // null or omitted = random seed; explicit = reproducible sampling
+                                       // (a scenario without activationPolicy gets always(): seed 0)
   allowDestructiveEffects: boolean     // false; must be true for DeadlockEffect / ThreadLeakEffect
   activeFrom             : Instant     // null = no lower bound; ISO-8601 in JSON, e.g. "2026-11-01T08:00:00Z"
   activeUntil            : Instant     // null = no upper bound; must be after activeFrom
@@ -558,7 +559,7 @@ Exceptions produced on purpose by an effect (`reject`, `exceptionInjection`, exc
 
 ## 9.4 `GateEffect` Timeout
 
-`GateEffect(maxBlock=null)` blocks the matched operation's thread indefinitely until `handle.release()` (or `stop()`/`close()`) is called. `release()` re-arms the gate: later matching calls block again until the next release. `release()` on a non-gate scenario or on a scenario that is not ACTIVE is a no-op. If the test fails to call `release()`, the application thread is permanently blocked. Use `maxBlock` to set a safety timeout. The testkit extensions call `stopTracked()` which releases all tracked handles in `afterEach`/`afterAll`.
+`GateEffect(maxBlock=null)` blocks the matched operation's thread indefinitely until `handle.release()` (or `stop()`/`close()`) is called. Only the Java API can build one: `release()` needs the handle, so a plan read from JSON (a plan file, HTTP, JMX, `@WithChaos`) refuses a `gate` without `maxBlock` with `ConfigLoadException`. `release()` re-arms the gate: later matching calls block again until the next release. `release()` on a non-gate scenario or on a scenario that is not ACTIVE is a no-op. If the test fails to call `release()`, the application thread is permanently blocked. Use `maxBlock` to set a safety timeout. The testkit extensions call `stopTracked()` which releases all tracked handles in `afterEach`/`afterAll`.
 
 ---
 
@@ -1366,14 +1367,14 @@ ChaosEffect.delay(Duration.ofSeconds(2))  // deterministic
 
 | Field      | Type                | Constraint       | Description                                          |
 |------------|---------------------|------------------|------------------------------------------------------|
-| `maxBlock` | Duration (ISO-8601) | positive or null | Maximum block duration. `null` = block indefinitely. |
+| `maxBlock` | Duration (ISO-8601) | positive; required in JSON | Maximum block duration. Plan JSON refuses a gate without it: nothing outside the Java API can release the gate. Through the API, `null` blocks until `handle.release()`. |
 
 **JSON example:**
 ```json
 { "type": "gate", "maxBlock": "PT5S" }
 ```
 
-**Warning:** `maxBlock=null` (indefinite gate) combined with a scenario that is not released before test completion will permanently block the application thread. The testkit `stopTracked()` cleanup protects against this in extension-managed scenarios.
+**Warning:** `maxBlock=null` (an indefinite gate, Java API only) combined with a scenario that is not released before test completion will permanently block the application thread. The testkit `stopTracked()` cleanup protects against this in extension-managed scenarios.
 
 ---
 

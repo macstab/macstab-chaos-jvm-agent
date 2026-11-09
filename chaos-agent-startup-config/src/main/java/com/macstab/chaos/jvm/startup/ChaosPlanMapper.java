@@ -27,6 +27,7 @@ import com.fasterxml.jackson.databind.introspect.BeanPropertyDefinition;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.fasterxml.jackson.databind.module.SimpleModule;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.macstab.chaos.jvm.api.ChaosEffect;
 import com.macstab.chaos.jvm.api.ChaosPlan;
 import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.Internal;
@@ -42,6 +43,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
+import java.util.function.IntFunction;
 import java.util.stream.Collectors;
 import org.jspecify.annotations.Nullable;
 
@@ -64,6 +66,8 @@ import org.jspecify.annotations.Nullable;
  *       streaming parser level; a pathological payload like {@code "[[[[...]}]]]...] }} cannot
  *       exhaust the stack or allocate an arbitrarily large String before the outer size gate sees
  *       it
+ *   <li>a {@code gate} needs {@code maxBlock}: nothing can release a gate read from JSON, since its
+ *       author holds no {@link com.macstab.chaos.jvm.api.ChaosActivationHandle}
  * </ul>
  *
  * <p>Input size is validated before parsing to prevent OOM from oversized payloads. Durations and
@@ -242,10 +246,16 @@ public final class ChaosPlanMapper {
     try {
       tree = OBJECT_MAPPER.readTree(json);
       if (tree.isArray()) {
-        return wrap(OBJECT_MAPPER.readValue(json, SCENARIO_LIST), planName, source);
+        return boundedGates(
+            wrap(OBJECT_MAPPER.readValue(json, SCENARIO_LIST), planName, source),
+            index -> "[" + index + "].effect",
+            source);
       }
       if (tree.isObject() && PLAN_MEMBERS.stream().noneMatch(tree::has)) {
-        return wrap(List.of(OBJECT_MAPPER.readValue(json, ChaosScenario.class)), planName, source);
+        return boundedGates(
+            wrap(List.of(OBJECT_MAPPER.readValue(json, ChaosScenario.class)), planName, source),
+            index -> "effect",
+            source);
       }
       // A plan, or neither an array nor an object: bound as a plan, as before.
       final ChaosPlan plan = OBJECT_MAPPER.readValue(json, ChaosPlan.class);
@@ -254,7 +264,7 @@ public final class ChaosPlanMapper {
         throw new ConfigLoadException(
             "chaos plan JSON is null; expected an object with \"scenarios\"", source);
       }
-      return plan;
+      return boundedGates(plan, index -> "scenarios[" + index + "].effect", source);
     } catch (JsonProcessingException exception) {
       final com.fasterxml.jackson.core.JsonLocation location = exception.getLocation();
       final boolean positioned = location != null && location.getLineNr() > 0;
@@ -266,6 +276,30 @@ public final class ChaosPlanMapper {
           positioned ? location.getColumnNr() : 0,
           parseFailureReason(exception, tree));
     }
+  }
+
+  /**
+   * Refuses a gate without {@code maxBlock}. Only an {@link
+   * com.macstab.chaos.jvm.api.ChaosActivationHandle} releases a gate, and a plan read from JSON (a
+   * file, HTTP, JMX, {@code @WithChaos}) gives none to its author, so such a gate would hold every
+   * caller until the scenario is stopped.
+   *
+   * @param path the JSON path of the effect of the scenario at an index
+   */
+  private static ChaosPlan boundedGates(
+      final ChaosPlan plan, final IntFunction<String> path, final String source) {
+    final List<ChaosScenario> scenarios = plan.scenarios();
+    for (int index = 0; index < scenarios.size(); index++) {
+      if (scenarios.get(index).effect() instanceof ChaosEffect.GateEffect gate
+          && gate.maxBlock() == null) {
+        final String reason =
+            "invalid value: gate needs maxBlock, nothing can release a gate read from JSON at "
+                + path.apply(index);
+        throw new ConfigLoadException(
+            "failed to parse chaos plan JSON: " + reason, source, null, 0, 0, reason);
+      }
+    }
+    return plan;
   }
 
   /** Wraps bare scenarios into a plan named {@code planName}; the plan's own rules apply. */

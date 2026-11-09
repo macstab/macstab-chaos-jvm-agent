@@ -11,6 +11,7 @@ import com.macstab.chaos.jvm.api.ChaosEventListener;
 import com.macstab.chaos.jvm.api.ChaosPlan;
 import com.macstab.chaos.jvm.api.ChaosScenario;
 import com.macstab.chaos.jvm.api.ChaosSession;
+import com.macstab.chaos.jvm.startup.ConfigLoadException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
@@ -83,6 +84,18 @@ class WithChaosSupportTest {
     } finally {
       thread.setContextClassLoader(original);
     }
+    assertThat(controlPlane.activated).isEmpty();
+  }
+
+  @Test
+  @DisplayName("a gate without maxBlock is refused: nothing could release it")
+  void unboundedGateRefused() throws Exception {
+    assertThatThrownBy(
+            () ->
+                WithChaosSupport.activate(
+                    Fixtures.class.getDeclaredMethod("unboundedGate"), controlPlane, null))
+        .isInstanceOf(ConfigLoadException.class)
+        .hasMessageContaining("gate needs maxBlock");
     assertThat(controlPlane.activated).isEmpty();
   }
 
@@ -195,5 +208,10 @@ class WithChaosSupportTest {
   static final class Fixtures {
     @WithChaos(resource = "classpath:chaos/with-chaos-plan.json")
     void resource() {}
+
+    @WithChaos(
+        "{\"id\": \"g\", \"selector\": {\"type\": \"executor\", \"operations\":"
+            + " [\"EXECUTOR_SUBMIT\"]}, \"effect\": {\"type\": \"gate\"}}")
+    void unboundedGate() {}
   }
 }
