@@ -1755,6 +1755,24 @@ class AgentEndToEndTest {
     }
 
     @Test
+    @DisplayName(
+        "Lettuce: a rejected asynchronous command and a rejected batch fail their futures, the"
+            + " batch evaluated once")
+    void lettuceAsyncReject() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          runReject(
+              "lettuce", ChaosSelector.redis(NamePattern.exact("SET")), "lettuce-async-reject");
+      assertThat(result.values()).doesNotContainKeys("single.call.type", "batch.call.type");
+      for (final String command : List.of("single", "batch.0", "batch.1")) {
+        assertThat(result.value(command + ".type"))
+            .as(command)
+            .isEqualTo("io.lettuce.core.RedisCommandTimeoutException");
+        assertThat(result.value(command + ".message")).as(command).isEqualTo("lettuce down");
+      }
+      assertThat(result.longValue("matched.lettuce")).as("one command and one batch").isEqualTo(2L);
+    }
+
+    @Test
     @DisplayName("R2DBC: a rejected execute throws R2dbcTransientResourceException")
     void r2dbc() throws Exception {
       final ChildJvmProbe.ProbeResult result =

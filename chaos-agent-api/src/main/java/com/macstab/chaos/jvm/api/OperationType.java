@@ -924,9 +924,12 @@ public enum OperationType {
 
   /**
    * Fires before a Redis command is written: Jedis {@code Connection.sendCommand(CommandArguments)}
-   * (every Jedis command, pipelined or not) and Lettuce {@code RedisChannelHandler.dispatch}. The
+   * (every Jedis command, pipelined or not) and Lettuce {@code RedisChannelHandler.dispatch} (a
+   * command, or a batch dispatched as a collection, evaluated once by its first command). The
    * target is the command name in upper case ({@code GET}, {@code SET}, ...). A reject throws
-   * {@code JedisConnectionException} or Lettuce's {@code RedisCommandTimeoutException}.
+   * {@code JedisConnectionException}; on Lettuce it completes each command exceptionally with
+   * {@code RedisCommandTimeoutException}, so the asynchronous API's futures fail and the
+   * synchronous API throws.
    *
    * <p>Use with {@link ChaosSelector.RedisSelector}.
    */

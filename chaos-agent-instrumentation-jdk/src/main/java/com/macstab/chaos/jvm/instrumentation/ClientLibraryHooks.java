@@ -113,11 +113,15 @@ final class ClientLibraryHooks {
                     advise(
                         ClientCallAdvice.LettuceDispatch.class,
                         ElementMatchers.named("dispatch")
+                            .and(ElementMatchers.takesArguments(1))
                             .and(
                                 ElementMatchers.takesArgument(
-                                    0,
-                                    ElementMatchers.named(
-                                        "io.lettuce.core.protocol.RedisCommand"))))));
+                                        0,
+                                        ElementMatchers.named(
+                                            "io.lettuce.core.protocol.RedisCommand"))
+                                    .or(
+                                        ElementMatchers.takesArgument(
+                                            0, java.util.Collection.class))))));
   }
 
   /** AWS SDK v2 sync and async client handlers. */

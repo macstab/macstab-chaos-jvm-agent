@@ -32,6 +32,7 @@ public final class ClientLibraryProbeMain {
       case "jedis-pooled-set" -> jedisPooledSet();
       case "jedis-pool-set" -> jedisPoolSet();
       case "lettuce-set" -> lettuceSet();
+      case "lettuce-async-reject" -> lettuceAsyncReject();
       case "r2dbc-execute" -> r2dbcExecute();
       case "aws-list-buckets" -> awsListBuckets();
       case "netty-write" -> nettyWrite();
@@ -383,6 +384,61 @@ public final class ClientLibraryProbeMain {
       } finally {
         client.shutdown();
       }
+    }
+  }
+
+  /**
+   * A Lettuce asynchronous {@code SET} and a batch of two {@code SET}s sent through {@code
+   * dispatch(Collection)}: whether the call threw, and how each command's future ended.
+   */
+  private static void lettuceAsyncReject() throws Exception {
+    try (FakeRedis redis = new FakeRedis()) {
+      final io.lettuce.core.RedisClient client =
+          io.lettuce.core.RedisClient.create("redis://127.0.0.1:" + redis.port());
+      try (io.lettuce.core.api.StatefulRedisConnection<String, String> connection =
+          client.connect()) {
+        try {
+          awaitCommand("single", connection.async().set("k", "v"));
+        } catch (final RuntimeException failure) {
+          report("single.call", failure);
+        }
+        final io.lettuce.core.codec.StringCodec codec = io.lettuce.core.codec.StringCodec.UTF8;
+        final List<io.lettuce.core.protocol.AsyncCommand<String, String, String>> batch =
+            new java.util.ArrayList<>();
+        for (final String key : List.of("a", "b")) {
+          batch.add(
+              new io.lettuce.core.protocol.AsyncCommand<>(
+                  new io.lettuce.core.protocol.Command<>(
+                      io.lettuce.core.protocol.CommandType.SET,
+                      new io.lettuce.core.output.StatusOutput<>(codec),
+                      new io.lettuce.core.protocol.CommandArgs<>(codec)
+                          .addKey(key)
+                          .addValue("v"))));
+        }
+        try {
+          connection.dispatch(batch);
+        } catch (final RuntimeException failure) {
+          report("batch.call", failure);
+        }
+        awaitCommand("batch.0", batch.get(0));
+        awaitCommand("batch.1", batch.get(1));
+      } finally {
+        client.shutdown();
+      }
+    }
+  }
+
+  private static void awaitCommand(
+      final String key, final java.util.concurrent.CompletionStage<?> command) {
+    try {
+      System.out.println(
+          key
+              + ".reply="
+              + command.toCompletableFuture().get(5, java.util.concurrent.TimeUnit.SECONDS));
+    } catch (final java.util.concurrent.ExecutionException failure) {
+      report(key, failure.getCause());
+    } catch (final InterruptedException | java.util.concurrent.TimeoutException failure) {
+      report(key + ".wait", failure);
     }
   }
 

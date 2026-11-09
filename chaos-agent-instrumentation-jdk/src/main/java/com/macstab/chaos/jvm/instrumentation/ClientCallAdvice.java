@@ -158,21 +158,46 @@ final class ClientCallAdvice {
     }
   }
 
-  /** Lettuce {@code RedisChannelHandler.dispatch(RedisCommand)}. */
+  /**
+   * Lettuce {@code RedisChannelHandler.dispatch(RedisCommand)} and {@code dispatch(Collection)} (a
+   * batch, evaluated once, by its first command's name). A reject skips the dispatch and completes
+   * each command exceptionally, as Lettuce does for a command it cannot write: the asynchronous
+   * API's futures fail, the synchronous API throws.
+   */
   static final class LettuceDispatch {
-    @Advice.OnMethodEnter
-    static void enter(
-        @Advice.This final Object connection, @Advice.Argument(0) final Object redisCommand)
-        throws Throwable {
+    @Advice.OnMethodEnter(skipOn = Advice.OnNonDefaultValue.class)
+    static @Nullable Throwable enter(
+        @Advice.This final Object connection, @Advice.Argument(0) final Object commands) {
       final String command;
       BootstrapDispatcher.beginInternalCall();
       try {
-        command = ClientCallExtractor.lettuceCommand(redisCommand);
+        command = ClientCallExtractor.lettuceCommand(commands);
       } finally {
         BootstrapDispatcher.endInternalCall();
       }
-      BootstrapDispatcher.beforeClientCall(
-          OperationTags.REDIS_COMMAND, connection, command, null, null);
+      try {
+        BootstrapDispatcher.beforeClientCall(
+            OperationTags.REDIS_COMMAND, connection, command, null, null);
+        return null;
+      } catch (final Throwable rejected) {
+        return rejected;
+      }
+    }
+
+    @Advice.OnMethodExit
+    static void exit(
+        @Advice.Enter final @Nullable Throwable rejected,
+        @Advice.Argument(0) final Object commands,
+        @Advice.Return(readOnly = false, typing = Assigner.Typing.DYNAMIC) Object dispatched) {
+      if (rejected != null) {
+        BootstrapDispatcher.beginInternalCall();
+        try {
+          ClientCallExtractor.lettuceFail(commands, rejected);
+        } finally {
+          BootstrapDispatcher.endInternalCall();
+        }
+        dispatched = commands;
+      }
     }
   }
 

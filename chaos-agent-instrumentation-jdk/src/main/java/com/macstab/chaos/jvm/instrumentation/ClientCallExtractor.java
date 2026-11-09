@@ -253,17 +253,47 @@ public final class ClientCallExtractor {
   }
 
   /**
-   * Returns the command type of a Lettuce {@code RedisCommand}, upper case.
+   * Returns the command type of a Lettuce {@code RedisCommand}, upper case; for a batch (a {@code
+   * Collection} of commands), that of its first command.
    *
-   * @param redisCommand the Lettuce command
+   * @param redisCommand the Lettuce command, or a collection of them
    * @return the command name, or {@code null}
    */
   public static @Nullable String lettuceCommand(final Object redisCommand) {
+    if (redisCommand instanceof Collection<?> batch) {
+      final Object first = batch.isEmpty() ? null : batch.iterator().next();
+      return first == null ? null : lettuceCommand(first);
+    }
     try {
       final Object type = invoke(redisCommand, "getType");
       return type == null ? null : String.valueOf(type).toUpperCase(Locale.ROOT);
     } catch (final Throwable unreadable) {
       return null;
+    }
+  }
+
+  /**
+   * Completes a rejected Lettuce command, or each command of a rejected batch, exceptionally
+   * ({@code RedisCommand.completeExceptionally}), as Lettuce does for a command it cannot write.
+   *
+   * @param commands the Lettuce command, or a collection of them
+   * @param failure the library exception the reject built
+   */
+  public static void lettuceFail(final Object commands, final Throwable failure) {
+    if (commands instanceof Collection<?> batch) {
+      for (final Object command : batch) {
+        lettuceFail(command, failure);
+      }
+      return;
+    }
+    try {
+      // Through the public interface: the command's runtime class need not be public.
+      Class.forName(
+              "io.lettuce.core.protocol.RedisCommand", false, commands.getClass().getClassLoader())
+          .getMethod("completeExceptionally", Throwable.class)
+          .invoke(commands, failure);
+    } catch (final ReflectiveOperationException | LinkageError | RuntimeException unreachable) {
+      // not a Lettuce command: nothing to complete
     }
   }
 

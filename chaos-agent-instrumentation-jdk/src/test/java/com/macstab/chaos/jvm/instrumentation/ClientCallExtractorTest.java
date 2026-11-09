@@ -1,6 +1,7 @@
 package com.macstab.chaos.jvm.instrumentation;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
@@ -222,6 +223,27 @@ class ClientCallExtractorTest {
       assertThat(ClientCallExtractor.lettuceCommand(new RedisCommand("hget"))).isEqualTo("HGET");
       assertThat(ClientCallExtractor.lettuceCommand(new RedisCommand(null))).isNull();
       assertThat(ClientCallExtractor.lettuceCommand(new RedisCommand(new Broken()))).isNull();
+    }
+
+    @Test
+    @DisplayName("names a Lettuce batch by its first command; an empty batch has no name")
+    void lettuceBatch() {
+      assertThat(
+              ClientCallExtractor.lettuceCommand(
+                  List.of(new RedisCommand("set"), new RedisCommand("get"))))
+          .isEqualTo("SET");
+      assertThat(ClientCallExtractor.lettuceCommand(List.of())).isNull();
+    }
+
+    @Test
+    @DisplayName("completing something that is not a Lettuce command does nothing")
+    void lettuceFailOnStandIn() {
+      assertThatCode(
+              () ->
+                  ClientCallExtractor.lettuceFail(
+                      List.of(new RedisCommand("set"), new Object()),
+                      new IllegalStateException("down")))
+          .doesNotThrowAnyException();
     }
   }
 
