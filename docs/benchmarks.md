@@ -96,21 +96,18 @@ public void setup() {
 
 With `Level.Trial` setup, by the time JMH begins the warmup iterations, all scenarios are fully activated and the `ScenarioRegistry` snapshot is in its final stable state. The measurement iterations see exactly the runtime cost of looking up and matching against a static scenario index.
 
-### 2.4 `Blackhole.consume()` — Dead Code Prevention
+### 2.4 Dead code and `Blackhole`
 
-Every benchmark method passes its return value to `bh.consume()`:
+Most benchmark methods call a dispatch entry point that returns `void` and pass nothing on:
 
 ```java
 @Benchmark
-public void agentInstalled_zeroScenarios(ZeroScenariosState state, Blackhole bh)
-        throws Throwable {
-    bh.consume(state.dispatcher.beforeJdbcStatementExecute("SELECT 1"));
+public void agentInstalled_zeroScenarios(ZeroScenariosState state) throws Throwable {
+    state.dispatcher.client().beforeHttpSend(url, OperationType.HTTP_CLIENT_SEND);
 }
 ```
 
-`beforeJdbcStatementExecute` returns `boolean`. If that return value were discarded (i.e., the benchmark method returned `void` without consuming it), the JIT compiler's escape analysis would determine that the result has no observable effect. Given that `beforeJdbcStatementExecute` with zero active scenarios reduces to a few comparisons and a return of `false`, the entire method body could be legally eliminated. The resulting benchmark would measure nothing — the compiled benchmark loop body would contain no meaningful work.
-
-`Blackhole.consume(boolean)` creates a data dependency that prevents the JIT from eliminating the call: the value must be computed because it is consumed by an opaque call that the JIT cannot reason about. `Blackhole` itself is carefully designed to prevent speculative optimisation: its implementation uses volatile writes and double-checking patterns that force the compiler to treat the consumed value as observable.
+The JIT cannot remove such a call even with zero scenarios: it reads the registry's `volatile` operation index (`DispatchEngine.idle`) and may throw, and both are observable. The `Phase4DispatchBenchmark` methods also take a `Blackhole` and consume their state (`bh.consume(state)`), which ties the measured call to an opaque sink the same way. A benchmark of a call that returns a value it does not otherwise use must hand that value to `Blackhole.consume()`, or the JIT may drop the computation and the benchmark measures nothing.
 
 ### 2.5 `@Fork(1)` — Single JVM Fork for CI
 
@@ -118,9 +115,9 @@ public void agentInstalled_zeroScenarios(ZeroScenariosState state, Blackhole bh)
 @Fork(1)
 ```
 
-`Fork(1)` runs the benchmarks in a single fresh JVM process per benchmark class (not per individual benchmark method — JMH forks per class when `Fork` is set at the class level). A fork creates a fresh JVM, avoids JIT profile pollution from previous benchmarks in the same JVM, and ensures each benchmark starts from a clean JIT compilation state.
+`Fork(1)` runs each benchmark — each method, and each combination of its `@Param` values — in one fresh JVM process; `@Fork` on the class only sets that default for its methods. A fork avoids JIT profile pollution from previous benchmarks in the same JVM and ensures each benchmark starts from a clean JIT compilation state. `BridgeDispatchBenchmark` uses `@Fork(2)`.
 
-`Fork(1)` is the right choice for CI pipelines: one fork is fast enough to run in a CI job and still isolates each class from the others. For release-level profiling or publication, increase to `Fork(3)` or `Fork(5)` to reduce variance across JVM startup conditions and to collect more GC/JIT data.
+`Fork(1)` is the right choice for CI pipelines: one fork is fast enough to run in a CI job and still isolates each benchmark from the others. For release-level profiling or publication, increase to `Fork(3)` or `Fork(5)` to reduce variance across JVM startup conditions and to collect more GC/JIT data.
 
 ### 2.6 `@Warmup(3, 1s)` / `@Measurement(5, 1s)` — JIT Saturation Reasoning
 
@@ -313,7 +310,7 @@ The benchmarks measure the **dispatch fast path only**. They do not measure:
 
 **`-prof gc`**: Adds GC pause and allocation rate columns to the output. If `alloc/op` is non-zero for the zero-scenario path, a `String` or `InvocationContext` allocation is escaping the stack. This would indicate a JIT escape analysis failure — uncommon but possible after a deoptimisation.
 
-**`-prof async`**: Uses async-profiler to produce a flamegraph of the hot path. Requires async-profiler on the classpath. The most illuminating result is the zero-scenario flamegraph: at JIT saturation it should show `beforeJdbcStatementExecute` → `evaluateJdbc` → `registry.match` → `isEmpty()` return as the dominant path with `contributions.isEmpty()` visible at the top.
+**`-prof async`**: Uses async-profiler to produce a flamegraph of the hot path. Requires async-profiler on the classpath. The most illuminating result is the zero-scenario flamegraph: at JIT saturation it should show `beforeJdbcStatementExecute` → `evaluateJdbc` → `engine.idle(operation)` → `registry.candidates(operation)` returning an empty array as the dominant path; no `InvocationContext` is built.
 
 **`-XX:-TieredCompilation`**: Forces all methods to compile directly to C2, skipping C1 intermediate compilation. This makes warmup slower but gives a cleaner measurement of fully-optimised code. Useful when comparing results across JVM versions.
 
