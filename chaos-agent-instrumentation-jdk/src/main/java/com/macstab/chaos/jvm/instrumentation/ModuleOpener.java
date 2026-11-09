@@ -1,7 +1,9 @@
 package com.macstab.chaos.jvm.instrumentation;
 
+import com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher;
 import java.lang.instrument.Instrumentation;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -24,9 +26,13 @@ final class ModuleOpener {
    * {@code chaos-agent-bootstrap/build.gradle.kts}) that the JVM honours on the {@code -javaagent:}
    * (premain) attach path before {@code premain} runs. Manifest opens are <b>not</b> honoured for
    * {@code agentmain} or runtime self-attach via {@code ByteBuddyAgent.install()}, so for those
-   * paths this method calls {@link Instrumentation#redefineModule} programmatically — exposing the
-   * same opens to the unnamed module of the system class loader. Same pattern OpenTelemetry,
-   * Datadog, and New Relic agents use.
+   * paths this method calls {@link Instrumentation#redefineModule} programmatically. Same pattern
+   * OpenTelemetry, Datadog, and New Relic agents use.
+   *
+   * <p>The opens go to every module agent code runs in: the unnamed module of the system class
+   * loader (the agent jar on the class path), the agent's own module (the agent classes in a class
+   * loader of their own, as in a fat jar) and the unnamed module of the bootstrap class loader (the
+   * bridge, which must be injected before this call).
    *
    * <p>Each entry below is paired with the agent feature that depends on it. If a future feature
    * needs a new internal package, add it both to the manifest <i>and</i> to this list.
@@ -40,16 +46,22 @@ final class ModuleOpener {
    *     redefineModule} call
    */
   static void grantInternalModuleOpens(final Instrumentation instrumentation) {
-    final Module unnamed = ClassLoader.getSystemClassLoader().getUnnamedModule();
-    final Set<Module> openTo = Set.of(unnamed);
+    final Set<Module> openTo = new HashSet<>();
+    openTo.add(ClassLoader.getSystemClassLoader().getUnnamedModule());
+    openTo.add(ModuleOpener.class.getModule());
+    try {
+      openTo.add(Class.forName(BootstrapDispatcher.class.getName(), false, null).getModule());
+    } catch (final ClassNotFoundException notInjected) {
+      LOGGER.log(Level.FINE, "bootstrap bridge not injected; its module is not opened to");
+    }
 
     // moduleClass → packages to open. Loaded reflectively so this code stays compilable on
     // toolchains that expose only some of these modules. Each lookup tolerates an absent module.
     final List<String[]> opens =
         List.of(
             new String[] {"java.net.http", "jdk.internal.net.http"},
+            // Named reflectively by the shaded ByteBuddy (ClassInjector.UsingUnsafe).
             new String[] {"java.base", "jdk.internal.misc"},
-            new String[] {"java.base", "jdk.internal.loader"},
             new String[] {"java.base", "sun.nio.ch"},
             new String[] {"java.base", "jdk.internal.ref"});
 

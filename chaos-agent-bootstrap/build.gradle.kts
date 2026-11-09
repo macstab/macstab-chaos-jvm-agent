@@ -77,8 +77,7 @@ val agentManifest = mapOf(
     // See docs/instrumentation.md "Module access strategy".
     "Add-Opens" to listOf(
         "java.net.http/jdk.internal.net.http",   // HttpClientImpl.send / sendAsync interception
-        "java.base/jdk.internal.misc",           // Attach API support paths on JDK 21+
-        "java.base/jdk.internal.loader",         // NativeLibraries.load instrumentation
+        "java.base/jdk.internal.misc",           // named reflectively by the shaded ByteBuddy (ClassInjector.UsingUnsafe)
         "java.base/sun.nio.ch",                  // DirectBuffer.cleaner() reflection (DirectBufferPressureStressor)
         "java.base/jdk.internal.ref",            // Modern Cleaner mechanism (Java 9+ replacement for sun.misc.Cleaner)
     ).joinToString(" "),

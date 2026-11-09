@@ -66,4 +66,37 @@ class ShadedAgentTest {
               .isEqualTo("true");
         });
   }
+
+  @Test
+  @DisplayName(
+      "in a fat jar (the agent in a class loader of its own), a stopped direct buffer pressure frees"
+          + " its memory at once")
+  void fatJarReleasesDirectBuffersOnStop() throws Exception {
+    // Epsilon never collects: only the stressor's eager release can lower the pool.
+    final ChildJvmProbe.ProbeResult result =
+        new ChildJvmProbe(workDir)
+            .runInFatJarShape(
+                FatJarProbeMain.class,
+                "direct-buffer-release",
+                "-XX:+UnlockExperimentalVMOptions",
+                "-XX:+UseEpsilonGC",
+                "-Xmx1g");
+
+    SoftAssertions.assertSoftly(
+        softly -> {
+          softly
+              .assertThat(result.value("agent.ownLoader"))
+              .as("the agent classes come from a loader of their own")
+              .isEqualTo("true");
+          softly.assertThat(result.longValue("directDuringMiB")).isGreaterThanOrEqualTo(32L);
+          softly
+              .assertThat(result.longValue("directDuringMiB") - result.longValue("directAfterMiB"))
+              .as("freed through the cleaner on stop: the opens reach the agent's own module")
+              .isGreaterThanOrEqualTo(32L);
+          softly
+              .assertThat(result.output())
+              .as("no warning that the cleaner is out of reach")
+              .doesNotContain("DirectBufferPressure");
+        });
+  }
 }

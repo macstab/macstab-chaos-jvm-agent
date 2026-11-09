@@ -175,6 +175,33 @@ final class ChildJvmProbe {
   }
 
   /**
+   * Runs {@code mainClass mode} in a child JVM in the fat-jar shape: the class path holds the test
+   * classes only, and the probe loads the agent jar ({@code chaos.bootstrap.agentJar}) in a class
+   * loader of its own and self-attaches.
+   *
+   * @param mainClass the probe main class
+   * @param mode the probe mode passed as the first program argument
+   * @param jvmArgs additional JVM arguments placed before the classpath
+   * @return the probe's {@code key=value} output lines, with its stderr
+   */
+  ProbeResult runInFatJarShape(final Class<?> mainClass, final String mode, final String... jvmArgs)
+      throws Exception {
+    final List<String> command = new ArrayList<>();
+    command.add(Path.of(System.getProperty("java.home"), "bin", "java").toString());
+    command.add("-Djdk.attach.allowAttachSelf=true");
+    command.add("-XX:+EnableDynamicAgentLoading");
+    command.add("-Dchaos.bootstrap.agentJar=" + System.getProperty("chaos.bootstrap.agentJar"));
+    command.addAll(List.of(jvmArgs));
+    command.add("-cp");
+    command.add(
+        Path.of(mainClass.getProtectionDomain().getCodeSource().getLocation().toURI()).toString());
+    command.add(mainClass.getName());
+    command.add(mode);
+    // Without the coverage agent, as runShadedOnly.
+    return executeAsIs(command);
+  }
+
+  /**
    * Runs {@code mainClass mode} in a child JVM with the agent attached and {@code plan} loaded.
    *
    * @param plan the plan written to the child's config file

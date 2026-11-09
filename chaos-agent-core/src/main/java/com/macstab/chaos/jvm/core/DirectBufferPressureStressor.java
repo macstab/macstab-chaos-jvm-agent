@@ -44,7 +44,7 @@ final class DirectBufferPressureStressor implements ManagedStressor {
    * {@code java.nio.DirectByteBuffer}, is package-private in the unopened {@code java.nio} package:
    * looked up there, {@code setAccessible} always fails, the handle is {@code null}, and {@link
    * #close()} cannot free native memory eagerly — it is released only whenever a GC happens to
-   * collect the buffers.
+   * collect the buffers. That is logged once as a WARNING.
    */
   private static @Nullable Method resolveCleanerMethod() {
     try {
@@ -52,8 +52,17 @@ final class DirectBufferPressureStressor implements ManagedStressor {
       m.setAccessible(true);
       return m;
     } catch (final Exception | LinkageError inaccessible) {
+      warnNoEagerRelease(inaccessible);
       return null;
     }
+  }
+
+  private static void warnNoEagerRelease(final Throwable cause) {
+    LOGGER.warning(
+        () ->
+            "DirectBufferPressure: the direct buffer cleaner is out of reach ("
+                + cause
+                + "); a stopped stressor's memory is freed only by a later GC");
   }
 
   private static @Nullable Method resolveCleanerCleanMethod() {
@@ -68,7 +77,8 @@ final class DirectBufferPressureStressor implements ManagedStressor {
       final Method m = cleaner.getClass().getMethod("clean");
       m.setAccessible(true);
       return m;
-    } catch (final Exception ignored) {
+    } catch (final Exception inaccessible) {
+      warnNoEagerRelease(inaccessible);
       return null;
     }
   }

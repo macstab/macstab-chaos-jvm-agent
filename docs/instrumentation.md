@@ -70,15 +70,16 @@ The agent reflects into and instruments classes in non-exported JDK internal pac
 | `-javaagent:` (premain at JVM startup)                                          | `Add-Opens` attribute in agent JAR `MANIFEST.MF`     | `chaos-agent-bootstrap/build.gradle.kts`                                                           |
 | `agentmain` / dynamic attach / `ByteBuddyAgent.install()` (runtime self-attach) | `Instrumentation.redefineModule(module, …, opens=…)` | `ModuleOpener#grantInternalModuleOpens`, called as the first step of `install(...)` |
 
-Both mechanisms grant the same set of opens to the unnamed module of the system classloader (matching `=ALL-UNNAMED`):
+Both mechanisms grant the same set of opens. The manifest opens to every unnamed module (`=ALL-UNNAMED`); `redefineModule` opens to each module agent code runs in: the unnamed module of the system class loader (the agent jar on the class path), the agent's own module (the agent classes in a class loader of their own, as in a fat jar that self-attaches) and the unnamed module of the bootstrap class loader (the bridge; the opens follow its injection).
 
 | Module / package                      | Why the agent needs it                                                                        |
 |---------------------------------------|-----------------------------------------------------------------------------------------------|
 | `java.net.http/jdk.internal.net.http` | Transform `HttpClientImpl.send(...)` / `sendAsync(...)` for `HTTP_CLIENT_SEND[_ASYNC]` chaos. |
-| `java.base/jdk.internal.misc`         | Attach API support paths on JDK 21+.                                                          |
-| `java.base/jdk.internal.loader`       | Transform `NativeLibraries.load(...)` for `NATIVE_LIBRARY_LOAD` chaos.                        |
+| `java.base/jdk.internal.misc`         | Named reflectively by the shaded ByteBuddy (`ClassInjector.UsingUnsafe`).                     |
 | `java.base/sun.nio.ch`                | `DirectBuffer.cleaner()` reflection (`DirectBufferPressureStressor`).                         |
 | `java.base/jdk.internal.ref`          | Modern `Cleaner` mechanism (Java 9+ replacement for `sun.misc.Cleaner`).                      |
+
+When an open is refused (a JVM that denies `redefineModule`), `DirectBufferPressureStressor` logs one WARNING and a stopped stressor's memory is freed by a later GC only.
 
 **Adding a new internal**: when a new feature requires access to another non-exported package, add it to **both** the manifest in `chaos-agent-bootstrap/build.gradle.kts` and the list inside `ModuleOpener#grantInternalModuleOpens`. Same pattern applies if a new advice class references additional helper types: those types must be injected into the bootstrap classloader from `injectBridge(...)` (see `HttpUrlExtractor`, `JdbcTargetExtractor` and `ClientCallExtractor` for prior art).
 
