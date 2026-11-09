@@ -133,10 +133,11 @@ final class ScenarioRegistry implements ChaosDiagnostics {
    *
    * <p>A controller registered under the same key that has finished — {@link
    * ChaosDiagnostics.ScenarioState#STOPPED} or {@link ChaosDiagnostics.ScenarioState#INACTIVE}
-   * (expired or out of applications) — is replaced and returned so the caller can destroy it. A
-   * stopped scenario can never run again ({@code start()} is a no-op after {@code stop()}), so its
-   * id is free for the next test of a suite, a re-posted plan or a reloaded config. The check and
-   * the replacement are one atomic step.
+   * (expired or out of applications) — is replaced and returned so the caller can end and destroy
+   * it. Publishes nothing, so a caller may hold a lock. A stopped scenario can never run again
+   * ({@code start()} is a no-op after {@code stop()}), so its id is free for the next test of a
+   * suite, a re-posted plan or a reloaded config. The check and the replacement are one atomic
+   * step.
    *
    * @param controller the controller to register; must not be {@code null}
    * @return the finished controller that was replaced, or {@code null}
@@ -144,12 +145,9 @@ final class ScenarioRegistry implements ChaosDiagnostics {
    *     {@code REGISTERED} or {@code ACTIVE}
    */
   ScenarioController register(final ScenarioController controller) {
-    // An expired controller under the key ends first, with its INACTIVE event published here,
-    // outside the map update: listener code never runs inside a bin lock.
-    final ScenarioController current = controllers.get(controller.key());
-    if (current != null) {
-      current.refreshExpiry();
-    }
+    // An expired controller under the key counts as finished and is replaced; the caller ends it
+    // (its INACTIVE event) with no lock held. Nothing is published here: the caller holds its
+    // lifecycle lock.
     final ScenarioController[] replaced = new ScenarioController[1];
     controllers.compute(
         controller.key(),

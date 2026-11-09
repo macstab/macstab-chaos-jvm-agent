@@ -221,6 +221,47 @@ class ChaosRuntimeActivationPolicyTest {
         assertThat(secondElapsed).as("no delay after activeFor expiry").isLessThan(DELAY_NANOS / 2);
       }
     }
+
+    @Test
+    @DisplayName(
+        "re-activating an expired id publishes its INACTIVE with no control-plane lock held")
+    void reactivatingExpiredIdPublishesOutsideTheLock() throws InterruptedException {
+      // Arrange
+      final MutableClock clock = new MutableClock();
+      try (ChaosRuntime runtime = new ChaosRuntime(clock, ChaosMetricsSink.NOOP)) {
+        final ChaosScenario scenario =
+            ChaosScenario.builder("expiring")
+                .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+                .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+                .activationPolicy(
+                    ActivationPolicy.builder().activeFor(Duration.ofMinutes(10)).build())
+                .build();
+        runtime.activate(scenario);
+        final List<Boolean> otherThreadGotTheLock = new ArrayList<>();
+        runtime.addEventListener(
+            event -> {
+              if (event.type() == ChaosEvent.Type.INACTIVE) {
+                // addEventListener takes the control plane's lock: it finishes only if the
+                // activating thread does not hold it while it publishes.
+                final Thread other = new Thread(() -> runtime.addEventListener(e -> {}));
+                other.start();
+                try {
+                  other.join(2_000);
+                } catch (final InterruptedException interrupted) {
+                  Thread.currentThread().interrupt();
+                }
+                otherThreadGotTheLock.add(!other.isAlive());
+              }
+            });
+        clock.advance(Duration.ofMinutes(11));
+
+        // Act
+        runtime.activate(scenario);
+
+        // Assert
+        assertThat(otherThreadGotTheLock).containsExactly(true);
+      }
+    }
   }
 
   @Nested

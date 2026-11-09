@@ -764,6 +764,8 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
 
   private static void destroyQuietly(final ScenarioController controller) {
     try {
+      // An expired controller ends first, with its INACTIVE event, here where no lock is held.
+      controller.refreshExpiry();
       controller.destroy();
     } catch (final RuntimeException failure) {
       // The replaced controller had already finished; a failure while releasing its remaining
