@@ -56,8 +56,9 @@ class AgentLogTest {
     final AgentLog log = AgentLog.named(NAME);
 
     log.warning(() -> "now");
+    log.warning(() -> "again");
 
-    assertThat(written).extracting(LogRecord::getMessage).containsExactly("now");
+    assertThat(written).extracting(LogRecord::getMessage).containsExactly("now", "again");
     assertThat(AgentLog.holding()).isFalse();
   }
 
