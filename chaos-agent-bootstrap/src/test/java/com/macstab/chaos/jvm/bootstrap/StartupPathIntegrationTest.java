@@ -313,6 +313,42 @@ class StartupPathIntegrationTest {
     }
   }
 
+  @Nested
+  @DisplayName("safepoint storm under -XX:+DisableExplicitGC")
+  class SafepointStormRetransforms {
+
+    private static final List<String> NO_EXPLICIT_GC =
+        List.of(
+            "-XX:+DisableExplicitGC",
+            "-Djdk.attach.allowAttachSelf=true",
+            "-XX:+EnableDynamicAgentLoading");
+
+    @Test
+    @DisplayName("retransforms classes when the agent started with -javaagent")
+    void premain() throws Exception {
+      assertRetransforms(runWithAgent(NO_EXPLICIT_GC, "safepoint-storm", "premain"));
+    }
+
+    @Test
+    @DisplayName("retransforms classes when the agent was attached")
+    void agentmain() throws Exception {
+      assertRetransforms(run(Map.of(), NO_EXPLICIT_GC, "safepoint-storm", "agentmain"));
+    }
+
+    @Test
+    @DisplayName("retransforms classes when the agent self-attached")
+    void selfAttach() throws Exception {
+      assertRetransforms(run(Map.of(), NO_EXPLICIT_GC, "safepoint-storm", "self-attach"));
+    }
+
+    private void assertRetransforms(final Result result) {
+      assertThat(result.value("stormState")).isEqualTo("ACTIVE");
+      assertThat(Long.parseLong(result.value("stormRetransforms")))
+          .as("the storm's retransforms are its only load where System.gc() does nothing")
+          .isPositive();
+    }
+  }
+
   // ── child JVM ──────────────────────────────────────────────────────────────
 
   private Result run(

@@ -53,6 +53,7 @@ public final class StartupPathProbeMain {
       case "bridge-retry" -> bridgeRetry();
       case "settings" -> settings();
       case "self-attach" -> selfAttach();
+      case "safepoint-storm" -> safepointStorm(args[1]);
       default -> throw new IllegalArgumentException("unknown probe mode: " + args[0]);
     }
   }
@@ -169,6 +170,60 @@ public final class StartupPathProbeMain {
       }
       System.out.println("applied=" + handle.appliedCount());
     }
+  }
+
+  /**
+   * Installs the agent through {@code path} ({@code premain}: started with -javaagent; {@code
+   * agentmain}: attached with the opt-in; {@code self-attach}: {@link
+   * ChaosPlatform#installLocally()}), then runs a safepoint storm with class retransforms and
+   * counts the retransformations its thread makes, seen by a retransform-capable transformer of
+   * this probe's own. The JVM runs with -XX:+DisableExplicitGC, so the retransforms are the storm's
+   * only load.
+   */
+  private static void safepointStorm(final String path) throws Exception {
+    switch (path) {
+      case "premain" -> {}
+      case "agentmain" -> {
+        System.setProperty(ChaosAgentBootstrap.ALLOW_DYNAMIC_ATTACH_PROPERTY, "true");
+        attachAgentJar();
+      }
+      case "self-attach" -> ChaosPlatform.installLocally();
+      default -> throw new IllegalArgumentException(path);
+    }
+    final java.util.concurrent.atomic.AtomicLong retransforms =
+        new java.util.concurrent.atomic.AtomicLong();
+    final java.lang.instrument.ClassFileTransformer counter =
+        new java.lang.instrument.ClassFileTransformer() {
+          @Override
+          public byte[] transform(
+              final ClassLoader loader,
+              final String className,
+              final Class<?> classBeingRedefined,
+              final java.security.ProtectionDomain protectionDomain,
+              final byte[] classfileBuffer) {
+            if (classBeingRedefined != null
+                && Thread.currentThread().getName().equals("macstab-chaos-safepoint-storm")) {
+              retransforms.incrementAndGet();
+            }
+            return null;
+          }
+        };
+    ByteBuddyAgent.install().addTransformer(counter, true);
+    try (var handle =
+        ChaosAgentBootstrap.current()
+            .activate(
+                ChaosScenario.builder("storm-retransforms")
+                    .selector(ChaosSelector.stress(ChaosSelector.StressTarget.SAFEPOINT_STORM))
+                    .effect(new ChaosEffect.SafepointStormEffect(Duration.ofMillis(20), 3))
+                    .activationPolicy(ActivationPolicy.always())
+                    .build())) {
+      System.out.println("stormState=" + handle.state());
+      final long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5L);
+      while (retransforms.get() == 0L && System.nanoTime() < deadline) {
+        Thread.sleep(20L);
+      }
+    }
+    System.out.println("stormRetransforms=" + retransforms.get());
   }
 
   /**

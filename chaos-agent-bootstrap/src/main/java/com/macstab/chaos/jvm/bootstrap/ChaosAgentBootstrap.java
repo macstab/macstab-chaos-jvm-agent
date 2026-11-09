@@ -468,7 +468,8 @@ public final class ChaosAgentBootstrap {
    * <p>On successful initialization, this method:
    *
    * <ol>
-   *   <li>Creates a new {@link ChaosRuntime}.
+   *   <li>Creates a new {@link ChaosRuntime} and hands it the {@link Instrumentation}, which the
+   *       safepoint storm retransforms classes through.
    *   <li>Installs all JDK instrumentation via {@link
    *       com.macstab.chaos.jvm.instrumentation.JdkInstrumentationInstaller}.
    *   <li>Registers a {@link ChaosDiagnosticsMBean} with the platform MBean server.
@@ -595,6 +596,8 @@ public final class ChaosAgentBootstrap {
       final Instrumentation instrumentation,
       final boolean deferMBean) {
     final ChaosRuntime runtime = new ChaosRuntime();
+    // The safepoint storm retransforms classes through it; set before any plan activates.
+    runtime.setInstrumentation(instrumentation);
     boolean instrumentationInstalled = false;
     ObjectName registeredMBean = null;
     Optional<ChaosReports> reports = Optional.empty();

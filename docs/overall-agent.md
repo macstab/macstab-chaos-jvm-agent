@@ -702,7 +702,7 @@ All activation failures are surfaced in `ChaosDiagnostics.snapshot().failures()`
 - Stressor creation failures are not swallowed: they propagate out of `activate()` (an `OutOfMemoryError`, also a thread the JVM cannot start, as `ChaosUnsupportedFeatureException`). `MetaspacePressureStressor` closes its partially-filled loader and rethrows if class definition fails (e.g. metaspace already exhausted).
 - `activeFor` and `activeUntil` end a stressor: it is closed and the scenario becomes `INACTIVE` with reason `"expired"`. A stressor that stops on its own ends its scenario too (`stressor failed: <type>`, `duration elapsed`, `lifespan elapsed`, L17). `activeFrom`, `maxApplications`, `rateLimit`, `activateAfterMatches`, `probability < 1` and `replayMatches` are rejected for stress scenarios.
 - `CodeCachePressureStressor` generates classes without a target application method; classes are immediately eligible for GC if the code cache does not retain them.
-- `SafepointStormStressor` calls `Instrumentation.retransformClasses()` on its timer thread when the runtime was given an `Instrumentation` (`ChaosRuntime.setInstrumentation`); without one it skips the retransformation step and still triggers `System.gc()`.
+- `SafepointStormStressor` calls `Instrumentation.retransformClasses()` on its timer thread when `retransformClassCount > 0`, through the `Instrumentation` the agent hands the runtime at every start (`-javaagent`, dynamic attach, self-attach). Only a runtime created without the agent (`new ChaosRuntime()`) has none; its storm skips the retransformation step and still triggers `System.gc()`.
 
 ## Effect on JVM Stability
 
