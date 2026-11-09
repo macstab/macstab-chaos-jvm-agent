@@ -143,6 +143,7 @@ Migration steps for each change: [docs/migration-2.0.md](docs/migration-2.0.md).
 
 ### Bug Fixes
 
+* **opentelemetry:** the `chaos.events` counter is described as "Chaos events by type": it carries no scenario id, but its description said "by type and scenario".
 * **spring, micronaut, quarkus:** a blank chaos switch value (`macstab.chaos.enabled=`) is off without a warning, as an absent one is, and as the agent arguments read it; it was warned about as an unrecognised boolean.
 * **spring, quarkus:** a scenario or handle id is logged through `LogText.sanitize` (by `ChaosAutoConfiguration`, `ChaosHandleRegistry` and `ChaosQuarkusExtension`): an id with a line break wrote a second, forged log line.
 * **micrometer:** the series of ended scenarios are retired when a `MeterFilter` denies the `chaos.scenarios` gauges (`management.metrics.enable.chaos.scenarios=false`): scrapes were counted by one of those gauges alone, and a denied gauge is never read, so the series of every ended scenario stayed until `close()`. Every meter read from the diagnostics now counts the scrapes.

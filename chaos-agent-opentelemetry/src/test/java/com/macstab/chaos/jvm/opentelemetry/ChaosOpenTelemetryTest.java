@@ -168,6 +168,9 @@ class ChaosOpenTelemetryTest {
       assertThat(metric("chaos.events").getLongSumData().getPoints())
           .isNotEmpty()
           .allSatisfy(point -> assertThat(point.getAttributes().size()).isEqualTo(1));
+      assertThat(metric("chaos.events").getDescription())
+          .as("it carries the event type only, no scenario")
+          .isEqualTo("Chaos events by type");
     }
   }
 

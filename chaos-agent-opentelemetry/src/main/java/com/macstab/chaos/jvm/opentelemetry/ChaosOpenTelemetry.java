@@ -241,11 +241,7 @@ public final class ChaosOpenTelemetry {
     private final LongCounter failures;
 
     Instruments(final Meter meter) {
-      events =
-          meter
-              .counterBuilder("chaos.events")
-              .setDescription("Chaos events by type and scenario")
-              .build();
+      events = meter.counterBuilder("chaos.events").setDescription("Chaos events by type").build();
       applications =
           meter
               .counterBuilder("chaos.applications")
