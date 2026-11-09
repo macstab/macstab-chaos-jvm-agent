@@ -1200,6 +1200,18 @@ class AgentEndToEndTest {
 
     @Test
     @DisplayName(
+        "a second copy overtaken between its foreign-copy check and its install is refused; the"
+            + " first copy's delegate stays")
+    void overtakenCopyRefused() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          probe.runWithoutAgent(InstallerProbeMain.class, "foreign-copy-race");
+
+      assertThat(result.value("raceRefused")).isEqualTo("true");
+      assertThat(result.value("delegateOfFirstCopy")).isEqualTo("true");
+    }
+
+    @Test
+    @DisplayName(
         "a bridge claimed by another agent revision refuses the install before it touches the"
             + " JVM")
     void bridgeOfAnotherRevisionIsRefused() throws Exception {

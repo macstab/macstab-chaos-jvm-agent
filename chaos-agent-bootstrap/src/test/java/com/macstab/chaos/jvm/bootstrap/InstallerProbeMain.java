@@ -38,6 +38,7 @@ public final class InstallerProbeMain {
       case "lifecycle" -> lifecycle();
       case "session-hosts-failure" -> sessionHostsFailure();
       case "foreign-copy" -> foreignCopy();
+      case "foreign-copy-race" -> foreignCopyRace();
       case "bridge-revision-claimed" -> bridgeOfAnotherRevision(true);
       case "bridge-revision-unclaimed" -> bridgeOfAnotherRevision(false);
       case "dispatcher-before-install" -> dispatcherBeforeInstall();
@@ -159,6 +160,59 @@ public final class InstallerProbeMain {
     }
     System.out.println("foreignAppends=" + counting.appends());
     System.out.println("foreignModuleRedefinitions=" + counting.moduleRedefinitions());
+  }
+
+  /**
+   * A second copy of the agent, in its own class loader, overtaken by the first copy between its
+   * foreign-copy check and its delegate install (the first copy installs while the second opens the
+   * modules): the second must refuse, not replace the first copy's delegate.
+   */
+  private static void foreignCopyRace() throws Exception {
+    final Instrumentation real = net.bytebuddy.agent.ByteBuddyAgent.install();
+    // The bridge is on the bootstrap class path, and no delegate is installed.
+    JdkInstrumentationInstaller.install(
+        real, new ChaosRuntime(), false, List.of(), List.of(), null);
+    JdkInstrumentationInstaller.uninstall(real);
+    final ScriptedInstrumentation overtaken =
+        new ScriptedInstrumentation(real)
+            .onFirstInstallStep(
+                () ->
+                    JdkInstrumentationInstaller.install(
+                        real, new ChaosRuntime(), false, List.of(), List.of(), null));
+    try (URLClassLoader isolated =
+        new URLClassLoader(classpath(), ClassLoader.getPlatformClassLoader())) {
+      final Class<?> runtimeClass = Class.forName(ChaosRuntime.class.getName(), true, isolated);
+      final Class<?> installer =
+          Class.forName(JdkInstrumentationInstaller.class.getName(), true, isolated);
+      try {
+        installer
+            .getMethod(
+                "install",
+                Instrumentation.class,
+                runtimeClass,
+                boolean.class,
+                List.class,
+                List.class,
+                java.nio.file.Path.class)
+            .invoke(
+                null,
+                overtaken,
+                runtimeClass.getConstructor().newInstance(),
+                false,
+                List.of(),
+                List.of(),
+                null);
+        System.out.println("raceRefused=false");
+      } catch (final java.lang.reflect.InvocationTargetException refused) {
+        System.out.println("raceRefused=" + (refused.getCause() instanceof IllegalStateException));
+      }
+    }
+    final Object delegate = bootDelegate();
+    System.out.println(
+        "delegateOfFirstCopy="
+            + (delegate != null
+                && delegate.getClass().getClassLoader()
+                    == InstallerProbeMain.class.getClassLoader()));
   }
 
   /**

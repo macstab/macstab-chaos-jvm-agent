@@ -143,6 +143,7 @@ Migration steps for each change: [docs/migration-2.0.md](docs/migration-2.0.md).
 
 ### Bug Fixes
 
+* **instrumentation:** two copies of the agent in different class loaders (two web applications that each bundle it) installing at the same time could both pass the check for another installed copy, and the later one replaced the first one's delegate: the first copy's scenarios stopped receiving calls. The check is repeated together with the install, under the bootstrap dispatcher's lock, so the later copy is refused.
 * **instrumentation:** a `DatagramSocket.send` with no `DATAGRAM_SEND` scenario allocates nothing once the DATAGRAM hooks are woven: the packet's address (`getSocketAddress()`, a new `InetSocketAddress` per call) was read before the idle check, about 40 bytes per send.
 * **quarkus:** `ChaosQuarkusExtension.contextPlane` and `releaseContextPlane`, public only for `ChaosArcProducer`'s reflective call across class loaders, are `@Internal` and no longer part of the recorded API.
 * **opentelemetry:** the `chaos.events` counter is described as "Chaos events by type": it carries no scenario id, but its description said "by type and scenario".

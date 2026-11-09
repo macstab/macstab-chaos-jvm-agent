@@ -127,7 +127,8 @@ public final class JdkInstrumentationInstaller {
    * @throws IllegalArgumentException if a clock prefix names JDK classes
    * @throws IllegalStateException if the bootstrap class path already holds the bridge of another
    *     agent revision, or a copy of the agent loaded by another class loader is installed (nothing
-   *     is changed then), or if a later step fails (the delegate and the hooks are removed again)
+   *     is changed then; when that copy installs while this one is installing, only this one's
+   *     module opens stay), or if a later step fails (the delegate and the hooks are removed again)
    */
   public static void install(
       final Instrumentation instrumentation,
@@ -145,7 +146,7 @@ public final class JdkInstrumentationInstaller {
     BridgeInjector.injectBridge(instrumentation, bridgeDir);
     ModuleOpener.grantInternalModuleOpens(instrumentation);
     try {
-      installDelegate(new ChaosBridge(runtime));
+      installDelegateUnlessForeign(new ChaosBridge(runtime));
       setSessionHeaderHosts(sessionHeaderHosts);
       runtime.setHookDemand(
           new HookDemand() {
@@ -564,6 +565,26 @@ public final class JdkInstrumentationInstaller {
               + existing.getClass().getClassLoader()
               + "); only one copy of the agent can be active per JVM. Remove the duplicate"
               + " chaos-agent jar from the application, or use the copy that is already installed");
+    }
+  }
+
+  /**
+   * Installs {@code bridgeDelegate} unless a copy of the agent loaded by another class loader has
+   * installed its delegate since {@link #install}'s first check: two copies (two web applications
+   * that each bundle the agent) can both pass that check. The check and the install hold the
+   * monitor of the bootstrap {@code BootstrapDispatcher}, which its {@code install} takes, as
+   * {@link #connectDispatcher} does.
+   */
+  private static void installDelegateUnlessForeign(final Object bridgeDelegate) {
+    final Class<?> dispatcher;
+    try {
+      dispatcher = bootstrapDispatcherClass();
+    } catch (final ClassNotFoundException notInjected) {
+      throw new IllegalStateException("the bridge is not on the bootstrap class path", notInjected);
+    }
+    synchronized (dispatcher) {
+      rejectForeignDelegate(installedDelegateOrNull());
+      installDelegate(bridgeDelegate);
     }
   }
 
