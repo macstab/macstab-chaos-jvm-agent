@@ -160,9 +160,11 @@ class ChaosOpenTelemetryTest {
                 assertThat(point.getValue()).isEqualTo(1L);
                 assertThat(point.getAttributes().get(ChaosOpenTelemetry.FAILURE_CATEGORY))
                     .isEqualTo("INVALID_CONFIGURATION");
-                assertThat(point.getAttributes().get(ChaosOpenTelemetry.SCENARIO_ID))
-                    .isEqualTo("otel-invalid");
+                assertThat(point.getAttributes().get(ChaosOpenTelemetry.SCENARIO_ID)).isNull();
               });
+      assertThat(metric("chaos.events").getLongSumData().getPoints())
+          .isNotEmpty()
+          .allSatisfy(point -> assertThat(point.getAttributes().size()).isEqualTo(1));
     }
   }
 

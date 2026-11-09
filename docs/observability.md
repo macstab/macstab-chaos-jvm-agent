@@ -68,7 +68,7 @@ Two optional modules turn events into metrics. Each instrument has one fixed set
 | `chaos.applications`        | counter               | `scenario`, `operation`, `effect`    | effects that took effect                                          |
 | `chaos.injected.delay`      | timer / histogram (ms) | `scenario`, `operation`             | latency the agent added to calls (from the `APPLIED` event's `delayMillis`) |
 | `chaos.skips`               | counter               | `scenario`, `reason`                 | matches the policy kept from applying (while a listener is registered) |
-| `chaos.activation.failures` | counter               | `scenario`, `category`               | failed activations                                                |
+| `chaos.activation.failures` | counter               | `category`                           | failed activations                                                |
 | `chaos.scenarios`           | gauge                 | `state`                              | registered scenarios per state                                    |
 | `chaos.events.dropped`      | counter               | —                                    | events dropped by full asynchronous listener queues               |
 | `chaos.hooks.woven`         | gauge                 | —                                    | hook groups woven into JDK and library classes                    |
@@ -80,7 +80,9 @@ ChaosMeterBinder binder = new ChaosMeterBinder(ChaosPlatform.current());
 binder.bindTo(meterRegistry);   // binder.close() stops counting
 ```
 
-**OpenTelemetry** (`chaos-agent-opentelemetry`), the same instruments with attributes `chaos.event.type`, `chaos.scenario.id`, `chaos.operation`, `chaos.effect`, `chaos.skip.reason`, `chaos.failure.category`, `chaos.scenario.state`, scope `com.macstab.chaos.jvm`:
+The series tagged with a `scenario` are retired once the scenario has ended (`STOPPED`, `INACTIVE`, or a refused activation) and two scrapes (reads of the `chaos.scenarios` gauges) ran since, so its last values were exported: on the next chaos event after that, or at `close()`. An id still registered or active in another scope (the JVM and sessions share an id's series) keeps its series. Without a later event, the ended ids wait for one; they are never more than the scenarios that ended.
+
+**OpenTelemetry** (`chaos-agent-opentelemetry`), the same instruments with attributes `chaos.event.type`, `chaos.scenario.id`, `chaos.operation`, `chaos.effect`, `chaos.skip.reason`, `chaos.failure.category`, `chaos.scenario.state`, scope `com.macstab.chaos.jvm`. `chaos.events` and `chaos.activation.failures` carry no scenario id; `chaos.applications`, `chaos.skips` and `chaos.injected.delay` keep `chaos.scenario.id`, because the API cannot retire a series: they are bounded by the SDK's cardinality limit, and a View drops the attribute where scenario ids are many:
 
 ```java
 AutoCloseable metrics = ChaosOpenTelemetry.metrics(ChaosPlatform.current(), openTelemetry);

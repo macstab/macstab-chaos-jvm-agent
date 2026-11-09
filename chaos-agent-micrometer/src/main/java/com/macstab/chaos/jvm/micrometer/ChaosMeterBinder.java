@@ -7,6 +7,7 @@ import com.macstab.chaos.jvm.api.ChaosEventListener;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.FunctionCounter;
 import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.Meter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import io.micrometer.core.instrument.binder.MeterBinder;
@@ -31,7 +32,7 @@ import java.util.Objects;
  *   <tr><td>{@code chaos.skips}</td><td>counter</td><td>{@code scenario}, {@code reason}</td>
  *       <td>matches the policy kept from applying (published while a listener is registered)</td></tr>
  *   <tr><td>{@code chaos.activation.failures}</td><td>counter</td>
- *       <td>{@code scenario}, {@code category}</td><td>failed activations</td></tr>
+ *       <td>{@code category}</td><td>failed activations</td></tr>
  *   <tr><td>{@code chaos.scenarios}</td><td>gauge</td><td>{@code state}</td>
  *       <td>registered scenarios per state</td></tr>
  *   <tr><td>{@code chaos.events.dropped}</td><td>function counter</td><td>none</td>
@@ -41,8 +42,15 @@ import java.util.Objects;
  * </table>
  *
  * <p>Events are counted on an agent-owned thread ({@link ChaosEventListener#async}), never on the
- * application thread that triggered them. {@link #close()} stops counting. For OpenTelemetry
- * without Micrometer, use the {@code chaos-agent-opentelemetry} module.
+ * application thread that triggered them. {@link #close()} stops counting.
+ *
+ * <p>The series tagged with a scenario are retired once the scenario has ended ({@code STOPPED},
+ * {@code INACTIVE}, or a {@code FAILED} activation) and two scrapes (reads of the {@code
+ * chaos.scenarios} gauges) ran since, so its last values were exported: on the first event after
+ * that, or at {@link #close()}, and only while no scenario with that id is registered or active in
+ * any scope (the scopes of one id share its series). Without a later event the ended ids wait for
+ * one; they are at most the scenarios that ended. For OpenTelemetry without Micrometer, use the
+ * {@code chaos-agent-opentelemetry} module.
  *
  * <pre>{@code
  * new ChaosMeterBinder(ChaosPlatform.current()).bindTo(meterRegistry);
@@ -50,9 +58,13 @@ import java.util.Objects;
  */
 public final class ChaosMeterBinder implements MeterBinder, AutoCloseable {
 
+  private static final java.util.logging.Logger LOGGER =
+      java.util.logging.Logger.getLogger(ChaosMeterBinder.class.getName());
+
   private final ChaosControlPlane controlPlane;
   private final java.util.List<ChaosEventListener> listeners =
       new java.util.concurrent.CopyOnWriteArrayList<>();
+  private final java.util.List<Series> bound = new java.util.concurrent.CopyOnWriteArrayList<>();
 
   /**
    * Creates a binder for {@code controlPlane}.
@@ -65,8 +77,20 @@ public final class ChaosMeterBinder implements MeterBinder, AutoCloseable {
 
   @Override
   public void bindTo(final MeterRegistry registry) {
+    final Series series = new Series(registry);
+    bound.add(series);
     for (final ChaosDiagnostics.ScenarioState state : ChaosDiagnostics.ScenarioState.values()) {
-      Gauge.builder("chaos.scenarios", controlPlane, plane -> countIn(plane, state))
+      // One gauge notices the scrapes: every scrape reads it.
+      final boolean scrapeProbe = state == ChaosDiagnostics.ScenarioState.REGISTERED;
+      Gauge.builder(
+              "chaos.scenarios",
+              controlPlane,
+              plane -> {
+                if (scrapeProbe) {
+                  series.scraped();
+                }
+                return countIn(plane, state);
+              })
           .description("Registered chaos scenarios by state")
           .tag("state", state.name().toLowerCase(Locale.ROOT))
           .register(registry);
@@ -83,20 +107,31 @@ public final class ChaosMeterBinder implements MeterBinder, AutoCloseable {
             plane -> detail(plane, "wovenHookGroups", ChaosMeterBinder::countList))
         .description("Hook groups woven into JDK and library classes")
         .register(registry);
-    final ChaosEventListener counting = ChaosEventListener.async(event -> count(registry, event));
+    final ChaosEventListener counting =
+        ChaosEventListener.async(
+            event -> {
+              final long scrapes = series.scrapes();
+              series.retireEnded(scrapes, false);
+              count(registry, event, series);
+              series.ended(event, scrapes);
+            });
     listeners.add(counting);
     controlPlane.addEventListener(counting);
   }
 
   /**
-   * Stops counting events for every registry this binder was bound to; meters already registered
-   * stay in their registry.
+   * Stops counting events for every registry this binder was bound to and retires the series of
+   * scenarios that ended; the other meters stay in their registry.
    */
   @Override
   public void close() {
     for (final ChaosEventListener registered : java.util.List.copyOf(listeners)) {
       controlPlane.removeEventListener(registered);
       listeners.remove(registered);
+    }
+    for (final Series series : java.util.List.copyOf(bound)) {
+      series.retireEnded(series.scrapes(), true);
+      bound.remove(series);
     }
   }
 
@@ -126,50 +161,169 @@ public final class ChaosMeterBinder implements MeterBinder, AutoCloseable {
     return commaSeparated.isBlank() ? 0 : commaSeparated.split(",").length;
   }
 
-  private static void count(final MeterRegistry registry, final ChaosEvent event) {
+  private static void count(
+      final MeterRegistry registry, final ChaosEvent event, final Series series) {
     final String scenario = String.valueOf(event.scenarioId());
-    Counter.builder("chaos.events")
-        .description("Chaos events by type and scenario")
-        .tag("type", event.type().name().toLowerCase(Locale.ROOT))
-        .tag("scenario", scenario)
-        .register(registry)
+    series
+        .track(
+            scenario,
+            Counter.builder("chaos.events")
+                .description("Chaos events by type and scenario")
+                .tag("type", event.type().name().toLowerCase(Locale.ROOT))
+                .tag("scenario", scenario)
+                .register(registry))
         .increment();
     final java.util.Map<String, String> attributes = event.attributes();
     switch (event.type()) {
       case APPLIED -> {
         final String operation = attributes.getOrDefault("operation", "unknown");
-        Counter.builder("chaos.applications")
-            .description("Chaos effects that took effect")
-            .tag("scenario", scenario)
-            .tag("operation", operation)
-            .tag("effect", attributes.getOrDefault("effectType", "unknown"))
-            .register(registry)
+        series
+            .track(
+                scenario,
+                Counter.builder("chaos.applications")
+                    .description("Chaos effects that took effect")
+                    .tag("scenario", scenario)
+                    .tag("operation", operation)
+                    .tag("effect", attributes.getOrDefault("effectType", "unknown"))
+                    .register(registry))
             .increment();
         final String delay = attributes.get("delayMillis");
         if (delay != null) {
-          Timer.builder("chaos.injected.delay")
-              .description("Latency the chaos agent added to calls")
-              .tag("scenario", scenario)
-              .tag("operation", operation)
-              .register(registry)
+          series
+              .track(
+                  scenario,
+                  Timer.builder("chaos.injected.delay")
+                      .description("Latency the chaos agent added to calls")
+                      .tag("scenario", scenario)
+                      .tag("operation", operation)
+                      .register(registry))
               .record(Duration.ofMillis(Long.parseLong(delay)));
         }
       }
       case SKIPPED ->
-          Counter.builder("chaos.skips")
-              .description("Matches the activation policy kept from applying")
-              .tag("scenario", scenario)
-              .tag("reason", attributes.getOrDefault("reason", "unknown"))
-              .register(registry)
+          series
+              .track(
+                  scenario,
+                  Counter.builder("chaos.skips")
+                      .description("Matches the activation policy kept from applying")
+                      .tag("scenario", scenario)
+                      .tag("reason", attributes.getOrDefault("reason", "unknown"))
+                      .register(registry))
               .increment();
       case FAILED ->
           Counter.builder("chaos.activation.failures")
               .description("Failed scenario activations")
-              .tag("scenario", scenario)
               .tag("category", attributes.getOrDefault("category", "unknown"))
               .register(registry)
               .increment();
       default -> {}
+    }
+  }
+
+  /**
+   * The scenario-tagged meters of one registry, and the ended scenarios whose meters are retired
+   * once their last values were scraped. Meters are remembered as {@code register} returned them,
+   * so they are removed by the id the registry mapped them to ({@code MeterFilter}s included).
+   */
+  private final class Series {
+    private final MeterRegistry registry;
+
+    /** Reads of the scrape probe gauge so far. */
+    private final java.util.concurrent.atomic.AtomicLong scrapes =
+        new java.util.concurrent.atomic.AtomicLong();
+
+    /** Guarded by {@code this}: the meters per scenario id. */
+    private final java.util.Map<String, java.util.Set<Meter>> meters = new java.util.HashMap<>();
+
+    /**
+     * Guarded by {@code this}: the scenario ids that ended and were not retired yet, with the
+     * scrape count the end event read before it was counted.
+     */
+    private final java.util.Map<String, Long> endedAt = new java.util.LinkedHashMap<>();
+
+    /** Whether a failed removal was logged: it is logged once. */
+    private boolean removalFailureLogged;
+
+    Series(final MeterRegistry registry) {
+      this.registry = registry;
+    }
+
+    void scraped() {
+      scrapes.incrementAndGet();
+    }
+
+    long scrapes() {
+      return scrapes.get();
+    }
+
+    synchronized <M extends Meter> M track(final String scenarioId, final M meter) {
+      meters.computeIfAbsent(scenarioId, id -> new java.util.HashSet<>()).add(meter);
+      return meter;
+    }
+
+    /**
+     * Marks the scenario of an end event ({@code STOPPED}, {@code INACTIVE}, {@code FAILED}).
+     *
+     * @param scrapes the scrape count the event read before it was counted
+     */
+    synchronized void ended(final ChaosEvent event, final long scrapes) {
+      switch (event.type()) {
+        case STOPPED, INACTIVE, FAILED -> endedAt.put(event.scenarioId(), scrapes);
+        default -> {}
+      }
+    }
+
+    /**
+     * Retires the series of the ended scenarios a whole scrape ran for after they were counted (two
+     * scrapes since the end event read the count: one may have overlapped the counting), or of all
+     * of them ({@code all}), unless a scenario of that id is registered or active again in some
+     * scope.
+     *
+     * @param scrapes the scrape count now
+     * @param all whether every ended id is due, scraped or not
+     */
+    synchronized void retireEnded(final long scrapes, final boolean all) {
+      if (endedAt.isEmpty()
+          || (!all && endedAt.values().stream().noneMatch(at -> at + 2 <= scrapes))) {
+        return;
+      }
+      final java.util.Set<String> live = new java.util.HashSet<>();
+      for (final ChaosDiagnostics.ScenarioReport report :
+          controlPlane.diagnostics().snapshot().scenarios()) {
+        if (report.state() == ChaosDiagnostics.ScenarioState.REGISTERED
+            || report.state() == ChaosDiagnostics.ScenarioState.ACTIVE) {
+          live.add(report.id());
+        }
+      }
+      final java.util.Iterator<java.util.Map.Entry<String, Long>> ended =
+          endedAt.entrySet().iterator();
+      while (ended.hasNext()) {
+        final java.util.Map.Entry<String, Long> entry = ended.next();
+        if (live.contains(entry.getKey())) {
+          // The id runs again in some scope: its series goes on; its next end marks it again.
+          ended.remove();
+        } else if (all || entry.getValue() + 2 <= scrapes) {
+          ended.remove();
+          // Never null: the event that marked the id registered its chaos.events series first.
+          remove(Objects.requireNonNullElse(meters.remove(entry.getKey()), java.util.Set.of()));
+        }
+      }
+    }
+
+    private void remove(final java.util.Set<Meter> retired) {
+      for (final Meter meter : retired) {
+        try {
+          registry.remove(meter);
+        } catch (final RuntimeException failure) {
+          if (!removalFailureLogged) {
+            removalFailureLogged = true;
+            LOGGER.log(
+                java.util.logging.Level.WARNING,
+                failure,
+                () -> "chaos-agent: could not remove the meter " + meter.getId());
+          }
+        }
+      }
     }
   }
 }

@@ -135,7 +135,7 @@ class ChaosMeterBinderTest {
     assertThat(
             registry
                 .get("chaos.activation.failures")
-                .tags("scenario", "twice", "category", "ACTIVATION_CONFLICT")
+                .tags("category", "ACTIVATION_CONFLICT")
                 .counter()
                 .count())
         .isEqualTo(1.0);
@@ -145,6 +145,244 @@ class ChaosMeterBinderTest {
     // close() removed the listener: this application is never handed to the binder.
     runtime.decorateExecutorRunnable("EXECUTOR_SUBMIT", this, () -> {});
     assertThat(registry.find("chaos.applications").counter()).isNull();
+  }
+
+  @Test
+  @DisplayName("the series of ended scenarios are retired one scrape later, on the next event")
+  void retiresEndedScenarios() {
+    new ChaosMeterBinder(runtime).bindTo(registry);
+    final java.util.List<com.macstab.chaos.jvm.api.ChaosActivationHandle> handles =
+        new java.util.ArrayList<>();
+    for (int i = 0; i < 50; i++) {
+      handles.add(runtime.activate(scenario("ended-" + i)));
+    }
+    // Closed (unregistered) and only stopped (still registered as STOPPED) alike.
+    for (int i = 0; i < 50; i++) {
+      if (i % 2 == 0) {
+        handles.get(i).close();
+      } else {
+        handles.get(i).stop();
+      }
+    }
+    await()
+        .atMost(Duration.ofSeconds(5))
+        .until(() -> registry.find("chaos.events").tag("type", "stopped").counters().size() == 50);
+
+    scrape();
+    scrape();
+    runtime.activate(scenario("later"));
+
+    await()
+        .atMost(Duration.ofSeconds(5))
+        .until(
+            () ->
+                registry
+                        .find("chaos.events")
+                        .tag("type", "registered")
+                        .tag("scenario", "later")
+                        .counter()
+                    != null);
+    for (int i = 0; i < 50; i++) {
+      assertThat(registry.find("chaos.events").tag("scenario", "ended-" + i).counter())
+          .as("ended-" + i)
+          .isNull();
+    }
+  }
+
+  @Test
+  @DisplayName("a series shared by an id that is still live in another scope is kept")
+  void keepsSharedSeries() {
+    new ChaosMeterBinder(runtime).bindTo(registry);
+    runtime.activate(scenario("shared"));
+    try (com.macstab.chaos.jvm.api.ChaosSession session = runtime.openSession("other")) {
+      session.activate(
+          ChaosScenario.builder("shared")
+              .scope(ChaosScenario.ScenarioScope.SESSION)
+              .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+              .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+              .build());
+    }
+    await()
+        .atMost(Duration.ofSeconds(5))
+        .until(
+            () ->
+                registry
+                        .find("chaos.events")
+                        .tags("type", "stopped", "scenario", "shared")
+                        .counter()
+                    != null);
+
+    scrape();
+    scrape();
+    runtime.activate(scenario("later"));
+
+    await()
+        .atMost(Duration.ofSeconds(5))
+        .until(
+            () ->
+                registry
+                        .find("chaos.events")
+                        .tag("type", "registered")
+                        .tag("scenario", "later")
+                        .counter()
+                    != null);
+    assertThat(
+            registry.find("chaos.events").tags("type", "started", "scenario", "shared").counter())
+        .isNotNull()
+        .satisfies(counter -> assertThat(counter.count()).isEqualTo(2.0));
+  }
+
+  @Test
+  @DisplayName("refused activations are counted by category, without a series per scenario")
+  void refusalsWithoutScenarioTag() {
+    new ChaosMeterBinder(runtime).bindTo(registry);
+    for (int i = 0; i < 50; i++) {
+      final ChaosScenario refused =
+          ChaosScenario.builder("refused-" + i)
+              .scope(ChaosScenario.ScenarioScope.SESSION)
+              .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+              .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+              .build();
+      try {
+        runtime.activate(refused);
+      } catch (final RuntimeException expected) {
+        // a session-scoped scenario outside a session is refused
+      }
+    }
+
+    await()
+        .atMost(Duration.ofSeconds(5))
+        .until(
+            () -> {
+              final io.micrometer.core.instrument.Counter failures =
+                  registry
+                      .find("chaos.activation.failures")
+                      .tag("category", "INVALID_CONFIGURATION")
+                      .counter();
+              return failures != null && failures.count() == 50.0;
+            });
+    assertThat(registry.find("chaos.activation.failures").tagKeys("scenario").counters()).isEmpty();
+  }
+
+  @Test
+  @DisplayName("an ended scenario not scraped yet keeps its series until close() retires it")
+  void closeRetiresUnscraped() {
+    final ChaosMeterBinder binder = new ChaosMeterBinder(runtime);
+    binder.bindTo(registry);
+    runtime.activate(
+        ChaosScenario.builder("waiting")
+            .scope(ChaosScenario.ScenarioScope.JVM)
+            .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+            .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+            .activationPolicy(
+                ActivationPolicy.builder().startMode(ActivationPolicy.StartMode.MANUAL).build())
+            .build());
+    runtime.activate(scenario("early")).close();
+    await()
+        .atMost(Duration.ofSeconds(5))
+        .until(
+            () ->
+                registry.find("chaos.events").tags("type", "stopped", "scenario", "early").counter()
+                    != null);
+    scrape();
+    runtime.activate(scenario("gone")).close();
+    await()
+        .atMost(Duration.ofSeconds(5))
+        .until(
+            () ->
+                registry.find("chaos.events").tags("type", "stopped", "scenario", "gone").counter()
+                    != null);
+    // Two scrapes since early ended, one since gone ended.
+    scrape();
+    runtime.activate(scenario("later"));
+    await()
+        .atMost(Duration.ofSeconds(5))
+        .until(
+            () ->
+                registry
+                        .find("chaos.events")
+                        .tags("type", "registered", "scenario", "later")
+                        .counter()
+                    != null);
+    assertThat(registry.find("chaos.events").tag("scenario", "early").counter())
+        .as("scraped since it ended")
+        .isNull();
+    assertThat(registry.find("chaos.events").tag("scenario", "gone").counter())
+        .as("not scraped since it ended")
+        .isNotNull();
+
+    binder.close();
+
+    assertThat(registry.find("chaos.events").tag("scenario", "gone").counter()).isNull();
+    assertThat(registry.find("chaos.events").tag("scenario", "waiting").counter())
+        .as("still registered")
+        .isNotNull();
+  }
+
+  @Test
+  @DisplayName("a meter the registry refuses to remove is logged once")
+  void removalFailureLoggedOnce() {
+    final io.micrometer.core.instrument.MeterRegistry refusing =
+        new SimpleMeterRegistry() {
+          @Override
+          public io.micrometer.core.instrument.Meter remove(
+              final io.micrometer.core.instrument.Meter meter) {
+            throw new IllegalStateException("refused");
+          }
+        };
+    final java.util.logging.Logger logger =
+        java.util.logging.Logger.getLogger(ChaosMeterBinder.class.getName());
+    final java.util.List<java.util.logging.LogRecord> logged =
+        new java.util.concurrent.CopyOnWriteArrayList<>();
+    final java.util.logging.Handler capture =
+        new java.util.logging.Handler() {
+          @Override
+          public void publish(final java.util.logging.LogRecord record) {
+            logged.add(record);
+          }
+
+          @Override
+          public void flush() {}
+
+          @Override
+          public void close() {}
+        };
+    logger.addHandler(capture);
+    try {
+      final ChaosMeterBinder binder = new ChaosMeterBinder(runtime);
+      binder.bindTo(refusing);
+      runtime.activate(scenario("stuck")).close();
+      await()
+          .atMost(Duration.ofSeconds(5))
+          .until(
+              () ->
+                  refusing
+                          .find("chaos.events")
+                          .tags("type", "stopped", "scenario", "stuck")
+                          .counter()
+                      != null);
+
+      binder.close();
+    } finally {
+      logger.removeHandler(capture);
+    }
+
+    assertThat(logged)
+        .singleElement()
+        .satisfies(
+            record -> assertThat(record.getLevel()).isEqualTo(java.util.logging.Level.WARNING));
+  }
+
+  private void scrape() {
+    registry.find("chaos.scenarios").gauges().forEach(io.micrometer.core.instrument.Gauge::value);
+  }
+
+  private static ChaosScenario scenario(final String id) {
+    return ChaosScenario.builder(id)
+        .scope(ChaosScenario.ScenarioScope.JVM)
+        .selector(ChaosSelector.executor(Set.of(OperationType.EXECUTOR_SUBMIT)))
+        .effect(ChaosEffect.delay(Duration.ofMillis(1)))
+        .build();
   }
 
   private long delayCount() {

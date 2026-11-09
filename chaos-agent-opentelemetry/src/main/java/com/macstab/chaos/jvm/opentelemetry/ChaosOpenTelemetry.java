@@ -30,21 +30,23 @@ import java.util.Objects;
  * <p>Metrics (instrumentation scope {@value #SCOPE}); every instrument has one fixed attribute set:
  *
  * <ul>
- *   <li>{@code chaos.events} — counter of every chaos event: {@code chaos.event.type}, {@code
- *       chaos.scenario.id}
+ *   <li>{@code chaos.events} — counter of every chaos event: {@code chaos.event.type}
  *   <li>{@code chaos.applications} — counter of effects that took effect: {@code
  *       chaos.scenario.id}, {@code chaos.operation}, {@code chaos.effect}
  *   <li>{@code chaos.injected.delay} — histogram (ms) of the latency the agent added: {@code
  *       chaos.scenario.id}, {@code chaos.operation}
  *   <li>{@code chaos.skips} — counter of matches the policy kept from applying: {@code
  *       chaos.scenario.id}, {@code chaos.skip.reason}
- *   <li>{@code chaos.activation.failures} — counter: {@code chaos.scenario.id}, {@code
- *       chaos.failure.category}
+ *   <li>{@code chaos.activation.failures} — counter: {@code chaos.failure.category}
  *   <li>{@code chaos.scenarios} — gauge of registered scenarios: {@code chaos.scenario.state}
  *   <li>{@code chaos.events.dropped} — counter of events dropped by full asynchronous listener
  *       queues
  *   <li>{@code chaos.hooks.woven} — gauge of hook groups woven into JDK and library classes
  * </ul>
+ *
+ * <p>{@code chaos.applications}, {@code chaos.injected.delay} and {@code chaos.skips} keep {@code
+ * chaos.scenario.id}: the API cannot retire a series, so their cardinality is bounded only by the
+ * SDK's cardinality limit; drop the attribute with a View where scenario ids are many.
  *
  * <p>Counters and the histogram are fed on an agent-owned thread ({@link
  * ChaosEventListener#async}); span events are added on the application thread, synchronously,
@@ -233,10 +235,9 @@ public final class ChaosOpenTelemetry {
     void record(final ChaosEvent event) {
       final String scenario = String.valueOf(event.scenarioId());
       final Map<String, String> attributes = event.attributes();
-      events.add(
-          1,
-          Attributes.of(
-              EVENT_TYPE, event.type().name().toLowerCase(Locale.ROOT), SCENARIO_ID, scenario));
+      // No scenario id on the event and failure counts: their series would grow with every
+      // scenario ever seen, and the API cannot retire them.
+      events.add(1, Attributes.of(EVENT_TYPE, event.type().name().toLowerCase(Locale.ROOT)));
       switch (event.type()) {
         case APPLIED -> {
           final String operation = attributes.getOrDefault("operation", "unknown");
@@ -266,12 +267,7 @@ public final class ChaosOpenTelemetry {
                     attributes.getOrDefault("reason", "unknown")));
         case FAILED ->
             failures.add(
-                1,
-                Attributes.of(
-                    SCENARIO_ID,
-                    scenario,
-                    FAILURE_CATEGORY,
-                    attributes.getOrDefault("category", "unknown")));
+                1, Attributes.of(FAILURE_CATEGORY, attributes.getOrDefault("category", "unknown")));
         default -> {}
       }
     }
