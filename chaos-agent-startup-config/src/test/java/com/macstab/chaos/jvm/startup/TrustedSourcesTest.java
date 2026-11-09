@@ -167,6 +167,16 @@ class TrustedSourcesTest {
     }
 
     @Test
+    @DisplayName("is off for a blank value, without a warning, as when absent")
+    void blankIsOffSilently() {
+      for (final String blank : List.of("", "  ")) {
+        assertThat(TrustedSources.isTrue(SWITCH + ".blank", blank)).as("'%s'", blank).isFalse();
+      }
+
+      assertThat(logged).isEmpty();
+    }
+
+    @Test
     @DisplayName("is off from an untrusted source, with one line naming the source")
     void untrusted() {
       final String source = "consul-" + System.nanoTime();

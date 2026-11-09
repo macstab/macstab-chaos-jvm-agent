@@ -150,16 +150,16 @@ public final class TrustedSources {
   }
 
   /**
-   * Reads a switch's value: {@code true|false|1|0|yes|no|on|off}. Any other value is off, with one
-   * warning naming the switch.
+   * Reads a switch's value: {@code true|false|1|0|yes|no|on|off}. A blank value is off, as an
+   * absent one is; any other value is off, with one warning naming the switch.
    *
    * @param property the switch, for the warning
-   * @param value the raw value; {@code null} is off
+   * @param value the raw value; {@code null} or blank is off
    * @return {@code true} when the value says on
    */
   public static boolean isTrue(final String property, final @Nullable String value) {
     final Boolean parsed = AgentArgs.parseBooleanQuietly(value);
-    if (parsed == null && value != null) {
+    if (parsed == null && value != null && !value.isBlank()) {
       report(
           Level.WARNING,
           "[chaos-agent] "
