@@ -4,6 +4,7 @@ import com.macstab.chaos.jvm.api.ChaosActivationHandle;
 import com.macstab.chaos.jvm.api.ChaosControlPlane;
 import com.macstab.chaos.jvm.api.ChaosDiagnostics;
 import com.macstab.chaos.jvm.api.ChaosPlan;
+import com.macstab.chaos.jvm.core.AgentLog;
 import com.macstab.chaos.jvm.startup.ChaosPlanMapper;
 import com.macstab.chaos.jvm.startup.ConfigLoadException;
 import com.macstab.chaos.jvm.startup.LogText;
@@ -13,7 +14,6 @@ import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.logging.Level;
-import java.util.logging.Logger;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -36,7 +36,7 @@ import org.jspecify.annotations.Nullable;
  */
 public final class ChaosManagement implements AutoCloseable {
 
-  private static final Logger LOGGER = Logger.getLogger(ChaosManagement.class.getName());
+  private static final AgentLog LOGGER = AgentLog.named(ChaosManagement.class.getName());
   private static final String PLAN_PREFIX = "plan:";
 
   private final ChaosControlPlane controlPlane;

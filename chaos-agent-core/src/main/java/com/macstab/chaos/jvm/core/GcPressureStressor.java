@@ -5,7 +5,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import java.util.function.LongSupplier;
-import java.util.logging.Logger;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -29,7 +28,7 @@ import org.jspecify.annotations.Nullable;
  */
 final class GcPressureStressor implements ManagedStressor {
 
-  private static final Logger LOGGER = Logger.getLogger("com.macstab.chaos.jvm");
+  private static final AgentLog LOGGER = AgentLog.named("com.macstab.chaos.jvm");
   private static final int RING_SIZE = 100;
   private static final long BATCH_INTERVAL_NANOS =
       java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(50L);

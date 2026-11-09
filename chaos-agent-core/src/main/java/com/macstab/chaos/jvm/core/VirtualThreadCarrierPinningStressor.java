@@ -6,7 +6,6 @@ import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
-import java.util.logging.Logger;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -39,7 +38,7 @@ import org.jspecify.annotations.Nullable;
  */
 final class VirtualThreadCarrierPinningStressor implements ManagedStressor {
 
-  private static final Logger LOGGER = Logger.getLogger("com.macstab.chaos.jvm");
+  private static final AgentLog LOGGER = AgentLog.named("com.macstab.chaos.jvm");
 
   /** First JDK feature release in which {@code synchronized} no longer pins (JEP 491). */
   private static final int MONITORS_UNPIN_FROM_FEATURE = 24;

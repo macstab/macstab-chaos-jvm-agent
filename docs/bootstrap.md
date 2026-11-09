@@ -83,6 +83,8 @@ The bootstrap bridge classes (`BridgeInjector.BRIDGE_CLASSES`) are stored in the
   ↓
 JVM calls: ChaosAgentBootstrap.premain(agentArgs, instrumentation)
   ↓
+AgentLog.hold()                   // the agent's log lines are held, not written (see below)
+  ↓
 initialize(agentArgs, instrumentation, System.getenv())
   ↓
 claim the INITIALIZATION slot (AtomicReference<CompletableFuture<ChaosRuntime>>)
@@ -110,7 +112,8 @@ JdkInstrumentationInstaller.install(instrumentation, runtime, eager, …, bridge
     the first time an activated scenario needs one of its operations
   — eager: every hook group woven now (the 1.x behaviour)
   ↓
-registerMBean(runtime)            // skipped with a warning if the name is taken
+registerMBean(runtime)            // skipped with a warning if the name is taken;
+                                  // premain defers it (see below)
   ↓
 JfrIntegration.installIfAvailable(runtime)
   ↓
@@ -127,7 +130,13 @@ complete the INITIALIZATION future   // publishes the runtime to current()
 
 on any failure: woven hook groups and bridge delegate removed (uninstall), MBean
 unregistered, runtime closed, slot freed — a later call can retry cleanly
+  ↓
+premain only: the agent thread macstab-chaos-logging-start waits until the
+application has initialised java.util.logging (at most 30 s), then registers
+the MBean and writes the held log lines
 ```
+
+**`java.util.logging` stays the application's**: the first JUL logger, and the platform MBean server, initialise the `LogManager`, and the class that becomes the `LogManager` is read from `java.util.logging.manager` at that moment. An application that sets the property in its `main` (WildFly's JBoss Modules, Quarkus in production) needs the agent to leave JUL alone during `premain`. So no agent class holds a static JUL logger (each logs through `AgentLog`, which looks its logger up when the first line is written), `premain` holds the agent's lines in a buffer of 256 (the oldest dropped and counted in one line), and the MBean is not registered yet. An agent thread reads whether the `LogManager` class has been initialised, without initialising it (`jdk.internal.misc.Unsafe.shouldBeInitialized`, through the `java.base/jdk.internal.misc` open the agent holds), every 20 ms; once it has, or after 30 s, the thread registers the MBean and writes the held lines with their original time. A JVM whose application never initialises JUL gets the MBean after 30 s; attaching a JMX client starts the JDK's management agent, which initialises JUL and so ends the wait. `agentmain` and self-attach run after `main` has started and register the MBean at once.
 
 ## Agentmain (dynamic attach)
 
@@ -201,7 +210,7 @@ The MBean is registered at `com.macstab.chaos.jvm:type=ChaosDiagnostics`.
 
 There are no attributes; structured data (`snapshot()`, `scenario(id)`) is available only through the `ChaosDiagnostics` API in code.
 
-**Registration**: Uses `ManagementFactory.getPlatformMBeanServer()`. If an MBean with that name is already registered, registration is skipped with a warning on stderr and the agent continues without its own MBean.
+**Registration**: Uses `ManagementFactory.getPlatformMBeanServer()`, after `premain` once the application has initialised `java.util.logging` (section 3). If an MBean with that name is already registered, registration is skipped with a warning on stderr and the agent continues without its own MBean.
 
 **Deregistration**: Not performed on a successful start; the MBean persists for the JVM lifetime. If initialization fails, the MBean registered by that attempt is unregistered as part of the rollback.
 

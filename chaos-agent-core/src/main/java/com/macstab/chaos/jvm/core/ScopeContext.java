@@ -9,7 +9,6 @@ import java.util.concurrent.RunnableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.logging.Level;
-import java.util.logging.Logger;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -44,7 +43,7 @@ import org.jspecify.annotations.Nullable;
  * ConcurrentLinkedDeque#peek()} stays O(1) on the hot path ({@link #currentSessionId()}).
  */
 final class ScopeContext {
-  private static final Logger LOGGER = Logger.getLogger("com.macstab.chaos.jvm");
+  private static final AgentLog LOGGER = AgentLog.named("com.macstab.chaos.jvm");
 
   /**
    * Stack entry that masks the sessions beneath it; compared by identity, so a session can never
@@ -319,8 +318,8 @@ final class ScopeContext {
           // thread) must not mask the actual result of the task or corrupt the executor.
           LOGGER.log(
               Level.FINE,
-              "chaos scope binding close failed; session stack may be inconsistent",
-              scopeCloseFailure);
+              scopeCloseFailure,
+              () -> "chaos scope binding close failed; session stack may be inconsistent");
         }
       }
     }
@@ -339,8 +338,8 @@ final class ScopeContext {
         } catch (final RuntimeException scopeCloseFailure) {
           LOGGER.log(
               Level.FINE,
-              "chaos scope binding close failed; session stack may be inconsistent",
-              scopeCloseFailure);
+              scopeCloseFailure,
+              () -> "chaos scope binding close failed; session stack may be inconsistent");
         }
       }
     }

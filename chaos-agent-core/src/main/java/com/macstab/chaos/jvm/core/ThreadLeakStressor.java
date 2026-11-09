@@ -5,7 +5,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
-import java.util.logging.Logger;
 
 /**
  * Spawns threads that park indefinitely, simulating a thread leak.
@@ -25,7 +24,7 @@ import java.util.logging.Logger;
  */
 final class ThreadLeakStressor implements ManagedStressor {
 
-  private static final Logger LOGGER = Logger.getLogger("com.macstab.chaos.jvm");
+  private static final AgentLog LOGGER = AgentLog.named("com.macstab.chaos.jvm");
 
   private final List<Thread> leakedThreads;
   private final AtomicBoolean stopped = new AtomicBoolean(false);

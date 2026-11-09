@@ -7,7 +7,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
-import java.util.logging.Logger;
 import net.bytebuddy.ByteBuddy;
 import net.bytebuddy.dynamic.DynamicType;
 import net.bytebuddy.dynamic.loading.ByteArrayClassLoader;
@@ -35,7 +34,7 @@ import org.jspecify.annotations.Nullable;
  */
 final class CodeCachePressureStressor implements ManagedStressor {
 
-  private static final Logger LOGGER = Logger.getLogger(CodeCachePressureStressor.class.getName());
+  private static final AgentLog LOGGER = AgentLog.named(CodeCachePressureStressor.class.getName());
   private static final String CLASS_NAME_PREFIX = "com.macstab.chaos.jvm.synthetic.CodeCacheClass$";
 
   private volatile @Nullable List<Class<?>> retainedClasses;

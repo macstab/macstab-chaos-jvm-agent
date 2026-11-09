@@ -2,6 +2,7 @@ package com.macstab.chaos.jvm.bootstrap;
 
 import com.macstab.chaos.jvm.api.ChaosControlPlane;
 import com.macstab.chaos.jvm.bootstrap.jfr.JfrIntegration;
+import com.macstab.chaos.jvm.core.AgentLog;
 import com.macstab.chaos.jvm.core.ChaosRuntime;
 import com.macstab.chaos.jvm.instrumentation.JdkInstrumentationInstaller;
 import com.macstab.chaos.jvm.startup.AgentArgs;
@@ -90,8 +91,7 @@ public final class ChaosAgentBootstrap {
 
   private static final String MBEAN_NAME = "com.macstab.chaos.jvm:type=ChaosDiagnostics";
 
-  private static final java.util.logging.Logger LOGGER =
-      java.util.logging.Logger.getLogger(ChaosAgentBootstrap.class.getName());
+  private static final AgentLog LOGGER = AgentLog.named(ChaosAgentBootstrap.class.getName());
 
   /**
    * ByteBuddy's switch for class files newer than it supports, as a user sets it. Built at run
@@ -115,6 +115,12 @@ public final class ChaosAgentBootstrap {
 
   /** Serialises concurrent {@link #installForLocalTests} calls; see that method for rationale. */
   private static final Object INSTALL_LOCK = new Object();
+
+  /**
+   * The MBean registration {@link #premain} deferred until the application has initialised {@code
+   * java.util.logging}; {@code null} once run, or when nothing was deferred.
+   */
+  private static final AtomicReference<@Nullable Runnable> DEFERRED_MBEAN = new AtomicReference<>();
 
   /**
    * System property / env-var name that opts in to installing the agent via {@link #agentmain}
@@ -194,6 +200,13 @@ public final class ChaosAgentBootstrap {
    * <p>This method is invoked by the JVM infrastructure before the application's {@code main}
    * method, ensuring that all instrumentation is in place before any application class is loaded.
    *
+   * <p>Nothing here initialises {@code java.util.logging}: the application's {@code main} may still
+   * choose the {@code LogManager} ({@code java.util.logging.manager}, as WildFly and Quarkus do),
+   * and the first logger fixes it. The agent's log lines are held ({@link AgentLog#hold()}) and the
+   * platform MBean, whose server initialises the {@code LogManager} too, is not registered yet: an
+   * agent thread does both once the application has initialised {@code java.util.logging}, or after
+   * {@link LoggingStart#LIMIT} at the latest.
+   *
    * @param agentArgs the raw argument string from the {@code -javaagent} command-line option, e.g.
    *     {@code configFile=/etc/chaos/plan.json;debugDumpOnStart=true}. May be {@code null} or blank
    *     if no arguments were provided.
@@ -202,9 +215,39 @@ public final class ChaosAgentBootstrap {
    */
   public static void premain(
       final @Nullable String agentArgs, final Instrumentation instrumentation) {
-    copyByteBuddyExperimental();
-    reportShadowingCopies(ClassLoader.getSystemClassLoader());
-    initialize(agentArgs, instrumentation, System.getenv());
+    AgentLog.hold();
+    boolean installed = false;
+    try {
+      copyByteBuddyExperimental();
+      reportShadowingCopies(ClassLoader.getSystemClassLoader());
+      initialize(agentArgs, instrumentation, System.getenv(), true);
+      installed = true;
+    } finally {
+      if (!installed) {
+        // The JVM exits on a failed premain: the lines that explain it are written now.
+        AgentLog.release();
+      }
+    }
+    LoggingStart.runAfter(
+        LoggingStart.logManagerInitialised(),
+        LoggingStart.LIMIT,
+        ChaosAgentBootstrap::finishDeferredStart);
+  }
+
+  /**
+   * The deferred part of {@link #premain}, run once the application has initialised {@code
+   * java.util.logging}: registers the MBean of the runtime premain installed, then writes the held
+   * log lines.
+   */
+  static void finishDeferredStart() {
+    final Runnable registration = DEFERRED_MBEAN.getAndSet(null);
+    try {
+      if (registration != null) {
+        registration.run();
+      }
+    } finally {
+      AgentLog.release();
+    }
   }
 
   /**
@@ -447,6 +490,18 @@ public final class ChaosAgentBootstrap {
       final @Nullable String agentArgs,
       final Instrumentation instrumentation,
       final Map<String, String> environment) {
+    return initialize(agentArgs, instrumentation, environment, false);
+  }
+
+  /**
+   * As {@link #initialize(String, Instrumentation, Map)}; with {@code deferMBean}, the MBean of the
+   * installed runtime is registered by {@link #finishDeferredStart} instead (premain).
+   */
+  private static ChaosRuntime initialize(
+      final @Nullable String agentArgs,
+      final Instrumentation instrumentation,
+      final Map<String, String> environment,
+      final boolean deferMBean) {
     final CompletableFuture<ChaosRuntime> claim = new CompletableFuture<>();
     final CompletableFuture<ChaosRuntime> existing = INITIALIZATION.compareAndExchange(null, claim);
     if (existing != null) {
@@ -461,7 +516,7 @@ public final class ChaosAgentBootstrap {
     try {
       // Resolved once: every setting reads these, and a parse warning is printed once.
       final AgentSettings settings = AgentSettings.of(agentArgs, environment);
-      final ChaosRuntime runtime = installRuntime(settings, instrumentation);
+      final ChaosRuntime runtime = installRuntime(settings, instrumentation, deferMBean);
       installedArgs = settings.args();
       claim.complete(runtime);
       return runtime;
@@ -536,7 +591,9 @@ public final class ChaosAgentBootstrap {
    * transformers (advice runs twice) and the MBean would keep reporting the dead runtime.
    */
   private static ChaosRuntime installRuntime(
-      final AgentSettings settings, final Instrumentation instrumentation) {
+      final AgentSettings settings,
+      final Instrumentation instrumentation,
+      final boolean deferMBean) {
     final ChaosRuntime runtime = new ChaosRuntime();
     boolean instrumentationInstalled = false;
     ObjectName registeredMBean = null;
@@ -554,7 +611,10 @@ public final class ChaosAgentBootstrap {
               SESSION_HEADER_HOSTS_ENV),
           bridgeDir(settings));
       instrumentationInstalled = true;
-      registeredMBean = registerMBean(runtime, jmxControl(settings));
+      final boolean control = jmxControl(settings);
+      if (!deferMBean) {
+        registeredMBean = registerMBean(runtime, control);
+      }
       installJfrIntegration(runtime);
       reports = ChaosReports.createIfEnabled(settings, runtime);
       final Optional<ChaosReports> report = reports;
@@ -596,6 +656,9 @@ public final class ChaosAgentBootstrap {
               report.ifPresent(r -> r.statusOk(loaded.plan().scenarios().size(), loaded.source()));
             }
           });
+      if (deferMBean) {
+        DEFERRED_MBEAN.set(() -> registerMBean(runtime, control));
+      }
       return runtime;
     } catch (final Throwable installFailure) {
       reports.ifPresent(ChaosReports::close);

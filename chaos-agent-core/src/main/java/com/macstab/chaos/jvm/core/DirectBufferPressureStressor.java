@@ -5,7 +5,6 @@ import java.lang.reflect.Method;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.logging.Logger;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -30,7 +29,7 @@ import org.jspecify.annotations.Nullable;
  */
 final class DirectBufferPressureStressor implements ManagedStressor {
 
-  private static final Logger LOGGER = Logger.getLogger("com.macstab.chaos.jvm");
+  private static final AgentLog LOGGER = AgentLog.named("com.macstab.chaos.jvm");
 
   /** Cached reflection handle for {@code sun.nio.ch.DirectBuffer.cleaner()}, or {@code null}. */
   private static final @Nullable Method DIRECT_BUFFER_CLEANER = resolveCleanerMethod();

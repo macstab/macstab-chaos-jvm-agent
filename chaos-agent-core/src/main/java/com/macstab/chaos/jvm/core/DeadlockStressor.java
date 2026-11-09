@@ -6,7 +6,6 @@ import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
-import java.util.logging.Logger;
 
 /**
  * Permanently deadlocks {@code participantCount} threads using a circular lock-acquisition order.
@@ -25,7 +24,7 @@ import java.util.logging.Logger;
  */
 final class DeadlockStressor implements ManagedStressor {
 
-  private static final Logger LOGGER = Logger.getLogger("com.macstab.chaos.jvm");
+  private static final AgentLog LOGGER = AgentLog.named("com.macstab.chaos.jvm");
 
   private final List<Thread> participants;
 

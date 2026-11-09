@@ -1,5 +1,6 @@
 package com.macstab.chaos.jvm.instrumentation;
 
+import com.macstab.chaos.jvm.core.AgentLog;
 import java.io.IOException;
 import java.io.InputStream;
 import java.lang.instrument.Instrumentation;
@@ -7,7 +8,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.jar.JarEntry;
 import java.util.jar.JarOutputStream;
-import java.util.logging.Logger;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -15,8 +15,8 @@ import org.jspecify.annotations.Nullable;
  * per JVM, so that advice woven into JDK classes can reach the agent ({@code docs/adr/0001}).
  */
 final class BridgeInjector {
-  private static final Logger LOGGER =
-      Logger.getLogger(JdkInstrumentationInstaller.class.getName());
+  private static final AgentLog LOGGER =
+      AgentLog.named(JdkInstrumentationInstaller.class.getName());
 
   private static final String BRIDGE_JAR_PREFIX = "macstab-chaos-bootstrap-bridge";
   private static final String BRIDGE_JAR_SUFFIX = ".jar";

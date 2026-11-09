@@ -6,7 +6,6 @@ import java.util.List;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
-import java.util.logging.Logger;
 import java.util.stream.Collectors;
 
 /**
@@ -19,7 +18,7 @@ import java.util.stream.Collectors;
  */
 final class AgentThreads {
 
-  private static final Logger LOGGER = Logger.getLogger("com.macstab.chaos.jvm");
+  private static final AgentLog LOGGER = AgentLog.named("com.macstab.chaos.jvm");
 
   /** How long a rollback waits for each thread it stops. */
   private static final long ROLLBACK_JOIN_MILLIS = 1_000L;

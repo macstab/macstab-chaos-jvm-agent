@@ -1,6 +1,7 @@
 package com.macstab.chaos.jvm.bootstrap;
 
 import com.macstab.chaos.jvm.api.ChaosEvent;
+import com.macstab.chaos.jvm.core.AgentLog;
 import com.macstab.chaos.jvm.core.ChaosRuntime;
 import com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher;
 import com.macstab.chaos.jvm.startup.AgentArgs;
@@ -25,7 +26,6 @@ import java.util.concurrent.atomic.LongAdder;
 import java.util.concurrent.locks.LockSupport;
 import java.util.function.Function;
 import java.util.logging.Level;
-import java.util.logging.Logger;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -81,7 +81,7 @@ final class ChaosReports implements AutoCloseable {
 
   private static final long BATCH_NANOS = TimeUnit.MILLISECONDS.toNanos(100);
 
-  private static final Logger LOGGER = Logger.getLogger(ChaosReports.class.getName());
+  private static final AgentLog LOGGER = AgentLog.named(ChaosReports.class.getName());
 
   private static volatile @Nullable ChaosReports current;
 

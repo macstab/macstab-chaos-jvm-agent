@@ -7,7 +7,6 @@ import java.util.Map;
 import java.util.WeakHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Level;
-import java.util.logging.Logger;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -25,7 +24,7 @@ import org.jspecify.annotations.Nullable;
  * the very frequent run-side calls return without locking when no session is in play.
  */
 final class SessionHandoff {
-  private static final Logger LOGGER = Logger.getLogger("com.macstab.chaos.jvm");
+  private static final AgentLog LOGGER = AgentLog.named("com.macstab.chaos.jvm");
 
   private final Map<Object, String> captured = Collections.synchronizedMap(new WeakHashMap<>());
   private final Map<Object, ChaosSession.ScopeBinding> active =
@@ -102,7 +101,7 @@ final class SessionHandoff {
     try {
       binding.close();
     } catch (final RuntimeException closeFailure) {
-      LOGGER.log(Level.FINE, "chaos session hand-off release failed", closeFailure);
+      LOGGER.log(Level.FINE, closeFailure, () -> "chaos session hand-off release failed");
     }
   }
 }

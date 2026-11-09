@@ -1,10 +1,10 @@
 package com.macstab.chaos.jvm.instrumentation;
 
+import com.macstab.chaos.jvm.core.AgentLog;
 import com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher;
 import java.net.URL;
 import java.util.Map;
 import java.util.WeakHashMap;
-import java.util.logging.Logger;
 import net.bytebuddy.matcher.ElementMatcher;
 import org.jspecify.annotations.Nullable;
 
@@ -33,8 +33,8 @@ import org.jspecify.annotations.Nullable;
  * jboss.modules.system.pkgs}, OSGi {@code org.osgi.framework.bootdelegation}).
  */
 final class BridgeVisibility {
-  private static final Logger LOGGER =
-      Logger.getLogger(JdkInstrumentationInstaller.class.getName());
+  private static final AgentLog LOGGER =
+      AgentLog.named(JdkInstrumentationInstaller.class.getName());
 
   /** The class file a loader would define its own {@code BootstrapDispatcher} from. */
   static final String DISPATCHER_CLASS_FILE =

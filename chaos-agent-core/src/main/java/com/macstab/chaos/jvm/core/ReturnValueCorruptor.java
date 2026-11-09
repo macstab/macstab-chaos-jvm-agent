@@ -24,7 +24,6 @@ import java.util.concurrent.LinkedBlockingDeque;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.PriorityBlockingQueue;
 import java.util.function.Supplier;
-import java.util.logging.Logger;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -40,7 +39,7 @@ import org.jspecify.annotations.Nullable;
  */
 final class ReturnValueCorruptor {
 
-  private static final Logger LOGGER = Logger.getLogger("com.macstab.chaos.jvm");
+  private static final AgentLog LOGGER = AgentLog.named("com.macstab.chaos.jvm");
 
   private static final Map<Class<?>, Object> ZERO_VALUES =
       Map.ofEntries(

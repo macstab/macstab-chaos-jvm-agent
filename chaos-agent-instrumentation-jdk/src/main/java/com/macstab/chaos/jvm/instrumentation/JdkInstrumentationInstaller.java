@@ -3,6 +3,7 @@ package com.macstab.chaos.jvm.instrumentation;
 import com.macstab.chaos.jvm.api.ChaosSelector;
 import com.macstab.chaos.jvm.api.Internal;
 import com.macstab.chaos.jvm.api.OperationType;
+import com.macstab.chaos.jvm.core.AgentLog;
 import com.macstab.chaos.jvm.core.ChaosRuntime;
 import com.macstab.chaos.jvm.core.HookDemand;
 import com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher;
@@ -15,7 +16,6 @@ import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.logging.Logger;
 import net.bytebuddy.agent.builder.AgentBuilder;
 import net.bytebuddy.agent.builder.ResettableClassFileTransformer;
 import net.bytebuddy.asm.Advice;
@@ -78,8 +78,8 @@ import org.jspecify.annotations.Nullable;
  * monitor.
  */
 public final class JdkInstrumentationInstaller {
-  private static final Logger LOGGER =
-      Logger.getLogger(JdkInstrumentationInstaller.class.getName());
+  private static final AgentLog LOGGER =
+      AgentLog.named(JdkInstrumentationInstaller.class.getName());
 
   /**
    * ByteBuddy's package, whose classes the agent never touches. Built at run time: the agent jar

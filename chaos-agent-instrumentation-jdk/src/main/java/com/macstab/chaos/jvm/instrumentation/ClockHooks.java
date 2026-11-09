@@ -3,9 +3,9 @@ package com.macstab.chaos.jvm.instrumentation;
 import static com.macstab.chaos.jvm.instrumentation.JdkInstrumentationInstaller.advise;
 import static com.macstab.chaos.jvm.instrumentation.JdkInstrumentationInstaller.clockPackages;
 
+import com.macstab.chaos.jvm.core.AgentLog;
 import com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher;
 import java.util.List;
-import java.util.logging.Logger;
 import net.bytebuddy.agent.builder.AgentBuilder;
 import net.bytebuddy.description.type.TypeDescription;
 import net.bytebuddy.matcher.ElementMatcher;
@@ -17,8 +17,8 @@ import net.bytebuddy.matcher.ElementMatchers;
  * JdkInstrumentationInstaller.HookGroup} weaves them on demand.
  */
 final class ClockHooks {
-  private static final Logger LOGGER =
-      Logger.getLogger(JdkInstrumentationInstaller.class.getName());
+  private static final AgentLog LOGGER =
+      AgentLog.named(JdkInstrumentationInstaller.class.getName());
 
   private ClockHooks() {}
 
@@ -110,8 +110,9 @@ final class ClockHooks {
       // but direct System.currentTimeMillis() calls stay unskewed: say so instead of doing
       // nothing silently.
       LOGGER.warning(
-          "chaos: a SYSTEM_CLOCK_MILLIS/NANOS scenario is active but clockCallSites is not set;"
-              + " direct System.currentTimeMillis()/nanoTime() calls are not skewed");
+          () ->
+              "chaos: a SYSTEM_CLOCK_MILLIS/NANOS scenario is active but clockCallSites is not set;"
+                  + " direct System.currentTimeMillis()/nanoTime() calls are not skewed");
       return agentBuilder;
     }
     ElementMatcher.Junction<TypeDescription> types = ElementMatchers.none();

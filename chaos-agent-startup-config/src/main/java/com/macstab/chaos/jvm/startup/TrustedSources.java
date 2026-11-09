@@ -55,8 +55,6 @@ public final class TrustedSources {
   private static final Set<String> MICRONAUT_NAMES =
       Set.of("system", "env", "cli", "context", "application", "test-properties");
 
-  private static final Logger LOGGER = Logger.getLogger(TrustedSources.class.getName());
-
   /** The lines already logged, so a switch read on every request is reported once. */
   private static final Set<String> REPORTED = ConcurrentHashMap.newKeySet();
 
@@ -188,7 +186,9 @@ public final class TrustedSources {
 
   private static void report(final Level level, final String line) {
     if (REPORTED.add(line)) {
-      LOGGER.log(level, line);
+      // Looked up when a line is written: a logger initialises the LogManager, which premain must
+      // leave to the application.
+      Logger.getLogger(TrustedSources.class.getName()).log(level, line);
     }
   }
 }

@@ -2,10 +2,10 @@ package com.macstab.chaos.jvm.instrumentation;
 
 import com.macstab.chaos.jvm.api.ChaosSelector;
 import com.macstab.chaos.jvm.api.OperationType;
+import com.macstab.chaos.jvm.core.AgentLog;
 import java.lang.instrument.Instrumentation;
 import java.util.Set;
 import java.util.function.Supplier;
-import java.util.logging.Logger;
 import net.bytebuddy.agent.builder.AgentBuilder;
 import net.bytebuddy.agent.builder.ResettableClassFileTransformer;
 import net.bytebuddy.description.method.MethodDescription;
@@ -29,7 +29,7 @@ import org.jspecify.annotations.Nullable;
  * agent's own classes (excluded by the base builder).
  */
 final class MethodWeaver {
-  private static final Logger LOGGER = Logger.getLogger("com.macstab.chaos.jvm");
+  private static final AgentLog LOGGER = AgentLog.named("com.macstab.chaos.jvm");
 
   private static Set<ChaosSelector.MethodSelector> woven = Set.of();
   private static @Nullable ResettableClassFileTransformer transformer;

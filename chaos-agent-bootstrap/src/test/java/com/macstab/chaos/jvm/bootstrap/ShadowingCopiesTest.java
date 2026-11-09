@@ -56,6 +56,30 @@ class ShadowingCopiesTest {
     assertThat(reported).isEmpty();
   }
 
+  @Test
+  @DisplayName(
+      "a class loader whose copies cannot be listed is not compared, and the start goes on")
+  void unlistableCopiesAreNotCompared() {
+    final ClassLoader unlistable =
+        new ClassLoader(null) {
+          @Override
+          public java.util.Enumeration<URL> getResources(final String name)
+              throws java.io.IOException {
+            throw new java.io.IOException("unreadable class path");
+          }
+        };
+    final ByteArrayOutputStream captured = new ByteArrayOutputStream();
+    final PrintStream original = System.err;
+    try (PrintStream capture = new PrintStream(captured, true, StandardCharsets.UTF_8)) {
+      System.setErr(capture);
+      ChaosAgentBootstrap.reportShadowingCopies(unlistable);
+    } finally {
+      System.setErr(original);
+    }
+
+    assertThat(captured.toString(StandardCharsets.UTF_8)).isEmpty();
+  }
+
   /** Runs the report over a class loader of {@code jars} and returns what it wrote to stderr. */
   private static String reportFor(final Path... jars) throws Exception {
     final URL[] urls = new URL[jars.length];

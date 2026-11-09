@@ -6,7 +6,6 @@ import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
-import java.util.logging.Logger;
 
 /**
  * Creates stop-the-world safepoint pauses by repeatedly calling {@link System#gc()} at a
@@ -23,7 +22,7 @@ import java.util.logging.Logger;
  */
 final class SafepointStormStressor implements ManagedStressor {
 
-  private static final Logger LOGGER = Logger.getLogger(SafepointStormStressor.class.getName());
+  private static final AgentLog LOGGER = AgentLog.named(SafepointStormStressor.class.getName());
 
   /**
    * ByteBuddy's package, whose classes the agent never touches. Built at run time: the agent jar

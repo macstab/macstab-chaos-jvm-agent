@@ -5,12 +5,12 @@ import com.macstab.chaos.jvm.api.ChaosControlPlane;
 import com.macstab.chaos.jvm.api.ChaosDiagnostics;
 import com.macstab.chaos.jvm.api.ChaosPlan;
 import com.macstab.chaos.jvm.api.ChaosScenario;
+import com.macstab.chaos.jvm.core.AgentLog;
 import com.macstab.chaos.jvm.startup.ChaosPlanMapper;
 import com.macstab.chaos.jvm.startup.ConfigLoadException;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Level;
-import java.util.logging.Logger;
 
 /**
  * Package-private JMX adapter that bridges the {@link ChaosDiagnosticsMXBean} interface to the
@@ -25,7 +25,7 @@ import java.util.logging.Logger;
  * it, so they can be stopped through it.
  */
 final class ChaosDiagnosticsMBean implements ChaosDiagnosticsMXBean {
-  private static final Logger LOGGER = Logger.getLogger(ChaosDiagnosticsMBean.class.getName());
+  private static final AgentLog LOGGER = AgentLog.named(ChaosDiagnosticsMBean.class.getName());
 
   private final ChaosDiagnostics diagnostics;
   private final ChaosControlPlane controlPlane;

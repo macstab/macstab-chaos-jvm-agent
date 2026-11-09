@@ -8,7 +8,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.logging.Level;
-import java.util.logging.Logger;
 
 /**
  * Synchronous event bus that dispatches {@link com.macstab.chaos.jvm.api.ChaosEvent}s to all
@@ -35,7 +34,7 @@ import java.util.logging.Logger;
  * that event.
  */
 final class ObservabilityBus {
-  private static final Logger LOGGER = Logger.getLogger("com.macstab.chaos.jvm");
+  private static final AgentLog LOGGER = AgentLog.named("com.macstab.chaos.jvm");
 
   /**
    * Scenarios whose plan set {@code structuredLoggingEnabled=false}, by {@code <scope>::<id>}:
@@ -435,6 +434,11 @@ final class ObservabilityBus {
     if (!LOGGER.isLoggable(level)) {
       return;
     }
+    LOGGER.log(level, () -> format(event));
+  }
+
+  /** The event's log line: {@code type=X scenarioId="…" message="…" attributes={k="v", …}}. */
+  private static String format(final ChaosEvent event) {
     final StringBuilder line = new StringBuilder(128);
     line.append("type=").append(event.type()).append(" scenarioId=\"");
     escape(event.scenarioId(), line);
@@ -450,7 +454,7 @@ final class ObservabilityBus {
       line.append('"');
       separator = ", ";
     }
-    LOGGER.log(level, line.append('}').toString());
+    return line.append('}').toString();
   }
 
   /**

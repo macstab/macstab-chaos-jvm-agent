@@ -714,7 +714,7 @@ final class ChaosControlPlaneImpl implements ChaosControlPlane {
     } catch (final RuntimeException failure) {
       // Unweaving after a removal: the scenario is already gone, so leftover advice only costs an
       // evaluation that matches nothing. Report it and carry on.
-      java.util.logging.Logger.getLogger("com.macstab.chaos.jvm")
+      AgentLog.named(AgentLog.AGENT)
           .warning(() -> "[chaos-agent] could not update method hooks: " + failure);
     }
   }

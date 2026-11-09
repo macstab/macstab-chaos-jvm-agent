@@ -3,7 +3,6 @@ package com.macstab.chaos.jvm.core;
 import com.macstab.chaos.jvm.api.ChaosEffect;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.logging.Logger;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -25,8 +24,8 @@ import org.jspecify.annotations.Nullable;
  */
 final class StringInternPressureStressor implements ManagedStressor {
 
-  private static final Logger LOGGER =
-      Logger.getLogger(StringInternPressureStressor.class.getName());
+  private static final AgentLog LOGGER =
+      AgentLog.named(StringInternPressureStressor.class.getName());
 
   /**
    * Upper bound on {@code stringLengthBytes}, refused above by the validator: 1 MiB is well above

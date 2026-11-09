@@ -7,7 +7,6 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
-import java.util.logging.Logger;
 
 /**
  * Creates high contention on a shared monitor by spawning threads that compete for a single {@link
@@ -29,7 +28,7 @@ import java.util.logging.Logger;
  */
 final class MonitorContentionStressor implements ManagedStressor {
 
-  private static final Logger LOGGER = Logger.getLogger("com.macstab.chaos.jvm");
+  private static final AgentLog LOGGER = AgentLog.named("com.macstab.chaos.jvm");
 
   private final List<Thread> contentionThreads;
   private final AtomicBoolean stopped = new AtomicBoolean(false);

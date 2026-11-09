@@ -10,7 +10,6 @@ import java.util.concurrent.ForkJoinTask;
 import java.util.concurrent.RecursiveAction;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import java.util.logging.Logger;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -39,7 +38,7 @@ import org.jspecify.annotations.Nullable;
  */
 final class ThreadLocalLeakStressor implements ManagedStressor {
 
-  private static final Logger LOGGER = Logger.getLogger("com.macstab.chaos.jvm");
+  private static final AgentLog LOGGER = AgentLog.named("com.macstab.chaos.jvm");
 
   /** How long the constructor waits for the common pool to plant every entry. */
   static final long PLANT_TIMEOUT_SECONDS = 10L;

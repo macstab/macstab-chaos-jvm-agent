@@ -8,7 +8,6 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
-import java.util.logging.Logger;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -32,8 +31,8 @@ import org.jspecify.annotations.Nullable;
  */
 final class ReferenceQueueFloodStressor implements ManagedStressor {
 
-  private static final Logger LOGGER =
-      Logger.getLogger(ReferenceQueueFloodStressor.class.getName());
+  private static final AgentLog LOGGER =
+      AgentLog.named(ReferenceQueueFloodStressor.class.getName());
 
   private final AtomicBoolean running = new AtomicBoolean(true);
   private final AtomicLong floodCycleCount = new AtomicLong();

@@ -2,7 +2,6 @@ package com.macstab.chaos.jvm.core;
 
 import com.macstab.chaos.jvm.api.ChaosEffect;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.logging.Logger;
 
 /**
  * Creates objects with slow finalizers to back up the JVM finalizer queue.
@@ -23,7 +22,7 @@ import java.util.logging.Logger;
  */
 final class FinalizerBacklogStressor implements ManagedStressor {
 
-  private static final Logger LOGGER = Logger.getLogger("com.macstab.chaos.jvm");
+  private static final AgentLog LOGGER = AgentLog.named("com.macstab.chaos.jvm");
 
   private final int createdCount;
   private final AtomicBoolean stopped = new AtomicBoolean(false);

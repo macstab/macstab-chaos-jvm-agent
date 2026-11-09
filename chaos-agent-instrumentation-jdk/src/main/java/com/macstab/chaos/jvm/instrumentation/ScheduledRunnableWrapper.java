@@ -10,7 +10,6 @@ import java.util.logging.Logger;
  * invocation.
  */
 public final class ScheduledRunnableWrapper implements Runnable {
-  private static final Logger LOGGER = Logger.getLogger("com.macstab.chaos.jvm");
 
   // Weak reference to break the retention cycle between ScheduledThreadPoolExecutor and this
   // wrapper. The pool's internal queue holds the wrapper for the full periodic schedule; a
@@ -66,14 +65,18 @@ public final class ScheduledRunnableWrapper implements Runnable {
         // The agent's own logging: a handler's file write is no FILE_IO of the application.
         BootstrapDispatcher.beginInternalCall();
         try {
-          LOGGER.log(
-              Level.WARNING,
-              chaosFailure,
-              () ->
-                  "chaos: suppressing chaos-injected exception from beforeScheduledTick to"
-                      + " preserve periodicity (task="
-                      + delegate.getClass().getName()
-                      + ")");
+          // A bridge class (bootstrap class loader): JUL, not the agent's AgentLog. Looked up here,
+          // not
+          // in a static field, so loading the class does not initialise the LogManager.
+          Logger.getLogger("com.macstab.chaos.jvm")
+              .log(
+                  Level.WARNING,
+                  chaosFailure,
+                  () ->
+                      "chaos: suppressing chaos-injected exception from beforeScheduledTick to"
+                          + " preserve periodicity (task="
+                          + delegate.getClass().getName()
+                          + ")");
         } finally {
           BootstrapDispatcher.endInternalCall();
         }

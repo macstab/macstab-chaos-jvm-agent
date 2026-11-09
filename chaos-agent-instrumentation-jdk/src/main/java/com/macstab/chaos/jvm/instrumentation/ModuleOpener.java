@@ -1,5 +1,6 @@
 package com.macstab.chaos.jvm.instrumentation;
 
+import com.macstab.chaos.jvm.core.AgentLog;
 import com.macstab.chaos.jvm.instrumentation.bridge.BootstrapDispatcher;
 import java.lang.instrument.Instrumentation;
 import java.util.Collections;
@@ -9,12 +10,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.logging.Level;
-import java.util.logging.Logger;
 
 /** Opens the JDK internal packages the agent needs, without {@code --add-opens} flags. */
 final class ModuleOpener {
-  private static final Logger LOGGER =
-      Logger.getLogger(JdkInstrumentationInstaller.class.getName());
+  private static final AgentLog LOGGER =
+      AgentLog.named(JdkInstrumentationInstaller.class.getName());
 
   private ModuleOpener() {}
 
@@ -52,7 +52,7 @@ final class ModuleOpener {
     try {
       openTo.add(Class.forName(BootstrapDispatcher.class.getName(), false, null).getModule());
     } catch (final ClassNotFoundException notInjected) {
-      LOGGER.log(Level.FINE, "bootstrap bridge not injected; its module is not opened to");
+      LOGGER.fine(() -> "bootstrap bridge not injected; its module is not opened to");
     }
 
     // moduleClass → packages to open. Loaded reflectively so this code stays compilable on
@@ -72,17 +72,13 @@ final class ModuleOpener {
       final String packageName = entry[1];
       final Module module = ModuleLayer.boot().findModule(moduleName).orElse(null);
       if (module == null) {
-        LOGGER.log(
-            Level.FINE,
-            "module {0} not present; skipping open of {1}",
-            new Object[] {moduleName, packageName});
+        LOGGER.fine(() -> "module " + moduleName + " not present; skipping open of " + packageName);
         continue;
       }
       if (!module.getPackages().contains(packageName)) {
-        LOGGER.log(
-            Level.FINE,
-            "module {0} does not contain package {1}; skipping",
-            new Object[] {moduleName, packageName});
+        LOGGER.fine(
+            () ->
+                "module " + moduleName + " does not contain package " + packageName + "; skipping");
         continue;
       }
       try {
