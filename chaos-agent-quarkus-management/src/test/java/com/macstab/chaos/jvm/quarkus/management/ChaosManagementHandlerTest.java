@@ -257,7 +257,9 @@ class ChaosManagementHandlerTest {
     assertThat(call(HttpMethod.GET, "/q/chaos", null).body()).contains("qk-mgmt-delay");
     assertThat(call(HttpMethod.POST, "/q/chaos", PLAN.replace("qk-mgmt\"}", "x\"}")).status())
         .isEqualTo(409);
-    assertThat(call(HttpMethod.DELETE, "/q/chaos/plan%3Aqk-mgmt", null).status()).isEqualTo(200);
+    final Exchange stopped = call(HttpMethod.DELETE, "/q/chaos/plan%3Aqk-mgmt", null);
+    assertThat(stopped.status()).isEqualTo(200);
+    assertThat(stopped.body()).contains("\"scenarioId\":\"plan:qk-mgmt\"");
     assertThat(call(HttpMethod.DELETE, "/q/chaos/qk-mgmt", null).status()).isEqualTo(404);
   }
 

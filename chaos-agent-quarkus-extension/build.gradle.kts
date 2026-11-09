@@ -5,6 +5,9 @@ dependencies {
     // Inside the agent jar (chaos-agent-bootstrap) at runtime: the trust rule for the switches.
     compileOnly(project(":chaos-agent-startup-config"))
     testImplementation(project(":chaos-agent-startup-config"))
+    // The shorthand test activates its scenarios through the runtime, so CompatibilityValidator
+    // decides which pairs are valid.
+    testImplementation(project(":chaos-agent-core"))
 
     compileOnly(platform(libs.quarkus.bom))
     compileOnly("io.quarkus:quarkus-core")

@@ -94,7 +94,9 @@ class ChaosManagementEndpointTest {
       }
 
       assertThat(stopped.statusCode()).as(stopped.body()).isEqualTo(200);
-      assertThat(stopped.body()).contains("\"status\":\"stopped\"");
+      assertThat(stopped.body())
+          .contains("\"status\":\"stopped\"")
+          .contains("\"scenarioId\":\"50%+off\"");
     }
   }
 

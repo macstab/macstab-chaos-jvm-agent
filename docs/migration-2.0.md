@@ -200,7 +200,7 @@ Before (1.x): `NamePattern.glob("a*b")` does not match `"a\nb"`. Now it does; `N
 
 ## 12. `/actuator/chaos` answers with the operation's HTTP status
 
-The Spring actuator endpoint answers like the Micronaut and Quarkus endpoints: a failed activation is 400 `invalid`, 409 `conflict` or 422 `rejected` instead of 200 with `status = "error"`; a stop is 404 `not-found` or 409 `unmanaged`. Clients that read `status = "error"` from a 200 must check the HTTP status (or the `invalid`, `conflict`, `rejected` outcomes). The startup plan (`macstab.chaos.config-file`) is no longer stoppable through the endpoint, which stops only the plans activated through it.
+The Spring actuator endpoint answers like the Micronaut and Quarkus endpoints: a failed activation is 400 `invalid`, 409 `conflict` or 422 `rejected` instead of 200 with `status = "error"`; a stop is 404 `not-found`, 409 `unmanaged`, or 409 `conflict` while the plan is still being activated (it keeps running; stop it again once its activation answered). The stop answer names the id it was asked for `scenarioId`, as in 1.x (earlier 2.0 builds wrote `id`). Clients that read `status = "error"` from a 200 must check the HTTP status (or the `invalid`, `conflict`, `rejected` outcomes). The startup plan (`macstab.chaos.config-file`) is no longer stoppable through the endpoint, which stops only the plans activated through it.
 
 ## 13. `reject` is refused where no real call fails
 

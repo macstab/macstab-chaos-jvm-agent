@@ -334,11 +334,12 @@ public final class ChaosManagement implements AutoCloseable {
   /**
    * The outcome of {@link #stop(String)}.
    *
-   * @param status {@code stopped}, {@code conflict}, {@code unmanaged} or {@code not-found}
-   * @param id the id asked for
+   * @param status {@code stopped}, {@code conflict} (the plan is being activated; it is not
+   *     stopped), {@code unmanaged} (a scenario not activated here) or {@code not-found}
+   * @param scenarioId the id asked for: a plan's handle id ({@code plan:<name>}) or its name
    * @param message details when not stopped
    */
-  public record StopResponse(String status, String id, @Nullable String message) {}
+  public record StopResponse(String status, String scenarioId, @Nullable String message) {}
 
   /**
    * The outcome of {@link #stopAll()}.

@@ -127,16 +127,32 @@ class ChaosQuarkusExtensionTest {
       assertThat(delay.maxDelay()).isEqualTo(Duration.ofMillis(100));
     }
 
+    @ChaosScenario(id = "suppress-submit", selector = "executor", effect = "suppress")
+    void annotatedExecutorSuppress() {}
+
     @Test
-    @DisplayName("suppress maps to a SuppressEffect and httpClient selector")
-    void suppressAnnotationMapsToSuppressEffect() throws Exception {
+    @DisplayName("suppress on httpClient is refused: an HTTP request cannot be skipped")
+    void httpSuppressIsRefused() throws Exception {
       final ChaosScenario annotation =
           AnnotationParsing.class
               .getDeclaredMethod("annotatedSuppress")
               .getAnnotation(ChaosScenario.class);
+      assertThatThrownBy(() -> ChaosQuarkusExtension.toScenario(annotation))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessage("effect=suppress is not supported for httpClient; use delay");
+    }
+
+    @Test
+    @DisplayName("suppress on executor drops the submission only, not the worker's task run")
+    void executorSuppressSelectsSubmitOnly() throws Exception {
+      final ChaosScenario annotation =
+          AnnotationParsing.class
+              .getDeclaredMethod("annotatedExecutorSuppress")
+              .getAnnotation(ChaosScenario.class);
       final com.macstab.chaos.jvm.api.ChaosScenario scenario =
           ChaosQuarkusExtension.toScenario(annotation);
-      assertThat(scenario.selector()).isInstanceOf(ChaosSelector.HttpClientSelector.class);
+      assertThat(scenario.selector())
+          .isEqualTo(ChaosSelector.executor(java.util.EnumSet.of(OperationType.EXECUTOR_SUBMIT)));
       assertThat(scenario.effect()).isInstanceOf(ChaosEffect.SuppressEffect.class);
     }
 

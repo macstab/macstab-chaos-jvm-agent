@@ -26,9 +26,9 @@ import java.lang.annotation.Target;
  * class OrderServiceTest {
  *
  *   @Test
- *   @ChaosScenario(id = "reject-http", selector = "httpClient", effect = "suppress")
+ *   @ChaosScenario(id = "slow-http", selector = "httpClient", effect = "delay:PT0.5S")
  *   void placesOrder() {
- *     // both the class-level slow-jdbc scenario and the method-level reject-http scenario
+ *     // both the class-level slow-jdbc scenario and the method-level slow-http scenario
  *     // are active while this test runs.
  *   }
  * }
@@ -56,8 +56,8 @@ public @interface ChaosScenario {
 
   /**
    * Selector identifier, one of {@code "executor"}, {@code "jvmRuntime"}, {@code "httpClient"}, or
-   * {@code "jdbc"}. The runtime validator enforces compatibility with {@link #effect()} at
-   * activation time.
+   * {@code "jdbc"}. A pair with {@link #effect()} that cannot apply is refused with {@link
+   * IllegalArgumentException} before anything is activated.
    *
    * @return the selector identifier
    */
@@ -71,7 +71,9 @@ public @interface ChaosScenario {
    * <ul>
    *   <li>{@code "delay:<iso-duration>"} — delay for the given ISO-8601 duration (e.g., {@code
    *       "delay:PT0.1S"} for 100 ms).
-   *   <li>{@code "suppress"} — silently discard the matched operation.
+   *   <li>{@code "suppress"} — silently discard the matched operation: with {@code "executor"} the
+   *       task submission only (a worker's task run cannot be skipped); refused for {@code
+   *       "httpClient"} and {@code "jdbc"}, whose calls cannot be skipped (use a delay).
    *   <li>{@code "freeze"} — shorthand for a clock-skew freeze effect (paired with {@code
    *       "jvmRuntime"}).
    * </ul>

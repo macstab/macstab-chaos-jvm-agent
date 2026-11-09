@@ -81,7 +81,7 @@ class ChaosQuarkusExtensionLifecycleTest {
     @ChaosScenario(id = "e", selector = "executor", effect = "delay:PT0.002S")
     void executor() {}
 
-    @ChaosScenario(id = "h", selector = "httpClient", effect = "suppress", scope = "SESSION")
+    @ChaosScenario(id = "h", selector = "httpClient", effect = "delay:PT1S", scope = "SESSION")
     void http() {}
 
     @ChaosScenario(id = "j", selector = "jdbc", effect = "delay:PT1S")

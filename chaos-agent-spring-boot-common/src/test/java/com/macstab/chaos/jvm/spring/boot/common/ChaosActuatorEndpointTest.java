@@ -94,6 +94,7 @@ class ChaosActuatorEndpointTest {
               final var response = endpoint.stop("unknown-id");
               assertThat(response.getStatus()).isEqualTo(404);
               assertThat(response.getBody().status()).isEqualTo("not-found");
+              assertThat(response.getBody().scenarioId()).isEqualTo("unknown-id");
             });
   }
 

@@ -328,8 +328,8 @@ public final class ChaosQuarkusExtension
     final com.macstab.chaos.jvm.api.ChaosScenario.ScenarioScope scope =
         com.macstab.chaos.jvm.api.ChaosScenario.ScenarioScope.valueOf(
             annotation.scope().toUpperCase(Locale.ROOT));
-    final ChaosSelector selector = parseSelector(annotation.selector());
     final ChaosEffect effect = parseEffect(annotation.effect());
+    final ChaosSelector selector = parseSelector(annotation.selector(), effect);
     if (selector instanceof ChaosSelector.JvmRuntimeSelector
         && !(effect instanceof ChaosEffect.ClockSkewEffect)) {
       // Clock reads only take a clock skew; a delay or suppress on them would never apply.
@@ -349,13 +349,22 @@ public final class ChaosQuarkusExtension
         .build();
   }
 
-  private static ChaosSelector parseSelector(final String selector) {
+  private static ChaosSelector parseSelector(final String selector, final ChaosEffect effect) {
     if (selector == null || selector.isBlank()) {
       throw new IllegalArgumentException("selector must be non-blank");
     }
     final String normalized = selector.trim();
+    final boolean suppress = effect instanceof ChaosEffect.SuppressEffect;
+    if (suppress && ("httpClient".equals(normalized) || "jdbc".equals(normalized))) {
+      // An HTTP request or a JDBC statement cannot be skipped: there is no result to return.
+      throw new IllegalArgumentException(
+          "effect=suppress is not supported for " + normalized + "; use delay");
+    }
     return switch (normalized) {
-      case "executor" -> ChaosSelector.executor(defaultExecutorOperations());
+      // A pool worker's task run cannot be skipped; suppress drops the submission only.
+      case "executor" ->
+          ChaosSelector.executor(
+              suppress ? EnumSet.of(OperationType.EXECUTOR_SUBMIT) : defaultExecutorOperations());
       // The clock reads that are actually instrumented: SYSTEM_CLOCK_MILLIS
       // (System.currentTimeMillis) is a JIT intrinsic that is never woven, so effect="freeze" on
       // it would do nothing.

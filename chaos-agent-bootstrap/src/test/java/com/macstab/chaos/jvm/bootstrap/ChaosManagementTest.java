@@ -670,7 +670,9 @@ class ChaosManagementTest {
         .isEqualTo("activated");
     final ChaosManagement.HttpResult stopped = management.handle("DELETE", "/a+b", null);
     assertThat(stopped.status()).isEqualTo(200);
-    assertThat(stopped.json()).contains("\"status\":\"stopped\"");
+    assertThat(stopped.json())
+        .contains("\"status\":\"stopped\"")
+        .contains("\"scenarioId\":\"a+b\"");
   }
 
   @Test
