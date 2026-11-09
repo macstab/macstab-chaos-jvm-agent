@@ -26,6 +26,8 @@ The agent runs inside applications that bring their own ByteBuddy (Mockito, Hibe
 - Coverage of the child-JVM tests runs against the shaded classes; `childJvmCoverage` maps it back onto the module classes.
 - Amended in 2.0: the bootstrap bridge classes (ADR 0001) are stored under `META-INF/macstab-chaos-bridge/`, not under their class names, so no class loader that reads the jar defines a copy of its own. The thin `chaos-agent-instrumentation-jdk` jar keeps them under their class names: it is published for builds and benchmarks that use the plain classes, and must never be bundled in an application.
 
+- Amended in 2.0: the libraries' multi-release overlays (`META-INF/versions/**`) and `module-info.class` files are left out of the agent jar. The agent jar is not a multi-release jar (its manifest declares no `Multi-Release`), so the JVM never reads those overlays, and the base classes of ByteBuddy and Jackson run on every JDK the agent supports (21 and later).
+
 ## Alternatives rejected
 
 - **Ordinary dependencies**: the clash above.

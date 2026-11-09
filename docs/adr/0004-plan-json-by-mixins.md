@@ -23,7 +23,7 @@ The API types are plain records and interfaces. `chaos-agent-startup-config` def
 
 - The API has no dependencies; the format can evolve without changing it.
 - Another `ObjectMapper` does not know the discriminators: plans are read and written with `ChaosPlanMapper`.
-- The schema cannot drift from the parser: the build fails when they differ.
+- The schema cannot drift from the parser: the build fails when the committed schema differs from the one derived from the mapper. It is never stricter than the mapper, but the mapper checks more than the schema can say (rules across fields, ranges), so a plan the schema accepts can still be refused.
 
 ## Alternatives rejected
 
