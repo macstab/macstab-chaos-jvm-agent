@@ -163,7 +163,7 @@ public final class StartupConfigPoller implements AutoCloseable {
     this.scheduler =
         Executors.newSingleThreadScheduledExecutor(
             runnable -> {
-              final Thread thread = new Thread(runnable, "chaos-config-poller");
+              final Thread thread = new Thread(() -> internally(runnable), "chaos-config-poller");
               thread.setDaemon(true);
               return thread;
             });
@@ -216,10 +216,16 @@ public final class StartupConfigPoller implements AutoCloseable {
     // The future is not needed: pollOnce() catches every Throwable, so the schedule never ends
     // with a failure that the future would report; close() stops the scheduler. A fixed delay:
     // ticks delayed by a slow read are not run back to back to catch up.
-    @SuppressWarnings("FutureReturnValueIgnored")
-    final Object unused =
-        scheduler.scheduleWithFixedDelay(
-            this::pollOnce, intervalMs, intervalMs, TimeUnit.MILLISECONDS);
+    // The scheduler is the agent's own (L3): the schedule call and the start of its thread run with
+    // the dispatch depth raised, and so does every tick, so neither a SCHEDULE_SUBMIT or
+    // SCHEDULE_TICK scenario nor a THREAD_START reject reaches the poller.
+    internally(
+        () -> {
+          @SuppressWarnings("FutureReturnValueIgnored")
+          final Object unused =
+              scheduler.scheduleWithFixedDelay(
+                  this::pollOnce, intervalMs, intervalMs, TimeUnit.MILLISECONDS);
+        });
   }
 
   /**
@@ -239,15 +245,18 @@ public final class StartupConfigPoller implements AutoCloseable {
     // cleared maps of this already-closed poller, leaving zombies registered in the runtime
     // with no owning handle.
     closed = true;
-    scheduler.shutdownNow();
-    // Best-effort: give the in-flight poll a short window to complete before we tear the maps
-    // down. If it completes, the closed check inside applyDiff short-circuits it. If it's
-    // still blocked in Files.newInputStream after the timeout we accept the window and rely on
-    // the closed flag alone — the poll thread is a daemon so it will not block JVM exit.
+    BootstrapDispatcher.beginInternalCall();
     try {
+      scheduler.shutdownNow();
+      // Best-effort: give the in-flight poll a short window to complete before we tear the maps
+      // down. If it completes, the closed check inside applyDiff short-circuits it. If it's
+      // still blocked in Files.newInputStream after the timeout we accept the window and rely on
+      // the closed flag alone — the poll thread is a daemon so it will not block JVM exit.
       scheduler.awaitTermination(500, TimeUnit.MILLISECONDS);
     } catch (final InterruptedException ignored) {
       Thread.currentThread().interrupt();
+    } finally {
+      BootstrapDispatcher.endInternalCall();
     }
     synchronized (this) {
       activeHandles.values().forEach(StartupConfigPoller::destroyHandle);
@@ -323,6 +332,16 @@ public final class StartupConfigPoller implements AutoCloseable {
     BootstrapDispatcher.beginInternalCall();
     try {
       return io.run();
+    } finally {
+      BootstrapDispatcher.endInternalCall();
+    }
+  }
+
+  /** Work of the poller's own (its thread's body, its schedule), which no scenario sees. */
+  private static void internally(final Runnable work) {
+    BootstrapDispatcher.beginInternalCall();
+    try {
+      work.run();
     } finally {
       BootstrapDispatcher.endInternalCall();
     }

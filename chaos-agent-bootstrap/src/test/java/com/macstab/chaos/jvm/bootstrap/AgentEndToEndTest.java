@@ -2799,6 +2799,48 @@ class AgentEndToEndTest {
     }
 
     @Test
+    @DisplayName("a periodic SCHEDULE_TICK suppress does not stop the plan file's reloads")
+    void planReloadIgnoresTickSuppress() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          watchedPlanReload(
+              scenario(
+                  "tick-suppress",
+                  new ChaosSelector.SchedulingSelector(
+                      Set.of(OperationType.SCHEDULE_TICK), NamePattern.any(), true),
+                  ChaosEffect.suppress()));
+      assertThat(result.value("reloaded")).isEqualTo("ACTIVE");
+    }
+
+    @Test
+    @DisplayName("a THREAD_START reject on chaos- names fails neither the start nor the reloads")
+    void planWatchIgnoresThreadStartReject() throws Exception {
+      final ChildJvmProbe.ProbeResult result =
+          watchedPlanReload(
+              scenario(
+                  "chaos-thread-reject",
+                  new ChaosSelector.ThreadSelector(
+                      Set.of(OperationType.THREAD_START),
+                      ChaosSelector.ThreadKind.ANY,
+                      NamePattern.prefix("chaos-"),
+                      null),
+                  ChaosEffect.reject("no threads")));
+      assertThat(result.value("reloaded")).isEqualTo("ACTIVE");
+    }
+
+    /** Runs {@code plan-reload} with {@code initial} as the watched startup plan. */
+    private ChildJvmProbe.ProbeResult watchedPlanReload(final ChaosScenario initial)
+        throws Exception {
+      final String mode = "plan-reload";
+      return probe.run(
+          plan(initial),
+          DefectProbeMain.class,
+          mode,
+          null,
+          "-Dmacstab.chaos.configWatchInterval=50",
+          "-Dchaos.test.planFile=" + tempDir.resolve(mode + "-plan.json"));
+    }
+
+    @Test
     @DisplayName("a FORK_JOIN_TASK_RUN gate does not hold the thread-local-leak planting")
     void threadLocalLeakIgnoresForkJoinGate() throws Exception {
       final ChildJvmProbe.ProbeResult result =

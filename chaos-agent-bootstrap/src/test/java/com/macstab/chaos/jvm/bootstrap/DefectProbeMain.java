@@ -144,6 +144,7 @@ public final class DefectProbeMain {
       case "http-url-connection" -> withHttpServer(DefectProbeMain::httpUrlConnection);
       case "agent-owned-stressors" -> agentOwnedStressors();
       case "plan-reload-under-file-reject" -> planReloadUnderFileReject();
+      case "plan-reload" -> planReload();
       case "tick-warning-to-log-file" -> tickWarningToLogFile();
       case "thread-local-leak-fork-join-gate" -> threadLocalLeakForkJoinGate();
       case "thread-local-leak-set-delay" -> threadLocalLeakSetDelay();
@@ -2980,7 +2981,6 @@ public final class DefectProbeMain {
    * state ({@code reloaded=ACTIVE}, or {@code absent} after 10 s) and how often the reject matched.
    */
   private static void planReloadUnderFileReject() throws Exception {
-    final Path plan = Path.of(System.getProperty("chaos.test.planFile"));
     final ChaosControlPlane plane = ChaosPlatform.current();
     try (ChaosActivationHandle reads =
         plane.activate(
@@ -2990,32 +2990,43 @@ public final class DefectProbeMain {
                 .effect(ChaosEffect.reject("disk"))
                 .activationPolicy(ActivationPolicy.always())
                 .build())) {
-      // A few ticks over the unchanged plan, then a change the poller must read.
-      LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(300));
-      Files.writeString(
-          plan,
-          """
-          {"scenarios":[{"id":"reloaded","scope":"JVM",
-            "selector":{"type":"executor","operations":["EXECUTOR_SUBMIT"]},
-            "effect":{"type":"delay","minDelay":"PT0.001S","maxDelay":"PT0.001S"}}]}
-          """);
-      final long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
-      String state = "absent";
-      while (System.nanoTime() < deadline) {
-        state =
-            plane
-                .diagnostics()
-                .scenario("reloaded")
-                .map(report -> report.state().name())
-                .orElse("absent");
-        if (state.equals("ACTIVE")) {
-          break;
-        }
-        LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(20));
-      }
-      System.out.println("reloaded=" + state);
+      planReload();
       System.out.println("readsMatched=" + reads.matchedCount());
     }
+  }
+
+  /**
+   * Rewrites the watched plan file ({@code chaos.test.planFile}) after a few ticks and waits for
+   * the poller to apply it. Prints the reloaded scenario's state ({@code reloaded=ACTIVE}, or
+   * {@code absent} after 10 s).
+   */
+  private static void planReload() throws Exception {
+    final Path plan = Path.of(System.getProperty("chaos.test.planFile"));
+    final ChaosControlPlane plane = ChaosPlatform.current();
+    // A few ticks over the unchanged plan, then a change the poller must read.
+    LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(300));
+    Files.writeString(
+        plan,
+        """
+        {"scenarios":[{"id":"reloaded","scope":"JVM",
+          "selector":{"type":"executor","operations":["EXECUTOR_SUBMIT"]},
+          "effect":{"type":"delay","minDelay":"PT0.001S","maxDelay":"PT0.001S"}}]}
+        """);
+    final long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+    String state = "absent";
+    while (System.nanoTime() < deadline) {
+      state =
+          plane
+              .diagnostics()
+              .scenario("reloaded")
+              .map(report -> report.state().name())
+              .orElse("absent");
+      if (state.equals("ACTIVE")) {
+        break;
+      }
+      LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(20));
+    }
+    System.out.println("reloaded=" + state);
   }
 
   /**
