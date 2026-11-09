@@ -10,14 +10,17 @@ import java.nio.file.attribute.PosixFilePermission;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The trust check of a directory the agent writes code into ({@code bridgeDir}): the directory must
  * be neither world-writable without the sticky bit nor owned by another user than the JVM's (root
- * excepted), and its parent not world-writable without the sticky bit. Either would let another
- * local user replace what the agent writes there. The plan file follows the same rule ({@link
- * StartupConfigLoader}). Modes and owners are POSIX notions: on a file system without a {@code
- * posix} view (Windows) only the existence of the directory is checked.
+ * excepted), no directory above it world-writable without the sticky bit or owned by another user,
+ * and no link on the configured path owned by another user. Any of them would let another local
+ * user replace what the agent writes there, or move it. The caller resolves the real path once and
+ * uses it for every file operation ({@link #distrust(Path, Path)}). The plan file follows the same
+ * rule ({@link StartupConfigLoader}). Modes and owners are POSIX notions: on a file system without
+ * a {@code posix} view (Windows) only the existence of the directory is checked.
  */
 @Internal
 public final class DirectoryTrust {
@@ -62,6 +65,33 @@ public final class DirectoryTrust {
     } catch (final IOException missing) {
       return Optional.of("it cannot be resolved (" + missing + ")");
     }
+    return distrust(directory, real, supportedViews, ownerOf, jvmUser);
+  }
+
+  /**
+   * Returns why a directory is not trusted, checked at a real path the caller resolved once: the
+   * caller then uses that real path, never the configured one, for every file it creates, writes
+   * and opens there, so a link re-pointed after the check cannot move them.
+   *
+   * @param directory the directory, as configured
+   * @param real its real path ({@link Path#toRealPath})
+   * @return the reason, or empty when the directory is trusted
+   */
+  public static Optional<String> distrust(final Path directory, final Path real) {
+    return distrust(
+        directory,
+        real,
+        real.getFileSystem().supportedFileAttributeViews(),
+        DirectoryTrust::ownerName,
+        System.getProperty("user.name", ""));
+  }
+
+  private static Optional<String> distrust(
+      final Path directory,
+      final Path real,
+      final Set<String> supportedViews,
+      final Function<Path, String> ownerOf,
+      final String jvmUser) {
     if (!Files.isDirectory(real, LinkOption.NOFOLLOW_LINKS)) {
       return Optional.of("it is not a directory");
     }
@@ -77,22 +107,73 @@ public final class DirectoryTrust {
         return Optional.of(
             "its parent directory " + parent + " is world-writable without the sticky bit");
       }
+      // Whoever can write a directory higher up can rename the path below it away and put another
+      // in its place.
+      for (Path above = parent == null ? null : parent.getParent();
+          above != null;
+          above = above.getParent()) {
+        if (worldWritableWithoutSticky(above)) {
+          return Optional.of(
+              "the directory " + above + " on its path is world-writable without the sticky bit");
+        }
+      }
     } catch (final IOException | UnsupportedOperationException unreadable) {
       return Optional.of("its permissions cannot be read (" + unreadable + ")");
     }
     if (jvmUser.isBlank() || jvmUser.equals("?")) {
       return Optional.empty();
     }
-    final String owner;
-    try {
-      owner = ownerOf.apply(real);
-    } catch (final UncheckedIOException | UnsupportedOperationException unavailable) {
-      return Optional.empty();
-    }
-    if (!owner.equals(jvmUser) && !owner.equals("root")) {
+    final String owner = ownerOrNull(real, ownerOf);
+    if (owner != null && !trustedOwner(owner, jvmUser)) {
       return Optional.of("it is owned by " + owner + ", not by the JVM's user " + jvmUser);
     }
+    // The owner of a directory above it can rename the path away, the owner of a link on the
+    // configured path can re-point it: both choose where the caller's files land.
+    for (Path above = real.getParent(); above != null; above = above.getParent()) {
+      final String aboveOwner = ownerOrNull(above, ownerOf);
+      if (aboveOwner != null && !trustedOwner(aboveOwner, jvmUser)) {
+        return Optional.of(
+            "the directory "
+                + above
+                + " on its path is owned by "
+                + aboveOwner
+                + ", not by the JVM's user "
+                + jvmUser);
+      }
+    }
+    final Path configured = directory.toAbsolutePath();
+    final Path root = configured.getRoot();
+    Path prefix = root;
+    for (final Path name : configured) {
+      prefix = prefix == null ? name : prefix.resolve(name);
+      if (Files.isSymbolicLink(prefix)) {
+        final String linkOwner = ownerOrNull(prefix, ownerOf);
+        if (linkOwner != null && !trustedOwner(linkOwner, jvmUser)) {
+          return Optional.of(
+              "the link "
+                  + prefix
+                  + " on its path is owned by "
+                  + linkOwner
+                  + ", not by the JVM's user "
+                  + jvmUser);
+        }
+      }
+    }
     return Optional.empty();
+  }
+
+  private static boolean trustedOwner(final String owner, final String jvmUser) {
+    return owner.equals(jvmUser) || owner.equals("root");
+  }
+
+  /** The owner of a path, or {@code null} when the file system cannot name it. */
+  private static @Nullable String ownerOrNull(
+      final Path path, final Function<Path, String> ownerOf) {
+    try {
+      return ownerOf.apply(path);
+    } catch (final UncheckedIOException | UnsupportedOperationException unavailable) {
+      return null;
+    }
   }
 
   /**

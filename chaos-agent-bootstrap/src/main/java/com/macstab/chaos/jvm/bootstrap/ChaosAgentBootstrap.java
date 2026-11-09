@@ -716,9 +716,12 @@ public final class ChaosAgentBootstrap {
    * The directory for the bootstrap bridge jar: agent arg {@code bridgeDir}, system property
    * {@value #BRIDGE_DIR_PROPERTY} or environment variable {@value #BRIDGE_DIR_ENV}. The bootstrap
    * class loader runs the code in that jar, so the directory must pass {@link DirectoryTrust}; a
-   * refused one aborts the start with the reason rather than fall back to another directory.
+   * refused one aborts the start with the reason rather than fall back to another directory. The
+   * path is resolved once and checked there, and that real path is returned: the jar is created,
+   * written and opened through it, so a link on the configured path re-pointed after the check
+   * moves nothing.
    *
-   * @return the directory, or {@code null} when not set
+   * @return the directory's real path, or {@code null} when not set
    * @throws IllegalStateException if the directory is refused
    */
   static java.nio.file.@Nullable Path bridgeDir(final AgentSettings settings) {
@@ -727,12 +730,23 @@ public final class ChaosAgentBootstrap {
       return null;
     }
     final java.nio.file.Path directory = java.nio.file.Path.of(value);
-    final Optional<String> refusal = DirectoryTrust.distrust(directory);
+    final java.nio.file.Path real;
+    try {
+      real = directory.toRealPath();
+    } catch (final java.io.IOException missing) {
+      throw new IllegalStateException(
+          "[chaos-agent] bridgeDir "
+              + directory
+              + " is refused: it cannot be resolved ("
+              + missing
+              + ")");
+    }
+    final Optional<String> refusal = DirectoryTrust.distrust(directory, real);
     if (refusal.isPresent()) {
       throw new IllegalStateException(
           "[chaos-agent] bridgeDir " + directory + " is refused: " + refusal.get());
     }
-    return directory;
+    return real;
   }
 
   /**

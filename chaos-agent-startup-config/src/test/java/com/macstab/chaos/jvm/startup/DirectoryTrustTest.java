@@ -84,6 +84,58 @@ class DirectoryTrustTest {
   }
 
   @Test
+  @DisplayName("a directory inside another user's directory is refused: that user can rename it")
+  void foreignAncestorRefused() throws Exception {
+    assumePosix();
+    final Path bobs = Files.createDirectory(tempDir.resolve("bobs"));
+    final Path directory = Files.createDirectory(bobs.resolve("bridge"));
+    final Path realBobs = bobs.toRealPath();
+
+    assertThat(
+            DirectoryTrust.distrust(
+                directory, POSIX, path -> path.equals(realBobs) ? "bob" : "alice", "alice"))
+        .hasValue(
+            "the directory "
+                + realBobs
+                + " on its path is owned by bob, not by the JVM's user alice");
+    assertThat(
+            DirectoryTrust.distrust(
+                directory, POSIX, path -> path.equals(realBobs) ? "root" : "alice", "alice"))
+        .isEmpty();
+  }
+
+  @Test
+  @DisplayName("a path through another user's link is refused: that user can re-point it")
+  void foreignLinkRefused() throws Exception {
+    assumePosix();
+    final Path target = Files.createDirectory(tempDir.resolve("target"));
+    final Path link = Files.createSymbolicLink(tempDir.resolve("link"), target);
+
+    assertThat(
+            DirectoryTrust.distrust(
+                link, POSIX, path -> path.equals(link) ? "bob" : "alice", "alice"))
+        .hasValue("the link " + link + " on its path is owned by bob, not by the JVM's user alice");
+    assertThat(DirectoryTrust.distrust(link, POSIX, path -> "alice", "alice")).isEmpty();
+  }
+
+  @Test
+  @DisplayName("a world-writable directory without the sticky bit anywhere above it is refused")
+  void worldWritableAncestorRefused() throws Exception {
+    assumePosix();
+    final Path shared = Files.createDirectory(tempDir.resolve("shared-root"));
+    final Path directory = Files.createDirectories(shared.resolve("team").resolve("bridge"));
+    Files.setPosixFilePermissions(shared, PosixFilePermissions.fromString("rwxrwxrwx"));
+    final String realShared = shared.toRealPath().toString();
+
+    assertThat(DirectoryTrust.distrust(directory))
+        .hasValueSatisfying(
+            reason ->
+                assertThat(reason)
+                    .contains(realShared)
+                    .contains("world-writable without the sticky bit"));
+  }
+
+  @Test
   @DisplayName("without a posix view (Windows DOMAIN\\user) only the directory itself is checked")
   void noPosixView() throws Exception {
     final Path directory = Files.createDirectory(tempDir.resolve("windows"));

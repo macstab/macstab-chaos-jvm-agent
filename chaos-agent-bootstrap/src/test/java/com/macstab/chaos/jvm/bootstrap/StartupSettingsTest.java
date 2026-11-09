@@ -84,8 +84,26 @@ class StartupSettingsTest {
     final Path bridge = Files.createDirectory(tempDir.resolve("bridge"));
 
     assertThat(ChaosAgentBootstrap.bridgeDir(AgentSettings.of("bridgeDir=" + bridge, Map.of())))
-        .isEqualTo(bridge);
+        .isEqualTo(bridge.toRealPath());
     assertThat(ChaosAgentBootstrap.bridgeDir(AgentSettings.of("", Map.of()))).isNull();
+  }
+
+  @Test
+  @DisplayName(
+      "bridgeDir is the real path it was checked at: a link re-pointed later moves nothing")
+  void bridgeDirIsTheCheckedRealPath(@TempDir final Path tempDir) throws Exception {
+    final Path trusted = Files.createDirectory(tempDir.resolve("trusted"));
+    final Path other = Files.createDirectory(tempDir.resolve("other"));
+    final Path link = Files.createSymbolicLink(tempDir.resolve("bridge"), trusted);
+
+    final Path directory =
+        ChaosAgentBootstrap.bridgeDir(AgentSettings.of("bridgeDir=" + link, Map.of()));
+    Files.delete(link);
+    Files.createSymbolicLink(link, other);
+    final Path jar =
+        Files.createTempFile(java.util.Objects.requireNonNull(directory), "bridge", ".jar");
+
+    assertThat(jar.toRealPath().getParent()).isEqualTo(trusted.toRealPath());
   }
 
   @Test
